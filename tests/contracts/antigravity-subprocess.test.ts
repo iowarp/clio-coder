@@ -86,7 +86,7 @@ writeFileSync(join(process.cwd(), "observed.json"), JSON.stringify({
   pid: process.pid, args: process.argv.slice(2), stdin,
   env: { HOME: process.env.HOME, PATH: process.env.PATH, AI_AGENT: process.env.AI_AGENT,
     FAKE_API_SECRET: process.env.FAKE_API_SECRET,
-    CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: process.env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS }
+    }
 }));
 if (scenario.stderr) process.stderr.write(scenario.stderr);
 if (scenario.hang) {
@@ -418,7 +418,6 @@ describe("Antigravity external subprocess contract", () => {
 				PATH: process.env.PATH,
 				HOME: home,
 				FAKE_API_SECRET: "must-not-leak",
-				CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1",
 			},
 		});
 		const result = await handle.promise;
@@ -433,18 +432,17 @@ describe("Antigravity external subprocess contract", () => {
 		equal((message.usage as typeof message.usage & { reasoningTokens?: number }).reasoningTokens, 3);
 		equal(message.usage.cacheRead, 1);
 		const observed = JSON.parse(readFileSync(join(root, "observed.json"), "utf8")) as Record<string, unknown>;
-		deepStrictEqual(observed.args, buildAgyArgs(input, { CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1" }));
+		deepStrictEqual(observed.args, buildAgyArgs(input));
 		deepStrictEqual(JSON.parse(String(observed.stdin).trim()), JSON.parse(buildAgyStdinLine(input)));
 		const env = observed.env as Record<string, unknown>;
 		equal(env.HOME, home);
 		equal(env.FAKE_API_SECRET, undefined);
-		equal(env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS, undefined);
 		equal(typeof env.PATH, "string");
 		equal(typeof env.AI_AGENT, "string");
 		ok(events.some((event) => event.type === "message_update"));
 	});
 
-	it("maps every autonomy exactly and refuses suggest before spawn", () => {
+	it("maps read-only and writable modes before spawn", () => {
 		const input = workerInput(process.cwd(), { readOnly: true });
 		const freshArgs = [
 			"--mode",
@@ -458,29 +456,23 @@ describe("Antigravity external subprocess contract", () => {
 			"--model",
 			input.wireModelId,
 		];
-		deepStrictEqual(buildAgyArgs(input, {}), freshArgs);
-		deepStrictEqual(buildAgyArgs({ ...input, sessionId: "" }, {}), freshArgs);
-		deepStrictEqual(buildAgyArgs({ ...input, sessionId: "abc" }, {}), [...freshArgs, "--conversation", "abc"]);
-		deepStrictEqual(buildAgyArgs({ ...input, readOnly: false, autonomy: "default" }, {}).slice(0, 2), [
+		deepStrictEqual(buildAgyArgs(input), freshArgs);
+		deepStrictEqual(buildAgyArgs({ ...input, sessionId: "" }), freshArgs);
+		deepStrictEqual(buildAgyArgs({ ...input, sessionId: "abc" }), [...freshArgs, "--conversation", "abc"]);
+		deepStrictEqual(buildAgyArgs({ ...input, readOnly: false, autonomy: "default" }).slice(0, 2), [
 			"--mode",
 			"accept-edits",
 		]);
-		deepStrictEqual(buildAgyArgs({ ...input, readOnly: false, autonomy: "yolo" }, {}).slice(0, 2), [
+		deepStrictEqual(buildAgyArgs({ ...input, readOnly: false, autonomy: "yolo" }).slice(0, 2), [
 			"--mode",
 			"accept-edits",
 		]);
-		deepStrictEqual(
-			buildAgyArgs({ ...input, readOnly: false, autonomy: "yolo" }, { CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1" }).slice(
-				0,
-				1,
-			),
-			["--dangerously-skip-permissions"],
-		);
-		deepStrictEqual(buildAgyArgs({ ...input, readOnly: false, autonomy: "default" }, {}).slice(0, 2), [
+
+		deepStrictEqual(buildAgyArgs({ ...input, readOnly: false, autonomy: "default" }).slice(0, 2), [
 			"--mode",
 			"accept-edits",
 		]);
-		equal(antigravitySubprocessConfigForAutonomy("yolo", {}).dangerousBypass, false);
+		equal(antigravitySubprocessConfigForAutonomy(false).dangerousBypass, false);
 	});
 
 	it("resumes only when the actual init echoes the caller's id", async () => {
@@ -545,7 +537,7 @@ describe("Antigravity external subprocess contract", () => {
 		}
 		equal(existsSync(join(root, "observed.json")), false);
 		for (const sessionId of ["a".repeat(4096), "é".repeat(2048), 'literal "quoted" trailing\\']) {
-			deepStrictEqual(buildAgyArgs(workerInput(root, { sessionId }), {}).slice(-2), ["--conversation", sessionId]);
+			deepStrictEqual(buildAgyArgs(workerInput(root, { sessionId })).slice(-2), ["--conversation", sessionId]);
 		}
 	});
 

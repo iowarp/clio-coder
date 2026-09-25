@@ -6,7 +6,6 @@ import type {
 	EffortLevel,
 	HookCallback,
 	Options,
-	PermissionMode,
 	PermissionResult,
 	query,
 	SDKMessage,
@@ -16,7 +15,6 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { readClioVersion } from "../../core/package-root.js";
-import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerBudget } from "../../worker/spec-contract.js";
 import { isReserveAdmittedTool, resolveDeliveryTools } from "../loop-guard.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
@@ -51,14 +49,6 @@ function buildClaudeSdkPrompt(input: WorkerRunInput): string {
 
 async function* oneSdkUserMessage(message: SDKUserMessage): AsyncIterable<SDKUserMessage> {
 	yield message;
-}
-
-function claudeSdkPermissionModeForAutonomy(_level: AutonomyLevel | undefined): PermissionMode {
-	return "default";
-}
-
-function claudeSdkToolsForAutonomy(_level: AutonomyLevel | undefined): NonNullable<Options["tools"]> {
-	return DEFAULT_CLAUDE_TOOLS;
 }
 
 function effortForThinking(level: WorkerRunInput["thinkingLevel"] | undefined): EffortLevel | undefined {
@@ -296,7 +286,6 @@ interface PermissionGateInput {
 	readOnly?: boolean;
 	safety: ReturnType<typeof createWorkerSafety>;
 	cwd: string;
-	autonomy?: AutonomyLevel;
 	onPermission: "deny" | "fail";
 	emit: WorkerEventEmit;
 	onPermissionFailure(): void;
@@ -431,7 +420,6 @@ function decideToolUse(
 		input: coerceToolInput(toolInput),
 		safety: input.safety,
 		cwd: input.cwd,
-		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
 		...(input.readOnly === true ? { readOnly: true } : {}),
 		onPermission: input.onPermission,
 		emit: input.emit,
@@ -548,7 +536,6 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 	const permissionGate: PermissionGateInput = {
 		safety,
 		cwd: process.cwd(),
-		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
 		...(input.readOnly === true ? { readOnly: true } : {}),
 		onPermission,
 		emit,
@@ -585,8 +572,8 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		cwd: process.cwd(),
 		model: input.wireModelId,
 		systemPrompt: systemPromptForInput(input),
-		tools: claudeSdkToolsForAutonomy(input.autonomy),
-		permissionMode: claudeSdkPermissionModeForAutonomy(input.autonomy),
+		tools: DEFAULT_CLAUDE_TOOLS,
+		permissionMode: "default",
 		canUseTool,
 		hooks: {
 			PreToolUse: [{ hooks: [preToolUseHook] }],

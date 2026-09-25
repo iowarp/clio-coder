@@ -50,7 +50,6 @@ export interface EvaluateClaudeToolPermissionInput {
 	input: Record<string, unknown>;
 	safety: SafetyContract;
 	cwd: string;
-	autonomy?: AutonomyLevel;
 	readOnly?: boolean;
 	/**
 	 * The worker's admitted tool surface (Clio builtin names), already narrowed
@@ -293,8 +292,8 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 			permissionRequired: false,
 		};
 	}
-	const level = input.autonomy ?? DEFAULT_AUTONOMY_LEVEL;
-	const decision = input.safety.evaluate(call, level === "yolo" ? "yolo" : undefined);
+	const level = DEFAULT_AUTONOMY_LEVEL;
+	const decision = input.safety.evaluate(call);
 	if (decision.kind === "block") {
 		return { kind: "deny", mapped, decision, reason: rejectionText(decision), permissionRequired: false };
 	}

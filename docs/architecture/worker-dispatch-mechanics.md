@@ -172,6 +172,10 @@ receipt seals `safety.toolTelemetry`: coverage is `complete`, `partial`, or
 Dispatch suppresses automatic retry after an executed state-changing call,
 after an unfinished state-changing call, or when an opaque mutation-capable
 runtime cannot prove that the failed attempt left the workspace unchanged.
+External CLI peers run with their default writable permission mode unless the
+dispatch carries `readOnly: true`. Codex, Claude Code, Antigravity, and Pi then
+use their read-only tool modes; OpenCode refuses read-only admission. The
+removed external full-access environment bypass cannot widen these modes.
 Claude CLI runs technically constrained to read-only tools retain retries;
 mutation-capable subprocess and ACP runs fail closed until isolated retry
 workspaces exist.

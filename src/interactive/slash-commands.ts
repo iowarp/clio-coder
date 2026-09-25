@@ -171,7 +171,7 @@ type SlashCommandVariant =
 	/** `source` is the line the operator typed, echoed above the run's transcript block. */
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions; source: string }
 	| { kind: "run-usage" }
-	| { kind: "delegate"; agentId: string; task: string; source: string; share?: boolean }
+	| { kind: "delegate"; agentId: string; task: string; source: string; share?: boolean; readOnly?: boolean }
 	| { kind: "delegate-usage" }
 	| { kind: "btw"; question: string }
 	| { kind: "draft"; request: string; count: number }
@@ -279,6 +279,7 @@ export interface ContextClearCommandOptions {
 }
 
 export interface RunCommandOptions {
+	readOnly?: boolean;
 	workerProfile?: string;
 	workerRuntime?: string;
 	target?: string;
@@ -450,6 +451,7 @@ export async function handleRun(
 			...(options.workerRuntime ? { workerRuntime: options.workerRuntime } : {}),
 			...(options.target ? { target: options.target } : {}),
 			...(options.worktree ? { worktree: true as const, apply: "preserve" as const } : {}),
+			...(options.readOnly ? { readOnly: true } : {}),
 			...(options.model ? { model: options.model } : {}),
 			...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
 			...(options.toolProfile ? { toolProfile: options.toolProfile } : {}),
@@ -466,11 +468,18 @@ async function handleDelegate(
 	agentId: string,
 	task: string,
 	deps: HandleRunDeps,
-	options: { share?: boolean } = {},
+	options: { share?: boolean; readOnly?: boolean } = {},
 ): Promise<void> {
 	await runAttributed(
 		"delegate",
-		{ agentId, delegationAgentId: agentId, executionRole: "builder", requestOrigin: "user", task },
+		{
+			agentId,
+			delegationAgentId: agentId,
+			executionRole: "builder",
+			requestOrigin: "user",
+			task,
+			...(options.readOnly ? { readOnly: true } : {}),
+		},
 		deps,
 		options.share === true,
 	);
@@ -1480,6 +1489,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				{ name: "--runtime", takesValue: true, valueName: "runtimeId" },
 				{ name: "--target", takesValue: true, valueName: "id" },
 				{ name: "--worktree" },
+				{ name: "--read-only" },
 				{ name: "--model", takesValue: true, valueName: "id" },
 				{ name: "--thinking", takesValue: true, values: RUN_THINKING_LEVELS, valueName: "level" },
 				{ name: "--tool-profile", takesValue: true, values: TOOL_PROFILE_NAMES },
@@ -1504,6 +1514,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const target = parsed.flags.get("--target");
 			if (typeof target === "string") options.target = target;
 			if (parsed.flags.has("--worktree")) options.worktree = true;
+			if (parsed.flags.has("--read-only")) options.readOnly = true;
 
 			const model = parsed.flags.get("--model");
 			if (typeof model === "string") options.model = model;
@@ -1570,7 +1581,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		kinds: ["delegate", "delegate-usage"],
 		args: {
 			parseFlagsBeforeRest: true,
-			flags: [{ name: "--share" }],
+			flags: [{ name: "--share" }, { name: "--read-only" }],
 			positionals: [
 				{ name: "agent-id", required: true },
 				{ name: "task", required: true, rest: true },
@@ -1580,7 +1591,14 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (parsed.error) return { kind: "delegate-usage" };
 			const agentId = parsed.positionals[0] ?? "";
 			const task = parsed.positionals[1] ?? "";
-			return { kind: "delegate", agentId, task, source: trimmed, ...(parsed.flags.has("--share") ? { share: true } : {}) };
+			return {
+				kind: "delegate",
+				agentId,
+				task,
+				source: trimmed,
+				...(parsed.flags.has("--share") ? { share: true } : {}),
+				...(parsed.flags.has("--read-only") ? { readOnly: true } : {}),
+			};
 		},
 		handle(command, ctx) {
 			if (command.kind === "delegate-usage") {
@@ -1604,7 +1622,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						bus: ctx.bus,
 						...(ctx.submitOperatorNote ? { submitOperatorNote: ctx.submitOperatorNote } : {}),
 					},
-					{ share },
+					{ share, readOnly: command.readOnly === true },
 				);
 				ctx.render();
 			})();

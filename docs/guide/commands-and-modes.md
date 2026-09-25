@@ -105,7 +105,8 @@ Turn it off under Settings → Appearance → Demo guidance (`interface.demo`), 
 | `--target <id>` | One-run main-agent or dispatch target override. |
 | `--model <wireId>` | One-run model override. |
 | `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
-| `--autonomy <level>` | One-run autonomy override: `default` or `yolo`. It does not change saved settings. |
+| `--autonomy <level>` | Main-agent one-run autonomy override: `default` or `yolo`. It does not change saved settings. Combining it with `--agent` is a usage error; use `--read-only` to restrict a dispatch. |
+| `--read-only` | Restrict a `--agent` dispatch to read-only tools. Without `--agent`, it is a usage error. |
 | `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. |
 | `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. |
 | `--max-context-tokens <n>` | One-run context-window override for supported local runtimes. |
@@ -242,8 +243,8 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/interop` | `/interop` | Inspect local coding agents, their ACP/headless/pane modes, and supported resource adoption. |
 | `/share` | `/share [runId]` | Share a worker result with the main agent |
 | `/archive` | `/archive export <path> \| /archive import [--dry-run] [--force] <path>` | Export or import a full Clio archive |
-| `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--worktree] [--share] <agent> <task>` | Run a worker or configured headless peer; `--worktree` preserves an isolated task branch. |
-| `/delegate` | `/delegate [--share] <agent-id> <task>` | Run a configured ACP peer with a managed receipt. |
+| `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--worktree] [--read-only] [--share] <agent> <task>` | Run a worker or configured headless peer; `--worktree` preserves an isolated task branch and `--read-only` denies writes. |
+| `/delegate` | `/delegate [--read-only] [--share] <agent-id> <task>` | Run a configured ACP peer with a managed receipt; `--read-only` denies write permission requests. |
 | `/peer` | `/peer [--cwd <workspace>] <claude-code\|codex\|opencode\|antigravity\|pi> [brief]` | Open an installed coding agent in an owned Herdr pane; no managed receipt. |
 | `/btw` | `/btw <question>` | Ask a side question that never enters the session transcript |
 | `/draft` | `/draft [N] <request>` | Draft N answers in parallel (2-4, default 3) and let a decision model pick the strongest |

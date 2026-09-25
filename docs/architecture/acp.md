@@ -411,8 +411,10 @@ enumeration in [server.ts](../../src/engine/acp/server.ts):
 [adapter.ts](../../src/engine/acp/adapter.ts) constructs `AcpToolMediator` when Clio acts as an
 ACP client for an outbound delegation. Under `clio-coder-policy` governance:
 1. Tool calls evaluate through the 10-step safety net policy engine.
-2. If the safety net or autonomy mode yields an `ask` verdict (such as unrecognized bash in `default`), the mediator resolves the ask as a **non-stall denial** through the non-stall denial policy.
+2. The mediator uses default autonomy for every delegated peer. If the safety net or default autonomy yields an `ask` verdict, it resolves the ask as a **non-stall denial**. A read-only delegation also denies every non-read request and outside read.
 3. This non-stall behavior prevents external non-interactive client connections from hanging indefinitely while preserving safety boundaries.
+
+A delegation with `toolGovernance: agent-managed` remains an explicit operator opt-in. It cannot enforce `--read-only`, so admission refuses that combination before starting the peer.
 
 This outbound path is distinct from the hosted server's
 `installPermissionBridge`. The hosted server sends `session/request_permission`

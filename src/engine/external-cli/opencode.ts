@@ -35,7 +35,7 @@ export { opencodeCliModeForAutonomy } from "../../domains/providers/runtimes/ext
 
 export function buildOpenCodeCliArgs(input: WorkerRunInput): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "opencode-cli");
-	opencodeCliModeForAutonomy(input.autonomy, input.readOnly === true);
+	opencodeCliModeForAutonomy(input.readOnly === true);
 	const args = ["run", "--format", "json"];
 	if (input.wireModelId.trim() && input.wireModelId !== OPENCODE_CLI_DEFAULT_MODEL) {
 		args.push("--model", input.wireModelId.trim());

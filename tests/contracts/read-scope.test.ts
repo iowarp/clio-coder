@@ -245,65 +245,53 @@ describe("read scope admission", () => {
 		);
 	});
 
-	it("reaches the Claude SDK seam: outside paths, search directories, and globs that leave the directory", () => {
-		const outside = join(base, "outside");
-		const decide = (toolName: string, input: Record<string, unknown>, autonomy: AutonomyLevel) =>
-			emitClaudeToolPermissionDecision({
-				toolName,
-				input,
-				safety: createWorkerSafety({ cwd: root }),
-				cwd: root,
-				autonomy,
-				emit: () => {},
-			});
-		const cases: Array<[string, Record<string, unknown>]> = [
-			["Read", { file_path: join(outside, "notes.txt") }],
-			["LS", { path: outside }],
-			["Grep", { pattern: "x", path: outside }],
-			["Grep", { pattern: "x", path: outside, file_path: "data/inside.txt" }],
-			["Grep", { pattern: "x", glob: `${outside}/*.txt` }],
-			["Glob", { pattern: `${outside}/**` }],
-			["Glob", { pattern: "../outside/*.txt" }],
-			["Glob", { pattern: "*.txt", path: outside }],
-		];
-		for (const [toolName, input] of cases) {
-			const denied = decide(toolName, input, "default");
-			strictEqual(denied.kind, "deny", `${toolName} ${JSON.stringify(input)}`);
-			match(denied.reason, /outside the workspace/u, toolName);
-			strictEqual(decide(toolName, input, "yolo").kind, "allow", `${toolName} ${JSON.stringify(input)}`);
-		}
-		strictEqual(decide("Glob", { pattern: "data/**/*.txt" }, "default").kind, "allow");
-		strictEqual(decide("Grep", { pattern: "x", glob: "*.txt", path: "data" }, "default").kind, "allow");
-	});
+	it("uses default permission mapping for Claude SDK and ACP peers and enforces read-only", async () => {
+		const outside = join(base, "outside", "notes.txt");
+		for (const readOnly of [false, true]) {
+			const sdk = (toolName: string, input: Record<string, unknown>) =>
+				emitClaudeToolPermissionDecision({
+					toolName,
+					input,
+					safety: createWorkerSafety({ cwd: root }),
+					cwd: root,
+					readOnly,
+					emit: () => {},
+				});
+			strictEqual(sdk("Read", { file_path: "data/inside.txt" }).kind, "allow");
+			strictEqual(sdk("Read", { file_path: outside }).kind, "deny");
+			for (const [toolName, input] of [
+				["LS", { path: join(base, "outside") }],
+				["Grep", { pattern: "x", path: join(base, "outside") }],
+				["Grep", { pattern: "x", glob: `${join(base, "outside")}/*.txt` }],
+				["Glob", { pattern: `${join(base, "outside")}/**` }],
+				["Glob", { pattern: "../outside/*.txt" }],
+			] as const) {
+				strictEqual(sdk(toolName, input).kind, "deny", toolName);
+			}
 
-	it("reaches the ACP seam, including a search that names its directory and one with no kind", async () => {
-		const outside = join(base, "outside");
-		const handle = async (toolCall: Record<string, unknown>, autonomy: AutonomyLevel) => {
-			const reasons: string[] = [];
+			strictEqual(sdk("Write", { file_path: "data/new.txt", content: "x" }).kind, readOnly ? "deny" : "allow");
 			const mediator = new AcpToolMediator({
 				safety: createWorkerSafety({ cwd: root }),
 				cwd: root,
 				toolGovernance: "clio-coder-policy",
-				autonomy,
-				onPermissionResolved: (event) => reasons.push(event.reason),
+				readOnly,
 			});
-			await mediator.handle({ toolCall, options: [{ optionId: "allow", kind: "allow_once", name: "Allow" }] });
-			return reasons;
-		};
-		const cases: Array<Record<string, unknown>> = [
-			{ kind: "read", rawInput: { path: join(outside, "notes.txt") } },
-			{ kind: "search", rawInput: { pattern: "x", path: outside } },
-			{ kind: "search", rawInput: { directory: outside } },
-			{ kind: "search", rawInput: { dir_path: outside } },
-			{ title: "grep", rawInput: { pattern: "x", path: outside } },
-		];
-		for (const toolCall of cases) {
-			const denied = await handle(toolCall, "default");
-			strictEqual(denied.length, 1, JSON.stringify(toolCall));
-			match(denied[0] as string, /a path outside the workspace/u, JSON.stringify(toolCall));
-			deepStrictEqual(await handle(toolCall, "yolo"), [], JSON.stringify(toolCall));
+			const request = (toolCall: Record<string, unknown>) =>
+				mediator.handle({ toolCall, options: [{ optionId: "allow", kind: "allow_once", name: "Allow" }] });
+			await request({ kind: "read", rawInput: { path: "data/inside.txt" } });
+			await request({ kind: "read", rawInput: { path: outside } });
+			for (const toolCall of [
+				{ kind: "search", rawInput: { pattern: "x", path: join(base, "outside") } },
+				{ kind: "search", rawInput: { directory: join(base, "outside") } },
+				{ title: "grep", rawInput: { pattern: "x", path: join(base, "outside") } },
+			]) {
+				await request(toolCall);
+			}
+
+			await request({ kind: "edit", rawInput: { path: "data/inside.txt", oldText: "marker", newText: "changed" } });
+			const decisions = mediator.snapshot().toolCallLog.map((entry) => entry.decision);
+			deepStrictEqual(decisions, ["approved", "denied", "denied", "denied", "denied", readOnly ? "denied" : "approved"]);
 		}
-		deepStrictEqual(await handle({ kind: "search", rawInput: { pattern: "x", path: "data" } }, "default"), []);
 	});
 
 	it("maps an outside read to deny, ask, ask, allow across the levels and leaves inside reads alone", () => {

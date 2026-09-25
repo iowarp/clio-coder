@@ -15,7 +15,7 @@ export { piCliModeForAutonomy } from "../../domains/providers/runtimes/external-
 
 export function buildPiCliArgs(input: WorkerRunInput): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "pi-cli");
-	const mode = piCliModeForAutonomy(input.autonomy, input.readOnly === true);
+	const mode = piCliModeForAutonomy(input.readOnly === true);
 	const args = ["--print", "--mode", "json", "--no-session", "--no-extensions", "--no-approve"];
 	if (mode === "read-only") args.push("--tools", "read,grep,find,ls");
 	if (input.wireModelId.trim() && input.wireModelId !== PI_CLI_DEFAULT_MODEL) {

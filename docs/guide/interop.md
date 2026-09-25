@@ -77,10 +77,22 @@ works in the current checkout and edits may appear immediately. A task worktree
 separates Git changes but does not confine the peer's own filesystem, shell, or
 network tools. Clio can mediate ACP permission requests a peer reports, but a
 peer may write without requesting permission; receipts mark this enforcement
-limit. OpenCode's verified headless path supports edit authority only and
-refuses read-only dispatched runs. Use the existing Git workflow to inspect
-and merge a preserved branch, and use `/share` when the main agent should read a
-managed result.
+limit. OpenCode's headless path supports writable runs and refuses read-only
+dispatched runs. Use the existing Git workflow to inspect and merge a
+preserved branch, and use `/share` when the main agent should read a managed
+result.
+
+Clio-managed peer dispatches run at default permissions, even when the main
+session uses yolo. Use `/run --read-only` for a headless target or
+`/delegate --read-only` for an ACP peer to deny writes on that run. Headless
+Codex uses `--sandbox read-only` or `workspace-write`; Claude Code uses `plan`
+with read tools or `acceptEdits`; Antigravity uses `plan --sandbox` or
+`accept-edits`; Pi limits read-only runs to read tools. OpenCode refuses a
+read-only headless run before launch. ACP policy mediation denies non-read
+permission requests and outside reads on a read-only delegation without
+waiting for an operator. A peer configured with
+`toolGovernance: agent-managed` is an explicit operator opt-in to peer-owned
+tools and cannot accept a read-only delegation.
 
 ## Outbound: Use this library from Claude Code
 
