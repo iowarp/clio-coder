@@ -373,7 +373,11 @@ test("a refused skill load reads the same live and on replay, from its persisted
 	const plain = (lines: string[]) => lines.map(stripTerminalSequences).filter((line) => line.length > 0);
 	assert.deepEqual(plain(live.render(120)), ["§ skill tech-spec not loaded · manual-only: /skill tech-spec ✗"]);
 
-	const replayed = createChatPanel();
+	// The replay clock advances on every read, as a slow runner's does. A
+	// replayed row may only state a duration the ledger recorded, never the
+	// time rehydration itself took.
+	let replayClock = Date.parse("2026-09-17T00:00:00Z");
+	const replayed = createChatPanel({ now: () => (replayClock += 7) });
 	rehydrateChatPanelFromTurns(replayed, [
 		{
 			turnId: "turn-0",
