@@ -203,8 +203,8 @@ export function contextCategorySwatch(category: ContextLedgerCategory, theme: Cl
 
 export type WorkerContextSeverity = "healthy" | "warn" | "critical";
 
-export const WORKER_CONTEXT_WARN_PCT = 80;
-export const WORKER_CONTEXT_CRITICAL_PCT = 95;
+const WORKER_CONTEXT_WARN_PCT = 80;
+const WORKER_CONTEXT_CRITICAL_PCT = 95;
 
 function workerContextSeverity(pct: number): WorkerContextSeverity {
 	if (pct >= WORKER_CONTEXT_CRITICAL_PCT) return "critical";

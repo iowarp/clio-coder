@@ -49,7 +49,7 @@ export interface NotificationCenter {
 }
 
 /** Info and success notices fade on their own; warnings and errors persist until dismissed. */
-export const DEFAULT_INFO_TTL_MS = 12_000;
+const DEFAULT_INFO_TTL_MS = 12_000;
 
 const SEVERITY: Record<NotificationLevel, number> = { error: 4, warning: 3, success: 2, info: 1 };
 
@@ -89,10 +89,10 @@ export function classifyNoticeLevel(text: string): NotificationLevel {
  * cannot leak a prompt, a path, a model answer, or a worker's task text. What
  * it carries is that something needs the operator, and nothing more.
  */
-export const DESKTOP_NOTIFY_TITLE = "clio-coder";
+const DESKTOP_NOTIFY_TITLE = "clio-coder";
 
 /** Maximum body length in bytes after sanitization. */
-export const DESKTOP_NOTIFY_BODY_MAX_BYTES = 128;
+const DESKTOP_NOTIFY_BODY_MAX_BYTES = 128;
 
 /**
  * The three events that earn a notification. `batch` carries the batch's short

@@ -170,7 +170,7 @@ function formatDispatchPhaseCell(phase: DispatchBoardPhase | undefined, width = 
 }
 
 /** Columns the compact island reserves for the phase cell when it can afford them. */
-export const PHASE_COLUMN_WIDTH = 12;
+const PHASE_COLUMN_WIDTH = 12;
 /** Below this much room for the agent label, the compact row drops the column entirely. */
 const PHASE_COLUMN_MIN_LABEL_WIDTH = 8;
 

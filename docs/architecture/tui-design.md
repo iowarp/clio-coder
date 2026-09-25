@@ -283,3 +283,7 @@ Machine counters are sampled only while Status is visible; samples from a previo
 Compact and expanded worker counts include retrying and cancelling runs in the shared active-status set.
 
 Context meters share single-cell glyph selection and stable largest-remainder geometry.
+
+Renderer-only presentation constants remain private to their owning modules.
+
+Renderer-only presentation constants remain private to their owning modules.

@@ -12,9 +12,8 @@ export function spinnerFrame(frameIndex: number): string {
 }
 
 /**
- * Elapsed time in the footer and inline status verbs. Kept as a named export
- * because several call sites reference it, but the body is now a thin delegate
- * to formatCompactMs so status durations share the one duration formatter:
+ * Elapsed time in the footer and inline status verbs. This delegates to
+ * formatCompactMs so status durations share the one duration formatter:
  * `4.2s` under ten seconds, `42s`, then `1m5s` with no space and no zero pad
  * (the previous body emitted `1m 5s`).
  */

@@ -31,13 +31,13 @@ import {
  * becomes a set of one-word columns, so the group stacks instead: a member's
  * answer is the reason the operator opened the board.
  */
-export const COUNCIL_COLUMN_MIN_WIDTH = 34;
+const COUNCIL_COLUMN_MIN_WIDTH = 34;
 
 /** Blank columns between two side-by-side member columns. */
-export const COUNCIL_COLUMN_GUTTER = 2;
+const COUNCIL_COLUMN_GUTTER = 2;
 
 /** Rows of a member's bounded answer tail a column shows before it defers to `/view`. */
-export const COUNCIL_ANSWER_ROWS = 4;
+const COUNCIL_ANSWER_ROWS = 4;
 
 /** One council run as the board draws it: the roster facts plus the run's presentation. */
 export interface CouncilMemberView {
