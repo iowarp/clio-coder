@@ -15,6 +15,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { AUTONOMY_LEVELS } from "../domains/safety/autonomy.js";
 import {
 	ACTIVE_AGENT_AUTOMATION_ROLES,
@@ -294,11 +295,34 @@ function expectEnum<T extends string>(
 	path: string,
 	value: unknown,
 	allowed: ReadonlyArray<T>,
+	retired?: Readonly<Record<string, T>>,
 ): T | undefined {
 	if (typeof value === "string" && (allowed as ReadonlyArray<string>).includes(value)) return value as T;
-	issues.add(path, `expected one of ${allowed.join(" | ")}, got ${describe(value)}`);
+	// Own keys only: a settings value such as `toString` would otherwise reach
+	// Object.prototype and advise a replacement that is not a spelling at all.
+	const replacement =
+		typeof value === "string" && retired !== undefined && Object.hasOwn(retired, value) ? retired[value] : undefined;
+	const advice = replacement === undefined ? "" : `; the retired value ${describe(value)} becomes "${replacement}"`;
+	issues.add(path, `expected one of ${allowed.join(" | ")}, got ${describe(value)}${advice}`);
 	return undefined;
 }
+
+/**
+ * 0.5.6 retired these spellings with no migration and no read-time alias, so
+ * the refusal is the only place the operator learns what to write instead.
+ * Naming the replacement keeps that refusal actionable without accepting the
+ * old value anywhere.
+ */
+const RETIRED_AUTONOMY_VALUES: Readonly<Record<string, AutonomyLevel>> = Object.freeze({
+	"auto-edit": "default",
+	suggest: "default",
+	"read-only": "default",
+	"full-auto": "yolo",
+});
+
+const RETIRED_LIFECYCLE_VALUES = Object.freeze({ "clio-managed": "clio-coder-managed" } as const);
+
+const RETIRED_TOOL_GOVERNANCE_VALUES = Object.freeze({ "clio-policy": "clio-coder-policy" } as const);
 
 function expectStringArray(issues: Issues, path: string, value: unknown): string[] | undefined {
 	if (!Array.isArray(value)) {
@@ -650,7 +674,13 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 		if (v !== undefined) target.capabilities = v;
 	}
 	if ("lifecycle" in value) {
-		const v = expectEnum(issues, `${path}.lifecycle`, value.lifecycle, ["user-managed", "clio-coder-managed"] as const);
+		const v = expectEnum(
+			issues,
+			`${path}.lifecycle`,
+			value.lifecycle,
+			["user-managed", "clio-coder-managed"] as const,
+			RETIRED_LIFECYCLE_VALUES,
+		);
 		if (v !== undefined) target.lifecycle = v;
 	}
 	if ("gateway" in value) {
@@ -1135,7 +1165,13 @@ function validateExternalAgent(
 		if (parsed !== undefined) agent.stallTimeoutMs = parsed;
 	}
 	if ("toolGovernance" in value) {
-		const parsed = expectEnum(issues, `${path}.toolGovernance`, value.toolGovernance, TOOL_GOVERNANCE);
+		const parsed = expectEnum(
+			issues,
+			`${path}.toolGovernance`,
+			value.toolGovernance,
+			TOOL_GOVERNANCE,
+			RETIRED_TOOL_GOVERNANCE_VALUES,
+		);
 		if (parsed !== undefined) agent.toolGovernance = parsed;
 	}
 	if ("projectContext" in value) {
@@ -1854,7 +1890,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			const safety = raw.safety;
 			issues.unknownKeys("safety", safety, ["autonomy", "limits", "review"]);
 			if ("autonomy" in safety) {
-				const parsed = expectEnum(issues, "safety.autonomy", safety.autonomy, AUTONOMY_LEVELS);
+				const parsed = expectEnum(issues, "safety.autonomy", safety.autonomy, AUTONOMY_LEVELS, RETIRED_AUTONOMY_VALUES);
 				if (parsed !== undefined) settings.safety.autonomy = parsed;
 			}
 			if ("limits" in safety) {
@@ -2095,6 +2131,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 									"integrations.externalAgents.defaults.toolGovernance",
 									defaults.toolGovernance,
 									TOOL_GOVERNANCE,
+									RETIRED_TOOL_GOVERNANCE_VALUES,
 								);
 								if (parsed !== undefined) settings.integrations.externalAgents.defaults.toolGovernance = parsed;
 							}
