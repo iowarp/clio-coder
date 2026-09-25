@@ -1518,13 +1518,11 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 								);
 							appendOutOfTurnUsageRow(deps.stateDir, {
 								label: "prewarm",
-								sessionId: startupSession?.id ?? null,
 								repoIdentity: startupSession?.cwdHash ?? null,
 								timestamp: new Date().toISOString(),
 								target,
 								attributedModelId: model,
 								callOutcome: result.aborted ? "aborted" : result.errorMessage ? "error" : "success",
-								timing: { durationMs: result.timing.apiMs },
 								usage: {
 									input: usage?.input ?? null,
 									output: usage?.output ?? null,
@@ -1533,7 +1531,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 									reasoning: null,
 									totalTokens: usage?.totalTokens ?? null,
 									costUsd: usage?.cost.total ?? null,
-									costProvenance: "unknown",
 								},
 							});
 						},

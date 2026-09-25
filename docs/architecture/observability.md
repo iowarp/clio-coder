@@ -130,7 +130,6 @@ A row has the following schema:
 ```json
 {
   "label": "side-question",
-  "sessionId": "01JQ2K7V8W",
   "repoIdentity": "9f2c1b4ea77d0c31",
   "timestamp": "2026-06-25T14:30:00.000Z",
   "target": "dynamo",
@@ -142,22 +141,21 @@ A row has the following schema:
     "cacheWrite": 0,
     "reasoning": 2,
     "totalTokens": 132,
-    "costUsd": 0.0004,
-    "costProvenance": "known"
+    "costUsd": 0.0004
   }
 }
 ```
 
 `repoIdentity` is the same cwd hash the session ledger is filed under, which is what lets `usage report --repo <path>` select these rows with the hash it already computes for the ledgers.
 
-`label` is one of `side-question`, `handoff`, `prewarm`, `background-memory`, or `failed-compaction`. Prompt pre-warm and proactive-memory calls are recorded here because neither appends an assistant call to the session JSONL; failed-compaction records preserve calls from an attempt that produced no checkpoint. A row may also carry `timing { durationMs }` and a `promptCache` block built from the backend's own prefill facts when the server reported them; a backend that reports no timings simply omits the block, as LM Studio's OpenAI-compatible port does.
+`label` is one of `side-question`, `handoff`, `prewarm`, `background-memory`, or `failed-compaction`. Prompt pre-warm and proactive-memory calls are recorded here because neither appends an assistant call to the session JSONL; failed-compaction records preserve calls from an attempt that produced no checkpoint. A row holds only what `clio-coder usage report` reads. Rows from earlier builds may also carry `sessionId`, `timing { durationMs }`, a `promptCache` block and `usage.costProvenance`; the reader ignores them, and the file is never rewritten to drop them.
 
 
-Failed compaction attempts record one `failed-compaction` row per invoked summary stream when no checkpoint is produced. `callOutcome` distinguishes a completed first stream (`success`) from an `error` or `aborted` stream; a completed call can belong to an unsuccessful split-compaction attempt. The rows capture the originating session/repository and selected target/model before asynchronous work can switch context. Successful compactions keep usage solely on their checkpoint, and their live accounting uses the same selected route. Unset model controls retain the active chat route.
+Failed compaction attempts record one `failed-compaction` row per invoked summary stream when no checkpoint is produced. `callOutcome` distinguishes a completed first stream (`success`) from an `error` or `aborted` stream; a completed call can belong to an unsuccessful split-compaction attempt. The rows capture the originating repository and selected target/model before asynchronous work can switch context. Successful compactions keep usage solely on their checkpoint, and their live accounting uses the same selected route. Unset model controls retain the active chat route.
 
 Prewarm rows also carry `callOutcome`. A failed or aborted prewarm reads back as that outcome with its unobserved usage fields `null`, never as a completed call that cost nothing. Prewarm rows written before the field existed read as they always did.
 
-New failed-compaction rows preserve missing usage fields as `null`. Positive partial-response facts survive an error that resets missing fields to zero. Ambiguous failed zeros remain unknown, reasoning is separate from ordinary output/total tokens, and an absent total is not inferred. Positive adapter prices are labeled `estimated`; zero or missing pricing is `unknown`, not a free-call claim. Existing numeric rows and historical checkpoints remain readable without rewriting them.
+New failed-compaction rows preserve missing usage fields as `null`. Positive partial-response facts survive an error that resets missing fields to zero. Ambiguous failed zeros remain unknown, reasoning is separate from ordinary output/total tokens, and an absent total is not inferred. The live `/usage` entry labels a positive adapter price `estimated` and zero or missing pricing `unknown`, not a free-call claim; the durable row carries the amount without that label. Existing numeric rows and historical checkpoints remain readable without rewriting them.
 
 `clio-coder usage report` includes these calls in its known subtotals, labels the failed-attempt count, and exposes `failedCompaction.knownUsage`, `erroredKnownUsage`, and per-field `unobservedUsageCalls` in the token and model JSON facts. A field with missing coverage and no known positive amount is `null`, including cost-only or wholly unobserved failures. Text output identifies incomplete subtotals. The live `/usage` view records positive known contributions under a failed-compaction label; its numeric token counters remain known subtotals. These figures do not certify provider billing or complete spending. The existing session-cost ceiling checks the numeric known sum, so unreported cost does not become an enforced complete-cost bound.
 

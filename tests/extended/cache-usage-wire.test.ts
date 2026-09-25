@@ -134,12 +134,11 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 			strictEqual(tracker.sessionTokens().totalTokens, 10100);
 			appendOutOfTurnUsageRow(env.dir, {
 				label: "prewarm",
-				sessionId: "fixture",
 				repoIdentity: "fixture",
 				timestamp: new Date(0).toISOString(),
 				target: "fixture",
 				attributedModelId: "fixture",
-				usage: { ...side, costProvenance: "estimated" },
+				usage: side,
 			});
 			const archived = readOutOfTurnUsageRows(env.dir);
 			deepStrictEqual(archived.errors, []);

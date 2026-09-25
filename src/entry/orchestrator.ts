@@ -933,7 +933,6 @@ async function runCompactionFlow(
 		recordFailedCompactionCalls(
 			{
 				stateDir,
-				sessionId: meta.id,
 				repoIdentity: meta.cwdHash || cwdHash(meta.cwd),
 				target: resolved.targetId,
 				model: resolved.wireModelId,
@@ -1655,7 +1654,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const meta = session?.current() ?? null;
 		return captureTaskMemoryUsage({
 			stateDir: clioStateDir(),
-			sessionId: meta?.id ?? null,
 			repoIdentity: meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null,
 			...(observability === undefined ? {} : { observability }),
 		});

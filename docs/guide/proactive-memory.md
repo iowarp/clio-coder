@@ -241,7 +241,7 @@ a server that is usually the same machine the operator's own turns run on.
 Every step is therefore accounted for the way a `/btw` side question is: one cost
 entry under the `background-memory` label, which `/usage` shows as its own
 `memory steps` row, and one durable row in `<stateDir>/usage/out-of-turn.jsonl`
-carrying the usage, the call's duration, and the backend's prefill facts.
+carrying the step's token usage and cost.
 `clio-coder usage report` folds those rows after the process exits, and `/memory`
 shows the lifetime figures folded from `steps.jsonl`: steps, tokens, model time,
 and the hit rate.

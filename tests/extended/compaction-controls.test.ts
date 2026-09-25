@@ -738,7 +738,6 @@ describe("production compaction controls", () => {
 		strictEqual(row.callOutcome, "error");
 		strictEqual(f.liveUsage.length, 1);
 		deepStrictEqual(f.liveUsage[0]?.slice(0, 2), ["summary-target", "summary"]);
-		strictEqual(row.sessionId, f.state.meta.id);
 		strictEqual(row.repoIdentity, f.state.meta.cwdHash);
 		strictEqual(row.target, "summary-target");
 		strictEqual(row.attributedModelId, "summary");
@@ -747,7 +746,8 @@ describe("production compaction controls", () => {
 		strictEqual(row.usage.totalTokens, 15);
 		strictEqual(row.usage.costUsd, null);
 		strictEqual(row.usage.cacheRead, null);
-		strictEqual(row.usage.costProvenance, "unknown");
+		// Provenance labels the live `/usage` entry; the durable row does not carry it.
+		strictEqual(f.liveUsage[0]?.[5], "unknown");
 	});
 	it("retains both calls when a split compaction's second stream fails", async () => {
 		const f = fixture(true);
@@ -780,7 +780,7 @@ describe("production compaction controls", () => {
 		strictEqual(f.liveUsage.length, 2);
 		for (const row of read.rows) {
 			strictEqual(row.target, "summary-target");
-			strictEqual(row.sessionId, f.state.meta.id);
+			strictEqual(row.repoIdentity, f.state.meta.cwdHash);
 		}
 	});
 	it("keeps ambiguous zero failed usage null and reports it as unknown in the built CLI", async () => {
@@ -805,7 +805,6 @@ describe("production compaction controls", () => {
 			reasoning: null,
 			totalTokens: null,
 			costUsd: null,
-			costProvenance: "unknown",
 		});
 		strictEqual(f.liveUsage.length, 0);
 		const result = spawnSync(
@@ -906,7 +905,7 @@ describe("production compaction controls", () => {
 		const row = readOutOfTurnUsageRows(clioStateDir()).rows[0];
 		ok(row);
 		strictEqual(row.usage.costUsd, 0.25);
-		strictEqual(row.usage.costProvenance, "estimated");
+		strictEqual(f.liveUsage[0]?.[5], "estimated");
 		strictEqual(row.usage.totalTokens, null);
 		strictEqual(row.usage.input, null);
 	});
@@ -937,7 +936,7 @@ describe("production compaction controls", () => {
 		};
 		await rejects(f.run(), /session or branch changed/);
 		strictEqual(f.entries().filter((entry) => entry.kind === "compactionSummary").length, 0);
-		strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows[0]?.sessionId, f.state.meta.id);
+		strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows[0]?.repoIdentity, f.state.meta.cwdHash);
 		strictEqual(f.liveUsage.length, 0);
 	});
 	it("retains spending without a checkpoint when the selected branch changes", async () => {
@@ -945,7 +944,7 @@ describe("production compaction controls", () => {
 		f.response.beforeReturn = () => f.pinLeaf("different-leaf");
 		await rejects(f.run(), /session or branch changed/);
 		strictEqual(f.entries().filter((entry) => entry.kind === "compactionSummary").length, 0);
-		strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows[0]?.sessionId, f.state.meta.id);
+		strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows[0]?.repoIdentity, f.state.meta.cwdHash);
 		strictEqual(f.liveUsage.length, 0);
 	});
 	it("surfaces a required usage-write failure without repeating the model call", async () => {
@@ -987,7 +986,11 @@ describe("production compaction controls", () => {
 		f.response.fail = true;
 		await rejects(f.run(), /fixture stream error/);
 		ok(readFileSync(outOfTurnUsagePath(clioStateDir()), "utf8").startsWith(before));
-		deepStrictEqual(readOutOfTurnUsageRows(clioStateDir()).rows[0], historical);
+		// The file keeps the historical line byte for byte; the reader drops the
+		// retired `sessionId` and `usage.costProvenance` it carries.
+		const { sessionId: _sessionId, usage: historicalUsage, ...kept } = historical;
+		const { costProvenance: _costProvenance, ...usage } = historicalUsage;
+		deepStrictEqual(readOutOfTurnUsageRows(clioStateDir()).rows[0], { ...kept, usage });
 	});
 	it("preserves spending when checkpoint append provably wrote nothing", async () => {
 		const f = fixture(true);

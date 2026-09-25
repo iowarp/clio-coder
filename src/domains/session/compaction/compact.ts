@@ -141,7 +141,6 @@ export interface CompactionCallObservation {
 	outcome: "success" | "error" | "aborted";
 	usage: unknown;
 	timestamp: string;
-	durationMs: number;
 }
 
 export interface CompactInput {
@@ -700,7 +699,6 @@ async function runSummaryStream(
 	input.signal?.throwIfAborted();
 	input.beforeSummaryCall?.();
 	const timestamp = new Date().toISOString();
-	const started = performance.now();
 	let usage: unknown;
 	let reported: Record<string, unknown> = {};
 	let outcome: CompactionCallObservation["outcome"] = "error";
@@ -750,7 +748,6 @@ async function runSummaryStream(
 			outcome: outcome === "error" && input.signal?.aborted ? "aborted" : outcome,
 			usage: outcome === "success" ? usage : reported,
 			timestamp,
-			durationMs: Math.max(0, performance.now() - started),
 		});
 	}
 }

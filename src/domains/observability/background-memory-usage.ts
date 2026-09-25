@@ -14,7 +14,6 @@
  * what an archive reader folds after the process is gone.
  */
 
-import { uncachedPrefillTokens } from "../../core/cache-telemetry.js";
 import type { CostProvenance } from "../providers/index.js";
 import type { CostEntryLabel, UsageBreakdown } from "./cost.js";
 import { appendOutOfTurnUsageRow, type OutOfTurnUsageRow } from "./out-of-turn-usage.js";
@@ -32,13 +31,6 @@ export interface BackgroundMemoryStepUsage {
 	totalTokens: number;
 	costUsd: number;
 	costProvenance: CostProvenance;
-	durationMs: number;
-	backend: {
-		promptTokens: number;
-		cachedTokens: number | null;
-		promptMs: number;
-		source: string;
-	} | null;
 }
 
 /** The subset of the observability contract this accounting needs. */
@@ -58,7 +50,6 @@ export interface BackgroundMemoryUsageSink {
 export interface RecordBackgroundMemoryStepInput {
 	usage: BackgroundMemoryStepUsage;
 	stateDir: string;
-	sessionId: string | null;
 	/** The cwd hash the session ledger is filed under, so `usage report --repo` selects it. */
 	repoIdentity: string | null;
 	observability?: BackgroundMemoryUsageSink | undefined;
@@ -70,11 +61,10 @@ export interface RecordBackgroundMemoryStepInput {
 /** Build the durable row for one memory step without writing it. */
 export function backgroundMemoryUsageRow(
 	usage: BackgroundMemoryStepUsage,
-	options: { sessionId: string | null; repoIdentity: string | null; now?: Date },
+	options: { repoIdentity: string | null; now?: Date },
 ): OutOfTurnUsageRow {
 	return {
 		label: "background-memory",
-		sessionId: options.sessionId,
 		repoIdentity: options.repoIdentity,
 		timestamp: (options.now ?? new Date()).toISOString(),
 		target: usage.targetId,
@@ -88,27 +78,7 @@ export function backgroundMemoryUsageRow(
 			reasoning: usage.reasoning,
 			totalTokens: usage.totalTokens,
 			costUsd: usage.costUsd,
-			costProvenance: usage.costProvenance,
 		},
-		timing: { durationMs: usage.durationMs },
-		...(usage.backend === null
-			? {}
-			: {
-					promptCache: {
-						promptTokens: usage.backend.promptTokens,
-						cachedTokens: usage.backend.cachedTokens,
-						uncachedPrefillTokens: uncachedPrefillTokens({
-							promptTokens: usage.backend.promptTokens,
-							cachedTokens: usage.backend.cachedTokens,
-							predictedTokens: 0,
-							promptMs: usage.backend.promptMs,
-							predictedMs: 0,
-							source: "llamacpp-timings",
-						}),
-						promptMs: usage.backend.promptMs,
-						source: usage.backend.source,
-					},
-				}),
 	};
 }
 
@@ -134,7 +104,6 @@ export function recordBackgroundMemoryStep(input: RecordBackgroundMemoryStepInpu
 		"background-memory",
 	);
 	const row = backgroundMemoryUsageRow(input.usage, {
-		sessionId: input.sessionId,
 		repoIdentity: input.repoIdentity,
 		...(input.now === undefined ? {} : { now: input.now }),
 	});
