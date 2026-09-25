@@ -11,6 +11,12 @@ import { tokenHex } from "../../../core/theme-token-hex.js";
  * set; the rest of the preset stays, because a wrong key here is rejected by
  * the validation open in `profile.ts` and would leave the operator with no
  * files pane at all.
+ *
+ * The tokens sit in the middle luminance band so they read on dark and light
+ * terminals, which also means two of them never make a readable pair. A badge
+ * therefore reverses one token instead of pairing it with another: the token
+ * becomes the background and the terminal's own background becomes the text,
+ * dark on a dark theme and light on a light one.
  */
 export function renderYaziTheme(): string {
 	const accent = tokenHex("accent");
@@ -35,22 +41,22 @@ marker_selected = { fg = "${success}", bg = "${success}" }
 marker_copied = { fg = "${accent}", bg = "${accent}" }
 marker_cut = { fg = "${error}", bg = "${error}" }
 marker_marked = { fg = "${info}", bg = "${info}" }
-count_copied = { fg = "${accent}", bg = "${frame}" }
-count_cut = { fg = "${error}", bg = "${frame}" }
-count_selected = { fg = "${success}", bg = "${frame}" }
+count_copied = { fg = "${accent}", reversed = true }
+count_cut = { fg = "${error}", reversed = true }
+count_selected = { fg = "${success}", reversed = true }
 border_style = { fg = "${frame}" }
 syntect_theme = ""
 
 [mode]
-normal_main = { bg = "${accent}", bold = true }
+normal_main = { fg = "${accent}", reversed = true, bold = true }
 normal_alt = { fg = "${accent}" }
-select_main = { bg = "${action}", bold = true }
+select_main = { fg = "${action}", reversed = true, bold = true }
 select_alt = { fg = "${action}" }
-unset_main = { bg = "${error}", bold = true }
+unset_main = { fg = "${error}", reversed = true, bold = true }
 unset_alt = { fg = "${error}" }
 
 [tabs]
-active = { bg = "${accent}", bold = true }
+active = { fg = "${accent}", reversed = true, bold = true }
 inactive = { fg = "${accent}" }
 
 [status]
@@ -65,7 +71,7 @@ progress_error = { fg = "${error}" }
 
 [which]
 cols = 3
-mask = { bg = "${frame}" }
+mask = {}
 cand = { fg = "${accent}" }
 rest = { fg = "${muted}" }
 desc = { fg = "${action}" }
