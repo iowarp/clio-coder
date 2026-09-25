@@ -798,7 +798,7 @@ test("the welcome keeps a full model name when space permits and shows the logo,
 	const component = banner({ model });
 	const wide = rows(component, 120);
 	ok(wide.join("\n").includes(model));
-	ok(wide.join("\n").includes("Built for the code behind science."));
+	ok(wide.join("\n").includes("Systems engineering beats vibes. Built by researchers who love to code!"));
 	ok(wide.join("\n").includes("Permissions  default"));
 	ok(wide[1]?.includes("████"));
 	component.collapseToSessionHeader();
