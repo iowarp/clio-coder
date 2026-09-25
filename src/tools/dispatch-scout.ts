@@ -19,6 +19,7 @@ import { sameRouteIdentity } from "../domains/dispatch/route-decision.js";
 import type { RoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { compileScoutTransition, type ScoutAgentBinding } from "../domains/dispatch/scout-transition.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
+import { normalizeYoloAuthorityBasis } from "../domains/dispatch/yolo-ids.js";
 import type { ResolvedDispatchPlanArtifact } from "./dispatch-plan.js";
 
 export const MAX_SCOUT_PLAN_DEADLINE_MS = 3_600_000;
@@ -169,13 +170,13 @@ export interface PreparedScoutContinuation {
 export function scoutPlanAuthorityGranted(
 	artifact: ResolvedDispatchPlanArtifact,
 	operatorApproved: boolean,
-	fullAuto: boolean,
+	yolo: boolean,
 ): boolean {
 	return artifact.tasks.every(
 		(task) =>
 			task.authorityGrant !== null &&
 			((task.authorityGrant.basis === "operator-plan-approval" && operatorApproved) ||
-				(task.authorityGrant.basis === "full-auto-policy" && fullAuto)),
+				(normalizeYoloAuthorityBasis(task.authorityGrant.basis) === "yolo-policy" && yolo)),
 	);
 }
 
@@ -278,7 +279,7 @@ export async function runScoutContinuationPlan<T, S>(input: {
 
 export function prepareScoutContinuation(input: {
 	source: VerifiedScoutSource;
-	authorization: "operator-plan-approval" | "full-auto-policy";
+	authorization: "operator-plan-approval" | "yolo-policy";
 	planAgentSelection: DispatchContract["planAgentSelection"];
 	costCeilingUsd: number;
 }): PreparedScoutContinuation {
@@ -289,7 +290,7 @@ export function prepareScoutContinuation(input: {
 	for (const subtask of input.source.scout.proposedSubtasks) {
 		const sourceIntent = input.source.receipt.routingIntent;
 		const routingIntent: RoutingIntent =
-			input.authorization === "full-auto-policy"
+			input.authorization === "yolo-policy"
 				? { ...sourceIntent, requiredCapabilities: [...sourceIntent.requiredCapabilities], failover: "approved" }
 				: {
 						...sourceIntent,
@@ -307,7 +308,7 @@ export function prepareScoutContinuation(input: {
 			requestOrigin: "user",
 			routingIntent,
 			failover: "approved",
-			...(input.authorization === "full-auto-policy" && sourceIntent.posture === "manual"
+			...(input.authorization === "yolo-policy" && sourceIntent.posture === "manual"
 				? {
 						target: input.source.receipt.targetId,
 						model: input.source.receipt.wireModelId,
@@ -328,7 +329,7 @@ export function prepareScoutContinuation(input: {
 	}
 	const priorCostCeiling = input.source.receipt.routingIntent.maxCostUsd;
 	const effectiveCostCeiling =
-		input.authorization === "full-auto-policy" && priorCostCeiling !== null
+		input.authorization === "yolo-policy" && priorCostCeiling !== null
 			? Math.min(input.costCeilingUsd, priorCostCeiling)
 			: input.costCeilingUsd;
 	const bindings: ScoutAgentBinding[] = proposals.map(({ subtask, agentSpec }) => ({
@@ -345,12 +346,12 @@ export function prepareScoutContinuation(input: {
 		bindings,
 		authority: {
 			basis: input.authorization,
-			approvedAuthorities: input.authorization === "full-auto-policy" ? requestedAuthorities : [],
+			approvedAuthorities: input.authorization === "yolo-policy" ? requestedAuthorities : [],
 		},
 		maxWorkers: 4,
 	});
 	if (transition.kind === "settled") throw new Error("dispatch: Scout phase unexpectedly settled during compilation");
-	if (input.authorization === "full-auto-policy" && transition.kind !== "ready") {
+	if (input.authorization === "yolo-policy" && transition.kind !== "ready") {
 		throw new Error("dispatch: yolo policy does not grant every requested Scout authority");
 	}
 	const plan = transition.plan;
@@ -379,7 +380,7 @@ export function prepareScoutContinuation(input: {
 		throw new Error("dispatch: Scout continuation exceeds the finite whole-plan deadline ceiling");
 	}
 	const priorDeadlineMs = input.source.receipt.routingIntent.deadlineMs;
-	if (input.authorization === "full-auto-policy" && priorDeadlineMs !== null && predictedDeadlineMs > priorDeadlineMs) {
+	if (input.authorization === "yolo-policy" && priorDeadlineMs !== null && predictedDeadlineMs > priorDeadlineMs) {
 		throw new Error("dispatch: yolo Scout continuation exceeds the previously granted deadline");
 	}
 	const deadlineMs = Math.max(priorDeadlineMs ?? 0, predictedDeadlineMs);

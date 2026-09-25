@@ -39,7 +39,7 @@ export function materializeAgentPlanSelection(
 		routingIntent: { ...intent, failover: "approved" },
 		failover: "approved",
 	};
-	const mode = input.authorization === "full-auto-policy" ? "active" : "shadow";
+	const mode = input.authorization === "yolo-policy" ? "active" : "shadow";
 	const decision = adapters.resolve(request, mode, {
 		expectedResultContractKind: input.expectedResultContract,
 		requestedAuthority: input.requestedAuthority,

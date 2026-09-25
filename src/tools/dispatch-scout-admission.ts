@@ -120,7 +120,7 @@ export function loadVerifiedScoutSource(input: {
 
 export function prepareScoutContinuation(input: {
 	source: VerifiedScoutSource;
-	authorization: "operator-plan-approval" | "full-auto-policy";
+	authorization: "operator-plan-approval" | "yolo-policy";
 	planAgentSelection: DispatchContract["planAgentSelection"];
 	costCeilingUsd: number;
 }): PreparedScoutContinuation {
@@ -131,7 +131,7 @@ export function prepareScoutContinuation(input: {
 	for (const subtask of input.source.scout.proposedSubtasks) {
 		const sourceIntent = input.source.receipt.routingIntent;
 		const routingIntent: RoutingIntent =
-			input.authorization === "full-auto-policy"
+			input.authorization === "yolo-policy"
 				? { ...sourceIntent, requiredCapabilities: [...sourceIntent.requiredCapabilities], failover: "approved" }
 				: {
 						...sourceIntent,
@@ -149,7 +149,7 @@ export function prepareScoutContinuation(input: {
 			requestOrigin: "user",
 			routingIntent,
 			failover: "approved",
-			...(input.authorization === "full-auto-policy" && sourceIntent.posture === "manual"
+			...(input.authorization === "yolo-policy" && sourceIntent.posture === "manual"
 				? {
 						target: input.source.receipt.targetId,
 						model: input.source.receipt.wireModelId,
@@ -183,12 +183,12 @@ export function prepareScoutContinuation(input: {
 		bindings,
 		authority: {
 			basis: input.authorization,
-			approvedAuthorities: input.authorization === "full-auto-policy" ? requestedAuthorities : [],
+			approvedAuthorities: input.authorization === "yolo-policy" ? requestedAuthorities : [],
 		},
 		maxWorkers: 4,
 	});
 	if (transition.kind === "settled") throw new Error("dispatch: Scout phase unexpectedly settled during compilation");
-	if (input.authorization === "full-auto-policy" && transition.kind !== "ready") {
+	if (input.authorization === "yolo-policy" && transition.kind !== "ready") {
 		throw new Error("dispatch: yolo policy does not grant every requested Scout authority");
 	}
 	const plan = transition.plan;

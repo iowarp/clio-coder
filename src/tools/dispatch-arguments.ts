@@ -83,7 +83,7 @@ export interface DispatchArgumentParserOptions {
 	hasAgent?: (id: string) => boolean;
 	auto: {
 		approvedAuthorities: ReadonlyArray<AgentAutomationAuthority>;
-		authorityBasis: "operator-plan-approval" | "full-auto-policy";
+		authorityBasis: "operator-plan-approval" | "yolo-policy";
 	};
 	resolveIntent?: (
 		rawIntent: unknown,

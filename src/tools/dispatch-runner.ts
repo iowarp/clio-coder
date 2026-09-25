@@ -48,6 +48,7 @@ import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/
 import { explainRouteDecision } from "../domains/dispatch/routing-intent.js";
 import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceipt } from "../domains/dispatch/types.js";
 import { isLegacyReadOnlyReceipt } from "../domains/dispatch/types.js";
+import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
 import { adaptRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
@@ -1148,7 +1149,7 @@ function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
 			.filter(
 				({ artifact }) =>
 					artifact.topology === "compete" &&
-					(artifact.outcome === "operator-confirmed" || artifact.outcome === "full-auto-applied"),
+					(artifact.outcome === "operator-confirmed" || normalizeYoloGateOutcome(artifact.outcome) === "yolo-applied"),
 			)
 			.map(({ artifact }) => artifact.group),
 	);
@@ -1619,7 +1620,7 @@ async function runCompete(
 						group,
 						topology: "compete",
 						cycle: 1,
-						outcome: "full-auto-applied",
+						outcome: "yolo-applied",
 						subjects: [winnerRef.subject],
 						winner: winnerRef,
 						confirmation: {
@@ -1726,7 +1727,7 @@ function runApplyWinner(
 	planHash: string,
 	authority:
 		| { outcome: "operator-confirmed"; requestId: string; requestedBy: string }
-		| { outcome: "full-auto-applied" }
+		| { outcome: "yolo-applied" }
 		| null,
 	mergeWinner: typeof mergeWinnerBranch = mergeWinnerBranch,
 	protectedPaths: ReadonlyArray<string> = [],
@@ -1832,7 +1833,7 @@ function runApplyWinner(
 				: {}),
 		};
 	}
-	if (authority.outcome === "full-auto-applied") {
+	if (authority.outcome === "yolo-applied") {
 		try {
 			confirmation = writeConfirmation();
 		} catch (err) {
@@ -2278,7 +2279,7 @@ export async function runDispatchTool(
 						requestedBy: approval.requestedBy,
 					}
 				: deps.getAutonomy?.() === "yolo"
-					? { outcome: "full-auto-applied" as const }
+					? { outcome: "yolo-applied" as const }
 					: null;
 		let protectedPaths: string[];
 		try {

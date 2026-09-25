@@ -9,6 +9,7 @@ import type {
 	RunReceiptQuality,
 	RunReceiptVerification,
 } from "../dispatch/types.js";
+import { normalizeYoloGateAuthority, normalizeYoloGateOutcome } from "../dispatch/yolo-ids.js";
 import type { FinishContractAssessment } from "../safety/finish-contract.js";
 
 /** Persisted version of the canonical, deliberately non-scalar trust model. */
@@ -315,7 +316,10 @@ function normalizeAttributedStatus(axis: TrustStatusAxis, value: Record<string, 
 	return {
 		state: value.state as string,
 		source: { kind: value.source.kind as TrustStatusSourceKind, id: value.source.id },
-		authority: { kind: value.authority.kind as TrustStatusAuthorityKind, id: value.authority.id },
+		authority: {
+			kind: value.authority.kind as TrustStatusAuthorityKind,
+			id: value.source.kind === "gate_decision" ? normalizeYoloGateAuthority(value.authority.id) : value.authority.id,
+		},
 		artifacts,
 	};
 }
@@ -865,7 +869,7 @@ function gateReference(artifact: GateDecisionArtifact): TrustArtifactReference {
 
 function gateAuthority(artifact: GateDecisionArtifact): TrustStatusAuthority {
 	if (artifact.outcome === "operator-confirmed") return { kind: "operator", id: "gate-confirmation" };
-	if (artifact.outcome === "full-auto-applied") return { kind: "clio", id: "full-auto-gate-policy" };
+	if (normalizeYoloGateOutcome(artifact.outcome) === "yolo-applied") return { kind: "clio", id: "yolo-gate-policy" };
 	return { kind: "reviewer", id: artifact.decider?.runId ?? "unavailable-decider" };
 }
 
@@ -892,7 +896,7 @@ export function adaptGateDecisionReviewStatus(
 		);
 	}
 	if (artifact.decider === undefined || artifact.correlation === undefined) {
-		if (artifact.outcome === "operator-confirmed" || artifact.outcome === "full-auto-applied") {
+		if (artifact.outcome === "operator-confirmed" || normalizeYoloGateOutcome(artifact.outcome) === "yolo-applied") {
 			return attributed("not_applicable", source, authority, artifacts);
 		}
 		return attributed("inconclusive", source, authority, artifacts);

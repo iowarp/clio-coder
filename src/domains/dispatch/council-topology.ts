@@ -19,6 +19,7 @@
 import type { ExecutionRole } from "./execution-role.js";
 import { COUNCIL_MAX_MEMBERS } from "./gate-role-prompts.js";
 import type { RunEnvelope, RunOutcome, RunStatus } from "./types.js";
+import { normalizeYoloCouncilApproval } from "./yolo-ids.js";
 
 /** How many councils one projection reports, newest first. */
 export const COUNCIL_TOPOLOGY_MAX_COUNCILS = 4;
@@ -319,7 +320,8 @@ function originOf(rows: ReadonlyArray<RunEnvelope>): CouncilOrigin | null {
 
 function approvalOf(rows: ReadonlyArray<RunEnvelope>): CouncilApproval | null {
 	const value = rows.find((row) => row.plan !== undefined)?.plan?.approval;
-	return value === "operator" || value === "yolo" ? value : null;
+	const approval = normalizeYoloCouncilApproval(value);
+	return approval === "operator" || approval === "yolo" ? approval : null;
 }
 
 /** Earliest start over the council's rows, as an ISO stamp. */

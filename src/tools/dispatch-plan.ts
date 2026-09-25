@@ -37,6 +37,7 @@ import { isRouteDecisionAgentSelection, type RouteDecisionV1 } from "../domains/
 import { ROUTE_POLICY_VERSION } from "../domains/dispatch/route-policy.js";
 import { isRoutingIntent, type RoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { DispatchFailoverCandidate, DispatchFailoverMode } from "../domains/dispatch/validation.js";
+import { normalizeYoloAuthorityBasis } from "../domains/dispatch/yolo-ids.js";
 import { prepareDispatchArguments } from "./dispatch-arguments.js";
 
 export type DispatchPlanTopology =
@@ -58,7 +59,7 @@ export type DispatchPlanSource = null | {
 
 export type DispatchPlanAuthorityGrant = null | {
 	requested: AgentAutomationAuthority;
-	basis: "operator-plan-approval" | "full-auto-policy";
+	basis: "operator-plan-approval" | "yolo-policy";
 };
 
 export interface DispatchPlanTaskView {
@@ -472,7 +473,7 @@ function renderPlanText(
 		}
 		if (task.agentSelection !== null) {
 			lines.push(
-				`    agent-selection=auto baseline=${safeField(task.agentSelection.baselineAgentId)} authority=${task.agentSelection.approvedAuthorities.map((authority) => safeField(authority)).join(",")} basis=${task.agentSelection.authorityBasis}`,
+				`    agent-selection=auto baseline=${safeField(task.agentSelection.baselineAgentId)} authority=${task.agentSelection.approvedAuthorities.map((authority) => safeField(authority)).join(",")} basis=${normalizeYoloAuthorityBasis(task.agentSelection.authorityBasis)}`,
 			);
 		}
 		if (task.stepId !== null) {
@@ -686,7 +687,8 @@ function isAuthorityGrant(value: unknown): value is Exclude<DispatchPlanAuthorit
 		isRecord(value) &&
 		Object.keys(value).sort().join("\u0000") === "basis\u0000requested" &&
 		AGENT_AUTOMATION_AUTHORITIES.includes(value.requested as AgentAutomationAuthority) &&
-		(value.basis === "operator-plan-approval" || value.basis === "full-auto-policy")
+		(normalizeYoloAuthorityBasis(value.basis) === "operator-plan-approval" ||
+			normalizeYoloAuthorityBasis(value.basis) === "yolo-policy")
 	);
 }
 
@@ -716,7 +718,8 @@ function isResolvedAgentSelection(value: unknown): value is NonNullable<Dispatch
 		return false;
 	if (value.version !== 1 || value.mode !== "auto") return false;
 	if (typeof value.baselineAgentId !== "string" || value.baselineAgentId.trim().length === 0) return false;
-	if (value.authorityBasis !== "operator-plan-approval" && value.authorityBasis !== "full-auto-policy") return false;
+	const authorityBasis = normalizeYoloAuthorityBasis(value.authorityBasis);
+	if (authorityBasis !== "operator-plan-approval" && authorityBasis !== "yolo-policy") return false;
 	if (
 		!Array.isArray(value.approvedAuthorities) ||
 		value.approvedAuthorities.length === 0 ||

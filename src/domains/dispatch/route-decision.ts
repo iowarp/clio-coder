@@ -47,6 +47,7 @@ import {
 	scoreRoute,
 } from "./route-policy.js";
 import { evaluateRouteReadiness, type RouteReadinessReport } from "./route-readiness.js";
+import { normalizeYoloAuthorityBasis } from "./yolo-ids.js";
 
 function routeCorrelationFacts(candidate: RouteCandidate): RouteCorrelationFacts {
 	return {
@@ -83,7 +84,7 @@ export interface RouteCandidate {
 
 export type RouteDecisionMode = "fixed" | "shadow" | "active";
 
-export type AgentSelectionAuthorityBasis = "operator-plan-approval" | "full-auto-policy";
+export type AgentSelectionAuthorityBasis = "operator-plan-approval" | "yolo-policy";
 
 export interface RouteDecisionAgentSelectionInput {
 	request: "explicit" | "auto";
@@ -173,6 +174,7 @@ function decisionReadinessReport(value: unknown): value is RouteReadinessReport 
 /** Strict validator for the required agent-selection evidence sealed in decisions and approvals. */
 export function isRouteDecisionAgentSelection(value: unknown): value is RouteDecisionAgentSelection {
 	if (!decisionRecord(value)) return false;
+	const authorityBasis = normalizeYoloAuthorityBasis(value.authorityBasis);
 	if (
 		!exactKeys(value, [
 			"request",
@@ -190,9 +192,7 @@ export function isRouteDecisionAgentSelection(value: unknown): value is RouteDec
 		value.baselineAgentId.length === 0 ||
 		typeof value.recommendedAgentId !== "string" ||
 		value.recommendedAgentId.length === 0 ||
-		(value.authorityBasis !== null &&
-			value.authorityBasis !== "operator-plan-approval" &&
-			value.authorityBasis !== "full-auto-policy") ||
+		(authorityBasis !== null && authorityBasis !== "operator-plan-approval" && authorityBasis !== "yolo-policy") ||
 		!Array.isArray(value.evaluations) ||
 		value.evaluations.length === 0 ||
 		value.evaluations.length > 64 ||
@@ -299,6 +299,7 @@ export function isRouteDecisionAgentSelection(value: unknown): value is RouteDec
 		return false;
 	if (value.authorityTransition !== null) {
 		const transition = value.authorityTransition;
+		const transitionBasis = decisionRecord(transition) ? normalizeYoloAuthorityBasis(transition.basis) : null;
 		if (
 			!decisionRecord(transition) ||
 			!exactKeys(transition, ["from", "to", "basis"]) ||
@@ -306,9 +307,9 @@ export function isRouteDecisionAgentSelection(value: unknown): value is RouteDec
 			transition.from.length === 0 ||
 			typeof transition.to !== "string" ||
 			transition.to.length === 0 ||
-			(transition.basis !== "same-authority" &&
-				transition.basis !== "operator-plan-approval" &&
-				transition.basis !== "full-auto-policy")
+			(transitionBasis !== "same-authority" &&
+				transitionBasis !== "operator-plan-approval" &&
+				transitionBasis !== "yolo-policy")
 		) {
 			return false;
 		}
@@ -324,7 +325,7 @@ export function isRouteDecisionAgentSelection(value: unknown): value is RouteDec
 		if (from === undefined || to === undefined) return false;
 		if (transition.basis === "same-authority") {
 			if (from.authority !== to.authority) return false;
-		} else if (transition.basis !== value.authorityBasis) return false;
+		} else if (transitionBasis !== authorityBasis) return false;
 	}
 	return (
 		(value.request !== "explicit" || value.authorityBasis === null) &&
