@@ -839,7 +839,13 @@ test("the welcome box closes at the viewport edge on narrow and wide terminals",
 		strictEqual(lines[14]?.[edge], "┘");
 		for (const line of lines.slice(1, 12)) strictEqual(line[edge], "│", line);
 		for (const line of lines.slice(13, 14)) strictEqual(line[edge], "│", line);
-		ok(!lines.slice(1, 6).filter((line) => line.includes("██")).some((line) => line.includes("…")), "art must resize rather than truncate");
+		ok(
+			!lines
+				.slice(1, 6)
+				.filter((line) => line.includes("██"))
+				.some((line) => line.includes("…")),
+			"art must resize rather than truncate",
+		);
 	}
 });
 

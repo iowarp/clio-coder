@@ -719,7 +719,12 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 	// imports. They are loaded here, not at module load, so a doctor run on a
 	// home with no targets (the `--fix` seed every CLI test starts from) pays
 	// nothing for a sweep it has nothing to do.
-	const [{ getRuntimeRegistry, closestRuntimeId }, { registerBuiltinRuntimes }, { loadPluginRuntimes }, { listKnownModelsForRuntime }] = await Promise.all([
+	const [
+		{ getRuntimeRegistry, closestRuntimeId },
+		{ registerBuiltinRuntimes },
+		{ loadPluginRuntimes },
+		{ listKnownModelsForRuntime },
+	] = await Promise.all([
 		import("../providers/registry.js"),
 		import("../providers/runtimes/builtins.js"),
 		import("../providers/plugins.js"),
@@ -742,11 +747,13 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 						: target.runtime === "ollama-native"
 							? "ollama"
 							: closestRuntimeId(registry, target.runtime);
-				return [{
-					ok: false,
-					name: `target ${target.id}`,
-					detail: `runtime '${target.runtime}' is unknown; ${replacement ? `use '${replacement}' instead` : "choose a registered runtime from \`clio-coder configure --list\`"} in settings.yaml`,
-				}];
+				return [
+					{
+						ok: false,
+						name: `target ${target.id}`,
+						detail: `runtime '${target.runtime}' is unknown; ${replacement ? `use '${replacement}' instead` : "choose a registered runtime from \`clio-coder configure --list\`"} in settings.yaml`,
+					},
+				];
 			}
 			// Cloud runtimes are validated against their catalog at configure time.
 			if (listKnownModelsForRuntime(runtime.id).length > 0) return [];
