@@ -44,7 +44,6 @@ function parseAgent(raw: unknown): InteropAgentRecord | null {
 	const installDir = stringField(raw, "installDir");
 	const decidedAt = stringField(raw, "decidedAt");
 	const decidedFingerprint = stringField(raw, "decidedFingerprint");
-	const hintedFingerprint = stringField(raw, "hintedFingerprint");
 	return {
 		kind: kind as InteropAgentId,
 		presence,
@@ -58,7 +57,6 @@ function parseAgent(raw: unknown): InteropAgentRecord | null {
 		...(decision === "accepted" || decision === "declined" ? { decision: decision as InteropDecision } : {}),
 		...(decidedAt !== undefined ? { decidedAt } : {}),
 		...(decidedFingerprint !== undefined ? { decidedFingerprint } : {}),
-		...(hintedFingerprint !== undefined ? { hintedFingerprint } : {}),
 	};
 }
 

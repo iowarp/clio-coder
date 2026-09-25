@@ -1,4 +1,3 @@
-import { expandConfigPath } from "../../core/resolve-config-value.js";
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import type { ResourceDiagnostic } from "./collision.js";
 import {
@@ -10,13 +9,11 @@ import {
 	parsePromptCommand,
 } from "./prompts/loader.js";
 import {
-	expandSkillInvocationInput,
 	type LoadSkillsInput,
 	loadSkills,
 	parsePendingSkillRequests,
 	parseSkillCommand,
 	type Skill,
-	type SkillExpansion,
 	type SkillExpansionOptions,
 } from "./skills/loader.js";
 
@@ -34,7 +31,6 @@ export interface ResourceLoaderOptions {
 
 export interface ResourcesLoader {
 	skills(cwd?: string): ResourceList<Skill>;
-	expandSkillInvocation(text: string, cwd?: string, options?: SkillExpansionOptions): SkillExpansion;
 	parsePendingSkillRequests(
 		text: string,
 		cwd?: string,
@@ -44,7 +40,6 @@ export interface ResourcesLoader {
 	/** Prompt templates for display only; see {@link ResourcesContract.promptsForDisplay}. */
 	promptsForDisplay(cwd?: string): ResourceList<PromptTemplate>;
 	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;
-	resolvePath(value: string, cwd?: string): string;
 	reload(): Promise<void>;
 }
 
@@ -67,9 +62,6 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 		skills(cwd = defaultCwd) {
 			return loadSkills({ cwd, ...skillOptions() });
 		},
-		expandSkillInvocation(text, cwd = defaultCwd, expansionOptions = {}) {
-			return expandSkillInvocationInput(text, loadSkills({ cwd, ...skillOptions() }), expansionOptions);
-		},
 		parsePendingSkillRequests(text, cwd = defaultCwd, expansionOptions = {}) {
 			// Plain text names no skill. Checking the prefix first keeps an ordinary
 			// submit from paying a full plugin walk for a catalog it never reads.
@@ -87,9 +79,6 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 			// diagnostics, so text without the prefix skips the template listing.
 			if (parsePromptCommand(text) === null) return { expanded: false, text, args: [], diagnostics: [] };
 			return expandPromptTemplateInput(text, loadPromptTemplates(promptOptions(cwd)));
-		},
-		resolvePath(value, cwd = defaultCwd) {
-			return expandConfigPath(value, { cwd });
 		},
 		async reload() {
 			return undefined;

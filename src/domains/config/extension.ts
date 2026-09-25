@@ -135,9 +135,6 @@ export function createConfigBundle(
 			if (!snapshot) throw new Error("config domain not started");
 			return snapshot;
 		},
-		set(next) {
-			contract.update?.(() => next);
-		},
 		update(mutate) {
 			if (!snapshot) throw new Error("config domain not started");
 			const previous = snapshot;

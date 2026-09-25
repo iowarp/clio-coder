@@ -23,7 +23,7 @@ test("config validates the actual mutation result before publishing or writing i
 		const loaded = await loadDomains([ConfigDomainModule, AgentsDomainModule]);
 		try {
 			const config = loaded.getContract<ConfigContract>("config");
-			ok(config?.set && config.update);
+			ok(config?.update);
 			const initial = structuredClone(config.get());
 			const initialDocument = readFileSync(settingsPath(), "utf8");
 			let publications = 0;
@@ -31,16 +31,13 @@ test("config validates the actual mutation result before publishing or writing i
 			try {
 				const collision = structuredClone(initial);
 				collision.integrations.externalAgents.entries = [{ id: "coder", command: "unstarted-fixture", args: [] }];
-				for (const mode of ["in-place", "replacement", "set"] as const) {
+				for (const mode of ["in-place", "replacement"] as const) {
 					throws(() => {
-						if (mode === "set") config.set?.(collision);
-						else {
-							config.update?.((settings) => {
-								if (mode === "replacement") return collision;
-								settings.integrations.externalAgents.entries = collision.integrations.externalAgents.entries;
-								return undefined;
-							});
-						}
+						config.update?.((settings) => {
+							if (mode === "replacement") return collision;
+							settings.integrations.externalAgents.entries = collision.integrations.externalAgents.entries;
+							return undefined;
+						});
 					}, /agent id collision/u);
 					deepStrictEqual(config.get(), initial, mode);
 					strictEqual(readFileSync(settingsPath(), "utf8"), initialDocument, mode);

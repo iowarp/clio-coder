@@ -83,7 +83,6 @@ function withStoredDecision(stored: InteropAgentRecord | undefined, fresh: Inter
 		...(stored.decision !== undefined ? { decision: stored.decision } : {}),
 		...(stored.decidedAt !== undefined ? { decidedAt: stored.decidedAt } : {}),
 		...(stored.decidedFingerprint !== undefined ? { decidedFingerprint: stored.decidedFingerprint } : {}),
-		...(stored.hintedFingerprint !== undefined ? { hintedFingerprint: stored.hintedFingerprint } : {}),
 	};
 }
 
@@ -131,25 +130,6 @@ function recordDecisions(
 		decidedAt,
 		decidedFingerprint: record.fingerprint,
 	}));
-}
-
-/**
- * One line at boot for agents that are installed, unconfigured, and undecided,
- * and only the first time each set of facts is seen. The caller decides where
- * this belongs; it is never emitted headless or under ACP.
- */
-export function interopBootHint(report: InteropReport, settings: ClioSettings): string | null {
-	const fresh = interopProposals(report, settings).filter(
-		(proposal) => report.agents.find((agent) => agent.kind === proposal.kind)?.hintedFingerprint !== proposal.fingerprint,
-	);
-	if (fresh.length === 0) return null;
-	updateRecords(
-		fresh.map((proposal) => proposal.kind),
-		report,
-		(record) => ({ ...record, hintedFingerprint: record.fingerprint }),
-	);
-	const names = fresh.map((proposal) => proposal.entry.id).join(", ");
-	return `clio-coder: ${names} detected on PATH and not configured. Run /interop to review.`;
 }
 
 /**

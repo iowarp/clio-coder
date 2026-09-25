@@ -213,7 +213,6 @@ export function createPromptsBundle(
 				operatorProfileApplied: customization.operatorProfileApplied,
 			};
 		},
-		reload,
 	};
 
 	let unsubscribeContextSources: (() => void) | null = null;

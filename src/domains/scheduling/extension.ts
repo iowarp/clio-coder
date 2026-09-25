@@ -82,13 +82,6 @@ export function createSchedulingBundle(
 			syncBudget();
 			return budget.ceilingUsd;
 		},
-		checkCeiling: (current) => {
-			syncBudget();
-			return budget.checkCeiling(current);
-		},
-		raiseCeiling: (next) => {
-			budget = createBudgetState(next);
-		},
 		preflight: () => {
 			const { verdict, currentUsd } = evaluate();
 			return { verdict, currentUsd, ceilingUsd: budget.ceilingUsd };

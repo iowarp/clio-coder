@@ -121,9 +121,6 @@ export interface ProvidersContract {
 	 */
 	getRuntime(id: string): RuntimeDescriptor | null;
 
-	/** Config-only readiness sweep. Does not hit the network. */
-	probeAll(): Promise<void>;
-
 	/** Passive live metadata sweep. `reasoning: true` / `tools: true` explicitly enable generation. */
 	probeAllLive(options?: LiveProbeOptions): Promise<void>;
 
@@ -135,9 +132,6 @@ export interface ProvidersContract {
 	 */
 	/** Optional cancellation covers auth and metadata; a cancelled probe does not publish health. */
 	probeTarget(id: string, options?: LiveProbeOptions): Promise<TargetStatus | null>;
-
-	/** Clear in-memory live connection state for a configured target. */
-	disconnectTarget(id: string): TargetStatus | null;
 
 	/**
 	 * Cached reasoning detection result for a given (target, wire model id).

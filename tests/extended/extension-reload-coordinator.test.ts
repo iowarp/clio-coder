@@ -172,7 +172,7 @@ describe("extension reload coordinator publication", () => {
 		});
 
 		strictEqual(harness.extensions.snapshot(), null, "the extensions domain start publishes nothing");
-		strictEqual(harness.extensions.generation(), 0);
+		strictEqual(harness.extensions.snapshot()?.generation ?? 0, 0);
 		strictEqual(harness.middleware.ownedGeneration("user-hooks"), 0);
 		const ephemeral = extensionSnapshotFor(project);
 		deepStrictEqual(
@@ -188,7 +188,7 @@ describe("extension reload coordinator publication", () => {
 		if (boot.status !== "committed") return;
 		deepStrictEqual([boot.generation, boot.previousGeneration, boot.changed], [1, 0, true]);
 		deepStrictEqual(log, ["ext-publish:1", "mw-publish:1", "committed:1"]);
-		strictEqual(harness.extensions.generation(), 1);
+		strictEqual(harness.extensions.snapshot()?.generation ?? 0, 1);
 		strictEqual(harness.middleware.ownedGeneration("user-hooks"), 1);
 		const booted = harness.extensions.snapshot();
 		deepStrictEqual(
@@ -224,7 +224,7 @@ describe("extension reload coordinator publication", () => {
 		strictEqual(reload.digest, boot.digest);
 		deepStrictEqual([reload.added, reload.removed, reload.modified], [[], [], []]);
 		deepStrictEqual(reload.hooks, boot.hooks);
-		strictEqual(harness.extensions.generation(), 2);
+		strictEqual(harness.extensions.snapshot()?.generation ?? 0, 2);
 		strictEqual(harness.middleware.ownedGeneration("user-hooks"), 2);
 		deepStrictEqual(harness.middleware.runHook({ hook: "turn_start" }).ruleIds, ["shared"]);
 		deepStrictEqual(
@@ -257,7 +257,7 @@ describe("extension reload coordinator publication", () => {
 			const result = harness.middleware.runHook({ hook: "turn_start" });
 			samples.push({
 				at,
-				extension: harness.extensions.generation(),
+				extension: harness.extensions.snapshot()?.generation ?? 0,
 				middleware: harness.middleware.ownedGeneration("user-hooks"),
 				snapshot: harness.extensions.snapshot()?.generation,
 				ruleIds: [...result.ruleIds],
@@ -327,7 +327,7 @@ describe("extension reload coordinator publication", () => {
 		const final = harness.middleware.runHook({ hook: "turn_start" });
 		deepStrictEqual(final.ruleIds, ["ext-a.hook", "ext-b.hook"]);
 		strictEqual(new Set(final.ruleIds).size, final.ruleIds.length, "sink re-entry introduced a duplicate id");
-		strictEqual(harness.extensions.generation(), 1);
+		strictEqual(harness.extensions.snapshot()?.generation ?? 0, 1);
 		strictEqual(harness.middleware.ownedGeneration("user-hooks"), 1);
 		ok(samples.length >= 4, samples.map((entry) => entry.at).join(", "));
 		for (const observed of samples) {
@@ -375,7 +375,7 @@ describe("extension reload coordinator publication", () => {
 		deepStrictEqual([switched.reason, switched.generation], ["workspace-changed", 1]);
 		strictEqual(cwdReads, 2, "the coordinator samples cwd exactly once for the refused run");
 		deepStrictEqual(middlewarePreparations, [1], "workspace mismatch is refused before middleware preparation");
-		strictEqual(harness.extensions.generation(), 1);
+		strictEqual(harness.extensions.snapshot()?.generation ?? 0, 1);
 		strictEqual(harness.middleware.ownedGeneration("user-hooks"), 1);
 		strictEqual(harness.extensions.snapshot()?.generation, 1);
 
@@ -386,7 +386,7 @@ describe("extension reload coordinator publication", () => {
 		strictEqual(recovered.generation, 3, "the refused workspace candidate burned generation 2");
 		strictEqual(cwdReads, 3);
 		deepStrictEqual(middlewarePreparations, [1, 3]);
-		strictEqual(harness.extensions.generation(), 3);
+		strictEqual(harness.extensions.snapshot()?.generation ?? 0, 3);
 		strictEqual(harness.middleware.ownedGeneration("user-hooks"), 3);
 		harness.stop();
 	});
@@ -678,7 +678,7 @@ describe("extension reload coordinator refusal paths", () => {
 		const outcome = coordinator.applyBoot();
 		strictEqual(outcome.status, "committed");
 		if (outcome.status !== "committed") return;
-		strictEqual(harness.extensions.generation(), 1);
+		strictEqual(harness.extensions.snapshot()?.generation ?? 0, 1);
 		strictEqual(harness.middleware.ownedGeneration("user-hooks"), 1);
 		strictEqual(harness.extensions.snapshot()?.generation, 1);
 		deepStrictEqual(harness.middleware.runHook({ hook: "turn_start" }).ruleIds, ["ext-a.hook"]);
@@ -706,7 +706,7 @@ describe("extension reload coordinator refusal paths", () => {
 		if (nestedOutcome.status === "rejected") {
 			deepStrictEqual([nestedOutcome.reason, nestedOutcome.generation], ["reentrant", 1]);
 		}
-		strictEqual(harness.extensions.generation(), 1);
+		strictEqual(harness.extensions.snapshot()?.generation ?? 0, 1);
 		strictEqual(harness.middleware.ownedGeneration("user-hooks"), 1);
 		harness.stop();
 	});

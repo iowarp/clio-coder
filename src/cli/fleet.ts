@@ -67,7 +67,7 @@ import { openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
 import { preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
-import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
+import { ensureClioState } from "../domains/lifecycle/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import {
 	aggregateCostAmounts,
@@ -374,7 +374,6 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		// only thing that can write each step's durable transcript.
 		createDispatchDomainModule({ journalRunEvents: true }),
 		SessionDomainModule,
-		LifecycleDomainModule,
 	]);
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");
 	const agents = loaded.getContract<AgentsContract>("agents");

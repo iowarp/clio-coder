@@ -2,7 +2,7 @@ import type { DomainContract } from "../../core/domain-loader.js";
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import type { ResourceDiagnostic } from "./collision.js";
 import type { PromptTemplate, PromptTemplateExpansion } from "./prompts/loader.js";
-import type { Skill, SkillExpansion, SkillExpansionOptions } from "./skills/loader.js";
+import type { Skill, SkillExpansionOptions } from "./skills/loader.js";
 
 export interface ResourceList<T> {
 	items: T[];
@@ -11,7 +11,6 @@ export interface ResourceList<T> {
 
 export interface ResourcesContract extends DomainContract {
 	skills(cwd?: string): ResourceList<Skill>;
-	expandSkillInvocation(text: string, cwd?: string, options?: SkillExpansionOptions): SkillExpansion;
 	parsePendingSkillRequests(
 		text: string,
 		cwd?: string,
@@ -26,6 +25,5 @@ export interface ResourcesContract extends DomainContract {
 	 */
 	promptsForDisplay(cwd?: string): ResourceList<PromptTemplate>;
 	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;
-	resolvePath(value: string, cwd?: string): string;
 	reload(): Promise<void>;
 }

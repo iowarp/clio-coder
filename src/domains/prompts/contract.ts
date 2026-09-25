@@ -53,7 +53,4 @@ export interface PromptsContract {
 	 * straight off this return rather than re-deriving them.
 	 */
 	compileWorkerPrompt(input: CompileWorkerPromptInput): Promise<CompiledSessionPrompt>;
-
-	/** Reload fragment table and advance `inputEpoch` after a successful load. */
-	reload(): void;
 }

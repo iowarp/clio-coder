@@ -274,7 +274,6 @@ describe("main compiled-prompt cache identity", () => {
 			async compileWorkerPrompt() {
 				throw new Error("not used");
 			},
-			reload() {},
 		};
 		const state = createTurnState("off");
 		const runtime = {
@@ -375,7 +374,6 @@ describe("main compiled-prompt cache identity", () => {
 			async compileWorkerPrompt() {
 				throw new Error("not used");
 			},
-			reload() {},
 		};
 		const state = createTurnState("off");
 		const runtime = {

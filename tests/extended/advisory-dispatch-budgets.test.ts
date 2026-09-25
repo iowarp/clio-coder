@@ -191,7 +191,7 @@ describe("dispatch advisory admission and explicit authority", () => {
 		let starts = 0;
 		const bundle = makeDispatchBundle(
 			dispatchStubContext({
-				scheduling: { preflight: () => ({ verdict: "over", currentUsd: 100, ceilingUsd: 1 }), checkCeiling: () => "over" },
+				scheduling: { preflight: () => ({ verdict: "over", currentUsd: 100, ceilingUsd: 1 }) },
 			}),
 			{
 				spawnWorker: (spec) => {

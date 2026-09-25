@@ -752,25 +752,12 @@ export function createProvidersBundle(
 		getRuntime(id) {
 			return registry.get(id);
 		},
-		probeAll,
 		probeAllLive,
 		async probeTarget(id, options) {
 			const settings = readConfig();
 			const target = settings.targets.find((ep) => ep.id === id);
 			if (!target) return null;
 			return probeTargetInternal(target, true, options);
-		},
-		disconnectTarget(id) {
-			const settings = readConfig();
-			const target = settings.targets.find((ep) => ep.id === id);
-			if (!target) return null;
-			for (const key of Array.from(reasoningCache.keys())) {
-				if (key.startsWith(`${id}:`)) reasoningCache.delete(key);
-			}
-			const status = buildStatus(target, registry.get(target.runtime), null);
-			statuses.set(target.id, status);
-			context.bus.emit(BusChannels.ProviderHealth, { id: target.id, status });
-			return status;
 		},
 		getDetectedReasoning(targetId, modelId) {
 			const cached = reasoningCache.get(reasoningCacheKey(targetId, modelId));

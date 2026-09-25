@@ -65,9 +65,6 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
 			});
 		},
-		listRules() {
-			return definitions.map((definition) => cloneMiddlewareRule(definition.rule));
-		},
 		snapshot() {
 			return createMiddlewareSnapshot(definitions.map((definition) => definition.rule));
 		},

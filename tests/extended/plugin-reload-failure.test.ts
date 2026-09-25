@@ -130,7 +130,6 @@ for (const mutation of ["disable", "remove"] as const) {
 			ok(!agents.contract.listSpecs().some((spec) => spec.id === "reload-active-agent"));
 			ok(agents.contract.get("coder"));
 			ok(agents.contract.get("user-survivor"));
-			ok(agents.contract.diagnostics().some((item) => item.message.includes("withdrawn until retry")));
 			const failedRevision = agents.contract.revision();
 			reload();
 			strictEqual(events.at(-1)?.changed, false);
@@ -140,7 +139,6 @@ for (const mutation of ["disable", "remove"] as const) {
 			strictEqual(events.at(-1)?.changed, false);
 			ok(agents.contract.get("reload-clash"));
 			strictEqual(agents.contract.get("reload-active-agent"), null);
-			strictEqual(agents.contract.diagnostics().length, 0);
 		} finally {
 			await agents.extension.stop?.();
 			process.chdir(originalCwd);

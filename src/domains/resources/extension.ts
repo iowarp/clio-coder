@@ -24,9 +24,6 @@ export function createResourcesBundle(
 		skills(cwd) {
 			return loader.skills(cwd);
 		},
-		expandSkillInvocation(text, cwd, options) {
-			return loader.expandSkillInvocation(text, cwd, options);
-		},
 		parsePendingSkillRequests(text, cwd, options) {
 			return loader.parsePendingSkillRequests(text, cwd, options);
 		},
@@ -38,9 +35,6 @@ export function createResourcesBundle(
 		},
 		expandPromptTemplate(text, cwd) {
 			return loader.expandPromptTemplate(text, cwd);
-		},
-		resolvePath(value, cwd) {
-			return loader.resolvePath(value, cwd);
 		},
 		reload() {
 			return loader.reload();

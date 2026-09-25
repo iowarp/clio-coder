@@ -67,10 +67,8 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 		list: () => statuses,
 		getTarget: (id: string) => settings.targets.find((entry) => entry.id === id) ?? null,
 		getRuntime: (id: string) => (id === runtime.id ? runtime : null),
-		probeAll: async () => {},
 		probeAllLive: async () => {},
 		probeTarget: async (id: string) => statuses.find((entry) => entry.target.id === id) ?? fallbackStatus,
-		disconnectTarget: (id: string) => statuses.find((entry) => entry.target.id === id) ?? fallbackStatus,
 		auth: {
 			statusForTarget: () => ({
 				providerId: runtime.id,
@@ -143,19 +141,15 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 		revision: () => 1,
 		list: () => recipes,
 		get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,
-		diagnostics: () => [],
 		listSpecs: () => recipes.map(normalizeAgentSpec),
 		getSpec: (id) => {
 			const recipe = recipes.find((entry) => entry.id === id);
 			return recipe ? normalizeAgentSpec(recipe) : null;
 		},
-		reload: () => {},
 	};
 	const middleware = createMiddlewareBundle().contract;
 	const scheduling: SchedulingContract = {
 		ceilingUsd: () => 5,
-		checkCeiling: () => "under",
-		raiseCeiling: () => {},
 		preflight: () => ({ verdict: "under", currentUsd: 0, ceilingUsd: 5 }),
 		maxWorkers: () => 4,
 		...options.scheduling,

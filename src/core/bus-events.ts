@@ -195,7 +195,7 @@ export interface ContextSourcesChangedPayload {
 	cwd: string;
 }
 
-export type ContextActivityKind = "context-init" | "context-clear" | "context-refresh" | "context-wiki" | "compaction";
+export type ContextActivityKind = "context-init" | "context-clear" | "context-refresh" | "compaction";
 export type ContextActivityPhase = "scan" | "codewiki" | "generate" | "clio-md" | "state" | "compact" | "done";
 export type ContextActivityStatus = "started" | "running" | "completed" | "failed";
 

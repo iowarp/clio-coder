@@ -47,8 +47,10 @@ export function makeDispatchBundle(
 	ctx: Parameters<typeof createDispatchBundle>[0],
 	options: Parameters<typeof createDispatchBundle>[1] = {},
 ): ReturnType<typeof createDispatchBundle> {
-	const production = createPromptsBundle(ctx).contract;
-	production.reload();
+	const bundle = createPromptsBundle(ctx);
+	// start() loads the fragment table before it returns; it has no await.
+	void bundle.extension.start();
+	const production = bundle.contract;
 	const prompts: PromptsContract = {
 		...production,
 		// Preserve test isolation while using production compilation and provenance.
