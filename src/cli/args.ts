@@ -31,6 +31,7 @@ export interface RunCliArgs {
 	model?: string;
 	thinking?: JobThinkingLevel;
 	autonomy?: AutonomyLevel;
+	readOnly: boolean;
 	sampling?: RunSamplingArgs;
 	agentId?: string;
 	agentProfile?: string;
@@ -61,6 +62,7 @@ const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = THINKING_LEVELS;
 export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 	const parsed: RunCliArgs = {
 		help: false,
+		readOnly: false,
 		json: false,
 		jsonEvents: "full",
 		required: [],
@@ -121,6 +123,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 						message: "--thinking must be one of: off|minimal|low|medium|high|xhigh|max",
 					});
 			}
+			continue;
+		}
+		if (arg === "--read-only") {
+			parsed.readOnly = true;
 			continue;
 		}
 		if (arg === "--autonomy") {
@@ -297,6 +303,12 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 	}
 
+	if (parsed.agentId !== undefined && parsed.autonomy !== undefined) {
+		parsed.diagnostics.push({
+			type: "error",
+			message: "--autonomy applies to the main agent; use --read-only to restrict --agent dispatch",
+		});
+	}
 	return parsed;
 }
 

@@ -38,12 +38,11 @@ export function buildCodexExecPrompt(input: WorkerRunInput): string {
 }
 
 /** `codex exec -` reads the work order from stdin; prompt text never enters argv. */
-export function buildCodexExecArgs(input: WorkerRunInput, gateEnv: NodeJS.ProcessEnv = process.env): string[] {
+export function buildCodexExecArgs(input: WorkerRunInput): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "codex-cli");
-	const permission = codexSubprocessPermissionConfigForAutonomy(input.autonomy, gateEnv, input.readOnly === true);
+	const permission = codexSubprocessPermissionConfigForAutonomy(input.readOnly === true);
 	const args = ["exec", "--json", "--ephemeral", "--skip-git-repo-check"];
-	if (permission.dangerousBypass) args.push("--dangerously-bypass-approvals-and-sandbox");
-	else args.push("--sandbox", permission.sandbox);
+	args.push("--sandbox", permission.sandbox);
 	if (input.wireModelId.trim() && input.wireModelId !== CODEX_CLI_DEFAULT_MODEL) {
 		args.push("--model", input.wireModelId.trim());
 	}
@@ -202,7 +201,7 @@ export function startCodexCliWorkerRun(
 	dependencies: CodexRuntimeDependencies = {},
 ): WorkerRunHandle {
 	const sourceEnv = dependencies.environment ?? process.env;
-	const args = buildCodexExecArgs(input, sourceEnv);
+	const args = buildCodexExecArgs(input);
 	const prompt = buildCodexExecPrompt(input);
 	const cwd = resolveSafeCwd(input.cwd, dependencies.workspaceRoot ?? process.cwd());
 	const child: CodexChildProcess = spawn(dependencies.binary ?? CODEX_BINARY, args, {

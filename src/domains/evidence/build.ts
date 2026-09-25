@@ -377,10 +377,7 @@ function buildFindings(
 			);
 		}
 		if (status.autonomyEnforcement.state === "bypassed") {
-			const message =
-				status.autonomyEnforcement.authority.id === "agent-managed"
-					? "run used external agent-managed governance; Clio safety blocks were not enforced"
-					: "run executed with external permission bypass (CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1); Clio safety blocks were not enforced";
+			const message = "run used external peer permissions outside Clio policy; Clio safety blocks were not enforced";
 			findings.push(finding(findings.length, "warn", "external-bypass", source.envelope.id, message));
 		} else if (status.autonomyEnforcement.state === "approximated") {
 			const mode =

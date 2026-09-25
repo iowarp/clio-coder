@@ -32,7 +32,7 @@ writeFileSync(join(process.cwd(), "observed.json"), JSON.stringify({
   args: process.argv.slice(2), stdin,
   env: { HOME: process.env.HOME, PATH: process.env.PATH, AI_AGENT: process.env.AI_AGENT,
     FAKE_API_SECRET: process.env.FAKE_API_SECRET,
-    CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: process.env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS }
+    }
 }));
 if (scenario.stderr) process.stderr.write(scenario.stderr);
 if (scenario.exitLeader) {
@@ -130,7 +130,6 @@ describe("Claude Code external subprocess contract", () => {
 				PATH: process.env.PATH,
 				HOME: home,
 				FAKE_API_SECRET: "must-not-leak",
-				CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1",
 			},
 		});
 		const result = await handle.promise;
@@ -147,7 +146,7 @@ describe("Claude Code external subprocess contract", () => {
 		equal(message.content[0]?.type === "text" ? message.content[0].text : "", "hello world");
 		const observed = JSON.parse(readFileSync(join(root, "observed.json"), "utf8")) as Record<string, unknown>;
 		const args = observed.args as string[];
-		deepStrictEqual(args, buildClaudeCodeArgs(input, { CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1" }));
+		deepStrictEqual(args, buildClaudeCodeArgs(input));
 		ok(args.includes("--append-system-prompt"));
 		for (const arg of args) doesNotMatch(arg, /Compare \/alpha|Question: \$HOME/);
 		equal(observed.stdin, buildClaudeCodePrompt(input));
@@ -155,7 +154,6 @@ describe("Claude Code external subprocess contract", () => {
 		const env = observed.env as Record<string, unknown>;
 		equal(env.HOME, home);
 		equal(env.FAKE_API_SECRET, undefined);
-		equal(env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS, undefined);
 		equal(typeof env.PATH, "string");
 		equal(typeof env.AI_AGENT, "string");
 		ok(events.some((event) => event.type === "message_update"));

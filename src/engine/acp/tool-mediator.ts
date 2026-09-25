@@ -6,7 +6,7 @@ import type { DelegationToolGovernance } from "../../core/defaults.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { DelegationToolCallLogEntry } from "../../domains/dispatch/types.js";
-import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "../../domains/safety/autonomy.js";
+import { DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "../../domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../../domains/safety/contract.js";
 import type {
 	AcpPermissionOption,
@@ -20,12 +20,6 @@ interface MediatorInput {
 	safety: SafetyContract;
 	cwd: string;
 	toolGovernance: DelegationToolGovernance;
-	/**
-	 * Session autonomy level (sd-01 §2.5). Applied after the safety net under
-	 * clio-coder-policy governance; `ask` dispositions resolve as non-stall denials
-	 * because a delegation has no operator to answer a prompt.
-	 */
-	autonomy?: AutonomyLevel;
 	readOnly?: boolean;
 	onPermissionResolved?(event: AcpMediatorPermissionResolvedEvent): void;
 }
@@ -609,9 +603,9 @@ export class AcpToolMediator {
 			decision = "denied";
 			reason = `unknown ACP tool: ${mapped.displayTool}`;
 		} else {
-			const level = this.input.autonomy ?? DEFAULT_AUTONOMY_LEVEL;
+			const level = DEFAULT_AUTONOMY_LEVEL;
 			const safetyDecisions = mapped.evaluations.map((evaluation) =>
-				this.input.safety.evaluate({ tool: evaluation.tool, args: evaluation.args }, level === "yolo" ? "yolo" : undefined),
+				this.input.safety.evaluate({ tool: evaluation.tool, args: evaluation.args }),
 			);
 			const blocking = safetyDecisions.find((candidate) => candidate.kind === "block");
 			const asking = safetyDecisions.find((candidate) => candidate.kind === "ask");

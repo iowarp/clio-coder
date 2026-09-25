@@ -354,12 +354,8 @@ describe("provider transport boundary", () => {
 			event: "user",
 			message: { content: "Use primary sources.\n\nCompare the two standards." },
 		});
-		strictEqual(antigravitySubprocessConfigForAutonomy("yolo", {}).externalMode, "accept-edits");
-		strictEqual(
-			antigravitySubprocessConfigForAutonomy("yolo", { CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1" }).externalMode,
-			"bypassPermissions",
-		);
-		strictEqual(antigravitySubprocessConfigForAutonomy("default", {}).externalMode, "accept-edits");
+		strictEqual(antigravitySubprocessConfigForAutonomy(false).externalMode, "accept-edits");
+		strictEqual(antigravitySubprocessConfigForAutonomy(true).externalMode, "plan+sandbox");
 	});
 
 	it("projects only model quirks consumed by the engine", () => {

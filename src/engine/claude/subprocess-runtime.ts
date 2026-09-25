@@ -3,7 +3,6 @@ import type { Readable, Writable } from "node:stream";
 
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../core/safe-exec.js";
-import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
 import { assertToolProfileEnforceable } from "../../tools/profiles.js";
 import { createProcessTreeTerminator, readBoundedLines, readStderr, waitForClose } from "../external-subprocess.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
@@ -27,16 +26,12 @@ export interface ClaudeRuntimeDependencies {
 }
 
 export interface ClaudeSubprocessPermissionConfig {
-	permissionMode: "plan" | "dontAsk" | "acceptEdits" | "default" | "bypassPermissions";
+	permissionMode: "plan" | "acceptEdits";
 	extraArgs: string[];
 	dangerousBypass: boolean;
 }
 
-export function claudeSubprocessPermissionConfigForAutonomy(
-	level: AutonomyLevel | undefined,
-	env: NodeJS.ProcessEnv = process.env,
-	readOnly = false,
-): ClaudeSubprocessPermissionConfig {
+export function claudeSubprocessPermissionConfigForAutonomy(readOnly = false): ClaudeSubprocessPermissionConfig {
 	if (readOnly) {
 		return {
 			permissionMode: "plan",
@@ -44,18 +39,7 @@ export function claudeSubprocessPermissionConfigForAutonomy(
 			dangerousBypass: false,
 		};
 	}
-	if (level === "yolo" && env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
-		return {
-			permissionMode: "bypassPermissions",
-			extraArgs: ["--allow-dangerously-skip-permissions"],
-			dangerousBypass: true,
-		};
-	}
-
-	if (level === "default") {
-		return { permissionMode: "acceptEdits", extraArgs: [], dangerousBypass: false };
-	}
-	return { permissionMode: "default", extraArgs: [], dangerousBypass: false };
+	return { permissionMode: "acceptEdits", extraArgs: [], dangerousBypass: false };
 }
 
 export function buildClaudeCodePrompt(input: WorkerRunInput): string {
@@ -69,9 +53,9 @@ export function buildClaudeCodePrompt(input: WorkerRunInput): string {
  * given, so the prompt never appears in argv. The system prompt stays on
  * `--append-system-prompt`: stdin carries only the user turn.
  */
-export function buildClaudeCodeArgs(input: WorkerRunInput, gateEnv: NodeJS.ProcessEnv = process.env): string[] {
+export function buildClaudeCodeArgs(input: WorkerRunInput): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "claude-code");
-	const permission = claudeSubprocessPermissionConfigForAutonomy(input.autonomy, gateEnv, input.readOnly === true);
+	const permission = claudeSubprocessPermissionConfigForAutonomy(input.readOnly === true);
 	const args = [
 		"-p",
 		"--output-format",
@@ -278,7 +262,7 @@ export function startClaudeCodeWorkerRun(
 	dependencies: ClaudeRuntimeDependencies = {},
 ): WorkerRunHandle {
 	const sourceEnv = dependencies.environment ?? process.env;
-	const args = buildClaudeCodeArgs(input, sourceEnv);
+	const args = buildClaudeCodeArgs(input);
 	const prompt = buildClaudeCodePrompt(input);
 	const workspaceRoot = dependencies.workspaceRoot ?? process.cwd();
 	const cwd = resolveSafeCwd(input.cwd, workspaceRoot);

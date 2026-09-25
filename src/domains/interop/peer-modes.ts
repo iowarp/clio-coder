@@ -69,7 +69,7 @@ export function peerModeCapabilities(
 			: targetIds.length === 0
 				? `No target uses the ${kind.headlessRuntimeId} runtime`
 				: kind.id === "opencode"
-					? "target configured; OpenCode headless supports edit autonomy only, with authentication checked at launch"
+					? "target configured; OpenCode headless supports writable runs but refuses read-only runs; authentication is checked at launch"
 					: "target configured; CLI authentication and the selected model are checked when a run starts";
 		const setupAction = !binaryPresent
 			? `Install ${kind.label} CLI`

@@ -48,7 +48,7 @@ import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js
 import { setupSteerChannel } from "./steer-channel.js";
 
 const USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--agent <recipe-id>] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--read-only] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--agent <recipe-id>] "<task>"\n';
 
 const HELP = `clio-coder run [flags] "<task>"
 
@@ -59,7 +59,8 @@ Flags:
   --target <id>             one-run main-agent or dispatch target override
   --model <wireId>          one-run model override
   --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh|max
-  --autonomy <level>        one-run autonomy: default|yolo
+  --autonomy <level>        main-agent autonomy: default|yolo
+  --read-only              restrict --agent dispatch to read-only tools
   --turn-mode <mode>        main-agent workflow: answer|proposal|change; not an authorization grant
   --allow-tools <names>     main-agent capability allowlist, comma-separated; none disables all tools
   --no-delegate            forbid main-agent dispatch for this task and its continuations
@@ -179,6 +180,7 @@ function armRunTimeout(seconds: number): HeadlessRunDeadline {
 
 function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
 	return (
+		parsed.readOnly ||
 		parsed.agentProfile !== undefined ||
 		parsed.agentRuntime !== undefined ||
 		parsed.toolProfile !== undefined ||
@@ -574,6 +576,7 @@ async function runDispatch(
 		task,
 		requestOrigin: "user",
 	};
+	if (parsed.readOnly) dispatchReq.readOnly = true;
 	if (parsed.agentProfile) dispatchReq.workerProfile = parsed.agentProfile;
 	if (parsed.agentRuntime) dispatchReq.workerRuntime = parsed.agentRuntime;
 	if (parsed.target) dispatchReq.target = parsed.target;

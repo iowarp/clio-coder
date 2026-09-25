@@ -2273,7 +2273,7 @@ function autonomyEnforcementForWorkerSpec(spec: WorkerSpec): RunReceiptAutonomyE
 	const readOnly = spec.readOnly === true;
 	if (spec.runtimeId === "claude-code") {
 		try {
-			const config = claudeSubprocessPermissionConfigForAutonomy(autonomy, process.env, readOnly);
+			const config = claudeSubprocessPermissionConfigForAutonomy(readOnly);
 			return {
 				grade: config.dangerousBypass ? "bypassed" : "approximated",
 				autonomy,
@@ -2286,7 +2286,7 @@ function autonomyEnforcementForWorkerSpec(spec: WorkerSpec): RunReceiptAutonomyE
 	}
 	if (spec.runtimeId === "codex-cli") {
 		try {
-			const config = codexSubprocessPermissionConfigForAutonomy(autonomy, process.env, readOnly);
+			const config = codexSubprocessPermissionConfigForAutonomy(readOnly);
 			return {
 				grade: config.dangerousBypass ? "bypassed" : "approximated",
 				autonomy,
@@ -2302,7 +2302,7 @@ function autonomyEnforcementForWorkerSpec(spec: WorkerSpec): RunReceiptAutonomyE
 			return {
 				grade: "approximated",
 				autonomy,
-				externalMode: opencodeCliModeForAutonomy(autonomy, readOnly),
+				externalMode: opencodeCliModeForAutonomy(readOnly),
 				dangerousBypass: false,
 			};
 		} catch {
@@ -2314,7 +2314,7 @@ function autonomyEnforcementForWorkerSpec(spec: WorkerSpec): RunReceiptAutonomyE
 			return {
 				grade: "approximated",
 				autonomy,
-				externalMode: piCliModeForAutonomy(autonomy, readOnly),
+				externalMode: piCliModeForAutonomy(readOnly),
 				dangerousBypass: false,
 			};
 		} catch {
@@ -2323,7 +2323,7 @@ function autonomyEnforcementForWorkerSpec(spec: WorkerSpec): RunReceiptAutonomyE
 	}
 	if (spec.runtimeId === "antigravity-code") {
 		try {
-			const config = antigravitySubprocessConfigForAutonomy(autonomy, process.env, readOnly);
+			const config = antigravitySubprocessConfigForAutonomy(readOnly);
 			return {
 				grade: config.dangerousBypass ? "bypassed" : "approximated",
 				autonomy,
@@ -4385,7 +4385,6 @@ export function createDispatchBundle(
 				dynamicPromptMessages: lifecycle.dynamicPromptMessages,
 				cwd: lifecycle.cwd,
 				safety,
-				autonomy: lifecycle.autonomy,
 				...(req.readOnly === true ? { readOnly: true } : {}),
 				clientVersion: readClioVersion(),
 				now,

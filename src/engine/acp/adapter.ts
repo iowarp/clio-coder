@@ -6,7 +6,6 @@ import {
 } from "../../core/defaults.js";
 import type { HeartbeatStamp } from "../../domains/dispatch/heartbeat.js";
 import { resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
-import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
 import type { SafetyContract } from "../../domains/safety/contract.js";
 import type { AgentEvent } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
@@ -37,8 +36,6 @@ export interface AcpDelegationRunInput {
 	dynamicPromptMessages?: ReadonlyArray<{ body: string }>;
 	cwd: string;
 	safety: SafetyContract;
-	/** Session autonomy level applied by the mediator under clio-coder-policy governance. */
-	autonomy?: AutonomyLevel;
 	readOnly?: boolean;
 	signal?: AbortSignal;
 	clientVersion?: string;
@@ -294,7 +291,6 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		safety: input.safety,
 		cwd: input.cwd,
 		toolGovernance: input.agent.toolGovernance ?? "clio-coder-policy",
-		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
 		...(input.readOnly === true ? { readOnly: true } : {}),
 		onPermissionResolved: (event) =>
 			emit({

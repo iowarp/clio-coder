@@ -3,7 +3,6 @@ import type { Readable, Writable } from "node:stream";
 
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../core/safe-exec.js";
-import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
 import { assertToolProfileEnforceable } from "../../tools/profiles.js";
 import { createProcessTreeTerminator, readBoundedLines, readStderr, waitForClose } from "../external-subprocess.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
@@ -45,7 +44,7 @@ export type AntigravityStreamEvent =
 export interface AntigravitySubprocessConfig {
 	extraArgs: string[];
 	dangerousBypass: boolean;
-	externalMode: "plan+sandbox" | "accept-edits" | "bypassPermissions";
+	externalMode: "plan+sandbox" | "accept-edits";
 }
 
 export interface AntigravityRuntimeDependencies {
@@ -55,29 +54,11 @@ export interface AntigravityRuntimeDependencies {
 	killGraceMs?: number;
 }
 
-/**
- * Translate Clio's effective autonomy ceiling to the official CLI's coarser
- * modes. Every non-bypass launch is explicit, so changing interactive `agy`
- * defaults cannot silently widen a delegated run.
- */
-export function antigravitySubprocessConfigForAutonomy(
-	level: AutonomyLevel | undefined,
-	env: NodeJS.ProcessEnv = process.env,
-	readOnly = false,
-): AntigravitySubprocessConfig {
+/** Keep the peer's own permission mode explicit for both dispatch restrictions. */
+export function antigravitySubprocessConfigForAutonomy(readOnly = false): AntigravitySubprocessConfig {
 	if (readOnly) {
 		return { extraArgs: ["--mode", "plan", "--sandbox"], dangerousBypass: false, externalMode: "plan+sandbox" };
 	}
-	if (level === "yolo" && env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
-		return {
-			extraArgs: ["--dangerously-skip-permissions"],
-			dangerousBypass: true,
-			externalMode: "bypassPermissions",
-		};
-	}
-
-	// Both default and ungated yolo stay at agy's explicit
-	// accept-edits ceiling. Shell/network policy remains owned by agy.
 	return { extraArgs: ["--mode", "accept-edits"], dangerousBypass: false, externalMode: "accept-edits" };
 }
 
@@ -102,9 +83,9 @@ export function buildAgyStdinLine(input: WorkerRunInput): string {
 	return `${JSON.stringify({ event: "user", message: { content } })}\n`;
 }
 
-export function buildAgyArgs(input: WorkerRunInput, gateEnv: NodeJS.ProcessEnv = process.env): string[] {
+export function buildAgyArgs(input: WorkerRunInput): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "antigravity-code");
-	const permission = antigravitySubprocessConfigForAutonomy(input.autonomy, gateEnv, input.readOnly === true);
+	const permission = antigravitySubprocessConfigForAutonomy(input.readOnly === true);
 	const args = [
 		...permission.extraArgs,
 		"--input-format",
@@ -380,7 +361,7 @@ export function startAntigravityWorkerRun(
 	dependencies: AntigravityRuntimeDependencies = {},
 ): WorkerRunHandle {
 	const sourceEnv = dependencies.environment ?? process.env;
-	const args = buildAgyArgs(input, sourceEnv);
+	const args = buildAgyArgs(input);
 	const stdinLine = buildAgyStdinLine(input);
 	const workspaceRoot = dependencies.workspaceRoot ?? process.cwd();
 	const cwd = resolveSafeCwd(input.cwd, workspaceRoot);
