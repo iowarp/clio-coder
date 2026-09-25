@@ -4,8 +4,8 @@ import type { ClioSettings } from "../core/config.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
 import type { AutonomyLevel } from "../domains/safety/index.js";
-import type { AcpJsonRpcPeerTransport, StdioServerTransportOptions } from "../engine/acp/transport.js";
 import type { AcpHandshake } from "../engine/acp/server.js";
+import type { AcpJsonRpcPeerTransport, StdioServerTransportOptions } from "../engine/acp/transport.js";
 import type { ImageContent } from "../engine/types.js";
 import type { TerminalLease } from "../interactive/terminal-lease.js";
 

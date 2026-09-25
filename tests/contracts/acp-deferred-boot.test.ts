@@ -6,8 +6,7 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { serveDeferredAcp } from "../../src/engine/acp/deferred-boot.js";
 import { createAcpHandshake } from "../../src/engine/acp/server.js";
-import { createStdioServerTransport } from "../../src/engine/acp/transport.js";
-import { createStdioTransport } from "../../src/engine/acp/transport.js";
+import { createStdioServerTransport, createStdioTransport } from "../../src/engine/acp/transport.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 test("ACP binds the first session cwd before boot and refuses a different later cwd", async () => {
@@ -31,8 +30,15 @@ test("ACP binds the first session cwd before boot and refuses a different later 
 	});
 	const transport = createStdioServerTransport({ input, output });
 	const handshake = createAcpHandshake({
-		version: "test", session: true, loadSession: true, settings: true, providers: true,
-		steer: true, dispatch: true, toolRegistry: true, bus: true,
+		version: "test",
+		session: true,
+		loadSession: true,
+		settings: true,
+		providers: true,
+		steer: true,
+		dispatch: true,
+		toolRegistry: true,
+		bus: true,
 	});
 	const seen: string[] = [];
 	const done = serveDeferredAcp({
@@ -99,13 +105,18 @@ test("ACP CLI boots the workspace named by its first session", { timeout: 90_000
 		{
 			cwd: launch,
 			env: Object.fromEntries(
-				Object.entries({ ...process.env, ...scratch.env, NODE_ENV: "test" })
-					.filter((entry): entry is [string, string] => entry[1] !== undefined),
+				Object.entries({ ...process.env, ...scratch.env, NODE_ENV: "test" }).filter(
+					(entry): entry is [string, string] => entry[1] !== undefined,
+				),
 			),
 		},
 	);
 	try {
-		const init = await child.request<{ protocolVersion: number; agentCapabilities: Record<string, unknown> }>("initialize", { protocolVersion: 1 }, 10_000);
+		const init = await child.request<{ protocolVersion: number; agentCapabilities: Record<string, unknown> }>(
+			"initialize",
+			{ protocolVersion: 1 },
+			10_000,
+		);
 		strictEqual(init.protocolVersion, 1);
 		const eager = createStdioTransport(
 			process.execPath,
@@ -113,13 +124,18 @@ test("ACP CLI boots the workspace named by its first session", { timeout: 90_000
 			{
 				cwd: launch,
 				env: Object.fromEntries(
-					Object.entries({ ...process.env, ...scratch.env, NODE_ENV: "test" })
-						.filter((entry): entry is [string, string] => entry[1] !== undefined),
+					Object.entries({ ...process.env, ...scratch.env, NODE_ENV: "test" }).filter(
+						(entry): entry is [string, string] => entry[1] !== undefined,
+					),
 				),
 			},
 		);
 		try {
-			const eagerInit = await eager.request<{ agentCapabilities: Record<string, unknown> }>("initialize", { protocolVersion: 1 }, 30_000);
+			const eagerInit = await eager.request<{ agentCapabilities: Record<string, unknown> }>(
+				"initialize",
+				{ protocolVersion: 1 },
+				30_000,
+			);
 			const normalized = (capabilities: Record<string, unknown>) => {
 				const copy = structuredClone(capabilities);
 				const metadata = copy._meta as Record<string, unknown>;
@@ -133,8 +149,15 @@ test("ACP CLI boots the workspace named by its first session", { timeout: 90_000
 		}
 		const created = await child.request<{ sessionId: string }>("session/new", { cwd: project, mcpServers: [] }, 60_000);
 		ok(created.sessionId);
-		const listed = await child.request<{ sessions: Array<{ sessionId: string; cwd: string }> }>("session/list", {}, 10_000);
-		strictEqual(listed.sessions.some((row) => row.sessionId === created.sessionId && row.cwd === project), true);
+		const listed = await child.request<{ sessions: Array<{ sessionId: string; cwd: string }> }>(
+			"session/list",
+			{},
+			10_000,
+		);
+		strictEqual(
+			listed.sessions.some((row) => row.sessionId === created.sessionId && row.cwd === project),
+			true,
+		);
 		await rejects(
 			child.request("session/new", { cwd: launch, mcpServers: [] }, 10_000),
 			(error: unknown) => error instanceof Error && error.message.includes(project),
@@ -152,15 +175,25 @@ test("ACP first unfiltered session list binds the launch directory", async () =>
 	const output = new PassThrough();
 	let observed = "";
 	output.setEncoding("utf8");
-	output.on("data", (chunk: string) => { observed += chunk; });
+	output.on("data", (chunk: string) => {
+		observed += chunk;
+	});
 	const transport = createStdioServerTransport({ input, output });
 	const handshake = createAcpHandshake({
-		session: true, loadSession: true, settings: true, providers: true,
-		steer: true, dispatch: true, toolRegistry: true, bus: true,
+		session: true,
+		loadSession: true,
+		settings: true,
+		providers: true,
+		steer: true,
+		dispatch: true,
+		toolRegistry: true,
+		bus: true,
 	});
 	let bootRoot: string | null = null;
 	const done = serveDeferredAcp({
-		transport, handshake, launchCwd: launch,
+		transport,
+		handshake,
+		launchCwd: launch,
 		boot: async (cwd, ready) => {
 			bootRoot = cwd;
 			transport.onRequest("session/list", () => ({ sessions: [] }));
@@ -187,16 +220,30 @@ test("ACP preboot logout keeps the workspace unbound", async () => {
 	const output = new PassThrough();
 	let observed = "";
 	output.setEncoding("utf8");
-	output.on("data", (chunk: string) => { observed += chunk; });
+	output.on("data", (chunk: string) => {
+		observed += chunk;
+	});
 	const transport = createStdioServerTransport({ input, output });
 	const handshake = createAcpHandshake({
-		session: true, loadSession: true, settings: true, providers: true,
-		steer: true, dispatch: true, toolRegistry: true, bus: true,
+		session: true,
+		loadSession: true,
+		settings: true,
+		providers: true,
+		steer: true,
+		dispatch: true,
+		toolRegistry: true,
+		bus: true,
 	});
 	let booted = false;
 	const done = serveDeferredAcp({
-		transport, handshake, launchCwd: process.cwd(),
-		boot: async (_cwd, ready) => { booted = true; ready(); return 0; },
+		transport,
+		handshake,
+		launchCwd: process.cwd(),
+		boot: async (_cwd, ready) => {
+			booted = true;
+			ready();
+			return 0;
+		},
 	});
 	try {
 		for (const [id, method, params] of [
@@ -210,7 +257,10 @@ test("ACP preboot logout keeps the workspace unbound", async () => {
 		for (let tries = 0; tries < 300 && !observed.includes('"id":4'); tries += 1) {
 			await new Promise((resolve) => setTimeout(resolve, 10));
 		}
-		const rows = observed.trim().split("\n").map((line) => JSON.parse(line) as { id: number; error?: { code: number } });
+		const rows = observed
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { id: number; error?: { code: number } });
 		strictEqual(rows.find((row) => row.id === 2)?.error?.code, -32602);
 		strictEqual(rows.find((row) => row.id === 4)?.error?.code, -32000);
 		strictEqual(booted, false);

@@ -34,8 +34,8 @@ import type { SessionContract, SessionMeta } from "../../domains/session/contrac
 import type { MessageEntry, SessionEntry } from "../../domains/session/entries.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import { askUserExposure } from "../../tools/ask-user.js";
-import type { ToolRegistry } from "../../tools/registry.js";
 import type { McpCapabilitySource, McpClientServerSpec } from "../../tools/gateway/mcp-capabilities.js";
+import type { ToolRegistry } from "../../tools/registry.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import type { AgentMessage } from "../types.js";
 import type { AcpCommandCatalog, AcpCommandControl } from "./commands.js";
@@ -1997,21 +1997,37 @@ export interface AcpHandshakeFeatures {
 function parseClientMcpServers(value: unknown, required: boolean): McpClientServerSpec[] {
 	if (value === undefined && !required) return [];
 	if (!Array.isArray(value) || value.length > 32) {
-		throw new AcpRequestError(-32602, "mcpServers must be an array of at most 32 stdio servers", { code: "invalid_params" });
+		throw new AcpRequestError(-32602, "mcpServers must be an array of at most 32 stdio servers", {
+			code: "invalid_params",
+		});
 	}
 	return value.map((raw: unknown) => {
-		if (!isRecord(raw) || (raw.type !== undefined && raw.type !== "stdio") ||
-			typeof raw.name !== "string" || raw.name.trim().length === 0 || Buffer.byteLength(raw.name) > 128 ||
-			typeof raw.command !== "string" || !isAbsolute(raw.command) || Buffer.byteLength(raw.command) > 512 ||
-			!Array.isArray(raw.args) || raw.args.length > 64 ||
+		if (
+			!isRecord(raw) ||
+			(raw.type !== undefined && raw.type !== "stdio") ||
+			typeof raw.name !== "string" ||
+			raw.name.trim().length === 0 ||
+			Buffer.byteLength(raw.name) > 128 ||
+			typeof raw.command !== "string" ||
+			!isAbsolute(raw.command) ||
+			Buffer.byteLength(raw.command) > 512 ||
+			!Array.isArray(raw.args) ||
+			raw.args.length > 64 ||
 			!raw.args.every((arg: unknown) => typeof arg === "string" && Buffer.byteLength(arg) <= 4096) ||
-			!Array.isArray(raw.env) || raw.env.length > 64) {
+			!Array.isArray(raw.env) ||
+			raw.env.length > 64
+		) {
 			throw new AcpRequestError(-32602, "invalid stdio MCP server declaration", { code: "invalid_params" });
 		}
 		const env: Record<string, string> = {};
 		for (const entry of raw.env) {
-			if (!isRecord(entry) || typeof entry.name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.name) ||
-				typeof entry.value !== "string" || Buffer.byteLength(entry.value) > 4096) {
+			if (
+				!isRecord(entry) ||
+				typeof entry.name !== "string" ||
+				!/^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.name) ||
+				typeof entry.value !== "string" ||
+				Buffer.byteLength(entry.value) > 4096
+			) {
 				throw new AcpRequestError(-32602, "invalid stdio MCP server environment", { code: "invalid_params" });
 			}
 			env[entry.name] = entry.value;
@@ -2054,14 +2070,23 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 		return params;
 	};
 	return {
-		get initialized() { return initialized; },
-		get loggedOut() { return loggedOut; },
-		get enabledEventKinds() { return enabledEventKinds; },
-		get toolProgressEnabled() { return toolProgressEnabled; },
+		get initialized() {
+			return initialized;
+		},
+		get loggedOut() {
+			return loggedOut;
+		},
+		get enabledEventKinds() {
+			return enabledEventKinds;
+		},
+		get toolProgressEnabled() {
+			return toolProgressEnabled;
+		},
 		workspaceInstanceId,
 		initialize(params) {
 			if (initialized) throw new AcpRequestError(-32600, "already initialized", { code: "already_initialized" });
-			const clientCapabilities = isRecord(params) && isRecord(params.clientCapabilities) ? params.clientCapabilities : null;
+			const clientCapabilities =
+				isRecord(params) && isRecord(params.clientCapabilities) ? params.clientCapabilities : null;
 			const clientMeta =
 				clientCapabilities !== null && isRecord(clientCapabilities._meta) ? clientCapabilities._meta : null;
 			const eventRequest =
@@ -2076,7 +2101,9 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 				eventRequest.version === 1 &&
 				Array.isArray(requestedEventKinds) &&
 				requestedEventKinds.length <= ACP_MAX_REQUESTED_EVENT_KINDS &&
-				requestedEventKinds.every((kind) => typeof kind === "string" && utf8Bytes(kind) <= 64 && !hasControlCharacters(kind))
+				requestedEventKinds.every(
+					(kind) => typeof kind === "string" && utf8Bytes(kind) <= 64 && !hasControlCharacters(kind),
+				)
 			) {
 				for (const kind of ACP_FORWARDABLE_EVENT_KINDS) {
 					if (requestedEventKinds.includes(kind)) enabledEventKinds.add(kind);
@@ -2126,9 +2153,11 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 							probe: features.providers,
 						},
 						...(features.commandsCapability !== undefined
-							? { [ACP_COMMANDS_META_KEY]: Object.fromEntries(
-									Object.entries(features.commandsCapability).filter(([key]) => key !== "count"),
-								) }
+							? {
+									[ACP_COMMANDS_META_KEY]: Object.fromEntries(
+										Object.entries(features.commandsCapability).filter(([key]) => key !== "count"),
+									),
+								}
 							: {}),
 						// Steering is announced, never negotiated: every method here is
 						// namespaced and additive, so a client that ignores this block
@@ -2219,19 +2248,24 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 
 export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<number> {
 	const sessions = new Map<string, AcpServerSession>();
-	const handshake = options.handshake ?? createAcpHandshake({
-		...(options.version === undefined ? {} : { version: options.version }),
-		session: options.session !== undefined,
-		loadSession: options.session !== undefined && options.readSessionEntries !== undefined &&
-			options.buildReplayMessages !== undefined && options.chat.resetForSession !== undefined,
-		settings: options.settings !== undefined,
-		providers: options.providers !== undefined,
-		...(options.commands === undefined ? {} : { commandsCapability: options.commands.capability }),
-		steer: options.chat.steer !== undefined,
-		dispatch: options.dispatch !== undefined,
-		toolRegistry: options.toolRegistry !== undefined,
-		bus: options.bus !== undefined,
-	});
+	const handshake =
+		options.handshake ??
+		createAcpHandshake({
+			...(options.version === undefined ? {} : { version: options.version }),
+			session: options.session !== undefined,
+			loadSession:
+				options.session !== undefined &&
+				options.readSessionEntries !== undefined &&
+				options.buildReplayMessages !== undefined &&
+				options.chat.resetForSession !== undefined,
+			settings: options.settings !== undefined,
+			providers: options.providers !== undefined,
+			...(options.commands === undefined ? {} : { commandsCapability: options.commands.capability }),
+			steer: options.chat.steer !== undefined,
+			dispatch: options.dispatch !== undefined,
+			toolRegistry: options.toolRegistry !== undefined,
+			bus: options.bus !== undefined,
+		});
 	const workspaceInstanceId = handshake.workspaceInstanceId;
 	const now = options.now ?? Date.now;
 	let eventSequence = 0;
@@ -2614,10 +2648,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	}
 
 	const requireInitialized = (): void => {
-		if (!handshake.initialized) throw new AcpRequestError(-32600, "initialize must be called first", { code: "not_initialized" });
+		if (!handshake.initialized)
+			throw new AcpRequestError(-32600, "initialize must be called first", { code: "not_initialized" });
 	};
 	const requireAuthenticated = (): void => {
-		if (handshake.loggedOut) throw new AcpRequestError(-32000, "authentication required", { code: "authentication_required" });
+		if (handshake.loggedOut)
+			throw new AcpRequestError(-32000, "authentication required", { code: "authentication_required" });
 	};
 
 	const sessionIdOf = (params: unknown): string => {
