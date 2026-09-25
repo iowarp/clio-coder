@@ -437,6 +437,11 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				const bounded = boundSettledText(sealed);
 				tailText = bounded.text;
 				droppedLines = bounded.dropped;
+				// The counts now describe the sealed answer, not the live tail it
+				// replaced. A one-line answer longer than the tail kept the bytes the
+				// tail had cut, so the card read a whole report as truncated and drew
+				// its raw JSON (BT-011).
+				droppedBytes = Math.max(0, Buffer.byteLength(sealed, "utf8") - Buffer.byteLength(bounded.text, "utf8"));
 			}
 			currentAction = null;
 			pendingActions.length = 0;
