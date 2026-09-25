@@ -60,6 +60,10 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### Terminal interface
 
+- The palette is derived from the Clio Coder logo and iowarp.ai: mint and cyan for identity, input and selection, orange for Clio acting, steel blue for information, slate for frames and secondary text, and green, amber and coral for success, warnings and errors. The launchpad wordmark is two-tone like the logo, and titles and the tagline are cyan.
+- Interactive startup asks the terminal for its background (OSC 11, then `COLORFGBG`) and draws the palette for a dark or light terminal, with every text token at 4:1 or better on common themes of each kind. An unknown background keeps a mid-luminance palette of about 3:1 on both. `CLIO_CODER_THEME=dark|light|neutral` overrides detection, and startup waits one terminal round trip, at most 200 ms.
+- Status colors mark only status. Context meter categories, shell flags, cancellations and the active dashboard tab no longer use amber, red or orange, and `yolo` is coral everywhere.
+- The Yazi files pane profile reverses one token for its mode, tab and count badges instead of pairing two, and the herdr theme block is rendered for the detected background with readable selection rows.
 - Pickers, inspectors, the permission card, ask-user and the leader menu open docked in the composer's slot instead of floating over the transcript, which keeps its rows, scrollback and mouse selection. The dock body has a fixed budget of 16 rows, fewer on short terminals, and in fullscreen mode the transcript shrinks by that height while a surface is open.
 - A permission card taller than its rows scrolls its terms or dispatch plan with the arrow and page keys and shows a position row.
 - A call the operator approved keeps an `allowed by you` line naming the rail on its live transcript row, and compact style no longer folds it into its neighbors. A resumed or replayed session does not show the line.
