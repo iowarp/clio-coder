@@ -200,7 +200,7 @@ export class Supervisor {
 					throw error;
 				}
 			});
-			transport.onNotification("clio-coder/event", (params) => {
+			transport.onNotification("_clio-coder/event", (params) => {
 				try {
 					const projected = fleetEvent(params, owned.id, owned.eventSequence);
 					// The sequence advances even for a dropped kind, so a later frame
@@ -208,7 +208,7 @@ export class Supervisor {
 					// rather than against the last one that happened to project.
 					owned.eventSequence = projected.sequence;
 					if (projected.type === null) {
-						console.error(`[clio-coder:gui] dropped an unrecognized clio-coder/event kind on session ${owned.id}`);
+						console.error(`[clio-coder:gui] dropped an unrecognized _clio-coder/event kind on session ${owned.id}`);
 						return;
 					}
 					// The type and the schema the item was checked against both come
@@ -389,7 +389,7 @@ export class Supervisor {
 			const settled = item.status === "completed" || item.status === "failed";
 			const partial = settled ? undefined : toolProgressText(update.content);
 			if (partial !== undefined) item.partialOutput = boundedText(partial, 16384);
-			else delete item.partialOutput;
+			else if (settled) delete item.partialOutput;
 			if (update.rawOutput) item.rawOutput = this.raw(update.rawOutput);
 			else if (settled && update.content) item.rawOutput = this.raw({ content: update.content });
 			this.publish({ type: "turn.tool", payload: { resource: entry.id, revision: this.revision(entry.id), item } });
@@ -458,13 +458,13 @@ export class Supervisor {
 			}
 		return this.projected(
 			id,
-			patch ? "clio-coder/settings/patch_safe" : "clio-coder/settings/get_safe",
+			patch ? "_clio-coder/settings/patch_safe" : "_clio-coder/settings/get_safe",
 			patch ? { patch } : {},
 			SafeSettings,
 		);
 	}
 	async targets(id: string) {
-		const raw = record(await this.active(id).client.request("clio-coder/targets/list", {}));
+		const raw = record(await this.active(id).client.request("_clio-coder/targets/list", {}));
 		const projected = Value.Clean(SessionTargets, {
 			targets: raw.targets,
 			truncated: record(raw._meta)["clio-coder/truncated"] === true,
@@ -474,10 +474,10 @@ export class Supervisor {
 		return projected;
 	}
 	probe(id: string, targetId: string) {
-		return this.projected(id, "clio-coder/targets/probe", { targetId }, TargetProbe);
+		return this.projected(id, "_clio-coder/targets/probe", { targetId }, TargetProbe);
 	}
 	autonomy(id: string, level?: Static<typeof AutonomyLevel>) {
-		return this.projected(id, "clio-coder/session/autonomy", { sessionId: id, ...(level ? { level } : {}) }, Autonomy);
+		return this.projected(id, "_clio-coder/session/autonomy", { sessionId: id, ...(level ? { level } : {}) }, Autonomy);
 	}
 	capabilities(id: string) {
 		return this.active(id).client.capabilities;
@@ -496,21 +496,21 @@ export class Supervisor {
 	}
 	steer(id: string, body: Static<typeof SteerRequest>) {
 		this.steering(id);
-		return this.projected(id, "clio-coder/session/steer", { sessionId: id, ...body }, SteerResult);
+		return this.projected(id, "_clio-coder/session/steer", { sessionId: id, ...body }, SteerResult);
 	}
 	queue(id: string) {
 		this.steering(id);
-		return this.projected(id, "clio-coder/session/queue", { sessionId: id }, QueueSnapshot);
+		return this.projected(id, "_clio-coder/session/queue", { sessionId: id }, QueueSnapshot);
 	}
 	clearQueue(id: string) {
 		this.steering(id);
-		return this.projected(id, "clio-coder/session/queue_clear", { sessionId: id }, QueueCleared);
+		return this.projected(id, "_clio-coder/session/queue_clear", { sessionId: id }, QueueCleared);
 	}
 	interrupt(id: string, reason?: string) {
 		this.steering(id);
 		return this.projected(
 			id,
-			"clio-coder/session/interrupt",
+			"_clio-coder/session/interrupt",
 			{ sessionId: id, ...(reason ? { reason } : {}) },
 			InterruptResult,
 		);
@@ -524,7 +524,7 @@ export class Supervisor {
 		const { runId, action, message } = body;
 		return this.projected(
 			id,
-			"clio-coder/dispatch/steer",
+			"_clio-coder/dispatch/steer",
 			{ sessionId: id, runId, action, ...(action === "guide" && message ? { message } : {}) },
 			DispatchSteerResult,
 		);
@@ -533,7 +533,7 @@ export class Supervisor {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.commands)
 			throw new AppProblem("conflict", "This Clio build exposes no operator commands.");
-		return this.projected(id, "clio-coder/commands/list", {}, CommandCatalog);
+		return this.projected(id, "_clio-coder/commands/list", {}, CommandCatalog);
 	}
 	invokeCommand(id: string, body: Static<typeof CommandRequest>) {
 		const entry = this.active(id);
@@ -541,7 +541,7 @@ export class Supervisor {
 			throw new AppProblem("conflict", "This Clio build exposes no operator commands.");
 		return this.projected(
 			id,
-			"clio-coder/commands/invoke",
+			"_clio-coder/commands/invoke",
 			{ sessionId: id, command: body.command, ...(body.argv ? { argv: body.argv } : {}) },
 			CommandResult,
 		);
@@ -553,9 +553,9 @@ export class Supervisor {
 		const params = { sessionId: id, ...(label === undefined ? {} : { label }) };
 		if (entry) {
 			if (action === "delete" || entry.closing) throw new AppProblem("conflict", "Close the session before deleting it.");
-			await entry.client.request(`clio-coder/session/${action}`, params);
+			await entry.client.request(`_clio-coder/session/${action}`, params);
 		} else {
-			const job = this.control(workspaceId, id, `clio-coder/session/${action}`, params);
+			const job = this.control(workspaceId, id, `_clio-coder/session/${action}`, params);
 			this.controls.add(job);
 			try {
 				await job;

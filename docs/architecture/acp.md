@@ -10,7 +10,7 @@ Source implementations: `src/engine/acp/` and [acp.ts](../../src/cli/acp.ts).
 
 ## 1. Overview & Protocol Specification
 
-Clio Coder provides a native ACP server via the `clio-coder acp` command. The server implements the open Agent Client Protocol specification (ACP v1 / schema 0.4.5) over standard I/O JSON-RPC 2.0 transport ([transport.ts](../../src/engine/acp/transport.ts)).
+Clio Coder provides a native ACP server via the `clio-coder acp` command. The server implements the open Agent Client Protocol specification (ACP v1, schema v1.23.0) over standard I/O JSON-RPC 2.0 transport ([transport.ts](../../src/engine/acp/transport.ts)).
 
 The ACP server allows external IDEs, editors (such as Zed), and automated orchestration engines to drive Clio Coder sessions over a structured protocol.
 The source tree includes the `apps/clio-coder-gui` application, which supervises
@@ -42,6 +42,8 @@ and server boot path.
 - `--cwd PATH`: Workspace root the server boots in. The path is resolved and then canonicalized with `fs.realpath`, so a symlinked launch root, a trailing slash, and a `/.` suffix all name the same workspace. Clio changes into that canonical path before it reads settings, builds project context, or opens a session ledger, so a session opens at that root. A path that does not exist or that the process cannot enter exits 2 without starting the server. The canonical path is the server's workspace identity for its whole life: `session/new` must carry a `cwd` that canonicalizes to the same path, and nothing after boot ever changes the process directory.
 - `--permission-timeout MS`: The server-side fail-safe ceiling for one mediated permission request, as a whole number from 1 through Node's maximum schedulable timer delay (`2147483647`) milliseconds. Values outside that range are refused before the protocol server starts. If the timer wins, the approval expires, the active turn is aborted, every parked call for that turn is settled only so execution can unwind, and `session/prompt` fails with `permission_expired`. Expiry is audited as `expired`, never as a human denial, and no denial result is fed into a continuing model loop. The flag overrides `integrations.externalAgents.defaults.permissionTimeoutMs` for this server only, which itself defaults to `DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000` ([defaults.ts](../../src/core/defaults.ts)). The graphical application treats the remaining ACP request window as a hard ceiling on its own approval budget, projects that duration onto its own clock, escalates immediately when the remaining window is shorter than its escalation delay, and cancels without publishing a card if the window has already elapsed. Other clients may enforce a shorter operator-facing policy by sending ordinary `session/cancel`.
 
+A client that advertises `clientCapabilities.auth.terminal:true` receives a terminal authentication method with `args:["auth","login"]`. Appending those args to the configured ACP launch command opens Clio's interactive Quick Connect flow through `clio-coder acp auth login` (including any preceding `--cwd` flag). Other clients receive no terminal method. The `authenticate` handler rejects unknown or terminal method IDs with `-32602`; terminal authentication takes place in a separate process. The `logout` handler ends the current ACP connection's authenticated state and returns `{}`. Subsequent session creation, loading and prompting on that connection return `-32000` until the client reconnects. Clio advertises `agentCapabilities.auth.logout:{}`.
+
 Transport frames are JSON-RPC 2.0 messages serialized over `stdin`/`stdout`. All logging and diagnostic output is strictly routed to `stderr` to preserve standard I/O framing integrity.
 
 ---
@@ -52,31 +54,33 @@ These are every method the server answers ([server.ts](../../src/engine/acp/serv
 
 | Method | Direction | Description |
 | :--- | :--- | :--- |
-| `initialize` | Client → Server | Negotiates the protocol version, agent capabilities, and server implementation info. Must be called first, exactly once. |
+| `initialize` | Client → Server | Answers with supported protocol version `1`, agent capabilities, and server implementation info. Must be called first, exactly once. |
+| `authenticate` | Client → Server | Rejects unknown method IDs with `-32602`. Terminal methods run in a separate process. |
+| `logout` | Client → Server | Ends the current ACP connection's authenticated state and returns `{}`. |
 | `session/new` | Client → Server | Opens the one session this process hosts, snapshotting the active autonomy posture and recording the bind-time target/model selection. |
 | `session/load` | Client → Server | Standard ACP v1 load. Resumes one closed session from the launch workspace, resets the provider context to its pinned active branch, and replays bounded original transcript updates before returning. |
 | `session/prompt` | Client → Server | Submits a user prompt to the session execution loop. |
 | `session/cancel` | Client → Server | Cancels the in-flight prompt, its running tools, and any outstanding permission request. Accepted as a request (returns `{}`) and as a notification (returns nothing). |
-| `session/close` | Client → Server | Closes the durable session and returns `{}`. Not an ACP v1 method: it is advertised through `agentCapabilities._meta["clio-coder/session"].close === true`. |
-| `clio-coder/session/list` | Client → Server | Lists bounded session summaries from the canonical launch workspace. Legal before opening a session and during a prompt. |
-| `clio-coder/session/label` | Client → Server | Sets or clears a durable session display name. Legal before opening a session and during a prompt. |
-| `clio-coder/session/delete` | Client → Server | Permanently deletes a closed workspace session. Refuses hosted or unended sessions. |
-| `clio-coder/session/autonomy` | Client → Server | Reads the hosted session's autonomy snapshot or explicitly overrides it for the next prompt. Set is refused during a prompt. |
-| `clio-coder/settings/get_safe` | Client → Server | Reads the closed credential-free settings projection. Legal before opening a session and during a prompt. |
-| `clio-coder/settings/patch_safe` | Client → Server | Atomically validates, persists, and applies a flat patch over the closed safe setting set. Refused during a prompt. |
-| `clio-coder/targets/list` | Client → Server | Lists bounded, credential-free target/model summaries from configuration and the in-memory cache without network traffic. |
-| `clio-coder/targets/probe` | Client → Server | Explicitly probes one configured target through the provider domain and returns only a closed health result. |
-| `clio-coder/session/steer` | Client → Server | Queues operator guidance on the running turn, on the steering queue (`next-slot`) or the follow-up queue (`end-of-turn`). Reports a refusal rather than a silent success when nothing is streaming. |
-| `clio-coder/session/queue` | Client → Server | Reads both queues in enqueue order. |
-| `clio-coder/session/queue_clear` | Client → Server | Drains both queues together and returns the texts, which become the client's to re-send. |
-| `clio-coder/session/interrupt` | Client → Server | Cancels the running turn, or reports why it cannot be. Cancel only: the outstanding `session/prompt` settles with `cancelled` and the next prompt is the client's to send. |
-| `clio-coder/dispatch/steer` | Client → Server | Queues guidance on, or aborts, one running worker by `runId`. Acceptance means queued on the worker's stdin, never delivered. |
-| `clio-coder/commands/list` | Client → Server | Returns the catalog of exposed operator commands with the grammar a palette builds its argument UI from. |
-| `clio-coder/commands/invoke` | Client → Server | Runs one exposed operator command headlessly and returns its notice level and output lines. |
+| `session/close` | Client → Server | Closes the durable session and returns `{}`. Advertised through `agentCapabilities.sessionCapabilities.close`. |
+| `_clio-coder/session/list` | Client → Server | Lists bounded session summaries from the canonical launch workspace. Legal before opening a session and during a prompt. |
+| `_clio-coder/session/label` | Client → Server | Sets or clears a durable session display name. Legal before opening a session and during a prompt. |
+| `_clio-coder/session/delete` | Client → Server | Permanently deletes a closed workspace session. Refuses hosted or unended sessions. |
+| `_clio-coder/session/autonomy` | Client → Server | Reads the hosted session's autonomy snapshot or explicitly overrides it for the next prompt. Set is refused during a prompt. |
+| `_clio-coder/settings/get_safe` | Client → Server | Reads the closed credential-free settings projection. Legal before opening a session and during a prompt. |
+| `_clio-coder/settings/patch_safe` | Client → Server | Atomically validates, persists, and applies a flat patch over the closed safe setting set. Refused during a prompt. |
+| `_clio-coder/targets/list` | Client → Server | Lists bounded, credential-free target/model summaries from configuration and the in-memory cache without network traffic. |
+| `_clio-coder/targets/probe` | Client → Server | Explicitly probes one configured target through the provider domain and returns only a closed health result. |
+| `_clio-coder/session/steer` | Client → Server | Queues operator guidance on the running turn, on the steering queue (`next-slot`) or the follow-up queue (`end-of-turn`). Reports a refusal rather than a silent success when nothing is streaming. |
+| `_clio-coder/session/queue` | Client → Server | Reads both queues in enqueue order. |
+| `_clio-coder/session/queue_clear` | Client → Server | Drains both queues together and returns the texts, which become the client's to re-send. |
+| `_clio-coder/session/interrupt` | Client → Server | Cancels the running turn, or reports why it cannot be. Cancel only: the outstanding `session/prompt` settles with `cancelled` and the next prompt is the client's to send. |
+| `_clio-coder/dispatch/steer` | Client → Server | Queues guidance on, or aborts, one running worker by `runId`. Acceptance means queued on the worker's stdin, never delivered. |
+| `_clio-coder/commands/list` | Client → Server | Returns the catalog of exposed operator commands with the grammar a palette builds its argument UI from. |
+| `_clio-coder/commands/invoke` | Client → Server | Runs one exposed operator command headlessly and returns its notice level and output lines. |
 | `session/request_permission` | Server → Client | Requests permission from the client for a gated tool operation. |
-| `clio-coder/event` | Server → Client | Sends a versioned extension event only to a client that opted into a recognized kind. The v1 allowlist is `safety.loopBlocked`, `dispatch.enqueued`, `dispatch.started`, `dispatch.progress`, `dispatch.completed`, `dispatch.failed`, `accountability.evidenceReady`, `compaction.end`, `context.warning`, `safety.toolBudgetExceeded`, and `provider.health`. Every kind is the engine's own `BusChannels` value, never a renamed alias, so a captured frame names its producer. |
+| `_clio-coder/event` | Server → Client | Sends a versioned extension event only to a client that opted into a recognized kind. The v1 allowlist is `safety.loopBlocked`, `dispatch.enqueued`, `dispatch.started`, `dispatch.progress`, `dispatch.completed`, `dispatch.failed`, `accountability.evidenceReady`, `compaction.end`, `context.warning`, `safety.toolBudgetExceeded`, and `provider.health`. Every kind is the engine's own `BusChannels` value, never a renamed alias, so a captured frame names its producer. |
 
-`agentCapabilities.loadSession` is `true`. All non-standard methods are advertised only under `agentCapabilities._meta`; a strict generic ACP v1 client sees the standard new/load/prompt/cancel/permission surface, ignores namespaced result metadata, and receives no non-standard notification unless it explicitly opts into a recognized event kind.
+`agentCapabilities.loadSession` is `true`, `agentCapabilities.sessionCapabilities.close` is `{}`, and unsupported optional session capabilities are omitted. All non-standard methods are advertised only under `agentCapabilities._meta`; a strict generic ACP v1 client sees the standard new/load/prompt/cancel/permission surface, ignores namespaced result metadata, and receives no non-standard notification unless it explicitly opts into a recognized event kind.
 
 ---
 
@@ -86,10 +90,10 @@ This section states what the server guarantees on the wire. It is the source-sid
 
 ### Error envelope
 
-JSON-RPC layer codes stay standard: `-32700` parse, `-32600` invalid request, `-32601` method not found, `-32602` invalid params. Every Clio-originated failure is `-32000`. Every error frame, whatever its code, carries its machine-readable detail in exactly one place:
+JSON-RPC layer codes follow the pinned ACP v1 schema: `-32700` parse, `-32600` invalid request, `-32601` method not found, `-32602` invalid params, `-32603` internal error, `-32002` missing resource, and `-32000` authentication required. Every error frame carries its machine-readable detail in exactly one place:
 
 ```json
-{"code":-32000,"message":"<one line, ≤256 chars, no paths, no stack>",
+{"code":-32603,"message":"<one line, ≤256 chars, no paths, no stack>",
  "data":{"_meta":{"clio-coder/error":{"version":1,"code":"<closed-set string>","reason":"<optional>","supported":[1]}}}}
 ```
 
@@ -99,10 +103,10 @@ JSON-RPC layer codes stay standard: `-32700` parse, `-32600` invalid request, `-
 | :--- | :--- |
 | `not_initialized` | Any method other than `initialize` before a successful `initialize`. |
 | `already_initialized` | A second `initialize` on the same connection. |
-| `protocol_version_unsupported` | `initialize.protocolVersion` is not the integer `1`. Uses `-32602` and carries `supported: [1]`. |
+| `authentication_required` | `logout` ended this connection's authenticated state. Uses `-32000`. |
 | `invalid_params` | A request is missing a required value, has an unknown key or closed-enum value, exceeds a byte/array bound, contains a C0/DEL control character in peer-controlled text, or otherwise violates its exact method shape. Uses `-32602`. `reason: "target-unknown"` refines selection of an unconfigured target. |
 | `session_cwd_mismatch` | `session/new.cwd` or `session/load.cwd` is absent, not an absolute string, unresolvable, or canonicalizes to something other than the server's workspace. |
-| `session_limit` | A second successful `session/new` or `session/load` in the same process, including after `session/close`. |
+| `session_limit` | A second `session/new` or `session/load` while a session is hosted. Closing the hosted session releases the slot. |
 | `session_unknown` | A session id is not hosted when hosting is required, or cannot be found in canonical-workspace history for a list/load/label/delete operation. The server does not disclose whether the same id exists under another workspace. |
 | `session_open` | Load or delete targets the hosted session, or a workspace record whose `endedAt` is still null. Clio has no cross-process lease, so an unclean crash is intentionally indistinguishable from another process still owning the record. |
 | `prompt_active` | A second `session/prompt` while one is running, `session/close` while one is running, or a settings/session-autonomy mutation during a prompt. |
@@ -113,12 +117,12 @@ JSON-RPC layer codes stay standard: `-32700` parse, `-32600` invalid request, `-
 | `invalid_request` | A frame was not JSON-RPC `2.0`, or carried an `id` and no `method`. Uses `-32600`; the rejected frame is not echoed. |
 | `input_line_too_large` | One stdin line exceeded 1 MiB. Uses `-32600` with `id: null`; the line is discarded and the transport continues. |
 | `invalid_request_id` | A request arrived with `id: null`. Uses `-32600`. |
-| `method_not_found` | An unregistered method. Uses `-32601`. `message` is the fixed string `method not found`; the peer-controlled method name is never echoed, however short it is. |
+| `method_not_found` | An unregistered or unavailable method. Uses `-32601`. `message` is the fixed string `method not found`; the peer-controlled method name is never echoed, however short it is. |
 | `internal_error` | A handler failed in a way it did not classify. `message` is the fixed string `internal error`; the thrower's text goes to stderr and carries no stack. |
 
 ### One session per process
 
-Exactly one `session/new` or `session/load` succeeds per process lifetime. Any later opener fails with `session_limit`, and closing the first session does not free the slot. One `chat` instance backs the server, so a second session id would share provider context and ledger ancestry with the first. A client that needs another workspace, another resumed session, or a clean context retires the child and spawns a new one.
+At most one `session/new` or `session/load` is hosted at a time. Another opener fails with `session_limit` until the hosted session closes. Closing releases the slot and resets the conversation so another session can open in the same process. The workspace remains the launch workspace for the lifetime of that process.
 
 ### Workspace pinning
 
@@ -140,17 +144,17 @@ Every replay notification precedes the `session/load` response and carries `para
 
 ### Session list, label, delete, and autonomy
 
-`clio-coder/session/list` accepts `{limit?:1..200}` (default 50) and returns `{sessions,truncated}` newest first. Each item is `{sessionId,label,preview,createdAt,updatedAt,turns,target,model,state,hosted}`. Label is null or at most 256 UTF-8 bytes; preview is a single line of at most 512 bytes; target/model use the attribution bounds. State is deliberately only `open` (hosted by this process), `closed` (`endedAt` is non-null), or `unknown` (unended but not hosted here). `hosted` is true only for this process. The complete result is capped to a 240 KiB stable prefix of whole newest-first session rows so the JSON-RPC response fits a strict 256 KiB line ceiling. When this byte budget drops a row, `truncated` is true and result `_meta["clio-coder/truncated"]` is also true; that `_meta` key is absent when only the requested `limit` shortened the history. The method is legal before an opener and during a prompt.
+`_clio-coder/session/list` accepts `{limit?:1..200}` (default 50) and returns `{sessions,truncated}` newest first. Each item is `{sessionId,label,preview,createdAt,updatedAt,turns,target,model,state,hosted}`. Label is null or at most 256 UTF-8 bytes; preview is a single line of at most 512 bytes; target/model use the attribution bounds. State is deliberately only `open` (hosted by this process), `closed` (`endedAt` is non-null), or `unknown` (unended but not hosted here). `hosted` is true only for this process. The complete result is capped to a 240 KiB stable prefix of whole newest-first session rows so the JSON-RPC response fits a strict 256 KiB line ceiling. When this byte budget drops a row, `truncated` is true and result `_meta["clio-coder/truncated"]` is also true; that `_meta` key is absent when only the requested `limit` shortened the history. The method is legal before an opener and during a prompt.
 
-`clio-coder/session/label` accepts `{sessionId,label}` where label is 0–256 UTF-8 bytes and C0/DEL-free. Empty clears. It writes the existing session-wide `sessionInfo.name` vocabulary, including for an off-current closed session, and list is the readback. It is legal before an opener and during a prompt.
+`_clio-coder/session/label` accepts `{sessionId,label}` where label is 0–256 UTF-8 bytes and C0/DEL-free. Empty clears. It writes the existing session-wide `sessionInfo.name` vocabulary, including for an off-current closed session, and list is the readback. It is legal before an opener and during a prompt.
 
-`clio-coder/session/delete` accepts `{sessionId}` and permanently deletes only a canonical-workspace record whose `endedAt` is non-null. Hosted or unended records fail `session_open`; unknown and cross-workspace ids fail `session_unknown` without disclosing another workspace. It is legal before an opener and during an unrelated prompt.
+`_clio-coder/session/delete` accepts `{sessionId}` and permanently deletes only a canonical-workspace record whose `endedAt` is non-null. Hosted or unended records fail `session_open`; unknown and cross-workspace ids fail `session_unknown` without disclosing another workspace. It is legal before an opener and during an unrelated prompt.
 
-`clio-coder/session/autonomy` accepts `{sessionId,level?}`. Without `level`, it returns `{level,source}`. `source:"settings"` means the inherited snapshot taken when the session was bound; `source:"session"` means an explicit ACP override. A valid supplied level changes only the hosted session, is refused with `prompt_active` during a turn, and controls Clio's ordinary safety/autonomy enforcement for the next prompt. It never bypasses classification or a safety rail. A global safe-settings autonomy patch changes the future-session default and does not silently mutate this bound snapshot.
+`_clio-coder/session/autonomy` accepts `{sessionId,level?}`. Without `level`, it returns `{level,source}`. `source:"settings"` means the inherited snapshot taken when the session was bound; `source:"session"` means an explicit ACP override. A valid supplied level changes only the hosted session, is refused with `prompt_active` during a turn, and controls Clio's ordinary safety/autonomy enforcement for the next prompt. It never bypasses classification or a safety rail. A global safe-settings autonomy patch changes the future-session default and does not silently mutate this bound snapshot.
 
 ### Safe settings and targets
 
-`clio-coder/settings/get_safe` accepts `{}` and returns exactly:
+`_clio-coder/settings/get_safe` accepts `{}` and returns exactly:
 
 ```json
 {"settings":{"chat":{"target":null,"model":null,"thinkingLevel":"off"},"safety":{"autonomy":"default"}},
@@ -159,15 +163,15 @@ Every replay notification precedes the `session/load` response and carries `para
 
 The values above are illustrative. Thinking is one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. No other settings leaf, URL, auth fact, credential reference, path, header, provider reason, or provider error crosses the wire. The method is legal before an opener and during a prompt.
 
-`clio-coder/settings/patch_safe` accepts `{patch}` where patch is a flat object keyed only by the four strings in `editable`. It validates the entire candidate before one locked settings mutation, persists routing as the future default, and updates this process's next-turn routing. The locked writer applies the effective-view delta to the user document and revalidates it with the workspace's project layers before writing, so a project-only target can be selected without copying its URL or descriptor into user settings; a higher-precedence project leaf that would silently undo the patch causes the write to fail with no partial document. Unknown keys or values are `invalid_params`; an unknown non-null target adds `reason:"target-unknown"`. Target/model identifiers use the 128/256-byte bounds and peer-controlled strings reject C0/DEL. A non-null model requires a non-null resulting target. A pre-existing selected route outside those bounds makes `get_safe` fail `internal_error` rather than falsely returning null. Patch is legal before an opener but fails `prompt_active` while a turn runs.
+`_clio-coder/settings/patch_safe` accepts `{patch}` where patch is a flat object keyed only by the four strings in `editable`. It validates the entire candidate before one locked settings mutation, persists routing as the future default, and updates this process's next-turn routing. The locked writer applies the effective-view delta to the user document and revalidates it with the workspace's project layers before writing, so a project-only target can be selected without copying its URL or descriptor into user settings; a higher-precedence project leaf that would silently undo the patch causes the write to fail with no partial document. Unknown keys or values are `invalid_params`; an unknown non-null target adds `reason:"target-unknown"`. Target/model identifiers use the 128/256-byte bounds and peer-controlled strings reject C0/DEL. A non-null model requires a non-null resulting target. A pre-existing selected route outside those bounds makes `get_safe` fail `internal_error` rather than falsely returning null. Patch is legal before an opener but fails `prompt_active` while a turn runs.
 
-`clio-coder/targets/list` accepts `{}` and returns `{targets:[{id,runtime,models,isOrchestrator}]}`. It reads only configured and cached state, never probes. At most 64 targets are returned. Target ids are at most 128 bytes, runtime ids 64, and the stable union of configured default/wire and discovered model ids is at most 64 models per target, each at most 256 bytes. The complete result is also capped to a 240 KiB stable prefix of whole target/model entries so it fits a strict 256 KiB JSON-RPC frame ceiling after the response envelope is added. If that byte budget drops a model or target, the result additionally carries `_meta["clio-coder/truncated"]:true`; the key is absent when the byte-budget result is complete. Unsafe stored identifiers are omitted rather than truncated into collisions. URL, auth state, credential provenance, raw runtime descriptors, health errors, and provider prose are never projected.
+`_clio-coder/targets/list` accepts `{}` and returns `{targets:[{id,runtime,models,isOrchestrator}]}`. It reads only configured and cached state, never probes. At most 64 targets are returned. Target ids are at most 128 bytes, runtime ids 64, and the stable union of configured default/wire and discovered model ids is at most 64 models per target, each at most 256 bytes. The complete result is also capped to a 240 KiB stable prefix of whole target/model entries so it fits a strict 256 KiB JSON-RPC frame ceiling after the response envelope is added. If that byte budget drops a model or target, the result additionally carries `_meta["clio-coder/truncated"]:true`; the key is absent when the byte-budget result is complete. Unsafe stored identifiers are omitted rather than truncated into collisions. URL, auth state, credential provenance, raw runtime descriptors, health errors, and provider prose are never projected.
 
-`clio-coder/targets/probe` accepts exactly `{targetId}` for an already-configured target and performs the provider domain's existing bounded live probe. It returns `{targetId,healthy,latencyMs,reason}` where latency is a non-negative integer or null and reason is exactly `not-configured`, `unreachable`, `unsupported`, `probe-failed`, or null. Provider text is mapped, never copied. The call starts no Clio turn and spends no orchestrator model tokens. Both target methods are legal before an opener and during a prompt.
+`_clio-coder/targets/probe` accepts exactly `{targetId}` for an already-configured target and performs the provider domain's existing bounded live probe. It returns `{targetId,healthy,latencyMs,reason}` where latency is a non-negative integer or null and reason is exactly `not-configured`, `unreachable`, `unsupported`, `probe-failed`, or null. Provider text is mapped, never copied. The call starts no Clio turn and spends no orchestrator model tokens. Both target methods are legal before an opener and during a prompt.
 
 ### Opt-in extension events
 
-A client opts into the first extension event with `initialize.params.clientCapabilities._meta["clio-coder/events"]={version:1,kinds:["safety.loopBlocked"]}`. The kinds array has at most 16 strings, each at most 64 UTF-8 bytes and C0/DEL-free; a malformed opt-in is ignored. Unknown bounded versions and kinds are ignored. Without a recognized opt-in, no `clio-coder/event` notification is sent.
+A client opts into the first extension event with `initialize.params.clientCapabilities._meta["clio-coder/events"]={version:1,kinds:["safety.loopBlocked"]}`. The kinds array has at most 16 strings, each at most 64 UTF-8 bytes and C0/DEL-free; a malformed opt-in is ignored. Unknown bounded versions and kinds are ignored. Without a recognized opt-in, no `_clio-coder/event` notification is sent.
 
 The v1 notification is
 `{version,workspaceInstanceId,sessionId,turnId,sequence,kind,terminal,payload}`.
@@ -233,7 +237,7 @@ otherwise have to infer from timing and tool titles.
 
 ### Prompt input
 
-Prompt text is read only from `params.prompt`, the ACP v1 array of content blocks, and only blocks with `type: "text"` and a string `text` contribute; the blocks are joined with a newline and trimmed. Image, audio, and resource_link blocks are ignored rather than coerced into prose the model would answer. No other shape is accepted: `params.content`, `params.message`, and a bare string `params.prompt` all fail with `-32602 invalid_params`, the same as a prompt whose text is empty. A client's framing bug therefore fails here the same way it would against any other ACP agent, instead of appearing to work only against Clio.
+Prompt text is read only from `params.prompt`, the ACP v1 array of content blocks. Text blocks contribute their `text`; baseline `resource_link` blocks contribute a `Resource: <name> (<uri>)` reference. The parts are joined with a newline and trimmed. Image, audio, and embedded resource blocks require capabilities Clio does not advertise and do not contribute text. No other shape is accepted: `params.content`, `params.message`, and a bare string `params.prompt` all fail with `-32602 invalid_params`, the same as a prompt whose text is empty. A client's framing bug therefore fails here the same way it would against any other ACP agent, instead of appearing to work only against Clio.
 
 ### Bounds
 
@@ -249,7 +253,7 @@ Every frame the server writes is bounded ([types.ts](../../src/engine/acp/types.
 - A live prompt emits at most 128 `tool_call` starts. On the next start the server emits no 129th call, cancels the underlying Clio turn, suppresses subsequent chat events, terminally fails every already-rendered open call, and resolves `session/prompt` with standard stop reason `max_turn_requests`. This stop reason is emitted by the ACP bridge only for that presentation ceiling; Clio's separate configurable execution guard remains an engine policy rather than a wire-cardinality promise.
 - A cancelled or failed turn synthesizes a `tool_call_update` with `status: "failed"` for every call that received a `tool_call` and no terminal update, before the prompt request settles.
 - Steer text is at most 16 KiB and must be non-blank. `\n`, `\r`, and `\t` are content; every other C0 control is refused rather than stripped, because a steer the model saw rewritten would disagree with the copy the client's own UI is showing. An interrupt `reason` is at most 256 bytes and control-character-free. Each queue returns at most 64 entries, each bounded to 16 KiB with the standard marker. A `runId` for dispatch steering is at most 128 bytes.
-- One `clio-coder/commands/invoke` returns at most 200 lines of at most 1 KiB each, with a trailing `…output truncated at 200 lines` when capped. `argv` is at most 32 elements of at most 4 KiB; elements are joined with single spaces and never quoted, so a quote character, a control character, and whitespace in any element that is not the last are all refused rather than escaped. A rest positional is taken verbatim to end of line, and a client cannot tell from the catalog which of its arguments lands in a rest slot.
+- One `_clio-coder/commands/invoke` returns at most 200 lines of at most 1 KiB each, with a trailing `…output truncated at 200 lines` when capped. `argv` is at most 32 elements of at most 4 KiB; elements are joined with single spaces and never quoted, so a quote character, a control character, and whitespace in any element that is not the last are all refused rather than escaped. A rest positional is taken verbatim to end of line, and a client cannot tell from the catalog which of its arguments lands in a rest slot.
 
 ### Admission failure
 
@@ -288,7 +292,7 @@ request to the configured endpoint, so the client decides when that is allowed.
 ### Permission requests
 
 The outbound `session/request_permission` carries
-`{sessionId, toolCall:{sessionUpdate:"tool_call", toolCallId, title, kind, status:"pending", rawInput, locations?}, options}`.
+`{sessionId, toolCall:{toolCallId, title, kind, status:"pending", rawInput, locations?}, options}`.
 `toolCallId` is always the id of a `tool_call` the client already rendered and
 has not yet seen finish. The tool's name is in `title`, never folded into
 `rawInput`.
@@ -363,21 +367,21 @@ The shipped `clio-coder acp` composition supplies the session, settings, provide
 
 | Key | Where | Payload |
 | :--- | :--- | :--- |
-| `clio-coder/session` | `initialize` → `agentCapabilities._meta` | `{ close:true, list:true, label:true, delete:true, autonomy:true }` |
+| `clio-coder/session` | `initialize` → `agentCapabilities._meta` | `{ close:true, list:true, label:true, delete:true, autonomy:true }`. Stable close support is also advertised through `sessionCapabilities.close`. |
 | `clio-coder/settings` | `initialize` → `agentCapabilities._meta` | `{ get_safe:true, patch_safe:true }` |
 | `clio-coder/targets` | `initialize` → `agentCapabilities._meta` | `{ list:true, probe:true }` |
 | `clio-coder/agent` | `initialize` → `agentCapabilities._meta` | `{ version:1, meta:"clio-coder/agent" }`, advertising per-frame agent attribution. |
 | `clio-coder/agent` | live and replayed `session/update.params._meta` | An array beginning with orchestrator attribution and including bounded delegated-agent attribution for a tool call when available. |
-| `clio-coder/events` | `initialize` → `agentCapabilities._meta` | `{ version:1, notification:"clio-coder/event", kinds:["safety.loopBlocked","dispatch.enqueued","dispatch.started","dispatch.progress","dispatch.completed","dispatch.failed","accountability.evidenceReady","compaction.end","context.warning","safety.toolBudgetExceeded","provider.health"], workspaceInstanceId }` |
+| `clio-coder/events` | `initialize` → `agentCapabilities._meta` | `{ version:1, notification:"_clio-coder/event", kinds:["safety.loopBlocked","dispatch.enqueued","dispatch.started","dispatch.progress","dispatch.completed","dispatch.failed","accountability.evidenceReady","compaction.end","context.warning","safety.toolBudgetExceeded","provider.health"], workspaceInstanceId }` |
 | `clio-coder/steering` | `initialize` → `agentCapabilities._meta` | `{ version:1, main, dispatch, modes:["next-slot","end-of-turn"], interrupt:true, methods:{steer,queue,clear,interrupt,dispatch} }`. `main` and `dispatch` report which queues this build actually wired. |
-| `clio-coder/commands` | `initialize` → `agentCapabilities._meta` | `{ version:1, list:"clio-coder/commands/list", invoke:"clio-coder/commands/invoke", count }`. Absent when the composition wired no command host, in which case both methods refuse. |
+| `clio-coder/commands` | `initialize` → `agentCapabilities._meta` | `{ version:1, list:"_clio-coder/commands/list", invoke:"_clio-coder/commands/invoke", count }`. Absent when the composition wired no command host, in which case both methods refuse. |
 | `clio-coder/toolProgress` | `initialize` → `clientCapabilities._meta` | `{ version:1 }`. The client opt-in that turns the stream on. Anything else, a missing key, a different version, or a non-object, leaves it off. |
 | `clio-coder/toolProgress` | `initialize` → `agentCapabilities._meta` | `{ version:1, minIntervalMs:250, maxFramesPerCall:64, maxContentBytes:16384 }`. Always announced, so a client that never receives a second frame can tell "the tool printed once" from "the floor suppressed it". |
 | `clio-coder/decision` | `initialize` → `agentCapabilities._meta` | `{ version:1, meta:"clio-coder/decision", options:["allow-once","reject-once","reject-and-stop"] }`. Present only when a tool registry is wired. |
 | `clio-coder/decision` | `session/request_permission` → `params._meta` | The classified decision facts for this ask; see **Permission requests**. |
 | `clio-coder/session` | `session/new` / `session/load` result `_meta` | Bind-time `{sessionId,target,model,autonomy,createdAt,resumed,replayed?}` attribution. |
 | `clio-coder/replay` | replayed `session/update.params._meta` | `{ turn }`; absent on live updates. |
-| `clio-coder/truncated` | `clio-coder/targets/list` or `clio-coder/session/list` result `_meta` | `true` only when that method's aggregate byte budget omitted a target/model entry or session row; absent otherwise. |
+| `clio-coder/truncated` | `_clio-coder/targets/list` or `_clio-coder/session/list` result `_meta` | `true` only when that method's aggregate byte budget omitted a target/model entry or session row; absent otherwise. |
 | `clio-coder/tools` | `initialize` → `agentCapabilities._meta` | `"mediated"` |
 | `clio-coder/usage` | `session/prompt` result `_meta` | `{ input, output, cacheRead, cacheWrite, reasoning, totalTokens, costUsd }` |
 | `clio-coder/error` | any `error.data._meta` | `{ version, code, reason?, supported? }` |
@@ -427,7 +431,7 @@ selects `allow-once`, subject to the timeout and binding rules above.
 
 The ACP boundary enforces strict isolation rules:
 
-1. **Autonomy Snapshotting**: The autonomy level is snapshotted at `session/new` or `session/load`. A subsequent global configuration change does not alter the bound remote session's security policy; only an explicit idle `clio-coder/session/autonomy` set changes its next prompt.
+1. **Autonomy Snapshotting**: The autonomy level is snapshotted at `session/new` or `session/load`. A subsequent global configuration change does not alter the bound remote session's security policy; only an explicit idle `_clio-coder/session/autonomy` set changes its next prompt.
 2. **Metadata Namespacing**: Clio-specific extensions travel exclusively within namespaced metadata fields (`ACP_USAGE_META_KEY = "clio-coder/usage"`, `ACP_SESSION_META_KEY = "clio-coder/session"` in [types.ts](../../src/engine/acp/types.ts)). Strict clients (e.g. Zed Serde deserializers) never encounter unmapped top-level keys.
 3. **No External Outcome Overrides**: External ACP processes cannot self-assert terminal outcome codes (e.g. `worker_final_output_missing` is enforced at Clio's trusted finalization seam).
 

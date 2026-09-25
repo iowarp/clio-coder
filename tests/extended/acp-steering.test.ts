@@ -134,19 +134,19 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		const sessionId = await openSession(peer);
 		const { prompt } = await startPrompt(peer, sessionId);
 
-		deepStrictEqual(await peer.call("clio-coder/session/steer", { sessionId, text: "use the cached index" }), {
+		deepStrictEqual(await peer.call("_clio-coder/session/steer", { sessionId, text: "use the cached index" }), {
 			accepted: true,
 			queue: "steer",
 		});
 		deepStrictEqual(
-			await peer.call("clio-coder/session/steer", {
+			await peer.call("_clio-coder/session/steer", {
 				sessionId,
 				text: "then write the report",
 				mode: "end-of-turn",
 			}),
 			{ accepted: true, queue: "follow-up" },
 		);
-		deepStrictEqual(await peer.call("clio-coder/session/queue", { sessionId }), {
+		deepStrictEqual(await peer.call("_clio-coder/session/queue", { sessionId }), {
 			steer: ["use the cached index"],
 			followUp: ["then write the report"],
 		});
@@ -163,7 +163,7 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		const served = serveClioAcpAgent({ transport: peer.transport, chat: loop.chat, cwd: process.cwd() });
 		const sessionId = await openSession(peer);
 
-		const idle = (await peer.call("clio-coder/session/steer", { sessionId, text: "too early" })) as {
+		const idle = (await peer.call("_clio-coder/session/steer", { sessionId, text: "too early" })) as {
 			accepted: boolean;
 			queue: string;
 			refusal: string;
@@ -171,7 +171,7 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		strictEqual(idle.accepted, false);
 		strictEqual(idle.queue, "steer");
 		ok(idle.refusal.includes("no prompt is active"));
-		deepStrictEqual(await peer.call("clio-coder/session/queue", { sessionId }), { steer: [], followUp: [] });
+		deepStrictEqual(await peer.call("_clio-coder/session/queue", { sessionId }), { steer: [], followUp: [] });
 
 		peer.transport.close();
 		strictEqual(await served, 0);
@@ -185,7 +185,7 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		// `interrupt` is a real engine mode and is deliberately not admitted here:
 		// it would resubmit the text as a turn this client never requested.
 		await rejects(
-			peer.call("clio-coder/session/steer", { sessionId, text: "now", mode: "interrupt" }),
+			peer.call("_clio-coder/session/steer", { sessionId, text: "now", mode: "interrupt" }),
 			(error: unknown) => {
 				ok(error instanceof AcpRequestError);
 				strictEqual(error.detail.code, "invalid_params");
@@ -203,12 +203,12 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		const sessionId = await openSession(peer);
 		const { prompt } = await startPrompt(peer, sessionId);
 
-		await peer.call("clio-coder/session/steer", { sessionId, text: "first" });
-		await peer.call("clio-coder/session/steer", { sessionId, text: "second", mode: "end-of-turn" });
-		deepStrictEqual(await peer.call("clio-coder/session/queue_clear", { sessionId }), {
+		await peer.call("_clio-coder/session/steer", { sessionId, text: "first" });
+		await peer.call("_clio-coder/session/steer", { sessionId, text: "second", mode: "end-of-turn" });
+		deepStrictEqual(await peer.call("_clio-coder/session/queue_clear", { sessionId }), {
 			restored: ["first", "second"],
 		});
-		deepStrictEqual(await peer.call("clio-coder/session/queue", { sessionId }), { steer: [], followUp: [] });
+		deepStrictEqual(await peer.call("_clio-coder/session/queue", { sessionId }), { steer: [], followUp: [] });
 
 		loop.finish();
 		await prompt;
@@ -223,7 +223,7 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		const sessionId = await openSession(peer);
 		const { prompt } = await startPrompt(peer, sessionId);
 
-		deepStrictEqual(await peer.call("clio-coder/session/interrupt", { sessionId, reason: "wrong file" }), {
+		deepStrictEqual(await peer.call("_clio-coder/session/interrupt", { sessionId, reason: "wrong file" }), {
 			cancelled: true,
 		});
 		strictEqual(loop.cancels, 1);
@@ -231,7 +231,7 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		strictEqual(response.stopReason, "cancelled");
 		// A steer after the interrupt is refused: the engine would strand it and
 		// resubmit it as a fresh prompt with no request to answer.
-		const afterwards = (await peer.call("clio-coder/session/steer", { sessionId, text: "one more" })) as {
+		const afterwards = (await peer.call("_clio-coder/session/steer", { sessionId, text: "one more" })) as {
 			accepted: boolean;
 		};
 		strictEqual(afterwards.accepted, false);
@@ -246,14 +246,14 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		const served = serveClioAcpAgent({ transport: peer.transport, chat: loop.chat, cwd: process.cwd() });
 		const sessionId = await openSession(peer);
 
-		deepStrictEqual(await peer.call("clio-coder/session/interrupt", { sessionId }), {
+		deepStrictEqual(await peer.call("_clio-coder/session/interrupt", { sessionId }), {
 			cancelled: false,
 			refusal: "no prompt is active on this session",
 		});
 
 		const { prompt } = await startPrompt(peer, sessionId);
 		loop.refuseInterrupt("an attached dispatch is running");
-		deepStrictEqual(await peer.call("clio-coder/session/interrupt", { sessionId }), {
+		deepStrictEqual(await peer.call("_clio-coder/session/interrupt", { sessionId }), {
 			cancelled: false,
 			refusal: "an attached dispatch is running",
 		});
@@ -279,7 +279,7 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		const created = (await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
 		const sessionId = created.sessionId;
 
-		const refused = (await peer.call("clio-coder/session/steer", { sessionId, text: "steer me" })) as {
+		const refused = (await peer.call("_clio-coder/session/steer", { sessionId, text: "steer me" })) as {
 			accepted: boolean;
 			refusal: string;
 		};
@@ -287,14 +287,14 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		ok(refused.refusal.includes("does not expose"));
 		// A queue read has no field to carry a refusal, so an unreadable queue
 		// fails the request rather than reporting two empty lists it never saw.
-		for (const method of ["clio-coder/session/queue", "clio-coder/session/queue_clear"]) {
+		for (const method of ["_clio-coder/session/queue", "_clio-coder/session/queue_clear"]) {
 			await rejects(peer.call(method, { sessionId }), (error: unknown) => {
 				ok(error instanceof AcpRequestError);
 				strictEqual(error.detail.code, "internal_error");
 				return true;
 			});
 		}
-		deepStrictEqual(await peer.call("clio-coder/session/interrupt", { sessionId }), {
+		deepStrictEqual(await peer.call("_clio-coder/session/interrupt", { sessionId }), {
 			cancelled: false,
 			refusal: "no prompt is active on this session",
 		});
@@ -319,11 +319,11 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		strictEqual(steering?.interrupt, true);
 		deepStrictEqual(steering?.modes, ["next-slot", "end-of-turn"]);
 		deepStrictEqual(steering?.methods, {
-			steer: "clio-coder/session/steer",
-			queue: "clio-coder/session/queue",
-			clear: "clio-coder/session/queue_clear",
-			interrupt: "clio-coder/session/interrupt",
-			dispatch: "clio-coder/dispatch/steer",
+			steer: "_clio-coder/session/steer",
+			queue: "_clio-coder/session/queue",
+			clear: "_clio-coder/session/queue_clear",
+			interrupt: "_clio-coder/session/interrupt",
+			dispatch: "_clio-coder/dispatch/steer",
 		});
 		wired.transport.close();
 		strictEqual(await servedWired, 0);
@@ -384,7 +384,7 @@ describe("contracts/acp reports dispatch steering as queued, never as delivered"
 		const sessionId = created.sessionId;
 
 		deepStrictEqual(
-			await peer.call("clio-coder/dispatch/steer", {
+			await peer.call("_clio-coder/dispatch/steer", {
 				sessionId,
 				runId: "run-live",
 				action: "guide",
@@ -425,7 +425,7 @@ describe("contracts/acp reports dispatch steering as queued, never as delivered"
 			});
 			const sessionId = await openSession(peer);
 			deepStrictEqual(
-				await peer.call("clio-coder/dispatch/steer", {
+				await peer.call("_clio-coder/dispatch/steer", {
 					sessionId,
 					runId: "run-live",
 					action: "guide",
@@ -451,17 +451,17 @@ describe("contracts/acp reports dispatch steering as queued, never as delivered"
 		});
 		const sessionId = await openSession(peer);
 
-		deepStrictEqual(await peer.call("clio-coder/dispatch/steer", { sessionId, runId: "run-live", action: "cancel" }), {
+		deepStrictEqual(await peer.call("_clio-coder/dispatch/steer", { sessionId, runId: "run-live", action: "cancel" }), {
 			accepted: true,
 		});
 		deepStrictEqual(dispatch.aborts, ["run-live"]);
-		deepStrictEqual(await peer.call("clio-coder/dispatch/steer", { sessionId, runId: "run-gone", action: "cancel" }), {
+		deepStrictEqual(await peer.call("_clio-coder/dispatch/steer", { sessionId, runId: "run-gone", action: "cancel" }), {
 			accepted: false,
 			reason: "run-not-active",
 		});
 		deepStrictEqual(dispatch.aborts, ["run-live"]);
 		await rejects(
-			peer.call("clio-coder/dispatch/steer", {
+			peer.call("_clio-coder/dispatch/steer", {
 				sessionId,
 				runId: "run-live",
 				action: "cancel",
@@ -480,7 +480,7 @@ describe("contracts/acp reports dispatch steering as queued, never as delivered"
 		const servedBare = serveClioAcpAgent({ transport: bare.transport, chat: fakeChat().chat, cwd: process.cwd() });
 		const bareSession = await openSession(bare);
 		deepStrictEqual(
-			await bare.call("clio-coder/dispatch/steer", { sessionId: bareSession, runId: "run-live", action: "cancel" }),
+			await bare.call("_clio-coder/dispatch/steer", { sessionId: bareSession, runId: "run-live", action: "cancel" }),
 			{ accepted: false, reason: "dispatch-unavailable" },
 		);
 		bare.transport.close();

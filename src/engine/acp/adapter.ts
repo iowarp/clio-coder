@@ -117,14 +117,13 @@ function sessionIdFrom(value: unknown): string | null {
 function supportsSessionClose(init: AcpInitializeResponse | null): boolean {
 	const caps = init?.agentCapabilities;
 	if (!isRecord(caps)) return false;
-	// session/close is a documented ACP RFD, not part of the stable schema, so a
-	// peer announces support through the _meta extension slot.
-	const meta = isRecord(caps._meta) ? caps._meta[ACP_SESSION_META_KEY] : undefined;
-	if (isRecord(meta) && meta.close === true) return true;
-	// Legacy Clio servers advertised close via a non-spec sessionCapabilities.close
-	// field; honour it so older peers still get a graceful close.
+	// Stable ACP v1 peers advertise session/close in sessionCapabilities.
 	const sessionCaps = caps.sessionCapabilities;
-	return isRecord(sessionCaps) && isRecord(sessionCaps.close);
+	if (isRecord(sessionCaps) && isRecord(sessionCaps.close)) return true;
+	// Older Clio peers announced close through _meta. Keep that path for peers
+	// whose sessions predate the stable capability.
+	const meta = isRecord(caps._meta) ? caps._meta[ACP_SESSION_META_KEY] : undefined;
+	return isRecord(meta) && meta.close === true;
 }
 
 function flattenPrompt(input: AcpDelegationRunInput): string {

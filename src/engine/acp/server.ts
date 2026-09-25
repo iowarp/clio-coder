@@ -144,7 +144,7 @@ export interface ClioAcpServerOptions {
 	session?: SessionContract;
 	providers?: ProvidersContract;
 	settings?: AcpSettingsControl;
-	/** Wired only by the composition root; absent means `clio-coder/dispatch/steer` refuses. */
+	/** Wired only by the composition root; absent means `_clio-coder/dispatch/steer` refuses. */
 	dispatch?: AcpDispatchControl;
 	/**
 	 * The 13 wire-shaped operator commands. Absent means the catalog is not
@@ -379,9 +379,10 @@ function contentText(value: unknown): string {
 
 /**
  * The prompt text of one `session/prompt`. ACP v1 carries it as `params.prompt`,
- * an array of content blocks, and only `text` blocks have a textual reading;
- * image, audio, and resource_link blocks are ignored rather than coerced into
- * prose the model would then answer. Nothing else is accepted: tolerating
+ * an array of content blocks. Text and resource links are the baseline prompt
+ * types in ACP v1; a link becomes a reference the model can see. Image, audio,
+ * and embedded resources require capabilities this server does not advertise.
+ * Nothing else is accepted: tolerating
  * `params.content`, `params.message`, or a bare string meant this server
  * answered request shapes no ACP client sends and no schema describes, so a
  * client's own framing bug looked like a working prompt here and failed
@@ -391,8 +392,11 @@ function promptText(params: unknown): string {
 	if (!isRecord(params) || !Array.isArray(params.prompt)) return "";
 	const parts: string[] = [];
 	for (const block of params.prompt) {
-		if (!isRecord(block) || block.type !== "text" || typeof block.text !== "string") continue;
-		parts.push(block.text);
+		if (!isRecord(block)) continue;
+		if (block.type === "text" && typeof block.text === "string") parts.push(block.text);
+		if (block.type === "resource_link" && typeof block.name === "string" && typeof block.uri === "string") {
+			parts.push(`Resource: ${block.name} (${block.uri})`);
+		}
 	}
 	return parts.join("\n").trim();
 }
@@ -412,7 +416,7 @@ const ACP_MAX_REPLAY_TOOL_CALLS = 8192;
 
 /**
  * Bus channels this server is willing to forward over the opt-in
- * `clio-coder/event` notification. Nothing outside this list is forwardable:
+ * `_clio-coder/event` notification. Nothing outside this list is forwardable:
  * the list is the allowlist, and a client's requested kinds are intersected
  * with it rather than trusted. `safety.loopBlocked` was the first member; the
  * dispatch lifecycle joined it so a client can draw a live fleet board from
@@ -1251,7 +1255,7 @@ function safeConfiguredIdentifier(value: unknown, maxBytes: number): string | nu
 	if (value === null || value === undefined) return null;
 	const safe = safeStoredIdentifier(value, maxBytes);
 	if (safe === null) {
-		throw new AcpRequestError(-32000, "configured route cannot be represented safely", { code: "internal_error" });
+		throw new AcpRequestError(-32603, "configured route cannot be represented safely", { code: "internal_error" });
 	}
 	return safe;
 }
@@ -1778,7 +1782,6 @@ function installPermissionBridge(input: {
 							{
 								sessionId,
 								toolCall: {
-									sessionUpdate: "tool_call",
 									toolCallId,
 									title: boundString(call.tool, ACP_MAX_TOOL_TITLE_BYTES),
 									kind: toolKind(call.tool),
@@ -1923,7 +1926,7 @@ const ACP_PROMPT_SETTLE_BOUND_MS = 5000;
  * engine's interrupt mode cancels the run and resubmits the text as a fresh
  * prompt, and ACP binds a turn to the `session/prompt` request/response pair,
  * so that second turn would have no request to carry its stop reason. A client
- * that wants it cancels through `clio-coder/session/interrupt` and prompts again.
+ * that wants it cancels through `_clio-coder/session/interrupt` and prompts again.
  */
 const ACP_STEERING_MODES = ["next-slot", "end-of-turn"] as const;
 type AcpSteeringMode = (typeof ACP_STEERING_MODES)[number];
@@ -1958,7 +1961,7 @@ function boundedQueueTexts(texts: ReadonlyArray<string>): string[] {
 }
 
 /**
- * Refusal codes for `clio-coder/dispatch/steer`. `DispatchContract.steer` reports
+ * Refusal codes for `_clio-coder/dispatch/steer`. `DispatchContract.steer` reports
  * every refusal as an operator-facing Error, so the wire gets the classification
  * and the prose goes to the stderr tail: the message legitimately quotes a
  * runtime id and a worker path, and neither belongs in a client's UI.
@@ -2056,7 +2059,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (!initialized || !enabledEventKinds.has(kind) || sessionId === null) return;
 		eventSequence += 1;
 		try {
-			options.transport.notify("clio-coder/event", {
+			options.transport.notify("_clio-coder/event", {
 				version: 1,
 				workspaceInstanceId,
 				sessionId,
@@ -2360,7 +2363,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	}
 
 	const requireInitialized = (): void => {
-		if (!initialized) throw new AcpRequestError(-32000, "initialize must be called first", { code: "not_initialized" });
+		if (!initialized) throw new AcpRequestError(-32600, "initialize must be called first", { code: "not_initialized" });
+	};
+	let loggedOut = false;
+	const requireAuthenticated = (): void => {
+		if (loggedOut) throw new AcpRequestError(-32000, "authentication required", { code: "authentication_required" });
 	};
 
 	const sessionIdOf = (params: unknown): string => {
@@ -2373,7 +2380,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	const assertParamKeys = (params: unknown, allowed: ReadonlySet<string>): Record<string, unknown> => {
 		if (params === undefined) return {};
-		if (!isRecord(params) || Object.keys(params).some((key) => !allowed.has(key))) {
+		if (!isRecord(params) || Object.keys(params).some((key) => key !== "_meta" && !allowed.has(key))) {
 			throw new AcpRequestError(-32602, "invalid method parameters", { code: "invalid_params" });
 		}
 		return params;
@@ -2381,7 +2388,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	const canonicalSessionCwd = (requested: unknown): string => {
 		const mismatch = (): AcpRequestError =>
-			new AcpRequestError(-32000, "session cwd does not match the server workspace", {
+			new AcpRequestError(-32602, "session cwd does not match the server workspace", {
 				code: "session_cwd_mismatch",
 			});
 		if (typeof requested !== "string" || requested.trim().length === 0 || !isAbsolute(requested)) throw mismatch();
@@ -2409,7 +2416,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	const workspaceMeta = (sessionId: string): SessionMeta => {
 		const meta = workspaceHistory().find((candidate) => candidate.id === sessionId);
-		if (!meta) throw new AcpRequestError(-32000, "unknown ACP session", { code: "session_unknown" });
+		if (!meta) throw new AcpRequestError(-32002, "unknown ACP session", { code: "session_unknown" });
 		return meta;
 	};
 
@@ -2424,22 +2431,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	const getSession = (params: unknown): AcpServerSession => {
 		const id = sessionIdOf(params);
 		const session = sessions.get(id);
-		if (!session) throw new AcpRequestError(-32000, "unknown ACP session", { code: "session_unknown" });
+		if (!session) throw new AcpRequestError(-32002, "unknown ACP session", { code: "session_unknown" });
 		return session;
 	};
 
 	options.transport.onRequest("initialize", (params) => {
-		if (initialized) throw new AcpRequestError(-32000, "already initialized", { code: "already_initialized" });
-		// A client that asked for a version this server does not speak must be
-		// told so. Accepting it silently would leave a future v2 client believing
-		// negotiation succeeded while every frame it receives is v1.
-		const version = isRecord(params) ? params.protocolVersion : undefined;
-		if (version !== 1) {
-			throw new AcpRequestError(-32602, "unsupported ACP protocol version", {
-				code: "protocol_version_unsupported",
-				supported: [1],
-			});
-		}
+		if (initialized) throw new AcpRequestError(-32600, "already initialized", { code: "already_initialized" });
 		const clientCapabilities = isRecord(params) && isRecord(params.clientCapabilities) ? params.clientCapabilities : null;
 		const clientMeta =
 			clientCapabilities !== null && isRecord(clientCapabilities._meta) ? clientCapabilities._meta : null;
@@ -2487,10 +2484,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				loadSession: canLoadSession,
 				promptCapabilities: { audio: false, embeddedContext: false, image: false },
 				mcpCapabilities: { http: false, sse: false },
-				// Clio mediates every tool through its own safety policy and supports an
-				// explicit session/close (a documented ACP RFD, not yet in the stable
-				// schema). Both are advertised via the _meta extension slot so strict
-				// clients never observe a non-spec capability field.
+				sessionCapabilities: { close: {} },
+				auth: { logout: {} },
+				// Clio mediates every tool through its own safety policy. Extensions
+				// are advertised through _meta while stable capabilities use schema fields.
 				_meta: {
 					[ACP_SESSION_META_KEY]: {
 						close: true,
@@ -2520,11 +2517,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						modes: ACP_STEERING_MODES,
 						interrupt: true,
 						methods: {
-							steer: "clio-coder/session/steer",
-							queue: "clio-coder/session/queue",
-							clear: "clio-coder/session/queue_clear",
-							interrupt: "clio-coder/session/interrupt",
-							dispatch: "clio-coder/dispatch/steer",
+							steer: "_clio-coder/session/steer",
+							queue: "_clio-coder/session/queue",
+							clear: "_clio-coder/session/queue_clear",
+							interrupt: "_clio-coder/session/interrupt",
+							dispatch: "_clio-coder/dispatch/steer",
 						},
 					},
 					// Per-frame agent attribution on `session/update`. Announced so a
@@ -2554,7 +2551,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						? {
 								"clio-coder/events": {
 									version: 1,
-									notification: "clio-coder/event",
+									notification: "_clio-coder/event",
 									kinds: ACP_FORWARDABLE_EVENT_KINDS,
 									workspaceInstanceId,
 								},
@@ -2563,24 +2560,46 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					...(options.toolRegistry !== undefined ? { "clio-coder/tools": "mediated" } : {}),
 				},
 			},
-			authMethods: [
-				{
-					id: "clio-login",
-					name: "Clio Target Auth & Setup",
-					description: "Configure models, API keys, and target endpoints in terminal",
-					type: "terminal",
-					args: ["auth", "login"],
-				},
-			],
+			authMethods:
+				isRecord(clientCapabilities?.auth) && clientCapabilities.auth.terminal === true
+					? [
+							{
+								id: "clio-login",
+								name: "Clio Target Auth & Setup",
+								description: "Configure models, API keys, and target endpoints in terminal",
+								type: "terminal",
+								args: ["auth", "login"],
+							},
+						]
+					: [],
 		} satisfies AcpInitializeResponse;
+	});
+
+	options.transport.onRequest("authenticate", (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["methodId"]));
+		if (typeof request.methodId !== "string" || request.methodId.length === 0) {
+			throw new AcpRequestError(-32602, "unknown authentication method", { code: "invalid_params" });
+		}
+		// The only offered flow is terminal auth in a separate process. The ACP
+		// schema forbids passing a terminal method to authenticate.
+		throw new AcpRequestError(-32602, "unknown authentication method", { code: "invalid_params" });
+	});
+
+	options.transport.onRequest("logout", (params) => {
+		requireInitialized();
+		assertParamKeys(params, new Set());
+		loggedOut = true;
+		return {};
 	});
 
 	options.transport.onRequest("session/new", (params) => {
 		requireInitialized();
+		requireAuthenticated();
 		// The chat instance can bind only one session at a time. Closing that
 		// session releases the slot; the next creation resets its conversation.
 		if (sessionCreated) {
-			throw new AcpRequestError(-32000, "this server hosts one session per process", { code: "session_limit" });
+			throw new AcpRequestError(-32602, "this server hosts one session per process", { code: "session_limit" });
 		}
 		const sessionCwd = canonicalSessionCwd(isRecord(params) ? params.cwd : undefined);
 		const route = routingSnapshot();
@@ -2590,7 +2609,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const meta = options.session?.create(createInput);
 		const id = meta?.id ?? randomUUID();
 		if (safeStoredIdentifier(id, ACP_MAX_SESSION_ID_BYTES) === null) {
-			throw new AcpRequestError(-32000, "session creation failed", { code: "internal_error" });
+			throw new AcpRequestError(-32603, "session creation failed", { code: "internal_error" });
 		}
 		options.chat.resetForSession?.(null);
 		const autonomy = options.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
@@ -2617,8 +2636,9 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	options.transport.onRequest("session/load", async (params) => {
 		requireInitialized();
+		requireAuthenticated();
 		if (sessionCreated) {
-			throw new AcpRequestError(-32000, "this server hosts one session per process", { code: "session_limit" });
+			throw new AcpRequestError(-32602, "this server hosts one session per process", { code: "session_limit" });
 		}
 		const request = assertParamKeys(params, new Set(["sessionId", "cwd", "mcpServers"]));
 		const id = sessionIdOf(request);
@@ -2628,7 +2648,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		const stored = workspaceMeta(id);
 		if (stored.endedAt === null) {
-			throw new AcpRequestError(-32000, "session may already be open", { code: "session_open" });
+			throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
 		}
 		const storedTarget = safeConfiguredIdentifier(stored.target, ACP_MAX_TARGET_ID_BYTES);
 		const storedModel = safeConfiguredIdentifier(stored.model, ACP_MAX_MODEL_ID_BYTES);
@@ -2638,7 +2658,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			options.buildReplayMessages === undefined ||
 			options.chat.resetForSession === undefined
 		) {
-			throw new AcpRequestError(-32000, "session loading is unavailable", { code: "internal_error" });
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
 
 		let leafTurnId: string | null;
@@ -2650,7 +2670,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			replayMessages = options.buildReplayMessages(entries, leafTurnId);
 			replay = prepareAcpReplay(entries, leafTurnId, id);
 		} catch {
-			throw new AcpRequestError(-32000, "session could not be loaded", { code: "internal_error" });
+			throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
 		}
 
 		let resumed: SessionMeta;
@@ -2666,7 +2686,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					// Best effort: no replay has been emitted and the slot remains unused.
 				}
 			}
-			throw new AcpRequestError(-32000, "session could not be loaded", { code: "internal_error" });
+			throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
 		}
 
 		const autonomy = options.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
@@ -2694,9 +2714,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		};
 	});
 
-	options.transport.onRequest("clio-coder/session/list", (params) => {
+	options.transport.onRequest("_clio-coder/session/list", (params) => {
 		requireInitialized();
 		const request = assertParamKeys(params, new Set(["limit"]));
+		if (options.session === undefined)
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		const limit = request.limit === undefined ? 50 : request.limit;
 		if (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > 200) {
 			throw new AcpRequestError(-32602, "limit must be an integer from 1 to 200", { code: "invalid_params" });
@@ -2737,43 +2759,43 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		};
 	});
 
-	options.transport.onRequest("clio-coder/session/label", (params) => {
+	options.transport.onRequest("_clio-coder/session/label", (params) => {
 		requireInitialized();
 		const request = assertParamKeys(params, new Set(["sessionId", "label"]));
 		const id = sessionIdOf(request);
 		workspaceMeta(id);
 		const label = requireBoundedClientString(request.label, "label", ACP_MAX_LABEL_BYTES, { allowEmpty: true });
 		if (options.session === undefined) {
-			throw new AcpRequestError(-32000, "session naming is unavailable", { code: "internal_error" });
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
 		try {
 			options.session.setName(label, id);
 		} catch {
-			throw new AcpRequestError(-32000, "session label could not be saved", { code: "internal_error" });
+			throw new AcpRequestError(-32603, "session label could not be saved", { code: "internal_error" });
 		}
 		return {};
 	});
 
-	options.transport.onRequest("clio-coder/session/delete", (params) => {
+	options.transport.onRequest("_clio-coder/session/delete", (params) => {
 		requireInitialized();
 		const request = assertParamKeys(params, new Set(["sessionId"]));
 		const id = sessionIdOf(request);
 		const meta = workspaceMeta(id);
 		if (sessions.has(id) || meta.endedAt === null) {
-			throw new AcpRequestError(-32000, "session may already be open", { code: "session_open" });
+			throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
 		}
 		if (options.session === undefined) {
-			throw new AcpRequestError(-32000, "session deletion is unavailable", { code: "internal_error" });
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
 		try {
 			options.session.deleteSession(id);
 		} catch {
-			throw new AcpRequestError(-32000, "session could not be deleted", { code: "internal_error" });
+			throw new AcpRequestError(-32603, "session could not be deleted", { code: "internal_error" });
 		}
 		return {};
 	});
 
-	options.transport.onRequest("clio-coder/session/autonomy", (params) => {
+	options.transport.onRequest("_clio-coder/session/autonomy", (params) => {
 		requireInitialized();
 		const request = assertParamKeys(params, new Set(["sessionId", "level"]));
 		const session = getSession(request);
@@ -2782,33 +2804,33 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32602, "invalid autonomy level", { code: "invalid_params" });
 		}
 		if (session.activePrompt !== null) {
-			throw new AcpRequestError(-32000, "cannot change autonomy during an active prompt", { code: "prompt_active" });
+			throw new AcpRequestError(-32602, "cannot change autonomy during an active prompt", { code: "prompt_active" });
 		}
 		session.autonomy = request.level;
 		session.autonomySource = "session";
 		return { level: session.autonomy, source: session.autonomySource };
 	});
 
-	options.transport.onRequest("clio-coder/settings/get_safe", (params) => {
+	options.transport.onRequest("_clio-coder/settings/get_safe", (params) => {
 		requireInitialized();
 		assertParamKeys(params, new Set());
 		if (options.settings === undefined) {
-			throw new AcpRequestError(-32000, "safe settings are unavailable", { code: "internal_error" });
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
 		return safeSettingsProjection(options.settings.read());
 	});
 
-	options.transport.onRequest("clio-coder/settings/patch_safe", (params) => {
+	options.transport.onRequest("_clio-coder/settings/patch_safe", (params) => {
 		requireInitialized();
 		const request = assertParamKeys(params, new Set(["patch"]));
 		if (!isRecord(request.patch)) {
 			throw new AcpRequestError(-32602, "patch must be an object", { code: "invalid_params" });
 		}
 		if (activePromptState !== null) {
-			throw new AcpRequestError(-32000, "cannot patch settings during an active prompt", { code: "prompt_active" });
+			throw new AcpRequestError(-32602, "cannot patch settings during an active prompt", { code: "prompt_active" });
 		}
 		if (options.settings === undefined) {
-			throw new AcpRequestError(-32000, "safe settings are unavailable", { code: "internal_error" });
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
 		const patch: AcpSafeSettingsPatch = {};
 		for (const [key, value] of Object.entries(request.patch)) {
@@ -2857,7 +2879,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		try {
 			return safeSettingsProjection(options.settings.commit(patch));
 		} catch {
-			throw new AcpRequestError(-32000, "safe settings could not be updated", { code: "internal_error" });
+			throw new AcpRequestError(-32603, "safe settings could not be updated", { code: "internal_error" });
 		}
 	});
 
@@ -2871,7 +2893,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		requireInitialized();
 		assertParamKeys(params, new Set());
 		if (options.commands === undefined) {
-			throw new AcpRequestError(-32000, "operator commands are unavailable", { code: "internal_error" });
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
 		commandCatalog ??= options.commands.catalog();
 		return commandCatalog;
@@ -2882,16 +2904,16 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const request = assertParamKeys(params, new Set(["sessionId", "command", "argv"]));
 		const session = getSession(request);
 		if (options.commands === undefined) {
-			throw new AcpRequestError(-32000, "operator commands are unavailable", { code: "internal_error" });
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
 		// Four of the thirteen put a user turn into the session. Doing that while
 		// a prompt is in flight is the steering path, not the submit path: the
 		// turn already running owns the stopReason, and a second unrequested
 		// submission folds content into it that the client never asked for. Those
 		// four are refused here and the client is told to use
-		// `clio-coder/session/steer` instead; the other nine are unaffected.
+		// `_clio-coder/session/steer` instead; the other nine are unaffected.
 		if (session.activePrompt !== null && options.commands.injectsUserTurn(request.command)) {
-			throw new AcpRequestError(-32000, "this command submits a user turn and a prompt is active", {
+			throw new AcpRequestError(-32602, "this command submits a user turn and a prompt is active", {
 				code: "prompt_active",
 				reason: "steer-instead",
 			});
@@ -2899,11 +2921,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return options.commands.invoke({ command: request.command, argv: request.argv });
 	});
 
-	options.transport.onRequest("clio-coder/targets/list", (params) => {
+	options.transport.onRequest("_clio-coder/targets/list", (params) => {
 		requireInitialized();
 		assertParamKeys(params, new Set());
 		if (options.providers === undefined) {
-			throw new AcpRequestError(-32000, "target discovery is unavailable", { code: "internal_error" });
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
 		const targets: AcpSafeTargetProjection[] = [];
 		let budgetExhausted = false;
@@ -2944,11 +2966,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		};
 	});
 
-	options.transport.onRequest("clio-coder/targets/probe", async (params) => {
+	options.transport.onRequest("_clio-coder/targets/probe", async (params) => {
 		requireInitialized();
 		const request = assertParamKeys(params, new Set(["targetId"]));
 		const targetId = requireBoundedClientString(request.targetId, "targetId", ACP_MAX_TARGET_ID_BYTES);
-		if (options.providers === undefined || options.providers.getTarget(targetId) === null) {
+		if (options.providers === undefined)
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		if (options.providers.getTarget(targetId) === null) {
 			throw new AcpRequestError(-32602, "target is not configured", {
 				code: "invalid_params",
 				reason: "target-unknown",
@@ -3018,7 +3042,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return null;
 	};
 
-	options.transport.onRequest("clio-coder/session/steer", (params) => {
+	options.transport.onRequest("_clio-coder/session/steer", (params) => {
 		requireInitialized();
 		const request = assertParamKeys(params, new Set(["sessionId", "text", "mode"]));
 		const session = getSession(request);
@@ -3045,32 +3069,32 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return { accepted: true, queue };
 	});
 
-	options.transport.onRequest("clio-coder/session/queue", (params) => {
+	options.transport.onRequest("_clio-coder/session/queue", (params) => {
 		requireInitialized();
 		const request = assertParamKeys(params, new Set(["sessionId"]));
 		getSession(request);
 		// An empty pair of lists is a fact about the queues, so a build that
 		// cannot read them refuses instead of reporting one it did not observe.
 		if (options.chat.queuedMessages === undefined) {
-			throw new AcpRequestError(-32000, "queue inspection is unavailable", { code: "internal_error" });
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
 		const queued = options.chat.queuedMessages();
 		return { steer: boundedQueueTexts(queued.steer), followUp: boundedQueueTexts(queued.followUp) };
 	});
 
-	options.transport.onRequest("clio-coder/session/queue_clear", (params) => {
+	options.transport.onRequest("_clio-coder/session/queue_clear", (params) => {
 		requireInitialized();
 		const request = assertParamKeys(params, new Set(["sessionId"]));
 		getSession(request);
 		if (options.chat.clearQueuedFollowUps === undefined) {
-			throw new AcpRequestError(-32000, "queue clearing is unavailable", { code: "internal_error" });
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
 		// Both queues drain together, exactly as Alt+Q does in the terminal: the
 		// returned texts are what the client now owns and must re-send to deliver.
 		return { restored: boundedQueueTexts(options.chat.clearQueuedFollowUps()) };
 	});
 
-	options.transport.onRequest("clio-coder/session/interrupt", (params) => {
+	options.transport.onRequest("_clio-coder/session/interrupt", (params) => {
 		requireInitialized();
 		const request = assertParamKeys(params, new Set(["sessionId", "reason"]));
 		const session = getSession(request);
@@ -3094,7 +3118,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return { cancelled: true };
 	});
 
-	options.transport.onRequest("clio-coder/dispatch/steer", (params) => {
+	options.transport.onRequest("_clio-coder/dispatch/steer", (params) => {
 		requireInitialized();
 		const request = assertParamKeys(params, new Set(["sessionId", "runId", "action", "message"]));
 		getSession(request);
@@ -3154,7 +3178,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		// the chat loop still persisting the aborted turn. The client cancels and
 		// awaits the prompt's terminal response first.
 		if (session.activePrompt) {
-			throw new AcpRequestError(-32000, "cancel the active prompt before closing the session", {
+			throw new AcpRequestError(-32602, "cancel the active prompt before closing the session", {
 				code: "prompt_active",
 			});
 		}
@@ -3168,9 +3192,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	options.transport.onRequest("session/prompt", async (params): Promise<AcpPromptResponse> => {
 		requireInitialized();
+		requireAuthenticated();
 		const session = getSession(params);
 		if (session.activePrompt || options.chat.isStreaming()) {
-			throw new AcpRequestError(-32000, "this session already has an active prompt", { code: "prompt_active" });
+			throw new AcpRequestError(-32602, "this session already has an active prompt", { code: "prompt_active" });
 		}
 		const text = promptText(params);
 		if (text.length === 0) throw new AcpRequestError(-32602, "prompt text is required", { code: "invalid_params" });
@@ -3224,7 +3249,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		// the run and fails the prompt so the model cannot react to/retry it.
 		if (active.permissionExpired) {
 			settleOpenToolCalls(options.transport, session.id, active, "permission approval expired");
-			throw new AcpRequestError(-32000, "permission approval expired", { code: "permission_expired" });
+			throw new AcpRequestError(-32800, "permission approval expired", { code: "permission_expired" });
 		}
 		// W001-A1: a peer that holds bounded per-turn state must never see a
 		// 129th tool start. This is a normal ACP agent-side request ceiling, not a
@@ -3244,10 +3269,14 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		// reason travels as a code; the notice text carries the settings path and
 		// stays off the wire.
 		if (active.admissionReason !== undefined && !active.sawTurnEnd && active.updatesSent === 0) {
-			throw new AcpRequestError(-32000, `Clio could not admit this prompt: ${active.admissionReason}`, {
-				code: "prompt_not_admitted",
-				reason: active.admissionReason,
-			});
+			throw new AcpRequestError(
+				active.admissionReason === "authentication-required" ? -32000 : -32603,
+				`Clio could not admit this prompt: ${active.admissionReason}`,
+				{
+					code: "prompt_not_admitted",
+					reason: active.admissionReason,
+				},
+			);
 		}
 		// ACP has no error StopReason: a failed turn is signalled by failing the
 		// session/prompt request itself.
@@ -3261,7 +3290,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			if (active.errorMessage !== undefined) {
 				options.diagnostics?.(`turn failed: ${acpErrorMessage(active.errorMessage)}`);
 			}
-			throw new AcpRequestError(-32000, ACP_TURN_FAILED_MESSAGE, { code: "turn_failed" });
+			throw new AcpRequestError(-32603, ACP_TURN_FAILED_MESSAGE, { code: "turn_failed" });
 		}
 		return promptResponse(active.stopReason, active);
 	});

@@ -18,6 +18,7 @@ Turn it off under Settings → Appearance → Demo guidance (`interface.demo`), 
 | `clio-coder run "<task>" [flags]` | Run one headless main-agent turn. Use `--json` for JSONL events. |
 | `clio-coder run "<task>" --agent <id> [flags]` | Dispatch one explicit fleet agent non-interactively and write a receipt. |
 | `clio-coder acp [--cwd PATH] [--permission-timeout MS]` | Serve Clio as an ACP v1 agent over stdio for ACP frontends. |
+| `clio-coder acp [--cwd PATH] auth login` | Open interactive Quick Connect when an ACP client offers terminal authentication. |
 | `clio-coder --version` | Print the installed version. `clio-coder version` is the subcommand form. |
 | `clio-coder --help [--all]` | Print the command list. `--all` appends every command under `clio-coder dev`. |
 | `clio-coder --api-key <key>` | Override the active target API key for one invocation. |

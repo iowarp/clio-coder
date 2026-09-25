@@ -2791,7 +2791,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}
 					: {}),
 				providers,
-				// The fleet controls `clio-coder/dispatch/steer` reaches. The server
+				// The fleet controls `_clio-coder/dispatch/steer` reaches. The server
 				// takes the two operations by structure, never the whole contract, so
 				// no ACP client can enqueue or route dispatch work through it.
 				dispatch: {
