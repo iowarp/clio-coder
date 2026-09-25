@@ -831,9 +831,9 @@ test("the welcome box closes at the viewport edge on narrow and wide terminals",
 	for (const width of [60, 80, 100, 160, 240]) {
 		const lines = component.render(width).map(stripAnsi);
 		const edge = width - 1;
-		strictEqual(lines[0]?.[0], "╭");
-		strictEqual(lines[0]?.[edge], "╮");
-		strictEqual(lines[14]?.[edge], "╯");
+		strictEqual(lines[0]?.[0], "┌");
+		strictEqual(lines[0]?.[edge], "┐");
+		strictEqual(lines[14]?.[edge], "┘");
 		for (const line of lines.slice(1, 12)) strictEqual(line[edge], "│", line);
 		for (const line of lines.slice(13, 14)) strictEqual(line[edge], "│", line);
 		ok(!lines.slice(1, 6).some((line) => line.includes("…")), "art must resize rather than truncate");

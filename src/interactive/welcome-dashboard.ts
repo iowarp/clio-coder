@@ -12,7 +12,9 @@ import {
 	clioTheme,
 	collapseHomePath,
 	formatTargetLabel,
+	frame,
 	GLYPH,
+	innerDivider,
 	padAnsi,
 } from "./theme/index.js";
 import { WELCOME_WORDMARK, WELCOME_WORDMARK_WIDE } from "./welcome-art.js";
@@ -517,12 +519,7 @@ export function buildWelcomeDashboardLines(
 	if (mode === "session") return [padAnsi(sessionRow(theme, stats, version, safeWidth), safeWidth)];
 	const panelWidth = safeWidth;
 	const room = Math.max(1, panelWidth - 4);
-	const frame = (text: string) => theme.fg("frame", text);
-	const row = (text: string) =>
-		`${frame("│")} ${padAnsi(truncateToWidth(text, room, GLYPH.ellipsis, false), room)} ${frame("│")}`;
-	const rule = (left: string, right: string) => frame(`${left}${"─".repeat(Math.max(0, panelWidth - 2))}${right}`);
-	const title = ` Clio Coder v${version} `;
-	const heading = `${frame("╭─")}${theme.fg("muted", title)}${frame(`${"─".repeat(Math.max(0, panelWidth - visibleWidth(title) - 3))}╮`)}`;
+	const fit = (text: string): string => truncateToWidth(text, room, GLYPH.ellipsis, false);
 	const wordmark = panelWidth >= 100 ? WELCOME_WORDMARK_WIDE : WELCOME_WORDMARK;
 	const sideBySide = panelWidth >= 76;
 	const artWidth = sideBySide ? visibleWidth(wordmark[0] ?? "") : 0;
@@ -557,22 +554,27 @@ export function buildWelcomeDashboardLines(
 		theme.fg("muted", stats.fleet),
 	];
 
-	return [
-		heading,
-		...Array.from({ length: Math.max(details.length, hints.length, sideBySide ? wordmark.length : 0) }, (_, index) => {
+	const rows = Array.from(
+		{ length: Math.max(details.length, hints.length, sideBySide ? wordmark.length : 0) },
+		(_, index) => {
 			const detail = details[index] ?? "";
 			const art = sideBySide ? `${padAnsi(theme.fg("accent", wordmark[index] ?? ""), artWidth)}   ` : "";
 			const content = `${art}${truncateToWidth(detail, detailWidth, GLYPH.ellipsis, false)}`;
-			return row(
+			return fit(
 				showHints
-					? `${padAnsi(content, contentWidth)} ${frame("│")} ${truncateToWidth(hints[index] ?? "", hintWidth, GLYPH.ellipsis, false)}`
+					? `${padAnsi(content, contentWidth)} ${theme.fg("frame", GLYPH.rail)} ${truncateToWidth(hints[index] ?? "", hintWidth, GLYPH.ellipsis, false)}`
 					: content,
 			);
-		}),
-		rule("├", "┤"),
-		row(actionRow(theme, stats, room)),
-		rule("╰", "╯"),
-	].map((line) => padAnsi(truncateToWidth(line, safeWidth, GLYPH.ellipsis, false), safeWidth));
+		},
+	);
+	// The launchpad is an island like every other framed block, so it shares the
+	// one frame recipe and its action row sits under the standard inner divider.
+	return frame(
+		theme,
+		`Clio Coder v${version}`,
+		[...rows, innerDivider(theme, room), fit(actionRow(theme, stats, room))],
+		panelWidth,
+	);
 }
 
 /**
