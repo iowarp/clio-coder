@@ -17,7 +17,8 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildCodewiki, serializeCodewiki } from "../src/domains/context/codewiki/indexer.js";
+import { serializeCodewiki } from "../src/domains/context/codewiki/artifact.js";
+import { buildCodewiki } from "../src/domains/context/codewiki/indexer.js";
 import { detectProjectProfile } from "../src/domains/session/workspace/project-type.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
