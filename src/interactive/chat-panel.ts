@@ -87,7 +87,7 @@ const OSC133_PROMPT_START = "\x1b]133;A\x07";
 const RESET = SGR_RESET;
 const DIM = SGR_DIM;
 const TEAL = fgSequence("accent");
-const BLUE_REASON = fgSequence("reason");
+const REASON_INK = fgSequence("reason");
 const RED_CRIT = fgSequence("error");
 const GREEN_OK = fgSequence("success");
 const AMBER_WARN = fgSequence("warning");
@@ -981,7 +981,7 @@ function dimLine(text: string, width: number): string {
  * gutter rail, so reasoning never reads as tool output. The excerpt is italic
  * as well as dim because it is the model thinking aloud, not its answer.
  */
-const REASON_RAIL = `${BLUE_REASON}│${RESET} `;
+const REASON_RAIL = `${REASON_INK}│${RESET} `;
 
 /**
  * A closed thinking stretch's folded marker, in place in the segment order. The
