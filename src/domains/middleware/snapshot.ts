@@ -12,12 +12,18 @@ import {
 } from "./runtime.js";
 import type { MiddlewareRule, MiddlewareSnapshot } from "./types.js";
 
+/**
+ * The declarative rules a worker rebuilds its middleware from. A worker has no
+ * operator surface, and its spec validator admits no `notify_operator` effect
+ * kind, so a rule declaring one would fail every dispatch at parse time. Such
+ * rules stay with the orchestrator.
+ */
 export function createMiddlewareSnapshot(
 	rules: ReadonlyArray<MiddlewareRule> = listMiddlewareRules(),
 ): MiddlewareSnapshot {
 	return {
 		version: 1,
-		rules: rules.map(cloneMiddlewareRule),
+		rules: rules.filter((rule) => !rule.effectKinds.includes("notify_operator")).map(cloneMiddlewareRule),
 	};
 }
 

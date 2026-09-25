@@ -6,7 +6,7 @@ import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-cons
 import type { ResultContract } from "../domains/agents/result-contract.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
-import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
+import type { MiddlewareEffectKind, MiddlewareHook, MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type {
 	CapabilityFlags,
 	RuntimeApiFamily,
@@ -236,7 +236,15 @@ const TOOL_PROFILE_NAMES = [
 const WORKER_PRODUCTS = ["orientation"] as const satisfies ReadonlyArray<AgentProduct>;
 const TARGET_LIFECYCLES = ["user-managed", "clio-coder-managed"] as const;
 const RESIDENCY_ROLES = ["chat", "memory", "worker", "target-default"] as const satisfies ReadonlyArray<ResidencyRole>;
-const MIDDLEWARE_HOOKS = ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"] as const;
+const MIDDLEWARE_HOOKS = [
+	"before_tool",
+	"after_tool",
+	"turn_start",
+	"turn_end",
+	"on_compaction",
+] as const satisfies ReadonlyArray<MiddlewareHook>;
+// notify_operator is deliberately absent: a worker has no operator surface, and
+// createMiddlewareSnapshot strips rules that declare it before a spec is built.
 const MIDDLEWARE_EFFECT_KINDS = [
 	"inject_reminder",
 	"annotate_tool_result",
@@ -245,7 +253,7 @@ const MIDDLEWARE_EFFECT_KINDS = [
 	"request_continuation",
 	"require_tool",
 	"lock_tools",
-] as const;
+] as const satisfies ReadonlyArray<MiddlewareEffectKind>;
 const RUNTIME_RESOLUTION_SEVERITIES = ["info", "warning", "error"] as const;
 // This worker wire validator stays dependency-light; runtime value imports
 // from domains are forbidden by the worker build boundary.
