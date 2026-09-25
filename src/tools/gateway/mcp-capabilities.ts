@@ -621,7 +621,11 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			const all = resolveStates();
 			const added: ServerState[] = [];
 			for (const server of servers) {
-				const slug = server.name.toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 24);
+				const slug = server.name
+					.toLowerCase()
+					.replace(/[^a-z0-9_-]+/g, "_")
+					.replace(/^_+|_+$/g, "")
+					.slice(0, 24);
 				const base = `acp_${slug || "server"}`;
 				let id = base;
 				for (let suffix = 2; all.has(id); suffix += 1) id = `${base.slice(0, 28)}_${suffix}`;
@@ -640,8 +644,16 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					trust: { status: "trusted", actionClass: "unknown" },
 				};
 				const state: ServerState = {
-					declaration, client: null, connecting: null, closing: null, tools: [], truncated: false,
-					registered: [], unregistrable: [], failure: null, catalog: null,
+					declaration,
+					client: null,
+					connecting: null,
+					closing: null,
+					tools: [],
+					truncated: false,
+					registered: [],
+					unregistrable: [],
+					failure: null,
+					catalog: null,
 				};
 				all.set(id, state);
 				added.push(state);

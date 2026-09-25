@@ -1,12 +1,12 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { resolve } from "node:path";
 import { test } from "node:test";
-import type { SessionContract } from "../../src/domains/session/contract.js";
-import { createWorkerSafety } from "../../src/engine/worker-tools.js";
-import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
-import { AcpRequestError } from "../../src/engine/acp/errors.js";
-import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import type { SessionContract } from "../../src/domains/session/contract.js";
+import { AcpRequestError } from "../../src/engine/acp/errors.js";
+import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
+import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
+import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createGatewayTool } from "../../src/tools/gateway/index.js";
 import { createMcpCapabilitySource } from "../../src/tools/gateway/mcp-capabilities.js";
 import { createRegistry } from "../../src/tools/registry.js";
@@ -26,8 +26,14 @@ test("ACP client stdio MCP server is callable through gateway and closes with it
 		request: async () => ({}) as never,
 		notify: () => {},
 		onNotification: () => () => {},
-		onRequest: (method, handler) => { handlers.set(method, handler); return () => handlers.delete(method); },
-		onClose: (handler) => { stop = handler; return () => {}; },
+		onRequest: (method, handler) => {
+			handlers.set(method, handler);
+			return () => handlers.delete(method);
+		},
+		onClose: (handler) => {
+			stop = handler;
+			return () => {};
+		},
 		close: () => stop(),
 	};
 	type StoredSession = { id: string; cwd: string; createdAt: string; endedAt: string | null };
@@ -35,7 +41,7 @@ test("ACP client stdio MCP server is callable through gateway and closes with it
 	let stored: StoredSession | null = null;
 	const session = {
 		current: () => current,
-		history: () => stored ? [stored] : [],
+		history: () => (stored ? [stored] : []),
 		create: () => {
 			current = { id: "acp-mcp", cwd, createdAt: new Date().toISOString(), endedAt: null };
 			stored = current;
@@ -48,14 +54,26 @@ test("ACP client stdio MCP server is callable through gateway and closes with it
 			return stored;
 		},
 		tree: () => ({ leafId: null }),
-		close: async () => { if (stored) stored.endedAt = new Date().toISOString(); current = null; },
+		close: async () => {
+			if (stored) stored.endedAt = new Date().toISOString();
+			current = null;
+		},
 	} as unknown as SessionContract;
 	const done = serveClioAcpAgent({
-		transport, cwd, session, toolRegistry: registry, mcpCapabilities: source,
-		readSessionEntries: () => [], buildReplayMessages: () => [],
+		transport,
+		cwd,
+		session,
+		toolRegistry: registry,
+		mcpCapabilities: source,
+		readSessionEntries: () => [],
+		buildReplayMessages: () => [],
 		chat: {
-			submit: async () => {}, cancel: () => {}, onEvent: () => () => {}, isStreaming: () => false,
-			getSessionId: () => current?.id ?? null, resetForSession: () => {},
+			submit: async () => {},
+			cancel: () => {},
+			onEvent: () => () => {},
+			isStreaming: () => false,
+			getSessionId: () => current?.id ?? null,
+			resetForSession: () => {},
 		},
 	});
 	const call = async (method: string, params: unknown) => {
@@ -70,7 +88,7 @@ test("ACP client stdio MCP server is callable through gateway and closes with it
 			(error: unknown) => error instanceof AcpRequestError && error.rpcCode === -32602,
 		);
 		const mcpServers = [{ name: "fixture", command: process.execPath, args: [fixture], env: [] }];
-		const created = await call("session/new", { cwd, mcpServers }) as { sessionId: string };
+		const created = (await call("session/new", { cwd, mcpServers })) as { sessionId: string };
 		strictEqual(created.sessionId, "acp-mcp");
 		deepStrictEqual(source.connectedIds({ readyOnly: true }), ["acp_fixture"]);
 		const result = await registry.invoke({

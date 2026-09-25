@@ -67,15 +67,17 @@ export async function serveDeferredAcp(options: DeferredAcpOptions): Promise<num
 			readyReject?.(new AcpRequestError(-32602, "session cwd cannot be entered", { code: "invalid_params" }));
 			return;
 		}
-		bootResult = options.boot(root, () => {
-			transport.setFallbackRequestHandler(null);
-			transport.setRequestGate(null);
-			readyResolve?.();
-		}).catch((error: unknown) => {
-			readyReject?.(error);
-			transport.setRequestGate(null);
-			throw error;
-		});
+		bootResult = options
+			.boot(root, () => {
+				transport.setFallbackRequestHandler(null);
+				transport.setRequestGate(null);
+				readyResolve?.();
+			})
+			.catch((error: unknown) => {
+				readyReject?.(error);
+				transport.setRequestGate(null);
+				throw error;
+			});
 		// The request handler receives the boot error through ready. The serve
 		// promise observes this rejection separately, so it never goes unhandled.
 		void bootResult.catch(() => undefined);
