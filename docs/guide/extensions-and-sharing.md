@@ -345,8 +345,13 @@ Options:
 | `--agents` | Include agent recipe files. |
 | `--fleets` | Include fleet contract files. |
 | `--all` | Include every supported resource class. |
+| `--dry-run` | List the entries the archive would hold and write nothing. |
+| `--json` | Print the archive, or with `--dry-run` its manifest, as JSON. |
 
 If no include flags are supplied, export includes all supported classes for the selected scope.
+Each share command refuses, with exit 2, a flag it does not use: `export` takes no
+`--force`, `import` takes neither `--both` nor include flags, and `inspect` takes
+only `--json`.
 
 Settings fragments are version 2 documents containing only
 `chat.modelPicker.cycleSet`, `chat.retry`, `fleet.concurrency`,

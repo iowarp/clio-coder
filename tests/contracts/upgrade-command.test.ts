@@ -11,6 +11,9 @@ import {
 } from "../../src/domains/lifecycle/install-method.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
+const ARGV_MODULE = new URL("../../src/cli/argv.ts", import.meta.url).href;
+const TSX_IMPORT = `--import=${import.meta.resolve("tsx")}`;
+
 function installedFixture() {
 	const home = makeScratchHome("clio-upgrade-command-");
 	const prefix = join(home.dir, "custom prefix");
@@ -21,9 +24,23 @@ function installedFixture() {
 	mkdirSync(dirname(entry), { recursive: true });
 	mkdirSync(bin);
 	writeFileSync(join(root, "package.json"), '{"name":"@iowarp/clio-coder","version":"0.5.4","type":"module"}');
+	// The relaunch is judged by the real startup parser, not by the fixture: a
+	// fake that accepted any argv is how a refused `--continue` relaunch stayed
+	// green. The post-install and doctor children are recognized by their verb.
 	writeFileSync(
 		entry,
-		`import fs from 'node:fs'; fs.appendFileSync(process.env.CALL_LOG, JSON.stringify({ entry: process.argv[1], args: process.argv.slice(2) })+'\\n'); process.exitCode = process.argv.includes('--continue') ? Number(process.env.RESTART_CODE || 0) : Number(process.env.POST_CODE || 0);`,
+		[
+			"import fs from 'node:fs';",
+			"const args = process.argv.slice(2);",
+			"fs.appendFileSync(process.env.CALL_LOG, JSON.stringify({ entry: process.argv[1], args })+'\\n');",
+			"if (args[0] === 'upgrade' || args[0] === 'doctor') process.exitCode = Number(process.env.POST_CODE || 0);",
+			"else {",
+			`  const { extractGlobalFlags } = await import(${JSON.stringify(ARGV_MODULE)});`,
+			"  const parsed = extractGlobalFlags(args);",
+			"  if (parsed.error) { process.stderr.write('relaunch refused: ' + parsed.error + '\\n'); process.exitCode = 2; }",
+			"  else process.exitCode = Number(process.env.RESTART_CODE || 0);",
+			"}",
+		].join("\n"),
 	);
 	writeFileSync(
 		join(bin, "npm"),
@@ -50,7 +67,15 @@ function installedFixture() {
 			});`,
 			],
 			{
-				env: { ...process.env, ...home.env, PATH: `${bin}:${process.env.PATH}`, CALL_LOG: log, ...env },
+				env: {
+					...process.env,
+					...home.env,
+					PATH: `${bin}:${process.env.PATH}`,
+					CALL_LOG: log,
+					// The installed-entry fixture imports the TypeScript argv parser.
+					NODE_OPTIONS: [process.env.NODE_OPTIONS, TSX_IMPORT].filter(Boolean).join(" "),
+					...env,
+				},
 				encoding: "utf8",
 				timeout: 20_000,
 			},
@@ -111,19 +136,44 @@ test("upgrade updates the same prefix and runs checks with the exact installed e
 	]);
 });
 
-test("restart follows successful checks, resumes the project, and propagates the new CLI's exit status", (t) => {
+test("restart follows successful checks, relaunches with argv the real parser accepts, and propagates the new CLI's exit status", (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
 	const result = f.run(["--restart"], "isInteractive: () => true,", { RESTART_CODE: "7" });
 	assert.equal(result.status, 7, result.stderr + result.stdout);
+	assert.doesNotMatch(result.stderr, /relaunch refused/);
 	assert.deepEqual(
 		f.calls().map((row) => row.args),
 		[
 			["install", "-g", "--prefix", f.prefix, "@iowarp/clio-coder@latest"],
 			["upgrade", "--post-install", "--channel=latest"],
-			["--continue"],
+			[],
 		],
 	);
+});
+
+test("every resume hint names /resume, never the refused --continue flag", (t) => {
+	const f = installedFixture();
+	t.after(f.home.cleanup);
+	const automated = f.run(["--restart"], "isInteractive: () => false,");
+	assert.equal(automated.status, 2);
+	assert.match(automated.stderr, /\/resume/);
+	const relaunchFailed = f.run(
+		["--restart"],
+		"isInteractive: () => true, runRestart: async () => { throw new Error('spawn failed'); },",
+	);
+	assert.equal(relaunchFailed.status, 1);
+	assert.match(relaunchFailed.stderr, /\/resume/);
+	const manual = f.run(
+		[],
+		`inspectInstallation: () => ({ ...inspectInstallation(${JSON.stringify(f.entry)}), kind: 'pnpm' }),`,
+	);
+	assert.match(manual.stdout, /\/resume/);
+	const preview = f.run(["--dry-run", "--restart"]);
+	assert.match(preview.stdout, /\/resume/);
+	for (const output of [automated, relaunchFailed, manual, preview]) {
+		assert.doesNotMatch(output.stdout + output.stderr, /--continue/);
+	}
 });
 
 test("failed checks never relaunch and recovery points to migrations", (t) => {

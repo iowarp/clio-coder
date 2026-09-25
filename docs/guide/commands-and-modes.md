@@ -60,9 +60,9 @@ Turn it off under Settings → Appearance → Demo guidance (`interface.demo`), 
 | `clio-coder verifiers discover\|inspect\|author\|validate\|edit\|dry-run` | Discover, inspect, author, validate, edit, or dry-run project checks. |
 | `clio-coder reset [--state\|--data\|--cache\|--auth\|--config\|--all] [--dry-run] [--force] [--json]` | Reset selected Clio Coder state. `--state` is the default level. |
 | `clio-coder uninstall [--dry-run] [--remove-binary] [--keep-config] [--keep-data] [--force] [--json]` | Remove Clio Coder state and print uninstall guidance. |
-| `clio-coder upgrade [--dry-run] [--channel=<latest\|beta\|dev>] [--skip-migrations] [--restart] [--json]` | Update an identified npm global installation in its original prefix and apply migrations with that installation's new binary. Other managers receive update instructions. `--post-install` runs local migrations and repairs only. `--restart` resumes the project's last session after success; it requires a terminal and cannot combine with `--json` or `--post-install`. |
+| `clio-coder upgrade [--dry-run] [--channel=<latest\|beta\|dev>] [--skip-migrations] [--restart] [--json]` | Update an identified npm global installation in its original prefix and apply migrations with that installation's new binary. Other managers receive update instructions. `--post-install` runs local migrations and repairs only. `--restart` relaunches the installed CLI in the project after success, where `/resume` picks up the last session; it requires a terminal and cannot combine with `--json` or `--post-install`. |
 | `clio-coder agents [--json] [--all]` | List discovered agent specs. |
-| `clio-coder fleet list\|run\|status\|drain\|resume` | List fleet contracts, run one, show dispatch state, or control admission. `drain` denies new execution starts for up to one hour and preserves running work; `resume` reopens admission immediately. `run <name>` takes `[--var k=v ...]` and `[--json]`; `status` takes `[--json] [--all]` and defaults to this project; `drain` and `resume` each take `[--json]`. |
+| `clio-coder fleet list\|run\|status\|drain\|resume` | List fleet contracts, run one, show dispatch state, or control admission. `drain` denies new execution starts for up to one hour and preserves running work; `resume` reopens admission immediately. `run <name>` takes `[--var k=v ...]`, `[--resume <runId>]` and `[--json]` and refuses any other flag with exit 2; `status` takes `[--json] [--all]` and defaults to this project; `drain` and `resume` each take `[--json]`. |
 | `clio-coder fleet inspect\|decisions --json [--all]` | Read bounded run, council, and gate decision summaries for this project. `--all` reads machine-wide state. |
 | `clio-coder fleet view <runId\|fleetRootId> [--follow] [--all]` | Read the append-only run journal after verifying receipt trust. A fleet root prints its durable step index. IDs from other projects require `--all`. Without `--follow`, the width-bounded snapshot is plain text with no ANSI control bytes. `--follow` requires an interactive terminal and one run id; `fleet view --help` prints this subcommand's own usage, including `--watch`. |
 | `clio-coder fleet view --watch <selection-file>` | Follow the run id currently named by the selection file and retarget when it changes. This is the operator-pulled watch surface used by the pane integration. |
@@ -85,9 +85,9 @@ Turn it off under Settings → Appearance → Demo guidance (`interface.demo`), 
 | `clio-coder gui [--open]`, `clio-coder dev gui` | Start the graphical application, an opt-in alpha for power users listed under `clio-coder --help --all`; the terminal UI stays the primary interface and nothing starts the application unless you run it. `--open` opens the browser. See the [GUI reference](commands-and-modes.md). |
 | `clio-coder docs [topic] [--no-open] [--foreground]`, `clio-coder docs --stop` | Open the documentation in your browser, rendered directly from the canonical Markdown. Use the installed background app when there is one. Otherwise start a loopback server in the background, reuse it on the next call, and stop it with `--stop` or after 15 minutes without an open page. `--no-open` prints the launch link. `--foreground` serves privately in this terminal until Ctrl+C. |
 | `clio-coder usage report [--repo <path>] [--days <n>] [--json]` | Cross-session usage facts from session/run ledgers and retained out-of-turn calls, including known failed-compaction spending and missing coverage. The window defaults to 30 days and the JSON schema is marked experimental. |
-| `clio-coder dev share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
+| `clio-coder dev share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--agents] [--fleets] [--settings] [--extensions] [--all] [--dry-run] [--json]` | Export project context, prompts, skills, agents, fleets, settings fragments, and extension bundles. `--dry-run` lists what the archive would hold and writes nothing. |
 | `clio-coder dev share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
-| `clio-coder dev share inspect <path> [--json]` | Inspect a share archive without importing it. |
+| `clio-coder dev share inspect <path> [--json]` | Inspect a share archive without importing it. Each share command refuses, with exit 2, a flag it does not use. |
 | `clio-coder export --out <path> ...` / `clio-coder import <path> ...` | Top-level aliases for `dev share export` and `dev share import`. Each `dev` command also resolves without the `dev` prefix. |
 | `clio-coder context` | Show project context status, preload class, codewiki freshness, and the codewiki digest when present. |
 | `clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose\|--apply\|--rewrite] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO-CODER.md`, `.clio-coder/codewiki.json`, and `.clio-coder/state.json`. |
@@ -98,6 +98,8 @@ Turn it off under Settings → Appearance → Demo guidance (`interface.demo`), 
 | `clio-coder context map [--out <path>] [--json]` | Write an archify architecture seed from the structural index without model calls. |
 | `clio-coder context replay (--sessions <path>... \| --synthetic <ids>) [--policies <ids>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--protect-last-turns <n>] [--min-evictable-tokens <n>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio session ledgers or the seeded procedural corpora and report retention, precision, token savings, recall cost, cold-prefix cost, saturation, and summary headroom. |
 | `clio-coder context working-set --session <id\|path>` | Inspect one session's durable working-set fold and path-index summary without modifying the ledger. |
+
+The startup flags `--api-key`, `--no-context-files` (`-nc`), `--no-skills` and `--skill` apply to the interactive session, `clio-coder run` and `clio-coder acp`. `--with-panes` and `--no-panes` apply to the interactive session alone. A startup flag given before any other subcommand is refused with exit 2 and a message naming the flag and the subcommand, because that command would ignore it.
 
 ### Project trust
 
@@ -141,11 +143,11 @@ project settings saves.
 | `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 | `--autonomy <level>` | Main-agent one-run autonomy override: `default` or `yolo`. It does not change saved settings. Combining it with `--agent` is a usage error; use `--read-only` to restrict a dispatch. |
 | `--read-only` | Restrict a `--agent` dispatch to read-only tools. Without `--agent`, it is a usage error. |
-| `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. |
-| `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. |
+| `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. They reach the main agent and an `--agent` worker alike. |
+| `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. They reach the main agent and an `--agent` worker alike. |
 | `--max-context-tokens <n>` | One-run context-window override for supported local runtimes. |
 | `--json` | Stream JSONL events for main-agent runs; dispatch streams events and receipt JSON. |
-| `--json-events <mode>` | Main-agent JSON stream mode: `full` or `terminal`; implies `--json`. |
+| `--json-events <mode>` | Main-agent JSON stream mode: `full` or `terminal`; implies `--json`. With `--agent` it is a usage error; use `--json`. |
 | `--session <id>` | Append this turn to an existing session identified by `<id>`. |
 | `--continue` | Append this turn to the most recent session for the current working directory. |
 | `--fail-on-noop` | Exit 1 when the main-agent run was a no-op, and seal its receipt as `failed` with `outcomeDetail: "noop"`. Main agent only; with `--agent` it is a usage error. See [Headless No-op Runs](#headless-no-op-runs). |
@@ -161,8 +163,9 @@ project settings saves.
 | `--tool-profile <name>` | Restrict dispatched-agent tools: `minimal-local`, `science-local`, or `full-agent`. |
 | `--require <capability>` | Require a target capability for dispatch. Repeatable. |
 | `--steer-channel <path>` | Read live steering lines from a FIFO or an appended regular file to steer the active run. |
-| `--with-panes` | Activate guest pane integration for this invocation when Clio is already inside a reachable herdr session. It overrides `interface.panes.enabled`. |
-| `--no-panes` | Disable pane integration for this invocation. It overrides `interface.panes.enabled`. |
+
+`clio-coder run` does not read the startup flags `--with-panes` and `--no-panes`.
+Given before `run`, they are refused with exit 2.
 
 `--with-panes` is an explicit first-class launch mode, not permission to start a
 pane server. Clio confirms `HERDR_ENV=1`, connects to an existing socket, and
@@ -172,8 +175,9 @@ id, while the viewer reads journals itself, so dispatch remains independent of
 the pane host and a second terminal can use the same journal surface directly.
 `interface.panes.enabled: embedded` does not start a host: it is an accepted but
 unimplemented rung that resolves to no panes, prints a refusal during boot, and
-is labelled `NOT IMPLEMENTED` in Settings. Use `auto` or `--with-panes` only
-when Clio is already inside a reachable herdr session.
+is labelled `NOT IMPLEMENTED` in Settings. `--with-panes` overrides it with
+`auto`. Use `auto` or `--with-panes` only when Clio is already inside a
+reachable herdr session.
 
 ### Headless Working Directory
 

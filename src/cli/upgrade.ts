@@ -28,13 +28,22 @@ Flags:
   --channel=<chan>      npm dist-tag to install (latest|beta|dev). npm installs only.
   --skip-migrations     skip migrations after the install step
   --post-install        apply local checks after a package-manager update; skip reinstall
-  --restart             after success, launch the installed CLI and resume this project's last session
+  --restart             after success, launch the installed CLI in this project; type /resume there
+                        to pick up the last session
   --json                emit machine-readable JSON output
   --help, -h            show this message
 `;
 
 /** One wording for the source-update advice. Three paths print it; they used to disagree. */
 const SOURCE_UPGRADE_LEAD = "To update the checkout itself (choose a release tag after fetching):";
+
+/**
+ * Sessions are resumed from inside the app (#191): the startup parser refuses
+ * `--continue`, so every hint names the picker and the relaunch is bare.
+ */
+const RESUME_HINT = "start clio-coder in this project and type /resume";
+const RELAUNCH_PREVIEW =
+	"Would relaunch the installed CLI in this project after success; type /resume there to pick up the last session.";
 
 interface UpgradeOptions {
 	dryRun: boolean;
@@ -151,7 +160,7 @@ async function runPostInstallUpgrade(opts: UpgradeOptions, installation: Install
 
 async function runRestart(installation: Installation): Promise<number> {
 	return new Promise((resolve, reject) => {
-		const child = spawn(process.execPath, [installation.entry, "--continue"], { stdio: "inherit" });
+		const child = spawn(process.execPath, [installation.entry], { stdio: "inherit" });
 		// Both share the foreground process group. Let the new CLI own Ctrl+C.
 		const interrupt = () => {};
 		const terminate = () => {
@@ -213,7 +222,7 @@ export async function runUpgradeCommand(
 		return 0;
 	}
 	if (opts.restart && !opts.dryRun && !deps.isInteractive()) {
-		printError("--restart requires an interactive terminal; run clio-coder --continue after upgrading");
+		printError(`--restart requires an interactive terminal; after upgrading, ${RESUME_HINT}`);
 		return 2;
 	}
 
@@ -241,7 +250,7 @@ export async function runUpgradeCommand(
 			return await deps.runRestart(installation);
 		} catch (error) {
 			printError(
-				`Upgrade complete, but relaunch failed: ${error instanceof Error ? error.message : String(error)}. Run clio-coder --continue.`,
+				`Upgrade complete, but relaunch failed: ${error instanceof Error ? error.message : String(error)}. To continue, ${RESUME_HINT}.`,
 			);
 			return 1;
 		}
@@ -252,8 +261,8 @@ export async function runUpgradeCommand(
 		presenter.note(`Package: ${installation.root}`);
 		presenter.commandAdvice("Update with the original package manager and its original global directory:", updateCommand);
 		presenter.commandAdvice(
-			"Then apply migrations and resume:",
-			"clio-coder upgrade --post-install\nclio-coder --continue",
+			"Then apply migrations, start clio-coder, and type /resume to pick up the last session:",
+			"clio-coder upgrade --post-install\nclio-coder",
 		);
 		if (opts.dryRun) presenter.warn("Dry run: no changes made");
 		else presenter.fail("This installation needs a package-manager update; no package was replaced.");
@@ -305,8 +314,7 @@ export async function runUpgradeCommand(
 	if (!opts.postInstall && versionIsCurrent && !hasPendingMigrations) {
 		presenter.warn(`Already on ${before}, with no pending migrations. Nothing to do.`);
 		if (method === "source") sourceAdvice();
-		if (opts.dryRun && opts.restart)
-			presenter.note("Would relaunch the installed CLI with --continue in this project after success.");
+		if (opts.dryRun && opts.restart) presenter.note(RELAUNCH_PREVIEW);
 		if (opts.dryRun) presenter.warn("Dry run: no changes made");
 		return finish();
 	}
@@ -325,7 +333,7 @@ export async function runUpgradeCommand(
 			for (const id of pendingMigrationIds) presenter.substep(id, "–");
 		}
 		presenter.note(`Would refresh ${describeRefresh()}.`);
-		if (opts.restart) presenter.note("Would relaunch the installed CLI with --continue in this project after success.");
+		if (opts.restart) presenter.note(RELAUNCH_PREVIEW);
 		presenter.warn("Dry run: no changes made");
 		presenter.done("Done");
 		return 0;

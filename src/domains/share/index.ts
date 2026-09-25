@@ -14,6 +14,7 @@ export {
 	planShareImport,
 	type ShareArchiveFile,
 	type ShareArchiveManifest,
+	type ShareArchiveManifestFile,
 	type ShareDiagnostic,
 	type ShareEntryType,
 	type ShareExportOptions,

@@ -79,6 +79,12 @@ export interface GlobalCliFlags {
 	panes?: "with" | "without";
 	/** `--autonomy <level>` before any subcommand: one interactive session at that level. */
 	autonomy?: AutonomyLevel;
+	/**
+	 * The boot-option flags (`--api-key`, `--skill`, `--no-context-files`/`-nc`,
+	 * `--no-skills`, `--with-panes`, `--no-panes`) as typed, in order, so a
+	 * command that cannot honor one can refuse it by the name the operator used.
+	 */
+	bootFlags: string[];
 	rest: string[];
 	error?: string;
 }
@@ -94,9 +100,10 @@ const GLOBAL_ONLY_FLAGS: ReadonlyMap<string, string> = new Map([
 	["--api-key", "--api-key <key>"],
 	["--no-context-files", "--no-context-files"],
 	["-nc", "-nc"],
-	["--with-panes", "--with-panes"],
-	["--no-panes", "--no-panes"],
 ]);
+
+/** Startup flags only the interactive session reads; no subcommand accepts them in either position. */
+const INTERACTIVE_ONLY_FLAGS: ReadonlySet<string> = new Set(["--with-panes", "--no-panes"]);
 
 /**
  * Explain the ordering rule when a rejected option is a global one in the
@@ -105,6 +112,9 @@ const GLOBAL_ONLY_FLAGS: ReadonlyMap<string, string> = new Map([
  * user guessing at a rule the help text states only by where it lists the flag.
  */
 export function globalFlagPositionHint(arg: string, command: string): string | null {
+	if (INTERACTIVE_ONLY_FLAGS.has(arg)) {
+		return `${arg} applies only to the interactive session; start it with clio-coder ${arg}`;
+	}
 	const usage = GLOBAL_ONLY_FLAGS.get(arg);
 	if (usage === undefined) return null;
 	return `${arg} is a global option and must come before the subcommand: clio-coder ${usage} ${command} ...`;
@@ -143,6 +153,7 @@ export function extractGlobalFlags(
 	let panes: "with" | "without" | undefined;
 	let autonomy: AutonomyLevel | undefined;
 	const skillPaths: string[] = [];
+	const bootFlags: string[] = [];
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 		if (arg === undefined) continue;
@@ -168,6 +179,7 @@ export function extractGlobalFlags(
 		}
 		if (arg === "--no-context-files" || arg === "-nc") {
 			noContextFiles = true;
+			bootFlags.push(arg);
 			continue;
 		}
 		if (arg === "--demo" || arg === "--no-demo") {
@@ -176,12 +188,14 @@ export function extractGlobalFlags(
 		}
 		if (arg === "--no-skills") {
 			noSkills = true;
+			bootFlags.push(arg);
 			continue;
 		}
 		if (arg === "--with-panes" || arg === "--no-panes") {
 			// Last occurrence wins, so a wrapper script's baked-in choice can be
 			// overridden by appending the opposite flag.
 			panes = arg === "--with-panes" ? "with" : "without";
+			bootFlags.push(arg);
 			continue;
 		}
 		if (arg === "--autonomy") {
@@ -191,6 +205,7 @@ export function extractGlobalFlags(
 					noContextFiles,
 					noSkills,
 					skillPaths,
+					bootFlags,
 					rest,
 					error: "--autonomy must be default|yolo",
 					...(apiKey === undefined ? {} : { apiKey }),
@@ -208,6 +223,7 @@ export function extractGlobalFlags(
 					noContextFiles,
 					noSkills,
 					skillPaths,
+					bootFlags,
 					rest,
 					error: `${arg} requires a value`,
 					...(apiKey === undefined ? {} : { apiKey }),
@@ -216,6 +232,7 @@ export function extractGlobalFlags(
 			}
 			if (arg === "--api-key") apiKey = value;
 			else skillPaths.push(value);
+			bootFlags.push(arg);
 			i += 1;
 			continue;
 		}
@@ -223,6 +240,7 @@ export function extractGlobalFlags(
 			noContextFiles,
 			noSkills,
 			skillPaths,
+			bootFlags,
 			rest,
 			error: unknownGlobalOptionError(arg),
 			...(apiKey === undefined ? {} : { apiKey }),
@@ -233,6 +251,7 @@ export function extractGlobalFlags(
 		noContextFiles,
 		noSkills,
 		skillPaths,
+		bootFlags,
 		rest,
 		...(apiKey === undefined ? {} : { apiKey }),
 		...(panes === undefined ? {} : { panes }),

@@ -281,9 +281,10 @@ installation can otherwise shadow the one you just installed.
 
 **Upgrade.** Finish your turn, leave with `/quit`, and from the same project
 directory run `clio-coder upgrade --restart`. It keeps the install's npm prefix,
-applies migrations through the new binary, and resumes only after success. With
-pnpm, run `pnpm add -g @iowarp/clio-coder@latest`, then
-`clio-coder upgrade --post-install` and `clio-coder --continue`. Source installs
+applies migrations through the new binary, and relaunches only after success;
+type `/resume` there to pick up the last session. With pnpm, run
+`pnpm add -g @iowarp/clio-coder@latest`, then `clio-coder upgrade --post-install`,
+start `clio-coder`, and type `/resume`. Source installs
 check out the new release tag and rerun `pnpm run install:local`. A quiet footer
 hint says when an update is available; it never upgrades on its own, and
 `CLIO_CODER_UPDATE_CHECK=0` turns it off.

@@ -1,7 +1,9 @@
 import { resolve } from "node:path";
 import {
+	createShareArchive,
 	importShareArchive,
 	planShareImport,
+	type ShareArchiveManifestFile,
 	type ShareDiagnostic,
 	type ShareExportOptions,
 	type ShareImportPlan,
@@ -15,9 +17,11 @@ const HELP = `clio-coder share <command>
 Export and import portable Clio project/resource archives.
 
 Commands:
-  clio-coder share export --out <path> [--project|--user|--both] [--context] [--prompts] [--skills] [--agents] [--fleets] [--settings] [--extensions]
+  clio-coder share export --out <path> [--project|--user|--both] [--context] [--prompts] [--skills] [--agents] [--fleets] [--settings] [--extensions] [--all] [--dry-run] [--json]
   clio-coder share import <path> [--dry-run] [--force] [--project|--user] [--json]
   clio-coder share inspect <path> [--json]
+
+A flag the chosen command does not use is refused rather than ignored.
 
 Aliases:
   clio-coder export --out <path> ...
@@ -27,6 +31,8 @@ Aliases:
 interface Parsed {
 	command?: string;
 	positional: string[];
+	/** Every flag token as typed, so a flag the command would ignore can be refused by name. */
+	flags: string[];
 	out?: string;
 	scope?: ShareScope | "both";
 	json: boolean;
@@ -43,7 +49,7 @@ interface Parsed {
 }
 
 function parse(argv: ReadonlyArray<string>): Parsed | null {
-	const out: Parsed = { positional: [], json: false, dryRun: false, force: false, help: false };
+	const out: Parsed = { positional: [], flags: [], json: false, dryRun: false, force: false, help: false };
 	for (let i = 0; i < argv.length; i += 1) {
 		const arg = argv[i];
 		if (!arg) continue;
@@ -51,6 +57,7 @@ function parse(argv: ReadonlyArray<string>): Parsed | null {
 			out.command = arg;
 			continue;
 		}
+		if (arg.startsWith("-")) out.flags.push(arg);
 		const need = (): string | null => {
 			const value = argv[i + 1];
 			if (!value) return null;
@@ -128,6 +135,33 @@ function parse(argv: ReadonlyArray<string>): Parsed | null {
 	return out;
 }
 
+/**
+ * The flags each command reads. The shared parser accepts the union, so before
+ * this list `export --force`, `export --dry-run` and `import --both` parsed
+ * cleanly and then did nothing, and an export dry run wrote the archive.
+ */
+const EXPORT_INCLUDE_FLAGS = [
+	"--context",
+	"--prompts",
+	"--skills",
+	"--agents",
+	"--fleets",
+	"--settings",
+	"--extensions",
+	"--all",
+] as const;
+const COMMAND_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
+	export: new Set(["--out", "--project", "--user", "--both", "--json", "--dry-run", ...EXPORT_INCLUDE_FLAGS]),
+	import: new Set(["--project", "--user", "--json", "--dry-run", "--force", "-f"]),
+	inspect: new Set(["--json"]),
+};
+
+function ignoredFlag(parsed: Parsed): string | null {
+	const allowed = parsed.command === undefined ? undefined : COMMAND_FLAGS[parsed.command];
+	if (allowed === undefined) return null;
+	return parsed.flags.find((flag) => !allowed.has(flag)) ?? null;
+}
+
 function hasBlockingDiagnostics(diagnostics: ReadonlyArray<ShareDiagnostic>): boolean {
 	return diagnostics.some((diag) => diag.type === "error" || diag.type === "conflict");
 }
@@ -188,11 +222,24 @@ function printPlan(plan: ShareImportPlan, dryRun: boolean): void {
 	if (plan.actions.length > 12) process.stdout.write(`  ... ${plan.actions.length - 12} more action(s)\n`);
 }
 
+function printExportPlan(files: ReadonlyArray<ShareArchiveManifestFile>, outPath: string): void {
+	process.stdout.write(`export dry-run: would write ${files.length} item(s) to ${outPath}\n`);
+	for (const file of files.slice(0, 12)) {
+		process.stdout.write(`  ${file.type.padEnd(15)} ${file.scope.padEnd(7)} ${file.archivePath}\n`);
+	}
+	if (files.length > 12) process.stdout.write(`  ... ${files.length - 12} more item(s)\n`);
+}
+
 export function runShareCommand(argv: ReadonlyArray<string>): number {
 	const parsed = parse(argv);
 	if (!parsed || parsed.help || !parsed.command) {
 		process.stdout.write(HELP);
 		return parsed ? 0 : 2;
+	}
+	const ignored = ignoredFlag(parsed);
+	if (ignored !== null) {
+		printError(`${ignored} does not apply to clio-coder share ${parsed.command}`);
+		return 2;
 	}
 	switch (parsed.command) {
 		case "export": {
@@ -200,9 +247,17 @@ export function runShareCommand(argv: ReadonlyArray<string>): number {
 				process.stderr.write("usage: clio-coder share export --out <path>\n");
 				return 2;
 			}
-			const archive = writeShareArchive(resolve(parsed.out), exportOptions(parsed));
+			const outPath = resolve(parsed.out);
+			if (parsed.dryRun) {
+				const archive = createShareArchive(exportOptions(parsed));
+				if (parsed.json) {
+					process.stdout.write(`${JSON.stringify({ dryRun: true, out: outPath, manifest: archive.manifest }, null, 2)}\n`);
+				} else printExportPlan(archive.manifest.files, outPath);
+				return 0;
+			}
+			const archive = writeShareArchive(outPath, exportOptions(parsed));
 			if (parsed.json) process.stdout.write(`${JSON.stringify({ archive }, null, 2)}\n`);
-			else printOk(`exported ${archive.files.length} item(s) to ${resolve(parsed.out)}`);
+			else printOk(`exported ${archive.files.length} item(s) to ${outPath}`);
 			return 0;
 		}
 		case "import": {
