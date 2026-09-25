@@ -14,8 +14,10 @@ import {
 	Text,
 	TuiAltScreen,
 	VStack,
+	visibleWidth,
 } from "../../src/engine/tui.js";
 import { ClioEditor } from "../../src/interactive/clio-editor.js";
+import { dockBodyRows } from "../../src/interactive/dock.js";
 import { dispatchInteractiveAction } from "../../src/interactive/interactive-application.js";
 import { createInteractiveInputRuntime } from "../../src/interactive/interactive-input-runtime.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
@@ -349,6 +351,12 @@ it("reports genuine effective collisions, disables direct and leader routes, and
 
 const plain = (component: Component | null, width = 100) =>
 	component?.render(width).map(stripTerminalSequences).join("\n") ?? "";
+/**
+ * What the composer draws. A modal surface docks in the composer's slot and its
+ * engine overlay paints no rows, so the focused component renders nothing and
+ * the surface is read where the operator sees it.
+ */
+const composerText = (editor: Component, width = 100) => plain(editor, width);
 it("edits search at Home/End and changes the visible match index in both directions", () => {
 	const f = fixture();
 	f.editor.setText("composer survives");
@@ -434,11 +442,11 @@ it("keeps interview word editing on its answer and Escape on the local question"
 	f.terminal.input("\x1b[200~alpha beta\x1b[201~");
 	f.terminal.input("\x1bb");
 	f.terminal.input("X");
-	assert.match(plain(f.tui.getFocusedComponent()), /alpha Xbeta/);
-	assert.doesNotMatch(plain(f.tui.getFocusedComponent()), /Alt\+Left/);
+	assert.match(composerText(f.editor), /alpha Xbeta/);
+	assert.doesNotMatch(composerText(f.editor), /Alt\+Left/);
 	f.terminal.input("\x1b");
 	assert.equal(f.state(), "ask-user");
-	assert.doesNotMatch(plain(f.tui.getFocusedComponent()), /alpha Xbeta/);
+	assert.doesNotMatch(composerText(f.editor), /alpha Xbeta/);
 	interview.cancel();
 	await result;
 });
@@ -471,11 +479,11 @@ it("honors resume selection overrides and refreshes help while it remains open",
 	f.terminal.input("\x19");
 	assert.equal(resumed, "second");
 	f.mount("help", () => openHelpOverlay(f.tui, f.keys, f.close, "Library"));
-	assert.match(plain(f.tui.getFocusedComponent(), 120), /Alt\+L/);
+	assert.match(composerText(f.editor, 120), /Alt\+L/);
 	f.keys.reload({ "clio-coder.library.toggle": "alt+p" });
 	assert.equal(f.state(), "help");
-	assert.match(plain(f.tui.getFocusedComponent(), 120), /Alt\+P/);
-	assert.doesNotMatch(plain(f.tui.getFocusedComponent(), 120), /Alt\+L/);
+	assert.match(composerText(f.editor, 120), /Alt\+P/);
+	assert.doesNotMatch(composerText(f.editor, 120), /Alt\+L/);
 });
 it("blocks repeated app actions even when a custom key collides with draft deletion", () => {
 	const f = fixture({ "clio-coder.library.toggle": "ctrl+d" });
@@ -485,7 +493,7 @@ it("blocks repeated app actions even when a custom key collides with draft delet
 	assert.equal(f.editor.getText(), "draft");
 });
 
-it("keeps the menu above the draft at normal and small sizes, with live human-facing hints", () => {
+it("docks the menu in the composer's slot at normal and small sizes, keeps the draft, and shows live hints", () => {
 	for (const [columns, rows] of [
 		[120, 42],
 		[80, 24],
@@ -498,12 +506,17 @@ it("keeps the menu above the draft at normal and small sizes, with live human-fa
 		f.keys.reload({ "clio-coder.leader": "ctrl+x" });
 		f.terminal.input("\x18");
 		f.tui.renderNow();
-		const menu = f.overlays.at(-1);
-		assert.ok(menu);
-		const bounds = menu.handle.getBounds();
-		assert.ok(bounds);
-		assert.ok(bounds.row + bounds.height < rows - f.editor.render(columns).length);
-		const text = plain(menu.component, columns);
+		// The dock: a title rail, the body in a two-column gutter, and a hint rail,
+		// every row the terminal's width and the whole within the dock budget.
+		const dock = f.editor.render(columns);
+		assert.ok(
+			dock.length >= 3 && dock.length <= dockBodyRows(f.tui) + 2,
+			`${dock.length} dock rows at ${columns}x${rows}`,
+		);
+		for (const line of dock) assert.equal(visibleWidth(line), columns, stripTerminalSequences(line));
+		assert.match(stripTerminalSequences(dock[0] ?? ""), /━/u);
+		for (const line of dock.slice(1, -1)) assert.match(stripTerminalSequences(line), /^ {2}/u);
+		const text = composerText(f.editor, columns);
 		assert.match(text, /Library ·/);
 		assert.doesNotMatch(text, /skills-hub|cancel owner/);
 		assert.match(text, /\[Ctrl\+C\] cancel/);
@@ -511,6 +524,8 @@ it("keeps the menu above the draft at normal and small sizes, with live human-fa
 		assert.equal(f.editor.getText(), "draft stays visible");
 		f.terminal.input("\x03");
 		assert.equal(f.state(), "closed");
+		f.tui.renderNow();
+		assert.match(composerText(f.editor, columns), /draft stays visible/);
 	}
 });
 it("lets held Ctrl+D edit a draft but never quit on repeat, and protects queued work", async () => {
