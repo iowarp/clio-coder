@@ -179,6 +179,8 @@ export interface CompactInput {
 	keepRecentTokens?: number;
 	/** Carry this user message verbatim if removed; defaults to the latest operator turn for manual compaction. */
 	preserveUserTurnId?: string;
+	/** A new operator request is pending admission and is not yet in `entries`. */
+	pendingOperatorTurn?: boolean;
 	/** Accounting observer; called once per invoked stream, including failures. */
 	onCall?: (call: CompactionCallObservation) => void;
 	/**
@@ -897,19 +899,17 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	// A generated split summary is not a reliable copy of the active request.
 	// Keep it in the canonical checkpoint so live replay and resume agree.
 	let userContext: PreservedUserContext | undefined =
-		priorCheckpoint?.kind === "compactionSummary" ? priorCheckpoint.userContext : undefined;
+		!input.pendingOperatorTurn && priorCheckpoint?.kind === "compactionSummary" ? priorCheckpoint.userContext : undefined;
 	// Manual compaction has no live active-turn hint after a turn settles.
 	// Preserve the latest operator request if the split removes it as well.
 	let activeUserIndex = -1;
 	let latestUserIndex = -1;
-	for (let index = entries.length - 1; index >= 0; index--) {
+	for (let index = entries.length - 1; !input.pendingOperatorTurn && index >= 0; index--) {
 		const entry = entries[index];
-		if (entry?.kind === "message" && entry.role === "user" && latestUserIndex === -1) latestUserIndex = index;
-		if (
-			entry?.kind === "message" &&
-			entry.role === "user" &&
-			(input.preserveUserTurnId === undefined || entry.turnId === input.preserveUserTurnId)
-		) {
+		if (entry?.kind !== "message" || entry.role !== "user") continue;
+		if ((entry.payload as { synthetic?: unknown } | null)?.synthetic === true) continue;
+		if (latestUserIndex === -1) latestUserIndex = index;
+		if (input.preserveUserTurnId === undefined || entry.turnId === input.preserveUserTurnId) {
 			activeUserIndex = index;
 			break;
 		}
