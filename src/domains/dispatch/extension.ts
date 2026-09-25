@@ -7406,7 +7406,12 @@ export function createDispatchBundle(
 				lineage: publishedLineage(run.lineage, run.hostRun),
 				startedAt: run.startedAt,
 				elapsedMs,
-				tokens: { input: meter.inputTokens, output: meter.outputTokens, total: totalTokens },
+				tokens: {
+					input: meter.inputTokens,
+					output: meter.outputTokens,
+					total: totalTokens,
+					cacheRead: meter.cacheReadTokens,
+				},
 				costUsd,
 				costProvenance,
 				node: run.node !== null ? { ...run.node } : null,

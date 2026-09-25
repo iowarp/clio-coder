@@ -257,7 +257,9 @@ function readRunningSnapshot(snapshot: DispatchSnapshot): Map<
 			if (!runId) continue;
 			const budget = cloneRunToolBudgetEnvelope(value.budget);
 			running.set(runId, {
-				inputTokens: finiteOrZero(value.tokens.input),
+				// Input counts cache reads here as it does on the settled receipt
+				// (`applyTerminalTokens`) and in the worker card's processed total.
+				inputTokens: finiteOrZero(value.tokens.input) + finiteOrZero(value.tokens.cacheRead),
 				outputTokens: finiteOrZero(value.tokens.output),
 				tokenCount: finiteOrZero(value.tokens.total),
 				costUsd: finiteOrZero(value.costUsd),
