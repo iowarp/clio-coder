@@ -6,6 +6,7 @@ import {
 	decisionFactsForPermission,
 } from "../domains/safety/decision-presentation.js";
 import { type Component, type OverlayOptions, type TUI, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { regularFrameGeometry } from "./layout.js";
 import {
 	MUTATION_PREVIEW_VISIBLE_ROWS,
 	type MutationFacts,
@@ -90,14 +91,17 @@ export function permissionOverlayPlacement(
 		anchor: "bottom-center",
 		margin,
 		visible: (termWidth, termHeight) => {
-			const dockHeight = editor.render(termWidth).length + footer.render(termWidth).length;
 			if (tui.mode === "fullscreen") {
-				margin.bottom = dockHeight;
+				margin.bottom = editor.render(termWidth).length + footer.render(termWidth).length;
 				return true;
 			}
 
-			const baseHeight = tui.render(termWidth).length;
-			const composerTop = Math.max(0, baseHeight - dockHeight);
+			const geometry = regularFrameGeometry(tui, termWidth);
+			const baseHeight = geometry?.height ?? tui.render(termWidth).length;
+			const dockHeight = geometry
+				? baseHeight - geometry.composerTop
+				: editor.render(termWidth).length + footer.render(termWidth).length;
+			const composerTop = geometry?.composerTop ?? Math.max(0, baseHeight - dockHeight);
 			const viewportStart = Math.max(0, baseHeight - termHeight);
 			const composerViewportRow = composerTop - viewportStart;
 			margin.bottom =
