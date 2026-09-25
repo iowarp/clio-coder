@@ -84,7 +84,7 @@ export function clioError(text: string): string {
 /**
  * The selection rule for a self-drawn list row: the focused row carries the
  * cursor in accent and its label in accent bold, and nothing else changes
- * colour. Decisions, tasks and the tree marked the row but left the label
+ * color. Decisions, tasks and the tree marked the row but left the label
  * plain while help, model and view highlighted it, so the same key press read
  * as three different things.
  */
