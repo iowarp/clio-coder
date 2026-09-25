@@ -1628,7 +1628,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const forceNow = process.env.CLIO_CODER_FORCE_COMPACT === "1";
 			try {
 				setTurnPreparation("compacting");
-				await context.runAutoCompact(agentRuntime, forceNow, undefined, undefined, submittedText, pendingSkillPolicy);
+				await context.runAutoCompact(
+					agentRuntime,
+					forceNow,
+					undefined,
+					undefined,
+					submittedText,
+					pendingSkillPolicy,
+					undefined,
+					undefined,
+					options.requestContinuation !== true,
+				);
 			} catch (err) {
 				emitNotice(`[Clio Coder] auto-compaction failed: ${err instanceof Error ? err.message : String(err)}`);
 				if (err instanceof Error && err.name === "AbortError") return;
@@ -1661,7 +1671,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				setTurnPreparation("compacting");
 				let failure: string | undefined;
 				await context
-					.runAutoCompact(agentRuntime, true, undefined, "overflow", submittedText, pendingSkillPolicy)
+					.runAutoCompact(
+						agentRuntime,
+						true,
+						undefined,
+						"overflow",
+						submittedText,
+						pendingSkillPolicy,
+						undefined,
+						undefined,
+						options.requestContinuation !== true,
+					)
 					.catch((error: unknown) => {
 						failure = error instanceof Error ? error.message : String(error);
 					})

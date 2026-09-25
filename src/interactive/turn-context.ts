@@ -139,6 +139,7 @@ export interface TurnContextDeps {
 					CompactInput,
 					| "keepRecentTokens"
 					| "preserveUserTurnId"
+					| "pendingOperatorTurn"
 					| "skillContextState"
 					| "signal"
 					| "beforeSummaryCall"
@@ -284,6 +285,7 @@ export interface TurnContext {
 		pendingSkillPolicy?: PendingSkillToolPolicy,
 		signal?: AbortSignal,
 		handoff?: ContinuityReductionHooks,
+		pendingUserIsOperator?: boolean,
 	): Promise<boolean>;
 	cancelCompaction(): void;
 	postToolContinuationGuard(
@@ -1172,6 +1174,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		pendingSkillPolicy?: PendingSkillToolPolicy,
 		signal?: AbortSignal,
 		handoff?: ContinuityReductionHooks,
+		pendingUserIsOperator = true,
 	): Promise<boolean> => {
 		if (!deps.readSessionEntries) return false;
 		const originSession = deps.session?.current()?.id;
@@ -1488,12 +1491,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					CompactInput,
 					| "keepRecentTokens"
 					| "preserveUserTurnId"
+					| "pendingOperatorTurn"
 					| "skillContextState"
 					| "signal"
 					| "beforeSummaryCall"
 					| "checkpointForSummary"
 			  >
 			| undefined = skillContextState !== undefined ? { skillContextState } : undefined;
+		if (pendingUserText !== undefined && state.activeUserTurnId === null && pendingUserIsOperator)
+			budget = { ...budget, pendingOperatorTurn: true };
 		if (useRequestBudget) {
 			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
 			const output = resolveTurnOutputReserve(agentRuntime, estimate.tokens);

@@ -872,6 +872,7 @@ async function runCompactionFlow(
 		CompactInput,
 		| "keepRecentTokens"
 		| "preserveUserTurnId"
+		| "pendingOperatorTurn"
 		| "skillContextState"
 		| "signal"
 		| "beforeSummaryCall"
@@ -1094,6 +1095,7 @@ export function createProductionAutoCompact(
 		CompactInput,
 		| "keepRecentTokens"
 		| "preserveUserTurnId"
+		| "pendingOperatorTurn"
 		| "skillContextState"
 		| "signal"
 		| "beforeSummaryCall"

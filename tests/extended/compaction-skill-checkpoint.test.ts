@@ -201,7 +201,9 @@ function overflowFixture(activeTask = false) {
 	state.runtime = runtime;
 	const budgets: Array<{
 		trigger: string | undefined;
-		budget: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState"> | undefined;
+		budget:
+			| Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "pendingOperatorTurn" | "skillContextState">
+			| undefined;
 	}> = [];
 	const results: CompactResult[] = [];
 	let compiledText = "";
@@ -353,7 +355,10 @@ describe("mandatory request-fit compaction", () => {
 			const { entries } = overflowFixture();
 			const entryCount = entries.length;
 			const order: string[] = [];
-			let budget: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState"> | undefined;
+			const budgets: Array<
+				| Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "pendingOperatorTurn" | "skillContextState">
+				| undefined
+			> = [];
 			const loop = createChatLoop({
 				getSettings: () => settings,
 				providers,
@@ -381,7 +386,7 @@ describe("mandatory request-fit compaction", () => {
 				} as unknown as PromptsContract,
 				autoCompact: async (_instructions, trigger, requested) => {
 					order.push(trigger ?? "unspecified");
-					budget = requested;
+					budgets.push(requested);
 					return null;
 				},
 			});
@@ -389,9 +394,13 @@ describe("mandatory request-fit compaction", () => {
 				loop.resetForSession("selected", buildModelReplayAgentMessagesFromTurns(entries));
 				await loop.submit("Create the current architecture map.");
 				deepStrictEqual(order, ["compile", "overflow"]);
-				ok((budget?.keepRecentTokens ?? 20000) < 20000);
-				deepStrictEqual(budget?.skillContextState, selection);
+				ok((budgets[0]?.keepRecentTokens ?? 20000) < 20000);
+				strictEqual(budgets[0]?.pendingOperatorTurn, true);
+				deepStrictEqual(budgets[0]?.skillContextState, selection);
 				strictEqual(entries.length, entryCount, "failed preflight must not append the pending operator turn");
+				order.length = 0;
+				await loop.submit("Continue the current architecture map.", { requestContinuation: true });
+				strictEqual(budgets[1]?.pendingOperatorTurn, undefined, "middleware continuation is not a pending operator turn");
 			} finally {
 				loop.dispose();
 			}
@@ -412,6 +421,8 @@ describe("mandatory request-fit compaction", () => {
 		strictEqual(f.results[0]?.messagesSummarized, 0);
 		strictEqual(await f.context.runAutoCompact(f.runtime, true, undefined, "overflow", pending), true);
 		ok((f.budgets[1]?.budget?.keepRecentTokens ?? 20000) < 20000);
+		strictEqual(f.budgets[1]?.budget?.pendingOperatorTurn, true);
+		strictEqual(f.results[1]?.userContext, undefined, "the completed request is not replayed as active before admission");
 		strictEqual(f.results[1]?.skillContext?.skills[0]?.content[0]?.text, f.body);
 		ok(f.context.liveContextEstimate(f.runtime, pending).tokens + 8192 <= 32768);
 		ok(JSON.stringify(f.runtime.agent.state.messages).includes(f.body));

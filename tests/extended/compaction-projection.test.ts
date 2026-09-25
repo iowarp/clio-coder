@@ -216,6 +216,52 @@ describe("compaction working-set provider boundary", () => {
 		strictEqual(result.userContext, undefined);
 	});
 
+	it("does not treat middleware continuation rows as operator requests", async () => {
+		const base = chain([
+			message("operator", "user", { text: "Keep the exact task." }),
+			message("older", "assistant", { text: "Earlier evidence ".repeat(1000) }),
+			message("synthetic", "user", { text: "Continue the run.", synthetic: true }),
+			message("tail", "assistant", { text: "Recent work." }),
+		]);
+		const synthetic = base[2];
+		const tail = base[3];
+		ok(synthetic && tail);
+		const keepRecentTokens = estimateTokens(synthetic) + estimateTokens(tail);
+		const first = await compact({ entries: base, model: model(), keepRecentTokens });
+		strictEqual(first.userContext?.text, "Keep the exact task.");
+		const prior = {
+			kind: "compactionSummary" as const,
+			turnId: "prior",
+			parentTurnId: "tail",
+			timestamp,
+			summary: first.summary,
+			firstKeptTurnId: first.firstKeptTurnId ?? "",
+			tokensBefore: first.tokensBefore,
+			userContext: first.userContext,
+		};
+		const second = await compact({
+			entries: [...base, prior, message("more", "assistant", { text: "Later evidence ".repeat(1000) })],
+			model: model(),
+			keepRecentTokens: 100,
+		});
+		strictEqual(second.userContext?.text, "Keep the exact task.");
+	});
+
+	it("retires a completed request when the next operator turn is pending outside the ledger", async () => {
+		const entries = chain([
+			message("old-user", "user", { text: "Finish the old task." }),
+			message("old-work", "assistant", { text: "Evidence ".repeat(1000) }),
+			message("old-done", "assistant", { text: "Old task complete." }),
+		]);
+		const result = await compact({
+			entries,
+			model: model(),
+			keepRecentTokens: 100,
+			pendingOperatorTurn: true,
+		});
+		strictEqual(result.userContext, undefined);
+	});
+
 	for (const cancelBeforeCall of [true, false]) {
 		it(`rejects cancellation ${cancelBeforeCall ? "before invocation" : "before accepting a late summary"}`, async () => {
 			const controller = new AbortController();
