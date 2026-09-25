@@ -1,17 +1,23 @@
 import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import type { ClioSettings } from "../../src/core/config.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { projectWorkingSet } from "../../src/domains/context/working-set/project.js";
 import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
+import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
 import { type CompactionCallObservation, compact } from "../../src/domains/session/compaction/compact.js";
 import { calculateContextTokens, estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
+import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { HANDOFF_SEED_CUSTOM_TYPE } from "../../src/domains/session/handoff.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { resolvedRequestContext } from "../../src/engine/context.js";
+import type { AgentMessage } from "../../src/engine/types.js";
 import { retireActiveUserContextForNextOperator } from "../../src/interactive/chat-renderer.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
+import { createTurnPersistence } from "../../src/interactive/turn-persistence.js";
+import type { ChatTurnState } from "../../src/interactive/turn-state.js";
 import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 
 const timestamp = "2026-09-06T00:00:00.000Z";
@@ -248,6 +254,40 @@ describe("compaction working-set provider boundary", () => {
 		);
 		doesNotMatch(
 			JSON.stringify(buildModelReplayAgentMessagesFromTurns([...entries, next])),
+			/Active user instructions \(verbatim\):\\nFix the seed/,
+		);
+		const ledger = [...entries];
+		const state = {
+			lastTurnId: "tail",
+			runtime: { agent: { state: { messages: [...live], systemPrompt: "", tools: [] } } },
+		} as unknown as ChatTurnState;
+		const session = {
+			current: () => ({ id: "test-session" }),
+			append: ({ payload, parentId }: { payload: unknown; parentId: string }) => {
+				ledger.push({ ...next, parentTurnId: parentId, payload });
+				return { id: "next-user" };
+			},
+		} as unknown as SessionContract;
+		const persistence = createTurnPersistence({
+			state,
+			session,
+			readSessionEntries: () => ledger,
+			getSettings: () => ({}) as ClioSettings,
+			middlewareToolChoice: { reset: () => {} } as unknown as MiddlewareToolChoiceControl,
+			consumePersistedEcho: (text) => text === "Continue.",
+			removeQueuedMirrorEntry: () => {},
+			promptCachePayloadForAssistant: () => ({}),
+			promptSideTokens: () => 0,
+		});
+		persistence.appendQueuedUserTurn({ role: "user", content: "Continue.", timestamp: Date.now() } as AgentMessage);
+		match(JSON.stringify(state.runtime?.agent.state.messages), /Active user instructions \(verbatim\):\\nFix the seed/);
+		persistence.appendQueuedUserTurn({
+			role: "user",
+			content: "Review the screenshot.",
+			timestamp: Date.now(),
+		} as AgentMessage);
+		doesNotMatch(
+			JSON.stringify(state.runtime?.agent.state.messages),
 			/Active user instructions \(verbatim\):\\nFix the seed/,
 		);
 	});

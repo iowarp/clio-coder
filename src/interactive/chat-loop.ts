@@ -1116,6 +1116,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const persistence = createTurnPersistence({
 		state,
 		session: deps.session,
+		readSessionEntries: deps.readSessionEntries,
 		getSettings: deps.getSettings,
 		middlewareToolChoice,
 		consumePersistedEcho: (text) => queues.consumePersistedEcho(text),
