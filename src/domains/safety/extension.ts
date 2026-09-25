@@ -351,14 +351,6 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			};
 			if (posture !== undefined) auditInput.posture = posture;
 			recordToolCallAudit(auditInput);
-			context.bus.emit(BusChannels.SafetyAllowed, {
-				tool: call.tool,
-				actionClass: classification.actionClass,
-				posture,
-				ruleId: policy.ruleId,
-				policySource: policy.policySource,
-				reasonCode: policy.reasonCode,
-			});
 			return { kind: "allow", classification, policy };
 		},
 		observeLoop(key, now) {
