@@ -38,6 +38,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - A later session that names a different `cwd` is refused with `-32602` naming the bound workspace.
 - Stdio MCP servers a client passes in `session/new`, `session/load` or `session/resume` run for that session only and are never written to settings. Every call goes through the gateway's safety policy and autonomy like any other MCP capability, and closing the session stops the servers.
 - **Breaking:** As a client of ACP peers, Clio selects a named model only through the peer's `model` config option and `session/set_config_option`. A peer that offers models only through the unstable `models` field can no longer take a named model, and that delegation fails before the prompt.
+- When an ACP peer offers a `thought_level` select config option, Clio sets a requested thinking level through `session/set_config_option` and refuses the delegation if the peer reports a different level. Peers without that option still use `model[effort]` variants.
 - Clio never answers a peer's permission request with `allow_always`, which would turn one approval into a standing grant inside the peer. When a peer offers no `allow_once` for a call Clio approves, Clio rejects the call and the receipt's delegation tool log says why.
 - Clio advertises no client capabilities to ACP peers, because she serves no file-system or terminal methods to them.
 
