@@ -533,7 +533,8 @@ export function buildWelcomeDashboardLines(
 	const hints = showHints ? welcomeHints(theme, hintPage, getKeyLabel) : [];
 	const detailWidth = sideBySide ? contentWidth - artWidth - 3 : contentWidth;
 	const field = (label: string, value: string) => `${theme.fg("dim", `${label}  `)}${value}`;
-	const tagline = theme.fg("muted", WELCOME_TAGLINE);
+	// The banner sets its tagline in cyan under the name; the launchpad does too.
+	const tagline = theme.fg("title", WELCOME_TAGLINE);
 	const taglineLines = sideBySide ? wrapTextWithAnsi(tagline, Math.max(1, detailWidth)) : [tagline];
 	const details = [
 		sideBySide ? (taglineLines[0] ?? "") : theme.style("title", "CLIO CODER", { bold: true }),
