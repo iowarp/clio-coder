@@ -20,6 +20,7 @@ import {
 	type TUI,
 	visibleWidth,
 } from "../../src/engine/tui.js";
+import { dockTop } from "../../src/interactive/dock.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import { type OverlayKeyDeps, routeOverlayKey } from "../../src/interactive/overlay-key-routing.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
@@ -207,8 +208,8 @@ test("usage replaces cost in parsing, dispatch, autocomplete, and Escape routing
 });
 
 test("usage overlay shows account details and live session totals, scrolls, resizes, and releases ownership", () => {
-	let frame: Component | undefined;
 	let options: OverlayOptions | undefined;
+	let rows = 100;
 	let listener: ((snapshot: ObservabilitySnapshot) => void) | undefined;
 	let unsubscribed = 0;
 	let hidden = 0;
@@ -230,25 +231,45 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		},
 	} as unknown as ObservabilityContract;
 	const tui = {
-		terminal: { setTitle: (title: string) => titles.push(title) },
+		terminal: {
+			setTitle: (title: string) => titles.push(title),
+			get rows() {
+				return rows;
+			},
+		},
 		requestRender: () => renders++,
-		showOverlay: (component: Component, supplied: OverlayOptions) => {
-			frame = component;
+		showOverlay: (_proxy: Component, supplied: OverlayOptions) => {
 			options = supplied;
 			return { hide: () => hidden++ };
 		},
 	} as unknown as TUI;
 	const handle = openUsageOverlay(tui, observability, { getQuotaSnapshots: () => quota });
+	// The engine overlay is a zero-row focus proxy; the composer draws the
+	// docked frame, so the test renders the dock's top entry at the terminal height.
+	const frame = dockTop(tui)?.frame as unknown as Component | undefined;
 	const render = (width = 100, height = 100) => {
+		rows = height;
 		options?.visible?.(width, height);
 		const lines = frame?.render(width) ?? [];
 		ok(lines.length <= height);
 		ok(lines.every((line) => visibleWidth(line) <= width));
 		return plain(lines);
 	};
+	// The dock holds 16 body rows, so the accounts list is read page by page.
+	const scrolled = (): string => {
+		const pages = [render()];
+		for (let page = 0; page < 20; page++) {
+			frame?.handleInput?.("\x1b[6~");
+			const next = render();
+			if (next === pages.at(-1)) break;
+			pages.push(next);
+		}
+		frame?.handleInput?.("\x1b[H");
+		return pages.join("\n");
+	};
 	try {
 		match(titles.at(-1) ?? "", /modal:usage/);
-		const text = render();
+		const text = scrolled();
 		match(text, /Claude Code \(Max\)/);
 		match(text, /\$30.41\/\$50.00/);
 		match(text, /76% used · 24% remaining/);
@@ -260,18 +281,20 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		quota = accounts().map((entry) =>
 			entry.providerId === "codex" ? { ...entry, stale: true, message: "refresh failed", retryAfterSeconds: 30 } : entry,
 		);
-		match(render(), /STALE · last good reading/);
-		match(render(), /Retry after 30s/);
+		match(scrolled(), /STALE · last good reading/);
+		match(scrolled(), /Retry after 30s/);
 		const before = renders;
 		listener?.(snapshot);
 		ok(renders > before);
 		frame?.handleInput?.("2");
 		match(render(), /Session tokens & cost/);
 		render(40, 12);
+		// Twelve rows leave the dock five body rows, one of them content, so the
+		// End and Home checks read a 16-row terminal.
 		frame?.handleInput?.("\x1b[F");
-		match(render(40, 12), /no token usage recorded/);
+		match(render(40, 16), /no token usage recorded/);
 		frame?.handleInput?.("\x1b[H");
-		match(render(40, 12), /Session tokens/);
+		match(render(40, 16), /Session tokens/);
 		frame?.handleInput?.("1");
 		match(render(), /Account-wide limits/);
 		frame?.handleInput?.("3");
