@@ -31,6 +31,11 @@ import { withReceiptIntegrity } from "./receipt-integrity.js";
 import { removeRunEventJournals } from "./run-event-journal.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunStatus } from "./types.js";
 
+/**
+ * One fleet root's durable record. Records written by earlier builds may also
+ * carry `dynamicPlans`, a list of validated delegation-plan hashes nothing
+ * read; it is no longer written and readers ignore it.
+ */
 export interface FleetRunRecord {
 	version: 1;
 	id: string;
@@ -45,7 +50,6 @@ export interface FleetRunRecord {
 	endedAt: string | null;
 	resumedFrom: string | null;
 	steps: Array<{ stepId: string; result: ExecutionStepResult }>;
-	dynamicPlans?: Array<{ stepId: string; hash: string }>;
 }
 
 export interface LedgerOptions {

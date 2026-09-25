@@ -11,28 +11,16 @@ function duration(start: string | undefined, end: string | null | undefined): nu
 	return Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, rawDurationMs(startMs, endMs)) : null;
 }
 
-/** Derive non-overlapping routing-system phases plus execution and total wall time. */
-export function deriveRunPhaseDurations(
-	marks: RunPhaseMarks | undefined,
-	executionStartedAt: string,
-	endedAt: string | null,
-): RunPhaseDurations {
-	const end = marks?.endedAt ?? endedAt;
+/** Derive the queue wait and the user-observed end-to-end time from a run's phase marks. */
+function deriveRunPhaseDurations(marks: RunPhaseMarks | undefined, endedAt: string | null): RunPhaseDurations {
 	return {
-		requestToDecisionMs: duration(marks?.requestedAt, marks?.decisionCompletedAt),
-		decisionMs: duration(marks?.decisionStartedAt, marks?.decisionCompletedAt),
-		admissionWaitMs: duration(marks?.decisionCompletedAt, marks?.queuedAt),
 		queueWaitMs: duration(marks?.queuedAt, marks?.admittedAt),
-		spawnSetupMs: duration(marks?.admittedAt, marks?.workerSpawnedAt),
-		timeToFirstModelTokenMs: duration(marks?.requestedAt, marks?.firstModelTokenAt),
-		timeToFirstToolMs: duration(marks?.requestedAt, marks?.firstToolAt),
-		executionMs: duration(executionStartedAt, end),
-		totalEndToEndMs: duration(marks?.requestedAt, end),
+		totalEndToEndMs: duration(marks?.requestedAt, marks?.endedAt ?? endedAt),
 	};
 }
 
 export function deriveEnvelopePhaseDurations(envelope: RunEnvelope, endedAt = envelope.endedAt): RunPhaseDurations {
-	return deriveRunPhaseDurations(envelope.timing, envelope.startedAt, endedAt);
+	return deriveRunPhaseDurations(envelope.timing, endedAt);
 }
 
 /** Timing is observability metadata: a failed timing write must never fail run finalization. */

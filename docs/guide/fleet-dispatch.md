@@ -447,9 +447,10 @@ still no count, score, or consensus line. The same text is on the result's
 `details.agentLedgerBoard`. A board nobody posted to is omitted, so a
 single-run dispatch and an unused board read exactly as they did before.
 
-What survives into a receipt is that run's `ledgerContribution`, which is the
-ledger id, its posted and refused counts, and a sha256 over its own attributed entries, sealed orchestrator-side
-and covered by receipt integrity.
+Receipts do not record ledger contributions. Builds before 0.5.6 sealed a
+`ledgerContribution` (ledger id, posted and refused counts, and a sha256 over
+the run's attributed entries) that nothing read; receipts that carry it still
+verify.
 
 ### Detached fan-out, backgrounding, and collect
 
@@ -949,8 +950,10 @@ include:
   label route quality.
 - `validationGrounding`: claimed versus grounded validations checked against canonical executed commands.
 - `capabilityMismatch`: capability class versus task shape verdict (`refuse` vs `flag`).
-- worker attestation identity: settings/WorkerSpec fingerprints, runtime,
-  target, endpoint, model, tool surface, node, and bounded resource facts.
+- `node`: the fleet node the run was placed on. The worker's attestation is
+  verified at spawn and a drifting peer never runs, but the attested identity
+  is not copied into the receipt. Builds before 0.5.6 sealed that projection
+  as `attestation`; receipts that carry it still verify.
 
 Process exit zero is not a delegated deliverable. Native and ACP runs succeed
 only when the drained event stream yields a nonempty receipt output with

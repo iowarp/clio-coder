@@ -183,7 +183,6 @@ describe("fleet lifecycle boundary", () => {
 				{ stepId: "verify", result: result("verify", false) },
 				{ stepId: "publish", result: result("publish") },
 			],
-			dynamicPlans: [],
 		};
 		const resumed = planFleetResume(record, plan, { name: "release" }, { channel: "stable" });
 		strictEqual(resumed.ok, true);

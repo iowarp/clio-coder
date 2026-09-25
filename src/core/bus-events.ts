@@ -661,7 +661,6 @@ export interface DispatchTerminalStats {
 	cacheWriteTokenCount: number;
 	cacheWrite1hTokenCount?: number;
 	reasoningTokenCount: number;
-	staticShellHash: string | null;
 	sessionShellHash: string | null;
 	dynamicHash: string | null;
 	costUsd: number;

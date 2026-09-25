@@ -288,7 +288,6 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		endedAt: null,
 		resumedFrom: input.resume?.record.id ?? null,
 		steps: [...replayed].map(([stepId, result]) => ({ stepId, result })),
-		dynamicPlans: [],
 	};
 	await writeFleetRun(fleetRunRecord);
 	// Every step of this run dispatches under `fleetRootId` as its lineage root,
@@ -531,7 +530,6 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 						: step.gate !== undefined
 							? { resultContractOverride: { kind: "artifact-report" as const } }
 							: {}),
-					...(step.gate !== undefined ? { fleetGateReceipt: { path: step.gate.path } } : {}),
 				};
 				if (step.plan?.proposals === true) {
 					const proposals: Array<{ agent: string; output: string }> = [];
@@ -637,8 +635,6 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 							} else {
 								delegationPlanHash = validated.hash;
 								delegationPlan = validated.plan;
-								fleetRunRecord.dynamicPlans?.push({ stepId: step.id, hash: validated.hash });
-								await writeFleetRun(fleetRunRecord);
 							}
 						}
 						// Settle only after the gate baseline and the delegation-plan

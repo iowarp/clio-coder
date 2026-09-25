@@ -19,7 +19,7 @@ import type { DispatchOwner } from "./ownership.js";
 import type { DispatchReservationRecord, ReservationTopology } from "./reservation-store.js";
 import type { ApprovedAssignmentRoute } from "./route-approval.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
-import type { RunEnvelope, RunLineage, RunNodeIdentity, RunPhaseDurations, RunReceipt, RunStatus } from "./types.js";
+import type { RunEnvelope, RunLineage, RunNodeIdentity, RunReceipt, RunStatus } from "./types.js";
 import type { DispatchFailoverCandidate, JobSpec } from "./validation.js";
 import type { WriteBoundaryAttribution } from "./write-boundary.js";
 
@@ -49,8 +49,6 @@ export interface DispatchRequest extends JobSpec {
 	 * boundary; never model-authored past that point.
 	 */
 	resultSummary?: DispatchResultSummaryAllowance;
-	/** Gate path whose post-run hash is sealed into this step's receipt. */
-	fleetGateReceipt?: { path: string };
 	/** Orchestrator-prepared task worktree state. Model arguments cannot author it. */
 	taskWorktree?: {
 		root: string;
@@ -208,8 +206,6 @@ export interface DispatchSnapshot {
 		startedAt: string;
 		/** Execution-only elapsed time retained for runtime monitoring. */
 		elapsedMs: number;
-		/** Routing-system phases, including total user-observed time. */
-		timing?: RunPhaseDurations;
 		tokens: { input: number; output: number; total: number };
 		costUsd: number;
 		costProvenance?: CostProvenance;
