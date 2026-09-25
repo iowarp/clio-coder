@@ -10,6 +10,15 @@ import { type DispatchBoardRow, formatTaskIslandLines, TASK_ISLAND_WIDTH } from 
 import { clioTheme, frame, GLYPH } from "./theme/index.js";
 import { isHelperRun } from "./worker-stream.js";
 
+const TASK_ISLAND_MIN_COLUMNS = 80;
+const TASK_ISLAND_MIN_ROWS = 18;
+const CONTEXT_ISLAND_MIN_COLUMNS = 92;
+const CONTEXT_ISLAND_MIN_ROWS = 20;
+
+function contextIslandFits(columns: number, rows: number): boolean {
+	return columns >= CONTEXT_ISLAND_MIN_COLUMNS && rows >= CONTEXT_ISLAND_MIN_ROWS;
+}
+
 export interface InteractiveTickerHandle {
 	unref?(): void;
 }
@@ -25,7 +34,7 @@ export interface InteractiveContextActivityStore {
 }
 
 export interface InteractiveTickersDeps {
-	tui: Pick<TUI, "requestRender" | "showOverlay">;
+	tui: Pick<TUI, "requestRender" | "showOverlay"> & { terminal: Pick<TUI["terminal"], "columns" | "rows"> };
 	dispatchBoardStore: InteractiveDispatchStore;
 	contextActivityStore: InteractiveContextActivityStore;
 	getOverlayState: () => string;
@@ -80,17 +89,13 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 		((handle: InteractiveTickerHandle) => clearInterval(handle as ReturnType<typeof setInterval>));
 	const taskIsland = new Text("", 0, 0);
 	const contextIsland = new Text("", 0, 0);
-	let taskIslandHeight = 24;
 	const taskIslandWidth = formatTaskIslandLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 	const taskIslandHandle = deps.tui.showOverlay(taskIsland, {
 		anchor: "top-right",
 		width: taskIslandWidth,
 		margin: { top: 1, right: 1 },
 		nonCapturing: true,
-		visible: (width, height) => {
-			taskIslandHeight = height;
-			return width >= 80 && height >= 18;
-		},
+		visible: (width, height) => width >= TASK_ISLAND_MIN_COLUMNS && height >= TASK_ISLAND_MIN_ROWS,
 	});
 	taskIslandHandle.setHidden(true);
 	const contextIslandHandle = deps.tui.showOverlay(contextIsland, {
@@ -98,7 +103,7 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 		width: CONTEXT_ISLAND_WIDTH,
 		margin: { top: 1, right: 1 },
 		nonCapturing: true,
-		visible: (width, height) => width >= 92 && height >= 20,
+		visible: contextIslandFits,
 	});
 	contextIslandHandle.setHidden(true);
 
@@ -112,7 +117,8 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 		const rows = deps.dispatchBoardStore.activeRows().filter((row) => !isHelperRun(row));
 		const board = rows.length === 0 ? (deps.getTaskBoard?.() ?? null) : null;
 		const boardHasOpenTasks = board !== null && taskBoardCounts(board).open > 0;
-		const contextActive = deps.contextActivityStore.active();
+		const contextActive =
+			deps.contextActivityStore.active() && contextIslandFits(deps.tui.terminal.columns, deps.tui.terminal.rows);
 		const hidden =
 			deps.getOverlayState() !== "closed" ||
 			deps.isFooterExpanded() ||
@@ -130,7 +136,7 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 			taskIsland.setText(
 				formatTaskIslandLines(
 					rows,
-					Math.max(1, Math.min(4, Math.floor((taskIslandHeight - 8) / 10))),
+					Math.max(1, Math.min(4, Math.floor((deps.tui.terminal.rows - 8) / 10))),
 					deps.getQuotaSnapshots?.() ?? [],
 				).join("\n"),
 			);
@@ -141,7 +147,11 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 
 	const renderContextIsland = (): void => {
 		const activity = deps.contextActivityStore.current();
-		contextIslandVisible = Boolean(activity) && deps.getOverlayState() === "closed" && !deps.isFooterExpanded();
+		contextIslandVisible =
+			Boolean(activity) &&
+			contextIslandFits(deps.tui.terminal.columns, deps.tui.terminal.rows) &&
+			deps.getOverlayState() === "closed" &&
+			!deps.isFooterExpanded();
 		contextIslandHandle.setHidden(!contextIslandVisible);
 		if (activity) contextIsland.setText(formatContextActivityIslandLines(activity).join("\n"));
 		contextIsland.invalidate();

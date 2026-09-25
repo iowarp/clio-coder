@@ -257,3 +257,5 @@ Every transcript row follows a rigid 2-column gutter format:
 Fleet cards and approvals share the target/model route spelling.
 
 The model picker uses an accent check for the active model; scoped and default state appear in details.
+
+The task summary yields to context activity only when the context summary fits the viewport.
