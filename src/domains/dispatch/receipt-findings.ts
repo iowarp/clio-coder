@@ -65,7 +65,7 @@ export interface CreateRunReceiptQualityInput {
  * tool identity and pass/fail result; generic process exit and shell commands
  * never enter this channel.
  */
-export function typedValidationFactsFromToolStats(
+function typedValidationFactsFromToolStats(
 	toolStats: ReadonlyArray<Pick<RunReceiptDraft["toolStats"][number], "tool" | "count" | "ok" | "errors" | "blocked">>,
 ): RunReceiptTypedValidationFact[] {
 	return toolStats
@@ -75,6 +75,124 @@ export function typedValidationFactsFromToolStats(
 			validatorDigest: createHash("sha256").update(canonicalJson(stat), "utf8").digest("hex"),
 			passed: stat.ok === stat.count && stat.errors === 0 && stat.blocked === 0,
 		}));
+}
+
+/**
+ * One finished `verify` call, in the order the run finished them. `check` is
+ * the call's {@link verifyCheckIdentity}, or null when the finish could not be
+ * tied to the arguments of its start. `outcome` is null when the finish named
+ * no outcome this build recognizes.
+ */
+export interface VerifyCallOutcome {
+	check: string | null;
+	outcome: "ok" | "error" | "blocked" | null;
+}
+
+/**
+ * Argument fields that change what a `verify` call checks. `timeout_ms` and
+ * `max_output_bytes` only bound the same check, so a retry with more time is
+ * still that check. `args` narrows a script (`test` against one file) and
+ * `browser` weakens a frontend check, so either one makes a different check:
+ * a narrower pass must never clear a wider failure (BT-017).
+ */
+const VERIFY_IDENTITY_FIELDS = ["check", "path", "cwd", "browser"] as const;
+
+function verifyScriptArgs(value: unknown): unknown {
+	// The tool accepts `args` as a JSON-encoded array from weak models
+	// (`prepareVerifyArguments`), so both spellings must name one check.
+	if (typeof value !== "string") return value;
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		return Array.isArray(parsed) ? parsed : value;
+	} catch {
+		// A malformed string is still a distinct argument; keying on it as given
+		// keeps it apart from every other spelling.
+		return value;
+	}
+}
+
+/**
+ * The canonical identity of the check one `verify` call ran, read from the
+ * call's own arguments. Two calls with the same identity ran the same check,
+ * so the later one's outcome supersedes the earlier one's. Null when the
+ * arguments are not an object or cannot be represented.
+ */
+export function verifyCheckIdentity(args: unknown): string | null {
+	if (args === null || typeof args !== "object" || Array.isArray(args)) return null;
+	const record = args as Record<string, unknown>;
+	const identity: Record<string, unknown> = {};
+	for (const field of VERIFY_IDENTITY_FIELDS) {
+		const value = record[field];
+		if (typeof value === "string" && value.trim().length > 0) identity[field] = value.trim();
+	}
+	const scriptArgs = verifyScriptArgs(record.args);
+	if (scriptArgs !== undefined && !(Array.isArray(scriptArgs) && scriptArgs.length === 0)) identity.args = scriptArgs;
+	try {
+		return canonicalJson(identity);
+	} catch {
+		// A value canonical JSON refuses cannot name a check; the call falls back
+		// to the conservative per-tool aggregate instead.
+		return null;
+	}
+}
+
+function typedVerifyFact(
+	check: string | null,
+	outcomes: ReadonlyArray<string | null>,
+	passed: boolean,
+): RunReceiptTypedValidationFact {
+	const evidence = { tool: "verify", check, outcomes };
+	return {
+		sourceId: "tool:verify",
+		validatorDigest: createHash("sha256").update(canonicalJson(evidence), "utf8").digest("hex"),
+		passed,
+	};
+}
+
+/**
+ * Typed validation facts for `verify`, one per check the run ran. A check's
+ * latest executed outcome decides it: an earlier failure the run fixed and
+ * re-ran clean seals as passed, and a pass the run later broke seals as failed
+ * (BT-017). A blocked attempt never ran the check, so it supersedes nothing,
+ * and a check with no executed call was never observed to pass.
+ *
+ * Calls that cannot be tied to a check share one fact that passes only when
+ * every such call passed. When no call can be tied to a check, the result is
+ * exactly the per-tool aggregate earlier builds sealed.
+ */
+export function typedValidationFactsFromVerifyCalls(
+	toolStats: ReadonlyArray<Pick<RunReceiptDraft["toolStats"][number], "tool" | "count" | "ok" | "errors" | "blocked">>,
+	calls: ReadonlyArray<VerifyCallOutcome>,
+): RunReceiptTypedValidationFact[] {
+	if (!calls.some((call) => call.check !== null && call.outcome !== null)) {
+		return typedValidationFactsFromToolStats(toolStats);
+	}
+	const byCheck = new Map<string, Array<"ok" | "error" | "blocked">>();
+	const unattributed: Array<string | null> = [];
+	for (const call of calls) {
+		if (call.check === null || call.outcome === null) {
+			unattributed.push(call.outcome);
+			continue;
+		}
+		const outcomes = byCheck.get(call.check) ?? [];
+		outcomes.push(call.outcome);
+		byCheck.set(call.check, outcomes);
+	}
+	const facts: RunReceiptTypedValidationFact[] = [];
+	for (const [check, outcomes] of byCheck) {
+		const executed = outcomes.filter((outcome) => outcome !== "blocked");
+		facts.push(typedVerifyFact(check, outcomes, executed.at(-1) === "ok"));
+	}
+	if (unattributed.length > 0) {
+		facts.push(
+			typedVerifyFact(
+				null,
+				unattributed,
+				unattributed.every((outcome) => outcome === "ok"),
+			),
+		);
+	}
+	return facts;
 }
 
 /** Create the required, JSON-clean quality block for one receipt finalization. */
@@ -205,18 +323,37 @@ function hasValidationEvidence(draft: Pick<RunReceiptDraft, "toolStats">): boole
 }
 
 /**
+ * Whether some validation tool passed. `verify` answers through its typed
+ * facts when the receipt has them, because the per-tool aggregate cannot tell
+ * a check the run fixed and re-ran from one it left failing (BT-017). Other
+ * validation tools carry no check identity, so their aggregate still decides.
+ */
+function hasPassingValidation(
+	toolStats: RunReceiptDraft["toolStats"],
+	typedValidations: ReadonlyArray<RunReceiptTypedValidationFact> | undefined,
+): boolean {
+	const verifyFacts = (typedValidations ?? []).filter((fact) => fact.sourceId === "tool:verify");
+	return toolStats.some((stat) => {
+		if (!isValidationTool(stat.tool)) return false;
+		if (stat.tool === "verify" && verifyFacts.length > 0) return verifyFacts.every((fact) => fact.passed);
+		return stat.ok > 0 && stat.errors === 0;
+	});
+}
+
+/**
  * Derive the receipt's descriptive evidence-confidence marker without
  * changing execution semantics. ACP agents may validate externally, so lack
  * of Clio-observed validation is unknown rather than a negative assertion.
+ * Pass the receipt's typed validations so the marker agrees with them.
  */
 export function deriveReceiptVerification(
-	draft: Pick<RunReceiptDraft, "toolStats">,
+	draft: Pick<RunReceiptDraft, "toolStats"> & { typedValidations?: ReadonlyArray<RunReceiptTypedValidationFact> },
 	context: { capabilityClass?: string | null; acpDelegation?: boolean } = {},
 ): RunReceiptVerification {
 	if (context.capabilityClass === "read-only") {
 		return { state: "not_applicable", basis: "read-only-agent" };
 	}
-	if (hasValidationEvidence(draft)) {
+	if (hasPassingValidation(draft.toolStats, draft.typedValidations)) {
 		return { state: "verified", basis: "validation-tool" };
 	}
 	// The basis names the claimant that answered and the state carries its

@@ -989,6 +989,15 @@ authenticated validator evidence. Briefing provenance and
 bounded `project_context` provenance are also rendered independently; neither
 hash substitutes for the other.
 
+A worker that runs `verify` more than once is judged by the latest run of each
+check. A check is the call's `check`, `path`, `cwd`, `browser` and `args` taken
+together. Re-running `verify(check="test")` after a fix clears the earlier
+failure, and a later failure of a check that passed seals as failed. A narrower
+`verify(check="test", args=[...])` is a different check, so its pass clears
+nothing, and a blocked call never ran its check, so it changes nothing. The
+receipt's `quality.typedValidations` carries one `tool:verify` fact per check,
+and evidence verification agrees with those facts.
+
 The canonical terminology for these facts is the five-axis trust status in
 [`evidence-and-memory.md`](../architecture/evidence-and-memory.md#canonical-trust-status).
 Receipt integrity projects onto artifact integrity; receipt verification,
