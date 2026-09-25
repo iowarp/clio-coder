@@ -137,6 +137,7 @@ Every framed block is built by `frame()` and `innerDivider()` in [rules.ts](../.
 Full-screen or docked panels for interactive workflows (`/settings`, `/view`, `/tasks`, `/usage`).
 - Header: Centered or left-aligned title with category tabs.
 - Navigation: `↑`/`↓` for items, `Tab` for sections, `Enter` to select, `Esc` to close.
+- **Selection**: A focused row carries `❯` in `accent` and its label in bold `accent`; nothing else on the row changes color. Every self-drawn list takes both from `selectionMark` and `selectionLabel` in [overlay-frame.ts](../../src/interactive/overlay-frame.ts).
 
 ### 3.3 Status Pills
 Compact inline lifecycle indicators:
@@ -154,7 +155,7 @@ No row exceeds the terminal width in visible cells at any width. The contracts i
 | Context island | Hidden | Hidden | Shown at 52 cells when the screen has 20 rows (from 92) | Same |
 | Council card | Stacked members | Stacked until each column holds 34 cells | Grid | Grid |
 | Compact footer | Two rows, 8-cell context meter | Two rows, 8-cell meter | Two rows, 14-cell meter, full hints | Two rows, wider identity |
-| Expanded footer | Pages stack | Context and Status split from 76 | Two columns | Two columns |
+| Expanded footer | Pages stack | Pages stack; Context and Status split from 84 | Two columns | Two columns |
 | Transcript | Prompt and prose wrap; action rows shorten paths first | Same | Rows at natural width | Same; extra columns never inflate rows |
 
 The minimum supported width is 40 columns. Gutters stay 2 columns with hanging indents.
@@ -170,7 +171,7 @@ The viewport has two kinds of content.
 
 **Stream ticks.** The chat panel returns a frame as `ChatPanelRegions`: a frozen `prefix` of the contiguous settled entries from the top of the transcript, and a `tail`. The prefix array keeps its identity across stream ticks, and the regular-mode root skips rewriting it while it sits at the same row. A settled entry is a committed prompt, a non-live replay block, a finished worker, a retry row, or an assistant entry with no pending message and no running tool. A stream tick renders only the live entry: `ChatPanelRenderMetrics.entriesRendered` is 1 per tick. An entry that changes after it settles, such as a retry row for the same attempt, drops its cached render and the freeze behind it.
 
-**Measuring.** `render-trace.ts` records frames, panel `entriesRendered` and `cacheHit`, and bytes written per commit. It has no count of terminal lines redrawn, so a claim about repainted rows needs a new counter at pi-tui's line-write path first. Tests never assert wall-clock time.
+**Measuring.** `render-trace.ts` records frames, panel `entriesRendered` and `cacheHit`, bytes written per commit, and `rowsChanged`: the number of root rows that differ from the previous frame at the same index. `rowsChanged` is computed only while a trace file is armed and is an estimate of pi-tui's differential write, since a viewport move, a resize or an overlay can make pi-tui repaint more rows. Tests never assert wall-clock time.
 
 ---
 
