@@ -211,25 +211,6 @@ function lengthStopMetadata(message: AgentMessage): Record<string, unknown> {
 	return metadata;
 }
 
-export function finalAssistantStopMessage(messages: ReadonlyArray<AgentMessage>): AgentMessage | null {
-	for (let index = messages.length - 1; index >= 0; index -= 1) {
-		const message = messages[index];
-		if (
-			!message ||
-			typeof message !== "object" ||
-			message === null ||
-			!("role" in message) ||
-			message.role !== "assistant"
-		) {
-			continue;
-		}
-		const stopReason = (message as { stopReason?: unknown }).stopReason;
-		if (stopReason !== undefined && stopReason !== "stop") continue;
-		return message;
-	}
-	return null;
-}
-
 export function hasStructuredToolCall(message: AgentMessage | undefined): boolean {
 	if (!message || typeof message !== "object" || !("content" in message) || !Array.isArray(message.content))
 		return false;

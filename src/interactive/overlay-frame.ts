@@ -6,20 +6,15 @@ import {
 	type OverlayOptions,
 	type OverlayUnfocusOptions,
 	type SelectListTheme,
-	type SettingsListTheme,
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
 import { keyboardOwner } from "./keyboard-owner.js";
 import { enterModal, type ModalMarkerSink } from "./modal-marker.js";
-import { type ClioToken, clioTheme, padAnsi, screenTitle, selectListTheme, settingsListTheme } from "./theme/index.js";
-
-export const IDENTITY = (text: string): string => text;
+import { type ClioToken, clioTheme, padAnsi, screenTitle, selectListTheme } from "./theme/index.js";
 
 export const DEFAULT_SELECT_THEME: SelectListTheme = selectListTheme(clioTheme());
-
-export const DEFAULT_SETTINGS_THEME: SettingsListTheme = settingsListTheme(clioTheme());
 
 interface InputTarget {
 	handleInput?: (data: string) => void;
@@ -284,12 +279,6 @@ function brandedBottomBorder(innerWidth: number, hint?: string, tone?: ClioToken
 		return `${frame("└")}${frame(prefix)}${clioTheme().fg("dim", clean)}${frame(suffix)}${frame(fill)}${frame("┘")}`;
 	}
 	return `${frame("└")}${frame(clipped)}${frame(fill)}${frame("┘")}`;
-}
-
-export function brandedContentRow(text: string, contentWidth: number): string {
-	// One pass, not two: padAnsi truncates to the same width with the same
-	// ellipsis, so the inner call was measuring and rebuilding the row for nothing.
-	return `${clioFrame("│")} ${padAnsi(text, contentWidth, "…")} ${clioFrame("│")}`;
 }
 
 export function formatRuntimeResolutionDiagnostic(diagnostic: RuntimeResolutionDiagnostic): string {

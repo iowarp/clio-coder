@@ -36,10 +36,6 @@ import { nextContentScrollOffset, type ViewScrollAction } from "../view/view-ove
  */
 const DEFAULT_ASK_USER_PRESENTATION = classifyDecisionPresentation(decisionFactsForAnswer("local"));
 
-export const ASK_USER_DECISION_TONE: ClioToken = DEFAULT_ASK_USER_PRESENTATION.semanticToken;
-export const ASK_USER_DECISION_TITLE = DEFAULT_ASK_USER_PRESENTATION.title;
-export const ASK_USER_WAITING_TITLE = "Ask User";
-
 /** An interview owns the viewport for every round, including one-question rounds. */
 const ASK_USER_FRAME_AND_MARGIN_ROWS = 4;
 const MIN_INNER_ROWS = 6;

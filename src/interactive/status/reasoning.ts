@@ -78,10 +78,3 @@ export function formatReasoningChip(
 	if (view.provenance === "unmeasured" || view.tokens <= 0) return null;
 	return `r${view.provenance === "provider" ? "" : "≈"}${format(view.tokens)}`;
 }
-
-export function formatReasoningLabel(view: ReasoningUsageView): string {
-	if (view.provenance === "provider") return "provider-reported";
-	if (view.provenance === "estimated") return "estimated";
-	if (view.provenance === "mixed") return "mixed";
-	return "unmeasured";
-}

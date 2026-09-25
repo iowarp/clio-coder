@@ -1,8 +1,17 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { it } from "node:test";
-import { type KeyBindingDeps, routeInteractiveKey } from "../../src/interactive/interactive-application.js";
+import { GLOBAL_ACTION_ORDER } from "../../src/interactive/application-controller.js";
+import { dispatchInteractiveAction, type KeyBindingDeps } from "../../src/interactive/interactive-application.js";
 import { createKeybindingManagerForTesting } from "../../src/interactive/keybinding-manager.js";
 import { type OverlayKeyDeps, routeOverlayKey } from "../../src/interactive/overlay-key-routing.js";
+
+/** The application controller's global routing: its action order, then the live dispatcher. */
+function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean {
+	for (const id of GLOBAL_ACTION_ORDER) {
+		if (deps.matches(data, id)) return dispatchInteractiveAction(id, deps);
+	}
+	return false;
+}
 
 it("routes Library and model defaults independently and closes Library with its own shortcut", () => {
 	const manager = createKeybindingManagerForTesting();

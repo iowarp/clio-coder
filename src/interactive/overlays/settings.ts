@@ -494,8 +494,6 @@ const NUMBER_SETTING_RULES = {
 
 export type NumberSettingId = keyof typeof NUMBER_SETTING_RULES;
 
-export const NUMBER_SETTING_IDS = Object.keys(NUMBER_SETTING_RULES) as readonly NumberSettingId[];
-
 type NumberSettingOutcome = { readonly value: number | null } | { readonly refusal: string };
 
 function describeSubmittedText(value: string): string {

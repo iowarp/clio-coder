@@ -13,10 +13,11 @@ import type { KeybindingDefinitions, KeyId } from "../../engine/tui.js";
 import { TUI_KEYBINDINGS } from "../../engine/tui.js";
 
 /**
- * Clio-specific keybinding ids. Each entry represents a routable action in
- * `routeInteractiveKey`. Ctrl+C is intentionally absent because its three-way
- * semantics (cancel stream / close overlay / clear editor / double-tap exit)
- * live in `resolveCtrlCAction` and are not a simple keybinding.
+ * Clio-specific keybinding ids. Each entry represents a routable action in the
+ * application controller's `CLOSED_ACTION_ORDER` or `GLOBAL_ACTION_ORDER`.
+ * Ctrl+C is intentionally absent because its semantics (cancel stream, close
+ * overlay, clear editor, protect the queue, double-tap exit) live in the
+ * controller's `resolveApplicationCtrlCAction` and are not a simple keybinding.
  */
 export interface ClioAppKeybindings {
 	"clio-coder.output.cycle": true;

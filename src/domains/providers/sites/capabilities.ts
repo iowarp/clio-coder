@@ -20,9 +20,6 @@ import { inspectDecisionSite } from "../decision-sites.js";
 import { isTrue, yesNo } from "../decisions.js";
 import type { DecisionQuestion } from "../types/inference.js";
 
-/** Bumped when the wording changes. */
-export const CAPABILITY_RANK_VERSION = "caprank-v1";
-
 /** Entries scored in one call. Latency held flat to this size; beyond it the tail keeps its place. */
 const MAX_ENTRIES = 256;
 /** Code points of one description; the gateway already cuts to the first sentence. */

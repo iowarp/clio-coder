@@ -70,11 +70,6 @@ export function listGroupHeader(theme: ClioTheme, label: string): string {
 	return theme.fg("dim", `── ${label}`);
 }
 
-/** A single colored chip. */
-export function chip(theme: ClioTheme, token: ClioToken, text: string): string {
-	return theme.fg(token, text);
-}
-
 /** A key=value chip: a dim key glued to a colored value (e.g. `git main`). */
 /** Subtle keybinding affordance, e.g. `⌃U dashboard`. */
 /** Join chips within a section with a dim middot, dropping empties. */
