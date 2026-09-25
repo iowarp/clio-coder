@@ -263,3 +263,5 @@ The task summary yields to context activity only when the context summary fits t
 Status meters paint structured, bounded cells using the shared meter glyphs.
 
 Board and context spinners use the shared animation cadence.
+
+Activity status respects the 40-column minimum before choosing its layout.

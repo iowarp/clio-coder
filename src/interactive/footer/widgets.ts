@@ -633,7 +633,7 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	const theme = clioTheme();
 	const status = options.status ?? defaultIdleStatus();
 	const toolCounts = options.toolCounts ?? { tools: {}, errors: 0 };
-	const statusWidth = Math.max(options.width ?? 120, 48);
+	const statusWidth = Math.max(options.width ?? 120, 40);
 	const isStreaming = status.phase !== "idle" && status.phase !== "ended";
 	const fleetSummaryIsAction = facts.dispatchSummary !== null && status.phase !== "dispatching";
 	const rows: DashboardRow[] = [
