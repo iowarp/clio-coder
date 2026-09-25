@@ -245,8 +245,6 @@ function isSameSelection(left: TasksOverlaySelection | undefined, right: TasksOv
 	return left.kind === "user" && right.kind === "user" && left.task.id === right.task.id;
 }
 
-const selectionCursor = selectionMark;
-
 function displayArtifactPath(path: string, workspace: string): string {
 	const root = resolve(workspace);
 	const target = isAbsolute(path) ? resolve(path) : resolve(root, path);
@@ -287,7 +285,7 @@ export function formatCompositeTasksOverlayBodyLines(
 			: STATUS_PRESENTATION[row.task.status];
 		lines.push(
 			fitContentLine(
-				`${selectionCursor(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(`${row.board.boardId}:${row.task.id}`)} ${muted(row.task.title)} ${dim(`· ${taskOriginLabel(row.task)} · ${row.board.title}`)}`,
+				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(`${row.board.boardId}:${row.task.id}`)} ${muted(row.task.title)} ${dim(`· ${taskOriginLabel(row.task)} · ${row.board.title}`)}`,
 				width,
 			),
 		);
@@ -302,7 +300,7 @@ export function formatCompositeTasksOverlayBodyLines(
 		const kind = artifact.artifactKind ? `:${artifact.artifactKind}` : "";
 		lines.push(
 			fitContentLine(
-				`${selectionCursor(isSameSelection(selected, rowSelection))} ${theme.fg("muted", GLYPH.toolHeader)} ${muted(displayArtifactPath(artifact.path, workspace))} ${dim(`· ${artifact.tool}${kind} · ${artifact.timestamp}`)}`,
+				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg("muted", GLYPH.toolHeader)} ${muted(displayArtifactPath(artifact.path, workspace))} ${dim(`· ${artifact.tool}${kind} · ${artifact.timestamp}`)}`,
 				width,
 			),
 		);
@@ -315,7 +313,7 @@ export function formatCompositeTasksOverlayBodyLines(
 		const presentation = USER_TASK_PRESENTATION[task.status];
 		lines.push(
 			fitContentLine(
-				`${selectionCursor(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(task.id.padEnd(4))} ${muted(task.title)} ${dim(`· ${task.status}`)}`,
+				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(task.id.padEnd(4))} ${muted(task.title)} ${dim(`· ${task.status}`)}`,
 				width,
 			),
 		);

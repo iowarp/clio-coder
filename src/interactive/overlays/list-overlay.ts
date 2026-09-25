@@ -14,10 +14,23 @@ import { localKey } from "../keyboard-owner.js";
 import { buildHint, FILTER_HINT, type HintEntry, type OverlayEscVerb, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, listGroupHeader, markdownTheme, rule, selectListTheme } from "../theme/index.js";
 
+/**
+ * Row width at and below which a list draws `narrowLabel`. It is the content
+ * width of an 80-column terminal, where the help list lost every description
+ * to the flags in front of it.
+ */
+export const NARROW_ROW_WIDTH = 76;
+
 export interface ListOverlayItem {
 	id: string;
 	/** Left-column text, already themed by the caller. */
 	label: string;
+	/**
+	 * A shorter spelling of `label` drawn at or below `NARROW_ROW_WIDTH`, so a
+	 * row can drop what matters least before the cut reaches what matters most.
+	 * Filtering still matches the full label.
+	 */
+	narrowLabel?: string;
 	/** Optional dim right-aligned column (origin, scope, version...). */
 	meta?: string;
 	/** Group header this item renders under, e.g. "project", "marketplace". */
@@ -537,7 +550,8 @@ export class ListOverlayView implements Component {
 					// identify. The label keeps at least half the row, and the metadata
 					// compacts into what is left or drops out entirely.
 					const rawMeta = item.meta ?? "";
-					const reservedLabel = Math.min(visibleWidth(item.label), Math.max(8, Math.floor(availableWidth * 0.5)));
+					const label = width <= NARROW_ROW_WIDTH && item.narrowLabel !== undefined ? item.narrowLabel : item.label;
+					const reservedLabel = Math.min(visibleWidth(label), Math.max(8, Math.floor(availableWidth * 0.5)));
 					const maxMetaWidth = Math.max(0, availableWidth - reservedLabel - 2);
 					const metaStr =
 						rawMeta.length === 0 || maxMetaWidth === 0
@@ -548,7 +562,7 @@ export class ListOverlayView implements Component {
 					const metaLen = metaStr ? visibleWidth(metaStr) : 0;
 
 					const maxLabelWidth = Math.max(1, availableWidth - (metaLen > 0 ? metaLen + 2 : 0));
-					const truncatedLabel = truncateToWidth(item.label, maxLabelWidth, GLYPH.ellipsis, false);
+					const truncatedLabel = truncateToWidth(label, maxLabelWidth, GLYPH.ellipsis, false);
 					const actualLabelWidth = visibleWidth(truncatedLabel);
 
 					// The gap exists only to separate metadata. A padded label plus a

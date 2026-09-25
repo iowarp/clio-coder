@@ -2,6 +2,7 @@ import type { ExtensionCommandRow } from "../../domains/extensions/operator-comm
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import { CLOSED_ACTION_ORDER, GLOBAL_ACTION_ORDER } from "../application-controller.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
+import { compactArgumentHint } from "../slash-autocomplete.js";
 import { commandReference, SLASH_COMMAND_GROUPS } from "../slash-commands.js";
 import { formatKeybindingDetailBodyLines } from "./keybinding-detail.js";
 import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
@@ -22,6 +23,11 @@ function formatKey(raw: string): string {
 		.join(" / ");
 }
 
+/** The usage cell: a fixed column that a long usage may overrun by design. */
+function usageColumn(usage: string): string {
+	return usage.length >= 30 ? `${usage} ` : usage.padEnd(30);
+}
+
 export function openHelpOverlay(
 	tui: TUI,
 	manager: ClioKeybindingManager,
@@ -35,11 +41,16 @@ export function openHelpOverlay(
 	const commands: ListOverlayItem[] = [...commandReference()]
 		.sort((a, b) => (groupRank.get(a.group) ?? 0) - (groupRank.get(b.group) ?? 0))
 		.map((ref) => {
-			const usagePart = ref.usage.length >= 30 ? `${ref.usage} ` : ref.usage.padEnd(30);
-			const label = `${usagePart}${ref.description}`;
+			const label = `${usageColumn(ref.usage)}${ref.description}`;
+			// Below 80 columns the flags are dropped before the description is cut:
+			// `/run [--agent-profile <profile>] …` left nothing of what /run does.
+			const { flags: _flags, ...withoutFlags } = ref.args ?? {};
+			const positionals = ref.args ? compactArgumentHint(withoutFlags) : undefined;
+			const narrowUsage = positionals ? `/${ref.name} ${positionals}` : `/${ref.name}`;
 			const item: ListOverlayItem = {
 				id: ref.name,
 				label,
+				narrowLabel: `${usageColumn(narrowUsage)}${ref.description}`,
 				group: ref.group,
 				// Overlay key actions are deliberately not duplicated here: each
 				// overlay's footer hint is the live source of its keys, and a static
