@@ -16,11 +16,14 @@ const TOKENS: Record<ClioToken, TokenColor> = {
 	// light. There every token keeps about 3:1 or better on both, except frame,
 	// which recedes on dark themes as the site's border does. The xterm
 	// fallbacks come from the same hue families and are picked for two-sided
-	// contrast rather than nearest color.
-	editor: { rgb: [9, 150, 159], xterm: 30 },
+	// contrast rather than nearest color, except the brand pair: mint (36) and
+	// cyan (37) stay apart, as the logo's two tones do, at about 2.7:1 on a
+	// white 256-color terminal, because the stronger teals (29, 30) blur into
+	// one on dark.
+	editor: { rgb: [9, 150, 159], xterm: 37 },
 	editorDanger: { rgb: [227, 86, 86], xterm: 167 },
 	editorAction: { rgb: [208, 109, 37], xterm: 166 },
-	accent: { rgb: [49, 151, 137], xterm: 30 },
+	accent: { rgb: [49, 151, 137], xterm: 36 },
 	accentDeep: { rgb: [24, 139, 123], xterm: 29 },
 	tool: { rgb: [64, 140, 150], xterm: 66 },
 	agent: { rgb: [192, 96, 31], xterm: 130 },
@@ -37,9 +40,9 @@ const TOKENS: Record<ClioToken, TokenColor> = {
 	reason: { rgb: [156, 134, 100], xterm: 137 },
 	dim: { rgb: [110, 123, 133], xterm: 244 },
 	muted: { rgb: [96, 128, 150], xterm: 102 },
-	title: { rgb: [9, 150, 159], xterm: 30 },
+	title: { rgb: [9, 150, 159], xterm: 37 },
 	frame: { rgb: [87, 114, 135], xterm: 243 },
-	frameStrong: { rgb: [9, 150, 159], xterm: 30 },
+	frameStrong: { rgb: [9, 150, 159], xterm: 37 },
 };
 
 export const SGR_RESET = "\u001b[0m";
