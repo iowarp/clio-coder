@@ -90,7 +90,6 @@ export {
 export type {
 	EvidenceAuditLinkedRow,
 	EvidenceBuildResult,
-	EvidenceCleanTraceRow,
 	EvidenceFinding,
 	EvidenceFindingsFile,
 	EvidenceGateDecisionsFile,
@@ -99,7 +98,6 @@ export type {
 	EvidenceOverview,
 	EvidenceProtectedArtifactEvent,
 	EvidenceProtectedArtifactsFile,
-	EvidenceRawTraceRow,
 	EvidenceReceiptFile,
 	EvidenceRunSource,
 	EvidenceRunTrustStatus,

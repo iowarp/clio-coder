@@ -41,14 +41,12 @@ import {
 	EVIDENCE_VERSION,
 	type EvidenceAuditLinkedRow,
 	type EvidenceBuildResult,
-	type EvidenceCleanTraceRow,
 	type EvidenceDecision,
 	type EvidenceFinding,
 	type EvidenceGateDecisionsFile,
 	type EvidenceLinkConfidence,
 	type EvidenceOverview,
 	type EvidenceProtectedArtifactsFile,
-	type EvidenceRawTraceRow,
 	type EvidenceReceiptFile,
 	type EvidenceRunLink,
 	type EvidenceRunSource,
@@ -176,10 +174,12 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		rawFindings.push({ ...row, id: `finding-${String(rawFindings.length + 1).padStart(3, "0")}` });
 	// Export-boundary redaction (cold path): secret-shaped values are scrubbed
 	// from everything the bundle serializes: envelopes, receipts (including
-	// delegation toolCallLog arguments), tool-event previews, audit rows,
-	// protected-artifact records, and the rendered transcript. Raw local
-	// session files are untouched; the bundle is the boundary, and the
-	// overview's redactionCount keeps the bundle honest about its filtering.
+	// delegation toolCallLog arguments), tool-event previews, and the rendered
+	// transcript. Raw local session files are untouched; the bundle is the
+	// boundary, and the overview's redactionCount keeps the bundle honest about
+	// its filtering. Audit rows and protected-artifact records are counted in
+	// the overview but no longer written as files (`audit-linked.jsonl` and
+	// `protected-artifacts.json` had no reader), so they are not redacted.
 	const tally = createRedactionTally();
 	const findings = redactSecretsDeep(rawFindings, tally);
 	const redactedRunSources: EvidenceRunSource[] = runSources.map((item) => ({
@@ -192,11 +192,6 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		...(event.argsPreview !== undefined ? { argsPreview: redactSecretsText(event.argsPreview, tally) } : {}),
 		...(event.resultPreview !== undefined ? { resultPreview: redactSecretsText(event.resultPreview, tally) } : {}),
 	}));
-	const redactedAuditLinks: AuditLinkResult = {
-		rows: auditLinks.rows.map((row) => redactSecretsDeep(row, tally)),
-		readErrors: auditLinks.readErrors,
-	};
-	const protectedArtifacts = redactSecretsDeep(protectedArtifactsRaw, tally);
 	const trustStatus = redactSecretsDeep(trustStatusRaw, tally);
 	const overview: EvidenceOverview = {
 		...buildOverview(
@@ -205,9 +200,9 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 			redactedRunSources,
 			findings,
 			sessionLinks,
-			redactedAuditLinks,
+			auditLinks,
 			redactedToolEvents,
-			protectedArtifacts,
+			protectedArtifactsRaw,
 		),
 		decisions: redactSecretsDeep(decisionLinks.decisions, tally),
 	};
@@ -222,11 +217,9 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		redactedRunSources,
 		findings,
 		sessionLinks,
-		redactedAuditLinks,
 		redactedToolEvents,
 		gateDecisions,
 		trustStatus,
-		protectedArtifacts,
 		transcript,
 	);
 	return {
@@ -620,11 +613,9 @@ async function writeEvidenceFiles(
 	runSources: ReadonlyArray<EvidenceRunSource>,
 	findings: ReadonlyArray<EvidenceFinding>,
 	sessionLinks: SessionLinkResult,
-	auditLinks: AuditLinkResult,
 	toolEventRows: ReadonlyArray<EvidenceToolEvent>,
 	gateDecisions: EvidenceGateDecisionsFile,
 	trustStatus: EvidenceTrustStatusFile,
-	protectedArtifacts: EvidenceProtectedArtifactsFile,
 	transcript?: string,
 ): Promise<void> {
 	await mkdir(directory, { recursive: true });
@@ -634,75 +625,12 @@ async function writeEvidenceFiles(
 		transcript ?? renderTranscript(overview, runSources, sessionLinks, trustStatus, findings),
 		"utf8",
 	);
-	await writeJsonl(join(directory, "trace.raw.jsonl"), rawTraceRows(runSources));
-	await writeJsonl(join(directory, "trace.cleaned.jsonl"), cleanedTraceRows(runSources, findings, toolEventRows));
 	await writeJsonl(join(directory, "tool-events.jsonl"), toolEventRows);
-	await writeJsonl(join(directory, "audit-linked.jsonl"), auditLinks.rows);
 	await writeJson(join(directory, "receipt.json"), receiptsFile(runSources));
 	await writeJson(join(directory, "gate-decisions.json"), gateDecisions);
 	await writeJson(join(directory, "trust-status.json"), trustStatus);
-	await writeJson(join(directory, "protected-artifacts.json"), protectedArtifacts);
 	await writeJson(join(directory, "findings.json"), findingsFile(overview.evidenceId, [...findings]));
 	await writeFile(join(directory, "findings.md"), renderEvidenceFindingsMarkdown(findings, trustStatus), "utf8");
-}
-
-function rawTraceRows(runSources: ReadonlyArray<EvidenceRunSource>): EvidenceRawTraceRow[] {
-	const rows: EvidenceRawTraceRow[] = [];
-	for (const source of runSources) {
-		rows.push({ kind: "run-ledger", runId: source.envelope.id, envelope: source.envelope });
-		if (source.receipt !== null) rows.push({ kind: "receipt", runId: source.envelope.id, receipt: source.receipt });
-		else if (source.receiptError !== null) {
-			rows.push({ kind: "receipt-error", runId: source.envelope.id, error: source.receiptError });
-		}
-	}
-	return rows;
-}
-
-function cleanedTraceRows(
-	runSources: ReadonlyArray<EvidenceRunSource>,
-	findings: ReadonlyArray<EvidenceFinding>,
-	toolEventRows: ReadonlyArray<EvidenceToolEvent>,
-): EvidenceCleanTraceRow[] {
-	const rows: EvidenceCleanTraceRow[] = [];
-	for (const source of runSources) {
-		const envelope = source.envelope;
-		// Clean trace rows project only provenance carried by an authenticated
-		// receipt: a rejected or retired seal contributes none of its fields.
-		// Runs without receipt provenance keep the standard row shape.
-		const receipt = authenticatedReceipt(source);
-		const provenance = receipt === null ? {} : extractRunProvenance(receipt);
-		rows.push({
-			kind: "run",
-			runId: envelope.id,
-			task: truncateText(envelope.task, MAX_TASK_CHARS),
-			status: envelope.status,
-			exitCode: source.receipt?.exitCode ?? envelope.exitCode,
-			startedAt: envelope.startedAt,
-			endedAt: envelope.endedAt,
-			wallTimeMs: durationMs(envelope.startedAt, envelope.endedAt),
-			cwd: envelope.cwd,
-			agentId: envelope.agentId,
-			targetId: envelope.targetId,
-			runtimeId: envelope.runtimeId,
-			wireModelId: envelope.wireModelId,
-			tokenCount: source.receipt?.tokenCount ?? envelope.tokenCount,
-			costUsd: source.receipt?.costUsd ?? envelope.costUsd,
-			...(provenance.pipeline !== undefined ? { pipeline: provenance.pipeline } : {}),
-			...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),
-			...(provenance.escalation !== undefined ? { escalation: provenance.escalation } : {}),
-		});
-		for (const event of toolEventRows.filter((item) => item.runId === source.envelope.id)) {
-			rows.push({ kind: "tool-summary", ...event });
-		}
-	}
-	// Everything the per-run grouping above did not claim, so an event whose run
-	// attribution is ambiguous or points outside this bundle still appears once.
-	const groupedRunIds = new Set(runSources.map((item) => item.envelope.id));
-	for (const event of toolEventRows.filter((item) => item.runId === null || !groupedRunIds.has(item.runId))) {
-		rows.push({ kind: "tool-summary", ...event });
-	}
-	for (const item of findings) rows.push({ kind: "finding", ...item });
-	return rows;
 }
 
 function toolEvents(

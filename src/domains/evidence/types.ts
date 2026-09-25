@@ -1,8 +1,6 @@
 import type { GateDecisionArtifact, RunEnvelope, RunReceipt, ToolCallStat } from "../dispatch/index.js";
-import type { RunPersonaOverride, RunPipelineProvenance } from "../dispatch/types.js";
 import type { ProtectedArtifact } from "../safety/protected-artifacts.js";
 import type { DecisionRecord } from "../session/entries.js";
-import type { RunEscalationCounts } from "./provenance.js";
 import type { CanonicalTrustStatus } from "./trust-status.js";
 
 export const EVIDENCE_VERSION = 1;
@@ -237,40 +235,6 @@ export interface EvidenceAuditLinkedRow {
 	row: Record<string, unknown>;
 }
 
-export interface EvidenceTraceRunRow {
-	kind: "run";
-	runId: string;
-	task: string;
-	status: string;
-	exitCode: number | null;
-	startedAt: string;
-	endedAt: string | null;
-	wallTimeMs: number;
-	cwd: string;
-	agentId: string;
-	targetId: string;
-	runtimeId: string;
-	wireModelId: string;
-	tokenCount: number;
-	costUsd: number;
-	/** Pipeline threading provenance; present only for pipeline steps after the first. */
-	pipeline?: RunPipelineProvenance;
-	/** Ad-hoc specialist provenance; present only when a persona override composed the prompt. */
-	personaOverride?: RunPersonaOverride;
-	/** Worker permission-escalation counters; present only when the run saw an escalation. */
-	escalation?: RunEscalationCounts;
-}
-
-export interface EvidenceTraceToolRow extends EvidenceToolEvent {
-	kind: "tool-summary";
-}
-
-export interface EvidenceTraceFindingRow extends EvidenceFinding {
-	kind: "finding";
-}
-
-export type EvidenceCleanTraceRow = EvidenceTraceRunRow | EvidenceTraceToolRow | EvidenceTraceFindingRow;
-
 export interface EvidenceReceiptFile {
 	version: 1;
 	receipts: RunReceipt[];
@@ -299,22 +263,5 @@ export interface EvidenceProtectedArtifactsFile {
 	artifacts: ProtectedArtifact[];
 	events: EvidenceProtectedArtifactEvent[];
 }
-
-export type EvidenceRawTraceRow =
-	| {
-			kind: "run-ledger";
-			runId: string;
-			envelope: RunEnvelope;
-	  }
-	| {
-			kind: "receipt";
-			runId: string;
-			receipt: RunReceipt;
-	  }
-	| {
-			kind: "receipt-error";
-			runId: string;
-			error: string;
-	  };
 
 export type EvidenceToolStat = ToolCallStat;

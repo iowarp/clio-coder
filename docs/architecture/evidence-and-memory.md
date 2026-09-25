@@ -45,17 +45,18 @@ Run/session evidence files:
 <dataDir>/evidence/<evidenceId>/
 ├── overview.json
 ├── transcript.md
-├── trace.raw.jsonl
-├── trace.cleaned.jsonl
 ├── tool-events.jsonl
-├── audit-linked.jsonl
 ├── receipt.json
 ├── gate-decisions.json
 ├── trust-status.json
-├── protected-artifacts.json
 ├── findings.json
 └── findings.md
 ```
+
+Bundles built before 0.5.6 also hold `trace.raw.jsonl`, `trace.cleaned.jsonl`,
+`audit-linked.jsonl` and `protected-artifacts.json`. No reader opened them, so
+new bundles do not write them; older bundles still read, because every reader
+opens the files above by name.
 
 ### Core files
 
@@ -63,25 +64,21 @@ Run/session evidence files:
 | --- | --- |
 | `overview.json` | Stable summary: source, runs, sessions, statuses, tasks, models, totals, tags, and file list. |
 | `transcript.md` | Human-readable run or session transcript. |
-| `trace.raw.jsonl` | Raw run ledger and receipt rows. |
-| `trace.cleaned.jsonl` | Compact normalized rows plus findings. |
 | `tool-events.jsonl` | Tool summaries from session entries, audit rows, or receipts. |
-| `audit-linked.jsonl` | Audit rows linked to run/session context when available. |
 | `receipt.json` | Receipt bundle (`{ version: 1, receipts: [...] }`); only receipts that pass integrity verification contribute verified fields. |
 | `gate-decisions.json` | Integrity-verified review verdicts, compete winner selections, and winner confirmations discovered from linked receipt ids. |
 | `trust-status.json` | Canonical per-run five-axis trust projections derived from authenticated receipts, gate decisions, and grounded validation artifacts. |
-| `protected-artifacts.json` | Protected artifact state/events. |
 | `findings.json` / `findings.md` | Structured findings plus a readable report that begins with each linked run's canonical tier, fixed-order summary, and five axes. |
 
 ### Run attribution under concurrency
 
-Session ledger entries are attributed to a run by the run id the producer stamped on the entry at write time. Rows built from those entries carry that provenance in a `runLink` field (`{ kind, confidence, candidateRunIds? }`) in `tool-events.jsonl` and `protected-artifacts.json`; a write-time stamp is `kind: "entry-run-id"`, `confidence: "exact"`. Entries written without run context fall back to timestamp windowing, labeled `kind: "timestamp-window"`, `confidence: "best-effort"`, and printed as `link=timestamp-window` in the transcript. Concurrent dispatch runs share one clock and their windows overlap, so an entry inside more than one window has no owner the bundle can name. Such an entry is reported in the bundle of every run it may belong to, with `runId: null`, `kind: "ambiguous-timestamp-window"`, and a `candidateRunIds` list, plus a `best-effort-link` finding counting them. It is never dropped and never claimed as exact.
+Session ledger entries are attributed to a run by the run id the producer stamped on the entry at write time. Rows built from those entries carry that provenance in a `runLink` field (`{ kind, confidence, candidateRunIds? }`) in `tool-events.jsonl`; a write-time stamp is `kind: "entry-run-id"`, `confidence: "exact"`. Entries written without run context fall back to timestamp windowing, labeled `kind: "timestamp-window"`, `confidence: "best-effort"`, and printed as `link=timestamp-window` in the transcript. Concurrent dispatch runs share one clock and their windows overlap, so an entry inside more than one window has no owner the bundle can name. Such an entry is reported in the bundle of every run it may belong to, with `runId: null`, `kind: "ambiguous-timestamp-window"`, and a `candidateRunIds` list, plus a `best-effort-link` finding counting them. It is never dropped and never claimed as exact.
 
-When a run was chained (pipeline), composed with a persona override, or escalated for a permission, `transcript.md` and `trace.cleaned.jsonl` surface the receipt's provenance field sets, and `clio-coder evidence inspect` prints them as a `provenance <runId>:` block. The block is printed only for a run whose seal the projection verified; a run whose seal was rejected or retired gets no block. The field paths, types, and stability labels are documented in the [receipt provenance schema](observability.md#receipt-fields-for-dispatch-provenance).
+When a run was chained (pipeline), composed with a persona override, or escalated for a permission, `transcript.md` surfaces the receipt's provenance field sets, and `clio-coder evidence inspect` prints them as a `provenance <runId>:` block. The block is printed only for a run whose seal the projection verified; a run whose seal was rejected or retired gets no block. The field paths, types, and stability labels are documented in the [receipt provenance schema](observability.md#receipt-fields-for-dispatch-provenance).
 
 ### Task and decision provenance
 
-Session evidence retains the two operator-facing bookkeeping ledgers instead of flattening them into prose. A `taskLedger` projection names the stable board id, goal counts, active runs, required evidence, and bounded task rows with status, origin, `userTaskId`, reason, and evidence. This keeps an operator task traceable from the project inbox correlation through agent pickup and completion. A `decisionLedger` projection names the active-path anchor, interview identity and status, timing, round count, summary, and every settled or superseded decision. Operator revisions are explicit through `revisedAt`, `revisionSource=operator`, and the recorded correction text. Both kinds remain session facts in `trace.raw.jsonl`, `trace.cleaned.jsonl`, and the readable transcript; evidence does not reinterpret them as validation results. Authenticated receipt `decisionRefs` link runs to recorded arguments on the session's active path, with resolved records in `overview.json` and resolved or missing-reference findings in both readable evidence documents. Wiki page writers receive up to twelve active decisions matching their source paths or symbols and cite those refs in the body and optional `decisions` frontmatter instead of inferring rationale.
+Session evidence retains the two operator-facing bookkeeping ledgers instead of flattening them into prose. A `taskLedger` projection names the stable board id, goal counts, active runs, required evidence, and bounded task rows with status, origin, `userTaskId`, reason, and evidence. This keeps an operator task traceable from the project inbox correlation through agent pickup and completion. A `decisionLedger` projection names the active-path anchor, interview identity and status, timing, round count, summary, and every settled or superseded decision. Operator revisions are explicit through `revisedAt`, `revisionSource=operator`, and the recorded correction text. Both kinds remain session facts in the readable transcript; evidence does not reinterpret them as validation results. Authenticated receipt `decisionRefs` link runs to recorded arguments on the session's active path, with resolved records in `overview.json` and resolved or missing-reference findings in both readable evidence documents. Wiki page writers receive up to twelve active decisions matching their source paths or symbols and cite those refs in the body and optional `decisions` frontmatter instead of inferring rationale.
 
 ---
 
@@ -220,7 +217,7 @@ They do not mutate receipt, gate-decision, evidence-bundle, or session formats.
 | Valid bounded project context, valid none-tier workspace-root record, or valid briefing hash | Context provenance is `recorded`. A `none`-tier run still receives the workspace-root message, so a none-tier block naming exactly `workspace-root` with a well-formed count and hash is `recorded`. Explicit project-context tier `none` with no content and no briefing is `not_applicable`; a missing historical field is `unknown`; a contradictory block (a handbook section under a none policy, a hash with no section, a malformed count) is `invalid`. |
 | Gate decision | An authenticated independent pass or fail maps to `passed` or `failed`. Correlated review maps to `not_independent`. Unauthenticated artifacts map to `unknown`; operator confirmation or yolo authority alone is `not_applicable` to independent review. |
 | Older receipt with `autonomyEnforcement` | Its integrity seal still verifies when the historical field was covered by the digest. Readers ignore the field and project five trust axes. |
-| Finish-contract assessment | The assessment remains linked in `audit-linked.jsonl` and contributes its domain findings and tags. It does not override the receipt-derived `completionEvidence` axis on the evidence surface alone. |
+| Finish-contract assessment | The assessment is an audit row linked to the run and counted in `totals.auditRows`. It does not override the receipt-derived `completionEvidence` axis on the evidence surface alone. |
 | Malformed audit row identifier | A blank or whitespace-only optional identifier remains linked as audit input and never aborts the bundle. It cannot affect the receipt-derived trust projection. |
 | Bundle without `trust-status.json` | Inspection reports `projection: historical_format` with no canonical run projections. It never reconstructs positive states from older summary tags. |
 

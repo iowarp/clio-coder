@@ -14,17 +14,19 @@ import type {
 	EvidenceTrustStatusView,
 } from "./types.js";
 
+/**
+ * The files a bundle is written with. Bundles built before 0.5.6 also hold
+ * `trace.raw.jsonl`, `trace.cleaned.jsonl`, `audit-linked.jsonl` and
+ * `protected-artifacts.json`, which no reader opened; those bundles still
+ * read, because every reader opens the files below by name.
+ */
 export const EVIDENCE_FILES = [
 	"overview.json",
 	"transcript.md",
-	"trace.raw.jsonl",
-	"trace.cleaned.jsonl",
 	"tool-events.jsonl",
-	"audit-linked.jsonl",
 	"receipt.json",
 	"gate-decisions.json",
 	"trust-status.json",
-	"protected-artifacts.json",
 	"findings.json",
 	"findings.md",
 ] as const;
