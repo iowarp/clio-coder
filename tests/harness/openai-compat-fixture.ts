@@ -268,10 +268,10 @@ export function seedOpenAICompatOrchestrator(configDir: string, url: string): vo
 
 /**
  * The orchestrator seed above plus the capability keys a tool-calling turn
- * needs. `autonomy` rewrites a top-level `autonomy:` line, but a v2 settings
- * file keeps the level under `safety:`, so the argument currently changes
- * nothing and the run stays at the saved `default`. Pass `--autonomy` to the
- * run to change the level.
+ * needs, and an optional saved autonomy level written to `safety.autonomy`.
+ * The seed throws when that key is missing, because a silent miss once left
+ * every test that seeded yolo running at default
+ * (tests/contracts/tool-orchestrator-seed.test.ts).
  */
 export function seedOpenAICompatToolOrchestrator(configDir: string, url: string, autonomy?: string): void {
 	seedOpenAICompatOrchestrator(configDir, url);
@@ -289,7 +289,11 @@ export function seedOpenAICompatToolOrchestrator(configDir: string, url: string,
 			"      maxTokens: 4096",
 		].join("\n"),
 	);
-	if (autonomy !== undefined) patched = patched.replace(/^autonomy: .*$/m, `autonomy: ${autonomy}`);
+	if (autonomy !== undefined) {
+		const safetyAutonomy = /^(safety:\n) {2}autonomy: .*$/m;
+		if (!safetyAutonomy.test(patched)) throw new Error(`no safety.autonomy line to seed in ${p}`);
+		patched = patched.replace(safetyAutonomy, `$1  autonomy: ${autonomy}`);
+	}
 	writeFileSync(p, patched, "utf8");
 }
 

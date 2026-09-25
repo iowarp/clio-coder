@@ -77,18 +77,7 @@ describe("clio-coder run --cwd", () => {
 		const project = join(scratch.root, "project");
 		mkdirSync(project);
 		const turn = await runCli(
-			[
-				"--no-context-files",
-				"--no-skills",
-				"run",
-				"--cwd",
-				project,
-				"--autonomy",
-				"default",
-				"--agent",
-				"coder",
-				"Write the proof file.",
-			],
+			["--no-context-files", "--no-skills", "run", "--cwd", project, "--agent", "coder", "Write the proof file."],
 			{ env: scratch.env, cwd: scratch.root, timeoutMs: 60_000 },
 		);
 		// The fixture's plain "done" does not satisfy the coder recipe's JSON
