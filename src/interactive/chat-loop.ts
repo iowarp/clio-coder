@@ -102,6 +102,7 @@ import {
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
+import { retireActiveUserContextForNextOperator } from "./chat-renderer.js";
 import { coldReasonText } from "./cold-reasons.js";
 import { DRAFT_MAX_TOKENS, DRAFT_SYSTEM_PROMPT, DRAFT_TEMPERATURES, draftTemperature } from "./drafts.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
@@ -1789,6 +1790,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// Admission observers are bookkeeping only and cannot affect the turn.
 			}
 			const runtimePromptText = submittedText;
+			if (options.requestContinuation !== true && deps.readSessionEntries) {
+				const prior = agentRuntime.agent.state.messages;
+				const retired = retireActiveUserContextForNextOperator(prior, deps.readSessionEntries(), {
+					...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
+				});
+				if (retired.length < prior.length) replaceEngineMessages(agentRuntime.agent, retired);
+			}
 			const priorPendingSkillPolicy = state.currentPendingSkillPolicy;
 			const priorAskUserPolicy = state.currentAskUserPolicy;
 			state.currentPendingSkillPolicy = pendingSkillPolicy;

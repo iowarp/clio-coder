@@ -1116,6 +1116,27 @@ export function selectReplayEntries(
 	return dropLegacyToolResultAssistantDuplicates(repairToolResultOrphans(entries, selected, cut.compactionIndex));
 }
 
+/** Retire the exact replay block when a later operator turn is admitted without a replay rebuild. */
+export function retireActiveUserContextForNextOperator(
+	messages: AgentMessage[],
+	turns: ReadonlyArray<SessionEntry>,
+	options: RehydrateChatPanelOptions = {},
+): AgentMessage[] {
+	const checkpoint = selectReplayEntries(turns, options).find((entry) => entry.kind === "compactionSummary");
+	if (checkpoint?.kind !== "compactionSummary" || !checkpoint.userContext) return messages;
+	const text = `Active user instructions (verbatim):\n${checkpoint.userContext.text}`;
+	const timestamp = timestampMillis(checkpoint.timestamp);
+	return messages.filter(
+		(message) =>
+			message.role !== "user" ||
+			message.timestamp !== timestamp ||
+			!Array.isArray(message.content) ||
+			message.content.length !== 1 ||
+			message.content[0]?.type !== "text" ||
+			message.content[0].text !== text,
+	);
+}
+
 function dropLegacyToolResultAssistantDuplicates(entries: ReadonlyArray<SessionEntry>): SessionEntry[] {
 	const out: SessionEntry[] = [];
 	for (const entry of entries) {
@@ -1207,7 +1228,16 @@ export function buildReplayAgentMessagesFromTurns(
 	};
 	const evidence = activeEntriesBeforeCompactionCut(options.skillContextEntries ?? turns, options);
 	const verified = captureSkillContext(evidence, skillState);
-	for (const entry of selectReplayEntries(turns, options)) {
+	const replayEntries = selectReplayEntries(turns, options);
+	const latestOperator = [...replayEntries]
+		.reverse()
+		.find(
+			(entry) =>
+				entry.kind === "message" &&
+				entry.role === "user" &&
+				(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
+		);
+	for (const entry of replayEntries) {
 		switch (entry.kind) {
 			case "message": {
 				const text = textBlockFromEntry(entry);
@@ -1240,7 +1270,7 @@ export function buildReplayAgentMessagesFromTurns(
 				break;
 			case "compactionSummary":
 				appendContextMessage(out, "user", compactionContextText(entry), entry.timestamp);
-				if (entry.userContext)
+				if (entry.userContext && (!latestOperator || latestOperator.turnId === entry.userContext.turnId))
 					out.push(
 						makeTextMessage("user", `Active user instructions (verbatim):\n${entry.userContext.text}`, entry.timestamp),
 					);
