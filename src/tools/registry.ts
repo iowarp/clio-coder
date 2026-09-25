@@ -28,6 +28,7 @@ import type { DecisionPresentation } from "../domains/safety/decision-presentati
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
 import type { ImageContent } from "../engine/types.js";
+import { withApprovalNote } from "./approval-note.js";
 import { askUserExposure } from "./ask-user.js";
 import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
@@ -366,7 +367,11 @@ export interface OneShotGrant {
 	actionClass: ActionClass;
 	/** Parked approval request approved for this single admission pass. */
 	requestId?: string;
-	/** Free-form origin tag carried into audit (`tool`, `keybind:single`, ...). */
+	/**
+	 * Surface that released the call: `tool:one_shot` (TUI card), `acp-client`,
+	 * `escalation:operator` or `escalation:remembered`. It is carried into audit
+	 * and decides the wording of the note the model reads (`approval-note.ts`).
+	 */
 	requestedBy: string;
 }
 
@@ -484,6 +489,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	>();
 	let approvalRequestCounter = 0;
 	const approvalRequestToken = randomBytes(4).toString("hex");
+
+	/** The rail that named the parked call, when the decision carried one. */
+	const approvalRailOf = (decision: SafetyDecision): string | undefined => {
+		if (decision.kind === "allow") return decision.policy?.ruleId;
+		return decision.match?.ruleId ?? decision.policy?.ruleId;
+	};
 
 	const runSpec = async (
 		spec: ToolSpec,
@@ -995,7 +1006,24 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// Seal the park before the body runs. Everything after this line is
 				// the tool working, and the caller charges that to the tool.
 				entry.closePark();
-				entry.resolve(await runSpec(outcome.spec, entry.call, outcome.decision, approvedOptions));
+				const verdict = await runSpec(outcome.spec, entry.call, outcome.decision, approvedOptions);
+				// A grant is invisible in the result otherwise, and the model reported
+				// a confirmed call as one that never asked (BT-003). The note names the
+				// surface that released the call, because an ACP client or a
+				// remembered escalation is not this session's operator. Only this path
+				// runs a released call, so no ordinary call is annotated.
+				entry.resolve(
+					grant !== undefined && verdict.kind === "ok"
+						? {
+								...verdict,
+								result: withApprovalNote(verdict.result, {
+									actionClass: grant.actionClass,
+									requestedBy: grant.requestedBy,
+									ruleId: approvalRailOf(entry.decision),
+								}),
+							}
+						: verdict,
+				);
 			}
 			const next = parked[0];
 			if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
