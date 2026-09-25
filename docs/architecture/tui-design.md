@@ -43,7 +43,7 @@ Tokens are defined in [src/interactive/theme/tokens.ts](../../src/interactive/th
 | Token | Hex | Role |
 | :--- | :--- | :--- |
 | `editor` | `#09969f` | Cyan composer rails (active input only). |
-| `editorDanger` | `#e35656` | Yolo autonomy rail caps and label. |
+| `editorDanger` | `#e35656` | `yolo` everywhere: composer rail caps, the `YOLO` rail label and the launchpad permission field. |
 | `editorAction` | `#d06d25` | Orange preparation / compacting phase rails. |
 | `accent` | `#319789` | Brand and interactivity in the logo's mint: selections, prompts, the active dashboard tab, the CLIO half of the wordmark, voice glyph (`✦`), active phases. |
 | `accentDeep` | `#188b7b` | Bold CAPS section headers and structural tags. |
@@ -53,13 +53,13 @@ Tokens are defined in [src/interactive/theme/tokens.ts](../../src/interactive/th
 | `success` | `#2a9c5c` | Positive outcomes (`✓`), clean git state, added diff lines (`+`). |
 | `warning` | `#aa8118` | Critical warnings (`⚠`), dirty git trees, retry attempts, blocked tools. |
 | `error` | `#dd5353` | Failures (`✗`), error rails, removed diff lines (`-`). |
-| `info` | `#4a90b4` | Informational messages, notices, system prompt indicators. |
+| `info` | `#4a90b4` | Informational messages and notices, links, the system-prompt context category, shell flags and numeric code ink, in the site's steel blue. |
 | `reason` | `#9c8664` | Sand reasoning indicators and thinking meter. |
 | `dim` | `#6e7b85` | Scaffolding: separators, shortcuts, durations, timestamps. |
 | `muted` | `#608096` | Secondary text: paths, previews, telemetry counts. |
 | `title` | `#09969f` | Overlay and frame headers, the CODER half of the wordmark and the `C_` of `>C_`, in the logo's cyan. |
 | `frame` | `#577287` | Borders, dividers, unused context meter space. |
-| `frameStrong` | `#09969f` | Active input rail background. |
+| `frameStrong` | `#09969f` | Transcript scrollbar thumb. |
 
 The palette is derived from the Clio Coder logo and iowarp.ai: mint and cyan carry identity, input and selection, the site's orange accent carries action, its steel blue carries information, and its slate carries frames and secondary text. Success is green, warnings amber, errors and `yolo` coral, and reasoning a sand tone beside the orange. Every token is shifted into the middle luminance band so it keeps about 3:1 or better on dark themes (black, One Dark, Solarized Dark) and light themes (white, Solarized Light); `frame` alone recedes further on dark themes. State is also spelled by labels, meter fill, and motion, so a monochrome terminal does not have to infer it from hue.
 
