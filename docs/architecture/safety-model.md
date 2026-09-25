@@ -30,7 +30,7 @@ Only the operator sets the level, through the user `settings.yaml`, `/settings`,
 | Damage-control confirmation rule | asks | asks |
 | Hard block | blocked | blocked |
 
-A read-only run is a dispatch restriction, not a level. Reviewer, judge and council roles, `/oracle`, the watchdog verifier, fleet `scope: readonly`, recipes with `capabilityClass: read-only`, and the operator's `--read-only` flag set it. The registry then denies every call that is not a read inside the workspace, and the model cannot load a skill.
+A read-only run is a dispatch restriction, not a level. Reviewer, judge and council roles, `/oracle`, the watchdog verifier, fleet `scope: readonly`, recipes with `capabilityClass: read-only`, and the operator's `--read-only` flag set it. For mediated tools, the registry denies calls other than reads inside the workspace, including skill activation. Dispatch refuses a read-only request on an agent-managed ACP peer that cannot enforce the restriction; subprocess runtimes do not expose per-call registry mediation, and their read-only guarantees vary by runtime.
 
 ## The safety net
 
@@ -59,12 +59,12 @@ Every rule is matched against each command a shell string would run, not only th
 
 ## Approvals
 
-A parked call carries a one-shot request id. Approving it resumes only that call and grants nothing standing. The approval card explains a decision already made; it never changes the decision. Who answers depends on the surface:
+A parked call carries a request id. A main-agent approval resumes only that call. A worker escalation approval also resumes the parked call and remembers the answer for matching tool, arguments, approval axis, and safety classification within that worker run. The approval card explains a decision already made; it never changes the decision. Who answers depends on the surface:
 
 - The TUI: the operator, in the approval card.
 - An ACP client, the GUI included: the client's own permission request, answered by its operator.
 - A headless `clio-coder run`: nobody is attached, so every ask is denied, and the session prompt says so.
-- A dispatched worker: `fleet.permissions.mode`. `deny`, the default, turns the ask into a tool denial and the run continues; `fail` ends the run as `permission_required`; `escalate` forwards the ask to the operator and falls back to `deny` or `fail` on timeout.
+- A dispatched worker: `fleet.permissions.mode`. `deny`, the default, turns the ask into a tool denial and the run continues; `fail` ends the run as `permission_required`; `escalate` forwards the ask to the operator and falls back to `deny` or `fail` on timeout. Subprocess runtimes admit only `deny`; Claude SDK admits `deny` or `fail`, but cannot park an `escalate` request.
 - An ACP delegation peer: the mediator denies the ask without stalling.
 
 ## Workers
@@ -78,7 +78,7 @@ A parked call carries a one-shot request id. Approving it resumes only that call
 
 - The finish contract ([finish-contract.ts](../../src/domains/safety/finish-contract.ts)) checks the end of a turn that changed files. It looks for validation evidence, such as a validation command that ran or a dispatch receipt, or for a `limitation` receipt. With neither, the model receives an advisory to report the change as unverified.
 - Checks named in a dispatch's `verification` run on the host after the worker finishes. The worker's report is a claim until then.
-- Each receipt carries a SHA-256 digest over the receipt and its ledger row. Verification recomputes it, so an edited receipt fails. The digest detects tampering; it is not a signature.
+- Each current receipt carries a SHA-256 digest over its canonical receipt fields and reconstructible ledger provenance. Verification checks shared ledger fields and recomputes the digest, so an edited sealed field fails. The digest detects tampering; it is not a signature.
 
 ## Source map
 
