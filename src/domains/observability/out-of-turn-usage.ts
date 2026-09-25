@@ -99,7 +99,11 @@ export interface OutOfTurnUsageRow {
 	target: string;
 	attributedModelId: string;
 	usage: OutOfTurnUsage;
-	/** New failed-compaction rows preserve unknown usage as null. Legacy rows are unchanged. */
+	/**
+	 * Whether the call completed. Required on failed-compaction rows and kept on
+	 * prewarm rows, whose writer records it; both preserve unknown usage as null.
+	 * Legacy rows without it are unchanged.
+	 */
 	callOutcome?: "success" | "error" | "aborted";
 	/** Present when the caller measured the call. */
 	timing?: OutOfTurnTiming;
@@ -230,14 +234,17 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 	if (typeof value.timestamp !== "string" || value.timestamp.length === 0) return null;
 	if (!isRecord(value.usage)) return null;
 	const usage = value.usage;
-	if (
-		label === "failed-compaction" &&
-		value.callOutcome !== "success" &&
-		value.callOutcome !== "error" &&
-		value.callOutcome !== "aborted"
-	)
-		return null;
-	const reading = label === "failed-compaction" ? nullableNumber : numberOr0;
+	const callOutcome =
+		value.callOutcome === "success" || value.callOutcome === "error" || value.callOutcome === "aborted"
+			? value.callOutcome
+			: undefined;
+	if (label === "failed-compaction" && callOutcome === undefined) return null;
+	// The prewarm writer records its outcome and leaves unobserved usage null.
+	// Coercing both away read a failed or aborted prewarm back as a completed
+	// call that cost nothing. Rows written before either field keep reading as
+	// they always did, because a number parses the same either way.
+	const keepsOutcome = label === "failed-compaction" || label === "prewarm";
+	const reading = keepsOutcome ? nullableNumber : numberOr0;
 	const timing = asTiming(value.timing);
 	const promptCache = asPromptCache(value.promptCache);
 	return {
@@ -261,7 +268,7 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 			costUsd: reading(usage.costUsd),
 			costProvenance: asCostProvenance(usage.costProvenance),
 		},
-		...(label === "failed-compaction" ? { callOutcome: value.callOutcome as "success" | "error" | "aborted" } : {}),
+		...(keepsOutcome && callOutcome !== undefined ? { callOutcome } : {}),
 		...(timing === null ? {} : { timing }),
 		...(promptCache === null ? {} : { promptCache }),
 	};

@@ -45,6 +45,18 @@ types are point events with `ended_at IS NULL`. A real tool call is folded into
 one row keyed by its worker tool-call id. Its payload carries the readable tool
 name, arguments, bounded result snippet, success, duration, and agent.
 
+A call can be announced by two producers under one id. The engine's
+`tool_execution_start`/`tool_execution_end` frames (native and ACP workers)
+carry the arguments and the result at the top level. Clio's
+`clio_coder_tool_start`/`clio_coder_tool_finish` frames (native, ACP and
+claude-sdk workers) nest their facts under `payload`, and only the finish
+carries a measured `durationMs`. The mirror merges both into the one row: the
+first observed start anchors `started_at`, the engine frames supply the name,
+arguments and result, the Clio finish supplies `duration_ms`, and `ended_at` is
+`started_at` plus that duration. A claude-sdk worker, which emits only the Clio
+frames, gets a row with its duration and no arguments. A call no producer timed
+keeps a null `duration_ms` and the mirror's own end stamp.
+
 Gate checks are stored as `checks_json` arrays of `{item, ok, note}`. They are
 projected only from successfully parsed typed reviewer/judge results, never by
 scraping prose. Worker/model/session occupancy is mirrored in `agent_sessions`.

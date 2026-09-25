@@ -768,9 +768,12 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 		},
 		evidenceBuildFailed(runId, message) {
 			pendingEvidence.delete(runId);
+			// A failed build is an error. The dispatch board reads only error-level
+			// evidence notices as a failed proof, so the warning this used to raise
+			// left the board's failed state unreachable.
 			pushNotice(
 				"evidence",
-				"warning",
+				"error",
 				message.length > 0 ? message : `evidence build failed for ${runId}`,
 				makeRef({ runId }),
 			);

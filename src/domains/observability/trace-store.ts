@@ -1395,11 +1395,27 @@ export interface DispatchTraceMirror {
 	close(): Promise<void>;
 }
 
+/**
+ * One tool call as the mirror has seen it so far. A call can be announced by
+ * two producers under the same id: the engine's `tool_execution_*` frames
+ * (native and ACP workers) and Clio's own `clio_coder_tool_*` frames (native,
+ * ACP and claude-sdk workers). The engine frames carry args and the result;
+ * only the Clio finish carries a measured duration. The row is rewritten on
+ * each finish with everything known so far, and the entry is released once
+ * every producer that started the call has finished it.
+ */
 interface ToolStart {
 	toolCallId: string;
 	tool: string;
 	args: unknown;
 	startedAt: string;
+	engineStarted: boolean;
+	clioStarted: boolean;
+	engineFinished: boolean;
+	clioFinished: boolean;
+	durationMs: number | null;
+	result: unknown;
+	ok: boolean;
 }
 
 export function createDispatchTraceMirror(
@@ -1514,7 +1530,14 @@ function recordProgress(
 	if (!isRecord(payload.event)) return;
 	const event = payload.event;
 	const type = typeof event.type === "string" ? normalizeClioCoderEventType(event.type) : "progress";
-	const toolCallId = stringValue(event.toolCallId) ?? stringValue(event.tool_call_id);
+	// Every producer of the Clio tool frames nests the call's facts under
+	// `payload` (engine/worker-runtime.ts, engine/claude/tool-safety.ts,
+	// engine/acp/event-mapper.ts), while the engine's own frames carry them at
+	// the top level. Reading the Clio frames at the top level found no id, so a
+	// claude-sdk worker got no tool rows and no row ever had a duration.
+	const clioToolFrame = type === "clio_coder_tool_start" || type === "clio_coder_tool_finish";
+	const toolFacts = clioToolFrame && isRecord(event.payload) ? event.payload : event;
+	const toolCallId = stringValue(toolFacts.toolCallId) ?? stringValue(toolFacts.tool_call_id);
 	if (
 		type === "message_end" &&
 		isRecord(event.message) &&
@@ -1548,17 +1571,46 @@ function recordProgress(
 		}
 	}
 	if ((type === "tool_execution_start" || type === "clio_coder_tool_start") && toolCallId !== null) {
-		starts.set(`${payload.runId}:${toolCallId}`, {
-			toolCallId,
-			tool: stringValue(event.toolName) ?? stringValue(event.tool) ?? "tool",
-			args: event.args ?? null,
-			startedAt: at,
-		});
+		const key = `${payload.runId}:${toolCallId}`;
+		const engine = type === "tool_execution_start";
+		const named = stringValue(toolFacts.toolName) ?? stringValue(toolFacts.tool);
+		const known = starts.get(key);
+		if (known === undefined) {
+			starts.set(key, {
+				toolCallId,
+				tool: named ?? "tool",
+				args: engine ? (toolFacts.args ?? null) : null,
+				startedAt: at,
+				engineStarted: engine,
+				clioStarted: !engine,
+				engineFinished: false,
+				clioFinished: false,
+				durationMs: null,
+				result: undefined,
+				ok: true,
+			});
+		} else if (engine) {
+			// The engine frame names the call the way rows always have and is the
+			// only one that carries args, so it refines a Clio-announced start.
+			known.engineStarted = true;
+			if (named !== null) known.tool = named;
+			if (toolFacts.args !== undefined) known.args = toolFacts.args;
+		} else known.clioStarted = true;
 		return;
 	}
 	if ((type === "tool_execution_end" || type === "clio_coder_tool_finish") && toolCallId !== null) {
 		const key = `${payload.runId}:${toolCallId}`;
 		const start = starts.get(key);
+		const engine = type === "tool_execution_end";
+		const finishedOk = toolFacts.isError !== true && toolFacts.outcome !== "error" && toolFacts.outcome !== "blocked";
+		const reported = toolFacts.result ?? toolFacts.resultSnippet;
+		if (start !== undefined) {
+			if (engine) start.engineFinished = true;
+			else start.clioFinished = true;
+			start.durationMs ??= finiteNonNegative(toolFacts.durationMs);
+			if (start.result === undefined && reported !== undefined) start.result = reported;
+			start.ok &&= finishedOk;
+		}
 		// One clock frame per row. The worker measures `durationMs` on its own
 		// clock while the mirror stamps `at` on the orchestrator's, so storing
 		// both as independent endpoints made `endedAt - startedAt` and
@@ -1570,7 +1622,7 @@ function recordProgress(
 		// observed start, `at` anchors the end and the start is derived backwards
 		// instead. With no reported span there is only one measurement to begin
 		// with, and both stamps stay as the mirror read them.
-		const duration = finiteNonNegative(event.durationMs);
+		const duration = start !== undefined ? start.durationMs : finiteNonNegative(toolFacts.durationMs);
 		const observedStart = start?.startedAt;
 		const startedAt = observedStart ?? (duration === null ? at : new Date(Date.parse(at) - duration).toISOString());
 		const startedAtMs = Date.parse(startedAt);
@@ -1578,10 +1630,10 @@ function recordProgress(
 			duration !== null && observedStart !== undefined && Number.isFinite(startedAtMs)
 				? new Date(startedAtMs + duration).toISOString()
 				: at;
-		const tool = start?.tool ?? stringValue(event.toolName) ?? stringValue(event.tool) ?? "tool";
-		const args = start?.args ?? event.args ?? null;
-		const result = event.result ?? event.resultSnippet ?? null;
-		const ok = event.isError !== true && event.outcome !== "error" && event.outcome !== "blocked";
+		const tool = start?.tool ?? stringValue(toolFacts.toolName) ?? stringValue(toolFacts.tool) ?? "tool";
+		const args = start?.args ?? toolFacts.args ?? null;
+		const result = (start !== undefined ? start.result : reported) ?? null;
+		const ok = start !== undefined ? start.ok : finishedOk;
 		store.insertEvent({
 			eventId: `${payload.runId}:tool:${toolCallId}`,
 			runId: payload.runId,
@@ -1601,7 +1653,12 @@ function recordProgress(
 			startedAt,
 			endedAt,
 		});
-		starts.delete(key);
+		if (
+			start === undefined ||
+			((!start.engineStarted || start.engineFinished) && (!start.clioStarted || start.clioFinished))
+		) {
+			starts.delete(key);
+		}
 		return;
 	}
 	const sequence = (seen.get(payload.runId) ?? 0) + 1;
