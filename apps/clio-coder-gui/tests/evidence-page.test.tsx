@@ -16,7 +16,7 @@ register(
 		'export async function load(url, context, next) { return url.endsWith(".css") ? { format: "module", source: "", shortCircuit: true } : next(url, context); }',
 	)}`,
 );
-const { EvidencePage } = await import("../client/pages/evidence.js");
+const { CollectedEvidence, EvidencePage } = await import("../client/pages/evidence.js");
 
 const client = { token: "t", call: () => new Promise(() => {}) } as unknown as Client;
 
@@ -62,4 +62,10 @@ test("the evidence list offers its links only while no refresh can have narrowed
 	assert.match(refreshing, /evidence-007/);
 	assert.doesNotMatch(refreshing, /href="\/evidence\/evidence-007"/);
 	assert.match(refreshing, /<button type="button" disabled="">Load more evidence<\/button>/);
+});
+
+test("newly collected evidence is named, never linked to its unlisted detail", () => {
+	const html = render(new QueryClient(), <CollectedEvidence id="evidence-new" />);
+	assert.match(html, /<code>evidence-new<\/code>/);
+	assert.doesNotMatch(html, /href=/);
 });

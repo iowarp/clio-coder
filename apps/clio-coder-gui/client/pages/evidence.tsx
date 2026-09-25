@@ -44,6 +44,18 @@ function TrustGuide({ axes }: { axes?: Record<(typeof trustChecks)[number]["key"
 		</details>
 	);
 }
+/**
+ * A new bundle was never served by a listing, so its detail route refuses it.
+ * The list orders bundles by their runs' times, not by collection time, so no
+ * fixed page is sure to hold it: name it rather than link to it.
+ */
+export function CollectedEvidence({ id }: { id: string }) {
+	return (
+		<p>
+			Collected <code>{id}</code>. Open it from the evidence list, which orders bundles by when their runs happened.
+		</p>
+	);
+}
 function EvidenceActions({ client, initialRun = "" }: { client: Client; initialRun?: string }) {
 	const selection = useWorkspaceSelection(client);
 	const [runId, setRunId] = useState(initialRun);
@@ -96,7 +108,7 @@ function EvidenceActions({ client, initialRun = "" }: { client: Client; initialR
 						<>
 							<p>{operation.data.result.message}</p>
 							{"kind" in operation.data.result && operation.data.result.kind === "evidence" && (
-								<Link to={`/evidence/${operation.data.result.id}`}>Read collected evidence</Link>
+								<CollectedEvidence id={operation.data.result.id} />
 							)}
 							{"kind" in operation.data.result && operation.data.result.kind === "receipt-verification" && (
 								<>
