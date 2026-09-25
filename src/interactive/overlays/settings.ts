@@ -83,7 +83,14 @@ import {
 } from "../../engine/tui.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
-import { buildHint, DEFAULT_SELECT_THEME, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
+import {
+	buildHint,
+	centeredWindow,
+	DEFAULT_SELECT_THEME,
+	fitRows,
+	selectionMark,
+	showClioOverlayFrame,
+} from "../overlay-frame.js";
 import { barSep, clioTheme, GLYPH, padAnsi, rule, screenTitle } from "../theme/index.js";
 import { modelsForTarget } from "./model-selector.js";
 
@@ -778,7 +785,7 @@ class ScopedModelChecklist implements Component {
 			return [theme.fg("dim", "No models are available to select.")];
 		}
 		const visibleRows = Math.min(10, this.rows.length);
-		const [start, end] = scrollWindow(this.rows.length, this.selectedRow, visibleRows);
+		const [start, end] = centeredWindow(this.rows.length, this.selectedRow, visibleRows);
 		const lines = this.rows.slice(start, end).map((row, offset) => {
 			if (row.kind === "group") return theme.style("dim", row.label, { bold: true });
 			const selected = start + offset === this.selectedRow;
@@ -2707,21 +2714,6 @@ function propagationFor(id: string): string | null {
 	return null;
 }
 
-function fixedLines(lines: readonly string[], width: number, height: number): string[] {
-	const out = lines.slice(0, height).map((line) => padAnsi(line, width, GLYPH.ellipsis));
-	while (out.length < height) out.push(" ".repeat(Math.max(0, width)));
-	return out;
-}
-
-/** Typed text, as opposed to an escape sequence or a control byte. */
-
-function scrollWindow(total: number, selected: number, height: number): [number, number] {
-	if (height <= 0 || total <= height) return [0, total];
-	const clamped = Math.max(0, Math.min(selected, total - 1));
-	const start = Math.max(0, Math.min(clamped - Math.floor(height / 2), total - height));
-	return [start, Math.min(total, start + height)];
-}
-
 function rowColumns(items: readonly SettingsCenterItem[], width: number, indentWidth: number): RowColumns {
 	const safeWidth = Math.max(1, width);
 	const prefixWidth = indentWidth + 2;
@@ -3045,7 +3037,7 @@ export class SettingsCenter implements Component {
 				: width >= ULTRAWIDE_LAYOUT_MIN_WIDTH
 					? this.renderUltraWide(width, bodyHeight)
 					: this.renderWide(width, bodyHeight);
-		return fixedLines(lines, width, bodyHeight);
+		return fitRows(lines, width, bodyHeight);
 	}
 
 	/**
@@ -3519,7 +3511,7 @@ export class SettingsCenter implements Component {
 
 	private emptyFilterLines(width: number, height: number): string[] {
 		const theme = clioTheme();
-		return fixedLines(
+		return fitRows(
 			[
 				theme.fg(
 					"muted",
@@ -3542,7 +3534,7 @@ export class SettingsCenter implements Component {
 		const theme = clioTheme();
 		const section = this.currentSection();
 		const item = this.selectedItem();
-		if (!section) return fixedLines([], width, height);
+		if (!section) return fitRows([], width, height);
 		if (this.level === "sections" || !item) {
 			const rows = [
 				screenTitle(theme, section.label),
@@ -3551,7 +3543,7 @@ export class SettingsCenter implements Component {
 				"",
 				theme.fg("dim", "Tab or → to edit its settings"),
 			];
-			return fixedLines(rows, width, height);
+			return fitRows(rows, width, height);
 		}
 		const body: string[] = [
 			screenTitle(theme, item.label),
@@ -3574,7 +3566,7 @@ export class SettingsCenter implements Component {
 		const marked =
 			body.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept;
 		const filler = Array.from({ length: Math.max(0, height - marked.length - note.length) }, () => "");
-		return fixedLines([...marked, ...filler, ...note], width, height);
+		return fitRows([...marked, ...filler, ...note], width, height);
 	}
 
 	private renderWide(width: number, bodyHeight: number): string[] {
@@ -3619,8 +3611,8 @@ export class SettingsCenter implements Component {
 			0,
 			rows.findIndex((row) => row.sectionId === this.selectedSectionId),
 		);
-		const [start, end] = scrollWindow(rows.length, selectedLine, height);
-		return fixedLines(
+		const [start, end] = centeredWindow(rows.length, selectedLine, height);
+		return fitRows(
 			rows.slice(start, end).map((row) => row.line),
 			width,
 			height,
@@ -3656,21 +3648,21 @@ export class SettingsCenter implements Component {
 	private renderRightLane(width: number, height: number): string[] {
 		if (this.submenuComponent) {
 			const lines = this.submenuComponent.render(width);
-			return fixedLines(lines, width, height);
+			return fitRows(lines, width, height);
 		}
 		const theme = clioTheme();
 		const section = this.currentSection();
-		if (!section) return fixedLines([], width, height);
+		if (!section) return fitRows([], width, height);
 		const rowBudget = Math.max(0, height - 1);
 		const selected = this.rowIndex(section.id);
-		const [start, end] = scrollWindow(section.items.length, selected, rowBudget);
+		const [start, end] = centeredWindow(section.items.length, selected, rowBudget);
 		const columns = rowColumns(section.items, width, 0);
 		const rows = section.items.slice(start, end).map((item, offset) => {
 			const isSelected = start + offset === selected && this.level === "rows";
 			const display = this.displayValueFor(item, isSelected);
 			return formatSettingRow(item, width, isSelected, columns, 0, display.value, display.pending);
 		});
-		return fixedLines([screenTitle(theme, section.label), ...rows], width, height);
+		return fitRows([screenTitle(theme, section.label), ...rows], width, height);
 	}
 
 	/**
@@ -3684,7 +3676,7 @@ export class SettingsCenter implements Component {
 		const available = Math.max(1, bodyHeight - head.length);
 		if (this.sections().length === 0) return [...head, ...this.emptyFilterLines(width, available)];
 		if (this.submenuComponent) {
-			return [...head, ...fixedLines(this.submenuComponent.render(width), width, available)];
+			return [...head, ...fitRows(this.submenuComponent.render(width), width, available)];
 		}
 		const inspector = this.narrowInspector(width, bodyHeight);
 		const listHeight = Math.max(1, available - inspector.length);
@@ -3733,8 +3725,8 @@ export class SettingsCenter implements Component {
 			0,
 			rows.findIndex((row) => row.sectionId === this.selectedSectionId),
 		);
-		const [start, end] = scrollWindow(rows.length, selectedLine, height);
-		return fixedLines(
+		const [start, end] = centeredWindow(rows.length, selectedLine, height);
+		return fitRows(
 			rows.slice(start, end).map((row) => row.line),
 			width,
 			height,
@@ -3743,16 +3735,16 @@ export class SettingsCenter implements Component {
 
 	private renderRowsPage(width: number, height: number): string[] {
 		const section = this.currentSection();
-		if (!section) return fixedLines([], width, height);
+		if (!section) return fitRows([], width, height);
 		const selected = this.rowIndex(section.id);
-		const [start, end] = scrollWindow(section.items.length, selected, height);
+		const [start, end] = centeredWindow(section.items.length, selected, height);
 		const columns = rowColumns(section.items, width, 0);
 		const rows = section.items.slice(start, end).map((item, offset) => {
 			const isSelected = start + offset === selected;
 			const display = this.displayValueFor(item, isSelected);
 			return formatSettingRow(item, width, isSelected, columns, 0, display.value, display.pending);
 		});
-		return fixedLines(rows, width, height);
+		return fitRows(rows, width, height);
 	}
 
 	private renderFooter(width: number, maxFooterLines: number): string[] {

@@ -13,7 +13,7 @@ import {
 } from "../../engine/tui.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
-import { buildHint, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, fitRows, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, markdownTheme, padAnsi } from "../theme/index.js";
 import {
 	type ArtifactProvider,
@@ -630,13 +630,13 @@ export class ViewOverlayView implements Component {
 
 		if (this.loadingArtifacts) {
 			lines.push(padAnsi(theme.fg("dim", "loading artifacts…"), width, GLYPH.ellipsis));
-			return this.fixedLines(lines, width, height);
+			return fitRows(lines, width, height);
 		}
 		if (this.artifactError) {
 			lines.push(
 				...wrapTextWithAnsi(theme.fg("error", this.artifactError), Math.max(1, width)).map((line) => padAnsi(line, width)),
 			);
-			return this.fixedLines(lines, width, height);
+			return fitRows(lines, width, height);
 		}
 
 		const filtered = this.filteredArtifacts();
@@ -651,7 +651,7 @@ export class ViewOverlayView implements Component {
 			),
 		);
 		if (filtered.length === 0)
-			return this.fixedLines(
+			return fitRows(
 				[
 					...lines,
 					theme.fg("dim", "No matching details."),
@@ -695,7 +695,7 @@ export class ViewOverlayView implements Component {
 			lines.push(padAnsi(`${cursor}${clippedTitle}${metaWidth > 0 ? `${gap}${meta}` : ""}`, width, GLYPH.ellipsis));
 		}
 
-		return this.fixedLines(lines, width, height);
+		return fitRows(lines, width, height);
 	}
 
 	private renderContent(width: number, height: number): string[] {
@@ -729,13 +729,7 @@ export class ViewOverlayView implements Component {
 			.slice(layoutPending ? 0 : this.contentScrollOffset, (layoutPending ? 0 : this.contentScrollOffset) + bodyHeight)
 			.map((line) => padAnsi(line, width, GLYPH.ellipsis));
 		const lines = [...header, ...visible];
-		return this.fixedLines(lines, width, height);
-	}
-
-	private fixedLines(lines: readonly string[], width: number, height: number): string[] {
-		const out = lines.slice(0, height).map((line) => padAnsi(line, width, GLYPH.ellipsis));
-		while (out.length < height) out.push(" ".repeat(Math.max(0, width)));
-		return out;
+		return fitRows(lines, width, height);
 	}
 
 	render(width: number): string[] {

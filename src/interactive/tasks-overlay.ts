@@ -14,11 +14,10 @@ import {
 	matchesKey,
 	type OverlayHandle,
 	type TUI,
-	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../engine/tui.js";
-import { buildHint, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
+import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
 import { type ClioToken, clioTheme, fitUnits, GLYPH, rule } from "./theme/index.js";
 
 /**
@@ -49,10 +48,6 @@ function muted(text: string): string {
 	return clioTheme().fg("muted", text);
 }
 
-function fitContentLine(text: string, width: number): string {
-	return truncateToWidth(text, Math.max(1, width), "…", true);
-}
-
 function firstUsefulToken(values: ReadonlyArray<string>): string | null {
 	for (const value of values) {
 		const token = value.trim();
@@ -79,7 +74,7 @@ function taskOriginLabel(task: TaskBoardTask): string {
 // `dispatch:`/`evidence:` derivations were pure string echoes of the run id, so
 // the in-flight run ids render once, in their own header line, instead.
 function formatTaskProofLine(board: TaskBoardSnapshot, width: number): string {
-	return fitContentLine(`${dim("proof")} ${muted(taskLedgerProofRef(board))}`, width);
+	return fitRow(`${dim("proof")} ${muted(taskLedgerProofRef(board))}`, width);
 }
 
 function taskRow(task: TaskBoardTask, width: number, selected?: boolean): string {
@@ -95,7 +90,7 @@ function taskRow(task: TaskBoardTask, width: number, selected?: boolean): string
 			? dim(task.title)
 			: muted(task.title);
 	const cursor = selected === undefined ? "" : `${selectionMark(selected)} `;
-	return fitContentLine(
+	return fitRow(
 		`${cursor}${glyph} ${dim(task.id.padEnd(4))} ${title} ${dim(`· ${taskOriginLabel(task)}${unverified ? " · unverified" : ""}`)}`,
 		width,
 	);
@@ -105,7 +100,7 @@ function wrapTaskProse(prefix: string, prose: string, width: number): string[] {
 	const prefixWidth = visibleWidth(prefix);
 	const proseWidth = Math.max(1, width - prefixWidth);
 	return wrapTextWithAnsi(prose, proseWidth).map((line, index) =>
-		fitContentLine(`${index === 0 ? prefix : " ".repeat(prefixWidth)}${line}`, width),
+		fitRow(`${index === 0 ? prefix : " ".repeat(prefixWidth)}${line}`, width),
 	);
 }
 
@@ -169,8 +164,8 @@ function formatTasksOverlayBodyLines(
 		counts.cancelled > 0 ? dim(`${counts.cancelled} dropped`) : null,
 	].filter((chip): chip is string => chip !== null);
 	const lines: string[] = [
-		fitContentLine(theme.fg("accent", board.title), width),
-		fitContentLine(chips.join(dim(" · ")), width),
+		fitRow(theme.fg("accent", board.title), width),
+		fitRow(chips.join(dim(" · ")), width),
 		rule(theme, width),
 		formatTaskProofLine(board, width),
 	];
@@ -230,7 +225,7 @@ function selectableRows(state: CompositeTasksOverlayState): TasksOverlaySelectio
 }
 
 function sectionHeading(label: string, width: number): string {
-	return fitContentLine(clioTheme().style("accent", label, { bold: true }), width);
+	return fitRow(clioTheme().style("accent", label, { bold: true }), width);
 }
 
 function isSameSelection(left: TasksOverlaySelection | undefined, right: TasksOverlaySelection): boolean {
@@ -277,14 +272,14 @@ export function formatCompositeTasksOverlayBodyLines(
 
 	lines.push("", sectionHeading("Task history", width));
 	const historyRows = terminalHistoryRows(state.board, state.history);
-	if (historyRows.length === 0) lines.push(fitContentLine(dim("No terminal tasks from prior boards."), width));
+	if (historyRows.length === 0) lines.push(fitRow(dim("No terminal tasks from prior boards."), width));
 	for (const row of historyRows) {
 		const rowSelection: TasksOverlaySelection = { kind: "history", board: row.board, task: row.task };
 		const presentation = unverifiedTaskChecks(row.task)
 			? { glyph: GLYPH.phaseBlocked, token: "warning" as const }
 			: STATUS_PRESENTATION[row.task.status];
 		lines.push(
-			fitContentLine(
+			fitRow(
 				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(`${row.board.boardId}:${row.task.id}`)} ${muted(row.task.title)} ${dim(`· ${taskOriginLabel(row.task)} · ${row.board.title}`)}`,
 				width,
 			),
@@ -293,13 +288,13 @@ export function formatCompositeTasksOverlayBodyLines(
 	}
 
 	lines.push("", sectionHeading("Artifacts", width));
-	if (state.artifacts.length === 0) lines.push(fitContentLine(dim("No workspace outputs recorded."), width));
+	if (state.artifacts.length === 0) lines.push(fitRow(dim("No workspace outputs recorded."), width));
 	const workspace = state.workspace ?? process.cwd();
 	for (const artifact of state.artifacts) {
 		const rowSelection: TasksOverlaySelection = { kind: "artifact", artifact };
 		const kind = artifact.artifactKind ? `:${artifact.artifactKind}` : "";
 		lines.push(
-			fitContentLine(
+			fitRow(
 				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg("muted", GLYPH.toolHeader)} ${muted(displayArtifactPath(artifact.path, workspace))} ${dim(`· ${artifact.tool}${kind} · ${artifact.timestamp}`)}`,
 				width,
 			),
@@ -307,12 +302,12 @@ export function formatCompositeTasksOverlayBodyLines(
 	}
 
 	lines.push("", sectionHeading("Operator tasks", width));
-	if (state.userTasks.length === 0) lines.push(fitContentLine(dim("No operator tasks in this project."), width));
+	if (state.userTasks.length === 0) lines.push(fitRow(dim("No operator tasks in this project."), width));
 	for (const task of state.userTasks) {
 		const rowSelection: TasksOverlaySelection = { kind: "user", task };
 		const presentation = USER_TASK_PRESENTATION[task.status];
 		lines.push(
-			fitContentLine(
+			fitRow(
 				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(task.id.padEnd(4))} ${muted(task.title)} ${dim(`· ${task.status}`)}`,
 				width,
 			),
@@ -368,8 +363,8 @@ class TasksOverlayBody implements Component {
 			Math.max(1, Math.floor(width)),
 		);
 		if (this.addInput) {
-			body.push("", fitContentLine(clioTheme().fg("accent", "New operator task"), width));
-			body.push(...this.addInput.render(Math.max(1, width)).map((line) => fitContentLine(line, width)));
+			body.push("", fitRow(clioTheme().fg("accent", "New operator task"), width));
+			body.push(...this.addInput.render(Math.max(1, width)).map((line) => fitRow(line, width)));
 		}
 		if (this.status) body.push("", ...wrapTextWithAnsi(clioTheme().fg("warning", this.status), Math.max(1, width)));
 		return body;

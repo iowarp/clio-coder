@@ -1,5 +1,6 @@
-import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
-import { clioTheme, GLYPH } from "../theme/index.js";
+import { visibleWidth } from "../../engine/tui.js";
+import { fitRow } from "../overlay-frame.js";
+import { clioTheme, GLYPH, padAnsi } from "../theme/index.js";
 
 export interface KeybindingDetailEntry {
 	id: string;
@@ -11,17 +12,6 @@ export interface KeybindingDetailEntry {
 
 const LABEL_WIDTH = 10;
 
-function fitCell(text: string, width: number): string {
-	const clipped = visibleWidth(text) >= width ? truncateToWidth(text, width, GLYPH.ellipsis, true) : text;
-	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
-}
-
-function fitLine(text: string, width: number): string {
-	const safeWidth = Math.max(1, width);
-	if (visibleWidth(text) <= safeWidth) return text;
-	return truncateToWidth(text, safeWidth, GLYPH.ellipsis, true);
-}
-
 function row(
 	label: string,
 	value: string,
@@ -32,7 +22,7 @@ function row(
 	} = {},
 ): string[] {
 	const theme = clioTheme();
-	const prefix = `${fitCell(theme.fg("dim", label), LABEL_WIDTH)} `;
+	const prefix = `${padAnsi(theme.fg("dim", label), LABEL_WIDTH)} `;
 	const prefixWidth = visibleWidth(prefix);
 	const available = Math.max(8, width - prefixWidth);
 	const values: string[] = [];
@@ -55,7 +45,7 @@ function row(
 	return values.map((text, index) => {
 		const lead = index === 0 ? prefix : " ".repeat(prefixWidth);
 		const styledPrefix = index === 0 ? (options.firstValuePrefix ?? "") : "";
-		return fitLine(`${lead}${styledPrefix}${valueStyle(text)}`, width);
+		return fitRow(`${lead}${styledPrefix}${valueStyle(text)}`, width);
 	});
 }
 
