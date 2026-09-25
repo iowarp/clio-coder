@@ -106,6 +106,7 @@ test("safe settings reject extra keys before ACP, project four keys, and expose 
 	const workspace = await h.workspaces.open(h.home.path),
 		session = await h.supervisor.open(workspace.id),
 		base = `/api/sessions/${session.id}`;
+	assert.equal(h.supervisor.capabilities(session.id).session?.autonomy, true);
 	const mutate = (path: string, body: unknown) =>
 		h.request(path, {
 			method: "PATCH",

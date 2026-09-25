@@ -331,7 +331,10 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 			strictEqual(rejected.error.data._meta["clio-coder/error"]?.code, "prompt_not_admitted");
 			strictEqual(rejected.error.data._meta["clio-coder/error"]?.reason, "authentication-required");
 			doesNotMatch(JSON.stringify(rejected), /CLIO_ACP_TEST_ONLY_KEY|settings.yaml|credentials.yaml/);
-			strictEqual(client.updates.length, 0);
+			strictEqual(
+				client.updates.some((update) => update.sessionUpdate !== "available_commands_update"),
+				false,
+			);
 			strictEqual(fixture.requests.length, 0);
 			await client.close(sessionId);
 			strictEqual(await runCli(["auth", "login", "acp-local", "--api-key", "synthetic-service-test-key"], target.env), 0);
@@ -390,7 +393,10 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 			const error = rejected.error as { code: number; data: { _meta: Record<string, Record<string, unknown>> } };
 			strictEqual(error.code, -32603);
 			strictEqual(error.data._meta["clio-coder/error"]?.code, "prompt_not_admitted");
-			strictEqual(emptyClient.updates.length, 0);
+			strictEqual(
+				emptyClient.updates.some((update) => update.sessionUpdate !== "available_commands_update"),
+				false,
+			);
 			await emptyClient.close(emptySession);
 		} finally {
 			textClient?.kill();

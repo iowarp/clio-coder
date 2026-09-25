@@ -10,7 +10,7 @@ import {
 	type TimelineItem,
 	type Turn,
 } from "../../contracts/sessions.js";
-import { Autonomy, type AutonomyLevel, SafeSettings, type SafeSettingsPatch } from "../../contracts/settings-safe.js";
+import { type AutonomyLevel, SafeSettings, type SafeSettingsPatch } from "../../contracts/settings-safe.js";
 import {
 	CommandCatalog,
 	type CommandRequest,
@@ -58,6 +58,7 @@ type Entry = {
 	turnId: string | null;
 	replay: number | null;
 	closing: boolean;
+	bound: boolean;
 	permissions?: Permissions;
 	eventSequence: number;
 	prompt?: Promise<void>;
@@ -172,7 +173,16 @@ export class Supervisor {
 				await transport.forceTerminate();
 				throw error;
 			}
-			entry = { id, client: new AcpClient(transport), row, turnId: null, replay: null, closing: false, eventSequence: 0 };
+			entry = {
+				id,
+				client: new AcpClient(transport),
+				row,
+				turnId: null,
+				replay: null,
+				closing: false,
+				bound: false,
+				eventSequence: 0,
+			};
 			this.snapshots.set(id, emptySession(id, workspaceId));
 			this.entries.set(id, entry);
 			this.starting--;
@@ -236,6 +246,7 @@ export class Supervisor {
 				this.snapshots.set(boundId, emptySession(boundId, workspaceId));
 			}
 			await this.children.bind(row, boundId);
+			entry.bound = true;
 			if (this.stopping) {
 				await this.retire(entry);
 				throw new AppProblem("unavailable", "Server shut down while opening the session.");
@@ -313,8 +324,16 @@ export class Supervisor {
 		const params = record(value),
 			update = record(params.update),
 			meta = record(params._meta);
+		const metadataUpdate =
+			update.sessionUpdate === "current_mode_update" ||
+			update.sessionUpdate === "config_option_update" ||
+			update.sessionUpdate === "session_info_update" ||
+			update.sessionUpdate === "available_commands_update";
+		// session/new can send metadata before its response binds the server's ID.
+		if (metadataUpdate && !entry.bound && params.sessionId !== entry.id) return;
 		if (params.sessionId !== entry.id)
 			throw new AppProblem("upstream_acp", "ACP update has a different session identity.");
+		if (metadataUpdate) return;
 		const replay = record(meta["clio-coder/replay"]).turn;
 		if (typeof replay === "number" && Number.isInteger(replay) && replay > 0 && replay !== entry.replay) {
 			if (entry.turnId) this.finish(entry, "end_turn", null, null, null);
@@ -477,7 +496,7 @@ export class Supervisor {
 		return this.projected(id, "_clio-coder/targets/probe", { targetId }, TargetProbe);
 	}
 	autonomy(id: string, level?: Static<typeof AutonomyLevel>) {
-		return this.projected(id, "_clio-coder/session/autonomy", { sessionId: id, ...(level ? { level } : {}) }, Autonomy);
+		return this.active(id).client.autonomy(id, level);
 	}
 	capabilities(id: string) {
 		return this.active(id).client.capabilities;
@@ -551,11 +570,12 @@ export class Supervisor {
 			throw new AppProblem("validation", "Session label exceeds 256 UTF-8 bytes.");
 		const entry = this.entries.get(id);
 		const params = { sessionId: id, ...(label === undefined ? {} : { label }) };
+		const method = action === "delete" ? "session/delete" : "_clio-coder/session/label";
 		if (entry) {
 			if (action === "delete" || entry.closing) throw new AppProblem("conflict", "Close the session before deleting it.");
-			await entry.client.request(`_clio-coder/session/${action}`, params);
+			await entry.client.request(method, params);
 		} else {
-			const job = this.control(workspaceId, id, `_clio-coder/session/${action}`, params);
+			const job = this.control(workspaceId, id, method, params);
 			this.controls.add(job);
 			try {
 				await job;

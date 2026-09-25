@@ -171,10 +171,10 @@ export interface AcpInitializeResponse {
 
 export interface AcpSessionInfo {
 	sessionId: string;
+	cwd: string;
 	title?: string;
-	cwd?: string;
 	updatedAt?: string;
-	messageCount?: number;
+	_meta?: Record<string, unknown>;
 }
 
 export interface AcpContentText {

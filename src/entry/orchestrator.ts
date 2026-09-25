@@ -2882,6 +2882,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						model: settings.chat.model,
 					};
 				},
+				setSessionRouting: (patch) => {
+					applyRoutingAtScope({ orchestrator: patch }, "session");
+				},
 				onActiveSessionAutonomyChange: (level) => {
 					activeAcpSessionAutonomy = level;
 				},

@@ -6,7 +6,6 @@ import {
 	DecisionCapability,
 	EMPTY_CAPABILITIES,
 	EventsCapability,
-	SessionCapability,
 	SteeringCapability,
 	ToolProgressCapability,
 } from "../../contracts/capabilities.js";
@@ -28,13 +27,28 @@ function optional<S extends TSchema>(schema: S, value: unknown): Static<S> | und
 	const projected = Value.Clean(schema, structuredClone(value));
 	return Value.Check(schema, projected) ? (projected as Static<S>) : undefined;
 }
+function stableCapability(value: unknown): boolean {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
 function readCapabilities(result: unknown): AgentCapabilities {
 	const capabilities = record(record(result).agentCapabilities);
 	const meta = record(capabilities._meta);
+	const stableSession = record(capabilities.sessionCapabilities);
+	const extensionSession = record(meta["clio-coder/session"]);
 	return {
 		loadSession: capabilities.loadSession === true,
 		mediatedTools: meta["clio-coder/tools"] === "mediated",
-		...maybe("session", optional(SessionCapability, meta["clio-coder/session"])),
+		...(Object.keys(stableSession).length > 0 || Object.keys(extensionSession).length > 0
+			? {
+					session: {
+						close: stableCapability(stableSession.close),
+						list: stableCapability(stableSession.list),
+						delete: stableCapability(stableSession.delete),
+						label: extensionSession.label === true,
+						autonomy: false,
+					},
+				}
+			: {}),
 		...maybe("settings", optional(Settings, meta["clio-coder/settings"])),
 		...maybe("targets", optional(Targets, meta["clio-coder/targets"])),
 		...maybe("steering", optional(SteeringCapability, meta["clio-coder/steering"])),
@@ -89,6 +103,7 @@ export function acpProblem(error: unknown) {
 	return new AppProblem("upstream_acp", "Clio ACP process is unavailable.");
 }
 export class AcpClient {
+	private readonly modes = new Map<string, { level: "default" | "yolo"; source: "settings" | "session" }>();
 	constructor(readonly transport: AcpJsonRpcTransport) {}
 	async request<T>(method: string, params: unknown, timeoutMs = 15000): Promise<T> {
 		try {
@@ -126,10 +141,35 @@ export class AcpClient {
 			mcpServers: [],
 			...(sessionId ? { sessionId } : {}),
 		});
-		if (sessionId) return sessionId;
+		const mode = record(record(result).modes).currentModeId;
+		if (sessionId) {
+			if (mode === "default" || mode === "yolo") this.rememberMode(sessionId, mode);
+			return sessionId;
+		}
 		if (!Value.Check(NewSession, result))
 			throw new AppProblem("upstream_acp", "Clio ACP returned an invalid session identity.");
+		if (mode === "default" || mode === "yolo") this.rememberMode(result.sessionId, mode);
 		return result.sessionId;
+	}
+	private rememberMode(sessionId: string, level: "default" | "yolo") {
+		this.modes.set(sessionId, { level, source: "settings" });
+		this.capabilities.session = {
+			close: false,
+			list: false,
+			delete: false,
+			label: false,
+			...this.capabilities.session,
+			autonomy: true,
+		};
+	}
+	async autonomy(sessionId: string, level?: "default" | "yolo") {
+		if (level !== undefined) {
+			await this.request("session/set_mode", { sessionId, modeId: level });
+			this.modes.set(sessionId, { level, source: "session" });
+		}
+		const current = this.modes.get(sessionId);
+		if (!current) throw new AppProblem("upstream_acp", "Clio did not provide a session mode.");
+		return current;
 	}
 	async prompt(sessionId: string, text: string) {
 		const result = await this.request<unknown>(
