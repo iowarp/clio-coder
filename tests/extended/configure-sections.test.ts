@@ -60,7 +60,7 @@ fleet:
     toolCallsPerRun: 30
     internalRunTimeoutMs: 600000
 safety:
-  autonomy: auto-edit
+  autonomy: default
   limits:
     sessionCostUsd: 5
     chatToolCallsPerTurn: 30

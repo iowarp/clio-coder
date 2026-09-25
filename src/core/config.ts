@@ -1866,12 +1866,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			const safety = raw.safety;
 			issues.unknownKeys("safety", safety, ["autonomy", "limits", "review"]);
 			if ("autonomy" in safety) {
-				const canonical = normalizeLegacyNamingValue(
-					normalizeLegacyNamingValue(safety.autonomy, "auto-edit", "default"),
-					"full-auto",
-					"yolo",
-				);
-				const parsed = expectEnum(issues, "safety.autonomy", canonical, OPERATOR_AUTONOMY_LEVELS);
+				const parsed = expectEnum(issues, "safety.autonomy", safety.autonomy, OPERATOR_AUTONOMY_LEVELS);
 				if (parsed !== undefined) settings.safety.autonomy = parsed;
 			}
 			if ("limits" in safety) {

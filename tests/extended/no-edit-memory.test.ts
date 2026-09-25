@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { compile } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 
-test("no-edit convention scope reaches full-auto prompts with mutation tools available", () => {
+test("no-edit convention scope reaches yolo prompts with mutation tools available", () => {
 	const prompt = compile(loadFragments(), {
 		identity: "identity.clio",
 		operatingContract: "operating.contract",
@@ -15,7 +15,7 @@ test("no-edit convention scope reaches full-auto prompts with mutation tools ava
 		},
 	}).systemPrompt;
 	match(prompt, /"Do not edit files" includes CLIO-CODER\.md and all repository files/u);
-	match(prompt, /Full-auto capability does not expand task scope/u);
+	match(prompt, /Yolo authority does not expand task scope/u);
 	match(prompt, /handoff export, shell write, or delegated\nedit/u);
 	match(prompt, /If the entry is absent, report that limit/u);
 	match(prompt, /where writes\nare authorized/u);

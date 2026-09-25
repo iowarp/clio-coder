@@ -228,6 +228,10 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			const migrated = readFileSync(join(home.root, "config", "settings.yaml"), "utf8");
 			match(migrated, /^version: 2$/mu);
 			match(migrated, /^ {2}autonomy: default$/mu);
+			const report = JSON.parse(
+				readFileSync(join(home.root, "state", "migration-reports", "2026-09-01-settings-v2.json"), "utf8"),
+			) as { notes: string[] };
+			ok(report.notes.some((note) => /autonomy.*default/u.test(note)));
 			match(migrated, /^chat:$/mu);
 			match(migrated, /^interface:$/mu);
 			ok(!/^panes:$/mu.test(migrated), "retired root panes map must be gone");

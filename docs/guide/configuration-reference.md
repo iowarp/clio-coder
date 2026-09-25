@@ -175,9 +175,9 @@ Trust and declaration loading are implemented in [`src/domains/gateway/mcp/trust
 
 ## Let Clio propose settings changes
 
-In an interactive `default` or `yolo` session, ask Clio to change a chat model, fleet route, profile, or autonomy setting. In `default`, Clio can lower autonomy but never propose raising it. Clio can discover `configure_clio` through the gateway and preview one saved setting change. In `default`, applying requests an **Apply** or **Cancel** decision from the host UI; in `yolo`, the exact preview applies directly. Applying checks that the saved value still matches the preview; expired or stale proposals need a fresh preview. The tool excludes credentials and connection definitions. The running session keeps its current routing, so reload Clio to use a newly saved route in that session. Other settings reload where the live settings loader supports it.
+In an interactive `default` or `yolo` session, ask Clio to change a chat model, fleet route, or profile. Clio can discover `configure_clio` through the gateway and preview one saved setting change. In `default`, applying requests an **Apply** or **Cancel** decision from the host UI; in `yolo`, the exact preview applies directly. Applying checks that the saved value still matches the preview; expired or stale proposals need a fresh preview. The tool excludes credentials, connection definitions, and `safety.autonomy`. The running session keeps its current routing, so reload Clio to use a newly saved route in that session. Other settings reload where the live settings loader supports it.
 
-The settings UI presents two choices: **default** and **yolo**. Saved older `auto-edit` and `full-auto` spellings are read as those canonical values. An explicit v1 upgrade converts its old `suggest` value to `default` and records that change in the migration report.
+`safety.autonomy` accepts only **default** and **yolo**. Set it in user `settings.yaml` or through an operator surface: `/settings`, `clio-coder configure`, `--autonomy`, or a session control in ACP or the GUI. Project settings cannot set it; Clio ignores that key and reports a layer issue. `configure_clio` cannot change it. An explicit v1 upgrade resets every other v1 autonomy value to `default` and records the reset in the migration report.
 
 ## Exact CLI and tool contracts
 

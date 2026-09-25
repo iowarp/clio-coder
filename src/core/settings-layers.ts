@@ -10,6 +10,7 @@
  * the one strict schema (core/config.ts). Project layers are committed
  * team configuration and must stay secrets-free, so credential-bearing keys are
  * stripped from the project and project.local layers with a diagnostic.
+ * Autonomy is operator-owned and is also stripped from project layers.
  *
  * Merge semantics, documented and explicit: objects deep-merge key by key;
  * arrays and scalars replace wholesale (a later layer's array wins entirely).
@@ -157,6 +158,25 @@ function stripCredentials(value: unknown, origin: SettingsOrigin, path: string, 
 	return out;
 }
 
+function stripProjectAutonomy(
+	blob: Record<string, unknown>,
+	origin: SettingsOrigin,
+	issues: SettingsLayerIssue[],
+): Record<string, unknown> {
+	if (!isRecord(blob.safety) || !Object.hasOwn(blob.safety, "autonomy")) return blob;
+	issues.push({
+		origin,
+		path: "safety.autonomy",
+		message: "autonomy is set only in user settings or by the operator; project value ignored",
+	});
+	const safety = { ...blob.safety };
+	delete safety.autonomy;
+	const cleaned = { ...blob };
+	if (Object.keys(safety).length === 0) delete cleaned.safety;
+	else cleaned.safety = safety;
+	return cleaned;
+}
+
 /**
  * Deep-merge raw layer blobs in precedence order, recording the origin that last
  * set each leaf. Objects recurse; arrays and scalars replace.
@@ -217,11 +237,13 @@ function prepareProjectLayers(cwd: string, issues: SettingsLayerIssue[]): Prepar
 	const readProjectLayer = (origin: SettingsOrigin, path: string, file: ProjectSurfaceFile | undefined): RawLayer => {
 		if (file?.error !== undefined) issues.push({ origin, path, message: file.error, kind: "unreadable" });
 		if (file?.text === null || file === undefined) return { origin, path, blob: undefined };
+		const raw = readRawLayer(origin, path, issues, file.text);
+		const blob = raw.blob === undefined ? undefined : stripProjectAutonomy(raw.blob, origin, issues);
 		if (snapshot.verdict !== "trusted") {
 			issues.push({ origin, path, message: projectSurfaceTrustNotice(snapshot, file.path) });
 			return { origin, path, blob: undefined };
 		}
-		return readRawLayer(origin, path, issues, file.text);
+		return { ...raw, blob };
 	};
 	const projectRaw = readProjectLayer("project", projectFile, snapshot.files[0]);
 	const localRaw = readProjectLayer("project.local", localFile, snapshot.files[1]);

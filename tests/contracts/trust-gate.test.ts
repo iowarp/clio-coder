@@ -34,7 +34,7 @@ test("S3-01: a real boot names skipped safety and settings files and the review 
 		const workspace = join(home.dir, "workspace");
 		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
 		writeFileSync(join(workspace, ".clio-coder", "safety.yaml"), "version: 1\ndisableDefaultPathPolicy: true\n");
-		writeFileSync(join(workspace, ".clio-coder", "settings.yaml"), "safety:\n  autonomy: full-auto\n");
+		writeFileSync(join(workspace, ".clio-coder", "settings.yaml"), "chat:\n  retry:\n    streamStallMs: 60000\n");
 		const cli = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
 		const boot = spawnSync(process.execPath, [cli], {
 			cwd: workspace,
@@ -59,7 +59,7 @@ test("S3-01: approved safety, settings, and hooks take effect, and changed bytes
 		const config = join(workspace, ".clio-coder");
 		mkdirSync(config, { recursive: true });
 		writeFileSync(join(config, "safety.yaml"), "version: 1\ndisableDefaultPathPolicy: true\n");
-		writeFileSync(join(config, "settings.yaml"), "safety:\n  autonomy: full-auto\n");
+		writeFileSync(join(config, "settings.yaml"), "chat:\n  retry:\n    streamStallMs: 60000\n");
 		writeFileSync(
 			join(config, "hooks.yaml"),
 			JSON.stringify([
@@ -70,7 +70,7 @@ test("S3-01: approved safety, settings, and hooks take effect, and changed bytes
 		strictEqual(readEnv().kind, "block");
 		for (const surface of ["safety", "settings", "hooks"] as const) approve(workspace, surface);
 		strictEqual(readEnv().kind, "allow");
-		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "yolo");
+		strictEqual(readLayeredSettings(workspace).settings.chat.retry.streamStallMs, 60000);
 		const hooks = buildUserHookRegistrations({ cwd: workspace, recordReceipt: () => undefined });
 		strictEqual(hooks.registrations.length, 1);
 		// Even a comment change needs fresh consent. No parser normalization can
@@ -81,7 +81,7 @@ test("S3-01: approved safety, settings, and hooks take effect, and changed bytes
 			strictEqual(captureProjectSurface(workspace, surface).verdict, "changed");
 		}
 		strictEqual(readEnv().kind, "block");
-		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "default");
+		strictEqual(readLayeredSettings(workspace).settings.chat.retry.streamStallMs, 180000);
 		deepStrictEqual(buildUserHookRegistrations({ cwd: workspace, recordReceipt: () => undefined }).registrations, []);
 		deepStrictEqual(hooks.registrations[0]?.evaluate({ hook: "before_tool", toolName: "read" }), []);
 	} finally {
@@ -170,7 +170,7 @@ test("S3-01: CLI review is read-only and approval refuses a stale digest", async
 		const workspace = join(home.dir, "workspace");
 		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
 		const file = join(workspace, ".clio-coder", "settings.yaml");
-		writeFileSync(file, "safety:\n  autonomy: full-auto\n");
+		writeFileSync(file, "chat:\n  retry:\n    streamStallMs: 60000\n");
 		const command = (args: string[]) =>
 			spawnSync(
 				process.execPath,
@@ -189,15 +189,15 @@ test("S3-01: CLI review is read-only and approval refuses a stale digest", async
 		strictEqual(review.status, 0, review.stderr);
 		const reviewed = JSON.parse(review.stdout) as { contentHash: string };
 		strictEqual(existsSync(workspaceTrustDirectory()), false);
-		writeFileSync(file, "safety:\n  autonomy: suggest\n");
+		writeFileSync(file, "chat:\n  retry:\n    streamStallMs: 70000\n");
 		strictEqual(command(["settings", "--hash", reviewed.contentHash]).status, 1);
 		strictEqual(captureProjectSurface(workspace, "settings").verdict, "untrusted");
 		const current = captureProjectSurface(workspace, "settings");
 		ok(current.contentHash);
 		strictEqual(command(["settings", "--hash", current.contentHash]).status, 0);
-		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "default");
+		strictEqual(readLayeredSettings(workspace).settings.chat.retry.streamStallMs, 70000);
 		strictEqual(command(["settings", "--revoke"]).status, 0);
-		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "default");
+		strictEqual(readLayeredSettings(workspace).settings.chat.retry.streamStallMs, 180000);
 	} finally {
 		home.restore();
 	}
@@ -241,12 +241,12 @@ test("S3-01: untrusted project hooks and settings cannot acquire operator author
 				{ id: "repo-command", kind: "command", on: "before_tool", argv: [process.execPath, "-e", "process.exit(0)"] },
 			]),
 		);
-		writeFileSync(join(workspace, ".clio-coder", "settings.yaml"), "safety:\n  autonomy: full-auto\n");
+		writeFileSync(join(workspace, ".clio-coder", "settings.yaml"), "chat:\n  retry:\n    streamStallMs: 60000\n");
 		const hooks = buildUserHookRegistrations({ cwd: workspace, recordReceipt: () => undefined });
 		deepStrictEqual(hooks.registrations, []);
 		ok(hooks.fileIssues.some((issue) => issue.message.includes("hooks.yaml") && issue.message.includes("untrusted")));
 		const settings = readLayeredSettings(workspace);
-		strictEqual(settings.settings.safety.autonomy, "default");
+		strictEqual(settings.settings.chat.retry.streamStallMs, 180000);
 		ok(settings.issues.some((issue) => issue.message.includes("settings.yaml") && issue.message.includes("untrusted")));
 	} finally {
 		home.restore();
