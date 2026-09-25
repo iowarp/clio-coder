@@ -2,10 +2,15 @@ import { match, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { parseRunCliArgs } from "../../src/cli/args.js";
+import { extractGlobalFlags } from "../../src/cli/argv.js";
 import { readSettings } from "../../src/core/config.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { applyControlValue } from "../../src/core/settings-controls.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { migrateSettingsV1Document } from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
+import { autonomyFromUserInput } from "../../src/domains/safety/autonomy.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 test("the user settings loader accepts only default and yolo autonomy", async (t) => {
@@ -66,5 +71,25 @@ test("project and local settings cannot override user autonomy, whether trusted 
 			const issue = layered.issues.find((item) => item.origin === origin && item.path === "safety.autonomy");
 			match(issue?.message ?? "", /autonomy.*operator|autonomy.*user settings/u);
 		}
+	}
+});
+
+// Retired level names must not regain meaning on any operator input surface.
+// tests/extended/knob-aliases.test.ts carries the same CLI guard outside CI.
+test("no CLI flag or settings editor accepts a retired autonomy name", () => {
+	for (const retired of ["suggest", "auto-edit", "full-auto", "capable", "read-only"]) {
+		strictEqual(parseRunCliArgs(["--autonomy", retired, "task"]).diagnostics[0]?.type, "error", retired);
+		strictEqual(extractGlobalFlags(["--autonomy", retired]).error, "--autonomy must be default|yolo", retired);
+		strictEqual(autonomyFromUserInput(retired), null, retired);
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		throws(() => applyControlValue(settings, "safety.autonomy", retired), /default, yolo/u, retired);
+		strictEqual(settings.safety.autonomy, "default", retired);
+	}
+	for (const level of ["default", "yolo"] as const) {
+		strictEqual(parseRunCliArgs(["--autonomy", level, "task"]).autonomy, level);
+		strictEqual(autonomyFromUserInput(level), level);
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		applyControlValue(settings, "safety.autonomy", level);
+		strictEqual(settings.safety.autonomy, level);
 	}
 });

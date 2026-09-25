@@ -124,7 +124,7 @@ describe("verify in repositories without package.json", () => {
 });
 
 describe("verify admission under headless autonomy", () => {
-	it("admits a derived check at full-auto exactly as bash admits its command", () => {
+	it("admits a derived check at yolo exactly as bash admits its command", () => {
 		const root = workspace({ "pyproject.toml": PYPROJECT, "uv.lock": "version = 1\n", "tests/test_a.py": "" });
 		strictEqual(admission(root, { check: "python-unittest" }, "yolo"), "allow");
 		strictEqual(
@@ -144,7 +144,7 @@ describe("verify admission under headless autonomy", () => {
 		strictEqual(admission(root, { check: "python-unittest" }, "default"), "ask");
 	});
 
-	it("runs a package typecheck or lint at full-auto and asks below it", () => {
+	it("runs a package typecheck or lint at yolo and asks at default", () => {
 		const root = workspace({
 			"package.json": JSON.stringify({ scripts: { typecheck: "tsc --noEmit", lint: "biome check ." } }),
 		});

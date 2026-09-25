@@ -50,7 +50,7 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
 
-it("keeps full-auto skill allow lists advisory while honoring explicit denials", () => {
+it("keeps yolo skill allow lists advisory while honoring explicit denials", () => {
 	const policy: PendingSkillToolPolicy = {
 		allowedSkillNames: ["research"],
 		requests: [],
@@ -704,7 +704,7 @@ describe("model skill activation by autonomy level", () => {
 		}
 	});
 
-	it("still refuses an uninstalled marketplace skill at full-auto", async () => {
+	it("still refuses an uninstalled marketplace skill at yolo", async () => {
 		const root = scratchRoot();
 		explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
 		// A catalog the operator could install from, holding a skill that is not installed here.

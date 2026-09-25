@@ -268,10 +268,10 @@ export function seedOpenAICompatOrchestrator(configDir: string, url: string): vo
 
 /**
  * The orchestrator seed above plus the capability keys a tool-calling turn
- * needs, and an optional autonomy level. `suggest` is the level at which a
- * mutating built-in such as `write` parks for approval instead of running, so a
- * test that wants to observe a permission request seeds it here rather than
- * reaching into the running process.
+ * needs. `autonomy` rewrites a top-level `autonomy:` line, but a v2 settings
+ * file keeps the level under `safety:`, so the argument currently changes
+ * nothing and the run stays at the saved `default`. Pass `--autonomy` to the
+ * run to change the level.
  */
 export function seedOpenAICompatToolOrchestrator(configDir: string, url: string, autonomy?: string): void {
 	seedOpenAICompatOrchestrator(configDir, url);

@@ -224,7 +224,7 @@ describe("headless skill activation by autonomy level", () => {
 		ok(!result.includes("FOREIGN_COPY_MUST_NOT_LOAD"));
 	});
 
-	it("activates an installed skill on a model call at full-auto", async () => {
+	it("activates an installed skill on a model call at yolo", async () => {
 		const turn = await headlessSkillTurn("yolo", "headless-interview");
 		strictEqual(turn.code, 0, turn.stderr);
 		const events = jsonEvents(turn.stdout);
@@ -263,7 +263,7 @@ describe("headless skill activation by autonomy level", () => {
 		match(result, /HEADLESS_SKILL_BODY_HEADLESS_INTERVIEW/u, turn.stdout);
 	});
 
-	it("still refuses an uninstalled marketplace skill at full-auto", async () => {
+	it("still refuses an uninstalled marketplace skill at yolo", async () => {
 		const turn = await headlessSkillTurn("yolo", "not-installed-anywhere");
 		strictEqual(turn.code, 0, turn.stderr);
 		const result = contextToolResult(jsonEvents(turn.stdout));

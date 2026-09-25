@@ -43,8 +43,8 @@ test("S1-02 hidden paths require confirmation", () => {
 });
 /**
  * The disposition a run at `level` gives a bash command. Repository scripts
- * need approval wherever an operator supervises; at full-auto they run like
- * any other unrecognized command.
+ * need approval at default; at yolo they run like any other unrecognized
+ * command.
  */
 function admitted(
 	policy: ReturnType<typeof createSafetyPolicyEngine>,

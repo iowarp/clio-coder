@@ -18,7 +18,7 @@ const { invokeRegisteredTool } = await import("../../src/tools/agent-tools.js");
 
 /**
  * Counted fs calls for one admitted call, admission through publish, on a
- * worker registry at auto-edit. Every target and root is still resolved at
+ * worker registry at default. Every target and root is still resolved at
  * admission, but each component once: a walk repeated inside the same call
  * raises these and fails here. Each call runs on a fresh scratch root after
  * one warmup call, so caches a first call fills are not counted.

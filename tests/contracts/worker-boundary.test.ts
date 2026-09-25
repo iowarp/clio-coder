@@ -57,7 +57,7 @@ describe("worker boundary", () => {
 			classification: { actionClass: "execute", reasons: [] },
 			rejection: { short: "approval required", detail: "", hints: [] },
 		};
-		const key = workerPermissionCacheKey(call, decision, "autonomy:auto-edit");
+		const key = workerPermissionCacheKey(call, decision, "autonomy:default");
 		for (const answer of ["approve", "deny"] as const) {
 			const remembered = new Map([[key, answer]]);
 			strictEqual(
@@ -65,25 +65,21 @@ describe("worker boundary", () => {
 					workerPermissionCacheKey(
 						{ tool: "bash", args: { cwd: "/repo", command: "custom-check" } },
 						decision,
-						"autonomy:auto-edit",
+						"autonomy:default",
 					),
 				),
 				answer,
 			);
 			for (const changed of [
 				workerPermissionCacheKey(call, decision, "net:project-verifier-confirm"),
-				workerPermissionCacheKey(call, decision, "autonomy:suggest"),
+				workerPermissionCacheKey(call, decision, "autonomy:yolo"),
 				workerPermissionCacheKey(
 					call,
 					{ ...decision, classification: { actionClass: "system_modify", reasons: [] } },
-					"autonomy:auto-edit",
+					"autonomy:default",
 				),
-				workerPermissionCacheKey(
-					{ ...call, args: { ...call.args, command: "other-check" } },
-					decision,
-					"autonomy:auto-edit",
-				),
-				workerPermissionCacheKey({ ...call, args: { ...call.args, cwd: "/other" } }, decision, "autonomy:auto-edit"),
+				workerPermissionCacheKey({ ...call, args: { ...call.args, command: "other-check" } }, decision, "autonomy:default"),
+				workerPermissionCacheKey({ ...call, args: { ...call.args, cwd: "/other" } }, decision, "autonomy:default"),
 			])
 				strictEqual(remembered.has(changed), false);
 		}

@@ -262,7 +262,7 @@ test("compact footer exposes activity, headroom and inference identity in two bo
 	match(text, /262.1k/);
 	match(text, /clio-coder.*v050/);
 	doesNotMatch(text, /think/u);
-	doesNotMatch(text, /auto-edit|70k processed|standard/);
+	doesNotMatch(text, /autonomy|yolo|70k processed|standard/);
 });
 
 test("Status renders live resource telemetry instead of a configuration dump", () => {
