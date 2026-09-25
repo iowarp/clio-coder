@@ -73,7 +73,7 @@ interface Wired {
 	parks: string[];
 }
 
-function wire(scene: Scenario, level: AutonomyLevel = "full-auto"): Wired {
+function wire(scene: Scenario, level: AutonomyLevel = "yolo"): Wired {
 	const clients: McpClient[] = [];
 	const parks: string[] = [];
 	const registry = createRegistry({ safety: createWorkerSafety({ cwd: scene.project }), autonomy: () => level });
@@ -217,7 +217,7 @@ describe("gateway MCP capabilities", () => {
 				);
 				const registry = createRegistry({
 					safety: createWorkerSafety({ cwd: scene.project }),
-					autonomy: () => "full-auto",
+					autonomy: () => "yolo",
 				});
 				const source = createMcpCapabilitySource({
 					cwd: scene.project,
@@ -408,7 +408,7 @@ describe("gateway MCP capabilities", () => {
 			import { registerAllTools } from ${moduleUrl("src/tools/bootstrap.ts")};
 			import { createMcpCapabilitySource } from ${moduleUrl("src/tools/gateway/index.ts")};
 			import { createMcpStdioClient } from ${moduleUrl("src/domains/gateway/mcp/index.ts")};
-			const registry = createRegistry({ safety: createWorkerSafety({cwd: ${JSON.stringify(scene.project)}}), autonomy: () => "full-auto" });
+			const registry = createRegistry({ safety: createWorkerSafety({cwd: ${JSON.stringify(scene.project)}}), autonomy: () => "yolo" });
 			let client;
 			const source = createMcpCapabilitySource({cwd: ${JSON.stringify(scene.project)}, configDir: ${JSON.stringify(scene.configDir)}, registry, clientFactory: (spec, opts) => client = createMcpStdioClient(spec, opts)});
 			const termination = getTerminationCoordinator();
@@ -795,21 +795,21 @@ describe("gateway MCP capabilities", () => {
 		strictEqual(clients.length, 1);
 	});
 
-	it("takes the capability's action class from the trust record: unknown asks everywhere and read-only denies it", async () => {
+	it("takes the capability's action class from trust: unknown asks in default and runs in yolo", async () => {
 		const scene = scenario();
 		ok(
 			trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake" }).ok,
 			"default trust class is unknown",
 		);
-		for (const level of ["suggest", "auto-edit", "full-auto"] as const) {
+		for (const level of ["default", "yolo"] as const) {
 			const wired = wire(scene, level);
 			open.push(wired.source);
 			const verdict = await wired.registry.invoke({
 				tool: ToolNames.Gateway,
 				args: { op: "call", capability: ECHO, args: { text: "x" } },
 			});
-			strictEqual(verdict.kind, "blocked", `${level}: the unknown class parks and the test denies it`);
-			deepStrictEqual(wired.parks, [ECHO], `${level}: the approval card names the MCP tool`);
+			strictEqual(verdict.kind, level === "default" ? "blocked" : "ok");
+			deepStrictEqual(wired.parks, level === "default" ? [ECHO] : []);
 			await wired.source.close();
 		}
 		const readOnly = wire(scene, "read-only");

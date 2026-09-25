@@ -178,11 +178,10 @@ export function openHelpOverlay(
 				"# Autonomy & safety net",
 				"**Tool surface**: which tools exist at all through registration, tool profiles, skill narrowing, and dispatch admission. " +
 					"Violations are terminal denials, never approvable.",
-				"**Safety net** (always on, level-independent): damage-control rules, path policy for secrets and system paths, " +
-					"command-substitution confirmation, and `git_destructive` blocks. Blocks are final at every level; confirm rails ask at every level.",
-				"**Autonomy level** (`/settings`, persisted as `autonomy`): the operator's standing grant per action class for actions the net passed, " +
-					"enforced by the harness at tool admission. read-only denies non-read, suggest parks every non-read call, " +
-					"auto-edit parks unrecognized commands, and full-auto runs them.",
+				"**Safety net**: damage-control rules and hard path protections remain active in both modes. " +
+					"A damage-control block is final; a damage-control confirmation still asks in yolo.",
+				"**Mode** (`/settings`, persisted as `safety.autonomy`): default runs workspace edits and recognized checks, " +
+					"but asks for unfamiliar commands, outward actions, and larger dispatch plans. Yolo runs through ordinary confirmation rails automatically.",
 				"**Approvals**: a parked call waits for a one-shot operator decision; approving resumes only that call. " +
 					"Workers resolve asks per `workers.onPermission` (Approvals Routing); headless runs auto-deny.",
 				"**Inspecting a mutation**: a parked `write` or `edit` card carries the target, the byte count, and a `sha256` digest of the exact call arguments. " +

@@ -212,9 +212,9 @@ describe("headless skill activation by autonomy level", () => {
 			toolCall: { name: "context", arguments: { scope: "skills", name: "herdr" } },
 		});
 		fixtures.push(fixture);
-		seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, "full-auto");
+		seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, "yolo");
 		const turn = await runCli(
-			["--no-context-files", "run", "--autonomy", "full-auto", "--json-events", "full", "Load the installed Herdr skill."],
+			["--no-context-files", "run", "--autonomy", "yolo", "--json-events", "full", "Load the installed Herdr skill."],
 			{ env, cwd },
 		);
 		strictEqual(turn.code, 0, turn.stderr);
@@ -225,7 +225,7 @@ describe("headless skill activation by autonomy level", () => {
 	});
 
 	it("activates an installed skill on a model call at full-auto", async () => {
-		const turn = await headlessSkillTurn("full-auto", "headless-interview");
+		const turn = await headlessSkillTurn("yolo", "headless-interview");
 		strictEqual(turn.code, 0, turn.stderr);
 		const events = jsonEvents(turn.stdout);
 		const result = contextToolResult(events);
@@ -238,7 +238,7 @@ describe("headless skill activation by autonomy level", () => {
 	});
 
 	it("records a skill without tool narrowing as a known selection so compaction can still cut", async () => {
-		const turn = await headlessSkillTurn("full-auto", "headless-interview", false);
+		const turn = await headlessSkillTurn("yolo", "headless-interview", false);
 		strictEqual(turn.code, 0, turn.stderr);
 		const events = jsonEvents(turn.stdout);
 		match(contextToolResult(events), /HEADLESS_SKILL_BODY_HEADLESS_INTERVIEW/u, turn.stdout);
@@ -256,17 +256,15 @@ describe("headless skill activation by autonomy level", () => {
 		strictEqual(states[0]?.data?.activationRefs?.length, 1);
 	});
 
-	it("keeps activation operator-gated at suggest", async () => {
-		const turn = await headlessSkillTurn("suggest", "headless-interview");
+	it("activates an installed skill in default mode", async () => {
+		const turn = await headlessSkillTurn("default", "headless-interview");
 		strictEqual(turn.code, 0, turn.stderr);
 		const result = contextToolResult(jsonEvents(turn.stdout));
-		match(result, /only the operator can activate a skill/u, turn.stdout);
-		ok(!/HEADLESS_SKILL_BODY_/u.test(result), "the skill body must not reach the model at suggest");
-		assertRefusal(turn, { subject: "skill", name: "headless-interview", kind: "operator-only" });
+		match(result, /HEADLESS_SKILL_BODY_HEADLESS_INTERVIEW/u, turn.stdout);
 	});
 
 	it("still refuses an uninstalled marketplace skill at full-auto", async () => {
-		const turn = await headlessSkillTurn("full-auto", "not-installed-anywhere");
+		const turn = await headlessSkillTurn("yolo", "not-installed-anywhere");
 		strictEqual(turn.code, 0, turn.stderr);
 		const result = contextToolResult(jsonEvents(turn.stdout));
 		ok(!/HEADLESS_SKILL_BODY_/u.test(result), "an uninstalled skill must not load");

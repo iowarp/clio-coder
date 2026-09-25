@@ -917,7 +917,7 @@ describe("contracts/configure-sections", () => {
 			["models", /Chat model\s+mock-model/u],
 			["chat", /Chat thinking\s+low/u],
 			["fleet", /Concurrency limit\s+auto/u],
-			["permissions", /Autonomy level\s+auto-edit/u],
+			["permissions", /Autonomy level\s+default/u],
 			["panes", /TUI mode\s+regular/u],
 			["skills", /Trust project imports\s+untrusted/u],
 			["diagnostics", /Config dir\s+\S/u],

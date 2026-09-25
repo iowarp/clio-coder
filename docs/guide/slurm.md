@@ -64,15 +64,15 @@ The server also exposes its older tool names (`submit_slurm_job`,
 
 An MCP server carries one action class for all of its tools, and the server's
 own annotations never choose it. A user-scope declaration gets the class
-`unknown`, and `unknown` asks for one-shot approval at `suggest`, `auto-edit`,
-and `full-auto` and is denied at `read-only`. So with the declaration above:
+`unknown`, and `unknown` asks for one-shot approval in `default`, runs in
+`yolo`, and is denied for internal read-only workers. So with the declaration above in `default`:
 
 - `slurm_submit` and `slurm_cancel` always ask before they reach the
   scheduler. A denied call never launches a job.
 - `slurm_list`, `slurm_describe`, and `slurm_cluster` ask too, although they
   only read. Polling a job costs one approval per poll.
-- A headless `clio-coder run` answers every ask with a denial, so it cannot
-  submit through this path.
+- A headless `clio-coder run` in `default` answers every ask with a denial. A
+  `yolo` run admits the unknown class unless a safety rule intervenes.
 
 A project declaration can be trusted with another class:
 `clio-coder mcp trust slurm --action-class read` makes all five run without

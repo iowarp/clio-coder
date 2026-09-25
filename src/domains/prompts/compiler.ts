@@ -195,12 +195,10 @@ function safetyOneLiner(level: string): string {
 	switch (level) {
 		case "read-only":
 			return "inspect and answer; mutating calls are auto-denied, so propose changes instead.";
-		case "suggest":
-			return "every non-read action parks for one-shot operator approval before it runs.";
-		case "auto-edit":
+		case "default":
 			return "workspace edits and recognized commands run; other bash asks for approval.";
-		case "full-auto":
-			return "act without asking; system_modify still asks and git_destructive is blocked by the safety net.";
+		case "yolo":
+			return "act without ordinary approval stops; damage-control rules can still block or ask.";
 		default:
 			return "follow the active safety contract.";
 	}
@@ -261,17 +259,19 @@ function sessionHasContext(inputs: SessionPromptInputs): boolean {
 /**
  * How the model changes a setting the operator asked for. configure_clio is a
  * gateway capability registered only on interactive sessions, and it previews
- * only at capable (auto-edit) or yolo (full-auto) autonomy, so every other
+ * only in default or yolo mode, so every other
  * session hands the change back to the operator's own settings UI.
  */
 function settingsChangePolicy(inputs: SessionPromptInputs, autonomyLevel: string): string {
 	if (
 		inputs.canConfigureClio === true &&
-		(autonomyLevel === "auto-edit" || autonomyLevel === "full-auto") &&
+		(autonomyLevel === "default" || autonomyLevel === "yolo") &&
 		toolSurfaceHasTool(inputs.toolNames, "gateway") &&
 		turnAllowsTool(inputs.turnConstraints, "configure_clio")
 	)
-		return 'When the operator asks to change a setting, call gateway(op="call", capability="configure_clio") with action="preview", then apply the returned proposal id. The operator confirms Apply in a dialog, and a stale or cancelled proposal changes nothing.';
+		return autonomyLevel === "yolo"
+			? 'When the operator asks to change a setting, call gateway(op="call", capability="configure_clio") with action="preview", then apply the returned proposal id. Yolo saves the exact preview without another prompt; a stale proposal changes nothing.'
+			: 'When the operator asks to change a setting, call gateway(op="call", capability="configure_clio") with action="preview", then apply the returned proposal id. The operator confirms Apply in a dialog, and a stale or cancelled proposal changes nothing.';
 	return "Changing a setting is the operator's step: name the /settings area or the clio-coder configure command that changes it.";
 }
 
@@ -554,12 +554,10 @@ export function workerSafetyOneLiner(level: AutonomyLevel, mode: WorkerPromptInp
 	if (level === "read-only") return safetyOneLiner(level);
 	const posture = workerPermissionSentence(mode);
 	switch (level) {
-		case "suggest":
-			return `read calls run freely; every non-read action requires approval. ${posture}`;
-		case "auto-edit":
+		case "default":
 			return `workspace edits and recognized commands run; other commands require approval. ${posture}`;
-		case "full-auto":
-			return `act without asking except for safety-classified approval-required calls. ${posture}`;
+		case "yolo":
+			return `act without ordinary approval stops; damage-control rules can still block or ask. ${posture}`;
 	}
 }
 
@@ -568,7 +566,7 @@ export function workerSafetyOneLiner(level: AutonomyLevel, mode: WorkerPromptInp
  * one-liner (with the run's permission routing) is the only role text. The
  * level fragments speak in action classes and never name a tool, so nothing
  * here can be false for a surface that lacks one; the earlier inline copy of
- * the levels claimed a full-auto worker's "dispatches" ran when no builtin
+ * the levels claimed a yolo worker's "dispatches" ran when no builtin
  * admits dispatch.
  */
 function renderWorkerSafetySection(safetyFragment: LoadedFragment, inputs: WorkerPromptInputs): string {

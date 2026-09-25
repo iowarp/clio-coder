@@ -104,7 +104,7 @@ describe("dispatch admission boundary", () => {
 			const tool = createDispatchTool({
 				dispatch: bundle.contract,
 				getAgentSpecs: () => agents.listSpecs(),
-				getAutonomy: () => "full-auto",
+				getAutonomy: () => "yolo",
 			});
 			ok(tool.prepareAdmissionArguments);
 			for (const workspace of ["/tmp/source-repository.", "C:\\work\\source-repository."]) {
@@ -616,7 +616,7 @@ describe("dispatch admission boundary", () => {
 			true,
 		);
 		strictEqual(
-			isBoundedGateRolePrompt({ role: "reviewer", autonomy: "auto-edit", systemPrompt: REVIEWER_GATE_PROMPT }),
+			isBoundedGateRolePrompt({ role: "reviewer", autonomy: "default", systemPrompt: REVIEWER_GATE_PROMPT }),
 			false,
 		);
 		strictEqual(
@@ -696,7 +696,7 @@ describe("dispatch admission boundary", () => {
 
 	it("rejects unmediated ACP autonomy narrowing before any worker starts", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.safety.autonomy = "full-auto";
+		settings.safety.autonomy = "yolo";
 		settings.integrations.externalAgents.entries = [
 			{ id: "external-reviewer", command: "mock-acp", args: [], toolGovernance: "agent-managed" },
 		];
@@ -716,7 +716,7 @@ describe("dispatch admission boundary", () => {
 			const tool = createDispatchTool({
 				getAgentSpecs: () => [],
 				dispatch: bundle.contract,
-				getAutonomy: () => "full-auto",
+				getAutonomy: () => "yolo",
 			});
 			const result = (await tool.run({ tasks: ["build first"], review: { reviewer: "external-reviewer" } }, {})) as {
 				kind: string;

@@ -31,7 +31,7 @@ test("only an explicit interactive prompt input adds guidance; disabling restore
 	const base = {
 		identity: "identity.clio",
 		operatingContract: "operating.contract",
-		safety: "safety.auto-edit",
+		safety: "safety.default",
 		sessionInputs: {},
 	};
 	const normal = compile(table, base);

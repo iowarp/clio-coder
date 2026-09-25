@@ -58,7 +58,7 @@ function fakeTransport(answer: (params: Record<string, unknown>) => unknown) {
  */
 async function askOnce(answer: (params: Record<string, unknown>) => unknown) {
 	const safety = createWorkerSafety({ cwd: process.cwd() });
-	const registry = createRegistry({ safety, autonomy: () => "suggest" });
+	const registry = createRegistry({ safety, autonomy: () => "default" });
 	registry.register(bashTool);
 	const peer = fakeTransport(answer);
 	let verdictKind = "";
@@ -84,7 +84,7 @@ async function askOnce(answer: (params: Record<string, unknown>) => unknown) {
 		transport: peer.transport,
 		chat,
 		toolRegistry: registry,
-		autonomy: () => "suggest",
+		autonomy: () => "default",
 		cwd: process.cwd(),
 	});
 	const init = (await peer.call("initialize", { protocolVersion: 1 })) as {
@@ -132,14 +132,14 @@ describe("contracts/acp attaches the decision facts it already computed to the p
 		strictEqual(meta.tierLabel, "Workspace authority");
 		strictEqual(meta.semanticToken, "action");
 		strictEqual(meta.actionClass, "execute");
-		deepStrictEqual(meta.axis, { kind: "autonomy", level: "suggest" });
+		deepStrictEqual(meta.axis, { kind: "autonomy", level: "default" });
 		deepStrictEqual(meta.origin, { kind: "main" });
 		strictEqual(meta.exposure, "local");
 		strictEqual(meta.reversibility, "limited");
 		ok(String(meta.authorizationCopy).includes("one execute call to bash"));
 		ok(String(meta.consequenceCopy).length > 0);
 		ok(String(meta.reversibilityCopy).startsWith("Reversible:"));
-		ok(String(meta.requestedByCopy).includes("autonomy level (suggest)"));
+		ok(String(meta.requestedByCopy).includes("autonomy level (default)"));
 		ok(String(meta.target).includes("echo hi"));
 	});
 

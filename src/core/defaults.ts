@@ -8,11 +8,11 @@
 
 import { DEFAULT_WORKING_SET_SETTINGS } from "../domains/context/working-set/defaults.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
-import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import type { OperatorAutonomyLevel } from "../domains/safety/autonomy.js";
 import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
 
 export type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
-export type { AutonomyLevel } from "../domains/safety/autonomy.js";
+export type { AutonomyLevel, OperatorAutonomyLevel } from "../domains/safety/autonomy.js";
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export const THINKING_LEVELS: ReadonlyArray<ThinkingLevel> = [
@@ -501,7 +501,7 @@ export interface ContextSettings {
 }
 
 export interface SafetySettings {
-	autonomy: AutonomyLevel;
+	autonomy: OperatorAutonomyLevel;
 	limits: {
 		sessionCostUsd: number;
 		chatToolCallsPerTurn: number;
@@ -601,7 +601,7 @@ export const DEFAULT_SETTINGS = {
 		} as MemorySettings,
 	} as ContextSettings,
 	safety: {
-		autonomy: "auto-edit" as AutonomyLevel,
+		autonomy: "default" as OperatorAutonomyLevel,
 		limits: {
 			sessionCostUsd: 5,
 			chatToolCallsPerTurn: GUARDRAIL_DEFAULTS.turnToolCallBudget,
@@ -747,7 +747,7 @@ context:
     timeoutMs: 60000
 
 safety:
-  autonomy: auto-edit
+  autonomy: default
   limits:
     sessionCostUsd: 5
     chatToolCallsPerTurn: 60

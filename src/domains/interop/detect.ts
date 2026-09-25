@@ -21,13 +21,24 @@ const VERSION_PROBE_MAX_OUTPUT_BYTES = 4096;
 /** Resolve an executable on PATH without a shell. Never throws; unresolvable state reports "unknown". */
 export function resolveOnPath(binaryNames: ReadonlyArray<string>): { presence: InteropPresence; binary?: string } {
 	if (binaryNames.length === 0) return { presence: "absent" };
-	const rawPath = process.env.PATH;
-	if (rawPath === undefined || rawPath.length === 0) return { presence: "unknown" };
 	let unreadable = false;
+	for (const name of binaryNames) {
+		if (!path.isAbsolute(name)) continue;
+		try {
+			accessSync(name, constants.X_OK);
+			if (statSync(name).isFile()) return { presence: "present", binary: name };
+		} catch (error) {
+			if (["EACCES", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) unreadable = true;
+		}
+	}
+	const rawPath = process.env.PATH;
+	if (rawPath === undefined || rawPath.length === 0)
+		return { presence: unreadable || binaryNames.some((name) => !path.isAbsolute(name)) ? "unknown" : "absent" };
 	try {
 		for (const dir of rawPath.split(path.delimiter)) {
 			if (dir.length === 0) continue;
 			for (const name of binaryNames) {
+				if (path.isAbsolute(name)) continue;
 				const candidate = path.join(dir, name);
 				try {
 					accessSync(candidate, constants.X_OK);

@@ -45,20 +45,19 @@ describe("self-knowledge in the session prompt", () => {
 			{ readySkillCount: 0 },
 			{ turnConstraints: { mode: "answer" as const } },
 		]) {
-			ok(compileSession("safety.auto-edit", inputs).includes(SETTINGS_ROUTE), JSON.stringify(inputs));
+			ok(compileSession("safety.default", inputs).includes(SETTINGS_ROUTE), JSON.stringify(inputs));
 		}
-		ok(!compileSession("safety.auto-edit", { toolNames: [ToolNames.Gateway] }).includes(SETTINGS_ROUTE));
+		ok(!compileSession("safety.default", { toolNames: [ToolNames.Gateway] }).includes(SETTINGS_ROUTE));
 	});
 
 	it("teaches the configure_clio preview only where the tool is registered and autonomy lets it run", () => {
 		const configure = /capability="configure_clio"/;
-		match(compileSession("safety.auto-edit", { canConfigureClio: true }), configure);
-		match(compileSession("safety.full-auto", { canConfigureClio: true }), configure);
+		match(compileSession("safety.default", { canConfigureClio: true }), configure);
+		match(compileSession("safety.yolo", { canConfigureClio: true }), configure);
 		for (const [safety, inputs] of [
-			["safety.suggest", { canConfigureClio: true }],
 			["safety.read-only", { canConfigureClio: true }],
-			["safety.auto-edit", {}],
-			["safety.auto-edit", { canConfigureClio: true, toolNames: [ToolNames.Context] }],
+			["safety.default", {}],
+			["safety.default", { canConfigureClio: true, toolNames: [ToolNames.Context] }],
 		] as const) {
 			const prompt = compileSession(safety, inputs);
 			doesNotMatch(prompt, configure, `${safety} ${JSON.stringify(inputs)}`);
@@ -67,7 +66,7 @@ describe("self-knowledge in the session prompt", () => {
 	});
 
 	it("names the shipped code map and never routes to the removed docs scope", () => {
-		const prompt = compileSession("safety.auto-edit");
+		const prompt = compileSession("safety.default");
 		match(prompt, /dist[/\\]assets[/\\]codewiki\.json/);
 		doesNotMatch(prompt, /\{CLIO_[A-Z_]+\}/);
 		doesNotMatch(codeNavToolSurface.description, /scope=docs/);

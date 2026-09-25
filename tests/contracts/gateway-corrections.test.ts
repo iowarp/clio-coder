@@ -50,7 +50,7 @@ describe("gateway correction contracts", () => {
 
 	it("preserves execute and write decisions and finish telemetry at every approval level, including executed errors", async () => {
 		for (const actionClass of ["write", "execute"] as const) {
-			for (const level of ["read-only", "suggest", "auto-edit", "full-auto"] as const) {
+			for (const level of ["read-only", "default", "default", "yolo"] as const) {
 				for (const fails of [false, true]) {
 					const records = [];
 					for (const placement of ["direct", "gateway"] as const) {
@@ -95,7 +95,7 @@ describe("gateway correction contracts", () => {
 						strictEqual(events[0]?.tool, tool);
 						strictEqual(events[0]?.actionClass, actionClass);
 						strictEqual(runs, level === "read-only" ? 0 : 2);
-						strictEqual(parks.length, level === "suggest" || (actionClass === "execute" && level === "auto-edit") ? 2 : 0);
+						strictEqual(parks.length, actionClass === "execute" && level === "default" ? 2 : 0);
 						const event = events[0];
 						ok(event);
 						const { tool: _tool, durationMs: _duration, ...finish } = event;

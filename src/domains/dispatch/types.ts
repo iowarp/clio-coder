@@ -274,8 +274,8 @@ export interface RunCouncilProvenance {
 /**
  * Plan-approval provenance for multi-task, compete, or remote dispatch.
  * `approval: "operator"` records that a supervised autonomy level parked the
- * dispatch call and an operator approved the plan; `"full-auto"` records that
- * full-auto skipped the stop and the plan was logged instead. The hash covers
+ * dispatch call and an operator approved the plan; `"yolo"` records that
+ * yolo skipped the stop and the plan was logged instead. The hash covers
  * the rendered plan artifact so every run of the plan chains to the same
  * approved text.
  */
@@ -283,7 +283,7 @@ export interface RunPlanProvenance {
 	hash: string;
 	topology: "parallel" | "sequential" | "pipeline" | "review" | "compete" | "council" | "detached" | "fleet";
 	taskCount: number;
-	approval: "operator" | "full-auto";
+	approval: "operator" | "yolo";
 	source: null | {
 		kind: "scout-transition";
 		runId: string;
@@ -952,7 +952,7 @@ export interface RunReceipt {
 	 * Whether the run changed nothing it was allowed to change: a tool call was
 	 * blocked and no mutating call succeeded, or tools ran and none succeeded.
 	 * A mutating call is one the tool registry classified as action class
-	 * `write` at admission, the class autonomy `auto-edit` runs without asking.
+	 * `write` at admission, the class default autonomy runs without asking.
 	 * A run that called no tool is not a no-op. Headless main-agent receipts
 	 * always carry it; `clio-coder run --fail-on-noop` turns a true value into
 	 * a failed run. Absent on worker receipts and on receipts written before

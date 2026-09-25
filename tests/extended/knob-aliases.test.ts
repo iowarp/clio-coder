@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseRunCliArgs } from "../../src/cli/args.js";
+import { extractGlobalFlags } from "../../src/cli/argv.js";
 import { configureGuardrails, GUARDRAIL_DEFAULTS, resolveGuardrail } from "../../src/core/guardrails.js";
 import { createLoopGuardRegistration, type OrchTurnToolCallBudget } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -10,9 +11,13 @@ import { createWorkerSafety } from "../../src/engine/worker-tools.js";
  * canonical setting or flag remains the only accepted policy surface.
  */
 describe("removed knob spellings", () => {
-	it("accepts capable and yolo as concise autonomy names", () => {
-		assert.equal(parseRunCliArgs(["--autonomy", "capable", "task"]).autonomy, "auto-edit");
-		assert.equal(parseRunCliArgs(["--autonomy", "yolo", "task"]).autonomy, "full-auto");
+	it("accepts only default and yolo as operator autonomy names", () => {
+		assert.equal(parseRunCliArgs(["--autonomy", "default", "task"]).autonomy, "default");
+		assert.equal(parseRunCliArgs(["--autonomy", "yolo", "task"]).autonomy, "yolo");
+		for (const removed of ["suggest", "auto-edit", "full-auto", "capable", "read-only"]) {
+			assert.equal(parseRunCliArgs(["--autonomy", removed, "task"]).diagnostics[0]?.type, "error", removed);
+			assert.equal(extractGlobalFlags(["--autonomy", removed]).error, "--autonomy must be default|yolo", removed);
+		}
 	});
 	it("parses explicit task bounds without interpreting task prose", () => {
 		const parsed = parseRunCliArgs([

@@ -1203,7 +1203,7 @@ function rejectedReasons(results: ReadonlyArray<PromiseSettledResult<unknown>>):
 /**
  * Best-of-N compete: N candidate builders run the same task in isolated
  * scratch git worktrees, each candidate's work is committed on its branch, a
- * read-only judge ranks them, and the winner is applied (full-auto) or handed
+ * read-only judge ranks them, and the winner is applied (yolo) or handed
  * to the operator (supervised: the winner's branch and worktree survive; the
  * apply_winner action routes through plan approval). Losers are always
  * cleaned, including on abort and on any thrown error.
@@ -1590,7 +1590,7 @@ async function runCompete(
 				},
 				judgeRun.pendingGate,
 			);
-			if (autonomy === "full-auto") {
+			if (autonomy === "yolo") {
 				const merge = (deps.competeWorktrees?.mergeWinner ?? mergeWinnerBranch)(root, pickedWorktree.branch);
 				if (!merge.ok) {
 					winner = { index: pick, branch: pickedWorktree.branch, applied: false };
@@ -1614,12 +1614,12 @@ async function runCompete(
 							id: winnerDecision.artifact.id,
 							digest: winnerDecision.artifact.integrity.digest,
 						},
-						detail: `full-auto applied ${pickedWorktree.branch} under dispatch plan ${base.plan?.hash ?? "unavailable"}`,
+						detail: `yolo applied ${pickedWorktree.branch} under dispatch plan ${base.plan?.hash ?? "unavailable"}`,
 					});
 				} catch (error) {
 					winner = { index: pick, branch: pickedWorktree.branch, applied: false };
 					throw new Error(
-						`winner ${pickedWorktree.branch} merged but full-auto application evidence failed: ${competeErrorMessage(error)}; branch preserved for recovery`,
+						`winner ${pickedWorktree.branch} merged but yolo application evidence failed: ${competeErrorMessage(error)}; branch preserved for recovery`,
 					);
 				}
 				winner = { index: pick, branch: pickedWorktree.branch, applied: true };
@@ -1722,7 +1722,7 @@ function runApplyWinner(
 	if (authority === null) {
 		return {
 			kind: "error",
-			message: "dispatch: apply_winner requires a registry-authenticated operator approval or full-auto authority",
+			message: "dispatch: apply_winner requires a registry-authenticated operator approval or yolo authority",
 		};
 	}
 	const branch = input.branch;
@@ -1796,7 +1796,7 @@ function runApplyWinner(
 				detail:
 					authority.outcome === "operator-confirmed"
 						? `operator confirmation ${authority.requestId} (${authority.requestedBy}) approved ${branch} under dispatch plan ${planHash}`
-						: `full-auto applied ${branch} under dispatch plan ${planHash}`,
+						: `yolo applied ${branch} under dispatch plan ${planHash}`,
 			}),
 		);
 	let confirmation: { artifact: GateDecisionArtifact; path: string } | null = null;
@@ -1826,7 +1826,7 @@ function runApplyWinner(
 		} catch (err) {
 			return {
 				kind: "error",
-				message: `dispatch: winner branch ${branch} was merged, but full-auto application evidence failed: ${competeErrorMessage(err)}; branch is preserved for recovery`,
+				message: `dispatch: winner branch ${branch} was merged, but yolo application evidence failed: ${competeErrorMessage(err)}; branch is preserved for recovery`,
 				details: { mode: "apply_winner", branch, group, applied: true, evidencePending: true },
 			};
 		}
@@ -2265,7 +2265,7 @@ export async function runDispatchTool(
 						requestId: approval.requestId,
 						requestedBy: approval.requestedBy,
 					}
-				: deps.getAutonomy?.() === "full-auto"
+				: deps.getAutonomy?.() === "yolo"
 					? { outcome: "full-auto-applied" as const }
 					: null;
 		let protectedPaths: string[];
@@ -2308,8 +2308,8 @@ export async function runDispatchTool(
 	let council = snapshot.council === undefined ? undefined : structuredClone(snapshot.council);
 
 	// Plan-scale calls are either approved at supervised admission or run
-	// unstopped at full-auto; every run seals the same plan hash.
-	const autonomy = deps.getAutonomy?.() ?? "auto-edit";
+	// unstopped in yolo; every run seals the same plan hash.
+	const autonomy = deps.getAutonomy?.() ?? "default";
 	const authenticatedApproval = options?.approval?.actionClass === "dispatch" ? options.approval : undefined;
 	const trustedResolvedPlan = admissionState.trustedResolvedPlans.get(args) ?? null;
 	const planView = snapshot.planView;
@@ -2337,7 +2337,7 @@ export async function runDispatchTool(
 	if (planView.planScale && deps.dispatch.preview !== undefined && resolvedPlan === null) {
 		return { kind: "error", message: "dispatch: resolved plan is missing after admission" };
 	}
-	if (planView.planScale && autonomy !== "full-auto" && authenticatedApproval === undefined) {
+	if (planView.planScale && autonomy !== "yolo" && authenticatedApproval === undefined) {
 		return {
 			kind: "error",
 			message: "dispatch: resolved plan requires a registry-authenticated operator approval",
@@ -2388,7 +2388,7 @@ export async function runDispatchTool(
 			hash: planView.hash,
 			topology: planView.topology,
 			taskCount: planView.taskCount,
-			approval: authenticatedApproval !== undefined ? "operator" : "full-auto",
+			approval: authenticatedApproval !== undefined ? "operator" : "yolo",
 			source:
 				resolvedPlan?.source === null || resolvedPlan?.source === undefined
 					? null
@@ -2442,7 +2442,7 @@ export async function runDispatchTool(
 			if (executionPlan.hash !== resolvedPlan.source.executionPlanHash) {
 				return { kind: "error", message: "dispatch: Scout dependency plan hash drifted after admission" };
 			}
-			if (!scoutPlanAuthorityGranted(resolvedPlan, authenticatedApproval !== undefined, autonomy === "full-auto")) {
+			if (!scoutPlanAuthorityGranted(resolvedPlan, authenticatedApproval !== undefined, autonomy === "yolo")) {
 				return { kind: "error", message: "dispatch: Scout dependency plan lacks authenticated authority grants" };
 			}
 			const executable = compileExecutionPlan({

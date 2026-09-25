@@ -60,7 +60,7 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			const tool = createDispatchTool({
 				dispatch: bundle.contract,
 				getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
-				getAutonomy: () => "full-auto",
+				getAutonomy: () => "yolo",
 				captureWorkerContext: () => {
 					captures++;
 					return captureWorkerContext({ sessionId: "parent", leafTurnId: "leaf", cwd: env.dir }, parent);
@@ -169,7 +169,7 @@ require("node:readline").createInterface({input: process.stdin}).on("line", (lin
  }
 });`;
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.safety.autonomy = "full-auto";
+	settings.safety.autonomy = "yolo";
 	settings.fleet.retry.maxRetries = 0;
 	settings.integrations.externalAgents.entries = [
 		{ id: "context-fixture", command: process.execPath, args: ["-e", peer], toolGovernance: "clio-coder-policy" },

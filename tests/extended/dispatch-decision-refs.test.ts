@@ -103,7 +103,7 @@ describe("decision refs are sealed from the board", () => {
 			args: Record<string, unknown>,
 		): Promise<DispatchRequest[]> {
 			const settings = structuredClone(DEFAULT_SETTINGS);
-			settings.safety.autonomy = "full-auto";
+			settings.safety.autonomy = "yolo";
 			const context = dispatchStubContext({ settings });
 			const bundle = makeDispatchBundle(context, {
 				spawnWorker: () => {
@@ -126,7 +126,7 @@ describe("decision refs are sealed from the board", () => {
 						},
 					},
 					getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
-					getAutonomy: () => "full-auto",
+					getAutonomy: () => "yolo",
 					getDecisionBoard: () => board,
 				});
 				const result = await tool.run(args, { toolCallId: "call-1" });

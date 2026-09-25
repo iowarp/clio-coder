@@ -31,6 +31,11 @@ export type DraftLabel = (typeof DRAFT_LABELS)[number];
  */
 export const DRAFT_TEMPERATURES = [0.3, 0.7, 1.0, 1.2] as const;
 
+/** Sonnet 5 rejects explicit sampling temperature with HTTP 400. */
+export function draftTemperature(modelId: string, temperature: number): number | undefined {
+	return modelId === "claude-sonnet-5" ? undefined : temperature;
+}
+
 export const DRAFT_SYSTEM_PROMPT = [
 	"You are drafting one candidate answer to the operator's request in a coding session.",
 	"The conversation above is read-only context. Write one complete answer to the request and nothing else.",

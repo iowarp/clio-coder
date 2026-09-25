@@ -67,9 +67,8 @@ function state(): FooterDashboardRenderState {
 			throughputDetail: null,
 			cost: null,
 			target: "blade · dynamo/qwopus3.8-27b-flash@q4_k_m",
-			thinking: "on",
 			capabilities: ["tools", "vision"],
-			safety: "auto-edit",
+			safety: "default",
 			toolProfile: "agent-managed",
 		},
 		context: {
@@ -262,7 +261,7 @@ test("compact footer exposes activity, headroom and inference identity in two bo
 
 	match(text, /262.1k/);
 	match(text, /clio-coder.*v050/);
-	match(text, /think/);
+	doesNotMatch(text, /think/u);
 	doesNotMatch(text, /auto-edit|70k processed|standard/);
 });
 
@@ -542,7 +541,7 @@ test("a narrow compact footer keeps the meter's percent whole, the activity whol
 		// The activity is whole; a row too narrow for the worker count drops it rather than cut it.
 		match(row, width === 60 ? /^Writing · 3s · 1 active\b/u : /^Writing · 3s +▰/u, row);
 		// An identity is readable or absent, never a stub like `bla…_k_m`.
-		const identity = / {2}· {2}(.+?)(?: · think| {3})/u.exec(row)?.[1];
+		const identity = / {2}· {2}(.+?)(?: {3}|$)/u.exec(row)?.[1];
 		ok(identity === undefined || visibleWidth(identity) >= 12, row);
 	}
 	match(line(100), /12\.\d% {2}~33\.9k \/ 262\.1k$/u);

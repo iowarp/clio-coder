@@ -185,7 +185,7 @@ describe("dispatch capacity under auto", () => {
 
 	it("admits SSH work past a clamped local node without shrinking the global pool", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.safety.autonomy = "full-auto";
+		settings.safety.autonomy = "yolo";
 		settings.fleet.concurrency = "auto";
 		settings.fleet.nodes = [{ id: "blade", host: "blade.lan", maxWorkers: 3 }];
 		const bundle = makeDispatchBundle(

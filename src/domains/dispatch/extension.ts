@@ -2269,9 +2269,8 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 
 const AUTONOMY_ORDER: Record<AutonomyLevel, number> = {
 	"read-only": 0,
-	suggest: 1,
-	"auto-edit": 2,
-	"full-auto": 3,
+	default: 1,
+	yolo: 2,
 };
 
 /** Lower of the session level and the request's narrowing; requests cannot widen. */
@@ -2301,7 +2300,7 @@ function autonomyEnforcementForWorkerSpec(
 	sessionAutonomy: AutonomyLevel,
 	requestedAutonomy: AutonomyLevel | undefined,
 ): RunReceiptAutonomyEnforcement {
-	const autonomy = spec.autonomy ?? "auto-edit";
+	const autonomy = spec.autonomy ?? "default";
 	const authorityEvidence = requestedAutonomyEvidence(sessionAutonomy, requestedAutonomy);
 	if (spec.runtimeId === "claude-code") {
 		try {
@@ -4113,7 +4112,7 @@ export function createDispatchBundle(
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.fleet.permissions.mode ?? "deny");
 		const cwd = req.cwd ?? process.cwd();
-		const sessionAutonomy = settings?.safety.autonomy ?? "auto-edit";
+		const sessionAutonomy = settings?.safety.autonomy ?? "default";
 		const effectiveAutonomy = effectiveWorkerAutonomy(sessionAutonomy, req.autonomy, spec.capabilityClass);
 		if (target.runtime.kind === "subprocess" && req.denyTools && req.denyTools.length > 0) {
 			throw new Error("dispatch: denyTools cannot be enforced on an external CLI target; use a native worker");
@@ -4280,7 +4279,7 @@ export function createDispatchBundle(
 			);
 		}
 		const admission = resolveDelegationAdmissionStage(req, safety);
-		const sessionAutonomy = settings.safety.autonomy ?? "auto-edit";
+		const sessionAutonomy = settings.safety.autonomy ?? "default";
 		const autonomy = clampWorkerAutonomy(sessionAutonomy, req.autonomy);
 		if (toolGovernance === "agent-managed" && autonomy !== sessionAutonomy) {
 			throw new Error(
@@ -6271,7 +6270,7 @@ export function createDispatchBundle(
 				...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
 				autonomyEnforcement: autonomyEnforcementForWorkerSpec(
 					spec,
-					lifecycle.settings?.safety.autonomy ?? "auto-edit",
+					lifecycle.settings?.safety.autonomy ?? "default",
 					req.autonomy,
 				),
 				safety: {
@@ -7009,7 +7008,7 @@ export function createDispatchBundle(
 			settings,
 			runtime: target.runtime,
 			readOnly:
-				effectiveWorkerAutonomy(settings?.safety.autonomy ?? "auto-edit", req.autonomy, agentSpec.capabilityClass) ===
+				effectiveWorkerAutonomy(settings?.safety.autonomy ?? "default", req.autonomy, agentSpec.capabilityClass) ===
 				"read-only",
 		});
 		const endpoint = endpointCapacityForTarget(target.target.id);

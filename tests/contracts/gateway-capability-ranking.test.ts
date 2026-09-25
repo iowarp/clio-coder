@@ -35,7 +35,7 @@ function capabilityName(index: number): string {
 
 /** A session-shaped registry with `count` gateway capabilities and an optional ranker. */
 function registryWith(count: number, ranker?: GatewayCapabilityRanker): ToolRegistry {
-	const registry = createRegistry({ safety: createWorkerSafety({ cwd: clioStateDir() }), autonomy: () => "full-auto" });
+	const registry = createRegistry({ safety: createWorkerSafety({ cwd: clioStateDir() }), autonomy: () => "yolo" });
 	for (let index = 0; index < count; index += 1) {
 		registry.register({
 			name: capabilityName(index) as ToolName,

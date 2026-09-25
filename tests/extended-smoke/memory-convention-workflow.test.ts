@@ -152,7 +152,7 @@ test("operator promotion persists a convention and only approval admits it into 
 					"--model",
 					"mock-model",
 					"--autonomy",
-					"full-auto",
+					"yolo",
 					"What approved numerical regression convention applies here?",
 				],
 				cwd,

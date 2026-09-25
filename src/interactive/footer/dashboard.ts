@@ -15,7 +15,6 @@ import {
 	type CapabilityFlags,
 	type ProvidersContract,
 	resolveModelCapabilities,
-	resolveModelRuntimeCapabilitiesForProviders,
 } from "../../domains/providers/index.js";
 import type { UsageSnapshot } from "../../domains/quota/types.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
@@ -431,15 +430,6 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 
 		const target = formatTargetLabel(settings?.chat?.target, settings?.chat?.model, { abbreviate: false });
 
-		const resolution = resolveModelRuntimeCapabilitiesForProviders(
-			deps.providers,
-			settings?.chat?.target,
-			settings?.chat?.model,
-			settings?.chat?.thinkingLevel ?? "off",
-		);
-
-		const thinking = resolution?.thinking.display ?? settings?.chat?.thinkingLevel ?? "off";
-
 		const wireModelId = settings?.chat?.model ?? current?.target.defaultModel ?? null;
 		const detectedReasoning =
 			wireModelId && typeof deps.providers.getDetectedReasoning === "function"
@@ -450,7 +440,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			: null;
 		const capabilities = capabilityLabels(caps);
 
-		const safety = settings?.safety.autonomy ?? "auto-edit";
+		const safety = settings?.safety.autonomy ?? "default";
 		const toolProfile = settings?.integrations.externalAgents?.defaults?.toolGovernance ?? "clio-coder-policy";
 
 		return {
@@ -480,7 +470,6 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				target,
 				targetId: settings?.chat?.target ?? null,
 				modelId: settings?.chat?.model ?? null,
-				thinking,
 				capabilities,
 				safety,
 				toolProfile,

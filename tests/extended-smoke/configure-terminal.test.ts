@@ -142,7 +142,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 				{ target: saved.chat.target, model: "solo" },
 			);
 			strictEqual(saved.fleet.concurrency, "auto");
-			strictEqual(saved.safety.autonomy, "auto-edit");
+			strictEqual(saved.safety.autonomy, "default");
 			strictEqual(saved.safety.limits.sessionCostUsd, 5);
 			strictEqual(saved.chat.prewarm, false);
 			strictEqual(saved.chat.maxOutputTokens, 0);
@@ -293,7 +293,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 		const file = seed(home, `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
 		const before = parse(readFileSync(file, "utf8"));
 		before.targets[0].auth = { apiKeyRef: "existing" };
-		before.safety = { autonomy: "full-auto" };
+		before.safety = { autonomy: "yolo" };
 		before.fleet.concurrency = 4;
 		before.chat.prewarm = true;
 		writeFileSync(file, stringify(before));
@@ -356,7 +356,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			const saved = parse(readFileSync(file, "utf8")) as ClioSettings;
 			strictEqual(saved.chat.thinkingLevel, "high");
 			strictEqual(saved.chat.model, null);
-			strictEqual(saved.safety.autonomy, "full-auto");
+			strictEqual(saved.safety.autonomy, "yolo");
 		} finally {
 			tty.close();
 			home.cleanup();

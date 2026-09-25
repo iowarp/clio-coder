@@ -223,7 +223,7 @@ function fixture(
 	const session = createSessionBundle(context).contract;
 	const safety = context.getContract<SafetyContract>("safety");
 	ok(safety);
-	const registry = createRegistry({ safety, autonomy: () => "full-auto" });
+	const registry = createRegistry({ safety, autonomy: () => "yolo" });
 	let toolStarted!: () => void;
 	const toolRunning = new Promise<void>((resolve) => {
 		toolStarted = resolve;

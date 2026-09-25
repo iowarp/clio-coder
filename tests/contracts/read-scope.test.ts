@@ -176,7 +176,7 @@ describe("read scope admission", () => {
 		const write = engine.evaluate({ tool: ToolNames.Write, args: { path: "@../at-escape.txt", content: "x" } });
 		strictEqual(write.actionClass, "system_modify");
 		strictEqual(write.kind, "ask");
-		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "auto-edit" });
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "default" });
 		registry.register(writeTool);
 		registry.onPermissionRequired((_call, _decision, meta) => {
 			registry.cancelParkedCall(meta.requestId, "contract: denied");
@@ -267,13 +267,13 @@ describe("read scope admission", () => {
 			["Glob", { pattern: "*.txt", path: outside }],
 		];
 		for (const [toolName, input] of cases) {
-			const denied = decide(toolName, input, "auto-edit");
+			const denied = decide(toolName, input, "default");
 			strictEqual(denied.kind, "deny", `${toolName} ${JSON.stringify(input)}`);
 			match(denied.reason, /outside the workspace/u, toolName);
-			strictEqual(decide(toolName, input, "full-auto").kind, "allow", `${toolName} ${JSON.stringify(input)}`);
+			strictEqual(decide(toolName, input, "yolo").kind, "allow", `${toolName} ${JSON.stringify(input)}`);
 		}
-		strictEqual(decide("Glob", { pattern: "data/**/*.txt" }, "auto-edit").kind, "allow");
-		strictEqual(decide("Grep", { pattern: "x", glob: "*.txt", path: "data" }, "auto-edit").kind, "allow");
+		strictEqual(decide("Glob", { pattern: "data/**/*.txt" }, "default").kind, "allow");
+		strictEqual(decide("Grep", { pattern: "x", glob: "*.txt", path: "data" }, "default").kind, "allow");
 	});
 
 	it("reaches the ACP seam, including a search that names its directory and one with no kind", async () => {
@@ -298,16 +298,16 @@ describe("read scope admission", () => {
 			{ title: "grep", rawInput: { pattern: "x", path: outside } },
 		];
 		for (const toolCall of cases) {
-			const denied = await handle(toolCall, "auto-edit");
+			const denied = await handle(toolCall, "default");
 			strictEqual(denied.length, 1, JSON.stringify(toolCall));
 			match(denied[0] as string, /a path outside the workspace/u, JSON.stringify(toolCall));
-			deepStrictEqual(await handle(toolCall, "full-auto"), [], JSON.stringify(toolCall));
+			deepStrictEqual(await handle(toolCall, "yolo"), [], JSON.stringify(toolCall));
 		}
-		deepStrictEqual(await handle({ kind: "search", rawInput: { pattern: "x", path: "data" } }, "auto-edit"), []);
+		deepStrictEqual(await handle({ kind: "search", rawInput: { pattern: "x", path: "data" } }, "default"), []);
 	});
 
 	it("maps an outside read to deny, ask, ask, allow across the levels and leaves inside reads alone", () => {
-		const levels: AutonomyLevel[] = ["read-only", "suggest", "auto-edit", "full-auto"];
+		const levels: AutonomyLevel[] = ["read-only", "default", "default", "yolo"];
 		deepStrictEqual(
 			levels.map((level) => mapAutonomy(level, "read", { readOutsideWorkspace: true })),
 			["deny", "ask", "ask", "allow"],
@@ -326,7 +326,7 @@ describe("read scope admission", () => {
 
 	it("parks every scoped tool at auto-edit, denies it unattended, and runs it once approved", async () => {
 		for (const entry of SCOPED) {
-			const denied = registryAt("auto-edit");
+			const denied = registryAt("default");
 			denied.onPermissionRequired((_call, decision, meta) => {
 				match(decision.kind === "ask" ? decision.rejection.short : "", /path is outside the workspace/u);
 				denied.cancelParkedCall(meta.requestId, "contract: denied");
@@ -334,7 +334,7 @@ describe("read scope admission", () => {
 			const blocked = await denied.invoke({ tool: entry.tool, args: argsFor(entry.tool, entry.linked) });
 			strictEqual(blocked.kind, "blocked", entry.tool);
 
-			const approved = registryAt("auto-edit");
+			const approved = registryAt("default");
 			approved.onPermissionRequired((_call, _decision, meta) => {
 				void approved.resumeParkedCalls({
 					actionClass: "read",
@@ -349,7 +349,7 @@ describe("read scope admission", () => {
 
 	it("runs every scoped tool at full-auto, denies it at read-only, and never asks for an inside path", async () => {
 		for (const entry of SCOPED) {
-			const suggest = registryAt("suggest");
+			const suggest = registryAt("default");
 			let asked = 0;
 			suggest.onPermissionRequired((_call, _decision, meta) => {
 				asked += 1;
@@ -358,7 +358,7 @@ describe("read scope admission", () => {
 			strictEqual((await suggest.invoke({ tool: entry.tool, args: argsFor(entry.tool, entry.outside) })).kind, "blocked");
 			strictEqual(asked, 1, entry.tool);
 
-			const fullAuto = registryAt("full-auto");
+			const fullAuto = registryAt("yolo");
 			const ran = await fullAuto.invoke({ tool: entry.tool, args: argsFor(entry.tool, entry.outside) });
 			strictEqual(ran.kind, "ok", `${entry.tool}: ${JSON.stringify(ran)}`);
 

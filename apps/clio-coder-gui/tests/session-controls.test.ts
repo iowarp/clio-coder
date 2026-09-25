@@ -132,10 +132,10 @@ test("safe settings reject extra keys before ACP, project four keys, and expose 
 	assert.equal(probe.healthy, true);
 	assert.equal(probe.latencyMs, 5);
 	const autonomy = await json(
-		await h.post(`${base}/autonomy`, { level: "auto-edit" }),
+		await h.post(`${base}/autonomy`, { level: "default" }),
 		routes.setSessionAutonomy.response,
 	);
-	assert.equal(autonomy.level, "auto-edit");
+	assert.equal(autonomy.level, "default");
 	assert.equal((await h.request(`${base}/autonomy`)).status, 200);
 });
 test("all eleven opted-in ACP event kinds reach valid bounded global envelopes, an unknown kind is dropped, and both strips retain", {

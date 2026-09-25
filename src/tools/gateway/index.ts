@@ -165,13 +165,13 @@ function autonomyNote(actionClass: ActionClass): string {
 		case "read":
 			return "Read class: runs at every autonomy level.";
 		case "write":
-			return "Write class: parks for operator approval at suggest, runs at auto-edit and full-auto, and is denied at read-only.";
+			return "Write class: runs in default and yolo, and is denied for internal read-only workers.";
 		case "execute":
-			return "Execute class: an unrecognized command asks at auto-edit, runs at full-auto, and is denied at read-only.";
+			return "Execute class: an unrecognized command asks in default, runs in yolo, and is denied for internal read-only workers.";
 		case "dispatch":
-			return "Dispatch class: plan-scale calls ask below full-auto; denied at read-only.";
+			return "Dispatch class: plan-scale calls ask in default, run in yolo, and are denied for internal read-only workers.";
 		case "unknown":
-			return "No action class was declared: every call asks for approval and read-only denies it.";
+			return "No action class was declared: default asks for approval, yolo runs it, and internal read-only workers deny it.";
 		default:
 			return `Action class ${actionClass}.`;
 	}
@@ -478,7 +478,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		const authority = admissionNotes(spec.name, spec.baseActionClass);
 		if (spec.name === ToolNames.WebFetch) {
 			authority.push(
-				"A non-GET method or a body is an outward action and asks at suggest and auto-edit; use web_read when a plain GET is enough.",
+				"A non-GET method or a body is an outward action and asks in default; use web_read when a plain GET is enough.",
 			);
 		}
 		if (spec.name === ToolNames.Artifact) {

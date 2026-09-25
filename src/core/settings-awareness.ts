@@ -4,12 +4,10 @@ import { SETTING_CONTROLS } from "./settings-controls.js";
 import { resolveSettingsSection, settingsSectionForPath } from "./settings-navigation.js";
 
 export const AUTONOMY_HELP = {
-	"read-only": "Inspect the workspace and answer questions. Edits, execution, and dispatch are refused.",
-	suggest: "Inspect freely; ask before edits, execution, or dispatch. Useful when reviewing an unfamiliar project.",
-	"auto-edit":
+	default:
 		"Edit the workspace, run recognized checks, and delegate routine work without repeated approval. Ask for unfamiliar commands, reads outside the workspace, declared outward actions, and larger dispatch plans. Safety rules still apply.",
-	"full-auto":
-		"Skip autonomy approvals, including unfamiliar commands and outward actions. Safety rules can still block or require approval. Choose this only for work you are prepared to let run unattended.",
+	yolo:
+		"Run without ordinary approval prompts, including unfamiliar commands and outward actions. Damage-control rules and hard path protections still apply.",
 } as const;
 
 function describeSettingsPosture(settings: Readonly<ClioSettings>): string {
@@ -100,7 +98,7 @@ export function settingsAwareness(settings: Readonly<ClioSettings>, query = "", 
 			concurrency: settings.fleet.concurrency,
 		},
 		note:
-			"Answer current-configuration questions from this live snapshot; documentation describes behavior, not this session’s configured values. For zero search matches, retry this settings scope with a short key or no query instead of reading whole guides. These are configured ceilings, not remaining budgets. This read changes nothing. When the user explicitly asks to change Clio routing or fleet settings in interactive full-auto, discover configure_clio through gateway, preview the exact change, then apply only through its direct operator approval. Never edit settings files with bash or write to bypass that approval. /settings supports session-only changes where available; configure saves global defaults.",
+			"Answer current-configuration questions from this live snapshot; documentation describes behavior, not this session’s configured values. For zero search matches, retry this settings scope with a short key or no query instead of reading whole guides. These are configured ceilings, not remaining budgets. This read changes nothing. When the user explicitly asks to change Clio routing or fleet settings, discover configure_clio through gateway, preview the exact change, then apply only through its direct operator approval. Never edit settings files with bash or write to bypass that approval. /settings supports session-only changes where available; configure saves global defaults.",
 		rows,
 		total: controls.length,
 		nextOffset: offset + rows.length < controls.length ? offset + rows.length : null,

@@ -15,9 +15,9 @@ The bundled index makes complete packages available without installing them. An 
 
 ## Operator ownership of installed skills
 
-Active `.clio-coder/skills/`, `<configDir>/skills/`, and managed package trees are operator-owned. Main and worker tool admission refuses recognized model writes, edits, deletes and shell mutations to those trees at every autonomy level. Canonical `clio-coder library` mutations through the model’s bash tool require one-shot operator approval, including at full-auto. Explicit operator requests can therefore be carried out by the agent using the managed installer; direct instruction-file edits remain blocked. Legacy resource mutation commands remain operator-only; install/update `--dry-run`, search, inspection and draft validation remain available. This is a tool-admission boundary, not an operating-system sandbox for arbitrary scripts or dynamically constructed shell commands.
+Active `.clio-coder/skills/`, `<configDir>/skills/`, and managed package trees are operator-owned. Main and worker tool admission refuses recognized model writes, edits, deletes and shell mutations to those trees in both operator modes. Canonical `clio-coder library` mutations through the model’s bash tool require one-shot approval in `default`; `yolo` skips that ordinary confirmation, while damage-control rules still apply. Direct instruction-file edits remain blocked. Legacy resource mutation commands remain operator-only; install/update `--dry-run`, search, inspection and draft validation remain available. This is a tool-admission boundary, not an operating-system sandbox for arbitrary scripts or dynamically constructed shell commands.
 
-Draft outside active roots, for example `draft-skills/example/`. The operator can review `library validate draft-skills/example/SKILL.md`, then register and install a complete package. Explicitly accepted skill offers install through the library. A lexical match alone never grants installation authority, including at `full-auto`.
+Draft outside active roots, for example `draft-skills/example/`. The operator can review `library validate draft-skills/example/SKILL.md`, then register and install a complete package. Explicitly accepted skill offers install through the library. A lexical match alone never installs a skill in either mode.
 
 ## Library keys and runtime use
 
@@ -35,7 +35,7 @@ Draft outside active roots, for example `draft-skills/example/`. The operator ca
 | `d` | Check installed drift |
 | `Esc` | Close or cancel |
 
-`/skill <name> [task]` activates a skill; `/skill off` clears the session's tool-surface narrowing. Loading can narrow allowed tools but cannot grant tools the host disallows. At `read-only` and `suggest`, activation requires an operator request; `auto-edit` and `full-auto` may activate installed skills. Listing available skills does not load their bodies.
+`/skill <name> [task]` activates a skill; `/skill off` clears the session's tool-surface narrowing. Loading can narrow allowed tools but cannot grant tools the host disallows. In `default` and `yolo`, the model may activate trusted installed skills. Internal read-only workers cannot. Listing available skills does not load their bodies.
 
 Model-visible skills must be trusted and permit model invocation. Loose compatibility skills are discovery-only at user and project scope and require explicit import. Imported foreign skills require `integrations.projectResources.trustProjectImports`. A project resource adopted into user scope retains foreign trust. Disabled, incompatible or drifted package resources do not load. `/library reload` refreshes an active session after a lifecycle change.
 

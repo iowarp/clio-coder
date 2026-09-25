@@ -38,7 +38,7 @@ Usage:
   clio-coder --no-context-files, -nc  skip CLIO-CODER.md project-context injection
   clio-coder --with-panes         activate the panes extension (terminal panes for workers and tools)
   clio-coder --no-panes           keep panes off even when settings turn them on
-  clio-coder --autonomy <level>   start this interactive session at capable|yolo (legacy levels accepted)
+  clio-coder --autonomy <level>   start this interactive session at default|yolo
   clio-coder configure            interactive first-run/configuration wizard
   clio-coder targets              list configured targets, health, auth, and capabilities
   clio-coder targets add          add a target interactively or via flags

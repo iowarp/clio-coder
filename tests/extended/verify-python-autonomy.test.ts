@@ -11,7 +11,7 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 type Engine = ReturnType<typeof createSafetyPolicyEngine>;
 
 /** The net decision for a verify call, then the autonomy mapping a run applies to it. */
-function admitted(engine: Engine, check: string, level: "auto-edit" | "full-auto" = "auto-edit"): string {
+function admitted(engine: Engine, check: string, level: "default" | "yolo" = "default"): string {
 	const decision = engine.evaluate({ tool: "verify", args: { check } });
 	if (decision.kind !== "allow") return decision.kind;
 	return mapAutonomy(level, decision.actionClass, { executeRecognized: decision.execRecognition !== "unrecognized" });
@@ -56,7 +56,7 @@ it("requires approved safety authority for Python argv without trusting arbitrar
 		for (const row of cases) {
 			const fullAuto =
 				row.expected === "block" || ["inline", "joined-args", "fake-chain"].includes(row.id) ? row.expected : "allow";
-			strictEqual(admitted(engine, row.id, "full-auto"), fullAuto, `${row.id} at full-auto`);
+			strictEqual(admitted(engine, row.id, "yolo"), fullAuto, `${row.id} at full-auto`);
 		}
 		writeFileSync(
 			join(scratch.dir, ".clio-coder/safety.yaml"),
@@ -81,7 +81,7 @@ it("requires approved safety authority for Python argv without trusting arbitrar
 		const confirmedPolicy = createSafetyPolicyEngine({ cwd: scratch.dir });
 		strictEqual(confirmedPolicy.metadata().projectPolicyValid, true);
 		strictEqual(admitted(confirmedPolicy, "absolute"), "ask");
-		strictEqual(admitted(confirmedPolicy, "absolute", "full-auto"), "ask", "requireConfirmation asks at every level");
+		strictEqual(admitted(confirmedPolicy, "absolute", "yolo"), "ask", "requireConfirmation asks at every level");
 		writeFileSync(
 			join(scratch.dir, ".clio-coder/safety.yaml"),
 			JSON.stringify({

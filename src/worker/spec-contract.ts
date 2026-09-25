@@ -168,7 +168,7 @@ interface WorkerSpecFields {
 	 * Session autonomy level captured at dispatch admission (sd-01 §2.5). The
 	 * worker registry applies the same mapping as the orchestrator's, so a
 	 * worker never acts more freely than the session that dispatched it.
-	 * Default "auto-edit".
+	 * Default "default".
 	 */
 	autonomy?: AutonomyLevel;
 	/**
@@ -253,12 +253,9 @@ const MIDDLEWARE_EFFECT_KINDS = [
 	"lock_tools",
 ] as const;
 const RUNTIME_RESOLUTION_SEVERITIES = ["info", "warning", "error"] as const;
-const SPEC_AUTONOMY_LEVELS = [
-	"read-only",
-	"suggest",
-	"auto-edit",
-	"full-auto",
-] as const satisfies ReadonlyArray<AutonomyLevel>;
+// This worker wire validator stays dependency-light; runtime value imports
+// from domains are forbidden by the worker build boundary.
+const SPEC_AUTONOMY_LEVELS = ["read-only", "default", "yolo"] as const satisfies ReadonlyArray<AutonomyLevel>;
 const THINKING_MECHANISMS = ["effort-levels", "budget-tokens", "on-off", "always-on", "none"] as const;
 const THINKING_BUDGET_ENFORCEMENTS = ["enforced", "informational", "none"] as const;
 const THINKING_NOTICE_KINDS = ["applied", "ignored-on-off", "always-on", "unsupported"] as const;

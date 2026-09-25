@@ -1,3 +1,4 @@
+import type { OutputStyle } from "../core/defaults.js";
 import {
 	Editor,
 	getKeybindings,
@@ -31,6 +32,7 @@ export interface EditorChrome {
 	getModelLabel: () => TargetIdentity | string;
 	/** Effective thinking level, e.g. `high` / `off`. */
 	getThinkingLabel: () => string;
+	getOutputStyle?: () => OutputStyle;
 	/** Effective session autonomy, including live overrides. */
 	getAutonomy?: () => string;
 	/** Monotonic animation clock, injectable for deterministic rendering tests. */
@@ -100,6 +102,17 @@ function modeToken(mode: ComposerMode): "action" | "accentDeep" | "warning" {
 	if (mode === "STEER" || mode === "PREPARING" || mode === "COMPACTING") return "action";
 	if (mode === "CONFIRM") return "warning";
 	return "accentDeep";
+}
+
+/** Five cells map the supported effort range without borrowing footer space. */
+function thinkingRailHint(theme: ClioTheme, level: string, style: OutputStyle, width: number): string {
+	const steps: Record<string, number> = { off: 0, minimal: 1, low: 1, medium: 2, high: 3, xhigh: 4, max: 5 };
+	if (process.env.CLIO_CODER_SCREEN_READER === "1" || width < 28 || !(level in steps))
+		return theme.fg("reason", `think ${level}`);
+	const count = steps[level] ?? 0;
+	const cells = `${theme.fg("reason", "▰".repeat(count))}${theme.fg("dim", "▱".repeat(5 - count))}`;
+	if (style === "compact") return `${theme.fg("reason", "T")} ${cells}`;
+	return `${theme.fg("reason", "think")} ${cells}${style === "detailed" ? ` ${theme.fg("reason", level)}` : ""}`;
 }
 
 /** The line the empty composer shows for the mode it is in. */
@@ -207,9 +220,9 @@ export class ClioEditor extends Editor {
 		const mode = composerMode(this.chrome, text);
 		const rail: EditorRailState = {
 			phase: mode === "CONFIRM" ? "attention" : mode === "MESSAGE" ? "idle" : "working",
-			fullAuto: this.chrome.getAutonomy?.() === "full-auto",
+			yolo: this.chrome.getAutonomy?.() === "yolo",
 			animate:
-				text.length === 0 &&
+				(mode === "CONFIRM" || text.length === 0) &&
 				process.env.CLIO_CODER_REDUCE_MOTION !== "1" &&
 				process.env.CLIO_CODER_SCREEN_READER !== "1" &&
 				process.env.TERM !== "dumb" &&
@@ -219,22 +232,30 @@ export class ClioEditor extends Editor {
 			now: this.chrome.getAnimationTime?.() ?? animationStep(performance.now()) * ANIMATION_STEP_MS,
 		};
 
-		// Normal composition needs no mode or model label on the input rail.
-		// Keep exceptional admission/permission states and native scroll counts.
+		// The effort meter lives on the composer; permission and preparation retain
+		// the left edge, while native scroll indicators keep their own row.
 		if (!hasScrollIndicator(lines[0] ?? "")) {
 			const exceptional = mode === "CONFIRM" || mode === "PREPARING" || mode === "COMPACTING";
+			const thinking = thinkingRailHint(
+				theme,
+				this.chrome.getThinkingLabel(),
+				this.chrome.getOutputStyle?.() ?? "standard",
+				safeWidth,
+			);
 			lines[0] = renderEditorRail(
 				theme,
 				safeWidth,
 				{
 					...(exceptional
 						? {
-								left: rail.fullAuto ? `${mode} · FULL-AUTO` : mode,
-								leftToken: rail.fullAuto ? ("editorDanger" as const) : modeToken(mode),
+								left: rail.yolo ? `${mode} · YOLO` : mode,
+								leftToken: rail.yolo ? ("editorDanger" as const) : modeToken(mode),
 							}
-						: rail.fullAuto
-							? { left: "FULL-AUTO", leftToken: "editorDanger" as const }
+						: rail.yolo
+							? { left: "YOLO", leftToken: "editorDanger" as const }
 							: {}),
+					right: thinking,
+					rightRaw: true,
 				},
 				rail,
 			);

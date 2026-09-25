@@ -62,8 +62,7 @@ function seedTarget(target: Home, endpoint: string): void {
 			].join("\n"),
 		)
 		.replace(/^ {2}target: null$/m, "  target: acp-local")
-		.replace(/^ {2}model: null$/m, "  model: mock-model")
-		.replace(/^ {2}autonomy: auto-edit$/m, "  autonomy: suggest");
+		.replace(/^ {2}model: null$/m, "  model: mock-model");
 	writeFileSync(path, settings);
 }
 class AcpClient {
@@ -245,7 +244,7 @@ async function provider(options: {
 							type: "function",
 							function: next?.tool
 								? { name: next.tool.name, arguments: JSON.stringify(next.tool.args) }
-								: { name: "write", arguments: '{"path":"note.txt","content":"from ACP"}' },
+								: { name: "bash", arguments: '{"command":"printf \'from ACP\' > note.txt"}' },
 						},
 					],
 				}
@@ -512,7 +511,7 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 		}
 	});
 
-	it("mediates one write allow and one write reject", async () => {
+	it("mediates one unrecognized shell write allow and one reject", async () => {
 		for (const decision of ["allow-once", "reject-once"] as const) {
 			const target = home();
 			const fixture = await provider({

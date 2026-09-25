@@ -26,8 +26,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
  * Slurm reaches Clio through the clio-kit Slurm MCP server and the existing
  * stdio gateway. A fixture server speaks its five tool names; no scheduler
  * runs. The declaration is user scope, as the guide recommends, so its action
- * class is `unknown` and every call asks, submissions and cancellations
- * included, at every level that asks at all.
+ * class is `unknown`: default asks for each call, while yolo runs them.
  */
 
 const FIXTURE = resolve("tests/fixtures/mcp-slurm-server.mjs");
@@ -106,7 +105,7 @@ describe("Slurm through the clio-kit MCP server", () => {
 
 	it("lists the five Slurm tools as gateway capabilities with the unknown action class", async () => {
 		declare(process.execPath, [FIXTURE, journal]);
-		const { registry } = wire("auto-edit", false);
+		const { registry } = wire("default", false);
 		// Nothing has recorded this server's tools yet, and an ordinary find no
 		// longer launches a server to fill that gap. The scoped refresh is the
 		// call that does.
@@ -126,16 +125,16 @@ describe("Slurm through the clio-kit MCP server", () => {
 
 	it("asks before a submission and a cancellation at the default autonomy, and a denied one never reaches the server", async () => {
 		declare(process.execPath, [FIXTURE, journal]);
-		const { registry, parks } = wire("auto-edit", false);
+		const { registry, parks } = wire("default", false);
 		strictEqual((await call(registry, "slurm_submit", { script_path: "run.sh" })).kind, "blocked");
 		strictEqual((await call(registry, "slurm_cancel", { job_id: "4821", confirm_job_id: "4821" })).kind, "blocked");
 		deepStrictEqual(parks, ["mcp_slurm__slurm_submit", "mcp_slurm__slurm_cancel"]);
 		strictEqual(existsSync(journal), false, "neither call reached the server");
 	});
 
-	it("runs the submit, describe, cancel loop once the operator approves each call, at full-auto too", async () => {
+	it("runs the submit, describe, cancel loop without ordinary approval in yolo", async () => {
 		declare(process.execPath, [FIXTURE, journal]);
-		const { registry, parks } = wire("full-auto", true);
+		const { registry, parks } = wire("yolo", true);
 		const submitted = await call(registry, "slurm_submit", { script_path: "run.sh", partition: "debug" });
 		if (submitted.kind !== "ok" || submitted.result.kind !== "ok") throw new Error(JSON.stringify(submitted));
 		strictEqual((JSON.parse(submitted.result.output) as { job_id: string }).job_id, "4821");
@@ -143,8 +142,8 @@ describe("Slurm through the clio-kit MCP server", () => {
 		if (described.kind !== "ok" || described.result.kind !== "ok") throw new Error(JSON.stringify(described));
 		strictEqual((JSON.parse(described.result.output) as { terminal: boolean }).terminal, true);
 		strictEqual((await call(registry, "slurm_cancel", { job_id: "4821", confirm_job_id: "4821" })).kind, "ok");
-		// One server, one class: the read-only describe asks like the other two.
-		deepStrictEqual(parks, ["mcp_slurm__slurm_submit", "mcp_slurm__slurm_describe", "mcp_slurm__slurm_cancel"]);
+		// One server, one class: yolo admits every call without an ordinary ask.
+		deepStrictEqual(parks, []);
 		strictEqual(readFileSync(journal, "utf8"), "submit run.sh\ncancel 4821\n");
 	});
 

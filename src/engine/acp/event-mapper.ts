@@ -45,6 +45,22 @@ export class AcpEventMapper {
 	/** Tool-call id to its `performance.now()` start mark; spans only, never an instant. */
 	private readonly toolStarts = new Map<string, number>();
 
+	/** Some ACP bridges stream a provider error as text, then report `end_turn`. */
+	reportedFailure(): string | null {
+		const lastLine = this.assistantText.trim().split(/\r?\n/u).at(-1);
+		if (!lastLine?.startsWith("{")) return null;
+		let value: unknown;
+		try {
+			value = JSON.parse(lastLine);
+		} catch {
+			return null;
+		}
+		if (!isRecord(value) || value.type !== "error" || typeof value.status !== "number" || value.status < 400) return null;
+		const error = isRecord(value.error) ? value.error : null;
+		if (typeof error?.message !== "string" || error.message.length === 0) return null;
+		return `ACP peer reported HTTP ${value.status}: ${error.message}`;
+	}
+
 	mapUpdate(params: unknown): Array<AgentEvent | ClioWorkerEvent> {
 		const record = isRecord(params) ? (params as AcpSessionUpdateParams) : {};
 		const update = isRecord(record.update) ? record.update : {};
@@ -79,9 +95,9 @@ export class AcpEventMapper {
 		return [];
 	}
 
-	finalEvents(response: AcpPromptResponse | null): AgentEvent[] {
+	finalEvents(response: AcpPromptResponse | null, reportedFailure: string | null = null): AgentEvent[] {
 		const stopReason = typeof response?.stopReason === "string" ? response.stopReason : "end_turn";
-		const agentStopReason = stopReasonForAgent(stopReason);
+		const agentStopReason = reportedFailure === null ? stopReasonForAgent(stopReason) : "error";
 		const content: Array<Record<string, unknown>> = [];
 		if (this.assistantThinking.length > 0) {
 			content.push({ type: "thinking", text: this.assistantThinking });
@@ -94,8 +110,8 @@ export class AcpEventMapper {
 			content,
 			timestamp: Date.now(),
 			stopReason: agentStopReason,
-			...(errorMessageForStopReason(stopReason) !== undefined
-				? { errorMessage: errorMessageForStopReason(stopReason) }
+			...(reportedFailure !== null || errorMessageForStopReason(stopReason) !== undefined
+				? { errorMessage: reportedFailure ?? errorMessageForStopReason(stopReason) }
 				: {}),
 			...(response?.usage !== undefined ? { usage: response.usage } : {}),
 		} as unknown as AgentMessage;

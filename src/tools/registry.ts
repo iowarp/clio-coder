@@ -225,7 +225,7 @@ export interface RegistryDeps {
 	 * Live autonomy level (sd-01 §2.2). Read per admission so hot-reloaded
 	 * settings apply to the next call. The orchestrator wires this to current
 	 * settings; workers wire it to the level carried on their WorkerSpec.
-	 * Absent means the default level (M7: auto-edit).
+	 * Absent means the default operator mode.
 	 */
 	autonomy?: () => AutonomyLevel;
 }
@@ -593,14 +593,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return { kind: "terminal", verdict: { kind: "not_visible", reason: `tool not registered: ${call.tool}` } };
 		}
 		const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
-		const directDecision = applyRegisteredToolClassification(
-			deps.safety.evaluate(call, grant ? "confirmed" : undefined),
-			spec,
-		);
+		const posture = grant ? "confirmed" : level === "yolo" ? "yolo" : undefined;
+		const directDecision = applyRegisteredToolClassification(deps.safety.evaluate(call, posture), spec);
 		const projectedCall = spec.safetyCall?.(call.args ?? {});
 		const projectedDecision =
 			projectedCall && directDecision.kind !== "block"
-				? applyRegisteredToolClassification(deps.safety.evaluate(projectedCall, grant ? "confirmed" : undefined), spec)
+				? applyRegisteredToolClassification(deps.safety.evaluate(projectedCall, posture), spec)
 				: undefined;
 		// Both the public capability and its underlying effects must pass. A trusted
 		// projection cannot bypass a rule targeting the capability's own name.

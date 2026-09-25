@@ -227,6 +227,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			]);
 			const migrated = readFileSync(join(home.root, "config", "settings.yaml"), "utf8");
 			match(migrated, /^version: 2$/mu);
+			match(migrated, /^ {2}autonomy: default$/mu);
 			match(migrated, /^chat:$/mu);
 			match(migrated, /^interface:$/mu);
 			ok(!/^panes:$/mu.test(migrated), "retired root panes map must be gone");
@@ -251,8 +252,8 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 	});
 
 	it("accepts --autonomy for the interactive session and refuses it where it would be dropped", async () => {
-		// WTF-P's guide and a published tutorial start a supervised session with
-		// `clio-coder --autonomy suggest`, which failed as an unknown global option.
+		// A one-session override must use the two operator modes and leave the
+		// persisted selection alone.
 		const home = isolatedHome("clio-coder-autonomy-boot-");
 		try {
 			mkdirSync(join(home.root, "config"), { recursive: true });
@@ -264,12 +265,12 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 
 			const bogus = await run(["--autonomy", "unsupported"], home.env);
 			strictEqual(bogus.code, 2, bogus.output);
-			match(bogus.output, /--autonomy must be one of: capable\|yolo\|read-only\|suggest\|auto-edit\|full-auto/u);
-			const dropped = await run(["--autonomy", "suggest", "doctor"], home.env);
+			match(bogus.output, /--autonomy must be default\|yolo/u);
+			const dropped = await run(["--autonomy", "default", "doctor"], home.env);
 			strictEqual(dropped.code, 2, dropped.output);
-			match(dropped.output, /clio-coder run --autonomy suggest/u);
+			match(dropped.output, /clio-coder run --autonomy default/u);
 
-			await reachEditor(launch(["--autonomy", "suggest"], { ...home.env, CLIO_CODER_INTERACTIVE: "1" }));
+			await reachEditor(launch(["--autonomy", "default"], { ...home.env, CLIO_CODER_INTERACTIVE: "1" }));
 			strictEqual(readFileSync(settingsPath, "utf8"), saved, "a one-session override must not rewrite settings.yaml");
 		} finally {
 			home.cleanup();

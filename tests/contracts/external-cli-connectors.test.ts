@@ -75,7 +75,7 @@ function input(root: string, runtime: WorkerRunInput["runtime"], patch: Partial<
 		wireModelId: runtime.knownModels?.[0] ?? "default",
 		allowedTools: [],
 		budget: { toolCalls: 20, readReserve: 0, synthesis: true, hardCap: 50 },
-		autonomy: "auto-edit",
+		autonomy: "default",
 		cwd: root,
 		...patch,
 	};
@@ -316,7 +316,7 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		match(observed.stdin, /Reply PONG/);
 		equal(observed.env.PI_CODING_AGENT_DIR, join(root, "pi-home"));
 		equal(observed.env.FAKE_SECRET, undefined);
-		throws(() => buildPiCliArgs({ ...run, autonomy: "suggest" }), /cannot enforce autonomy/);
+		ok(!buildPiCliArgs({ ...run, autonomy: "default" }).includes("read,grep,find,ls"));
 	});
 
 	it("parses OpenCode source-defined text, step usage, and error events", async () => {

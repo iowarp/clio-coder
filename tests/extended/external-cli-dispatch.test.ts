@@ -61,7 +61,7 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 	settings.fleet.default.target = "codex-test";
 	settings.fleet.default.model = "codex-cli-default";
 	settings.fleet.retry.maxRetries = 0;
-	settings.safety.autonomy = "read-only";
+	settings.safety.autonomy = "default";
 	const bundle = makeDispatchBundle(
 		dispatchStubContext({ settings, runtime: codexCliRuntime, agentTools: [], useRuntimeDefaultAgentBudget: true }),
 	);
@@ -144,7 +144,7 @@ for (const event of [
 	settings.fleet.default.target = "pi-test";
 	settings.fleet.default.model = "pi-cli-default";
 	settings.fleet.retry.maxRetries = 0;
-	settings.safety.autonomy = "read-only";
+	settings.safety.autonomy = "default";
 	const bundle = makeDispatchBundle(
 		dispatchStubContext({ settings, runtime: piCliRuntime, agentTools: [], useRuntimeDefaultAgentBudget: true }),
 	);
@@ -221,7 +221,7 @@ test("external edits distinguish current checkout, preserved worktree, and faile
 	settings.fleet.default.target = "codex-test";
 	settings.fleet.default.model = "codex-cli-default";
 	settings.fleet.retry.maxRetries = 0;
-	settings.safety.autonomy = "auto-edit";
+	settings.safety.autonomy = "default";
 	const bundle = makeDispatchBundle(
 		dispatchStubContext({ settings, runtime: codexCliRuntime, agentTools: [], useRuntimeDefaultAgentBudget: true }),
 	);
@@ -230,7 +230,7 @@ test("external edits distinguish current checkout, preserved worktree, and faile
 		const request = {
 			agentId: "coder",
 			target: "codex-test",
-			autonomy: "auto-edit" as const,
+			autonomy: "default" as const,
 			executionRole: "builder" as const,
 			requestOrigin: "user" as const,
 			cwd: root,
@@ -313,7 +313,7 @@ for (const event of [
 	settings.fleet.default.target = "codex-test";
 	settings.fleet.default.model = "codex-cli-default";
 	settings.fleet.retry.maxRetries = 0;
-	settings.safety.autonomy = "auto-edit";
+	settings.safety.autonomy = "default";
 	const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: codexCliRuntime }));
 	await bundle.extension.start();
 	try {
@@ -323,7 +323,7 @@ for (const event of [
 				target: "codex-test",
 				task: "Create proof.txt",
 				cwd: root,
-				autonomy: "auto-edit",
+				autonomy: "default",
 				executionRole: "builder",
 				requestOrigin: "user",
 				denyTools: ["write"],
@@ -335,7 +335,7 @@ for (const event of [
 			target: "codex-test",
 			task: "Create proof.txt",
 			cwd: root,
-			autonomy: "auto-edit",
+			autonomy: "default",
 			executionRole: "builder",
 			requestOrigin: "user",
 			worktree: true,

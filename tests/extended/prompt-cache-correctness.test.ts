@@ -34,7 +34,7 @@ function identityInput(): MainPromptCacheIdentityInput {
 		targetId: "local",
 		runtimeId: "llama.cpp",
 		wireModelId: "stable-model",
-		autonomy: "auto-edit",
+		autonomy: "default",
 		sessionId: "session-1",
 		cwd: "/workspace",
 		workingContextPaths: ["src/b.ts", "src/a.ts"],
@@ -98,7 +98,7 @@ describe("main compiled-prompt cache identity", () => {
 			["target", { ...identityInput(), targetId: "remote" }],
 			["runtime", { ...identityInput(), runtimeId: "ollama" }],
 			["wire model", { ...identityInput(), wireModelId: "changed-model" }],
-			["autonomy", { ...identityInput(), autonomy: "suggest" }],
+			["autonomy", { ...identityInput(), autonomy: "yolo" }],
 			["session", { ...identityInput(), sessionId: "session-2" }],
 			["cwd", { ...identityInput(), cwd: "/other-workspace" }],
 			["working-context membership", { ...identityInput(), workingContextPaths: ["src/a.ts"] }],
@@ -304,7 +304,7 @@ describe("main compiled-prompt cache identity", () => {
 		const agentRuntime = runtime as unknown as AgentRuntime;
 		const context = createTurnContext({
 			state,
-			getSettings: () => ({ safety: { autonomy: "auto-edit" } }) as never,
+			getSettings: () => ({ safety: { autonomy: "default" } }) as never,
 			providers: { getRuntime: () => undefined } as unknown as ProvidersContract,
 			prompts,
 			toolRegistry: { get: () => undefined } as unknown as ToolRegistry,
@@ -399,7 +399,7 @@ describe("main compiled-prompt cache identity", () => {
 		const cacheNotices: string[][] = [];
 		const context = createTurnContext({
 			state,
-			getSettings: () => ({ safety: { autonomy: "auto-edit" } }) as never,
+			getSettings: () => ({ safety: { autonomy: "default" } }) as never,
 			providers: { getRuntime: () => undefined } as unknown as ProvidersContract,
 			prompts,
 			session: {

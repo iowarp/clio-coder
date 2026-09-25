@@ -1,4 +1,7 @@
+import { MAX_SERVED_ARTIFACT_IDS } from "../../contracts/common.js";
 import { AppProblem } from "./problem.js";
+
+export { MAX_SERVED_ARTIFACT_IDS } from "../../contracts/common.js";
 
 /**
  * The one way a browser may name a durable artifact.
@@ -40,8 +43,6 @@ export const RUN_KINDS = ["run", "dispatch"] as const satisfies readonly Artifac
  * projection which somehow returned an unbounded list is a bug to be surfaced
  * rather than an allowlist to be filled.
  */
-export const MAX_SERVED_ARTIFACT_IDS = 64;
-
 /**
  * The shape an artifact id may take. Membership in the window is the real check.
  * This is the second one, and it exists because an admitted id becomes a child

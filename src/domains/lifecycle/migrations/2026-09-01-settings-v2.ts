@@ -171,6 +171,16 @@ function migrateRosters(value: unknown, transform: SettingsV2DocumentTransform):
 	return rosters;
 }
 
+function migrateAutonomy(value: unknown, transform: SettingsV2DocumentTransform): unknown {
+	if (value === "suggest") {
+		transform.notes.push("legacy suggest autonomy became default; review the new supervised workspace permissions");
+		return "default";
+	}
+	if (value === "auto-edit") return "default";
+	if (value === "full-auto") return "yolo";
+	return cloneValue(value);
+}
+
 function migrateFleetNodeAliases(transform: SettingsV2DocumentTransform): void {
 	const nodes = getPath(transform.document, "fleet.nodes");
 	if (!Array.isArray(nodes)) return;
@@ -206,7 +216,7 @@ export function migrateSettingsV1Document(raw: unknown): SettingsV2DocumentTrans
 	};
 
 	const moves: ReadonlyArray<readonly [string, string, ValueTransform?]> = [
-		["autonomy", "safety.autonomy"],
+		["autonomy", "safety.autonomy", migrateAutonomy],
 		["orchestrator.target", "chat.target"],
 		["orchestrator.model", "chat.model"],
 		["orchestrator.thinkingLevel", "chat.thinkingLevel"],

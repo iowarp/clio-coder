@@ -55,7 +55,7 @@ afterEach(() => {
 
 test("ACP worktree dispatch records its branch and changed paths for later merge", { timeout: 20_000 }, async () => {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.safety.autonomy = "auto-edit";
+	settings.safety.autonomy = "default";
 	settings.fleet.retry.maxRetries = 0;
 	settings.integrations.externalAgents.entries = [
 		{
@@ -73,7 +73,7 @@ test("ACP worktree dispatch records its branch and changed paths for later merge
 			agentId: "acp-writer",
 			task: "Create proof.txt",
 			cwd: root,
-			autonomy: "auto-edit",
+			autonomy: "default",
 			executionRole: "builder",
 			requestOrigin: "user",
 			worktree: true,

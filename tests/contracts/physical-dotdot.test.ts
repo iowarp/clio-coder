@@ -67,7 +67,7 @@ describe("physical `..` through a symlink", () => {
 
 	/** A write tool call at auto-edit whose park, if any, the operator approves. */
 	async function approvedWrite(path: string, content: string) {
-		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "auto-edit" });
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "default" });
 		registry.register(writeTool);
 		registry.onPermissionRequired((_call, decision, meta) => {
 			setImmediate(() => {
@@ -133,7 +133,7 @@ describe("physical `..` through a symlink", () => {
 		// Lexically <base>/y.txt; physically data/sub/deeper → sub → data → root.
 		const path = "data/deeplink/../../../y.txt";
 		deepStrictEqual(writeClass(path), { actionClass: "write", reasons: [] });
-		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "auto-edit" });
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "default" });
 		registry.register(writeTool);
 		const verdict = await registry.invoke({ tool: ToolNames.Write, args: { path, content: "inside\n" } });
 		strictEqual(verdict.kind, "ok");
@@ -151,7 +151,7 @@ describe("physical `..` through a symlink", () => {
 		const lexical = compilePathPolicy({ zeroAccessPaths: [join(root, "data", "notes.txt")] }, root);
 		strictEqual(evaluatePathPolicy(lexical, "read", path).kind, "allow");
 		// Outside the workspace, so the read runs unattended only at full-auto.
-		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "full-auto" });
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "yolo" });
 		registry.register(readTool);
 		const verdict = await registry.invoke({ tool: ToolNames.Read, args: { path } });
 		strictEqual(verdict.kind, "ok");

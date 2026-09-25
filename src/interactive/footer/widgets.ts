@@ -71,7 +71,6 @@ export interface SessionFacts {
 	/** Raw route fields for boundary-aware fitting in the compact footer. */
 	targetId?: string | null;
 	modelId?: string | null;
-	thinking: string | null;
 	capabilities: string[] | null;
 	safety: string | null;
 	toolProfile: string | null;
@@ -256,7 +255,7 @@ function collapseRemote(remote: string | null): string | null {
 /**
  * Workspace/status row helper: workspace identity on the left and a meaningful
  * work phase on the right. The active compact dashboard layout is composed in
- * dashboard.ts, including its separate route and thinking labels.
+ * dashboard.ts, including its route label.
  */
 export function compactPrimaryLine(
 	workspace: WorkspaceFacts,
@@ -621,7 +620,6 @@ export function sessionQuadrant(facts: SessionFacts, _options: ExpandedQuadrantO
 		[
 			identity ? kv(identity.key, identity.value, "accent") : statusRow(null),
 			kv("target", facts.target, "accent"),
-			kv("think", facts.thinking, "reason"),
 			styledKv("caps", capabilitiesValue(theme, facts.capabilities)),
 			// accentDeep is a structure color reserved for the section tag; the autonomy
 			// value is a plain fact and reads muted like the other neutral values.

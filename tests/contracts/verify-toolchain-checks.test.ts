@@ -35,7 +35,7 @@ function textOf(result: Awaited<ReturnType<typeof verifyTool.run>>): string {
 }
 
 /** What a headless run does with a verify call: the net decision, then the autonomy mapping. */
-function admission(root: string, args: Record<string, unknown>, level: "full-auto" | "auto-edit"): string {
+function admission(root: string, args: Record<string, unknown>, level: "yolo" | "default"): string {
 	const decision = createSafetyPolicyEngine({ cwd: root }).evaluate({ tool: "verify", args });
 	if (decision.kind !== "allow") return decision.kind;
 	return mapAutonomy(level, decision.actionClass, { executeRecognized: decision.execRecognition !== "unrecognized" });
@@ -126,22 +126,22 @@ describe("verify in repositories without package.json", () => {
 describe("verify admission under headless autonomy", () => {
 	it("admits a derived check at full-auto exactly as bash admits its command", () => {
 		const root = workspace({ "pyproject.toml": PYPROJECT, "uv.lock": "version = 1\n", "tests/test_a.py": "" });
-		strictEqual(admission(root, { check: "python-unittest" }, "full-auto"), "allow");
+		strictEqual(admission(root, { check: "python-unittest" }, "yolo"), "allow");
 		strictEqual(
-			admission(root, { check: "python-unittest" }, "full-auto"),
+			admission(root, { check: "python-unittest" }, "yolo"),
 			(() => {
 				const decision = createSafetyPolicyEngine({ cwd: root }).evaluate({
 					tool: "bash",
 					args: { command: "uv run python -m unittest discover -s tests" },
 				});
 				return decision.kind === "allow"
-					? mapAutonomy("full-auto", decision.actionClass, {
+					? mapAutonomy("yolo", decision.actionClass, {
 							executeRecognized: decision.execRecognition !== "unrecognized",
 						})
 					: decision.kind;
 			})(),
 		);
-		strictEqual(admission(root, { check: "python-unittest" }, "auto-edit"), "ask");
+		strictEqual(admission(root, { check: "python-unittest" }, "default"), "ask");
 	});
 
 	it("runs a package typecheck or lint at full-auto and asks below it", () => {
@@ -149,16 +149,16 @@ describe("verify admission under headless autonomy", () => {
 			"package.json": JSON.stringify({ scripts: { typecheck: "tsc --noEmit", lint: "biome check ." } }),
 		});
 		for (const check of ["typecheck", "lint"]) {
-			strictEqual(admission(root, { check }, "full-auto"), "allow", check);
-			strictEqual(admission(root, { check }, "auto-edit"), "ask", check);
+			strictEqual(admission(root, { check }, "yolo"), "allow", check);
+			strictEqual(admission(root, { check }, "default"), "ask", check);
 		}
 	});
 
 	it("does not turn a listing or an undeclared id into a permission ask", () => {
 		const root = workspace({ "pyproject.toml": PYPROJECT, "tests/test_a.py": "" });
-		strictEqual(admission(root, { check: "" }, "full-auto"), "allow");
-		strictEqual(admission(root, {}, "auto-edit"), "allow");
-		strictEqual(admission(root, { check: "pytest tests/test_a.py" }, "full-auto"), "allow");
+		strictEqual(admission(root, { check: "" }, "yolo"), "allow");
+		strictEqual(admission(root, {}, "default"), "allow");
+		strictEqual(admission(root, { check: "pytest tests/test_a.py" }, "yolo"), "allow");
 	});
 
 	it("scans model-supplied arguments with the resolved command", () => {
@@ -172,7 +172,7 @@ describe("verify admission under headless autonomy", () => {
 			"ask",
 			"the JSON-string argument shape accepted by verify has the same safety decision",
 		);
-		strictEqual(admission(root, { check: "python-unittest", args: ["tests.test_a"] }, "full-auto"), "allow");
+		strictEqual(admission(root, { check: "python-unittest", args: ["tests.test_a"] }, "yolo"), "allow");
 		const destructive = engine.evaluate({
 			tool: "verify",
 			args: { check: "python-unittest", args: ["&&", "rm", "-rf", "/"] },
@@ -182,7 +182,7 @@ describe("verify admission under headless autonomy", () => {
 
 	it("scans package-script arguments after the declared script name", () => {
 		const root = workspace({ "package.json": JSON.stringify({ scripts: { test: "node --test" } }) });
-		strictEqual(admission(root, { check: "test", args: ["safe.test.js"] }, "full-auto"), "allow");
+		strictEqual(admission(root, { check: "test", args: ["safe.test.js"] }, "yolo"), "allow");
 		const hidden = createSafetyPolicyEngine({ cwd: root }).evaluate({
 			tool: "verify",
 			args: { check: "test", args: ["$(touch x)"] },

@@ -1667,17 +1667,17 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 		actions: [
 			{
 				label: "Autonomy level",
-				hint: "capable | yolo",
+				hint: "default | yolo",
 				run: async (io) => {
 					io.out.write(
-						"  capable edits the workspace and runs recognized checks; unfamiliar commands ask.\n  yolo skips autonomy prompts while safety rules still apply.\n",
+						"  default edits the workspace and runs recognized checks; unfamiliar commands ask.\n  yolo clears ordinary prompts; damage-control rules and hard path protections still apply.\n",
 					);
 					const current = readSettings().safety.autonomy;
 					await askChoice(
 						io,
 						"Autonomy level",
-						["capable", "yolo"],
-						current === "auto-edit" ? "capable" : current === "full-auto" ? "yolo" : current,
+						["default", "yolo"],
+						current === "default" ? "default" : current === "yolo" ? "yolo" : current,
 						(value) => {
 							updateSettings((draft) => {
 								draft.safety.autonomy = autonomyFromUserInput(value) ?? draft.safety.autonomy;

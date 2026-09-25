@@ -11,7 +11,7 @@ import { parseWorkerContextProvenance } from "../worker/context-seed.js";
  * compete topology, applies a compete winner, or places work on a remote
  * fleet node. Supervised autonomy levels route exactly these calls through
  * ONE plan approval: the registry parks the call with the rendered plan as
- * the ask, and approving it approves the whole plan. full-auto never stops;
+ * the ask, and approving it approves the whole plan. Yolo never stops;
  * the dispatch tool logs the same artifact's hash into every run's receipt
  * (RunPlanProvenance) so the chain records what would have been approved.
  *

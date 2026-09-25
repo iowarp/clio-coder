@@ -1,12 +1,7 @@
 import { type Static, Type } from "typebox";
 
 const closed = { additionalProperties: false };
-export const AutonomyLevel = Type.Union([
-	Type.Literal("read-only"),
-	Type.Literal("suggest"),
-	Type.Literal("auto-edit"),
-	Type.Literal("full-auto"),
-]);
+export const AutonomyLevel = Type.Union([Type.Literal("default"), Type.Literal("yolo")]);
 export const ThinkingLevel = Type.Union([
 	Type.Literal("off"),
 	Type.Literal("minimal"),

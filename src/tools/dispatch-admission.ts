@@ -229,7 +229,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			hasAgent: (id) => deps.getAgentSpecs().some((spec) => spec.id === id),
 			auto: {
 				approvedAuthorities: ["read-only", "verification", "artifact-write", "workspace-edit"],
-				authorityBasis: deps.getAutonomy?.() === "full-auto" ? "full-auto-policy" : "operator-plan-approval",
+				authorityBasis: deps.getAutonomy?.() === "yolo" ? "full-auto-policy" : "operator-plan-approval",
 			},
 			resolveIntent(rawIntent, cwd) {
 				const discovery = discoverDeclaredChecks(cwd);
@@ -451,7 +451,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				});
 				const prepared = prepareScoutContinuation({
 					source,
-					authorization: deps.getAutonomy?.() === "full-auto" ? "full-auto-policy" : "operator-plan-approval",
+					authorization: deps.getAutonomy?.() === "yolo" ? "full-auto-policy" : "operator-plan-approval",
 					planAgentSelection: deps.dispatch.planAgentSelection,
 					costCeilingUsd: resolvedCostCeiling(),
 				});

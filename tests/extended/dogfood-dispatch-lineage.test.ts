@@ -48,7 +48,7 @@ async function fixture(transientFailure = false, spawn?: (spec: WorkerSpec) => S
 	settings.chat.prewarm = false;
 	settings.chat.target = "fixture";
 	settings.chat.model = "fixture-model";
-	settings.safety.autonomy = "full-auto";
+	settings.safety.autonomy = "yolo";
 	settings.fleet.retry.maxRetries = transientFailure ? 1 : 0;
 	settings.targets = [{ id: "fixture", runtime: "fixture", defaultModel: "fixture-model" }];
 	settings.fleet.default = { target: "fixture", model: "fixture-model", thinkingLevel: "off" };
@@ -130,11 +130,11 @@ async function fixture(transientFailure = false, spawn?: (spec: WorkerSpec) => S
 			},
 		},
 		getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
-		getAutonomy: () => "full-auto",
+		getAutonomy: () => "yolo",
 	});
 	const safety = context.getContract<SafetyContract>("safety");
 	ok(safety);
-	const registry = createRegistry({ safety, autonomy: () => "full-auto" });
+	const registry = createRegistry({ safety, autonomy: () => "yolo" });
 	registry.register(tool);
 	return { settings, context, bundle, tool, registry, captured, completed, preparations };
 }
@@ -515,7 +515,7 @@ it("ACP delegation publishes the same trusted host ancestry on its receipt, enve
 	timeout: 15000,
 }, async () => {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.safety.autonomy = "full-auto";
+	settings.safety.autonomy = "yolo";
 	settings.fleet.retry.maxRetries = 0;
 	settings.integrations.externalAgents.entries = [
 		{ id: "lineage-fixture", command: process.execPath, args: ["-e", ACP_PEER], toolGovernance: "clio-coder-policy" },
@@ -531,7 +531,7 @@ it("ACP delegation publishes the same trusted host ancestry on its receipt, enve
 		const tool = createDispatchTool({
 			dispatch: bundle.contract,
 			getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
-			getAutonomy: () => "full-auto",
+			getAutonomy: () => "yolo",
 		});
 		const result = await tool.run(
 			{

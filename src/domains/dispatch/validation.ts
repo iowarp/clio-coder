@@ -536,7 +536,7 @@ export function validateJobSpec(spec: unknown): Validated {
 
 	if ("autonomy" in spec && spec.autonomy !== undefined) {
 		if (!isAutonomyLevel(spec.autonomy)) {
-			errors.push("autonomy must be one of: read-only|suggest|auto-edit|full-auto");
+			errors.push("autonomy must be one of: read-only|default|yolo");
 		}
 	}
 
@@ -728,7 +728,7 @@ const VALID_PLAN_TOPOLOGIES = new Set([
 	"detached",
 	"fleet",
 ]);
-const VALID_PLAN_APPROVALS = new Set(["operator", "full-auto"]);
+const VALID_PLAN_APPROVALS = new Set(["operator", "yolo"]);
 
 function isValidGate(value: unknown): value is RunGateProvenance {
 	if (!isPlainObject(value)) return false;

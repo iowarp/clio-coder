@@ -504,8 +504,8 @@ N candidate builders (2 to 4) run the same task, each in its own scratch git
 worktree under `.clio-coder/worktrees/<group>/` on its own
 `clio-coder/compete/<group>/<n>` branch. Each candidate's work is committed on its
 branch; a read-only judge ranks the branches and names a winner
-(`WINNER: <n>`). At full-auto the winning branch is merged. At supervised
-levels the winner's branch and worktree are preserved and the operator
+(`WINNER: <n>`). In `yolo` the winning branch is merged. In `default`
+the winner's branch and worktree are preserved and the operator
 confirms through `apply_winner`, whose approval prompt is the winner
 confirmation. Losers are cleaned on every path, including abort.
 
@@ -605,9 +605,9 @@ sibling processes' reservations are preserved.
 Execution consumes the same pins, including each expanded builder/reviewer/candidate/judge role and
 the SSH node's transport kind and host. A placement, host, capability, or
 cost-ceiling change fails before launch rather than silently choosing an
-unapproved alternative. Full-auto skips the stop and seals the
+unapproved alternative. Yolo skips the stop and seals the
 same plan hash into every run's receipt instead
-(`plan.approval: "full-auto"`). Read-only autonomy denies dispatch outright,
+(`plan.approval: "full-auto"` is the stable receipt value). Internal read-only workers deny dispatch outright,
 as it denies every non-read action.
 
 The registry boundary is resolved dispatch plan v3. `deadlineMs` is required:
@@ -794,7 +794,7 @@ settle reconnaissance directly or return at most four typed subtasks. The
 coordinator validates ids, dependencies, expected result contracts, and
 requested authority and rejects embedded agents, routes, deadlines, costs, or
 other control fields. Escalation to workspace editing requires authenticated
-plan approval or existing full-auto authority.
+plan approval or existing yolo authority.
 
 ## Assignments, attempts, and failover
 
@@ -1004,7 +1004,7 @@ Protected-artifact hard blocks follow compete work into candidate worktrees:
 Clio mirrors every applicable parent-checkout path into each admitted worker
 spec and independently rejects a winner branch whose diff touches a protected
 parent path. The merge/apply coordinator rechecks the live protection state,
-so neither full-auto nor a later supervised winner approval can override that
+so neither yolo nor a later supervised winner approval can override that
 hard block.
 
 ## Operator visibility

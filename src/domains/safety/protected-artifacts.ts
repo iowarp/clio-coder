@@ -1144,7 +1144,7 @@ function pathMatchesArtifact(commandPath: string, artifactKey: string, mode: "ta
 /**
  * Every fixed label `validationMatch` returns. The only other label is the
  * `npm run <verification script>` family. The policy engine's
- * `TEST_RUNNER_COMMANDS` must run each of these without an ask at auto-edit;
+ * `TEST_RUNNER_COMMANDS` must run each of these without an ask in default;
  * `tests/contracts/test-runner-vocabulary.test.ts` fails when the two drift.
  */
 export const VALIDATION_COMMAND_LABELS = [

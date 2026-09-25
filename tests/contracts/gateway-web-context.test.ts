@@ -30,7 +30,7 @@ describe("web_read and web_fetch", () => {
 
 	it("parks an outward web_fetch at auto-edit while the same arguments run through web_read as a plain GET", async () => {
 		const parks: string[] = [];
-		const registry = createRegistry({ safety: createWorkerSafety(), autonomy: () => "auto-edit" });
+		const registry = createRegistry({ safety: createWorkerSafety(), autonomy: () => "default" });
 		registry.register(webReadTool);
 		registry.register(webFetchTool);
 		registry.onPermissionRequired((call, _decision, meta) => {

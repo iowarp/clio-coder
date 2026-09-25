@@ -57,7 +57,7 @@ describe("settings and migration boundary", () => {
 		deepStrictEqual(defaults.issues, []);
 		deepStrictEqual(defaults.settings, DEFAULT_SETTINGS);
 		strictEqual(defaults.settings.version, 2);
-		strictEqual(defaults.settings.safety.autonomy, "auto-edit");
+		strictEqual(defaults.settings.safety.autonomy, "default");
 		strictEqual(defaults.settings.safety.limits.sessionCostUsd, 5);
 		strictEqual(defaults.settings.chat.prewarm, false);
 		strictEqual(defaults.settings.chat.maxOutputTokens, 0);

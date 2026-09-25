@@ -573,7 +573,7 @@ function checkSettingsInventory(): void {
 		["context.compaction.auto", "`true`"],
 		["safety.limits.sessionCostUsd", "`5`"],
 		["fleet.concurrency", "`auto`"],
-		["safety.autonomy", "`auto-edit`"],
+		["safety.autonomy", "`default`"],
 		["chat.target", "`null`"],
 		["interface.outputDetail", "`standard`"],
 	];

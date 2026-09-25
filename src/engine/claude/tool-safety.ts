@@ -287,8 +287,8 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 			permissionRequired: false,
 		};
 	}
-	const decision = input.safety.evaluate(call);
 	const level = input.autonomy ?? DEFAULT_AUTONOMY_LEVEL;
+	const decision = input.safety.evaluate(call, level === "yolo" ? "yolo" : undefined);
 	if (decision.kind === "block") {
 		return { kind: "deny", mapped, decision, reason: rejectionText(decision), permissionRequired: false };
 	}

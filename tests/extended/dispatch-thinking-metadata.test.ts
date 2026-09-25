@@ -67,7 +67,7 @@ async function setup(beforeMetadata?: () => Promise<void>) {
 			},
 		},
 		getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
-		getAutonomy: () => "full-auto",
+		getAutonomy: () => "yolo",
 	});
 	return {
 		env,

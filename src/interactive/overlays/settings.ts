@@ -1280,13 +1280,13 @@ export function buildSettingItems(
 		...maintenanceRows(),
 		settingItem(
 			"autonomy",
-			settings.safety.autonomy === "auto-edit"
-				? "capable"
-				: settings.safety.autonomy === "full-auto"
+			settings.safety.autonomy === "default"
+				? "default"
+				: settings.safety.autonomy === "yolo"
 					? "yolo"
 					: settings.safety.autonomy,
 			{
-				values: ["capable", "yolo"],
+				values: ["default", "yolo"],
 			},
 		),
 		settingItem("workers.onPermission", settings.fleet.permissions.mode ?? "deny", {
@@ -2084,10 +2084,8 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 	if (applyEntrySettingChange(settings, id, value)) return;
 	switch (id) {
 		case "autonomy":
-			if (value === "capable") settings.safety.autonomy = "auto-edit";
-			else if (value === "yolo") settings.safety.autonomy = "full-auto";
-			if (value === "read-only" || value === "suggest" || value === "auto-edit" || value === "full-auto")
-				settings.safety.autonomy = value;
+			if (value === "default") settings.safety.autonomy = "default";
+			else if (value === "yolo") settings.safety.autonomy = "yolo";
 			return;
 		case "workers.onPermission":
 			if (value === "deny" || value === "fail" || value === "escalate") settings.fleet.permissions.mode = value;
@@ -3866,9 +3864,7 @@ export class SettingsCenter implements Component {
 			const noteKept = note.slice(0, Math.max(1, maxFooterLines - top.length));
 			const middleBudget = Math.max(0, maxFooterLines - top.length - noteKept.length);
 			// The explanation is wrapped, so a short terminal drops whole lines off
-			// its end rather than cutting one. At 40 columns the autonomy help
-			// stopped at "read-only observes; suggest" and read as the whole
-			// sentence, so the last line it keeps says that it is not.
+			// its end rather than cutting one. Mark a truncated last line explicitly.
 			const kept = middle.slice(0, middleBudget);
 			const last = kept.at(-1);
 			const marked =

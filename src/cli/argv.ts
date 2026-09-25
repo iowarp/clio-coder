@@ -8,11 +8,7 @@
  */
 
 import chalk from "chalk";
-import type { AutonomyLevel } from "../domains/safety/autonomy.js";
-
-// Keep early CLI parsing out of the domain graph. Friendly names normalize to
-// the persisted values below; legacy names remain accepted for scripts.
-const AUTONOMY_LEVELS = ["capable", "yolo", "read-only", "suggest", "auto-edit", "full-auto"] as const;
+import type { OperatorAutonomyLevel } from "../domains/safety/autonomy.js";
 
 export function printError(message: string, detail?: string): void {
 	const head = chalk.red("error:");
@@ -82,7 +78,7 @@ export interface GlobalCliFlags {
 	 */
 	panes?: "with" | "without";
 	/** `--autonomy <level>` before any subcommand: one interactive session at that level. */
-	autonomy?: AutonomyLevel;
+	autonomy?: OperatorAutonomyLevel;
 	rest: string[];
 	error?: string;
 }
@@ -145,7 +141,7 @@ export function extractGlobalFlags(
 	let noSkills = false;
 	let demo: boolean | undefined;
 	let panes: "with" | "without" | undefined;
-	let autonomy: AutonomyLevel | undefined;
+	let autonomy: OperatorAutonomyLevel | undefined;
 	const skillPaths: string[] = [];
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -190,18 +186,18 @@ export function extractGlobalFlags(
 		}
 		if (arg === "--autonomy") {
 			const value = argv[i + 1];
-			if (value === undefined || !(AUTONOMY_LEVELS as ReadonlyArray<string>).includes(value)) {
+			if (value !== "default" && value !== "yolo") {
 				return {
 					noContextFiles,
 					noSkills,
 					skillPaths,
 					rest,
-					error: `--autonomy must be one of: ${AUTONOMY_LEVELS.join("|")}`,
+					error: "--autonomy must be default|yolo",
 					...(apiKey === undefined ? {} : { apiKey }),
 					...(panes === undefined ? {} : { panes }),
 				};
 			}
-			autonomy = (value === "capable" ? "auto-edit" : value === "yolo" ? "full-auto" : value) as AutonomyLevel;
+			autonomy = value;
 			i += 1;
 			continue;
 		}

@@ -66,7 +66,7 @@ function compileInputs(overrides: Partial<SessionPromptInputs> = {}): CompileInp
 	return {
 		identity: "identity.clio",
 		operatingContract: "operating.contract",
-		safety: "safety.auto-edit",
+		safety: "safety.default",
 		sessionInputs: sessionInputs(overrides),
 		additionalFragments: [
 			{
@@ -135,7 +135,7 @@ describe("compiled main prompt: section layout", () => {
 			["operating-contract", firstLine(table.byId.get("operating.contract")?.body)],
 			["delegation", firstLine(table.byId.get("operating.delegation")?.body)],
 			["skills", firstLine(table.byId.get("operating.skills")?.body)],
-			["safety", "Autonomy: auto-edit."],
+			["safety", "Autonomy: default."],
 			["tool-contract", "Direct tools:"],
 			["fleet", "- coder (workspace-edit, 50 calls)"],
 			["project-context", "<project-type>typescript</project-type>"],

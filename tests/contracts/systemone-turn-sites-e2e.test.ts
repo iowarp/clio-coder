@@ -152,7 +152,7 @@ describe("pre-turn decision sites through the built binary", { timeout: 180_000 
 		scratch.env.CLIO_CODER_TEST_JEV_KEY = "fixture-jev-key";
 		chat = await startOpenAICompatFixture("Hello.");
 		jev = await startJevFixture();
-		seedOpenAICompatToolOrchestrator(scratch.configDir, chat.url, "auto-edit");
+		seedOpenAICompatToolOrchestrator(scratch.configDir, chat.url, "default");
 	});
 
 	after(async () => {

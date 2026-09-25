@@ -104,10 +104,10 @@ test("real built CLI streams through HTTP; E3 records one, two, three ACP child 
 	);
 	assert.equal(probe.healthy, true);
 	const autonomy = await json(
-		await server.post(`/api/sessions/${id}/autonomy`, { level: "suggest" }),
+		await server.post(`/api/sessions/${id}/autonomy`, { level: "default" }),
 		routes.setSessionAutonomy.response,
 	);
-	assert.equal(autonomy.level, "suggest");
+	assert.equal(autonomy.level, "default");
 	const renamed = await server.request(`/api/sessions/${id}`, "PATCH", { label: "S4 verified conversation" });
 	assert.equal(renamed.status, 200, await renamed.clone().text());
 	assert.equal(

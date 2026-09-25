@@ -11372,19 +11372,11 @@
 															"anyOf": [
 																{
 																	"type": "string",
-																	"const": "read-only"
+																	"const": "default"
 																},
 																{
 																	"type": "string",
-																	"const": "suggest"
-																},
-																{
-																	"type": "string",
-																	"const": "auto-edit"
-																},
-																{
-																	"type": "string",
-																	"const": "full-auto"
+																	"const": "yolo"
 																}
 															]
 														}
@@ -11609,19 +11601,11 @@
 										"anyOf": [
 											{
 												"type": "string",
-												"const": "read-only"
+												"const": "default"
 											},
 											{
 												"type": "string",
-												"const": "suggest"
-											},
-											{
-												"type": "string",
-												"const": "auto-edit"
-											},
-											{
-												"type": "string",
-												"const": "full-auto"
+												"const": "yolo"
 											}
 										]
 									}
@@ -11717,19 +11701,11 @@
 															"anyOf": [
 																{
 																	"type": "string",
-																	"const": "read-only"
+																	"const": "default"
 																},
 																{
 																	"type": "string",
-																	"const": "suggest"
-																},
-																{
-																	"type": "string",
-																	"const": "auto-edit"
-																},
-																{
-																	"type": "string",
-																	"const": "full-auto"
+																	"const": "yolo"
 																}
 															]
 														}
@@ -13903,19 +13879,11 @@
 											"anyOf": [
 												{
 													"type": "string",
-													"const": "read-only"
+													"const": "default"
 												},
 												{
 													"type": "string",
-													"const": "suggest"
-												},
-												{
-													"type": "string",
-													"const": "auto-edit"
-												},
-												{
-													"type": "string",
-													"const": "full-auto"
+													"const": "yolo"
 												}
 											]
 										},
@@ -14055,19 +14023,11 @@
 										"anyOf": [
 											{
 												"type": "string",
-												"const": "read-only"
+												"const": "default"
 											},
 											{
 												"type": "string",
-												"const": "suggest"
-											},
-											{
-												"type": "string",
-												"const": "auto-edit"
-											},
-											{
-												"type": "string",
-												"const": "full-auto"
+												"const": "yolo"
 											}
 										]
 									}
@@ -14090,19 +14050,11 @@
 											"anyOf": [
 												{
 													"type": "string",
-													"const": "read-only"
+													"const": "default"
 												},
 												{
 													"type": "string",
-													"const": "suggest"
-												},
-												{
-													"type": "string",
-													"const": "auto-edit"
-												},
-												{
-													"type": "string",
-													"const": "full-auto"
+													"const": "yolo"
 												}
 											]
 										},

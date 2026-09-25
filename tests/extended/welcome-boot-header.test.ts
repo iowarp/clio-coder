@@ -786,7 +786,8 @@ test("compact footer keeps the quantization token whole when placement does not 
 		built.footer.refresh();
 		const footer = built.footer.view.render(60).map(stripTerminalSequences).join("\n");
 		ok(footer.includes("@q4_k_m"), footer);
-		if (footer.includes("…")) match(footer, /…[/.@_-]/u, footer);
+		const primary = footer.split("\n")[0] ?? "";
+		if (primary.includes("…")) match(primary, /…[/.@_-]/u, primary);
 	} finally {
 		built.dispose();
 	}
@@ -798,7 +799,7 @@ test("the welcome keeps a full model name when space permits and shows the logo,
 	const wide = rows(component, 120);
 	ok(wide.join("\n").includes(model));
 	ok(wide.join("\n").includes("Built for the code behind science."));
-	ok(wide.join("\n").includes("Permissions  auto-edit"));
+	ok(wide.join("\n").includes("Permissions  default"));
 	ok(wide[1]?.includes("████"));
 	component.collapseToSessionHeader();
 	strictEqual(rows(component, 120).length, 1);
@@ -810,7 +811,7 @@ test("the instant shell uses the finished welcome footprint without hydration co
 	settings.chat.target = "local";
 	settings.chat.model = "model";
 	settings.targets = [{ id: "local", runtime: "llamacpp" }];
-	settings.safety.autonomy = "full-auto";
+	settings.safety.autonomy = "yolo";
 	const boot = createBootWelcome(settings, "Ctrl+S");
 	for (const width of WIDTHS) {
 		const lines = boot.render(width).map(stripTerminalSequences);
@@ -820,7 +821,7 @@ test("the instant shell uses the finished welcome footprint without hydration co
 		ok(!lines.join("\n").includes("✓"));
 	}
 	const wide = boot.render(120).map(stripTerminalSequences).join("\n");
-	ok(wide.includes("Permissions  full-auto"));
+	ok(wide.includes("Permissions  yolo"));
 	ok(wide.includes("Ctrl+S to send"));
 	ok(wide.includes("Clio Coder v"));
 });

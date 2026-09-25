@@ -62,7 +62,7 @@ async function admittedCall(entry: (typeof CASES)[number]) {
 			createWorkerSafety({ cwd: root }),
 			{ noSkills: true },
 			[],
-			"auto-edit",
+			"default",
 		);
 		// Let setup I/O drain so it cannot land inside the counted window.
 		await new Promise((resolve) => setImmediate(resolve));

@@ -49,7 +49,7 @@ afterEach(() => {
 
 function tools() {
 	const safety = createWorkerSafety({ cwd: env.dir });
-	const registry = createRegistry({ safety, autonomy: () => "full-auto" });
+	const registry = createRegistry({ safety, autonomy: () => "default" });
 	registry.register(bashTool);
 	return { safety, registry };
 }
@@ -57,7 +57,7 @@ function tools() {
 test("headless denied asks preserve the actual cause/rule, final denial and bounded no-bypass feedback", async () => {
 	const { safety, registry } = tools();
 	const original = safety.evaluate({ tool: "bash", args: { command: inline } });
-	strictEqual(original.kind, "ask", "full-auto must not relax the hidden-content confirmation rail");
+	strictEqual(original.kind, "ask", "default mode must review hidden shell content");
 	strictEqual(original.policy?.ruleId, "bash-hidden-content");
 	registry.onPermissionRequired(() => registry.cancelParkedCalls(HEADLESS_PERMISSION_DENIED_REASON));
 	const bash = resolveAgentTools({ registry })[0];
@@ -107,7 +107,7 @@ for (const check of ["correlation", "receipt"] as const)
 			{ cwd: env.dir, env: process.env, encoding: "utf8", timeout: 30_000 },
 		);
 		strictEqual(child.error, undefined);
-		strictEqual(child.status, 1, "the unresolved hard block fails the run");
+		strictEqual(child.status, 1, `the unresolved hard block fails the run: ${child.stderr}`);
 		const output = child.stdout;
 		const events = JSON.parse(readFileSync(eventsPath, "utf8")) as ChatLoopEvent[];
 		const { safety } = tools();
@@ -127,8 +127,8 @@ for (const check of ["correlation", "receipt"] as const)
 		if (check === "correlation") {
 			for (const [id, command, outcome] of [
 				["ask-first", inline, "blocked"],
-				["error-second", "cat missing-blocked.txt", "error"],
-				["success", "cat sentinel.txt", "ok"],
+				["error-second", "ls missing-blocked.txt", "error"],
+				["success", "ls sentinel.txt", "ok"],
 				["hard", "rm -f sentinel.txt", "blocked"],
 			] as const) {
 				const event = ends.find((entry) => entry.toolCallId === id);
@@ -267,19 +267,19 @@ describe("headless no-op contract through the built binary", () => {
 	}
 
 	for (const failOnNoop of [true, false]) {
-		test(`a run whose write was denied ${failOnNoop ? "fails under --fail-on-noop" : "also fails without the flag"}`, async () => {
-			// At suggest a write parks for approval, and a headless run has no
+		test(`a run whose shell write was denied ${failOnNoop ? "fails under --fail-on-noop" : "also fails without the flag"}`, async () => {
+			// Hidden shell content asks in default mode, and a headless run has no
 			// operator, so the ask is denied and the model answers with prose.
-			const { turn, receipt, project } = await headlessTurn({ autonomy: "suggest", steps: [writeProof], failOnNoop });
+			const { turn, receipt, project } = await headlessTurn({ autonomy: "default", steps: [deniedInline], failOnNoop });
 			ok(!existsSync(join(project, "c2-proof.txt")), "the denied write must not land");
 			strictEqual(receipt.noop, true);
 			ok((receipt.safety?.blockedAttempts.length ?? 0) > 0);
 			deepStrictEqual(
 				receipt.safety?.blockedAttempts.map((attempt) => [attempt.tool, attempt.actionClass]),
-				[["write", "write"]],
+				[["bash", "execute"]],
 			);
 			deepStrictEqual(receipt.safety?.decisions, { allowed: 0, blocked: 0, permissionRequested: 1 });
-			strictEqual(receipt.toolStats.find((stat) => stat.tool === "write")?.blocked, 1);
+			strictEqual(receipt.toolStats.find((stat) => stat.tool === "bash")?.blocked, 1);
 			if (failOnNoop) {
 				strictEqual(turn.code, 1, turn.stderr);
 				strictEqual(receipt.outcome, "failed");
@@ -298,7 +298,7 @@ describe("headless no-op contract through the built binary", () => {
 
 	test("a run whose write succeeded is not a no-op under --fail-on-noop", async () => {
 		const { turn, receipt, project } = await headlessTurn({
-			autonomy: "auto-edit",
+			autonomy: "default",
 			steps: [writeProof],
 			failOnNoop: true,
 			reply: "done",
@@ -313,7 +313,7 @@ describe("headless no-op contract through the built binary", () => {
 
 	test("one blocked call and one successful write is not a no-op under --fail-on-noop", async () => {
 		const { turn, receipt, project } = await headlessTurn({
-			autonomy: "auto-edit",
+			autonomy: "default",
 			steps: [deniedInline, writeProof],
 			failOnNoop: true,
 			reply: "done",
@@ -334,7 +334,7 @@ describe("headless no-op contract through the built binary", () => {
 		// write-class call is the artifact explaining the failure. That artifact
 		// is the turn's answer, not a change to the workspace.
 		const { turn, receipt, project } = await headlessTurn({
-			autonomy: "auto-edit",
+			autonomy: "default",
 			steps: [
 				{ id: "call-edit", name: "edit", arguments: { path: ".env", edits: [{ oldText: "A=1", newText: "A=2" }] } },
 				{
@@ -361,12 +361,12 @@ describe("headless no-op contract through the built binary", () => {
 		strictEqual(receipt.toolStats.find((stat) => stat.tool === "gateway")?.ok, 1);
 	});
 
-	test("three identical denied writes all count as permission requests", async () => {
+	test("three identical denied shell writes all count as permission requests", async () => {
 		// The loop guard rewrites the third denial's reason with its own
 		// guidance, so a reason-prefix check would count that one as a hard block.
 		const { receipt } = await headlessTurn({
-			autonomy: "suggest",
-			steps: [writeProof, { ...writeProof, id: "call-write-2" }, { ...writeProof, id: "call-write-3" }],
+			autonomy: "default",
+			steps: [deniedInline, { ...deniedInline, id: "call-inline-2" }, { ...deniedInline, id: "call-inline-3" }],
 			failOnNoop: false,
 		});
 		strictEqual(receipt.safety?.blockedAttempts.length, 3);
@@ -375,7 +375,7 @@ describe("headless no-op contract through the built binary", () => {
 	});
 
 	test("the sealed noop bit is covered by the receipt integrity digest", async () => {
-		const { receipt, envelope } = await headlessTurn({ autonomy: "suggest", steps: [writeProof], failOnNoop: false });
+		const { receipt, envelope } = await headlessTurn({ autonomy: "default", steps: [deniedInline], failOnNoop: false });
 		strictEqual(receipt.noop, true);
 		ok(verifyReceiptIntegrity(receipt, envelope).ok, "the sealed receipt must verify as written");
 		strictEqual(verifyReceiptIntegrity({ ...receipt, noop: false }, envelope).ok, false, "a flipped noop must fail");
@@ -385,7 +385,7 @@ describe("headless no-op contract through the built binary", () => {
 
 	test("a prose answer with no tool call is not a no-op under --fail-on-noop", async () => {
 		const { turn, receipt } = await headlessTurn({
-			autonomy: "auto-edit",
+			autonomy: "default",
 			steps: [],
 			failOnNoop: true,
 			reply: "The answer is 42.",
@@ -398,7 +398,7 @@ describe("headless no-op contract through the built binary", () => {
 
 	test("tools that all failed without a block are a no-op under --fail-on-noop", async () => {
 		const { turn, receipt } = await headlessTurn({
-			autonomy: "auto-edit",
+			autonomy: "default",
 			steps: [{ id: "call-read", name: "read", arguments: { path: "missing-input.txt" } }],
 			failOnNoop: true,
 		});

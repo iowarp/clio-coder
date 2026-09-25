@@ -86,7 +86,7 @@ const COUNCIL_MEMBER_LABEL = /^[a-z][a-z0-9_-]{0,31}$/u;
 export type CouncilSynthesisKind = "none" | "vote" | "judge";
 
 /** How a council's dispatch plan was admitted, when the row records one. */
-export type CouncilApproval = "operator" | "full-auto";
+export type CouncilApproval = "operator" | "yolo";
 
 /** Who asked for the council: the operator's `/council`, the model, or the runtime. */
 export type CouncilOrigin = "user" | "agent" | "internal";
@@ -319,7 +319,7 @@ function originOf(rows: ReadonlyArray<RunEnvelope>): CouncilOrigin | null {
 
 function approvalOf(rows: ReadonlyArray<RunEnvelope>): CouncilApproval | null {
 	const value = rows.find((row) => row.plan !== undefined)?.plan?.approval;
-	return value === "operator" || value === "full-auto" ? value : null;
+	return value === "operator" || value === "yolo" ? value : null;
 }
 
 /** Earliest start over the council's rows, as an ISO stamp. */

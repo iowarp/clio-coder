@@ -164,7 +164,7 @@ describe("speculative dispatch through the built binary", {
 					: null,
 		});
 		jev = await startJev();
-		seedOpenAICompatToolOrchestrator(scratch.configDir, chat.url, "full-auto");
+		seedOpenAICompatToolOrchestrator(scratch.configDir, chat.url, "yolo");
 	});
 
 	after(async () => {
@@ -200,14 +200,11 @@ describe("speculative dispatch through the built binary", {
 		const journalBefore = new Set(speculativeJournalRows(scratch.stateDir).map((entry) => entry.turnId));
 		const before = new Set(readRunJournal(scratch.stateDir)?.envelopes.keys() ?? []);
 		const jevBefore = jev.requests.length;
-		const result = await runCli(
-			["run", "--json", "--autonomy", "full-auto", "Ask Documenter to explain this workspace."],
-			{
-				env: scratch.env,
-				cwd: scratch.root,
-				timeoutMs: 90_000,
-			},
-		);
+		const result = await runCli(["run", "--json", "--autonomy", "yolo", "Ask Documenter to explain this workspace."], {
+			env: scratch.env,
+			cwd: scratch.root,
+			timeoutMs: 90_000,
+		});
 		strictEqual(result.code, 0, `run failed\nstdout=${result.stdout.slice(-2000)}\nstderr=${result.stderr}`);
 		const journal = readRunJournal(scratch.stateDir);
 		ok(journal);

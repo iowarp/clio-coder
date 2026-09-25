@@ -10,6 +10,7 @@ import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { DISPATCH_SCOPE, emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
+import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE } from "./artifact-pagination.js";
 
 function Topologies({
 	councils,
@@ -101,8 +102,12 @@ export function FleetPage({ client }: { client: Client }) {
 		queryKey: ["fleet-roots"],
 		initialPageParam: undefined as string | undefined,
 		queryFn: ({ pageParam }) =>
-			client.call(routes.fleetRoots, { ...emptyInput, query: { limit: 40, ...(pageParam ? { cursor: pageParam } : {}) } }),
+			client.call(routes.fleetRoots, {
+				...emptyInput,
+				query: { limit: ARTIFACT_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) },
+			}),
 		getNextPageParam: (page) => page.nextCursor ?? undefined,
+		maxPages: ARTIFACT_MAX_PAGES,
 	});
 	const runs = useInfiniteQuery({
 		queryKey: ["fleet-dispatches"],
@@ -110,9 +115,10 @@ export function FleetPage({ client }: { client: Client }) {
 		queryFn: ({ pageParam }) =>
 			client.call(routes.dispatchRuns, {
 				...emptyInput,
-				query: { limit: 40, ...(pageParam ? { cursor: pageParam } : {}) },
+				query: { limit: ARTIFACT_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) },
 			}),
 		getNextPageParam: (page) => page.nextCursor ?? undefined,
+		maxPages: ARTIFACT_MAX_PAGES,
 	});
 	const councils = useQuery({
 		queryKey: ["fleet-councils"],

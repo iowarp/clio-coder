@@ -69,7 +69,7 @@ interface Wired {
 
 function wire(scene: Scenario, factory?: (spec: McpServerSpec, options: McpClientOptions) => McpClient): Wired {
 	const clients: McpClient[] = [];
-	const registry = createRegistry({ safety: createWorkerSafety({ cwd: scene.project }), autonomy: () => "full-auto" });
+	const registry = createRegistry({ safety: createWorkerSafety({ cwd: scene.project }), autonomy: () => "yolo" });
 	const source = createMcpCapabilitySource({
 		cwd: scene.project,
 		configDir: scene.configDir,

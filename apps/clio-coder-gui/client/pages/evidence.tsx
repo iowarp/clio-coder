@@ -7,6 +7,7 @@ import { useOperation } from "../api/queries.js";
 import { Facts } from "../design/facts.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
+import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE } from "./artifact-pagination.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 
 const verdictText = {
@@ -131,9 +132,10 @@ export function EvidencePage({ client }: { client: Client }) {
 		queryFn: ({ pageParam }) =>
 			client.call(routes.evidenceList, {
 				...emptyInput,
-				query: { limit: 40, ...(pageParam ? { cursor: pageParam } : {}) },
+				query: { limit: ARTIFACT_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) },
 			}),
 		getNextPageParam: (page) => page.nextCursor ?? undefined,
+		maxPages: ARTIFACT_MAX_PAGES,
 	});
 	return (
 		<section>

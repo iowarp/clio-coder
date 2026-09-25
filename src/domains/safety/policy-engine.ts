@@ -67,7 +67,9 @@ export type SafetyPolicySource =
 export interface SafetyPolicyDecision {
 	/**
 	 * Net verdict (sd-01 §2.2): `block` is final at every autonomy level,
-	 * `ask` is a net rail demanding operator confirmation at every level, and
+	 * `ask` is a net rail demanding operator confirmation at the current level,
+	 * including damage-control asks that remain active in yolo. Ordinary asks
+	 * are cleared by the yolo posture before this verdict is returned. An
 	 * `allow` means the net passed; the autonomy mapping decides what happens
 	 * next at the admission seam (tools/registry.ts, acp/tool-mediator.ts).
 	 */
@@ -89,13 +91,13 @@ export interface SafetyPolicyDecision {
 	/**
 	 * Execute-class passes only: whether the command is in the no-prompt set
 	 * (built-in allowlist, project policy command, typed execution tool). The
-	 * autonomy mapping asks for unrecognized execution below full-auto.
+	 * autonomy mapping asks for unrecognized execution in default mode.
 	 */
 	execRecognition?: "recognized" | "unrecognized";
 	/**
 	 * Set on an allowed read, ls, grep, or find whose path resolves outside the
 	 * workspace and outside Clio's own readable roots. The net passed; the
-	 * autonomy mapping asks for it below full-auto.
+	 * autonomy mapping asks for it in default mode.
 	 */
 	readScope?: "outside-workspace";
 }
@@ -154,7 +156,7 @@ const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
 ];
 
 /**
- * Test runners run without an ask at auto-edit and full-auto (#377). They
+ * Test runners run without an ask in default and yolo modes (#377). They
  * execute repository-authored code, which the maintainer accepted so a
  * headless run can verify its own work by the project's own command. Every id
  * here maps to a `detectValidationCommand` label, and
@@ -182,7 +184,7 @@ export const TEST_RUNNER_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
 /**
  * Repository scripts that are not test runners. They still count as validation
  * evidence (`npm run <verification script>`). Their net verdict passes after
- * safety checks, while autonomy asks below full-auto unless project policy
+ * safety checks, while autonomy asks in default unless project policy
  * explicitly declares the command safe.
  */
 export const PROJECT_SCRIPT_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
@@ -517,14 +519,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 
 			// Managed library changes can be authorized by the operator. Direct
 			// mutations and all hard path/trust blocks above remain non-overridable.
-			if (mutationCommand !== null && invokesClioSkillMutation(mutationCommand)) {
+			if (mutationCommand !== null && invokesClioSkillMutation(mutationCommand) && !(posture === "yolo" && askRule)) {
 				const input = {
 					ruleId: "library-confirm",
 					reasonCode: "library-confirm",
 					reasons: ["Library changes require one-shot operator confirmation"],
 					policySource: "builtin-classifier" as const,
 				};
-				return posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input);
+				return posture === "confirmed" || posture === "yolo" ? allowDecision(base, input) : askDecision(base, input);
 			}
 
 			// The authored ask rail (sd-01 M3) decides only among calls that
@@ -559,7 +561,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					reasons: [...classification.reasons, "system-level changes require one-shot confirmation at every autonomy level"],
 					policySource: "builtin-classifier",
 				};
-				return posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input);
+				return posture === "confirmed" || posture === "yolo" ? allowDecision(base, input) : askDecision(base, input);
 			}
 
 			const packageCommand =
@@ -581,8 +583,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					projectPolicy,
 				);
 				// A typed verifier still runs through the same command safety scan.
-				// Unrecognized checks are left to the autonomy mapping: capable asks,
-				// while the operator's full-auto choice admits them headlessly.
+				// Unrecognized checks are left to the autonomy mapping: default asks,
+				// while yolo admits them headlessly.
 				if (bash.kind === "block") return blockDecision(base, bash);
 				if (bash.kind === "ask") return askDecision(base, bash);
 				return allowDecision(base, bash);
@@ -604,7 +606,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// Search scope: the zero-access list above is the only path rail a
 			// read-class tool meets, so a path through a link or a plain `..` used
 			// to be read, listed, and searched at every level. The net still passes
-			// it; the flag lets the autonomy mapping ask below full-auto.
+			// it; the flag lets the autonomy mapping ask in default mode.
 			if (isReadScopeTool(call.tool) && posture !== "confirmed") {
 				const escaped = readScopeEscape(pathArg(call.args) ?? ".", callCwd, cwd, readExemptRoots, walkMemo);
 				if (escaped !== null) {
@@ -798,7 +800,7 @@ function evaluateBashPolicy(
 	// joining them would erase argument boundaries or invent a shell chain.
 	if (typeof input !== "string" && !input.every((arg) => /^[\w=./:-]+$/u.test(arg))) {
 		return {
-			kind: posture === "confirmed" ? "allow" : "ask",
+			kind: posture === "confirmed" || posture === "yolo" ? "allow" : "ask",
 			ruleId: "verify-unrecognized-argv",
 			reasonCode: "verify-unrecognized-argv",
 			reasons: ["project verifier argv is outside the bare-word no-prompt command set"],
@@ -820,7 +822,8 @@ function evaluateBashPolicy(
 		typeof input === "string" &&
 		(/\$(?:[A-Za-z_{0-9@*#?!-])/.test(command) ||
 			/(?:^|[\s;&|])(?:python[\d.]*|node|ruby|perl|php|lua)\s+(?:[^\n]*?\s)?-[ce]\b/.test(command)) &&
-		posture !== "confirmed"
+		posture !== "confirmed" &&
+		posture !== "yolo"
 	) {
 		return {
 			kind: "ask",
@@ -845,7 +848,7 @@ function evaluateBashPolicy(
 		};
 		if (policy.hash !== null) base.policyHash = policy.hash;
 		if (policy.path !== null) base.projectPolicyPath = policy.path;
-		if (projectMatch.requireConfirmation && posture !== "confirmed") {
+		if (projectMatch.requireConfirmation && posture !== "confirmed" && posture !== "yolo") {
 			return {
 				...base,
 				kind: "ask",
@@ -866,14 +869,13 @@ function evaluateBashPolicy(
 		};
 	}
 	// Command substitution is the content-hiding channel: the net cannot scan
-	// what `$(...)` or backticks produce at runtime, so it stays an ask rail at
-	// every level, including full-auto (sd-01 M5). A confirmed posture (one-shot
-	// grant) admits it like any other confirm rail.
+	// what `$(...)` or backticks produce at runtime, so default asks. A
+	// confirmed one-shot grant or yolo posture admits it after the safety scan.
 	// A command that is nothing but `sh -c '<script>'` is recognized by its
 	// script. Recognition can only narrow this way: the script is what runs, and
 	// judging the wrapper instead is what let the wrapper be a bypass.
 	const recognitionCommand = inlineShellScript(command) ?? command;
-	if (hasCommandSubstitution(recognitionCommand) && posture !== "confirmed") {
+	if (hasCommandSubstitution(recognitionCommand) && posture !== "confirmed" && posture !== "yolo") {
 		return {
 			kind: "ask",
 			ruleId: "bash-command-substitution",
@@ -927,7 +929,7 @@ function evaluateBashPolicy(
 			`every step of the && chain is recognized: ${chain.ruleIds.join(", ")}`,
 			...chain.scriptPreviews,
 		];
-		if (chain.requiresConfirmation && posture !== "confirmed") {
+		if (chain.requiresConfirmation && posture !== "confirmed" && posture !== "yolo") {
 			return {
 				kind: "ask",
 				ruleId: "bash-recognized-chain",
@@ -948,8 +950,8 @@ function evaluateBashPolicy(
 	}
 	// Remaining sequencing operators (pipes, ;, redirects, and && chains with an
 	// unrecognized member) defeat per-command recognition, so the command is
-	// unrecognized by definition: the autonomy mapping asks at suggest/auto-edit,
-	// runs at full-auto, denies at read-only. The rule pack has already scanned
+	// unrecognized by definition: the autonomy mapping asks in default,
+	// runs in yolo, and denies for internal read-only workers. The rule pack scanned
 	// the full string, so a destructive verb behind an operator was caught before
 	// this point.
 	if (hasSequencingOperators(command)) {
@@ -1112,9 +1114,9 @@ const CHAIN_MAX_SEGMENTS = 6;
 
 interface ChainRecognition {
 	ruleIds: ReadonlyArray<string>;
-	/** Explicit project policy confirmation remains a net rail at every level. */
+	/** Explicit project policy confirmation asks in default and is skipped in yolo. */
 	requiresConfirmation: boolean;
-	/** Built-in project scripts ask at supervised levels and run at full-auto. */
+	/** Built-in project scripts ask in default and run in yolo. */
 	requiresAutonomyApproval: boolean;
 	scriptPreviews: ReadonlyArray<string>;
 }
@@ -1128,7 +1130,7 @@ interface ChainRecognition {
  * This exists because the compound form is what a model reaches for first and
  * the flat rule cost more than it bought: in a recorded live drive 34 of 75
  * calls were blocked, nearly all of them `cd x && y`, since an unrecognized
- * execute asks below full-auto and a headless run answers every ask with a
+ * execute asks in default mode and a headless run answers every ask with a
  * denial (REPORT-dispatch-drive-1.md S2). Meanwhile `sh -c '<anything>'` sailed
  * past the same rail, so the rail was mostly taxing the honest spelling. The
  * `sh -c` half is closed at both ends now: this function recognizes such a
@@ -1218,7 +1220,7 @@ function hasSequencingOperators(command: string): boolean {
 /**
  * Content-hiding constructs: `$(...)` and backticks execute text the net
  * cannot see until runtime. Kept separate from sequencing (sd-01 M5) so they
- * can stay ask-gated at full-auto.
+ * can ask in default while yolo passes the ordinary confirmation.
  */
 function hasCommandSubstitution(command: string): boolean {
 	return /(`|\$\()/.test(command);

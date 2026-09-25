@@ -2,7 +2,7 @@ import { type ClioTheme, type ClioToken, type RuleOptions, rule } from "./theme/
 
 export interface EditorRailState {
 	phase: "idle" | "working" | "attention";
-	fullAuto: boolean;
+	yolo: boolean;
 	animate: boolean;
 	now: number;
 }
@@ -24,13 +24,14 @@ export function renderEditorRail(
 		for (let column = 0; column < fill.length; column += 1) {
 			let token: ClioToken = "editor";
 			if (state.phase === "attention") {
-				token = state.animate && Math.floor(state.now / 900) % 2 === 1 ? "action" : "editorAction";
+				const wave = Math.abs(column - center);
+				token = !state.animate || wave >= 9 ? "editorAction" : wave < 3 ? "warning" : wave < 6 ? "editorAction" : "action";
 			} else if (state.phase === "working" && state.animate) {
 				const distance = Math.abs(column - center);
 				if (distance < tokens.length) token = tokens[distance] ?? "editor";
 			}
 			// Fixed endcaps retain the safety signal through every animation phase.
-			if (state.fullAuto && (column < 3 || column >= fill.length - 3)) token = "editorDanger";
+			if (state.yolo && (column < 3 || column >= fill.length - 3)) token = "editorDanger";
 			if (runToken !== token && runToken !== null) {
 				output += theme.style(runToken, run, { bold: true });
 				run = "";

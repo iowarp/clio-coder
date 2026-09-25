@@ -68,7 +68,7 @@ function guidance(overrides: Partial<GuidanceDeps> = {}, store = fakeProfile()) 
 	let enabled = true;
 	const hook = createGuidanceRegistration({
 		enabled: () => enabled,
-		autonomy: () => "auto-edit",
+		autonomy: () => "default",
 		keyFor: (id) => (id === "clio-coder.output.cycle" ? "Alt+O" : null),
 		hasProjectContext: () => true,
 		profile: store.io,
@@ -128,8 +128,8 @@ describe("demo guidance tips", () => {
 	});
 
 	it("words the settings tip for the autonomy that can act on it", () => {
-		const { turn } = guidance({ autonomy: () => "suggest" });
-		match(tipOf(turn("how can I change the thinking level in clio?")) ?? "", /\/model switches the chat model/);
+		const { turn } = guidance({ autonomy: () => "default" });
+		match(tipOf(turn("how can I change the thinking level in clio?")) ?? "", /preview a Clio settings change/);
 	});
 
 	it("does nothing and touches no profile while demo guidance is off", () => {
@@ -210,7 +210,7 @@ describe("demo guidance tips", () => {
 	it("teaches only slash commands that exist", () => {
 		const names = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
 		const context = {
-			autonomy: "auto-edit",
+			autonomy: "default",
 			keyFor: () => "Alt+O",
 			hasProjectContext: false,
 			contextPressure: 0.9,

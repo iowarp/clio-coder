@@ -274,7 +274,7 @@ The base provenance sets, steering, routing, quality, worker identity, result-co
 | `safety.toolTelemetry.unfinished` | `{ tool, count }[]` | Current dispatch receipts | Tool starts that had no matching finish when the receipt sealed | experimental |
 | `safety.toolTelemetry.workspaceMutationPossible` | `boolean` | Current dispatch receipts | Whether incomplete or unavailable telemetry could conceal a shared-workspace mutation; retry admission fails closed when true | experimental |
 | `autonomyEnforcement.grade` | `string` | Always | The autonomy grade level enforced for the run | experimental |
-| `autonomyEnforcement.autonomy` | `string` | Always | The effective autonomy level name (e.g. auto-edit, suggest, read-only, full-auto) | experimental |
+| `autonomyEnforcement.autonomy` | `string` | Always | The effective operator mode (`default` or `yolo`), or internal `read-only` posture | experimental |
 | `autonomyEnforcement.externalMode` | `string` | When running external worker | The execution mode of the external worker runtime | experimental |
 | `autonomyEnforcement.dangerousBypass` | `boolean` | When running external worker | Whether a safety bypass was explicitly activated | experimental |
 | `validationGrounding.claimed` | `number` | Validation grounding evaluated | Count of validations claimed by worker | experimental |

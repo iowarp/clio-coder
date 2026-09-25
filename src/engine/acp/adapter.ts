@@ -383,15 +383,16 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				mergeUsage(usage, promptResponse?.usage);
 				mergeUsage(usage, promptResponse?.tokenUsage);
 			}
-			for (const event of mapper.finalEvents(promptResponse ?? null)) emit(event);
+			const reportedFailure = mapper.reportedFailure();
+			for (const event of mapper.finalEvents(promptResponse ?? null, reportedFailure)) emit(event);
 			const stopReason = typeof promptResponse?.stopReason === "string" ? promptResponse.stopReason : "end_turn";
 			const toolSnapshot = mediator.snapshot();
 			return {
 				messages: [],
-				exitCode: aborted || stopReason === "cancelled" ? 1 : stopReason === "end_turn" ? 0 : 1,
+				exitCode: aborted || reportedFailure !== null || stopReason === "cancelled" ? 1 : stopReason === "end_turn" ? 0 : 1,
 				stopReason,
-				...(stopReason !== "end_turn" && stopReason !== "cancelled"
-					? { failureMessage: `ACP stopReason=${stopReason}` }
+				...(reportedFailure !== null || (stopReason !== "end_turn" && stopReason !== "cancelled")
+					? { failureMessage: reportedFailure ?? `ACP stopReason=${stopReason}` }
 					: {}),
 				usage,
 				delegation: {

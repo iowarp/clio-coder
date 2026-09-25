@@ -20,7 +20,7 @@ import { toolPromptHintsForNames } from "../../src/tools/builtin-tool-catalog.js
 const table = loadFragments();
 const builtinRecipes = discoverAgentRecipes(process.cwd()).filter((recipe) => recipe.source === "builtin");
 const fleetRoster = renderFleetPromptSection(builtinRecipes.map(normalizeAgentSpec));
-const autonomyLevels: ReadonlyArray<AutonomyLevel> = ["read-only", "suggest", "auto-edit", "full-auto"];
+const autonomyLevels: ReadonlyArray<AutonomyLevel> = ["read-only", "default", "default", "yolo"];
 
 function occurrences(text: string, needle: string): number {
 	return text.split(needle).length - 1;
@@ -43,7 +43,7 @@ function mainPrompt(input: {
 	return compile(table, {
 		identity: "identity.clio",
 		operatingContract: "operating.contract",
-		safety: `safety.${input.autonomy ?? "auto-edit"}`,
+		safety: `safety.${input.autonomy ?? "default"}`,
 		sessionInputs: {
 			provider: "dynamo",
 			model: "qwen3.8-27b",
@@ -85,7 +85,7 @@ function workerPrompt(input: {
 	const providerSupportsTools = input.providerSupportsTools === undefined ? true : input.providerSupportsTools;
 	return compileWorker(table, {
 		...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
-		autonomy: input.autonomy ?? "auto-edit",
+		autonomy: input.autonomy ?? "default",
 		providerSupportsTools,
 		toolNames,
 		toolPromptHints: toolPromptHintsForNames(toolNames, role),
@@ -177,7 +177,7 @@ describe("compact prompt contracts", () => {
 		});
 		match(compiled.systemPrompt, /You are Clio, the coding agent in IOWarp's CLIO ecosystem/u);
 		match(compiled.systemPrompt, /Her documentation and source ship with the package/u);
-		match(compiled.systemPrompt, /Autonomy: auto-edit\./u);
+		match(compiled.systemPrompt, /Autonomy: default\./u);
 		match(compiled.systemPrompt, /Hard blocks\s+\(destructive git,/u);
 		match(compiled.systemPrompt, /A sealed run receipt is the durable record/u);
 		match(compiled.systemPrompt, /advisory claim until its evidence is verified/u);

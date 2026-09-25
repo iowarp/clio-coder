@@ -7,7 +7,7 @@ test("no-edit convention scope reaches full-auto prompts with mutation tools ava
 	const prompt = compile(loadFragments(), {
 		identity: "identity.clio",
 		operatingContract: "operating.contract",
-		safety: "safety.full-auto",
+		safety: "safety.yolo",
 		sessionInputs: {
 			providerSupportsTools: true,
 			toolNames: ["read", "edit", "write", "bash", "dispatch"],

@@ -167,7 +167,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 
 | Key | Default | When it applies |
 | --- | --- | --- |
-| `safety.autonomy` | `auto-edit` | immediately |
+| `safety.autonomy` | `default` | immediately |
 | `safety.limits.sessionCostUsd` | `5` | next turn |
 | `safety.limits.chatToolCallsPerTurn` | `60` | next turn |
 | `safety.limits.readBytesPerCall` | `51200` | next turn |

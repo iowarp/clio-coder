@@ -1,4 +1,4 @@
-import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { createStdioTransport } from "../../src/engine/acp/transport.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
@@ -43,6 +43,21 @@ test("ACP child accepts a new session after closing its bound session", async ()
 			mcpServers: [],
 		});
 		ok(first.sessionId);
+		for (const removed of ["read-only", "suggest", "auto-edit", "full-auto", "capable"]) {
+			await rejects(
+				transport.request("clio-coder/session/autonomy", { sessionId: first.sessionId, level: removed }),
+				/invalid autonomy level/u,
+				removed,
+			);
+		}
+		deepStrictEqual(
+			await transport.request("clio-coder/session/autonomy", { sessionId: first.sessionId, level: "yolo" }),
+			{ level: "yolo", source: "session" },
+		);
+		deepStrictEqual(
+			await transport.request("clio-coder/session/autonomy", { sessionId: first.sessionId, level: "default" }),
+			{ level: "default", source: "session" },
+		);
 		deepStrictEqual(await transport.request("session/close", { sessionId: first.sessionId }), {});
 		const second = await transport.request<{ sessionId: string }>("session/new", {
 			cwd: process.cwd(),

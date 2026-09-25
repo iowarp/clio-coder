@@ -613,8 +613,9 @@ export class AcpToolMediator {
 			decision = "denied";
 			reason = `unknown ACP tool: ${mapped.displayTool}`;
 		} else {
+			const level = this.input.autonomy ?? DEFAULT_AUTONOMY_LEVEL;
 			const safetyDecisions = mapped.evaluations.map((evaluation) =>
-				this.input.safety.evaluate({ tool: evaluation.tool, args: evaluation.args }),
+				this.input.safety.evaluate({ tool: evaluation.tool, args: evaluation.args }, level === "yolo" ? "yolo" : undefined),
 			);
 			const blocking = safetyDecisions.find((candidate) => candidate.kind === "block");
 			const asking = safetyDecisions.find((candidate) => candidate.kind === "ask");
@@ -629,7 +630,6 @@ export class AcpToolMediator {
 				// The net passed; the autonomy mapping decides (sd-01 §2.2). An
 				// "ask" disposition resolves as a non-stall denial, exactly like a
 				// net confirm rail below: a delegation has no operator to answer.
-				const level = this.input.autonomy ?? DEFAULT_AUTONOMY_LEVEL;
 				const dispositions = safetyDecisions.map((candidate) => ({
 					candidate,
 					disposition: mapAutonomy(level, candidate.classification.actionClass, {

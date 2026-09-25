@@ -62,7 +62,7 @@ const STOP_WORDS = new Set([
 const VOCABULARY_ALIASES: ReadonlyArray<{ triggers: ReadonlyArray<string>; expansions: ReadonlyArray<string> }> = [
 	{
 		triggers: ["approval", "confirm", "confirmation", "deny", "permission", "permissions", "prompt"],
-		expansions: ["autonomy", "ask", "deny", "safety", "policy", "full-auto", "read-only"],
+		expansions: ["autonomy", "ask", "deny", "safety", "policy", "yolo", "read-only"],
 	},
 	{
 		triggers: ["agent", "agents", "dispatch", "fleet", "worker", "workers", "run"],

@@ -480,8 +480,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				"off"
 			);
 		},
+		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		isStreaming: () => deps.chat.isStreaming(),
-		getAutonomy: () => deps.getSettings?.().safety.autonomy ?? "auto-edit",
+		getAutonomy: () => deps.getSettings?.().safety.autonomy ?? "default",
 		...(deps.isAwaitingApproval ? { isAwaitingApproval: deps.isAwaitingApproval } : {}),
 		...(deps.getPermissionInspection ? { getPermissionInspection: deps.getPermissionInspection } : {}),
 		getTurnPreparation: () => deps.chat.turnPreparation().phase,

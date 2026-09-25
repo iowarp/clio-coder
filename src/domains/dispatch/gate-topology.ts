@@ -107,6 +107,7 @@ const REASON_RULES: ReadonlyArray<readonly [string, GateDecisionReason]> = [
 	["judge picked failed or missing candidate", "judge-picked-failed-candidate"],
 	["judge-selected candidate ", "winner-touches-protected-artifact"],
 	["operator confirmation ", "operator-confirmed-winner"],
+	["yolo applied ", "full-auto-applied-winner"],
 	["full-auto applied ", "full-auto-applied-winner"],
 ];
 

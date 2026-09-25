@@ -217,16 +217,11 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 			if (first) {
 				const settings = readSettings();
 				const autonomy = {
-					"read-only": "inspect and answer; no edits or commands",
-					suggest: "ask before edits, commands, and delegation",
-					"auto-edit": "edit and run recognized checks; unfamiliar commands ask",
-					"full-auto": "skip autonomy approvals; safety rules still apply",
+					default: "edit and run recognized checks; unfamiliar commands ask",
+					yolo: "run without ordinary prompts; damage-control rules still apply",
 				}[settings.safety.autonomy];
 				presenter.fields([
-					[
-						"Autonomy",
-						`${settings.safety.autonomy === "auto-edit" ? "capable" : settings.safety.autonomy === "full-auto" ? "yolo" : settings.safety.autonomy} · ${autonomy}`,
-					],
+					["Autonomy", `${settings.safety.autonomy} · ${autonomy}`],
 					[
 						"Worker approvals",
 						settings.fleet.permissions.mode === "deny"

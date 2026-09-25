@@ -39,7 +39,7 @@ test("S4-02 stable prompt and web fetch hint identify untrusted tool data", asyn
 	const prompt = compile(loadFragments(), {
 		identity: "identity.clio",
 		operatingContract: "operating.contract",
-		safety: "safety.auto-edit",
+		safety: "safety.default",
 		sessionInputs: {
 			provider: "local",
 			model: "fixture",

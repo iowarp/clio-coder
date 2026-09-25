@@ -58,7 +58,7 @@ describe("safety gate boundary", () => {
 		policy: SafetyPolicyEngine,
 		tool: string,
 		args: Record<string, unknown>,
-		level: "read-only" | "suggest" | "auto-edit" | "full-auto",
+		level: "read-only" | "default" | "yolo",
 	): string {
 		const decision = policy.evaluate({ tool, args });
 		return decision.kind === "allow"
@@ -81,7 +81,7 @@ describe("safety gate boundary", () => {
 		strictEqual(secretRead.reasonCode, "secret_path_bash");
 	});
 
-	it("admits only standalone git diff whitespace checks at capable", () => {
+	it("admits only standalone git diff whitespace checks in default mode", () => {
 		const policy = engine();
 		for (const command of ["git diff --check", "git diff --cached --check"]) {
 			const args = { command };
@@ -90,9 +90,8 @@ describe("safety gate boundary", () => {
 			strictEqual(decision.ruleId, "builtin:git-diff-check", command);
 			strictEqual(decision.execRecognition, "recognized", command);
 			strictEqual(executionDisposition(policy, ToolNames.Bash, args, "read-only"), "deny", command);
-			strictEqual(executionDisposition(policy, ToolNames.Bash, args, "suggest"), "ask", command);
-			strictEqual(executionDisposition(policy, ToolNames.Bash, args, "auto-edit"), "allow", command);
-			strictEqual(executionDisposition(policy, ToolNames.Bash, args, "full-auto"), "allow", command);
+			strictEqual(executionDisposition(policy, ToolNames.Bash, args, "default"), "allow", command);
+			strictEqual(executionDisposition(policy, ToolNames.Bash, args, "yolo"), "allow", command);
 		}
 		for (const command of [
 			"git diff --check --ext-diff",
@@ -103,7 +102,7 @@ describe("safety gate boundary", () => {
 		]) {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
 			strictEqual(decision.execRecognition, "unrecognized", command);
-			strictEqual(executionDisposition(policy, ToolNames.Bash, { command }, "auto-edit"), "ask", command);
+			strictEqual(executionDisposition(policy, ToolNames.Bash, { command }, "default"), "ask", command);
 		}
 		for (const command of ["git diff --check $(cat args)", "git diff --check `cat args`"]) {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "ask", command);
@@ -111,7 +110,7 @@ describe("safety gate boundary", () => {
 		for (const command of ["git diff --check > .env", "git diff --check && cat ~/.ssh/id_rsa"]) {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "block", command);
 		}
-		strictEqual(executionDisposition(policy, ToolNames.Bash, { command: "npm run build" }, "auto-edit"), "ask");
+		strictEqual(executionDisposition(policy, ToolNames.Bash, { command: "npm run build" }, "default"), "ask");
 	});
 
 	it("recognizes only safe complete command chains inside the workspace", () => {
@@ -128,11 +127,11 @@ describe("safety gate boundary", () => {
 		);
 		strictEqual(admitted.execRecognition, "unrecognized");
 		strictEqual(
-			executionDisposition(policy, ToolNames.Bash, { command: "cd pkg && npm run build && git status" }, "auto-edit"),
+			executionDisposition(policy, ToolNames.Bash, { command: "cd pkg && npm run build && git status" }, "default"),
 			"ask",
 		);
 		strictEqual(
-			executionDisposition(policy, ToolNames.Bash, { command: "cd pkg && npm run build && git status" }, "full-auto"),
+			executionDisposition(policy, ToolNames.Bash, { command: "cd pkg && npm run build && git status" }, "yolo"),
 			"allow",
 		);
 		// A test runner is recognized without confirmation (#377), so the same chain runs.
@@ -154,8 +153,8 @@ describe("safety gate boundary", () => {
 		);
 		for (const command of ["npm run build 2>&1 | tail -30", "npm run lint > output.txt", "npm test 2>&1 | tail -30"]) {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
-			strictEqual(executionDisposition(policy, ToolNames.Bash, { command }, "auto-edit"), "ask", command);
-			strictEqual(executionDisposition(policy, ToolNames.Bash, { command }, "full-auto"), "allow", command);
+			strictEqual(executionDisposition(policy, ToolNames.Bash, { command }, "default"), "ask", command);
+			strictEqual(executionDisposition(policy, ToolNames.Bash, { command }, "yolo"), "allow", command);
 		}
 	});
 
@@ -178,7 +177,7 @@ describe("safety gate boundary", () => {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command, cwd } });
 			strictEqual(decision.execRecognition, recognition, command);
 			strictEqual(
-				mapAutonomy("auto-edit", decision.actionClass, { executeRecognized: recognition === "recognized" }),
+				mapAutonomy("default", decision.actionClass, { executeRecognized: recognition === "recognized" }),
 				recognition === "recognized" ? "allow" : "ask",
 			);
 		}
@@ -236,7 +235,7 @@ describe("safety gate boundary", () => {
 		strictEqual(destructive.reasonCode.startsWith("damage-control:"), true);
 	});
 
-	it("admits typed package verification at full-auto after the command safety scan", () => {
+	it("admits typed package verification in yolo after the command safety scan", () => {
 		const policy = engine();
 		for (const check of ["typecheck", "lint", "build"]) {
 			const args = { check };
@@ -244,13 +243,12 @@ describe("safety gate boundary", () => {
 			strictEqual(decision.kind, "allow", check);
 			strictEqual(decision.execRecognition, "unrecognized", check);
 			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "read-only"), "deny", check);
-			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "suggest"), "ask", check);
-			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "auto-edit"), "ask", check);
-			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "full-auto"), "allow", check);
+			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "default"), "ask", check);
+			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "yolo"), "allow", check);
 		}
 	});
 
-	it("keeps explicit confirmations and hard execution rails at full-auto", () => {
+	it("yolo clears ordinary confirmation rails while damage control still decides", () => {
 		writeFileSync(
 			join(scratch, ".clio-coder", "safety.yaml"),
 			"version: 1\ncommands:\n  - id: approved-build\n    command: npm run build\n    actionClass: execute\n    requireConfirmation: true\n",
@@ -260,14 +258,16 @@ describe("safety gate boundary", () => {
 		strictEqual(confirmed.kind, "ask");
 		strictEqual(confirmed.reasonCode, "project-policy:approved-build");
 		strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command: "npm run build" } }, "confirmed").kind, "allow");
+		strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command: "npm run build" } }, "yolo").kind, "allow");
 		for (const [command, kind] of [
-			["npm run build $(cat args)", "ask"],
-			["npm run build && sudo apt update", "ask"],
+			["npm run build $(cat args)", "allow"],
+			["npm run build && sudo apt update", "allow"],
 			["npm run build && rm -rf /", "block"],
 			["npm run build && cat ~/.ssh/id_rsa", "block"],
-			["npm run build && clio-coder library install skill:example --yes", "ask"],
+			["npm run build && clio-coder library install skill:example --yes", "allow"],
+			["gcloud iam policies", "ask"],
 		] as const) {
-			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, kind, command);
+			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }, "yolo").kind, kind, command);
 		}
 	});
 
@@ -314,11 +314,11 @@ describe("safety gate boundary", () => {
 		}
 	});
 
-	it("refuses an actual full-auto registry write without touching active bytes while allowing a draft", async () => {
+	it("refuses a yolo registry write without touching active bytes while allowing a draft", async () => {
 		const target = join(scratch, ".clio-coder", "skills", "example", "SKILL.md");
 		mkdirSync(join(scratch, ".clio-coder", "skills", "example"), { recursive: true });
 		writeFileSync(target, "Operator instructions.\n");
-		const registry = createRegistry({ safety: createWorkerSafety({ cwd: scratch }), autonomy: () => "full-auto" });
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: scratch }), autonomy: () => "yolo" });
 		registry.register(writeTool);
 		const denied = await registry.invoke({
 			tool: ToolNames.Write,
@@ -744,7 +744,12 @@ describe("safety gate boundary", () => {
 			strictEqual(policy.evaluate(call).kind, "ask", command);
 			strictEqual(policy.evaluate(call, "confirmed").kind, "allow", command);
 		}
-		strictEqual(mapAutonomy("full-auto", "git_destructive"), "deny");
+		strictEqual(mapAutonomy("yolo", "git_destructive"), "deny");
+		strictEqual(mapAutonomy("default", "unknown"), "ask");
+		strictEqual(mapAutonomy("yolo", "unknown"), "allow");
+		strictEqual(mapAutonomy("default", "system_modify"), "ask");
+		strictEqual(mapAutonomy("yolo", "system_modify"), "allow");
+		strictEqual(mapAutonomy("read-only", "system_modify"), "deny");
 	});
 
 	it("fails execution closed under an invalid project policy without blocking normal reads", () => {

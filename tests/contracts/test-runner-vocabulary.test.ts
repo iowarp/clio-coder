@@ -109,7 +109,7 @@ describe("test runner vocabulary (#377)", () => {
 			strictEqual(decision.execRecognition, "recognized", spelling);
 			ok(decision.ruleId !== undefined, spelling);
 			strictEqual(TEST_RUNNER_LABELS[decision.ruleId], label, spelling);
-			strictEqual(disposition(policy, spelling, "auto-edit"), "allow", spelling);
+			strictEqual(disposition(policy, spelling, "default"), "allow", spelling);
 		}
 		for (const [id, spelling] of Object.entries(PROJECT_SCRIPT_SPELLINGS)) {
 			strictEqual(detectValidationCommand(spelling).kind, "validation", spelling);
@@ -119,23 +119,22 @@ describe("test runner vocabulary (#377)", () => {
 			strictEqual(decision.ruleId, id, spelling);
 			strictEqual(decision.execRecognition, "unrecognized", spelling);
 			strictEqual(disposition(policy, spelling, "read-only"), "deny", spelling);
-			strictEqual(disposition(policy, spelling, "suggest"), "ask", spelling);
-			strictEqual(disposition(policy, spelling, "auto-edit"), "ask", spelling);
-			strictEqual(disposition(policy, spelling, "full-auto"), "allow", spelling);
-			strictEqual(disposition(policy, `npm test && ${spelling}`, "auto-edit"), "ask", spelling);
-			strictEqual(disposition(policy, `npm test && ${spelling}`, "full-auto"), "allow", spelling);
+			strictEqual(disposition(policy, spelling, "default"), "ask", spelling);
+			strictEqual(disposition(policy, spelling, "default"), "ask", spelling);
+			strictEqual(disposition(policy, spelling, "yolo"), "allow", spelling);
+			strictEqual(disposition(policy, `npm test && ${spelling}`, "default"), "ask", spelling);
+			strictEqual(disposition(policy, `npm test && ${spelling}`, "yolo"), "allow", spelling);
 		}
 	});
 
-	it("runs the project's test command unattended at auto-edit and full-auto only", () => {
+	it("runs the project's test command unattended at default and yolo", () => {
 		for (const command of [
 			"python3 -m unittest -q test_solver",
 			"ctest --output-on-failure",
 			"node --test sum.test.mjs",
 		]) {
-			strictEqual(disposition(policy, command, "auto-edit"), "allow", command);
-			strictEqual(disposition(policy, command, "full-auto"), "allow", command);
-			strictEqual(disposition(policy, command, "suggest"), "ask", command);
+			strictEqual(disposition(policy, command, "default"), "allow", command);
+			strictEqual(disposition(policy, command, "yolo"), "allow", command);
 			strictEqual(disposition(policy, command, "read-only"), "deny", command);
 		}
 	});
@@ -149,7 +148,7 @@ describe("test runner vocabulary (#377)", () => {
 			"meson test > /etc/x",
 		]) {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
-			notStrictEqual(disposition(policy, command, "auto-edit"), "allow", command);
+			notStrictEqual(disposition(policy, command, "default"), "allow", command);
 			notStrictEqual(decision.kind, "allow", `${command} must keep its safety rail`);
 		}
 		for (const command of [
@@ -158,18 +157,18 @@ describe("test runner vocabulary (#377)", () => {
 			"ctest | tee out.txt",
 			"ctest && npm run build",
 		]) {
-			strictEqual(disposition(policy, command, "auto-edit"), "ask", command);
-			strictEqual(disposition(policy, command, "full-auto"), "allow", command);
+			strictEqual(disposition(policy, command, "default"), "ask", command);
+			strictEqual(disposition(policy, command, "yolo"), "allow", command);
 		}
 		// A quoted argument leaves the bare-word charset, so the command is
 		// unrecognized bash again: the autonomy level decides, as before #377.
-		strictEqual(disposition(policy, "python3 -m unittest 'test solver'", "auto-edit"), "ask");
+		strictEqual(disposition(policy, "python3 -m unittest 'test solver'", "default"), "ask");
 	});
 
 	it("does not mistake a Node script argument or evaluation for the test runner", () => {
 		for (const command of ["node sum.mjs --test", "node -e process.exit(0) -- --test", "node --test-only sum.mjs"]) {
 			strictEqual(detectValidationCommand(command).kind, "none", command);
-			strictEqual(disposition(policy, command, "auto-edit"), "ask", command);
+			strictEqual(disposition(policy, command, "default"), "ask", command);
 		}
 	});
 
@@ -178,7 +177,7 @@ describe("test runner vocabulary (#377)", () => {
 		strictEqual(decision.kind, "allow");
 		strictEqual(decision.ruleId, "bash-recognized-chain");
 		strictEqual(decision.execRecognition, "recognized");
-		strictEqual(disposition(policy, "cd build && ctest --output-on-failure", "auto-edit"), "allow");
-		notStrictEqual(disposition(policy, "cd .. && ctest", "auto-edit"), "allow");
+		strictEqual(disposition(policy, "cd build && ctest --output-on-failure", "default"), "allow");
+		notStrictEqual(disposition(policy, "cd .. && ctest", "default"), "allow");
 	});
 });

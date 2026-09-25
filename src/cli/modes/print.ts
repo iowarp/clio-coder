@@ -133,7 +133,7 @@ interface HeadlessMainAgentReceiptStats {
 
 /**
  * The registry action class a successful call must carry to count as a
- * mutation for the no-op rule. It is the class autonomy `auto-edit` runs
+ * mutation for the no-op rule. It is the class autonomy `default` runs
  * without asking (`mapAutonomy` in domains/safety/autonomy.ts): write, edit,
  * and an outward web_fetch. The class comes from the registry's own admission
  * of each call, so an extension tool that declares a write base class counts

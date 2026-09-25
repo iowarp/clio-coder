@@ -297,7 +297,7 @@ describe("mandatory request-fit compaction", () => {
 		);
 	});
 
-	for (const autonomy of ["read-only", "auto-edit", "full-auto"] as const) {
+	for (const autonomy of ["default", "yolo"] as const) {
 		it(`routes resumed ${autonomy} submit through overflow with the recorded skill selection`, async () => {
 			const settings = structuredClone(DEFAULT_SETTINGS);
 			settings.safety.autonomy = autonomy;

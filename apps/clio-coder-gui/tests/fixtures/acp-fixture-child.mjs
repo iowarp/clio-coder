@@ -9,10 +9,10 @@ const scenario = process.env.CLIO_CODER_WEB_FIXTURE_SCENARIO ?? "text";
 let sessionId = randomUUID(),
 	cancelled = false;
 let eventSequence = 0,
-	autonomy = "suggest";
+	autonomy = "default";
 const settings = {
 	chat: { target: "fixture", model: "fixture-model", thinkingLevel: "off" },
-	safety: { autonomy: "suggest" },
+	safety: { autonomy: "default" },
 };
 const editable = ["chat.target", "chat.model", "chat.thinkingLevel", "safety.autonomy"];
 const pending = new Map();

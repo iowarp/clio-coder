@@ -68,7 +68,7 @@ test("trusted user hooks protect paths before mutations and after observations i
 				"run",
 				"--json",
 				"--autonomy",
-				"full-auto",
+				"yolo",
 				"Exercise the declared path protection hooks and finish.",
 			],
 			{

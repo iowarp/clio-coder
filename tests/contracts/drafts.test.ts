@@ -11,6 +11,7 @@ import {
 	DRAFT_DEFAULT,
 	DRAFT_SYSTEM_PROMPT,
 	draftJudgeRequest,
+	draftTemperature,
 	judgeDrafts,
 	parseDraftArgs,
 	readDraftVerdict,
@@ -38,6 +39,10 @@ const LIVE_ANSWERS: Record<string, DecisionAnswer> = {
 };
 
 describe("/draft arguments", () => {
+	it("omits explicit temperature for Sonnet 5 while retaining local model variation", () => {
+		strictEqual(draftTemperature("claude-sonnet-5", 0.7), undefined);
+		strictEqual(draftTemperature("mercury-2.5", 0.7), 0.7);
+	});
 	it("reads a leading count and defaults to three", () => {
 		deepStrictEqual(parseDraftArgs("2 write a retry helper"), { count: 2, request: "write a retry helper" });
 		deepStrictEqual(parseDraftArgs("write a retry helper"), { count: DRAFT_DEFAULT, request: "write a retry helper" });

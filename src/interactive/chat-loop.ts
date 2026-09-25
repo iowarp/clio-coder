@@ -103,7 +103,7 @@ import {
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { coldReasonText } from "./cold-reasons.js";
-import { DRAFT_MAX_TOKENS, DRAFT_SYSTEM_PROMPT, DRAFT_TEMPERATURES } from "./drafts.js";
+import { DRAFT_MAX_TOKENS, DRAFT_SYSTEM_PROMPT, DRAFT_TEMPERATURES, draftTemperature } from "./drafts.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import type { runPrewarmRound } from "./prewarm.js";
@@ -861,7 +861,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			};
 			emitNotice(
 				policy?.allowListAdvisory === true && current.length === 0
-					? `[Clio Coder] Skill activated: ${activated.join(", ")}. Its allowed-tools list is guidance in full-auto; explicit disallowed-tools still apply.`
+					? `[Clio Coder] Skill activated: ${activated.join(", ")}. Its allowed-tools list is guidance in yolo; explicit disallowed-tools still apply.`
 					: current.length > 0
 						? `[Clio Coder] Skill activated: ${activated.join(", ")}. Its tool surface stays armed across your next turns until another skill replaces it or you run /skill off.`
 						: `[Clio Coder] Skill activated: ${activated.join(", ")}. It declares no tool narrowing.`,
@@ -1583,7 +1583,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					modelMayActivateSkills(deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy),
 			);
 			if (pendingSkillPolicy) {
-				pendingSkillPolicy.allowListAdvisory = (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "full-auto";
+				pendingSkillPolicy.allowListAdvisory = (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "yolo";
 			}
 			// What was already loaded when this turn started, so the settle-time
 			// notice names the skills this turn activated and not the ones a
@@ -2082,6 +2082,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
 			const candidates = await Promise.all(
 				DRAFT_TEMPERATURES.slice(0, count).map(async (temperature, index): Promise<DraftCandidate> => {
+					const samplingTemperature = draftTemperature(prepared.runtime.agent.state.model.id, temperature);
 					try {
 						// One endpoint slot per round: each is a full request against the
 						// same scheduler, and capacity has to count every one of them.
@@ -2093,7 +2094,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								systemPrompt: DRAFT_SYSTEM_PROMPT,
 								userText: text,
 								maxTokens: DRAFT_MAX_TOKENS,
-								temperature,
+								...(samplingTemperature === undefined ? {} : { temperature: samplingTemperature }),
 								...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
 								...(options.signal ? { signal: options.signal } : {}),
 								...(options.onCandidate ? { onDelta: (partial: string) => options.onCandidate?.(index, partial) } : {}),

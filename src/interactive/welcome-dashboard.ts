@@ -540,7 +540,7 @@ function buildWelcomeDashboardLines(
 		theme.fg("dim", "Model"),
 		routeRow(theme, stats, detailWidth),
 		field("Workspace", workspaceLabel(theme, stats, Math.max(1, detailWidth - 11))),
-		field("Permissions", theme.fg(stats.autonomy === "full-auto" ? "warning" : "muted", stats.autonomy)),
+		field("Permissions", theme.fg(stats.autonomy === "yolo" ? "warning" : "muted", stats.autonomy)),
 		theme.fg("dim", "Ask Clio how to use or extend her."),
 		theme.fg("dim", "Targets"),
 		theme.fg("muted", stats.targets),
@@ -726,7 +726,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			routeReason,
 			projectContext: launchpad ? this.projectContext(cwd) : "checking",
 			submitKeyLabel: launchpad ? (this.deps.getSubmitKeyLabel?.() ?? null) : null,
-			autonomy: settings?.safety?.autonomy ?? "auto-edit",
+			autonomy: settings?.safety?.autonomy ?? "default",
 			quota: launchpad ? (this.deps.getQuotaSummary?.() ?? null) : null,
 			...inventory(settings, statuses, this.deps.getAgentCount?.()),
 		};
