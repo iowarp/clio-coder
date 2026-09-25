@@ -178,7 +178,12 @@ export const evidenceTool: ToolSpec = {
 					details: { code: "evidence_foreign", artifactAbsent: false },
 				};
 			}
+			const worktree =
+				mode === "run"
+					? await (await import("../domains/evidence/build.js")).authenticatedRunWorktree(clioStateDir(), id)
+					: null;
 			return boundedResult({
+				...(worktree === null ? {} : { worktree }),
 				...inspected,
 				...(await evidenceDetailSnapshot(evidenceId, Date.now, dataDir)),
 				gateDecisions: await loadEvidenceGateDecisions(dataDir, evidenceId),
