@@ -6,7 +6,6 @@ import type {
 	CodewikiArtifactRef,
 	CodewikiBuildWorkerOutcome,
 	CodewikiBuildWorkerRequest,
-	CodewikiBuildWorkerResult,
 } from "./build-worker-protocol.js";
 import { buildCodewiki, type CodewikiBuildOptions, syncCodewiki, updateCodewikiPaths } from "./indexer.js";
 import type { Codewiki } from "./schema.js";
@@ -101,21 +100,4 @@ export async function executeCodewikiBuildOutcome(
 		}
 	}
 	throw new Error("codewiki source snapshot did not stabilize after 3 attempts; previous index preserved");
-}
-
-/**
- * In-process form for callers that hold the artifact: the worker outcome with
- * the handed object substituted wherever the reconciliation left it unchanged.
- */
-export async function executeCodewikiBuild(
-	request: CodewikiBuildWorkerRequest,
-	options: CodewikiBuildOptions = {},
-): Promise<CodewikiBuildWorkerResult> {
-	const outcome = await executeCodewikiBuildOutcome(request, options);
-	if (outcome.codewiki)
-		return { codewiki: outcome.codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
-	const handed = request.kind === "build" ? null : request.current;
-	const current = handed && !isArtifactRef(handed) ? handed : readCodewiki(request.cwd);
-	if (!current) throw new Error("codewiki reconciliation returned no artifact");
-	return { codewiki: current, fingerprint: outcome.fingerprint, changed: outcome.changed };
 }

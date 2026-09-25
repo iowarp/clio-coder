@@ -1,12 +1,7 @@
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
-import {
-	enumerateWorkspaceFiles,
-	enumerateWorkspaceFilesAsync,
-	WORKSPACE_EXCLUDED_DIRS,
-} from "../../../core/workspace-files.js";
-import { createSlicer } from "../codewiki/cooperative.js";
+import { enumerateWorkspaceFiles, WORKSPACE_EXCLUDED_DIRS } from "../../../core/workspace-files.js";
 
 /** Shared, bounded byte evidence for the existing wiki checkpoint/publication. */
 export type WikiSourceContent = Record<string, string | null>;
@@ -69,21 +64,6 @@ export function captureWikiSourceContent(cwd: string): WikiSourceContent {
 		const files = enumerateWorkspaceFiles(cwd, WORKSPACE_EXCLUDED_DIRS);
 		const snapshot = capture(cwd, files);
 		for (const path of files) snapshot.add(path);
-		return snapshot.content;
-	} catch {
-		return {};
-	}
-}
-
-export async function captureWikiSourceContentAsync(cwd: string): Promise<WikiSourceContent> {
-	try {
-		const slicer = createSlicer();
-		const files = await enumerateWorkspaceFilesAsync(cwd, WORKSPACE_EXCLUDED_DIRS, undefined, slicer);
-		const snapshot = capture(cwd, files);
-		for (const path of files) {
-			snapshot.add(path);
-			await slicer.tick();
-		}
 		return snapshot.content;
 	} catch {
 		return {};

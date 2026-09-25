@@ -1,16 +1,12 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
-import { enumerateWorkspaceFiles, enumerateWorkspaceFilesAsync } from "../../core/workspace-files.js";
-import { readCodewiki, readCodewikiAsync } from "./codewiki/artifact.js";
-import { type CooperativeSlicer, createSlicer } from "./codewiki/cooperative.js";
+import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
+import { readCodewiki } from "./codewiki/artifact.js";
 import { isIndexablePath } from "./codewiki/paths.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import { EXCLUDED_DIRS } from "./excluded-dirs.js";
-
-const execFileAsync = promisify(execFile);
 
 export interface Fingerprint {
 	treeHash: string;
@@ -66,15 +62,6 @@ function currentGitHead(cwd: string): string | null {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "ignore"],
 		}).trim();
-	} catch {
-		return null;
-	}
-}
-
-async function currentGitHeadAsync(cwd: string): Promise<string | null> {
-	try {
-		const { stdout } = await execFileAsync("git", ["rev-parse", "--verify", "HEAD"], { cwd, encoding: "utf8" });
-		return stdout.trim();
 	} catch {
 		return null;
 	}
@@ -142,40 +129,6 @@ export function computeFingerprint(
 	return {
 		treeHash: hash.digest("hex"),
 		gitHead: currentGitHead(cwd),
-		loc: artifactLoc ?? loc,
-	};
-}
-
-export interface ComputeFingerprintAsyncOptions {
-	slicer?: CooperativeSlicer;
-}
-
-/**
- * Same content fingerprint, with cooperative yields between file reads and
- * during enumeration. Individual reads remain synchronous; callers on status
- * surfaces and session-start paths avoid a single uninterrupted whole-tree scan.
- */
-export async function computeFingerprintAsync(
-	cwd: string,
-	codewiki: Codewiki | null | undefined = undefined,
-	options: ComputeFingerprintAsyncOptions = {},
-): Promise<Fingerprint> {
-	const slicer = options.slicer ?? createSlicer();
-	const artifact = codewiki === undefined ? await readCodewikiAsync(cwd) : codewiki;
-	await slicer.tick();
-	const files = (await enumerateWorkspaceFilesAsync(cwd, EXCLUDED_DIRS, undefined, slicer)).filter(isIndexablePath);
-
-	const hash = createTreeHash();
-	const artifactLoc = locFromCodewiki(artifact);
-	let loc = 0;
-	for (const relPath of files) {
-		await slicer.tick();
-		loc += accumulateFile(cwd, relPath, hash, artifactLoc);
-	}
-
-	return {
-		treeHash: hash.digest("hex"),
-		gitHead: await currentGitHeadAsync(cwd),
 		loc: artifactLoc ?? loc,
 	};
 }
