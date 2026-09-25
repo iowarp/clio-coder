@@ -50,10 +50,7 @@ test("every shell operator that can follow a damage-control command still asks",
 	}
 });
 
-// A `$(...)` inside double quotes is not reported as a substitution by
-// scanShellLike, so `echo "$(git restore .)"` is deliberately absent here. That
-// is a gap in the shared scanner, not in this rail, and every consumer of
-// scanShellLike has it.
+// ORCH-005 covers the double-quoted form in damage-control-scan-args.test.ts.
 test("a damage-control command hidden in a substitution or an inner shell still asks", () => {
 	for (const command of [
 		"$(git restore .)",

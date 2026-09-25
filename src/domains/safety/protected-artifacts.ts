@@ -1329,6 +1329,14 @@ export function scanShellLike(command: string): ShellToken[] {
 					continue;
 				}
 			}
+			if (quote === '"' && char === "$" && command[index + 1] === "(") {
+				// ORCH-005: double quotes preserve the word but still execute $(...).
+				const close = matchingParen(command, index + 1);
+				current += command.slice(index, close + 1);
+				substitutions.push(command.slice(index + 2, close));
+				index = close;
+				continue;
+			}
 			current += char;
 			continue;
 		}

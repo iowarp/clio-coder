@@ -68,3 +68,24 @@ test("a recognized command still runs without a confirmation", () => {
 		}
 	}
 });
+
+// ORCH-005. Double quotes still execute command substitutions. The scanner
+// must inspect their inner commands while leaving escaped and single-quoted
+// dollar signs as literal text.
+test("a destructive command substitution inside double quotes still asks at yolo", () => {
+	for (const command of [
+		'echo "$(git restore .)"',
+		'echo "$(echo $(git restore .))"',
+		'echo "$(echo "$(git restore .)")"',
+	]) {
+		const decision = decide({ command }, "yolo");
+		strictEqual(decision.kind, "ask", `${command}: ${decision.reasonCode}`);
+		strictEqual(decision.reasonCode?.startsWith("damage-control:"), true, command);
+	}
+	for (const command of ["echo '$(git restore .)'", String.raw`echo "\$(git restore .)"`]) {
+		const decision = decide({ command }, "yolo");
+		strictEqual(decision.kind, "allow", `${command}: ${decision.reasonCode}`);
+	}
+	const hardBlock = decide({ command: 'echo "$(rm -rf build)"' }, "yolo");
+	strictEqual(hardBlock.kind, "block", hardBlock.reasonCode);
+});
