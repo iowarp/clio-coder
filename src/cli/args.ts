@@ -75,6 +75,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		diagnostics: [],
 	};
 
+	let jsonEventsGiven = false;
 	for (let i = 0; i < argv.length; i += 1) {
 		const arg = argv[i];
 		const need = (flag: string): string | null => {
@@ -95,6 +96,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			continue;
 		}
 		if (arg === "--json-events") {
+			jsonEventsGiven = true;
 			const value = need(arg);
 			if (value !== null) {
 				parsed.json = true;
@@ -307,6 +309,14 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		parsed.diagnostics.push({
 			type: "error",
 			message: "--autonomy applies to the main agent; use --read-only to restrict --agent dispatch",
+		});
+	}
+	// Only the main-agent stream reads the mode (cli/modes/print.ts); a dispatch
+	// took the flag and printed its usual stream.
+	if (parsed.agentId !== undefined && jsonEventsGiven) {
+		parsed.diagnostics.push({
+			type: "error",
+			message: "--json-events applies to the main agent; use --json with --agent dispatch",
 		});
 	}
 	return parsed;

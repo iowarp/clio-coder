@@ -238,16 +238,18 @@ migrations before its final doctor repair.
 For npm global installs, `upgrade` derives the prefix from the running package,
 including custom prefixes, and runs post-install checks through the exact installed
 entry. Another launcher on `PATH` cannot take over those checks. An older dist-tag
-does not trigger a downgrade. To update and resume the project's last conversation,
-finish the turn, leave with `/quit`, and run:
+does not trigger a downgrade. To update and return to the project, finish the
+turn, leave with `/quit`, and run:
 
 ```bash
 clio-coder upgrade --restart
 ```
 
-Relaunch happens only after successful installation and checks, using `--continue`
-in the current directory. `--restart` requires a terminal and cannot combine with
-`--json` or `--post-install`. A dry run never installs or relaunches.
+Relaunch happens only after successful installation and checks. It starts the
+installed CLI in the current directory with no arguments, because sessions are
+resumed from inside the app: type `/resume` there to pick up the last
+conversation. `--restart` requires a terminal and cannot combine with `--json`
+or `--post-install`. A dry run never installs or relaunches.
 
 For pnpm, Bun, Yarn, repository-local, and cached installations, first update
 with the package manager that owns that installation, then run:

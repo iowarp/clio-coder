@@ -21,11 +21,10 @@ export function resolvePanesEnablement(
 	setting: PanesEnablement | undefined,
 ): PanesEnablement {
 	if (flag === "without") return "off";
-	if (flag === "with") {
-		// `--with-panes` on a settings file that names `embedded` honors the
-		// stronger setting; on `off` or absent settings it activates guest
-		// detection, which is the flag's promise.
-		return setting === "embedded" ? "embedded" : "auto";
-	}
+	// `--with-panes` activates guest detection, which is the flag's promise.
+	// It used to keep an `embedded` setting, but that rung is not implemented
+	// and resolves to no panes (src/domains/mux/detect.ts), so the flag did
+	// nothing on exactly the settings file that asked for panes the hardest.
+	if (flag === "with") return "auto";
 	return setting ?? "off";
 }

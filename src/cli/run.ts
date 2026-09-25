@@ -73,7 +73,7 @@ Flags:
   --repeat-penalty <N>      one-run repeat penalty override
   --max-context-tokens <N>  cap this run's context budget without enlarging the server window
   --json                    stream JSONL events for the main-agent path; dispatch streams events and receipt JSON
-  --json-events <mode>      main-agent JSON stream mode: full|terminal; implies --json
+  --json-events <mode>      main-agent JSON stream mode: full|terminal; implies --json; refused with --agent
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
   --session <id>            append this turn to an existing session
   --continue                append this turn to the most recent session for this cwd
@@ -313,10 +313,13 @@ export async function runClioRun(
 	const parsed = parseRunCliArgs(args);
 	// One-run overrides ride the scoped run-overrides transport (restored on
 	// exit) so dispatched worker subprocesses inherit them; see
-	// core/run-overrides.ts.
+	// core/run-overrides.ts. The main agent applies its sampling flags per turn
+	// (cli/modes/print.ts), so only `--agent` carries them here, where the
+	// worker is the only reader.
 	return withRunOverrides(
 		{
 			...(parsed.maxContextTokens !== undefined ? { maxContextTokens: parsed.maxContextTokens } : {}),
+			...(parsed.agentId !== undefined && parsed.sampling !== undefined ? { sampling: { ...parsed.sampling } } : {}),
 		},
 		async () => {
 			if (parsed.help) {

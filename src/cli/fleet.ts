@@ -320,13 +320,24 @@ function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): stri
 async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	const { vars, rest, error } = parseVars(args);
 	if (error !== undefined) return fail(error);
-	const json = rest.includes("--json");
-	const resumeIndex = rest.indexOf("--resume");
-	const resumeId = resumeIndex === -1 ? undefined : rest[resumeIndex + 1];
-	if (resumeIndex !== -1 && (resumeId === undefined || resumeId.startsWith("-"))) {
-		return fail("--resume requires a run id");
+	// A positional scan, so an option value is never read as the contract name
+	// (`--resume <runId> <name>` used to run a contract named after the run id)
+	// and an unknown flag is refused instead of running the contract anyway.
+	let json = false;
+	let resumeId: string | undefined;
+	let name: string | undefined;
+	for (let index = 0; index < rest.length; index += 1) {
+		const arg = rest[index];
+		if (arg === undefined) continue;
+		if (arg === "--json") json = true;
+		else if (arg === "--resume") {
+			const value = rest[index + 1];
+			if (value === undefined || value.startsWith("-")) return fail("--resume requires a run id");
+			resumeId = value;
+			index += 1;
+		} else if (arg.startsWith("-")) return fail(`unknown fleet run option: ${arg}`);
+		else name ??= arg;
 	}
-	const name = rest.find((arg) => !arg.startsWith("-"));
 	if (!name) {
 		return fail("usage: clio-coder fleet run <name> [--var key=value ...] [--resume <runId>] [--json]");
 	}

@@ -109,7 +109,11 @@ test("detects replacement and same-version rebuilds without consulting the regis
 	});
 	assert.equal(await check.probe(controller.signal), null);
 	await writeFile(join(f.root, "package.json"), '{"name":"@iowarp/clio-coder","version":"0.5.5"}');
-	assert.equal((await check.probe(controller.signal))?.kind, "replaced");
+	const replaced = await check.probe(controller.signal);
+	assert.equal(replaced?.kind, "replaced");
+	// The startup parser refuses --continue (#191); the hint names the picker.
+	assert.match(replaced?.text ?? "", /\/resume/);
+	assert.doesNotMatch(replaced?.text ?? "", /--continue/);
 	await writeFile(join(f.root, "package.json"), '{"name":"@iowarp/clio-coder","version":"0.5.4"}');
 	await utimes(f.entry, new Date(), new Date());
 	assert.equal((await check.probe(controller.signal))?.kind, "replaced");

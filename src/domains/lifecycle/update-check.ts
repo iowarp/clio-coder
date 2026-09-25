@@ -70,7 +70,7 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 					return {
 						kind: "replaced",
 						key: `replaced:${runningVersion}:${disk.version}:${entry.mtimeMs}`,
-						text: `Installation changed · /quit, then clio-coder --continue`,
+						text: "Installation changed · /quit, restart clio-coder, then /resume",
 					};
 			}
 		} catch {

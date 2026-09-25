@@ -20,7 +20,6 @@ process.env.AI_AGENT = AI_AGENT_NAME;
 // its own chunk.
 import { traceBoot } from "../core/boot-trace.js";
 import { incompleteInstallationAdvice } from "../core/incomplete-installation.js";
-import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { extractGlobalFlags, parseFlags, printError } from "./argv.js";
 
 const HELP = `Clio Coder command line
@@ -126,7 +125,29 @@ interface CliBootOptions {
 	noSkills?: boolean;
 	skillPaths?: string[];
 	panes?: "with" | "without";
-	autonomy?: AutonomyLevel;
+}
+
+/**
+ * Commands whose handler reads the boot options. Every other command used to
+ * receive them and drop them, so `clio-coder --api-key K fleet run` ran on the
+ * configured key with no word said. The panes flags belong to the interactive
+ * session alone: neither `run` nor `acp` reads them.
+ */
+const BOOT_OPTION_COMMANDS: ReadonlySet<string> = new Set(["run", "acp"]);
+const PANES_FLAGS: ReadonlySet<string> = new Set(["--with-panes", "--no-panes"]);
+
+/** The refusal for the first boot flag `command` cannot honor, or null when it honors them all. */
+function unhonoredBootFlag(command: string | undefined, bootFlags: ReadonlyArray<string>): string | null {
+	if (command === undefined || !COMMAND_HANDLERS.has(command) || command === "dev") return null;
+	for (const flag of bootFlags) {
+		if (PANES_FLAGS.has(flag)) {
+			return `${flag} applies only to the interactive session; clio-coder ${command} does not honor it.`;
+		}
+		if (!BOOT_OPTION_COMMANDS.has(command)) {
+			return `${flag} applies only to the interactive session, clio-coder run, and clio-coder acp; clio-coder ${command} does not honor it.`;
+		}
+	}
+	return null;
 }
 
 type CommandHandler = (subArgs: string[], bootOptions: CliBootOptions) => Promise<number>;
@@ -161,6 +182,7 @@ async function main(argv: string[]): Promise<number> {
 		panes,
 		demo,
 		autonomy,
+		bootFlags,
 		rest,
 		error: globalFlagError,
 	} = extractGlobalFlags(argv, isCommandToken);
@@ -198,6 +220,13 @@ async function main(argv: string[]): Promise<number> {
 		printError(
 			`--autonomy before a subcommand applies to the interactive session only. For a headless turn use: clio-coder run --autonomy ${autonomy} "<task>"`,
 		);
+		return 2;
+	}
+	// A `dev` command is judged by the command it names, which is the one that
+	// would have received and dropped the options.
+	const refusal = unhonoredBootFlag(subcommand === "dev" ? subArgs[0] : subcommand, bootFlags);
+	if (refusal !== null) {
+		printError(refusal);
 		return 2;
 	}
 	if (!subcommand) {
