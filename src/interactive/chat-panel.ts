@@ -2489,7 +2489,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					tool.settledWithoutResult = undefined;
 					if (typeof enriched.durationMs === "number" && Number.isFinite(enriched.durationMs)) {
 						tool.durationMs = enriched.durationMs;
-					} else if (tool.startedAtMs !== undefined) {
+					} else if (tool.startedAtMs !== undefined && replayStampMs === undefined) {
+						// A replay has only the ledger's duration; wall-clock elapsed here
+						// would measure rehydration, not the tool.
 						const elapsed = Math.max(0, now() - tool.startedAtMs);
 						if (elapsed > 0) tool.durationMs = elapsed;
 					}
