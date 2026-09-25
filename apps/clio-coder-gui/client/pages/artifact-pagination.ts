@@ -16,3 +16,12 @@ export const ARTIFACT_PAGE_SIZE = Math.floor(MAX_SERVED_ARTIFACT_IDS / (ARTIFACT
 export function admittedPages<P>(query: { data?: { pages: P[] } | undefined; isRefetchError: boolean }): P[] {
 	return query.isRefetchError ? [] : (query.data?.pages ?? []);
 }
+
+/**
+ * Whether retained links may be followed. A refresh replaces the server's window
+ * with a fresh first page before it refetches the rest, so until it settles a
+ * retained link may already be refused. A load-more never evicts a retained page.
+ */
+export function retainedLinksLive(query: { isRefetching: boolean }): boolean {
+	return !query.isRefetching;
+}
