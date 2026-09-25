@@ -6,7 +6,7 @@ import { afterEach, describe, it } from "node:test";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
 import { installExtension } from "../../src/domains/extensions/state.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
-import type { HookReceipt } from "../../src/domains/middleware/hooks.js";
+import { type HookReceipt, normalizeUserHook } from "../../src/domains/middleware/hooks.js";
 import { buildUserHookRegistrations, readHookSources } from "../../src/domains/middleware/hooks-io.js";
 import { BUILTIN_MIDDLEWARE_RULE_IDS } from "../../src/domains/middleware/rules.js";
 import {
@@ -16,8 +16,11 @@ import {
 	runMiddlewareAsyncRegistrations,
 	runMiddlewareRegistrations,
 } from "../../src/domains/middleware/runtime.js";
-import { createMiddlewareContractFromSnapshot } from "../../src/domains/middleware/snapshot.js";
-import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/middleware/types.js";
+import {
+	createMiddlewareContractFromSnapshot,
+	createMiddlewareSnapshot,
+} from "../../src/domains/middleware/snapshot.js";
+import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareRule } from "../../src/domains/middleware/types.js";
 import { capturedHookSourcesFor } from "../../src/entry/extension-hook-sources.js";
 
 function registration(
@@ -54,7 +57,7 @@ describe("middleware hook boundary", () => {
 		symlinkSync(path.join(outside, "payload"), path.join(extensionRoot, "payload"), "dir");
 		writeFileSync(
 			path.join(extensionRoot, "hooks.yaml"),
-			"- id: must-not-load\n  on: before_tool\n  kind: prompt\n  message: unsafe\n",
+			"- id: must-not-load\n  on: turn_start\n  kind: prompt\n  message: unsafe\n",
 		);
 
 		const snapshot = buildExtensionSnapshot({ cwd: project, generation: 0 });
@@ -78,7 +81,7 @@ describe("middleware hook boundary", () => {
 		);
 		writeFileSync(
 			path.join(source, "hooks.yaml"),
-			"- id: receipted\n  on: before_tool\n  kind: prompt\n  message: verify\n",
+			"- id: receipted\n  on: turn_start\n  kind: prompt\n  message: verify\n",
 		);
 		const installed = installExtension(source, { cwd: project, scope: "project" }).extension;
 		strictEqual(installed?.loadable, true);
@@ -89,7 +92,7 @@ describe("middleware hook boundary", () => {
 		// snapshot was built cannot reach this generation's registrations.
 		writeFileSync(
 			path.join(project, ".clio-coder", "extensions", "receipt-hooks", "hooks.yaml"),
-			"- id: rewritten\n  on: before_tool\n  kind: prompt\n  message: tampered\n",
+			"- id: rewritten\n  on: turn_start\n  kind: prompt\n  message: tampered\n",
 		);
 		const receipts: HookReceipt[] = [];
 		const built = buildUserHookRegistrations({
@@ -106,7 +109,7 @@ describe("middleware hook boundary", () => {
 		);
 		const [registration] = built.registrations;
 		ok(registration);
-		registration.evaluate({ hook: "before_tool", toolName: "read" });
+		registration.evaluate({ hook: "turn_start" });
 		deepStrictEqual(receipts[0]?.extension, {
 			id: "receipt-hooks",
 			scope: "project",
@@ -134,8 +137,8 @@ describe("middleware hook boundary", () => {
 		});
 		deepStrictEqual(rebuilt.registrations, []);
 		strictEqual(middleware.replaceRegistrations("user-hooks", 3, rebuilt.registrations).applied, true);
-		deepStrictEqual(middleware.runHook({ hook: "before_tool", toolName: "read" }).ruleIds, []);
-		registration.evaluate({ hook: "before_tool", toolName: "read" });
+		deepStrictEqual(middleware.runHook({ hook: "turn_start" }).ruleIds, []);
+		registration.evaluate({ hook: "turn_start" });
 		strictEqual(receipts.length, 2);
 		strictEqual(receipts[1]?.extension?.generation, 2);
 	});
@@ -527,5 +530,75 @@ describe("middleware registration table publication", () => {
 		const report = middleware.replaceRegistrations("user-hooks", 2, [emitting("w"), emitting("w")]);
 		strictEqual(report.applied, true);
 		deepStrictEqual(middleware.runHook(PROBE).ruleIds, [FIXED_RULE_ID, "w", "v"]);
+	});
+});
+
+describe("user hook applicability", () => {
+	const source = { origin: "project" as const, sourcePath: "hooks.yaml" };
+	const options = { workspaceRoot: "/workspace" };
+	const issuesFor = (raw: Record<string, unknown>): string[] => normalizeUserHook(raw, source, options).issues;
+
+	it("rejects a hook whose event cannot apply the effect it produces, naming the events that can", () => {
+		const cases: Array<[Record<string, unknown>, RegExp]> = [
+			[
+				{ on: "before_tool", kind: "prompt", message: "m" },
+				/before_tool cannot apply inject_reminder.*turn_start, turn_end/u,
+			],
+			[
+				{ on: "after_tool", kind: "effect", effect: { kind: "block_tool", reason: "r", severity: "hard-block" } },
+				/after_tool cannot apply block_tool.*before_tool/u,
+			],
+			[{ on: "turn_end", kind: "command", argv: ["true"] }, /turn_end cannot apply annotate_tool_result/u],
+			[{ on: "on_compaction", kind: "prompt", message: "m" }, /on_compaction cannot apply inject_reminder/u],
+			[
+				{ on: "turn_end", kind: "effect", effect: { kind: "lock_tools" } },
+				/turn_end cannot apply lock_tools.*before_tool, after_tool, turn_start/u,
+			],
+		];
+		for (const [raw, expected] of cases) {
+			const result = normalizeUserHook(raw, source, options);
+			strictEqual(result.hook, undefined, JSON.stringify(raw));
+			ok(
+				result.issues.some((issue) => expected.test(issue)),
+				`${JSON.stringify(raw)}: ${result.issues.join("; ")}`,
+			);
+		}
+	});
+
+	it("admits each event paired with an effect it applies", () => {
+		deepStrictEqual(issuesFor({ on: "turn_start", kind: "prompt", message: "m" }), []);
+		deepStrictEqual(issuesFor({ on: "turn_end", kind: "command", argv: ["true"], as: "reminder" }), []);
+		deepStrictEqual(issuesFor({ on: "after_tool", kind: "command", argv: ["true"] }), []);
+		deepStrictEqual(
+			issuesFor({
+				on: "before_tool",
+				kind: "effect",
+				effect: { kind: "block_tool", reason: "r", severity: "hard-block" },
+			}),
+			[],
+		);
+		deepStrictEqual(
+			issuesFor({ on: "turn_end", kind: "effect", effect: { kind: "request_continuation", message: "m" } }),
+			[],
+		);
+	});
+
+	it("strips operator-notification rules from the snapshot workers receive", () => {
+		const rule = (id: string, effectKinds: MiddlewareRule["effectKinds"]): MiddlewareRule => ({
+			id,
+			source: "builtin",
+			description: id,
+			enabled: true,
+			hooks: ["turn_end"],
+			effectKinds,
+		});
+		const snapshot = createMiddlewareSnapshot([
+			rule("notifies", ["inject_reminder", "notify_operator"]),
+			rule("continues", ["request_continuation"]),
+		]);
+		deepStrictEqual(
+			snapshot.rules.map((entry) => entry.id),
+			["continues"],
+		);
 	});
 });

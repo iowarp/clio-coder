@@ -26,11 +26,43 @@ import type { MiddlewareHookRegistration } from "./runtime.js";
 import {
 	isMiddlewareHook,
 	isMiddlewareReminderSeverity,
+	MIDDLEWARE_HOOKS,
 	type MiddlewareEffect,
+	type MiddlewareEffectKind,
 	type MiddlewareHook,
 	type MiddlewareReminderSeverity,
 } from "./types.js";
 import { validateMiddlewareEffect } from "./validate.js";
+
+/**
+ * The effects the orchestrator applies at each event. Anything else a hook
+ * returns there is dropped, so a user hook pairing an event with an effect it
+ * cannot apply is refused at load rather than recorded as "emitted" and
+ * ignored. Tool hooks apply through the registry (block_tool before execution
+ * only, annotations on the result, tool choice for the next round) and the
+ * protected-artifacts guard absorbs protect_path; turn_start and turn_end
+ * apply through turn-middleware.ts; on_compaction is observe-only.
+ */
+const USER_HOOK_APPLIED_EFFECTS: Readonly<Record<MiddlewareHook, ReadonlyArray<MiddlewareEffectKind>>> = {
+	before_tool: ["block_tool", "annotate_tool_result", "require_tool", "lock_tools", "protect_path"],
+	after_tool: ["annotate_tool_result", "require_tool", "lock_tools", "protect_path"],
+	turn_start: ["inject_reminder", "notify_operator", "require_tool", "lock_tools"],
+	turn_end: ["inject_reminder", "request_continuation", "notify_operator"],
+	on_compaction: [],
+};
+
+function producedEffectKind(spec: NormalizedUserHookSpec): MiddlewareEffectKind {
+	if (spec.kind === "prompt") return "inject_reminder";
+	if (spec.kind === "effect") return spec.effect.kind;
+	return spec.as === "reminder" ? "inject_reminder" : "annotate_tool_result";
+}
+
+function applicabilityIssue(on: MiddlewareHook, spec: NormalizedUserHookSpec): string | null {
+	const kind = producedEffectKind(spec);
+	if (USER_HOOK_APPLIED_EFFECTS[on].includes(kind)) return null;
+	const events = MIDDLEWARE_HOOKS.filter((hook) => USER_HOOK_APPLIED_EFFECTS[hook].includes(kind));
+	return `${on} cannot apply ${kind}; use ${events.length > 0 ? events.join(", ") : "no event"} for this hook`;
+}
 
 export type UserHookKind = "command" | "prompt" | "effect";
 
@@ -280,6 +312,8 @@ export function normalizeUserHook(
 		return { issues };
 	}
 	const on = raw.on as MiddlewareHook;
+	const inapplicable = applicabilityIssue(on, spec);
+	if (inapplicable !== null) return { issues: [inapplicable] };
 	const hash = stableHash({ on, tools: tools ?? null, spec });
 	const id =
 		typeof raw.id === "string" && raw.id.length > 0 ? raw.id : `${source.sourceId ?? source.origin}.${spec.kind}.${hash}`;

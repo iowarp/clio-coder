@@ -94,15 +94,18 @@ Supported hooks:
 
 Supported effect kinds:
 
-| Effect | Current meaning |
-| --- | --- |
-| `inject_reminder` | Structured reminder payload. |
-| `annotate_tool_result` | Append deterministic annotation to a tool result. |
-| `block_tool` | Hard-block a tool before execution. |
-| `protect_path` | Register a protected artifact path in session state. |
-| `request_continuation` | Ask the chat loop for one bounded automatic continuation. |
-| `require_tool` | Require a specific tool for the next turn. |
-| `lock_tools` | Lock available tools to the current subset. |
+| Effect | Current meaning | Applied at |
+| --- | --- | --- |
+| `inject_reminder` | Structured reminder payload. | `turn_start`, `turn_end` |
+| `annotate_tool_result` | Append deterministic annotation to a tool result. | `before_tool`, `after_tool` |
+| `block_tool` | Hard-block a tool before execution. | `before_tool` |
+| `protect_path` | Register a protected artifact path in session state. | `before_tool`, `after_tool` |
+| `request_continuation` | Ask the chat loop for one bounded automatic continuation. | `turn_end` |
+| `require_tool` | Require a specific tool on the next provider round. | `before_tool`, `after_tool`, `turn_start` |
+| `lock_tools` | Set tool choice to `none`, so the next provider rounds answer in text only, until the next submitted turn. | `before_tool`, `after_tool`, `turn_start` |
+| `notify_operator` | Show the operator a tip or info notice, keyed by the effect `key`. The model does not see it. | `turn_start`, `turn_end` |
+
+An effect returned at any other hook is dropped. `on_compaction` applies none. A user-defined hook whose event cannot apply the effect it produces is refused at load with an issue naming the events that can, so its receipt never reports an effect that was dropped. A `prompt` hook produces `inject_reminder`, a `command` hook produces `annotate_tool_result` or, with `as: reminder`, `inject_reminder`, and an `effect` hook produces its declared kind.
 
 Declarative rules run before coded registrations. Scoped registrations match by hook and, for tool hooks, by tool name. Hook failures emit diagnostics and later hooks still run.
 
@@ -113,7 +116,7 @@ Middleware hook budgets are phase-aware through `DEFAULT_MIDDLEWARE_HOOK_BUDGETS
 - `turn_end`: 75 ms
 - `on_compaction`: 150 ms
 
-Per-phase budgets can be overridden via `CLIO_CODER_HOOK_BUDGET_<PHASE>_MS` or global `CLIO_CODER_HOOK_BUDGET_MS`. Warmup grace exempts initial calls (`DEFAULT_HOOK_BUDGET_WARMUP_CALLS = 1`), and steady-state warnings trigger when at least 3 of the last 5 post-warmup calls exceed budget (`DEFAULT_HOOK_BUDGET_WINDOW = 5`, `DEFAULT_HOOK_BUDGET_THRESHOLD = 3`). Overruns are reported but do not abort the turn. The orchestrator and workers share the middleware contract, but worker guard state is process-local.
+Per-phase budgets can be overridden via `CLIO_CODER_HOOK_BUDGET_<PHASE>_MS` or global `CLIO_CODER_HOOK_BUDGET_MS`. Warmup grace exempts initial calls (`DEFAULT_HOOK_BUDGET_WARMUP_CALLS = 1`), and steady-state warnings trigger when at least 3 of the last 5 post-warmup calls exceed budget (`DEFAULT_HOOK_BUDGET_WINDOW = 5`, `DEFAULT_HOOK_BUDGET_THRESHOLD = 3`). Overruns are reported but do not abort the turn. The orchestrator and workers share the middleware contract, but workers evaluate tool hooks only: a worker rebuilds its middleware from the builtin declarative rules in its spec snapshot, never fires `turn_start`, `turn_end`, or `on_compaction` through it, and never receives user-defined hooks. The snapshot omits any rule that declares `notify_operator`, because a worker has no operator surface. Worker guard state is process-local.
 
 Middleware reminders are visible request text, not hidden prompt state. `turn_start` reminders flush into the same accepted request; `turn_end` reminders flush once on the next request. A `request_continuation` from any producer is capped at one automatic continuation per user prompt; a second producer in the same prompt gets a footer notice that the nudge is spent, and the turn is handed back to the operator rather than looped.
 
