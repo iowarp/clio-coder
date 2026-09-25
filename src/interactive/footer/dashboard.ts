@@ -374,6 +374,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	const setExpanded = (expanded: boolean): void => {
 		dashboardMode = expanded ? "expanded" : "compact";
 		page = "Activity";
+		machine.setActive(false);
 		refresh();
 	};
 	const machine = createLocalMachineSampler(() => {
@@ -402,6 +403,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			else if (page === "Status") setExpanded(false);
 			else {
 				page = DASHBOARD_PAGES[DASHBOARD_PAGES.indexOf(page) + 1] ?? "Activity";
+				machine.setActive(page === "Status");
 				refresh();
 			}
 			return dashboardMode;

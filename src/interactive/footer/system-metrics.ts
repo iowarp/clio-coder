@@ -82,10 +82,14 @@ async function gpuMetrics(): Promise<LocalMachineMetrics["gpu"]> {
 export function createLocalMachineSampler(onUpdate: () => void) {
 	let snapshot: LocalMachineMetrics | null = null;
 	let disposed = false;
+	let active = false;
+	let generation = 0;
+	let timer: ReturnType<typeof setInterval> | null = null;
 	let pending = false;
 	let previous: { at: number; cpu: Pair; network: Map<string, Pair>; disk: Map<string, Pair> } | null = null;
 	const sample = async () => {
-		if (disposed || pending) return;
+		if (disposed || !active || pending) return;
+		const sampleGeneration = generation;
 		pending = true;
 		try {
 			const at = performance.now();
@@ -110,7 +114,7 @@ export function createLocalMachineSampler(onUpdate: () => void) {
 			const diskRate = previous ? busiest(disk, previous.disk, elapsed) : null;
 			const totalDelta = previous ? cpu.second - previous.cpu.second : 0;
 			const idleDelta = previous ? cpu.first - previous.cpu.first : 0;
-			if (disposed) return;
+			if (disposed || !active || sampleGeneration !== generation) return;
 			snapshot = {
 				scope: linux && /microsoft/i.test(release()) ? "WSL guest" : "local OS",
 				sampledAt: Date.now(),
@@ -127,21 +131,38 @@ export function createLocalMachineSampler(onUpdate: () => void) {
 			onUpdate();
 		} finally {
 			pending = false;
+			// A page switch can invalidate an in-flight sample and reopen Status
+			// before it settles. Take a fresh sample for the new visible period.
+			if (active && sampleGeneration !== generation) tick();
 		}
 	};
 	const tick = () => {
 		void sample().catch(() => {
-			snapshot = null;
+			if (active) snapshot = null;
 		});
 	};
-	const timer = setInterval(tick, 2000);
-	timer.unref();
-	tick();
 	return {
 		snapshot: () => snapshot,
+		setActive(next: boolean): void {
+			if (disposed || active === next) return;
+			active = next;
+			generation += 1;
+			snapshot = null;
+			previous = null;
+			if (timer !== null) clearInterval(timer);
+			timer = null;
+			if (!active) return;
+			timer = setInterval(tick, 2000);
+			timer.unref();
+			tick();
+		},
 		dispose: () => {
 			disposed = true;
-			clearInterval(timer);
+			active = false;
+			generation += 1;
+			if (timer !== null) clearInterval(timer);
+			timer = null;
+			snapshot = null;
 		},
 	};
 }

@@ -277,3 +277,5 @@ Footer status and metric labels share retry, completion, token-rate and failure 
 Footer snapshots omit session facts that no renderer consumes.
 
 Footer snapshots omit session facts that no renderer consumes.
+
+Machine counters are sampled only while Status is visible; samples from a previous visible period are discarded.
