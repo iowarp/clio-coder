@@ -45,19 +45,13 @@ test("ACP child accepts a new session after closing its bound session", async ()
 		ok(first.sessionId);
 		for (const removed of ["read-only", "suggest", "auto-edit", "full-auto", "capable"]) {
 			await rejects(
-				transport.request("_clio-coder/session/autonomy", { sessionId: first.sessionId, level: removed }),
+				transport.request("session/set_mode", { sessionId: first.sessionId, modeId: removed }),
 				/invalid autonomy level/u,
 				removed,
 			);
 		}
-		deepStrictEqual(
-			await transport.request("_clio-coder/session/autonomy", { sessionId: first.sessionId, level: "yolo" }),
-			{ level: "yolo", source: "session" },
-		);
-		deepStrictEqual(
-			await transport.request("_clio-coder/session/autonomy", { sessionId: first.sessionId, level: "default" }),
-			{ level: "default", source: "session" },
-		);
+		deepStrictEqual(await transport.request("session/set_mode", { sessionId: first.sessionId, modeId: "yolo" }), {});
+		deepStrictEqual(await transport.request("session/set_mode", { sessionId: first.sessionId, modeId: "default" }), {});
 		deepStrictEqual(await transport.request("session/close", { sessionId: first.sessionId }), {});
 		const second = await transport.request<{ sessionId: string }>("session/new", {
 			cwd: process.cwd(),

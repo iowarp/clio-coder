@@ -308,7 +308,17 @@ async function handle(frame) {
 			}
 			case "session/new":
 				if (["session_limit", "session_cwd_mismatch"].includes(scenario)) throw Error(scenario);
-				result = { sessionId };
+				update({ sessionUpdate: "available_commands_update", availableCommands: [] });
+				result = {
+					sessionId,
+					modes: {
+						currentModeId: autonomy,
+						availableModes: [
+							{ id: "default", name: "Default" },
+							{ id: "yolo", name: "Yolo" },
+						],
+					},
+				};
 				if (ROUTE)
 					setTimeout(
 						() => event("provider.health", { targetId: "fixture", status: "healthy", available: true, latencyMs: 5 }),
@@ -317,6 +327,15 @@ async function handle(frame) {
 				break;
 			case "session/load":
 				sessionId = frame.params.sessionId;
+				result = {
+					modes: {
+						currentModeId: autonomy,
+						availableModes: [
+							{ id: "default", name: "Default" },
+							{ id: "yolo", name: "Yolo" },
+						],
+					},
+				};
 				update(
 					{ sessionUpdate: "user_message_chunk", content: { type: "text", text: "Earlier prompt" } },
 					{ "clio-coder/replay": { turn: 1 } },
@@ -510,12 +529,13 @@ async function handle(frame) {
 			case "_clio-coder/targets/probe":
 				result = { targetId: frame.params.targetId, healthy: true, latencyMs: 5, reason: null };
 				break;
-			case "_clio-coder/session/autonomy":
-				autonomy = frame.params.level ?? autonomy;
-				result = { level: autonomy, source: "session" };
+			case "session/set_mode":
+				autonomy = frame.params.modeId;
+				update({ sessionUpdate: "current_mode_update", currentModeId: autonomy });
+				update({ sessionUpdate: "config_option_update", configOptions: [] });
 				break;
 			case "_clio-coder/session/label":
-			case "_clio-coder/session/delete":
+			case "session/delete":
 				break;
 			default:
 				throw Error("method_not_found");

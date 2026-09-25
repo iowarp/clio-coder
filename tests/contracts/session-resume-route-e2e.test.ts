@@ -98,7 +98,7 @@ describe("resuming a session keeps the route it ran on", { timeout: 180_000 }, (
 		);
 		try {
 			await client.request("initialize", { protocolVersion: 1, clientInfo: { name: "contract", version: "1" } });
-			const listed = await client.request<{ sessions: Array<{ sessionId: string }> }>("_clio-coder/session/list", {});
+			const listed = await client.request<{ sessions: Array<{ sessionId: string }> }>("session/list", {});
 			const sessionId = listed.sessions[0]?.sessionId;
 			ok(sessionId, "no session to load");
 			await client.request("session/load", { sessionId, cwd: scratch.root, mcpServers: [] });
@@ -107,10 +107,19 @@ describe("resuming a session keeps the route it ran on", { timeout: 180_000 }, (
 			const before = chat.requests.length;
 			await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "still there?" }] }, 60_000);
 			strictEqual(chat.requests[before]?.model, "mock-model");
+			saveChatModel("mock-model");
+			const options = await client.request<{ configOptions: Array<{ id: string; currentValue: string }> }>(
+				"session/set_config_option",
+				{ sessionId, configId: "model", value: "other-model" },
+			);
+			strictEqual(options.configOptions.find((option) => option.id === "model")?.currentValue, "other-model");
+			const changed = chat.requests.length;
+			await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "new model?" }] }, 60_000);
+			strictEqual(chat.requests[changed]?.model, "other-model");
 			await client.request("session/close", { sessionId });
 		} finally {
 			client.close();
 		}
-		deepStrictEqual(readChatRoute(), { target: "mock-chat", model: "other-model" });
+		deepStrictEqual(readChatRoute(), { target: "mock-chat", model: "mock-model" });
 	});
 });
