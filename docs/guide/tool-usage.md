@@ -176,7 +176,7 @@ Operator display is independently folded and tail-biased. If display/context omi
 
 Commands writing outside the workspace ask in `default` and run in `yolo` unless damage control intervenes; zero-access paths remain denied. Repository test runners are allowed without confirmation in both modes: `npm test`, `pytest`, `python -m pytest`, `python -m unittest` (python/python3/python3.N), `cargo test`, `go test`, `ctest`, `make test`, `make check`, `ninja test`, `meson test`, `mvn test`, `gradle test`, `./gradlew test`. Arguments must be bare words to qualify as recognized. An `&&` chain is admitted in `default` only if each command qualifies. Repository build, lint, typecheck and CI scripts (`npm run lint`, `npm run build`, `npm run typecheck`, `npm run ci`) are unrecognized by default: they ask in `default`, where a headless run denies them, and run in `yolo`. A project safety policy entry can recognize one. Its `requireConfirmation` setting asks in `default` and is skipped in `yolo`. Damage-control asks and blocks remain authoritative.
 
-Shell commands inside `$(...)` are scanned for damage-control rules even when the substitution is inside double quotes. An escaped dollar sign or a single-quoted `$(...)` remains literal text. A matching damage-control rule still asks in `yolo`.
+Shell commands inside `$(...)` or backticks are scanned for damage-control rules, including substitutions inside double quotes. An escaped delimiter in the outer shell word or a single-quoted substitution remains literal text. Escaped backticks inside a backtick script can delimit a nested substitution. A matching damage-control rule still asks in `yolo`.
 
 Prefer dedicated read/search tools for envelope continuation and ignore rules, and `verify` for declared checks.
 

@@ -89,3 +89,37 @@ test("a destructive command substitution inside double quotes still asks at yolo
 	const hardBlock = decide({ command: 'echo "$(rm -rf build)"' }, "yolo");
 	strictEqual(hardBlock.kind, "block", hardBlock.reasonCode);
 });
+
+// ORCH-006. Legacy backticks execute an inner shell even when the resulting
+// word is double-quoted. Escaped ticks and single-quoted ticks are only text.
+test("backtick substitutions cannot hide damage-control commands", () => {
+	const tick = "\x60";
+	const escapedTick = `\\${tick}`;
+	for (const command of [
+		`echo ${tick}git restore .${tick}`,
+		`echo "${tick}git restore .${tick}"`,
+		`echo $(echo ${tick}git restore .${tick})`,
+		`echo ${tick}echo $(git restore .)${tick}`,
+		`echo ${tick}echo ${escapedTick}git restore .${escapedTick}${tick}`,
+	]) {
+		const decision = decide({ command }, "yolo");
+		strictEqual(decision.kind, "ask", `${command}: ${decision.reasonCode}`);
+		strictEqual(decision.reasonCode?.startsWith("damage-control:"), true, command);
+	}
+	for (const command of [
+		`echo ${escapedTick}git restore .${escapedTick}`,
+		`echo "${escapedTick}git restore .${escapedTick}"`,
+		`echo '${tick}git restore .${tick}'`,
+	]) {
+		const decision = decide({ command }, "yolo");
+		strictEqual(decision.kind, "allow", `${command}: ${decision.reasonCode}`);
+	}
+	for (const command of [
+		`echo ${tick}rm -rf build${tick}`,
+		`echo "${tick}rm -rf build${tick}"`,
+		`echo ${tick}echo ${escapedTick}rm -rf build${escapedTick}${tick}`,
+	]) {
+		const decision = decide({ command }, "yolo");
+		strictEqual(decision.kind, "block", `${command}: ${decision.reasonCode}`);
+	}
+});

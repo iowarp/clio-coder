@@ -85,7 +85,7 @@ export interface ShellToken {
 	quoted: boolean;
 	start: number;
 	end: number;
-	/** Scripts of the `$(...)`, `<(...)`, and `>(...)` substitutions this word carries. */
+	/** Scripts of the `$(...)`, backtick, `<(...)`, and `>(...)` substitutions this word carries. */
 	substitutions?: string[];
 }
 
@@ -1312,6 +1312,15 @@ export function scanShellLike(command: string): ShellToken[] {
 		quoted = false;
 		substitutions = [];
 	};
+	const appendBacktick = (open: number): number | null => {
+		const close = matchingBacktick(command, open);
+		if (close === null) return null;
+		wordStart ??= open;
+		current += command.slice(open, close + 1);
+		// ORCH-006: escaped ticks inside a backtick script become nested delimiters.
+		substitutions.push(command.slice(open + 1, close).replace(/\\`/gu, "`"));
+		return close;
+	};
 
 	for (let index = 0; index < command.length; index += 1) {
 		const char = command[index];
@@ -1326,6 +1335,13 @@ export function scanShellLike(command: string): ShellToken[] {
 				if (next === "\n" || '$`"\\'.includes(next)) {
 					index += 1;
 					if (next !== "\n") current += next;
+					continue;
+				}
+			}
+			if (quote === '"' && char === "`") {
+				const close = appendBacktick(index);
+				if (close !== null) {
+					index = close;
 					continue;
 				}
 			}
@@ -1356,6 +1372,13 @@ export function scanShellLike(command: string): ShellToken[] {
 			}
 			index += 1;
 			continue;
+		}
+		if (char === "`") {
+			const close = appendBacktick(index);
+			if (close !== null) {
+				index = close;
+				continue;
+			}
 		}
 		if (char === "#" && wordStart === null) {
 			// A comment starts only at an unquoted word boundary. Leave its newline
@@ -1411,6 +1434,15 @@ export function scanShellLike(command: string): ShellToken[] {
 	}
 	pushCurrent(command.length);
 	return tokens;
+}
+
+/** ORCH-006: backticks delimit a child script outside single quotes unless escaped. */
+function matchingBacktick(command: string, open: number): number | null {
+	for (let index = open + 1; index < command.length; index += 1) {
+		if (command[index] === "\\") index += 1;
+		else if (command[index] === "`") return index;
+	}
+	return null;
 }
 
 /**
