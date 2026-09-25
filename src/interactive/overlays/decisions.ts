@@ -63,7 +63,7 @@ function interviewHeader(interview: DecisionLedgerEntry, width: number, now: num
 	const presentation = classifyDecisionPresentation(decisionFactsForAnswer(interview.exposure ?? "local"));
 	const rounds = `${interview.roundCount} round${interview.roundCount === 1 ? "" : "s"}`;
 	const status =
-		interview.interviewStatus === "complete" ? theme.fg("success", "complete") : theme.fg("warning", "cancelled");
+		interview.interviewStatus === "complete" ? theme.fg("success", "complete") : theme.fg("muted", "cancelled");
 	const heading = `${theme.style(presentation.semanticToken, presentation.tierLabel, { bold: true })}${theme.fg("dim", " · ")}${theme.fg("accent", relativeTime(interview.endedAt, now))}${theme.fg("dim", " · ")}${theme.fg("muted", rounds)}${theme.fg("dim", " · ")}${status}`;
 	const lines = [fitRow(heading, width)];
 	if (interview.summary) {
