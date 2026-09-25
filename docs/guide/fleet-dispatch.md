@@ -772,11 +772,12 @@ Shadow is the default and never changes the explicit route. Active route
 selection requires both the execution role and posture to be named:
 
 ```yaml
-routing:
-  activeRoles: [researcher, verifier, reviewer, judge]
-  activePostures: [quality, balanced]
-  agentAutomation:
-    activeAgentRoles: []
+version: 2
+fleet:
+  adaptiveRouting:
+    roles: [researcher, verifier, reviewer, judge]
+    postures: [quality, balanced]
+    agentRoles: []
 ```
 
 For every exact tuple, `evaluateRouteReadiness` requires consistent hard-
