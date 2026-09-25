@@ -2,6 +2,89 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.5.6 - Unreleased
+
+### Autonomy
+
+- **Breaking:** `safety.autonomy` accepts only `default` and `yolo`. The retired values `auto-edit`, `full-auto`, `suggest` and `read-only` are refused with no migration, and Clio will not start while your user `settings.yaml` holds one. Edit the file by hand: `auto-edit`, `suggest` and `read-only` become `default`, and `full-auto` becomes `yolo`. `clio-coder paths` shows where the file is. `--autonomy` accepts the same two names.
+- **Breaking:** Project settings can no longer set autonomy. A `safety.autonomy` in `.clio-coder/settings.yaml` or `.clio-coder/settings.local.yaml` is ignored with a diagnostic, whether or not the file is trusted. Set it in your user `settings.yaml`, `/settings`, `clio-coder configure`, `--autonomy`, or an ACP client's session mode.
+- `configure_clio` refuses to preview or apply `safety.autonomy` at either level, so only the operator changes autonomy.
+- Autonomy now governs only the main agent. Workers and peers always run at `default` (see Dispatch and peers).
+- The session prompt, the `/settings` help and the safety model guide describe the two levels as the code enforces them. `default` runs workspace edits and recognized commands, and asks before project build, lint, typecheck and CI scripts, other commands, outward actions, access outside the workspace and plan-scale dispatch. `yolo` runs all of those without asking, while hard blocks, damage-control confirmations and protected paths still apply.
+- A headless `clio-coder run` now tells the model that no operator is attached and that approval-required calls are denied, instead of saying they pause for a confirmation that never comes.
+
+### Dispatch and peers
+
+- **Breaking:** Every dispatched worker and external peer runs at `default`, whatever the session level. A yolo session no longer passes yolo to its workers, and their asks resolve through `fleet.permissions.mode`.
+- **Breaking:** `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS` is removed and ignored, so a peer can no longer run in its own full-access mode through Clio. `toolGovernance: agent-managed` on a peer entry remains the one explicit opt-in to peer-owned tools, and admission refuses it for a read-only run.
+- **Breaking:** `clio-coder run --agent --autonomy` is a usage error (exit 2). Use `--read-only` to restrict a dispatch.
+- **Breaking:** The worker spec is now version 5, so a remote fleet node running an older build refuses dispatches until it is upgraded.
+- Read-only is a dispatch restriction instead of an autonomy level. Recipes with `capabilityClass: read-only`, reviewer, judge and council roles, `/oracle`, the watchdog verifier and fleet `scope: readonly` set it. A read-only run may read inside the workspace and nothing else, and it cannot load a skill.
+- Added `--read-only` to `/run`, `/delegate` and `clio-coder run --agent` to restrict one dispatch. Peers enforce it with their own read-only modes: Codex `--sandbox read-only`, Claude Code `plan` with read tools, Antigravity `plan --sandbox`, and Pi read tools. OpenCode refuses a read-only headless run before launch.
+
+### ACP
+
+- **Breaking:** Clio's custom methods and her event notification moved under the `_clio-coder/` prefix that ACP reserves for extensions, for example `_clio-coder/session/label` and `_clio-coder/event`. The `clio-coder/*` names are gone with no alias, so third-party clients must switch.
+- **Breaking:** The custom session list, delete and autonomy methods are gone. Use `session/list`, `session/delete`, and `session/set_mode` or `session/set_config_option`.
+- **Breaking:** Error codes follow the ACP v1 schema. `-32000` now means only authentication required; invalid params use `-32602`, a missing resource `-32002`, and an unclassified failure `-32603`. A client that treated `-32000` as a generic failure must read the specific codes.
+- `initialize` answers protocol version 1 and advertises only what Clio serves. A client that advertises `auth.terminal` gets a terminal method that runs `clio-coder acp auth login` and opens Quick Connect in a separate process; other clients get none. `authenticate` and `logout` are served.
+- Every request and notification accepts `_meta`, and `session/prompt` accepts `resource_link` blocks, which the model sees as a `Resource: <name> (<uri>)` line.
+- Added `session/list` with a cwd filter and cursor paging, `session/delete`, and `session/resume`, which restores a closed session without resending its messages.
+- `session/load` streams the complete active-branch history, without the former 64-turn and 4 MiB cut, so loading a long session sends much more to the client.
+- `session/close` cancels an active prompt, waits for it to settle, and then closes, instead of refusing.
+- Sessions offer the modes `default` and `yolo` through `session/set_mode` and `current_mode_update`, and config options for autonomy, model and thinking level through `session/set_config_option` and `config_option_update`. A change during a prompt is refused, and model and thinking changes apply to the session without saving a default.
+- The server sends `available_commands_update` for the commands that work over ACP, `session_info_update` when the session label changes, and each tool's `name` when it starts. Per-turn usage, now with cost provenance, stays in `_meta["clio-coder/usage"]`; Clio sends no `usage_update` or `plan` update.
+- When no workspace is bound yet, the first `session/new`, `session/load` or `session/resume` binds the server to the `cwd` it names, so a client no longer has to launch Clio in the project directory. `clio-coder acp --cwd <dir>` still binds at launch.
+- A later session that names a different `cwd` is refused with `-32602` naming the bound workspace.
+- Stdio MCP servers a client passes in `session/new`, `session/load` or `session/resume` run for that session only and are never written to settings. Every call goes through the gateway's safety policy and autonomy like any other MCP capability, and closing the session stops the servers.
+- **Breaking:** As a client of ACP peers, Clio selects a named model only through the peer's `model` config option and `session/set_config_option`. A peer that offers models only through the unstable `models` field can no longer take a named model, and that delegation fails before the prompt.
+- Clio never answers a peer's permission request with `allow_always`, which would turn one approval into a standing grant inside the peer. When a peer offers no `allow_once` for a call Clio approves, Clio rejects the call and the receipt's delegation tool log says why.
+- Clio advertises no client capabilities to ACP peers, because she serves no file-system or terminal methods to them.
+
+### Receipts and evidence
+
+- **Breaking:** A receipt records one `autonomy` field, the level the run ran under; workers always record `default`. The `autonomyEnforcement` block and the autonomy trust axis are gone, so evidence and the GUI show five trust checks instead of six. Read `autonomy` where you read `autonomyEnforcement`. Receipts sealed by earlier builds still verify.
+- **Breaking:** New gate decisions and receipts write `yolo-policy`, `yolo-applied`, `yolo-applied-winner` and `yolo-gate-policy` where earlier builds wrote the `full-auto-*` ids. Records sealed earlier still read and verify unchanged.
+- **Breaking:** New receipts no longer carry fields nothing read: `attestation`, `identity.hpc` (the Slurm, PBS or LSF allocation), `reproducibility.git`, `fleetGate`, `ledgerContribution`, `pathScope`, `staticShellHash` and the decision and first-token phase marks. Sealing a receipt no longer spawns git. Older receipts still verify.
+- New evidence bundles no longer write `trace.raw.jsonl`, `trace.cleaned.jsonl`, `audit-linked.jsonl` or `protected-artifacts.json`; their counts stay in the overview. Bundles from earlier builds still read.
+
+### Fixes
+
+- **Breaking:** A startup flag before a subcommand other than `run` or `acp` (for example `clio-coder -nc doctor`) is refused with exit 2 instead of silently ignored. `--with-panes` and `--no-panes` are refused before any subcommand.
+- **Breaking:** `clio-coder fleet run` refuses unknown flags and no longer takes an option's value as the contract name.
+- **Breaking:** `clio-coder share export --dry-run` lists the entries and writes nothing, and each share command refuses a flag it does not read, so `export --force`, `import --both` and `inspect --force` exit 2.
+- `clio-coder upgrade --restart` relaunches plain `clio-coder` instead of the refused `--continue`, and every resume hint names `/resume`.
+- `clio-coder run --agent` forwards the seven sampling flags (`--temperature`, `--top-p`, `--top-k`, `--min-p`, `--presence-penalty`, `--frequency-penalty`, `--repeat-penalty`) to the worker and refuses `--json-events`.
+- `--with-panes` with `interface.panes.enabled: embedded` now looks for a herdr host, as `auto` does, instead of opening no panes.
+- `clio-coder doctor --deep` evaluates each validator at the session's autonomy level, as tool admission does. A `$(...)` validator asks at `default` and runs at `yolo`, and a damage-control confirmation asks at both levels.
+- A failed evidence build now shows as an error on the dispatch board and in the footer.
+- The trace mirror records every worker's tool calls with their durations, including claude-sdk workers, which had no `tool_call` rows.
+- Tool statistics, safety decisions and finish-contract entries a worker produces now survive backpressure on the worker stream.
+- A worker that fails to spawn names the spawn error in its receipt.
+- A run adopted after a restart keeps its council membership and cost provenance.
+- A failed or aborted prewarm no longer reads as a free success in usage records.
+- A replayed tool row without a recorded duration no longer shows a made-up one.
+- The GUI receipt provenance panel shows the Clio Coder version again, and the GUI keeps a running tool's partial output when an update carries no content.
+
+### Removed
+
+- **Breaking:** The read-time aliases for the old `clio` names are gone, with no migration. A user `settings.yaml` with `lifecycle: clio-managed` or `toolGovernance: clio-policy` refuses to load; use `clio-coder-managed` and `clio-coder-policy`. A target with `runtime: lmstudio-native` or `ollama-native` resolves to an unknown runtime; use `lmstudio` or `ollama`, and re-enter credentials stored under the old id. A `clio.<action>` keybinding is ignored in favor of the default; use `clio-coder.<action>`. Installed `clio-dev` and `clio-test` skills load under their old names, and installing `clio-dev` finds nothing; the skills are now `clio-coder-dev` and `clio-coder-test`.
+- **Breaking:** `doctor --fix` no longer rewrites legacy names in settings, skills, tool markers or the yazi profile, and `upgrade` registers two migrations instead of five. A yazi process left from a 0.4 session no longer delivers picks, and fleet preflight no longer accepts the pre-rename `clio-preflight/1` reply.
+- **Breaking:** Three settings keys nothing read are retired: `integrations.externalAgents.entries[].permissionTimeoutMs`, `integrations.externalAgents.entries[].labels` and `fleet.decisionProfiles.routing`. A user settings file naming one refuses to load with a "retired without replacement" issue; earlier builds wrote `permissionTimeoutMs` on every peer accepted through interop consent, so remove it by hand. In a project layer the key is dropped with a diagnostic.
+- **Breaking:** A user hook whose event cannot apply its effect is refused at load instead of recording an effect that was dropped. Every user hook on `on_compaction` is refused.
+- **Breaking:** A plugin manifest that declares `resources.themes` is refused. No loader ever read it.
+- **Breaking:** `clio-coder configure --remove` and `--rename` are gone. Use `clio-coder targets remove` and `clio-coder targets rename`.
+- New `trace.sqlite` databases have no `envelopes` table or itemized cost columns, which nothing filled, and the GUI drops the always-empty envelopes panel. A `trace sql` query naming them fails on a new database, and a 0.5.5 build cannot prune a database this build created. Existing databases keep both.
+- `clio-coder usage report` rows no longer record `sessionId`, `timing`, `promptCache` or cost provenance, which the report never read.
+- The `safety.allowed` and `extensions.reloaded` bus channels, which had no subscriber, and the GUI's desktop approval notifications, which could never be turned on.
+
+### Documentation
+
+- The README is rebuilt around nine fixed sections with a product screenshot, and a `readme-shape` hygiene check keeps that structure.
+- The safety model guide is rewritten to the two-level model and to what the code enforces, including the real damage-control hard blocks and confirmation rules.
+- The environment variable reference lists the ambient variables Clio reads, and its hygiene check now also fails when a documented variable is no longer read. `clio-coder config trust safety|hooks|settings` is documented.
+- The 0.5.5 sprint retrospective no longer ships in the package documentation.
+
 ## 0.5.5 - 2026-09-24
 
 ### External coding agents
