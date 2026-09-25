@@ -43,7 +43,7 @@ import {
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import { extractLocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 import {
-	antigravitySubprocessConfigForAutonomy,
+	antigravitySubprocessConfig,
 	buildAgyArgs,
 	buildAgyStdinLine,
 	parseAntigravityStreamLine,
@@ -354,8 +354,8 @@ describe("provider transport boundary", () => {
 			event: "user",
 			message: { content: "Use primary sources.\n\nCompare the two standards." },
 		});
-		strictEqual(antigravitySubprocessConfigForAutonomy(false).externalMode, "accept-edits");
-		strictEqual(antigravitySubprocessConfigForAutonomy(true).externalMode, "plan+sandbox");
+		strictEqual(antigravitySubprocessConfig(false).externalMode, "accept-edits");
+		strictEqual(antigravitySubprocessConfig(true).externalMode, "plan+sandbox");
 	});
 
 	it("projects only model quirks consumed by the engine", () => {

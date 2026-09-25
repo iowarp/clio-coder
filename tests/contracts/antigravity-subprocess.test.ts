@@ -32,7 +32,7 @@ import type { ProbeResult } from "../../src/domains/providers/types/runtime-desc
 import {
 	ANTIGRAVITY_MAX_STREAM_BYTES,
 	ANTIGRAVITY_MAX_STREAM_LINE_BYTES,
-	antigravitySubprocessConfigForAutonomy,
+	antigravitySubprocessConfig,
 	buildAgyArgs,
 	buildAgyStdinLine,
 	startAntigravityWorkerRun,
@@ -472,7 +472,10 @@ describe("Antigravity external subprocess contract", () => {
 			"--mode",
 			"accept-edits",
 		]);
-		equal(antigravitySubprocessConfigForAutonomy(false).dangerousBypass, false);
+		deepStrictEqual(antigravitySubprocessConfig(false), {
+			extraArgs: ["--mode", "accept-edits"],
+			externalMode: "accept-edits",
+		});
 	});
 
 	it("resumes only when the actual init echoes the caller's id", async () => {

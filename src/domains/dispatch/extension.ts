@@ -21,7 +21,7 @@ import { type Dirent, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { BusChannels, type DispatchCompletedPayload, type DispatchRunIdentity } from "../../core/bus-events.js";
-import { DEFAULT_SETTINGS, type DelegationToolGovernance } from "../../core/defaults.js";
+import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { gatewayRoutingObservationFromRecord } from "../../core/gateway-routing.js";
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../../core/guardrails.js";
@@ -43,8 +43,6 @@ import {
 	type AcpDelegationRunInput,
 	startAcpDelegationRun,
 } from "../../engine/acp/adapter.js";
-import { antigravitySubprocessConfigForAutonomy } from "../../engine/antigravity/subprocess-runtime.js";
-import { claudeSubprocessPermissionConfigForAutonomy } from "../../engine/claude/subprocess-runtime.js";
 import { isClaudeCanonicalTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
 import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
@@ -119,11 +117,6 @@ import {
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../providers/index.js";
-import {
-	codexSubprocessPermissionConfigForAutonomy,
-	opencodeCliModeForAutonomy,
-	piCliModeForAutonomy,
-} from "../providers/runtimes/external-cli-policy.js";
 import { type ActionClass, classify as classifyAction } from "../safety/action-classifier.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
@@ -319,7 +312,6 @@ import {
 	type RunPipelineProvenance,
 	type RunProjectContextProvenance,
 	type RunReceipt,
-	type RunReceiptAutonomyEnforcement,
 	type RunReceiptDraft,
 	type RunReceiptOutput,
 	type RunReceiptResultContractFact,
@@ -2266,90 +2258,6 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	if (Buffer.byteLength(JSON.stringify(spec), "utf8") + 1 > WORKER_STDIN_FRAME_MAX_BYTES)
 		throw new Error("worker context: complete WorkerSpec exceeds the stdin frame budget; use a smaller splice");
 	return spec;
-}
-
-function autonomyEnforcementForWorkerSpec(spec: WorkerSpec): RunReceiptAutonomyEnforcement {
-	const autonomy = "default";
-	const readOnly = spec.readOnly === true;
-	if (spec.runtimeId === "claude-code") {
-		try {
-			const config = claudeSubprocessPermissionConfigForAutonomy(readOnly);
-			return {
-				grade: config.dangerousBypass ? "bypassed" : "approximated",
-				autonomy,
-				externalMode: config.permissionMode,
-				dangerousBypass: config.dangerousBypass,
-			};
-		} catch {
-			return { grade: "approximated", autonomy };
-		}
-	}
-	if (spec.runtimeId === "codex-cli") {
-		try {
-			const config = codexSubprocessPermissionConfigForAutonomy(readOnly);
-			return {
-				grade: config.dangerousBypass ? "bypassed" : "approximated",
-				autonomy,
-				externalMode: config.sandbox,
-				dangerousBypass: config.dangerousBypass,
-			};
-		} catch {
-			return { grade: "approximated", autonomy };
-		}
-	}
-	if (spec.runtimeId === "opencode-cli") {
-		try {
-			return {
-				grade: "approximated",
-				autonomy,
-				externalMode: opencodeCliModeForAutonomy(readOnly),
-				dangerousBypass: false,
-			};
-		} catch {
-			return { grade: "approximated", autonomy };
-		}
-	}
-	if (spec.runtimeId === "pi-cli") {
-		try {
-			return {
-				grade: "approximated",
-				autonomy,
-				externalMode: piCliModeForAutonomy(readOnly),
-				dangerousBypass: false,
-			};
-		} catch {
-			return { grade: "approximated", autonomy };
-		}
-	}
-	if (spec.runtimeId === "antigravity-code") {
-		try {
-			const config = antigravitySubprocessConfigForAutonomy(readOnly);
-			return {
-				grade: config.dangerousBypass ? "bypassed" : "approximated",
-				autonomy,
-				externalMode: config.externalMode,
-				dangerousBypass: config.dangerousBypass,
-			};
-		} catch {
-			return { grade: "approximated", autonomy };
-		}
-	}
-	return { grade: "mediated", autonomy };
-}
-
-function autonomyEnforcementForAcpDelegation(toolGovernance: DelegationToolGovernance): RunReceiptAutonomyEnforcement {
-	const autonomy = "default";
-	if (toolGovernance === "agent-managed") {
-		return {
-			grade: "bypassed",
-			autonomy,
-			externalMode: toolGovernance,
-			dangerousBypass: true,
-		};
-	}
-	// Both policies apply only to ACP permission requests the peer reports. A
-	// peer can still use its own tools without asking, including under deny-all.
-	return { grade: "approximated", autonomy, externalMode: toolGovernance };
 }
 
 function pickCapabilityMatchedWorker(
@@ -4816,9 +4724,7 @@ export function createDispatchBundle(
 				verification: deriveReceiptVerification({ toolStats: finalToolStats }, { acpDelegation: true }),
 				routingIntent: req.routingIntent ?? defaultRoutingIntent(req),
 				quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
-				autonomyEnforcement: autonomyEnforcementForAcpDelegation(
-					lifecycle.agentConfig.toolGovernance ?? "clio-coder-policy",
-				),
+				autonomy: "default",
 				safety: {
 					decisions: safetyDecisionCounts,
 					blockedAttempts,
@@ -6218,7 +6124,7 @@ export function createDispatchBundle(
 					resultContract,
 				}),
 				...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
-				autonomyEnforcement: autonomyEnforcementForWorkerSpec(spec),
+				autonomy: "default",
 				safety: {
 					// Escalation tallies fold in only when an ask escalated, so deny and fail receipts stay byte-identical.
 					decisions:

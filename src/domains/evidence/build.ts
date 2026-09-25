@@ -376,29 +376,12 @@ function buildFindings(
 				),
 			);
 		}
-		if (status.autonomyEnforcement.state === "bypassed") {
+		if (receipt?.delegation?.toolGovernance === "agent-managed") {
 			const message = "run used external peer permissions outside Clio policy; Clio safety blocks were not enforced";
 			findings.push(finding(findings.length, "warn", "external-bypass", source.envelope.id, message));
-		} else if (status.autonomyEnforcement.state === "approximated") {
-			const mode =
-				status.autonomyEnforcement.authority.id === "external-runtime"
-					? ""
-					: ` via ${status.autonomyEnforcement.authority.id}`;
-			findings.push(
-				finding(
-					findings.length,
-					"info",
-					"external-approximation",
-					source.envelope.id,
-					`run used approximated external autonomy enforcement${mode}`,
-				),
-			);
 		}
-		// The remaining axes were never read here, so a run could finish with
-		// no independent review, a contradictory context record, or a mutation
-		// nobody validated, and findings.md said nothing. Each finding is
-		// selected from the canonical state the way the validation and
-		// autonomy findings above are, with the detailed record left in
+		// Independent review, context contradictions, and completion gaps also
+		// need findings. Their canonical states and detailed records remain in
 		// trust-status.json.
 		findings.push(...axisFindings(findings.length, source, status));
 		if (source.envelope.status === "stale" || source.envelope.status === "dead") {
@@ -707,7 +690,6 @@ function cleanedTraceRows(
 			...(provenance.pipeline !== undefined ? { pipeline: provenance.pipeline } : {}),
 			...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),
 			...(provenance.escalation !== undefined ? { escalation: provenance.escalation } : {}),
-			...(provenance.autonomyEnforcement !== undefined ? { autonomyEnforcement: provenance.autonomyEnforcement } : {}),
 		});
 		for (const event of toolEventRows.filter((item) => item.runId === source.envelope.id)) {
 			rows.push({ kind: "tool-summary", ...event });

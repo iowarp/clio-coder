@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { opencodeCliModeForAutonomy } from "../../domains/providers/runtimes/external-cli-policy.js";
+import { opencodeCliMode } from "../../domains/providers/runtimes/external-cli-policy.js";
 import { assertToolProfileEnforceable } from "../../tools/profiles.js";
 import type { WorkerRunInput } from "../worker-runtime.js";
 import { cliEventRecord, emptyCliUsage, finiteUsage, type JsonlCliConnector } from "./jsonl-runner.js";
@@ -31,11 +31,11 @@ function referencedOpenCodeCredentials(sourceEnv: NodeJS.ProcessEnv): Record<str
 	return forwarded;
 }
 
-export { opencodeCliModeForAutonomy } from "../../domains/providers/runtimes/external-cli-policy.js";
+export { opencodeCliMode } from "../../domains/providers/runtimes/external-cli-policy.js";
 
 export function buildOpenCodeCliArgs(input: WorkerRunInput): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "opencode-cli");
-	opencodeCliModeForAutonomy(input.readOnly === true);
+	opencodeCliMode(input.readOnly === true);
 	const args = ["run", "--format", "json"];
 	if (input.wireModelId.trim() && input.wireModelId !== OPENCODE_CLI_DEFAULT_MODEL) {
 		args.push("--model", input.wireModelId.trim());

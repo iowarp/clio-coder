@@ -569,7 +569,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 		toolCalls: countToolStats(input.stats.toolStats),
 		toolStats,
 		skillActivations: input.stats.skillActivations,
-		autonomyEnforcement: { grade: "mediated", autonomy: snapshot.autonomy },
+		autonomy: snapshot.autonomy,
 		// Sealed on every main-agent receipt, flag or no flag, so a driver can
 		// apply its own no-op rule to a run that exited 0.
 		safety: {

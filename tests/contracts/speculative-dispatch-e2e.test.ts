@@ -214,6 +214,12 @@ describe("speculative dispatch through the built binary", {
 		ok(run);
 		const receipt = journal.receipts.find((entry) => entry.runId === run.id);
 		ok(receipt, "the run sealed no receipt");
+		strictEqual(receipt.autonomy, "default");
+		ok(!Object.hasOwn(receipt, "autonomyEnforcement"));
+		const mainReceipt = journal.receipts.find((entry) => entry.agentId === "main-agent" && !before.has(entry.runId));
+		ok(mainReceipt, "the headless turn sealed no main-agent receipt");
+		strictEqual(mainReceipt.autonomy, "yolo");
+		ok(!Object.hasOwn(mainReceipt, "autonomyEnforcement"));
 		return {
 			run,
 			receipt,

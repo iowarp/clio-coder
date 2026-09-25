@@ -3672,7 +3672,6 @@
 																	"validationGrounding",
 																	"independentReview",
 																	"contextProvenance",
-																	"autonomyEnforcement",
 																	"completionEvidence"
 																],
 																"properties": {
@@ -3686,9 +3685,6 @@
 																		"type": "string"
 																	},
 																	"contextProvenance": {
-																		"type": "string"
-																	},
-																	"autonomyEnforcement": {
 																		"type": "string"
 																	},
 																	"completionEvidence": {
@@ -24458,7 +24454,6 @@
 																						"validationGrounding",
 																						"independentReview",
 																						"contextProvenance",
-																						"autonomyEnforcement",
 																						"completionEvidence"
 																					],
 																					"properties": {
@@ -24472,9 +24467,6 @@
 																							"type": "string"
 																						},
 																						"contextProvenance": {
-																							"type": "string"
-																						},
-																						"autonomyEnforcement": {
 																							"type": "string"
 																						},
 																						"completionEvidence": {
@@ -25614,7 +25606,6 @@
 																						"validationGrounding",
 																						"independentReview",
 																						"contextProvenance",
-																						"autonomyEnforcement",
 																						"completionEvidence"
 																					],
 																					"properties": {
@@ -25628,9 +25619,6 @@
 																							"type": "string"
 																						},
 																						"contextProvenance": {
-																							"type": "string"
-																						},
-																						"autonomyEnforcement": {
 																							"type": "string"
 																						},
 																						"completionEvidence": {
@@ -33255,7 +33243,6 @@
 																							"validationGrounding",
 																							"independentReview",
 																							"contextProvenance",
-																							"autonomyEnforcement",
 																							"completionEvidence"
 																						],
 																						"properties": {
@@ -33269,9 +33256,6 @@
 																								"type": "string"
 																							},
 																							"contextProvenance": {
-																								"type": "string"
-																							},
-																							"autonomyEnforcement": {
 																								"type": "string"
 																							},
 																							"completionEvidence": {

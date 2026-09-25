@@ -43,10 +43,20 @@ test("evidence REST preserves all 40 artifacts, historical unknown, provenance a
 		assert.deepEqual(detail.attribution, { exact: 1, bestEffort: 1, unclassified: 1 });
 		assert.equal(JSON.stringify(detail).includes("private event text"), false);
 		assert.equal(detail.runs[0]?.summary.axes.artifactIntegrity, "verified");
+		assert.equal(Object.keys(detail.runs[0]?.summary.axes ?? {}).length, 5);
+		assert.equal(Object.hasOwn(detail.runs[0]?.summary.axes ?? {}, "autonomyEnforcement"), false);
 		assert.equal(detail.runs[0]?.summary.verdict, detail.verdict);
 		assert.equal(detail.gateDecisions.length, 1);
 		assert.equal(detail.gateDecisions[0]?.outcome, "pass");
 		assert.match(detail.provenance[0]?.lines.join(" ") ?? "", /step 2.*earlier-run/);
+		const historicalPath = join(h.home.path, "data/evidence/evidence-038/trust-status.json");
+		const historical = JSON.parse(await readFile(historicalPath, "utf8"));
+		for (const run of historical.runs) {
+			run.status.autonomyEnforcement = { state: "absent", reason: "not_recorded" };
+		}
+		await writeFile(historicalPath, JSON.stringify(historical));
+		const older = await json(await h.request("/api/evidence/evidence-038"), EvidenceDetail);
+		assert.equal(Object.keys(older.runs[0]?.summary.axes ?? {}).length, 5);
 		assert.equal(
 			(await json(await h.request("/api/evidence/evidence-000"), EvidenceDetail)).projection,
 			"historical_format",

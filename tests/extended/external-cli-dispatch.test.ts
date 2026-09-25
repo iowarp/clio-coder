@@ -347,7 +347,7 @@ for (const event of [
 			"succeeded",
 			JSON.stringify({ failure: receipt.failureMessage, output: receipt.output?.text, quality: receipt.quality }),
 		);
-		equal(receipt.autonomyEnforcement?.externalMode, "workspace-write");
+		equal(receipt.autonomy, "default");
 		deepStrictEqual(receipt.worktree?.changedPaths, ["proof.txt"]);
 		ok(receipt.worktree);
 		equal(readFileSync(join(receipt.worktree.path, "proof.txt"), "utf8"), "HELLO");

@@ -69,15 +69,15 @@ Run/session evidence files:
 | `audit-linked.jsonl` | Audit rows linked to run/session context when available. |
 | `receipt.json` | Receipt bundle (`{ version: 1, receipts: [...] }`); only receipts that pass integrity verification contribute verified fields. |
 | `gate-decisions.json` | Integrity-verified review verdicts, compete winner selections, and winner confirmations discovered from linked receipt ids. |
-| `trust-status.json` | Canonical per-run six-axis trust projections derived from authenticated receipts, gate decisions, and grounded validation artifacts. |
+| `trust-status.json` | Canonical per-run five-axis trust projections derived from authenticated receipts, gate decisions, and grounded validation artifacts. |
 | `protected-artifacts.json` | Protected artifact state/events. |
-| `findings.json` / `findings.md` | Structured findings plus a readable report that begins with each linked run's canonical tier, fixed-order summary, and six axes. |
+| `findings.json` / `findings.md` | Structured findings plus a readable report that begins with each linked run's canonical tier, fixed-order summary, and five axes. |
 
 ### Run attribution under concurrency
 
 Session ledger entries are attributed to a run by the run id the producer stamped on the entry at write time. Rows built from those entries carry that provenance in a `runLink` field (`{ kind, confidence, candidateRunIds? }`) in `tool-events.jsonl` and `protected-artifacts.json`; a write-time stamp is `kind: "entry-run-id"`, `confidence: "exact"`. Entries written without run context fall back to timestamp windowing, labeled `kind: "timestamp-window"`, `confidence: "best-effort"`, and printed as `link=timestamp-window` in the transcript. Concurrent dispatch runs share one clock and their windows overlap, so an entry inside more than one window has no owner the bundle can name. Such an entry is reported in the bundle of every run it may belong to, with `runId: null`, `kind: "ambiguous-timestamp-window"`, and a `candidateRunIds` list, plus a `best-effort-link` finding counting them. It is never dropped and never claimed as exact.
 
-When a run was chained (pipeline), composed with a persona override, or escalated for a permission, `transcript.md` and `trace.cleaned.jsonl` surface the receipt's provenance field sets, and `clio-coder evidence inspect` prints them as a `provenance <runId>:` block. The block is the detail behind the canonical trust projection, never a second reading of it: it is printed only for a run whose seal the projection verified, its `autonomy:` line carries the policy name, external mode, and bypass flag and never the axis word (`mediated`, `approximated`, `bypassed` are the trust summary's to print), and a run whose seal was rejected or retired gets no block at all, so the output never publishes a value the projection reported as `absent`. The field paths, types, and stability labels are documented in the [receipt provenance schema](observability.md#receipt-fields-for-dispatch-provenance).
+When a run was chained (pipeline), composed with a persona override, or escalated for a permission, `transcript.md` and `trace.cleaned.jsonl` surface the receipt's provenance field sets, and `clio-coder evidence inspect` prints them as a `provenance <runId>:` block. The block is printed only for a run whose seal the projection verified; a run whose seal was rejected or retired gets no block. The field paths, types, and stability labels are documented in the [receipt provenance schema](observability.md#receipt-fields-for-dispatch-provenance).
 
 ### Task and decision provenance
 
@@ -117,7 +117,7 @@ Clio Coder classifies every run and session record using a closed set of 29 cano
 | `session-missing` | Provenance | No parent session could be resolved for this run. |
 | `auth-failure` | Failure | Missing or invalid credentials/API keys. |
 | `external-bypass` | Security | An external runner bypassed standard safety gates. |
-| `external-approximation`| Validation | An external runner approximated results rather than fully executing. |
+| `external-approximation` | Historical | Older evidence bundles may contain this finding. Current builds do not emit it. |
 | `independent-review` | Validation | The canonical independent-review axis: a failed, correlated, or inconclusive review is a warning; a successful run with no review at all is an info row saying its result rests on its own receipt. |
 | `context-provenance` | Provenance | The canonical context-provenance axis read `invalid`: the receipt's briefing or project-context record contradicts itself. |
 | `completion-evidence` | Validation | The canonical completion-evidence axis: a mutation that finished without validation evidence at the completion boundary is a warning; an explicit limitation is an info row. |
@@ -170,7 +170,7 @@ present independently, and neither hash is evidence for the other.
 ### Canonical trust status
 
 [trust-status.ts](../../src/domains/evidence/trust-status.ts) defines the version 1 canonical trust
-status. It is a six-axis algebra, not an overall trust verdict, confidence
+status. It is a five-axis algebra, not an overall trust verdict, confidence
 percentage, or pass/fail score. Consumers project only the axes needed for a
 decision and preserve every other axis unchanged.
 
@@ -180,7 +180,6 @@ decision and preserve every other axis unchanged.
 | Validation grounding | `validated`, `failed`, `ungrounded`, `absent`, `unknown`, `not_applicable` | What correctness-bearing validation was observed and grounded? |
 | Independent review | `passed`, `failed`, `inconclusive`, `not_independent`, `absent`, `unknown`, `not_applicable` | What outcome did an authenticated independent reviewer or judge record? |
 | Context provenance | `recorded`, `invalid`, `absent`, `unknown`, `not_applicable` | Is the origin of briefing, project context, or linked evidence recorded consistently? |
-| Autonomy enforcement | `enforced`, `approximated`, `bypassed`, `absent`, `unknown`, `not_applicable` | How faithfully did the runtime enforce the selected authority? |
 | Completion evidence | `evidenced`, `incomplete`, `limited`, `absent`, `unknown`, `not_applicable` | What did the finish contract observe at the completion boundary? |
 
 `absent` means no fact was recorded and carries a reason but no invented
@@ -190,15 +189,15 @@ not apply. Every non-absent state names both its source and its authority.
 Sources may retain up to 16 typed artifact references. References contain an
 artifact kind, identifier, and optional SHA-256 digest; they never embed the
 artifact body. Normalization sorts the references and rejects duplicates,
-unbounded lists, unknown fields, invalid identifiers, and sources that are not
-permitted to speak for an axis.
+unbounded lists, unknown fields within an axis, invalid identifiers, and
+sources that are not permitted to speak for an axis. Unknown top-level axes
+from older evidence files are ignored.
 
 The composition rules prohibit cross-axis promotion:
 
 - Verified artifact integrity never promotes validation grounding.
 - Recorded context provenance never promotes validation or correctness.
 - A passing review never establishes authorship or context origin.
-- Enforced autonomy never promotes completion evidence.
 - A completion self-report never promotes validation grounding. The linked
   `completion_contract` audit row is the run's own report of what it did, so it
   reaches completion evidence and no other axis. Validation grounding is filled
@@ -212,7 +211,7 @@ They do not mutate receipt, gate-decision, evidence-bundle, or session formats.
 | Missing receipt | Every receipt-owned axis is `absent` with `artifact_missing`. |
 | Current receipt present but integrity not checked | Artifact integrity is `unknown`; the receipt's own digest never authenticates itself. The other receipt-owned axes are `absent` with `not_observed` until authentication succeeds. |
 | Historical receipt missing its integrity block | Receipt-owned axes are `unknown` through the compatibility source, even if a caller presents a contradictory positive verification result. |
-| Integrity verification succeeds or fails | Artifact integrity is `verified` or `failed`. A failure leaves the receipt-owned validation grounding, context provenance, and autonomy enforcement `absent`; no untrusted receipt claim contributes a positive state. Validation the session ledger observed on its own (a validation command that ran and exited 0) still grounds the run, so a tampered run can read `artifactIntegrity: failed` beside `validationGrounding: validated`. The two axes name different artifacts and different authorities, and the bundle's `receipt-integrity` finding is what flags the pairing. |
+| Integrity verification succeeds or fails | Artifact integrity is `verified` or `failed`. A failure leaves the receipt-owned validation grounding and context provenance `absent`; no untrusted receipt claim contributes a positive state. Validation the session ledger observed on its own (a validation command that ran and exited 0) still grounds the run, so a tampered run can read `artifactIntegrity: failed` beside `validationGrounding: validated`. The two axes name different artifacts and different authorities, and the bundle's `receipt-integrity` finding is what flags the pairing. |
 | Receipt sealed under a retired integrity version | Artifact integrity is `unknown` through the compatibility source `run_receipt:<runId>:integrity-v<N>-retired`, which is where the human clause reads the version back from (`seal v19 retired (this build verifies v20)`); `failed` and "seal broken" are reserved for a seal this build checked and rejected. The receipt-owned axes are `absent` with `historical_format`, and the verdict is `unknown` rather than `compromised`. The receipt is not migrated and not read as evidence: the bundle records a `receipt-retired` info finding, `evidence build` prints it as a note and exits 0, and `/view verify` reports `verify retired` with both versions. |
 | Receipt `verification.state: verified` | Validation grounding is `validated` unless a stronger typed failure or ungrounded claim is present. |
 | Receipt `verification.state: unverified` | Validation grounding is `absent` with `not_observed`; lack of a validation tool is not a failed validation. |
@@ -220,7 +219,7 @@ They do not mutate receipt, gate-decision, evidence-bundle, or session formats.
 | Typed receipt validation or result-contract quality | A passing correctness-bearing fact maps to `validated`; a failing fact maps to `failed`; an ungrounded passing claim maps to `ungrounded`. |
 | Valid bounded project context, valid none-tier workspace-root record, or valid briefing hash | Context provenance is `recorded`. A `none`-tier run still receives the workspace-root message, so a none-tier block naming exactly `workspace-root` with a well-formed count and hash is `recorded`. Explicit project-context tier `none` with no content and no briefing is `not_applicable`; a missing historical field is `unknown`; a contradictory block (a handbook section under a none policy, a hash with no section, a malformed count) is `invalid`. |
 | Gate decision | An authenticated independent pass or fail maps to `passed` or `failed`. Correlated review maps to `not_independent`. Unauthenticated artifacts map to `unknown`; operator confirmation or yolo authority alone is `not_applicable` to independent review. |
-| Receipt autonomy grade | `mediated`, `approximated`, and `bypassed` map to `enforced`, `approximated`, and `bypassed`. A dangerous-bypass flag always normalizes to `bypassed`; a missing historical block is `unknown`. |
+| Older receipt with `autonomyEnforcement` | Its integrity seal still verifies when the historical field was covered by the digest. Readers ignore the field and project five trust axes. |
 | Finish-contract assessment | The assessment remains linked in `audit-linked.jsonl` and contributes its domain findings and tags. It does not override the receipt-derived `completionEvidence` axis on the evidence surface alone. |
 | Malformed audit row identifier | A blank or whitespace-only optional identifier remains linked as audit input and never aborts the bundle. It cannot affect the receipt-derived trust projection. |
 | Bundle without `trust-status.json` | Inspection reports `projection: historical_format` with no canonical run projections. It never reconstructs positive states from older summary tags. |
@@ -229,9 +228,9 @@ Receipt inspection, worker output, monitor details, and evidence rebuilding all
 use the same authenticated receipt projection boundary. Evidence rebuilding
 then composes independently authenticated gate decisions without changing
 receipt-owned axes. Findings such as
-`no-validation`, `proxy-validation`, `external-approximation`,
-`external-bypass`, `independent-review`, `context-provenance`, and
-`completion-evidence` are selected from the canonical states. `findings.md`
+`no-validation`, `proxy-validation`, `external-bypass`,
+`independent-review`, `context-provenance`, and `completion-evidence`
+are selected from authenticated receipt facts and canonical states. `findings.md`
 prints the tier, summary, and every axis before those diagnostic records, while
 their detailed domain artifacts remain in the receipt, gate, audit, and trace
 files.
@@ -249,11 +248,11 @@ same canonical input renders the same verdict on the dispatch run line, in a
 monitor block, under `clio-coder evidence inspect`, in `findings.md`, on the
 Alt+W board, in the `/view` receipt header, and on the ACP wire.
 
-The compact human line has six fixed clauses in a fixed order and answers the
+The compact human line has five fixed clauses in a fixed order and answers the
 four operator questions without receipt internals:
 
 ```text
-trust v1: sealed; grounded by host-verification; not independently reviewed; mediated; context recorded; completion evidenced
+trust v1: sealed; grounded by host-verification; not independently reviewed; context recorded; completion evidenced
 ```
 
 | Clause | Axis | Question it answers |
@@ -261,12 +260,10 @@ trust v1: sealed; grounded by host-verification; not independently reviewed; med
 | `sealed` / `seal broken` / `seal unchecked` / `no receipt` | Artifact integrity | Can the record be trusted to be what was written? |
 | `grounded by <claimant>` / `validation failed by <claimant>` / `inferred: validation claimed, none observed` / `no validation observed` / `validation unknown (<system>)` / `validation not applicable` | Validation grounding | Who claims the result, and what was observed? |
 | `independently reviewed: pass` / `independently reviewed: fail` / `independent review inconclusive` / `review not independent` / `not independently reviewed` | Independent review | What did a second, uncorrelated authority check? |
-| `mediated` / `approximated (<runtime>)` / `bypassed (<runtime>)` / `autonomy not recorded` | Autonomy enforcement | Did Clio's own gate mediate the run? |
 | `context recorded` / `context record invalid` / `context not recorded` | Context provenance | Is what the worker was given recorded consistently? |
 | `completion evidenced` / `completion unevidenced` / `completion limited` / `completion not applicable` | Completion evidence | What did the finish contract observe? |
 
-`mediated` is the word for the `enforced` state because it is what the
-receipt grade already says; `inferred` is the word for an `ungrounded` claim.
+`inferred` is the word for an `ungrounded` claim.
 Every `unknown` and `absent` state prints as such, so what remains unknown is
 part of the line, never an omission.
 
@@ -274,12 +271,12 @@ The drill-down line prints every axis by its canonical state id and is the
 same on every text surface:
 
 ```text
-trust_status=v1 artifactIntegrity:verified validationGrounding:validated independentReview:absent contextProvenance:recorded autonomyEnforcement:enforced completionEvidence:evidenced
+trust_status=v1 artifactIntegrity:verified validationGrounding:validated independentReview:absent contextProvenance:recorded completionEvidence:evidenced
 ```
 
 The machine projection (`TrustSummaryProjection`, `trust` on the `dispatch`
 tool's `details.runs[]` entries and on the `monitor` receipt details) is
-bounded and versioned: the verdict tier, the six axis states, the claimant,
+bounded and versioned: the verdict tier, the five axis states, the claimant,
 the axes still unknown, the compact text, and up to 8 `<kind>:<id>`
 references into the detailed artifacts. It is flat by design so a depth-capped
 wire such as ACP `rawOutput` carries it whole where the nested canonical
@@ -288,7 +285,7 @@ status's artifact references fall off the depth cap.
 The verdict tier styles a surface and never scores a run. `reviewed` is the
 only tier styled as independently verified; a sealed receipt with observed
 validation is `grounded`, a sealed receipt with nothing observed is
-`unverified`, a broken seal, bypassed gate, failed or inferred validation,
+`unverified`, a broken seal, failed or inferred validation,
 failed or correlated review, or contradictory context record is
 `compromised`, and an unchecked or missing seal is `unknown`. The Alt+W board
 never carries a verdict on the terminal bus event: the event is published the

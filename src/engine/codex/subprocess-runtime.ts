@@ -3,7 +3,7 @@ import type { Readable, Writable } from "node:stream";
 
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../core/safe-exec.js";
-import { codexSubprocessPermissionConfigForAutonomy } from "../../domains/providers/runtimes/external-cli-policy.js";
+import { codexSubprocessPermissionConfig } from "../../domains/providers/runtimes/external-cli-policy.js";
 import { assertToolProfileEnforceable } from "../../tools/profiles.js";
 import { createProcessTreeTerminator, readBoundedLines, readStderr, waitForClose } from "../external-subprocess.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
@@ -25,7 +25,7 @@ export interface CodexRuntimeDependencies {
 }
 
 export type { CodexSubprocessPermissionConfig } from "../../domains/providers/runtimes/external-cli-policy.js";
-export { codexSubprocessPermissionConfigForAutonomy } from "../../domains/providers/runtimes/external-cli-policy.js";
+export { codexSubprocessPermissionConfig } from "../../domains/providers/runtimes/external-cli-policy.js";
 
 export function buildCodexExecPrompt(input: WorkerRunInput): string {
 	return [
@@ -40,7 +40,7 @@ export function buildCodexExecPrompt(input: WorkerRunInput): string {
 /** `codex exec -` reads the work order from stdin; prompt text never enters argv. */
 export function buildCodexExecArgs(input: WorkerRunInput): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "codex-cli");
-	const permission = codexSubprocessPermissionConfigForAutonomy(input.readOnly === true);
+	const permission = codexSubprocessPermissionConfig(input.readOnly === true);
 	const args = ["exec", "--json", "--ephemeral", "--skip-git-repo-check"];
 	args.push("--sandbox", permission.sandbox);
 	if (input.wireModelId.trim() && input.wireModelId !== CODEX_CLI_DEFAULT_MODEL) {

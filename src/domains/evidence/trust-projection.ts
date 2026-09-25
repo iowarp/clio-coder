@@ -10,7 +10,7 @@ import {
 
 /**
  * The one projection of the canonical trust status every operator surface
- * renders. The six-axis model stays the source of truth and is never
+ * renders. The five-axis model stays the source of truth and is never
  * collapsed into a score here; this module only fixes the words each state is
  * called and the order the axes are read in, so the dispatch line, the
  * monitor block, `evidence inspect`, `findings.md`, the Alt+W board, the
@@ -64,11 +64,9 @@ type AxisStates = { [Axis in TrustStatusAxis]: (typeof TRUST_STATUS_STATES)[Axis
 
 /**
  * The standardized word for every state. A word is what an operator reads;
- * the state id is what a machine reads. `mediated` names the `enforced`
- * autonomy state because that is the receipt grade and the documented
- * meaning: Clio's own safety gate mediated the run. `inferred` names an
- * ungrounded validation claim: the worker said it validated, nothing was
- * observed to have run.
+ * the state id is what a machine reads. `inferred` names an ungrounded
+ * validation claim: the worker said it validated, but nothing was observed
+ * to have run.
  */
 export const TRUST_STATE_WORDS: { [Axis in TrustStatusAxis]: Record<AxisStates[Axis], string> } = {
 	artifactIntegrity: {
@@ -101,14 +99,6 @@ export const TRUST_STATE_WORDS: { [Axis in TrustStatusAxis]: Record<AxisStates[A
 		absent: "context not recorded",
 		unknown: "context unknown",
 		not_applicable: "context not applicable",
-	},
-	autonomyEnforcement: {
-		enforced: "mediated",
-		approximated: "approximated",
-		bypassed: "bypassed",
-		absent: "autonomy not recorded",
-		unknown: "autonomy unknown",
-		not_applicable: "autonomy not applicable",
 	},
 	completionEvidence: {
 		evidenced: "completion evidenced",
@@ -158,17 +148,9 @@ function validationClause(status: CanonicalTrustStatus): string {
 	return word;
 }
 
-/** External runtimes name themselves on the autonomy clause so approximation is never anonymous. */
-function autonomyClause(status: CanonicalTrustStatus): string {
-	const entry = status.autonomyEnforcement;
-	const word = trustStateWord("autonomyEnforcement", entry.state);
-	if (entry.state !== "approximated" && entry.state !== "bypassed") return word;
-	return `${word} (${entry.authority.id})`;
-}
-
 /**
  * The compact human body. Clause order is fixed: integrity, validation with
- * its claimant, independent review, autonomy, context, completion. Every
+ * its claimant, independent review, context, completion. Every
  * surface prints this body verbatim, so two surfaces can only disagree by
  * reading different canonical input.
  */
@@ -177,7 +159,6 @@ export function formatTrustSummary(status: CanonicalTrustStatus): string {
 		integrityClause(status),
 		validationClause(status),
 		trustStateWord("independentReview", status.independentReview.state),
-		autonomyClause(status),
 		trustStateWord("contextProvenance", status.contextProvenance.state),
 		trustStateWord("completionEvidence", status.completionEvidence.state),
 	].join("; ");
@@ -205,9 +186,9 @@ function isUnanswered(status: CanonicalTrustStatus, axis: TrustStatusAxis): bool
 }
 
 /**
- * Read the tier off the axes in priority order. A broken seal, a bypassed
- * gate, a failed or inferred validation, a failed or correlated review, or a
- * contradictory context record compromises the result whatever else holds.
+ * Read the tier off the axes in priority order. A broken seal, a failed or
+ * inferred validation, a failed or correlated review, or a contradictory
+ * context record compromises the result whatever else holds.
  * An unchecked or missing seal leaves it unknown. Only an authenticated
  * independent pass is `reviewed`; observed validation without one is
  * `grounded`; a sealed receipt with nothing observed is `unverified`.
@@ -216,10 +197,8 @@ export function trustVerdict(status: CanonicalTrustStatus): TrustVerdict {
 	const integrity = status.artifactIntegrity.state;
 	const validation = status.validationGrounding.state;
 	const review = status.independentReview.state;
-	const autonomy = status.autonomyEnforcement.state;
 	if (
 		integrity === "failed" ||
-		autonomy === "bypassed" ||
 		validation === "failed" ||
 		validation === "ungrounded" ||
 		review === "failed" ||

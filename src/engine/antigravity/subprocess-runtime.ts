@@ -43,7 +43,6 @@ export type AntigravityStreamEvent =
 
 export interface AntigravitySubprocessConfig {
 	extraArgs: string[];
-	dangerousBypass: boolean;
 	externalMode: "plan+sandbox" | "accept-edits";
 }
 
@@ -55,11 +54,11 @@ export interface AntigravityRuntimeDependencies {
 }
 
 /** Keep the peer's own permission mode explicit for both dispatch restrictions. */
-export function antigravitySubprocessConfigForAutonomy(readOnly = false): AntigravitySubprocessConfig {
+export function antigravitySubprocessConfig(readOnly = false): AntigravitySubprocessConfig {
 	if (readOnly) {
-		return { extraArgs: ["--mode", "plan", "--sandbox"], dangerousBypass: false, externalMode: "plan+sandbox" };
+		return { extraArgs: ["--mode", "plan", "--sandbox"], externalMode: "plan+sandbox" };
 	}
-	return { extraArgs: ["--mode", "accept-edits"], dangerousBypass: false, externalMode: "accept-edits" };
+	return { extraArgs: ["--mode", "accept-edits"], externalMode: "accept-edits" };
 }
 
 function buildAntigravityPrompt(input: WorkerRunInput): string {
@@ -85,7 +84,7 @@ export function buildAgyStdinLine(input: WorkerRunInput): string {
 
 export function buildAgyArgs(input: WorkerRunInput): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "antigravity-code");
-	const permission = antigravitySubprocessConfigForAutonomy(input.readOnly === true);
+	const permission = antigravitySubprocessConfig(input.readOnly === true);
 	const args = [
 		...permission.extraArgs,
 		"--input-format",

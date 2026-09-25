@@ -47,6 +47,7 @@ import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-f
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { explainRouteDecision } from "../domains/dispatch/routing-intent.js";
 import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceipt } from "../domains/dispatch/types.js";
+import { isLegacyReadOnlyReceipt } from "../domains/dispatch/types.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
 import { adaptRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
@@ -661,13 +662,12 @@ function dispatchDetails(
 				exitCode: receipt.exitCode,
 				receiptPath,
 				eventCount: summary.count,
-				// Structured evidence state for downstream consumers: mirrors the
-				// sealed receipt read-only, plus the integrity check so a tampered
-				// receipt is machine-visible here too.
+				// The dispatch restriction is visible beside the receipt integrity
+				// result. Historical receipts may still encode read-only as a level.
 				verification: integrity.ok ? receipt.verification : UNVERIFIABLE_RECEIPT_VERIFICATION,
 				hostVerification: integrity.ok ? (receipt.hostVerification ?? null) : null,
 				receiptIntegrity: integrity,
-				readOnly,
+				readOnly: readOnly || (integrity.ok && isLegacyReadOnlyReceipt(receipt)),
 				...(integrity.ok && receipt.toolActivity !== undefined ? { toolActivity: receipt.toolActivity } : {}),
 				trustStatus,
 				// The bounded projection sits shallow and flat on purpose: a
@@ -697,7 +697,6 @@ function dispatchDetails(
 				...(provenance.pipeline !== undefined ? { pipeline: provenance.pipeline } : {}),
 				...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),
 				...(provenance.escalation !== undefined ? { escalation: provenance.escalation } : {}),
-				...(provenance.autonomyEnforcement !== undefined ? { autonomyEnforcement: provenance.autonomyEnforcement } : {}),
 				...(integrity.ok && receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
 					? { routing: explainRouteDecision(receipt.routeDecision, receipt.routingIntent) }
 					: {}),
@@ -1455,7 +1454,7 @@ async function runCompete(
 				if (failed) return "builder failed";
 				// Current dispatches carry the read-only restriction directly; older
 				// receipts may still record it as a legacy autonomy level.
-				if (candidateRuns[index]?.readOnly !== true && receipt?.autonomyEnforcement?.autonomy !== "read-only") {
+				if (candidateRuns[index]?.readOnly !== true && !isLegacyReadOnlyReceipt(receipt)) {
 					commitCandidateWork(worktree, `clio-coder compete ${group} candidate ${worktree.index}`);
 				}
 				return candidateDiffStat(root, worktree.branch);

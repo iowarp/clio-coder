@@ -603,7 +603,6 @@ export class AcpToolMediator {
 			decision = "denied";
 			reason = `unknown ACP tool: ${mapped.displayTool}`;
 		} else {
-			const level = DEFAULT_AUTONOMY_LEVEL;
 			const safetyDecisions = mapped.evaluations.map((evaluation) =>
 				this.input.safety.evaluate({ tool: evaluation.tool, args: evaluation.args }),
 			);
@@ -632,7 +631,7 @@ export class AcpToolMediator {
 				// net confirm rail below: a delegation has no operator to answer.
 				const dispositions = safetyDecisions.map((candidate) => ({
 					candidate,
-					disposition: mapAutonomy(level, candidate.classification.actionClass, {
+					disposition: mapAutonomy(DEFAULT_AUTONOMY_LEVEL, candidate.classification.actionClass, {
 						executeRecognized: candidate.policy?.execRecognition !== "unrecognized",
 						...(candidate.policy?.readScope === "outside-workspace" ? { readOutsideWorkspace: true } : {}),
 					}),
@@ -645,7 +644,7 @@ export class AcpToolMediator {
 						askDisposition.candidate.policy?.readScope === "outside-workspace"
 							? "a path outside the workspace"
 							: askDisposition.candidate.classification.actionClass;
-					reason = `permission_required: autonomy ${level} requires approval for ${asked}; denied by non-stall policy (no interactive operator in delegation context)`;
+					reason = `permission_required: autonomy ${DEFAULT_AUTONOMY_LEVEL} requires approval for ${asked}; denied by non-stall policy (no interactive operator in delegation context)`;
 				} else {
 					decision = "approved";
 					reason = safetyDecision?.policy?.reasonCode ?? "allowed";

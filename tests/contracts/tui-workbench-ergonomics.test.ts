@@ -374,12 +374,10 @@ for (const width of widths) {
 				artifactIntegrity: "verified",
 				validationGrounding: "absent",
 				independentReview: "absent",
-				autonomyEnforcement: "enforced",
 				contextProvenance: "recorded",
 				completionEvidence: "absent",
 			},
-			text:
-				"sealed; no validation observed; not independently reviewed; mediated; context recorded; completion not recorded",
+			text: "sealed; no validation observed; not independently reviewed; context recorded; completion not recorded",
 		};
 		const original = structuredClone(row);
 		const board = createDispatchBoardView(

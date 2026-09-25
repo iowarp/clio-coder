@@ -969,13 +969,12 @@ authenticated validator evidence. Briefing provenance and
 bounded `project_context` provenance are also rendered independently; neither
 hash substitutes for the other.
 
-The canonical terminology for these facts is the six-axis trust status in
+The canonical terminology for these facts is the five-axis trust status in
 [`evidence-and-memory.md`](../architecture/evidence-and-memory.md#canonical-trust-status).
 Receipt integrity projects onto artifact integrity; receipt verification,
 typed quality, and validation grounding project onto validation grounding;
 gate decisions project onto independent review; briefing and project context
-project onto context provenance; and `autonomyEnforcement` projects onto
-autonomy enforcement. A receipt does not contain independent-review or
+project onto context provenance. A receipt does not contain independent-review or
 completion-evidence outcomes merely because it is sealed. Those axes remain
 `absent` until an authenticated gate artifact or finish assessment is composed.
 In particular, verified integrity cannot validate claims, known provenance

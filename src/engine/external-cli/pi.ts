@@ -1,4 +1,4 @@
-import { piCliModeForAutonomy } from "../../domains/providers/runtimes/external-cli-policy.js";
+import { piCliMode } from "../../domains/providers/runtimes/external-cli-policy.js";
 import { assertToolProfileEnforceable } from "../../tools/profiles.js";
 import type { WorkerRunInput } from "../worker-runtime.js";
 import {
@@ -11,11 +11,11 @@ import {
 
 export const PI_CLI_DEFAULT_MODEL = "pi-cli-default";
 
-export { piCliModeForAutonomy } from "../../domains/providers/runtimes/external-cli-policy.js";
+export { piCliMode } from "../../domains/providers/runtimes/external-cli-policy.js";
 
 export function buildPiCliArgs(input: WorkerRunInput): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "pi-cli");
-	const mode = piCliModeForAutonomy(input.readOnly === true);
+	const mode = piCliMode(input.readOnly === true);
 	const args = ["--print", "--mode", "json", "--no-session", "--no-extensions", "--no-approve"];
 	if (mode === "read-only") args.push("--tools", "read,grep,find,ls");
 	if (input.wireModelId.trim() && input.wireModelId !== PI_CLI_DEFAULT_MODEL) {
