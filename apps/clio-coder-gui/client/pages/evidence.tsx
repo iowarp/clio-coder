@@ -7,7 +7,7 @@ import { useOperation } from "../api/queries.js";
 import { Facts } from "../design/facts.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
-import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE, admittedPages } from "./artifact-pagination.js";
+import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE, admittedPages, retainedLinksLive } from "./artifact-pagination.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 
 const verdictText = {
@@ -137,6 +137,7 @@ export function EvidencePage({ client }: { client: Client }) {
 		getNextPageParam: (page) => page.nextCursor ?? undefined,
 		maxPages: ARTIFACT_MAX_PAGES,
 	});
+	const live = retainedLinksLive(inventory);
 	return (
 		<section>
 			<PanelHeading panel={PANELS.evidenceInventory} level={1} />
@@ -164,7 +165,7 @@ export function EvidencePage({ client }: { client: Client }) {
 					.map(({ overview, verdict }) => (
 						<article key={overview.evidenceId} className="trace-panel">
 							<h2>
-								<Link to={`/evidence/${overview.evidenceId}`}>{overview.evidenceId}</Link>
+								{live ? <Link to={`/evidence/${overview.evidenceId}`}>{overview.evidenceId}</Link> : overview.evidenceId}
 							</h2>
 							<p>
 								<strong>{verdict}</strong> · {overview.generatedAt}
@@ -180,7 +181,7 @@ export function EvidencePage({ client }: { client: Client }) {
 			{inventory.hasNextPage && !inventory.isRefetchError && (
 				<>
 					<PanelEmpty>{emptyState.bounded("evidence bundles")}</PanelEmpty>
-					<button type="button" disabled={inventory.isFetchingNextPage} onClick={() => void inventory.fetchNextPage()}>
+					<button type="button" disabled={inventory.isFetching} onClick={() => void inventory.fetchNextPage()}>
 						Load more evidence
 					</button>
 				</>

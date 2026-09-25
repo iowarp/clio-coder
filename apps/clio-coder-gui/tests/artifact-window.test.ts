@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { InfiniteQueryObserver, QueryClient } from "@tanstack/react-query";
-import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE, admittedPages } from "../client/pages/artifact-pagination.js";
+import {
+	ARTIFACT_MAX_PAGES,
+	ARTIFACT_PAGE_SIZE,
+	admittedPages,
+	retainedLinksLive,
+} from "../client/pages/artifact-pagination.js";
 import { Problem } from "../contracts/common.js";
 import { EvidencePage } from "../contracts/evidence.js";
 import { DispatchRuns, FleetRoots } from "../contracts/fleet.js";
@@ -144,8 +149,9 @@ test("every response carries the full security header set", async (t) => {
 /**
  * Mirrors EvidencePage: the same page size, retention and rendered pages, fed by
  * a stand-in for the list route that records what it served exactly as the
- * route does. `failWhen` fails a request before or after the server records it;
- * `checkInFlight` asserts every rendered link is admitted while a page loads.
+ * route does. `failWhen` fails a request before or after the server records it.
+ * Each time the server records a page, `moments` notes whether the page still
+ * offered links and which rendered ids the window no longer admitted.
  */
 function paginatedEvidence() {
 	const artifacts = new ArtifactWindow();
@@ -153,8 +159,8 @@ function paginatedEvidence() {
 	const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	const state = {
 		failWhen: undefined as undefined | ((cursor: string | undefined) => "before-record" | "after-record" | undefined),
-		checkInFlight: true,
 	};
+	const moments: { live: boolean; refused: string[] }[] = [];
 	const observer = new InfiniteQueryObserver(queries, {
 		queryKey: ["evidence"],
 		initialPageParam: undefined as string | undefined,
@@ -164,8 +170,16 @@ function paginatedEvidence() {
 			const start = pageParam ? Number(pageParam) : 0;
 			const ids = served.slice(start, start + ARTIFACT_PAGE_SIZE);
 			artifacts.page("evidence", pageParam, ids);
-			if (state.checkInFlight)
-				for (const id of rendered()) assert.equal(artifacts.admit("evidence", id), id, "Rendered while a page loads");
+			moments.push({
+				live: retainedLinksLive(observer.getCurrentResult()),
+				refused: rendered().filter((id) => {
+					try {
+						return artifacts.admit("evidence", id) !== id;
+					} catch {
+						return true;
+					}
+				}),
+			});
 			if (failure === "after-record") throw new Error("response lost after the server recorded the page");
 			const next = start + ids.length;
 			return { ids, nextCursor: next < served.length ? String(next) : null };
@@ -175,11 +189,15 @@ function paginatedEvidence() {
 	});
 	const rendered = () => admittedPages(observer.getCurrentResult()).flatMap((page) => page.ids);
 	const unsubscribe = observer.subscribe(() => {});
+	/** Every link a page offered was admitted at every moment the server changed its window. */
+	const followable = () => moments.filter((moment) => moment.live && moment.refused.length);
 	return {
 		artifacts,
 		observer,
 		rendered,
 		state,
+		moments,
+		followable,
 		prepend: (ids: string[]) => {
 			served = [...ids, ...served];
 		},
@@ -191,7 +209,7 @@ function paginatedEvidence() {
 }
 
 test("every evidence link the paginated page still renders stays admitted, even while the next page is in flight", async () => {
-	const { artifacts, observer, rendered, state, close } = paginatedEvidence();
+	const { artifacts, observer, rendered, state, moments, followable, close } = paginatedEvidence();
 	try {
 		await observer.refetch();
 		for (let page = 0; page < 6; page++) {
@@ -208,22 +226,23 @@ test("every evidence link the paginated page still renders stays admitted, even 
 		for (const id of before) assert.equal(artifacts.admit("evidence", id), id);
 		// Retention stays bounded: the first page aged out on both sides.
 		assert.throws(() => artifacts.admit("evidence", "evidence-000"), { reason: "outside-window" });
+		// A load-more keeps its links followable throughout, and none was ever refused.
+		assert.ok(moments.length >= 8 && moments.every((moment) => moment.live && !moment.refused.length));
+		assert.deepEqual(followable(), []);
 	} finally {
 		close();
 	}
 });
 
 test("a refresh whose later page fails renders no link the narrowed window refuses", async () => {
-	const { artifacts, observer, rendered, state, prepend, close } = paginatedEvidence();
+	const { artifacts, observer, rendered, state, prepend, followable, close } = paginatedEvidence();
 	try {
 		await observer.refetch();
 		await observer.fetchNextPage();
 		const secondPage = observer.getCurrentResult().data?.pages[1]?.ids ?? [];
 		assert.equal(secondPage.length, ARTIFACT_PAGE_SIZE);
 		// New evidence arrives, then a refresh serves a fresh first page, narrowing
-		// the window, and the second page's read fails. This test owns the settled
-		// state after that failure, not the moment between the two refresh requests.
-		state.checkInFlight = false;
+		// the window, and the second page's read fails.
 		prepend(["evidence-new"]);
 		for (const failure of ["before-record", "after-record"] as const) {
 			state.failWhen = (cursor) => (cursor ? failure : undefined);
@@ -242,6 +261,29 @@ test("a refresh whose later page fails renders no link the narrowed window refus
 		assert.equal((await observer.refetch()).status, "success");
 		assert.equal(rendered().length, 2 * ARTIFACT_PAGE_SIZE);
 		for (const id of rendered()) assert.equal(artifacts.admit("evidence", id), id);
+		assert.deepEqual(followable(), []);
+	} finally {
+		close();
+	}
+});
+
+test("a successful refresh offers no retained link between narrowing the window and refetching the rest", async () => {
+	const { observer, rendered, moments, prepend, followable, close } = paginatedEvidence();
+	try {
+		await observer.refetch();
+		await observer.fetchNextPage();
+		prepend(["evidence-new"]);
+		const lastSeen = rendered().at(-1);
+		const before = moments.length;
+		assert.equal((await observer.refetch()).status, "success");
+		// The moment the server served the fresh first page, the old second page was
+		// still on screen and already refused, so none of its links was followable.
+		const interval = moments[before];
+		assert.ok(interval?.refused.includes(lastSeen ?? ""), "the fresh first page narrowed the window");
+		assert.equal(interval?.live, false);
+		assert.equal(retainedLinksLive(observer.getCurrentResult()), true);
+		assert.equal(rendered()[0], "evidence-new");
+		assert.deepEqual(followable(), []);
 	} finally {
 		close();
 	}
