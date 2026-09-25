@@ -66,8 +66,10 @@ The palette is derived from the Clio Coder logo and iowarp.ai: mint and cyan car
 ### 1.2 Placement Invariants
 
 - **State Indication**: Color is strictly functional. Telemetry and neutral numbers use `muted` or `dim`.
-- **Orange Scarcity**: Orange marks live work and amber-orange marks a pending operator decision. Settled rows and idle borders stay teal or neutral.
+- **Orange Scarcity**: Orange marks live work and amber-orange marks a pending operator decision. Settled rows and idle borders stay cyan, mint or neutral.
 - **Budgeting**: Max one non-neutral token per chip; max one status token per framed card.
+- **Status Colors Mean Status**: `success`, `warning` and `error` mark outcomes and conditions only. Categorical color, such as context meter categories, shell flags and code ink, uses brand, `tool`, `info`, `reason` or `agent`, so a healthy screen never shows amber or red. `yolo` is always `editorDanger`.
+- **No Token Pairs**: Every token sits in the middle luminance band, so two tokens never make a readable foreground and background pair. A badge reverses one token, so the terminal's own background becomes its text.
 
 ### 1.3 Composer Rail States
 
@@ -211,7 +213,7 @@ The footer anchors live system telemetry across two lines:
 | **Worker Dispatched** | Cyan with a travelling orange accent while the composer is empty | `◆` or `◇` by origin (`agent`) | `N workers active` |
 | **Approval Required** | Moving orange and amber spectrum with `CONFIRM` and decision keys | `?` (`warning`) | `awaiting approval` |
 | **Compacting** | Cyan with a travelling orange accent and `COMPACTING` label | `§` (`reason`) | `compacting context` |
-| **Terminal Error** | Teal idle rail after the turn ends; the failure stays in the transcript | `✦` (`error`) | `error` |
+| **Terminal Error** | Cyan idle rail after the turn ends; the failure stays in the transcript | `✦` (`error`) | `error` |
 
 ---
 
