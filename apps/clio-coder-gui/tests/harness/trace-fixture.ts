@@ -73,7 +73,7 @@ export function traceFixture(state: string, count = 12) {
 			toolStats: [{ tool: "read", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 15 }],
 			findingsSummary: { tags: [], findingCount: 0, firstPassSuccess: false },
 			integrity: { digest: "fixture-receipt-digest" },
-			clioVersion: "0.4.7",
+			clioCoderVersion: "0.4.7",
 			platform: "linux",
 			nodeVersion: "24",
 			lineage: { parentRunId: "parent-1" },
