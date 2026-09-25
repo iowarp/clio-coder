@@ -11,6 +11,8 @@ import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { SessionTurnUsage } from "../domains/observability/trace-store.js";
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
+import type { SessionEntry } from "../domains/session/entries.js";
+import { replaceEngineMessages } from "../engine/agent.js";
 import type { ClioTurnRecord } from "../engine/session.js";
 import type { AgentEvent, AgentMessage, Usage } from "../engine/types.js";
 import {
@@ -28,12 +30,14 @@ import {
 	terminalFailureFromAssistantMessage,
 	toolResultSummary,
 } from "./chat-loop-messages.js";
+import { retireActiveUserContextForNextOperator } from "./chat-renderer.js";
 import type { RetryStatusPayload } from "./turn-recovery.js";
 import type { AgentRuntime, ChatLoopTarget, ChatTurnState } from "./turn-state.js";
 
 export interface TurnPersistenceDeps {
 	state: ChatTurnState;
 	session?: SessionContract | undefined;
+	readSessionEntries?: (() => ReadonlyArray<SessionEntry>) | undefined;
 	getSettings: () => Readonly<ClioSettings>;
 	middlewareToolChoice: MiddlewareToolChoiceControl;
 	/** Consume a user text the loop already persisted itself (echo dedupe). */
@@ -331,6 +335,13 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			});
 			state.lastTurnId = userTurn.id;
 			state.activeUserTurnId = userTurn.id;
+			if (state.runtime && deps.readSessionEntries) {
+				const prior = state.runtime.agent.state.messages;
+				const retired = retireActiveUserContextForNextOperator(prior, deps.readSessionEntries(), {
+					activeLeafTurnId: userTurn.id,
+				});
+				if (retired.length < prior.length) replaceEngineMessages(state.runtime.agent, retired);
+			}
 			state.synthesisToolLock = false;
 			deps.middlewareToolChoice.reset();
 			startTracedTurn(userTurn.id, text);
