@@ -9,18 +9,17 @@ export interface KeybindingDetailEntry {
 	warnings?: ReadonlyArray<string>;
 }
 
-const ELLIPSIS = "…";
 const LABEL_WIDTH = 10;
 
 function fitCell(text: string, width: number): string {
-	const clipped = visibleWidth(text) >= width ? truncateToWidth(text, width, ELLIPSIS, true) : text;
+	const clipped = visibleWidth(text) >= width ? truncateToWidth(text, width, GLYPH.ellipsis, true) : text;
 	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
 function fitLine(text: string, width: number): string {
 	const safeWidth = Math.max(1, width);
 	if (visibleWidth(text) <= safeWidth) return text;
-	return truncateToWidth(text, safeWidth, ELLIPSIS, true);
+	return truncateToWidth(text, safeWidth, GLYPH.ellipsis, true);
 }
 
 function row(

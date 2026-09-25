@@ -140,7 +140,6 @@ const SHIPPED_RESILIENCE_COOLDOWN_MS = DEFAULT_SETTINGS.fleet.retry.routeCooldow
  * unmarked cut presents a fragment as the whole value, so every cell, row, and
  * explanation line in this overlay carries the marker.
  */
-const ELLIPSIS = "…";
 const SELECT_UP = "\u001b[A";
 const SELECT_DOWN = "\u001b[B";
 
@@ -787,7 +786,7 @@ class ScopedModelChecklist implements Component {
 			const pointer = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
 			const check = theme.fg(checked ? "accent" : "dim", checked ? "[x]" : "[ ]");
 			const label = selected ? theme.style("accent", row.label, { bold: true }) : theme.fg("muted", row.label);
-			return truncateToWidth(`${pointer}${check} ${label}`, Math.max(1, width), ELLIPSIS, true);
+			return truncateToWidth(`${pointer}${check} ${label}`, Math.max(1, width), GLYPH.ellipsis, true);
 		});
 		const selected = this.rows[this.selectedRow];
 		if (selected?.kind === "entry") {
@@ -798,7 +797,7 @@ class ScopedModelChecklist implements Component {
 			// fact, so the line that survives the clip says it is not.
 			const last = kept.at(-1);
 			const marked =
-				wrapped.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${ELLIPSIS}`] : kept;
+				wrapped.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept;
 			lines.push("", ...marked);
 		}
 		return lines;
@@ -2665,24 +2664,24 @@ function humanizeChangePlanValue(plan: SettingsChangePlan): string {
 function truncateProfileFact(text: string, width: number): string {
 	const safeWidth = Math.max(1, width);
 	if (visibleWidth(text) <= safeWidth) return text;
-	if (safeWidth <= visibleWidth(ELLIPSIS)) return ELLIPSIS;
+	if (safeWidth <= visibleWidth(GLYPH.ellipsis)) return GLYPH.ellipsis;
 	const characters: string[] = [];
 	let used = 0;
-	const contentWidth = safeWidth - visibleWidth(ELLIPSIS);
+	const contentWidth = safeWidth - visibleWidth(GLYPH.ellipsis);
 	for (const character of Array.from(text)) {
 		const characterWidth = visibleWidth(character);
 		if (used + characterWidth > contentWidth) break;
 		characters.push(character);
 		used += characterWidth;
 	}
-	return `${characters.join("")}${ELLIPSIS}`;
+	return `${characters.join("")}${GLYPH.ellipsis}`;
 }
 
 function ellipsizeFromLeft(text: string, width: number): string {
 	const safeWidth = Math.max(1, width);
 	if (visibleWidth(text) <= safeWidth) return text;
-	if (safeWidth <= visibleWidth(ELLIPSIS)) return ELLIPSIS;
-	const suffixWidth = safeWidth - visibleWidth(ELLIPSIS);
+	if (safeWidth <= visibleWidth(GLYPH.ellipsis)) return GLYPH.ellipsis;
+	const suffixWidth = safeWidth - visibleWidth(GLYPH.ellipsis);
 	const suffix: string[] = [];
 	let used = 0;
 	for (const character of Array.from(text).reverse()) {
@@ -2691,7 +2690,7 @@ function ellipsizeFromLeft(text: string, width: number): string {
 		suffix.unshift(character);
 		used += characterWidth;
 	}
-	return `${ELLIPSIS}${suffix.join("")}`;
+	return `${GLYPH.ellipsis}${suffix.join("")}`;
 }
 
 interface RowColumns {
@@ -2709,7 +2708,7 @@ function propagationFor(id: string): string | null {
 }
 
 function fixedLines(lines: readonly string[], width: number, height: number): string[] {
-	const out = lines.slice(0, height).map((line) => padAnsi(line, width, ELLIPSIS));
+	const out = lines.slice(0, height).map((line) => padAnsi(line, width, GLYPH.ellipsis));
 	while (out.length < height) out.push(" ".repeat(Math.max(0, width)));
 	return out;
 }
@@ -2765,12 +2764,12 @@ function formatSettingRow(
 		return truncateToWidth(
 			`${indent}${prefix}${label}${ROW_GAP}${theme.fg(selected ? "accent" : "muted", item.currentValue)}`,
 			width,
-			ELLIPSIS,
+			GLYPH.ellipsis,
 			true,
 		);
 	}
 	const prefix = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
-	const labelText = padAnsi(item.label, columns.label, ELLIPSIS);
+	const labelText = padAnsi(item.label, columns.label, GLYPH.ellipsis);
 	const label = selected
 		? theme.style("accent", labelText, { bold: true })
 		: item.presentationKind === "group-header"
@@ -2779,7 +2778,7 @@ function formatSettingRow(
 				? theme.style("accentDeep", labelText, { bold: true })
 				: labelText;
 	if (item.presentationKind === "group-header") {
-		return truncateToWidth(`${indent}  ${label}`, width, ELLIPSIS, true);
+		return truncateToWidth(`${indent}  ${label}`, width, GLYPH.ellipsis, true);
 	}
 	const modified = !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue;
 	const marker = pending
@@ -2794,7 +2793,7 @@ function formatSettingRow(
 	// is the expendable metadata; keeping it would collapse `chat+fleet` to
 	// `cha…` beside an otherwise readable health state.
 	if (columns.path > 0 && !(item.presentationKind === "status" && width < 64)) {
-		pathSegment = `${theme.fg("dim", padAnsi(item.configPath, columns.path, ELLIPSIS))}${ROW_GAP}`;
+		pathSegment = `${theme.fg("dim", padAnsi(item.configPath, columns.path, GLYPH.ellipsis))}${ROW_GAP}`;
 		used += columns.path + visibleWidth(ROW_GAP);
 	}
 	const valueWidth = Math.max(1, width - used - 2);
@@ -2804,7 +2803,12 @@ function formatSettingRow(
 			? [{ text: "— ", tone: "neutral" as const }, ...item.valueSegments]
 			: item.valueSegments;
 	const value = renderSettingValue(valueSegments, valueWidth, selected, item.readOnly);
-	return truncateToWidth(`${indent}${prefix}${label}${ROW_GAP}${pathSegment}${marker}${value}`, width, ELLIPSIS, true);
+	return truncateToWidth(
+		`${indent}${prefix}${label}${ROW_GAP}${pathSegment}${marker}${value}`,
+		width,
+		GLYPH.ellipsis,
+		true,
+	);
 }
 
 function targetConsoleColumns(
@@ -2860,8 +2864,15 @@ function formatTargetConsoleHeader(width: number, indentWidth: number): string {
 	const indent = " ".repeat(Math.max(0, indentWidth));
 	const available = Math.max(1, width - visibleWidth(indent) - 2);
 	const labels = { health: "HEALTH", id: "TARGET", roles: "ROLES", runtime: "RUNTIME", latency: "LATENCY" } as const;
-	const cells = targetConsoleColumns(available).map((column) => padAnsi(labels[column.key], column.width, ELLIPSIS));
-	return truncateToWidth(`${indent}  ${theme.style("dim", cells.join(ROW_GAP), { bold: true })}`, width, ELLIPSIS, true);
+	const cells = targetConsoleColumns(available).map((column) =>
+		padAnsi(labels[column.key], column.width, GLYPH.ellipsis),
+	);
+	return truncateToWidth(
+		`${indent}  ${theme.style("dim", cells.join(ROW_GAP), { bold: true })}`,
+		width,
+		GLYPH.ellipsis,
+		true,
+	);
 }
 
 function formatTargetConsoleRow(
@@ -2878,13 +2889,13 @@ function formatTargetConsoleRow(
 	const available = Math.max(1, width - visibleWidth(indent) - 2);
 	const cells = targetConsoleColumns(available).map((column) => {
 		const text = column.key === "health" ? console.health.text : console[column.key];
-		const padded = padAnsi(text, column.width, ELLIPSIS);
+		const padded = padAnsi(text, column.width, GLYPH.ellipsis);
 		if (column.key === "health")
 			return renderSettingValue([{ ...console.health, text: padded }], column.width, selected, false);
 		if (column.key === "id" && selected) return theme.style("accent", padded, { bold: true });
 		return theme.fg(selected ? "accent" : "muted", padded);
 	});
-	return truncateToWidth(`${indent}${prefix}${cells.join(ROW_GAP)}`, width, ELLIPSIS, true);
+	return truncateToWidth(`${indent}${prefix}${cells.join(ROW_GAP)}`, width, GLYPH.ellipsis, true);
 }
 
 function renderSettingValue(
@@ -2915,14 +2926,14 @@ function renderSettingValue(
 			...(prefixWidth > 0
 				? [
 						{
-							text: visibleWidth(prefix) <= prefixWidth ? prefix : truncateToWidth(prefix, prefixWidth, ELLIPSIS, true),
+							text: visibleWidth(prefix) <= prefixWidth ? prefix : truncateToWidth(prefix, prefixWidth, GLYPH.ellipsis, true),
 							tone: "neutral" as const,
 						},
 					]
 				: []),
 			{
 				...semantic,
-				text: truncateToWidth(semantic.text, semanticWidth, ELLIPSIS, true),
+				text: truncateToWidth(semantic.text, semanticWidth, GLYPH.ellipsis, true),
 			},
 		];
 	}
@@ -2930,7 +2941,7 @@ function renderSettingValue(
 	const rendered: string[] = [];
 	for (const segment of visible) {
 		if (remaining <= 0) break;
-		const text = truncateToWidth(segment.text, remaining, ELLIPSIS);
+		const text = truncateToWidth(segment.text, remaining, GLYPH.ellipsis);
 		remaining -= visibleWidth(text);
 		const token =
 			segment.tone === "healthy"
@@ -3478,7 +3489,7 @@ export class SettingsCenter implements Component {
 				...Array.from(
 					{ length: bodyRows },
 					(_, index) =>
-						`${padAnsi(left[index] ?? "", leftWidth, ELLIPSIS)}${separator}${padAnsi(work[index] ?? "", workWidth, ELLIPSIS)}`,
+						`${padAnsi(left[index] ?? "", leftWidth, GLYPH.ellipsis)}${separator}${padAnsi(work[index] ?? "", workWidth, GLYPH.ellipsis)}`,
 				),
 			];
 		}
@@ -3490,9 +3501,9 @@ export class SettingsCenter implements Component {
 			...head,
 			...Array.from({ length: bodyRows }, (_, index) =>
 				[
-					padAnsi(left[index] ?? "", leftWidth, ELLIPSIS),
-					padAnsi(center[index] ?? "", centerWidth, ELLIPSIS),
-					padAnsi(right[index] ?? "", detailWidth, ELLIPSIS),
+					padAnsi(left[index] ?? "", leftWidth, GLYPH.ellipsis),
+					padAnsi(center[index] ?? "", centerWidth, GLYPH.ellipsis),
+					padAnsi(right[index] ?? "", detailWidth, GLYPH.ellipsis),
 				].join(separator),
 			),
 		];
@@ -3502,15 +3513,18 @@ export class SettingsCenter implements Component {
 	private filterEditorLines(width: number): string[] {
 		if (this.filterDraft === null) return [];
 		const theme = clioTheme();
-		return [truncateToWidth(theme.fg("accent", `Filter settings: ${this.filterDraft}_`), width, ELLIPSIS, true)];
+		return [truncateToWidth(theme.fg("accent", `Filter settings: ${this.filterDraft}_`), width, GLYPH.ellipsis, true)];
 	}
 
 	private emptyFilterLines(width: number, height: number): string[] {
 		const theme = clioTheme();
 		return fixedLines(
 			[
-				theme.fg("muted", truncateToWidth(`No settings match “${this.effectiveFilterQuery()}”`, width, ELLIPSIS, true)),
-				theme.fg("dim", truncateToWidth("/ edit filter · empty Enter clears", width, ELLIPSIS, true)),
+				theme.fg(
+					"muted",
+					truncateToWidth(`No settings match “${this.effectiveFilterQuery()}”`, width, GLYPH.ellipsis, true),
+				),
+				theme.fg("dim", truncateToWidth("/ edit filter · empty Enter clears", width, GLYPH.ellipsis, true)),
 			],
 			width,
 			height,
@@ -3556,7 +3570,8 @@ export class SettingsCenter implements Component {
 		// last line that actually carries text.
 		while (kept.length > 0 && (kept.at(-1) ?? "").trim().length === 0) kept.pop();
 		const last = kept.at(-1);
-		const marked = body.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${ELLIPSIS}`] : kept;
+		const marked =
+			body.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept;
 		const filler = Array.from({ length: Math.max(0, height - marked.length - note.length) }, () => "");
 		return fixedLines([...marked, ...filler, ...note], width, height);
 	}
@@ -3578,7 +3593,7 @@ export class SettingsCenter implements Component {
 		const body = Array.from(
 			{ length: contentHeight },
 			(_, index) =>
-				`${padAnsi(left[index] ?? "", leftWidth, ELLIPSIS)}${separator}${padAnsi(right[index] ?? "", rightWidth, ELLIPSIS)}`,
+				`${padAnsi(left[index] ?? "", leftWidth, GLYPH.ellipsis)}${separator}${padAnsi(right[index] ?? "", rightWidth, GLYPH.ellipsis)}`,
 		);
 		return [...head, ...body, ...footer];
 	}
@@ -3688,7 +3703,7 @@ export class SettingsCenter implements Component {
 			if (item) trail.push(item.label);
 		}
 		const query = this.filterQuery.trim().length > 0 ? theme.fg("accent", `  /${this.filterQuery}`) : "";
-		return truncateToWidth(`${screenTitle(theme, trail.join(" › "))}${query}`, width, ELLIPSIS, true);
+		return truncateToWidth(`${screenTitle(theme, trail.join(" › "))}${query}`, width, GLYPH.ellipsis, true);
 	}
 
 	/**
@@ -3708,7 +3723,7 @@ export class SettingsCenter implements Component {
 		const wrapped = wrapTextWithAnsi(theme.fg("muted", text), Math.max(1, width));
 		const kept = wrapped.slice(0, budget);
 		const last = kept.at(-1);
-		return wrapped.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${ELLIPSIS}`] : kept;
+		return wrapped.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept;
 	}
 
 	private renderSectionsPage(width: number, height: number): string[] {
@@ -3843,7 +3858,7 @@ export class SettingsCenter implements Component {
 		maxFooterLines: number,
 		width: number,
 	): string[] {
-		const fit = (line: string): string => truncateToWidth(line, width, ELLIPSIS, true);
+		const fit = (line: string): string => truncateToWidth(line, width, GLYPH.ellipsis, true);
 		let out: string[];
 		if (maxFooterLines <= top.length) {
 			out = top.slice(0, maxFooterLines).map(fit);
@@ -3858,7 +3873,7 @@ export class SettingsCenter implements Component {
 			const kept = middle.slice(0, middleBudget);
 			const last = kept.at(-1);
 			const marked =
-				middle.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${ELLIPSIS}`] : kept;
+				middle.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept;
 			out = [...top.map(fit), ...marked.map(fit), ...noteKept.map(fit)];
 		}
 		while (out.length < maxFooterLines) out.push("");

@@ -14,8 +14,6 @@ import { localKey } from "../keyboard-owner.js";
 import { buildHint, FILTER_HINT, type HintEntry, type OverlayEscVerb, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, listGroupHeader, markdownTheme, rule, selectListTheme } from "../theme/index.js";
 
-const ELLIPSIS = "…";
-
 export interface ListOverlayItem {
 	id: string;
 	/** Left-column text, already themed by the caller. */
@@ -439,7 +437,7 @@ export class ListOverlayView implements Component {
 
 	private padLine(line: string, targetWidth: number): string {
 		const w = visibleWidth(line);
-		if (w >= targetWidth) return truncateToWidth(line, targetWidth, ELLIPSIS, true);
+		if (w >= targetWidth) return truncateToWidth(line, targetWidth, GLYPH.ellipsis, true);
 		return line + " ".repeat(targetWidth - w);
 	}
 
@@ -545,12 +543,12 @@ export class ListOverlayView implements Component {
 						rawMeta.length === 0 || maxMetaWidth === 0
 							? ""
 							: visibleWidth(rawMeta) > maxMetaWidth
-								? truncateToWidth(rawMeta, maxMetaWidth, ELLIPSIS, true)
+								? truncateToWidth(rawMeta, maxMetaWidth, GLYPH.ellipsis, true)
 								: rawMeta;
 					const metaLen = metaStr ? visibleWidth(metaStr) : 0;
 
 					const maxLabelWidth = Math.max(1, availableWidth - (metaLen > 0 ? metaLen + 2 : 0));
-					const truncatedLabel = truncateToWidth(item.label, maxLabelWidth, ELLIPSIS, false);
+					const truncatedLabel = truncateToWidth(item.label, maxLabelWidth, GLYPH.ellipsis, false);
 					const actualLabelWidth = visibleWidth(truncatedLabel);
 
 					// The gap exists only to separate metadata. A padded label plus a
@@ -610,7 +608,7 @@ export class ListOverlayView implements Component {
 		const sliced = mdLines.slice(this.detailScrollOffset, this.detailScrollOffset + height);
 		const padded = sliced.map((line) => {
 			const w = visibleWidth(line);
-			if (w >= width) return truncateToWidth(line, width, ELLIPSIS, true);
+			if (w >= width) return truncateToWidth(line, width, GLYPH.ellipsis, true);
 			return line + " ".repeat(width - w);
 		});
 

@@ -43,7 +43,6 @@ const MIN_INNER_ROWS = 6;
 const MIN_QUESTION_ROWS = 3;
 const MAX_LABEL_COLUMN = 30;
 const MIN_LABEL_COLUMN = 12;
-const ELLIPSIS = "…";
 const CONTINUATION_INDENT = "    ";
 const TEXT_ASKING_DESCRIPTION = "opens a text field for your answer";
 
@@ -198,7 +197,7 @@ function answerText(question: AskUserQuestion, selected: ReadonlySet<number>, cu
 function fitLine(text: string, width: number): string {
 	const safeWidth = Math.max(1, width);
 	if (visibleWidth(text) <= safeWidth) return text;
-	return truncateToWidth(text, safeWidth, ELLIPSIS, true);
+	return truncateToWidth(text, safeWidth, GLYPH.ellipsis, true);
 }
 
 /** Wrap a prose value inside the columns left by its one-time row label. */
@@ -565,7 +564,11 @@ class AskUserOverlayView implements Component {
 		this.questions.forEach((question, index) => {
 			const active = index === this.index;
 			const answered = Boolean(this.states[index]?.answer.trim());
-			const prefix = active ? "› " : answered ? "✓ " : "○ ";
+			const prefix = active
+				? `${theme.fg("accent", GLYPH.cursor)} `
+				: answered
+					? `${theme.fg("success", GLYPH.ok)} `
+					: "  ";
 			menu.push(
 				...wrapLabeledValue(
 					prefix,
