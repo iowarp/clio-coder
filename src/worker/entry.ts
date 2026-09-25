@@ -211,7 +211,7 @@ async function main(): Promise<number> {
 		...(spec.onPermission !== undefined ? { onPermission: spec.onPermission } : {}),
 		...(spec.escalation !== undefined ? { escalation: spec.escalation } : {}),
 		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
-		...(spec.autonomy !== undefined ? { autonomy: spec.autonomy } : {}),
+		...(spec.readOnly !== undefined ? { readOnly: spec.readOnly } : {}),
 		...(spec.writeRoots !== undefined ? { writeRoots: [...spec.writeRoots] } : {}),
 		...(spec.protectedArtifactState !== undefined
 			? {

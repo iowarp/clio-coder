@@ -179,7 +179,11 @@ function dispatchMutatedParentWorkspace(details: MiddlewareHookInput["toolResult
 	if (!Array.isArray(details?.runs)) return false;
 	return details.runs.some((value: unknown) => {
 		if (!isRecord(value) || !isRecord(value.receiptIntegrity) || value.receiptIntegrity.ok !== true) return false;
-		if (isRecord(value.autonomyEnforcement) && value.autonomyEnforcement.autonomy === "read-only") return false;
+		if (
+			value.readOnly === true ||
+			(isRecord(value.autonomyEnforcement) && value.autonomyEnforcement.autonomy === "read-only")
+		)
+			return false;
 		const mutatingSucceeded = isRecord(value.toolActivity) && value.toolActivity.mutatingSucceeded === true;
 		const placement = value.placement;
 		if (placement === undefined) return mutatingSucceeded;

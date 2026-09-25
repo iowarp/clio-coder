@@ -58,7 +58,7 @@ describe("safety gate boundary", () => {
 		policy: SafetyPolicyEngine,
 		tool: string,
 		args: Record<string, unknown>,
-		level: "read-only" | "default" | "yolo",
+		level: "default" | "yolo",
 	): string {
 		const decision = policy.evaluate({ tool, args });
 		return decision.kind === "allow"
@@ -89,7 +89,6 @@ describe("safety gate boundary", () => {
 			strictEqual(decision.kind, "allow", command);
 			strictEqual(decision.ruleId, "builtin:git-diff-check", command);
 			strictEqual(decision.execRecognition, "recognized", command);
-			strictEqual(executionDisposition(policy, ToolNames.Bash, args, "read-only"), "deny", command);
 			strictEqual(executionDisposition(policy, ToolNames.Bash, args, "default"), "allow", command);
 			strictEqual(executionDisposition(policy, ToolNames.Bash, args, "yolo"), "allow", command);
 		}
@@ -242,7 +241,6 @@ describe("safety gate boundary", () => {
 			const decision = policy.evaluate({ tool: ToolNames.Verify, args });
 			strictEqual(decision.kind, "allow", check);
 			strictEqual(decision.execRecognition, "unrecognized", check);
-			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "read-only"), "deny", check);
 			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "default"), "ask", check);
 			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "yolo"), "allow", check);
 		}
@@ -749,7 +747,6 @@ describe("safety gate boundary", () => {
 		strictEqual(mapAutonomy("yolo", "unknown"), "allow");
 		strictEqual(mapAutonomy("default", "system_modify"), "ask");
 		strictEqual(mapAutonomy("yolo", "system_modify"), "allow");
-		strictEqual(mapAutonomy("read-only", "system_modify"), "deny");
 	});
 
 	it("fails execution closed under an invalid project policy without blocking normal reads", () => {

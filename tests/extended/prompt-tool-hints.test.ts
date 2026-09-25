@@ -34,7 +34,6 @@ function rolePrompt(
 		dynamic: false,
 	};
 	return compileWorker(table, {
-		autonomy: "default",
 		providerSupportsTools: true,
 		toolNames,
 		toolPromptHints,

@@ -1379,7 +1379,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// Stamps every run with the session that dispatched it, which is what
 				// keeps a sibling Clio process's runs and batches out of this one.
 				getSessionId: () => sessionIdForDispatch?.() ?? null,
-				autonomyOverride: (options.headless?.autonomy ?? options.autonomy) !== undefined,
 				// The domain owns the durable journal here, not the dispatch
 				// tool's event registry: `/run`, a watchdog run, and a model
 				// dispatch all have to leave the same transcript behind, and only
@@ -1785,8 +1784,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 	// First-turn skills reminder: user-message-visible text is the one channel
 	// the battery-tested local models act on. Which protocol it teaches follows
-	// the effective autonomy level, resolved one line up: internal read-only
-	// workers suggest; default and yolo can load trusted installed skills.
+	// the effective session autonomy level, resolved one line up: default and
+	// yolo can load trusted installed skills. Read-only workers cannot activate them.
 	if (resources && skillDiscoveryEnabled) {
 		middleware.registerHook(
 			createSkillsReminderRegistration({
@@ -1801,7 +1800,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					return discoverMarketplaceSkills({ cwd: process.cwd() }).skills.filter((skill) => !installed.has(skill.name))
 						.length;
 				},
-				modelMayActivateSkills: () => modelMayActivateSkills(resolveEffectiveAutonomy()),
+				modelMayActivateSkills: () => modelMayActivateSkills(),
 			}),
 		);
 	}

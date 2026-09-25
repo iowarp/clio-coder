@@ -20,7 +20,7 @@ import { toolPromptHintsForNames } from "../../src/tools/builtin-tool-catalog.js
 const table = loadFragments();
 const builtinRecipes = discoverAgentRecipes(process.cwd()).filter((recipe) => recipe.source === "builtin");
 const fleetRoster = renderFleetPromptSection(builtinRecipes.map(normalizeAgentSpec));
-const autonomyLevels: ReadonlyArray<AutonomyLevel> = ["read-only", "default", "default", "yolo"];
+const autonomyLevels: ReadonlyArray<AutonomyLevel> = ["default", "yolo"];
 
 function occurrences(text: string, needle: string): number {
 	return text.split(needle).length - 1;
@@ -70,8 +70,8 @@ function persona(body: string, id = "matrix"): RenderedPromptFragment {
 }
 
 function workerPrompt(input: {
+	readOnly?: boolean;
 	turnConstraints?: TurnConstraints;
-	autonomy?: AutonomyLevel;
 	providerSupportsTools?: boolean | null;
 	hasContext: boolean;
 	hasBoundSkills: boolean;
@@ -85,7 +85,7 @@ function workerPrompt(input: {
 	const providerSupportsTools = input.providerSupportsTools === undefined ? true : input.providerSupportsTools;
 	return compileWorker(table, {
 		...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
-		autonomy: input.autonomy ?? "default",
+		...(input.readOnly ? { readOnly: true } : {}),
 		providerSupportsTools,
 		toolNames,
 		toolPromptHints: toolPromptHintsForNames(toolNames, role),
@@ -229,22 +229,24 @@ describe("compact prompt contracts", () => {
 	});
 
 	it("preserves worker safety, permission routing, claims, result shape, and section order", () => {
-		for (const autonomy of autonomyLevels) {
+		for (const readOnly of [false, true]) {
 			const compiled = workerPrompt({
-				autonomy,
+				readOnly,
 				providerSupportsTools: true,
 				hasContext: true,
 				hasBoundSkills: false,
 			});
 			deepStrictEqual(
 				compiled.sections.map((section) => section.id),
-				["identity", "operating-contract", "tool-contract", "safety", "persona"],
+				readOnly
+					? ["identity", "operating-contract", "tool-contract", "safety", "dispatch.read-only", "persona"]
+					: ["identity", "operating-contract", "tool-contract", "safety", "persona"],
 			);
 			match(compiled.systemPrompt, /You are Clio, IOWarp's coding agent, running as one bounded worker/u);
 			match(compiled.systemPrompt, /The assigned task is authoritative/u);
 			strictEqual(occurrences(compiled.systemPrompt, WORKER_CLAIM_GUIDANCE), 1);
 			match(compiled.systemPrompt, /"mutatedPaths":\[\],"validations"/u);
-			match(compiled.systemPrompt, new RegExp(`Autonomy: ${autonomy}\\.`, "u"));
+			match(compiled.systemPrompt, /Autonomy: default\./u);
 		}
 
 		match(

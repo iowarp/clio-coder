@@ -144,7 +144,7 @@ Refused. Three contradictions are enumerated.
   never reach outside. Read scope is checked against reads plus writes, because a
   declared write root is necessarily readable.
 - **Write scope against run authority.** `write_roots` declared on a request
-  whose autonomy is `read-only` is `intent_write_without_authority`. Silently
+  with `readOnly: true` is `intent_write_without_authority`. Silently
   dropping the declaration would leave the request claiming a write scope nothing
   enforces.
 

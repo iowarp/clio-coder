@@ -23,7 +23,7 @@ describe("gateway correction contracts", () => {
 
 	it("refuses normalized protected data paths before the reader runs", async () => {
 		const cwd = clioStateDir();
-		const registry = createRegistry({ safety: createWorkerSafety({ cwd }), autonomy: () => "read-only" });
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd }), autonomy: () => "default", readOnly: true });
 		let reads = 0;
 		const data = createDataTool({ getCwd: () => cwd });
 		registry.register({
@@ -50,11 +50,19 @@ describe("gateway correction contracts", () => {
 
 	it("preserves execute and write decisions and finish telemetry at every approval level, including executed errors", async () => {
 		for (const actionClass of ["write", "execute"] as const) {
-			for (const level of ["read-only", "default", "default", "yolo"] as const) {
+			for (const { level, readOnly } of [
+				{ level: "default", readOnly: true },
+				{ level: "default", readOnly: false },
+				{ level: "yolo", readOnly: false },
+			] as const) {
 				for (const fails of [false, true]) {
 					const records = [];
 					for (const placement of ["direct", "gateway"] as const) {
-						const registry = createRegistry({ safety: createWorkerSafety({ cwd: clioStateDir() }), autonomy: () => level });
+						const registry = createRegistry({
+							safety: createWorkerSafety({ cwd: clioStateDir() }),
+							autonomy: () => level,
+							readOnly,
+						});
 						const name = ToolNames.Artifact;
 						let runs = 0;
 						registry.register({
@@ -94,8 +102,8 @@ describe("gateway correction contracts", () => {
 						strictEqual(events.length, 1);
 						strictEqual(events[0]?.tool, tool);
 						strictEqual(events[0]?.actionClass, actionClass);
-						strictEqual(runs, level === "read-only" ? 0 : 2);
-						strictEqual(parks.length, actionClass === "execute" && level === "default" ? 2 : 0);
+						strictEqual(runs, readOnly ? 0 : 2);
+						strictEqual(parks.length, !readOnly && actionClass === "execute" && level === "default" ? 2 : 0);
 						const event = events[0];
 						ok(event);
 						const { tool: _tool, durationMs: _duration, ...finish } = event;

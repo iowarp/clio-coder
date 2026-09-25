@@ -12,7 +12,6 @@ import { asDirectoryPathBoundary, resolvePathBoundary } from "../../core/path-bo
 import { cloneValidatedResponseSchema } from "../../core/response-schema.js";
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
 import type { AgentProduct } from "../agents/spec.js";
-import { type AutonomyLevel, isAutonomyLevel } from "../safety/autonomy.js";
 import { cloneDispatchBudgetRequest, type DispatchBudgetRequest } from "./budget-envelope.js";
 import {
 	EXECUTION_HANDOFF_MAX_ITEMS,
@@ -161,13 +160,8 @@ export interface JobSpec {
 	 * with rootRunId = the new run's own id.
 	 */
 	lineage?: RunLineage;
-	/**
-	 * Per-run autonomy narrowing. Admission clamps the worker's effective
-	 * autonomy to the LOWER of this and the session level, so a request can
-	 * make a reviewer or judge read-only but can never grant a worker more
-	 * authority than the orchestrator holds.
-	 */
-	autonomy?: AutonomyLevel;
+	/** Dispatch restriction that denies mutation and outside-workspace reads. */
+	readOnly?: boolean;
 	/** Review/compete gate provenance sealed into the run's receipt. */
 	gate?: RunGateProvenance;
 	/** Council grouping projected to receipts and fleet surfaces. */
@@ -222,7 +216,7 @@ const KNOWN_KEYS = new Set([
 	"pipelineInput",
 	"predecessorHandoffs",
 	"lineage",
-	"autonomy",
+	"readOnly",
 	"gate",
 	"council",
 	"plan",
@@ -499,7 +493,7 @@ export function validateJobSpec(spec: unknown): Validated {
 			classifyDispatchIntentCompatibility({
 				intent: spec.intent,
 				...(spec.writeRoots !== undefined ? { writeRoots: spec.writeRoots } : {}),
-				...(spec.autonomy !== undefined ? { autonomy: spec.autonomy } : {}),
+				...(spec.readOnly !== undefined ? { readOnly: spec.readOnly } : {}),
 				...(typeof spec.cwd === "string" && spec.cwd.length > 0 ? { cwd: spec.cwd } : {}),
 			}),
 		)) {
@@ -534,10 +528,8 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
-	if ("autonomy" in spec && spec.autonomy !== undefined) {
-		if (!isAutonomyLevel(spec.autonomy)) {
-			errors.push("autonomy must be one of: read-only|default|yolo");
-		}
+	if ("readOnly" in spec && spec.readOnly !== undefined && typeof spec.readOnly !== "boolean") {
+		errors.push("readOnly must be a boolean");
 	}
 
 	if ("gate" in spec && spec.gate !== undefined) {
@@ -629,7 +621,7 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (isValidPredecessorHandoffs(spec.predecessorHandoffs))
 		out.predecessorHandoffs = spec.predecessorHandoffs.map((handoff) => ({ ...handoff }));
 	if (isValidLineage(spec.lineage)) out.lineage = spec.lineage;
-	if (isAutonomyLevel(spec.autonomy)) out.autonomy = spec.autonomy;
+	if (typeof spec.readOnly === "boolean") out.readOnly = spec.readOnly;
 	if (isValidGate(spec.gate)) out.gate = cloneGate(spec.gate);
 	if (isValidCouncil(spec.council)) out.council = { ...spec.council };
 	if (typeof spec.competeStance === "string" && VALID_COMPETE_STANCES.has(spec.competeStance)) {

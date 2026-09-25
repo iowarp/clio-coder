@@ -191,9 +191,22 @@ describe("loop guard identical-call epoch", () => {
 					runs: [
 						{
 							receiptIntegrity: { ok: true },
-							autonomyEnforcement: { autonomy: "read-only" },
+							readOnly: true,
 							placement: { mode: "current", changedPaths: ["fix.ts"] },
 							toolActivity: { mutatingSucceeded: true },
+						},
+					],
+				},
+				restarts: false,
+			},
+			{
+				name: "legacy read-only receipt",
+				details: {
+					runs: [
+						{
+							receiptIntegrity: { ok: true },
+							autonomyEnforcement: { autonomy: "read-only" },
+							placement: { mode: "current", changedPaths: ["fix.ts"] },
 						},
 					],
 				},

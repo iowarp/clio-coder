@@ -81,13 +81,7 @@ describe("formatModelRejection composes the model-facing blocked text", () => {
 
 describe("blocked tool errors surface recovery guidance to the model", () => {
 	it("a zero-access read rejects with the policy reason, not just the short label", async () => {
-		const registry = createWorkerToolRegistry(
-			undefined,
-			createWorkerSafety({ cwd: process.cwd() }),
-			undefined,
-			[],
-			"yolo",
-		);
+		const registry = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd: process.cwd() }), undefined, []);
 		await rejects(
 			invokeRegisteredTool(registry, ToolNames.Read, { path: ".env" }),
 			(err: unknown) => {

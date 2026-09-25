@@ -10,8 +10,7 @@ export function parallelWriterConflict(
 ): string | null {
 	const classes = new Map(specs.map((spec) => [spec.id, spec.capabilityClass]));
 	const writers = requests.filter(
-		(request) =>
-			request.worktree !== true && request.autonomy !== "read-only" && classes.get(request.agentId) !== "read-only",
+		(request) => request.worktree !== true && request.readOnly !== true && classes.get(request.agentId) !== "read-only",
 	);
 	const roots = writers.map((request) =>
 		(request.writeRoots ?? request.intent?.writeRoots ?? []).map((root) =>

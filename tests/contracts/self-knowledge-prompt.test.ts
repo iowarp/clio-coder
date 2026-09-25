@@ -55,7 +55,6 @@ describe("self-knowledge in the session prompt", () => {
 		match(compileSession("safety.default", { canConfigureClio: true }), configure);
 		match(compileSession("safety.yolo", { canConfigureClio: true }), configure);
 		for (const [safety, inputs] of [
-			["safety.read-only", { canConfigureClio: true }],
 			["safety.default", {}],
 			["safety.default", { canConfigureClio: true, toolNames: [ToolNames.Context] }],
 		] as const) {

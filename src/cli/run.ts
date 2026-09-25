@@ -511,7 +511,6 @@ async function runDispatch(
 		SchedulingDomainModule,
 		createDispatchDomainModule({
 			getSettings: () => effectiveSettings,
-			autonomyOverride: parsed.autonomy !== undefined,
 			// This path iterates `handle.events` itself and builds no dispatch
 			// event registry, so the domain is the only thing that can write the
 			// run's durable transcript.

@@ -136,7 +136,7 @@ export function createLedgerTool(deps: LedgerToolDeps): ToolSpec {
 		}),
 		// Read class on purpose. A post reaches a coordination board over a
 		// one-way lane and touches no workspace, and reviewers and judges run
-		// pinned to read-only autonomy, where a write class would block exactly
+		// pinned to a read-only dispatch restriction, where a write class would block
 		// the peer review this design depends on.
 		baseActionClass: "read",
 		executionMode: "sequential",

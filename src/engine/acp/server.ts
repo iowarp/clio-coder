@@ -22,12 +22,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import type { ProvidersContract } from "../../domains/providers/contract.js";
 import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
-import {
-	type AutonomyLevel,
-	DEFAULT_AUTONOMY_LEVEL,
-	isOperatorAutonomyLevel,
-	type OperatorAutonomyLevel,
-} from "../../domains/safety/autonomy.js";
+import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL, isAutonomyLevel } from "../../domains/safety/autonomy.js";
 import { describeCallTarget } from "../../domains/safety/call-target.js";
 import type { DecisionPresentation, TrustedDecisionFacts } from "../../domains/safety/decision-presentation.js";
 import {
@@ -128,14 +123,14 @@ export type AcpThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "
 
 export interface AcpSafeSettingsSnapshot extends AcpRoutingSnapshot {
 	thinkingLevel: AcpThinkingLevel;
-	autonomy: OperatorAutonomyLevel;
+	autonomy: AutonomyLevel;
 }
 
 export type AcpSafeSettingsPatch = Partial<{
 	"chat.target": string | null;
 	"chat.model": string | null;
 	"chat.thinkingLevel": AcpThinkingLevel;
-	"safety.autonomy": OperatorAutonomyLevel;
+	"safety.autonomy": AutonomyLevel;
 }>;
 
 export interface AcpSettingsControl {
@@ -1491,7 +1486,7 @@ const ACP_EMPTY_TRUNCATED_SESSION_LIST_BYTES = utf8Bytes(
 
 function safeSettingsProjection(snapshot: AcpSafeSettingsSnapshot): Record<string, unknown> {
 	const thinkingLevel = ACP_THINKING_LEVELS.has(snapshot.thinkingLevel) ? snapshot.thinkingLevel : "off";
-	const autonomy = isOperatorAutonomyLevel(snapshot.autonomy) ? snapshot.autonomy : DEFAULT_AUTONOMY_LEVEL;
+	const autonomy = isAutonomyLevel(snapshot.autonomy) ? snapshot.autonomy : DEFAULT_AUTONOMY_LEVEL;
 	return {
 		settings: {
 			chat: {
@@ -2783,7 +2778,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const request = assertParamKeys(params, new Set(["sessionId", "level"]));
 		const session = getSession(request);
 		if (request.level === undefined) return { level: session.autonomy, source: session.autonomySource };
-		if (!isOperatorAutonomyLevel(request.level)) {
+		if (!isAutonomyLevel(request.level)) {
 			throw new AcpRequestError(-32602, "invalid autonomy level", { code: "invalid_params" });
 		}
 		if (session.activePrompt !== null) {
@@ -2846,7 +2841,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					patch[key] = value as AcpThinkingLevel;
 					break;
 				case "safety.autonomy":
-					if (!isOperatorAutonomyLevel(value)) {
+					if (!isAutonomyLevel(value)) {
 						throw new AcpRequestError(-32602, "invalid autonomy level", { code: "invalid_params" });
 					}
 					patch[key] = value;

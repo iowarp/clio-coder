@@ -264,20 +264,6 @@ export function workerEscalationNotice(payload: unknown): BusNotice | null {
 }
 
 /**
- * The autonomy mapping auto-denied a call (deny dispositions; today only the
- * read-only level). The transcript shows the rejection the model received;
- * this notice names the level so the operator knows the dial, not a safety
- * rail, refused the action.
- */
-export function autonomyDeniedNotice(decision: SafetyDecision, level: string): BusNotice {
-	const actionClass = decision.classification.actionClass;
-	return {
-		level: "warn",
-		text: `[autonomy] denied ${actionClass} (${level}): Clio proposes changes at this level.`,
-	};
-}
-
-/**
  * The blocked call's transcript row states the refusal and its body the
  * rejection the model received, the rule included, so this notice passes
  * through the footer's notice slot with the policy dimension: which rule

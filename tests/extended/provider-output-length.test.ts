@@ -158,7 +158,6 @@ for (const abortRecovery of [false, true]) {
 					product: "orientation",
 					noSkills: true,
 					cwd: env.dir,
-					autonomy: "yolo",
 					writeRoots: [asDirectoryPathBoundary(env.dir)],
 				},
 				(event) => {

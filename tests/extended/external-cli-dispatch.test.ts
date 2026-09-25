@@ -71,7 +71,7 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 			agentId: "coder",
 			target: "codex-test",
 			task: "Reply PONG",
-			autonomy: "read-only" as const,
+			readOnly: true as const,
 			executionRole: "researcher" as const,
 			requestOrigin: "user" as const,
 			cwd: root,
@@ -154,7 +154,7 @@ for (const event of [
 			agentId: "coder",
 			target: "pi-test",
 			task: "Reply PONG",
-			autonomy: "read-only",
+			readOnly: true,
 			executionRole: "researcher",
 			requestOrigin: "user",
 			cwd: root,
@@ -230,7 +230,7 @@ test("external edits distinguish current checkout, preserved worktree, and faile
 		const request = {
 			agentId: "coder",
 			target: "codex-test",
-			autonomy: "default" as const,
+
 			executionRole: "builder" as const,
 			requestOrigin: "user" as const,
 			cwd: root,
@@ -323,7 +323,7 @@ for (const event of [
 				target: "codex-test",
 				task: "Create proof.txt",
 				cwd: root,
-				autonomy: "default",
+
 				executionRole: "builder",
 				requestOrigin: "user",
 				denyTools: ["write"],
@@ -335,7 +335,7 @@ for (const event of [
 			target: "codex-test",
 			task: "Create proof.txt",
 			cwd: root,
-			autonomy: "default",
+
 			executionRole: "builder",
 			requestOrigin: "user",
 			worktree: true,

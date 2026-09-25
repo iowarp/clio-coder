@@ -105,10 +105,10 @@ export function competeStanceLiner(stance: CompeteStance): string {
 
 export function isBoundedGateRolePrompt(input: {
 	role: string | undefined;
-	autonomy: string | undefined;
+	readOnly: boolean | undefined;
 	systemPrompt: string | undefined;
 }): boolean {
-	if (input.autonomy !== "read-only") return false;
+	if (input.readOnly !== true) return false;
 	if (input.role === "reviewer") return input.systemPrompt === REVIEWER_GATE_PROMPT;
 	if (input.role === "judge") return input.systemPrompt === JUDGE_GATE_PROMPT;
 	if (input.role === "synthesis") return input.systemPrompt === COUNCIL_JUDGE_PROMPT;

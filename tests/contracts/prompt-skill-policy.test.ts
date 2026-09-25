@@ -55,7 +55,7 @@ async function fixture(t: TestContext) {
 for (const level of AUTONOMY_LEVELS) {
 	it(`compiled skill instructions agree with actual session-skill admission at ${level}`, async (t) => {
 		const { context } = await fixture(t);
-		const enabled = modelMayActivateSkills(level);
+		const enabled = modelMayActivateSkills();
 		const pendingSkillPolicy = withModelSkillActivation(undefined, enabled);
 		const result = await context.run(
 			{ scope: "skills", name: "fixture-skill" },
@@ -101,14 +101,13 @@ for (const level of AUTONOMY_LEVELS) {
 
 	it(`recipe-bound worker admission remains narrowed at ${level}`, async (t) => {
 		const { context } = await fixture(t);
-		const policy = withModelSkillActivation(agentSkillToolPolicy(["declared-skill"]), modelMayActivateSkills(level));
+		const policy = withModelSkillActivation(agentSkillToolPolicy(["declared-skill"]), modelMayActivateSkills());
 		assert.ok(policy);
 		const denied = await context.run({ scope: "skills", name: "fixture-skill" }, { pendingSkillPolicy: policy });
 		assert.ok(denied.kind === "error");
 		assert.match(denied.message, /may load only its declared skill/);
 		assert.deepEqual(denied.details?.refusal, { subject: "skill", name: "fixture-skill", kind: "recipe-bound" });
 		const compiled = compileWorker(table, {
-			autonomy: level,
 			providerSupportsTools: true,
 			toolNames: [ToolNames.Context, ToolNames.Read],
 			toolPromptHints: [],
@@ -134,12 +133,12 @@ for (const level of AUTONOMY_LEVELS) {
 		const skill = discoverMarketplaceSkills({ cwd: env.dir }).skills[0];
 		assert.ok(skill, "bundled marketplace has a candidate");
 		const context = createContextTool({ getCwd: () => env.dir });
-		const policy = withModelSkillActivation(undefined, modelMayActivateSkills(level));
+		const policy = withModelSkillActivation(undefined, modelMayActivateSkills());
 		const result = await context.run({ scope: "skills", name: skill.name }, policy ? { pendingSkillPolicy: policy } : {});
 		assert.ok(result.kind === "error");
 		assert.match(
 			result.message,
-			modelMayActivateSkills(level) ? /not installed.*marketplace.*operator/ : /only the operator can activate/,
+			modelMayActivateSkills() ? /not installed.*marketplace.*operator/ : /only the operator can activate/,
 		);
 		assert.match(
 			prompt(level).systemPrompt,
@@ -165,12 +164,12 @@ it("autonomy transitions change the existing prompt cache identity and compiled 
 		}),
 	);
 	assert.equal(new Set(keys).size, AUTONOMY_LEVELS.length);
-	const before = prompt("read-only");
-	const after = prompt("default");
-	const restored = prompt("read-only");
+	const before = prompt("default");
+	const after = prompt("yolo");
+	const restored = prompt("default");
 	assert.notEqual(before.systemPromptHash, after.systemPromptHash);
 	assert.equal(before.systemPrompt, restored.systemPrompt);
-	assert.match(before.systemPrompt, /only the operator activates skills/);
+	assert.match(before.systemPrompt, /Load matching ready Clio skills/);
 	assert.match(after.systemPrompt, /Load matching ready Clio skills/);
 });
 

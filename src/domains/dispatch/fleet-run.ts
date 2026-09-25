@@ -439,7 +439,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 						attempt: 0,
 						depth: 1,
 					},
-					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
+					...(step.scope === "readonly" ? { readOnly: true as const } : {}),
 					...(step.target !== undefined ? { target: step.target } : {}),
 					...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
 				};
@@ -523,7 +523,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 								},
 							}
 						: {}),
-					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
+					...(step.scope === "readonly" ? { readOnly: true as const } : {}),
 					...(step.target !== undefined ? { target: step.target } : {}),
 					...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
 					...(step.plan !== undefined
@@ -543,7 +543,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 							cwd: workspaceRoot,
 							requestOrigin: "user",
 							...(decisionRefs.length > 0 ? { decisionRefs } : {}),
-							autonomy: "read-only",
+							readOnly: true,
 							lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
 							resultContractOverride: { kind: "artifact-report" },
 							...(step.target !== undefined ? { target: step.target } : {}),

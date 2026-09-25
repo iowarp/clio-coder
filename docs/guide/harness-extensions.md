@@ -73,7 +73,7 @@ The manifest keys are `id`, `name`, `version`, `description`, `capabilities`, `c
 
 ## Admission and lifecycle
 
-Every model-visible extension command tool is an execution action and runs sequentially. Packages cannot declare themselves read-only. The registry evaluates both the qualified capability call and its fixed executable command through Clio's existing safety policy, autonomy, approval, and middleware rules. Read-only autonomy blocks commands; workers with explicit write confinement cannot execute an unconfined extension command. Installation does not bypass command approval. The child receives Clio's normal allowlisted tool environment, which excludes provider credentials and interpreter injection variables.
+Every model-visible extension command tool is an execution action and runs sequentially. Packages cannot declare themselves read-only. The registry evaluates both the qualified capability call and its fixed executable command through Clio's existing safety policy, autonomy, approval, and middleware rules. A read-only dispatch restriction blocks commands; workers with explicit write confinement cannot execute an unconfined extension command. Installation does not bypass command approval. The child receives Clio's normal allowlisted tool environment, which excludes provider credentials and interpreter injection variables.
 
 Command tools are installed programs with the filesystem and network access of the invoking process. Entry containment and environment filtering do not create an operating-system sandbox. Install code you trust, as you would a local executable script.
 

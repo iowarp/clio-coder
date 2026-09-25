@@ -474,8 +474,6 @@ export interface DispatchBundleOptions {
 	getSessionId?: () => string | null;
 	/** Live hard-block state cloned into each mediated worker spec. */
 	getProtectedArtifactState?: () => ProtectedArtifactState;
-	/** True only when this invocation supplied an explicit one-run autonomy override. */
-	autonomyOverride?: boolean;
 	/** Git-backed receipt provenance collector; injectable for deterministic tests. */
 	collectReproducibility?: typeof collectReproducibilityMetadata;
 	/** Observer injection seam. Production constructs the durable observer. */
@@ -1207,7 +1205,7 @@ function hasPersonaOverride(req: DispatchRequest): boolean {
  *
  * A reviewer, a compete judge, and a council synthesis all carry a system
  * prompt the coordinator wrote, pinned by {@link isBoundedGateRolePrompt} to
- * one exact text under one gate role and read-only autonomy. That is the
+ * one exact text under one gate role and a read-only run restriction. That is the
  * topology speaking, not an operator reshaping a recipe, so it is not the
  * thing the shadow and internal audiences are protected from. The ACP
  * delegation path already draws the line here; without the same line, a
@@ -1217,7 +1215,7 @@ function hasPersonaOverride(req: DispatchRequest): boolean {
  */
 function hasCallerPersonaOverride(req: DispatchRequest): boolean {
 	if (!hasPersonaOverride(req)) return false;
-	return !isBoundedGateRolePrompt({ role: req.gate?.role, autonomy: req.autonomy, systemPrompt: req.systemPrompt });
+	return !isBoundedGateRolePrompt({ role: req.gate?.role, readOnly: req.readOnly, systemPrompt: req.systemPrompt });
 }
 
 function personaOverrideFor(req: DispatchRequest, staticCompositionHash: string | null): RunPersonaOverride | null {
@@ -1246,8 +1244,10 @@ export interface WorkerDynamicContext {
 	cwd?: string;
 	/** Effective project-context tier; the project message renders only when "bounded". */
 	projectContextTier?: AgentProjectContextTier | null;
-	/** Effective autonomy the worker spec will carry; renders the safety-posture line. */
+	/** Worker autonomy posture rendered in the dynamic safety line. */
 	autonomy?: AutonomyLevel | null;
+	/** Render the read-only restriction for peer workers that bypass the native prompt compiler. */
+	readOnly?: boolean;
 	/** Effective approval routing; defaults to deny for legacy direct callers. */
 	onPermission?: WorkerPermissionMode | null;
 	/** Captured authored handbooks; preferred over the legacy structured projection. */
@@ -1373,8 +1373,15 @@ export function buildDynamicPromptMessages(
 	const autonomy = dynamicContext.autonomy;
 	if (autonomy) {
 		const permission = dynamicContext.onPermission ?? "deny";
-		const body = `Safety posture: autonomy ${autonomy}. ${workerSafetyOneLiner(autonomy, permission)} Worker permission routing: ${permission}.`;
+		const body = `Safety posture: autonomy ${autonomy}. ${workerSafetyOneLiner(permission)} Worker permission routing: ${permission}.`;
 		messages.push({ id: "dispatch-safety-posture", body, contentHash: sha256(body) });
+	}
+	if (dynamicContext.readOnly === true) {
+		const body = [
+			"# Read-only run",
+			"This dispatch restricts this run to inspection inside the workspace. Do not call tools to write, execute, dispatch, or read outside the workspace. Forbidden calls are denied without asking. Describe needed changes as text for the dispatching agent.",
+		].join("\n\n");
+		messages.push({ id: "dispatch-read-only", body, contentHash: sha256(body) });
 	}
 	const requirements = renderDispatchIntentRequirements(req.intent);
 	if (requirements !== null) {
@@ -1529,7 +1536,7 @@ interface DispatchWorkerSpecInput {
 	apiKey: string | undefined;
 	middlewareSnapshot: ReturnType<MiddlewareContract["snapshot"]>;
 	protectedArtifactState?: ProtectedArtifactState;
-	effectiveAutonomy: AutonomyLevel;
+	readOnly: boolean;
 	budget: WorkerBudget;
 	/** Effective settings snapshot for this run; falls back to config.get(). */
 	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
@@ -1567,7 +1574,7 @@ interface DispatchLifecycleStage {
 	operatorProfileApplied: boolean;
 	/** Read-only recipe admitted against a mutating task; null when the pairing was sound. */
 	capabilityMismatch: CapabilityMismatch | null;
-	effectiveAutonomy: AutonomyLevel;
+	readOnly: boolean;
 	budget: WorkerBudget;
 	budgetEnvelope: RunToolBudgetEnvelope;
 	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
@@ -1599,7 +1606,6 @@ interface AcpDelegationLifecycleStage {
 	rulesApplied: string[];
 	/** ACP delegation bypasses the worker prompt compiler entirely, so this is always false. */
 	operatorProfileApplied: boolean;
-	sessionAutonomy: AutonomyLevel;
 	autonomy: AutonomyLevel;
 }
 
@@ -1893,7 +1899,7 @@ function assertPostRuntimeToolCompatibility(
 		: [];
 	const cause =
 		confined.length > 0
-			? `; declared write roots remove ${confined.join(", ")}, so omit write roots (use autonomy: "read-only" or worktree: true) for this agent`
+			? `; declared write roots remove ${confined.join(", ")}, so omit write roots or use worktree: true for this agent`
 			: "";
 	throw new Error(
 		`dispatch: admission denied: agent '${agentId}' is incompatible with runtime '${target.runtime.id}' after tool narrowing; missing required tools: ${compatibility.missingRequired.join(", ")}${cause}`,
@@ -2254,12 +2260,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	// Carry the tool profile so external CLI runtimes that cannot mediate
 	// per-tool calls can refuse a narrowing profile they would otherwise ignore.
 	if (input.admission.toolProfile !== undefined) spec.toolProfile = input.admission.toolProfile;
-	// Workers inherit the session's autonomy level at admission time (sd-01
-	// §2.5); the worker registry applies the same mapping the orchestrator's
-	// does, with asks resolving through onPermission above. A request-level
-	// autonomy can only narrow (reviewer/judge runs pin read-only); a worker
-	// never exceeds the orchestrator's authority.
-	spec.autonomy = input.effectiveAutonomy;
+	if (input.readOnly) spec.readOnly = true;
 	if (input.req.contextSeed && input.target.runtime.kind === "http")
 		spec.contextSeed = parseWorkerContextSeed(input.req.contextSeed);
 	if (Buffer.byteLength(JSON.stringify(spec), "utf8") + 1 > WORKER_STDIN_FRAME_MAX_BYTES)
@@ -2267,67 +2268,33 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	return spec;
 }
 
-const AUTONOMY_ORDER: Record<AutonomyLevel, number> = {
-	"read-only": 0,
-	default: 1,
-	yolo: 2,
-};
-
-/** Lower of the session level and the request's narrowing; requests cannot widen. */
-function clampWorkerAutonomy(session: AutonomyLevel, requested: AutonomyLevel | undefined): AutonomyLevel {
-	if (requested === undefined) return session;
-	return AUTONOMY_ORDER[requested] < AUTONOMY_ORDER[session] ? requested : session;
-}
-
-/** Read-only recipes are an authority boundary, including on opaque external loops. */
-export function effectiveWorkerAutonomy(
-	session: AutonomyLevel,
-	requested: AutonomyLevel | undefined,
-	capabilityClass: AgentCapabilityClass,
-): AutonomyLevel {
-	return clampWorkerAutonomy(session, capabilityClass === "read-only" ? "read-only" : requested);
-}
-
-function requestedAutonomyEvidence(
-	sessionAutonomy: AutonomyLevel,
-	requestedAutonomy: AutonomyLevel | undefined,
-): Pick<RunReceiptAutonomyEnforcement, "requestedAutonomy" | "sessionAutonomy"> {
-	return requestedAutonomy === undefined ? {} : { requestedAutonomy, sessionAutonomy };
-}
-
-function autonomyEnforcementForWorkerSpec(
-	spec: WorkerSpec,
-	sessionAutonomy: AutonomyLevel,
-	requestedAutonomy: AutonomyLevel | undefined,
-): RunReceiptAutonomyEnforcement {
-	const autonomy = spec.autonomy ?? "default";
-	const authorityEvidence = requestedAutonomyEvidence(sessionAutonomy, requestedAutonomy);
+function autonomyEnforcementForWorkerSpec(spec: WorkerSpec): RunReceiptAutonomyEnforcement {
+	const autonomy = "default";
+	const readOnly = spec.readOnly === true;
 	if (spec.runtimeId === "claude-code") {
 		try {
-			const config = claudeSubprocessPermissionConfigForAutonomy(autonomy);
+			const config = claudeSubprocessPermissionConfigForAutonomy(autonomy, process.env, readOnly);
 			return {
 				grade: config.dangerousBypass ? "bypassed" : "approximated",
 				autonomy,
-				...authorityEvidence,
 				externalMode: config.permissionMode,
 				dangerousBypass: config.dangerousBypass,
 			};
 		} catch {
-			return { grade: "approximated", autonomy, ...authorityEvidence };
+			return { grade: "approximated", autonomy };
 		}
 	}
 	if (spec.runtimeId === "codex-cli") {
 		try {
-			const config = codexSubprocessPermissionConfigForAutonomy(autonomy);
+			const config = codexSubprocessPermissionConfigForAutonomy(autonomy, process.env, readOnly);
 			return {
 				grade: config.dangerousBypass ? "bypassed" : "approximated",
 				autonomy,
-				...authorityEvidence,
 				externalMode: config.sandbox,
 				dangerousBypass: config.dangerousBypass,
 			};
 		} catch {
-			return { grade: "approximated", autonomy, ...authorityEvidence };
+			return { grade: "approximated", autonomy };
 		}
 	}
 	if (spec.runtimeId === "opencode-cli") {
@@ -2335,12 +2302,11 @@ function autonomyEnforcementForWorkerSpec(
 			return {
 				grade: "approximated",
 				autonomy,
-				...authorityEvidence,
-				externalMode: opencodeCliModeForAutonomy(autonomy),
+				externalMode: opencodeCliModeForAutonomy(autonomy, readOnly),
 				dangerousBypass: false,
 			};
 		} catch {
-			return { grade: "approximated", autonomy, ...authorityEvidence };
+			return { grade: "approximated", autonomy };
 		}
 	}
 	if (spec.runtimeId === "pi-cli") {
@@ -2348,50 +2314,42 @@ function autonomyEnforcementForWorkerSpec(
 			return {
 				grade: "approximated",
 				autonomy,
-				...authorityEvidence,
-				externalMode: piCliModeForAutonomy(autonomy),
+				externalMode: piCliModeForAutonomy(autonomy, readOnly),
 				dangerousBypass: false,
 			};
 		} catch {
-			return { grade: "approximated", autonomy, ...authorityEvidence };
+			return { grade: "approximated", autonomy };
 		}
 	}
 	if (spec.runtimeId === "antigravity-code") {
 		try {
-			const config = antigravitySubprocessConfigForAutonomy(autonomy);
+			const config = antigravitySubprocessConfigForAutonomy(autonomy, process.env, readOnly);
 			return {
 				grade: config.dangerousBypass ? "bypassed" : "approximated",
 				autonomy,
-				...authorityEvidence,
 				externalMode: config.externalMode,
 				dangerousBypass: config.dangerousBypass,
 			};
 		} catch {
-			return { grade: "approximated", autonomy, ...authorityEvidence };
+			return { grade: "approximated", autonomy };
 		}
 	}
-	return { grade: "mediated", autonomy, ...authorityEvidence };
+	return { grade: "mediated", autonomy };
 }
 
-function autonomyEnforcementForAcpDelegation(
-	autonomy: AutonomyLevel,
-	toolGovernance: DelegationToolGovernance,
-	sessionAutonomy: AutonomyLevel,
-	requestedAutonomy: AutonomyLevel | undefined,
-): RunReceiptAutonomyEnforcement {
-	const authorityEvidence = requestedAutonomyEvidence(sessionAutonomy, requestedAutonomy);
+function autonomyEnforcementForAcpDelegation(toolGovernance: DelegationToolGovernance): RunReceiptAutonomyEnforcement {
+	const autonomy = "default";
 	if (toolGovernance === "agent-managed") {
 		return {
 			grade: "bypassed",
 			autonomy,
-			...authorityEvidence,
 			externalMode: toolGovernance,
 			dangerousBypass: true,
 		};
 	}
 	// Both policies apply only to ACP permission requests the peer reports. A
 	// peer can still use its own tools without asking, including under deny-all.
-	return { grade: "approximated", autonomy, ...authorityEvidence, externalMode: toolGovernance };
+	return { grade: "approximated", autonomy, externalMode: toolGovernance };
 }
 
 function pickCapabilityMatchedWorker(
@@ -4112,8 +4070,7 @@ export function createDispatchBundle(
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.fleet.permissions.mode ?? "deny");
 		const cwd = req.cwd ?? process.cwd();
-		const sessionAutonomy = settings?.safety.autonomy ?? "default";
-		const effectiveAutonomy = effectiveWorkerAutonomy(sessionAutonomy, req.autonomy, spec.capabilityClass);
+		const readOnly = req.readOnly === true || spec.capabilityClass === "read-only";
 		if (target.runtime.kind === "subprocess" && req.denyTools && req.denyTools.length > 0) {
 			throw new Error("dispatch: denyTools cannot be enforced on an external CLI target; use a native worker");
 		}
@@ -4139,7 +4096,7 @@ export function createDispatchBundle(
 			hasCanonicalContext && recipe.skills !== undefined && recipe.skills.length > 0 && req.noSkills !== true;
 		const compiledWorkerPrompt = await prompts.compileWorkerPrompt({
 			...(req.turnConstraints ? { turnConstraints: req.turnConstraints } : {}),
-			autonomy: effectiveAutonomy,
+			...(readOnly ? { readOnly: true } : {}),
 			providerSupportsTools: target.runtime.kind === "subprocess" ? null : targetToolCapability(target),
 			toolNames: effectiveTools,
 			toolPromptHints: toolPromptHintsForNames(effectiveTools, hasBoundSkills ? "bound-worker" : "worker"),
@@ -4164,7 +4121,7 @@ export function createDispatchBundle(
 			allowedTools: effectiveTools,
 			settings,
 			runtime: target.runtime,
-			readOnly: effectiveAutonomy === "read-only",
+			readOnly,
 		});
 		// Fetch captured project context only for tiers that receive it, so
 		// read-only scouts never pay the CLIO-CODER.md read. The tier is spec policy
@@ -4178,7 +4135,7 @@ export function createDispatchBundle(
 			workingContextPaths: pathScope.workingContextPaths,
 			cwd,
 			projectContextTier: tier,
-			autonomy: effectiveAutonomy,
+			autonomy: "default",
 			onPermission: settings?.fleet.permissions.mode ?? "deny",
 			projectPrompt,
 			projectReadTools:
@@ -4241,7 +4198,7 @@ export function createDispatchBundle(
 			rulesApplied: compiledWorkerPrompt.rulesApplied ?? [],
 			operatorProfileApplied: compiledWorkerPrompt.operatorProfileApplied ?? false,
 			capabilityMismatch,
-			effectiveAutonomy,
+			readOnly,
 			budget: budgetEnvelope.effective,
 			budgetEnvelope,
 			...(settings ? { settings } : {}),
@@ -4273,19 +4230,13 @@ export function createDispatchBundle(
 		const configured = settings.integrations.externalAgents.entries.find((entry) => entry.id === agentId);
 		if (!configured) throw new Error(`dispatch: ACP delegation agent '${agentId}' not configured`);
 		const toolGovernance = configured.toolGovernance ?? "clio-coder-policy";
-		if (options?.autonomyOverride === true && toolGovernance === "agent-managed") {
+		if (req.readOnly === true && toolGovernance === "agent-managed") {
 			throw new Error(
-				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', which cannot enforce an explicit one-run autonomy override; choose clio-coder-policy or deny-all governance, or omit --autonomy`,
+				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', which cannot enforce a read-only run; choose clio-coder-policy or deny-all governance`,
 			);
 		}
 		const admission = resolveDelegationAdmissionStage(req, safety);
-		const sessionAutonomy = settings.safety.autonomy ?? "default";
-		const autonomy = clampWorkerAutonomy(sessionAutonomy, req.autonomy);
-		if (toolGovernance === "agent-managed" && autonomy !== sessionAutonomy) {
-			throw new Error(
-				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed' and cannot enforce request autonomy narrowing from '${sessionAutonomy}' to '${autonomy}'`,
-			);
-		}
+		const autonomy = "default";
 		const cwd = req.cwd ?? process.cwd();
 		const pathScope = resolveDispatchPathScope(req);
 		const personaBody = workerPersonaBody(req, null, false);
@@ -4307,6 +4258,7 @@ export function createDispatchBundle(
 			cwd,
 			projectContextTier: tier,
 			autonomy,
+			...(req.readOnly === true ? { readOnly: true } : {}),
 			projectPrompt,
 			projectReadTools: null,
 			projectExternalReadTools: true,
@@ -4345,7 +4297,6 @@ export function createDispatchBundle(
 			projectContext: projectContextProvenance,
 			rulesApplied: [],
 			operatorProfileApplied: false,
-			sessionAutonomy,
 			autonomy,
 		};
 	}
@@ -4435,6 +4386,7 @@ export function createDispatchBundle(
 				cwd: lifecycle.cwd,
 				safety,
 				autonomy: lifecycle.autonomy,
+				...(req.readOnly === true ? { readOnly: true } : {}),
 				clientVersion: readClioVersion(),
 				now,
 				monotonicNow,
@@ -4866,10 +4818,7 @@ export function createDispatchBundle(
 				routingIntent: req.routingIntent ?? defaultRoutingIntent(req),
 				quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
 				autonomyEnforcement: autonomyEnforcementForAcpDelegation(
-					lifecycle.autonomy,
 					lifecycle.agentConfig.toolGovernance ?? "clio-coder-policy",
-					lifecycle.sessionAutonomy,
-					req.autonomy,
 				),
 				safety: {
 					decisions: safetyDecisionCounts,
@@ -5449,7 +5398,7 @@ export function createDispatchBundle(
 					middlewareSnapshot: middleware.snapshot(),
 					protectedArtifactState,
 					apiKey: lifecycle.apiKey,
-					effectiveAutonomy: lifecycle.effectiveAutonomy,
+					readOnly: lifecycle.readOnly,
 					budget: lifecycle.budget,
 					...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
 				},
@@ -6162,8 +6111,7 @@ export function createDispatchBundle(
 			const telemetryIngestionErrors = toolTelemetryIngestionErrors + malformedWorkerStdoutLineCount(result);
 			const workspaceMutationPossible =
 				lifecycle.runtimeKind === "subprocess"
-					? !["claude-code", "codex-cli", "pi-cli"].includes(lifecycle.target.runtime.id) ||
-						lifecycle.effectiveAutonomy !== "read-only"
+					? !["claude-code", "codex-cli", "pi-cli"].includes(lifecycle.target.runtime.id) || !lifecycle.readOnly
 					: lifecycle.admission.allowedTools.some((tool) => classifyAction({ tool }).actionClass !== "read");
 			const toolTelemetryCoverage =
 				lifecycle.runtimeKind === "subprocess"
@@ -6271,11 +6219,7 @@ export function createDispatchBundle(
 					resultContract,
 				}),
 				...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
-				autonomyEnforcement: autonomyEnforcementForWorkerSpec(
-					spec,
-					lifecycle.settings?.safety.autonomy ?? "default",
-					req.autonomy,
-				),
+				autonomyEnforcement: autonomyEnforcementForWorkerSpec(spec),
 				safety: {
 					// Escalation tallies fold in only when an ask escalated, so deny and fail receipts stay byte-identical.
 					decisions:
@@ -7010,9 +6954,7 @@ export function createDispatchBundle(
 			allowedTools: effectiveTools,
 			settings,
 			runtime: target.runtime,
-			readOnly:
-				effectiveWorkerAutonomy(settings?.safety.autonomy ?? "default", req.autonomy, agentSpec.capabilityClass) ===
-				"read-only",
+			readOnly: req.readOnly === true || agentSpec.capabilityClass === "read-only",
 		});
 		const endpoint = endpointCapacityForTarget(target.target.id);
 		return {

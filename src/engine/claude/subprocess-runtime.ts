@@ -35,7 +35,15 @@ export interface ClaudeSubprocessPermissionConfig {
 export function claudeSubprocessPermissionConfigForAutonomy(
 	level: AutonomyLevel | undefined,
 	env: NodeJS.ProcessEnv = process.env,
+	readOnly = false,
 ): ClaudeSubprocessPermissionConfig {
+	if (readOnly) {
+		return {
+			permissionMode: "plan",
+			extraArgs: ["--tools", READ_ONLY_CLAUDE_TOOLS.join(",")],
+			dangerousBypass: false,
+		};
+	}
 	if (level === "yolo" && env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
 		return {
 			permissionMode: "bypassPermissions",
@@ -43,13 +51,7 @@ export function claudeSubprocessPermissionConfigForAutonomy(
 			dangerousBypass: true,
 		};
 	}
-	if (level === "read-only") {
-		return {
-			permissionMode: "plan",
-			extraArgs: ["--tools", READ_ONLY_CLAUDE_TOOLS.join(",")],
-			dangerousBypass: false,
-		};
-	}
+
 	if (level === "default") {
 		return { permissionMode: "acceptEdits", extraArgs: [], dangerousBypass: false };
 	}
@@ -69,7 +71,7 @@ export function buildClaudeCodePrompt(input: WorkerRunInput): string {
  */
 export function buildClaudeCodeArgs(input: WorkerRunInput, gateEnv: NodeJS.ProcessEnv = process.env): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "claude-code");
-	const permission = claudeSubprocessPermissionConfigForAutonomy(input.autonomy, gateEnv);
+	const permission = claudeSubprocessPermissionConfigForAutonomy(input.autonomy, gateEnv, input.readOnly === true);
 	const args = [
 		"-p",
 		"--output-format",

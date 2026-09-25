@@ -403,6 +403,7 @@ function successNote(receipt: RunReceipt): string | null {
 }
 
 interface CompletedRun {
+	readOnly?: boolean;
 	receipt: RunReceipt;
 	receiptPath: string | null;
 	summary: EventSummary;
@@ -425,9 +426,20 @@ function completeRun(
 	receipt: RunReceipt,
 	summary: EventSummary,
 	pendingGate?: PendingGateDecisionHandle,
+	request?: DispatchRequest,
 ): CompletedRun {
 	const envelope = deps.dispatch.getRun(receipt.runId);
+	const capabilityClass = deps.getAgentSpecs().find((spec) => spec.id === receipt.agentId)?.capabilityClass;
+	const gateRole = receipt.gate?.role;
+	const readOnly =
+		request?.readOnly === true ||
+		capabilityClass === "read-only" ||
+		gateRole === "reviewer" ||
+		gateRole === "judge" ||
+		gateRole === "synthesis" ||
+		gateRole === "member";
 	return {
+		readOnly,
 		receipt,
 		receiptPath: envelope?.receiptPath ?? null,
 		summary,
@@ -636,7 +648,7 @@ function dispatchDetails(
 		// renders details can show the board without re-reading the store.
 		...(board !== null ? { agentLedgerBoard: board } : {}),
 		...(transition !== null ? { scoutTransition: transition } : {}),
-		runs: runs.map(({ receipt, receiptPath, summary, integrity }) => {
+		runs: runs.map(({ receipt, receiptPath, summary, integrity, readOnly }) => {
 			// Additive provenance keys only; folded in when the receipt carries the
 			// field so a run entry without them keeps its exact shape.
 			const provenance = extractRunProvenance(receipt);
@@ -655,6 +667,7 @@ function dispatchDetails(
 				verification: integrity.ok ? receipt.verification : UNVERIFIABLE_RECEIPT_VERIFICATION,
 				hostVerification: integrity.ok ? (receipt.hostVerification ?? null) : null,
 				receiptIntegrity: integrity,
+				readOnly,
 				...(integrity.ok && receipt.toolActivity !== undefined ? { toolActivity: receipt.toolActivity } : {}),
 				trustStatus,
 				// The bounded projection sits shallow and flat on purpose: a
@@ -828,7 +841,7 @@ async function runReviewGated(
 		} finally {
 			activeRunId = null;
 		}
-		const completed = completeRun(deps, receipt, summary, pendingGate);
+		const completed = completeRun(deps, receipt, summary, pendingGate, request);
 		runs.push(completed);
 		return completed;
 	};
@@ -879,7 +892,7 @@ async function runReviewGated(
 				executionRole: "reviewer",
 				task: renderDispatchReviewerTask(base.task, builder.receipt.runId, cycle, base.intent),
 				systemPrompt: REVIEWER_GATE_PROMPT,
-				autonomy: "read-only",
+				readOnly: true,
 				gate: { role: "reviewer", group, cycle, subjects: [subjectRef(builder.receipt)] },
 				pipelineInput: {
 					fromRunId: builder.receipt.runId,
@@ -1305,7 +1318,7 @@ async function runCompete(
 		const summaryWithGate = summaryResult.status === "fulfilled" ? summaryResult.value : null;
 		const receipt = receiptResult.status === "fulfilled" ? receiptResult.value : null;
 		if (summaryWithGate === null || receipt === null) throw new Error(`run ${handle.runId} produced no settled result`);
-		return completeRun(deps, receipt, summaryWithGate.summary, summaryWithGate.pendingGate);
+		return completeRun(deps, receipt, summaryWithGate.summary, summaryWithGate.pendingGate, request);
 	};
 	const admitOwnedRun = async (request: DispatchRequest, label: string): Promise<OwnedCompeteRun> => {
 		try {
@@ -1440,9 +1453,9 @@ async function runCompete(
 				const receipt = candidateRuns[index]?.receipt;
 				const failed = receipt !== undefined && isPipelineStepFailure(receipt);
 				if (failed) return "builder failed";
-				// The receipt records the candidate's effective authority after recipe
-				// and invocation narrowing, independently of the coordinator's autonomy.
-				if (receipt?.autonomyEnforcement?.autonomy !== "read-only") {
+				// Current dispatches carry the read-only restriction directly; older
+				// receipts may still record it as a legacy autonomy level.
+				if (candidateRuns[index]?.readOnly !== true && receipt?.autonomyEnforcement?.autonomy !== "read-only") {
 					commitCandidateWork(worktree, `clio-coder compete ${group} candidate ${worktree.index}`);
 				}
 				return candidateDiffStat(root, worktree.branch);
@@ -1477,7 +1490,7 @@ async function runCompete(
 					},
 				),
 				systemPrompt: JUDGE_GATE_PROMPT,
-				autonomy: "read-only",
+				readOnly: true,
 				cwd: root,
 				gate: {
 					role: "judge",
@@ -1994,7 +2007,7 @@ async function runCouncil(
 				consumeGateSensitiveDispatchEvents(deps, handle.runId, request.agentId, handle.events),
 				handle.finalPromise,
 			]);
-			return completeRun(deps, receipt, summary);
+			return completeRun(deps, receipt, summary, undefined, request);
 		} finally {
 			if (timer !== undefined) clearTimeout(timer);
 			signal?.removeEventListener("abort", abort);
@@ -2028,7 +2041,7 @@ async function runCouncil(
 				const request: DispatchRequest = {
 					...base,
 					executionRole: "researcher",
-					autonomy: "read-only",
+					readOnly: true,
 					toolProfile: "council-read-only",
 					// Admission already demoted the caller's declared write roots to
 					// read roots for every planned member, and the resolved-plan pin
@@ -2127,7 +2140,7 @@ async function runCouncil(
 				),
 			),
 			systemPrompt: COUNCIL_JUDGE_PROMPT,
-			autonomy: "read-only",
+			readOnly: true,
 			toolProfile: "council-read-only",
 			gate: { role: "synthesis", group, cycle: council.rounds, subjects: finalRuns.map((run) => subjectRef(run.receipt)) },
 			council: { group, label: "synthesis", round: council.rounds },
@@ -2665,7 +2678,7 @@ async function runSequential(
 				);
 			}
 			activeRunId = null;
-			runs.push(completeRun(deps, settled.value.receipt, settled.value.summary));
+			runs.push(completeRun(deps, settled.value.receipt, settled.value.summary, undefined, request));
 		}
 		return runs;
 	} finally {
@@ -2736,7 +2749,7 @@ async function runPipeline(
 			const registered = deps.runEvents.registerSingle(handle, request.agentId, fallbackProgressBus(deps));
 			const { receipt, summary } = await registered.completion;
 			activeRunId = null;
-			runs.push(completeRun(deps, receipt, summary));
+			runs.push(completeRun(deps, receipt, summary, undefined, request));
 			// Execution can succeed while a conforming report records a failed
 			// check. Keep that receipt truthful, but do not feed failed quality
 			// into a dependent step. Review/compete use failure to drive their
@@ -2868,7 +2881,7 @@ async function runWriterLimitedBatch(
 		const registered = deps.runEvents.registerSingle(handle, request.agentId, fallbackProgressBus(deps));
 		const value = await registered.completion;
 		activeIds.delete(handle.runId);
-		const run = completeRun(deps, value.receipt, value.summary);
+		const run = completeRun(deps, value.receipt, value.summary, undefined, request);
 		completed.set(request, run);
 		return run;
 	};

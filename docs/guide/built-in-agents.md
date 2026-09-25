@@ -84,7 +84,7 @@ worker. A native target without discovery must use caller-supplied sources or sa
 discovery was unavailable. Its `world-knowledge-report` separates supported
 facts and supplied source identifiers from synthesis, uncertainty, and follow-up
 verification; it never fabricates citations. The capability class remains
-`read-only` regardless of the caller's requested autonomy.
+`read-only` and her runs receive a read-only dispatch restriction regardless of the main agent's level.
 
 `oracle` is the only shadow agent an operator reaches directly, and only through
 `/oracle <question>`. It never receives a forked transcript. `/oracle` packs a
@@ -99,7 +99,7 @@ record. Entries are filtered to the active branch before the fold, so a `/tree`
 switch never briefs the advisor on decisions the operator walked away from.
 
 The run is an ordinary singular dispatch with `requestOrigin: "internal"` and
-`autonomy: "read-only"`, so admission, receipts, and the Fleet Runs island apply
+`readOnly: true`, so admission, receipts, and the Fleet Runs island apply
 to it exactly as they apply to `/run`. Its `oracle-report` contract carries the
 answer shape: a verdict line, the strongest challenge the advisor can mount, the
 evidence that would change its mind, and the decisions it cited. The rendered

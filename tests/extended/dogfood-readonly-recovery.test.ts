@@ -23,7 +23,7 @@ describe("read-only denial permits independent native inspection without authori
 		process.chdir(workspace);
 		sentinel = join(workspace, "sentinel.txt");
 		writeFileSync(sentinel, original);
-		registry = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd: workspace }), undefined, [], "read-only");
+		registry = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd: workspace }), undefined, [], true);
 	});
 
 	afterEach(() => {
@@ -45,18 +45,15 @@ describe("read-only denial permits independent native inspection without authori
 			},
 		);
 		strictEqual(readFileSync(sentinel, "utf8"), original, "the attempted shell mutation never executes");
-		match(feedback, /bash denied: autonomy level is read-only/);
-		match(feedback, /execute actions are denied/);
+		match(feedback, /bash denied: this run is read-only/);
+		match(feedback, /dispatch that started this run is read-only/);
 		return feedback;
 	}
 
 	it("blocks the real shell mutation and names a bounded native inspection path", async () => {
 		const feedback = await denyShell();
-		for (const tool of ["read", "grep", "find", "ls"]) {
-			match(feedback, new RegExp(`\\b${tool}\\b`), `the denied shell names native ${tool}`);
-		}
-		match(feedback, /independent.*inspection/i, "the pivot is a separate inspection task");
-		match(feedback, /do not.*denied.*(execution|write)/i, "inspection cannot reproduce the denied action");
+		match(feedback, /Inspection tools remain available for paths inside the workspace/);
+		doesNotMatch(feedback, /autonomy|\/settings|--autonomy/i);
 		match(feedback, /Do not retry this action through another tool/, "the standing no-bypass rail remains");
 	});
 
@@ -77,16 +74,16 @@ describe("read-only denial permits independent native inspection without authori
 		}
 		await rejects(
 			invokeRegisteredTool(registry, ToolNames.Write, { path: sentinel, content: "MUTATED" }),
-			/write denied: autonomy level is read-only/,
+			/write denied: this run is read-only/,
 		);
 		strictEqual(readFileSync(sentinel, "utf8"), original, "neither inspection nor alternate native writes mutate it");
 	});
 
-	it("gives the operator both an interactive setting and a headless autonomy affordance", async () => {
+	it("directs the proposal to the dispatching agent without autonomy advice", async () => {
 		const feedback = await denyShell();
-		match(feedback, /operator/i);
-		match(feedback, /interactive.*\/settings/i);
-		match(feedback, /headless.*--autonomy/i);
+		match(feedback, /dispatching agent/i);
+		match(feedback, /read-only/i);
+		match(feedback, /inspection tools/i);
 	});
 
 	it("does not turn a protected native read into an inspection exception", async () => {

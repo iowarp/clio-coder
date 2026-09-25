@@ -86,7 +86,7 @@ function workerInput(root: string, patch: Partial<WorkerRunInput> = {}): WorkerR
 		wireModelId: "claude-sonnet-5",
 		allowedTools: [],
 		budget: { toolCalls: 20, readReserve: 0, synthesis: true, hardCap: 50 },
-		autonomy: "read-only",
+		readOnly: true,
 		cwd: root,
 		...patch,
 	};

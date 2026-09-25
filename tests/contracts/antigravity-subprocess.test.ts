@@ -128,7 +128,7 @@ function workerInput(root: string, patch: Partial<WorkerRunInput> = {}): WorkerR
 		wireModelId: "gemini-live-high",
 		allowedTools: [],
 		budget: { toolCalls: 20, readReserve: 0, synthesis: true, hardCap: 50 },
-		autonomy: "read-only",
+		readOnly: true,
 		cwd: root,
 		...patch,
 	};
@@ -445,7 +445,7 @@ describe("Antigravity external subprocess contract", () => {
 	});
 
 	it("maps every autonomy exactly and refuses suggest before spawn", () => {
-		const input = workerInput(process.cwd(), { autonomy: "read-only" });
+		const input = workerInput(process.cwd(), { readOnly: true });
 		const freshArgs = [
 			"--mode",
 			"plan",
@@ -461,13 +461,25 @@ describe("Antigravity external subprocess contract", () => {
 		deepStrictEqual(buildAgyArgs(input, {}), freshArgs);
 		deepStrictEqual(buildAgyArgs({ ...input, sessionId: "" }, {}), freshArgs);
 		deepStrictEqual(buildAgyArgs({ ...input, sessionId: "abc" }, {}), [...freshArgs, "--conversation", "abc"]);
-		deepStrictEqual(buildAgyArgs({ ...input, autonomy: "default" }, {}).slice(0, 2), ["--mode", "accept-edits"]);
-		deepStrictEqual(buildAgyArgs({ ...input, autonomy: "yolo" }, {}).slice(0, 2), ["--mode", "accept-edits"]);
+		deepStrictEqual(buildAgyArgs({ ...input, readOnly: false, autonomy: "default" }, {}).slice(0, 2), [
+			"--mode",
+			"accept-edits",
+		]);
+		deepStrictEqual(buildAgyArgs({ ...input, readOnly: false, autonomy: "yolo" }, {}).slice(0, 2), [
+			"--mode",
+			"accept-edits",
+		]);
 		deepStrictEqual(
-			buildAgyArgs({ ...input, autonomy: "yolo" }, { CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1" }).slice(0, 1),
+			buildAgyArgs({ ...input, readOnly: false, autonomy: "yolo" }, { CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1" }).slice(
+				0,
+				1,
+			),
 			["--dangerously-skip-permissions"],
 		);
-		deepStrictEqual(buildAgyArgs({ ...input, autonomy: "default" }, {}).slice(0, 2), ["--mode", "accept-edits"]);
+		deepStrictEqual(buildAgyArgs({ ...input, readOnly: false, autonomy: "default" }, {}).slice(0, 2), [
+			"--mode",
+			"accept-edits",
+		]);
 		equal(antigravitySubprocessConfigForAutonomy("yolo", {}).dangerousBypass, false);
 	});
 

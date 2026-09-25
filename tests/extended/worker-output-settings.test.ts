@@ -75,7 +75,6 @@ for (const scenario of scenarios) {
 					product: "orientation",
 					noSkills: true,
 					cwd: workspace,
-					autonomy: "yolo",
 				},
 				() => {},
 			);

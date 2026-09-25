@@ -152,15 +152,16 @@ describe("harness extension executable capabilities", () => {
 		const invalid = await registry.get(testName)?.run({ unknown: true });
 		equal(invalid?.kind, "error");
 	});
-	it("does not bypass read-only autonomy or worker write confinement", async () => {
+	it("does not bypass a read-only run or worker write confinement", async () => {
 		const { cwd } = installed();
-		for (const [autonomy, writeRoots] of [
-			["read-only", undefined],
-			["yolo", ["outputs"]],
+		for (const [readOnly, writeRoots] of [
+			[true, undefined],
+			[false, ["outputs"]],
 		] as const) {
 			const registry = createRegistry({
 				safety: createWorkerSafety({ cwd, ...(writeRoots ? { writeRoots } : {}) }),
-				autonomy: () => autonomy,
+				autonomy: () => (readOnly ? "default" : "yolo"),
+				readOnly,
 			});
 			registerHarnessExtensionTools(registry, cwd);
 			const verdict = await registry.invoke({ tool: testName, args: { text: "read" } });
@@ -268,7 +269,7 @@ describe("harness extension executable capabilities", () => {
 		);
 		// read-only denies the command through the gateway exactly as it denies
 		// the command by name: the gateway call itself settles as that block.
-		const readOnly = createRegistry({ safety: createWorkerSafety({ cwd }), autonomy: () => "read-only" });
+		const readOnly = createRegistry({ safety: createWorkerSafety({ cwd }), autonomy: () => "default", readOnly: true });
 		registerHarnessExtensionTools(readOnly, cwd);
 		readOnly.register(createGatewayTool({ registry: readOnly }));
 		const denied = await readOnly.invoke({

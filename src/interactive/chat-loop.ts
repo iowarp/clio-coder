@@ -1581,8 +1581,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// armed surface is what this turn runs under.
 			const pendingSkillPolicy = withModelSkillActivation(
 				createPendingSkillToolPolicy(pendingSkillRequests) ?? state.activeSkillSurface,
-				state.currentTurnConstraints?.skills !== "disabled" &&
-					modelMayActivateSkills(deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy),
+				state.currentTurnConstraints?.skills !== "disabled" && modelMayActivateSkills(),
 			);
 			if (pendingSkillPolicy) {
 				pendingSkillPolicy.allowListAdvisory = (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "yolo";

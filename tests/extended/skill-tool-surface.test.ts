@@ -22,7 +22,7 @@ import {
 	loadSkills,
 	parsePendingSkillRequests,
 } from "../../src/domains/resources/skills/loader.js";
-import { type AutonomyLevel, modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
+import { modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
@@ -127,11 +127,11 @@ function turnPolicy(
 	input: string,
 	root: string,
 	armed: PendingSkillToolPolicy | undefined,
-	autonomy: AutonomyLevel = "default",
+	readOnly = false,
 ): PendingSkillToolPolicy | undefined {
 	const list = loadSkills({ cwd: root, disableDiscovery: true, explicitSkillPaths: explicitPaths });
 	const requests = parsePendingSkillRequests(input, list, { cwd: root }).pendingSkillRequests;
-	return withModelSkillActivation(createPendingSkillToolPolicy(requests) ?? armed, modelMayActivateSkills(autonomy));
+	return withModelSkillActivation(createPendingSkillToolPolicy(requests) ?? armed, modelMayActivateSkills(readOnly));
 }
 
 let explicitPaths: string[] = [];
@@ -255,7 +255,7 @@ describe("skill tool surface lifetime", () => {
 		);
 		const byModel = await context.run(
 			{ scope: "skills", name: "interview" },
-			invokeOptions(turnPolicy("look at the failing test", root, undefined, "yolo")),
+			invokeOptions(turnPolicy("look at the failing test", root, undefined)),
 		);
 		ok(byOperator.kind === "ok" && byModel.kind === "ok");
 		strictEqual((byOperator.details as { activation?: unknown }).activation, "operator");
@@ -672,7 +672,7 @@ describe("model skill activation by autonomy level", () => {
 			explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
 			const context = contextToolFor(root);
 			// No /skill this turn: the model calls context(scope="skills") itself.
-			const policy = turnPolicy("look at the failing test", root, undefined, autonomy);
+			const policy = turnPolicy("look at the failing test", root, undefined);
 			ok(policy !== undefined);
 			strictEqual(policy.modelActivation, true);
 			const activated = await context.run({ scope: "skills", name: "interview" }, invokeOptions(policy));
@@ -689,22 +689,20 @@ describe("model skill activation by autonomy level", () => {
 		});
 	}
 
-	for (const autonomy of ["read-only"] as const) {
-		it(`keeps activation operator-gated at ${autonomy}`, async () => {
-			const root = scratchRoot();
-			explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
-			const context = contextToolFor(root);
-			const policy = turnPolicy("look at the failing test", root, undefined, autonomy);
-			deepStrictEqual(skillSurfaceNames(policy), []);
-			const refused = await context.run({ scope: "skills", name: "interview" }, invokeOptions(policy));
-			strictEqual(refused.kind, "error");
-			if (refused.kind === "error") {
-				match(refused.message, /only the operator can activate a skill/u);
-				match(refused.message, /Suggested skill: \/skill/u);
-				deepStrictEqual(refused.details?.refusal, { subject: "skill", name: "interview", kind: "operator-only" });
-			}
-		});
-	}
+	it("keeps activation operator-gated on a read-only run", async () => {
+		const root = scratchRoot();
+		explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
+		const context = contextToolFor(root);
+		const policy = turnPolicy("look at the failing test", root, undefined, true);
+		deepStrictEqual(skillSurfaceNames(policy), []);
+		const refused = await context.run({ scope: "skills", name: "interview" }, invokeOptions(policy));
+		strictEqual(refused.kind, "error");
+		if (refused.kind === "error") {
+			match(refused.message, /only the operator can activate a skill/u);
+			match(refused.message, /Suggested skill: \/skill/u);
+			deepStrictEqual(refused.details?.refusal, { subject: "skill", name: "interview", kind: "operator-only" });
+		}
+	});
 
 	it("still refuses an uninstalled marketplace skill at full-auto", async () => {
 		const root = scratchRoot();
@@ -737,7 +735,7 @@ describe("model skill activation by autonomy level", () => {
 			getCwd: () => root,
 			getSkillLoaderOptions: () => ({ explicitSkillPaths: explicitPaths }),
 		});
-		const policy = turnPolicy("do the thing", root, undefined, "yolo");
+		const policy = turnPolicy("do the thing", root, undefined);
 		ok(policy !== undefined);
 		const refused = await context.run({ scope: "skills", name: "marketplace-only" }, invokeOptions(policy));
 		strictEqual(refused.kind, "error");
@@ -761,7 +759,7 @@ describe("model skill activation by autonomy level", () => {
 			match(result.message, /^context: /u, "the model still reads the policy text");
 			return result.details?.refusal;
 		};
-		const auto = turnPolicy("look at the failing test", root, undefined, "yolo");
+		const auto = turnPolicy("look at the failing test", root, undefined);
 		deepStrictEqual(await refusal("manual", auto), { subject: "skill", name: "manual", kind: "manual-only" });
 		deepStrictEqual(await refusal("absent", auto), { subject: "skill", name: "absent", kind: "unknown" });
 		strictEqual((await context.run({ scope: "skills", name: "interview" }, invokeOptions(auto))).kind, "ok");

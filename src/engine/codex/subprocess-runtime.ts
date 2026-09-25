@@ -40,7 +40,7 @@ export function buildCodexExecPrompt(input: WorkerRunInput): string {
 /** `codex exec -` reads the work order from stdin; prompt text never enters argv. */
 export function buildCodexExecArgs(input: WorkerRunInput, gateEnv: NodeJS.ProcessEnv = process.env): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "codex-cli");
-	const permission = codexSubprocessPermissionConfigForAutonomy(input.autonomy, gateEnv);
+	const permission = codexSubprocessPermissionConfigForAutonomy(input.autonomy, gateEnv, input.readOnly === true);
 	const args = ["exec", "--json", "--ephemeral", "--skip-git-repo-check"];
 	if (permission.dangerousBypass) args.push("--dangerously-bypass-approvals-and-sandbox");
 	else args.push("--sandbox", permission.sandbox);

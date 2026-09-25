@@ -18,7 +18,7 @@ import {
 	selectActiveRules,
 } from "../context/index.js";
 import { detectRunIdentity } from "../dispatch/run-identity.js";
-import { isAutonomyLevel, modelMayActivateSkills } from "../safety/autonomy.js";
+import { isAutonomyLevel } from "../safety/autonomy.js";
 import {
 	compile,
 	compileWorker,
@@ -402,7 +402,7 @@ function selfDevelopmentSkillFragments(
 	autonomy: string,
 ): RenderedPromptFragment[] {
 	if (!selfRepo || !sessionCanUseSkills(inputs) || inputs.turnConstraints?.mode === "proposal") return [];
-	const activation = isAutonomyLevel(autonomy) && modelMayActivateSkills(autonomy);
+	const activation = isAutonomyLevel(autonomy);
 	const body = [
 		"# Self-development skills",
 		"For a task that changes Clio's source, harness, prompts, or library, use clio-coder-dev before editing and clio-coder-test when choosing validation. Skip this workflow for unrelated or self-contained questions.",

@@ -3,7 +3,7 @@
 import type { ClioSettings } from "../core/config.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
-import type { OperatorAutonomyLevel } from "../domains/safety/index.js";
+import type { AutonomyLevel } from "../domains/safety/index.js";
 import type { AcpJsonRpcPeerTransport, StdioServerTransportOptions } from "../engine/acp/transport.js";
 import type { ImageContent } from "../engine/types.js";
 import type { TerminalLease } from "../interactive/terminal-lease.js";
@@ -47,7 +47,7 @@ export interface BootOptions {
 	/** `--with-panes` / `--no-panes`. The flag beats `panes.enabled` in both directions. */
 	panes?: "with" | "without";
 	/** Global `--autonomy <level>`: a one-session override for the interactive app; settings.yaml is untouched. */
-	autonomy?: OperatorAutonomyLevel;
+	autonomy?: AutonomyLevel;
 	headless?: {
 		prompt: string;
 		constraints?: TurnConstraints;
@@ -58,7 +58,7 @@ export interface BootOptions {
 		target?: string;
 		model?: string;
 		thinking?: ThinkingLevel;
-		autonomy?: OperatorAutonomyLevel;
+		autonomy?: AutonomyLevel;
 		sampling?: HeadlessSamplingOverrides;
 		noSkills?: boolean;
 		skillPaths?: ReadonlyArray<string>;

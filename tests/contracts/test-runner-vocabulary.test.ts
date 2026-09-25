@@ -118,8 +118,6 @@ describe("test runner vocabulary (#377)", () => {
 			strictEqual(decision.kind, "allow", spelling);
 			strictEqual(decision.ruleId, id, spelling);
 			strictEqual(decision.execRecognition, "unrecognized", spelling);
-			strictEqual(disposition(policy, spelling, "read-only"), "deny", spelling);
-			strictEqual(disposition(policy, spelling, "default"), "ask", spelling);
 			strictEqual(disposition(policy, spelling, "default"), "ask", spelling);
 			strictEqual(disposition(policy, spelling, "yolo"), "allow", spelling);
 			strictEqual(disposition(policy, `npm test && ${spelling}`, "default"), "ask", spelling);
@@ -135,7 +133,6 @@ describe("test runner vocabulary (#377)", () => {
 		]) {
 			strictEqual(disposition(policy, command, "default"), "allow", command);
 			strictEqual(disposition(policy, command, "yolo"), "allow", command);
-			strictEqual(disposition(policy, command, "read-only"), "deny", command);
 		}
 	});
 

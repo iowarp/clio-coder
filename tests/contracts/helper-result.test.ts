@@ -193,7 +193,7 @@ test("dispatch selects helper mode from trusted audience and seals its validated
 		spawnWorker(spec) {
 			const parsed = parseWorkerSpec(JSON.parse(JSON.stringify(spec)));
 			strictEqual(parsed.helperResult, true);
-			strictEqual(spec.autonomy, "read-only");
+			strictEqual(spec.readOnly, true);
 			ok(
 				!spec.allowedTools.includes("write") && !spec.allowedTools.includes("edit") && !spec.allowedTools.includes("bash"),
 			);

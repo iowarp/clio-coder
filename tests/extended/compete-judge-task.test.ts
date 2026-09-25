@@ -148,7 +148,7 @@ it("can retrieve a clipped preview from an external receipt under read-only path
 		const policy = createSafetyPolicyEngine({ cwd: root, projectPolicy: loadProjectSafetyPolicy(root) });
 		const decision = policy.evaluate(call);
 		strictEqual(decision.kind, "allow");
-		strictEqual(mapAutonomy("read-only", decision.actionClass), "allow");
+		strictEqual(mapAutonomy("default", decision.actionClass), "allow");
 		const read = await readTool.run(call.args);
 		strictEqual(read.kind, "ok");
 		if (read.kind === "ok") strictEqual(JSON.parse(read.output).output.text, evidence.receipt.output.text);

@@ -334,7 +334,7 @@ describe("provider transport boundary", () => {
 			wireModelId: "gemini-3.8-flash-high",
 			allowedTools: [],
 			budget: { toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 50 },
-			autonomy: "read-only" as const,
+			readOnly: true as const,
 		};
 		const args = buildAgyArgs(base);
 		deepStrictEqual(args.slice(0, 9), [

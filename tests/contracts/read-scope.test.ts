@@ -307,19 +307,19 @@ describe("read scope admission", () => {
 	});
 
 	it("maps an outside read to deny, ask, ask, allow across the levels and leaves inside reads alone", () => {
-		const levels: AutonomyLevel[] = ["read-only", "default", "default", "yolo"];
+		const levels: AutonomyLevel[] = ["default", "yolo"];
 		deepStrictEqual(
 			levels.map((level) => mapAutonomy(level, "read", { readOutsideWorkspace: true })),
-			["deny", "ask", "ask", "allow"],
+			["ask", "allow"],
 		);
 		deepStrictEqual(
 			levels.map((level) => mapAutonomy(level, "read")),
-			["allow", "allow", "allow", "allow"],
+			["allow", "allow"],
 		);
 	});
 
-	function registryAt(level: AutonomyLevel) {
-		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => level });
+	function registryAt(level: AutonomyLevel, readOnly = false) {
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => level, readOnly });
 		for (const entry of SCOPED) registry.register(entry.spec);
 		return registry;
 	}
@@ -362,10 +362,10 @@ describe("read scope admission", () => {
 			const ran = await fullAuto.invoke({ tool: entry.tool, args: argsFor(entry.tool, entry.outside) });
 			strictEqual(ran.kind, "ok", `${entry.tool}: ${JSON.stringify(ran)}`);
 
-			const readOnly = registryAt("read-only");
+			const readOnly = registryAt("default", true);
 			const denied = await readOnly.invoke({ tool: entry.tool, args: argsFor(entry.tool, entry.outside) });
 			strictEqual(denied.kind, "blocked", entry.tool);
-			if (denied.kind === "blocked") match(denied.reason, /outside the workspace at autonomy read-only/u);
+			if (denied.kind === "blocked") match(denied.reason, /this run is read-only/u);
 
 			const inside = entry.tool === ToolNames.Read ? "data/inside.txt" : "data";
 			const insideRun = await readOnly.invoke({ tool: entry.tool, args: argsFor(entry.tool, inside) });

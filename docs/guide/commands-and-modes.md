@@ -118,7 +118,7 @@ Turn it off under Settings → Appearance → Demo guidance (`interface.demo`), 
 | `--agent <recipe-id>` | Dispatch a fleet agent instead of the main agent. Unknown ids fail fast. |
 | `--skill <path>` | Make one explicit skill file or skill directory available for this run. Repeatable; the model loads its instructions with `context(scope="skills", name=...)`. |
 | `--no-skills` | Disable skill discovery for this run and automatic skill/marketplace prompt guidance while still honoring explicit `--skill` paths. |
-| `--turn-mode <mode>` | Main-agent workflow guidance (`answer`, `proposal`, `change`). Guides prompt and turn continuation (`answer` and `proposal` disable autonomous continuation turns; `proposal` renders `tasks` `plan`/`add` as blocked proposals). Not an authorization grant: mutating tools (`write`, `edit`) are not denied by `mode` alone; enforcement requires `--allow-tools` or `--autonomy read-only`. See [Turn Constraints](#turn-constraints). |
+| `--turn-mode <mode>` | Main-agent workflow guidance (`answer`, `proposal`, `change`). Guides prompt and turn continuation (`answer` and `proposal` disable autonomous continuation turns; `proposal` renders `tasks` `plan`/`add` as blocked proposals). Not an authorization grant: mutating tools (`write`, `edit`) are not denied by `mode` alone; use `--allow-tools` to restrict execution. See [Turn Constraints](#turn-constraints). |
 | `--no-delegate` | Forbid worker delegation (`dispatch`) for this run; the agent must work directly. |
 | `--allow-tools <names\|none>` | Comma-separated allowlist of capability names permitted for this turn, or `none` to disable all tools. Enforces mechanical restriction at admission and runtime. |
 | `--agent-profile <name>` | Use a named fleet profile for dispatch. |

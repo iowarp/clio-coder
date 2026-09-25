@@ -532,7 +532,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 					agentId: step.agentId,
 					executionRole: requestExecutionRole({ agentId: step.agentId, resolveFacts: roleFacts }),
 					task: step.task,
-					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
+					...(step.scope === "readonly" ? { readOnly: true as const } : {}),
 					...(step.target !== undefined ? { target: step.target } : {}),
 					...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
 				};

@@ -6,7 +6,7 @@ import { type TurnConstraints, turnAllowsTool } from "../../core/turn-constraint
 import { TOOL_RESULT_TRUST_CONTRACT } from "../../core/untrusted-content.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { directSurfaceNames } from "../../tools/surface.js";
-import { type AutonomyLevel, isAutonomyLevel, modelMayActivateSkills } from "../safety/autonomy.js";
+import { isAutonomyLevel, modelMayActivateSkills } from "../safety/autonomy.js";
 import { ceilChars } from "../session/context-accounting.js";
 import { DEMO_GUIDANCE } from "./demo-guidance.js";
 import type { FragmentTable, LoadedFragment } from "./fragment-loader.js";
@@ -83,8 +83,8 @@ export interface CompileInputs {
 export interface WorkerPromptInputs {
 	/** The same inherited constraints enforced by worker admission. */
 	turnConstraints?: TurnConstraints;
-	/** The autonomy level already clamped by dispatch admission. */
-	autonomy: AutonomyLevel;
+	/** Dispatch-owned restriction on this worker run. */
+	readOnly?: boolean;
 	/**
 	 * Whether the selected target can attach canonical Clio tool schemas.
 	 * `null` means the delegated target's inventory is not observable.
@@ -193,8 +193,6 @@ function lookupFragment(table: FragmentTable, id: string, role: string): LoadedF
  */
 function safetyOneLiner(level: string): string {
 	switch (level) {
-		case "read-only":
-			return "inspect and answer; mutating calls are auto-denied, so propose changes instead.";
 		case "default":
 			return "workspace edits and recognized commands run; other bash asks for approval.";
 		case "yolo":
@@ -549,28 +547,13 @@ function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
 	return lines.join("\n");
 }
 
-/** Worker-specific autonomy directive that reflects permission routing without changing session prompt policy. */
-export function workerSafetyOneLiner(level: AutonomyLevel, mode: WorkerPromptInputs["onPermission"]): string {
-	if (level === "read-only") return safetyOneLiner(level);
-	const posture = workerPermissionSentence(mode);
-	switch (level) {
-		case "default":
-			return `workspace edits and recognized commands run; other commands require approval. ${posture}`;
-		case "yolo":
-			return `act without ordinary approval stops; damage-control rules can still block or ask. ${posture}`;
-	}
+/** Worker guidance always describes default admission and run-specific permission routing. */
+export function workerSafetyOneLiner(mode: WorkerPromptInputs["onPermission"]): string {
+	return `workspace edits and recognized commands run; other commands require approval. ${workerPermissionSentence(mode)}`;
 }
 
-/**
- * The worker reads the same `safety.<level>` fragment the session does; the
- * one-liner (with the run's permission routing) is the only role text. The
- * level fragments speak in action classes and never name a tool, so nothing
- * here can be false for a surface that lacks one; the earlier inline copy of
- * the levels claimed a yolo worker's "dispatches" ran when no builtin
- * admits dispatch.
- */
 function renderWorkerSafetySection(safetyFragment: LoadedFragment, inputs: WorkerPromptInputs): string {
-	const oneLine = `Autonomy: ${inputs.autonomy}. ${workerSafetyOneLiner(inputs.autonomy, inputs.onPermission)}`;
+	const oneLine = `Autonomy: default. ${workerSafetyOneLiner(inputs.onPermission)}`;
 	const body = safetyFragment.body.trim();
 	return body.length > 0 ? `${oneLine}\n\n${body}` : oneLine;
 }
@@ -727,7 +710,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			: undefined;
 	const skills = sessionCanUseSkills(session) ? table.byId.get("operating.skills") : undefined;
 	const skillActivation =
-		isAutonomyLevel(autonomyLevel) && modelMayActivateSkills(autonomyLevel)
+		isAutonomyLevel(autonomyLevel) && modelMayActivateSkills()
 			? 'Load matching ready Clio skills with context(scope="skills", name="<name>") and continue the task; skill restrictions still apply.'
 			: "Suggest matching skills as /skill <name> (in order when several compose), then continue without them; only the operator activates skills.";
 
@@ -820,7 +803,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	const identity = lookupFragment(table, "identity.clio-coder-worker", "worker identity");
 	const operatingContract = lookupFragment(table, "operating.contract", "operating contract");
 	const workerContract = lookupFragment(table, "operating.worker", "worker contract");
-	const safety = lookupFragment(table, `safety.${inputs.autonomy}`, "safety");
+	const safety = lookupFragment(table, "safety.default", "safety");
 
 	const parts: string[] = [];
 	const sections: PromptSection[] = [];
@@ -835,6 +818,8 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	push("operating-contract", renderWorkerOperatingContract(operatingContract, workerContract));
 	push("tool-contract", renderWorkerToolContractBlock(inputs));
 	push("safety", renderWorkerSafetySection(safety, inputs));
+	if (inputs.readOnly === true)
+		push("dispatch.read-only", lookupFragment(table, "dispatch.read-only", "read-only restriction").body);
 	push("persona", inputs.persona.body);
 	for (const fragment of inputs.additionalFragments ?? []) {
 		push(fragment.id, fragment.body);
@@ -847,6 +832,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 		operatingContract,
 		workerContract,
 		safety,
+		...(inputs.readOnly === true ? [lookupFragment(table, "dispatch.read-only", "read-only restriction")] : []),
 		inputs.persona,
 		...(inputs.additionalFragments ?? []),
 	].map((fragment) => ({

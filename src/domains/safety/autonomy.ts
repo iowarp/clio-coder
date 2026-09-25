@@ -18,11 +18,9 @@ import type { RejectionMessage } from "./rejection-feedback.js";
  * deterministic deny, workers.onPermission, delegation non-stall deny).
  */
 
-export const OPERATOR_AUTONOMY_LEVELS = ["default", "yolo"] as const;
-export const AUTONOMY_LEVELS = ["read-only", ...OPERATOR_AUTONOMY_LEVELS] as const;
+export const AUTONOMY_LEVELS = ["default", "yolo"] as const;
 
 export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number];
-export type OperatorAutonomyLevel = (typeof OPERATOR_AUTONOMY_LEVELS)[number];
 
 export const DEFAULT_AUTONOMY_LEVEL: AutonomyLevel = "default";
 
@@ -30,13 +28,9 @@ export function isAutonomyLevel(value: unknown): value is AutonomyLevel {
 	return typeof value === "string" && (AUTONOMY_LEVELS as ReadonlyArray<string>).includes(value);
 }
 
-export function isOperatorAutonomyLevel(value: unknown): value is OperatorAutonomyLevel {
-	return value === "default" || value === "yolo";
-}
-
 /** Operator input accepts only the two current modes. Saved settings migrate separately. */
-export function autonomyFromUserInput(value: string): OperatorAutonomyLevel | null {
-	return isOperatorAutonomyLevel(value) ? value : null;
+export function autonomyFromUserInput(value: string): AutonomyLevel | null {
+	return isAutonomyLevel(value) ? value : null;
 }
 
 export type AutonomyDisposition = "allow" | "ask" | "deny";
@@ -84,18 +78,9 @@ export interface AutonomyMappingOptions {
 	readOutsideWorkspace?: boolean;
 }
 
-/**
- * Whether the model may activate an installed skill itself rather than
- * emitting the suggestion anchor and waiting for the operator to type
- * `/skill <name>`.
- *
- * Read-only workers cannot activate skills. In default and yolo modes, a skill
- * can only narrow the tool surface, never
- * widen it, so the gate buys no safety there. The level is the opt-in; there is
- * no per-skill frontmatter flag for this.
- */
-export function modelMayActivateSkills(level: AutonomyLevel): boolean {
-	return level !== "read-only";
+/** A read-only dispatch does not let the model activate skills. */
+export function modelMayActivateSkills(readOnly = false): boolean {
+	return !readOnly;
 }
 
 /**
@@ -113,12 +98,11 @@ export function mapAutonomy(
 	if (level === "default" && options.exposure === "outward") return "ask";
 	// The workspace is what the operator handed over. A read, listing, or
 	// search aimed outside it asks at every supervised level and runs at
-	// yolo. `read-only` never invokes approvals, so the ask is its deny.
+	// yolo.
 	if (actionClass === "read" && options.readOutsideWorkspace === true && level !== "yolo") {
-		return level === "read-only" ? "deny" : "ask";
+		return "ask";
 	}
 	if (actionClass === "read") return "allow";
-	if (level === "read-only") return "deny";
 	// Default and yolo from here.
 	switch (actionClass) {
 		case "write":
@@ -140,50 +124,7 @@ export function mapAutonomy(
 			// The safety engine has already checked protected paths and damage
 			// control. Its ordinary system-change confirmation belongs to default.
 			return level === "yolo" ? "allow" : "ask";
-		default:
-			return "ask";
 	}
-}
-
-/**
- * Rejection text for autonomy `deny` dispositions. Only `read-only` produces
- * denies, so the message is the propose-instead contract from §2.3, or the
- * search-scope text when the denied call is a read outside the workspace.
- */
-export function autonomyDenyRejection(
-	level: AutonomyLevel,
-	tool: string,
-	actionClass: ActionClass,
-	readOutsideWorkspace = false,
-): RejectionMessage {
-	if (readOutsideWorkspace) {
-		return {
-			short: `${tool} denied: the path is outside the workspace at autonomy ${level}`,
-			detail:
-				`The path resolves outside the workspace. Autonomy ${level} reads, lists, and searches inside the workspace ` +
-				"and denies a path outside it without prompting.",
-			hints: [
-				"Work from paths inside the workspace, or name the outside path to the operator as text.",
-				"The operator can raise the level in interactive /settings or with clio-coder run --autonomy <level>.",
-			],
-		};
-	}
-	return {
-		short: `${tool} denied: autonomy level is ${level}`,
-		detail:
-			`Clio is at autonomy ${level}: ${actionClass} actions are denied without prompting. ` +
-			"Describe the change you would make instead, so the operator can apply it or raise the autonomy level.",
-		hints: [
-			...(level === "read-only" && actionClass === "execute"
-				? [
-						"For independent permitted inspection, use the native read, grep, find, or ls tools when available. " +
-							"Do not use them to reproduce the denied execution or write; each call still follows its safety policy.",
-					]
-				: []),
-			"Propose the exact edit or command as text.",
-			"The operator can change the level in interactive /settings or start a new headless run with clio-coder run --autonomy <level>.",
-		],
-	};
 }
 
 /**

@@ -90,7 +90,6 @@ for (const scenario of scenarios) {
 					product: "orientation",
 					noSkills: true,
 					cwd: env.dir,
-					autonomy: "yolo",
 					helperResult: true,
 					resultContract: { kind: "scout-report" },
 				},

@@ -438,7 +438,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					agentId: step.agentId,
 					executionRole: step.executionRole,
 					task: step.task,
-					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
+					...(step.scope === "readonly" ? { readOnly: true as const } : {}),
 					...(step.target !== undefined ? { target: step.target } : {}),
 					...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
 				};

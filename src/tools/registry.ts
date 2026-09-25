@@ -19,7 +19,6 @@ import {
 	type AutonomyExposure,
 	type AutonomyLevel,
 	autonomyAskRejection,
-	autonomyDenyRejection,
 	DEFAULT_AUTONOMY_EXPOSURE,
 	DEFAULT_AUTONOMY_LEVEL,
 	mapAutonomy,
@@ -224,10 +223,12 @@ export interface RegistryDeps {
 	/**
 	 * Live autonomy level (sd-01 §2.2). Read per admission so hot-reloaded
 	 * settings apply to the next call. The orchestrator wires this to current
-	 * settings; workers wire it to the level carried on their WorkerSpec.
+	 * settings; workers always wire it to default.
 	 * Absent means the default operator mode.
 	 */
 	autonomy?: () => AutonomyLevel;
+	/** Dispatch-owned restriction, fixed for the lifetime of this run. */
+	readOnly?: boolean;
 }
 
 export interface ToolInvokeOptions {
@@ -439,12 +440,6 @@ export interface ToolRegistry {
 	onPermissionRequired(
 		listener: (call: ClassifierCall, decision: SafetyDecision, meta: PermissionRequiredMeta) => void,
 	): () => void;
-	/**
-	 * Subscribe to the signal fired when the autonomy mapping auto-denies a
-	 * call (deny dispositions, today only at read-only). The verdict already
-	 * carries the rejection; this exists for operator-facing notices.
-	 */
-	onAutonomyDenied(listener: (call: ClassifierCall, decision: SafetyDecision, level: AutonomyLevel) => void): () => void;
 }
 
 export type RegistryVerdict =
@@ -484,9 +479,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	const parked: ParkedCall[] = [];
 	const permissionListeners = new Set<
 		(call: ClassifierCall, decision: SafetyDecision, meta: PermissionRequiredMeta) => void
-	>();
-	const autonomyDeniedListeners = new Set<
-		(call: ClassifierCall, decision: SafetyDecision, level: AutonomyLevel) => void
 	>();
 	let approvalRequestCounter = 0;
 	const approvalRequestToken = randomBytes(4).toString("hex");
@@ -607,11 +599,22 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				? directDecision
 				: (projectedDecision ?? directDecision);
 		// Stage 1, the safety net (level-independent): engine blocks are final;
-		// engine asks are confirm rails that park at every level. read-only is
-		// the exception by definition: approvals are never invoked there, so a
-		// confirm rail resolves as the same auto-deny as any other mutation.
+		// engine asks are confirm rails that park at every autonomy level.
 		if (decision.kind === "block") {
 			return { kind: "terminal", verdict: { kind: "blocked", reason: decision.rejection.short, decision } };
+		}
+		const actionClass = decision.classification.actionClass;
+		const readOutside = decision.policy?.readScope === "outside-workspace";
+		if (
+			deps.readOnly === true &&
+			(actionClass !== "read" ||
+				readOutside ||
+				decision.kind === "ask" ||
+				(call.tool === ToolNames.Context && call.args?.scope === "skills" && typeof call.args?.name === "string"))
+		) {
+			const verdict = readOnlyDeniedVerdict(decision, call.tool);
+			recordRegistryDisposition(call, verdict.decision, "denied", { reasonCode: "dispatch:read_only" });
+			return { kind: "terminal", verdict };
 		}
 		const outsideTurn = !turnAllowsTool(options?.turnConstraints, call.tool);
 		const outsideRun =
@@ -651,14 +654,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			});
 			return { kind: "terminal", verdict };
 		}
-		const actionClass = decision.classification.actionClass;
 		if (decision.kind === "ask") {
-			if (level === "read-only") {
-				const verdict = autonomyDenyVerdict(decision, level, call.tool, actionClass);
-				recordRegistryDisposition(call, verdict.decision, "denied", { reasonCode: `autonomy:${level}` });
-				notifyAutonomyDenied(call, verdict.decision, level);
-				return { kind: "terminal", verdict };
-			}
 			if (grant?.actionClass === actionClass) return { kind: "execute", spec, decision };
 			return { kind: "park", decision, axis: approvalAxisId(decision, level) };
 		}
@@ -699,19 +695,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				: call.tool === ToolNames.WebFetch && webFetchIsOutward(call.args)
 					? "outward"
 					: DEFAULT_AUTONOMY_EXPOSURE;
-		const readOutside = decision.policy?.readScope === "outside-workspace";
 		const disposition = mapAutonomy(level, actionClass, {
 			executeRecognized: decision.policy?.execRecognition !== "unrecognized",
 			...(readOutside ? { readOutsideWorkspace: true } : {}),
 			...(planScale ? { dispatchPlanScale: true } : {}),
 			...(exposure === "outward" ? { exposure } : {}),
 		});
-		if (disposition === "deny") {
-			const verdict = autonomyDenyVerdict(decision, level, call.tool, actionClass, readOutside);
-			recordRegistryDisposition(call, verdict.decision, "denied", { reasonCode: `autonomy:${level}` });
-			notifyAutonomyDenied(call, verdict.decision, level);
-			return { kind: "terminal", verdict };
-		}
 		if (disposition === "ask") {
 			const askDecision =
 				planScale && dispatchPlan !== null
@@ -842,16 +831,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			} catch {
 				// Listener errors never abort admission; they are surfaced via
 				// whatever observability the caller wires up.
-			}
-		}
-	};
-
-	const notifyAutonomyDenied = (call: ClassifierCall, decision: SafetyDecision, level: AutonomyLevel): void => {
-		for (const listener of autonomyDeniedListeners) {
-			try {
-				listener(call, decision, level);
-			} catch {
-				// Same contract as permission listeners: never abort admission.
 			}
 		}
 	};
@@ -1030,12 +1009,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			permissionListeners.add(listener);
 			return () => {
 				permissionListeners.delete(listener);
-			};
-		},
-		onAutonomyDenied(listener) {
-			autonomyDeniedListeners.add(listener);
-			return () => {
-				autonomyDeniedListeners.delete(listener);
 			};
 		},
 	};
@@ -1312,19 +1285,16 @@ function skillSurfaceBlockedVerdict(
 	return { kind: "blocked", reason, decision: blocked };
 }
 
-/**
- * Terminal blocked verdict for an autonomy `deny` disposition (read-only).
- * The decision is re-shaped as a block so downstream consumers (worker
- * events, dispatch receipts) report it as a denial, not a pending ask.
- */
-function autonomyDenyVerdict(
-	decision: SafetyDecision,
-	level: AutonomyLevel,
-	tool: string,
-	actionClass: ActionClass,
-	readOutsideWorkspace = false,
-): Extract<RegistryVerdict, { kind: "blocked" }> {
-	const rejection = autonomyDenyRejection(level, tool, actionClass, readOutsideWorkspace);
+/** A read-only dispatch resolves every forbidden call as a terminal denial. */
+function readOnlyDeniedVerdict(decision: SafetyDecision, tool: string): Extract<RegistryVerdict, { kind: "blocked" }> {
+	const rejection = {
+		short: `${tool} denied: this run is read-only`,
+		detail: `The dispatch that started this run is read-only, so this call cannot execute.`,
+		hints: [
+			"Describe the proposed change as text for the dispatching agent.",
+			"Inspection tools remain available for paths inside the workspace.",
+		],
+	};
 	const blocked: SafetyDecision = {
 		kind: "block",
 		classification: decision.classification,

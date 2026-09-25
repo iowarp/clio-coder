@@ -17,14 +17,13 @@ import type {
 	TargetDescriptor,
 	ThinkingLevel,
 } from "../domains/providers/index.js";
-import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { ProtectedArtifact } from "../domains/safety/protected-artifacts.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import { parseWorkerContextSeed } from "./context-seed.js";
 import { INTERNAL_HELPER_RESULT_KINDS } from "./protocol.js";
 
 /** Current attested, budget-bearing dispatch document emitted by this release. */
-export const WORKER_SPEC_VERSION = 4;
+export const WORKER_SPEC_VERSION = 5;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 2;
 export const WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1;
 
@@ -164,13 +163,8 @@ interface WorkerSpecFields {
 	 * Defaults: 120000 ms, "deny".
 	 */
 	escalation?: WorkerEscalationConfig;
-	/**
-	 * Session autonomy level captured at dispatch admission (sd-01 §2.5). The
-	 * worker registry applies the same mapping as the orchestrator's, so a
-	 * worker never acts more freely than the session that dispatched it.
-	 * Default "default".
-	 */
-	autonomy?: AutonomyLevel;
+	/** Dispatch restriction for this worker run. */
+	readOnly?: boolean;
 	/**
 	 * Absolute path boundaries write-class tool calls are confined to for this run.
 	 * Exact files omit a trailing slash and subtrees retain one.
@@ -255,7 +249,6 @@ const MIDDLEWARE_EFFECT_KINDS = [
 const RUNTIME_RESOLUTION_SEVERITIES = ["info", "warning", "error"] as const;
 // This worker wire validator stays dependency-light; runtime value imports
 // from domains are forbidden by the worker build boundary.
-const SPEC_AUTONOMY_LEVELS = ["read-only", "default", "yolo"] as const satisfies ReadonlyArray<AutonomyLevel>;
 const THINKING_MECHANISMS = ["effort-levels", "budget-tokens", "on-off", "always-on", "none"] as const;
 const THINKING_BUDGET_ENFORCEMENTS = ["enforced", "informational", "none"] as const;
 const THINKING_NOTICE_KINDS = ["applied", "ignored-on-off", "always-on", "unsupported"] as const;
@@ -737,8 +730,8 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 			throw new Error('WorkerSpec.escalation.fallback must be "deny" or "fail"');
 		}
 	}
-	if (spec.autonomy !== undefined) {
-		readEnum(spec.autonomy, "WorkerSpec.autonomy", SPEC_AUTONOMY_LEVELS);
+	if (spec.readOnly !== undefined && typeof spec.readOnly !== "boolean") {
+		throw new Error("WorkerSpec.readOnly must be a boolean");
 	}
 	if (spec.ledger !== undefined) {
 		const ledger = readRecord(spec.ledger, "WorkerSpec.ledger");

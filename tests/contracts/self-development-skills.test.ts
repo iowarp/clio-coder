@@ -62,9 +62,9 @@ for (const worktree of [false, true]) {
 		for (const level of AUTONOMY_LEVELS) {
 			const context = createContextTool({ getCwd: () => nested, skillMarketplace: false });
 			for (const name of CLIO_SELF_DEVELOPMENT_SKILLS) {
-				const pendingSkillPolicy = withModelSkillActivation(undefined, modelMayActivateSkills(level));
+				const pendingSkillPolicy = withModelSkillActivation(undefined, modelMayActivateSkills());
 				const result = await context.run({ scope: "skills", name }, pendingSkillPolicy ? { pendingSkillPolicy } : {});
-				strictEqual(result.kind, modelMayActivateSkills(level) ? "ok" : "error", level);
+				strictEqual(result.kind, modelMayActivateSkills() ? "ok" : "error", level);
 				if (result.kind === "ok") {
 					ok(pendingSkillPolicy?.loadedSkillNames.has(name));
 				} else match(result.message, /only the operator can activate/);
@@ -194,7 +194,6 @@ it("repo guidance tracks actual skill capability, autonomy and turn restrictions
 	match(automatic.systemPrompt, /# Self-development skills/);
 	match(automatic.systemPrompt, /without waiting for a separate skill request/);
 	strictEqual(automatic.systemPrompt.includes("## Establish the actual assignment"), false);
-	match((await prompt(inputs, "read-only")).systemPrompt, /Only the operator activates skills at this autonomy level/);
 	for (const disabled of [
 		{ ...inputs, skillDiscoveryEnabled: false },
 		{ ...inputs, providerSupportsTools: false },

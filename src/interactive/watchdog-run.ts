@@ -51,7 +51,7 @@ export async function runWatchdogReview(trigger: WatchdogTrigger, deps: Watchdog
 		requestOrigin: "internal",
 		// Narrowed below whatever the session holds. A reviewer that could write
 		// would be a second builder nobody admitted.
-		autonomy: "read-only",
+		readOnly: true,
 		...(deps.target ? { target: deps.target } : {}),
 	};
 	const progressBus = deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus;

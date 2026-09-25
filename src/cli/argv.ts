@@ -8,7 +8,7 @@
  */
 
 import chalk from "chalk";
-import type { OperatorAutonomyLevel } from "../domains/safety/autonomy.js";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 
 export function printError(message: string, detail?: string): void {
 	const head = chalk.red("error:");
@@ -78,7 +78,7 @@ export interface GlobalCliFlags {
 	 */
 	panes?: "with" | "without";
 	/** `--autonomy <level>` before any subcommand: one interactive session at that level. */
-	autonomy?: OperatorAutonomyLevel;
+	autonomy?: AutonomyLevel;
 	rest: string[];
 	error?: string;
 }
@@ -141,7 +141,7 @@ export function extractGlobalFlags(
 	let noSkills = false;
 	let demo: boolean | undefined;
 	let panes: "with" | "without" | undefined;
-	let autonomy: OperatorAutonomyLevel | undefined;
+	let autonomy: AutonomyLevel | undefined;
 	const skillPaths: string[] = [];
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];

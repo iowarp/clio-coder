@@ -2,7 +2,7 @@ import { THINKING_LEVELS } from "../core/defaults.js";
 import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
-import { autonomyFromUserInput, type OperatorAutonomyLevel } from "../domains/safety/autonomy.js";
+import { type AutonomyLevel, autonomyFromUserInput } from "../domains/safety/autonomy.js";
 import { globalFlagPositionHint } from "./argv.js";
 
 export interface CliArgDiagnostic {
@@ -30,7 +30,7 @@ export interface RunCliArgs {
 	target?: string;
 	model?: string;
 	thinking?: JobThinkingLevel;
-	autonomy?: OperatorAutonomyLevel;
+	autonomy?: AutonomyLevel;
 	sampling?: RunSamplingArgs;
 	agentId?: string;
 	agentProfile?: string;

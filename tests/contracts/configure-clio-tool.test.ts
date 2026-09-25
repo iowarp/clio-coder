@@ -67,8 +67,6 @@ test("configure_clio rejects stale proposals, cancellation, sensitive paths and 
 	strictEqual(canceled.kind, "ok");
 	strictEqual(readSettings().chat.thinkingLevel, "high");
 	strictEqual(asked, 1);
-	const confined = createConfigureClioTool({ getAutonomy: () => "read-only", askUser: async () => ({ answers: [] }) });
-	strictEqual((await confined.run({ action: "preview", path: "chat.thinkingLevel", value: "high" })).kind, "error");
 });
 
 test("configure_clio refuses autonomy at both levels, including padded values and apply", async (t) => {

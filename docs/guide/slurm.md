@@ -65,7 +65,7 @@ The server also exposes its older tool names (`submit_slurm_job`,
 An MCP server carries one action class for all of its tools, and the server's
 own annotations never choose it. A user-scope declaration gets the class
 `unknown`, and `unknown` asks for one-shot approval in `default`, runs in
-`yolo`, and is denied for internal read-only workers. So with the declaration above in `default`:
+`yolo`, and is denied on read-only dispatched runs. So with the declaration above in `default`:
 
 - `slurm_submit` and `slurm_cancel` always ask before they reach the
   scheduler. A denied call never launches a job.

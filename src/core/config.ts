@@ -15,7 +15,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { OPERATOR_AUTONOMY_LEVELS } from "../domains/safety/autonomy.js";
+import { AUTONOMY_LEVELS } from "../domains/safety/autonomy.js";
 import {
 	ACTIVE_AGENT_AUTOMATION_ROLES,
 	ACTIVE_ROUTING_POSTURES,
@@ -1866,7 +1866,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			const safety = raw.safety;
 			issues.unknownKeys("safety", safety, ["autonomy", "limits", "review"]);
 			if ("autonomy" in safety) {
-				const parsed = expectEnum(issues, "safety.autonomy", safety.autonomy, OPERATOR_AUTONOMY_LEVELS);
+				const parsed = expectEnum(issues, "safety.autonomy", safety.autonomy, AUTONOMY_LEVELS);
 				if (parsed !== undefined) settings.safety.autonomy = parsed;
 			}
 			if ("limits" in safety) {
