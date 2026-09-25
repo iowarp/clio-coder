@@ -254,7 +254,7 @@ covers every method in detail.
 From source, pin the release tag for a reproducible checkout:
 
 ```bash
-git clone --branch v0.5.5 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.5.6 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm run install:local
