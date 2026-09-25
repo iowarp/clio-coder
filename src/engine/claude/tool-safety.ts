@@ -411,7 +411,7 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 				mode,
 				reason:
 					mode === "fail"
-						? `permission required for ${decision.mapped.clioToolName}; workers.onPermission=fail ends this run`
+						? `permission required for ${decision.mapped.clioToolName}; fleet.permissions.mode=fail ends this run`
 						: `permission denied by policy: Claude SDK workers run non-interactively; ${decision.reason}`,
 			},
 		});

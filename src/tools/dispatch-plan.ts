@@ -9,7 +9,7 @@ import { parseWorkerContextProvenance } from "../worker/context-seed.js";
  *
  * A dispatch call is plan-scale when it fans out more than one task, runs a
  * compete topology, applies a compete winner, or places work on a remote
- * fleet node. Supervised autonomy levels route exactly these calls through
+ * fleet node. Default autonomy routes exactly these calls through
  * ONE plan approval: the registry parks the call with the rendered plan as
  * the ask, and approving it approves the whole plan. Yolo never stops;
  * the dispatch tool logs the same artifact's hash into every run's receipt
@@ -109,7 +109,7 @@ export interface DispatchPlanTaskView {
 export interface DispatchPlanView {
 	topology: DispatchPlanTopology;
 	taskCount: number;
-	/** True when this call requires plan approval at supervised autonomy levels. */
+	/** True when this call requires plan approval at default autonomy. */
 	planScale: boolean;
 	tasks: DispatchPlanTaskView[];
 	/**

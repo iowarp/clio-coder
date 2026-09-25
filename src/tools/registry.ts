@@ -681,8 +681,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		}
 		// Stage 2, the autonomy mapping (sd-01 §2.3): the net passed; the level
 		// decides run / ask / deny per action class. Plan-scale dispatch calls
-		// (multi-task, compete, remote node) carry the plan flag so supervised
-		// levels route them through one plan approval.
+		// (multi-task, compete, remote node) carry the plan flag so default
+		// routes them through one plan approval.
 		const dispatchPlan =
 			call.tool === ToolNames.Dispatch
 				? (spec.describeDispatchPlan?.(call.args ?? {}) ?? describeDispatchPlan(call.args))

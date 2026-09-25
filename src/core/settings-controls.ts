@@ -200,7 +200,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 /** Longer, optional guidance shown beneath the one-line description when there is room. */
 export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	autonomy:
-		"Default edits the workspace, dispatches routine work, and runs recognized commands; unfamiliar execution, outward actions, and larger dispatch plans ask. Yolo clears ordinary approval prompts, while damage-control rules and hard path protections still apply.",
+		"Default edits the workspace, dispatches routine work, and runs recognized commands; project scripts, unfamiliar execution, outward actions, access outside the workspace, and larger dispatch plans ask. Yolo clears those approval prompts, while hard blocks, damage-control rules and protected paths still apply.",
 	"defaults.maxTokens":
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
 	"context.toolResultMaxBytes":
@@ -285,8 +285,9 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, string>>> = {
 	autonomy: {
 		default:
-			"edits and dispatches run; recognized commands (tests, lint, build, .clio-coder/safety.yaml entries) run; other commands ask, as do confirmations marked exposure=outward (filing an issue or PR, pushing, releasing)",
-		yolo: "runs without ordinary approval prompts; damage-control rules and hard path protections still apply",
+			"workspace edits and recognized commands (tests, git inspection, trusted .clio-coder/safety.yaml entries) run; project build, lint, typecheck and CI scripts, unfamiliar commands, outward confirmations, access outside the workspace, and larger dispatch plans ask",
+		yolo:
+			"edits, commands, outward confirmations, access outside the workspace and dispatch plans run without asking; hard blocks, damage-control rules and protected paths still apply",
 	},
 	"workers.onPermission": {
 		deny: "a worker permission ask becomes a tool denial; the run continues",

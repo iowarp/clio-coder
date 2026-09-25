@@ -1101,9 +1101,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// Exact, byte-stable denial reasons for the deny/fail postures. Escalate
 	// timeouts and operator denials use their own wording below.
 	const denyReason = (tool: string, actionClass: string): string =>
-		`permission denied by policy: dispatched workers run non-interactively (workers.onPermission=deny); ${tool} requires ${actionClass} confirmation`;
+		`permission denied by policy: dispatched workers run non-interactively (fleet.permissions.mode=deny); ${tool} requires ${actionClass} confirmation`;
 	const failReason = (tool: string, actionClass: string): string =>
-		`permission required for ${tool} (${actionClass}); workers.onPermission=fail ends this run`;
+		`permission required for ${tool} (${actionClass}); fleet.permissions.mode=fail ends this run`;
 
 	interface ActiveEscalation {
 		requestId: string;

@@ -12,10 +12,12 @@ import type { RejectionMessage } from "./rejection-feedback.js";
  *
  * An outward-facing gate parks in default mode and runs in yolo mode.
  *
- * The mapping is pure. The registry (orchestrator and worker) and the ACP
- * delegation mediator are the only consumers; each resolves an `ask`
- * disposition through its own approvals context (interactive park, headless
- * deterministic deny, workers.onPermission, delegation non-stall deny).
+ * The mapping is pure. Its consumers are the tool registry (orchestrator and
+ * worker), the Claude SDK tool-safety bridge, the ACP delegation mediator and
+ * the doctor --deep dry run. Each resolves an `ask` disposition through its
+ * own approvals context: interactive park, headless deterministic deny,
+ * fleet.permissions.mode for workers, delegation non-stall deny, or a
+ * reported verdict.
  */
 
 export const AUTONOMY_LEVELS = ["default", "yolo"] as const;
@@ -60,7 +62,7 @@ export interface AutonomyMappingOptions {
 	/**
 	 * Dispatch-class calls only: true when the call is a plan-scale dispatch
 	 * (multi-task fan-out, compete topology, remote node placement, or winner
-	 * application). Supervised levels route these through ONE plan approval;
+	 * application). Default routes these through ONE plan approval;
 	 * approving the parked call approves the whole plan. Yolo skips the
 	 * stop (the dispatch tool logs the plan into the receipt chain instead).
 	 */
@@ -97,8 +99,7 @@ export function mapAutonomy(
 	// Default grants workspace action without granting outward publication.
 	if (level === "default" && options.exposure === "outward") return "ask";
 	// The workspace is what the operator handed over. A read, listing, or
-	// search aimed outside it asks at every supervised level and runs at
-	// yolo.
+	// search aimed outside it asks at default and runs at yolo.
 	if (actionClass === "read" && options.readOutsideWorkspace === true && level !== "yolo") {
 		return "ask";
 	}
@@ -167,12 +168,12 @@ export function autonomyAskRejection(
 			"The call is parked until the operator approves it once or cancels it.",
 		hints: [
 			"Approving resumes only this call.",
-			"The operator can approve command declarations in .clio-coder/safety.yaml; declarations do not bypass the autonomy level or safety net.",
 			// Offer available tools without promising that changing the tool
 			// spelling bypasses the execution approval or a safety-net rail.
 			...(actionClass === "execute"
 				? [
-						'For a declared check, use verify(check="<id>"). Recognized test commands can run without an autonomy prompt; other checks may still require safety-net confirmation.',
+						"A command the operator declares in .clio-coder/safety.yaml, once that file is approved with clio-coder config trust safety, runs without this prompt; the safety net still applies.",
+						'For a declared check, use verify(check="<id>"). Recognized test commands run without this prompt; other checks still ask at default.',
 						"Workspace inspection can use the ls, read, grep, and find tools; path protections and safety-net rules still apply.",
 					]
 				: []),

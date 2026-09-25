@@ -15,7 +15,7 @@ test("no-edit convention scope reaches yolo prompts with mutation tools availabl
 		},
 	}).systemPrompt;
 	match(prompt, /"Do not edit files" includes CLIO-CODER\.md and all repository files/u);
-	match(prompt, /Yolo authority does not expand task scope/u);
+	match(prompt, /Available tools never widen task scope/u);
 	match(prompt, /handoff export, shell write, or delegated\nedit/u);
 	match(prompt, /If the entry is absent, report that limit/u);
 	match(prompt, /where writes\nare authorized/u);

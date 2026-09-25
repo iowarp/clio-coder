@@ -1,158 +1,91 @@
 # Clio Coder Safety Model
 
-`createSafetyPolicyEngine` in [policy-engine.ts](../../src/domains/safety/policy-engine.ts) evaluates tool admission. The [tool usage guide](../guide/tool-usage.md) shows the operator surface.
+`createSafetyPolicyEngine` in [policy-engine.ts](../../src/domains/safety/policy-engine.ts) decides what a tool call may do. The tool registry in [registry.ts](../../src/tools/registry.ts) applies that decision and then the autonomy mapping in [autonomy.ts](../../src/domains/safety/autonomy.ts). The [tool usage guide](../guide/tool-usage.md) shows the operator surface.
 
-This document specifies the security, admission control, and execution safety architecture of Clio Coder across [src/domains/safety/](../../src/domains/safety/index.ts) and [src/tools/](../../src/tools/registry.ts).
+Safety is enforced by code, not by the prompt. The session prompt describes the rules, and the registry enforces them whether or not the model followed that description.
 
-The core thesis of Clio's safety model is that **agent safety must be code-enforced, not prompt-dependent**. Language models cannot reliably self-govern through system instructions alone. Clio interposes deterministic code gates between the language model's intent and actual system execution, enforcing containment, privilege minimization, path canonicalization, and explicit operator consent.
+## What this is not
 
----
+Clio gates tool calls before they run. It is not an operating-system sandbox. Commands, hooks and external agents run with the operator's own permissions. Environment filtering narrows what a child process inherits; it does not isolate the child.
 
-## 1. Process Isolation Boundary
+## Autonomy
 
-Clio's safety architecture provides admission control and execution gating; **it is not an operating-system kernel sandbox**.
+Autonomy is the operator's grant to the main agent. There are two levels:
 
-Child processes, tool executions, and external agent bridges run with the permissions of the host user executing Clio. While Clio strictly inspects, rewrites, and gates actions before execution, environment variable filtering is an allowlist/denylist mechanism and cannot guarantee total isolation from arbitrary local host state. Operators must review privileged operations before granting standing approvals.
+- `default` runs workspace reads, edits and recognized commands. Other commands, outward actions, access outside the workspace, system changes and plan-scale dispatch ask the operator.
+- `yolo` is the same agent without those ordinary stops. It never outranks the safety net: hard blocks, damage-control rules and protected paths hold at both levels.
 
----
+Only the operator sets the level, through the user `settings.yaml`, `/settings`, `clio-coder configure`, `--autonomy`, or the session mode of an ACP client. Project settings layers cannot set it, and no tool, skill, worker or model output can raise it. Every dispatched worker runs at `default`, whatever the session level.
 
-## 2. The Dual-Axis Security Model
+| Action | `default` | `yolo` |
+| --- | --- | --- |
+| Read, list or search inside the workspace | runs | runs |
+| Read, list or search outside the workspace | asks | runs |
+| Write or edit inside the workspace | runs | runs |
+| Write outside the workspace, or another `system_modify` action | asks | runs |
+| Recognized command: a built-in test runner or inspection command, a `&&` chain of them, or a command declared in a trusted `.clio-coder/safety.yaml` | runs | runs |
+| Any other command: project build, lint, typecheck and CI scripts, `$(...)`, pipes, redirects | asks | runs |
+| Outward action: `ask_user` with `exposure: outward`, or `web_fetch` other than a bodiless GET or HEAD | asks | runs |
+| Plan-scale dispatch: several tasks, a compete, a remote node, or applying a compete winner | asks once for the whole plan | runs, and the plan hash is sealed into each receipt |
+| Damage-control confirmation rule | asks | asks |
+| Hard block | blocked | blocked |
 
-Clio evaluates every proposed action along two orthogonal axes: **Autonomy** and the **Safety Net**.
+A read-only run is a dispatch restriction, not a level. Reviewer, judge and council roles, `/oracle`, the watchdog verifier, fleet `scope: readonly`, recipes with `capabilityClass: read-only`, and the operator's `--read-only` flag set it. The registry then denies every call that is not a read inside the workspace, and the model cannot load a skill.
 
-```
-                           Safety Net (Damage Control & Policy)
-                               ▲
-                               │  [Hard Blocked: rm -rf /, disk wipes]
-                               │
-                               │  [Confirm Required: matched damage-control ask rules]
-                               │
-                               │  [Admitted Non-Destructive]
-                               ┼────────────────────────────────────────► Autonomy Axis
-                       default (supervised)                yolo
-```
+## The safety net
 
-### 2.1 The Autonomy Axis (Delegation Dial)
-Autonomy governs when the agent may act automatically versus when it must request operator confirmation:
+The policy engine checks a call in this order, and the first block wins:
 
-| Autonomy Level | Read Workspace | Mutate Files | Shell Commands | Network Calls |
-| :--- | :--- | :--- | :--- | :--- |
-| `default` | Allowed | Allowed (in write roots) | Unrecognized commands ask* | Outward calls ask |
-| `yolo` | Allowed | Allowed (in write roots) | Allowed unless blocked by damage control | Allowed unless blocked by damage control |
+1. Write-root confinement. When a run declares `write_roots`, a write outside them is blocked, and so are commands and dispatch, which could write anywhere.
+2. Damage-control blocks from [damage-control-rules.yaml](../../damage-control-rules.yaml), and any `git_destructive` command that no ask rule covers.
+3. An approved `.clio-coder/safety.yaml` that is invalid. Execution tools fail closed until it is fixed.
+4. Operator authority. A tool cannot grant workspace trust, change Clio's `settings.yaml` or the workspace trust records, or change installed skills, plugins and extensions outside the operator CLI.
+5. Path policy. Zero-access paths, such as `.env`, `~/.ssh/`, `*.pem`, `credentials.yaml` and `.git/config`, are neither read nor written, and a bash command that names one is blocked. Read-only paths, such as `.clio-coder/safety.yaml`, `.clio-coder/verifiers.yaml`, installed resource directories and system directories, are never written.
+6. Confirmation rails. A damage-control ask rule asks at both levels. Library changes, system changes and the ordinary command rails ask at `default` and pass at `yolo`.
 
-*Test Runner Recognition*: Standard test suites (`npm test`, `pytest`, `cargo test`, `go test`) run without confirmation in `default`.
+The registry then applies the read-only restriction, the turn's allowed tools and any skill's tool narrowing, and last the autonomy mapping in the table above.
 
-Every dispatched worker runs at `default`. A read-only dispatch restricts the run to inspection inside the workspace.
+Paths are judged after links and a physical `..` are resolved, so a link cannot carry a read or a write out of scope unnoticed ([read-scope.ts](../../src/domains/safety/read-scope.ts)).
 
-### 2.2 The Safety Net (Invariant Policy)
-The safety net operates independently of the autonomy dial:
-- **Hard Blocks**: Actions that are permanently forbidden regardless of autonomy level (e.g., recursive deletion of root or home, writing to block devices, fork bombs).
-- **Confirmation Rails**: Ordinary confirmation asks are skipped in `yolo`. A damage-control rule can still require approval at either operator mode.
+A project `.clio-coder/safety.yaml` can declare commands and path entries, but it takes effect only after the operator approves its exact bytes with `clio-coder config trust safety`. See [Commands and modes](../guide/commands-and-modes.md#project-trust).
 
-### 2.3 Advisory Presentation vs Authoritative Code
-- **Consequence Tiers** (`low`, `medium`, `high`, `critical`) are purely advisory visual signals rendered in the TUI to inform human judgment.
-- **Authority**: Access control decisions are evaluated strictly by code in [src/domains/safety/policy-engine.ts](../../src/domains/safety/policy-engine.ts); the model's self-assessed risk score never grants execution authority.
+### Damage-control rules
 
----
+Hard blocks include recursive or forced `rm`, `sudo rm`, `find -delete`, `rsync --delete`, `shred`, `chmod 777`, `dd` to a device, `mkfs`, fork bombs, forced process kills, clearing shell history, force pushes, `git reset --hard`, `git clean` on directories, stash and reflog destruction, `git filter-branch`, `curl` or `wget` piped to a shell, writes to system roots, cloud deletion commands (AWS, gcloud, Firebase, Vercel, Netlify, Wrangler), and SQL `DROP`, `TRUNCATE` and unbounded `DELETE`.
 
-## 3. Policy Engine Evaluation Pipeline
+Confirmation rules ask at both levels: `git checkout -- .`, `git restore .`, `git stash drop`, `git branch -D`, deleting a remote branch with `git push`, `gcloud iam policies`, SQL `DELETE` by id, `truncate -s 0`, and `:>`.
 
-Every tool invocation—whether from the primary orchestrator or a background worker—passes through a deterministic 10-step evaluation sequence before execution:
+## Approvals
 
-```mermaid
-flowchart TD
-    A["Tool Call Issued"] --> B["1. Tool Registration & Class Check"]
-    B --> C["2. Skill Surface Narrowing Gating"]
-    C --> D["3. Path Containment & Symlink Resolution"]
-    D --> E["4. Write Roots Verification"]
-    E --> F["5. Damage-Control Pattern Matching"]
-    F --> G["6. Project Safety Policy Check (.clio-coder/safety.yaml)"]
-    G --> H["7. Autonomy Level Mapping"]
-    H --> I{"Requires Approval?"}
-    I -- Yes --> J["Park for Operator Consent (One-Shot RequestId)"]
-    I -- No --> K["Execute Tool"]
-    J -- Approved --> K
-    J -- Denied --> L["Refuse Call with Diagnostic"]
-```
+A parked call carries a one-shot request id. Approving it resumes only that call and grants nothing standing. The approval card explains a decision already made; it never changes the decision. Who answers depends on the surface:
 
-<details>
-<summary>The 10-step evaluation sequence in detail</summary>
+- The TUI: the operator, in the approval card.
+- An ACP client, the GUI included: the client's own permission request, answered by its operator.
+- A headless `clio-coder run`: nobody is attached, so every ask is denied, and the session prompt says so.
+- A dispatched worker: `fleet.permissions.mode`. `deny`, the default, turns the ask into a tool denial and the run continues; `fail` ends the run as `permission_required`; `escalate` forwards the ask to the operator and falls back to `deny` or `fail` on timeout.
+- An ACP delegation peer: the mediator denies the ask without stalling.
 
-1. **Tool Registration**: Verifies the tool is registered in the active tool plane.
-2. **Skill Narrowing**: Gated against active `allowed-tools` if a skill is armed.
-3. **Protected Paths**: Confirms target paths do not touch `.git/`, `.clio-coder/`, or system directories.
-4. **Symlink Traversal**: Resolves every intermediate symlink to prevent directory breakout.
-5. **Write Roots**: Verifies file mutation targets fall inside declared repository write boundaries.
-6. **Damage Control**: Scans command strings against `damage-control-rules.yaml`.
-7. **Project Policy**: Evaluates local rules in `.clio-coder/safety.yaml`.
-8. **Autonomy Mapping**: Evaluates the action class against the session's active autonomy level.
-9. **One-Shot Approval**: If confirmation is required, mints an isolated `requestId`.
-10. **Execution & Receipt Sealing**: Executes the action and appends the outcome to the audit log.
+## Workers
 
-</details>
+- Every worker runs at `default`. A read-only dispatch adds the restriction above.
+- A task that declares `write_roots` is confined to them and cannot run commands or dispatch.
+- A task with `worktree: true` runs in its own git worktree at `.clio-coder/worktrees/<runId>/` on branch `clio-coder/task/<runId>`. See [Fleet dispatch](../guide/fleet-dispatch.md#worktree-per-task).
+- A checkout writer lease lets one Clio process at a time dispatch workspace-edit workers into a checkout. A second process is refused with `checkout_writer_lease_held` ([checkout-writer-lease.ts](../../src/domains/dispatch/checkout-writer-lease.ts)).
 
----
+## Evidence and the finish contract
 
-## 4. Path Canonicalization & Symlink Invariants
+- The finish contract ([finish-contract.ts](../../src/domains/safety/finish-contract.ts)) checks the end of a turn that changed files. It looks for validation evidence, such as a validation command that ran or a dispatch receipt, or for a `limitation` receipt. With neither, the model receives an advisory to report the change as unverified.
+- Checks named in a dispatch's `verification` run on the host after the worker finishes. The worker's report is a claim until then.
+- Each receipt carries a SHA-256 digest over the receipt and its ledger row. Verification recomputes it, so an edited receipt fails. The digest detects tampering; it is not a signature.
 
-Path traversal vulnerabilities are a primary attack vector for autonomous agents. Clio enforces strict kernel-aligned path resolution:
+## Source map
 
-- **Component-by-Component Resolution**: Every intermediate directory component is checked for symlink traversal before resolving subsequent segments.
-- **Kernel-Aligned `..` Traversal**: Traversing `..` after a symlink resolves relative to the *target* directory where the symlink points, exactly as the Linux/POSIX kernel resolves it, preventing sandbox escape via crafted link chains.
-- **Write Root Boundaries**: Mutations are strictly confined to declared `write_roots`. Writes attempting to navigate outside the project checkout fail closed immediately.
-
----
-
-## 5. Semantic Shell Admission & Damage Control
-
-Shell commands executed via `bash` undergo structural parsing and pattern scanning before process spawning:
-
-### 5.1 Damage Control Rules (`damage-control-rules.yaml`)
-- **Permanently Blocked**:
-  - Root/home deletion (`rm -rf /`, `rm -rf ~`, `rm -rf $HOME`).
-  - Raw filesystem or partition operations (`dd`, `mkfs`, `fdisk`).
-  - Remote payload execution (`curl ... | sh`, `wget ... | bash`).
-  - Dangerous permission mutations (`chmod -R 777 /`).
-- **Confirmation Required**:
-  - Network commands (`curl`, `wget`, `ssh`, `rsync`).
-  - Git destructive operations (`git push --force`, `git reset --hard`).
-  - System daemon modification (`systemctl`, `service`).
-
-### 5.2 Shell AST & Argument Inspection
-Clio parses bash command syntax to detect evasion tactics:
-- **Redirection Gating**: Inspects write redirection targets (`> /etc/hosts`, `>> ~/.bashrc`).
-- **Chained Navigation**: When commands chain directories (`cd /tmp && rm *`), Clio resolves paths relative to the intermediate working directory.
-- **Variable Expansion**: Commands attempting unexpanded environment writes prompt for verification.
-
----
-
-## 6. Worker Isolation & Subagent Permissions
-
-When tasks are delegated to background workers:
-
-- **Worker Autonomy**: Every dispatched worker runs at `default`, regardless of the main agent's level. A read-only dispatch adds a restriction on its tool calls.
-- **Write-Scope Confinement**: Workers are restricted to the task's declared `write_roots`.
-- **Git Worktree Isolation**: Concurrent workers execute inside dedicated git worktrees (`.clio-coder/worktrees/<runId>/` on branch `clio/task/<runId>`). This prevents race conditions and corrupted working trees.
-- **Checkout Writer Leases**: Single-writer tokens ensure only one worker at a time can merge or write to the primary repository checkout.
-
----
-
-## 7. Rigor Gates & Deterministic Finish Contracts
-
-Safety in Clio extends beyond preventing destructive actions to ensuring **computational correctness and honesty**:
-
-- **Finish Contract Assessor**: High-stakes tasks require explicit verification contracts (`tasks[].intent.verification`).
-- **Host-Run Checks**: Verification checks (`npm test`, typecheck, lint) are executed by the orchestrator host environment, not self-reported by the model.
-- **Evidence Bundles**: Results are sealed into cryptographic evidence bundles recording exit codes, duration, and output hashes before a task is marked `verified`.
-
----
-
-## 8. Source Implementation Map
-
-| Security Component | Source Location | Key Contracts |
+| Component | Source | Key contracts |
 | :--- | :--- | :--- |
-| Policy engine and gating | [policy-engine.ts](../../src/domains/safety/policy-engine.ts) | `createSafetyPolicyEngine` |
-| Damage control rules | [damage-control.ts](../../src/domains/safety/damage-control.ts) | `match` |
+| Policy engine | [policy-engine.ts](../../src/domains/safety/policy-engine.ts) | `createSafetyPolicyEngine` |
+| Autonomy mapping | [autonomy.ts](../../src/domains/safety/autonomy.ts) | `mapAutonomy`, `autonomyAskRejection` |
+| Tool admission | [registry.ts](../../src/tools/registry.ts) | `createRegistry` |
+| Damage-control rules | [damage-control.ts](../../src/domains/safety/damage-control.ts) | `match` |
 | Read scope checks | [read-scope.ts](../../src/domains/safety/read-scope.ts) | `readScopeEscape`, `readScopeSpellings` |
 | Audit records | [audit.ts](../../src/domains/safety/audit.ts) | `buildAuditRecord`, `openAuditWriter` |
 | Finish contract and rigor | [finish-contract.ts](../../src/domains/safety/finish-contract.ts) | `assessFinishContract` |

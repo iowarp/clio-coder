@@ -523,7 +523,13 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				const input = {
 					ruleId: "library-confirm",
 					reasonCode: "library-confirm",
-					reasons: ["Library changes require one-shot operator confirmation"],
+					reasons: [
+						posture === "confirmed"
+							? "library change confirmed by operator"
+							: posture === "yolo"
+								? "library change admitted by yolo"
+								: "library changes require one-shot operator confirmation in default",
+					],
 					policySource: "builtin-classifier" as const,
 				};
 				return posture === "confirmed" || posture === "yolo" ? allowDecision(base, input) : askDecision(base, input);
@@ -558,7 +564,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				> = {
 					ruleId: "system-modify-confirm",
 					reasonCode: "system-modify-confirm",
-					reasons: [...classification.reasons, "system-level changes require one-shot confirmation at every autonomy level"],
+					reasons: [
+						...classification.reasons,
+						posture === "confirmed"
+							? "system-level change confirmed by operator"
+							: posture === "yolo"
+								? "system-level change admitted by yolo"
+								: "system-level changes require one-shot confirmation in default",
+					],
 					policySource: "builtin-classifier",
 				};
 				return posture === "confirmed" || posture === "yolo" ? allowDecision(base, input) : askDecision(base, input);
@@ -903,7 +916,7 @@ function evaluateBashPolicy(
 			reasonCode: "project-script-autonomy",
 			ruleId: projectScript.id,
 			reasons: [
-				"Repository-authored validation code is admitted by autonomy after safety checks; supervised levels ask unless a safety command declaration approves it.",
+				"Repository-authored validation code passed the safety checks; default asks for it unless a trusted safety command declaration approves it, and yolo runs it.",
 				projectScriptPreview(recognitionCommand, callCwd),
 			],
 			policySource: "builtin-command-allowlist",
@@ -951,7 +964,7 @@ function evaluateBashPolicy(
 	// Remaining sequencing operators (pipes, ;, redirects, and && chains with an
 	// unrecognized member) defeat per-command recognition, so the command is
 	// unrecognized by definition: the autonomy mapping asks in default,
-	// runs in yolo, and denies for internal read-only workers. The rule pack scanned
+	// runs in yolo, and is denied in a read-only run. The rule pack scanned
 	// the full string, so a destructive verb behind an operator was caught before
 	// this point.
 	if (hasSequencingOperators(command)) {
