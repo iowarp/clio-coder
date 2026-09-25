@@ -69,7 +69,7 @@ describe("harness extension package boundary", () => {
 			version: "1.0.0",
 			description: "Domain workflow that belongs in a plugin.",
 		};
-		for (const key of ["resources", "prompts", "skills", "agents", "fleets", "themes"] as const) {
+		for (const key of ["resources", "prompts", "skills", "agents", "fleets"] as const) {
 			const parsed = parseExtensionManifest({ ...base, [key]: "prompts" }, "/fixture/clio-coder-extension.yaml");
 			strictEqual(parsed.manifest, undefined);
 			ok(

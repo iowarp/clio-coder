@@ -30,7 +30,6 @@ export function buildPluginSnapshot(cwd = process.cwd(), snapshotGeneration = 0)
 		prompts: [],
 		agents: [],
 		fleets: [],
-		themes: [],
 	};
 	for (const item of packages) {
 		if (!item.loadable || !item.provenance) continue;

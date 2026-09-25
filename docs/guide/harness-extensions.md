@@ -69,7 +69,7 @@ Schemas support `type`, `description`, `properties`, `required`, `additionalProp
 
 Qualified names use `extension_<id>__<name>` and must fit 64 characters. Package IDs use provider-safe lowercase letters, numbers, single underscores, and hyphens; local tool names start with a letter and use lowercase letters, numbers, and single underscores. Duplicate and colliding tool registrations are refused.
 
-The manifest keys are `id`, `name`, `version`, `description`, `capabilities`, `compatibility`, and optional `runtime` (described below). A manifest naming `resources`, `prompts`, `skills`, `agents`, `fleets`, or `themes` is invalid, and the diagnostic points at `clio-coder library install <path>`. `capabilities` is optional: a package whose only contribution is a root `hooks.yaml` is a valid harness extension with no command tools.
+The manifest keys are `id`, `name`, `version`, `description`, `capabilities`, `compatibility`, and optional `runtime` (described below). A manifest naming `resources`, `prompts`, `skills`, `agents`, or `fleets` is invalid, and the diagnostic points at `clio-coder library install <path>`. `capabilities` is optional: a package whose only contribution is a root `hooks.yaml` is a valid harness extension with no command tools.
 
 ## Admission and lifecycle
 

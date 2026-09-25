@@ -592,31 +592,6 @@ export function validateLibraryPackage(
 		}
 	}
 
-	// ---------------------------------------------------------------------------
-	// 6. Themes
-	// ---------------------------------------------------------------------------
-	if (declaredResources.themes !== undefined) {
-		const themesDir = pluginResourcePath(resolved, declaredResources.themes);
-		const exists = existsSync(themesDir) && statSync(themesDir).isDirectory();
-		resources.push({
-			kind: "theme",
-			name: path.basename(themesDir),
-			path: normalizePathRel(resolved, themesDir),
-			valid: exists,
-			diagnostics: exists
-				? []
-				: [
-						{
-							severity: "error",
-							code: "ERR_THEME",
-							message: `declared themes resource root directory does not exist: ${declaredResources.themes}`,
-							path: themesDir,
-							kind: "theme",
-						},
-					],
-		});
-	}
-
 	const contentValid = !contentDiagnostics.some((d) => d.severity === "error");
 	const valid = true && contentValid;
 

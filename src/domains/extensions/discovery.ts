@@ -13,7 +13,7 @@ const COMPATIBILITY_KEYS = new Set(["clio"]);
  * Keys a domain package used to declare here. They are named so the refusal
  * points at the plugin installer instead of reading as a typo.
  */
-const PLUGIN_OWNED_KEYS = new Set(["resources", "skills", "prompts", "agents", "fleets", "themes"]);
+const PLUGIN_OWNED_KEYS = new Set(["resources", "skills", "prompts", "agents", "fleets"]);
 const PLUGIN_GUIDANCE = "domain resources belong in a plugin: clio-coder library install <path>";
 
 function compareNames(a: { name: string }, b: { name: string }): number {

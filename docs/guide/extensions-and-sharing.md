@@ -214,7 +214,7 @@ capabilities:
 
 Required fields are `id`, `version`, and `description`. `name` defaults to `id` when absent. `capabilities` is optional, so a package whose only contribution is a root `hooks.yaml` is valid. The command-tool contract lives in [harness-extensions.md](harness-extensions.md).
 
-A manifest that declares `resources`, `prompts`, `skills`, `agents`, `fleets`, or `themes` is invalid. Those are plugin content, and the diagnostic says so: install the bundle with `clio-coder library install <path>` instead.
+A manifest that declares `resources`, `prompts`, `skills`, `agents`, or `fleets` is invalid. Those are plugin content, and the diagnostic says so: install the bundle with `clio-coder library install <path>` instead.
 
 IDs must be lowercase and may include numbers, dots, underscores, and hyphens; they must start/end alphanumeric.
 
