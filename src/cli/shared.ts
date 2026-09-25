@@ -14,7 +14,6 @@ export {
 	formatColumns,
 	parseFlags,
 	printError,
-	printHeader,
 	printNote,
 	printOk,
 } from "./argv.js";

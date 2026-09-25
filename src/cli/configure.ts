@@ -162,9 +162,6 @@ interface ParsedArgs {
 	quick: boolean;
 	settings: boolean;
 	section?: string;
-	remove?: string;
-	renameOld?: string;
-	renameNew?: string;
 	id?: string;
 	runtime?: string;
 	url?: string;
@@ -241,13 +238,6 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			case "--interop":
 				out.interop = true;
-				break;
-			case "--remove":
-				out.remove = need();
-				break;
-			case "--rename":
-				out.renameOld = need();
-				out.renameNew = need();
 				break;
 			case "--id":
 				out.id = need();
@@ -2336,8 +2326,6 @@ export async function runConfigureCommand(
 		const rl = new ConfigurePrompts(inStream, outStream);
 		return runInteropReview({ rl, streams: { in: inStream, out: outStream } });
 	}
-	if (args.remove) return runTargetRemove(args.remove);
-	if (args.renameOld && args.renameNew) return runTargetRename(args.renameOld, args.renameNew);
 
 	if (args.positional.length > 0) {
 		printError(
