@@ -10,6 +10,7 @@ import type { MessageEntry, SessionEntry } from "../../src/domains/session/entri
 import { HANDOFF_SEED_CUSTOM_TYPE } from "../../src/domains/session/handoff.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { resolvedRequestContext } from "../../src/engine/context.js";
+import { retireActiveUserContextForNextOperator } from "../../src/interactive/chat-renderer.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 
@@ -214,6 +215,41 @@ describe("compaction working-set provider boundary", () => {
 		});
 		strictEqual(result.firstKeptTurnId, "new-user");
 		strictEqual(result.userContext, undefined);
+	});
+
+	it("retires an active checkpoint request at the next operator turn without another compaction", () => {
+		const entries = chain([
+			message("old-user", "user", { text: "Fix the seed." }),
+			message("old-answer", "assistant", { text: "Seed fix complete." }),
+			{
+				kind: "compactionSummary",
+				turnId: "checkpoint",
+				parentTurnId: null,
+				timestamp,
+				summary: "Seed fix in progress.",
+				firstKeptTurnId: "old-answer",
+				tokensBefore: 10000,
+				messagesSummarized: 1,
+				userContext: { turnId: "old-user", text: "Fix the seed." },
+			},
+			message("tail", "assistant", { text: "Checkpoint carried forward." }),
+		]);
+		const live = buildModelReplayAgentMessagesFromTurns(entries);
+		match(JSON.stringify(live), /Active user instructions \(verbatim\):\\nFix the seed/);
+		const synthetic = { ...message("middleware", "user", { text: "Continue.", synthetic: true }), parentTurnId: "tail" };
+		match(
+			JSON.stringify(buildModelReplayAgentMessagesFromTurns([...entries, synthetic])),
+			/Active user instructions \(verbatim\):\\nFix the seed/,
+		);
+		const next = { ...message("next-user", "user", { text: "Review the screenshot." }), parentTurnId: "tail" };
+		doesNotMatch(
+			JSON.stringify(retireActiveUserContextForNextOperator(live, [...entries, next])),
+			/Active user instructions \(verbatim\):\\nFix the seed/,
+		);
+		doesNotMatch(
+			JSON.stringify(buildModelReplayAgentMessagesFromTurns([...entries, next])),
+			/Active user instructions \(verbatim\):\\nFix the seed/,
+		);
 	});
 
 	it("does not treat middleware continuation rows as operator requests", async () => {
