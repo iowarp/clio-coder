@@ -901,8 +901,10 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	// Manual compaction has no live active-turn hint after a turn settles.
 	// Preserve the latest operator request if the split removes it as well.
 	let activeUserIndex = -1;
+	let latestUserIndex = -1;
 	for (let index = entries.length - 1; index >= 0; index--) {
 		const entry = entries[index];
+		if (entry?.kind === "message" && entry.role === "user" && latestUserIndex === -1) latestUserIndex = index;
 		if (
 			entry?.kind === "message" &&
 			entry.role === "user" &&
@@ -912,6 +914,10 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 			break;
 		}
 	}
+	// A checkpoint's verbatim request belongs to its original turn. Once a new
+	// user turn exists, replay must not present the old request as still active.
+	if (userContext && latestUserIndex >= 0 && entries[latestUserIndex]?.turnId !== userContext.turnId)
+		userContext = undefined;
 	const activeUser =
 		activeUserIndex >= 0 && activeUserIndex < cut.firstKeptEntryIndex ? entries[activeUserIndex] : undefined;
 	if (activeUser?.kind === "message" && activeUser.payload && typeof activeUser.payload === "object") {

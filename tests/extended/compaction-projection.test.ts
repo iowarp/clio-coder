@@ -187,6 +187,35 @@ describe("compaction working-set provider boundary", () => {
 		);
 	});
 
+	it("drops verbatim instructions from a completed turn when a newer user turn is retained", async () => {
+		const newUser = message("new-user", "user", { text: "Review the screenshot." });
+		const tail = message("new-tail", "assistant", { text: "Inspecting the screenshot." });
+		const entries = chain([
+			message("old-user", "user", { text: "Fix the seed." }),
+			message("old-assistant", "assistant", { text: "Seed fix complete." }),
+			{
+				kind: "compactionSummary",
+				turnId: "prior",
+				parentTurnId: null,
+				timestamp,
+				summary: "Prior work complete.",
+				firstKeptTurnId: "old-assistant",
+				tokensBefore: 10000,
+				userContext: { turnId: "old-user", text: "Fix the seed." },
+			},
+			message("older-work", "assistant", { text: "Earlier evidence ".repeat(1000) }),
+			newUser,
+			tail,
+		]);
+		const result = await compact({
+			entries,
+			model: model(),
+			keepRecentTokens: estimateTokens(newUser) + estimateTokens(tail),
+		});
+		strictEqual(result.firstKeptTurnId, "new-user");
+		strictEqual(result.userContext, undefined);
+	});
+
 	for (const cancelBeforeCall of [true, false]) {
 		it(`rejects cancellation ${cancelBeforeCall ? "before invocation" : "before accepting a late summary"}`, async () => {
 			const controller = new AbortController();
