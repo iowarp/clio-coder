@@ -117,6 +117,9 @@ All symbols are defined in [src/interactive/theme/glyphs.ts](../../src/interacti
 | `│` | `rail` | `frame` | Rail | Island sides, column separators. |
 | `╌` | `innerDivider` | `frame` | Inner divider | Rows inside an island. |
 | `…` | `ellipsis` | inherits | Cut | Every truncation. |
+| `↺` | `recent` | `dim` | Recently used | Model picker mark column. |
+| `━` `─` | `meterFull` `meterEmpty` | by meter | Meter cells | Quota and resource bars. |
+| `→` | `next` | inherits | Next step | Dashboard page order, key chords. |
 
 Trust verdicts on a dispatch card print `✓` for reviewed and `✗` for compromised; grounded and unverified print the verdict word alone, because a diamond on that line would read as an origin.
 
