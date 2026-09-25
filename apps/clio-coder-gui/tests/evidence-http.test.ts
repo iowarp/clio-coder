@@ -80,6 +80,9 @@ test("real CLI builds evidence once per key, follows typed storage, and rechecks
 		assert.equal(operation.status, "succeeded", JSON.stringify(operation));
 		assert.ok(operation.status === "succeeded" && "kind" in operation.result && operation.result.kind === "evidence");
 		assert.equal(operation.result.artifact.overview.source.kind, "run");
+		// A collected bundle is refused until a listing serves it, so the GUI must not
+		// link its detail straight from the operation result.
+		assert.equal((await h.request(`/api/evidence/${operation.result.id}`)).status, 403);
 		assert.equal((await json(await h.request("/api/evidence?limit=100"), EvidencePage)).items.length, 41);
 		const verify = async () => {
 			const accepted = await json(
