@@ -30,7 +30,7 @@ test("the narrow footer gives the model a readable row with context anchored at 
 
 test("narrow context reports unknown, estimated and saved occupancy without inventing measurements", () => {
 	const state = footerState();
-	state.context.budget = { revision: 1, historical: false, inputSource: "estimated" };
+	state.context.budget = { revision: "1", historical: false, inputSource: "estimated" };
 	state.context.used = 50_000;
 	state.context.contextWindow = 100_000;
 	for (const width of [40, 60]) {
@@ -38,13 +38,13 @@ test("narrow context reports unknown, estimated and saved occupancy without inve
 		match(row, /ctx ~50\.0%$/);
 		ok(visibleWidth(row) <= width);
 	}
-	state.context.budget = { revision: 2, historical: true, inputSource: "historical" };
+	state.context.budget = { revision: "2", historical: true, inputSource: "historical" };
 	match(stripTerminalSequences(renderCompactDashboard(state, 60)[0] ?? ""), /ctx saved 50\.0%$/);
 	state.context.used = null;
-	state.context.budget = { revision: 3, historical: false, inputSource: "unknown" };
+	state.context.budget = { revision: "3", historical: false, inputSource: "unknown" };
 	match(stripTerminalSequences(renderCompactDashboard(state, 60)[0] ?? ""), /ctx \?%$/);
 	state.context.used = 0;
-	state.context.budget = { revision: 4, historical: false, inputSource: "estimated" };
+	state.context.budget = { revision: "4", historical: false, inputSource: "estimated" };
 	match(stripTerminalSequences(renderCompactDashboard(state, 60)[0] ?? ""), /ctx ~0\.0%$/);
 });
 
