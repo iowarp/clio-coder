@@ -384,22 +384,23 @@ is refused outright rather than accepted and left unenforced.
 Removing the inference fallback requires a later explicit issue. This is the
 gate that issue has to clear, and it is measured rather than argued.
 
-`pathScope.mode` is sealed on every receipt, so the share of dispatches still
-resolving policy-bearing scope from prose is a fact in the evidence store. No
-code computes that share today; this is planned work for the retirement issue.
-The measurement must read nothing but that mode field, so the aggregate is safe
-to report from receipts whose prose must not be quoted. The two bounds are
-declared in [intent-compatibility.ts](../../src/domains/dispatch/intent-compatibility.ts).
+Receipts written since 0.5.6 no longer carry `pathScope`, so the share of
+dispatches still resolving policy-bearing scope from prose is not in the
+evidence store today. Measuring it is planned work for the retirement issue:
+that issue must record the resolved mode again and read nothing but that mode,
+so the aggregate stays safe to report from records whose prose must not be
+quoted. The two bounds are declared in
+[intent-compatibility.ts](../../src/domains/dispatch/intent-compatibility.ts).
 
-The criterion is met when, over a window of receipts:
+The criterion is met when, over a window of dispatches:
 
-- at least `DISPATCH_INTENT_RETIREMENT_MIN_SAMPLE` (200) receipts carry a
-  resolved `pathScope`, and
-- at most `DISPATCH_INTENT_RETIREMENT_MAX_LEGACY_SHARE` (2%) of them have
-  `mode: "legacy-inferred"`.
+- at least `DISPATCH_INTENT_RETIREMENT_MIN_SAMPLE` (200) dispatches carry a
+  recorded resolution mode, and
+- at most `DISPATCH_INTENT_RETIREMENT_MAX_LEGACY_SHARE` (2%) of them resolved
+  as `legacy-inferred`.
 
-A window with no measured receipts must never count as ready, so an empty
-evidence store cannot read as full adoption. The producer
+A window with no measured dispatches must never count as ready, so an empty
+record cannot read as full adoption. The producer
 rows in section 3 marked **None today** are the concrete work that has to land
 before the share can fall: each is a producer that cannot currently declare, so
 each one contributes to the legacy count no matter how the model behaves.
