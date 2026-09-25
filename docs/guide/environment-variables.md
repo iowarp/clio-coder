@@ -9,6 +9,7 @@ The `environment-variable-inventory` check in [check-hygiene.ts](../../scripts/c
 | Variable | Default | Controls |
 | --- | --- | --- |
 | `NO_COLOR` | unset | Set to any non-empty value to drop every foreground and background color. Bold, dim, italic, and underline stay, because they are what is left to read the interface by ([tokens.ts](../../src/interactive/theme/tokens.ts)). |
+| `CLIO_CODER_THEME` | unset | `dark` or `light` picks the palette drawn for that terminal background and skips the startup OSC 11 query; `neutral` forces the mid-luminance palette that reads on either. Unset detects the background from the terminal's OSC 11 reply, then `COLORFGBG` ([terminal-background.ts](../../src/core/terminal-background.ts)). |
 | `CLIO_CODER_UPDATE_CHECK` | on | `0` disables background update checks, detection of a replaced installation, and upgrade hints. Checks start only in an interactive session, after its first full frame and a five-second delay ([interactive-application.ts](../../src/interactive/interactive-application.ts), [update-check.ts](../../src/domains/lifecycle/update-check.ts)). |
 | `NO_UPDATE_NOTIFIER` | unset | Any non-empty value suppresses the update monitor. A non-empty `CI` also suppresses it. Explicit `clio-coder upgrade` still works. |
 | `CLIO_CODER_RIGOR` | repo-derived | Finish-contract evidence bar, `normal` or `high`, layered over the repo-derived default ([rigor.ts](../../src/domains/safety/rigor.ts)). |
@@ -56,7 +57,7 @@ These names follow an upstream or operating-system convention. They are not subs
 | --- | --- |
 | Provider credential variables | [env-api-keys.ts](../../src/engine/env-api-keys.ts) maps the selected provider to its conventional key, including `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `AWS_*` Bedrock credentials, and Google Vertex application credentials. `clio-coder auth` remains the preferred managed credential path. |
 | `VISUAL`, `EDITOR` | External editor command, with `VISUAL` taking precedence ([external-editor.ts](../../src/core/external-editor.ts)). |
-| `TERM`, `COLORTERM`, `TERM_PROGRAM`, `WT_SESSION` | Terminal capability, color-depth, keybinding, and desktop-notification adaptation. These variables describe the terminal rather than Clio policy. |
+| `TERM`, `COLORTERM`, `COLORFGBG`, `TERM_PROGRAM`, `WT_SESSION` | Terminal capability, color-depth, background, keybinding, and desktop-notification adaptation. These variables describe the terminal rather than Clio policy. |
 | `SSH_CONNECTION`, `SSH_TTY`, `TMUX`, `STY` | Remote-session and terminal-multiplexer detection used by the adaptive stream-pacing policy ([stream-pacing-policy.ts](../../src/interactive/stream-pacing-policy.ts)). |
 | `COLUMNS` | Fallback text width for non-TTY CLI output ([text-layout.ts](../../src/cli/text-layout.ts)). |
 | `TZ` | Local timestamp formatting and daily audit-log date boundaries ([format-time.ts](../../src/interactive/format-time.ts), [audit.ts](../../src/domains/safety/audit.ts)). |

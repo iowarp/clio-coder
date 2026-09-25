@@ -40,7 +40,7 @@ Tokens are defined in [src/interactive/theme/tokens.ts](../../src/interactive/th
 
 ### 1.1 Color Tokens
 
-| Token | Hex | Role |
+| Token | Hex (unknown background) | Role |
 | :--- | :--- | :--- |
 | `editor` | `#09969f` | Cyan composer rails (active input only). |
 | `editorDanger` | `#e35656` | `yolo` everywhere: composer rail caps, the `YOLO` rail label and the launchpad permission field. |
@@ -61,7 +61,9 @@ Tokens are defined in [src/interactive/theme/tokens.ts](../../src/interactive/th
 | `frame` | `#577287` | Borders, dividers, unused context meter space. |
 | `frameStrong` | `#09969f` | Transcript scrollbar thumb. |
 
-The palette is derived from the Clio Coder logo and iowarp.ai: mint and cyan carry identity, input and selection, the site's orange accent carries action, its steel blue carries information, and its slate carries frames and secondary text. Success is green, warnings amber, errors and `yolo` coral, and reasoning a sand tone beside the orange. Every token is shifted into the middle luminance band so it keeps about 3:1 or better on dark themes (black, One Dark, Solarized Dark) and light themes (white, Solarized Light); `frame` alone recedes further on dark themes. State is also spelled by labels, meter fill, and motion, so a monochrome terminal does not have to infer it from hue.
+The palette is derived from the Clio Coder logo and iowarp.ai: mint and cyan carry identity, input and selection, the site's orange accent carries action, its steel blue carries information, and its slate carries frames and secondary text. Success is green, warnings amber, errors and `yolo` coral, and reasoning a sand tone beside the orange.
+
+Each token has three values in [theme-token-hex.ts](../../src/core/theme-token-hex.ts), one per terminal background. Before the terminal lease starts, interactive startup asks the terminal for its background with an OSC 11 query, followed by DA1 so that a terminal which ignores OSC 11 costs one round trip. `COLORFGBG` is the fallback, and `CLIO_CODER_THEME` overrides both. A dark terminal gets the brand near full brightness, a light terminal gets deeper tones, and every text token holds 4:1 on common themes of its kind (a contract checks this). When the background is unknown, the mid-luminance column keeps about 3:1 on both kinds. `frame` recedes on purpose in every column. State is also spelled by labels, meter fill, and motion, so a monochrome terminal does not have to infer it from hue.
 
 ### 1.2 Placement Invariants
 
