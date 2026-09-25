@@ -73,10 +73,14 @@ interface Wired {
 	parks: string[];
 }
 
-function wire(scene: Scenario, level: AutonomyLevel = "yolo"): Wired {
+function wire(scene: Scenario, level: AutonomyLevel = "yolo", readOnly = false): Wired {
 	const clients: McpClient[] = [];
 	const parks: string[] = [];
-	const registry = createRegistry({ safety: createWorkerSafety({ cwd: scene.project }), autonomy: () => level });
+	const registry = createRegistry({
+		safety: createWorkerSafety({ cwd: scene.project }),
+		autonomy: () => level,
+		...(readOnly ? { readOnly: true } : {}),
+	});
 	const source = createMcpCapabilitySource({
 		cwd: scene.project,
 		configDir: scene.configDir,
@@ -812,7 +816,7 @@ describe("gateway MCP capabilities", () => {
 			deepStrictEqual(wired.parks, level === "default" ? [ECHO] : []);
 			await wired.source.close();
 		}
-		const readOnly = wire(scene, "read-only");
+		const readOnly = wire(scene, "default", true);
 		open.push(readOnly.source);
 		const denied = await readOnly.registry.invoke({
 			tool: ToolNames.Gateway,

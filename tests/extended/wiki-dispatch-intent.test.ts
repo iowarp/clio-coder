@@ -90,7 +90,7 @@ it("admits production wiki planner and page scope without interpreting absolute 
 			);
 			assert.deepEqual(spec.writeRoots, [asDirectoryPathBoundary(outputDir)]);
 			assert.deepEqual(spec.denyTools, [ToolNames.Git]);
-			assert.equal(spec.autonomy, undefined);
+			assert.equal(spec.readOnly, undefined);
 			assert.equal(spec.noSkills, true);
 			assert.equal(spec.requestOrigin, "internal");
 			assert.equal(spec.assignmentDeadlineAt, undefined);

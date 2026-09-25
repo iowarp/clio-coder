@@ -39,6 +39,7 @@ export interface AcpDelegationRunInput {
 	safety: SafetyContract;
 	/** Session autonomy level applied by the mediator under clio-coder-policy governance. */
 	autonomy?: AutonomyLevel;
+	readOnly?: boolean;
 	signal?: AbortSignal;
 	clientVersion?: string;
 	/** Testable SIGTERM grace used by hard termination. */
@@ -294,6 +295,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		cwd: input.cwd,
 		toolGovernance: input.agent.toolGovernance ?? "clio-coder-policy",
 		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
+		...(input.readOnly === true ? { readOnly: true } : {}),
 		onPermissionResolved: (event) =>
 			emit({
 				type: "clio_coder_permission_resolved",

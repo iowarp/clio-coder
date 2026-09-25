@@ -35,7 +35,7 @@ Draft outside active roots, for example `draft-skills/example/`. The operator ca
 | `d` | Check installed drift |
 | `Esc` | Close or cancel |
 
-`/skill <name> [task]` activates a skill; `/skill off` clears the session's tool-surface narrowing. Loading can narrow allowed tools but cannot grant tools the host disallows. In `default` and `yolo`, the model may activate trusted installed skills. Internal read-only workers cannot. Listing available skills does not load their bodies.
+`/skill <name> [task]` activates a skill; `/skill off` clears the session's tool-surface narrowing. Loading can narrow allowed tools but cannot grant tools the host disallows. In `default` and `yolo`, the model may activate trusted installed skills. Read-only dispatched runs cannot activate skills. Listing available skills does not load their bodies.
 
 Model-visible skills must be trusted and permit model invocation. Loose compatibility skills are discovery-only at user and project scope and require explicit import. Imported foreign skills require `integrations.projectResources.trustProjectImports`. A project resource adopted into user scope retains foreign trust. Disabled, incompatible or drifted package resources do not load. `/library reload` refreshes an active session after a lifecycle change.
 

@@ -15,7 +15,7 @@ import {
 	type MiddlewareSnapshot,
 } from "../domains/middleware/index.js";
 import { classify as classifyAction } from "../domains/safety/action-classifier.js";
-import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
+import { DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import {
 	createLoopState,
@@ -141,7 +141,7 @@ export function createWorkerToolRegistry(
 	safety: SafetyContract = createWorkerSafety(),
 	skillLoaderOptions?: { noSkills?: boolean; skillPaths?: string[]; trustProjectCompatRoots?: boolean },
 	hookRegistrations?: ReadonlyArray<MiddlewareHookRegistration>,
-	autonomy?: AutonomyLevel,
+	readOnly?: boolean,
 	onMiddlewareEffects?: RegistryDeps["onMiddlewareEffects"],
 	agentLedger?: AgentLedgerPort,
 	workerRecall?: WorkerRecall,
@@ -154,12 +154,12 @@ export function createWorkerToolRegistry(
 	for (const registration of hookRegistrations ?? []) {
 		middleware.registerHook(registration);
 	}
-	// The level is fixed for the lifetime of the worker run: it ships on the
-	// WorkerSpec at dispatch admission and never hot-reloads mid-run.
+	// Worker admission is always default; the spec carries a separate read-only restriction.
 	const registry = createRegistry({
 		safety,
 		middleware,
-		autonomy: () => autonomy ?? DEFAULT_AUTONOMY_LEVEL,
+		autonomy: () => DEFAULT_AUTONOMY_LEVEL,
+		...(readOnly === true ? { readOnly: true } : {}),
 		...(onMiddlewareEffects ? { onMiddlewareEffects } : {}),
 	});
 	// The ledger tool registers unconditionally. attestedToolSignature signs the

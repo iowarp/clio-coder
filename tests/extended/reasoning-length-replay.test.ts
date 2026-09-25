@@ -205,7 +205,6 @@ test("real worker preserves the length-limited thought through contract repair a
 				product: "orientation",
 				noSkills: true,
 				cwd: env.dir,
-				autonomy: "yolo",
 			},
 			() => {},
 		);

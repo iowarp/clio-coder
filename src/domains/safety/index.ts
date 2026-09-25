@@ -14,15 +14,12 @@ export {
 	type AutonomyExposure,
 	type AutonomyLevel,
 	autonomyAskRejection,
-	autonomyDenyRejection,
 	autonomyFromUserInput,
 	DEFAULT_AUTONOMY_EXPOSURE,
 	DEFAULT_AUTONOMY_LEVEL,
 	isAutonomyLevel,
 	mapAutonomy,
 	modelMayActivateSkills,
-	OPERATOR_AUTONOMY_LEVELS,
-	type OperatorAutonomyLevel,
 } from "./autonomy.js";
 export type { SafetyContract, SafetyDecision } from "./contract.js";
 export type {

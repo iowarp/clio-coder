@@ -10,7 +10,7 @@ test("convention guidance reaches a session even when no memory record exists", 
 	const prompt = compile(loadFragments(), {
 		identity: "identity.clio",
 		operatingContract: "operating.contract",
-		safety: "safety.read-only",
+		safety: "safety.default",
 		sessionInputs: { providerSupportsTools: true, toolNames: ["read"], memorySection: "" },
 	}).systemPrompt;
 	match(prompt, /inspect and cite its sources/u);

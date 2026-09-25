@@ -39,7 +39,7 @@ describe("gateway on the worker surface", () => {
 	});
 
 	it("intersects explicit turn scope with recipe schemas and gateway admission", async () => {
-		const registry = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd: scratch() }), undefined, [], "yolo");
+		const registry = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd: scratch() }), undefined, []);
 		const turnConstraints = {
 			allowedTools: ["git", "context"],
 			skills: "disabled" as const,
@@ -134,7 +134,7 @@ describe("gateway on the worker surface", () => {
 
 	it("runs gateway → git for the admitted recipe and refuses a capability the recipe did not declare", async () => {
 		const cwd = scratch();
-		const registry = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd }), undefined, [], "yolo");
+		const registry = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd }), undefined, []);
 		const allowedTools = [...RECIPE_TOOLS, ToolNames.Gateway];
 		const git = await registry.invoke(
 			{ tool: ToolNames.Gateway, args: { op: "call", capability: ToolNames.Git, args: { op: "log", limit: 1 } } },

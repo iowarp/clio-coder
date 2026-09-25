@@ -89,7 +89,7 @@ Turn budget: all envelope-backed tools draw from one shared pool of 192KB per tu
 
 ## Search scope: read, ls, grep, and find outside the workspace
 
-`read`, `ls`, `grep`, and `find` run without asking on any path inside the session workspace. A path that resolves outside it, by an absolute path, a `..`, or a link at any component, asks for one-shot approval in `default` and runs in `yolo`. Headless runs deny the ask, so give a headless run `--autonomy yolo` or a `--cwd` that contains what it must read. Zero-access paths (`.env`, `~/.ssh/`, the credential store) are refused in both modes. Internal inspection workers use a separate read-only posture and deny outside reads. Installed skill, plugin, and extension trees, the `full:` offload files a truncation notice names, and dispatch receipts stay readable without an ask. A search that starts inside the workspace never follows a linked directory out of it. See [the safety model](../architecture/safety-model.md#21-the-autonomy-axis-delegation-dial).
+`read`, `ls`, `grep`, and `find` run without asking on any path inside the session workspace. A path that resolves outside it, by an absolute path, a `..`, or a link at any component, asks for one-shot approval in `default` and runs in `yolo`. Headless runs deny the ask, so give a headless run `--autonomy yolo` or a `--cwd` that contains what it must read. Zero-access paths (`.env`, `~/.ssh/`, the credential store) are refused in both modes. Read-only dispatched runs deny outside reads and all non-read calls without asking. Workers run at `default`. Installed skill, plugin, and extension trees, the `full:` offload files a truncation notice names, and dispatch receipts stay readable without an ask. A search that starts inside the workspace never follows a linked directory out of it. See [the safety model](../architecture/safety-model.md#21-the-autonomy-axis-delegation-dial).
 
 ## read: page through a file with offset, limit, and tail
 
@@ -509,7 +509,7 @@ gateway(op="call", capability="git", args={op: "log", limit: 10})
 
 Direct OBSERVE retrieval of the working environment. Source: [index.ts](../../src/tools/context/index.ts).
 
-Arguments are `scope` (`workspace`, `settings`, `skills`, or `recall`), `name` and `include_tree` for skills, and `ref`, `offset`, and `limit` for recall. `query` can narrow recall. Workspace returns the cached session git/project snapshot and requires a bound session. Skills list or activate installed skills in `default` and `yolo`; internal read-only workers cannot activate them, and recipe-bound workers can load only their declared skills. Recall retrieves evicted observations without changing the eviction marker. Workspace, settings, and skills use a 50KB cap.
+Arguments are `scope` (`workspace`, `settings`, `skills`, or `recall`), `name` and `include_tree` for skills, and `ref`, `offset`, and `limit` for recall. `query` can narrow recall. Workspace returns the cached session git/project snapshot and requires a bound session. Skills list or activate installed skills in `default` and `yolo`; read-only runs cannot activate them, and recipe-bound workers can load only their declared skills. Recall retrieves evicted observations without changing the eviction marker. Workspace, settings, and skills use a 50KB cap.
 
 `context(scope="settings")` reads an allowlisted view of the running session's
 effective configuration. It explains autonomy, worker approvals, and configured

@@ -162,7 +162,11 @@ describe("native budget inspection through the registered context tool", () => {
 			context.setCurrentSnapshot(context.captureRuntimeContextSnapshot(runtime, "leaf", 0.85));
 			context.reconcileUsage(usage);
 		}
-		const registry = createRegistry({ safety: createWorkerSafety({ cwd: env.dir }), autonomy: () => "read-only" });
+		const registry = createRegistry({
+			safety: createWorkerSafety({ cwd: env.dir }),
+			autonomy: () => "default",
+			readOnly: true,
+		});
 		registerAllTools(registry, { mcpCapabilities: false, getContextBudget: () => context.inspectLiveBudget() });
 		return {
 			settings,

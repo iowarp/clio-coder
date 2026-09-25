@@ -78,7 +78,7 @@ separates Git changes but does not confine the peer's own filesystem, shell, or
 network tools. Clio can mediate ACP permission requests a peer reports, but a
 peer may write without requesting permission; receipts mark this enforcement
 limit. OpenCode's verified headless path supports edit authority only and
-refuses internal `read-only` runs. Use the existing Git workflow to inspect
+refuses read-only dispatched runs. Use the existing Git workflow to inspect
 and merge a preserved branch, and use `/share` when the main agent should read a
 managed result.
 

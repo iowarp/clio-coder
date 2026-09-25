@@ -24,7 +24,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
  * through `gateway call`.
  */
 
-const LEVELS: ReadonlyArray<AutonomyLevel> = ["read-only", "default", "default", "yolo"];
+const LEVELS: ReadonlyArray<AutonomyLevel> = ["default", "yolo"];
 const roots: string[] = [];
 
 function scratch(): string {
@@ -73,10 +73,15 @@ function harness(
 	level: AutonomyLevel,
 	placement: "direct" | "gateway",
 	answer: "approve" | "deny",
+	readOnly = false,
 ): Harness {
 	const rows: ToolCallAuditInput[] = [];
 	const parks: ParkRecord[] = [];
-	const registry = createRegistry({ safety: auditing(createWorkerSafety({ cwd }), rows), autonomy: () => level });
+	const registry = createRegistry({
+		safety: auditing(createWorkerSafety({ cwd }), rows),
+		autonomy: () => level,
+		...(readOnly ? { readOnly: true } : {}),
+	});
 	registry.register({ ...createArtifactTool({ getCwd: () => cwd }), placement });
 	registry.register({ ...gitTool, placement });
 	registry.register(createGatewayTool({ registry }));
@@ -141,8 +146,8 @@ describe("direct and gateway invocation preserve the same authority", () => {
 	});
 
 	it("denies a write-class capability at read-only identically, with the capability's own audit row", async () => {
-		const direct = harness(scratch(), "read-only", "direct", "approve");
-		const gateway = harness(scratch(), "read-only", "gateway", "approve");
+		const direct = harness(scratch(), "default", "direct", "approve", true);
+		const gateway = harness(scratch(), "default", "gateway", "approve", true);
 		const viaDirect = await invokeDirect(direct.registry, ToolNames.Artifact, ARTIFACT_ARGS);
 		const viaGateway = await invokeGateway(gateway.registry, ToolNames.Artifact, ARTIFACT_ARGS);
 		strictEqual(viaDirect.kind, "blocked");

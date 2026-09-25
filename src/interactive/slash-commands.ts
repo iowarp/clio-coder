@@ -482,7 +482,7 @@ async function handleDelegate(
  * Nothing here is a side channel. The run goes through the ordinary dispatch
  * path, so admission, the receipt, and the Fleet Runs island treat it exactly
  * as they treat a `/run`; `requestOrigin: "internal"` is what lets a shadow
- * recipe be reached at all, and `autonomy: "read-only"` narrows the worker
+ * recipe be reached at all, and `readOnly: true` narrows the worker
  * below whatever the session holds. The answer reaches the main agent the way
  * `/share` puts one there: an operator-authored note on the ordinary user-turn
  * path, never a fabricated tool result.
@@ -514,7 +514,7 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
 			...(ctx.getAgentRoleFacts ? { resolveFacts: ctx.getAgentRoleFacts } : {}),
 		}),
 		requestOrigin: "internal",
-		autonomy: "read-only",
+		readOnly: true,
 	};
 	const progressBus = ctx.dispatch.ownsProgressBus?.(ctx.bus) === true ? undefined : ctx.bus;
 	try {

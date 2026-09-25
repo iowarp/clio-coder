@@ -25,8 +25,7 @@ const SOURCE = [
 type Call = { name: string; arguments: string };
 const grep: Call = {
 	name: "grep",
-	// The worker runs in this process, so a relative path would search the
-	// checkout rather than the scratch workspace.
+	// The worker searches the scratch workspace, which is its process directory.
 	arguments: JSON.stringify({ pattern: "openUsageOverlayState", path: "{WORKSPACE}" }),
 };
 const submit = (line: number): Call => ({
@@ -40,6 +39,8 @@ const submit = (line: number): Call => ({
 
 async function runScout(rounds: Call[][]) {
 	const env = await isolateClioEnv("clio-scout-grep-grounding-");
+	const previousCwd = process.cwd();
+	process.chdir(env.dir);
 	writeFileSync(join(env.dir, "overlays.ts"), SOURCE);
 	const events: Array<AgentEvent | ClioWorkerEvent> = [];
 	let requests = 0;
@@ -74,7 +75,6 @@ async function runScout(rounds: Call[][]) {
 				product: "orientation",
 				noSkills: true,
 				cwd: env.dir,
-				autonomy: "yolo",
 				helperResult: true,
 				resultContract: { kind: "scout-report" },
 			},
@@ -86,6 +86,7 @@ async function runScout(rounds: Call[][]) {
 		worker?.abort();
 		await worker?.promise;
 		await closeServer(server);
+		process.chdir(previousCwd);
 		env.restore();
 	}
 }

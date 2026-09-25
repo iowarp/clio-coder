@@ -6,12 +6,7 @@ import type { DelegationToolGovernance } from "../../core/defaults.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { DelegationToolCallLogEntry } from "../../domains/dispatch/types.js";
-import {
-	type AutonomyLevel,
-	autonomyDenyRejection,
-	DEFAULT_AUTONOMY_LEVEL,
-	mapAutonomy,
-} from "../../domains/safety/autonomy.js";
+import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "../../domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../../domains/safety/contract.js";
 import type {
 	AcpPermissionOption,
@@ -31,6 +26,7 @@ interface MediatorInput {
 	 * because a delegation has no operator to answer a prompt.
 	 */
 	autonomy?: AutonomyLevel;
+	readOnly?: boolean;
 	onPermissionResolved?(event: AcpMediatorPermissionResolvedEvent): void;
 }
 
@@ -623,6 +619,16 @@ export class AcpToolMediator {
 			if (blocking !== undefined) {
 				decision = "denied";
 				reason = blocking.policy?.reasonCode ?? blocking.kind;
+			} else if (
+				this.input.readOnly === true &&
+				(asking !== undefined ||
+					safetyDecisions.some(
+						(candidate) =>
+							candidate.classification.actionClass !== "read" || candidate.policy?.readScope === "outside-workspace",
+					))
+			) {
+				decision = "denied";
+				reason = `${mapped.tool} denied: this run is read-only`;
 			} else if (asking !== undefined) {
 				decision = "denied";
 				reason = "permission_required: denied by non-stall policy (no interactive operator in delegation context)";
@@ -637,18 +643,8 @@ export class AcpToolMediator {
 						...(candidate.policy?.readScope === "outside-workspace" ? { readOutsideWorkspace: true } : {}),
 					}),
 				}));
-				const deniedDisposition = dispositions.find((candidate) => candidate.disposition === "deny");
 				const askDisposition = dispositions.find((candidate) => candidate.disposition === "ask");
-				if (deniedDisposition !== undefined) {
-					safetyDecision = deniedDisposition.candidate;
-					decision = "denied";
-					reason = autonomyDenyRejection(
-						level,
-						mapped.tool,
-						deniedDisposition.candidate.classification.actionClass,
-						deniedDisposition.candidate.policy?.readScope === "outside-workspace",
-					).short;
-				} else if (askDisposition !== undefined) {
+				if (askDisposition !== undefined) {
 					safetyDecision = askDisposition.candidate;
 					decision = "denied";
 					const asked =

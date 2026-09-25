@@ -63,7 +63,6 @@ import {
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
-import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
@@ -176,11 +175,10 @@ export interface WorkerRunInput {
 	onPermission?: "deny" | "fail" | "escalate";
 	/** Escalation bounds, honored only when onPermission="escalate". */
 	escalation?: WorkerEscalationConfig;
-	/**
-	 * Session autonomy level captured at dispatch admission (sd-01 §2.5).
-	 * Workers inherit the orchestrator's level; absent means the default.
-	 */
-	autonomy?: AutonomyLevel;
+	/** Dispatch-owned restriction on tool admission for this run. */
+	readOnly?: boolean;
+	/** Internal external-connector posture. Native workers ignore it and always use default. */
+	autonomy?: import("../domains/safety/autonomy.js").AutonomyLevel;
 	/**
 	 * Absolute directories write-class tool calls are confined to for this run.
 	 * Enforced at the shared worker safety seam (createWorkerSafety) so both the
@@ -551,7 +549,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					: {}),
 			}),
 		],
-		input.autonomy,
+		input.readOnly,
 		(effects) => middlewareToolChoice.apply(effects),
 		input.agentLedger,
 		observations.recall,

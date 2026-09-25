@@ -73,7 +73,7 @@ test("ACP worktree dispatch records its branch and changed paths for later merge
 			agentId: "acp-writer",
 			task: "Create proof.txt",
 			cwd: root,
-			autonomy: "default",
+
 			executionRole: "builder",
 			requestOrigin: "user",
 			worktree: true,

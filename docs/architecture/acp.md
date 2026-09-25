@@ -130,7 +130,7 @@ Workspace authority remains the exact canonical launch directory, never the encl
 
 `session/new` captures the current effective orchestrator `target` and `model` in durable session metadata and returns them under `_meta["clio-coder/session"]`. These are the initial selections at bind time, not an eager health/admission promise. A later settings patch may change the next turn's route; the original metadata remains initial attribution and the runtime ledger records later model changes. The TUI `/new` path records the same two fields.
 
-`session/new` returns `{sessionId,_meta:{"clio-coder/session":{sessionId,target,model,autonomy,createdAt,resumed:false}}}`. Session ids and target ids are 1–128 UTF-8 bytes; model ids are at most 256 bytes. `target` or `model` is null when that half was unselected at bind. A locally configured selected route that exceeds those wire bounds makes the opener fail `internal_error`; Clio never converts an active over-bound selection to null and then runs it anyway. `createdAt` is canonical ISO-8601 and autonomy is `default` or `yolo` for operator sessions; internal inspection workers may use `read-only`.
+`session/new` returns `{sessionId,_meta:{"clio-coder/session":{sessionId,target,model,autonomy,createdAt,resumed:false}}}`. Session ids and target ids are 1–128 UTF-8 bytes; model ids are at most 256 bytes. `target` or `model` is null when that half was unselected at bind. A locally configured selected route that exceeds those wire bounds makes the opener fail `internal_error`; Clio never converts an active over-bound selection to null and then runs it anyway. `createdAt` is canonical ISO-8601 and autonomy is `default` or `yolo` for operator sessions; workers run at `default`, with a separate read-only dispatch restriction.
 
 `session/load` accepts exactly `{sessionId,cwd,mcpServers:[]}`. Non-empty or malformed MCP configuration is `invalid_params`; this server advertises no MCP transport capability. The id must occur in the launch workspace's history and must be durably closed. An unhosted record with `endedAt:null` fails `session_open`: Clio cannot prove whether it belongs to a live process or an unclean crash, and does not guess.
 
@@ -411,7 +411,7 @@ enumeration in [server.ts](../../src/engine/acp/server.ts):
 [adapter.ts](../../src/engine/acp/adapter.ts) constructs `AcpToolMediator` when Clio acts as an
 ACP client for an outbound delegation. Under `clio-coder-policy` governance:
 1. Tool calls evaluate through the 10-step safety net policy engine.
-2. If the safety net or autonomy mode yields an `ask` verdict (such as unrecognized bash in `default`), the mediator resolves the ask as a **non-stall denial** (`autonomyDenyRejection`).
+2. If the safety net or autonomy mode yields an `ask` verdict (such as unrecognized bash in `default`), the mediator resolves the ask as a **non-stall denial** through the non-stall denial policy.
 3. This non-stall behavior prevents external non-interactive client connections from hanging indefinitely while preserving safety boundaries.
 
 This outbound path is distinct from the hosted server's

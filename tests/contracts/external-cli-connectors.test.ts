@@ -289,7 +289,7 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 			},
 			{ type: "agent_settled" },
 		]);
-		const run = input(root, piCliRuntime, { autonomy: "read-only" });
+		const run = input(root, piCliRuntime, { readOnly: true });
 		const result = await startJsonlCliRun(PI_CLI_CONNECTOR, run, () => undefined, {
 			binary,
 			workspaceRoot: root,
@@ -316,7 +316,7 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		match(observed.stdin, /Reply PONG/);
 		equal(observed.env.PI_CODING_AGENT_DIR, join(root, "pi-home"));
 		equal(observed.env.FAKE_SECRET, undefined);
-		ok(!buildPiCliArgs({ ...run, autonomy: "default" }).includes("read,grep,find,ls"));
+		ok(!buildPiCliArgs({ ...run, readOnly: false }).includes("read,grep,find,ls"));
 	});
 
 	it("parses OpenCode source-defined text, step usage, and error events", async () => {
@@ -348,7 +348,7 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		deepStrictEqual(observed.args, buildOpenCodeCliArgs(run));
 		match(observed.stdin, /Reply PONG/);
 		equal(observed.env.OPENCODE_CONFIG_DIR, join(root, "opencode-home"));
-		throws(() => buildOpenCodeCliArgs({ ...run, autonomy: "read-only" }), /cannot enforce autonomy/);
+		throws(() => buildOpenCodeCliArgs({ ...run, readOnly: true }), /cannot enforce a read-only run/);
 	});
 
 	it("passes only credentials explicitly referenced by OpenCode's local config", async () => {

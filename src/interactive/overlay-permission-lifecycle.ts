@@ -9,7 +9,7 @@ import { decisionActionClass } from "../domains/safety/decision-presentation.js"
 import type { ToolRiskSubject } from "../domains/safety/tool-risk.js";
 import { askUserExposure } from "../tools/ask-user.js";
 import type { PermissionRequiredMeta, ToolRegistry } from "../tools/registry.js";
-import { approvalParkedNotice, autonomyDeniedNotice, workerEscalationNotice } from "./bus-notices.js";
+import { approvalParkedNotice, workerEscalationNotice } from "./bus-notices.js";
 import type { ToolApprovalStateEvent } from "./chat-loop.js";
 import type { NoticeLevel } from "./command-output.js";
 import { createMutationInspector, type MutationInspector, mutationFacts } from "./mutation-preview.js";
@@ -26,7 +26,6 @@ type PermissionToolRegistry = Pick<
 	| "cancelParkedCall"
 	| "cancelParkedCalls"
 	| "hasParkedCalls"
-	| "onAutonomyDenied"
 	| "onPermissionRequired"
 	| "parkedCount"
 	| "renotifyHead"
@@ -404,13 +403,6 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const unsubscribeWorkerCompleted = deps.bus.on(BusChannels.DispatchCompleted, withdrawTerminalRun);
 	const unsubscribeWorkerFailed = deps.bus.on(BusChannels.DispatchFailed, withdrawTerminalRun);
 
-	const unsubscribeAutonomy =
-		deps.toolRegistry?.onAutonomyDenied((_call, decision, level) => {
-			const notice = autonomyDeniedNotice(decision, level);
-			deps.appendNotice(notice.level, notice.text);
-			deps.requestRender();
-		}) ?? (() => {});
-
 	const onPermissionOverlayClosed = (): void => {
 		if (withdrawingWorker) {
 			withdrawingWorker = false;
@@ -520,7 +512,6 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			unsubscribeWorkerResolution();
 			unsubscribeWorkerCompleted();
 			unsubscribeWorkerFailed();
-			unsubscribeAutonomy();
 		},
 	};
 }

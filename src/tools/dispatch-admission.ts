@@ -638,7 +638,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 								executionRole: "reviewer",
 								task: renderDispatchReviewerTask(base.task, subject.runId, cycle, base.intent),
 								systemPrompt: REVIEWER_GATE_PROMPT,
-								autonomy: "read-only",
+								readOnly: true,
 								gate: { role: "reviewer", group: "plan-preview", cycle, subjects: [subject] },
 								...(base.cwd !== undefined ? { cwd: base.cwd } : {}),
 								...(reviewResult.review.node !== undefined ? { node: reviewResult.review.node } : {}),
@@ -674,7 +674,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 							executionRole: "judge",
 							task: `Plan-time capability check for the ${compete.candidates}-candidate judge.`,
 							systemPrompt: JUDGE_GATE_PROMPT,
-							autonomy: "read-only",
+							readOnly: true,
 							gate: { role: "judge", group: "plan-preview", cycle: 1, subjects },
 							...(base.cwd !== undefined ? { cwd: base.cwd } : {}),
 							...(compete.judge?.node !== undefined ? { node: compete.judge.node } : {}),
@@ -696,7 +696,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 						const memberRequest: DispatchRequest = {
 							...base,
 							executionRole: "researcher",
-							autonomy: "read-only",
+							readOnly: true,
 							toolProfile: "council-read-only",
 							// A member inherits the caller's declared scope but never its
 							// write authority: the same trees arrive as read roots, so the
@@ -747,7 +747,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 						executionRole: "judge",
 						task: "Plan-time capability check for council synthesis.",
 						systemPrompt: COUNCIL_JUDGE_PROMPT,
-						autonomy: "read-only",
+						readOnly: true,
 						toolProfile: "council-read-only",
 						gate: { role: "synthesis", group: "plan-preview", cycle: council.rounds, subjects },
 						...(council.judge?.node ? { node: council.judge.node } : {}),

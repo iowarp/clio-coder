@@ -63,7 +63,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `RouteCandidate` in [route-decision.ts](../../src/domains/dispatch/route-decision.ts).
 
 ### 15. Posture (Autonomy Level)
-- **Definition**: The active operator permission mode governing tool mutation authority (`default`, `yolo`). Internal inspection workers may use a read-only posture.
+- **Definition**: The active operator permission mode governing tool mutation authority (`default`, `yolo`). Workers run at `default`; a read-only dispatch restricts their tools.
 - **Owning Type**: `AutonomyLevel` in [autonomy.ts](../../src/domains/safety/autonomy.ts).
 
 ### 16. Capability Class

@@ -74,7 +74,7 @@ Design decisions that shape everything else:
 
 ## Worker prompt and budget admission
 
-Dispatch resolves the recipe, target, effective autonomy, and final canonical toolkit before compiling one stable Clio worker harness. The harness contains identity-lite, the shared operating contract, the exact native tool surface (or honest no-tools wording), safety for the enforced autonomy, and the recipe or bounded override persona. Project context, memory, bounded briefing, pipeline input, task text, and run posture remain dynamic messages and therefore do not churn stable hashes. Briefing is explicitly untrusted task data and does not transport conversation or session history.
+Dispatch resolves the recipe, target, read-only restriction, and final canonical toolkit before compiling one stable Clio worker harness. The harness contains identity-lite, the shared operating contract, the exact native tool surface (or honest no-tools wording), default safety and any read-only dispatch restriction, and the recipe or bounded override persona. Project context, memory, bounded briefing, pipeline input, task text, and run posture remain dynamic messages and therefore do not churn stable hashes. Briefing is explicitly untrusted task data and does not transport conversation or session history.
 
 One run has a first-class singular shape: `task` is the worker assignment and
 `briefing` is separate bounded context/data. Briefing never replaces task,
@@ -233,9 +233,8 @@ never migrated.
 ## Topologies
 
 All topologies go through the dispatch tool, the same admission chain, and
-the autonomy matrix. Workers never exceed the orchestrator's authority; a
-request-level `autonomy` can only narrow the level (reviewers and judges run
-`read-only`).
+the autonomy matrix. Every worker runs at `default`, regardless of the main agent's level.
+A `readOnly` dispatch restriction denies mutation and outside reads; reviewers and judges use it.
 
 | Topology | Invocation | Semantics |
 | --- | --- | --- |
@@ -479,7 +478,7 @@ Collect every detached batch before final synthesis.
 The builder runs the task. A reviewer then inspects the workspace against the
 task. The reviewer defaults to the builtin `verifier` recipe
 (`DEFAULT_GATE_DECIDER_AGENT_ID`) and never falls back to the builder's own
-agent; it is pinned to read-only autonomy and is routable to a different node,
+agent; it is given a read-only dispatch restriction and is routable to a different node,
 model, or target.
 
 The reviewer answers a typed `verifier-report` contract rather than trailing
@@ -524,7 +523,7 @@ operator inspection rather than silently auto-applied after restart.
 Council is the read-only sibling of compete. Two to five members run the same
 singular task concurrently on local HTTP or native targets. A request selects
 exactly one configured `fleet.rosters` entry or supplies inline `members`.
-Admission pins every member to `read-only` autonomy and to the `read`, `grep`,
+Admission gives every member a read-only dispatch restriction and access to the `read`, `grep`,
 `find`, `ls`, `code_nav`, and `context` tool surface. A route that resolves to
 an SSH fleet node is refused before approval. Council never creates a worktree
 and never mutates the workspace.
@@ -607,8 +606,8 @@ the SSH node's transport kind and host. A placement, host, capability, or
 cost-ceiling change fails before launch rather than silently choosing an
 unapproved alternative. Yolo skips the stop and seals the
 same plan hash into every run's receipt instead
-(`plan.approval: "full-auto"` is the stable receipt value). Internal read-only workers deny dispatch outright,
-as it denies every non-read action.
+(`plan.approval: "full-auto"` is the stable receipt value). Read-only runs deny dispatch outright
+because they deny every non-read action.
 
 The registry boundary is resolved dispatch plan v3. `deadlineMs` is required:
 a fleet plan carries a positive finite number and a non-fleet plan carries
@@ -634,7 +633,7 @@ A `kind: gate` step asks its validator agent to write exactly one repository-rel
 
 A `kind: plan` step defaults to the builtin `architect`. It declares `roster`, `maxTasks` from 1 through 16, an optional `proposals: true`, its own scope and write boundary, and an optional target or profile default. The architect returns a `delegation-plan` object whose tasks contain `id`, `agent`, `description`, `depends_on`, `writes`, and an optional `mode` of `sequential` or `parallel`. The coordinator admits only roster agents, unique and acyclic task ids, resolvable dependencies, the declared task count, and task writes contained by the plan step boundary. Successful tasks carry lineage to the plan step and inherit its target or profile. A contract with `writers: 1` serializes write tasks through the existing single-writer token.
 
-When `proposals: true`, every roster member first runs with read-only autonomy against the same task. Their answers reach the architect as labelled, bounded briefing data. Proposal agents do not choose targets for generated work. The plan step's contract default remains authoritative for every admitted task.
+When `proposals: true`, every roster member first runs with a read-only dispatch restriction against the same task. Their answers reach the architect as labelled, bounded briefing data. Proposal agents do not choose targets for generated work. The plan step's contract default remains authoritative for every admitted task.
 
 ### Fleet authoring
 
@@ -1109,7 +1108,7 @@ hard block.
 - The monitor tool reports the node and reroute lineage on `status`, `list`,
   and `collect`.
 - `clio-coder fleet status [--json]` shows the durable ledger view cross-process.
-- A worker permission escalation uses the `Worker escalation` consequence tier in operator presentation. The tier names the worker agent and run and describes where the one-shot answer returns. It does not approve the request, change the worker's inherited autonomy, or weaken the safety net; the existing worker escalation protocol remains the only resolution path.
+- A worker permission escalation uses the `Worker escalation` consequence tier in operator presentation. The tier names the worker agent and run and describes where the one-shot answer returns. It does not approve the request, change the worker's default autonomy, or weaken the safety net; the existing worker escalation protocol remains the only resolution path.
 
 ## Speculation observer
 

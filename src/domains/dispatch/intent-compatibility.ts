@@ -81,8 +81,8 @@ export interface DispatchIntentCompatibilityInput {
 	intent?: unknown;
 	/** The request's legacy `writeRoots` field exactly as the producer set it. */
 	writeRoots?: unknown;
-	/** Request-level autonomy narrowing, when the producer set one. */
-	autonomy?: unknown;
+	/** Request-level read-only restriction, when the producer set one. */
+	readOnly?: unknown;
 	/** Job cwd used to compare the two write declarations on one footing. */
 	cwd?: string;
 }
@@ -159,8 +159,8 @@ function outputsOutsideWriteRoots(intent: DispatchIntent): DispatchIntentCompati
 	);
 }
 
-function writeWithoutAuthority(intent: DispatchIntent, autonomy: unknown): DispatchIntentCompatibilityFinding | null {
-	if (intent.writeRoots.length === 0 || autonomy !== "read-only") return null;
+function writeWithoutAuthority(intent: DispatchIntent, readOnly: unknown): DispatchIntentCompatibilityFinding | null {
+	if (intent.writeRoots.length === 0 || readOnly !== true) return null;
 	return finding(
 		"intent_write_without_authority",
 		"refuse",
@@ -223,7 +223,7 @@ export function classifyDispatchIntentCompatibility(
 	}
 	const outputs = outputsOutsideWriteRoots(intent);
 	if (outputs !== null) findings.push(outputs);
-	const authority = writeWithoutAuthority(intent, input.autonomy);
+	const authority = writeWithoutAuthority(intent, input.readOnly);
 	if (authority !== null) findings.push(authority);
 	if (intent.verification.length === 0 && (intent.writeRoots.length > 0 || intent.expectedOutputs.length > 0)) {
 		findings.push(

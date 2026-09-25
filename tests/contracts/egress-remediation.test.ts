@@ -10,7 +10,6 @@ test("write-shaped fetches cannot use the read-only rail", () => {
 	for (const args of [{ method: "POST" }, { method: "GET", body: "" }]) {
 		const action = classify({ tool: "web_fetch", args }).actionClass;
 		strictEqual(action, "write");
-		strictEqual(mapAutonomy("read-only", action, { exposure: "outward" }), "deny");
 		strictEqual(mapAutonomy("default", action, { exposure: "outward" }), "ask");
 		strictEqual(mapAutonomy("yolo", action, { exposure: "outward" }), "allow");
 	}
@@ -185,8 +184,8 @@ test("registry parks outward HTTP requests and executes GET at every autonomy le
 				strictEqual(ran, false);
 				await registry.resumeParkedCalls({ actionClass: "write", requestedBy: "contract-operator" });
 			}
-			strictEqual((await result).kind, outward && level === "read-only" ? "blocked" : "ok");
-			strictEqual(ran, !(outward && level === "read-only"));
+			strictEqual((await result).kind, "ok");
+			strictEqual(ran, true);
 		}
 });
 

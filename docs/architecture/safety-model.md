@@ -42,7 +42,7 @@ Autonomy governs when the agent may act automatically versus when it must reques
 
 *Test Runner Recognition*: Standard test suites (`npm test`, `pytest`, `cargo test`, `go test`) run without confirmation in `default`.
 
-Internal inspection workers may use a separate `read-only` posture; it is not an operator mode.
+Every dispatched worker runs at `default`. A read-only dispatch restricts the run to inspection inside the workspace.
 
 ### 2.2 The Safety Net (Invariant Policy)
 The safety net operates independently of the autonomy dial:
@@ -130,7 +130,7 @@ Clio parses bash command syntax to detect evasion tactics:
 
 When tasks are delegated to background workers:
 
-- **Autonomy Floor**: Subagents inherit the parent's autonomy level or lower; a worker can never elevate autonomy beyond the orchestrator's grant.
+- **Worker Autonomy**: Every dispatched worker runs at `default`, regardless of the main agent's level. A read-only dispatch adds a restriction on its tool calls.
 - **Write-Scope Confinement**: Workers are restricted to the task's declared `write_roots`.
 - **Git Worktree Isolation**: Concurrent workers execute inside dedicated git worktrees (`.clio-coder/worktrees/<runId>/` on branch `clio/task/<runId>`). This prevents race conditions and corrupted working trees.
 - **Checkout Writer Leases**: Single-writer tokens ensure only one worker at a time can merge or write to the primary repository checkout.

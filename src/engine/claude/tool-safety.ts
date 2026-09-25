@@ -5,7 +5,6 @@ import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
 import {
 	type AutonomyLevel,
 	autonomyAskRejection,
-	autonomyDenyRejection,
 	DEFAULT_AUTONOMY_LEVEL,
 	mapAutonomy,
 } from "../../domains/safety/autonomy.js";
@@ -52,6 +51,7 @@ export interface EvaluateClaudeToolPermissionInput {
 	safety: SafetyContract;
 	cwd: string;
 	autonomy?: AutonomyLevel;
+	readOnly?: boolean;
 	/**
 	 * The worker's admitted tool surface (Clio builtin names), already narrowed
 	 * by any tool_profile. When present, a mapped Claude tool whose Clio builtin
@@ -199,12 +199,18 @@ function readsOutsideWorkspace(decision: SafetyDecision): boolean {
 	return decision.policy?.readScope === "outside-workspace";
 }
 
-function toAutonomyBlock(decision: SafetyDecision, level: AutonomyLevel, call: ClassifierCall): SafetyDecision {
-	const actionClass = decision.classification.actionClass;
+function toReadOnlyBlock(decision: SafetyDecision, tool: string): SafetyDecision {
 	return {
 		kind: "block",
 		classification: decision.classification,
-		rejection: autonomyDenyRejection(level, call.tool, actionClass, readsOutsideWorkspace(decision)),
+		rejection: {
+			short: `${tool} denied: this run is read-only`,
+			detail: "The dispatch that started this run is read-only, so this call cannot execute.",
+			hints: [
+				"Describe the proposed change as text for the dispatching agent.",
+				"Inspection tools remain available inside the workspace.",
+			],
+		},
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};
 }
@@ -292,18 +298,21 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 	if (decision.kind === "block") {
 		return { kind: "deny", mapped, decision, reason: rejectionText(decision), permissionRequired: false };
 	}
+	if (
+		input.readOnly === true &&
+		(decision.classification.actionClass !== "read" || readsOutsideWorkspace(decision) || decision.kind === "ask")
+	) {
+		const blocked = toReadOnlyBlock(decision, call.tool);
+		return {
+			kind: "deny",
+			mapped,
+			decision: blocked,
+			reason: rejectionText(blocked),
+			reasonCode: "dispatch:read_only",
+			permissionRequired: false,
+		};
+	}
 	if (decision.kind === "ask") {
-		if (level === "read-only") {
-			const blocked = toAutonomyBlock(decision, level, call);
-			return {
-				kind: "deny",
-				mapped,
-				decision: blocked,
-				reason: rejectionText(blocked),
-				reasonCode: `autonomy:${level}`,
-				permissionRequired: false,
-			};
-		}
 		return { kind: "deny", mapped, decision, reason: rejectionText(decision), permissionRequired: true };
 	}
 	const actionClass = decision.classification.actionClass;
@@ -315,17 +324,6 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 		const admission = input.budgetGate?.admit(mapped.clioToolName);
 		if (admission?.kind === "deny") return budgetDenial(input, mapped, call, admission.reason);
 		return { kind: "allow", mapped, decision, reason: decision.policy?.reasonCode ?? "allowed" };
-	}
-	if (disposition === "deny") {
-		const blocked = toAutonomyBlock(decision, level, call);
-		return {
-			kind: "deny",
-			mapped,
-			decision: blocked,
-			reason: rejectionText(blocked),
-			reasonCode: `autonomy:${level}`,
-			permissionRequired: false,
-		};
 	}
 	const ask = toAutonomyAsk(decision, level, call);
 	return {

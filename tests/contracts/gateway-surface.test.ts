@@ -185,7 +185,7 @@ describe("gateway surface placement", () => {
 		writeFileSync(join(cwd, "note.txt"), "hello\n");
 		const safety = createWorkerSafety({ cwd });
 		const guard = createLoopGuardRegistration({ safety, toolCallCap: 10 });
-		const registry = createWorkerToolRegistry(undefined, safety, undefined, [guard], "yolo");
+		const registry = createWorkerToolRegistry(undefined, safety, undefined, [guard]);
 		const nested = await registry.invoke({
 			tool: ToolNames.Gateway,
 			args: { op: "call", capability: ToolNames.CredentialPresent, args: { name: "CLIO_GATEWAY_TEST_ABSENT" } },
@@ -198,7 +198,7 @@ describe("gateway surface placement", () => {
 	});
 
 	it("exempts the gateway from the skill surface and checks the capability under its own name", async () => {
-		const registry = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd: env.dir }), undefined, [], "yolo");
+		const registry = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd: env.dir }), undefined, []);
 		const pendingSkillPolicy = {
 			allowedSkillNames: [],
 			requests: [],

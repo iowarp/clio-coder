@@ -77,9 +77,6 @@ describe("doctor --deep validation contract dry run", () => {
 		match(fullAuto[1]?.detail ?? "", /; runs without approval at yolo$/);
 		match(fullAuto[3]?.detail ?? "", /; blocked by the safety policy/);
 
-		const readOnly = contractDryRunFindings({ workspaceRoot: workspace, autonomy: "read-only" });
-		match(readOnly[0]?.detail ?? "", /; denied at read-only$/);
-
 		// A dry run: the program resolved, and nothing executed it.
 		strictEqual(existsSync(marker), false);
 	});

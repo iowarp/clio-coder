@@ -9,23 +9,24 @@ export interface CodexSubprocessPermissionConfig {
 export function codexSubprocessPermissionConfigForAutonomy(
 	level: AutonomyLevel | undefined,
 	env: NodeJS.ProcessEnv = process.env,
+	readOnly = false,
 ): CodexSubprocessPermissionConfig {
-	if (level === "read-only") return { sandbox: "read-only", dangerousBypass: false };
+	if (readOnly) return { sandbox: "read-only", dangerousBypass: false };
 	if (level === "yolo" && env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
 		return { sandbox: "danger-full-access", dangerousBypass: true };
 	}
 	return { sandbox: "workspace-write", dangerousBypass: false };
 }
 
-export function opencodeCliModeForAutonomy(level: AutonomyLevel | undefined): "edit" {
-	if (level === "read-only") {
+export function opencodeCliModeForAutonomy(_level: AutonomyLevel | undefined, readOnly = false): "edit" {
+	if (readOnly) {
 		throw new Error(
-			`opencode-cli runtime cannot enforce autonomy '${level}' through opencode run; choose ACP with an enforceable policy or an edit-capable run`,
+			`opencode-cli runtime cannot enforce a read-only run through opencode run; choose ACP with an enforceable policy or an edit-capable run`,
 		);
 	}
 	return "edit";
 }
 
-export function piCliModeForAutonomy(level: AutonomyLevel | undefined): "read-only" | "edit" {
-	return level === "read-only" ? "read-only" : "edit";
+export function piCliModeForAutonomy(_level: AutonomyLevel | undefined, readOnly = false): "read-only" | "edit" {
+	return readOnly ? "read-only" : "edit";
 }

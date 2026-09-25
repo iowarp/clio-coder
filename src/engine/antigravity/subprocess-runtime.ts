@@ -63,7 +63,11 @@ export interface AntigravityRuntimeDependencies {
 export function antigravitySubprocessConfigForAutonomy(
 	level: AutonomyLevel | undefined,
 	env: NodeJS.ProcessEnv = process.env,
+	readOnly = false,
 ): AntigravitySubprocessConfig {
+	if (readOnly) {
+		return { extraArgs: ["--mode", "plan", "--sandbox"], dangerousBypass: false, externalMode: "plan+sandbox" };
+	}
 	if (level === "yolo" && env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
 		return {
 			extraArgs: ["--dangerously-skip-permissions"],
@@ -71,9 +75,7 @@ export function antigravitySubprocessConfigForAutonomy(
 			externalMode: "bypassPermissions",
 		};
 	}
-	if (level === "read-only") {
-		return { extraArgs: ["--mode", "plan", "--sandbox"], dangerousBypass: false, externalMode: "plan+sandbox" };
-	}
+
 	// Both default and ungated yolo stay at agy's explicit
 	// accept-edits ceiling. Shell/network policy remains owned by agy.
 	return { extraArgs: ["--mode", "accept-edits"], dangerousBypass: false, externalMode: "accept-edits" };
@@ -102,7 +104,7 @@ export function buildAgyStdinLine(input: WorkerRunInput): string {
 
 export function buildAgyArgs(input: WorkerRunInput, gateEnv: NodeJS.ProcessEnv = process.env): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "antigravity-code");
-	const permission = antigravitySubprocessConfigForAutonomy(input.autonomy, gateEnv);
+	const permission = antigravitySubprocessConfigForAutonomy(input.autonomy, gateEnv, input.readOnly === true);
 	const args = [
 		...permission.extraArgs,
 		"--input-format",

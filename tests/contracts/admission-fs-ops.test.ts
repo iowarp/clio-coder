@@ -57,13 +57,7 @@ async function admittedCall(entry: (typeof CASES)[number]) {
 		mkdirSync(join(root, "data"), { recursive: true, mode: 0o755 });
 		entry.seed(root);
 		process.chdir(root);
-		const registry = createWorkerToolRegistry(
-			undefined,
-			createWorkerSafety({ cwd: root }),
-			{ noSkills: true },
-			[],
-			"default",
-		);
+		const registry = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd: root }), { noSkills: true }, []);
 		// Let setup I/O drain so it cannot land inside the counted window.
 		await new Promise((resolve) => setImmediate(resolve));
 		await new Promise((resolve) => setImmediate(resolve));

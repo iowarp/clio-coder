@@ -603,7 +603,7 @@ describe("dispatch admission boundary", () => {
 			new Map([["typecheck", { id: "typecheck", timeoutMs: 30_000 }]]),
 		);
 		ok(normalized.ok);
-		const findings = classifyDispatchIntentCompatibility({ intent: normalized.intent, autonomy: "read-only" });
+		const findings = classifyDispatchIntentCompatibility({ intent: normalized.intent, readOnly: true });
 		deepStrictEqual(
 			findings.filter((finding) => finding.decision === "refuse").map((finding) => finding.code),
 			["intent_write_without_authority"],
@@ -611,18 +611,12 @@ describe("dispatch admission boundary", () => {
 	});
 
 	it("admits only coordinator-bounded ACP gate prompts under read-only authority", () => {
+		strictEqual(isBoundedGateRolePrompt({ role: "reviewer", readOnly: true, systemPrompt: REVIEWER_GATE_PROMPT }), true);
 		strictEqual(
-			isBoundedGateRolePrompt({ role: "reviewer", autonomy: "read-only", systemPrompt: REVIEWER_GATE_PROMPT }),
-			true,
-		);
-		strictEqual(
-			isBoundedGateRolePrompt({ role: "reviewer", autonomy: "default", systemPrompt: REVIEWER_GATE_PROMPT }),
+			isBoundedGateRolePrompt({ role: "reviewer", readOnly: false, systemPrompt: REVIEWER_GATE_PROMPT }),
 			false,
 		);
-		strictEqual(
-			isBoundedGateRolePrompt({ role: "reviewer", autonomy: "read-only", systemPrompt: "caller persona" }),
-			false,
-		);
+		strictEqual(isBoundedGateRolePrompt({ role: "reviewer", readOnly: true, systemPrompt: "caller persona" }), false);
 	});
 
 	it("admits a budget-declaring recipe on a Claude CLI target as an external one-shot budget", async () => {
@@ -694,7 +688,7 @@ describe("dispatch admission boundary", () => {
 		}
 	});
 
-	it("rejects unmediated ACP autonomy narrowing before any worker starts", async () => {
+	it("rejects an unmediated ACP read-only dispatch before any worker starts", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.safety.autonomy = "yolo";
 		settings.integrations.externalAgents.entries = [
@@ -723,7 +717,7 @@ describe("dispatch admission boundary", () => {
 				message?: string;
 			};
 			strictEqual(result.kind, "error");
-			match(result.message ?? "", /agent-managed.*cannot enforce request autonomy narrowing/u);
+			match(result.message ?? "", /agent-managed.*cannot enforce a read-only run/u);
 			strictEqual(starts, 0);
 			strictEqual(bundle.contract.listRuns().length, 0);
 		} finally {

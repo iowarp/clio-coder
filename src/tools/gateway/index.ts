@@ -165,13 +165,13 @@ function autonomyNote(actionClass: ActionClass): string {
 		case "read":
 			return "Read class: runs at every autonomy level.";
 		case "write":
-			return "Write class: runs in default and yolo, and is denied for internal read-only workers.";
+			return "Write class: runs in default and yolo, and is denied for read-only runs.";
 		case "execute":
-			return "Execute class: an unrecognized command asks in default, runs in yolo, and is denied for internal read-only workers.";
+			return "Execute class: an unrecognized command asks in default, runs in yolo, and is denied for read-only runs.";
 		case "dispatch":
-			return "Dispatch class: plan-scale calls ask in default, run in yolo, and are denied for internal read-only workers.";
+			return "Dispatch class: plan-scale calls ask in default, run in yolo, and are denied for read-only runs.";
 		case "unknown":
-			return "No action class was declared: default asks for approval, yolo runs it, and internal read-only workers deny it.";
+			return "No action class was declared: default asks for approval, yolo runs it, and read-only runs deny it.";
 		default:
 			return `Action class ${actionClass}.`;
 	}

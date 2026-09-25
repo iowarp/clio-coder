@@ -123,7 +123,7 @@ grep -E "^WARN" "$doctor_log" || true
 
 turn_out="$scratch/turn.jsonl"
 turn_err="$scratch/turn.err"
-run_args=(run --autonomy read-only --json)
+run_args=(run --allow-tools none --json)
 [ -n "$target" ] && run_args+=(--target "$target")
 [ -n "$model" ] && run_args+=(--model "$model")
 run_args+=("Reply with the single word ready.")

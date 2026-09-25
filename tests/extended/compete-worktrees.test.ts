@@ -129,7 +129,7 @@ for (const agent of ["scout", "coder"] as const) {
 					events: (async function* () {
 						if (judge) {
 							// This is the admitted production spec, with a source-only worker seam.
-							ok(spec.autonomy === "read-only");
+							ok(spec.readOnly === true);
 							ok(spec.allowedTools.includes(ToolNames.Read));
 							const policy = createWorkerSafety({
 								cwd,
@@ -143,7 +143,7 @@ for (const agent of ["scout", "coder"] as const) {
 								const call = { tool: ToolNames.Read, args: { path: evidence.receiptPath } };
 								const decision = policy.evaluate(call);
 								strictEqual(decision.kind, "allow");
-								strictEqual(mapAutonomy(spec.autonomy, policy.classify(call).actionClass), "allow");
+								strictEqual(mapAutonomy("default", policy.classify(call).actionClass), "allow");
 								const read = await readTool.run(call.args);
 								strictEqual(read.kind, "ok");
 								if (read.kind === "ok") {
@@ -261,7 +261,7 @@ for (const agent of ["scout", "coder"] as const) {
 			ok(judgeRun?.receiptPath);
 			const judgeReceipt = JSON.parse(readFileSync(judgeRun.receiptPath, "utf8")) as RunReceipt;
 			strictEqual(judgeReceipt.outcome, "succeeded");
-			strictEqual(judgeReceipt.autonomyEnforcement?.autonomy, "read-only");
+			strictEqual(judgeReceipt.autonomyEnforcement?.autonomy, "default");
 			deepStrictEqual(
 				judgeReceipt.gate?.subjects?.map((subject) => subject.runId).sort(),
 				receipts.map((receipt) => receipt.runId).sort(),
@@ -297,7 +297,7 @@ for (const agent of ["scout", "coder"] as const) {
 			for (const receipt of receipts) {
 				strictEqual(receipt.gate?.role, "candidate");
 				strictEqual(receipt.outcome, "succeeded");
-				strictEqual(receipt.autonomyEnforcement?.autonomy, writer ? "default" : "read-only");
+				strictEqual(receipt.autonomyEnforcement?.autonomy, "default");
 				if (!writer) deepStrictEqual(receipt.intent?.writeRoots, []);
 			}
 			strictEqual(candidateBefore.length, 2);

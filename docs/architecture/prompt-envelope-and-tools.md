@@ -227,7 +227,7 @@ Several tools sit in a plane for containment rather than class:
 | `git` | EXECUTE plane, read class | Read-only inspection (`op=status/diff/log`) that runs on the safe-exec spine. |
 | `monitor` | ORCHESTRATE plane, read class, parallel | It never mutates a run. |
 | `tasks` | Read class, sequential | It orchestrates the agent's own work rather than workers. Sequential so two board mutations in one batch cannot interleave. |
-| `ledger` | Read class | A post reaches a one-way control lane and a read answers from a local mirror, so it touches no workspace. Reviewers and judges are pinned to read-only autonomy, where a write class would block the peer review the board exists for. |
+| `ledger` | Read class | A post reaches a one-way control lane and a read answers from a local mirror, so it touches no workspace. Reviewers and judges have a read-only dispatch restriction, where a write class would block the peer review the board exists for. |
 | `panes` | Read class, sequential | It controls only Clio-owned terminal panes through the live mux. Sequential so two operations cannot race the same pane registry. |
 | `evidence` | OBSERVE plane, sequential | It only reads canonical evidence, trust status, gate decisions, and findings, but `run` mode may materialize a bundle under Clio's data directory. |
 | `limitation` | ORCHESTRATE plane, read class, parallel | It appends one typed receipt to the session ledger and touches nothing else. The call is pure. |

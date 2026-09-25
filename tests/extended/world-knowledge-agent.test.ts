@@ -12,7 +12,7 @@ import {
 	formatEffectiveBudget,
 	resolveToolBudgetEnvelope,
 } from "../../src/domains/dispatch/budget-envelope.js";
-import { budgetEnforcementForRuntime, effectiveWorkerAutonomy } from "../../src/domains/dispatch/extension.js";
+import { budgetEnforcementForRuntime } from "../../src/domains/dispatch/extension.js";
 
 function worldResult(discovery: "performed" | "caller-supplied-only" | "unavailable") {
 	return JSON.stringify({
@@ -61,8 +61,6 @@ describe("world-knowledge agent contract", () => {
 		deepStrictEqual(spec.toolRequirements.required, []);
 		equal(resolveAgentToolCompatibility(spec, [], { mediatesDispatch: true }).compatible, true);
 		equal(resolveAgentToolCompatibility(spec, ["read", "web_fetch"], { mediatesDispatch: true }).compatible, true);
-		equal(effectiveWorkerAutonomy("yolo", "yolo", spec.capabilityClass), "read-only");
-		equal(effectiveWorkerAutonomy("yolo", "default", "workspace-edit"), "default");
 	});
 
 	it("separates supported facts, synthesis, uncertainty, and follow-up without inventing citations", () => {

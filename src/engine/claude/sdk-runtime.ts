@@ -293,6 +293,7 @@ function emitTextDelta(
 }
 
 interface PermissionGateInput {
+	readOnly?: boolean;
 	safety: ReturnType<typeof createWorkerSafety>;
 	cwd: string;
 	autonomy?: AutonomyLevel;
@@ -431,6 +432,7 @@ function decideToolUse(
 		safety: input.safety,
 		cwd: input.cwd,
 		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
+		...(input.readOnly === true ? { readOnly: true } : {}),
 		onPermission: input.onPermission,
 		emit: input.emit,
 		allowedTools: input.allowedTools,
@@ -547,6 +549,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		safety,
 		cwd: process.cwd(),
 		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
+		...(input.readOnly === true ? { readOnly: true } : {}),
 		onPermission,
 		emit,
 		handledToolDecisions: new Map<string, ClaudeToolPermissionDecision>(),
