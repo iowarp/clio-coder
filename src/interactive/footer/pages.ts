@@ -490,7 +490,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 		],
 		[
 			"Sampling",
-			resource ? `${Math.max(0, Math.round((Date.now() - resource.sampledAt) / 1000))}s ago · 2s cadence` : "pending",
+			resource ? `${Math.max(0, Math.round((state.now - resource.sampledAt) / 1000))}s ago · 2s cadence` : "pending",
 		],
 		["Scope note", "busiest interface/disk · local only"],
 	];
