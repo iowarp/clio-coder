@@ -603,8 +603,8 @@ function checkSettingsInventory(): void {
 
 // ---------------------------------------------------------------------------
 // environment-variable-inventory: docs/guide/environment-variables.md claims to
-// list every CLIO_* variable src reads. Was
-// tests/contracts/environment-variable-inventory.test.ts.
+// list every CLIO_* variable src reads, and every variable it names must still
+// be read by src. Was tests/contracts/environment-variable-inventory.test.ts.
 // ---------------------------------------------------------------------------
 const DOCUMENTED_ENV_FAMILIES: ReadonlyArray<RegExp> = [
 	/^CLIO_CODER_WORKER_FAUX(_[A-Z_]+)?$/, // documented as `CLIO_CODER_WORKER_FAUX` (+ suffixes)
@@ -624,28 +624,60 @@ function sourceFiles(dir: string): string[] {
 	return found;
 }
 
-function readEnvNames(): Map<string, string[]> {
-	const byName = new Map<string, string[]>();
-	const pattern =
-		/(?:env(?:\.(CLIO_[A-Z0-9_]+|NO_COLOR)|\[["'](CLIO_[A-Z0-9_]+|NO_COLOR)["']\])|(?:const\s+[A-Z0-9_]+_ENV\s*=\s*["'](CLIO_[A-Z0-9_]+)["']))/g;
+interface EnvSourceScan {
+	/** Clio-family names in a forward-checked read form, with the files that read them. */
+	clioReads: Map<string, string[]>;
+	/** Every name, Clio or ambient, that a code line reads or holds as an env key. */
+	readNames: Set<string>;
+	/** Env keys built from a template literal, as literal prefix and suffix around the hole. */
+	templateKeys: Array<{ prefix: string; suffix: string }>;
+}
+
+/**
+ * One pass over src for both directions. The reverse direction accepts
+ * `env.NAME`, `someEnv.NAME`, a quoted `"NAME"` (constants, key lists and
+ * helper arguments), and `$NAME` or `${NAME}` (shell text Clio generates).
+ * Matches on a line that starts as a comment do not count, so a comment naming
+ * a removed variable cannot keep its row alive.
+ */
+function scanEnvSources(): EnvSourceScan {
+	const clioReads = new Map<string, string[]>();
+	const readNames = new Set<string>();
+	const templateKeys: Array<{ prefix: string; suffix: string }> = [];
+	const forward =
+		/(?:env(?:\.(CLIO_[A-Z0-9_]+|NO_COLOR)|\[["'](CLIO_[A-Z0-9_]+|NO_COLOR)["']\])|(?:const\s+[A-Z0-9_]+_ENV(?:_VAR)?\s*=\s*["'](CLIO_[A-Z0-9_]+)["']))/g;
+	const reverse = /[eE]nv\??\.([A-Z][A-Z0-9_]*)\b|["']([A-Z][A-Z0-9_]*)["']|\$\{?([A-Z][A-Z0-9_]*)\b/g;
+	const template = /[eE]nv\[`([A-Z][A-Z0-9_]*)\$\{[^}`]*\}([A-Z0-9_]*)`\]/g;
+	const onCommentLine = (source: string, index: number): boolean => {
+		const line = source.slice(source.lastIndexOf("\n", index) + 1, index).trimStart();
+		return line.startsWith("//") || line.startsWith("*") || line.startsWith("/*");
+	};
 	for (const file of sourceFiles(join(root, "src"))) {
 		const source = readFileSync(file, "utf8");
-		for (const match of source.matchAll(pattern)) {
+		const relPath = file.slice(root.length);
+		for (const match of source.matchAll(forward)) {
 			const name = match[1] ?? match[2] ?? match[3];
 			if (name === undefined) continue;
-			const relPath = file.slice(root.length);
-			const sites = byName.get(name) ?? [];
+			const sites = clioReads.get(name) ?? [];
 			if (!sites.includes(relPath)) sites.push(relPath);
-			byName.set(name, sites);
+			clioReads.set(name, sites);
+		}
+		for (const match of source.matchAll(reverse)) {
+			const name = match[1] ?? match[2] ?? match[3];
+			if (name !== undefined && !onCommentLine(source, match.index)) readNames.add(name);
+		}
+		for (const match of source.matchAll(template)) {
+			if (!onCommentLine(source, match.index)) templateKeys.push({ prefix: match[1] ?? "", suffix: match[2] ?? "" });
 		}
 	}
-	return byName;
+	return { clioReads, readNames, templateKeys };
 }
 
 function checkEnvironmentVariableInventory(): void {
 	const doc = readRoot("docs/guide/environment-variables.md");
+	const scan = scanEnvSources();
 	const missing: string[] = [];
-	for (const [name, sites] of readEnvNames()) {
+	for (const [name, sites] of scan.clioReads) {
 		if (doc.includes(`\`${name}\``)) continue;
 		if (DOCUMENTED_ENV_FAMILIES.some((family) => family.test(name))) continue;
 		missing.push(`${name} (read at ${sites.join(", ")})`);
@@ -654,6 +686,26 @@ function checkEnvironmentVariableInventory(): void {
 		fail(
 			"environment-variable-inventory",
 			`docs/guide/environment-variables.md claims to list every variable src reads, and omits:\n  ${missing.join("\n  ")}`,
+		);
+	}
+
+	// Reverse direction: every backticked variable name on the page, with any
+	// `=value` dropped, must still be read. Wildcards (`AWS_*`) and templates
+	// (`<PHASE>`) name families, not variables, and are skipped by the pattern.
+	const documented = new Set([...doc.matchAll(/`([A-Z][A-Z0-9_]*)(?:=[^`]*)?`/g)].map((match) => match[1] ?? ""));
+	const unread = [...documented].filter(
+		(name) =>
+			name.length > 0 &&
+			!scan.readNames.has(name) &&
+			!scan.templateKeys.some(
+				({ prefix, suffix }) =>
+					name.length > prefix.length + suffix.length && name.startsWith(prefix) && name.endsWith(suffix),
+			),
+	);
+	if (unread.length > 0) {
+		fail(
+			"environment-variable-inventory",
+			`docs/guide/environment-variables.md documents variables no src file reads (as env.NAME, "NAME", or $NAME in generated shell); remove the row or restore the read:\n  ${unread.sort().join("\n  ")}`,
 		);
 	}
 

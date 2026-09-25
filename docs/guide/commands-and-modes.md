@@ -33,6 +33,7 @@ Turn it off under Settings → Appearance → Demo guidance (`interface.demo`), 
 | `clio-coder configure --list` | List user-facing runtime ids. |
 | `clio-coder configure --list --all` | List every registered runtime, including aliases. |
 | `clio-coder config [inspect] [--json]` | Print the effective customization graph across settings, context files, rules, skills, prompts, agents, extensions, safety, memory, hooks, and operator profile. |
+| `clio-coder config trust safety\|hooks\|settings [--json\|--hash <sha256>\|--revoke]` | Review, approve, or revoke one privilege-bearing project surface for this workspace. See [Project trust](#project-trust). |
 | `clio-coder targets [--json] [--probe [--reasoning] [--tools]] [--target <id>]` | List targets and metadata; `--reasoning` and `--tools` explicitly generate qualification requests. |
 | `clio-coder targets add` | Add a target interactively or through configure flags. |
 | `clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]` | Select the named roles only when any role flag is present. `--background-model` selects memory; `--orchestrator-model` selects chat; `--fleet-model` or `--fleet-target` selects fleet. Other roles and thinking levels are preserved. Without role flags, chat and fleet use the target default (or shared `--model`), while memory is preserved. With role flags, `--model` is refused with exit 2 when no selected role falls back to it; pass `--orchestrator-model` to set chat. Confirmation names only roles whose settings changed. Model IDs must match a nonempty discovered or cached inventory exactly; unavailable discovery is reported explicitly. |
@@ -97,6 +98,38 @@ Turn it off under Settings → Appearance → Demo guidance (`interface.demo`), 
 | `clio-coder context map [--out <path>] [--json]` | Write an archify architecture seed from the structural index without model calls. |
 | `clio-coder context replay (--sessions <path>... \| --synthetic <ids>) [--policies <ids>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--protect-last-turns <n>] [--min-evictable-tokens <n>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio session ledgers or the seeded procedural corpora and report retention, precision, token savings, recall cost, cold-prefix cost, saturation, and summary headroom. |
 | `clio-coder context working-set --session <id\|path>` | Inspect one session's durable working-set fold and path-index summary without modifying the ledger. |
+
+### Project trust
+
+Three project surfaces carry operator authority, so Clio ignores each one in a
+workspace until you approve its exact bytes:
+
+| Surface | Files |
+| --- | --- |
+| `safety` | The nearest `.clio-coder/safety.yaml`, searching up from the workspace root. |
+| `hooks` | `.clio-coder/hooks.yaml` and `.clio-coder/hooks.local.yaml`. |
+| `settings` | `.clio-coder/settings.yaml` and `.clio-coder/settings.local.yaml`. |
+
+A surface that was never approved, or whose files changed after approval, is
+ignored, and Clio reports it with the command that reviews it.
+`clio-coder config inspect` lists an ignored project settings layer beside the
+settings it failed to change.
+
+| Command | Effect |
+| --- | --- |
+| `clio-coder config trust <surface>` | Print the captured files and their SHA-256 digest as JSON. When at least one file is readable, the exact approval command follows. Read-only. |
+| `clio-coder config trust <surface> --json` | The same JSON with no approval line, for scripts. Read-only. |
+| `clio-coder config trust <surface> --hash <sha256>` | Approve exactly the reviewed bytes. It exits 1 when the files changed since the review or none of them is readable. |
+| `clio-coder config trust <surface> --revoke` | Remove the approval for this workspace. |
+
+Approval is per surface and per canonical workspace. Trusting one surface never
+trusts another, and trusting a parent directory never trusts a child workspace.
+Settings and safety take effect at the next restart. A revoked hook stops
+before its next execution, and a newly approved hook registers when extensions
+reload. A missing surface name or an unknown flag is a usage error (exit 2).
+Approval records live under the Clio state directory, in
+`workspace-trust/`, and are written only by this command and by Clio's own
+project settings saves.
 
 ## Headless Run Flags
 
