@@ -415,11 +415,11 @@ it("keeps model filter Escape local and edits actual settings and View filters",
 	f.open("view", view);
 	f.terminal.input("\x1b[F");
 	f.terminal.input("\x1b[98u");
-	assert.match(plain(view), /filter: alphab/);
+	assert.match(plain(view), /> alphab/);
 	f.terminal.input("\x07");
 	f.terminal.input("z");
-	assert.match(plain(view), /filter: alpha/);
-	assert.doesNotMatch(plain(view), /filter: alphab/);
+	assert.match(plain(view), /> alpha/);
+	assert.doesNotMatch(plain(view), /> alphab/);
 });
 it("keeps interview word editing on its answer and Escape on the local question", async () => {
 	const f = fixture();

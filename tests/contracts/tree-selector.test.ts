@@ -104,7 +104,7 @@ it("treats p and s as label text while editing and retains filtering and sorting
 	deepStrictEqual(f.edits, [["oldest", "ps", "session"]]);
 	deepStrictEqual(f.order(), ["newest", "branch", "marker", "oldest"]);
 	match(stripTerminalSequences(f.view.getHint()), /cwd:current.*recent/u);
-	match(f.text(), /label:.*ps/u);
+	match(f.text(), /label:"ps"/u);
 });
 
 it("keeps structural rows inert after sorting", () => {

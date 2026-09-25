@@ -314,6 +314,12 @@ export class TreeOverlayView implements Component {
 				lines.push("");
 			}
 		}
+		if (this.submode === "edit-label") {
+			// The label editor is the same `> text` input every list overlay shows;
+			// it used to be a footer string with a fake `_` caret that never moved.
+			this.labelInput.focused = true;
+			lines.push(...this.labelInput.render(contentWidth));
+		}
 		if (this.status) {
 			// A status is a bracketed notice: the tag reads dim and the message
 			// muted, except a failure which renders red end to end.
@@ -329,7 +335,7 @@ export class TreeOverlayView implements Component {
 
 	private footerText(): string {
 		if (this.submode === "edit-label") {
-			return `label: ${this.labelBuffer}_  ${buildHint([{ key: "Enter", verb: "commit" }], "back")}`;
+			return buildHint([{ key: "Enter", verb: "commit label" }], "back");
 		}
 		const tsLabel = this.showTimestamps ? "on" : "off";
 		return buildHint([
