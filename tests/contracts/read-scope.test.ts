@@ -20,7 +20,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 
 /**
  * Search scope: read, ls, grep, and find stay read class, and a path that
- * resolves outside the workspace asks below full-auto and runs at full-auto.
+ * resolves outside the workspace asks at default and runs at yolo.
  * The workspace sits one level inside its own temp directory, so `..` from it
  * and `data/out -> ../..` both land in that directory.
  */
@@ -312,7 +312,7 @@ describe("read scope admission", () => {
 		return registry;
 	}
 
-	it("parks every scoped tool at auto-edit, denies it unattended, and runs it once approved", async () => {
+	it("parks every scoped tool at default, denies it unattended, and runs it once approved", async () => {
 		for (const entry of SCOPED) {
 			const denied = registryAt("default");
 			denied.onPermissionRequired((_call, decision, meta) => {
@@ -335,19 +335,22 @@ describe("read scope admission", () => {
 		}
 	});
 
-	it("runs every scoped tool at full-auto, denies it at read-only, and never asks for an inside path", async () => {
+	it("runs every scoped tool at yolo, denies it in a read-only run, and never asks for an inside path", async () => {
 		for (const entry of SCOPED) {
-			const suggest = registryAt("default");
+			const atDefault = registryAt("default");
 			let asked = 0;
-			suggest.onPermissionRequired((_call, _decision, meta) => {
+			atDefault.onPermissionRequired((_call, _decision, meta) => {
 				asked += 1;
-				suggest.cancelParkedCall(meta.requestId, "contract: denied");
+				atDefault.cancelParkedCall(meta.requestId, "contract: denied");
 			});
-			strictEqual((await suggest.invoke({ tool: entry.tool, args: argsFor(entry.tool, entry.outside) })).kind, "blocked");
+			strictEqual(
+				(await atDefault.invoke({ tool: entry.tool, args: argsFor(entry.tool, entry.outside) })).kind,
+				"blocked",
+			);
 			strictEqual(asked, 1, entry.tool);
 
-			const fullAuto = registryAt("yolo");
-			const ran = await fullAuto.invoke({ tool: entry.tool, args: argsFor(entry.tool, entry.outside) });
+			const atYolo = registryAt("yolo");
+			const ran = await atYolo.invoke({ tool: entry.tool, args: argsFor(entry.tool, entry.outside) });
 			strictEqual(ran.kind, "ok", `${entry.tool}: ${JSON.stringify(ran)}`);
 
 			const readOnly = registryAt("default", true);

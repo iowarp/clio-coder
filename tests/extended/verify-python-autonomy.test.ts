@@ -27,7 +27,7 @@ it("requires approved safety authority for Python argv without trusting arbitrar
 				command: ["/home/akougkas/iowarp/battletest-v044/python-env/bin/python", "-m", "pytest", "-q"],
 				expected: "ask",
 			},
-			// A PATH-resolved test runner runs unattended at auto-edit (#377).
+			// A PATH-resolved test runner runs unattended at default (#377).
 			{ id: "python", command: ["python3", "-m", "pytest", "-q", "test_index_policy.py"], expected: "allow" },
 			{ id: "arbitrary", command: ["custom-check", "test.py"], expected: "ask" },
 			{ id: "node-project", command: ["node", "test/add.test.mjs"], expected: "ask" },
@@ -50,13 +50,13 @@ it("requires approved safety authority for Python argv without trusting arbitrar
 		);
 		const engine = createSafetyPolicyEngine({ cwd: scratch.dir });
 		for (const row of cases) strictEqual(admitted(engine, row.id), row.expected, row.id);
-		// At full-auto a catalog verifier is admitted like the same command through
+		// At yolo a catalog verifier is admitted like the same command through
 		// bash: unrecognized argv runs, while net blocks and argv the net cannot
 		// read as bare words still stop it.
 		for (const row of cases) {
-			const fullAuto =
+			const atYolo =
 				row.expected === "block" || ["inline", "joined-args", "fake-chain"].includes(row.id) ? row.expected : "allow";
-			strictEqual(admitted(engine, row.id, "yolo"), fullAuto, `${row.id} at full-auto`);
+			strictEqual(admitted(engine, row.id, "yolo"), atYolo, `${row.id} at yolo`);
 		}
 		writeFileSync(
 			join(scratch.dir, ".clio-coder/safety.yaml"),

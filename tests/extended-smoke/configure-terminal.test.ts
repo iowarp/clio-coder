@@ -349,7 +349,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			tty.send(DOWN.repeat(3) + ENTER);
 			await tty.expect("Worker permission mode");
 			tty.send(ENTER);
-			await tty.expect("❯ capable");
+			await tty.expect("❯ default");
 			tty.send(DOWN + ENTER);
 			await tty.expect("Autonomy level set to yolo");
 			await tty.quit();

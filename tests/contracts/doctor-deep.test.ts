@@ -53,9 +53,9 @@ describe("doctor --deep validation contract dry run", () => {
 		});
 		const workspace = workspaceWithContract(["git status", "CI=1 mytool --check", "nosuchtool --x", "rm -rf /"]);
 
-		const autoEdit = contractDryRunFindings({ workspaceRoot: workspace, autonomy: "default" });
+		const atDefault = contractDryRunFindings({ workspaceRoot: workspace, autonomy: "default" });
 		deepStrictEqual(
-			autoEdit.map((f) => [f.name, f.level]),
+			atDefault.map((f) => [f.name, f.level]),
 			[
 				["validator 1", "ok"],
 				["validator 2", "warn"],
@@ -63,19 +63,19 @@ describe("doctor --deep validation contract dry run", () => {
 				["validator 4", "warn"],
 			],
 		);
-		match(autoEdit[0]?.detail ?? "", /^`git status`: git is \/\S+\/git; runs without approval at default$/);
+		match(atDefault[0]?.detail ?? "", /^`git status`: git is \/\S+\/git; runs without approval at default$/);
 		strictEqual(
-			autoEdit[1]?.detail,
+			atDefault[1]?.detail,
 			`\`CI=1 mytool --check\`: mytool is ${tool}; asks for approval at default and runs at yolo; declare it in .clio-coder/safety.yaml to run it unattended`,
 		);
-		match(autoEdit[2]?.detail ?? "", /^`nosuchtool --x`: nosuchtool not found; /);
-		match(autoEdit[3]?.detail ?? "", /; blocked by the safety policy \(damage-control:/);
-		ok(autoEdit.every((f) => f.ok));
+		match(atDefault[2]?.detail ?? "", /^`nosuchtool --x`: nosuchtool not found; /);
+		match(atDefault[3]?.detail ?? "", /; blocked by the safety policy \(damage-control:/);
+		ok(atDefault.every((f) => f.ok));
 
-		const fullAuto = contractDryRunFindings({ workspaceRoot: workspace, autonomy: "yolo" });
-		strictEqual(fullAuto[1]?.level, "ok");
-		match(fullAuto[1]?.detail ?? "", /; runs without approval at yolo$/);
-		match(fullAuto[3]?.detail ?? "", /; blocked by the safety policy/);
+		const atYolo = contractDryRunFindings({ workspaceRoot: workspace, autonomy: "yolo" });
+		strictEqual(atYolo[1]?.level, "ok");
+		match(atYolo[1]?.detail ?? "", /; runs without approval at yolo$/);
+		match(atYolo[3]?.detail ?? "", /; blocked by the safety policy/);
 
 		// A dry run: the program resolved, and nothing executed it.
 		strictEqual(existsSync(marker), false);

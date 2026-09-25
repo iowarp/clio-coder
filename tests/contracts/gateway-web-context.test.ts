@@ -28,7 +28,7 @@ describe("web_read and web_fetch", () => {
 		strictEqual(classify({ tool: ToolNames.WebFetch, args: { url: "https://example.invalid/" } }).actionClass, "read");
 	});
 
-	it("parks an outward web_fetch at auto-edit while the same arguments run through web_read as a plain GET", async () => {
+	it("parks an outward web_fetch at default while the same arguments run through web_read as a plain GET", async () => {
 		const parks: string[] = [];
 		const registry = createRegistry({ safety: createWorkerSafety(), autonomy: () => "default" });
 		registry.register(webReadTool);
@@ -39,7 +39,7 @@ describe("web_read and web_fetch", () => {
 		});
 		const args = { url: "ftp://example.invalid/resource", method: "POST", body: "payload" };
 		const fetched = await registry.invoke({ tool: ToolNames.WebFetch, args });
-		strictEqual(fetched.kind, "blocked", "an outward request asks at auto-edit; the test denied it");
+		strictEqual(fetched.kind, "blocked", "an outward request asks at default; the test denied it");
 		deepStrictEqual(parks, [ToolNames.WebFetch]);
 		const read = await registry.invoke({ tool: ToolNames.WebRead, args });
 		strictEqual(read.kind, "ok", "web_read never asks: nothing it accepts is outward");

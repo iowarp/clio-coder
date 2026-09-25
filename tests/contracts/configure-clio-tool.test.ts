@@ -70,7 +70,7 @@ test("configure_clio rejects stale proposals, cancellation, sensitive paths and 
 });
 
 test("configure_clio refuses autonomy at both levels, including padded values and apply", async (t) => {
-	const env = await isolateClioEnv("clio-configure-capable-");
+	const env = await isolateClioEnv("clio-configure-autonomy-refusal-");
 	t.after(() => env.restore());
 	for (const level of ["default", "yolo"] as const) {
 		const tool = createConfigureClioTool({ getAutonomy: () => level, askUser: async () => ({ answers: [] }) });

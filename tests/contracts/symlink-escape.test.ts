@@ -173,7 +173,7 @@ describe("symlink escape admission", () => {
 });
 
 /**
- * The out-of-root write at auto-edit is the known call the policy engine
+ * The out-of-root write at default is the known call the policy engine
  * parks for operator confirmation. A park settles only through a listener's
  * answer, so a registry with no listener must refuse it rather than hang.
  */
@@ -196,7 +196,7 @@ describe("park without a permission listener", () => {
 		rmSync(base, { recursive: true, force: true });
 	});
 
-	function autoEditRegistry() {
+	function defaultRegistry() {
 		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "default" });
 		registry.register(writeTool);
 		return registry;
@@ -215,7 +215,7 @@ describe("park without a permission listener", () => {
 	}
 
 	it("refuses the call fail closed and says why", async () => {
-		const registry = autoEditRegistry();
+		const registry = defaultRegistry();
 		const verdict = await settledWithin(
 			registry.invoke({ tool: ToolNames.Write, args: { path: "data/out.txt", content: "x" } }),
 			2000,
@@ -231,7 +231,7 @@ describe("park without a permission listener", () => {
 	});
 
 	it("parks as before when a listener is registered, and runs the call once approved", async () => {
-		const registry = autoEditRegistry();
+		const registry = defaultRegistry();
 		const asked: Array<{ actionClass: string; requestId: string }> = [];
 		registry.onPermissionRequired((_call, decision, meta) => {
 			asked.push({ actionClass: decision.classification.actionClass, requestId: meta.requestId });

@@ -207,7 +207,7 @@ describe("ask_user tool", () => {
 		strictEqual(f.shown.length, 2);
 	});
 
-	it("parks an outward or misspelled exposure for the operator at auto-edit instead of asking ungated", async () => {
+	it("parks an outward or misspelled exposure for the operator at default instead of asking ungated", async () => {
 		const f = fixture([]);
 		for (const exposure of ["outward", "public"]) {
 			const verdict = await f.invoke({ exposure, questions: [{ question: "Publish the release?" }] });

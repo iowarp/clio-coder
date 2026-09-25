@@ -65,7 +65,7 @@ describe("physical `..` through a symlink", () => {
 		return classify({ tool: ToolNames.Write, args: { path, content: "x" } });
 	}
 
-	/** A write tool call at auto-edit whose park, if any, the operator approves. */
+	/** A write tool call at default whose park, if any, the operator approves. */
 	async function approvedWrite(path: string, content: string) {
 		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "default" });
 		registry.register(writeTool);
@@ -150,7 +150,7 @@ describe("physical `..` through a symlink", () => {
 		strictEqual(evaluatePathPolicy(secret, "read", path).kind, "block");
 		const lexical = compilePathPolicy({ zeroAccessPaths: [join(root, "data", "notes.txt")] }, root);
 		strictEqual(evaluatePathPolicy(lexical, "read", path).kind, "allow");
-		// Outside the workspace, so the read runs unattended only at full-auto.
+		// Outside the workspace, so the read runs unattended only at yolo.
 		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "yolo" });
 		registry.register(readTool);
 		const verdict = await registry.invoke({ tool: ToolNames.Read, args: { path } });

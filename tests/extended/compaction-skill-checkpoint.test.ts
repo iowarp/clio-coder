@@ -263,7 +263,7 @@ describe("mandatory request-fit compaction", () => {
 		const f = overflowFixture();
 		const pending = "Create the exact source-backed map; keep tracked source unchanged.";
 		f.priceAt(25000, pending);
-		// This is the policy submit creates on auto-edit/full-auto after a cold resume.
+		// This is the policy submit creates at default or yolo after a cold resume.
 		const policy = withModelSkillActivation(undefined, true);
 		strictEqual(await f.context.runAutoCompact(f.runtime, true, undefined, "overflow", pending, policy), true);
 		strictEqual(f.results[0]?.skillContext?.skills[0]?.content[0]?.text, f.body);

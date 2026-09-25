@@ -145,7 +145,7 @@ describe("direct and gateway invocation preserve the same authority", () => {
 		env.restore();
 	});
 
-	it("denies a write-class capability at read-only identically, with the capability's own audit row", async () => {
+	it("denies a write-class capability in a read-only run identically, with the capability's own audit row", async () => {
 		const direct = harness(scratch(), "default", "direct", "approve", true);
 		const gateway = harness(scratch(), "default", "gateway", "approve", true);
 		const viaDirect = await invokeDirect(direct.registry, ToolNames.Artifact, ARTIFACT_ARGS);
