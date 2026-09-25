@@ -550,10 +550,13 @@ export class ListOverlayView implements Component {
 					const metaLen = metaStr ? visibleWidth(metaStr) : 0;
 
 					const maxLabelWidth = Math.max(1, availableWidth - (metaLen > 0 ? metaLen + 2 : 0));
-					const truncatedLabel = truncateToWidth(item.label, maxLabelWidth, ELLIPSIS, true);
+					const truncatedLabel = truncateToWidth(item.label, maxLabelWidth, ELLIPSIS, false);
 					const actualLabelWidth = visibleWidth(truncatedLabel);
 
-					const spacing = " ".repeat(Math.max(1, availableWidth - actualLabelWidth - metaLen));
+					// The gap exists only to separate metadata. A padded label plus a
+					// forced space overflowed a row with no metadata by one cell, and
+					// padLine then cut a row that had lost nothing with an ellipsis.
+					const spacing = " ".repeat(Math.max(metaLen > 0 ? 1 : 0, availableWidth - actualLabelWidth - metaLen));
 
 					let labelPart = truncatedLabel;
 					let metaPart = metaStr;
