@@ -128,9 +128,9 @@ describe("clio_docs and clio_library", () => {
 			punctuation.payload as { results: Array<{ file: string; heading: string; anchor: string }> }
 		).results.find(
 			(result) =>
-				result.file === "docs/architecture/tui-design.md" && result.heading === "5.1 Welcome Launchpad & Session Header",
+				result.file === "docs/architecture/tui-design.md" && result.heading === "4.1 Welcome Launchpad & Session Header",
 		);
-		strictEqual(punctuationResult?.anchor, "#51-welcome-launchpad--session-header");
+		strictEqual(punctuationResult?.anchor, "#41-welcome-launchpad--session-header");
 
 		const unicode = searchDocs("19 Origin Glyphs", 12);
 		ok(unicode.ok, unicode.ok ? "" : unicode.message);
