@@ -4429,6 +4429,7 @@ export function createDispatchBundle(
 				agent: lifecycle.agentConfig,
 				task: req.task,
 				...(req.model !== undefined ? { model: req.model } : {}),
+				...(req.thinkingLevel !== undefined ? { thinkingLevel: req.thinkingLevel } : {}),
 				systemPrompt: lifecycle.systemPrompt,
 				dynamicPromptMessages: lifecycle.dynamicPromptMessages,
 				cwd: lifecycle.cwd,
@@ -4886,6 +4887,7 @@ export function createDispatchBundle(
 				reproducibility: collectReproducibility(lifecycle.cwd, safetyMetadata),
 				delegation: {
 					agentConfigId: lifecycle.agentConfig.id,
+					...(result.delegation.selectedModelId !== undefined ? { selectedModelId: result.delegation.selectedModelId } : {}),
 					command: lifecycle.agentConfig.command,
 					args: [...(lifecycle.agentConfig.args ?? [])],
 					acpSessionId: result.delegation.acpSessionId,

@@ -115,6 +115,16 @@ export function classifyFailure(
 	// error. Ending it here surfaces the contract message the operator has to act
 	// on instead of burying it under two more identical failures.
 	if (WORKERSPEC_REJECTION.test(diagnostic)) return "deterministic-task";
+	// ACP model admission and 400/404 prompt verdicts reject the same request
+	// on every attempt. They do not indicate that the peer is unhealthy.
+	if (
+		/^acp delegation failed: acp peer (?:does not offer|offers multiple efforts for) requested model\b/.test(
+			diagnostic,
+		) ||
+		/^acp peer reported http (?:400|404):/.test(diagnostic) ||
+		/^acp delegation failed: acp (?:session\/prompt|session\/set_model) failed: (?:http )?(?:400|404)\b/.test(diagnostic)
+	)
+		return "deterministic-task";
 	// A provider that reports the prompt no longer fits the model's context
 	// window has judged the request, not the target. The identical input earns
 	// the identical overflow on every retry, and charging it to the target

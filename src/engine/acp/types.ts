@@ -273,6 +273,7 @@ export interface AcpDelegationResult {
 	usage: AcpDelegationUsage;
 	delegation: {
 		acpSessionId: string | null;
+		selectedModelId?: string;
 		initialize: AcpInitializeResponse | null;
 		toolCallsRequested: number;
 		toolCallsApproved: number;

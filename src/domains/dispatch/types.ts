@@ -572,6 +572,8 @@ export interface DelegationToolCallLogEntry {
 
 export interface RunReceiptDelegation {
 	agentConfigId: string;
+	/** Peer-advertised model selected for the ACP session, when available. */
+	selectedModelId?: string;
 	command: string;
 	args: string[];
 	acpSessionId: string | null;

@@ -23,6 +23,22 @@ function classifyTail(stderrTail: string) {
 }
 
 describe("dispatch failure classification", () => {
+	it("does not retry ACP model admission or peer HTTP 400/404 or charge the peer breaker", () => {
+		for (const tail of [
+			"ACP delegation failed: ACP peer does not offer requested model 'gpt-6-unknown'",
+			"ACP delegation failed: ACP peer offers multiple efforts for requested model 'gpt-6-luna'; specify thinkingLevel",
+			"ACP peer reported HTTP 400: The model is not supported.",
+			"ACP peer reported HTTP 404: Model not found.",
+			"ACP delegation failed: ACP session/prompt failed: HTTP 400 Bad Request",
+		]) {
+			const failureClass = classifyTail(tail);
+			strictEqual(failureClass, "deterministic-task", tail);
+			strictEqual(decideRetry(failureClass, 0, 2).retry, false, tail);
+			strictEqual(affectsTargetBreaker(failureClass), false, tail);
+		}
+		strictEqual(classifyTail("ACP peer reported HTTP 500: server error"), "target-transient");
+	});
+
 	it("keeps a provider context overflow off the target breaker and out of retry", () => {
 		for (const tail of [
 			"[worker] provider error: 400 This model's maximum context length is 8192 tokens. However, you requested 9000 tokens",

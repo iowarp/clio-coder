@@ -34,6 +34,20 @@ test("ACP provider error streamed as text is marked as a failed turn", () => {
 	strictEqual(terminal.message.errorMessage, failure);
 });
 
+test("ACP Anthropic error envelope without HTTP status is still a failure", () => {
+	const mapper = new AcpEventMapper();
+	mapper.mapUpdate({
+		update: {
+			sessionUpdate: "agent_message_chunk",
+			content: {
+				type: "text",
+				text: '{"type":"error","error":{"type":"invalid_request_error","message":"Unknown model"}}',
+			},
+		},
+	});
+	strictEqual(mapper.reportedFailure(), "ACP peer reported error: Unknown model");
+});
+
 test("ACP ordinary text and quoted error examples do not become failures", () => {
 	for (const text of [
 		"The package version is 0.5.5.",
@@ -65,6 +79,23 @@ test("ACP adapter fails a peer turn that returns an error envelope with end_turn
 	strictEqual(result.failureMessage, "ACP peer reported HTTP 400: The model is not supported.");
 });
 
+test("ACP adapter fails a statusless Anthropic error envelope with end_turn", async () => {
+	const cwd = process.cwd();
+	const result = await startAcpDelegationRun({
+		agent: {
+			id: "anthropic-error-fixture",
+			command: process.execPath,
+			args: [fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url)), "anthropic-error"],
+		},
+		task: "report version",
+		cwd,
+		safety: createWorkerSafety({ cwd }),
+	}).promise;
+	strictEqual(result.exitCode, 1);
+	strictEqual(result.stopReason, "error");
+	strictEqual(result.failureMessage, "ACP peer reported error: The model is not supported.");
+});
+
 test("ACP adapter selects a requested Codex model before prompting", async () => {
 	const cwd = process.cwd();
 	const run = startAcpDelegationRun({
@@ -82,6 +113,54 @@ test("ACP adapter selects a requested Codex model before prompting", async () =>
 	const result = await run.promise;
 	strictEqual(result.exitCode, 0, result.failureMessage);
 	strictEqual(result.stopReason, "end_turn");
+	strictEqual(result.delegation.selectedModelId, "gpt-6-luna[medium]");
+});
+
+test("ACP adapter uses the requested effort and rejects an ambiguous base model", async () => {
+	const cwd = process.cwd();
+	const agent = {
+		id: "model-fixture",
+		command: process.execPath,
+		args: [fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url)), "model-variants"],
+		connectTimeoutMs: 5_000,
+	};
+	const safety = createWorkerSafety({ cwd });
+	const pinned = await startAcpDelegationRun({
+		agent,
+		task: "report version",
+		model: "gpt-6-luna",
+		thinkingLevel: "high",
+		cwd,
+		safety,
+	}).promise;
+	strictEqual(pinned.exitCode, 0, pinned.failureMessage);
+	strictEqual(pinned.delegation.selectedModelId, "gpt-6-luna[high]");
+	const ambiguous = await startAcpDelegationRun({ agent, task: "report version", model: "gpt-6-luna", cwd, safety })
+		.promise;
+	strictEqual(ambiguous.exitCode, 1);
+	strictEqual(ambiguous.failureMessage?.includes("offers multiple efforts"), true);
+});
+
+test("ACP adapter fails a prompt response missing stopReason", async () => {
+	const terminal = new AcpEventMapper().finalEvents({})[0] as {
+		message: { stopReason: string; errorMessage: string };
+	};
+	strictEqual(terminal.message.stopReason, "error");
+	strictEqual(terminal.message.errorMessage, "ACP prompt response missing stopReason");
+	const cwd = process.cwd();
+	const result = await startAcpDelegationRun({
+		agent: {
+			id: "missing-stop-fixture",
+			command: process.execPath,
+			args: [fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url)), "missing-stop-reason"],
+		},
+		task: "report version",
+		cwd,
+		safety: createWorkerSafety({ cwd }),
+	}).promise;
+	strictEqual(result.exitCode, 1);
+	strictEqual(result.stopReason, "error");
+	strictEqual(result.failureMessage, "ACP prompt response missing stopReason");
 });
 
 test("ACP adapter fails an unavailable explicit model before prompting", async () => {
@@ -130,6 +209,7 @@ test("ACP dispatch seals peer errors as failed and forwards a requested model", 
 		const succeeded = await selected.finalPromise;
 		strictEqual(succeeded.outcome, "succeeded");
 		strictEqual(succeeded.exitCode, 0);
+		strictEqual(succeeded.delegation?.selectedModelId, "gpt-6-luna[medium]");
 	} finally {
 		await bundle.extension.stop?.();
 		restoreDispatchState();
