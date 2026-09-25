@@ -517,14 +517,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 							: `not judged: ${status.detail}`,
 				};
 			}
-			const verdict = await judgeDrafts(
-				status.decider,
-				request,
-				candidates,
-				`${status.targetId}/${status.model ?? "default"}`,
-				signal,
-			);
-			return verdict ? { verdict } : { reason: `not judged: ${status.targetId} gave no usable answer` };
+			return judgeDrafts(status.decider, request, candidates, `${status.targetId}/${status.model ?? "default"}`, signal);
 		},
 		...(deps.app.agents ? { agents: deps.app.agents } : {}),
 		...(scheduling ? { getBudgetPreflight: () => scheduling.preflight() } : {}),
