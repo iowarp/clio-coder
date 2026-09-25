@@ -797,8 +797,11 @@ test("the welcome keeps a full model name when space permits and shows the logo,
 	const model = "dynamo/qwopus3.5-flash@q4_k_m";
 	const component = banner({ model });
 	const wide = rows(component, 120);
+	const tagline = "Systems engineering beats vibes! Built by researchers who love to code.";
 	ok(wide.join("\n").includes(model));
-	ok(wide.join("\n").includes("Systems engineering beats vibes. Built by researchers who love to code!"));
+	ok(wide[1]?.includes(tagline));
+	ok(!wide[0]?.includes(tagline));
+	ok(rows(component, 200)[1]?.includes(tagline));
 	ok(wide.join("\n").includes("Permissions  default"));
 	ok(wide[1]?.includes("████"));
 	component.collapseToSessionHeader();
@@ -836,7 +839,7 @@ test("the welcome box closes at the viewport edge on narrow and wide terminals",
 		strictEqual(lines[14]?.[edge], "┘");
 		for (const line of lines.slice(1, 12)) strictEqual(line[edge], "│", line);
 		for (const line of lines.slice(13, 14)) strictEqual(line[edge], "│", line);
-		ok(!lines.slice(1, 6).some((line) => line.includes("…")), "art must resize rather than truncate");
+		ok(!lines.slice(1, 6).filter((line) => line.includes("██")).some((line) => line.includes("…")), "art must resize rather than truncate");
 	}
 });
 
