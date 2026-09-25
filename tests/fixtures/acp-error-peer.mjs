@@ -1,9 +1,11 @@
 import { createInterface } from "node:readline";
 
 const mode = process.argv[2];
-const modelPin = mode === "model-pin" || mode === "model-variants";
+const thoughtOption = mode === "thought-option" || mode === "thought-refuse";
+const modelPin = mode === "model-pin" || mode === "model-variants" || thoughtOption;
 const legacyModels = mode === "legacy-models";
-let selectedModel = "gpt-6-astra[medium]";
+let selectedModel = thoughtOption ? "gpt-6-astra" : "gpt-6-astra[medium]";
+let selectedThought = "medium";
 let setModelCalled = false;
 
 function send(value) {
@@ -20,11 +22,13 @@ function modelValue(value) {
  * unrelated option first so the client must pick by category, not position.
  */
 function configOptions() {
-	const values = [
-		modelValue("gpt-6-astra[medium]"),
-		modelValue("gpt-6-luna[medium]"),
-		...(mode === "model-variants" ? [modelValue("gpt-6-luna[high]")] : []),
-	];
+	const values = thoughtOption
+		? [modelValue("gpt-6-astra"), modelValue("gpt-6-luna")]
+		: [
+				modelValue("gpt-6-astra[medium]"),
+				modelValue("gpt-6-luna[medium]"),
+				...(mode === "model-variants" ? [modelValue("gpt-6-luna[high]")] : []),
+			];
 	const model = {
 		id: "peer-model",
 		name: "Model",
@@ -33,6 +37,19 @@ function configOptions() {
 		currentValue: selectedModel,
 		options: mode === "model-variants" ? [{ group: "gpt-6", name: "GPT-6", options: values }] : values,
 	};
+	if (thoughtOption) {
+		return [
+			model,
+			{
+				id: "peer-thinking",
+				name: "Thinking level",
+				category: "thought_level",
+				type: "select",
+				currentValue: selectedThought,
+				options: [{ group: "effort", name: "Effort", options: [modelValue("medium"), modelValue("high")] }],
+			},
+		];
+	}
 	return mode === "model-variants"
 		? [
 				{
@@ -90,11 +107,12 @@ for await (const line of createInterface({ input: process.stdin })) {
 		});
 	} else if (request.method === "session/set_config_option") {
 		const option = configOptions().find((candidate) => candidate.id === request.params?.configId);
-		if (option?.category !== "model" || typeof request.params?.value !== "string") {
+		if (!option || typeof request.params?.value !== "string") {
 			send({ jsonrpc: "2.0", id: request.id, error: { code: -32602, message: "unknown config option" } });
 			continue;
 		}
-		selectedModel = request.params.value;
+		if (option.category === "model") selectedModel = request.params.value;
+		else if (option.category === "thought_level" && mode !== "thought-refuse") selectedThought = request.params.value;
 		send({ jsonrpc: "2.0", id: request.id, result: { configOptions: configOptions() } });
 	} else if (request.method === "session/set_model") {
 		setModelCalled = true;
@@ -116,7 +134,15 @@ for await (const line of createInterface({ input: process.stdin })) {
 			send({
 				jsonrpc: "2.0",
 				id: request.id,
-				result: { stopReason: selectedModel.startsWith("gpt-6-luna[") ? "end_turn" : "refusal" },
+				result: {
+					stopReason: thoughtOption
+						? selectedThought === "high"
+							? "end_turn"
+							: "refusal"
+						: selectedModel.startsWith("gpt-6-luna[")
+							? "end_turn"
+							: "refusal",
+				},
 			});
 			continue;
 		}

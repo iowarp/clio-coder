@@ -141,6 +141,60 @@ test("ACP adapter uses the requested effort and rejects an ambiguous base model"
 	strictEqual(ambiguous.failureMessage?.includes("offers multiple efforts"), true);
 });
 
+test("ACP adapter selects model and thinking level through separate peer config options", async () => {
+	const cwd = process.cwd();
+	const result = await startAcpDelegationRun({
+		agent: {
+			id: "thought-fixture",
+			command: process.execPath,
+			args: [fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url)), "thought-option"],
+		},
+		task: "report version",
+		model: "gpt-6-luna",
+		thinkingLevel: "high",
+		cwd,
+		safety: createWorkerSafety({ cwd }),
+	}).promise;
+	strictEqual(result.exitCode, 0, result.failureMessage);
+	strictEqual(result.delegation.selectedModelId, "gpt-6-luna");
+});
+
+test("ACP adapter selects a peer thinking level without a model request", async () => {
+	const cwd = process.cwd();
+	const result = await startAcpDelegationRun({
+		agent: {
+			id: "thought-fixture",
+			command: process.execPath,
+			args: [fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url)), "thought-option"],
+		},
+		task: "report version",
+		thinkingLevel: "high",
+		cwd,
+		safety: createWorkerSafety({ cwd }),
+	}).promise;
+	strictEqual(result.exitCode, 0, result.failureMessage);
+	strictEqual(result.delegation.selectedModelId, "gpt-6-astra");
+});
+
+test("ACP adapter fails before prompting when the peer keeps another thinking level", async () => {
+	const cwd = process.cwd();
+	const result = await startAcpDelegationRun({
+		agent: {
+			id: "thought-fixture",
+			command: process.execPath,
+			args: [fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url)), "thought-refuse"],
+		},
+		task: "report version",
+		model: "gpt-6-luna",
+		thinkingLevel: "high",
+		cwd,
+		safety: createWorkerSafety({ cwd }),
+	}).promise;
+	strictEqual(result.exitCode, 1);
+	strictEqual(result.stopReason, "error");
+	strictEqual(result.failureMessage?.includes("kept thinking level 'medium' after Clio selected 'high'"), true);
+});
+
 test("ACP adapter selects models only through the stable config option, never session/set_model", async () => {
 	const cwd = process.cwd();
 	// A peer that offers only the unstable `models` field has no stable model
