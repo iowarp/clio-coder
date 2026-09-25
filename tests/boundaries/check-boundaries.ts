@@ -217,6 +217,11 @@ const STAGE0_SEAMS: ReadonlyArray<Stage0Seam> = [
 		reason: "the Stage 1 composition root owns the ACP server surface.",
 	},
 	{
+		module: "src/engine/acp/deferred-boot.ts",
+		reason:
+			"the ACP CLI keeps its transport open while the first workspace request selects a root; deferred boot depends only on ACP protocol leaves.",
+	},
+	{
 		module: "src/engine/acp/commands.ts",
 		reason:
 			"the Stage 1 composition root binds the operator-command control the ACP server takes by structure. The projection value-imports the slash registry, which the root already reaches directly, so it enters the Stage 0 overlap through the same door it already owns rather than through the ACP server seam.",
