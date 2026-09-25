@@ -25,10 +25,6 @@ export function printOk(message: string): void {
 	process.stdout.write(`${chalk.green("ok:")} ${message}\n`);
 }
 
-export function printHeader(message: string): void {
-	process.stdout.write(`${chalk.cyan(message)}\n`);
-}
-
 export function columnWidths(rows: ReadonlyArray<ReadonlyArray<string>>): number[] {
 	const widths: number[] = [];
 	for (const row of rows) {
