@@ -13,6 +13,7 @@ Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
   --permission-timeout MS  How long a mediated permission request may wait for the
                            client before the prompt expires. Defaults to the configured
                            delegation.defaults.permissionTimeoutMs.
+  auth login               Open interactive Quick Connect for terminal ACP authentication.
 
 This command is intended for ACP frontends to spawn. Interactive delegation remains
 available through /agents, /delegate, the dispatch board, and receipts.
@@ -70,11 +71,12 @@ export async function runAcpCommand(
 	// sentinel. Keep the command boundary tolerant too, so another dispatcher
 	// can pass the flag spelling through without changing ACP option semantics.
 	const normalizedArgs = args[0] === "--acp" ? args.slice(1) : args;
+	const terminalAuth = normalizedArgs.at(-2) === "auth" && normalizedArgs.at(-1) === "login";
 	if (normalizedArgs.includes("--help") || normalizedArgs.includes("-h")) {
 		process.stdout.write(HELP);
 		return 0;
 	}
-	const flags = parseAcpFlags(normalizedArgs);
+	const flags = parseAcpFlags(terminalAuth ? normalizedArgs.slice(0, -2) : normalizedArgs);
 	if (typeof flags === "string") {
 		printError(flags);
 		process.stderr.write(HELP);
@@ -93,6 +95,7 @@ export async function runAcpCommand(
 			return 2;
 		}
 	}
+	if (terminalAuth) return (await import("./configure.js")).runConfigureCommand(["--quick"]);
 	takeOverStdout();
 	try {
 		return await runClioCommand({

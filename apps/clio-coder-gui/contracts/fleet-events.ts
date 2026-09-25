@@ -163,7 +163,7 @@ export const HEALTH_EVENT_TYPES = [
 	"health.provider",
 ] as const;
 /**
- * Every `clio-coder/event` kind this app understands, mapped to the delta it
+ * Every `_clio-coder/event` kind this app understands, mapped to the delta it
  * becomes. Adding an engine kind here without also adding it to
  * `ACP_EVENT_KINDS` in `sessions.ts` only means the server never opts in; the
  * reverse leaves an opted-in kind with nowhere to go, which the reader logs and

@@ -57,7 +57,7 @@ const HEALTH_KINDS = ["compaction.end", "context.warning", "safety.toolBudgetExc
 
 function eventsOf(peer: ReturnType<typeof fakeTransport>): Array<Record<string, unknown>> {
 	return peer.notifications
-		.filter((entry) => entry.method === "clio-coder/event")
+		.filter((entry) => entry.method === "_clio-coder/event")
 		.map((entry) => entry.params as Record<string, unknown>);
 }
 

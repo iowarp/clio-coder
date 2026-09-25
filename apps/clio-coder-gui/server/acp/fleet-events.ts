@@ -18,7 +18,7 @@ export type AcpEvent =
 	| { type: null; item: null; sequence: number };
 
 /**
- * Projects one `clio-coder/event` frame, or reports that it is not projectable.
+ * Projects one `_clio-coder/event` frame, or reports that it is not projectable.
  *
  * Two failures are deliberately not the same thing. A kind this build has never
  * heard of is a newer engine talking to an older app: it comes back with

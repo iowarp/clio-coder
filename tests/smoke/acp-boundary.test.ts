@@ -37,6 +37,21 @@ async function runCli(args: string[], env: NodeJS.ProcessEnv): Promise<number | 
 		child.once("close", resolve);
 	});
 }
+async function runCliWithStderr(
+	args: string[],
+	env: NodeJS.ProcessEnv,
+): Promise<{ code: number | null; stderr: string }> {
+	const child = spawn(process.execPath, [CLI, ...args], { cwd: ROOT, env, stdio: ["ignore", "ignore", "pipe"] });
+	let stderr = "";
+	child.stderr.setEncoding("utf8");
+	child.stderr.on("data", (chunk: string) => {
+		stderr += chunk;
+	});
+	return new Promise((resolve, reject) => {
+		child.once("error", reject);
+		child.once("close", (code) => resolve({ code, stderr }));
+	});
+}
 async function initialize(target: Home): Promise<void> {
 	strictEqual(await runCli(["doctor", "--fix"], target.env), 0);
 }
@@ -267,6 +282,16 @@ async function closeServer(server: Server): Promise<void> {
 	await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
+	it("runs terminal authentication args through interactive Quick Connect", async () => {
+		const target = home();
+		try {
+			const result = await runCliWithStderr(["acp", "auth", "login"], target.env);
+			strictEqual(result.code, 2);
+			match(result.stderr, /--quick needs a terminal/u);
+		} finally {
+			target.cleanup();
+		}
+	});
 	it("reports missing service credentials before admission and uses saved auth after reopening", async () => {
 		const target = home();
 		const fixture = await provider({
@@ -299,9 +324,10 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 				.then(
 					() => null,
 					(error: unknown) =>
-						error as { error: { message: string; data: { _meta: Record<string, Record<string, unknown>> } } },
+						error as { error: { code: number; message: string; data: { _meta: Record<string, Record<string, unknown>> } } },
 				);
 			ok(rejected);
+			strictEqual(rejected.error.code, -32000);
 			strictEqual(rejected.error.data._meta["clio-coder/error"]?.code, "prompt_not_admitted");
 			strictEqual(rejected.error.data._meta["clio-coder/error"]?.reason, "authentication-required");
 			doesNotMatch(JSON.stringify(rejected), /CLIO_ACP_TEST_ONLY_KEY|settings.yaml|credentials.yaml/);
@@ -362,7 +388,7 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 				);
 			ok(rejected, "unconfigured prompt unexpectedly succeeded");
 			const error = rejected.error as { code: number; data: { _meta: Record<string, Record<string, unknown>> } };
-			strictEqual(error.code, -32000);
+			strictEqual(error.code, -32603);
 			strictEqual(error.data._meta["clio-coder/error"]?.code, "prompt_not_admitted");
 			strictEqual(emptyClient.updates.length, 0);
 			await emptyClient.close(emptySession);
@@ -535,6 +561,7 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 				strictEqual(permission.method, "session/request_permission");
 				const toolCall = permission.params.toolCall as Record<string, unknown>;
 				strictEqual(toolCall.status, "pending");
+				strictEqual("sessionUpdate" in toolCall, false);
 				if (decision === "allow-once") match(String(toolCall.toolCallId), /^clio-coder-tool-\d+$/u);
 				else strictEqual(toolCall.toolCallId, "clio-coder-tool-7");
 				client.respond(permission.id, { outcome: { outcome: "selected", optionId: decision } });

@@ -75,7 +75,7 @@ function control(calls: string[]) {
 			return { level: "info" as const, lines: ["ran"] };
 		},
 		injectsUserTurn: (command: unknown) => command === "share",
-		capability: { version: 1, list: "clio-coder/commands/list", invoke: "clio-coder/commands/invoke", count: 13 },
+		capability: { version: 1, list: "_clio-coder/commands/list", invoke: "_clio-coder/commands/invoke", count: 13 },
 	};
 }
 
@@ -89,7 +89,7 @@ describe("contracts/acp exposes the operator command catalog only when one is wi
 		};
 		strictEqual(init.agentCapabilities._meta["clio-coder/commands"], undefined);
 		await rejects(
-			() => peer.call("clio-coder/commands/list", {}),
+			() => peer.call("_clio-coder/commands/list", {}),
 			(error: unknown) => error instanceof AcpRequestError && error.detail?.code === "internal_error",
 		);
 		peer.transport.close();
@@ -114,10 +114,10 @@ describe("contracts/acp exposes the operator command catalog only when one is wi
 		strictEqual(init.protocolVersion, 1);
 		strictEqual(init.agentCapabilities._meta["clio-coder/commands"]?.count, 13);
 		const session = (await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
-		strictEqual(await peer.call("clio-coder/commands/list", {}), CATALOG);
-		await peer.call("clio-coder/commands/list", {});
+		strictEqual(await peer.call("_clio-coder/commands/list", {}), CATALOG);
+		await peer.call("_clio-coder/commands/list", {});
 		strictEqual(calls.filter((entry) => entry === "catalog").length, 1);
-		const result = (await peer.call("clio-coder/commands/invoke", {
+		const result = (await peer.call("_clio-coder/commands/invoke", {
 			sessionId: session.sessionId,
 			command: "doctor",
 		})) as { lines: string[] };
@@ -144,12 +144,12 @@ describe("contracts/acp exposes the operator command catalog only when one is wi
 		});
 		await new Promise((resolve) => setImmediate(resolve));
 		await rejects(
-			() => peer.call("clio-coder/commands/invoke", { sessionId: session.sessionId, command: "share" }),
+			() => peer.call("_clio-coder/commands/invoke", { sessionId: session.sessionId, command: "share" }),
 			(error: unknown) => error instanceof AcpRequestError && error.detail?.code === "prompt_active",
 		);
 		ok(!calls.includes("invoke:share"));
 		// A command that submits nothing is unaffected by the running turn.
-		await peer.call("clio-coder/commands/invoke", { sessionId: session.sessionId, command: "mcp" });
+		await peer.call("_clio-coder/commands/invoke", { sessionId: session.sessionId, command: "mcp" });
 		ok(calls.includes("invoke:mcp"));
 		chat.release();
 		await prompt;
@@ -178,7 +178,7 @@ it("the real command control carries completed doctor findings through JSON-RPC"
 	try {
 		await peer.call("initialize", { protocolVersion: 1, clientCapabilities: {} });
 		const session = (await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
-		const result = (await peer.call("clio-coder/commands/invoke", {
+		const result = (await peer.call("_clio-coder/commands/invoke", {
 			sessionId: session.sessionId,
 			command: "doctor",
 			argv: [],

@@ -1,9 +1,9 @@
 /**
  * The operator command catalog, projected onto ACP.
  *
- * Two methods ride the `_meta` seam: `clio-coder/commands/list` hands a client
+ * Two methods ride the `_meta` seam: `_clio-coder/commands/list` hands a client
  * the grammar it needs to build an argument UI, and
- * `clio-coder/commands/invoke` runs one of them headlessly. Neither adds a
+ * `_clio-coder/commands/invoke` runs one of them headlessly. Neither adds a
  * `sessionUpdate` kind or a top-level response field, so protocolVersion stays
  * at 1.
  *
@@ -78,7 +78,7 @@ export interface AcpCommandRule {
 	subcommands?: ReadonlyArray<string>;
 	/**
 	 * The command dispatches a worker and returns before it finishes. Its result
-	 * is "started"; everything interesting arrives as `clio-coder/event` dispatch
+	 * is "started"; everything interesting arrives as `_clio-coder/event` dispatch
 	 * kinds. A client not consuming those sees a control that appears to do
 	 * nothing.
 	 */
@@ -497,7 +497,7 @@ export function invokeAcpCommand(
 	// A dispatch command returns before its worker produces anything, and a
 	// silent success would read as a control that did nothing.
 	if (rule.streams === "dispatch" && lines.length === 0 && outcome === "accepted") {
-		push(`${rule.name} started; progress arrives as clio-coder/event dispatch kinds`);
+		push(`${rule.name} started; progress arrives as _clio-coder/event dispatch kinds`);
 	}
 	return Promise.resolve(finish());
 }

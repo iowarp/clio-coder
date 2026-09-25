@@ -207,7 +207,7 @@ export type SessionDelta = {
 	[K in keyof typeof SessionDeltas]: { type: K; payload: Static<(typeof SessionDeltas)[K]> };
 }[keyof typeof SessionDeltas];
 /**
- * The `clio-coder/event` kinds this app opts into at `initialize`. Each is the
+ * The `_clio-coder/event` kinds this app opts into at `initialize`. Each is the
  * engine's own `BusChannels` value, never a renamed alias, so the wire frame
  * names its producer. The engine intersects this list with its own allowlist,
  * so a kind listed here that it does not forward costs nothing.

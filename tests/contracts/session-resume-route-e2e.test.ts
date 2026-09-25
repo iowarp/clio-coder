@@ -98,11 +98,11 @@ describe("resuming a session keeps the route it ran on", { timeout: 180_000 }, (
 		);
 		try {
 			await client.request("initialize", { protocolVersion: 1, clientInfo: { name: "contract", version: "1" } });
-			const listed = await client.request<{ sessions: Array<{ sessionId: string }> }>("clio-coder/session/list", {});
+			const listed = await client.request<{ sessions: Array<{ sessionId: string }> }>("_clio-coder/session/list", {});
 			const sessionId = listed.sessions[0]?.sessionId;
 			ok(sessionId, "no session to load");
 			await client.request("session/load", { sessionId, cwd: scratch.root, mcpServers: [] });
-			const route = await client.request<Record<string, unknown>>("clio-coder/settings/get_safe", {});
+			const route = await client.request<Record<string, unknown>>("_clio-coder/settings/get_safe", {});
 			strictEqual(JSON.stringify(route).includes('"mock-model"'), true, JSON.stringify(route));
 			const before = chat.requests.length;
 			await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "still there?" }] }, 60_000);

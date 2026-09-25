@@ -70,3 +70,21 @@ test("a malformed frame of a kind this app does handle still fails the turn loud
 	assert.equal(turn?.status, "failed");
 	assert.equal(turn?.problem?.type, "urn:clio-coder:problem:upstream_acp");
 });
+
+test("a content-less running tool update keeps the last partial output", { timeout: 15000 }, async (t) => {
+	const h = await harness({}, { scenario: "tool-progress-no-content" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const partials: Array<string | undefined> = [];
+	t.after(
+		h.hub.connect(undefined, (event) => {
+			if (event.type !== "turn.tool") return;
+			const item = event.payload.item;
+			if (item.status === "in_progress") partials.push(item.partialOutput);
+		}),
+	);
+	h.supervisor.startTurn(session.id, "Read the fixture");
+	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status !== "running");
+	assert.deepEqual(partials.slice(-2), ["partial output", "partial output"]);
+});

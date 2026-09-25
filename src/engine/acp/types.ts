@@ -37,8 +37,8 @@ export const ACP_DECISION_META_KEY = "clio-coder/decision";
  * just to know what a method is called (rule6, tests/boundaries).
  */
 export const ACP_COMMANDS_META_KEY = "clio-coder/commands";
-export const ACP_COMMANDS_LIST_METHOD = "clio-coder/commands/list";
-export const ACP_COMMANDS_INVOKE_METHOD = "clio-coder/commands/invoke";
+export const ACP_COMMANDS_LIST_METHOD = "_clio-coder/commands/list";
+export const ACP_COMMANDS_INVOKE_METHOD = "_clio-coder/commands/invoke";
 
 /**
  * Wire bounds for one prompt turn (CONTRACT C001 §3). A client renders every
@@ -100,7 +100,7 @@ export const ACP_MIN_TOOL_PROGRESS_INTERVAL_MS = 250;
  */
 export const ACP_MAX_TOOL_CALL_ID_BYTES = 128;
 
-/** ACP v1 `ToolKind` closed enum (schema 0.4.5). */
+/** ACP v1 `ToolKind` closed enum (schema v1.23.0). */
 export type AcpToolKind =
 	| "read"
 	| "edit"
@@ -113,8 +113,8 @@ export type AcpToolKind =
 	| "switch_mode"
 	| "other";
 
-/** ACP v1 `ToolCallStatus` closed enum (schema 0.4.5). */
-export type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
+/** ACP v1 `ToolCallStatus` closed enum (schema v1.23.0). */
+export type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled";
 
 export interface AcpJsonRpcRequest {
 	jsonrpc: "2.0";
@@ -163,7 +163,7 @@ export interface AcpAuthMethod {
 }
 
 export interface AcpInitializeResponse {
-	protocolVersion?: number;
+	protocolVersion: number;
 	agentCapabilities?: Record<string, unknown>;
 	agentInfo?: AcpImplementationInfo;
 	authMethods?: AcpAuthMethod[];
@@ -185,13 +185,13 @@ export interface AcpContentText {
 export interface AcpContentResourceLink {
 	type: "resource_link";
 	uri: string;
-	name?: string;
+	name: string;
 	mimeType?: string;
 }
 
 export type AcpContentBlock = AcpContentText | AcpContentResourceLink | Record<string, unknown>;
 
-/** ACP v1 `ToolCallLocation` (schema 0.4.5). */
+/** ACP v1 `ToolCallLocation` (schema v1.23.0). */
 export interface AcpToolCallLocation {
 	/** The file path being accessed or modified. */
 	path: string;

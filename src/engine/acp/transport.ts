@@ -181,7 +181,7 @@ function handlerErrorFrame(id: string | number, err: unknown, diagnostics?: (lin
 		return jsonRpcError(id, err.rpcCode, message, acpErrorData(err.detail));
 	}
 	diagnostics?.(`internal error: ${acpErrorMessage(err)}`);
-	return jsonRpcError(id, -32000, ACP_INTERNAL_ERROR_MESSAGE, acpErrorData({ code: "internal_error" }));
+	return jsonRpcError(id, -32603, ACP_INTERNAL_ERROR_MESSAGE, acpErrorData({ code: "internal_error" }));
 }
 
 class StdioJsonRpcTransport implements AcpJsonRpcTransport {

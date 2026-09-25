@@ -90,7 +90,7 @@ const permission = async () => {
 };
 const event = (kind, payload, terminal = false) =>
 	send({
-		method: "clio-coder/event",
+		method: "_clio-coder/event",
 		params: {
 			version: 1,
 			workspaceInstanceId: "fixture",
@@ -114,11 +114,11 @@ const STEERING =
 				modes: ["next-slot", "end-of-turn"],
 				interrupt: true,
 				methods: {
-					steer: "clio-coder/session/steer",
-					queue: "clio-coder/session/queue",
-					clear: "clio-coder/session/queue_clear",
-					interrupt: "clio-coder/session/interrupt",
-					dispatch: "clio-coder/dispatch/steer",
+					steer: "_clio-coder/session/steer",
+					queue: "_clio-coder/session/queue",
+					clear: "_clio-coder/session/queue_clear",
+					interrupt: "_clio-coder/session/interrupt",
+					dispatch: "_clio-coder/dispatch/steer",
 				},
 			}
 		: null;
@@ -245,7 +245,7 @@ const fleet = () => {
 		["future.unknownKind", { anything: true }],
 	])
 		send({
-			method: "clio-coder/event",
+			method: "_clio-coder/event",
 			params: {
 				version: 1,
 				workspaceInstanceId: "fixture",
@@ -293,8 +293,8 @@ async function handle(frame) {
 											? {
 													"clio-coder/commands": {
 														version: 1,
-														list: "clio-coder/commands/list",
-														invoke: "clio-coder/commands/invoke",
+														list: "_clio-coder/commands/list",
+														invoke: "_clio-coder/commands/invoke",
 														count: COMMANDS.commands.length,
 													},
 												}
@@ -376,7 +376,7 @@ async function handle(frame) {
 					update({ sessionUpdate: "future_unknown_kind", anything: true });
 					if (scenario === "malformed-update")
 						update({ sessionUpdate: "agent_message_chunk", content: { type: "image", data: "not-text" } });
-					if (scenario === "tool") {
+					if (scenario === "tool" || scenario === "tool-progress-no-content") {
 						update({
 							sessionUpdate: "tool_call",
 							toolCallId: "read-1",
@@ -386,6 +386,23 @@ async function handle(frame) {
 							locations: [{ path: "README.md", line: 0 }],
 							rawInput: { path: "README.md" },
 						});
+						if (scenario === "tool-progress-no-content") {
+							update({
+								sessionUpdate: "tool_call_update",
+								toolCallId: "read-1",
+								title: "Read README",
+								kind: "read",
+								status: "in_progress",
+								content: [{ type: "content", content: { type: "text", text: "partial output" } }],
+							});
+							update({
+								sessionUpdate: "tool_call_update",
+								toolCallId: "read-1",
+								title: "Read README",
+								kind: "read",
+								status: "in_progress",
+							});
+						}
 						update({
 							sessionUpdate: "tool_call_update",
 							toolCallId: "read-1",
@@ -404,11 +421,11 @@ async function handle(frame) {
 				result = { stopReason: cancelled ? "cancelled" : "end_turn", _meta: { "clio-coder/usage": usage } };
 				break;
 			}
-			case "clio-coder/commands/list":
+			case "_clio-coder/commands/list":
 				if (!COMMANDS) throw Error("method_not_found");
 				result = COMMANDS;
 				break;
-			case "clio-coder/commands/invoke": {
+			case "_clio-coder/commands/invoke": {
 				if (!COMMANDS?.commands.some((row) => row.name === frame.params.command)) throw Error("command_not_exposed");
 				const { command, argv = [] } = frame.params;
 				result =
@@ -417,22 +434,22 @@ async function handle(frame) {
 						: { level: "info", lines: [`Context action: ${argv.join(" ")}`] };
 				break;
 			}
-			case "clio-coder/session/steer": {
+			case "_clio-coder/session/steer": {
 				const followUp = frame.params.mode === "end-of-turn";
 				(followUp ? queues.followUp : queues.steer).push(frame.params.text);
 				result = { accepted: true, queue: followUp ? "follow-up" : "steer" };
 				break;
 			}
-			case "clio-coder/session/queue":
+			case "_clio-coder/session/queue":
 				result = queues;
 				break;
-			case "clio-coder/session/queue_clear":
+			case "_clio-coder/session/queue_clear":
 				result = { restored: [...queues.steer.splice(0), ...queues.followUp.splice(0)] };
 				break;
-			case "clio-coder/session/interrupt":
+			case "_clio-coder/session/interrupt":
 				result = { cancelled: false, refusal: "A dispatched worker is attached; stop the turn instead." };
 				break;
-			case "clio-coder/dispatch/steer": {
+			case "_clio-coder/dispatch/steer": {
 				const { runId, action } = frame.params;
 				const settle = liveRuns.get(runId);
 				if (settle === undefined) result = { accepted: false, reason: "run-not-active" };
@@ -454,7 +471,7 @@ async function handle(frame) {
 			case "session/close":
 				cancelled = true;
 				break;
-			case "clio-coder/settings/patch_safe":
+			case "_clio-coder/settings/patch_safe":
 				for (const [key, value] of Object.entries(frame.params.patch)) {
 					if (!editable.includes(key)) throw Error("invalid_params");
 					const [group, name] = key.split(".");
@@ -462,10 +479,10 @@ async function handle(frame) {
 				}
 				result = { settings, editable };
 				break;
-			case "clio-coder/settings/get_safe":
+			case "_clio-coder/settings/get_safe":
 				result = { settings, editable, privateCredential: "must-be-stripped" };
 				break;
-			case "clio-coder/targets/list":
+			case "_clio-coder/targets/list":
 				result = {
 					targets: [
 						{
@@ -490,15 +507,15 @@ async function handle(frame) {
 					_meta: { "clio-coder/truncated": true },
 				};
 				break;
-			case "clio-coder/targets/probe":
+			case "_clio-coder/targets/probe":
 				result = { targetId: frame.params.targetId, healthy: true, latencyMs: 5, reason: null };
 				break;
-			case "clio-coder/session/autonomy":
+			case "_clio-coder/session/autonomy":
 				autonomy = frame.params.level ?? autonomy;
 				result = { level: autonomy, source: "session" };
 				break;
-			case "clio-coder/session/label":
-			case "clio-coder/session/delete":
+			case "_clio-coder/session/label":
+			case "_clio-coder/session/delete":
 				break;
 			default:
 				throw Error("method_not_found");

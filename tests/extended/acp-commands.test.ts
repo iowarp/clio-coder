@@ -249,7 +249,7 @@ test("a dispatch command reports that it started, because its result is an event
 	const result = await invokeAcpCommand({ command: "delegate", argv: ["codex", "summarize the diff"] }, pending);
 	assert.equal(requested, 1);
 	assert.equal(result.level, "info");
-	assert.deepEqual(result.lines, ["delegate started; progress arrives as clio-coder/event dispatch kinds"]);
+	assert.deepEqual(result.lines, ["delegate started; progress arrives as _clio-coder/event dispatch kinds"]);
 });
 
 test("a command that is wired reports its own outcome instead of a started line", async () => {
@@ -308,8 +308,8 @@ test("the announced capability names the two methods a client calls", async () =
 		{ ...ACP_COMMANDS_CAPABILITY },
 		{
 			version: 1,
-			list: "clio-coder/commands/list",
-			invoke: "clio-coder/commands/invoke",
+			list: "_clio-coder/commands/list",
+			invoke: "_clio-coder/commands/invoke",
 			count: 13,
 		},
 	);
