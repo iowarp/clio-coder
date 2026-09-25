@@ -378,6 +378,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		const entries: HintEntry[] = [];
 		if (row) {
 			entries.push({ key: "↑↓", verb: "select" });
+		}
+		if (row && row.council === undefined) {
 			entries.push({
 				key: "Enter",
 				verb: deps.dispatchBoard.detailExpanded() ? "hide detail" : "detail",
