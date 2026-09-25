@@ -139,6 +139,7 @@ function fixture(overrides: Record<string, string | string[]> = {}) {
 			toggleMutationInspection: noop,
 			scrollMutationInspection: noop,
 			togglePermissionTerms: noop,
+			scrollPermissionCard: () => false,
 			cancelAskUser: close,
 			toggleFooterDashboardState: () => {
 				counts.status++;

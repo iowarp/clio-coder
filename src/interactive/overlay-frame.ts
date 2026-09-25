@@ -370,6 +370,20 @@ function fitBody(lines: ReadonlyArray<string>, rowBudget: number, contentWidth: 
 	return [...kept, clioTheme().fg("dim", truncateToWidth(`… ${hidden} more rows`, contentWidth, "", true))];
 }
 
+/**
+ * A body that lays itself out for the rows the frame has. `fitBody` can only cut
+ * a body that is too tall, and a cut card has no key that reaches what it hid
+ * (BT-005), so a body that can scroll takes the budget and windows itself.
+ * Zero means the budget is not known yet.
+ */
+export interface RowBudgetedBody {
+	setBodyRows(rows: number): void;
+}
+
+function isRowBudgeted(child: Component): child is Component & RowBudgetedBody {
+	return typeof (child as Partial<RowBudgetedBody>).setBodyRows === "function";
+}
+
 export class ClioOverlayFrame implements Component {
 	/**
 	 * Rows the box may occupy, or zero while unknown.
@@ -427,6 +441,7 @@ export class ClioOverlayFrame implements Component {
 	render(width: number): string[] {
 		const boxWidth = Math.max(5, Math.min(this.boxWidth > 0 ? this.boxWidth : width, width));
 		const contentWidth = Math.max(1, boxWidth - 4);
+		if (isRowBudgeted(this.child)) this.child.setBodyRows(this.rowBudget > 0 ? Math.max(1, this.rowBudget - 2) : 0);
 		const childLines = this.child.render(contentWidth);
 		const titleText = typeof this.title === "function" ? this.title() : this.title;
 		const hint = typeof this.footerHint === "function" ? this.footerHint(contentWidth + 2) : this.footerHint;
