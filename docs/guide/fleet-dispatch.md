@@ -833,6 +833,11 @@ apart from an unpinned run that was free to move. Receipts sealed before the
 field existed omit it, and a main-agent or print-mode receipt omits it because
 no dispatch failover governed it.
 
+When a lower-level request omits the failover field, retry policy defaults to
+`none` for a target or node pin and `automatic` otherwise. Normal tool
+admission resolves `routing.failover` explicitly; a manual target, model, or
+node pin requires `none`.
+
 A plan-approved task is never `automatic`. An explicitly pinned task seals its
 exact tuple with `failover: "none"`; any other planned task seals
 `failover: "approved"` with a bounded candidate list enumerated by
@@ -954,15 +959,16 @@ include:
 - `routingIntent`, `routeDecision`, and `quality`: the normalized hard bounds,
   complete current-policy decision, exact execution role, route estimate and
   readiness evidence, and authenticated quality sources.
+- `effectiveFailover`: the retry mode that actually governed a worker run;
+  older receipts and runs without dispatch failover omit it.
 - `resultContract`: the admitted contract identity and `valid`, `invalid`, or
   `not-reached` conformance state. Only a due correctness-bearing contract can
   label route quality.
 - `validationGrounding`: claimed versus grounded validations checked against canonical executed commands.
 - `capabilityMismatch`: capability class versus task shape verdict (`refuse` vs `flag`).
-- `node`: the fleet node the run was placed on. The worker's attestation is
-  verified at spawn and a drifting peer never runs, but the attested identity
-  is not copied into the receipt. Builds before 0.5.6 sealed that projection
-  as `attestation`; receipts that carry it still verify.
+The worker's attestation is verified at spawn and a drifting peer never runs,
+but the attested identity is not copied into the receipt. Builds before 0.5.6
+sealed that projection as `attestation`; receipts that carry it still verify.
 
 Process exit zero is not a delegated deliverable. Native and ACP runs succeed
 only when the drained event stream yields a nonempty receipt output with
