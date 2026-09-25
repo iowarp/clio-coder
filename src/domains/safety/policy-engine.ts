@@ -326,8 +326,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 							? ["npm", "run", verifyResolution.check.id, ...(verifyExtraArgs.length > 0 ? ["--", ...verifyExtraArgs] : [])]
 							: null;
 			const verifyCommand = verifyArgv?.join(" ") ?? null;
-			const scan = verifyCommand ?? damageControlScan(call);
-			const hit = scan ? matchSourcedRule(scan, sourcedRules) : null;
+			const scans = (verifyCommand !== null ? [verifyCommand] : damageControlScans(call)).filter((scan) => scan !== "");
+			const hit = scans.length > 0 ? matchSourcedRule(scans, sourcedRules) : null;
 			const classification = effectiveClassification(rawClassification, hit?.match);
 
 			const base = baseDecision(call, classification, callCwd, posture, command);
@@ -1066,18 +1066,22 @@ function blockDecision(
 	return { ...base, ...input, kind: "block", rejection };
 }
 
-function matchSourcedRule(commandString: string, rules: ReadonlyArray<SourcedRule>) {
+/**
+ * Rule order is precedence, so the outer loop stays over the rules and each one
+ * is offered every scan candidate (BT-001). A rule fires on the first candidate
+ * it matches, which can only add matches, never reorder or drop one.
+ */
+function matchSourcedRule(candidates: ReadonlyArray<string>, rules: ReadonlyArray<SourcedRule>) {
 	for (const entry of rules) {
-		if (entry.rule.pattern.test(commandString)) {
-			const match: DamageControlMatch = {
-				ruleId: entry.rule.id,
-				reason: `matched ${entry.rule.id}: ${entry.rule.description}`,
-				actionClass: entry.rule.class,
-				block: entry.rule.block,
-			};
-			if (entry.rule.ask !== undefined) match.ask = entry.rule.ask;
-			return { match, source: entry.source };
-		}
+		if (!candidates.some((candidate) => entry.rule.pattern.test(candidate))) continue;
+		const match: DamageControlMatch = {
+			ruleId: entry.rule.id,
+			reason: `matched ${entry.rule.id}: ${entry.rule.description}`,
+			actionClass: entry.rule.class,
+			block: entry.rule.block,
+		};
+		if (entry.rule.ask !== undefined) match.ask = entry.rule.ask;
+		return { match, source: entry.source };
 	}
 	return null;
 }
@@ -1303,10 +1307,25 @@ const CONTENT_BEARING_TOOLS: ReadonlySet<string> = new Set([
  * Dispatch and task-board prose likewise does not execute; worker commands
  * are scanned when the worker calls an execute-class tool.
  */
-function damageControlScan(call: ClassifierCall): string {
-	if (!CONTENT_BEARING_TOOLS.has(call.tool)) return serializeArgs(call.args);
-	const pathArg = call.args?.path;
-	return typeof pathArg === "string" ? pathArg : "";
+/**
+ * Strings a damage-control rule is tested against. Joining every argument into
+ * one blob put the command in the middle of it, so a rule anchored with `$`
+ * stopped matching the moment the model also supplied `cwd` or `timeout_ms`:
+ * `git restore .` ran at both levels and the authored `git checkout -- .`
+ * confirm rail fell through to the classifier's unconditional git_destructive
+ * block (BT-001). The command is offered on its own as well. The blob stays a
+ * candidate so no rule that matched before stops matching now.
+ */
+function damageControlScans(call: ClassifierCall): string[] {
+	if (CONTENT_BEARING_TOOLS.has(call.tool)) {
+		const pathArg = call.args?.path;
+		return typeof pathArg === "string" ? [pathArg] : [];
+	}
+	const command = call.args?.command;
+	const candidates = typeof command === "string" ? [command] : [];
+	const serialized = serializeArgs(call.args);
+	if (!candidates.includes(serialized)) candidates.push(serialized);
+	return candidates;
 }
 
 function serializeArgs(args?: Record<string, unknown>): string {
