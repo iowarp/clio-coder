@@ -825,6 +825,14 @@ part—for example, an SSH channel failure can move the node while retaining the
 agent, target, and model. Cancellation, policy rejection, and permission
 refusal neither retry nor penalize infrastructure.
 
+A worker receipt records the mode that governed its retries as
+`effectiveFailover`. That is a different fact from `routingIntent.failover`,
+which carries the two-valued policy the request asked for and reads `none`
+whenever nothing was requested, so only `effectiveFailover` tells a sealed tuple
+apart from an unpinned run that was free to move. Receipts sealed before the
+field existed omit it, and a main-agent or print-mode receipt omits it because
+no dispatch failover governed it.
+
 A plan-approved task is never `automatic`. An explicitly pinned task seals its
 exact tuple with `failover: "none"`; any other planned task seals
 `failover: "approved"` with a bounded candidate list enumerated by

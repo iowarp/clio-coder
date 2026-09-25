@@ -22,6 +22,7 @@ import type { DispatchIntent } from "./intent.js";
 import type { DispatchPathScopeProvenance } from "./path-scope.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
 import type { RoutingIntent } from "./routing-intent.js";
+import type { DispatchFailoverMode } from "./validation.js";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
 
@@ -965,6 +966,14 @@ export interface RunReceipt {
 	};
 	/** Required normalized routing request, sealed without task or prompt data. */
 	routingIntent: RoutingIntent;
+	/**
+	 * The failover mode that governed this run's retries, which is a different
+	 * question from the `routingIntent.failover` the request asked for: that
+	 * axis has two values and defaults to `none`, while this one answers
+	 * `automatic` for an unpinned request (BT-010). Optional, so a receipt
+	 * sealed before the field existed digests exactly as it did.
+	 */
+	effectiveFailover?: DispatchFailoverMode;
 	/** Required routing-quality facts known at receipt finalization. */
 	quality: RunReceiptQuality;
 	skillActivations?: SkillActivation[];

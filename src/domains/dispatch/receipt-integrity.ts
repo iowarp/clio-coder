@@ -139,6 +139,9 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	hostVerification: true,
 	worktree: true,
 	routingIntent: true,
+	// Absent on receipts sealed before the field existed, so those digest
+	// exactly as they did.
+	effectiveFailover: true,
 	quality: true,
 	skillActivations: true,
 	// Keep the historical field in the digest so older sealed receipts still verify.

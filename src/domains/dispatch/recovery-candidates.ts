@@ -22,6 +22,28 @@ export function retryDecisionWithinFailover(decision: RetryDecision, failover: D
 	return failover === "none" ? { ...decision, excludedRouteParts: [], qualityEscalation: null } : decision;
 }
 
+/**
+ * The failover mode that actually governs a request's retries.
+ *
+ * `RoutingFailover` on the receipt's `routingIntent` has two values and
+ * defaults to `none` for every request, while this axis has three and answers
+ * `automatic` for an unpinned one. An unpinned run therefore sealed a receipt
+ * reading `failover: "none"` while its retries were free to exclude the failed
+ * route part, which made a sealed route and a drifting one indistinguishable in
+ * evidence (BT-010). The receipt records this answer as well.
+ *
+ * This is the reading the retry path already used; extracting it changes no
+ * route selection.
+ */
+export function effectiveFailoverMode(req: {
+	failover?: DispatchFailoverMode;
+	node?: string;
+	target?: string;
+}): DispatchFailoverMode {
+	if (req.failover !== undefined) return req.failover;
+	return req.node !== undefined || req.target !== undefined ? "none" : "automatic";
+}
+
 export function approvedEnvelopeRejection(approval: ApprovedAssignmentRoute, candidate: RouteCandidate): string | null {
 	try {
 		assertApprovedRecoveryCapability(approval, candidate);

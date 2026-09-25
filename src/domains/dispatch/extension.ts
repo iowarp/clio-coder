@@ -3004,8 +3004,7 @@ export function createDispatchBundle(
 	}
 
 	function failoverModeFor(req: DispatchRequest): DispatchFailoverMode {
-		if (req.failover !== undefined) return req.failover;
-		return req.node !== undefined || req.target !== undefined ? "none" : "automatic";
+		return recovery.effectiveFailoverMode(req);
 	}
 
 	function assignmentPolicyFor(req: DispatchRequest): import("./assignment.js").AssignmentPolicy {
@@ -4692,6 +4691,7 @@ export function createDispatchBundle(
 				}),
 				verification: deriveReceiptVerification({ toolStats: finalToolStats }, { acpDelegation: true }),
 				routingIntent: req.routingIntent ?? defaultRoutingIntent(req),
+				effectiveFailover: failoverModeFor(req),
 				quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
 				autonomy: "default",
 				safety: {
@@ -6040,6 +6040,7 @@ export function createDispatchBundle(
 					{ capabilityClass: lifecycle.capabilityClass },
 				),
 				routingIntent: req.routingIntent ?? defaultRoutingIntent(req),
+				effectiveFailover: failoverModeFor(req),
 				quality: createRunReceiptQuality({
 					...(req.responseSchema === undefined ? {} : { responseSchema: req.responseSchema }),
 					runtimeEnforceable:
