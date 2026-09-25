@@ -7,18 +7,13 @@ import {
 	type TokenThroughputSnapshot,
 	type UsageBreakdown,
 } from "../../domains/observability/index.js";
-import { describeLocalCapacity, type LocalCapacity } from "../../domains/scheduling/local-capacity.js";
+import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
 import type { ContextLedger, ContextLedgerCategory } from "../../domains/session/context-ledger.js";
 import { type TaskBoardSnapshot, taskBoardCounts } from "../../domains/session/task-board.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { CONTEXT_CATEGORY_TOKEN, contextCategorySwatch, renderContextMeterBar } from "../context-meter.js";
-import {
-	agentDisplayLabel,
-	type DispatchBoardRow,
-	dispatchRowPrefix,
-	dispatchStatusPresentation,
-} from "../dispatch-board.js";
+import type { DispatchBoardRow } from "../dispatch-board.js";
 import { buildSegmentedContextBar, CONTEXT_BAR_LABEL_WIDTH, formatFooterTokens } from "../footer-panel.js";
 import {
 	type AgentStatus,
@@ -37,7 +32,6 @@ import {
 	joinChips,
 	sectionTag,
 } from "../theme/index.js";
-import { isHelperRun } from "../worker-stream.js";
 
 export interface ToolTallySnapshot {
 	tools: Readonly<Record<string, number>>;
@@ -516,34 +510,6 @@ function stopReasonStyle(reason: TurnSummary["stopReason"]): { glyph: string; to
 	return { glyph: GLYPH.ok, token: "success" };
 }
 
-/**
- * One row per live worker: the origin glyph, the sub-process glyph when Clio
- * started the run for itself, the agent's own name, the fleet node it landed
- * on, its status glyph, elapsed, and the receipt id once the run has sealed
- * one. Units are fitted whole, so a narrow quadrant closes on a dim ellipsis
- * rather than clipping a receipt id into a string that still reads like a valid
- * trace argument.
- */
-function workerLine(theme: ClioTheme, row: DispatchBoardRow, _width: number): string {
-	const presentation = dispatchStatusPresentation(row.status, { compact: true });
-	// The Activity section already promotes the fleet summary (or dispatch phase)
-	// to action orange. Worker rows remain readable without repeating that signal.
-	const units = [
-		theme.fg("muted", agentDisplayLabel(row)),
-		theme.fg("dim", row.node ?? "local"),
-		theme.fg(presentation.token, presentation.glyph),
-		theme.fg("dim", formatCompactMs(row.elapsedMs)),
-		...(row.receiptId !== undefined ? [theme.fg("dim", row.receiptId)] : []),
-	];
-	if (row.progress?.toolCalls !== undefined) units.push(theme.fg("muted", `${row.progress.toolCalls} calls`));
-	if (row.progress?.contextTokens !== undefined)
-		units.push(theme.fg("muted", `context ${formatFooterTokens(row.progress.contextTokens)}`));
-	if (row.progress?.inputTokens !== undefined || row.inputTokens > 0 || row.outputTokens > 0) {
-		units.push(theme.fg("dim", `↑${formatFooterTokens(row.inputTokens)} ↓${formatFooterTokens(row.outputTokens)}`));
-	}
-	return `${dispatchRowPrefix(theme, row).text}${units.join(" · ")}`;
-}
-
 interface ActivityQuadrantOptions extends ExpandedQuadrantOptions {
 	status?: AgentStatus;
 	toolCounts?: ToolTallySnapshot;
@@ -553,7 +519,6 @@ interface ActivityQuadrantOptions extends ExpandedQuadrantOptions {
 	contextUsed?: number | null;
 	tick?: number;
 	now?: number;
-	maxWorkers?: number;
 }
 
 function defaultIdleStatus(): AgentStatus {
@@ -644,11 +609,6 @@ function cumulativeTokens(sessionTokens: UsageBreakdown | null | undefined): num
 	return finiteNonNegative(sessionTokens?.totalTokens) || fallback;
 }
 
-function fleetValue(dispatchSummary: string | null, dispatchRows: ReadonlyArray<DispatchBoardRow>): string | null {
-	if (dispatchSummary) return dispatchSummary.replace(/^dispatch\s+/, "");
-	return dispatchRows.length > 0 ? `${dispatchRows.length} runs` : null;
-}
-
 function meaningfulToolTally(value: string): string | null {
 	return /^(?:none(?: · 0✗)?|0✗)$/u.test(value.trim()) ? null : value;
 }
@@ -670,7 +630,6 @@ function activeTaskLine(theme: ClioTheme, board: TaskBoardSnapshot): string | nu
 
 export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadrantOptions = {}): string[] {
 	const theme = clioTheme();
-	const maxWorkers = Math.max(0, options.maxWorkers ?? 3);
 	const status = options.status ?? defaultIdleStatus();
 	const toolCounts = options.toolCounts ?? { tools: {}, errors: 0 };
 	const statusWidth = Math.max(options.width ?? 120, 48);
@@ -678,17 +637,7 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	const fleetSummaryIsAction = facts.dispatchSummary !== null && status.phase !== "dispatching";
 	const rows: DashboardRow[] = [
 		statusRow(
-			buildHarnessStatePill(
-				theme,
-				status,
-				toolCounts,
-				facts.dispatchRows,
-				options.tick ?? 0,
-				options.now ?? Date.now(),
-				statusWidth,
-				fleetSummaryIsAction,
-				facts.localCapacity ?? null,
-			),
+			buildHarnessStatePill(theme, status, toolCounts, options.tick ?? 0, options.now ?? Date.now(), statusWidth),
 		),
 	];
 	if (facts.contextActivity) {
@@ -721,15 +670,7 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	// only honest rendering of that. See formatCostAggregate.
 	const cost = formatCostAggregate(options.sessionCost);
 	rows.push(cost === null ? statusRow(null) : styledKv("cost", theme.fg("muted", cost)));
-	rows.push(kv("fleet", fleetValue(facts.dispatchSummary, facts.dispatchRows), fleetSummaryIsAction ? "action" : "dim"));
-	// Every worker up to the panel bound gets its own row; what the bound cuts is
-	// counted out loud instead of vanishing, so the row count an operator sees
-	// always reconciles with the `fleet` line above it.
-	const workerWidth = options.width !== undefined && Number.isFinite(options.width) ? options.width : 48;
-	const fleetRows = facts.dispatchRows;
-	for (const row of fleetRows.slice(0, maxWorkers)) rows.push(statusRow(workerLine(theme, row, workerWidth)));
-	const hiddenWorkers = fleetRows.length - maxWorkers;
-	if (hiddenWorkers > 0) rows.push(statusRow(theme.fg("dim", `+${hiddenWorkers} more`)));
+	rows.push(kv("fleet", facts.dispatchSummary?.replace(/^dispatch\s+/, ""), fleetSummaryIsAction ? "action" : "dim"));
 	if (facts.taskBoard && facts.taskBoard.tasks.length > 0) {
 		rows.push(styledKv("tasks", taskBoardValue(theme, facts.taskBoard)));
 		rows.push(statusRow(activeTaskLine(theme, facts.taskBoard)));
@@ -842,64 +783,19 @@ function harnessPhasePresentation(status: AgentStatus, width: number, now: numbe
 	}
 }
 
-function activeWorkerRows(rows: ReadonlyArray<DispatchBoardRow>): ReadonlyArray<DispatchBoardRow> {
-	return rows.filter((row) => row.status === "running" || row.status === "stale" || row.status === "enqueued");
-}
-
-/**
- * Background work stays a count beside the main phase. When a host limit holds
- * local demand below what is queued, the chip names that limit.
- */
-function activeWorkerChip(rows: ReadonlyArray<DispatchBoardRow>, localCapacity: LocalCapacity | null = null): string {
-	const active = activeWorkerRows(rows);
-	const helpers = active.filter(isHelperRun).length;
-	const workers = active.length - helpers;
-	const chip = [
-		helpers > 0 ? `${helpers} helper${helpers === 1 ? "" : "s"}` : null,
-		workers > 0 ? `${workers} worker${workers === 1 ? "" : "s"}` : null,
-	]
-		.filter(Boolean)
-		.join(" · ");
-	if (localCapacity === null) return chip;
-	const localDemand = active.filter((row) => row.node === undefined || row.node === "local").length;
-	const bound = localDemand > localCapacity.limit ? describeLocalCapacity(localCapacity) : null;
-	return bound === null ? chip : `${chip} · ${bound}`;
-}
-
-function harnessBadge(
-	theme: ClioTheme,
-	status: AgentStatus,
-	toolCounts: ToolTallySnapshot,
-	dispatchRows: ReadonlyArray<DispatchBoardRow>,
-	fleetSummaryIsAction = false,
-	localCapacity: LocalCapacity | null = null,
-): string {
-	const workers = activeWorkerRows(dispatchRows).length;
-	const activeTools = finiteNonNegative(toolCounts.active);
-	// Active fleet work is a Clio-signature state; it gets the action color.
-	if (workers > 0) {
-		const token = status.phase === "dispatching" ? "muted" : fleetSummaryIsAction ? "accent" : "action";
-		return theme.fg(token, activeWorkerChip(dispatchRows, localCapacity));
-	}
-	const badgeText = activeTools > 0 ? `tools ${activeTools}` : null;
-	return badgeText ? theme.fg("muted", badgeText) : "";
-}
-
 function buildHarnessStatePill(
 	theme: ClioTheme,
 	status: AgentStatus,
 	toolCounts: ToolTallySnapshot,
-	dispatchRows: ReadonlyArray<DispatchBoardRow>,
 	tick: number,
 	now: number,
 	width: number,
-	fleetSummaryIsAction = false,
-	localCapacity: LocalCapacity | null = null,
 ): string {
 	const safeWidth = Math.max(1, Math.floor(width));
-	const badge = harnessBadge(theme, status, toolCounts, dispatchRows, fleetSummaryIsAction, localCapacity);
-	// Idleness is absence of work, not a phase worth narrating. If a tool or
-	// fleet remains live while the harness settles, keep that activity without
+	const activeTools = finiteNonNegative(toolCounts.active);
+	const badge = activeTools > 0 ? theme.fg("muted", `tools ${activeTools}`) : "";
+	// Idleness is absence of work, not a phase worth narrating. If a tool
+	// remains live while the harness settles, keep that activity without
 	// prefixing it with an idle glyph.
 	if (status.phase === "idle") return badge;
 	const phase = harnessPhasePresentation(status, safeWidth, now);

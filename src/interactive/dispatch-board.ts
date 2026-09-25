@@ -208,7 +208,7 @@ const STATUS_ORDER: Record<DispatchBoardStatus, number> = {
  * as an agent literally called "sh:scout", and an operator cannot tell a
  * prefix apart from user data at a glance.
  */
-export function agentDisplayLabel(row: Pick<DispatchBoardRow, "agentId" | "agentAudience">): string {
+function agentDisplayLabel(row: Pick<DispatchBoardRow, "agentId" | "agentAudience">): string {
 	return row.agentId;
 }
 
@@ -265,7 +265,7 @@ function dispatchOriginPresentation(row: Pick<DispatchBoardRow, "requestOrigin">
  * own display width so each caller can reserve columns for it without
  * measuring ANSI.
  */
-export function dispatchRowPrefix(
+function dispatchRowPrefix(
 	theme: ClioTheme,
 	row: Pick<DispatchBoardRow, "agentAudience" | "requestOrigin">,
 ): { text: string; width: number } {

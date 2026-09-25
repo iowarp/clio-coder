@@ -90,21 +90,17 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 	const theme = clioTheme();
 	const sideBySide = width >= 110;
 	const summaryWidth = sideBySide ? Math.floor((width - 3) / 2) : width;
-	const summary = activityQuadrant(
-		{ ...state.agent, dispatchRows: [] },
-		{
-			width: summaryWidth,
-			status: state.status,
-			toolCounts: state.toolCounts,
-			throughput: state.throughput,
-			sessionTokens: state.sessionTokens,
-			sessionCost: state.sessionCost,
-			contextUsed: state.context.used,
-			tick: state.tick,
-			now: state.now,
-			maxWorkers: 0,
-		},
-	).slice(1);
+	const summary = activityQuadrant(state.agent, {
+		width: summaryWidth,
+		status: state.status,
+		toolCounts: state.toolCounts,
+		throughput: state.throughput,
+		sessionTokens: state.sessionTokens,
+		sessionCost: state.sessionCost,
+		contextUsed: state.context.used,
+		tick: state.tick,
+		now: state.now,
+	}).slice(1);
 	const active = state.dispatchRows.filter((row) => ACTIVE_AGENT_STATUSES.has(row.status));
 	const history = state.dispatchRows.filter((row) => !ACTIVE_AGENT_STATUSES.has(row.status));
 	if (!state.dispatchRows.length)
