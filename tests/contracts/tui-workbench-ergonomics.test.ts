@@ -131,7 +131,7 @@ for (const width of widths) {
 		assert.equal(editor.getText(), "Research 研究 é");
 	});
 
-	test(`footer keeps worktree suffix and current phase at ${width} columns`, () => {
+	test(`footer keeps the current phase and workspace when space permits at ${width} columns`, () => {
 		const snapshot = footerState();
 		snapshot.workspace.cwd = `/tmp/${"very-long-parent/".repeat(5)}研究-worktree`;
 		snapshot.agent.statusText = "Needs approval";
@@ -139,7 +139,8 @@ for (const width of widths) {
 		const rows = renderCompactDashboard(snapshot, width);
 		bounded(rows, width);
 		assert.match(plain(rows), /Needs approval/u);
-		assert.match(plain(rows), /tree/u);
+		if (width > 60) assert.match(plain(rows), /tree/u);
+		else assert.equal(rows.length, 1);
 	});
 
 	test(`empty board and multiple-worker navigation fit ${width} columns`, () => {
@@ -274,7 +275,8 @@ for (const width of widths) {
 		const rows = renderCompactDashboard(snapshot, width);
 		bounded(rows, width);
 		assert.match(plain(rows), /2 active/u);
-		assert.match(plain(rows), /tree/u);
+		if (width > 60) assert.match(plain(rows), /tree/u);
+		else assert.equal(rows.length, 1);
 	});
 }
 
@@ -306,12 +308,12 @@ for (const width of widths) {
 			const render = (path: string) => {
 				const snapshot = footerState();
 				snapshot.workspace.cwd = path;
-				return renderCompactDashboard(snapshot, width)[1] ?? "";
+				return renderCompactDashboard(snapshot, width).join("\n");
 			};
 			const actual = render(cwd);
 			assert.equal(actual, render(cleanCwd));
-			bounded([actual], width);
-			const plain = stripTerminalSequences(actual);
+			bounded(actual.split("\n"), width);
+			const plain = stripTerminalSequences(actual).replaceAll("\n", "");
 			assert.doesNotMatch(plain, /OSC_TITLE_PAYLOAD/u);
 			assert.ok([...plain].every((character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127));
 		}

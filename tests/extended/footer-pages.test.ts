@@ -171,7 +171,7 @@ test("the footer composes at the width a frame renders it, so a resize never sta
 		// The first frame after a resize renders before the footer's next refresh.
 		columns = 40;
 		const narrow = footer.view.render(40);
-		strictEqual(narrow.length, 2, plain(narrow));
+		strictEqual(narrow.length, 1, plain(narrow));
 		for (const row of narrow) ok(visibleWidth(row) <= 40, row);
 		deepStrictEqual(footer.view.render(40), narrow, "a repeat frame at the same width reuses the rows");
 	} finally {
@@ -249,10 +249,10 @@ test("Activity retains fast tool actions between calls and shows live worker out
 	match(render(), /Live response · provisional/);
 });
 
-test("compact footer exposes activity, headroom and inference identity in two bounded dynamic rows", () => {
+test("compact footer exposes activity, headroom and inference identity in bounded responsive rows", () => {
 	for (const width of [40, 80, 160]) {
 		const rows = renderCompactDashboard(state(), width);
-		strictEqual(rows.length, 2);
+		strictEqual(rows.length, width <= 60 ? 1 : 2);
 		ok(rows.every((row) => visibleWidth(row) <= width));
 	}
 	const text = plain(renderCompactDashboard(state(), 160));
@@ -493,8 +493,8 @@ test("the compact footer names an armed skill surface beside the activity, unpad
 		match(line(width), /^exploring · 1 active · skill tdd\b/u);
 		ok(visibleWidth(line(width)) <= width);
 	}
-	// At 60 columns the whole activity and the badge leave no readable room for the identity.
-	doesNotMatch(line(60), /blade/u);
+	// The percentage-only context leaves room for a readable identity at 60 columns.
+	match(line(60), /blade/u);
 	// Narrow: the knowledge mark stands in for the word, and an identity with
 	// no room left is dropped rather than cut to a stub.
 	snapshot.session.activeSkills = ["tdd", "perf-review"];
@@ -504,20 +504,20 @@ test("the compact footer names an armed skill surface beside the activity, unpad
 		doesNotMatch(row, /……|skill t…/u);
 		ok(visibleWidth(row) <= width, row);
 	}
-	match(line(40), /§ tdd… +▰/u, "no room for the identity at 40 columns, so the meter follows the badge");
+	match(line(40), /§ tdd… +ctx/u, "no room for the identity at 40 columns, so context follows the badge");
 	// The mark form is never padded out to the badge's budget.
 	snapshot.session.activeSkills = ["tdd-go"];
 	const { statusText, dispatchRows } = { statusText: snapshot.agent.statusText, dispatchRows: snapshot.dispatchRows };
 	snapshot.agent.statusText = "Ready";
 	snapshot.dispatchRows = [];
-	match(line(60), /^Ready · § tdd-go {2}· {2}blade/u);
+	match(line(60), /^Ready · skill tdd-go · blade/u);
 	snapshot.agent.statusText = statusText;
 	snapshot.dispatchRows = dispatchRows;
 	snapshot.session.activeSkills = [];
 	doesNotMatch(line(100), /skill|§/u);
 });
 
-test("a narrow compact footer keeps the meter's percent whole, the activity whole, and no identity stub", () => {
+test("a narrow compact footer keeps context and activity whole with no identity stub", () => {
 	const snapshot = state();
 	snapshot.agent.statusText = "Writing · 3s";
 	const line = (width: number) => stripTerminalSequences(renderCompactDashboard(snapshot, width)[0] ?? "");
@@ -536,19 +536,19 @@ test("a narrow compact footer keeps the meter's percent whole, the activity whol
 		const row = line(width);
 		ok(visibleWidth(row) <= width, row);
 		// Counts that do not fit are dropped; the percent is never cut.
-		match(row, / {2}\d+\.\d%$/u, row);
-		doesNotMatch(row, /~|\d…|\/ /u, row);
+		match(row, /ctx ~\d+\.\d%$/u, row);
+		doesNotMatch(row, /\d…|\/ /u, row);
 		// The activity is whole; a row too narrow for the worker count drops it rather than cut it.
-		match(row, width === 60 ? /^Writing · 3s · 1 active\b/u : /^Writing · 3s +▰/u, row);
+		match(row, /^Writing · 3s · 1 active\b/u, row);
 		// An identity is readable or absent, never a stub like `bla…_k_m`.
-		const identity = / {2}· {2}(.+?)(?: {3}|$)/u.exec(row)?.[1];
+		const identity = /1 active · (.+?)(?: {3}|$)/u.exec(row)?.[1];
 		ok(identity === undefined || visibleWidth(identity) >= 12, row);
 	}
 	match(line(100), /12\.\d% {2}~33\.9k \/ 262\.1k$/u);
 	// The ledger meter states counts alone, so a narrow row states its percent instead.
 	const ledgerSnapshot = state();
 	const narrow = stripTerminalSequences(renderCompactDashboard(ledgerSnapshot, 40)[0] ?? "");
-	match(narrow, /▒ \d+\.\d%$/u, narrow);
+	match(narrow, /ctx \d+\.\d%$/u, narrow);
 	match(stripTerminalSequences(renderCompactDashboard(ledgerSnapshot, 100)[0] ?? ""), /68\.5k \/ 262\.1k$/u);
 });
 

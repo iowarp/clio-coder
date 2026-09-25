@@ -295,10 +295,11 @@ function fitNames(prefix: string, names: readonly string[], room: number): strin
 	return truncateToWidth(`${prefix}${names[0] ?? ""}`, Math.max(1, room), "…");
 }
 
-/** Model and context above; persistent workspace and a rotating hint area below. */
+/** At 60 cells and below, workspace and tips yield; only attention needs a second row. */
 export function renderCompactDashboard(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
 	const w = Math.max(1, width);
+	const narrow = w <= 60;
 	const fit = (s: string, n = w) => truncateToWidth(s, Math.max(1, n), "…", true);
 	const ledger = state.context.ledger;
 	const workers = state.dispatchRows.filter((row) => ACTIVE_AGENT_STATUSES.has(row.status)).length;
@@ -313,8 +314,22 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const rightBudget = Math.floor(w * 0.48);
 	const percent = state.context.budget || !ledger ? "" : ` ${formatContextPercent(contextUsagePercent(state.context))}`;
 	const withCounts = `${meter} ${usage}`;
-	const context =
+	const fullContext =
 		meter.length === 0 || visibleWidth(withCounts) <= rightBudget ? withCounts : `${meter}${percent}`.trimEnd();
+	// A label and percentage leave a narrow footer enough room to name the
+	// model, while preserving the provenance carried by the expanded counts.
+	const occupancy = contextUsagePercent(state.context);
+	const source =
+		occupancy === null
+			? ""
+			: state.context.budget?.inputSource === "historical"
+				? "saved "
+				: state.context.budget
+					? "~"
+					: "";
+	const context = narrow
+		? `${theme.fg("dim", "ctx ")}${theme.fg("muted", `${source}${formatContextPercent(occupancy)}`)}`
+		: fullContext;
 	const rightWidth = Math.min(rightBudget, visibleWidth(context));
 
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
@@ -353,10 +368,11 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 					weekly.label,
 				)
 			: "";
-	const baseRoom = leftRoom - activityWidth - skillRoom - (badge ? visibleWidth(badge) + 3 : 0) - 5;
+	const identitySeparator = narrow ? " · " : "  ·  ";
+	const baseRoom =
+		leftRoom - activityWidth - skillRoom - (badge ? visibleWidth(badge) + 3 : 0) - identitySeparator.length;
 	// Too narrow for a readable identity: drop it rather than cut it to a stub
-	// such as `bl…_m`, which names neither the target nor the model. The
-	// The composer rail now carries the thinking level.
+	// such as `bl…_m`, which names neither the target nor the model.
 	const identityMin = Math.min(visibleWidth(identity), IDENTITY_MIN_CELLS);
 	const readable = baseRoom >= identityMin;
 	const identityRoom = Math.max(1, baseRoom);
@@ -367,7 +383,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 					abbreviate: false,
 				})
 			: fitIdentityLabel(identity, identityRoom);
-	const shownIdentity = readable ? `  ·  ${theme.fg("muted", fittedIdentity)}` : "";
+	const shownIdentity = readable ? `${identitySeparator}${theme.fg("muted", fittedIdentity)}` : "";
 	const left = `${activity}${skill ? ` · ${skill}` : ""}${shownIdentity}${badge ? ` · ${badge}` : ""}`;
 	const pair = (l: string, r: string, rw: number) => `${fit(l, w - rw - 3)}   ${fit(r, rw)}`;
 	const notice = topNotification(state.notices, state.now);
@@ -384,6 +400,11 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			: state.demoHint
 				? `${theme.fg("accent", "Tip")} ${theme.fg("muted", clean(state.demoHint))}`
 				: theme.fg("dim", (state.demo !== false ? footerKeyHint(state.now, w < 120) : null) ?? `${key} Dashboard`);
+	if (narrow) {
+		const rows = [fit(pair(left, context, rightWidth))];
+		if (urgent || notice) rows.push(fit(foot));
+		return rows;
+	}
 	// An armed escape instruction must keep its whole action at narrow widths;
 	// the workspace label can yield room that an ordinary rotating hint cannot.
 	const hintBudget = urgent ? Math.max(1, w - 3 - 8) : Math.floor(w * 0.48);
