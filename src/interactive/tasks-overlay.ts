@@ -17,6 +17,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../engine/tui.js";
+import type { RowBudgetedBody } from "./overlay-frame.js";
 import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
 import { type ClioToken, clioTheme, fitUnits, GLYPH, rule } from "./theme/index.js";
 
@@ -132,11 +133,29 @@ function taskReceiptRows(task: TaskBoardTask, width: number): string[] {
 	return [];
 }
 
+/**
+ * Where one selectable row sits in the body. `line` is the row itself;
+ * `[start, end)` is what has to be on screen with it: its receipt rows, the
+ * section heading when the row opens a section, and the rest of the body when
+ * it is the last row, so an empty section below it is still reached.
+ */
+interface TasksRowSpan {
+	line: number;
+	start: number;
+	end: number;
+}
+
+interface TasksOverlayLayout {
+	lines: string[];
+	/** One span per `selectableRows` entry, in the same order. */
+	spans: TasksRowSpan[];
+}
+
 function formatTasksOverlayBodyLines(
 	board: TaskBoardSnapshot | null,
 	contentWidth = DEFAULT_CONTENT_WIDTH,
 	selectedTaskId?: string | null,
-): string[] {
+): TasksOverlayLayout {
 	const theme = clioTheme();
 	const width = Math.max(1, Math.floor(contentWidth));
 	if (!board || board.tasks.length === 0) {
@@ -145,14 +164,17 @@ function formatTasksOverlayBodyLines(
 		// to be emitted at its natural length and hard-cut by the frame, so at 80
 		// and 40 columns the sentence ended at "before multi-step" and the reader
 		// was left with a fragment of the only instruction here.
-		return [
-			...wrapTextWithAnsi(muted("No task board declared in this session."), width),
-			"",
-			...wrapTextWithAnsi(
-				dim('The agent declares one with the tasks tool (action="plan") before multi-step work.'),
-				width,
-			),
-		];
+		return {
+			lines: [
+				...wrapTextWithAnsi(muted("No task board declared in this session."), width),
+				"",
+				...wrapTextWithAnsi(
+					dim('The agent declares one with the tasks tool (action="plan") before multi-step work.'),
+					width,
+				),
+			],
+			spans: [],
+		};
 	}
 	const counts = taskBoardCounts(board);
 	const unverifiedCount = board.tasks.filter((task) => unverifiedTaskChecks(task) !== null).length;
@@ -175,11 +197,15 @@ function formatTasksOverlayBodyLines(
 	if (activeRuns.length > 0) {
 		lines.push(fitUnits(theme, `${dim("in flight")} `, activeRuns.map(muted), width));
 	}
+	const spans: TasksRowSpan[] = [];
 	for (const task of board.tasks) {
+		const line = lines.length;
 		lines.push(taskRow(task, width, selectedTaskId === undefined ? undefined : selectedTaskId === task.id));
 		lines.push(...taskReceiptRows(task, width));
+		// The first task carries the board's title, counts and proof above it.
+		spans.push({ line, start: spans.length === 0 ? 0 : line, end: lines.length });
 	}
-	return lines;
+	return { lines, spans };
 }
 
 type TasksOverlaySelection =
@@ -260,6 +286,10 @@ export function formatCompositeTasksOverlayBodyLines(
 	state: CompositeTasksOverlayState,
 	contentWidth = DEFAULT_CONTENT_WIDTH,
 ): string[] {
+	return layoutCompositeTasksOverlay(state, contentWidth).lines;
+}
+
+function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentWidth: number): TasksOverlayLayout {
 	const width = Math.max(1, Math.floor(contentWidth));
 	const theme = clioTheme();
 	const rows = selectableRows(state);
@@ -268,9 +298,23 @@ export function formatCompositeTasksOverlayBodyLines(
 	const currentSelected = selected?.kind === "current" ? selected.task.id : null;
 	// The frame title already says Tasks; a second heading under it was the one
 	// title the overlay repeated.
-	const lines = [...formatTasksOverlayBodyLines(state.board, width, currentSelected)];
+	const current = formatTasksOverlayBodyLines(state.board, width, currentSelected);
+	const lines = [...current.lines];
+	const spans = [...current.spans];
+	let heading = 0;
+	const openSection = (label: string): void => {
+		lines.push("");
+		heading = lines.length;
+		lines.push(sectionHeading(label, width));
+	};
+	const pushRow = (rowLines: ReadonlyArray<string>): void => {
+		const line = lines.length;
+		const opensSection = line === heading + 1;
+		lines.push(...rowLines);
+		spans.push({ line, start: opensSection ? heading : line, end: lines.length });
+	};
 
-	lines.push("", sectionHeading("Task history", width));
+	openSection("Task history");
 	const historyRows = terminalHistoryRows(state.board, state.history);
 	if (historyRows.length === 0) lines.push(fitRow(dim("No terminal tasks from prior boards."), width));
 	for (const row of historyRows) {
@@ -278,43 +322,84 @@ export function formatCompositeTasksOverlayBodyLines(
 		const presentation = unverifiedTaskChecks(row.task)
 			? { glyph: GLYPH.phaseBlocked, token: "warning" as const }
 			: STATUS_PRESENTATION[row.task.status];
-		lines.push(
+		pushRow([
 			fitRow(
 				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(`${row.board.boardId}:${row.task.id}`)} ${muted(row.task.title)} ${dim(`· ${taskOriginLabel(row.task)} · ${row.board.title}`)}`,
 				width,
 			),
-		);
-		lines.push(...taskReceiptRows(row.task, width));
+			...taskReceiptRows(row.task, width),
+		]);
 	}
 
-	lines.push("", sectionHeading("Artifacts", width));
+	openSection("Artifacts");
 	if (state.artifacts.length === 0) lines.push(fitRow(dim("No workspace outputs recorded."), width));
 	const workspace = state.workspace ?? process.cwd();
 	for (const artifact of state.artifacts) {
 		const rowSelection: TasksOverlaySelection = { kind: "artifact", artifact };
 		const kind = artifact.artifactKind ? `:${artifact.artifactKind}` : "";
-		lines.push(
+		pushRow([
 			fitRow(
 				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg("muted", GLYPH.toolHeader)} ${muted(displayArtifactPath(artifact.path, workspace))} ${dim(`· ${artifact.tool}${kind} · ${artifact.timestamp}`)}`,
 				width,
 			),
-		);
+		]);
 	}
 
-	lines.push("", sectionHeading("Operator tasks", width));
+	openSection("Operator tasks");
 	if (state.userTasks.length === 0) lines.push(fitRow(dim("No operator tasks in this project."), width));
 	for (const task of state.userTasks) {
 		const rowSelection: TasksOverlaySelection = { kind: "user", task };
 		const presentation = USER_TASK_PRESENTATION[task.status];
-		lines.push(
+		pushRow([
 			fitRow(
 				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(task.id.padEnd(4))} ${muted(task.title)} ${dim(`· ${task.status}`)}`,
 				width,
 			),
-		);
-		if (task.note) lines.push(...wrapTaskProse(`       ${dim("note")} `, muted(task.note), width));
+			...(task.note ? wrapTaskProse(`       ${dim("note")} `, muted(task.note), width) : []),
+		]);
 	}
-	return lines;
+	const last = spans.at(-1);
+	if (last) last.end = lines.length;
+	return { lines, spans };
+}
+
+/**
+ * The first line of a `height`-row window that shows `span`, moved from
+ * `offset` as little as possible. A span taller than the window shows its head.
+ */
+function followTasksWindow(offset: number, span: TasksRowSpan, height: number, total: number): number {
+	let next = offset;
+	if (span.end - span.start > height || span.start < next) next = span.start;
+	else if (span.end > next + height) next = span.end - height;
+	return Math.max(0, Math.min(next, total - height));
+}
+
+/**
+ * The row a page move leaves selected: the current one while its line is still
+ * in the window, else the first (paging down) or last (paging up) row whose
+ * line is. A page with no row on it keeps the selection where it was.
+ */
+function selectionAfterPage(
+	spans: ReadonlyArray<TasksRowSpan>,
+	selected: number,
+	offset: number,
+	height: number,
+	direction: 1 | -1,
+): number {
+	const inWindow = (span: TasksRowSpan | undefined): boolean =>
+		span !== undefined && span.line >= offset && span.line < offset + height;
+	if (inWindow(spans[selected])) return selected;
+	const visible = spans.flatMap((span, index) => (inWindow(span) ? [index] : []));
+	return (direction > 0 ? visible[0] : visible.at(-1)) ?? selected;
+}
+
+/** The first row of the next or previous section that has rows, wrapping around. */
+function sectionJumpIndex(rows: ReadonlyArray<TasksOverlaySelection>, selected: number, direction: 1 | -1): number {
+	const kinds = [...new Set(rows.map((row) => row.kind))];
+	const at = Math.max(0, kinds.indexOf(rows[selected]?.kind ?? "current"));
+	const target = kinds[(at + direction + kinds.length) % kinds.length];
+	const index = rows.findIndex((row) => row.kind === target);
+	return index === -1 ? selected : index;
 }
 
 export interface OpenTasksOverlayOptions {
@@ -335,13 +420,26 @@ export interface OpenTasksOverlayOptions {
 	workspace?: string;
 }
 
-class TasksOverlayBody implements Component {
+class TasksOverlayBody implements Component, RowBudgetedBody {
 	private history: ReadonlyArray<SessionTaskHistoryBoard> = [];
 	private artifacts: ReadonlyArray<SessionArtifact> = [];
 	private userTasks: ReadonlyArray<UserTask> = [];
 	private selectedIndex = 0;
 	private addInput: Input | null = null;
 	private status = "";
+	/**
+	 * The dock's fixed budget cut the board behind "… N more rows", so the
+	 * operator tasks the footer keys act on were never reachable (BT-015). The
+	 * board now windows itself: the window follows the selection, pages with
+	 * PgUp/PgDn, and keeps the add field and the status pinned below it.
+	 */
+	private bodyRows = 0;
+	private offset = 0;
+	/** Rows in the window, or zero while the whole board fits. */
+	private windowRows = 0;
+	/** Set by a selection move; the next render, which knows the layout, scrolls to it. */
+	private followSelection = false;
+	private layout: TasksOverlayLayout | null = null;
 
 	constructor(
 		private readonly getBoard: () => TaskBoardSnapshot | null,
@@ -350,24 +448,40 @@ class TasksOverlayBody implements Component {
 		this.refreshCaptured();
 	}
 
+	setBodyRows(rows: number): void {
+		this.bodyRows = Math.max(0, Math.floor(rows));
+	}
+
 	render(width: number): string[] {
-		const body = formatCompositeTasksOverlayBodyLines(
-			{
-				board: this.readBoard(),
-				history: this.history,
-				artifacts: this.artifacts,
-				userTasks: this.userTasks,
-				selectedIndex: this.selectedIndex,
-				...(this.options.workspace ? { workspace: this.options.workspace } : {}),
-			},
-			Math.max(1, Math.floor(width)),
-		);
+		const safeWidth = Math.max(1, Math.floor(width));
+		const layout = layoutCompositeTasksOverlay(this.state(), safeWidth);
+		this.layout = layout;
+		const pinned: string[] = [];
 		if (this.addInput) {
-			body.push("", fitRow(clioTheme().fg("accent", "New operator task"), width));
-			body.push(...this.addInput.render(Math.max(1, width)).map((line) => fitRow(line, width)));
+			pinned.push("", fitRow(clioTheme().fg("accent", "New operator task"), safeWidth));
+			pinned.push(...this.addInput.render(safeWidth).map((line) => fitRow(line, safeWidth)));
 		}
-		if (this.status) body.push("", ...wrapTextWithAnsi(clioTheme().fg("warning", this.status), Math.max(1, width)));
-		return body;
+		if (this.status) pinned.push("", ...wrapTextWithAnsi(clioTheme().fg("warning", this.status), safeWidth));
+		const total = layout.lines.length;
+		const room = this.bodyRows - pinned.length - 1;
+		const span = layout.spans[Math.min(this.selectedIndex, layout.spans.length - 1)];
+		const follow = this.followSelection;
+		this.followSelection = false;
+		// With no known budget, or no room left for a window, the board renders
+		// whole and the frame's cut still marks what is missing.
+		if (this.bodyRows <= 0 || total + pinned.length <= this.bodyRows || room < 1) {
+			this.windowRows = 0;
+			this.offset = 0;
+			return [...layout.lines, ...pinned];
+		}
+		this.windowRows = room;
+		this.offset =
+			follow && span
+				? followTasksWindow(this.offset, span, room, total)
+				: Math.max(0, Math.min(this.offset, total - room));
+		const end = this.offset + room;
+		const position = dim(`${this.offset + 1}–${end} of ${total} rows · PgUp/PgDn page`);
+		return [...layout.lines.slice(this.offset, end), fitRow(position, safeWidth), ...pinned];
 	}
 
 	handleInput(data: string): void {
@@ -396,15 +510,21 @@ class TasksOverlayBody implements Component {
 		const state = this.state();
 		const rows = selectableRows(state);
 		this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, Math.max(0, rows.length - 1)));
+		if (matchesKey(data, "pageUp") || matchesKey(data, "pageDown")) {
+			this.page(matchesKey(data, "pageDown") ? 1 : -1);
+			return;
+		}
 		if (rows.length === 0) return;
 		if (matchesKey(data, "up")) {
-			this.selectedIndex = Math.max(0, this.selectedIndex - 1);
-			this.requestRender();
+			this.select(this.selectedIndex - 1, rows.length);
 			return;
 		}
 		if (matchesKey(data, "down")) {
-			this.selectedIndex = Math.min(rows.length - 1, this.selectedIndex + 1);
-			this.requestRender();
+			this.select(this.selectedIndex + 1, rows.length);
+			return;
+		}
+		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
+			this.select(sectionJumpIndex(rows, this.selectedIndex, matchesKey(data, "tab") ? 1 : -1), rows.length);
 			return;
 		}
 		const selected = rows[this.selectedIndex];
@@ -428,6 +548,8 @@ class TasksOverlayBody implements Component {
 			? buildHint([{ key: "Enter", verb: "add" }], "back")
 			: buildHint([
 					{ key: "↑↓", verb: "select" },
+					...(this.windowRows > 0 ? [{ key: "PgUp/PgDn", verb: "page" }] : []),
+					{ key: "Tab", verb: "section" },
 					{ key: "Enter", verb: "view" },
 					{ key: "a", verb: "add" },
 					{ key: "h", verb: "hand" },
@@ -446,6 +568,27 @@ class TasksOverlayBody implements Component {
 			selectedIndex: this.selectedIndex,
 			...(this.options.workspace ? { workspace: this.options.workspace } : {}),
 		};
+	}
+
+	/** Move the selection; the next render brings its row, with what belongs to it, into the window. */
+	private select(index: number, rowCount: number): void {
+		this.selectedIndex = Math.max(0, Math.min(index, rowCount - 1));
+		this.followSelection = true;
+		this.requestRender();
+	}
+
+	private page(direction: 1 | -1): void {
+		if (!this.layout || this.windowRows <= 0) return;
+		const step = Math.max(1, this.windowRows - 1);
+		this.offset = Math.max(0, Math.min(this.offset + direction * step, this.layout.lines.length - this.windowRows));
+		this.selectedIndex = selectionAfterPage(
+			this.layout.spans,
+			this.selectedIndex,
+			this.offset,
+			this.windowRows,
+			direction,
+		);
+		this.requestRender();
 	}
 
 	private readBoard(): TaskBoardSnapshot | null {
