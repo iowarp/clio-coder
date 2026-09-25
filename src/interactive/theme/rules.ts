@@ -122,7 +122,13 @@ export function frame(
 
 	const leftStr = hasTitle ? `${frameFg("┌─")} ${styledTitle} ` : frameFg("┌─");
 	const rightStr = hasMeta ? ` ${theme.fg("dim", meta)} ${frameFg("─┐")}` : frameFg("┐");
-	const top = `${leftStr}${frameFg("─".repeat(fillWidth))}${rightStr}`;
+	const composedTop = `${leftStr}${frameFg("─".repeat(fillWidth))}${rightStr}`;
+	// A title or meta wider than the island is clipped before the corner, so the
+	// top border keeps the exact width every body row has.
+	const top =
+		leftVisible + rightVisible > safeWidth
+			? `${truncateToWidth(composedTop, safeWidth - 1, GLYPH.ellipsis, false)}${frameFg("┐")}`
+			: composedTop;
 
 	const body = lines.map((line) => `${frameFg("│")} ${padAnsi(line, contentWidth)} ${frameFg("│")}`);
 	const bottom = `${frameFg("└")}${frameFg("─".repeat(safeWidth - 2))}${frameFg("┘")}`;

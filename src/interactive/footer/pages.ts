@@ -13,6 +13,7 @@ import { clioTheme, formatCompactMs, formatContextPercent, GLYPH, rule } from ".
 import { fitIdentityLabel, formatTargetLabel } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
+import { notificationGlyph, notificationToken, topNotification } from "./notifications.js";
 import {
 	activityQuadrant,
 	contextOccupancyBar,
@@ -364,9 +365,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const shownIdentity = readable ? `  ·  ${theme.fg("muted", fittedIdentity)}` : "";
 	const left = `${activity}${skill ? ` · ${skill}` : ""}${shownIdentity}${badge ? ` · ${badge}` : ""}`;
 	const pair = (l: string, r: string, rw: number) => `${fit(l, w - rw - 3)}   ${fit(r, rw)}`;
-	const notice = [...state.notices]
-		.filter((n) => n.expiresAt === null || n.expiresAt > state.now)
-		.sort((a, b) => b.addedAt - a.addedAt)[0];
+	const notice = topNotification(state.notices, state.now);
 	const key = getKeybindings().getKeys("clio-coder.status.toggle").join("/") || "Dashboard";
 	const urgent = state.session.shutdownArmed
 		? "Ctrl+C again to quit"
@@ -376,10 +375,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const foot = urgent
 		? theme.fg("warning", urgent)
 		: notice
-			? theme.fg(
-					notice.level === "error" ? "error" : notice.level === "warning" ? "warning" : "muted",
-					`• ${clean(notice.text)}`,
-				)
+			? theme.fg(notificationToken(notice.level), `${notificationGlyph(notice.level)} ${clean(notice.text)}`)
 			: state.demoHint
 				? `${theme.fg("accent", "Tip")} ${theme.fg("muted", clean(state.demoHint))}`
 				: theme.fg("dim", (state.demo !== false ? footerKeyHint(state.now, w < 120) : null) ?? `${key} Dashboard`);

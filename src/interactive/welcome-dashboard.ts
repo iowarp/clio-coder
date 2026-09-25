@@ -504,7 +504,7 @@ function welcomeHints(theme: ClioTheme, page: number, getKeyLabel?: WelcomeDashb
 }
 
 /** Shared by the instant shell and hydrated UI: one stable, framed welcome. */
-function buildWelcomeDashboardLines(
+export function buildWelcomeDashboardLines(
 	stats: WelcomeDashboardStats,
 	version: string,
 	width: number,

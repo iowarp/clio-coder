@@ -53,14 +53,14 @@ export const DEFAULT_INFO_TTL_MS = 12_000;
 
 const SEVERITY: Record<NotificationLevel, number> = { error: 4, warning: 3, success: 2, info: 1 };
 
-function notificationGlyph(level: NotificationLevel): string {
+export function notificationGlyph(level: NotificationLevel): string {
 	if (level === "error") return GLYPH.error;
 	if (level === "warning") return GLYPH.warn;
 	if (level === "success") return GLYPH.ok;
 	return GLYPH.info;
 }
 
-function notificationToken(level: NotificationLevel): ClioToken {
+export function notificationToken(level: NotificationLevel): ClioToken {
 	if (level === "error") return "error";
 	if (level === "warning") return "warning";
 	if (level === "success") return "success";
@@ -309,6 +309,19 @@ function isLive(entry: Notification, now: number): boolean {
 
 function bySeverityThenRecency(a: Notification, b: Notification): number {
 	return SEVERITY[b.level] - SEVERITY[a.level] || b.addedAt - a.addedAt;
+}
+
+/**
+ * The one notice a one-slot surface shows: the head of the center's own order.
+ * The compact footer sorted by recency alone, so a fresh info notice hid an
+ * unresolved error that the notice panel still ranked first.
+ */
+export function topNotification(notices: ReadonlyArray<Notification>, now: number): Notification | undefined {
+	let top: Notification | undefined;
+	for (const entry of notices) {
+		if (isLive(entry, now) && (top === undefined || bySeverityThenRecency(entry, top) < 0)) top = entry;
+	}
+	return top;
 }
 
 export interface NotificationCenterOptions {
