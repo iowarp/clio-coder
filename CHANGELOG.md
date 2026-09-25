@@ -13,6 +13,12 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - The session prompt, the `/settings` help and the safety model guide describe the two levels as the code enforces them. `default` runs workspace edits and recognized commands, and asks before project build, lint, typecheck and CI scripts, other commands, outward actions, access outside the workspace and plan-scale dispatch. `yolo` runs all of those without asking, while hard blocks, damage-control confirmations and protected paths still apply.
 - A headless `clio-coder run` now tells the model that no operator is attached and that approval-required calls are denied, instead of saying they pause for a confirmation that never comes.
 
+### Safety
+
+- Damage-control rules now match each command a shell string would run, including `&&`, `||` and `;` chains, `sh -c` scripts, `$(...)` and backtick substitutions, and substitutions inside double quotes. Before, `git restore . && echo ok` ran at yolo with no confirmation, and a second bash argument could hide `git restore .` from every rule. Commands like these may now ask or hit a hard block where they used to run.
+- The `git restore` and `git checkout --` discard-all confirmations also match the `./` and `:/` spellings of the whole worktree and allow options before the pathspec.
+- When an approval releases a parked call, the tool result starts with one line naming who released it: the operator, a forwarded worker escalation, an ACP client, or a remembered answer. The model no longer sees an approved call as one that never asked.
+
 ### Dispatch and peers
 
 - **Breaking:** Every dispatched worker and external peer runs at `default`, whatever the session level. A yolo session no longer passes yolo to its workers, and their asks resolve through `fleet.permissions.mode`.
@@ -48,6 +54,17 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - **Breaking:** New gate decisions and receipts write `yolo-policy`, `yolo-applied`, `yolo-applied-winner` and `yolo-gate-policy` where earlier builds wrote the `full-auto-*` ids. Records sealed earlier still read and verify unchanged.
 - **Breaking:** New receipts no longer carry fields nothing read: `attestation`, `identity.hpc` (the Slurm, PBS or LSF allocation), `reproducibility.git`, `fleetGate`, `ledgerContribution`, `pathScope`, `staticShellHash` and the decision and first-token phase marks. Sealing a receipt no longer spawns git. Older receipts still verify.
 - New evidence bundles no longer write `trace.raw.jsonl`, `trace.cleaned.jsonl`, `audit-linked.jsonl` or `protected-artifacts.json`; their counts stay in the overview. Bundles from earlier builds still read.
+- Worker receipts record `effectiveFailover`, the failover mode the retry path actually used, beside the requested `routingIntent.failover`. Main-agent and print-mode receipts omit it, and earlier receipts verify unchanged.
+- A worker whose validation tool ran and failed now seals verification basis `validation-tool` with state `unverified` instead of `no-validation-tool`. Observed validation also outranks `acp-external-unobserved`.
+- ACP delegation receipts keep each peer call's ACP tool kind, so starts and finishes pair, successful edits count as mutations, and peer-owned completions no longer claim a safety approval. A call without a kind reads as `other`, and a title such as `npm test` no longer counts as verification.
+
+### Terminal interface
+
+- Pickers, inspectors, the permission card, ask-user and the leader menu open docked in the composer's slot instead of floating over the transcript, which keeps its rows, scrollback and mouse selection. The dock body has a fixed budget of 16 rows, fewer on short terminals, and in fullscreen mode the transcript shrinks by that height while a surface is open.
+- A permission card taller than its rows scrolls its terms or dispatch plan with the arrow and page keys and shows a position row.
+- A call the operator approved keeps an `allowed by you` line naming the rail on its live transcript row, and compact style no longer folds it into its neighbors. A resumed or replayed session does not show the line.
+- The Fleet runs island names a running run's phase in the words its inline card uses, and its live input count includes cache reads, so its totals match the card.
+- Self-drawn list rows share one selection style, view, settings and the session tree show the editor's live filter row, the footer stacks Context and Status below 84 columns, and help rows drop flags before the description at narrow widths.
 
 ### Fixes
 
