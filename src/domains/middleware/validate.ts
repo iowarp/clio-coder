@@ -1,31 +1,14 @@
 import {
 	isMiddlewareAnnotationSeverity,
 	isMiddlewareEffectKind,
-	isMiddlewareHook,
 	isMiddlewareReminderSeverity,
 	type MiddlewareEffect,
-	type MiddlewareEffectKind,
-	type MiddlewareHook,
-	type MiddlewareRule,
-	type MiddlewareRuleSource,
 } from "./types.js";
 
 export interface MiddlewareValidationIssue {
 	path: string;
 	message: string;
 }
-
-export type MiddlewareRuleValidationResult =
-	| {
-			valid: true;
-			rule: MiddlewareRule;
-			issues: [];
-	  }
-	| {
-			valid: false;
-			issues: MiddlewareValidationIssue[];
-			rule?: undefined;
-	  };
 
 export type MiddlewareEffectValidationResult =
 	| {
@@ -39,56 +22,11 @@ export type MiddlewareEffectValidationResult =
 			effect?: undefined;
 	  };
 
-export function validateMiddlewareRule(value: unknown, source = "$"): MiddlewareRuleValidationResult {
-	const issues: MiddlewareValidationIssue[] = [];
-	const rule = readMiddlewareRule(value, source, issues);
-	if (issues.length > 0 || rule === null) return { valid: false, issues };
-	return { valid: true, rule, issues: [] };
-}
-
 export function validateMiddlewareEffect(value: unknown, source = "$"): MiddlewareEffectValidationResult {
 	const issues: MiddlewareValidationIssue[] = [];
 	const effect = readMiddlewareEffect(value, source, issues);
 	if (issues.length > 0 || effect === null) return { valid: false, issues };
 	return { valid: true, effect, issues: [] };
-}
-
-function readMiddlewareRule(value: unknown, path: string, issues: MiddlewareValidationIssue[]): MiddlewareRule | null {
-	if (!isRecord(value)) {
-		issues.push({ path, message: "expected middleware rule object" });
-		return null;
-	}
-	rejectUnexpectedFields(value, path, ["id", "source", "description", "enabled", "hooks", "effectKinds"], issues);
-	const id = readRequiredString(value, `${path}.id`, issues);
-	const source = readRuleSource(value, `${path}.source`, issues);
-	const description = readRequiredString(value, `${path}.description`, issues);
-	const enabled = readRequiredBoolean(value, `${path}.enabled`, issues);
-	const hooks = readHookArray(value, `${path}.hooks`, issues);
-	const effectKinds = readEffectKindArray(value, `${path}.effectKinds`, issues);
-	if (id !== null && !/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$/.test(id)) {
-		issues.push({
-			path: `${path}.id`,
-			message: "expected lowercase kebab-case id with optional dot-separated namespace",
-		});
-	}
-	if (
-		id === null ||
-		source === null ||
-		description === null ||
-		enabled === null ||
-		hooks === null ||
-		effectKinds === null
-	) {
-		return null;
-	}
-	return {
-		id,
-		source,
-		description,
-		enabled,
-		hooks,
-		effectKinds,
-	};
 }
 
 function readMiddlewareEffect(
@@ -212,67 +150,6 @@ function readRequestContinuation(
 	return { kind: "request_continuation", message };
 }
 
-function readRuleSource(
-	record: Record<string, unknown>,
-	path: string,
-	issues: MiddlewareValidationIssue[],
-): MiddlewareRuleSource | null {
-	const field = pathField(path);
-	const value = record[field];
-	if (value !== "builtin") {
-		issues.push({ path, message: "expected builtin" });
-		return null;
-	}
-	return value;
-}
-
-function readHookArray(
-	record: Record<string, unknown>,
-	path: string,
-	issues: MiddlewareValidationIssue[],
-): MiddlewareHook[] | null {
-	return readEnumArray(record, path, isMiddlewareHook, "expected known middleware hook", issues);
-}
-
-function readEffectKindArray(
-	record: Record<string, unknown>,
-	path: string,
-	issues: MiddlewareValidationIssue[],
-): MiddlewareEffectKind[] | null {
-	return readEnumArray(record, path, isMiddlewareEffectKind, "expected known middleware effect kind", issues);
-}
-
-function readEnumArray<T extends string>(
-	record: Record<string, unknown>,
-	path: string,
-	isValue: (value: string) => value is T,
-	message: string,
-	issues: MiddlewareValidationIssue[],
-): T[] | null {
-	const field = pathField(path);
-	const value = record[field];
-	if (!Array.isArray(value) || value.length === 0) {
-		issues.push({ path, message: "expected non-empty string array" });
-		return null;
-	}
-	const seen = new Set<T>();
-	const parsed: T[] = [];
-	for (let index = 0; index < value.length; index += 1) {
-		const item = value[index];
-		if (typeof item !== "string" || !isValue(item)) {
-			issues.push({ path: `${path}[${index}]`, message });
-			continue;
-		}
-		if (seen.has(item)) {
-			issues.push({ path: `${path}[${index}]`, message: "duplicate entry" });
-			continue;
-		}
-		seen.add(item);
-		parsed.push(item);
-	}
-	return parsed;
-}
-
 function readRequiredString(
 	record: Record<string, unknown>,
 	path: string,
@@ -297,19 +174,6 @@ function readOptionalString(
 	if (typeof value !== "string" || value.trim().length === 0) {
 		issues.push({ path, message: "expected non-empty string" });
 		return undefined;
-	}
-	return value;
-}
-
-function readRequiredBoolean(
-	record: Record<string, unknown>,
-	path: string,
-	issues: MiddlewareValidationIssue[],
-): boolean | null {
-	const value = record[pathField(path)];
-	if (typeof value !== "boolean") {
-		issues.push({ path, message: "expected boolean" });
-		return null;
 	}
 	return value;
 }

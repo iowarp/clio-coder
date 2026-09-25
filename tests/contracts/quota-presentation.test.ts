@@ -9,8 +9,6 @@ import {
 	primaryWindow,
 	severityForPct,
 	snapshotSeverity,
-	statusPageQuotaRows,
-	welcomeQuotaLines,
 	windowByKey,
 	windowSeverity,
 } from "../../src/domains/quota/presentation.js";
@@ -86,27 +84,6 @@ it("keeps genuinely different accounts apart", () => {
 	assert.equal(foldDuplicateAccounts([claude, codex, antigravity]).length, 3);
 });
 
-it("writes one welcome line per connected subscription", () => {
-	const lines = welcomeQuotaLines([
-		snapshot("claude-code", "Claude Code", ANTHROPIC_WINDOWS, {
-			plan: "Max",
-			credits: { display: "$30.41 / $50.00", usedPct: 61 },
-		}),
-		snapshot("codex", "Codex", [window("weekly", "Weekly", 76)], { plan: "Pro" }),
-		snapshot("antigravity", "Antigravity", [], {
-			status: "expired",
-			message: "Antigravity's stored token expired; run the agy command once to refresh it",
-		}),
-		snapshot("copilot", "Copilot", [], { status: "no_credentials", message: "none" }),
-	]);
-
-	assert.deepEqual(lines, [
-		"Claude Code · Max · 5h 6% used · Weekly 9% used · $30.41 / $50.00",
-		"Codex · Pro · Weekly 76% used",
-		"Antigravity · Antigravity's stored token expired; run the agy command once to refresh it",
-	]);
-});
-
 it("builds a compact footer segment, showing 5h only where a provider reports one", () => {
 	const segment = footerQuotaSegment([
 		snapshot("claude-code", "Claude Code", ANTHROPIC_WINDOWS, { plan: "Max" }),
@@ -127,22 +104,6 @@ it("falls back to the busiest window when a provider names neither session nor w
 it("returns no footer segment when nothing is connected", () => {
 	assert.equal(footerQuotaSegment([]), null);
 	assert.equal(footerQuotaSegment([snapshot("x", "X", [], { status: "error", message: "boom" })]), null);
-});
-
-it("builds status page rows with reset times and severity", () => {
-	const rows = statusPageQuotaRows([
-		snapshot("codex", "Codex", [window("weekly", "Weekly", 76, { resetsAt: "2026-09-27T15:00:00.000Z" })], {
-			plan: "Pro",
-		}),
-		snapshot("antigravity", "Antigravity", [], { status: "expired", message: "run agy" }),
-	]);
-
-	assert.deepEqual(rows[0], {
-		label: "Codex (Pro)",
-		detail: "Weekly 76% used (resets 2026-09-27 15:00Z)",
-		severity: "caution",
-	});
-	assert.deepEqual(rows[1], { label: "Antigravity", detail: "run agy", severity: "normal" });
 });
 
 it("marks local inference as free rather than omitting it", () => {

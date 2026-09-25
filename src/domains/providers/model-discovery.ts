@@ -25,10 +25,6 @@ function uniqueModels(ids: ReadonlyArray<string | undefined>): string[] {
 	return out;
 }
 
-export function modelLoadStateLabel(status: TargetStatus, modelId: string): string {
-	return status.discoveredModelStates?.[modelId]?.state ?? "-";
-}
-
 /** Whether the model is serving, waiting to serve, or not on the server at all. */
 export type ModelResidency = "resident" | "loading" | "absent" | "unknown";
 

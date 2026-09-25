@@ -21,12 +21,10 @@ import {
 	type PluginExpectedCopy,
 	type PluginMutationResult,
 	type PluginScope,
-	type PluginSnapshot,
 	PluginWriterRefusal,
 	pluginBaseDir,
 	pluginContentDigest,
 	readPluginInstallRecord,
-	reloadPluginResources,
 	removePlugin,
 	withPluginScopeLock,
 } from "../plugins/index.js";
@@ -174,11 +172,6 @@ export function releaseLibraryLifecycle(plan: Pick<LibraryLifecyclePlan, "id">):
 	const byStep = staged.get(plan.id);
 	staged.delete(plan.id);
 	for (const item of byStep?.values() ?? []) releaseLibraryPlan(item);
-}
-
-/** Plans carry no callbacks or bytes; this exists so callers can treat them symmetrically with import summaries. */
-export function libraryLifecyclePlanSummary(plan: LibraryLifecyclePlan): LibraryLifecyclePlan {
-	return plan;
 }
 
 // ---------------------------------------------------------------------------
@@ -776,18 +769,6 @@ export function retryLibraryRefresh(cwd: string, refresh?: LibraryRefreshHost): 
 	} catch (error) {
 		return { status: "failed", error: error instanceof Error ? error.message : String(error) };
 	}
-}
-
-/** Default host adapter over the snapshot reload; the TUI wraps it with its bus notification. */
-export function pluginSnapshotRefreshHost(
-	reload: (cwd: string) => PluginSnapshot = reloadPluginResources,
-	previousGeneration: (cwd: string) => number = () => 0,
-): LibraryRefreshHost {
-	return (cwd) => {
-		const before = previousGeneration(cwd);
-		const next = reload(cwd);
-		return { status: "refreshed", generation: next.generation, changed: before === 0 || next.generation !== before };
-	};
 }
 
 /** The typed kind of an import: the applied install record when published, else the reviewed manifest bytes. */

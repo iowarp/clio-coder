@@ -113,7 +113,6 @@ export {
 	computeWikiContentHash,
 	computeWikiContentHashOfDir,
 	currentWikiGitHead,
-	isWikiMeta,
 	readWikiMeta,
 	validateWikiMeta,
 	type WikiMeta,
@@ -140,7 +139,6 @@ export {
 	readWikiPlanFile,
 	sanitizePagePath,
 	sanitizeWikiPlan,
-	scopePlanForUpdate,
 	writeWikiPlanFile,
 } from "./wiki/plan-store.js";
 export {

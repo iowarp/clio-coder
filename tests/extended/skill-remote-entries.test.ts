@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import yaml from "yaml";
 import { normalizedSkillHash } from "../../src/domains/resources/skills/content-hash.js";
-import { installSkillFromSource, updateSkills } from "../../src/domains/resources/skills/install.js";
+import { installSkillFromSource } from "../../src/domains/resources/skills/install.js";
 import { loadSkills } from "../../src/domains/resources/skills/loader.js";
 import { discoverMarketplaceSkills } from "../../src/domains/resources/skills/marketplace.js";
 
@@ -220,32 +220,6 @@ describe("remote marketplace entries", () => {
 		ok(loaded);
 		strictEqual(loaded.provenance?.installUrl, upstream);
 		strictEqual(loaded.provenance?.installedHash, result.installedHash);
-	});
-
-	it("keeps the overlay through an update when the resolver still names it", () => {
-		const root = scratch();
-		const upstream = writeUpstream(root);
-		const { packageRoot } = writeCatalogPackage(root, { remote: true });
-		const overlay = join(packageRoot, "skills", "planning", "mapper");
-		const project = join(root, "project");
-		mkdirSync(project);
-		installSkillFromSource({ source: upstream, scope: "project", cwd: project, overlay, exclude: ["test"] });
-
-		writeFileSync(join(upstream, "bin", "mapper.mjs"), "console.log('render v2');\n", "utf8");
-		writeFileSync(join(overlay, "SKILL.md"), wrapperSkill("Wrapper body, second edition."), "utf8");
-		const reports = updateSkills({
-			cwd: project,
-			name: "mapper",
-			resolveShaping: (skill) => (skill.sourceUrl === upstream ? { overlay, exclude: ["test"] } : undefined),
-		});
-		deepStrictEqual(
-			reports.map((report) => report.status),
-			["updated"],
-		);
-		const installed = join(project, ".clio-coder", "skills", "mapper");
-		match(readFileSync(join(installed, "SKILL.md"), "utf8"), /second edition/);
-		match(readFileSync(join(installed, "bin", "mapper.mjs"), "utf8"), /render v2/);
-		strictEqual(existsSync(join(installed, "test")), false);
 	});
 
 	it("lets an overlay-bearing index entry win over its own catalog folder", () => {

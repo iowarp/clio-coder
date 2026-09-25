@@ -123,7 +123,6 @@ export type {
 export {
 	formatRegistrationConflict,
 	registrationFromRuleDefinition,
-	runMiddlewareHook,
 	runMiddlewareRegistrations,
 	writeMiddlewareDiagnosticToStderr,
 } from "./runtime.js";
@@ -179,10 +178,9 @@ export {
 } from "./types.js";
 export type {
 	MiddlewareEffectValidationResult,
-	MiddlewareRuleValidationResult,
 	MiddlewareValidationIssue,
 } from "./validate.js";
-export { validateMiddlewareEffect, validateMiddlewareRule } from "./validate.js";
+export { validateMiddlewareEffect } from "./validate.js";
 export {
 	coalesceTurnDiff,
 	createWatchdogRegistration,

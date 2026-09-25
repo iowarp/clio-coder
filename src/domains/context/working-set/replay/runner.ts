@@ -44,7 +44,6 @@ export interface ReplayConfig {
 	threshold: number;
 	target: number;
 	settings: WorkingSetSettings;
-	seed: number;
 	/** Absent: summaries are counted as `turnsToFirstSummary` but never applied. */
 	summaries?: ReplaySummaryModel;
 }

@@ -12,7 +12,12 @@ import {
 	parsePluginGithubSource,
 	readPluginCatalog,
 } from "../../src/domains/plugins/catalog.js";
-import { installLibraryPackage, listInstalledPlugins, pluginContentDigest } from "../../src/domains/plugins/index.js";
+import {
+	installLibraryPackage,
+	listInstalledPlugins,
+	pluginContentDigest,
+	removePlugin,
+} from "../../src/domains/plugins/index.js";
 import {
 	classifyLibraryRequirements,
 	discoverLibrary,
@@ -22,14 +27,12 @@ import {
 	libraryEntryInstalled,
 	libraryEntryPin,
 	libraryInstallPath,
-	libraryRuntimeName,
 	libraryWorkspace,
 	pinLibraryEntry,
 	planLibraryInstall,
 	planLibraryUpdate,
 	registerLibraryPackage,
 	releaseLibraryPlan,
-	removeLibraryEntry,
 	resolveLibraryPackage,
 	resolveLibraryRequirements,
 } from "../../src/domains/resources/library.js";
@@ -171,7 +174,7 @@ describe("plugin library lifecycle", () => {
 		equal(libraryEntryDrift(item, { scope: "project" }).status, "changed");
 		equal(libraryEntryDrift(item, { scope: "user" }).status, "clean");
 		throws(() => pinLibraryEntry(item, { scope: "project" }), /plugin_local_changes/);
-		removeLibraryEntry(item, { scope: "project" });
+		removePlugin(item.name, { scope: "project" });
 		equal(existsSync(projectPath), false);
 		equal(libraryEntryInstalled(item, { scope: "project" }), false);
 		equal(libraryEntryInstalled(item, { scope: "user" }), true);
@@ -498,27 +501,6 @@ describe("plugin library lifecycle", () => {
 		match(pinned.output, /supported only/);
 	});
 
-	it("uses the authored prompt path even when package and component names differ", () => {
-		const source = bundle();
-		mkdirSync(path.join(source, "prompts", "nested"), { recursive: true });
-		writeFileSync(path.join(source, "prompts", "nested", "start.md"), "Explain the workspace.");
-		const file = path.join(source, "plugin.json");
-		const manifest = JSON.parse(readFileSync(file, "utf8"));
-		manifest.extensions = {
-			"ai.iowarp.clio": {
-				manifestVersion: 1,
-				kind: "prompt",
-				resources: { prompts: "prompts" },
-				components: [{ kind: "prompt", id: "authored-component", path: "prompts/nested/start.md" }],
-			},
-		};
-		writeFileSync(file, JSON.stringify(manifest));
-		const item = entry(source, { kind: "prompt" });
-		equal(libraryRuntimeName(item), undefined);
-		installLibraryPlan(planLibraryInstall(item));
-		equal(libraryRuntimeName(item), "nested:start");
-	});
-
 	it("keeps kind-qualified lifecycle actions on the matching scope when another kind shadows its name", async () => {
 		const pluginSource = bundle();
 		installLibraryPlan(planLibraryInstall(entry(pluginSource), { scope: "project" }));
@@ -578,7 +560,7 @@ describe("plugin library lifecycle", () => {
 		equal(pluginContentDigest(projectBefore.rootPath), projectDigest);
 		equal(copy("project")?.enabled, true);
 		installLibraryPlan(planLibraryInstall(entry(skillSource, { kind: "skill" }), { scope: "user" }));
-		removeLibraryEntry(skillEntry);
+		removePlugin(skillEntry.name, { scope: "user" });
 		equal(copy("user"), undefined);
 		equal(pluginContentDigest(projectBefore.rootPath), projectDigest);
 	});

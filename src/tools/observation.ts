@@ -1,4 +1,4 @@
-import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
+import { resolveGuardrail } from "../core/guardrails.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import type { ImageContent } from "../engine/types.js";
 import type { ToolInvokeOptions, ToolResult } from "./registry.js";
@@ -68,10 +68,6 @@ export const OBSERVE_SELF_CAPS = {
 	contextLibrary: 16 * 1024,
 } as const;
 
-// Per-turn observation budget pool. One pool per sessionId:turnId shared by
-// every OBSERVE tool; LRU-pruned so abandoned turns cannot grow the map.
-// The configurable value lives at safety.limits.observationBytesPerTurn.
-export const DEFAULT_OBSERVATION_TURN_BUDGET_BYTES = GUARDRAIL_DEFAULTS.observationTurnBudgetBytes;
 const MIN_BUDGET_SLICE_BYTES = 1024;
 const BUDGET_TRACK_LIMIT = 256;
 

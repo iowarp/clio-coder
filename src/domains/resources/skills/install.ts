@@ -66,30 +66,6 @@ export interface InstallSkillResult {
 	warnings: string[];
 }
 
-export type SkillUpdateStatus = "up-to-date" | "updated" | "local-changes" | "no-source" | "error";
-
-export interface SkillUpdateReport {
-	name: string;
-	status: SkillUpdateStatus;
-	detail?: string;
-}
-
-export interface UpdateSkillsInput {
-	cwd?: string;
-	configDir?: string;
-	/** Update a single skill by name; otherwise requires all=true. */
-	name?: string;
-	all?: boolean;
-	/** Overwrite local modifications. */
-	force?: boolean;
-	/**
-	 * Recovers the overlay and exclude list an installed skill was shaped with,
-	 * keyed by its name and recorded source URL. Without it an update of a
-	 * remote-entry skill would refetch bare upstream and drop the wrapper.
-	 */
-	resolveShaping?: (skill: { name: string; sourceUrl: string }) => SkillInstallShaping | undefined;
-}
-
 /**
  * A path inside a cloned repository, and nothing else. The URL pattern's tail
  * is free-form, so `.../blob/main/../../../etc` would join out of the clone
@@ -407,88 +383,4 @@ export function installSkillFromSource(input: InstallSkillInput): InstallSkillRe
 	} finally {
 		fetched.cleanup();
 	}
-}
-
-function managedSkills(cwd: string, configDir?: string): Skill[] {
-	const list = loadSkills({ cwd, ...(configDir ? { configDir } : {}) });
-	// Only Clio-managed roots are update targets; compat roots belong to other harnesses.
-	return list.items.filter(
-		(skill) => skill.source === "clio-coder" && (skill.scope === "user" || skill.scope === "project"),
-	);
-}
-
-function updateOne(skill: Skill, force: boolean, shaping: SkillInstallShaping = {}): SkillUpdateReport {
-	const sourceUrl = skill.provenance?.installUrl;
-	if (!sourceUrl) return { name: skill.name, status: "no-source", detail: "no source-url provenance recorded" };
-	const spec = parseSkillSourceSpec(sourceUrl);
-	if (!spec) return { name: skill.name, status: "error", detail: `unsupported source-url: ${sourceUrl}` };
-
-	let fetched: FetchedSource;
-	try {
-		fetched = shapeSource(fetchSource(spec), shaping);
-	} catch (err) {
-		return { name: skill.name, status: "error", detail: err instanceof Error ? err.message : String(err) };
-	}
-	try {
-		// The same gate a fresh install passes. Upstream may have moved on to a
-		// SKILL.md that no longer loads, and without this an update replaces a
-		// working skill with one that fails discovery: the operator is told the
-		// skill updated, and it silently stops existing.
-		validateSourceSkill(fetched.skillDir);
-		const remoteFile = path.join(fetched.skillDir, "SKILL.md");
-		const remoteRaw = readFileSync(remoteFile, "utf8");
-		const remoteHash = normalizedSkillHash(remoteRaw);
-		const localRaw = readFileSync(skill.filePath, "utf8");
-		const localHash = normalizedSkillHash(localRaw);
-		const recordedHash = skill.provenance?.installedHash ?? null;
-
-		if (remoteHash === localHash) return { name: skill.name, status: "up-to-date" };
-		// Without a recorded install hash, a local/remote mismatch is indistinguishable
-		// from local edits; stay conservative either way.
-		const locallyModified = recordedHash === null || localHash !== recordedHash;
-		if (locallyModified && !force) {
-			return { name: skill.name, status: "local-changes", detail: "skipped, use --force to overwrite" };
-		}
-
-		swapSkillDir((staging) => {
-			copySkillDir(fetched.skillDir, staging);
-			writeFileSync(
-				path.join(staging, "SKILL.md"),
-				injectProvenanceFrontmatter(remoteRaw, {
-					sourceUrl,
-					installedAt: skill.provenance?.installedAt ?? new Date().toISOString(),
-					updatedAt: new Date().toISOString(),
-					installedHash: remoteHash,
-					// Who installed a skill is set once; an update, worker- or
-					// operator-run, does not change who put it there originally.
-					...(skill.provenance?.installedBy ? { installedBy: skill.provenance.installedBy } : {}),
-				}),
-				"utf8",
-			);
-		}, skill.baseDir);
-		return { name: skill.name, status: "updated" };
-	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
-		return { name: skill.name, status: "error", detail: reason };
-	} finally {
-		fetched.cleanup();
-	}
-}
-
-export function updateSkills(input: UpdateSkillsInput = {}): SkillUpdateReport[] {
-	const cwd = input.cwd ?? process.cwd();
-	const skills = managedSkills(cwd, input.configDir);
-	const shapingFor = (skill: Skill): SkillInstallShaping =>
-		(skill.provenance?.installUrl &&
-			input.resolveShaping?.({ name: skill.name, sourceUrl: skill.provenance.installUrl })) ||
-		{};
-	if (input.name) {
-		const skill = skills.find((entry) => entry.name === input.name);
-		if (!skill) return [{ name: input.name, status: "error", detail: "not found in Clio-managed skill roots" }];
-		return [updateOne(skill, input.force === true, shapingFor(skill))];
-	}
-	if (input.all !== true) throw new Error("updateSkills requires a name or all=true");
-	return skills
-		.filter((skill) => skill.provenance?.installUrl)
-		.map((skill) => updateOne(skill, input.force === true, shapingFor(skill)));
 }

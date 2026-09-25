@@ -196,7 +196,3 @@ export function parseAgentRecipeSchema(input: ParseRecipeSchemaInput): AgentReci
 		body: input.body,
 	};
 }
-
-export function recipeSchemaFieldNames(): ReadonlyArray<string> {
-	return ALL_RECIPE_KEYS;
-}

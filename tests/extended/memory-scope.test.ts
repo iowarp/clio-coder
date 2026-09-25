@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { canonicalMemoryRepositoryIdentity, selectApprovedMemory } from "../../src/domains/memory/operations.js";
+import { canonicalMemoryRepositoryIdentity } from "../../src/domains/memory/operations.js";
 import { memoryRecordFromPromotion } from "../../src/domains/memory/promotion.js";
+import { selectMemoryForPrompt } from "../../src/domains/memory/prompt-section.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import {
 	parseTaskMemoryHandoffSnapshot,
@@ -41,14 +42,14 @@ describe("memory scope boundary", () => {
 		const repoA = { kind: "canonical-path", key: "/memory/repo-a" } as const;
 		const repoB = { kind: "canonical-path", key: "/memory/repo-b" } as const;
 		const records = [record("global", "global"), record("a", "repo", repoA), record("b", "repo", repoB)];
-		const selected = selectApprovedMemory(records, {
+		const selected = selectMemoryForPrompt(records, {
 			scopes: ["global", "repo"],
 			tokenBudget: 10_000,
 			activeRepository: repoA,
 		});
 		deepStrictEqual(selected.map(({ id }) => id).sort(), ["a", "global"]);
 		deepStrictEqual(
-			selectApprovedMemory(records, { scopes: ["global", "repo"], tokenBudget: 10_000, activeRepository: null }).map(
+			selectMemoryForPrompt(records, { scopes: ["global", "repo"], tokenBudget: 10_000, activeRepository: null }).map(
 				({ id }) => id,
 			),
 			["global"],

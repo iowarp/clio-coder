@@ -10,12 +10,7 @@ import {
 	thinkingBudgetFromMap,
 	thinkingEffortFromMap,
 } from "./thinking-control-policy.js";
-import {
-	availableThinkingLevels,
-	type CapabilityFlags,
-	type ThinkingLevel,
-	VALID_THINKING_LEVELS,
-} from "./types/capability-flags.js";
+import { availableThinkingLevels, type CapabilityFlags, type ThinkingLevel } from "./types/capability-flags.js";
 import type { KnowledgeBase, KnowledgeBaseHit } from "./types/knowledge-base.js";
 import {
 	extractLocalModelQuirks,
@@ -142,8 +137,6 @@ interface ClioRuntimeMetadata {
 const LEVELS_ON_OFF: ReadonlyArray<ThinkingLevel> = ["off", "low"];
 const LEVELS_ALWAYS_ON: ReadonlyArray<ThinkingLevel> = ["high"];
 const LEVELS_NONE: ReadonlyArray<ThinkingLevel> = ["off"];
-/** Ascending intensity. VALID_THINKING_LEVELS is already declared in that order. */
-const LEVEL_ORDER: ReadonlyArray<ThinkingLevel> = VALID_THINKING_LEVELS;
 const HARMONY_LEVELS: ReadonlyArray<ThinkingLevel> = ["low", "medium", "high"];
 
 function effortFor(
@@ -310,11 +303,6 @@ export function applyThinkingMechanism(
 			return result;
 		}
 	}
-}
-
-function sortedThinkingLevels(levels: Iterable<ThinkingLevel>): ThinkingLevel[] {
-	const set = new Set(levels);
-	return LEVEL_ORDER.filter((level) => set.has(level));
 }
 
 function supportedBudgetLevels(
@@ -789,16 +777,6 @@ export function resolveModelRuntimeCapabilitiesForModel<TApi extends Api>(
 	});
 }
 
-export function coerceThinkingLevelForRuntime(
-	input: ResolveRuntimeCapabilitiesInput,
-	requested: ThinkingLevel | undefined,
-): ThinkingLevel {
-	return resolveModelRuntimeCapabilities({
-		...input,
-		configuredThinkingLevel: requested ?? input.configuredThinkingLevel ?? "off",
-	}).thinking.effectiveLevel;
-}
-
 export function resolveTargetRuntimeCapabilities(
 	target: TargetDescriptor,
 	runtime: RuntimeDescriptor,
@@ -818,12 +796,4 @@ export function resolveTargetRuntimeCapabilities(
 		...thinkingHintsForCatalogModel(runtime.id, wireModelId),
 		...(configuredThinkingLevel ? { configuredThinkingLevel } : {}),
 	});
-}
-
-export function supportedThinkingLevelLabels(resolved: ResolvedModelRuntimeCapabilities): ReadonlyArray<string> {
-	return resolved.thinking.supportedLevels.map((level) => thinkingLevelChoiceLabel(resolved.thinking.mechanism, level));
-}
-
-export function sortedSupportedThinkingLevels(levels: Iterable<ThinkingLevel>): ReadonlyArray<ThinkingLevel> {
-	return sortedThinkingLevels(levels);
 }

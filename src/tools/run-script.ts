@@ -991,7 +991,5 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 	};
 }
 
-export const runScriptTool: ToolSpec = createRunScriptTool();
-
 /** Exported for the bootstrap: the options a wrapped runner forwards unchanged. */
 export type RunScriptInvokeOptions = ToolInvokeOptions;

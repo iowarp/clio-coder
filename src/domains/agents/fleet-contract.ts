@@ -914,11 +914,6 @@ function assertNoV5FieldsBefore(frontmatter: Record<string, unknown>, sourcePath
 	}
 }
 
-/** Every loop in the contract, in declaration order. */
-export function fleetLoopSteps(contract: FleetContract): FleetContractLoopStep[] {
-	return contract.steps.filter((step): step is FleetContractLoopStep => step.kind === "loop");
-}
-
 /**
  * Every registered command this contract invokes, in declaration order: the
  * declared code steps plus the deterministic half of every loop. A loop's

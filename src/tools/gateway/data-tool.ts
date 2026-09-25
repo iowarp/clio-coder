@@ -197,5 +197,3 @@ export function createDataTool(deps: DataToolDeps = {}): ToolSpec {
 		},
 	};
 }
-
-export const dataTool: ToolSpec = createDataTool();

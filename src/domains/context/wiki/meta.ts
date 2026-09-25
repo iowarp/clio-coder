@@ -163,10 +163,6 @@ export function validateWikiMeta(value: unknown): WikiMetaValidation {
 	};
 }
 
-export function isWikiMeta(value: unknown): value is WikiMeta {
-	return validateWikiMeta(value).ok;
-}
-
 export function readWikiMeta(cwd: string): WikiMeta | null {
 	return readWikiMetaInDir(wikiDir(cwd));
 }

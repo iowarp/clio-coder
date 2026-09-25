@@ -2,11 +2,6 @@ import type { DomainModule } from "../../core/domain-loader.js";
 import { createPromptsBundle, type PromptsBundleOptions } from "./extension.js";
 import { PromptsManifest } from "./manifest.js";
 
-export const PromptsDomainModule: DomainModule = {
-	manifest: PromptsManifest,
-	createExtension: createPromptsBundle,
-};
-
 /**
  * Build a `PromptsDomainModule` with bundle options closed over the factory
  * call. Used by the orchestrator and `clio-coder run` to thread the global

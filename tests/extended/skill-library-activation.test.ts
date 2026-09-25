@@ -3,12 +3,12 @@ import { cpSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "nod
 import path from "node:path";
 import { it } from "node:test";
 import { skillActivationFromToolDetails, withModelSkillActivation } from "../../src/core/skill-activation.js";
-import { clearPluginSnapshots, pluginSnapshotFor } from "../../src/domains/plugins/index.js";
+import { clearPluginSnapshots, pluginSnapshotFor, reloadPluginResources } from "../../src/domains/plugins/index.js";
 import { discoverLibrary } from "../../src/domains/resources/library.js";
 import {
 	applyLibraryLifecycle,
+	type LibraryRefreshHost,
 	planLibraryLifecycle,
-	pluginSnapshotRefreshHost,
 } from "../../src/domains/resources/library-actions.js";
 import { readLibraryInventory } from "../../src/domains/resources/library-inventory.js";
 import { loadSkills, parsePendingSkillRequests } from "../../src/domains/resources/skills/loader.js";
@@ -45,7 +45,7 @@ it("activates every bundled skill from its native package in a workspace with pe
 		strictEqual(catalog.length, 36);
 		const installableCatalog = catalog.filter((entry) => !/^(?:[a-z][a-z0-9+.-]*:\/\/|git@)/i.test(entry.sourceUrl));
 		strictEqual(installableCatalog.length, 35);
-		const refresh = pluginSnapshotRefreshHost();
+		const refresh = (project: string) => reloadPluginResources(project);
 		refresh(cwd);
 		for (const entry of installableCatalog) {
 			const result = applyLibraryLifecycle(
@@ -92,10 +92,13 @@ for (const scope of ["user", "project"] as const) {
 			const foreignFile = path.join(foreign, "SKILL.md");
 			const foreignBytes = readFileSync(foreignFile, "utf8");
 			const generations: number[] = [];
-			const refresh = pluginSnapshotRefreshHost(
-				(project) => reloadPluginResourcesAndNotify(project, (event) => generations.push(event.generation)),
-				(project) => pluginSnapshotFor(project).generation,
-			);
+			// The session host: reload with a notification, and report a change
+			// when the committed generation moved.
+			const refresh: LibraryRefreshHost = (project) => {
+				const before = pluginSnapshotFor(project).generation;
+				const next = reloadPluginResourcesAndNotify(project, (event) => generations.push(event.generation));
+				return { status: "refreshed", generation: next.generation, changed: before === 0 || next.generation !== before };
+			};
 			refresh(cwd); // The already-running session initially has no native installation.
 			const context = createContextTool({ getCwd: () => cwd });
 			const plan = planLibraryLifecycle({ operation: "install", ref: "skill:herdr", scope, cwd });

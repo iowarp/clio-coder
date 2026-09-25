@@ -322,32 +322,6 @@ export function compactPrimaryLine(
 	return joinColumns(left, right, safeWidth);
 }
 
-/**
- * Compact secondary row: context fill + the single most important activity on
- * the left, dispatch summary + tool tally on the right.
- */
-function compactMetricChipLimit(width: number): number {
-	if (width < 48) return 1;
-	if (width < 72) return 2;
-	if (width < 100) return 4;
-	return 6;
-}
-
-function contextBarCellBounds(width: number): { min: number; max: number } {
-	if (width < 48) return { min: 6, max: 6 };
-	if (width < 72) return { min: 8, max: 8 };
-	if (width < 100) return { min: 12, max: 12 };
-	return { min: 14, max: 16 };
-}
-
-function compactContextBarWidth(width: number): number {
-	const bounds = contextBarCellBounds(width);
-	const leftHalfBudget = Math.max(0, Math.floor(width / 2));
-	const budgetCells = Math.max(0, leftHalfBudget - CONTEXT_BAR_LABEL_WIDTH);
-	const wideScale = width >= 100 ? 14 + Math.min(2, Math.max(0, Math.floor((width - 100) / 10))) : bounds.max;
-	return Math.max(bounds.min, Math.min(bounds.max, budgetCells, wideScale));
-}
-
 function contextBreakdownForBar(context: ContextEngineFacts): ContextUsageBreakdown | undefined {
 	const reportedUsed = finiteNonNegative(context.used);
 	const toolTokens = finiteNonNegative(context.toolSchemaTokens);
@@ -432,81 +406,6 @@ export function contextOccupancyBar(context: ContextEngineFacts, cells: number, 
 		context.contextWindow ?? 0,
 		context.used === null ? undefined : contextBreakdownForBar(context),
 	);
-}
-
-/** The live window after the percent; null when unknown or the row is too narrow to carry it. */
-export function compactContextWindowLabel(context: ContextEngineFacts, width: number): string | null {
-	if (width < 72) return null;
-	const window = finiteNonNegative(
-		context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow),
-	);
-	return window > 0 ? formatFooterTokens(window) : null;
-}
-
-export function compactSecondaryLine(
-	context: ContextEngineFacts,
-	agent: AgentWorkFacts,
-	width: number,
-	theme: ClioTheme = clioTheme(),
-	status: AgentStatus = {
-		phase: "idle",
-		since: 0,
-		lastMeaningfulAt: 0,
-		watchdogTier: 0,
-		watchdogPeak: 0,
-		localRuntime: false,
-	},
-	throughput: TokenThroughputSnapshot | null = null,
-	sessionTokens: UsageBreakdown | null = null,
-	sessionCost: CostAggregate | null = null,
-	outputStyle?: OutputStyle | null,
-	leaderArmed = false,
-	shutdownArmed = false,
-): string {
-	const safeWidth = Math.max(1, Math.floor(width));
-	const barCells = compactContextBarWidth(safeWidth);
-	let left = "";
-	if (context.ledger && !context.budget) {
-		// The row follows the kv grammar: dim key, muted value. An unmeasured
-		// percent renders the ?% placeholder dim because it is scaffolding for a
-		// number that has not arrived, not a measurement.
-		const percent = theme.fg(
-			context.ledger.percent !== null ? "muted" : "dim",
-			formatContextPercent(context.ledger.percent),
-		);
-		left = `${theme.fg("dim", "ctx")} ${renderContextMeterBar(context.ledger, barCells, theme)} ${percent}`;
-	} else {
-		left = `${context.budget?.inputSource === "historical" ? theme.fg("dim", "saved ") : ""}${contextOccupancyBar(context, barCells, theme)}`;
-	}
-	// A percentage alone does not say whether the window is 128k or 1M, so at
-	// widths that can afford it the live window follows the percent. It comes
-	// from the ledger when one is bound (the layer that answered the window is
-	// also the layer that produced the percent) and from the facts otherwise.
-	const windowLabel = compactContextWindowLabel(context, safeWidth);
-	if (windowLabel) left = `${left} ${theme.fg("dim", "of")} ${theme.fg("muted", windowLabel)}`;
-	const maxRightWidth = Math.max(0, safeWidth - visibleWidth(left) - 1);
-	const right = buildMetricStrip(
-		theme,
-		status,
-		throughput,
-		agent.lastTurn,
-		sessionTokens,
-		sessionCost,
-		context.used ?? undefined,
-		maxRightWidth,
-		compactMetricChipLimit(safeWidth),
-		outputStyle,
-		leaderArmed,
-		shutdownArmed,
-	);
-	// At the smallest widths the context meter consumes the entire secondary
-	// row, so keep a compact mode marker on the left instead of silently hiding
-	// the active transcript setting.
-	if (outputStyle && outputStyle !== "standard" && visibleWidth(right) === 0) {
-		const marker = outputStyle === "compact" ? "C" : outputStyle === "detailed" ? "D" : "S";
-		left = `${left}${theme.fg("dim", ` out:${marker}`)}`;
-	}
-	return joinColumns(left, right, safeWidth);
 }
 
 type DashboardRow =
@@ -1194,10 +1093,6 @@ function harnessBadge(
 	return badgeText ? theme.fg("muted", badgeText) : "";
 }
 
-function outputStyleLabel(verbosity: OutputStyle): string {
-	return verbosity.charAt(0).toUpperCase() + verbosity.slice(1);
-}
-
 function buildHarnessStatePill(
 	theme: ClioTheme,
 	status: AgentStatus,
@@ -1225,120 +1120,4 @@ function buildHarnessStatePill(
 	const lead = phase.live ? spinnerFrame(tick) : phase.glyph;
 	const mainPill = theme.style(phase.token, `${lead} ${phase.label}`);
 	return badge ? `${mainPill} ${theme.fg("dim", "·")} ${badge}` : mainPill;
-}
-
-/**
- * Drop order for the metric strip. The chip budget and the width budget both cut
- * from the highest rank down, so one ordering decides what an 80-column footer
- * keeps.
- *
- * The session total sits alone at the top. It is measured, it does not depend on
- * pricing, and it does not go stale between turns, which is not true of anything
- * else on the strip. At 80 columns the budget is four chips and the per-turn
- * detail used to spend all of it, so a session holding 9.7k measured tokens
- * showed none of them.
- */
-const CHIP_RANK_SHUTDOWN = -2;
-const CHIP_RANK_LEADER = -1;
-const CHIP_RANK_TOTALS = 0;
-const CHIP_RANK_DETAIL = 1;
-
-interface RankedChip {
-	text: string;
-	rank: number;
-}
-
-function pushChip(chips: RankedChip[], text: string | null, rank: number): void {
-	if (typeof text === "string" && text.length > 0) chips.push({ text, rank });
-}
-
-/**
- * Cut the strip to the chip budget and then to the width, dropping the
- * lowest-priority chip still standing each time. Within one rank the rightmost
- * goes first, which keeps the surviving chips in the order they were built.
- */
-function selectChips(
-	theme: ClioTheme,
-	chips: ReadonlyArray<RankedChip>,
-	chipLimit: number,
-	maxWidth: number,
-): string[] {
-	const dropOrder = chips
-		.map((chip, index) => ({ rank: chip.rank, index }))
-		.sort((a, b) => b.rank - a.rank || b.index - a.index);
-	const dropped = new Set<number>();
-	const surviving = (): string[] => chips.filter((_, index) => !dropped.has(index)).map((chip) => chip.text);
-	for (const { index } of dropOrder) {
-		if (chips.length - dropped.size <= chipLimit && visibleWidth(joinChips(theme, surviving())) <= maxWidth) break;
-		dropped.add(index);
-	}
-	return surviving();
-}
-
-function buildMetricStrip(
-	theme: ClioTheme,
-	status: AgentStatus,
-	throughput: TokenThroughputSnapshot | null | undefined,
-	lastTurn: TurnSummary | null | undefined,
-	sessionTokens: UsageBreakdown | null | undefined,
-	sessionCost: CostAggregate | null | undefined,
-	liveInputTokens: number | null | undefined,
-	maxWidth: number,
-	maxChipsCount = 6,
-	outputStyle?: OutputStyle | null,
-	leaderArmed = false,
-	shutdownArmed = false,
-): string {
-	const safeMaxWidth = Math.max(0, Math.floor(maxWidth));
-	if (safeMaxWidth <= 0) return "";
-	const isStreaming = status.phase !== "idle" && status.phase !== "ended";
-	const style = outputStyle ?? "standard";
-
-	const candidates: Array<string | null> = [];
-	if (isStreaming && outputStyle === "detailed") {
-		const tps = finiteNonNegative(throughput?.tokensPerSecond);
-		const rounded = tps > 0 ? (tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10) : null;
-		candidates.push(rounded !== null ? theme.fg("success", `${GLYPH.speed}${rounded}/s`) : null);
-
-		const liveOutput = finiteNonNegative(throughput?.outputTokens);
-		candidates.push(liveOutput > 0 ? theme.fg("success", `${GLYPH.down}${formatFooterTokens(liveOutput)}`) : null);
-
-		const ttftMs = finiteNonNegative(throughput?.ttftMs);
-		candidates.push(ttftMs > 0 ? theme.fg("muted", `ttft ${formatCompactMs(ttftMs)}`) : null);
-
-		const inputTokens =
-			finiteNonNegative(liveInputTokens) ||
-			finiteNonNegative(status.summary?.inputTokens) ||
-			finiteNonNegative(lastTurn?.inputTokens) ||
-			finiteNonNegative(sessionTokens?.input);
-		candidates.push(inputTokens > 0 ? theme.fg("muted", `${GLYPH.up}${formatFooterTokens(inputTokens)}`) : null);
-	}
-
-	const fallbackTotal = finiteNonNegative(sessionTokens?.input) + finiteNonNegative(sessionTokens?.output);
-	const cumulativeTotal = finiteNonNegative(sessionTokens?.totalTokens) || fallbackTotal;
-	const totalChip = cumulativeTotal > 0 ? theme.fg("muted", `Σ${formatFooterTokens(cumulativeTotal)}`) : null;
-	// Null when nothing priced these tokens, and an absent chip is the honest
-	// rendering of that. `$0.00` on a session that had made no call was a number
-	// nothing measured, and `cost unknown` beside a real Σ read as doubt about
-	// the tokens. See formatCostAggregate.
-	const cost = formatCostAggregate(sessionCost);
-	const costChip = cost === null ? null : theme.fg("muted", cost);
-
-	const chipLimit = Math.max(0, Math.floor(maxChipsCount));
-	const chips: RankedChip[] = [];
-	pushChip(chips, theme.fg("muted", outputStyleLabel(style)), CHIP_RANK_LEADER);
-	// Ranked above every measurement: the strip is cut by dropping the
-	// lowest-ranked chip, and these two are the answer to "did that key
-	// register". The quit hint outranks the leader because its window is
-	// 500ms wide and the leader remains visible until dismissed.
-	// Two rungs rather than one: the strip drops a chip it cannot fit whole, and
-	// a terminal narrow enough to lose the sentence is exactly the one where the
-	// operator most needs to be told the press registered.
-	const shutdownHint = safeMaxWidth >= 20 ? "Ctrl+C again to quit" : "Ctrl+C again";
-	pushChip(chips, shutdownArmed ? theme.fg("warning", shutdownHint) : null, CHIP_RANK_SHUTDOWN);
-	pushChip(chips, leaderArmed ? theme.fg("accent", "action menu") : null, CHIP_RANK_LEADER);
-	for (const chip of candidates) pushChip(chips, chip, CHIP_RANK_DETAIL);
-	pushChip(chips, totalChip, CHIP_RANK_TOTALS);
-	pushChip(chips, costChip, CHIP_RANK_DETAIL);
-	return joinChips(theme, selectChips(theme, chips, chipLimit, safeMaxWidth));
 }

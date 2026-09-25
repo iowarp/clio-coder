@@ -22,12 +22,9 @@ import {
 	type PluginScope,
 	pluginBaseDir,
 	pluginContentDigest,
-	pluginResourcePath,
 	readPluginInstallRecord,
 	readPluginManifest,
-	removePlugin,
 } from "../plugins/index.js";
-import { splitYamlFrontmatter } from "./common-loader.js";
 import type { LibraryPackageEntry, LibraryRequirementRef } from "./library-types.js";
 
 export type LibraryEntry = LibraryPackageEntry;
@@ -240,30 +237,6 @@ export function libraryWorkspace(options: LibraryScopeOptions & { catalog?: stri
 				})),
 		})),
 	};
-}
-
-/** Resolve the authored invocation identity; package names do not rewrite resource IDs. */
-export function libraryRuntimeName(
-	entry: Pick<LibraryEntry, "kind" | "name">,
-	options: LibraryScopeOptions = {},
-): string | undefined {
-	const installed = installedPlugin(entry, options);
-	if (!installed?.loadable || entry.kind === "plugin") return undefined;
-	const manifest = installed.manifest;
-	const component = manifest?.clio.components.find((item) => item.kind === entry.kind);
-	if (!manifest || !component) return undefined;
-	const file = pluginResourcePath(installed.rootPath, component.path);
-	if (entry.kind === "agent") return path.basename(file, ".md");
-	if (entry.kind === "prompt")
-		return path
-			.relative(pluginResourcePath(installed.rootPath, manifest.clio.resources.prompts as string), file)
-			.replace(/\.md$/, "")
-			.split(path.sep)
-			.join(":");
-	const parsed = splitYamlFrontmatter(readFileSync(file, "utf8"));
-	if (!parsed.ok) return undefined;
-	const metadata = parsed.frontmatter;
-	return typeof metadata.name === "string" ? metadata.name : undefined;
 }
 
 function installedPlugin(entry: Pick<LibraryEntry, "kind" | "name">, options: LibraryScopeOptions = {}) {
@@ -523,20 +496,6 @@ export function planLibraryUpdate(
 	const plan = planLibraryInstall(entry, { ...options, scope: plugin.scope, force: true });
 	if (!options.force) plan.expectedInstalledDigest = pluginContentDigest(plugin.rootPath);
 	return plan;
-}
-
-export function removeLibraryEntry(
-	entry: Pick<LibraryEntry, "kind" | "name">,
-	options: { cwd?: string; scope?: PluginScope; expect?: PluginExpectedState } = {},
-): LibraryInstallResult {
-	const installed = installedPlugin(entry, options);
-	if (!installed) throw new Error(`package not installed: ${libraryEntryRef(entry)}`);
-	const result = removePlugin(entry.name, { ...options, scope: installed.scope });
-	if (result.diagnostics.some((item) => item.type === "error"))
-		throw new Error(
-			`${result.diagnostics.map((item) => item.message).join("; ")}${result.recovery ? `; recovery: ${JSON.stringify(result.recovery)}` : ""}`,
-		);
-	return result.recovery ? { recovery: result.recovery } : {};
 }
 
 export function pinLibraryEntry(

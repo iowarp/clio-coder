@@ -1,7 +1,6 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { createHookBudgetTracker, type HookBudgetStats, type HookBudgetTracker } from "./budget.js";
 import type { MiddlewareRegistrationConflictTier, MiddlewareRegistrationOwner } from "./registrations.js";
-import { listMiddlewareRuleDefinitions } from "./rules.js";
 import {
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
 	type MiddlewareEffect,
@@ -157,7 +156,7 @@ export function formatRegistrationConflict(
  * Wrap a declarative rule definition as a degenerate coded registration so a
  * single ordered evaluation path serves both. The wrapped `evaluate` keeps the
  * rule's enabled flag, hook list, tool scoping, and declared-effect-kind
- * filtering exactly as `runMiddlewareHook` always applied them.
+ * filtering.
  */
 export function registrationFromRuleDefinition(definition: MiddlewareRuleDefinition): MiddlewareHookRegistration {
 	const registration: MiddlewareHookRegistration = {
@@ -297,13 +296,6 @@ function emitDiagnostic(sink: MiddlewareDiagnosticSink, diagnostic: MiddlewareDi
 	} catch {
 		// A diagnostics sink must never affect hook evaluation or the turn.
 	}
-}
-
-export function runMiddlewareHook(
-	input: MiddlewareHookInput,
-	definitions: ReadonlyArray<MiddlewareRuleDefinition> = listMiddlewareRuleDefinitions(),
-): MiddlewareHookResult {
-	return runMiddlewareRegistrations(input, definitions.map(registrationFromRuleDefinition));
 }
 
 function evaluateRuleDefinition(definition: MiddlewareRuleDefinition, input: MiddlewareHookInput): MiddlewareEffect[] {

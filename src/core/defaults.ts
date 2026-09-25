@@ -147,8 +147,7 @@ export interface FleetRouteSettings {
 /**
  * Compaction controls the session domain reads at runtime. The structural
  * type lives here so core/defaults.ts stays free of a backward domain
- * dependency; the engine-level defaults and the companion
- * DEFAULT_COMPACTION_SETTINGS value live alongside the rest of the
+ * dependency; the engine-level defaults live alongside the rest of the
  * compaction engine in src/domains/session/compaction/defaults.ts.
  *
  * Fields:
@@ -654,8 +653,6 @@ export const DEFAULT_SETTINGS = {
 		git: { commitAttribution: true },
 	} as IntegrationsSettings,
 };
-
-export type DefaultSettings = typeof DEFAULT_SETTINGS;
 
 /**
  * Raw YAML document written to the resolved config directory's settings.yaml on
