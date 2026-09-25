@@ -38,12 +38,6 @@ export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 export const RUN_KINDS = ["run", "dispatch"] as const satisfies readonly ArtifactKind[];
 
 /**
- * The widest window any projection may serve. Every list route is clamped below
- * it, so the cap is not the operating limit: it is the assertion that a
- * projection which somehow returned an unbounded list is a bug to be surfaced
- * rather than an allowlist to be filled.
- */
-/**
  * The shape an artifact id may take. Membership in the window is the real check.
  * This is the second one, and it exists because an admitted id becomes a child
  * process argument: no separator, no traversal, no leading dash a command could
