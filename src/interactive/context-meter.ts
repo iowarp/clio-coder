@@ -1,4 +1,5 @@
 import type { ContextLedger, ContextLedgerCategory, ContextLedgerGroup } from "../domains/session/context-ledger.js";
+import { visibleWidth } from "../engine/tui.js";
 import { type ClioTheme, type ClioToken, clioTheme, GLYPH } from "./theme/index.js";
 
 /**
@@ -30,8 +31,7 @@ export const CONTEXT_CATEGORY_TOKEN: Readonly<Record<ContextLedgerCategory, Clio
 };
 
 function contextCategoryGlyph(category: ContextLedgerCategory): string {
-	const filled = visibleSingle(GLYPH.contextFull) ? GLYPH.contextFull : GLYPH.barFull;
-	const free = visibleSingle(GLYPH.contextFree) ? GLYPH.contextFree : GLYPH.barEmpty;
+	const { filled, free } = contextBarGlyphs();
 	// The autocompact reserve is held-back headroom, not consumed context; it
 	// must stay glyph-distinct from both filled and free so a large reserve
 	// never makes 85% and 97% bars look identical when color is unavailable.
@@ -39,11 +39,12 @@ function contextCategoryGlyph(category: ContextLedgerCategory): string {
 	return category === "free" ? free : filled;
 }
 
-function visibleSingle(glyph: string): boolean {
-	// The braille context glyphs are single-width; the fallback bar glyphs are
-	// too. A defensive check keeps the meter aligned on terminals that render
-	// the preferred glyphs as wide.
-	return [...glyph].length === 1;
+/** Both context meter renderers must choose the same one-cell fallback. */
+export function contextBarGlyphs(): { filled: string; free: string } {
+	return {
+		filled: visibleWidth(GLYPH.contextFull) === 1 ? GLYPH.contextFull : GLYPH.barFull,
+		free: visibleWidth(GLYPH.contextFree) === 1 ? GLYPH.contextFree : GLYPH.barEmpty,
+	};
 }
 
 export interface AllocateMeterCellsOptions {
@@ -53,6 +54,24 @@ export interface AllocateMeterCellsOptions {
 	 * the large overlay grid; leave false for the coarse footer bar.
 	 */
 	ensureVisible?: boolean;
+}
+
+/** Stable largest-remainder allocation for the compact bar and ledger grid. */
+export function largestRemainderCells(values: readonly number[], denominator: number, totalCells: number): number[] {
+	const cells = Math.max(0, Math.floor(totalCells));
+	if (cells === 0 || denominator <= 0 || values.length === 0) return values.map(() => 0);
+	const raw = values.map((value) => (value / denominator) * cells);
+	const allocation = raw.map((value) => Math.floor(value));
+	let remaining = cells - allocation.reduce((sum, value) => sum + value, 0);
+	const order = raw
+		.map((value, index) => ({ index, frac: value - Math.floor(value) }))
+		.sort((a, b) => (Math.abs(b.frac - a.frac) > 1e-9 ? b.frac - a.frac : a.index - b.index));
+	for (const { index } of order) {
+		if (remaining <= 0) break;
+		allocation[index] = (allocation[index] ?? 0) + 1;
+		remaining -= 1;
+	}
+	return allocation;
 }
 
 /**
@@ -69,17 +88,11 @@ function allocateMeterCells(
 	const cells = Math.max(0, Math.floor(totalCells));
 	if (cells === 0 || contextWindow <= 0 || meter.length === 0) return [];
 
-	const raw = meter.map((group) => (group.tokens / contextWindow) * cells);
-	const allocation = raw.map((value) => Math.floor(value));
-	let remaining = cells - allocation.reduce((sum, value) => sum + value, 0);
-	const order = raw
-		.map((value, index) => ({ index, frac: value - Math.floor(value) }))
-		.sort((a, b) => b.frac - a.frac || a.index - b.index);
-	for (const { index } of order) {
-		if (remaining <= 0) break;
-		allocation[index] = (allocation[index] ?? 0) + 1;
-		remaining -= 1;
-	}
+	const allocation = largestRemainderCells(
+		meter.map((group) => group.tokens),
+		contextWindow,
+		cells,
+	);
 
 	if (options.ensureVisible) {
 		const freeIndex = meter.findIndex((group) => group.category === "free");

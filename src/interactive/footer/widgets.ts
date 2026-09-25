@@ -13,7 +13,13 @@ import { type TaskBoardSnapshot, taskBoardCounts } from "../../domains/session/t
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { CONTEXT_CATEGORY_TOKEN, contextCategorySwatch, renderContextMeterBar } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
-import { buildSegmentedContextBar, CONTEXT_BAR_LABEL_WIDTH, formatFooterTokens } from "../footer-panel.js";
+import {
+	buildSegmentedContextBar,
+	CONTEXT_BAR_LABEL_WIDTH,
+	finiteNonNegative,
+	fitFooterText,
+	formatFooterTokens,
+} from "../footer-panel.js";
 import {
 	type AgentStatus,
 	formatReasoningChip,
@@ -29,6 +35,7 @@ import {
 	formatContextPercent,
 	GLYPH,
 	joinChips,
+	padAnsi,
 	sectionTag,
 } from "../theme/index.js";
 
@@ -127,7 +134,7 @@ export interface AgentWorkFacts {
  * visible output, so the extra measurement stays.
  */
 export function fitDashboardLine(line: string, width: number): string {
-	return visibleWidth(line) > width ? truncateToWidth(line, width, GLYPH.ellipsis, true) : line;
+	return fitFooterText(line, width, GLYPH.ellipsis);
 }
 
 /**
@@ -136,13 +143,7 @@ export function fitDashboardLine(line: string, width: number): string {
  * never reads as a complete fact.
  */
 function cell(text: string, width: number): string {
-	const safe = Math.max(0, width);
-	const clipped = truncateToWidth(text, safe, GLYPH.ellipsis, true);
-	return `${clipped}${" ".repeat(Math.max(0, safe - visibleWidth(clipped)))}`;
-}
-
-function finiteNonNegative(value: number | null | undefined): number {
-	return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+	return padAnsi(text, width, GLYPH.ellipsis);
 }
 
 /**

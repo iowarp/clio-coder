@@ -1,6 +1,7 @@
 import type { TokenThroughputSnapshot, UsageBreakdown } from "../domains/observability/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { type Text, truncateToWidth, visibleWidth } from "../engine/tui.js";
+import { contextBarGlyphs, largestRemainderCells } from "./context-meter.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
 import { formatReasoningChip } from "./status/reasoning.js";
 import { type ClioTheme, formatContextPercent, GLYPH } from "./theme/index.js";
@@ -138,45 +139,12 @@ type SegmentBreakdownInput = {
 	pendingUserTokens: number;
 };
 
-function finiteNonNegative(value: number | null | undefined): number {
+export function finiteNonNegative(value: number | null | undefined): number {
 	return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
-}
-
-function contextBarGlyphs(): { filled: string; free: string } {
-	return {
-		filled: visibleWidth(GLYPH.contextFull) === 1 ? GLYPH.contextFull : GLYPH.barFull,
-		free: visibleWidth(GLYPH.contextFree) === 1 ? GLYPH.contextFree : GLYPH.barEmpty,
-	};
 }
 
 function contextPercentLabel(percent: number | null): string {
 	return `  ${formatContextPercent(percent).padEnd(CONTEXT_PERCENT_FIELD_WIDTH, " ")}`;
-}
-
-function largestRemainderCells(values: readonly [number, number, number], filled: number): [number, number, number] {
-	const total = values[0] + values[1] + values[2];
-	if (filled <= 0 || total <= 0) return [0, 0, 0];
-	const raw: [number, number, number] = [
-		(values[0] / total) * filled,
-		(values[1] / total) * filled,
-		(values[2] / total) * filled,
-	];
-	const cells: [number, number, number] = [Math.floor(raw[0]), Math.floor(raw[1]), Math.floor(raw[2])];
-	let remaining = filled - cells[0] - cells[1] - cells[2];
-	const order = [0, 1, 2].sort((a, b) => {
-		const rawA = raw[a] ?? 0;
-		const rawB = raw[b] ?? 0;
-		const diff = rawB - Math.floor(rawB) - (rawA - Math.floor(rawA));
-		return Math.abs(diff) > 1e-9 ? diff : a - b;
-	});
-	for (const index of order) {
-		if (remaining <= 0) break;
-		if (index === 0) cells[0] += 1;
-		else if (index === 1) cells[1] += 1;
-		else cells[2] += 1;
-		remaining -= 1;
-	}
-	return cells;
 }
 
 export function buildSegmentedContextBar(
@@ -202,8 +170,10 @@ export function buildSegmentedContextBar(
 	if (used > 0) filled = Math.max(1, filled);
 
 	const scale = categoryTotal > 0 && used < categoryTotal ? used / categoryTotal : 1;
-	const [systemCells, toolCells, conversationCells] = largestRemainderCells(
-		[system * scale, tools * scale, conversation * scale],
+	const weights = [system * scale, tools * scale, conversation * scale];
+	const [systemCells = 0, toolCells = 0, conversationCells = 0] = largestRemainderCells(
+		weights,
+		weights.reduce((sum, value) => sum + value, 0),
 		filled,
 	);
 	const freeCells = Math.max(0, cells - filled);
