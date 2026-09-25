@@ -407,11 +407,12 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	let dashboardMode: FooterDashboardMode = "compact";
 	let page: DashboardPage = "Activity";
 	let disposed = false;
-	const now = (): number => deps.now?.() ?? Date.now();
 	const state = (width: number): FooterDashboardRenderState => {
+		const now = deps.now?.() ?? Date.now();
+		const notices = deps.getNotifications?.() ?? [];
 		// Every refresh within one animation step composes the same spinner, so a
 		// refresh the status stream asks for between ticks costs no bytes.
-		const frame = animationStep(now());
+		const frame = animationStep(now);
 		const dispatch = deps.getDispatchRows?.() ?? [];
 		const tools = deps.getToolCounts?.() ?? { tools: {}, errors: 0 };
 		const status = deps.getAgentStatus?.();
@@ -515,7 +516,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				ledger: contextLedger,
 			},
 			agent: {
-				statusText: statusText(status, now(), width, frame),
+				statusText: statusText(status, now, width, frame),
 				dispatchSummary: dispatchSegment(dispatch),
 				toolTally: formatToolTally(tools, contextLedger?.toolCount ?? null),
 				dispatchRows: dispatch,
@@ -528,19 +529,19 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			demoHint: demoHints({
 				enabled: settings?.interface.demo === true,
 				learned: (feature) => (readHarnessProfile().features[feature] ?? 0) > 0,
-				now: now(),
+				now,
 				quiet:
 					dashboardMode !== "compact" ||
 					compactionActive ||
 					["tool_blocked", "retrying", "stuck"].includes(status?.phase ?? "") ||
 					(status?.activeTools ?? []).some((tool) => tool.toolName === "ask_user") ||
-					(deps.getNotifications?.() ?? []).some((n) => n.expiresAt === null || n.expiresAt > now()),
+					notices.some((n) => n.expiresAt === null || n.expiresAt > now),
 				agentActive: dispatch.some((row) => row.status === "running"),
 				toolsUsed: Object.values(tools.tools).some((count) => count > 0),
 				contextBusy: (contextLedger?.usedTokens ?? 0) > (contextLedger?.contextWindow ?? Infinity) * 0.4,
 				dashboardKey: getKeybindings().getKeys("clio-coder.status.toggle").join("/") || "Dashboard",
 			}),
-			notices: deps.getNotifications?.() ?? [],
+			notices,
 			status: status ?? {
 				phase: "idle",
 				since: 0,
@@ -555,7 +556,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			sessionTokens: usage ?? null,
 			sessionCost: deps.getSessionCost?.() ?? null,
 			tick: frame,
-			now: now(),
+			now,
 		};
 	};
 	function composeFooter(width: number): string {
