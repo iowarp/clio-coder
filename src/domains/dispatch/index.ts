@@ -55,11 +55,8 @@ export type {
 } from "./execution-plan.js";
 export {
 	compileExecutionPlan,
-	compileLinearExecutionPlan,
 	executionPlanAncestors,
 	executionPlanWaves,
-	isAgentStep,
-	isCodeStep,
 	spliceExecutionPlan,
 } from "./execution-plan.js";
 export {
@@ -76,7 +73,6 @@ export {
 	gateRouteCorrelation,
 	isExecutionRole,
 	modelFamily,
-	preferIndependentRoute,
 	type RouteCorrelationFacts,
 	requestExecutionRole,
 	withAttemptRole,
@@ -131,7 +127,6 @@ export {
 	normalizeDispatchIntent,
 } from "./intent.js";
 export type {
-	DispatchIntentAdoption,
 	DispatchIntentCompatibilityCode,
 	DispatchIntentCompatibilityDecision,
 	DispatchIntentCompatibilityFinding,
@@ -142,7 +137,6 @@ export {
 	DISPATCH_INTENT_RETIREMENT_MIN_SAMPLE,
 	DISPATCH_INTENT_SUPPORTED_VERSIONS,
 	DISPATCH_INTENT_VERSION,
-	dispatchIntentAdoption,
 	dispatchIntentRefusals,
 	dispatchIntentScopeWidening,
 	isSupportedDispatchIntentVersion,
@@ -153,7 +147,7 @@ export { createRouteHistoryStore } from "./route-history.js";
 export type { RouteQualityLabel, RouteQualityReduction } from "./route-quality.js";
 export { reduceRouteQuality } from "./route-quality.js";
 export type { RouteExplanation, RoutingIntent } from "./routing-intent.js";
-export { explainRouteDecision, parseRoutingIntent, preferLocalTie, routingIntentRejection } from "./routing-intent.js";
+export { explainRouteDecision, parseRoutingIntent, routingIntentRejection } from "./routing-intent.js";
 export type { FleetRunRecord } from "./state.js";
 export { readFleetRun, writeFleetRun } from "./state.js";
 export type {

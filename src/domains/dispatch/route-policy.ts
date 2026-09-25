@@ -13,8 +13,6 @@ export const MINIMUM_QUALITY_LABELED_OUTCOMES = 6;
 
 export type RoutingPosture = "manual" | "quality" | "balanced" | "latency" | "economy";
 
-export const ROUTING_POSTURES: ReadonlyArray<RoutingPosture> = ["manual", "quality", "balanced", "latency", "economy"];
-
 export interface RouteEstimate {
 	/** Quality denominators contain pass/fail labels only; unmeasured work is excluded. */
 	qualityLabeledCount: number;

@@ -1,33 +1,14 @@
 /** Authenticated two-call Scout continuation protocol. */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { clioStateDir } from "../core/xdg.js";
 import { parseScoutResult, resultContractSourceId, type ScoutResult } from "../domains/agents/result-contract.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
-import type {
-	DispatchAgentPlanResolution,
-	DispatchContract,
-	DispatchPlanTaskResolution,
-	DispatchRequest,
-} from "../domains/dispatch/contract.js";
-import { type ExecutionPlan, requireAgentSteps } from "../domains/dispatch/execution-plan.js";
+import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
+import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { executePlan } from "../domains/dispatch/execution-scheduler.js";
-import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
-import { sameRouteIdentity } from "../domains/dispatch/route-decision.js";
-import type { RoutingIntent } from "../domains/dispatch/routing-intent.js";
-import { compileScoutTransition, type ScoutAgentBinding } from "../domains/dispatch/scout-transition.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import { normalizeYoloAuthorityBasis } from "../domains/dispatch/yolo-ids.js";
 import type { ResolvedDispatchPlanArtifact } from "./dispatch-plan.js";
-
-export const MAX_SCOUT_PLAN_DEADLINE_MS = 3_600_000;
-
-export interface ScoutContinuationRef {
-	runId: string;
-	receiptDigest: string;
-}
 
 export type ScoutTransitionDetail =
 	| {
@@ -44,34 +25,7 @@ export type ScoutTransitionDetail =
 			continueWith: { from_scout: { run_id: string; receipt_digest: string } };
 	  };
 
-function record(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function scoutContinuationRefFromArgs(
-	args: Record<string, unknown>,
-): { ok: true; ref: ScoutContinuationRef | null } | { ok: false; message: string } {
-	if (!Object.hasOwn(args, "from_scout")) return { ok: true, ref: null };
-	if (Object.keys(args).some((key) => key !== "from_scout")) {
-		return {
-			ok: false,
-			message: "dispatch: from_scout cannot be combined with task, agent, route, topology, or tool controls",
-		};
-	}
-	const value = args.from_scout;
-	if (!record(value) || Object.keys(value).sort().join("\u0000") !== "receipt_digest\u0000run_id") {
-		return { ok: false, message: "dispatch: from_scout requires exactly run_id and receipt_digest" };
-	}
-	if (typeof value.run_id !== "string" || value.run_id.trim().length === 0) {
-		return { ok: false, message: "dispatch: from_scout.run_id must be non-empty" };
-	}
-	if (typeof value.receipt_digest !== "string" || !/^[0-9a-f]{64}$/u.test(value.receipt_digest)) {
-		return { ok: false, message: "dispatch: from_scout.receipt_digest must be a sha256 digest" };
-	}
-	return { ok: true, ref: { runId: value.run_id.trim(), receiptDigest: value.receipt_digest } };
-}
-
-export interface VerifiedScoutSource {
+interface VerifiedScoutSource {
 	envelope: RunEnvelope;
 	receipt: RunReceipt;
 	scout: ScoutResult;
@@ -102,36 +56,6 @@ function validateScoutSource(
 	return { envelope, receipt, scout, spec };
 }
 
-export function loadVerifiedScoutSource(input: {
-	ref: ScoutContinuationRef;
-	dispatch: Pick<DispatchContract, "getRun" | "owner">;
-	agentSpecs: ReadonlyArray<AgentSpec>;
-}): VerifiedScoutSource {
-	const envelope = input.dispatch.getRun(input.ref.runId);
-	if (envelope === null) throw new Error(`dispatch: Scout source run '${input.ref.runId}' is unavailable`);
-	// A continuation dispatches workers into the source run's cwd, so a Scout
-	// run another session made would send this session's workers into that
-	// session's project.
-	if (!dispatchOwnership(dispatchOwnerOf(input.dispatch)).ownsRun(envelope)) {
-		throw new Error(`dispatch: Scout source run '${input.ref.runId}' belongs to another session`);
-	}
-	const receiptPath = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${input.ref.runId}.json`);
-	if (!existsSync(receiptPath)) throw new Error(`dispatch: Scout source receipt '${input.ref.runId}' is unavailable`);
-	let receipt: RunReceipt;
-	try {
-		receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as RunReceipt;
-	} catch (error) {
-		throw new Error(
-			`dispatch: Scout source receipt is unreadable: ${error instanceof Error ? error.message : String(error)}`,
-		);
-	}
-	if (receipt.runId !== input.ref.runId) throw new Error("dispatch: Scout source receipt contains another run id");
-	const source = validateScoutSource(receipt, envelope, input.agentSpecs);
-	if (receipt.integrity.digest !== input.ref.receiptDigest)
-		throw new Error("dispatch: Scout source receipt digest does not match");
-	return source;
-}
-
 export function scoutTransitionDetail(input: {
 	receipt: RunReceipt;
 	envelope: RunEnvelope;
@@ -158,13 +82,6 @@ export function scoutTransitionDetail(input: {
 	} catch {
 		return null;
 	}
-}
-
-export interface PreparedScoutContinuation {
-	artifact: ResolvedDispatchPlanArtifact;
-	requests: DispatchRequest[];
-	resolutions: DispatchPlanTaskResolution[];
-	executionPlan: ExecutionPlan;
 }
 
 export function scoutPlanAuthorityGranted(
@@ -274,195 +191,5 @@ export async function runScoutContinuationPlan<T, S>(input: {
 			return completed === undefined ? [] : [completed];
 		}),
 		skipped: result.skipped,
-	};
-}
-
-export function prepareScoutContinuation(input: {
-	source: VerifiedScoutSource;
-	authorization: "operator-plan-approval" | "yolo-policy";
-	planAgentSelection: DispatchContract["planAgentSelection"];
-	costCeilingUsd: number;
-}): PreparedScoutContinuation {
-	if (!input.source.scout.needsSplit) throw new Error("dispatch: Scout phase is settled and has no continuation plan");
-	const proposals: Array<
-		DispatchAgentPlanResolution & { subtask: ScoutResult["proposedSubtasks"][number]; routingIntent: RoutingIntent }
-	> = [];
-	for (const subtask of input.source.scout.proposedSubtasks) {
-		const sourceIntent = input.source.receipt.routingIntent;
-		const routingIntent: RoutingIntent =
-			input.authorization === "yolo-policy"
-				? { ...sourceIntent, requiredCapabilities: [...sourceIntent.requiredCapabilities], failover: "approved" }
-				: {
-						...sourceIntent,
-						posture: sourceIntent.posture === "manual" ? "balanced" : sourceIntent.posture,
-						maxCostUsd: input.costCeilingUsd,
-						deadlineMs: null,
-						requiredCapabilities: [...sourceIntent.requiredCapabilities],
-						failover: "approved",
-					};
-		const request: DispatchRequest = {
-			agentId: input.source.receipt.agentId,
-			executionRole: "researcher",
-			task: subtask.task,
-			cwd: input.source.envelope.cwd,
-			requestOrigin: "user",
-			routingIntent,
-			failover: "approved",
-			...(input.authorization === "yolo-policy" && sourceIntent.posture === "manual"
-				? {
-						target: input.source.receipt.targetId,
-						model: input.source.receipt.wireModelId,
-						node: input.source.receipt.node?.id ?? "local",
-					}
-				: {}),
-		};
-		proposals.push({
-			...input.planAgentSelection({
-				request,
-				expectedResultContract: subtask.expectedResultContract,
-				requestedAuthority: subtask.requestedAuthority,
-				authorization: input.authorization,
-			}),
-			subtask,
-			routingIntent,
-		});
-	}
-	const priorCostCeiling = input.source.receipt.routingIntent.maxCostUsd;
-	const effectiveCostCeiling =
-		input.authorization === "yolo-policy" && priorCostCeiling !== null
-			? Math.min(input.costCeilingUsd, priorCostCeiling)
-			: input.costCeilingUsd;
-	const bindings: ScoutAgentBinding[] = proposals.map(({ subtask, agentSpec }) => ({
-		subtaskId: subtask.id,
-		spec: agentSpec,
-	}));
-	const requestedAuthorities = [
-		...new Set(input.source.scout.proposedSubtasks.map((subtask) => subtask.requestedAuthority)),
-	];
-	const transition = compileScoutTransition({
-		scout: input.source.scout,
-		sourceReceiptDigest: input.source.receipt.integrity.digest,
-		rootTask: input.source.receipt.task,
-		bindings,
-		authority: {
-			basis: input.authorization,
-			approvedAuthorities: input.authorization === "yolo-policy" ? requestedAuthorities : [],
-		},
-		maxWorkers: 4,
-	});
-	if (transition.kind === "settled") throw new Error("dispatch: Scout phase unexpectedly settled during compilation");
-	if (input.authorization === "yolo-policy" && transition.kind !== "ready") {
-		throw new Error("dispatch: yolo policy does not grant every requested Scout authority");
-	}
-	const plan = transition.plan;
-	const p95ByStep = new Map(
-		proposals.map((proposal) => {
-			const selected = proposal.decision.candidateEvaluations.find((entry) =>
-				sameRouteIdentity(entry.candidate, proposal.decision.selected),
-			);
-			if (selected === undefined || selected.rejection !== null) {
-				throw new Error(`dispatch: Scout step '${proposal.subtask.id}' has no admissible latency estimate`);
-			}
-			return [proposal.subtask.id, selected.estimate.p95EndToEndMs] as const;
-		}),
-	);
-	const predictedDeadlineMs = Math.ceil(
-		plan.waves.reduce(
-			(total, wave) => total + Math.max(...wave.map((stepId) => p95ByStep.get(stepId) ?? Number.POSITIVE_INFINITY)),
-			0,
-		),
-	);
-	if (
-		!Number.isFinite(predictedDeadlineMs) ||
-		predictedDeadlineMs < 1 ||
-		predictedDeadlineMs > MAX_SCOUT_PLAN_DEADLINE_MS
-	) {
-		throw new Error("dispatch: Scout continuation exceeds the finite whole-plan deadline ceiling");
-	}
-	const priorDeadlineMs = input.source.receipt.routingIntent.deadlineMs;
-	if (input.authorization === "yolo-policy" && priorDeadlineMs !== null && predictedDeadlineMs > priorDeadlineMs) {
-		throw new Error("dispatch: yolo Scout continuation exceeds the previously granted deadline");
-	}
-	const deadlineMs = Math.max(priorDeadlineMs ?? 0, predictedDeadlineMs);
-	const requests: DispatchRequest[] = [];
-	const resolutions: DispatchPlanTaskResolution[] = [];
-	const tasks = requireAgentSteps(plan.steps).map((step, index): ResolvedDispatchPlanArtifact["tasks"][number] => {
-		const proposal = proposals.find((entry) => entry.subtask.id === step.id);
-		if (proposal === undefined) throw new Error(`dispatch: Scout step '${step.id}' has no route proposal`);
-		const selected = proposal.decision.selected;
-		const selection: NonNullable<DispatchRequest["agentSelection"]> = {
-			version: 1,
-			mode: "auto",
-			baselineAgentId: input.source.receipt.agentId,
-			approvedAuthorities: [step.requestedAuthority],
-			authorityBasis: input.authorization,
-		};
-		requests.push({
-			agentId: selected.agentId,
-			executionRole: selected.executionRole,
-			task: step.task,
-			cwd: input.source.envelope.cwd,
-			requestOrigin: "user",
-			agentSelection: selection,
-			routingIntent: {
-				...proposal.routingIntent,
-				maxCostUsd: effectiveCostCeiling,
-				deadlineMs,
-				failover: "none",
-			},
-			failover: "none",
-		});
-		resolutions.push(proposal.resolution);
-		return {
-			agent: proposal.resolution.agentId,
-			task: step.task,
-			target: proposal.resolution.targetId,
-			model: proposal.resolution.wireModelId,
-			node: proposal.resolution.node.id,
-			nodeKind: proposal.resolution.node.kind,
-			...(proposal.resolution.node.host === undefined ? {} : { nodeHost: proposal.resolution.node.host }),
-			routingIntent: {
-				...proposal.routingIntent,
-				maxCostUsd: effectiveCostCeiling,
-				deadlineMs,
-				failover: "none",
-			},
-			failover: "none",
-			routeApproval: null,
-			agentSelection: selection,
-			stepId: step.id,
-			dependencies: [...step.dependencies],
-			executionRole: step.executionRole,
-			expectedResultContract: step.expectedResultContract,
-			authorityGrant: { requested: step.requestedAuthority, basis: input.authorization },
-			agentDecision: proposal.decision,
-			wave: plan.waves.findIndex((wave) => wave.includes(step.id)),
-			role: "task",
-			position: index + 1,
-		};
-	});
-	const aggregateCost = resolutions.reduce((sum, resolution) => sum + resolution.costUpperBoundUsd, 0);
-	if (!Number.isFinite(aggregateCost) || aggregateCost > effectiveCostCeiling) {
-		throw new Error("dispatch: Scout continuation exceeds the scheduling cost ceiling");
-	}
-	return {
-		artifact: {
-			version: 3,
-			topology: "fleet",
-			source: {
-				kind: "scout-transition",
-				runId: input.source.receipt.runId,
-				receiptDigest: input.source.receipt.integrity.digest,
-				executionPlanHash: plan.hash,
-			},
-			maxWorkers: plan.maxWorkers,
-			onFailure: plan.onFailure,
-			tasks,
-			costCeilingUsd: effectiveCostCeiling,
-			deadlineMs,
-		},
-		requests,
-		resolutions,
-		executionPlan: plan,
 	};
 }
