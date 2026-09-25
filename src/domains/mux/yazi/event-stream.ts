@@ -4,7 +4,6 @@ import { StringDecoder } from "node:string_decoder";
 export const YAZI_STREAM_POLL_MS = 250;
 export const YAZI_STREAM_MAX_BYTES = 1024 * 1024;
 export const YAZI_PICK_EVENT = "clio-coder-pick";
-export const LEGACY_YAZI_PICK_EVENT = "clio-pick";
 
 export interface YaziCdEvent {
 	kind: "cd";
@@ -63,7 +62,7 @@ export function parseYaziEventLine(line: string): YaziEvent | null {
 	const third = second < 0 ? -1 : line.indexOf(",", second + 1);
 	if (first <= 0 || second <= first + 1 || third <= second + 1) return null;
 	const kind = line.slice(0, first);
-	if (kind !== "cd" && kind !== YAZI_PICK_EVENT && kind !== LEGACY_YAZI_PICK_EVENT) return null;
+	if (kind !== "cd" && kind !== YAZI_PICK_EVENT) return null;
 	const receiver = line.slice(first + 1, second);
 	const sender = line.slice(second + 1, third);
 	try {
@@ -154,7 +153,7 @@ export function createYaziEventStream(options: YaziEventStreamOptions): YaziEven
 				const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
 				if (line.length === 0) continue;
 				const kind = line.slice(0, line.indexOf(","));
-				if (kind !== "cd" && kind !== YAZI_PICK_EVENT && kind !== LEGACY_YAZI_PICK_EVENT) continue;
+				if (kind !== "cd" && kind !== YAZI_PICK_EVENT) continue;
 				const event = parseYaziEventLine(line);
 				if (!event) {
 					state.malformedLines += 1;

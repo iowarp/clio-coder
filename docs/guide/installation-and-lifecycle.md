@@ -131,7 +131,7 @@ The core files are created automatically during the first run. `credentials.yaml
 | **State** | `migrations.json` | Log of successfully applied schema/state migrations. | Writer/umask default | Removed by uninstall / `reset --state`. |
 | **State** | `gui/docs-server.json`, `gui/docs-server.log` | The record and log of the background documentation server started by `clio-coder docs`. The record holds the private launch token, so it is written with mode 0600. | 0600 record | Removed by uninstall / `reset --state`; `clio-coder docs --stop` removes the record. The log stays until the next launch or purge. |
 | **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. | Writer/umask default | Removed by uninstall / `reset --data`. |
-| **Data** | `tools/<id>/<version>/` | One pinned external program Clio downloaded on request (`clio-coder tools install <id>`), with its upstream license text and a `clio-install.json` recording url, sha256, platform and install time. Binaries `0o755`, documents `0o644`. Only the pinned version is kept: a successful install prunes the versions it supersedes. | `0o755` dir | `clio-coder tools remove <id>` deletes every version of one tool; removed by uninstall / `reset --data`. |
+| **Data** | `tools/<id>/<version>/` | One pinned external program Clio downloaded on request (`clio-coder tools install <id>`), with its upstream license text and a `clio-coder-install.json` recording url, sha256, platform and install time. Binaries `0o755`, documents `0o644`. Only the pinned version is kept: a successful install prunes the versions it supersedes. | `0o755` dir | `clio-coder tools remove <id>` deletes every version of one tool; removed by uninstall / `reset --data`. |
 | **State** | `audit/YYYY-MM-DD.jsonl` | Daily safety audit logs showing allowed/blocked tool actions. | Writer/umask default | Removed by uninstall / `reset --state`. |
 | **State** | `sessions/<cwdHash>/<id>/` | Session details: `meta.json`, `current.jsonl`, and fork hierarchies `tree.json`. | Writer/umask default | Removed by uninstall / `reset --state`. |
 
@@ -292,13 +292,34 @@ remain available when the monitor is disabled.
 
 #### Current migration contract
 
-The source tree registers five migrations in execution order:
+The source tree registers two migrations in execution order:
 
 1. `2026-09-01-settings-v2`
-2. `2026-09-01-clio-coder-naming`
-3. `2026-09-01-retire-panes-knobs`
-4. `2026-08-18-lmstudio-runtime-id`
-5. `2026-09-18-ollama-runtime-id`
+2. `2026-09-01-retire-panes-knobs`
+
+The naming migration `2026-09-01-clio-coder-naming` and the runtime-id
+migrations `2026-08-18-lmstudio-runtime-id` and `2026-09-18-ollama-runtime-id`
+were retired together with the legacy naming aliases, with no replacement. A
+home that already recorded these ids keeps them in the manifest, where they
+stay inert. Nothing rewrites a released value any more, so edit old settings by
+hand:
+
+- `lifecycle: clio-managed` becomes `clio-coder-managed`, and
+  `toolGovernance: clio-policy` becomes `clio-coder-policy`. In the user
+  `settings.yaml` the old value fails validation with an error naming the
+  accepted values. In a project or local layer the leaf is dropped with a
+  diagnostic.
+- `runtime: lmstudio-native` becomes `lmstudio`, and `runtime: ollama-native`
+  becomes `ollama`. The old id passes settings validation, but the target
+  resolves to an unknown runtime and cannot be used.
+- A `clio.<action>` keybinding id becomes `clio-coder.<action>`. The old id is
+  reported as an unknown action and the default binding stays in effect.
+
+Skills and model overlays are not rewritten either. A `SKILL.md` or model
+catalog overlay entry whose metadata sits under `clio:` instead of `clio-coder:`
+loads without that metadata. An installed `clio-dev` or `clio-test` skill keeps
+its old name, so lookups of `clio-coder-dev` and `clio-coder-test` miss it
+until it is reinstalled or renamed.
 
 Applied IDs are recorded in `<stateDir>/migrations.json`. An ID already in that
 manifest is skipped, and each successful migration is recorded immediately so a

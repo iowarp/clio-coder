@@ -182,7 +182,6 @@ function probeFromCatalog(catalog: LmStudioCatalog, target: TargetDescriptor): P
 
 const lmstudioRuntime: RuntimeDescriptor = {
 	id: "lmstudio",
-	aliases: ["lmstudio-native"],
 	displayName: "LM Studio",
 	kind: "http",
 	tier: "local-native",

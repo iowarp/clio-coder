@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { namingCompatibilityEnvironment } from "../../../core/naming-compat.js";
 import { clioCacheDir } from "../../../core/xdg.js";
 import { findPinnedTool } from "../../toolchain/registry.js";
 import { describeResolution, resolveToolBinary, toolStatus } from "../../toolchain/resolve.js";
@@ -10,7 +9,6 @@ import type { MuxContract } from "../contract.js";
 import type { MuxPaneRef } from "../types.js";
 import {
 	createYaziEventStream,
-	LEGACY_YAZI_PICK_EVENT,
 	YAZI_PICK_EVENT,
 	YAZI_STREAM_POLL_MS,
 	type YaziEvent,
@@ -175,19 +173,13 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 	const token = options.mode === "companion" ? (options.pickToken ?? randomUUID()) : null;
 	const env: Record<string, string> = {
 		...(managedProfile ? { YAZI_CONFIG_HOME: managedProfile.dir } : {}),
-		...(token ? namingCompatibilityEnvironment("CLIO_CODER_YAZI_PICK_TOKEN", "CLIO_YAZI_PICK_TOKEN", token) : {}),
+		...(token ? { CLIO_CODER_YAZI_PICK_TOKEN: token } : {}),
 	};
 	let argv: ReadonlyArray<string>;
 	let stdoutPath: string | undefined;
 	if (options.mode === "companion") {
 		writeFileSync(streamPath, "");
-		argv = [
-			binaries.yaziPath,
-			"--local-events",
-			`cd,${YAZI_PICK_EVENT},${LEGACY_YAZI_PICK_EVENT}`,
-			"--remote-events",
-			`${YAZI_PICK_EVENT},${LEGACY_YAZI_PICK_EVENT}`,
-		];
+		argv = [binaries.yaziPath, "--local-events", `cd,${YAZI_PICK_EVENT}`, "--remote-events", YAZI_PICK_EVENT];
 		stdoutPath = streamPath;
 	} else {
 		writeFileSync(chooserPath, "");

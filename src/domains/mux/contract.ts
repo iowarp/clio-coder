@@ -49,7 +49,11 @@ const SELF_AGENT_SOURCE = "clio-coder:coder";
 /** Token every Clio-created pane carries so orphans are findable. */
 const OWNER_TOKEN_KEY = "clio_coder_owner";
 const OWNER_TOKEN_VALUE = "clio-coder:mux";
-/** Old-host cleanup bridge; ownership readers retain this indefinitely. */
+/**
+ * The token 0.4 sessions wrote. Clio no longer writes it, but ownership readers
+ * keep matching it so a pane an older session left open is still found and
+ * cleaned up.
+ */
 const LEGACY_OWNER_TOKEN_KEY = "clio_owner";
 const LEGACY_OWNER_TOKEN_VALUE = "clio:mux";
 /** herdr caps a metadata token value at 80 characters. */
@@ -262,7 +266,6 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			...(title === undefined ? {} : { title }),
 			tokens: {
 				[OWNER_TOKEN_KEY]: OWNER_TOKEN_VALUE,
-				[LEGACY_OWNER_TOKEN_KEY]: LEGACY_OWNER_TOKEN_VALUE,
 				...tokens,
 			},
 		});

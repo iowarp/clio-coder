@@ -2,7 +2,6 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
-import { warnLegacyNaming } from "../../../core/naming-compat.js";
 import type { CapabilityFlags } from "./capability-flags.js";
 
 export interface KnowledgeBaseEntry {
@@ -155,10 +154,7 @@ function normalizeEntry(raw: unknown, file: string): KnowledgeBaseEntry {
 		}
 		entry.quirks = candidate.quirks as Record<string, unknown>;
 	}
-	const canonicalMetadata = candidate["clio-coder"];
-	const legacyMetadata = candidate.clio;
-	if (legacyMetadata !== undefined) warnLegacyNaming("clio: model metadata", "clio-coder: model metadata");
-	const metadata = canonicalMetadata ?? legacyMetadata;
+	const metadata = candidate["clio-coder"];
 	if (metadata !== undefined) {
 		if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
 			throw new Error(`knowledge base file ${file}: entry '${family}' clio-coder metadata must be an object`);

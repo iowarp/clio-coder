@@ -29,7 +29,6 @@ import {
 	THINKING_LEVELS,
 	type ThinkingLevel,
 } from "./defaults.js";
-import { warnLegacyNaming } from "./naming-compat.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
 import { MAX_TIMER_DELAY_MS } from "./timers.js";
@@ -352,12 +351,6 @@ const THINKING_FORMATS = [
 const STRUCTURED_OUTPUTS = ["json-schema", "gbnf", "xgrammar", "none"] as const;
 const TOOL_GOVERNANCE = ["clio-coder-policy", "agent-managed", "deny-all"] as const;
 
-function normalizeLegacyNamingValue(value: unknown, legacy: string, canonical: string): unknown {
-	if (value !== legacy) return value;
-	warnLegacyNaming(legacy, canonical);
-	return canonical;
-}
-
 type TargetCapabilities = NonNullable<ClioSettings["targets"][number]["capabilities"]>;
 
 function validateCapabilities(issues: Issues, path: string, value: unknown): TargetCapabilities | undefined {
@@ -657,12 +650,7 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 		if (v !== undefined) target.capabilities = v;
 	}
 	if ("lifecycle" in value) {
-		const v = expectEnum(
-			issues,
-			`${path}.lifecycle`,
-			normalizeLegacyNamingValue(value.lifecycle, "clio-managed", "clio-coder-managed"),
-			["user-managed", "clio-coder-managed"] as const,
-		);
+		const v = expectEnum(issues, `${path}.lifecycle`, value.lifecycle, ["user-managed", "clio-coder-managed"] as const);
 		if (v !== undefined) target.lifecycle = v;
 	}
 	if ("gateway" in value) {
@@ -1137,12 +1125,7 @@ function validateExternalAgent(
 		if (parsed !== undefined) agent.stallTimeoutMs = parsed;
 	}
 	if ("toolGovernance" in value) {
-		const parsed = expectEnum(
-			issues,
-			`${path}.toolGovernance`,
-			normalizeLegacyNamingValue(value.toolGovernance, "clio-policy", "clio-coder-policy"),
-			TOOL_GOVERNANCE,
-		);
+		const parsed = expectEnum(issues, `${path}.toolGovernance`, value.toolGovernance, TOOL_GOVERNANCE);
 		if (parsed !== undefined) agent.toolGovernance = parsed;
 	}
 	if ("projectContext" in value) {
@@ -1225,24 +1208,18 @@ function validateKeybindings(issues: Issues, path: string, value: unknown): Reco
 	}
 	const next: Record<string, string | string[]> = {};
 	for (const [rawKey, rawValue] of Object.entries(value)) {
-		const legacyId = rawKey.trim();
-		const id = legacyId.startsWith("clio.") ? `clio-coder.${legacyId.slice("clio.".length)}` : legacyId;
+		const id = rawKey.trim();
 		if (!id) {
 			issues.add(path, "empty keybinding id");
 			continue;
 		}
-		if (id !== legacyId) {
-			warnLegacyNaming(legacyId, id);
-			// Canonical values win even when the legacy key occurs later in YAML.
-			if (Object.hasOwn(value, id)) continue;
-		}
 		if (typeof rawValue === "string") {
-			const parsed = expectString(issues, `${path}.${legacyId}`, rawValue);
+			const parsed = expectString(issues, `${path}.${id}`, rawValue);
 			if (parsed !== undefined) next[id] = parsed;
 		} else if (Array.isArray(rawValue)) {
-			const parsed = expectStringArray(issues, `${path}.${legacyId}`, rawValue);
+			const parsed = expectStringArray(issues, `${path}.${id}`, rawValue);
 			if (parsed !== undefined && parsed.length > 0) next[id] = parsed;
-		} else issues.add(`${path}.${legacyId}`, `expected a string or list of strings, got ${describe(rawValue)}`);
+		} else issues.add(`${path}.${id}`, `expected a string or list of strings, got ${describe(rawValue)}`);
 	}
 	return next;
 }
@@ -2105,7 +2082,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 								const parsed = expectEnum(
 									issues,
 									"integrations.externalAgents.defaults.toolGovernance",
-									normalizeLegacyNamingValue(defaults.toolGovernance, "clio-policy", "clio-coder-policy"),
+									defaults.toolGovernance,
 									TOOL_GOVERNANCE,
 								);
 								if (parsed !== undefined) settings.integrations.externalAgents.defaults.toolGovernance = parsed;

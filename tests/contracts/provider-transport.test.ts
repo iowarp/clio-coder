@@ -28,6 +28,7 @@ import { createRuntimeRegistry, getRuntimeRegistry } from "../../src/domains/pro
 import antigravityCodeRuntime, {
 	parseAntigravityModelCatalogDetails,
 } from "../../src/domains/providers/runtimes/antigravity/antigravity-code.js";
+import { findBuiltinRuntimeBootMetadata } from "../../src/domains/providers/runtimes/boot-manifest.js";
 import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
 import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
 import googleRuntime from "../../src/domains/providers/runtimes/cloud/google.js";
@@ -256,12 +257,15 @@ describe("provider transport boundary", () => {
 		strictEqual(settings.chat.model, "next-model");
 	});
 
-	it("selects canonical built-in runtimes and aliases without duplicating them", () => {
+	it("selects canonical built-in runtimes once and resolves no released runtime ids", () => {
 		const registry = createRuntimeRegistry();
 		registerBuiltinRuntimes(registry);
-		const canonical = registry.get("lmstudio");
-		ok(canonical !== null);
-		strictEqual(registry.get("lmstudio-native"), canonical);
+		ok(registry.get("lmstudio") !== null);
+		ok(registry.get("ollama") !== null);
+		strictEqual(registry.get("lmstudio-native"), null);
+		strictEqual(registry.get("ollama-native"), null);
+		strictEqual(findBuiltinRuntimeBootMetadata("lmstudio-native"), null);
+		strictEqual(findBuiltinRuntimeBootMetadata("ollama-native"), null);
 		strictEqual(registry.list().filter((runtime) => runtime.id === "lmstudio").length, 1);
 		strictEqual(registry.get("not-installed"), null);
 	});

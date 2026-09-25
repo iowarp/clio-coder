@@ -32,11 +32,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import lmStudioRuntimeId from "./2026-08-18-lmstudio-runtime-id.js";
-import clioCoderNaming from "./2026-09-01-clio-coder-naming.js";
 import retirePanesKnobs from "./2026-09-01-retire-panes-knobs.js";
 import settingsV2 from "./2026-09-01-settings-v2.js";
-import ollamaRuntimeId from "./2026-09-18-ollama-runtime-id.js";
 
 export interface Migration {
 	id: string;
@@ -57,16 +54,15 @@ export interface MigrationRunResult {
 }
 
 // Settings v2 owns the complete v1 rewrite, including the already-retired pane
-// keys, and must run before either older migration reaches the strict v2 reader.
+// keys, and must run before any later migration reaches the strict v2 reader.
 // `retirePanesKnobs` remains registered for homes that already recorded the v2
 // migration independently and for manifest continuity; it is a no-op on v2.
-const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
-	settingsV2,
-	clioCoderNaming,
-	retirePanesKnobs,
-	lmStudioRuntimeId,
-	ollamaRuntimeId,
-]);
+//
+// The naming migration (`2026-09-01-clio-coder-naming`) and the runtime-id
+// migrations (`2026-08-18-lmstudio-runtime-id`, `2026-09-18-ollama-runtime-id`)
+// were retired with the legacy naming layer. Homes that recorded their ids keep
+// them in the manifest; an id with no registered migration is inert.
+const REGISTRY: ReadonlyArray<Migration> = Object.freeze([settingsV2, retirePanesKnobs]);
 
 export function listMigrations(): ReadonlyArray<Migration> {
 	return REGISTRY;
