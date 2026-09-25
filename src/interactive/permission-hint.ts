@@ -53,6 +53,7 @@ export function permissionHintEntries(
 	composerHasDraft = false,
 	inspection: PermissionInspectionHint = "none",
 	terms?: PermissionTermsHint,
+	scrollable = false,
 ): HintEntry[] {
 	return [
 		composerHasDraft
@@ -64,6 +65,9 @@ export function permissionHintEntries(
 		...(terms === undefined
 			? []
 			: [{ key: PERMISSION_TERMS_KEY, verb: terms === "open" ? "hide terms" : "terms", short: "terms", critical: false }]),
+		// A card taller than its rows scrolls (BT-005). The open mutation names the
+		// same keys itself below.
+		...(scrollable && inspection !== "open" ? [{ key: "↑↓", verb: "scroll", critical: false }] : []),
 		...(inspection === "none"
 			? []
 			: inspection === "open"

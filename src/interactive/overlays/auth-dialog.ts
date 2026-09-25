@@ -1,17 +1,8 @@
-import {
-	type Component,
-	Input,
-	type OverlayHandle,
-	Text,
-	type TUI,
-	truncateToWidth,
-	visibleWidth,
-} from "../../engine/tui.js";
-import { buildHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { type Component, Input, type OverlayHandle, Text, type TUI, visibleWidth } from "../../engine/tui.js";
+import { buildHint, FocusBox, fitRow, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, screenTitle } from "../theme/index.js";
 
 export const AUTH_DIALOG_WIDTH = 88;
-const ELLIPSIS = "…";
 const KEY_WIDTH = 10;
 
 export interface AuthDialogHandle {
@@ -25,12 +16,6 @@ export interface AuthDialogHandle {
 	};
 }
 
-function fitLine(text: string, width: number): string {
-	const safeWidth = Math.max(1, width);
-	if (visibleWidth(text) <= safeWidth) return text;
-	return truncateToWidth(text, safeWidth, ELLIPSIS, true);
-}
-
 function keyCell(label: string): string {
 	const theme = clioTheme();
 	const key = theme.fg("dim", label);
@@ -39,7 +24,7 @@ function keyCell(label: string): string {
 }
 
 function normalizeAuthLine(line: string): string {
-	return line.replace(/\.\.\./g, ELLIPSIS);
+	return line.replace(/\.\.\./g, GLYPH.ellipsis);
 }
 
 function formatAuthChoiceLine(line: string): string | null {
@@ -87,7 +72,7 @@ function renderInputWithDesignCursor(input: Input, width: number): string[] {
 	return input
 		.render(width)
 		.map((line) =>
-			fitLine(line.startsWith("> ") ? `${theme.fg("accent", `${GLYPH.cursor} `)}${line.slice(2)}` : line, width),
+			fitRow(line.startsWith("> ") ? `${theme.fg("accent", `${GLYPH.cursor} `)}${line.slice(2)}` : line, width),
 		);
 }
 

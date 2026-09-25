@@ -47,6 +47,7 @@ import {
 	spinnerFrame,
 } from "./theme/index.js";
 import { fitIdentityLabel } from "./theme/labels.js";
+import { workerActivityWords } from "./worker-activity.js";
 import { isHelperRun } from "./worker-stream.js";
 
 export type DispatchBoardStatus = ObservabilityRunSummary["status"];
@@ -588,7 +589,7 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 			? theme.fg("dim", isTerminalStatus(row.status) ? "receipt not read back" : "not sealed yet")
 			: theme.fg(
 					trustVerdictToken(row.trust.verdict),
-					`${trustVerdictGlyph(row.trust.verdict)} ${row.trust.verdict}; ${compact ? trustStateWord("validationGrounding", "absent") : row.trust.text}`,
+					`${trustVerdictMark(row.trust.verdict)}${row.trust.verdict}; ${compact ? trustStateWord("validationGrounding", "absent") : row.trust.text}`,
 				);
 	const host =
 		row.hostVerification === undefined ? "" : ` · ${theme.fg("muted", `host checks ${row.hostVerification}`)}`;
@@ -796,19 +797,19 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: Readon
 		...(row.status === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
 	});
 	const glyph = theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph);
-	const statusStr = theme.fg(presentation.token, presentation.label);
+	// A running row says what the run is doing in the inline card's words: the
+	// island said `running` beside a card that said `starting` (BT-007).
+	const statusLabel =
+		row.status === "running" && row.progress !== undefined
+			? sanitizeCallTargetText(workerActivityWords(row.progress))
+			: presentation.label;
+	const statusStr = theme.fg(presentation.token, statusLabel);
 
 	// Reserve the glyph, separators, status word, and elapsed so a long agent
 	// label is clipped with a `…` marker rather than shoved off the row unmarked.
 	const rowPrefix = dispatchRowPrefix(theme, row);
 	const labelChrome =
-		visibleWidth(presentation.glyph) +
-		1 +
-		rowPrefix.width +
-		3 +
-		visibleWidth(presentation.label) +
-		3 +
-		visibleWidth(elapsed);
+		visibleWidth(presentation.glyph) + 1 + rowPrefix.width + 3 + visibleWidth(statusLabel) + 3 + visibleWidth(elapsed);
 	// The phase column rides the compact row only when the row can still show a
 	// readable agent label beside it. TASK_ISLAND_WIDTH is fixed, so a row that
 	// cannot afford the cell drops the column here and shows the phase in the
@@ -1188,15 +1189,14 @@ function trustVerdictToken(verdict: TrustVerdict): ClioToken {
 	}
 }
 
-function trustVerdictGlyph(verdict: TrustVerdict): string {
-	switch (verdict) {
-		case "reviewed":
-			return GLYPH.ok;
-		case "compromised":
-			return GLYPH.error;
-		default:
-			return "◇";
-	}
+/**
+ * Only the two settled verdicts carry a glyph. `◇` and `◆` already mark who
+ * started a run on this board, so a hollow diamond here read as an origin.
+ */
+function trustVerdictMark(verdict: TrustVerdict): string {
+	if (verdict === "reviewed") return `${GLYPH.ok} `;
+	if (verdict === "compromised") return `${GLYPH.error} `;
+	return "";
 }
 
 function terminalDetail(row: DispatchBoardRow): string | null {

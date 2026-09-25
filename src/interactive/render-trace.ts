@@ -32,6 +32,8 @@ export interface RenderTraceFrameRecord {
 	panelHighWater: number;
 	inputHighWater: number;
 	panel: { durationMs: number; cacheHit: boolean; entriesRendered: number } | null;
+	/** Clio estimate from root rows at the same indices; viewport moves and overlays can make pi-tui write more. */
+	rowsChanged: number | null;
 	pipeline: {
 		componentMs: number;
 		overlayCompositionMs: number;
@@ -319,12 +321,15 @@ interface FrameState {
 	panelHighWater: number;
 	inputHighWater: number;
 	panel: { durationMs: number; cacheHit: boolean; entriesRendered: number } | null;
+	rowsChanged: number | null;
 	phases: Record<"component" | TuiRenderPhase, number>;
 	commits: RenderTraceCommit[];
 }
 
 export interface RenderTrace extends TuiRenderObserver {
+	readonly rowsChangedEnabled: boolean;
 	recordPanelRender(metrics: { durationMs: number; cacheHit: boolean; entriesRendered: number }): void;
+	recordRootRows(rows: readonly string[]): void;
 	beginGeneration(): void;
 	recordVisibleEvent(fields: { kind: VisibleEventKind; contentIndex: number; delta: string }): number;
 	recordQueue(eventSeq: number, action: "admit" | "dequeue"): void;
@@ -393,6 +398,7 @@ export function createRenderTrace(
 	let queueDepth = 0;
 	let currentFrame: FrameState | null = null;
 	let pendingPanel: FrameState["panel"] = null;
+	let previousRootRows: string[] | null = null;
 	let lastCommitAt: number | null = null;
 	let firstCommitListener: ((frameId: number) => void) | null = null;
 	let firstCommitDelivered = false;
@@ -402,8 +408,27 @@ export function createRenderTrace(
 	writer?.enqueue({ type: "trace_start", version: RENDER_TRACE_VERSION, at: 0 });
 
 	const trace: RenderTrace = {
+		rowsChangedEnabled: writer !== null,
 		recordPanelRender(metrics): void {
-			pendingPanel = metrics;
+			if (currentFrame) currentFrame.panel = metrics;
+			else pendingPanel = metrics;
+		},
+		recordRootRows(rows): void {
+			if (writer === null || currentFrame === null) return;
+			if (previousRootRows === null) previousRootRows = [];
+			const previous = previousRootRows;
+			let changed = 0;
+			const common = Math.min(previous.length, rows.length);
+			for (let index = 0; index < common; index++) {
+				if (previous[index] === rows[index]) continue;
+				previous[index] = rows[index] ?? "";
+				changed++;
+			}
+			changed += Math.abs(previous.length - rows.length);
+			for (let index = common; index < rows.length; index++) previous[index] = rows[index] ?? "";
+			previous.length = rows.length;
+			currentFrame.rowsChanged = changed;
+			// RegularRoot reuses its array, so this owned snapshot must not alias it.
 		},
 		beginGeneration(): void {
 			generation += 1;
@@ -481,6 +506,7 @@ export function createRenderTrace(
 				panelHighWater,
 				inputHighWater,
 				panel: pendingPanel,
+				rowsChanged: null,
 				phases: { component: 0, overlay: 0, normalization: 0, cursor: 0 },
 				commits: [],
 			};
@@ -515,6 +541,7 @@ export function createRenderTrace(
 				panelHighWater: frame.panelHighWater,
 				inputHighWater: frame.inputHighWater,
 				panel: frame.panel,
+				rowsChanged: frame.rowsChanged,
 				pipeline: {
 					componentMs: rounded(frame.phases.component),
 					overlayCompositionMs: rounded(frame.phases.overlay),
@@ -616,16 +643,19 @@ export function createRenderTrace(
 /** Time the root component without replacing its identity or layout markers. */
 export function traceComponentRenders<TComponent extends { render(width: number): string[] }>(
 	component: TComponent,
-	trace: Pick<RenderTrace, "beginComponentRender" | "endComponentRender">,
+	trace: Pick<RenderTrace, "beginComponentRender" | "endComponentRender" | "recordRootRows" | "rowsChangedEnabled">,
 ): () => void {
 	const original = component.render;
 	const wrapped = function (this: TComponent, width: number): string[] {
 		const token = trace.beginComponentRender();
+		let rows: string[];
 		try {
-			return original.call(this, width);
+			rows = original.call(this, width);
 		} finally {
 			trace.endComponentRender(token);
 		}
+		if (trace.rowsChangedEnabled) trace.recordRootRows(rows);
+		return rows;
 	};
 	component.render = wrapped;
 	return () => {

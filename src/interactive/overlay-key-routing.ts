@@ -55,6 +55,8 @@ export interface PermissionOverlayKeyDeps {
 	scrollMutationInspection?: (delta: number) => void;
 	/** Fold or unfold the standing approval terms on the card. */
 	togglePermissionTerms?: () => void;
+	/** Scroll a card taller than its rows (BT-005); false leaves the key unconsumed. */
+	scrollPermissionCard?: (delta: number) => boolean;
 }
 
 export interface DispatchBoardOverlayKeyDeps {
@@ -157,6 +159,10 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 			deps.scrollMutationInspection(delta);
 			return true;
 		}
+	}
+	if (deps.scrollPermissionCard && !isKeyRelease(data)) {
+		const delta = mutationScrollDelta(data);
+		if (delta !== 0 && deps.scrollPermissionCard(delta)) return true;
 	}
 	if (isEscapeKey(data)) {
 		deps.cancelPermission();

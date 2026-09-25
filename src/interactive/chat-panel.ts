@@ -27,6 +27,7 @@ import { presentProviderError, providerErrorEvidence } from "./renderers/provide
 import { renderRetryStatus } from "./renderers/retry-status.js";
 import { renderSkillSuggestionRow, renderSkillSurfaceRow } from "./renderers/skill-rows.js";
 import {
+	approvalAxisText,
 	hasToolBody,
 	renderFoldedGroup,
 	renderToolAwaitingApproval,
@@ -242,6 +243,8 @@ type ToolSegment = {
 	awaitingApproval?: boolean | undefined;
 	/** Live, redacted approval facts. Never reconstructed during replay. */
 	approvalView?: ApprovalRequestView | undefined;
+	/** The axis an operator grant answered, kept past settlement (BT-003). Live only, like `approvalView`. */
+	operatorGrant?: string | undefined;
 	settlement?: "blocked" | "aborted" | "orphaned" | undefined;
 	/**
 	 * The admission verdict's short reason, present only on a settlement the
@@ -1104,6 +1107,7 @@ function renderToolSegmentLines(
 		outcome: seg.settlement,
 		blockReason: seg.blockReason,
 		evictedReason: seg.evictedReason,
+		operatorGrant: seg.operatorGrant,
 	};
 	const options = { unbounded, diffStyle: seg.replayed ? ("plain" as const) : ("color" as const) };
 	if (unbounded && seg.finished) return renderToolExecution(finished, width, options);
@@ -1129,12 +1133,15 @@ function finishedCall(seg: ToolSegment): ToolExecutionFinished {
 		resultSummary: seg.resultSummary,
 		actionClass: seg.actionClass,
 		cardAttached: seg.cardAttached,
+		operatorGrant: seg.operatorGrant,
 	};
 }
 
 /** The Compact fold a settled tool segment joins, or null when it keeps its own row. */
 function foldFamily(seg: AssistantSegment | undefined): ToolFoldFamily | null {
 	if (seg?.kind !== "tool" || !seg.finished) return null;
+	// A fold row cannot say which of its calls the operator allowed.
+	if (seg.operatorGrant !== undefined) return null;
 	return toolFoldFamily(finishedCall(seg));
 }
 
@@ -1866,6 +1873,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const entryIsStable = (entry: TranscriptEntry): boolean =>
 		(entry.role === "user" && (entry.status?.() ?? "committed") === "committed") ||
 		(entry.role === "replayBlock" && entry.isLive?.() !== true) ||
+		entry.role === "retryStatus" ||
 		(entry.role === "worker" && !entry.state.pending) ||
 		(entry.role === "assistant" &&
 			!entry.pending &&
@@ -2425,6 +2433,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				if (owner) invalidateEntryCache(owner.entry);
 				const tool = owner?.segment;
 				if (tool && !tool.finished) {
+					// Only the grant path resumes a parked call; a denial settles it blocked.
+					if (event.state === "resumed" && tool.approvalView !== undefined)
+						tool.operatorGrant = approvalAxisText(tool.approvalView);
 					tool.awaitingApproval = event.state === "awaiting-approval" ? true : undefined;
 					tool.approvalView = event.state === "awaiting-approval" ? event.view : undefined;
 					markDirty();
@@ -2569,6 +2580,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (event.type === "retry_status") {
 				const last = transcript[transcript.length - 1];
 				if (last?.role === "retryStatus" && last.status.attempt === event.status.attempt) {
+					// A retry row is stable, so it caches and can freeze; a new phase
+					// or countdown for the same attempt must drop that render first.
+					invalidateEntryCache(last);
 					last.status = event.status;
 				} else {
 					transcript.push({ role: "retryStatus", status: event.status, at: stamp() });

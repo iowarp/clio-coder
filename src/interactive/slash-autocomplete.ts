@@ -103,7 +103,12 @@ function emptyCompletionSources(): Record<CompletionSlotName, CompletionSource> 
 	return sources;
 }
 
-function compactArgumentHint(args: CommandArgsSpec | undefined): string | undefined {
+/**
+ * The one rule for shortening a command's argument grammar: flags go first,
+ * left to right, and positionals stay. The composer popup and the help list
+ * share it, so a command reads the same in both places.
+ */
+export function compactArgumentHint(args: CommandArgsSpec | undefined): string | undefined {
 	if (!args) return undefined;
 	if (args.subcommands) {
 		const rootStr = renderArgsSpec({

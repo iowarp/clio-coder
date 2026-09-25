@@ -13,15 +13,16 @@ import {
 	type SelectItem,
 	SelectList,
 	type TUI,
-	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { cancelledAskUserResult } from "../../tools/ask-user.js";
+import { dockBodyRows } from "../dock.js";
 import {
 	buildHint,
 	DEFAULT_SELECT_THEME,
+	fitRow,
 	type HintEntry,
 	type OverlayEscVerb,
 	showClioOverlayFrame,
@@ -43,7 +44,6 @@ const MIN_INNER_ROWS = 6;
 const MIN_QUESTION_ROWS = 3;
 const MAX_LABEL_COLUMN = 30;
 const MIN_LABEL_COLUMN = 12;
-const ELLIPSIS = "…";
 const CONTINUATION_INDENT = "    ";
 const TEXT_ASKING_DESCRIPTION = "opens a text field for your answer";
 
@@ -195,12 +195,6 @@ function answerText(question: AskUserQuestion, selected: ReadonlySet<number>, cu
 	return parts.join("; ");
 }
 
-function fitLine(text: string, width: number): string {
-	const safeWidth = Math.max(1, width);
-	if (visibleWidth(text) <= safeWidth) return text;
-	return truncateToWidth(text, safeWidth, ELLIPSIS, true);
-}
-
 /** Wrap a prose value inside the columns left by its one-time row label. */
 function wrapLabeledValue(prefix: string, value: string, width: number): string[] {
 	const safeWidth = Math.max(1, width);
@@ -281,12 +275,12 @@ class AnswerEditor extends Editor {
 
 	protected override renderTopBorder(width: number): string {
 		const theme = clioTheme();
-		return fitLine(theme.fg("dim", this.caption), width);
+		return fitRow(theme.fg("dim", this.caption), width);
 	}
 
 	protected override renderBottomBorder(width: number, hiddenLineCount: number): string {
 		if (hiddenLineCount <= 0) return "";
-		return fitLine(clioTheme().fg("dim", `${GLYPH.down} ${hiddenLineCount} more rows`), width);
+		return fitRow(clioTheme().fg("dim", `${GLYPH.down} ${hiddenLineCount} more rows`), width);
 	}
 }
 
@@ -311,9 +305,9 @@ class InputTextControl implements TextControl {
 		const rows = this.input
 			.render(width)
 			.map((line) =>
-				fitLine(line.startsWith("> ") ? `${theme.fg("accent", `${GLYPH.cursor} `)}${line.slice(2)}` : line, width),
+				fitRow(line.startsWith("> ") ? `${theme.fg("accent", `${GLYPH.cursor} `)}${line.slice(2)}` : line, width),
 			);
-		return [fitLine(theme.fg("dim", this.caption), width), ...rows];
+		return [fitRow(theme.fg("dim", this.caption), width), ...rows];
 	}
 
 	applyEdit(operation: "undo"): void {
@@ -397,7 +391,7 @@ function windowOptionRows(layout: OptionRowLayout, focusedIndex: number, rowBudg
 	}
 	const visible = layout.rows.slice(start, end).flat();
 	const marker = `  (${focusedIndex + 1}/${layout.rows.length})${start > 0 ? ` ${GLYPH.up}` : ""}${end < layout.rows.length ? ` ${GLYPH.down}` : ""}`;
-	return [...visible, fitLine(theme.fg("dim", marker), width)];
+	return [...visible, fitRow(theme.fg("dim", marker), width)];
 }
 
 class AskUserOverlayView implements Component {
@@ -565,7 +559,11 @@ class AskUserOverlayView implements Component {
 		this.questions.forEach((question, index) => {
 			const active = index === this.index;
 			const answered = Boolean(this.states[index]?.answer.trim());
-			const prefix = active ? "› " : answered ? "✓ " : "○ ";
+			const prefix = active
+				? `${theme.fg("accent", GLYPH.cursor)} `
+				: answered
+					? `${theme.fg("success", GLYPH.ok)} `
+					: "  ";
 			menu.push(
 				...wrapLabeledValue(
 					prefix,
@@ -591,7 +589,7 @@ class AskUserOverlayView implements Component {
 
 		const theme = clioTheme();
 		const strip = [
-			fitLine(
+			fitRow(
 				theme.style("accent", `Question ${this.index + 1} of ${this.questions.length} · Round ${this.roundsAnswered + 1}`, {
 					bold: true,
 				}),
@@ -629,7 +627,7 @@ class AskUserOverlayView implements Component {
 		this.questionRegionRows = viewRows;
 		this.questionScroll = Math.max(0, Math.min(this.questionScroll, Math.max(0, body.length - viewRows)));
 		const visible = body.slice(this.questionScroll, this.questionScroll + viewRows);
-		if (overflows) visible.push(fitLine(clioTheme().fg("dim", this.scrollIndicator(body.length, viewRows)), safeWidth));
+		if (overflows) visible.push(fitRow(clioTheme().fg("dim", this.scrollIndicator(body.length, viewRows)), safeWidth));
 
 		return [...fixedTop, ...visible, "", ...control, ...status, ...ledger].slice(0, maxRows);
 	}
@@ -720,7 +718,7 @@ class AskUserOverlayView implements Component {
 		if (!defaultTier || this.detailsExpanded) {
 			const tier = theme.style(this.presentation.semanticToken, this.presentation.tierLabel, { bold: true });
 			const requested = theme.fg("dim", `requested by ${this.presentation.requestedByCopy}`);
-			lines.push(fitLine(`${tier}${dotSep(theme)}${requested}`, width));
+			lines.push(fitRow(`${tier}${dotSep(theme)}${requested}`, width));
 		}
 		if (this.detailsExpanded) {
 			lines.push(
@@ -753,7 +751,7 @@ class AskUserOverlayView implements Component {
 	private renderWaiting(width: number, maxRows: number): string[] {
 		const theme = clioTheme();
 		const lines = [
-			fitLine(
+			fitRow(
 				`${screenTitle(theme, "Interview")}${dotSep(theme)}${theme.fg(
 					"muted",
 					this.history.length > 0 ? "answer sent · waiting for the next question" : "waiting for the first question",
@@ -893,19 +891,19 @@ class AskUserOverlayView implements Component {
 		const entries = this.ledgerEntries();
 		if (entries.length === 0) return [];
 		const count = `${entries.length} earlier answer${entries.length === 1 ? "" : "s"}`;
-		if (!this.ledgerExpanded) return ["", fitLine(theme.fg("dim", `${count} · a to review`), width)];
+		if (!this.ledgerExpanded) return ["", fitRow(theme.fg("dim", `${count} · a to review`), width)];
 		const rows: string[] = [];
 		for (const entry of entries) {
 			rows.push(...wrapLabeledValue(`${theme.fg("dim", entry.label)} `, theme.fg("muted", entry.answer), width));
 		}
-		const head = ["", fitLine(rule(theme, width, { left: "Answers", leftToken: "dim" }), width)];
+		const head = ["", fitRow(rule(theme, width, { left: "Answers", leftToken: "dim" }), width)];
 		const budget = Math.max(1, rowBudget - head.length);
 		if (rows.length <= budget) return [...head, ...rows];
 		const kept = rows.slice(0, Math.max(0, budget - 1));
 		return [
 			...head,
 			...kept,
-			fitLine(theme.fg("dim", `${GLYPH.ellipsis} ${rows.length - kept.length} more on /decisions`), width),
+			fitRow(theme.fg("dim", `${GLYPH.ellipsis} ${rows.length - kept.length} more on /decisions`), width),
 		];
 	}
 
@@ -1292,7 +1290,8 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 
 	const view = new AskUserOverlayView({
 		...deps,
-		getTerminalRows: () => tui.terminal?.rows ?? 0,
+		// The dock budget, spelled as the terminal height the body subtracts its frame rows from.
+		getTerminalRows: () => dockBodyRows(tui) + ASK_USER_FRAME_AND_MARGIN_ROWS,
 		requestRender: () => tui.requestRender(),
 		tui,
 	});
@@ -1301,7 +1300,6 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 		anchor: "top-left",
 		width: "100%",
 		margin: 0,
-		fullscreen: true,
 		// Not derived from the title: this modal swaps between a waiting title
 		// and a classified decision title without ever changing hands.
 		markerId: "ask-user",

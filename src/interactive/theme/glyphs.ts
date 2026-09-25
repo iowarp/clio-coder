@@ -73,6 +73,14 @@ export const GLYPH = {
 	// that still holds the origin column.
 	workerInternal: "·",
 	ellipsis: "…",
+	// A model picked recently, in the model picker's mark column.
+	recent: "↺",
+	// Quota and resource meters: consumed and remaining cells. Heavier than the
+	// frame's own line so a meter never reads as a border.
+	meterFull: "━",
+	meterEmpty: "─",
+	// A sequence or next step: dashboard page order, a key chord's second key.
+	next: "→",
 	// A count of the same thing repeated: a worker's repeated call, a helper kind.
 	times: "×",
 	favorite: "★",

@@ -11,9 +11,10 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
+import { dockBodyRows } from "../dock.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
-import { buildHint, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, fitRows, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, markdownTheme, padAnsi } from "../theme/index.js";
 import {
 	type ArtifactProvider,
@@ -31,8 +32,6 @@ export const VIEW_OVERLAY_MARGIN = { top: 0, right: 0, bottom: 0, left: 0 } as c
 const LEFT_PANE_MIN_WIDTH = 36;
 const LEFT_PANE_MAX_WIDTH = 72;
 const SEPARATOR = " │ ";
-const ELLIPSIS = "…";
-
 /**
  * Below this the two panes cannot both be read.
  *
@@ -343,26 +342,29 @@ function buildArtifactHeaderLines(
 	verification: ViewVerificationState | undefined,
 	width: number,
 ): string[] {
-	if (!artifact) return [padAnsi(clioTheme().fg("muted", "No artifact selected"), width, ELLIPSIS)];
+	if (!artifact) return [padAnsi(clioTheme().fg("muted", "No artifact selected"), width, GLYPH.ellipsis)];
 	const theme = clioTheme();
 	// The list may cut a title, especially in a split pane. Give the selected
 	// act its own readable heading before the full body, while bounding a very
 	// long command so it cannot consume the entire preview.
 	const title = redactSecretString(sanitizeCallTargetText(artifact.title));
 	const wrappedTitle = wrapTextWithAnsi(
-		theme.fg("title", truncateToWidth(title, Math.max(1, width * 3), ELLIPSIS, true)),
+		theme.fg("title", truncateToWidth(title, Math.max(1, width * 3), GLYPH.ellipsis, true)),
 		Math.max(1, width),
 	);
 	const titleRows =
 		wrappedTitle.length <= 3
 			? wrappedTitle
-			: [...wrappedTitle.slice(0, 2), truncateToWidth(`${wrappedTitle[2] ?? ""}${ELLIPSIS}`, width, ELLIPSIS, true)];
+			: [
+					...wrappedTitle.slice(0, 2),
+					truncateToWidth(`${wrappedTitle[2] ?? ""}${GLYPH.ellipsis}`, width, GLYPH.ellipsis, true),
+				];
 	const size = formatArtifactSize(artifact.sizeBytes);
 	const metadata = [artifact.category, formatLocalTime(artifact.timestamp), size].filter(Boolean).join(" · ");
 	const verify = verificationText(verification);
 	const heading = [
-		...titleRows.map((row) => padAnsi(row, width, ELLIPSIS)),
-		padAnsi(theme.fg("dim", metadata), width, ELLIPSIS),
+		...titleRows.map((row) => padAnsi(row, width, GLYPH.ellipsis)),
+		padAnsi(theme.fg("dim", metadata), width, GLYPH.ellipsis),
 	];
 	if (verify.length === 0) return heading;
 	const token =
@@ -375,7 +377,7 @@ function buildArtifactHeaderLines(
 					: "info";
 	return [
 		...heading,
-		...wrapTextWithAnsi(theme.fg(token, verify), Math.max(1, width)).map((line) => padAnsi(line, width, ELLIPSIS)),
+		...wrapTextWithAnsi(theme.fg(token, verify), Math.max(1, width)).map((line) => padAnsi(line, width, GLYPH.ellipsis)),
 	];
 }
 
@@ -619,19 +621,23 @@ export class ViewOverlayView implements Component {
 	private renderList(width: number, height: number): string[] {
 		const theme = clioTheme();
 		const lines: string[] = [];
-		const filterLabel = this.focus === "list" ? theme.fg("accent", "filter") : theme.fg("dim", "filter");
-		const filterValue = this.filterText.length > 0 ? this.filterText : theme.fg("dim", "(empty)");
-		lines.push(padAnsi(`${filterLabel}: ${filterValue}`, width, ELLIPSIS));
+		// The filter row appears with the first typed character and is the same
+		// `> text` input every other list overlay shows, rather than a permanent
+		// `filter: (empty)` caption.
+		if (this.filterText.length > 0) {
+			this.filterInput.focused = this.focus === "list";
+			lines.push(...this.filterInput.render(width));
+		}
 
 		if (this.loadingArtifacts) {
-			lines.push(padAnsi(theme.fg("dim", "loading artifacts…"), width, ELLIPSIS));
-			return this.fixedLines(lines, width, height);
+			lines.push(padAnsi(theme.fg("dim", "loading artifacts…"), width, GLYPH.ellipsis));
+			return fitRows(lines, width, height);
 		}
 		if (this.artifactError) {
 			lines.push(
 				...wrapTextWithAnsi(theme.fg("error", this.artifactError), Math.max(1, width)).map((line) => padAnsi(line, width)),
 			);
-			return this.fixedLines(lines, width, height);
+			return fitRows(lines, width, height);
 		}
 
 		const filtered = this.filteredArtifacts();
@@ -642,11 +648,11 @@ export class ViewOverlayView implements Component {
 					`List · ${filtered.length}/${this.artifacts.length} · ←→ category`,
 				),
 				width,
-				ELLIPSIS,
+				GLYPH.ellipsis,
 			),
 		);
 		if (filtered.length === 0)
-			return this.fixedLines(
+			return fitRows(
 				[
 					...lines,
 					theme.fg("dim", "No matching details."),
@@ -668,16 +674,16 @@ export class ViewOverlayView implements Component {
 		for (const row of rows.slice(this.listScrollOffset, this.listScrollOffset + rowHeight)) {
 			if (row.type === "group") {
 				const count = filtered.filter((artifact) => artifact.category === row.category).length;
-				lines.push(padAnsi(theme.fg("dim", `── ${categoryLabel(row.category)} (${count})`), width, ELLIPSIS));
+				lines.push(padAnsi(theme.fg("dim", `── ${categoryLabel(row.category)} (${count})`), width, GLYPH.ellipsis));
 				continue;
 			}
 			if (row.type === "empty") {
-				lines.push(padAnsi(theme.fg("dim", "  (empty)"), width, ELLIPSIS));
+				lines.push(padAnsi(theme.fg("dim", "  (empty)"), width, GLYPH.ellipsis));
 				continue;
 			}
 			if (!row.item) continue;
 			const selected = row.itemIndex === this.selectedIndex;
-			const cursor = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+			const cursor = `${selectionMark(selected)} `;
 			const safeTitle = redactSecretString(sanitizeCallTargetText(row.item.title));
 			const title = selected ? theme.style("accent", safeTitle, { bold: true }) : safeTitle;
 			const metaParts = [formatRelativeTime(row.item.timestamp), formatArtifactSize(row.item.sizeBytes)].filter(Boolean);
@@ -685,12 +691,12 @@ export class ViewOverlayView implements Component {
 			const available = Math.max(1, width - visibleWidth(cursor));
 			const metaWidth = visibleWidth(meta);
 			const titleWidth = Math.max(1, available - (metaWidth > 0 ? metaWidth + 1 : 0));
-			const clippedTitle = truncateToWidth(title, titleWidth, ELLIPSIS, true);
+			const clippedTitle = truncateToWidth(title, titleWidth, GLYPH.ellipsis, true);
 			const gap = " ".repeat(Math.max(1, available - visibleWidth(clippedTitle) - metaWidth));
-			lines.push(padAnsi(`${cursor}${clippedTitle}${metaWidth > 0 ? `${gap}${meta}` : ""}`, width, ELLIPSIS));
+			lines.push(padAnsi(`${cursor}${clippedTitle}${metaWidth > 0 ? `${gap}${meta}` : ""}`, width, GLYPH.ellipsis));
 		}
 
-		return this.fixedLines(lines, width, height);
+		return fitRows(lines, width, height);
 	}
 
 	private renderContent(width: number, height: number): string[] {
@@ -711,7 +717,7 @@ export class ViewOverlayView implements Component {
 					: `Preview${position} · n/p item · i info · Esc list`
 				: `Preview${position} · Enter/Tab focus`;
 		const header = [
-			padAnsi(clioTheme().fg(this.focus === "content" ? "accent" : "dim", headerLabel), width, ELLIPSIS),
+			padAnsi(clioTheme().fg(this.focus === "content" ? "accent" : "dim", headerLabel), width, GLYPH.ellipsis),
 			...buildArtifactHeaderLines(artifact, verification, width),
 		];
 		const bodyHeight = Math.max(0, height - header.length);
@@ -722,15 +728,9 @@ export class ViewOverlayView implements Component {
 		if (!layoutPending && this.contentScrollOffset > maxOffset) this.contentScrollOffset = maxOffset;
 		const visible = body
 			.slice(layoutPending ? 0 : this.contentScrollOffset, (layoutPending ? 0 : this.contentScrollOffset) + bodyHeight)
-			.map((line) => padAnsi(line, width, ELLIPSIS));
+			.map((line) => padAnsi(line, width, GLYPH.ellipsis));
 		const lines = [...header, ...visible];
-		return this.fixedLines(lines, width, height);
-	}
-
-	private fixedLines(lines: readonly string[], width: number, height: number): string[] {
-		const out = lines.slice(0, height).map((line) => padAnsi(line, width, ELLIPSIS));
-		while (out.length < height) out.push(" ".repeat(Math.max(0, width)));
-		return out;
+		return fitRows(lines, width, height);
 	}
 
 	render(width: number): string[] {
@@ -886,7 +886,7 @@ export class ViewOverlayView implements Component {
 }
 
 function viewBodyHeight(tui: TUI): number {
-	return Math.max(1, tui.terminal.rows - VIEW_OVERLAY_MARGIN.top - VIEW_OVERLAY_MARGIN.bottom - 2);
+	return dockBodyRows(tui);
 }
 
 export function openViewOverlay(

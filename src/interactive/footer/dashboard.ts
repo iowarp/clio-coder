@@ -22,7 +22,7 @@ import type { ContextUsageSnapshot } from "../../domains/session/context-account
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
-import { getKeybindings, Text, visibleWidth } from "../../engine/tui.js";
+import { getKeybindings, Text } from "../../engine/tui.js";
 import { getCurrentBranch } from "../../utils/git.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import {
@@ -35,23 +35,9 @@ import {
 } from "../footer-panel.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
-import {
-	animationStep,
-	barSep,
-	brandMark,
-	clioTheme,
-	collapseHomePath,
-	formatTargetLabel,
-	rule,
-	screenTitle,
-} from "../theme/index.js";
+import { animationStep, clioTheme, collapseHomePath, formatTargetLabel } from "../theme/index.js";
 import { createDemoHints } from "./demo-hints.js";
-import {
-	formatNotificationBadge,
-	formatNotificationPanel,
-	type Notification,
-	type NotificationCenter,
-} from "./notifications.js";
+import { formatNotificationPanel, type Notification, type NotificationCenter } from "./notifications.js";
 import { DASHBOARD_PAGES, type DashboardPage, renderCompactDashboard, renderDashboardPage } from "./pages.js";
 import { createLocalMachineSampler, type LocalMachineMetrics } from "./system-metrics.js";
 
@@ -70,21 +56,12 @@ export function capabilityLabels(caps: CapabilityFlags | null): string[] {
 
 import {
 	type AgentWorkFacts,
-	activityQuadrant,
 	type ContextEngineFacts,
-	contextQuadrant,
-	EXPANDED_MID,
-	EXPANDED_ULTRAWIDE,
-	EXPANDED_WIDE,
 	fitDashboardLine,
 	formatToolTally,
 	type SessionFacts,
-	sessionQuadrant,
 	type ToolTallySnapshot,
 	type WorkspaceFacts,
-	workspaceQuadrant,
-	zipColumnBlocks,
-	zipColumns,
 } from "./widgets.js";
 
 export type { ToolTallySnapshot } from "./widgets.js";
@@ -178,163 +155,7 @@ function costSegment(value: CostAggregate | undefined): string | null {
 	return cost === null ? null : `cost ${cost}`;
 }
 
-/** The compact and expanded dashboard share the same live facts. */
-function renderFooterCompactLines(state: FooterDashboardRenderState, width: number): string[] {
-	return renderCompactDashboard(state, width);
-}
-
-/** Notice surface, composed by the view below the grid: compact badge or expanded panel. */
-function renderFooterNotices(
-	notices: ReadonlyArray<Notification>,
-	width: number,
-	mode: FooterDashboardMode,
-	dismissKeyLabel?: string,
-): string[] {
-	const safeWidth = Math.max(1, Math.floor(width));
-	if (mode === "expanded") {
-		return formatNotificationPanel(notices, safeWidth, dismissKeyLabel ? { dismissKeyLabel } : {});
-	}
-	const badge = formatNotificationBadge(notices, safeWidth, dismissKeyLabel ? { dismissKeyLabel } : {});
-	return badge ? [badge] : [];
-}
-
-function renderFooterDashboardLines(
-	state: FooterDashboardRenderState,
-	width: number,
-	mode: FooterDashboardMode = "compact",
-): string[] {
-	return mode === "expanded" ? renderFooterStatusLines(state, width) : renderFooterCompactLines(state, width);
-}
-
-/**
- * Expanded footer: responsive sections ordered by operational urgency.
- * Widths at 220 columns and above use four weighted horizontal sections.
- * Widths from 80 to 219 columns use a two by two grid.
- * Widths below 80 columns use a vertical stack with all sections retained.
- */
-function renderFooterStatusLines(state: FooterDashboardRenderState, width: number): string[] {
-	const theme = clioTheme();
-	const safeWidth = Math.max(1, Math.floor(width));
-	const header = headerLine(state.session, safeWidth);
-
-	if (safeWidth >= EXPANDED_ULTRAWIDE) {
-		const sep = barSep(theme);
-		const widths = expandedWideColumnWidths(safeWidth, visibleWidth(sep) * 3);
-		const blocks = [
-			activityQuadrant(state.agent, {
-				width: widths[0],
-				maxWorkers: 4,
-				status: state.status,
-				toolCounts: state.toolCounts,
-				throughput: state.throughput,
-				sessionTokens: state.sessionTokens,
-				sessionCost: state.sessionCost,
-				contextUsed: state.context.used,
-				tick: state.tick,
-				now: state.now,
-			}),
-			contextQuadrant(state.context, { width: widths[1] }),
-			sessionQuadrant(state.session, { width: widths[2] }),
-			workspaceQuadrant(state.workspace, { width: widths[3] }),
-		];
-		return [header, rule(theme, safeWidth), ...zipColumnBlocks(blocks, widths, sep)].map((line) =>
-			fitDashboardLine(line, safeWidth),
-		);
-	}
-
-	if (safeWidth >= EXPANDED_WIDE) {
-		const sep = barSep(theme);
-		const [topLeftWidth, topRightWidth] = expandedPairWidths(safeWidth, visibleWidth(sep));
-		const [bottomLeftWidth, bottomRightWidth] = expandedPairWidths(safeWidth, visibleWidth(sep));
-		const top = zipColumns(
-			activityQuadrant(state.agent, {
-				width: topLeftWidth,
-				maxWorkers: 4,
-				status: state.status,
-				toolCounts: state.toolCounts,
-				throughput: state.throughput,
-				sessionTokens: state.sessionTokens,
-				sessionCost: state.sessionCost,
-				contextUsed: state.context.used,
-				tick: state.tick,
-				now: state.now,
-			}),
-			contextQuadrant(state.context, { width: topRightWidth }),
-			topLeftWidth,
-			topRightWidth,
-			sep,
-		);
-		const bottom = zipColumns(
-			sessionQuadrant(state.session, { width: bottomLeftWidth }),
-			workspaceQuadrant(state.workspace, { width: bottomRightWidth }),
-			bottomLeftWidth,
-			bottomRightWidth,
-			sep,
-		);
-		return [header, rule(theme, safeWidth), ...top, "", ...bottom].map((line) => fitDashboardLine(line, safeWidth));
-	}
-
-	const blocks = [
-		activityQuadrant(state.agent, {
-			width: safeWidth,
-			maxWorkers: safeWidth >= EXPANDED_MID ? 3 : 2,
-			status: state.status,
-			toolCounts: state.toolCounts,
-			throughput: state.throughput,
-			sessionTokens: state.sessionTokens,
-			sessionCost: state.sessionCost,
-			contextUsed: state.context.used,
-			tick: state.tick,
-			now: state.now,
-		}),
-		contextQuadrant(state.context, { width: safeWidth }),
-		sessionQuadrant(state.session, { width: safeWidth }),
-		workspaceQuadrant(state.workspace, { width: safeWidth }),
-	];
-	return [header, rule(theme, safeWidth), ...blocks.flatMap((block) => [...block, ""]).slice(0, -1)].map((line) =>
-		fitDashboardLine(line, safeWidth),
-	);
-}
-
-/**
- * Column widths for Activity, Context, Session, and Workspace. The base makes
- * current work the strongest column; surplus is shared by urgency until the
- * lower-priority sections reach their caps, then spills into Activity.
- */
-function expandedWideColumnWidths(width: number, totalSepWidth: number): [number, number, number, number] {
-	const available = Math.max(0, width - totalSepWidth);
-	const widths: [number, number, number, number] = [32, 31, 27, 21];
-	let remaining = Math.max(0, available - widths.reduce((sum, item) => sum + item, 0));
-	const max: [number, number, number, number] = [Number.POSITIVE_INFINITY, 56, 44, 40];
-	const order = [0, 1, 2, 3] as const;
-	let cursor = 0;
-	while (remaining > 0) {
-		const index = order[cursor % order.length] ?? 3;
-		if (widths[index] < max[index]) {
-			widths[index] += 1;
-			remaining -= 1;
-		}
-		cursor += 1;
-	}
-	return widths;
-}
-
-function expandedPairWidths(width: number, sepWidth: number): [number, number] {
-	const available = Math.max(0, width - sepWidth);
-	const left = Math.floor(available * 0.53);
-	return [left, available - left];
-}
-
-function headerLine(session: SessionFacts, width: number): string {
-	const theme = clioTheme();
-	const left = `${brandMark(theme)} ${screenTitle(theme, "CLIO DASHBOARD")}`;
-	const right = theme.fg("dim", `v${session.version}`);
-	const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
-	return fitDashboardLine(`${left}${" ".repeat(gap)}${right}`, width);
-}
-
 export interface FooterDashboardPanel extends FooterPanel {
-	statusLines(width: number): string[];
 	mode(): FooterDashboardMode;
 	isExpanded(): boolean;
 	setExpanded(expanded: boolean): void;
@@ -378,6 +199,7 @@ function workspaceFacts(deps: FooterDashboardDeps, branchSlot: string | null): W
  */
 class FooterText extends Text {
 	private composedWidth: number | null = null;
+	private composedText = "";
 	private readonly compose: (width: number) => string;
 
 	constructor(compose: (width: number) => string) {
@@ -387,7 +209,10 @@ class FooterText extends Text {
 
 	composeAt(width: number): void {
 		this.composedWidth = width;
-		this.setText(this.compose(width));
+		const text = this.compose(width);
+		if (text === this.composedText) return;
+		this.composedText = text;
+		this.setText(text);
 	}
 
 	override render(width: number): string[] {
@@ -403,11 +228,12 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	let dashboardMode: FooterDashboardMode = "compact";
 	let page: DashboardPage = "Activity";
 	let disposed = false;
-	const now = (): number => deps.now?.() ?? Date.now();
 	const state = (width: number): FooterDashboardRenderState => {
+		const now = deps.now?.() ?? Date.now();
+		const notices = deps.getNotifications?.() ?? [];
 		// Every refresh within one animation step composes the same spinner, so a
 		// refresh the status stream asks for between ticks costs no bytes.
-		const frame = animationStep(now());
+		const frame = animationStep(now);
 		const dispatch = deps.getDispatchRows?.() ?? [];
 		const tools = deps.getToolCounts?.() ?? { tools: {}, errors: 0 };
 		const status = deps.getAgentStatus?.();
@@ -511,7 +337,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				ledger: contextLedger,
 			},
 			agent: {
-				statusText: statusText(status, now(), width, frame),
+				statusText: statusText(status, now, width, frame),
 				dispatchSummary: dispatchSegment(dispatch),
 				toolTally: formatToolTally(tools, contextLedger?.toolCount ?? null),
 				dispatchRows: dispatch,
@@ -524,19 +350,19 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			demoHint: demoHints({
 				enabled: settings?.interface.demo === true,
 				learned: (feature) => (readHarnessProfile().features[feature] ?? 0) > 0,
-				now: now(),
+				now,
 				quiet:
 					dashboardMode !== "compact" ||
 					compactionActive ||
 					["tool_blocked", "retrying", "stuck"].includes(status?.phase ?? "") ||
 					(status?.activeTools ?? []).some((tool) => tool.toolName === "ask_user") ||
-					(deps.getNotifications?.() ?? []).some((n) => n.expiresAt === null || n.expiresAt > now()),
+					notices.some((n) => n.expiresAt === null || n.expiresAt > now),
 				agentActive: dispatch.some((row) => row.status === "running"),
 				toolsUsed: Object.values(tools.tools).some((count) => count > 0),
 				contextBusy: (contextLedger?.usedTokens ?? 0) > (contextLedger?.contextWindow ?? Infinity) * 0.4,
 				dashboardKey: getKeybindings().getKeys("clio-coder.status.toggle").join("/") || "Dashboard",
 			}),
-			notices: deps.getNotifications?.() ?? [],
+			notices,
 			status: status ?? {
 				phase: "idle",
 				since: 0,
@@ -551,7 +377,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			sessionTokens: usage ?? null,
 			sessionCost: deps.getSessionCost?.() ?? null,
 			tick: frame,
-			now: now(),
+			now,
 		};
 	};
 	function composeFooter(width: number): string {
@@ -559,7 +385,13 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const lifecycleHint = deps.getLifecycleHint?.();
 		const lifecycleLine = lifecycleHint ? [fitDashboardLine(clioTheme().fg("dim", lifecycleHint), width)] : [];
 		const notices =
-			dashboardMode === "compact" ? [] : renderFooterNotices(current.notices, width, dashboardMode, deps.dismissKeyLabel);
+			dashboardMode === "compact"
+				? []
+				: formatNotificationPanel(
+						current.notices,
+						width,
+						deps.dismissKeyLabel ? { dismissKeyLabel: deps.dismissKeyLabel } : {},
+					);
 		const contributed = deps.getExtensionStatus?.() ?? [];
 		const extensionLine =
 			dashboardMode === "expanded" && contributed.length
@@ -577,7 +409,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 							lifecycleLine.length,
 						getKeybindings().getKeys("clio-coder.status.toggle").join(" / "),
 					)
-				: renderFooterDashboardLines(current, width, dashboardMode);
+				: renderCompactDashboard(current, width);
 		return [...grid, ...extensionLine, ...lifecycleLine, ...notices].join("\n");
 	}
 	const refresh = (): void => {
@@ -603,9 +435,6 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	return {
 		view,
 		refresh,
-		statusLines(width: number) {
-			return renderFooterStatusLines(state(width), width);
-		},
 		mode() {
 			return dashboardMode;
 		},

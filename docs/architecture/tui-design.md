@@ -85,52 +85,93 @@ The top rail carries the effective thinking level: five cells for `off`, `minima
 
 ## 2. Glyph Vocabulary
 
-All symbols are defined in [src/interactive/theme/glyphs.ts](../../src/interactive/theme/glyphs.ts).
+All symbols are defined in [src/interactive/theme/glyphs.ts](../../src/interactive/theme/glyphs.ts). A glyph means one thing everywhere; a surface that needs a new meaning asks for a new constant rather than borrowing a shape.
 
-| Glyph | Token | Meaning | Used by |
-| :--- | :--- | :--- | :--- |
-| `>C_` | `accent` | Brand wordmark | Welcome launchpad, session headers. |
-| `✦` | `accent` | Agent voice | First row of agent prose blocks; error blocks (`error`). |
-| `▌` | `accent` | Operator input | Left gutter of user prompt lines. |
-| `›` | `action` | Quoted user text | Steering queues, command echoes in overlays. |
-| `❯` | `accent` | Cursor | Focus selection in lists, menus, and overlays. |
-| `▸` | `tool` | Observe / Search | File reads, listings, searches, grep, data inspections. |
-| `§` | `tool` | Knowledge / Skill | Context, docs, library, evidence, skills, compaction. |
-| `±` | `tool` | Mutate | File writes, patches, edits, artifacts. |
-| `$` | `tool` | Execute | Shell commands, scripts, checks, git operations. |
-| `↗` | `tool` | Network | Web fetches, URL reading. |
-| `?` | `warning`| Question | Operator approvals, decision points, limitation notices. |
-| `⇢` | `tool` | External Call | MCP tools, gateways, external extensions. |
-| `⚙` | `agent` | Worker Run | Background dispatched worker activity. |
-| `✓` | `success`| Done / OK | Successful outcomes, clean checks, settled runs. |
-| `✗` | `error`  | Failed | Errors, rejected checks, failed runs. |
-| `⊘` | `dim`    | Cancelled | User cancellation or aborted turns. |
-| `↻` | `warning`| Retry | Provider retries, failover attempts. |
-| `ℹ` | `info`   | Notice | Non-blocking system information. |
-| `⚠` | `warning`| Warning | Action required, quota limits, stale states. |
+| Glyph | `GLYPH` key | Token | Meaning | Used by |
+| :--- | :--- | :--- | :--- | :--- |
+| `>C_` | `brand` | `accent` | Brand wordmark | Launchpad and session header only. |
+| `✦` | `agent` | `accent` | Agent voice | First row of agent prose; `error` on a failed turn. |
+| `▌` | `userBar` | `accent` | Operator input | Gutter of every prompt row. |
+| `›` | `user` | `action` | Quoted operator text | Steering queue, command echoes. |
+| `❯` | `cursor` | `accent` | Focus | Selected row in lists, menus and overlays. |
+| `▸` | `toolHeader` | `tool` | Observe or search | Reads, listings, searches. |
+| `§` | `classKnowledge` | `tool` | Knowledge or skill | Context, docs, library, evidence, skills. |
+| `±` | `classMutate` | `tool` | Mutate | Writes, patches, edits. |
+| `$` | `classExecute` | `tool` | Execute | Shell commands, checks, git. |
+| `↗` | `classNetwork` | `tool` | Network | Web fetches. |
+| `?` | `classInteraction` | `warning` | Operator question | Approvals and `ask_user`. |
+| `⇢` | `classExternal` | `tool` | External call | MCP tools and gateways. |
+| `◇` | `workerHuman` | `accent` | Run the operator started | Worker block, board origin column, footer count. |
+| `◆` | `workerAgent` | `agent` | Run the model started | Same surfaces as `◇`. |
+| `·` | `workerInternal` | by audience | Internal run | Board origin column only; elsewhere `·` is the unit separator. |
+| `↳` | `subProcess` | by audience | Helper or shadow run | One-row helper lines. |
+| `●` | `running` | `accent` | Running | Status pills, island rows. |
+| `◌` | `queued` | `dim` | Queued or pending | Status pills, task island. |
+| `⚙` | `phaseTool` | `muted` | Live tool activity | Running tool rows and the footer phase. |
+| `✓` | `ok` | `success` | Done | Outcomes, reviewed trust verdicts. |
+| `✗` | `error` | `error` | Failed | Outcomes, compromised trust verdicts. |
+| `⊘` | `cancelled` | `dim` | Cancelled | Aborted turns and runs. |
+| `↻` | `phaseRetry` | `warning` | Retry | Provider retries and failover. |
+| `ℹ` | `info` | `info` | Notice | Info notices. |
+| `⚠` | `warn` | `warning` | Warning | Warning notices, quota limits, stale state. |
+| `│` | `rail` | `frame` | Rail | Island sides, column separators. |
+| `╌` | `innerDivider` | `frame` | Inner divider | Rows inside an island. |
+| `…` | `ellipsis` | inherits | Cut | Every truncation. |
+| `↺` | `recent` | `dim` | Recently used | Model picker mark column. |
+| `━` `─` | `meterFull` `meterEmpty` | by meter | Meter cells | Quota and resource bars. |
+| `→` | `next` | inherits | Next step | Dashboard page order, key chords. |
+
+Trust verdicts on a dispatch card print `✓` for reviewed and `✗` for compromised; grounded and unverified print the verdict word alone, because a diamond on that line would read as an origin.
 
 ---
 
 ## 3. Structural Layouts
 
 ### 3.1 The Island (Framed Block)
-Bounded content blocks framed with single-line box drawing characters (`┌`, `┐`, `└`, `┘`, `─`, `│`).
-- **Header**: Embedded in top border: `┌─ Title ────────────────────┐`.
-- **Width**: Responsive; wraps or truncates content with `…`.
+Every framed block is built by `frame()` and `innerDivider()` in [rules.ts](../../src/interactive/theme/rules.ts): the launchpad, the fleet and task islands, the council card, the dispatch cards and the steering queue. No surface draws its own corners, tees or rounded frame.
+- **Header**: Embedded in the top border in the bold `title` token: `┌─ Title ─────────── meta ─┐`. Optional right metadata is `dim`. A title wider than the island is clipped with `…` before the corner.
+- **Body**: `│ ` + content padded to the inner width + ` │`. Sections inside one island are separated by a full-width `╌` row, never by a `├┤` tee.
+- **Width**: Every row is exactly the island width in visible cells. Content is truncated with `…`, never wrapped past the rail.
 
 ### 3.2 Overlays & Modals
 Full-screen or docked panels for interactive workflows (`/settings`, `/view`, `/tasks`, `/usage`).
 - Header: Centered or left-aligned title with category tabs.
 - Navigation: `↑`/`↓` for items, `Tab` for sections, `Enter` to select, `Esc` to close.
+- **Selection**: A focused row carries `❯` in `accent` and its label in bold `accent`; nothing else on the row changes color. Every self-drawn list takes both from `selectionMark` and `selectionLabel` in [overlay-frame.ts](../../src/interactive/overlay-frame.ts).
 
 ### 3.3 Status Pills
 Compact inline lifecycle indicators:
 `[● running]` (`action`) · `[✓ ready]` (`success`) · `[⚠ blocked]` (`warning`) · `[✗ failed]` (`error`).
 
-### 3.4 Narrow Terminal Adaptation
-- **<84 columns**: Side-by-side panes collapse to stacked single-column layouts.
-- **<60 columns**: Footer simplifies from 2 rows to essential meters; action rows drop scalar args before dropping command verbs.
-- **40 columns**: Minimum supported width; gutters remain fixed at 2 columns with hanging indents.
+### 3.4 Width Degradation
+
+No row exceeds the terminal width in visible cells at any width. The contracts in `tests/contracts/tui-island-frames.test.ts`, `tests/contracts/transcript-retry-prefix.test.ts` and `tests/contracts/footer-notice-priority.test.ts` render at 60, 80, 120 and 200 columns.
+
+| Surface | 60 | 80 | 120 | 200 |
+| :--- | :--- | :--- | :--- | :--- |
+| Launchpad | Stacked details, no wordmark | Wordmark beside details (from 76) | Wide wordmark (from 100) | Hint column added (from 160) |
+| Session header | One row | One row | One row | One row |
+| Fleet or task island | Hidden | Shown at 48 cells when the screen has 18 rows | Same | Same |
+| Context island | Hidden | Hidden | Shown at 52 cells when the screen has 20 rows (from 92) | Same |
+| Council card | Stacked members | Stacked until each column holds 34 cells | Grid | Grid |
+| Compact footer | Two rows, 8-cell context meter | Two rows, 8-cell meter | Two rows, 14-cell meter, full hints | Two rows, wider identity |
+| Expanded footer | Pages stack | Pages stack; Context and Status split from 84 | Two columns | Two columns |
+| Transcript | Prompt and prose wrap; action rows shorten paths first | Same | Rows at natural width | Same; extra columns never inflate rows |
+
+The minimum supported width is 40 columns. Gutters stay 2 columns with hanging indents.
+
+### 3.5 Pinned Islands and the Dynamic Transcript
+
+The viewport has two kinds of content.
+
+- **Pinned**: the composer and the footer dock below the transcript in [layout.ts](../../src/interactive/layout.ts). Two islands float at the top right as non-capturing overlays owned by `interactive-tickers.ts`: the fleet island (live dispatch rows and councils, one card per council) or, when no run is live, the task island, and the context island while a context operation runs. Only one island shows at a time, the context island taking precedence, and every island hides while an overlay is open or the footer is expanded. An island never takes the keyboard. Known gap: from 80 to 91 columns, context activity hides the fleet or task island while the context island still needs 92, so neither shows.
+- **Dynamic**: everything in the transcript. Dispatch, council and worker state render as transcript blocks that update in place; the islands summarize them and never become a second history. The decision board stays a capturing overlay (`/decisions`), because a decision needs the keyboard and an island may not hold it.
+
+**Hydration.** The instant shell paints `createBootWelcome` with the settings already read, at the same geometry as the hydrated launchpad. A resumed session replays its turns through the same panel operations a live turn uses (`rehydrateChatPanelFromTurns` in `chat-renderer.ts`), and the settled entries are pre-rendered in the other output styles while idle.
+
+**Stream ticks.** The chat panel returns a frame as `ChatPanelRegions`: a frozen `prefix` of the contiguous settled entries from the top of the transcript, and a `tail`. The prefix array keeps its identity across stream ticks, and the regular-mode root skips rewriting it while it sits at the same row. A settled entry is a committed prompt, a non-live replay block, a finished worker, a retry row, or an assistant entry with no pending message and no running tool. A stream tick renders only the live entry: `ChatPanelRenderMetrics.entriesRendered` is 1 per tick. An entry that changes after it settles, such as a retry row for the same attempt, drops its cached render and the freeze behind it.
+
+**Measuring.** `render-trace.ts` records frames, panel `entriesRendered` and `cacheHit`, bytes written per commit, and `rowsChanged`: the number of root rows that differ from the previous frame at the same index. `rowsChanged` is computed only while a trace file is armed and is an estimate of pi-tui's differential write, since a viewport move, a resize or an overlay can make pi-tui repaint more rows. Tests never assert wall-clock time.
 
 ---
 
@@ -138,26 +179,27 @@ Compact inline lifecycle indicators:
 
 The visual hierarchy coordinates four primary screen surfaces: Header, Transcript, Composer, and Footer.
 
-### 5.1 Welcome Launchpad & Session Header
+### 4.1 Welcome Launchpad & Session Header
 
 The header operates in two distinct modes:
-- **Launchpad (before the first prompt)**: A framed panel dashboard enclosed by `╭─ Clio Coder v<version> ─╮`. Displays model route status, workspace path, autonomy level, target inventory, fleet recipes, and cached subscription quotas.
+- **Launchpad (before the first prompt)**: A standard island titled `Clio Coder v<version>`, with the action row under an inner divider. Displays model route status, workspace path, autonomy level, target inventory, fleet recipes, and cached subscription quotas.
 - **Session Header (after prompt admission)**: Collapses into a single compact line showing the active route and directory, preserving vertical space for the transcript.
 
-### 5.2 Composer (ClioEditor)
+### 4.2 Composer (ClioEditor)
 
 The input surface (`ClioEditor`) frames the operator's prompt:
 - **Rails**: Framed with double vertical rails. Normal input uses pastel teal (`editor`); `yolo` adds muted coral caps (`editorDanger`); active work uses clay orange (`editorAction`). A permission wait carries a moving orange spectrum. The upper rail carries a five-cell thinking meter, with a text label in narrow and screen-reader views.
 - **Steering Affordance**: Queued steering instructions display a `›` marker in `action` orange above the prompt.
 
-### 5.3 Progressively Disclosed Footer
+### 4.3 Progressively Disclosed Footer
 
 The footer anchors live system telemetry across two lines:
 - **Line 1 (Activity & Model)**: Active tool or worker status, model identity, weekly quota headroom, throughput metrics, and context occupancy meter.
 - **Line 2 (Environment & Hints)**: Working directory, Git branch / dirty status, and rotating context hints.
-- **Narrow Terminals**: At narrow widths (<60 columns), secondary tips yield space to essential meters without wrapping.
+- **Notice Slot**: Line 2 has room for one notice. It shows the head of the notice center's order, most severe first and newest within a level, with the level's glyph and token (`✗`, `⚠`, `✓`, `ℹ`). An armed quit or leader key outranks any notice.
+- **Narrow Terminals**: Secondary hints yield space to the context percentage and phase without wrapping; optional counts drop before a number is cut.
 
-### 5.4 State Choreography Table
+### 4.4 State Choreography Table
 
 | Lifecycle State | Composer Rails | Gutter Mark | Footer Indicator |
 | :--- | :--- | :--- | :--- |
@@ -166,7 +208,7 @@ The footer anchors live system telemetry across two lines:
 | **Thinking** | Teal with a travelling clay accent while the composer is empty; effort meter remains on the top rail | `│` (`reason`) | `thinking (r<tokens>)` |
 | **Writing / Streaming** | Teal with a travelling clay accent while the composer is empty | `✦` (`accent`) | `writing` |
 | **Tool Execution** | Teal with a travelling clay accent while the composer is empty | Action class glyph | `running <tool>` |
-| **Worker Dispatched** | Teal with a travelling clay accent while the composer is empty | `⚙` (`agent`) | `N workers active` |
+| **Worker Dispatched** | Teal with a travelling clay accent while the composer is empty | `◆` or `◇` by origin (`agent`) | `N workers active` |
 | **Approval Required** | Moving orange and amber spectrum with `CONFIRM` and decision keys | `?` (`warning`) | `awaiting approval` |
 | **Compacting** | Teal with a travelling clay accent and `COMPACTING` label | `§` (`reason`) | `compacting context` |
 | **Terminal Error** | Teal idle rail after the turn ends; the failure stays in the transcript | `✦` (`error`) | `error` |
@@ -182,7 +224,8 @@ Every transcript row follows a rigid 2-column gutter format:
 - **Prose Head**: `✦ ` followed by text in standard color.
 - **Prose Continuation**: `  ` indented 2 spaces.
 - **Tool Action Row**: Class glyph (`▸`, `§`, `±`, `$`, `↗`, `?`, `⇢`) + verb + scalar target + outcome (`✓ Done · 12ms`).
-- **Worker Rows**: `◆ delegated to <role>` leading into nested worker card (`⚙ running ...`).
+- **Operator Grant**: A call that ran because the operator allowed it at a permission card keeps a rail row under its action row, `? allowed by you · safety-net rail <rule>` or `· autonomy level <level>`, with `?` in `warning`. Compact never folds such a call into its neighbors. The row is live only, because the approval facts never reach the session ledger.
+- **Worker Rows**: The origin mark (`◆` model, `◇` operator) heads the worker block; a running tool inside it shows `⚙`.
 - **Turn Settlement**: Final turn outcome closes the block with outcome in gutter (`✓ Done · 14s · 3 calls · in 100k · out 380`).
 
 ---

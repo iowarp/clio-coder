@@ -5,7 +5,7 @@ import {
 	type DecisionPresentation,
 	decisionFactsForPermission,
 } from "../domains/safety/decision-presentation.js";
-import { type Component, type OverlayOptions, type TUI, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { type Component, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import {
 	MUTATION_PREVIEW_VISIBLE_ROWS,
 	type MutationFacts,
@@ -14,7 +14,7 @@ import {
 	mutationFactsLine,
 	mutationPreviewWindow,
 } from "./mutation-preview.js";
-import { fitHintEntries } from "./overlay-frame.js";
+import { fitHintEntries, fitRow, type RowBudgetedBody } from "./overlay-frame.js";
 import {
 	MUTATION_PREVIEW_KEY,
 	PERMISSION_TERMS_KEY,
@@ -72,44 +72,6 @@ const PERMISSION_OVERLAY_CONTENT_WIDTH = 78;
 export const PERMISSION_OVERLAY_WIDTH = PERMISSION_OVERLAY_CONTENT_WIDTH + 4;
 
 /**
- * Place a permission frame immediately above the live composer in both TUI
- * modes. The editor grows with wrapped and multiline drafts, while the footer
- * can add notice rows, so their rendered heights are the bottom dock rather
- * than a fixed clearance. Regular mode preserves terminal scrollback and may
- * leave that dock above the viewport bottom when the transcript is short.
- * Recompute its viewport row on every frame so draft changes and terminal
- * resizes move the dialog with the composer.
- */
-export function permissionOverlayPlacement(
-	tui: Pick<TUI, "mode" | "render">,
-	editor: Pick<Component, "render">,
-	footer: Pick<Component, "render">,
-): OverlayOptions {
-	const margin = { bottom: 0 };
-	return {
-		anchor: "bottom-center",
-		margin,
-		visible: (termWidth, termHeight) => {
-			const dockHeight = editor.render(termWidth).length + footer.render(termWidth).length;
-			if (tui.mode === "fullscreen") {
-				margin.bottom = dockHeight;
-				return true;
-			}
-
-			const baseHeight = tui.render(termWidth).length;
-			const composerTop = Math.max(0, baseHeight - dockHeight);
-			const viewportStart = Math.max(0, baseHeight - termHeight);
-			const composerViewportRow = composerTop - viewportStart;
-			margin.bottom =
-				composerViewportRow >= 0 && composerViewportRow < termHeight
-					? Math.max(0, termHeight - composerViewportRow)
-					: dockHeight;
-			return true;
-		},
-	};
-}
-
-/**
  * The overlay body, plus the inspection state the key router drives. The
  * preview is built on the first toggle rather than per frame, so the file read
  * and the diff happen once when the operator asks for them.
@@ -124,7 +86,7 @@ export function permissionOverlayPlacement(
  */
 export type PermissionAdvisoryReader = () => string;
 
-export interface PermissionOverlayBodyHandle extends Component {
+export interface PermissionOverlayBodyHandle extends Component, RowBudgetedBody {
 	/** Whether this card has a mutation the operator can read locally. */
 	canInspect(): boolean;
 	isInspecting(): boolean;
@@ -133,6 +95,10 @@ export interface PermissionOverlayBodyHandle extends Component {
 	/** The standing approval terms, folded behind `?` (see `permissionOverlayLines`). */
 	isShowingTerms(): boolean;
 	toggleTerms(): void;
+	/** Whether the card, inspection closed, is taller than its rows and windows itself. */
+	isCardScrollable(): boolean;
+	/** Move that window; false when the card fits and the key is not the card's. */
+	scrollCard(delta: number): boolean;
 }
 
 class PermissionOverlayBody implements PermissionOverlayBodyHandle {
@@ -141,6 +107,9 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	private lastLineCount = 0;
 	private terms = false;
 	private argumentsOpen = false;
+	private bodyRows = 0;
+	private cardScroll = 0;
+	private cardMaxScroll = 0;
 
 	constructor(
 		private readonly view: ApprovalRequestView,
@@ -184,6 +153,21 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 
 	toggleTerms(): void {
 		this.terms = !this.terms;
+		this.cardScroll = 0;
+	}
+
+	setBodyRows(rows: number): void {
+		this.bodyRows = Math.max(0, Math.floor(rows));
+	}
+
+	isCardScrollable(): boolean {
+		return !this.isInspecting() && this.cardMaxScroll > 0;
+	}
+
+	scrollCard(delta: number): boolean {
+		if (!this.isCardScrollable()) return false;
+		this.cardScroll = Math.max(0, Math.min(this.cardScroll + delta, this.cardMaxScroll));
+		return true;
 	}
 
 	render(width: number): string[] {
@@ -203,16 +187,40 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 				),
 			];
 		}
-		if (this.preview === null)
-			return [
-				...permissionOverlayLines(this.view, width, this.terms, this.readAdvisory()),
-				...(this.invocation && !this.inspect
+		if (this.preview === null) {
+			const { facts, rest } = permissionCardSections(this.view, width, this.terms, this.readAdvisory());
+			const tail =
+				this.invocation && !this.inspect
 					? wrapTextWithAnsi(clioTheme().fg("dim", "v · inspect the complete invocation before deciding"), width)
-					: []),
-			];
+					: [];
+			return this.windowCard(facts, rest, tail, width);
+		}
 		const rendered = permissionInspectionLines(this.view, this.preview, width, this.scroll);
 		this.lastLineCount = rendered.wrappedLineCount;
 		return rendered.lines;
+	}
+
+	/**
+	 * The card in the rows the frame has. The facts that identify the call stay
+	 * put and the terms or plan below them scroll, because the frame's own cut
+	 * hid the end of the Stop consequence at 60x40 with nothing that reached it
+	 * (BT-005). With no known budget, or no room for a window, the card renders
+	 * whole and the frame's cut still marks what is missing.
+	 */
+	private windowCard(facts: string[], rest: string[], tail: string[], width: number): string[] {
+		const whole = [...facts, ...rest, ...tail];
+		const room = this.bodyRows - facts.length - tail.length - 1;
+		if (this.bodyRows <= 0 || whole.length <= this.bodyRows || room < 1) {
+			this.cardMaxScroll = 0;
+			this.cardScroll = 0;
+			return whole;
+		}
+		this.cardMaxScroll = rest.length - room;
+		this.cardScroll = Math.min(this.cardScroll, this.cardMaxScroll);
+		const end = this.cardScroll + room;
+		const back = this.terms ? ` · ${PERMISSION_TERMS_KEY} back` : "";
+		const position = clioTheme().fg("dim", `${this.cardScroll + 1}–${end} of ${rest.length} rows · ↑↓ scroll${back}`);
+		return [...facts, ...rest.slice(this.cardScroll, end), fitRow(position, width), ...tail];
 	}
 
 	/**
@@ -304,8 +312,9 @@ export function permissionOverlayHint(
 	composerHasDraft = false,
 	inspection: PermissionInspectionHint = "none",
 	terms: PermissionTermsHint = "closed",
+	scrollable = false,
 ): string {
-	return fitHintEntries(permissionHintEntries(composerHasDraft, inspection, terms), innerWidth - 3);
+	return fitHintEntries(permissionHintEntries(composerHasDraft, inspection, terms, scrollable), innerWidth - 3);
 }
 
 /** The tools whose parked call mutates a file, so a card without a preview owes the operator a reason. */
@@ -395,14 +404,19 @@ function termsSummary(presentation: DecisionPresentation, actionClass: string): 
  * `?` and the card leads with what changes per call: the tool, the target in
  * full, the mutation facts, and who asked.
  */
-function permissionOverlayLines(view: ApprovalRequestView, width: number, terms = false, advisory = ""): string[] {
+function permissionCardSections(
+	view: ApprovalRequestView,
+	width: number,
+	terms = false,
+	advisory = "",
+): { facts: string[]; rest: string[] } {
 	const content = Math.max(8, Math.floor(width));
 	const presentation = permissionDecisionPresentation(view);
 	// The parked call is awaiting a decision, not blocked: the raw rejection
 	// short ("<tool> blocked: <class>") is never rendered here because its
 	// wording contradicts the ask. Tool, Target, Action, and the asking axis
 	// carry everything the operator needs to decide.
-	const lines = [
+	const facts = [
 		...field("Tool: ", `${view.tool} · Action: ${view.actionClass}`, content),
 		...(view.target !== undefined && view.target.length > 0 ? field("Target: ", view.target, content) : []),
 		// Size and digest stay on the collapsed card whether or not the operator
@@ -428,6 +442,8 @@ function permissionOverlayLines(view: ApprovalRequestView, width: number, terms 
 		// styling keeps it from reading as a verdict at a glance.
 		...(advisory.length > 0 ? wrapSentence(clioTheme().fg("dim", advisory), content) : []),
 		...(view.queueDepth !== undefined && view.queueDepth > 1 ? [`1 of ${view.queueDepth} parked`] : []),
+	];
+	const rest = [
 		...(view.artifact !== undefined
 			? [
 					"",
@@ -438,10 +454,10 @@ function permissionOverlayLines(view: ApprovalRequestView, width: number, terms 
 		"",
 	];
 	if (!terms) {
-		lines.push(...wrapSentence(termsSummary(presentation, view.actionClass), content));
-		return lines;
+		rest.push(...wrapSentence(termsSummary(presentation, view.actionClass), content));
+		return { facts, rest };
 	}
-	lines.push(
+	rest.push(
 		...wrapSentence(`Approval: ${presentation.authorizationCopy}`, content),
 		...wrapSentence(`Consequence: ${presentation.consequenceCopy}`, content),
 		...wrapSentence(presentation.reversibilityCopy, content),
@@ -449,7 +465,7 @@ function permissionOverlayLines(view: ApprovalRequestView, width: number, terms 
 		...wrapSentence(`Stop: ${actionConsequence(presentation, "stop")}`, content),
 		...wrapSentence("Hard-blocked actions remain blocked.", content),
 	);
-	return lines;
+	return { facts, rest };
 }
 
 /**

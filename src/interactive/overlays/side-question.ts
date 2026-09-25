@@ -8,7 +8,7 @@
 
 import { type Component, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, GLYPH, rule } from "../theme/index.js";
+import { animationStep, clioTheme, GLYPH, rule, spinnerFrame } from "../theme/index.js";
 
 export const SIDE_QUESTION_OVERLAY_TITLE = "Side question";
 
@@ -81,21 +81,25 @@ function formatSideQuestionBody(
 	return lines;
 }
 
-const SPINNER_FRAMES = ["·", "•", "●", "•"] as const;
-
-class SideQuestionOverlayBody implements Component {
+/**
+ * The spinner steps on the shared animation clock. It used to advance once per
+ * render, so it sped up with the frame rate and spent the running glyph `●` as
+ * a spinner frame.
+ */
+export class SideQuestionOverlayBody implements Component {
 	private phase: SideQuestionOverlayPhase = { kind: "streaming", text: "" };
-	private frame = 0;
 
-	constructor(private readonly question: string) {}
+	constructor(
+		private readonly question: string,
+		private readonly now: () => number = Date.now,
+	) {}
 
 	set(phase: SideQuestionOverlayPhase): void {
 		this.phase = phase;
 	}
 
 	render(width: number): string[] {
-		if (this.phase.kind === "streaming") this.frame = (this.frame + 1) % SPINNER_FRAMES.length;
-		return formatSideQuestionBody(this.question, this.phase, width, SPINNER_FRAMES[this.frame] ?? "·");
+		return formatSideQuestionBody(this.question, this.phase, width, spinnerFrame(animationStep(this.now())));
 	}
 
 	invalidate(): void {}

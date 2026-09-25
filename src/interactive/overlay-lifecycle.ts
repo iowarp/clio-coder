@@ -15,10 +15,8 @@ import { createOverlaySessionLifecycle } from "./overlay-session-lifecycle.js";
 import { createOverlayTransitions } from "./overlay-transitions.js";
 import {
 	createPermissionOverlayBody,
-	PERMISSION_OVERLAY_WIDTH,
 	type PermissionOverlayBodyHandle,
 	permissionOverlayHint,
-	permissionOverlayPlacement,
 	permissionOverlayTitle,
 	permissionOverlayTone,
 } from "./permission-overlay.js";
@@ -194,6 +192,8 @@ export interface OverlayLifecycleController {
 	scrollMutationInspection(delta: number): void;
 	/** Fold or unfold the standing approval terms on the live permission card. */
 	togglePermissionTerms(): void;
+	/** Scroll a permission card taller than its rows; false when the card fits. */
+	scrollPermissionCard(delta: number): boolean;
 	cancelAskUser(): void;
 	dispose(): void;
 }
@@ -318,8 +318,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			const body = createPermissionOverlayBody(view, inspect, invocation, advisory);
 			permissionBody = body;
 			const handle = showOverlayFrame(tui, body, {
-				...permissionOverlayPlacement(tui, editor, footer.view),
-				width: PERMISSION_OVERLAY_WIDTH,
+				// The card docks above the composer's own rows: a steer typed while
+				// the call is parked is what the CONFIRM rail is for.
+				keepComposer: true,
 				// Not derived from the title: that one is classified per decision
 				// axis and is one of five strings for the same modal.
 				markerId: "permission-confirm",
@@ -334,6 +335,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 						editor.getText().length > 0,
 						inspectionHint(),
 						body.isShowingTerms() ? "open" : "closed",
+						body.isCardScrollable(),
 					),
 			});
 			if (!overlayTransitions.showPermission(handle)) {
@@ -598,6 +600,11 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		togglePermissionTerms: () => {
 			permissionBody?.toggleTerms();
 			tui.requestRender();
+		},
+		scrollPermissionCard: (delta) => {
+			const consumed = permissionBody?.scrollCard(delta) ?? false;
+			if (consumed) tui.requestRender();
+			return consumed;
 		},
 		cancelAskUser: overlayAskUser.cancel,
 		dispose: () => {
