@@ -1,11 +1,12 @@
 /**
  * Transcript notices. Every notice the transcript keeps is one block with a
  * mark in the gutter, like every other block: `ℹ` information, `✓` success,
- * `⚠` a warning, `✗` an error and `↻` a provider retry. The mark carries the
- * level in shape and color, the text stays `muted`, and a wrapped notice hangs
- * in the content column. The `[Clio Coder]` product tag is dropped because the
- * whole transcript is Clio's; a subsystem tag such as `[/context compact]` or
- * `[model]` stays, dim, because it names which part of Clio is speaking.
+ * `⚠` a warning, `✗` an error, `↻` a provider retry and `⊘` a turn the
+ * operator cancelled. The mark carries the level in shape and color, the text
+ * stays `muted`, and a wrapped notice hangs in the content column. The
+ * `[Clio Coder]` product tag is dropped because the whole transcript is
+ * Clio's; a subsystem tag such as `[/context compact]` or `[model]` stays,
+ * dim, because it names which part of Clio is speaking.
  *
  * Pure: no I/O, no module-level mutable state beyond the shared theme handle.
  */
@@ -21,7 +22,7 @@ const theme = clioTheme();
 const LEADING_TAG = /^(\[[^\]]+\])([\s\S]*)$/u;
 const PRODUCT_TAG = /^\s*\[Clio Coder\]\s*/u;
 
-export type NoticeMark = "info" | "success" | "warning" | "error" | "retry";
+export type NoticeMark = "info" | "success" | "warning" | "error" | "retry" | "cancelled";
 
 const MARKS: Readonly<Record<NoticeMark, { glyph: string; token: ClioToken }>> = {
 	info: { glyph: GLYPH.info, token: "info" },
@@ -29,6 +30,9 @@ const MARKS: Readonly<Record<NoticeMark, { glyph: string; token: ClioToken }>> =
 	warning: { glyph: GLYPH.warn, token: "warning" },
 	error: { glyph: GLYPH.error, token: "error" },
 	retry: { glyph: GLYPH.phaseRetry, token: "warning" },
+	// An operator cancel is not a warning; the footer settles the same turn as
+	// `⊘ cancelled`, so its closing row matches (BT-013).
+	cancelled: { glyph: GLYPH.cancelled, token: "dim" },
 };
 
 /** A leading bracketed tag in `dim`, the message in `muted`; untagged text passes unchanged. */
