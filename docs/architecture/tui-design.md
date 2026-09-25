@@ -261,3 +261,5 @@ The model picker uses an accent check for the active model; scoped and default s
 The task summary yields to context activity only when the context summary fits the viewport.
 
 Status meters paint structured, bounded cells using the shared meter glyphs.
+
+Board and context spinners use the shared animation cadence.

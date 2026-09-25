@@ -33,6 +33,7 @@ import { formatFooterTokens } from "./footer-panel.js";
 import { routeWeeklyQuota } from "./quota-view.js";
 import { presentWorkerContractAnswer, safeWorkerAnswerText } from "./renderers/worker-answer.js";
 import {
+	animationStep,
 	type ClioTheme,
 	type ClioToken,
 	clioTheme,
@@ -619,7 +620,7 @@ function renderDispatchCard(
 	const detail = terminalDetail(row);
 
 	const presentation = dispatchStatusPresentation(row.status, {
-		...(row.status === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
+		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
 	// Only a running glyph takes action orange; its word and the card's cost and
 	// TTFT remain neutral telemetry.
@@ -791,7 +792,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: Readon
 	const dot = dotSep(theme);
 	const presentation = dispatchStatusPresentation(row.status, {
 		compact: true,
-		...(row.status === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
+		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
 	const glyph = theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph);
 	// A running row says what the run is doing in the inline card's words: the
@@ -882,7 +883,7 @@ function councilMemberView(
 ): CouncilMemberView {
 	const presentation = dispatchStatusPresentation(row.status, {
 		compact: true,
-		...(row.status === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
+		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
 	return {
 		runId: row.runId,
@@ -933,7 +934,7 @@ function foldCouncilGroup(
 	);
 	const presentation = dispatchStatusPresentation(aggregate?.[0] ?? "running", {
 		compact: true,
-		...(aggregate?.[0] === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
+		...(aggregate?.[0] === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
 	const members = [...newest.entries()]
 		.sort(([left], [right]) => left.localeCompare(right))

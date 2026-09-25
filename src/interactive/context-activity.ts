@@ -7,7 +7,16 @@ import {
 } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
-import { type ClioTheme, clioTheme, formatCompactMs, frame, GLYPH, padAnsi, spinnerFrame } from "./theme/index.js";
+import {
+	animationStep,
+	type ClioTheme,
+	clioTheme,
+	formatCompactMs,
+	frame,
+	GLYPH,
+	padAnsi,
+	spinnerFrame,
+} from "./theme/index.js";
 
 export interface ContextActivitySnapshot {
 	kind: ContextActivityKind;
@@ -119,7 +128,7 @@ export function formatContextActivityIslandLines(
 	activity: ContextActivitySnapshot,
 	width = CONTEXT_ISLAND_WIDTH,
 	now = Date.now(),
-	tick = Math.floor(now / 100),
+	tick = animationStep(now),
 ): string[] {
 	const theme = clioTheme();
 	const bodyWidth = Math.max(1, width - 4);
