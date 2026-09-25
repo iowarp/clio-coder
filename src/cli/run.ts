@@ -17,7 +17,7 @@ import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatc
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
-import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
+import { ensureClioState } from "../domains/lifecycle/index.js";
 import {
 	buildMemoryPromptSection,
 	canonicalMemoryRepositoryIdentity,
@@ -521,7 +521,6 @@ async function runDispatch(
 			// run's durable transcript.
 			journalRunEvents: true,
 		}),
-		LifecycleDomainModule,
 	]);
 	const config = loaded.getContract<ConfigContract>("config");
 	const baseSettings = config?.get() ?? readSettings();

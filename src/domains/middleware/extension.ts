@@ -7,7 +7,7 @@ import {
 } from "./budget.js";
 import type { MiddlewareContract } from "./contract.js";
 import { createMiddlewareRegistrationTable } from "./registrations.js";
-import { cloneMiddlewareRule, listMiddlewareRuleDefinitions } from "./rules.js";
+import { listMiddlewareRuleDefinitions } from "./rules.js";
 import {
 	type MiddlewareDiagnosticSink,
 	type MiddlewareHookRegistration,
@@ -81,9 +81,6 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 			return runMiddlewareAsyncRegistrations(input, registrations, priorEffects, {
 				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
 			});
-		},
-		listRules() {
-			return ruleDefinitions.map((definition) => cloneMiddlewareRule(definition.rule));
 		},
 		snapshot() {
 			return createMiddlewareSnapshot(ruleDefinitions.map((definition) => definition.rule));

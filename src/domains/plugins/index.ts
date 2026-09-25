@@ -1,13 +1,11 @@
 import type { DomainModule } from "../../core/domain-loader.js";
-import type { PluginsContract } from "./contract.js";
 import { createPluginsBundle } from "./extension.js";
 import { PluginsManifest } from "./manifest.js";
 
-export const PluginsDomainModule: DomainModule<PluginsContract> = {
+export const PluginsDomainModule: DomainModule = {
 	manifest: PluginsManifest,
 	createExtension: createPluginsBundle,
 };
-export type { PluginsContract } from "./contract.js";
 export {
 	discoverPluginPackages,
 	isPluginId,

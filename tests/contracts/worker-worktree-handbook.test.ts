@@ -42,11 +42,8 @@ test("a worker in a task worktree receives the source checkout's untracked handb
 	const base = dispatchStubContext({ settings });
 	let delivered: ReadonlyArray<{ body: string }> = [];
 	let workerCwd = "";
-	const context: Pick<ContextContract, "renderPromptContext" | "projectStructuredContext"> = {
+	const context: Pick<ContextContract, "renderPromptContext"> = {
 		renderPromptContext: (cwd) => renderPromptContext(cwd),
-		projectStructuredContext() {
-			throw new Error("must use captured authored source");
-		},
 	};
 	const bundle = makeDispatchBundle(
 		{

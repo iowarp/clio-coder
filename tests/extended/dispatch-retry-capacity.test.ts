@@ -54,7 +54,6 @@ async function retryFixture(
 			scheduling: {
 				preflight: () => ({ verdict: "under", ...budget }),
 				maxWorkers: () => options.maxWorkers ?? 4,
-				checkCeiling: (usd) => (usd < budget.ceilingUsd ? "under" : usd === budget.ceilingUsd ? "at" : "over"),
 			},
 		}),
 		{

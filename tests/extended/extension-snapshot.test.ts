@@ -213,7 +213,7 @@ describe("extension reload generations", () => {
 		});
 		bundle.extension.start();
 		strictEqual(bundle.contract.snapshot(), null, "start binds an empty store and publishes nothing");
-		strictEqual(bundle.contract.generation(), 0);
+		strictEqual(bundle.contract.snapshot()?.generation ?? 0, 0);
 		strictEqual(extensionSnapshotFor(project).generation, 0, "readers take the ephemeral path");
 		const boot = publish(bundle);
 		strictEqual(boot.generation, 1);
@@ -235,10 +235,10 @@ describe("extension reload generations", () => {
 		strictEqual(rejected.reason, "build-failed");
 		strictEqual(rejected.generation, 4);
 		strictEqual(rejected.diagnostics.entries[0]?.message, "simulated listing failure");
-		strictEqual(bundle.contract.generation(), 4);
+		strictEqual(bundle.contract.snapshot()?.generation ?? 0, 4);
 		const recovered = publish(bundle);
 		strictEqual(recovered.generation, 6, "the failed candidate burned generation 5");
-		strictEqual(bundle.contract.generation(), 6);
+		strictEqual(bundle.contract.snapshot()?.generation ?? 0, 6);
 		bundle.extension.stop?.();
 	});
 
@@ -276,7 +276,7 @@ describe("extension reload generations", () => {
 		second.candidate.publish();
 		strictEqual(bundle.contract.snapshot(), second.candidate.snapshot);
 		strictEqual(second.candidate.current(), false, "a published candidate is settled");
-		strictEqual(bundle.contract.generation(), 3);
+		strictEqual(bundle.contract.snapshot()?.generation ?? 0, 3);
 		bundle.extension.stop?.();
 	});
 
@@ -326,7 +326,7 @@ describe("extension reload generations", () => {
 			[["elsewhere", 0]],
 			"another cwd gets an ephemeral generation-0 projection",
 		);
-		strictEqual(bundle.contract.generation(), 2);
+		strictEqual(bundle.contract.snapshot()?.generation ?? 0, 2);
 		bundle.extension.stop?.();
 		strictEqual(extensionSnapshotFor(project).generation, 0, "stop unbinds the store");
 	});

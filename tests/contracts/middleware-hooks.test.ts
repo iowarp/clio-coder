@@ -363,7 +363,7 @@ describe("middleware generation-owned registrations", () => {
 		const after = middleware.runHook(PROBE);
 		deepStrictEqual(after.ruleIds, [FIXED_RULE_ID, "host.x", "u"]);
 		deepStrictEqual(messages(after.effects), [FIXED_RULE_ID, "host.x", "host-u"]);
-		strictEqual(middleware.listRules()[0]?.id, builtinId, "builtin rules stay first in the declarative order");
+		strictEqual(middleware.snapshot().rules[0]?.id, builtinId, "builtin rules stay first in the declarative order");
 	});
 
 	it("anchors the owned slot where it was first applied and keeps it there across replacements", () => {
@@ -455,7 +455,7 @@ describe("middleware registration table publication", () => {
 	it("holds one copy-on-write state reference and publishes with an assignment that cannot refuse", () => {
 		const middleware = ownedBundle();
 		const before = middleware.runHook(PROBE);
-		const listBefore = middleware.listRules();
+		const listBefore = middleware.snapshot().rules;
 		ok(listBefore.length > 0);
 		const prepared = middleware.prepareRegistrationReplacement("user-hooks", 1, [emitting("u")]);
 		strictEqual(prepared.status, "prepared");

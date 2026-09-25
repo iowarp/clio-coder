@@ -1,9 +1,8 @@
 import { readSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { acceptInteropAgents, declineInteropAgents, interopBootHint, interopProposals } from "./consent.js";
+import { acceptInteropAgents, declineInteropAgents, interopProposals } from "./consent.js";
 import type { InteropContract } from "./contract.js";
 import { detectInteropAgents } from "./detect.js";
-import { INTEROP_AGENT_KINDS } from "./registry.js";
 import { readInteropReport } from "./state.js";
 import type { InteropReport } from "./types.js";
 
@@ -17,9 +16,6 @@ export function createInteropBundle(_context: DomainContext): DomainBundle<Inter
 		},
 	};
 	const contract: InteropContract = {
-		kinds() {
-			return INTEROP_AGENT_KINDS;
-		},
 		async detect(input = {}) {
 			detected = await detectInteropAgents(input, detected?.agents);
 			return detected;
@@ -50,9 +46,6 @@ export function createInteropBundle(_context: DomainContext): DomainBundle<Inter
 			const result = declineInteropAgents(ids, detected ?? readInteropReport() ?? EMPTY_REPORT);
 			detected = readInteropReport() ?? detected;
 			return result;
-		},
-		bootHint(report) {
-			return interopBootHint(report, readSettings());
 		},
 	};
 	return { extension, contract };

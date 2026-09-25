@@ -7,12 +7,11 @@ import type { ChangeKind, ConfigDiff } from "./classify.js";
  */
 export interface ConfigContract {
 	get(): Readonly<ClioSettings>;
-	set?(next: ClioSettings): void;
 	/**
 	 * Cross-process-safe read-modify-write: the mutator runs against the
 	 * freshest on-disk settings while holding the advisory settings lock, so
 	 * two processes patching different fields cannot drop each other's writes.
-	 * Refreshes the in-memory snapshot and dispatches change events like set.
+	 * Refreshes the in-memory snapshot and dispatches change events.
 	 */
 	update?(mutate: SettingsMutator): void;
 	/** Save an explicit edit to this workspace's trusted private settings layer. */

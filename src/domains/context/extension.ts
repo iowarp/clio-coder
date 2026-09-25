@@ -20,7 +20,6 @@ import type { ContextContract, ContextState } from "./contract.js";
 import { renderPromptContext } from "./prompt-context.js";
 import { runContextRefresh } from "./refresh.js";
 import { type ClioProjectState, readClioState, writeClioState } from "./state.js";
-import { runWikiGenerate } from "./wiki/generate.js";
 
 /**
  * Persist the current Clio state for `cwd`, preserving imported-context source
@@ -382,47 +381,7 @@ export function createContextBundle(
 				throw err;
 			}
 		},
-		async runWikiGenerate(input) {
-			const emitProgress = (event: Omit<ContextActivityPayload, "kind" | "at">): void => {
-				_context.bus.emit(BusChannels.ContextActivity, { kind: "context-wiki", at: Date.now(), ...event });
-				input?.onProgress?.(event);
-			};
-			try {
-				return await runWikiGenerate({
-					...(input ?? { model: "configured-clio-target" }),
-					decisions: input?.decisions ?? (await currentDecisions(_context)),
-					onProgress: emitProgress,
-				});
-			} catch (err) {
-				emitProgress({
-					phase: "done",
-					status: "failed",
-					message: "context wiki failed",
-					detail: err instanceof Error ? err.message : String(err),
-				});
-				throw err;
-			}
-		},
 		renderPromptContext,
-		projectStructuredContext(cwd = process.cwd()) {
-			const clio = loadProjectClioMd(cwd).value;
-			if (!clio) return null;
-			// Exact-title allowlist: "Verification expectations" is the only
-			// custom section ever projected to workers (verification class only,
-			// enforced dispatch-side). Same case-insensitive comparison as
-			// clio-md's sectionBody().
-			const verificationBody = clio.sections
-				.filter((section) => section.title.toLowerCase() === "verification expectations")
-				.map((section) => section.body.trim())
-				.filter((body) => body.length > 0)
-				.join("\n\n");
-			return {
-				projectName: clio.projectName,
-				conventions: [...clio.conventions],
-				invariants: [...clio.invariants],
-				...(verificationBody.length > 0 ? { verificationExpectations: verificationBody } : {}),
-			};
-		},
 		contextState: contextState.read,
 		startupHints: () => [...startupHints],
 		noteFileChanges,

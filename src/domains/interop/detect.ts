@@ -222,7 +222,6 @@ export async function detectInteropAgents(
 			...(prior?.decision !== undefined ? { decision: prior.decision } : {}),
 			...(prior?.decidedAt !== undefined ? { decidedAt: prior.decidedAt } : {}),
 			...(prior?.decidedFingerprint !== undefined ? { decidedFingerprint: prior.decidedFingerprint } : {}),
-			...(prior?.hintedFingerprint !== undefined ? { hintedFingerprint: prior.hintedFingerprint } : {}),
 		});
 	}
 

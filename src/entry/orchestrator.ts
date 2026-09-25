@@ -65,12 +65,7 @@ import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.
 import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
-import {
-	describeUpgradeNotice,
-	ensureClioState,
-	LifecycleDomainModule,
-	takeUpgradeNotice,
-} from "../domains/lifecycle/index.js";
+import { describeUpgradeNotice, ensureClioState, takeUpgradeNotice } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import {
 	createTaskMemoryTelemetrySink,
@@ -202,7 +197,6 @@ import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
-import { ToolchainDomainModule } from "../domains/toolchain/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
@@ -1349,7 +1343,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// Live probes exercise this session's chat model once the effective view
 			// exists (assigned below with dispatch's); until then, the shared snapshot.
 			createProvidersDomainModule({ getSettings: () => effectiveSettingsForDispatch?.() }),
-			ToolchainDomainModule,
 			SafetyDomainModule,
 			createPromptsDomainModule({
 				noContextFiles: options.noContextFiles === true,
@@ -1385,7 +1378,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// the last of the three ever reaches that registry.
 				journalRunEvents: true,
 			}),
-			LifecycleDomainModule,
 		],
 		{ diagnostic: bootStderr, ...(bootPhaseBoundary ? { beforeEach: bootPhaseBoundary } : {}) },
 	);

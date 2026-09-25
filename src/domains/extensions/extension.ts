@@ -1,13 +1,6 @@
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { ExtensionsContract } from "./contract.js";
-import {
-	disableExtension,
-	discoverExtensionPackages,
-	enableExtension,
-	installExtension,
-	listInstalledExtensions,
-	removeExtension,
-} from "./manager.js";
+import { listInstalledExtensions } from "./manager.js";
 import {
 	type BuildExtensionSnapshotInput,
 	buildExtensionSnapshot,
@@ -84,26 +77,8 @@ export function createExtensionsBundle(
 		list(cwd, options = {}) {
 			return listInstalledExtensions(cwd, options);
 		},
-		discover(root) {
-			return discoverExtensionPackages(root);
-		},
-		install(root, options = {}) {
-			return installExtension(root, options);
-		},
-		enable(id, options = {}) {
-			return enableExtension(id, options);
-		},
-		disable(id, options = {}) {
-			return disableExtension(id, options);
-		},
-		remove(id, options = {}) {
-			return removeExtension(id, options);
-		},
 		snapshot() {
 			return store.current();
-		},
-		generation() {
-			return store.current()?.generation ?? 0;
 		},
 		prepareReload() {
 			if (inFlight !== null) return rejected("reentrant", { entries: [], truncated: 0 });

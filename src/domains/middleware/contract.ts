@@ -4,13 +4,7 @@ import type {
 	ReplaceRegistrationsReport,
 } from "./registrations.js";
 import type { MiddlewareDiagnosticSink, MiddlewareHookRegistration } from "./runtime.js";
-import type {
-	MiddlewareEffect,
-	MiddlewareHookInput,
-	MiddlewareHookResult,
-	MiddlewareRule,
-	MiddlewareSnapshot,
-} from "./types.js";
+import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookResult, MiddlewareSnapshot } from "./types.js";
 
 export interface MiddlewareContract {
 	runHook(input: MiddlewareHookInput): MiddlewareHookResult;
@@ -19,7 +13,6 @@ export interface MiddlewareContract {
 		input: MiddlewareHookInput,
 		priorEffects?: ReadonlyArray<MiddlewareEffect>,
 	): Promise<MiddlewareHookResult>;
-	listRules(): ReadonlyArray<MiddlewareRule>;
 	snapshot(): MiddlewareSnapshot;
 	/**
 	 * Append a coded hook registration after every existing rule and

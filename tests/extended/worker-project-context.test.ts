@@ -34,13 +34,10 @@ for (const scenario of [
 		const base = dispatchStubContext({ settings });
 		let reads = 0;
 		let delivered: ReadonlyArray<{ body: string }> = [];
-		const context: Pick<ContextContract, "renderPromptContext" | "projectStructuredContext"> = {
+		const context: Pick<ContextContract, "renderPromptContext"> = {
 			renderPromptContext(cwd) {
 				reads++;
 				return renderPromptContext(cwd);
-			},
-			projectStructuredContext() {
-				throw new Error("must use captured authored source");
 			},
 		};
 		const bundle = makeDispatchBundle(

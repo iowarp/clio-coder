@@ -79,8 +79,6 @@ export interface InteropAgentRecord extends InteropAgentFacts {
 	decidedAt?: string;
 	/** Fingerprint the decision was made against; a change re-proposes the agent. */
 	decidedFingerprint?: string;
-	/** Fingerprint the boot hint last named, so unchanged facts stay silent. */
-	hintedFingerprint?: string;
 }
 
 export interface InteropReport {

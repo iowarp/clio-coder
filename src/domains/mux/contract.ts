@@ -139,8 +139,6 @@ export interface MuxContract extends DomainContract {
 	 * cannot see. False when nothing was zoomed or the tier is absent.
 	 */
 	unzoomSelf(): Promise<boolean>;
-	/** Set a dock's share of its axis. False when the slot has no dock or the tier is absent. */
-	resizeDock(slot: DockSlot, share: number): Promise<boolean>;
 	/** Live dock geometry states, for `/panes` status. */
 	docks(): ReadonlyArray<DockState>;
 	notify(request: MuxNotifyRequest): Promise<void>;
@@ -493,11 +491,6 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 				},
 				false,
 			);
-		},
-
-		async resizeDock(slot: DockSlot, share: number): Promise<boolean> {
-			if (!docks) return false;
-			return await attempt("resizeDock", () => docks.resize(slot, share), false);
 		},
 
 		docks(): ReadonlyArray<DockState> {

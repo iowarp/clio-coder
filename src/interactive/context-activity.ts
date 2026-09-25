@@ -26,19 +26,12 @@ interface ContextActivityEntry extends ContextActivitySnapshot {}
 
 export const CONTEXT_ISLAND_WIDTH = 52;
 const PHASES: ReadonlyArray<ContextActivityPhase> = ["scan", "codewiki", "generate", "clio-md", "state", "done"];
-/**
- * A wiki run only ever emits codewiki, generate, state, and done. Trailing the
- * bootstrap phases it never reaches would leave `scan` and `CLIO-CODER.md` dimmed for
- * the whole run and would stretch the progress bar across steps that cannot
- * happen.
- */
-const WIKI_PHASES: ReadonlyArray<ContextActivityPhase> = ["codewiki", "generate", "state", "done"];
 /** Compaction is one bounded operation, not the five-stage context-init pipeline. */
 const COMPACTION_PHASES: ReadonlyArray<ContextActivityPhase> = ["compact", "done"];
 const PHASE_LABELS: Record<ContextActivityPhase, string> = {
 	scan: "scan",
-	// "index" rather than "wiki": this phase is the codewiki index build, and
-	// `context-wiki` runs made the old label ambiguous with the Markdown wiki.
+	// "index" rather than "wiki": this phase is the codewiki index build, which
+	// the old label confused with the Markdown wiki.
 	codewiki: "index",
 	generate: "draft",
 	"clio-md": "CLIO-CODER.md",
@@ -46,28 +39,21 @@ const PHASE_LABELS: Record<ContextActivityPhase, string> = {
 	compact: "compact",
 	done: "done",
 };
-const WIKI_PHASE_LABELS: Partial<Record<ContextActivityPhase, string>> = {
-	generate: "pages",
-	state: "promote",
-};
 const TERMINAL_RETENTION_MS = 4_000;
 
 const KINDS: ReadonlySet<string> = new Set<ContextActivityKind>([
 	"context-init",
 	"context-clear",
 	"context-refresh",
-	"context-wiki",
 	"compaction",
 ]);
 const PHASE_SET: ReadonlySet<string> = new Set<ContextActivityPhase>([...PHASES, ...COMPACTION_PHASES]);
 
 function phasesFor(kind: ContextActivityKind): ReadonlyArray<ContextActivityPhase> {
-	if (kind === "compaction") return COMPACTION_PHASES;
-	return kind === "context-wiki" ? WIKI_PHASES : PHASES;
+	return kind === "compaction" ? COMPACTION_PHASES : PHASES;
 }
 
-function phaseLabel(kind: ContextActivityKind, phase: ContextActivityPhase): string {
-	if (kind === "context-wiki") return WIKI_PHASE_LABELS[phase] ?? PHASE_LABELS[phase];
+function phaseLabel(phase: ContextActivityPhase): string {
 	return PHASE_LABELS[phase];
 }
 const STATUSES: ReadonlySet<string> = new Set<ContextActivityStatus>(["started", "running", "completed", "failed"]);
@@ -115,7 +101,7 @@ function phaseTrail(theme: ClioTheme, activity: ContextActivitySnapshot, width: 
 	const parts = phasesFor(activity.kind)
 		.slice(0, -1)
 		.map((phase, index) => {
-			const label = phaseLabel(activity.kind, phase);
+			const label = phaseLabel(phase);
 			if (index < currentIndex) return theme.fg("success", label);
 			if (index === currentIndex && activity.status !== "completed") return theme.fg("accent", label);
 			return theme.fg("dim", label);
@@ -126,7 +112,7 @@ function phaseTrail(theme: ClioTheme, activity: ContextActivitySnapshot, width: 
 function statusLabel(theme: ClioTheme, activity: ContextActivitySnapshot, tick: number): string {
 	if (activity.status === "failed") return theme.fg("error", `${GLYPH.error} failed`);
 	if (activity.status === "completed") return theme.fg("success", `${GLYPH.ok} done`);
-	return theme.fg("accent", `${spinnerFrame(tick)} ${phaseLabel(activity.kind, activity.phase)}`);
+	return theme.fg("accent", `${spinnerFrame(tick)} ${phaseLabel(activity.phase)}`);
 }
 
 export function formatContextActivityIslandLines(
@@ -142,11 +128,9 @@ export function formatContextActivityIslandLines(
 			? "Context Init"
 			: activity.kind === "context-refresh"
 				? "Context Refresh"
-				: activity.kind === "context-wiki"
-					? "Context Wiki"
-					: activity.kind === "compaction"
-						? "Context Compact"
-						: "Context";
+				: activity.kind === "compaction"
+					? "Context Compact"
+					: "Context";
 	const elapsedMs = Math.max(0, (activity.completedAtMs ?? now) - activity.startedAtMs);
 	const topLine = `${theme.style("accent", title, { bold: true })} ${theme.fg("dim", "·")} ${statusLabel(theme, activity, tick)} ${theme.fg("dim", "·")} ${theme.fg("info", formatCompactMs(elapsedMs))}`;
 	const barWidth = Math.max(8, Math.min(24, bodyWidth - 10));

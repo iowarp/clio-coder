@@ -3,7 +3,6 @@ import type { RunBootstrapInput, RunBootstrapResult } from "./bootstrap.js";
 import type { RunContextClearInput, RunContextClearResult } from "./clear.js";
 import type { ParsedClioMd } from "./clio-md.js";
 import type { RunContextRefreshInput, RunContextRefreshResult } from "./refresh.js";
-import type { RunWikiGenerateInput, RunWikiGenerateResult } from "./wiki/generate.js";
 
 export interface ProjectPromptContext {
 	text: string;
@@ -52,14 +51,7 @@ export interface ContextContract extends DomainContract {
 	 * Backs `/context refresh` and `clio-coder context refresh`.
 	 */
 	runContextRefresh(input?: RunContextRefreshInput): Promise<RunContextRefreshResult>;
-	runWikiGenerate(input?: RunWikiGenerateInput): Promise<RunWikiGenerateResult>;
 	renderPromptContext(cwd: string): ProjectPromptContext;
-	/**
-	 * Effective project handbook fields (project name, conventions, invariants)
-	 * or null when no selected handbook has a structured projection. Never returns raw handbook
-	 * text; used by dispatch to give workers bounded project context.
-	 */
-	projectStructuredContext(cwd?: string): ProjectStructuredContext | null;
 	contextState(cwd?: string): ContextState;
 	startupHints(): string[];
 	/**

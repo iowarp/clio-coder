@@ -22,11 +22,13 @@ src/
 ```
 
 Feature-domain directories include the following. Not every row is a loaded
-`DomainModule`: the orchestrator currently loads config, extensions, interop,
-plugins, resources, share, context, providers, toolchain, safety, prompts,
-agents, middleware, session, observability, scheduling, dispatch, and
-lifecycle, plus mux when the pane tier is active. The other rows are libraries
-or CLI-owned feature areas.
+`DomainModule`: the orchestrator currently loads config, extensions, plugins,
+interop, resources, share, context, providers, safety, prompts, agents,
+middleware, session, observability, scheduling, and dispatch, plus mux when
+the pane tier is active. The plugins domain publishes no contract; it stays
+loaded so teardown drops cached plugin snapshots. The other rows, lifecycle
+and toolchain included, are libraries or CLI-owned feature areas whose module
+functions callers import directly.
 
 | Domain | Primary source | Public surface |
 | --- | --- | --- |

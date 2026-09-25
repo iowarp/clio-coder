@@ -1,13 +1,3 @@
-import type { DomainModule } from "../../core/domain-loader.js";
-import { createLifecycleBundle } from "./extension.js";
-import { LifecycleManifest } from "./manifest.js";
-
-export const LifecycleDomainModule: DomainModule = {
-	manifest: LifecycleManifest,
-	createExtension: createLifecycleBundle,
-};
-
-export type { LifecycleContract } from "./contract.js";
 export { type DoctorFinding, formatDoctorReport, runDoctor } from "./doctor.js";
 export {
 	listMigrations,

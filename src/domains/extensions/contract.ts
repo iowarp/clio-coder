@@ -1,10 +1,6 @@
 import type { DomainContract } from "../../core/domain-loader.js";
 import type {
-	ExtensionCandidate,
-	ExtensionInstallOptions,
-	ExtensionInstallResult,
 	ExtensionListOptions,
-	ExtensionMutationResult,
 	ExtensionReloadPrepareResult,
 	ExtensionSnapshot,
 	InstalledExtension,
@@ -12,13 +8,7 @@ import type {
 
 export interface ExtensionsContract extends DomainContract {
 	list(cwd?: string, options?: ExtensionListOptions): InstalledExtension[];
-	discover(path: string): ExtensionCandidate[];
-	install(path: string, options?: ExtensionInstallOptions): ExtensionInstallResult;
-	enable(id: string, options?: ExtensionListOptions): ExtensionMutationResult;
-	disable(id: string, options?: ExtensionListOptions): ExtensionMutationResult;
-	remove(id: string, options?: ExtensionListOptions): ExtensionMutationResult;
 	snapshot(): ExtensionSnapshot | null;
-	generation(): number;
 	/**
 	 * Build and validate the next generation from disk without publishing it.
 	 * Never throws: a build failure or an in-flight candidate is reported as a

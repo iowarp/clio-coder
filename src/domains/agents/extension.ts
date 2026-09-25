@@ -6,13 +6,12 @@ import type { ConfigContract } from "../config/contract.js";
 import { pluginSnapshotFor, withPluginDiscoveryPass } from "../plugins/index.js";
 import type { AgentsContract } from "./contract.js";
 import type { AgentRecipe } from "./recipe.js";
-import { type AgentRecipeDiagnostic, discoverAgentRecipes } from "./registry.js";
+import { discoverAgentRecipes } from "./registry.js";
 import { type AgentSpec, normalizeAgentSpec } from "./spec.js";
 
 export function createAgentsBundle(_context: DomainContext): DomainBundle<AgentsContract> {
 	let recipes: ReadonlyArray<AgentRecipe> = [];
 	let specs: ReadonlyArray<AgentSpec> = [];
-	let diagnostics: ReadonlyArray<AgentRecipeDiagnostic> = [];
 	let revision = 0;
 	let rediscoveryPending = false;
 	let attemptedRecipes: ReadonlyArray<AgentRecipe> | null = null;
@@ -22,11 +21,10 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 	function discover(): void {
 		attemptedRecipes = null;
 		discoveredPluginDigest = null;
-		const nextDiagnostics: AgentRecipeDiagnostic[] = [];
 		// Read the digest in the discovery's own pass, so it names exactly the
 		// verified projection the recipes came from without a second walk.
 		const { merged, pluginDigest } = withPluginDiscoveryPass(() => ({
-			merged: discoverAgentRecipes(process.cwd(), nextDiagnostics),
+			merged: discoverAgentRecipes(process.cwd()),
 			pluginDigest: pluginSnapshotFor(process.cwd()).digest,
 		}));
 		attemptedRecipes = merged;
@@ -34,7 +32,6 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		assertAgentIdNamespace(merged, config?.get()?.integrations.externalAgents?.entries ?? []);
 		recipes = merged;
 		specs = recipes.map(normalizeAgentSpec);
-		diagnostics = nextDiagnostics;
 		revision += 1;
 		rediscoveryPending = false;
 		discoveredPluginDigest = pluginDigest;
@@ -82,14 +79,6 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 					}
 					recipes = recipes.filter((recipe) => recipe.source !== "plugin" && !conflictingIds.has(recipe.id));
 					specs = recipes.map(normalizeAgentSpec);
-					diagnostics = [
-						...diagnostics,
-						{
-							source: "project" as const,
-							filepath: process.cwd(),
-							message: `recipe reload failed; package recipes withdrawn until retry: ${error instanceof Error ? error.message : String(error)}`,
-						},
-					].slice(-100);
 					revision += 1;
 					writeDiagnostic(
 						`[clio-coder:agents] rediscovery after resource reload failed: ${error instanceof Error ? error.message : String(error)}\n`,
@@ -115,9 +104,6 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		},
 		get(id: string): AgentRecipe | null {
 			return recipes.find((r) => r.id === id) ?? null;
-		},
-		diagnostics() {
-			return diagnostics.map((diagnostic) => ({ ...diagnostic }));
 		},
 		listSpecs() {
 			const config = _context.getContract<ConfigContract>("config");
@@ -172,9 +158,6 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 				};
 			}
 			return null;
-		},
-		reload() {
-			discover();
 		},
 	};
 

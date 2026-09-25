@@ -10,8 +10,6 @@ export interface BudgetPreflight {
 
 export interface SchedulingContract {
 	ceilingUsd(): number;
-	checkCeiling(currentUsd: number): BudgetVerdict;
-	raiseCeiling(newUsd: number): void;
 	/**
 	 * Evaluate the running session cost against the ceiling. Scheduling owns the
 	 * observability lookup so callers (notably dispatch) don't need to import it.

@@ -1,5 +1,5 @@
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { createShareArchive, importShareArchive, planShareImport, writeShareArchive } from "./archive.js";
+import { importShareArchive, planShareImport, writeShareArchive } from "./archive.js";
 import type { ShareContract } from "./contract.js";
 
 export function createShareBundle(_context: DomainContext): DomainBundle<ShareContract> {
@@ -9,9 +9,6 @@ export function createShareBundle(_context: DomainContext): DomainBundle<ShareCo
 		},
 	};
 	const contract: ShareContract = {
-		createArchive(options) {
-			return createShareArchive(options);
-		},
 		writeArchive(outPath, options) {
 			return writeShareArchive(outPath, options);
 		},

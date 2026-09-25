@@ -207,8 +207,6 @@ export interface DockController {
 	): Promise<MuxPaneRef | null>;
 	/** Record an adopted pane (crash recovery) as this slot's dock. */
 	adopt(slot: DockSlot, ref: MuxPaneRef): void;
-	/** Set a dock's share explicitly, as `/panes` resize does. */
-	resize(slot: DockSlot, share: number): Promise<boolean>;
 	/** Feed a `layout.updated` push; user resizes become the new target. */
 	noteLayoutUpdated(geometry: MuxTabGeometry): void;
 	/** Feed a pane departure; a closed dock is a decision, not a fault. */
@@ -324,12 +322,6 @@ export function createDockController(options: DockControllerOptions): DockContro
 				targetShare: spec.defaultShare,
 				lastAppliedShare: spec.defaultShare,
 			});
-		},
-
-		async resize(slot: DockSlot, share: number): Promise<boolean> {
-			const state = bySlot.get(slot);
-			if (!state) return false;
-			return await applyShare(state, Math.max(clampDockShare(share), 0.01));
 		},
 
 		noteLayoutUpdated(geometry: MuxTabGeometry): void {

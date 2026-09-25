@@ -86,7 +86,6 @@ for (const agent of ["scout", "coder"] as const) {
 			settings,
 			scheduling: {
 				preflight: () => ({ verdict: "over", currentUsd: 100, ceilingUsd: 0.01 }),
-				checkCeiling: () => "over",
 			},
 		});
 		const specs = context.getContract<AgentsContract>("agents")?.listSpecs() ?? [];
