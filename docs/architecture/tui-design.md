@@ -42,26 +42,26 @@ Tokens are defined in [src/interactive/theme/tokens.ts](../../src/interactive/th
 
 | Token | Hex | Role |
 | :--- | :--- | :--- |
-| `editor` | `#0f9c82` | Teal composer rails (active input only). |
-| `editorDanger` | `#ec3e45` | Yolo autonomy rail caps and label. |
-| `editorAction` | `#d6660f` | Orange preparation / compacting phase rails. |
-| `accent` | `#0e967f` | Brand and interactivity: frames, selections, prompts, voice glyph (`✦`), active phases. |
-| `accentDeep` | `#0c8c76` | Bold CAPS section headers and structural tags. |
-| `tool` | `#4a8793` | Action-row verbs in the tool ledger. |
-| `agent` | `#c3672b` | Dispatch verbs and active worker counts. |
-| `action` | `#d6660f` | Active operations: dispatch pills, running fleet badges, steering queue markers. |
-| `success` | `#2b973f` | Positive outcomes (`✓`), clean git state, added diff lines (`+`). |
-| `warning` | `#b17c00` | Critical warnings (`⚠`), dirty git trees, retry attempts, blocked tools. |
-| `error` | `#e94146` | Failures (`✗`), error rails, removed diff lines (`-`). |
-| `info` | `#3a7fe8` | Informational messages, notices, system prompt indicators. |
-| `reason` | `#966bce` | Violet reasoning indicators and thinking meter. |
-| `dim` | `#7c7c7c` | Scaffolding: separators, shortcuts, durations, timestamps. |
-| `muted` | `#78828c` | Secondary text: paths, previews, telemetry counts. |
-| `title` | `#0e967f` | Overlay and frame headers. |
-| `frame` | `#707a85` | Borders, dividers, unused context meter space. |
-| `frameStrong` | `#0f9c82` | Active input rail background. |
+| `editor` | `#09969f` | Cyan composer rails (active input only). |
+| `editorDanger` | `#e35656` | Yolo autonomy rail caps and label. |
+| `editorAction` | `#d06d25` | Orange preparation / compacting phase rails. |
+| `accent` | `#319789` | Brand and interactivity: frames, selections, prompts, voice glyph (`✦`), active phases. |
+| `accentDeep` | `#188b7b` | Bold CAPS section headers and structural tags. |
+| `tool` | `#408c96` | Action-row verbs in the tool ledger. |
+| `agent` | `#c0601f` | Dispatch verbs and active worker counts. |
+| `action` | `#d06d25` | Active operations: dispatch pills, running fleet badges, steering queue markers. |
+| `success` | `#2a9c5c` | Positive outcomes (`✓`), clean git state, added diff lines (`+`). |
+| `warning` | `#aa8118` | Critical warnings (`⚠`), dirty git trees, retry attempts, blocked tools. |
+| `error` | `#dd5353` | Failures (`✗`), error rails, removed diff lines (`-`). |
+| `info` | `#4a90b4` | Informational messages, notices, system prompt indicators. |
+| `reason` | `#9c8664` | Sand reasoning indicators and thinking meter. |
+| `dim` | `#6e7b85` | Scaffolding: separators, shortcuts, durations, timestamps. |
+| `muted` | `#608096` | Secondary text: paths, previews, telemetry counts. |
+| `title` | `#319789` | Overlay and frame headers. |
+| `frame` | `#577287` | Borders, dividers, unused context meter space. |
+| `frameStrong` | `#09969f` | Active input rail background. |
 
-The palette serves dark and light terminal themes with one set of colors, so every token sits in the middle luminance band and keeps about 3:1 or better against black, One Dark, Solarized Dark, white and Solarized Light backgrounds. Roles differ by hue: teal carries identity, input and selection; green success; amber warnings; red errors and `yolo`; blue information; violet reasoning; orange action. `frame`, `dim` and `muted` are neutral grays, which recede less than a single-background palette could. State is also spelled by labels, meter fill, and motion, so a monochrome terminal does not have to infer it from hue.
+The palette is derived from the Clio Coder logo and iowarp.ai: mint and cyan carry identity, input and selection, the site's orange accent carries action, its steel blue carries information, and its slate carries frames and secondary text. Success is green, warnings amber, errors and `yolo` coral, and reasoning a sand tone beside the orange. Every token is shifted into the middle luminance band so it keeps about 3:1 or better on dark themes (black, One Dark, Solarized Dark) and light themes (white, Solarized Light); `frame` alone recedes further on dark themes. State is also spelled by labels, meter fill, and motion, so a monochrome terminal does not have to infer it from hue.
 
 ### 1.2 Placement Invariants
 
@@ -73,9 +73,9 @@ The palette serves dark and light terminal themes with one set of colors, so eve
 
 | State | Rail treatment | Motion |
 | :--- | :--- | :--- |
-| `default`, idle | Teal fill | Static |
-| `yolo`, idle | Teal with red caps and `YOLO` label | Static |
-| Working or steering | Teal fill with a travelling orange accent | Only when the composer is empty |
+| `default`, idle | Cyan fill | Static |
+| `yolo`, idle | Cyan with coral caps and `YOLO` label | Static |
+| Working or steering | Cyan fill with a travelling orange accent | Only when the composer is empty |
 | Permission wait | Orange and amber spectrum with `CONFIRM` and decision keys | Moving spectrum, even with a draft |
 | Reduced motion, screen reader, or `NO_COLOR` | Same labels and meter; static fill | None |
 
@@ -188,7 +188,7 @@ The header operates in two distinct modes:
 ### 4.2 Composer (ClioEditor)
 
 The input surface (`ClioEditor`) frames the operator's prompt:
-- **Rails**: Framed with double vertical rails. Normal input uses teal (`editor`); `yolo` adds red caps (`editorDanger`); active work uses orange (`editorAction`). A permission wait carries a moving orange spectrum. The upper rail carries a five-cell thinking meter, with a text label in narrow and screen-reader views.
+- **Rails**: Framed with double vertical rails. Normal input uses cyan (`editor`); `yolo` adds coral caps (`editorDanger`); active work uses orange (`editorAction`). A permission wait carries a moving orange spectrum. The upper rail carries a five-cell thinking meter, with a text label in narrow and screen-reader views.
 - **Steering Affordance**: Queued steering instructions display a `›` marker in `action` orange above the prompt.
 
 ### 4.3 Progressively Disclosed Footer
@@ -203,14 +203,14 @@ The footer anchors live system telemetry across two lines:
 
 | Lifecycle State | Composer Rails | Gutter Mark | Footer Indicator |
 | :--- | :--- | :--- | :--- |
-| **Idle** | `editor` (teal) | ` ` | `ready` |
-| **Typing / Input** | `editor` (teal) | `▌` (`accent`) | `editing` |
-| **Thinking** | Teal with a travelling orange accent while the composer is empty; effort meter remains on the top rail | `│` (`reason`) | `thinking (r<tokens>)` |
-| **Writing / Streaming** | Teal with a travelling orange accent while the composer is empty | `✦` (`accent`) | `writing` |
-| **Tool Execution** | Teal with a travelling orange accent while the composer is empty | Action class glyph | `running <tool>` |
-| **Worker Dispatched** | Teal with a travelling orange accent while the composer is empty | `◆` or `◇` by origin (`agent`) | `N workers active` |
+| **Idle** | `editor` (cyan) | ` ` | `ready` |
+| **Typing / Input** | `editor` (cyan) | `▌` (`accent`) | `editing` |
+| **Thinking** | Cyan with a travelling orange accent while the composer is empty; effort meter remains on the top rail | `│` (`reason`) | `thinking (r<tokens>)` |
+| **Writing / Streaming** | Cyan with a travelling orange accent while the composer is empty | `✦` (`accent`) | `writing` |
+| **Tool Execution** | Cyan with a travelling orange accent while the composer is empty | Action class glyph | `running <tool>` |
+| **Worker Dispatched** | Cyan with a travelling orange accent while the composer is empty | `◆` or `◇` by origin (`agent`) | `N workers active` |
 | **Approval Required** | Moving orange and amber spectrum with `CONFIRM` and decision keys | `?` (`warning`) | `awaiting approval` |
-| **Compacting** | Teal with a travelling orange accent and `COMPACTING` label | `§` (`reason`) | `compacting context` |
+| **Compacting** | Cyan with a travelling orange accent and `COMPACTING` label | `§` (`reason`) | `compacting context` |
 | **Terminal Error** | Teal idle rail after the turn ends; the failure stays in the transcript | `✦` (`error`) | `error` |
 
 ---

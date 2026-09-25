@@ -8,37 +8,38 @@ interface TokenColor {
 }
 
 const TOKENS: Record<ClioToken, TokenColor> = {
-	// Every token is a foreground on a background Clio cannot see: a dark theme
-	// (black, One Dark, Solarized Dark) or a light one (white, Solarized Light).
-	// Each sits in the middle luminance band, relative luminance 0.19 to 0.26,
-	// where it keeps about 3:1 or better on both. A pastel reads on dark and
-	// vanishes on light; a deep tone does the reverse. Roles are therefore told
-	// apart by hue and saturation rather than lightness, and subdued roles can
-	// recede only so far on either side. The xterm fallbacks are picked for the
-	// same two-sided contrast, not for nearest color.
-	editor: { rgb: [15, 156, 130], xterm: 30 },
-	editorDanger: { rgb: [236, 62, 69], xterm: 196 },
-	editorAction: { rgb: [214, 102, 15], xterm: 166 },
-	accent: { rgb: [14, 150, 127], xterm: 30 },
-	accentDeep: { rgb: [12, 140, 118], xterm: 29 },
-	tool: { rgb: [74, 135, 147], xterm: 66 },
-	agent: { rgb: [195, 103, 43], xterm: 130 },
+	// Every hue comes from the brand: the logo's mint and cyan, iowarp.ai's
+	// orange accent, steel-blue text and slate borders, and its success, warning
+	// and error tones. Each is shifted into the middle luminance band (relative
+	// luminance 0.16 to 0.25) because Clio cannot see whether the terminal runs
+	// a dark or a light theme, and a brand pastel that glows on dark vanishes on
+	// light. There every token keeps about 3:1 or better on both, except frame,
+	// which recedes on dark themes as the site's border does. The xterm
+	// fallbacks come from the same hue families and are picked for two-sided
+	// contrast rather than nearest color.
+	editor: { rgb: [9, 150, 159], xterm: 30 },
+	editorDanger: { rgb: [227, 86, 86], xterm: 167 },
+	editorAction: { rgb: [208, 109, 37], xterm: 166 },
+	accent: { rgb: [49, 151, 137], xterm: 30 },
+	accentDeep: { rgb: [24, 139, 123], xterm: 29 },
+	tool: { rgb: [64, 140, 150], xterm: 66 },
+	agent: { rgb: [192, 96, 31], xterm: 130 },
 	// Orange means Clio is acting. It fires only for Clio's signature actions
 	// (dispatching, queued and running fleet work, steering) and for the border
 	// of a prompt that has taken the keyboard and is waiting on a decision, never
 	// as decoration, and never a metric, at most one orange element per region of
 	// the screen. warning stays amber for actual warnings.
-	action: { rgb: [214, 102, 15], xterm: 166 },
-	success: { rgb: [43, 151, 63], xterm: 28 },
-	warning: { rgb: [177, 124, 0], xterm: 136 },
-	error: { rgb: [233, 65, 70], xterm: 160 },
-	info: { rgb: [58, 127, 232], xterm: 32 },
-	reason: { rgb: [150, 107, 206], xterm: 98 },
-	dim: { rgb: [124, 124, 124], xterm: 244 },
-	muted: { rgb: [120, 130, 140], xterm: 102 },
-	title: { rgb: [14, 150, 127], xterm: 30 },
-	frame: { rgb: [112, 122, 133], xterm: 243 },
-	frameStrong: { rgb: [15, 156, 130], xterm: 30 },
+	action: { rgb: [208, 109, 37], xterm: 166 },
+	success: { rgb: [42, 156, 92], xterm: 28 },
+	warning: { rgb: [170, 129, 24], xterm: 136 },
+	error: { rgb: [221, 83, 83], xterm: 167 },
+	info: { rgb: [74, 144, 180], xterm: 67 },
+	reason: { rgb: [156, 134, 100], xterm: 137 },
+	dim: { rgb: [110, 123, 133], xterm: 244 },
+	muted: { rgb: [96, 128, 150], xterm: 102 },
+	title: { rgb: [49, 151, 137], xterm: 30 },
+	frame: { rgb: [87, 114, 135], xterm: 243 },
+	frameStrong: { rgb: [9, 150, 159], xterm: 30 },
 };
 
 export const SGR_RESET = "\u001b[0m";
