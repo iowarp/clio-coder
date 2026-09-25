@@ -85,8 +85,11 @@ reads activate and install nothing.
 
 The `safety.<level>` body is the same on every surface: the session and every
 worker read that one body, and the only role-specific text is what
-"approval-required" resolves to, meaning one operator confirmation for the
-session and the worker's `onPermission` routing for a worker.
+"approval-required" resolves to. For an interactive, ACP or GUI session it is
+one operator confirmation. For a headless `clio-coder run` the sentence says
+that no operator is attached, so approval-required calls are denied, and asks
+the model to use recognized commands and typed checks and report what could
+not run. For a worker it is the worker's `onPermission` routing.
 
 Prompt extensions can add dynamic fragments for project rules, the operator profile, and Clio source-tree awareness. Pending skill requests and middleware reminders are visible text in the user message, not hidden prompt machinery.
 

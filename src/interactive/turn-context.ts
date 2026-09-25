@@ -122,6 +122,8 @@ import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 export interface TurnContextDeps {
 	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
 	interactiveGuidance?: boolean;
+	/** True for a headless `clio-coder run`, whose approval asks are always denied. */
+	headless?: boolean;
 	state: ChatTurnState;
 	getSettings: () => Readonly<ClioSettings>;
 	providers: ProvidersContract;
@@ -1884,6 +1886,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				...(guidance ? { thinkingGuidance: guidance } : {}),
 				...(toolPromptHints.length > 0 ? { toolPromptHints } : {}),
 				...(deps.toolRegistry?.get(ToolNames.ConfigureClio) ? { canConfigureClio: true } : {}),
+				...(deps.headless === true ? { headless: true } : {}),
 			};
 			if (deps.getMemorySection) {
 				try {

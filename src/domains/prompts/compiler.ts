@@ -45,6 +45,12 @@ export interface SessionPromptInputs {
 	/** True when configure_clio is registered on this session's gateway (interactive sessions only). */
 	canConfigureClio?: boolean;
 	/**
+	 * True for a headless `clio-coder run`. No operator is attached, so the
+	 * headless permission listener denies every approval ask at both autonomy
+	 * levels, and the safety section must say that instead of promising a pause.
+	 */
+	headless?: boolean;
+	/**
 	 * Per-tool prompt hints derived once from the frozen surface at compile
 	 * time (registry metadata `promptHint`). Rendered into the Tool Contract
 	 * sorted by tool name so the compiled text is byte-stable per surface.
@@ -203,18 +209,29 @@ function safetyOneLiner(level: string): string {
 }
 
 /**
- * What "approval-required" resolves to for the session: one operator
- * confirmation per parked call. The level fragments say which calls park;
+ * What "approval-required" resolves to for a session with an operator
+ * attached (interactive, ACP, GUI): one operator confirmation per parked
+ * call. The level fragments say which calls park;
  * this line says what parking means, and it is role text because a worker's
  * parked call resolves through its `onPermission` routing instead.
  */
 export const SESSION_APPROVAL_SEMANTICS =
 	"Approval-required calls pause for one operator confirmation, which grants only the parked action; cancellation cancels the parked call cleanly.";
 
-function renderSafetySection(safetyFragment: LoadedFragment, level: string): string {
+/**
+ * The headless replacement for `SESSION_APPROVAL_SEMANTICS`. A `clio-coder run`
+ * denies every approval ask (src/core/headless-permission.ts), a yolo
+ * damage-control confirm included, so promising a pause would send the model
+ * to wait on an operator who never answers.
+ */
+export const HEADLESS_SESSION_APPROVAL_SEMANTICS =
+	"No operator is attached to this headless run, so approval-required calls are denied instead of pausing; use recognized commands and typed checks, and report what could not run.";
+
+function renderSafetySection(safetyFragment: LoadedFragment, level: string, headless: boolean): string {
 	const oneLine = `Autonomy: ${level}. ${safetyOneLiner(level)}`;
 	const body = safetyFragment.body.trim();
-	return body.length > 0 ? `${oneLine}\n${SESSION_APPROVAL_SEMANTICS}\n\n${body}` : oneLine;
+	const approval = headless ? HEADLESS_SESSION_APPROVAL_SEMANTICS : SESSION_APPROVAL_SEMANTICS;
+	return body.length > 0 ? `${oneLine}\n${approval}\n\n${body}` : oneLine;
 }
 
 function renderRuntimeBlock(inputs: SessionPromptInputs): string {
@@ -721,7 +738,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		["harness-awareness", harnessAwareness],
 		["delegation", delegation?.body ?? ""],
 		["skills", skills?.body.replace("{SKILL_ACTIVATION_POLICY}", skillActivation) ?? ""],
-		["safety", renderSafetySection(safety, autonomyLevel)],
+		["safety", renderSafetySection(safety, autonomyLevel, session.headless === true)],
 		["runtime", renderRuntimeBlock(session)],
 		["tool-contract", renderToolContractBlock(session)],
 		["fleet", renderFleetBlock(session)],
