@@ -1618,6 +1618,36 @@ async function readRunLedger(stateDir: string): Promise<RunLedgerRows> {
 	return { rows: parsed, path: target };
 }
 
+/** A small placement read from the live sealed receipt, never from a cached evidence bundle. */
+export async function authenticatedRunWorktree(
+	stateDir: string,
+	runId: string,
+): Promise<{
+	branch: string;
+	changedPaths?: string[];
+	changedPathsOmitted?: number;
+} | null> {
+	try {
+		const [envelope] = selectRunEnvelopes(await readRunLedger(stateDir), { kind: "run", runId });
+		if (!envelope) return null;
+		const { receipt, error } = await readReceipt(stateDir, envelope);
+		if (error !== null || !receipt?.worktree) return null;
+		const { branch } = receipt.worktree;
+		const changedPaths = receipt.worktree.changedPaths;
+		return {
+			branch,
+			...(changedPaths === undefined
+				? {}
+				: {
+						changedPaths: changedPaths.slice(0, 20),
+						changedPathsOmitted: Math.max(0, changedPaths.length - 20),
+					}),
+		};
+	} catch {
+		return null;
+	}
+}
+
 /** Existence check for tool authorization; never returns another session's run data. */
 export async function hasSessionRunEvidence(stateDir: string, sessionId: string): Promise<boolean> {
 	let ledger: RunLedgerRows;

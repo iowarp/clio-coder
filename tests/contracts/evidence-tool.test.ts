@@ -30,6 +30,7 @@ type EvidenceOutput = Awaited<ReturnType<typeof inspectEvidence>> &
 			open: number;
 		} | null;
 		toolEvents: { total: number; linked: number };
+		worktree?: { branch: string; changedPaths: string[] };
 	};
 
 /** The fixture run's own session: evidence reads are scoped to the session and project asking. */
@@ -178,6 +179,30 @@ describe("evidence tool", () => {
 		await evidence({ mode: "run", runId: "fixture" });
 		strictEqual(await readFile(file, "utf8"), before);
 		strictEqual(classify({ tool: "evidence", args: { mode: "run", runId: "fixture" } }).actionClass, "read");
+	});
+
+	it("exposes worktree fields only while the run receipt still verifies", async () => {
+		const envelope = fixtureEnvelope("worktree-fixture");
+		const worktree = {
+			path: "/workspace/.clio-coder/worktrees/worktree-fixture",
+			branch: "clio-coder/task/worktree-fixture",
+			diffHash: "a".repeat(40),
+			changedPaths: ["release-worktree-probe.txt"],
+			apply: "preserve" as const,
+			applied: false,
+		};
+		const receipt = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), worktree }, envelope);
+		await mkdir(join(clioStateDir(), "receipts"), { recursive: true });
+		await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
+		const receiptPath = join(clioStateDir(), "receipts", "worktree-fixture.json");
+		await writeFile(receiptPath, JSON.stringify(receipt));
+		strictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree?.branch, worktree.branch);
+		deepStrictEqual(
+			output(await evidence({ mode: "run", runId: envelope.id })).worktree?.changedPaths,
+			worktree.changedPaths,
+		);
+		await writeFile(receiptPath, JSON.stringify({ ...receipt, worktree: { ...worktree, branch: "forged" } }));
+		strictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree, undefined);
 	});
 
 	it("returns a bounded redacted summary only to the owning session", async () => {
