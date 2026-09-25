@@ -7,10 +7,11 @@
  *     receipt and persists runs.json. Without isolation a test reads, locks,
  *     and rewrites the developer's real multi-megabyte ledger (a state leak,
  *     and the dominant cost of the contracts lane).
- *   - Reproducibility cost. The production collector shells out to three
- *     synchronous git subprocesses per receipt. The fast collector here skips
- *     git but stays argument-preserving: cwd and safety metadata still flow
- *     through, so receipt-content and orphan-recovery plumbing remain testable.
+ *   - Reproducibility plumbing. The fast collector here stays
+ *     argument-preserving: cwd and safety metadata flow through exactly as the
+ *     production collector passes them, so a regression that hands the
+ *     collector the wrong cwd or safety metadata still surfaces in receipt
+ *     content and orphan recovery.
  */
 
 import { mkdtempSync } from "node:fs";
@@ -24,14 +25,13 @@ import type { SafetyPolicyMetadata } from "../../src/domains/safety/policy-engin
 import { type IsolatedClioEnv, isolateClioEnv } from "./scratch-env.js";
 
 /**
- * Drop-in for collectReproducibilityMetadata that never spawns git. It mirrors
- * the real collector's signature and preserves both arguments, so a regression
- * that passes the wrong cwd or safety metadata to the collector still surfaces.
+ * Drop-in for collectReproducibilityMetadata. It mirrors the real collector's
+ * signature and preserves both arguments, so a regression that passes the
+ * wrong cwd or safety metadata to the collector still surfaces.
  */
 export function fastReproducibility(cwd: string, safety: SafetyPolicyMetadata | null): RunReceiptReproducibility {
 	return {
 		cwd,
-		git: { branch: null, commit: null, dirty: null, dirtyEntries: null, statusHash: null },
 		safetyPolicy: {
 			version: safety?.version ?? 1,
 			rulePackHash: safety?.rulePackHash ?? null,

@@ -92,7 +92,6 @@ describe("orphan adoption", () => {
 			costProvenance: "known",
 			reproducibility: {
 				cwd: envelope.cwd,
-				git: { branch: null, commit: null, dirty: null, dirtyEntries: null, statusHash: null },
 				safetyPolicy: {
 					version: 1,
 					rulePackHash: null,

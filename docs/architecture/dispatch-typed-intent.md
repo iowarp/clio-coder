@@ -65,7 +65,7 @@ Each rule resolves to exactly one of three decisions.
 | Decision | Meaning | Where it surfaces |
 | :--- | :--- | :--- |
 | **accept** | The request is unambiguous. | Nothing is reported. |
-| **warn** | The request is compatible, but the classifier identified a weaker declaration or a scope-replacement tradeoff. The dispatch runs with the authority it would have had anyway. | Current admission publishes the typed-scope replacement warning. Legacy provenance still appears in the approval artifact and sealed `pathScope`; the absent-intent and missing-verification classifier findings are not emitted as standalone warnings. |
+| **warn** | The request is compatible, but the classifier identified a weaker declaration or a scope-replacement tradeoff. The dispatch runs with the authority it would have had anyway. | Current admission publishes the typed-scope replacement warning. Legacy provenance still appears in the approval artifact; the absent-intent and missing-verification classifier findings are not emitted as standalone warnings. |
 | **refuse** | The request states two incompatible things about authority, or states one this build cannot interpret. | Terminal admission error carrying the reason code. The dispatch never runs. |
 
 The invariant that separates `warn` from `refuse`: **a warning is never the
@@ -201,8 +201,8 @@ only malformed or absolute prose-path inference can refuse it.
 | Contract | Version | Carries intent | Migration policy |
 | :--- | :--- | :--- | :--- |
 | **`DispatchIntent`** | `2` | It *is* the intent | **Refused, never migrated.** Any other version fails admission with `intent_version_unsupported`. A stored declaration is restated on a fresh call. |
-| **`DispatchPathScopeProvenance`** | `1` | Resolved scope with field source and confidence, never source prose | Sealed inside the receipt; shares the receipt's policy. |
-| **Run Receipt** | `20` | `intent` and `pathScope`, both inside the integrity digest | **Refused, never migrated.** A receipt below v20 is reported as retired: intact, but never read as evidence. |
+| **`DispatchPathScopeProvenance`** | `1` | Resolved scope with field source and confidence, never source prose | Sealed inside receipts written before 0.5.6, which still verify; newer receipts do not carry it. |
+| **Run Receipt** | `20` | `intent` inside the integrity digest, plus `pathScope` on receipts written before 0.5.6 | **Refused, never migrated.** A receipt below v20 is reported as retired: intact, but never read as evidence. |
 | **`ResolvedDispatchPlanArtifact`** | `3` | `intent` and `resolvedVerification` per task | **Refused, never migrated.** `resolvedDispatchPlanFromArgs` returns `null` for any version but 3, and a task whose `intent` fails `isDispatchIntent` invalidates the whole artifact. The call falls back to unresolved admission rather than executing a half-understood plan. |
 | **Dispatch plan approval text and hash** | Rendered, hashed | `intent_sha256` for a declared task; the full inferred scope table for a legacy task | Not persisted across versions. The hash binds the exact rendering an operator approved. |
 | **Worker Spec** | `3` | **No.** Carries the *resolved* `writeRoots`, not the declaration | Fail-closed preflight rejection. Deliberate: a worker receives an enforced boundary, never a statement of intent it could reinterpret. |

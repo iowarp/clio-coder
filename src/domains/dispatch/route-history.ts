@@ -6,11 +6,27 @@ import { atomicWrite } from "../../engine/session.js";
 import { type ExecutionRole, isExecutionRole } from "./execution-role.js";
 import { type RouteCandidate, routeCapabilityKey, routeDriftGuard, routeDriftInvalidates } from "./route-decision.js";
 import type { RouteQualityLabel } from "./route-quality.js";
-import type { RunPhaseDurations } from "./types.js";
 
 export type RouteReliabilityOutcome = "success" | "failure" | "neutral";
 
 /** One reconstructable, terminal observation for a concrete route identity. */
+/**
+ * The persisted phase-timing shape of a version 3 route history record. Route
+ * policy reads `queueWaitMs` and `totalEndToEndMs`; the other seven keys are
+ * written as null so records stay valid for readers that require all nine.
+ */
+export interface RouteHistoryPhaseTiming {
+	requestToDecisionMs: number | null;
+	decisionMs: number | null;
+	admissionWaitMs: number | null;
+	queueWaitMs: number | null;
+	spawnSetupMs: number | null;
+	timeToFirstModelTokenMs: number | null;
+	timeToFirstToolMs: number | null;
+	executionMs: number | null;
+	totalEndToEndMs: number | null;
+}
+
 export interface RouteHistoryRecord {
 	version: 3;
 	receiptDigest: string;
@@ -23,7 +39,7 @@ export interface RouteHistoryRecord {
 	firstPass: boolean;
 	/** Only completed, non-quality-failed work may contribute timing or cost. */
 	completedCostUsd: number | null;
-	completedPhaseTiming: RunPhaseDurations | null;
+	completedPhaseTiming: RouteHistoryPhaseTiming | null;
 	/** Whether the completed route consumed cache tokens for this exact identity. */
 	cacheRead: boolean;
 	sourceDigests: string[];
@@ -249,7 +265,7 @@ function isRouteCandidate(value: unknown): value is RouteCandidate {
 	].every((field) => typeof field === "string");
 }
 
-function isPhaseTiming(value: unknown): value is RunPhaseDurations {
+function isPhaseTiming(value: unknown): value is RouteHistoryPhaseTiming {
 	if (!isRecord(value)) return false;
 	return [
 		"requestToDecisionMs",

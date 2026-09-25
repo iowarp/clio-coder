@@ -22,9 +22,7 @@ import {
 	WORKER_EVENT_QUEUE_MAX_FRAMES,
 	WORKER_PROTOCOL_VERSION,
 	type WorkerAttestation,
-	type WorkerResourceValue,
 } from "../../worker/protocol.js";
-import type { RunReceiptAttestation } from "./types.js";
 
 export type {
 	AgentLedgerBody,
@@ -172,43 +170,6 @@ function workerSpecDigestOf(spec: unknown): string {
 	return createHash("sha256")
 		.update(`clio-coder.workerSpec:${canonicalJson(spec)}`, "utf8")
 		.digest("hex");
-}
-
-function resourceOrNull(value: WorkerResourceValue<number>): number | null {
-	return value.known ? value.value : null;
-}
-
-/**
- * Project an attestation into the bounded shape a receipt seals. Returns an
- * empty object when nothing was attested, so a caller can spread it into a
- * receipt draft without branching.
- */
-export function receiptAttestationFields(
-	attestation: WorkerAttestation | null,
-): { attestation: RunReceiptAttestation } | Record<string, never> {
-	if (attestation === null) return {};
-	return {
-		attestation: {
-			protocolVersion: attestation.protocolVersion,
-			host: attestation.host,
-			pid: attestation.pid,
-			processGroupId: attestation.processGroupId,
-			settingsFingerprint: attestation.settingsFingerprint,
-			specDigest: attestation.specDigest,
-			targetId: attestation.targetId,
-			endpointIdentityHash: attestation.endpointIdentityHash,
-			wireModelId: attestation.wireModelId,
-			runtimeId: attestation.runtimeId,
-			toolSignature: attestation.toolSignature,
-			resources: {
-				labels: [...attestation.resources.labels],
-				cpuCount: resourceOrNull(attestation.resources.cpuCount),
-				totalMemoryBytes: resourceOrNull(attestation.resources.totalMemoryBytes),
-				gpuCount: resourceOrNull(attestation.resources.gpuCount),
-				vramBytes: resourceOrNull(attestation.resources.vramBytes),
-			},
-		},
-	};
 }
 
 /**

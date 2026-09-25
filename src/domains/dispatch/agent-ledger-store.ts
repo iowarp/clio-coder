@@ -17,13 +17,12 @@
  * sentence.
  */
 
-import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
-import { type AgentLedgerEntry, canonicalJson, parseAgentLedgerBody } from "../../worker/protocol.js";
+import { type AgentLedgerEntry, parseAgentLedgerBody } from "../../worker/protocol.js";
 import { AGENT_LEDGER_PROMPT_MAX_CHARS, claimConflicts, renderAgentLedger } from "./agent-ledger.js";
 
 /** Bounded ring: newest first, oldest dropped past this count. */
@@ -230,28 +229,4 @@ export async function closeAgentLedger(id: string): Promise<AgentLedgerRecord | 
 		writeStore(ledgers);
 	});
 	return closed;
-}
-
-export interface AgentLedgerContribution {
-	posted: number;
-	refused: number;
-	/** sha256 over canonicalJson of this run's attributed entries in sequence order. */
-	digest: string;
-}
-
-/**
- * What one run contributed, for its receipt. Sealed orchestrator-side from the
- * stored entries; the worker reports nothing about its own contribution.
- */
-export function agentLedgerContribution(id: string, runId: string): AgentLedgerContribution | null {
-	const record = readAgentLedger(id);
-	if (record === null) return null;
-	const contribution = contributionFor(record, runId);
-	const mine = record.entries
-		.filter((entry) => entry.runId === runId)
-		.sort((left, right) => left.sequence - right.sequence);
-	const digest = createHash("sha256")
-		.update(`clio-coder.agentLedger:${canonicalJson(mine)}`, "utf8")
-		.digest("hex");
-	return { posted: contribution.posted, refused: contribution.refused, digest };
 }

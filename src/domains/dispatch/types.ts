@@ -172,7 +172,12 @@ export interface RunProjectContextProvenance {
 export interface RunIdentity {
 	host: string;
 	user: string;
-	hpc: {
+	/**
+	 * Scheduler allocation identity. Builds before 0.5.6 stamped it from Slurm,
+	 * PBS or LSF environment variables and nothing read it; receipts and ledger
+	 * rows that carry it keep it so their digests verify.
+	 */
+	hpc?: {
 		scheduler: "slurm" | "pbs" | "lsf";
 		jobId: string;
 		jobName: string | null;
@@ -326,31 +331,26 @@ export function runKindSupportsLiveSteering(kind: RunKind): boolean {
 }
 export type DispatchRequestOrigin = "user" | "agent" | "internal";
 
-/** Durable routing-system phase marks. They live on the ledger envelope, not the sealed receipt. */
+/**
+ * Durable routing-system phase marks. They live on the ledger envelope, not the
+ * sealed receipt. Rows written by earlier builds may also carry
+ * `decisionStartedAt`, `decisionCompletedAt`, `firstModelTokenAt` and
+ * `firstToolAt`; nothing ever read the durations derived from them, so they
+ * are no longer stamped and readers ignore them.
+ */
 export interface RunPhaseMarks {
 	requestedAt: string;
-	decisionStartedAt: string;
-	decisionCompletedAt?: string;
 	queuedAt?: string;
 	admittedAt?: string;
 	workerSpawnedAt?: string;
 	/** Set when the worker was a process held for this dispatch by speculative dispatch. */
 	heldWorkerAdoptedAt?: string;
-	firstModelTokenAt?: string;
-	firstToolAt?: string;
 	endedAt?: string;
 }
 
-/** Derived durations keep execution and user-observed end-to-end time explicitly distinct. */
+/** The two derived durations route policy reads: queue wait and user-observed end-to-end time. */
 export interface RunPhaseDurations {
-	requestToDecisionMs: number | null;
-	decisionMs: number | null;
-	admissionWaitMs: number | null;
 	queueWaitMs: number | null;
-	spawnSetupMs: number | null;
-	timeToFirstModelTokenMs: number | null;
-	timeToFirstToolMs: number | null;
-	executionMs: number | null;
 	totalEndToEndMs: number | null;
 }
 
@@ -522,6 +522,11 @@ export interface RunEnvelope {
 	cacheReadTokenCount?: number;
 	cacheWriteTokenCount?: number;
 	cacheWrite1hTokenCount?: number;
+	/**
+	 * A byte-for-byte copy of the receipt's `staticCompositionHash`, written
+	 * only by builds before 0.5.6. Rows that carry it keep it so the receipts
+	 * sealed against them verify.
+	 */
 	staticShellHash?: string | null;
 	sessionShellHash?: string | null;
 	dynamicHash?: string | null;
@@ -673,7 +678,12 @@ export interface RunReceiptSafetySummary {
 
 export interface RunReceiptReproducibility {
 	cwd: string;
-	git: {
+	/**
+	 * Checkout state at finalization. Builds before 0.5.6 spent three `git`
+	 * spawns per run collecting it, and nothing read it; the integrity digest
+	 * still covers it so those receipts verify.
+	 */
+	git?: {
 		branch: string | null;
 		commit: string | null;
 		dirty: boolean | null;
@@ -821,7 +831,11 @@ export interface RunReceipt {
 	task: string;
 	/** Normalized dispatch intent admitted before worker execution. */
 	intent?: DispatchIntent;
-	/** Resolved policy-bearing paths with field source and confidence, without source prose. */
+	/**
+	 * Resolved policy-bearing paths with field source and confidence, without
+	 * source prose. Written only by builds before 0.5.6, which sealed it without
+	 * any reader; the integrity digest still covers it so those receipts verify.
+	 */
 	pathScope?: DispatchPathScopeProvenance;
 	/** Integrity-sealed recipe policy, invocation request, effective phase, and admission reasons. */
 	budget?: RunToolBudgetEnvelope;
@@ -846,12 +860,10 @@ export interface RunReceipt {
 	node?: RunNodeIdentity;
 	/**
 	 * Route and node identity attested by the worker process that executed the
-	 * run. Every native and remote worker transport attests, so a receipt from
-	 * the worker path carries this field. It is legitimately absent on receipts
-	 * that no worker process produced: the print-mode main-agent receipt
-	 * (src/cli/modes/print.ts), which runs in the orchestrator process, and ACP
-	 * delegation receipts, whose external agent never sends an announce frame.
-	 * Contract tests that stub the spawn also leave it absent.
+	 * run. Attestation is still verified at spawn (`worker-spawn.ts`), and a
+	 * drifting peer never runs. Only builds before 0.5.6 sealed this projection
+	 * into the receipt, where nothing read it; the integrity digest still covers
+	 * it so those receipts verify.
 	 */
 	attestation?: RunReceiptAttestation;
 	/** Dead-node failover hops, oldest first; absent when the run was never rerouted. */
@@ -863,7 +875,11 @@ export interface RunReceipt {
 	council?: RunCouncilProvenance;
 	/** Plan-approval provenance; present only on runs of an approval-gated plan. */
 	plan?: RunPlanProvenance;
-	/** Version 5 fleet gate artifact authored by this run. */
+	/**
+	 * Version 5 fleet gate artifact authored by this run. Written only by builds
+	 * before 0.5.6, which sealed it without any reader; the integrity digest
+	 * still covers it so those receipts verify.
+	 */
 	fleetGate?: { path: string; pathHash: string };
 	/** Ad-hoc specialist provenance; present only when a persona override composed the stable prompt. */
 	personaOverride?: RunPersonaOverride;
@@ -916,6 +932,10 @@ export interface RunReceipt {
 	};
 	compiledPromptHash: string | null;
 	staticCompositionHash: string | null;
+	/**
+	 * A byte-for-byte copy of `staticCompositionHash`, written only by builds
+	 * before 0.5.6; the integrity digest still covers it so those receipts verify.
+	 */
 	staticShellHash?: string | null;
 	sessionShellHash?: string | null;
 	dynamicHash?: string | null;
@@ -973,10 +993,9 @@ export interface RunReceipt {
 	/** Read-only recipe admitted against a mutating task; absent when the pairing was sound. */
 	capabilityMismatch?: RunCapabilityMismatch;
 	/**
-	 * What this run contributed to its dispatch's agent ledger. Optional and
-	 * absent unless the run had a ledger, following validationGrounding and
-	 * capabilityMismatch: receiptDigestFields skips undefined, so a receipt
-	 * without one omits the field from canonical serialization.
+	 * What this run contributed to its dispatch's agent ledger. Written only by
+	 * builds before 0.5.6, which sealed it without any reader; the integrity
+	 * digest still covers it so those receipts verify.
 	 */
 	ledgerContribution?: RunLedgerContribution;
 	/**

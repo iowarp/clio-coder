@@ -17,7 +17,7 @@ import { persistWorkerContextSeed } from "../context/worker/store.js";
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { type Dirent, readdirSync, readFileSync } from "node:fs";
+import { type Dirent, readdirSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { BusChannels, type DispatchCompletedPayload, type DispatchRunIdentity } from "../../core/bus-events.js";
@@ -141,7 +141,6 @@ import { AGENT_LEDGER_PROMPT_MAX_CHARS, renderAgentLedger } from "./agent-ledger
 import { publishAgentLedgerEntry, subscribeAgentLedger } from "./agent-ledger-hub.js";
 import {
 	type AgentLedgerAttribution,
-	agentLedgerContribution,
 	appendAgentLedgerEntry,
 	MAX_AGENT_LEDGER_POSTS_PER_RUN,
 	readAgentLedger,
@@ -245,7 +244,7 @@ import {
 	inferredScopeParentTokenNotice,
 	resolveDispatchPathScope,
 } from "./path-scope.js";
-import { deriveEnvelopePhaseDurations, deriveRunPhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
+import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
 import {
 	createRunReceiptQuality,
@@ -336,7 +335,6 @@ import {
 	type AgentLedgerBody,
 	computeSettingsFingerprint,
 	endpointIdentityHash,
-	receiptAttestationFields,
 	type WorkerModelLoad,
 } from "./worker-protocol.js";
 import {
@@ -599,21 +597,6 @@ function toolSignature(tools: ReadonlyArray<ToolName>): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function eventContainsFirstModelToken(event: Record<string, unknown>): boolean {
-	if (event.type === "message_end") return true;
-	const assistantEvent = isRecord(event.assistantMessageEvent) ? event.assistantMessageEvent : null;
-	return (
-		assistantEvent?.type === "text_delta" ||
-		assistantEvent?.type === "thinking_delta" ||
-		assistantEvent?.type === "toolcall_start" ||
-		assistantEvent?.type === "toolcall_delta"
-	);
-}
-
-function eventStartsTool(event: Record<string, unknown>): boolean {
-	return event.type === "tool_execution_start" || event.type === "clio_coder_tool_start";
 }
 
 function finitePositive(value: unknown): number | undefined {
@@ -4236,7 +4219,6 @@ export function createDispatchBundle(
 			enforcement: "external-one-shot",
 		});
 		publishDispatchPathScope(req, lifecycle.pathScope);
-		timing.decisionCompletedAt = new Date(now()).toISOString();
 		const targetId = `delegation:${lifecycle.agentConfig.id}`;
 		const runtimeId = "acp";
 		const wireModelId = lifecycle.agentConfig.id;
@@ -4330,17 +4312,6 @@ export function createDispatchBundle(
 				dispatchResultContract(req, req.agentId && maybeAgents ? maybeAgents.getSpec(req.agentId) : null),
 			),
 		});
-		const markObservedPhase = (field: "firstModelTokenAt" | "firstToolAt"): void => {
-			if (timing[field] !== undefined) return;
-			timing[field] = new Date(now()).toISOString();
-			const runId = runIdForPermissionAudit;
-			if (runId !== null) {
-				recordRunTimingBestEffort(
-					() => ledgerRef.update(runId, { timing: { ...timing } }),
-					(error) => reportDispatchDiagnostic(`record timing for run ${runId}`, error),
-				);
-			}
-		};
 		const foldAcpEvent = (raw: unknown): void => {
 			outputCapture.observe(raw);
 			const event = raw as {
@@ -4371,10 +4342,6 @@ export function createDispatchBundle(
 					source?: "operator" | "timeout" | "policy" | "remembered";
 				};
 			};
-			if (isRecord(event)) {
-				if (eventContainsFirstModelToken(event)) markObservedPhase("firstModelTokenAt");
-				if (eventStartsTool(event)) markObservedPhase("firstToolAt");
-			}
 			if (event.type === "clio_coder_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
 			}
@@ -4480,7 +4447,6 @@ export function createDispatchBundle(
 				timing,
 				sessionId: req.ownerSessionId ?? null,
 				cwd: lifecycle.cwd,
-				staticShellHash: lifecycle.staticCompositionHash,
 				sessionShellHash: lifecycle.sessionShellHash,
 				dynamicHash: lifecycle.dynamicHash,
 				promptSignature: lifecycle.promptSignature,
@@ -4663,7 +4629,6 @@ export function createDispatchBundle(
 				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
 				...(req.intent !== undefined ? { intent: structuredClone(req.intent) } : {}),
-				pathScope: structuredClone(lifecycle.pathScope.provenance),
 				targetId,
 				wireModelId,
 				runtimeId,
@@ -4707,7 +4672,6 @@ export function createDispatchBundle(
 				costProvenance: usage.costProvenance ?? "unknown",
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
-				staticShellHash: lifecycle.staticCompositionHash,
 				sessionShellHash: lifecycle.sessionShellHash,
 				dynamicHash: lifecycle.dynamicHash,
 				promptSignature: lifecycle.promptSignature,
@@ -4787,7 +4751,6 @@ export function createDispatchBundle(
 				cacheWriteTokenCount: receipt.cacheWriteTokenCount ?? 0,
 				...(receipt.cacheWrite1hTokenCount === undefined ? {} : { cacheWrite1hTokenCount: receipt.cacheWrite1hTokenCount }),
 				reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
-				staticShellHash: receipt.staticShellHash ?? null,
 				sessionShellHash: receipt.sessionShellHash ?? null,
 				dynamicHash: receipt.dynamicHash ?? null,
 				costUsd: receipt.costUsd,
@@ -4936,7 +4899,6 @@ export function createDispatchBundle(
 					outputTokenCount: receiptDraft.outputTokenCount ?? 0,
 					costUsd: receiptDraft.costUsd,
 					...(receiptDraft.costProvenance ? { costProvenance: receiptDraft.costProvenance } : {}),
-					staticShellHash: receiptDraft.staticShellHash ?? null,
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,
 					dynamicHash: receiptDraft.dynamicHash ?? null,
 					cacheReadTokenCount: receiptDraft.cacheReadTokenCount ?? 0,
@@ -5062,7 +5024,7 @@ export function createDispatchBundle(
 	}> {
 		const hostRun = preparation?.hostRun;
 		const requestedAt = new Date(now()).toISOString();
-		const timing: RunPhaseMarks = { requestedAt, decisionStartedAt: requestedAt };
+		const timing: RunPhaseMarks = { requestedAt };
 		const settings = getEffectiveSettings();
 		const isAcpAgent = settings?.integrations.externalAgents?.entries?.some((entry) => entry.id === req.agentId) ?? false;
 		if (isAcpAgent && !req.delegationAgentId) {
@@ -5174,7 +5136,6 @@ export function createDispatchBundle(
 			req.assignmentDeadlineAt ?? Date.parse(requestedAt) + (req.routingIntent?.deadlineMs ?? 60_000);
 		const lifecycle = await resolveLifecycle(req, settings, metadataDeadlineAt, preparation?.signal);
 		preparation?.signal?.throwIfAborted();
-		timing.decisionCompletedAt = new Date(now()).toISOString();
 		assertResponseSchemaEnforceable(
 			lifecycle.target.runtime,
 			lifecycle.target.modelCapabilities,
@@ -5498,17 +5459,6 @@ export function createDispatchBundle(
 					}
 				: {}),
 		});
-		const markObservedPhase = (field: "firstModelTokenAt" | "firstToolAt"): void => {
-			if (timing[field] !== undefined) return;
-			timing[field] = new Date(now()).toISOString();
-			const runId = runIdForPermissionAudit;
-			if (runId !== null) {
-				recordRunTimingBestEffort(
-					() => ledgerRef.update(runId, { timing: { ...timing } }),
-					(error) => reportDispatchDiagnostic(`record timing for run ${runId}`, error),
-				);
-			}
-		};
 		const foldWorkerEvent = (raw: unknown): void => {
 			outputCapture.observe(raw);
 			const event = raw as {
@@ -5548,10 +5498,6 @@ export function createDispatchBundle(
 					source?: "operator" | "timeout" | "policy" | "remembered";
 				};
 			};
-			if (isRecord(event)) {
-				if (eventContainsFirstModelToken(event)) markObservedPhase("firstModelTokenAt");
-				if (eventStartsTool(event)) markObservedPhase("firstToolAt");
-			}
 			if (event.type === "clio_coder_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
 			}
@@ -5766,7 +5712,6 @@ export function createDispatchBundle(
 				timing,
 				sessionId: req.ownerSessionId ?? null,
 				cwd: lifecycle.cwd,
-				staticShellHash: lifecycle.staticCompositionHash,
 				sessionShellHash: lifecycle.sessionShellHash,
 				dynamicHash: lifecycle.dynamicHash,
 				promptSignature: lifecycle.promptSignature,
@@ -5995,22 +5940,6 @@ export function createDispatchBundle(
 			const tokenCount =
 				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
 			const protectedArtifacts = protectedArtifactReceiptSummary(spec.protectedArtifactState);
-			const fleetGate = (() => {
-				if (req.fleetGateReceipt === undefined) return null;
-				try {
-					const content = readFileSync(resolvePath(lifecycle.cwd, req.fleetGateReceipt.path));
-					return { path: req.fleetGateReceipt.path, pathHash: createHash("sha256").update(content).digest("hex") };
-				} catch {
-					return { path: req.fleetGateReceipt.path, pathHash: createHash("sha256").update("").digest("hex") };
-				}
-			})();
-			// Sealed from the stored board, never from anything the worker said
-			// about itself. Absent when the run had no ledger.
-			const ledgerContribution = (() => {
-				if (agentLedgerId === null) return null;
-				const contribution = agentLedgerContribution(agentLedgerId, envelope.id);
-				return contribution === null ? null : { ledgerId: agentLedgerId, ...contribution };
-			})();
 			const finalToolStats = snapshotToolStats(toolStats);
 			const unfinished = snapshotUnfinishedTools(inFlightTools);
 			const telemetryIngestionErrors = toolTelemetryIngestionErrors + malformedWorkerStdoutLineCount(result);
@@ -6040,10 +5969,8 @@ export function createDispatchBundle(
 				outcomeCode,
 				lineage: publishedLineage(lineage, hostRun),
 				...(req.intent !== undefined ? { intent: structuredClone(req.intent) } : {}),
-				pathScope: structuredClone(lifecycle.pathScope.provenance),
 				identity,
 				node: placement?.node ?? LOCAL_RUN_NODE,
-				...receiptAttestationFields(worker.attestation?.() ?? null),
 				...(placement?.reroutes !== undefined && placement.reroutes.length > 0
 					? { reroutes: [...placement.reroutes] }
 					: {}),
@@ -6054,14 +5981,12 @@ export function createDispatchBundle(
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
 				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
-				...(fleetGate !== null ? { fleetGate } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				...(lifecycle.decisionRefs ? { decisionRefs: lifecycle.decisionRefs } : {}),
 				projectContext: lifecycle.projectContext,
 				rulesApplied: lifecycle.rulesApplied,
 				operatorProfileApplied: lifecycle.operatorProfileApplied,
 				...(validationGrounding !== null ? { validationGrounding } : {}),
-				...(ledgerContribution !== null ? { ledgerContribution } : {}),
 				...(lifecycle.capabilityMismatch !== null
 					? {
 							capabilityMismatch: {
@@ -6096,7 +6021,6 @@ export function createDispatchBundle(
 				...(externalTelemetry ? { externalTelemetry } : {}),
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
-				staticShellHash: lifecycle.staticCompositionHash,
 				sessionShellHash: lifecycle.sessionShellHash,
 				dynamicHash: lifecycle.dynamicHash,
 				promptSignature: lifecycle.promptSignature,
@@ -6181,7 +6105,6 @@ export function createDispatchBundle(
 				cacheWriteTokenCount: receipt.cacheWriteTokenCount ?? 0,
 				...(receipt.cacheWrite1hTokenCount === undefined ? {} : { cacheWrite1hTokenCount: receipt.cacheWrite1hTokenCount }),
 				reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
-				staticShellHash: receipt.staticShellHash ?? null,
 				sessionShellHash: receipt.sessionShellHash ?? null,
 				dynamicHash: receipt.dynamicHash ?? null,
 				costUsd: receipt.costUsd,
@@ -6454,7 +6377,6 @@ export function createDispatchBundle(
 					outputTokenCount: receiptDraft.outputTokenCount ?? 0,
 					costUsd: receiptDraft.costUsd,
 					...(receiptDraft.costProvenance ? { costProvenance: receiptDraft.costProvenance } : {}),
-					staticShellHash: receiptDraft.staticShellHash ?? null,
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,
 					dynamicHash: receiptDraft.dynamicHash ?? null,
 					...(receiptDraft.cacheReadTokenCount !== undefined
@@ -7319,7 +7241,6 @@ export function createDispatchBundle(
 			cacheReadTokenCount: 0,
 			cacheWriteTokenCount: 0,
 			reasoningTokenCount: 0,
-			staticShellHash: null,
 			sessionShellHash: null,
 			dynamicHash: null,
 			costUsd: 0,
@@ -7455,7 +7376,6 @@ export function createDispatchBundle(
 				lineage: { parentRunId: null, rootRunId: pending.identity.runId, attempt: 0, depth: 0 },
 				startedAt,
 				elapsedMs: 0,
-				timing: deriveRunPhaseDurations(pending.timing, startedAt, new Date(tickNow).toISOString()),
 				tokens: { input: 0, output: 0, total: 0 },
 				costUsd: 0,
 				costProvenance: "unknown",
@@ -7481,7 +7401,6 @@ export function createDispatchBundle(
 			const costProvenance = run.costProvenance === "unknown" && costUsd > 0 ? "estimated" : run.costProvenance;
 			const startedMs = Date.parse(run.startedAt);
 			const elapsedMs = Number.isFinite(startedMs) ? Math.max(0, tickNow - startedMs) : 0;
-			const timing = deriveRunPhaseDurations(run.timing, run.startedAt, new Date(tickNow).toISOString());
 			running.push({
 				runId: run.runId,
 				agentId: run.agentId,
@@ -7493,7 +7412,6 @@ export function createDispatchBundle(
 				lineage: publishedLineage(run.lineage, run.hostRun),
 				startedAt: run.startedAt,
 				elapsedMs,
-				timing,
 				tokens: { input: meter.inputTokens, output: meter.outputTokens, total: totalTokens },
 				costUsd,
 				costProvenance,
