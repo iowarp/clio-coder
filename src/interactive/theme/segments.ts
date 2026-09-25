@@ -14,17 +14,17 @@ function present(parts: ReadonlyArray<string | null | undefined>): string[] {
 }
 
 /**
- * The Clio logotype: the `>C_` wordmark composed from the tokens the system
- * already assigns to its three characters. `>` and `_` are terminal
- * scaffolding and render dim; `C` is Clio and renders bold accent. GLYPH.brand
- * keeps the plain string for width math and ANSI-stripping tests, and the
- * welcome header and dashboard header stay the only surfaces that paint it.
+ * The Clio logotype: the `>C_` wordmark painted as the logo is, a mint
+ * chevron (accent) before the cyan C and cursor bar (title), with the C bold.
+ * GLYPH.brand keeps the plain string for width math and ANSI-stripping tests,
+ * and the welcome header and dashboard header stay the only surfaces that
+ * paint it.
  */
 export function brandMark(theme: ClioTheme): string {
 	const prompt = GLYPH.brand.slice(0, 1);
 	const initial = GLYPH.brand.slice(1, 2);
 	const cursor = GLYPH.brand.slice(2, 3);
-	return `${theme.fg("dim", prompt)}${theme.style("accent", initial, { bold: true })}${theme.fg("dim", cursor)}`;
+	return `${theme.fg("accent", prompt)}${theme.style("title", initial, { bold: true })}${theme.fg("title", cursor)}`;
 }
 
 /** Dim middot used to separate chips inside a single section. */

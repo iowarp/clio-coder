@@ -9,7 +9,7 @@ import { type DispatchBoardRow, dispatchStatusPresentation, renderDispatchActivi
 import { formatFooterTokens } from "../footer-panel.js";
 import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
 import { previewRows } from "../renderers/preview.js";
-import { clioTheme, formatCompactMs, formatContextPercent, GLYPH, rule } from "../theme/index.js";
+import { brandMark, clioTheme, formatCompactMs, formatContextPercent, GLYPH, rule } from "../theme/index.js";
 import { fitIdentityLabel, formatTargetLabel } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
@@ -573,11 +573,11 @@ export function renderDashboardPage(
 	const budget = Math.max(8, Math.floor(terminalRows / 4));
 	const tabs = DASHBOARD_PAGES.map((name, index) =>
 		name === page
-			? theme.style("agent", ` ${index + 1} ${name.toUpperCase()} `, { bold: true, underline: true })
+			? theme.style("accent", ` ${index + 1} ${name.toUpperCase()} `, { bold: true, underline: true })
 			: theme.fg("dim", ` ${index + 1} ${name} `),
 	);
 
-	const tabText = `${theme.style("accent", ">C_", { bold: true })} ${tabs.join(" ")}`;
+	const tabText = `${brandMark(theme)} ${tabs.join(" ")}`;
 	const identityRoom = safeWidth - visibleWidth(tabText) - 4;
 	const identity = clean(state.session.target ?? "No model selected");
 	const heading = [

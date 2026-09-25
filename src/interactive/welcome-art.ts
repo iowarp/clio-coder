@@ -32,5 +32,7 @@ function stacked(font: Record<string, readonly string[]>): string[] {
 	];
 }
 
+/** Rows above this index spell CLIO; the blank row and CODER follow. */
+export const WELCOME_WORDMARK_SPLIT = 5;
 export const WELCOME_WORDMARK = stacked(LETTERS);
 export const WELCOME_WORDMARK_WIDE = stacked(WIDE_LETTERS);

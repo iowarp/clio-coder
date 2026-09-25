@@ -209,7 +209,7 @@ export function buildSegmentedContextBar(
 	);
 	const freeCells = Math.max(0, cells - filled);
 	const systemPart = systemCells > 0 ? theme.fg("info", glyphs.filled.repeat(systemCells)) : "";
-	const toolPart = toolCells > 0 ? theme.fg("warning", glyphs.filled.repeat(toolCells)) : "";
+	const toolPart = toolCells > 0 ? theme.fg("tool", glyphs.filled.repeat(toolCells)) : "";
 	const conversationPart = conversationCells > 0 ? theme.fg("accent", glyphs.filled.repeat(conversationCells)) : "";
 	const freePart = freeCells > 0 ? theme.style("frame", glyphs.free.repeat(freeCells), { dim: true }) : "";
 	return `${systemPart}${toolPart}${conversationPart}${freePart}${contextPercentLabel(percent)}`;

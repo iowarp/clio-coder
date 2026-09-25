@@ -42,7 +42,7 @@ const TOKEN_HEX: Readonly<Record<ClioToken, `#${string}`>> = {
 	reason: "#9c8664",
 	dim: "#6e7b85",
 	muted: "#608096",
-	title: "#319789",
+	title: "#09969f",
 	frame: "#577287",
 	frameStrong: "#09969f",
 };

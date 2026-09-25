@@ -17,7 +17,7 @@ import {
 	innerDivider,
 	padAnsi,
 } from "./theme/index.js";
-import { WELCOME_WORDMARK, WELCOME_WORDMARK_WIDE } from "./welcome-art.js";
+import { WELCOME_WORDMARK, WELCOME_WORDMARK_SPLIT, WELCOME_WORDMARK_WIDE } from "./welcome-art.js";
 
 const WELCOME_TAGLINE = "Systems engineering beats vibes! Built by researchers who love to code.";
 
@@ -562,7 +562,9 @@ export function buildWelcomeDashboardLines(
 		{ length: Math.max(details.length, hints.length, sideBySide ? wordmark.length : 0) },
 		(_, index) => {
 			const detail = details[index] ?? "";
-			const art = sideBySide ? `${padAnsi(theme.fg("accent", wordmark[index] ?? ""), artWidth)}   ` : "";
+			// Two-tone like the logo: CLIO in mint above, CODER in cyan below.
+			const artToken = index < WELCOME_WORDMARK_SPLIT ? "accent" : "title";
+			const art = sideBySide ? `${padAnsi(theme.fg(artToken, wordmark[index] ?? ""), artWidth)}   ` : "";
 			const content = `${art}${truncateToWidth(detail, detailWidth, GLYPH.ellipsis, false)}`;
 			return fit(
 				showHints

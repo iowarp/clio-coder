@@ -8,17 +8,22 @@ import { type ClioTheme, type ClioToken, clioTheme, GLYPH } from "./theme/index.
  * harness portrays how full the window is.
  */
 
-/** Color assigned to each category across every context rendering. */
+/**
+ * Color assigned to each category across every context rendering. Categories
+ * never borrow a status color: a healthy window full of amber and red cells
+ * reads as an alarm. Severity belongs to the percent label and the worker
+ * context tokens below.
+ */
 export const CONTEXT_CATEGORY_TOKEN: Readonly<Record<ContextLedgerCategory, ClioToken>> = {
 	system: "info",
-	tools: "warning",
-	toolResults: "tool",
-	agents: "reason",
-	skills: "success",
-	memory: "error",
+	tools: "tool",
+	toolResults: "title",
+	agents: "agent",
+	skills: "reason",
+	memory: "accentDeep",
 	project: "muted",
 	messages: "accent",
-	pending: "accentDeep",
+	pending: "accent",
 	reserve: "frame",
 	free: "frame",
 	streaming: "accent",

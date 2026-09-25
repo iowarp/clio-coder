@@ -472,7 +472,7 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 		const composition = contextComposition(facts);
 		fill = joinChips(theme, [
 			composition.system > 0 ? theme.fg("info", `sys ${formatFooterTokens(composition.system)}`) : null,
-			composition.tools > 0 ? theme.fg("warning", `tools ${formatFooterTokens(composition.tools)}`) : null,
+			composition.tools > 0 ? theme.fg("tool", `tools ${formatFooterTokens(composition.tools)}`) : null,
 		]);
 		chatFree = joinChips(theme, [
 			composition.chat > 0 ? theme.fg("accent", formatFooterTokens(composition.chat)) : null,
@@ -484,7 +484,7 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 		const filledChar = visibleWidth(GLYPH.contextFull) === 1 ? GLYPH.contextFull : GLYPH.barFull;
 		const freeChar = visibleWidth(GLYPH.contextFree) === 1 ? GLYPH.contextFree : GLYPH.barEmpty;
 		legendRows = [
-			`${theme.fg("info", `${filledChar} sys`)} ${theme.fg("warning", `${filledChar} tools`)} ${theme.fg("accent", `${filledChar} chat`)} ${theme.style("frame", `${freeChar} free`, { dim: true })}`,
+			`${theme.fg("info", `${filledChar} sys`)} ${theme.fg("tool", `${filledChar} tools`)} ${theme.fg("accent", `${filledChar} chat`)} ${theme.style("frame", `${freeChar} free`, { dim: true })}`,
 		];
 	}
 
