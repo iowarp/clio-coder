@@ -275,12 +275,11 @@ export function dispatchIntentScopeWidening(
 }
 
 /**
- * The retirement criterion for the legacy inference fallback.
- *
- * `pathScope.mode` is sealed on every receipt, so the share of dispatches still
- * resolving policy-bearing scope from prose is measurable from evidence rather
- * than estimated. Removal stays a separate, explicit issue; this is the gate
- * that issue has to clear before it can be opened.
+ * The retirement criterion for the legacy inference fallback: the largest
+ * share of dispatches that may still resolve policy-bearing scope from prose.
+ * Receipts no longer record the resolution mode, so the retirement issue must
+ * record it again before the share can be measured. Removal stays a separate,
+ * explicit issue; this is the gate that issue has to clear.
  */
 export const DISPATCH_INTENT_RETIREMENT_MAX_LEGACY_SHARE = 0.02;
 
