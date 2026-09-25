@@ -229,13 +229,20 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getModelLabel: () =>
 			[settings.chat.target, settings.chat.model].filter((part) => part && part.length > 0).join("·") || "starting",
 		getThinkingLabel: () => settings.chat.thinkingLevel ?? "off",
+		getOutputStyle: () => settings.interface.outputDetail,
 		getAutonomy: () => settings.safety.autonomy,
 		getSubmitKeyLabel: () => keybindings.getKeys("tui.input.submit")[0] ?? "Enter",
 		getNewlineKeyLabel: () => keybindings.getKeys("tui.input.newLine")[0] ?? "Ctrl+J",
 	};
-	const editorChromeProxy: EditorChrome = {
+	// Presentation drives the lease's editor through this proxy, so a chrome
+	// field it omits never reaches the rail. It dropped the output style and
+	// Alt+O left the thinking rail on the Standard label (BT-009). Required
+	// makes the next new field a type error here; the animation clock is a
+	// rendering-test seam that the editor already defaults.
+	const editorChromeProxy: Required<Omit<EditorChrome, "getAnimationTime">> = {
 		getModelLabel: () => editorChrome.getModelLabel(),
 		getThinkingLabel: () => editorChrome.getThinkingLabel(),
+		getOutputStyle: () => editorChrome.getOutputStyle?.() ?? settings.interface.outputDetail,
 		getAutonomy: () => editorChrome.getAutonomy?.() ?? settings.safety.autonomy,
 		isStreaming: () => editorChrome.isStreaming?.() ?? false,
 		isAwaitingApproval: () => editorChrome.isAwaitingApproval?.() ?? false,
