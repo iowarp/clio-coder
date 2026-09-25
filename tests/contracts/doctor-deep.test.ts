@@ -66,7 +66,7 @@ describe("doctor --deep validation contract dry run", () => {
 		match(autoEdit[0]?.detail ?? "", /^`git status`: git is \/\S+\/git; runs without approval at default$/);
 		strictEqual(
 			autoEdit[1]?.detail,
-			`\`CI=1 mytool --check\`: mytool is ${tool}; asks for approval at default; declare it in .clio-coder/safety.yaml to run it unattended`,
+			`\`CI=1 mytool --check\`: mytool is ${tool}; asks for approval at default and runs at yolo; declare it in .clio-coder/safety.yaml to run it unattended`,
 		);
 		match(autoEdit[2]?.detail ?? "", /^`nosuchtool --x`: nosuchtool not found; /);
 		match(autoEdit[3]?.detail ?? "", /; blocked by the safety policy \(damage-control:/);
@@ -79,6 +79,31 @@ describe("doctor --deep validation contract dry run", () => {
 
 		// A dry run: the program resolved, and nothing executed it.
 		strictEqual(existsSync(marker), false);
+	});
+
+	it("evaluates each validator with the session posture, as tool admission does", () => {
+		const workspace = workspaceWithContract(["git log -n 1 $(git rev-parse HEAD)", "truncate -s 0 build.log"]);
+
+		const atDefault = contractDryRunFindings({ workspaceRoot: workspace, autonomy: "default" });
+		strictEqual(atDefault[0]?.level, "warn");
+		match(
+			atDefault[0]?.detail ?? "",
+			/; asks for approval at default and runs at yolo \(bash-command-substitution\)$/,
+			"an ordinary rail asks at default only",
+		);
+		strictEqual(atDefault[1]?.level, "warn");
+		match(
+			atDefault[1]?.detail ?? "",
+			/; asks for confirmation at default and yolo \(damage-control:truncate-size-zero\)$/,
+			"a damage-control confirmation asks at both levels",
+		);
+
+		const atYolo = contractDryRunFindings({ workspaceRoot: workspace, autonomy: "yolo" });
+		strictEqual(atYolo[0]?.level, "ok", atYolo[0]?.detail);
+		match(atYolo[0]?.detail ?? "", /; runs without approval at yolo$/);
+		strictEqual(atYolo[1]?.level, "warn");
+		match(atYolo[1]?.detail ?? "", /; asks for confirmation at default and yolo \(damage-control:truncate-size-zero\)$/);
+		ok([...atDefault, ...atYolo].every((f) => !/every autonomy level/.test(f.detail)));
 	});
 
 	it("adds no rows without a parsed contract", () => {

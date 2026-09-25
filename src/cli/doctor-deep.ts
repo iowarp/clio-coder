@@ -78,10 +78,13 @@ export interface ContractDryRunOptions {
 /**
  * Dry run of the workspace validation contract. Each declared validator
  * command is resolved on PATH and handed to the same two stages tool
- * admission applies to a bash call: the policy engine's verdict, then the
- * autonomy mapping at the configured level. Nothing is executed. A row warns
- * when the program is missing or when the command would stop for approval or
- * be refused, because either one stalls an unattended validation.
+ * admission applies to a bash call (src/tools/registry.ts): the policy
+ * engine's verdict under the session posture, then the autonomy mapping at the
+ * configured level. The posture matters because yolo clears the ordinary
+ * rails inside the engine, so evaluating without it reported a `$(...)`
+ * validator as asking at yolo when admission runs it. Nothing is executed. A
+ * row warns when the program is missing or when the command would stop for
+ * approval or be refused, because either one stalls an unattended validation.
  */
 export function contractDryRunFindings(options: ContractDryRunOptions): DoctorFinding[] {
 	const workspaceRoot = options.workspaceRoot ?? process.cwd();
@@ -91,30 +94,40 @@ export function contractDryRunFindings(options: ContractDryRunOptions): DoctorFi
 	if (validators.length === 0) return [];
 	const engine = createSafetyPolicyEngine({ cwd: workspaceRoot });
 	const level = options.autonomy;
+	const posture = level === "yolo" ? "yolo" : undefined;
 	return validators.map((command, index): DoctorFinding => {
 		const name = `validator ${index + 1}`;
 		const program = commandProgram(command);
 		const resolved = program === null ? null : resolveProgram(program, workspaceRoot);
 		const where =
 			program === null ? "no program" : resolved === null ? `${program} not found` : `${program} is ${resolved}`;
-		const decision = engine.evaluate({ tool: ToolNames.Bash, args: { command } });
+		const call = { tool: ToolNames.Bash, args: { command } };
+		const decision = engine.evaluate(call, posture);
 		let verdict: string;
 		let runs = false;
 		if (decision.kind === "block") {
 			verdict = `blocked by the safety policy (${decision.reasonCode})`;
 		} else if (decision.kind === "ask") {
-			verdict = `asks for approval at every autonomy level (${decision.reasonCode})`;
+			// An ask that survives the yolo posture is a damage-control
+			// confirmation, which holds at both levels. Any other engine ask is
+			// an ordinary rail that yolo clears.
+			const asksAtYolo = level === "yolo" || engine.evaluate(call, "yolo").kind === "ask";
+			verdict = asksAtYolo
+				? `asks for confirmation at default and yolo (${decision.reasonCode})`
+				: `asks for approval at default and runs at yolo (${decision.reasonCode})`;
 		} else {
 			const disposition = mapAutonomy(level, decision.actionClass, {
 				executeRecognized: decision.execRecognition !== "unrecognized",
 			});
 			runs = disposition === "allow";
+			// The mapping asks only at default, and it denies only the action
+			// classes admission hard-blocks at both levels (git_destructive).
 			verdict =
 				disposition === "allow"
 					? `runs without approval at ${level}`
 					: disposition === "ask"
-						? `asks for approval at ${level}; declare it in .clio-coder/safety.yaml to run it unattended`
-						: `denied at ${level}`;
+						? "asks for approval at default and runs at yolo; declare it in .clio-coder/safety.yaml to run it unattended"
+						: `blocked by the safety policy (classification:${decision.actionClass})`;
 		}
 		return {
 			ok: true,

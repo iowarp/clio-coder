@@ -107,17 +107,28 @@ loads while an in-session probe runs.
 For each command under `validators:` in the workspace validation contract,
 doctor resolves the program (the first word after any `NAME=value`
 assignments) on PATH, or relative to the workspace when it contains a `/`.
-Then it asks the safety policy engine what it would decide for that command as
-a bash call, and applies the autonomy mapping at the configured
-`safety.autonomy`, or at the session's level for `/doctor deep`. Nothing is
-executed.
+Then it evaluates the command as a bash call the way tool admission does, at
+the configured `safety.autonomy` or at the session's level for `/doctor deep`.
+The safety policy engine decides under that level's posture, so yolo clears
+the ordinary rails, and the autonomy mapping at that level decides the rest.
+Nothing is executed.
 
 The row is `OK` when the program resolves and the command would run without an
-approval ask. It is `WARN` when the program is missing, when the policy blocks
-the command, when a safety rule asks for approval at every level, or when the
-configured autonomy asks for or denies it. A command that asks only because
-it is unrecognized can be declared in `.clio-coder/safety.yaml` to run
-unattended.
+approval ask at that level. Otherwise it is `WARN`. The verdict says what
+really happens:
+
+| Verdict | What happens |
+| --- | --- |
+| `runs without approval at <level>` | The command runs at the evaluated level. |
+| `asks for approval at default and runs at yolo` | An ordinary rail, such as `$(...)` command substitution or an unrecognized command. Default asks and yolo runs it. |
+| `asks for confirmation at default and yolo` | A damage-control confirmation rule matched. It asks at both levels. |
+| `blocked by the safety policy` | A block. It holds at both levels. |
+
+A verdict that comes from a safety rule names the rule's reason code in
+parentheses. A command that asks only because it is unrecognized gets a hint
+instead: declare it in `.clio-coder/safety.yaml` to run it unattended at
+default. The project safety file takes effect only after you approve it with
+`clio-coder config trust safety`.
 
 With no contract, or a contract with no validators, the dry run adds no rows.
 
