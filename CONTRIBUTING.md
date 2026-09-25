@@ -58,6 +58,18 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
    ```
 4. Verify `pnpm run ci` passes before requesting review.
 
+## README contract
+
+`README.md` is the front page on GitHub and npm. Its structure is fixed, and the `readme-shape` check in `scripts/check-hygiene.ts` fails on drift. Length is not limited; structure is.
+
+- Sections, in order: Get started, Why Clio, Models, Everyday use, Safety, Install, Documentation, Contribute, Acknowledgements. No new sections, and no sub-headings outside a collapsed `<details>` block.
+- Required elements: the Markdown `# Clio Coder` title, the product screenshot `assets/readme/clio-session.png` referenced from `main`, the source install block that `readme-install-block` pins, and the collapsed **For agents** block under Documentation.
+- Images use absolute `https://` URLs, because npm renders the README without `assets/`.
+- Release numbers appear only in the Install pin. Release notes belong in [CHANGELOG.md](CHANGELOG.md).
+- A release changes the Install pin and, when the terminal interface changed visibly, the screenshot. Nothing else is a required release edit.
+- A feature documents itself in `docs/`. The README gains at most a bullet in Why Clio, a row in an existing table, or a line in an existing collapsed block.
+- Changing the structure changes this section and `README_SECTIONS` in `scripts/check-hygiene.ts` in the same commit, with the maintainer's approval.
+
 ## Library & Skills
 
 `library/` contains five package kinds: **skill, agent, prompt, fleet, and plugin** (see [library guide](library/README.md)).
