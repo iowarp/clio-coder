@@ -109,7 +109,7 @@ function selectableModelRow(): ModelRow {
 		authText: "ready",
 		available: true,
 		reason: "",
-		healthGlyph: "●",
+		healthToken: "success",
 		healthText: "healthy",
 		caps,
 		capabilityDecisions: {

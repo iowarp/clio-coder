@@ -255,3 +255,5 @@ Every transcript row follows a rigid 2-column gutter format:
 | Permission overlay | [permission-overlay.ts](../../src/interactive/permission-overlay.ts) | Permission presentation |
 
 Fleet cards and approvals share the target/model route spelling.
+
+The model picker uses an accent check for the active model; scoped and default state appear in details.

@@ -29,7 +29,6 @@ import {
 	Input,
 	matchesKey,
 	type OverlayHandle,
-	type SelectItem,
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
@@ -44,7 +43,7 @@ import {
 	formatRuntimeResolutionDiagnostic,
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
-import { type ClioToken, clioTheme, GLYPH } from "../theme/index.js";
+import { type ClioToken, clioTheme, fitIdentityLabel, GLYPH } from "../theme/index.js";
 
 export const MODEL_OVERLAY_WIDTH = 82;
 const MODEL_OVERLAY_MAX_WIDTH = 120;
@@ -65,7 +64,7 @@ const TARGET_COL_WIDTH_WIDE = 12;
 const RUNTIME_COL_WIDTH_NARROW = 10;
 const RUNTIME_COL_WIDTH_MEDIUM = 14;
 const RUNTIME_COL_WIDTH_WIDE = 18;
-const SELECTED_PREFIX_WIDTH = 6;
+const SELECTED_PREFIX_WIDTH = 4;
 const TAB = "\t";
 
 function resolveOverlayWidth(terminalColumns: number): number {
@@ -94,30 +93,13 @@ export interface OpenModelOverlayDeps {
 	autoRefresh?: boolean;
 }
 
-function healthGlyph(status: TargetStatus): string {
+function healthToken(status: TargetStatus): ClioToken {
 	switch (status.health.status) {
 		case "healthy":
-			return GLYPH.running;
-		case "degraded":
-			return "◐";
-		case "down":
-			return "○";
-		default:
-			return "·";
-	}
-}
-
-/**
- * Map a row's health glyph back to its semantic token so the status cell states
- * the fact in color: healthy green, degraded amber, down red, unknown dim.
- */
-function healthToken(row: ModelRow): ClioToken {
-	switch (row.healthGlyph) {
-		case GLYPH.running:
 			return "success";
-		case "◐":
+		case "degraded":
 			return "warning";
-		case "○":
+		case "down":
 			return "error";
 		default:
 			return "dim";
@@ -151,15 +133,6 @@ function maxTokensDecisionLabel(decisions: RuntimeCapabilityDecision): string {
 	return compactTokenCount(decisions.maxTokens);
 }
 
-function truncateMiddle(text: string, maxWidth: number): string {
-	if (maxWidth <= 0 || text.length <= maxWidth) return text;
-	if (maxWidth <= 8) return truncateToWidth(text, maxWidth, "", true);
-	const suffixWidth = Math.min(14, Math.max(6, Math.floor(maxWidth / 3)));
-	const prefixWidth = maxWidth - suffixWidth - 1;
-	if (prefixWidth <= 0) return truncateToWidth(text, maxWidth, "", true);
-	return `${text.slice(0, prefixWidth)}…${text.slice(-suffixWidth)}`;
-}
-
 type ModelSource = ProviderModelSource | "missing";
 type ModelBucket = "local" | "cloud";
 type ModelRefreshScope = "selected" | "all";
@@ -181,7 +154,7 @@ export interface ModelRow {
 	authText: string;
 	available: boolean;
 	reason: string;
-	healthGlyph: string;
+	healthToken: ClioToken;
 	healthText: string;
 	caps: CapabilityFlags;
 	capabilityDecisions?: RuntimeCapabilityDecision;
@@ -216,9 +189,6 @@ export function modelsForTarget(status: TargetStatus): string[] {
 }
 
 export interface ModelItemsResult {
-	items: SelectItem[];
-	/** Parallel to items. onSelect of items[i] resolves to refs[i]. */
-	refs: ModelSelection[];
 	rows: ModelRow[];
 	summary: ModelOverlaySummary;
 }
@@ -385,8 +355,6 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 			);
 		});
 	const scopeSet = new Set(deps.settings.chat.modelPicker.cycleSet ?? []);
-	const items: SelectItem[] = [];
-	const refs: ModelSelection[] = [];
 	const rows: ModelRow[] = [];
 	for (const status of list) {
 		const { target } = status;
@@ -423,7 +391,7 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 				authText,
 				available: status.available,
 				reason: status.reason,
-				healthGlyph: healthGlyph(status),
+				healthToken: healthToken(status),
 				healthText: healthText(status),
 				caps: rowCaps,
 				capabilityDecisions: decisions,
@@ -443,12 +411,6 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 				visibleByDefault: target.id === activeTarget || scopeSet.has(target.id),
 				selectable: false,
 			};
-			items.push({
-				value: target.id,
-				label: `${row.healthGlyph}  ${runtimeName}`,
-				description: `target=${target.id}  auth=${authText}${status.reason ? `  ${status.reason}` : ""}`,
-			});
-			refs.push({ target: target.id, model: target.defaultModel ?? "" });
 			rows.push(row);
 			continue;
 		}
@@ -489,7 +451,7 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 				authText,
 				available: status.available,
 				reason: status.reason,
-				healthGlyph: healthGlyph(status),
+				healthToken: healthToken(status),
 				healthText: healthText(status),
 				caps: rowCaps,
 				capabilityDecisions: decisions,
@@ -510,16 +472,10 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 				// exists and why it is refused, but it cannot be chosen for the chat role.
 				selectable: supportsAgentRoleTools(decisions),
 			};
-			items.push({
-				value: rowRef,
-				label: `${row.healthGlyph}${favorite ? GLYPH.favorite : scopeHit ? GLYPH.scoped : active ? GLYPH.active : " "} ${wireModel}`,
-				description: `${row.context}  ${badges}  ${runtimeShortName}  target=${target.id}`,
-			});
-			refs.push({ target: target.id, model: wireModel });
 			rows.push(row);
 		}
 	}
-	return { items, refs, rows, summary: buildSummary(rows, list.length, activeRef) };
+	return { rows, summary: buildSummary(rows, list.length, activeRef) };
 }
 
 interface ModelColumns {
@@ -562,31 +518,23 @@ function modelColumns(width: number): ModelColumns {
 
 /** The model cell, always leaving `MODEL_COL_GUTTER` blank columns before ctx. */
 function fitModelCell(text: string, columnWidth: number): string {
-	return fitCell(truncateMiddle(text, Math.max(1, columnWidth - MODEL_COL_GUTTER)), columnWidth);
+	return fitCell(fitIdentityLabel(text, Math.max(1, columnWidth - MODEL_COL_GUTTER)), columnWidth);
 }
 
-function fitCell(text: string, width: number, align: "left" | "right" = "left"): string {
-	const clipped = truncateToWidth(text, width, "", true);
+function fitCell(text: string, width: number, align: "left" | "right" = "left", ellipsis = ""): string {
+	const clipped = truncateToWidth(text, width, ellipsis, true);
 	const pad = " ".repeat(Math.max(0, width - visibleWidth(clipped)));
 	return align === "right" ? `${pad}${clipped}` : `${clipped}${pad}`;
 }
 
-function fitLine(text: string, width: number): string {
-	const clipped = truncateToWidth(text, width, "", true);
-	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
-}
-
-// The state mark to the left of a model id. The active model carries the accent
-// active mark; a scoped model the muted scoped mark; favorite, recent, and
-// default are quiet dim metadata; everything else is a dim placeholder dot.
+// The active, favorite and recent marks keep one fixed column. Scoped and
+// default remain words in the selected row's detail instead of run-origin marks.
 function activeMark(row: ModelRow): string {
 	const theme = clioTheme();
-	if (row.active) return theme.fg("accent", GLYPH.active);
+	if (row.active) return theme.fg("accent", GLYPH.ok);
 	if (row.favorite) return theme.fg("dim", GLYPH.favorite);
-	if (row.recent) return theme.fg("dim", "↺");
-	if (row.scoped) return theme.fg("muted", GLYPH.scoped);
-	if (row.defaultModel) return theme.fg("dim", "d");
-	return theme.fg("dim", "·");
+	if (row.recent) return theme.fg("dim", GLYPH.recent);
+	return " ";
 }
 
 function formatModelHeader(width: number): string {
@@ -599,19 +547,18 @@ function formatModelHeader(width: number): string {
 	if (columns.showTarget) line += ` ${fitCell("target", columns.targetWidth)}`;
 	if (columns.showRuntime) line += ` ${fitCell("runtime", columns.runtimeWidth)}`;
 	// Table headers render dim per the design-system table recipe (section 4.6).
-	return clioTheme().fg("dim", fitLine(line, width));
+	return clioTheme().fg("dim", fitCell(line, width));
 }
 
 function formatModelRow(row: ModelRow, width: number, selected: boolean): string {
 	const theme = clioTheme();
 	const columns = modelColumns(width);
-	// Selection points with the accent cursor and bolds the model id; the health
-	// glyph states the fact in its status token; the remaining cells stay muted.
+	// Selection points with the accent cursor and bolds the model id. The target
+	// cell carries health color while the remaining cells stay muted.
 	// The whole line is never recolored, so a cell's own reset can never clip the
 	// selection highlight.
 	const pointer = selected ? theme.fg("accent", GLYPH.cursor) : " ";
-	const health = theme.fg(healthToken(row), row.healthGlyph);
-	const prefix = `${pointer} ${health} ${activeMark(row)} `;
+	const prefix = `${pointer} ${activeMark(row)} `;
 	const modelLabel = row.model.length > 0 ? row.model : "(no model ids)";
 	const modelCell = fitModelCell(modelLabel, columns.modelWidth);
 	const model = selected ? theme.style("accent", modelCell, { bold: true }) : theme.fg("muted", modelCell);
@@ -620,9 +567,9 @@ function formatModelRow(row: ModelRow, width: number, selected: boolean): string
 		model +
 		`${theme.fg("muted", fitCell(row.context, CONTEXT_COL_WIDTH, "right"))} ` +
 		theme.fg("muted", fitCell(row.badges, CAPS_COL_WIDTH));
-	if (columns.showTarget) line += ` ${theme.fg("muted", fitCell(row.target, columns.targetWidth))}`;
+	if (columns.showTarget) line += ` ${theme.fg(row.healthToken, fitCell(row.target, columns.targetWidth))}`;
 	if (columns.showRuntime) line += ` ${theme.fg("dim", fitCell(row.runtimeShortName, columns.runtimeWidth))}`;
-	return fitLine(line, width);
+	return fitCell(line, width);
 }
 
 function capabilityNames(caps: CapabilityFlags): string {
@@ -770,9 +717,11 @@ function renderModelOverlayLines(input: {
 	const lines = [
 		theme.fg(
 			"dim",
-			fitLine(
+			fitCell(
 				`${modeLabel} · ${selectableFiltered}/${input.summary.totalModels} models · ${input.summary.targets} targets · ${input.summary.localModels} local  ${input.summary.cloudModels} cloud`,
 				width,
+				"left",
+				GLYPH.ellipsis,
 			),
 		),
 		...wrapTextWithAnsi(
@@ -803,13 +752,13 @@ function renderModelOverlayLines(input: {
 			lines.push(formatModelRow(row, width, start + i === selectedIndex));
 		}
 		if (filtered.length > VISIBLE_ROWS) {
-			lines.push(theme.fg("dim", fitLine(`  (${selectedIndex + 1}/${filtered.length})`, width)));
+			lines.push(theme.fg("dim", fitCell(`  (${selectedIndex + 1}/${filtered.length})`, width)));
 		}
 	}
 	lines.push("");
 	if (selected) lines.push(...formatModelDetail(selected, width));
-	else lines.push(theme.fg("muted", fitLine("no selected model", width)), "");
-	return lines.map((line) => fitLine(line, width));
+	else lines.push(theme.fg("muted", fitCell("no selected model", width)), "");
+	return lines.map((line) => fitCell(line, width));
 }
 
 interface ModelRefreshActions {
