@@ -533,13 +533,15 @@ describe("contracts/files pane theme", () => {
 		for (const section of ["mgr", "mode", "status", "which", "pick", "input", "notify"]) {
 			ok(theme.includes(`[${section}]`), `theme must cover [${section}]`);
 		}
-		const herdr = renderHerdrThemeBlock();
+		const herdr = renderHerdrThemeBlock("dark");
 		ok(parseTomlDocument(herdr), "the herdr block must parse as TOML");
 		match(herdr, /\[theme\.custom\]/u);
-		ok(herdr.includes(`accent = "${tokenHex("accent")}"`));
+		ok(herdr.includes(`accent = "${tokenHex("accent", "dark")}"`));
+		match(renderHerdrThemeBlock("light"), new RegExp(`accent = "${tokenHex("accent", "light")}"`, "u"));
 		// Every literal color in both documents is one of Clio's tokens.
 		const colors = new Set([...`${theme}${herdr}`.matchAll(/#[0-9a-f]{6}/gu)].map((m) => m[0]));
 		for (const color of colors) ok(theme.includes(color) || herdr.includes(color));
-		strictEqual(colors.size <= 13, true);
+		// Ten unknown-background tokens for yazi, five dark tokens and two row surfaces for herdr.
+		strictEqual(colors.size <= 17, true);
 	});
 });

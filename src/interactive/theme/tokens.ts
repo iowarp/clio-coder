@@ -1,40 +1,61 @@
-import type { ClioToken } from "../../core/theme-token-hex.js";
+import { terminalBackground } from "../../core/terminal-background.js";
+import type { ClioToken, ThemeBackground } from "../../core/theme-token-hex.js";
+import { tokenHex } from "../../core/theme-token-hex.js";
 
-export type { ClioToken } from "../../core/theme-token-hex.js";
+export type { ClioToken, ThemeBackground } from "../../core/theme-token-hex.js";
 
 interface TokenColor {
 	rgb: readonly [number, number, number];
 	xterm: number;
 }
 
-const TOKENS: Record<ClioToken, TokenColor> = {
-	// Brand hues (logo mint and cyan, iowarp.ai orange, steel and slate) moved
-	// into the mid-luminance band so each reads on dark and light themes. The
-	// xterm picks favor two-sided contrast; 36 and 37 keep mint and cyan apart.
-	editor: { rgb: [9, 150, 159], xterm: 37 },
-	editorDanger: { rgb: [227, 86, 86], xterm: 167 },
-	editorAction: { rgb: [208, 109, 37], xterm: 166 },
-	accent: { rgb: [49, 151, 137], xterm: 36 },
-	accentDeep: { rgb: [24, 139, 123], xterm: 29 },
-	tool: { rgb: [64, 140, 150], xterm: 66 },
-	agent: { rgb: [192, 96, 31], xterm: 130 },
+/**
+ * xterm-256 fallbacks per background, [unknown, dark, light], beside the hex
+ * columns in core/theme-token-hex.ts. The unknown column favors two-sided
+ * contrast, with 36 and 37 keeping the logo's mint and cyan apart.
+ */
+const XTERM: Record<ClioToken, readonly [number, number, number]> = {
+	editor: [37, 44, 30],
+	editorDanger: [167, 203, 160],
+	editorAction: [166, 208, 130],
+	accent: [36, 79, 29],
+	accentDeep: [29, 36, 23],
+	tool: [66, 73, 66],
+	agent: [130, 173, 94],
 	// Orange means Clio is acting. It fires only for Clio's signature actions
 	// (dispatching, queued and running fleet work, steering) and for the border
 	// of a prompt that has taken the keyboard and is waiting on a decision, never
 	// as decoration, and never a metric, at most one orange element per region of
 	// the screen. warning stays amber for actual warnings.
-	action: { rgb: [208, 109, 37], xterm: 166 },
-	success: { rgb: [42, 156, 92], xterm: 28 },
-	warning: { rgb: [170, 129, 24], xterm: 136 },
-	error: { rgb: [221, 83, 83], xterm: 167 },
-	info: { rgb: [74, 144, 180], xterm: 67 },
-	reason: { rgb: [156, 134, 100], xterm: 137 },
-	dim: { rgb: [110, 123, 133], xterm: 244 },
-	muted: { rgb: [96, 128, 150], xterm: 102 },
-	title: { rgb: [9, 150, 159], xterm: 37 },
-	frame: { rgb: [87, 114, 135], xterm: 243 },
-	frameStrong: { rgb: [9, 150, 159], xterm: 37 },
+	action: [166, 208, 130],
+	success: [28, 42, 28],
+	warning: [136, 220, 136],
+	error: [167, 210, 124],
+	info: [67, 74, 24],
+	reason: [137, 180, 101],
+	dim: [244, 245, 243],
+	muted: [102, 248, 241],
+	title: [37, 44, 30],
+	frame: [243, 24, 250],
+	frameStrong: [37, 44, 30],
 };
+
+const PALETTES = new Map<ThemeBackground | null, Record<ClioToken, TokenColor>>();
+
+function palette(background: ThemeBackground | null): Record<ClioToken, TokenColor> {
+	let colors = PALETTES.get(background);
+	if (colors === undefined) {
+		const column = background === "dark" ? 1 : background === "light" ? 2 : 0;
+		const entries = (Object.keys(XTERM) as ClioToken[]).map((token): [ClioToken, TokenColor] => {
+			const hex = tokenHex(token, background);
+			const rgb = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)) as [number, number, number];
+			return [token, { rgb, xterm: XTERM[token][column] }];
+		});
+		colors = Object.fromEntries(entries) as Record<ClioToken, TokenColor>;
+		PALETTES.set(background, colors);
+	}
+	return colors;
+}
 
 export const SGR_RESET = "\u001b[0m";
 export const SGR_DIM = "\u001b[2m";
@@ -93,20 +114,23 @@ function bgCode(color: TokenColor, truecolor: boolean): string {
 
 export function fgSequence(token: ClioToken, truecolor: boolean = detectTruecolor()): string {
 	if (colorDisabled()) return "";
-	return `\u001b[${fgCode(TOKENS[token], truecolor)}m`;
+	return `\u001b[${fgCode(palette(terminalBackground())[token], truecolor)}m`;
 }
 
-export function createClioTheme(options: { truecolor?: boolean; color?: boolean } = {}): ClioTheme {
+export function createClioTheme(
+	options: { truecolor?: boolean; color?: boolean; background?: ThemeBackground | null } = {},
+): ClioTheme {
 	const truecolor = options.truecolor ?? detectTruecolor();
 	const color = options.color ?? !colorDisabled();
+	const colors = palette(options.background === undefined ? terminalBackground() : options.background);
 	const paint = (text: string, mods: PaintMods): string => {
 		const codes: string[] = [];
 		if (mods.bold) codes.push("1");
 		if (mods.dim) codes.push("2");
 		if (mods.italic) codes.push("3");
 		if (mods.underline) codes.push("4");
-		if (color && mods.fg) codes.push(fgCode(TOKENS[mods.fg], truecolor));
-		if (color && mods.bg) codes.push(bgCode(TOKENS[mods.bg], truecolor));
+		if (color && mods.fg) codes.push(fgCode(colors[mods.fg], truecolor));
+		if (color && mods.bg) codes.push(bgCode(colors[mods.bg], truecolor));
 		if (codes.length === 0) return text;
 		return `\u001b[${codes.join(";")}m${text}${SGR_RESET}`;
 	};
@@ -116,13 +140,13 @@ export function createClioTheme(options: { truecolor?: boolean; color?: boolean 
 		fg: (token, text) => paint(text, { fg: token }),
 		bg: (token, text) => paint(text, { bg: token }),
 		style: (token, text, mods = {}) => paint(text, { ...mods, fg: token }),
-		fgSequence: (token) => (color ? `\u001b[${fgCode(TOKENS[token], truecolor)}m` : ""),
+		fgSequence: (token) => (color ? `\u001b[${fgCode(colors[token], truecolor)}m` : ""),
 	};
 }
 
 /** True when `value` names one of the theme's own tokens, so it can be painted as one. */
 export function isClioToken(value: string): value is ClioToken {
-	return Object.hasOwn(TOKENS, value);
+	return Object.hasOwn(XTERM, value);
 }
 
 const HEX_COLOR = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/u;

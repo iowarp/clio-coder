@@ -35,6 +35,10 @@ const ROOT_ENV = "CLIO_CODER_TEST_TMP_ROOT";
 // gives the suite one deterministic default without changing product behavior.
 delete process.env.FORCE_COLOR;
 delete process.env.NO_COLOR;
+// The terminal background picks the palette the same way, so a light-themed
+// shell cannot move the suite off the unknown-background palette.
+delete process.env.COLORFGBG;
+delete process.env.CLIO_CODER_THEME;
 /** Names every root this harness makes, and the only names it will remove. */
 export const TEST_TMP_ROOT_PREFIX = "clio-coder-tests-";
 

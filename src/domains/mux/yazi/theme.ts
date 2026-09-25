@@ -1,3 +1,5 @@
+import { terminalBackground } from "../../../core/terminal-background.js";
+import type { ThemeBackground } from "../../../core/theme-token-hex.js";
 import { tokenHex } from "../../../core/theme-token-hex.js";
 
 /**
@@ -114,7 +116,19 @@ title_error = { fg = "${error}" }
 }
 
 /**
- * The same palette as a herdr `[theme.custom]` block.
+ * Row backgrounds for herdr's selection and active row. A row background sits
+ * under herdr's own text, which is light on a dark theme and dark on a light
+ * one, so it has to be a quiet surface rather than a mid-luminance token. These
+ * are iowarp.ai's navy surface and a pale cyan wash of the logo cyan.
+ */
+const HERDR_ROW_BG: Readonly<Record<ThemeBackground, { selection: string; active: string }>> = {
+	dark: { selection: "#0f2a3d", active: "#0f1f35" },
+	light: { selection: "#cfe9ec", active: "#e6f2f4" },
+};
+
+/**
+ * The same palette as a herdr `[theme.custom]` block, drawn for the terminal
+ * background Clio detected (dark when unknown, herdr's usual chrome).
  *
  * herdr themes its chrome (sidebar, tab bar, borders, agent rows) from its own
  * config.toml and has no per-pane styling on the wire, so Clio cannot color
@@ -122,15 +136,17 @@ title_error = { fg = "${error}" }
  * herdr's chrome match Clio, to paste into herdr's config; Clio never writes
  * another program's configuration itself.
  */
-export function renderHerdrThemeBlock(): string {
-	return `# Clio Coder theme tokens for herdr. Paste into ~/.config/herdr/config.toml, then run \`herdr server reload-config\`.
+export function renderHerdrThemeBlock(background: ThemeBackground = terminalBackground() ?? "dark"): string {
+	const hex = (token: Parameters<typeof tokenHex>[0]) => tokenHex(token, background);
+	const rows = HERDR_ROW_BG[background];
+	return `# Clio Coder theme tokens for herdr (${background} terminal). Paste into ~/.config/herdr/config.toml, then run \`herdr server reload-config\`.
 [theme.custom]
-accent = "${tokenHex("accent")}"
-green = "${tokenHex("success")}"
-blue = "${tokenHex("info")}"
-red = "${tokenHex("error")}"
-yellow = "${tokenHex("warning")}"
-selection_bg = "${tokenHex("frame")}"
-active_row_bg = "${tokenHex("frame")}"
+accent = "${hex("accent")}"
+green = "${hex("success")}"
+blue = "${hex("info")}"
+red = "${hex("error")}"
+yellow = "${hex("warning")}"
+selection_bg = "${rows.selection}"
+active_row_bg = "${rows.active}"
 `;
 }
