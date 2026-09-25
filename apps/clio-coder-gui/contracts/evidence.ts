@@ -18,7 +18,6 @@ export const TrustAxes = Type.Object(
 		validationGrounding: Type.String(),
 		independentReview: Type.String(),
 		contextProvenance: Type.String(),
-		autonomyEnforcement: Type.String(),
 		completionEvidence: Type.String(),
 	},
 	closed,

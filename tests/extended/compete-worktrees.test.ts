@@ -261,7 +261,7 @@ for (const agent of ["scout", "coder"] as const) {
 			ok(judgeRun?.receiptPath);
 			const judgeReceipt = JSON.parse(readFileSync(judgeRun.receiptPath, "utf8")) as RunReceipt;
 			strictEqual(judgeReceipt.outcome, "succeeded");
-			strictEqual(judgeReceipt.autonomyEnforcement?.autonomy, "default");
+			strictEqual(judgeReceipt.autonomy, "default");
 			deepStrictEqual(
 				judgeReceipt.gate?.subjects?.map((subject) => subject.runId).sort(),
 				receipts.map((receipt) => receipt.runId).sort(),
@@ -297,7 +297,7 @@ for (const agent of ["scout", "coder"] as const) {
 			for (const receipt of receipts) {
 				strictEqual(receipt.gate?.role, "candidate");
 				strictEqual(receipt.outcome, "succeeded");
-				strictEqual(receipt.autonomyEnforcement?.autonomy, "default");
+				strictEqual(receipt.autonomy, "default");
 				if (!writer) deepStrictEqual(receipt.intent?.writeRoots, []);
 			}
 			strictEqual(candidateBefore.length, 2);

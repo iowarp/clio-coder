@@ -222,7 +222,7 @@ Receipts carry the current integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 2
 
 Integrity is only the artifact-integrity axis of the canonical trust status.
 The other axes are validation grounding, independent review, context
-provenance, autonomy enforcement, and completion evidence. Sealing proves that
+provenance and completion evidence. Sealing proves that
 the receipt matches its covered ledger facts; it does not verify correctness,
 establish context authorship, turn a correlated review into an independent
 one, or prove completion. Every non-absent canonical fact retains a named

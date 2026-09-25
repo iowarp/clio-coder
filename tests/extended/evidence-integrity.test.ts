@@ -27,7 +27,6 @@ describe("evidence integrity boundary", () => {
 		const view = runProvenanceFromUnknown({
 			pipeline: { fromRunId: "run-parent", position: 2, inputBytes: 1024, inputTruncated: false },
 			personaOverride: { promptHash: "a".repeat(64) },
-			autonomyEnforcement: { grade: "bypassed", autonomy: "full", dangerousBypass: true },
 		});
 		deepStrictEqual(view.pipeline, {
 			fromRunId: "run-parent",

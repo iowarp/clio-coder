@@ -292,7 +292,6 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 			permissionRequired: false,
 		};
 	}
-	const level = DEFAULT_AUTONOMY_LEVEL;
 	const decision = input.safety.evaluate(call);
 	if (decision.kind === "block") {
 		return { kind: "deny", mapped, decision, reason: rejectionText(decision), permissionRequired: false };
@@ -315,7 +314,7 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 		return { kind: "deny", mapped, decision, reason: rejectionText(decision), permissionRequired: true };
 	}
 	const actionClass = decision.classification.actionClass;
-	const disposition = mapAutonomy(level, actionClass, {
+	const disposition = mapAutonomy(DEFAULT_AUTONOMY_LEVEL, actionClass, {
 		executeRecognized: decision.policy?.execRecognition !== "unrecognized",
 		...(readsOutsideWorkspace(decision) ? { readOutsideWorkspace: true } : {}),
 	});
@@ -324,13 +323,13 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 		if (admission?.kind === "deny") return budgetDenial(input, mapped, call, admission.reason);
 		return { kind: "allow", mapped, decision, reason: decision.policy?.reasonCode ?? "allowed" };
 	}
-	const ask = toAutonomyAsk(decision, level, call);
+	const ask = toAutonomyAsk(decision, DEFAULT_AUTONOMY_LEVEL, call);
 	return {
 		kind: "deny",
 		mapped,
 		decision: ask,
 		reason: rejectionText(ask),
-		reasonCode: `autonomy:${level}`,
+		reasonCode: `autonomy:${DEFAULT_AUTONOMY_LEVEL}`,
 		permissionRequired: true,
 	};
 }

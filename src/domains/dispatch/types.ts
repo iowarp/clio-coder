@@ -15,6 +15,7 @@ import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { EvidenceTag } from "../evidence/index.js";
 import type { CostProvenance, RuntimeTargetSnapshot } from "../providers/index.js";
+import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
 import type { ExecutionRole, GateTopologyRole } from "./execution-role.js";
 import type { DispatchIntent } from "./intent.js";
@@ -23,6 +24,20 @@ import type { RouteDecisionV1 } from "./route-decision.js";
 import type { RoutingIntent } from "./routing-intent.js";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
+
+/** Read the former read-only receipt level only when a receipt predates the autonomy field. */
+export function isLegacyReadOnlyReceipt(value: unknown): boolean {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const receipt = value as Record<string, unknown>;
+	if (receipt.autonomy !== undefined) return false;
+	const legacy = receipt.autonomyEnforcement;
+	return (
+		typeof legacy === "object" &&
+		legacy !== null &&
+		!Array.isArray(legacy) &&
+		(legacy as Record<string, unknown>).autonomy === "read-only"
+	);
+}
 
 /**
  * Terminal outcome taxonomy. Every run that reaches finalization gets exactly
@@ -705,20 +720,6 @@ export interface RunReceiptOutput {
 	structured?: import("../agents/result-contract.js").StructuredHelperResult;
 }
 
-export type RunAutonomyEnforcementGrade = "mediated" | "approximated" | "bypassed";
-
-export interface RunReceiptAutonomyEnforcement {
-	grade: RunAutonomyEnforcementGrade;
-	/** Effective authority enforced by the runtime. */
-	autonomy: string;
-	/** Request-level narrowing, present when the caller supplied one. */
-	requestedAutonomy?: string;
-	/** Session ceiling against which a request-level value was clamped. */
-	sessionAutonomy?: string;
-	externalMode?: string;
-	dangerousBypass?: boolean;
-}
-
 /**
  * Evidence confidence is descriptive receipt provenance, orthogonal to the
  * execution outcome. It must never drive retry, reroute, or finish gating.
@@ -947,8 +948,8 @@ export interface RunReceipt {
 	/** Required routing-quality facts known at receipt finalization. */
 	quality: RunReceiptQuality;
 	skillActivations?: SkillActivation[];
-	/** How this runtime enforced the run's captured autonomy level. */
-	autonomyEnforcement?: RunReceiptAutonomyEnforcement;
+	/** Level the run used. Older sealed receipts may omit this field. */
+	autonomy?: AutonomyLevel;
 	safety?: RunReceiptSafetySummary;
 	/**
 	 * Whether the run changed nothing it was allowed to change: a tool call was

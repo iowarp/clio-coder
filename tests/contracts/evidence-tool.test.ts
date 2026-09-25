@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { materializePendingGateDecision, stagePendingGateDecision } from "../../src/domains/dispatch/gate-decisions.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import type { RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import { evidenceDetailSnapshot } from "../../src/domains/evidence/detail.js";
 import { buildEvidence, inspectEvidence, TRUST_STATUS_AXES } from "../../src/domains/evidence/index.js";
 import { EVIDENCE_INVENTORY_MAX_ARTIFACTS } from "../../src/domains/evidence/inventory.js";
@@ -155,6 +156,22 @@ describe("evidence tool", () => {
 		deepStrictEqual(Object.keys(inspected.runs[0]?.axes ?? {}), [...TRUST_STATUS_AXES]);
 		strictEqual(inspected.runs[0]?.verdict, (await evidenceDetailSnapshot(built.evidenceId)).runs[0]?.verdict);
 		deepStrictEqual(inspected.gateDecisions, []);
+	});
+
+	it("reports agent-managed delegation from an authenticated receipt", async () => {
+		const envelope = fixtureEnvelope("delegation-bypass");
+		const receipt = withReceiptIntegrity(
+			{
+				...fixtureReceiptDraft(envelope),
+				delegation: { toolGovernance: "agent-managed" } as NonNullable<RunReceiptDraft["delegation"]>,
+			},
+			envelope,
+		);
+		await mkdir(join(clioStateDir(), "receipts"), { recursive: true });
+		await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
+		await writeFile(join(clioStateDir(), "receipts", `${envelope.id}.json`), JSON.stringify(receipt));
+		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: envelope.id });
+		ok(built.findings.some((finding) => finding.tag === "external-bypass"));
 	});
 
 	it("returns only integrity-verified gate decisions", async () => {

@@ -6,9 +6,8 @@ import { isRoutingIntent } from "./routing-intent.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, RunReceiptQuality } from "./types.js";
 
 /**
- * The single receipt integrity contract. Clio is pre-1.0 with no installed
- * base, so there are no historical receipts to keep verifying: a receipt is
- * either this version or it is not a receipt.
+ * The single receipt integrity contract. Historical receipts sealed under
+ * this version retain their digest coverage when optional fields change.
  */
 export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 20;
 export type ReceiptIntegrityVersion = RunReceiptIntegrity["version"];
@@ -142,7 +141,9 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	routingIntent: true,
 	quality: true,
 	skillActivations: true,
+	// Keep the historical field in the digest so older sealed receipts still verify.
 	autonomyEnforcement: true,
+	autonomy: true,
 	safety: true,
 	// Optional and absent on worker receipts and on older main-agent receipts,
 	// so those digest exactly as they did before the field existed.
@@ -165,7 +166,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	outcomeCode: true,
 	steering: true,
 	routeDecision: true,
-} as const satisfies Record<ReceiptIntegrityField, true>;
+} as const satisfies Record<ReceiptIntegrityField, true> & { autonomyEnforcement: true };
 
 const RECEIPT_FIELDS = Object.keys(RECEIPT_INTEGRITY_FIELD_COVERAGE) as ReceiptIntegrityField[];
 

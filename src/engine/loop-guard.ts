@@ -31,6 +31,7 @@ import {
 } from "../core/guardrails.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
+import { isLegacyReadOnlyReceipt } from "../domains/dispatch/types.js";
 import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../domains/middleware/types.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
@@ -179,11 +180,7 @@ function dispatchMutatedParentWorkspace(details: MiddlewareHookInput["toolResult
 	if (!Array.isArray(details?.runs)) return false;
 	return details.runs.some((value: unknown) => {
 		if (!isRecord(value) || !isRecord(value.receiptIntegrity) || value.receiptIntegrity.ok !== true) return false;
-		if (
-			value.readOnly === true ||
-			(isRecord(value.autonomyEnforcement) && value.autonomyEnforcement.autonomy === "read-only")
-		)
-			return false;
+		if (value.readOnly === true || isLegacyReadOnlyReceipt(value)) return false;
 		const mutatingSucceeded = isRecord(value.toolActivity) && value.toolActivity.mutatingSucceeded === true;
 		const placement = value.placement;
 		if (placement === undefined) return mutatingSucceeded;

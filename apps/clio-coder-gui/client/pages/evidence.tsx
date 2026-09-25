@@ -16,7 +16,7 @@ const verdictText = {
 	grounded: "The receipt is intact and validation was observed.",
 	reviewed: "The receipt is intact and an independent review passed.",
 	compromised:
-		"At least one trust check failed or a validation claim lacked an observed command. The receipt seal may still be intact; read the six checks below.",
+		"At least one trust check failed or a validation claim lacked an observed command. The receipt seal may still be intact; read the five checks below.",
 };
 
 const trustChecks = [
@@ -24,14 +24,13 @@ const trustChecks = [
 	{ key: "validationGrounding", label: "Validation", meaning: "Did an observed command support the claimed check?" },
 	{ key: "independentReview", label: "Independent review", meaning: "Did an independent reviewer check this result?" },
 	{ key: "contextProvenance", label: "Context", meaning: "Was the worker context recorded and valid?" },
-	{ key: "autonomyEnforcement", label: "Safety", meaning: "Did Clio enforce the worker safety boundary?" },
 	{ key: "completionEvidence", label: "Completion", meaning: "Is the completed work supported by evidence?" },
 ] as const;
 
 function TrustGuide({ axes }: { axes?: Record<(typeof trustChecks)[number]["key"], string> }) {
 	return (
 		<details className="trace-panel">
-			<summary>How to read the six trust checks</summary>
+			<summary>How to read the five trust checks</summary>
 			<p>The verdict summarizes these checks; it is not a correctness score.</p>
 			<dl className="settings-list">
 				{trustChecks.map((check) => (

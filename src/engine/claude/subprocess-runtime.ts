@@ -28,18 +28,16 @@ export interface ClaudeRuntimeDependencies {
 export interface ClaudeSubprocessPermissionConfig {
 	permissionMode: "plan" | "acceptEdits";
 	extraArgs: string[];
-	dangerousBypass: boolean;
 }
 
-export function claudeSubprocessPermissionConfigForAutonomy(readOnly = false): ClaudeSubprocessPermissionConfig {
+function claudeSubprocessPermissionConfig(readOnly = false): ClaudeSubprocessPermissionConfig {
 	if (readOnly) {
 		return {
 			permissionMode: "plan",
 			extraArgs: ["--tools", READ_ONLY_CLAUDE_TOOLS.join(",")],
-			dangerousBypass: false,
 		};
 	}
-	return { permissionMode: "acceptEdits", extraArgs: [], dangerousBypass: false };
+	return { permissionMode: "acceptEdits", extraArgs: [] };
 }
 
 export function buildClaudeCodePrompt(input: WorkerRunInput): string {
@@ -55,7 +53,7 @@ export function buildClaudeCodePrompt(input: WorkerRunInput): string {
  */
 export function buildClaudeCodeArgs(input: WorkerRunInput): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "claude-code");
-	const permission = claudeSubprocessPermissionConfigForAutonomy(input.readOnly === true);
+	const permission = claudeSubprocessPermissionConfig(input.readOnly === true);
 	const args = [
 		"-p",
 		"--output-format",

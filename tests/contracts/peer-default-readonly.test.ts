@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { parse, stringify } from "yaml";
 import { parseRunCliArgs } from "../../src/cli/args.js";
 import { runClioRun } from "../../src/cli/run.js";
-import { codexSubprocessPermissionConfigForAutonomy } from "../../src/domains/providers/runtimes/external-cli-policy.js";
+import { codexSubprocessPermissionConfig } from "../../src/domains/providers/runtimes/external-cli-policy.js";
 import { buildAgyArgs } from "../../src/engine/antigravity/subprocess-runtime.js";
 import { buildClaudeCodeArgs } from "../../src/engine/claude/subprocess-runtime.js";
 import { buildCodexExecArgs } from "../../src/engine/codex/subprocess-runtime.js";
@@ -48,9 +48,8 @@ test("peer launch arguments depend only on the read-only restriction", () => {
 				"--sandbox",
 				readOnly ? "read-only" : "workspace-write",
 			]);
-			deepStrictEqual(codexSubprocessPermissionConfigForAutonomy(readOnly), {
+			deepStrictEqual(codexSubprocessPermissionConfig(readOnly), {
 				sandbox: readOnly ? "read-only" : "workspace-write",
-				dangerousBypass: false,
 			});
 			const claude = buildClaudeCodeArgs(run);
 			deepStrictEqual(
@@ -177,7 +176,9 @@ for (const event of [
 		const argv = JSON.parse(readFileSync(join(scratch.root, "peer-argv.json"), "utf8")) as string[];
 		ok(argv.includes("--sandbox"));
 		equal(argv[argv.indexOf("--sandbox") + 1], "read-only");
-		equal(sealedReceipt(scratch.stateDir).receipt.autonomyEnforcement?.externalMode, "read-only");
+		const { receipt } = sealedReceipt(scratch.stateDir);
+		equal(receipt.autonomy, "default");
+		ok(!Object.hasOwn(receipt, "autonomyEnforcement"));
 	} finally {
 		scratch.cleanup();
 	}

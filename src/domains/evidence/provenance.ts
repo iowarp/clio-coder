@@ -1,9 +1,4 @@
-import type {
-	RunPersonaOverride,
-	RunPipelineProvenance,
-	RunReceipt,
-	RunReceiptAutonomyEnforcement,
-} from "../dispatch/types.js";
+import type { RunPersonaOverride, RunPipelineProvenance, RunReceipt } from "../dispatch/types.js";
 import type { CanonicalTrustStatus } from "./trust-status.js";
 
 /**
@@ -28,11 +23,10 @@ export interface RunProvenanceView {
 	pipeline?: RunPipelineProvenance;
 	personaOverride?: RunPersonaOverride;
 	escalation?: RunEscalationCounts;
-	autonomyEnforcement?: RunReceiptAutonomyEnforcement;
 }
 
 /** The receipt fields the provenance view reads; a narrow slice of RunReceipt. */
-type ProvenanceReceipt = Pick<RunReceipt, "pipeline" | "personaOverride" | "safety" | "autonomyEnforcement">;
+type ProvenanceReceipt = Pick<RunReceipt, "pipeline" | "personaOverride" | "safety">;
 
 /** Number of leading hash characters shown as a persona-override prompt-hash prefix. */
 export const PERSONA_HASH_PREFIX_CHARS = 12;
@@ -47,19 +41,13 @@ export function extractRunProvenance(receipt: ProvenanceReceipt): RunProvenanceV
 	if (receipt.personaOverride !== undefined) view.personaOverride = receipt.personaOverride;
 	const escalation = escalationCountsFrom(receipt.safety);
 	if (escalation !== null) view.escalation = escalation;
-	if (receipt.autonomyEnforcement !== undefined) view.autonomyEnforcement = receipt.autonomyEnforcement;
 	return view;
 }
 
 /**
  * The slice of a provenance view the canonical projection admits. The
- * projection is the only thing that decides whether an axis is reported, so
- * the autonomy detail (`autonomy=`, `mode=`, `dangerousBypass=`) is kept only
- * when the projection reports the autonomy axis in a recorded state, and the
- * non-axis provenance (pipeline, persona override, escalations) only when the
- * seal that carries it verified. With no projection at hand no axis detail is
- * admitted at all, whatever the receipt says; the non-axis provenance passes
- * through for a caller that prints it beside its own integrity banner.
+ * provenance is admitted only when the receipt seal verified. Without a
+ * projection, callers may print it beside their own integrity banner.
  */
 export function admitRunProvenance(view: RunProvenanceView, status?: CanonicalTrustStatus): RunProvenanceView {
 	const admitted: RunProvenanceView = {};
@@ -68,24 +56,12 @@ export function admitRunProvenance(view: RunProvenanceView, status?: CanonicalTr
 		if (view.personaOverride !== undefined) admitted.personaOverride = view.personaOverride;
 		if (view.escalation !== undefined) admitted.escalation = view.escalation;
 	}
-	const autonomy = status?.autonomyEnforcement.state;
-	if (
-		view.autonomyEnforcement !== undefined &&
-		(autonomy === "enforced" || autonomy === "approximated" || autonomy === "bypassed")
-	) {
-		admitted.autonomyEnforcement = view.autonomyEnforcement;
-	}
 	return admitted;
 }
 
 /** True when at least one provenance field set is present. */
 export function hasRunProvenance(view: RunProvenanceView): boolean {
-	return (
-		view.pipeline !== undefined ||
-		view.personaOverride !== undefined ||
-		view.escalation !== undefined ||
-		view.autonomyEnforcement !== undefined
-	);
+	return view.pipeline !== undefined || view.personaOverride !== undefined || view.escalation !== undefined;
 }
 
 /**
@@ -103,8 +79,6 @@ export function runProvenanceFromUnknown(value: unknown): RunProvenanceView {
 	if (personaOverride !== null) view.personaOverride = personaOverride;
 	const escalation = escalationFromUnknown(value.safety);
 	if (escalation !== null) view.escalation = escalation;
-	const autonomyEnforcement = autonomyEnforcementFromUnknown(value.autonomyEnforcement);
-	if (autonomyEnforcement !== null) view.autonomyEnforcement = autonomyEnforcement;
 	return view;
 }
 
@@ -128,16 +102,6 @@ function pipelineFromUnknown(value: unknown): RunPipelineProvenance | null {
 function personaOverrideFromUnknown(value: unknown): RunPersonaOverride | null {
 	if (!isRecord(value) || typeof value.promptHash !== "string" || value.promptHash.length === 0) return null;
 	return { promptHash: value.promptHash };
-}
-
-function autonomyEnforcementFromUnknown(value: unknown): RunReceiptAutonomyEnforcement | null {
-	if (!isRecord(value)) return null;
-	if (value.grade !== "mediated" && value.grade !== "approximated" && value.grade !== "bypassed") return null;
-	if (typeof value.autonomy !== "string" || value.autonomy.length === 0) return null;
-	const view: RunReceiptAutonomyEnforcement = { grade: value.grade, autonomy: value.autonomy };
-	if (typeof value.externalMode === "string" && value.externalMode.length > 0) view.externalMode = value.externalMode;
-	if (typeof value.dangerousBypass === "boolean") view.dangerousBypass = value.dangerousBypass;
-	return view;
 }
 
 function escalationFromUnknown(safety: unknown): RunEscalationCounts | null {
@@ -173,11 +137,7 @@ function formatPersonaHashPrefix(promptHash: string): string {
 
 /**
  * Human transcript sentences for each admitted provenance field set, gated
- * through {@link admitRunProvenance}. The autonomy line carries only the
- * detail the canonical projection does not: the policy name, the external
- * mode, and the bypass flag. The axis itself (mediated, approximated,
- * bypassed) is printed by the trust summary and nowhere else, so one
- * autonomy fact never appears in two vocabularies on one screen.
+ * through {@link admitRunProvenance}.
  */
 export function provenanceTranscriptLines(source: RunProvenanceView, status?: CanonicalTrustStatus): string[] {
 	const view = admitRunProvenance(source, status);
@@ -194,12 +154,6 @@ export function provenanceTranscriptLines(source: RunProvenanceView, status?: Ca
 	if (view.escalation !== undefined) {
 		const { requested, approved, denied, timedOut } = view.escalation;
 		lines.push(`escalations: ${requested} requested, ${approved} approved, ${denied} denied, ${timedOut} timed out`);
-	}
-	if (view.autonomyEnforcement !== undefined) {
-		const { autonomy, externalMode, dangerousBypass } = view.autonomyEnforcement;
-		const mode = externalMode !== undefined ? ` mode=${externalMode}` : "";
-		const bypass = dangerousBypass === true ? " dangerousBypass=true" : "";
-		lines.push(`autonomy: ${autonomy}${mode}${bypass}`);
 	}
 	return lines;
 }
@@ -224,12 +178,6 @@ export function provenanceCompactSuffix(source: RunProvenanceView, status?: Cano
 	if (view.escalation !== undefined) {
 		const { requested, approved, denied, timedOut } = view.escalation;
 		parts.push(`escalations=${requested}req/${approved}appr/${denied}deny/${timedOut}timeout`);
-	}
-	if (view.autonomyEnforcement !== undefined) {
-		const { autonomy, externalMode, dangerousBypass } = view.autonomyEnforcement;
-		const mode = externalMode !== undefined ? `/${externalMode}` : "";
-		const bypass = dangerousBypass === true ? "/bypass" : "";
-		parts.push(`autonomy=${autonomy}${mode}${bypass}`);
 	}
 	return parts.length === 0 ? "" : ` ${parts.join(" ")}`;
 }

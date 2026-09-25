@@ -504,7 +504,6 @@ function compromisedTrustAxes(status: ReturnType<typeof inspectRunReceiptTrustSt
 		if (axis === "validationGrounding") return state === "failed" || state === "ungrounded";
 		if (axis === "independentReview") return state === "failed" || state === "not_independent";
 		if (axis === "contextProvenance") return state === "invalid";
-		if (axis === "autonomyEnforcement") return state === "bypassed";
 		return false;
 	});
 }

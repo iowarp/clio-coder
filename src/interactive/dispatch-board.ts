@@ -581,7 +581,6 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 		axes?.artifactIntegrity === "verified" &&
 		axes.validationGrounding === "absent" &&
 		axes.independentReview === "absent" &&
-		axes.autonomyEnforcement === "enforced" &&
 		axes.contextProvenance === "recorded" &&
 		axes.completionEvidence === "absent";
 	const trust =

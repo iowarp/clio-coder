@@ -23,7 +23,6 @@ export const TRUST_STATUS_AXES = [
 	"validationGrounding",
 	"independentReview",
 	"contextProvenance",
-	"autonomyEnforcement",
 	"completionEvidence",
 ] as const;
 
@@ -35,7 +34,6 @@ export const TRUST_STATUS_STATES = {
 	validationGrounding: ["validated", "failed", "ungrounded", "absent", "unknown", "not_applicable"],
 	independentReview: ["passed", "failed", "inconclusive", "not_independent", "absent", "unknown", "not_applicable"],
 	contextProvenance: ["recorded", "invalid", "absent", "unknown", "not_applicable"],
-	autonomyEnforcement: ["enforced", "approximated", "bypassed", "absent", "unknown", "not_applicable"],
 	completionEvidence: ["evidenced", "incomplete", "limited", "absent", "unknown", "not_applicable"],
 } as const satisfies Record<TrustStatusAxis, ReadonlyArray<string>>;
 
@@ -114,8 +112,6 @@ export type IndependentReviewStatus = AttributedState<NonAbsentAxisState<"indepe
 
 export type ContextProvenanceStatus = AttributedState<NonAbsentAxisState<"contextProvenance">> | AbsentTrustStatus;
 
-export type AutonomyEnforcementStatus = AttributedState<NonAbsentAxisState<"autonomyEnforcement">> | AbsentTrustStatus;
-
 export type CompletionEvidenceStatus = AttributedState<NonAbsentAxisState<"completionEvidence">> | AbsentTrustStatus;
 
 export interface TrustStatusAxes {
@@ -123,7 +119,6 @@ export interface TrustStatusAxes {
 	validationGrounding: ValidationGroundingStatus;
 	independentReview: IndependentReviewStatus;
 	contextProvenance: ContextProvenanceStatus;
-	autonomyEnforcement: AutonomyEnforcementStatus;
 	completionEvidence: CompletionEvidenceStatus;
 }
 
@@ -154,7 +149,6 @@ const AXIS_STATES: Record<TrustStatusAxis, ReadonlySet<string>> = {
 	validationGrounding: new Set(TRUST_STATUS_STATES.validationGrounding),
 	independentReview: new Set(TRUST_STATUS_STATES.independentReview),
 	contextProvenance: new Set(TRUST_STATUS_STATES.contextProvenance),
-	autonomyEnforcement: new Set(TRUST_STATUS_STATES.autonomyEnforcement),
 	completionEvidence: new Set(TRUST_STATUS_STATES.completionEvidence),
 };
 
@@ -163,7 +157,6 @@ const AXIS_SOURCES: Record<TrustStatusAxis, ReadonlySet<TrustStatusSourceKind>> 
 	validationGrounding: new Set(["run_receipt", "evidence_bundle", "compatibility"]),
 	independentReview: new Set(["gate_decision", "compatibility"]),
 	contextProvenance: new Set(["run_receipt", "evidence_bundle", "compatibility"]),
-	autonomyEnforcement: new Set(["run_receipt", "compatibility"]),
 	completionEvidence: new Set(["finish_contract", "compatibility"]),
 };
 
@@ -346,8 +339,8 @@ function normalizeAxis(axis: TrustStatusAxis, value: unknown): TrustStatusAxes[T
 
 /** Validate, defensively copy, and deterministically order a canonical aggregate. */
 export function normalizeTrustStatus(value: unknown): CanonicalTrustStatus {
-	if (!isRecord(value) || !hasExactKeys(value, ["version", ...TRUST_STATUS_AXES])) {
-		throw new Error("trust status has unknown or missing fields");
+	if (!isRecord(value) || !TRUST_STATUS_AXES.every((axis) => Object.hasOwn(value, axis))) {
+		throw new Error("trust status has missing fields");
 	}
 	if (value.version !== TRUST_STATUS_VERSION) throw new Error("trust status version is invalid");
 	return {
@@ -356,7 +349,6 @@ export function normalizeTrustStatus(value: unknown): CanonicalTrustStatus {
 		validationGrounding: normalizeAxis("validationGrounding", value.validationGrounding) as ValidationGroundingStatus,
 		independentReview: normalizeAxis("independentReview", value.independentReview) as IndependentReviewStatus,
 		contextProvenance: normalizeAxis("contextProvenance", value.contextProvenance) as ContextProvenanceStatus,
-		autonomyEnforcement: normalizeAxis("autonomyEnforcement", value.autonomyEnforcement) as AutonomyEnforcementStatus,
 		completionEvidence: normalizeAxis("completionEvidence", value.completionEvidence) as CompletionEvidenceStatus,
 	};
 }
@@ -384,7 +376,6 @@ export function composeTrustStatus(...projections: ReadonlyArray<TrustStatusProj
 		validationGrounding: absentTrustStatus("not_recorded"),
 		independentReview: absentTrustStatus("not_recorded"),
 		contextProvenance: absentTrustStatus("not_recorded"),
-		autonomyEnforcement: absentTrustStatus("not_recorded"),
 		completionEvidence: absentTrustStatus("not_recorded"),
 	};
 	for (const projection of projections) {
@@ -392,7 +383,6 @@ export function composeTrustStatus(...projections: ReadonlyArray<TrustStatusProj
 		if (projection.validationGrounding !== undefined) axes.validationGrounding = projection.validationGrounding;
 		if (projection.independentReview !== undefined) axes.independentReview = projection.independentReview;
 		if (projection.contextProvenance !== undefined) axes.contextProvenance = projection.contextProvenance;
-		if (projection.autonomyEnforcement !== undefined) axes.autonomyEnforcement = projection.autonomyEnforcement;
 		if (projection.completionEvidence !== undefined) axes.completionEvidence = projection.completionEvidence;
 	}
 	return normalizeTrustStatus({ version: TRUST_STATUS_VERSION, ...axes });
@@ -410,7 +400,6 @@ export function projectTrustStatus(
 	if (requested.has("validationGrounding")) projection.validationGrounding = normalized.validationGrounding;
 	if (requested.has("independentReview")) projection.independentReview = normalized.independentReview;
 	if (requested.has("contextProvenance")) projection.contextProvenance = normalized.contextProvenance;
-	if (requested.has("autonomyEnforcement")) projection.autonomyEnforcement = normalized.autonomyEnforcement;
 	if (requested.has("completionEvidence")) projection.completionEvidence = normalized.completionEvidence;
 	return projection;
 }
@@ -427,7 +416,6 @@ export type PersistedRunReceiptTrustFacts = Pick<RunReceipt, "runId"> &
 			| "briefing"
 			| "projectContext"
 			| "workerContext"
-			| "autonomyEnforcement"
 		>
 	>;
 
@@ -760,30 +748,6 @@ export function adaptRunReceiptContextStatus(
 	return attributed(validBoundedProjectContext(context) ? "recorded" : "invalid", source, DISPATCH_AUTHORITY, artifacts);
 }
 
-/** Adapt the recorded runtime grade and conservatively recover inconsistent bypass flags. */
-export function adaptRunReceiptAutonomyStatus(
-	receipt: PersistedRunReceiptTrustFacts | null | undefined,
-): AutonomyEnforcementStatus {
-	if (receipt === null || receipt === undefined) return absentTrustStatus("artifact_missing");
-	const enforcement = receipt.autonomyEnforcement;
-	const artifacts = [receiptReference(receipt)];
-	if (enforcement === undefined) {
-		return attributed("unknown", compatibilitySource(receipt, "autonomyEnforcement"), COMPATIBILITY_AUTHORITY, artifacts);
-	}
-	artifacts.push({ kind: "autonomy_policy", id: `${receipt.runId}:${enforcement.autonomy}` });
-	const authority: TrustStatusAuthority =
-		enforcement.grade === "mediated"
-			? { kind: "clio", id: "safety-autonomy" }
-			: { kind: "runtime", id: enforcement.externalMode ?? "external-runtime" };
-	const state =
-		enforcement.dangerousBypass === true || enforcement.grade === "bypassed"
-			? "bypassed"
-			: enforcement.grade === "approximated"
-				? "approximated"
-				: "enforced";
-	return attributed(state, receiptSource(receipt), authority, artifacts);
-}
-
 export interface AdaptRunReceiptTrustOptions {
 	integrity?: ReceiptIntegrityOutcome;
 }
@@ -803,7 +767,6 @@ function unauthenticatedReceiptProjection(
 		return {
 			validationGrounding: absentTrustStatus("artifact_missing"),
 			contextProvenance: absentTrustStatus("artifact_missing"),
-			autonomyEnforcement: absentTrustStatus("artifact_missing"),
 		};
 	}
 	if (receipt.integrity === undefined) {
@@ -821,12 +784,6 @@ function unauthenticatedReceiptProjection(
 				COMPATIBILITY_AUTHORITY,
 				artifacts,
 			),
-			autonomyEnforcement: attributed(
-				"unknown",
-				compatibilitySource(receipt, "canonical-projection"),
-				COMPATIBILITY_AUTHORITY,
-				artifacts,
-			),
 		};
 	}
 	// A retired seal leaves the receipt unread rather than rejected: its axes
@@ -835,7 +792,6 @@ function unauthenticatedReceiptProjection(
 		return {
 			validationGrounding: absentTrustStatus("historical_format"),
 			contextProvenance: absentTrustStatus("historical_format"),
-			autonomyEnforcement: absentTrustStatus("historical_format"),
 		};
 	}
 	// The artifact-integrity axis retains the failure diagnostic. No other
@@ -843,7 +799,6 @@ function unauthenticatedReceiptProjection(
 	return {
 		validationGrounding: absentTrustStatus("not_observed"),
 		contextProvenance: absentTrustStatus("not_observed"),
-		autonomyEnforcement: absentTrustStatus("not_observed"),
 	};
 }
 
@@ -857,7 +812,6 @@ export function adaptRunReceiptTrustStatus(
 		? {
 				validationGrounding: adaptRunReceiptValidationStatus(receipt),
 				contextProvenance: adaptRunReceiptContextStatus(receipt),
-				autonomyEnforcement: adaptRunReceiptAutonomyStatus(receipt),
 			}
 		: unauthenticatedReceiptProjection(receipt, options.integrity);
 	return composeTrustStatus({
