@@ -123,25 +123,9 @@ describe("trace mirror tool rows", () => {
 describe("evidence build failure", () => {
 	function readModel(): ProjectionReadModel {
 		return {
-			metrics: () => ({
-				dispatchesCompleted: 0,
-				dispatchesFailed: 0,
-				safetyClassifications: 0,
-				totalTokens: 0,
-				histograms: {},
-			}),
-			sessionCost: () => 0,
 			sessionCostSummary: () => emptyCostAggregate(),
 			sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
 			latestThroughput: () => null,
-			readAccountability: () => ({
-				totalRuns: 0,
-				firstPassRuns: 0,
-				firstPassRate: 0,
-				unverifiedSuccesses: 0,
-				ungroundedClaims: 0,
-				failureCauses: [],
-			}),
 		};
 	}
 

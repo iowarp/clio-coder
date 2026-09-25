@@ -1,23 +1,20 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
 /**
- * Observability domain wire-up. Listens to dispatch + safety bus channels and
- * folds payloads into telemetry/cost trackers. Other domains read the snapshot
- * through the contract; the one thing it emits is
- * `accountability.evidenceReady`, once per run whose evidence bundle landed.
+ * Observability domain wire-up. Listens to the dispatch bus channels and folds
+ * their payloads into the session cost tracker, the projection and the trace
+ * mirror. Other domains read the snapshot through the contract; the one thing
+ * it emits is `accountability.evidenceReady`, once per run whose evidence
+ * bundle landed.
  */
 
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
-import type { SessionContract } from "../session/contract.js";
-import { readAccountabilitySummary } from "./accountability.js";
 import type { ObservabilityContract, ObservabilityRunEvidence, TokenThroughputSnapshot } from "./contract.js";
 import { createCostTracker } from "./cost.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
-import { aggregateMetrics } from "./metrics.js";
 import { createObservabilityProjection } from "./projection.js";
-import { createTelemetry } from "./telemetry.js";
 import { createDispatchTraceMirror, type DispatchTraceMirror, traceDatabasePath } from "./trace-store.js";
 
 /**
@@ -44,15 +41,10 @@ export function dispatchHasEvidenceLedger(payload: DispatchTerminalLike): boolea
 	return payload.lineage !== undefined;
 }
 
-function recordDispatchCost(
-	telemetry: ReturnType<typeof createTelemetry>,
-	cost: ReturnType<typeof createCostTracker>,
-	payload: DispatchTerminalLike,
-): void {
+function recordDispatchCost(cost: ReturnType<typeof createCostTracker>, payload: DispatchTerminalLike): void {
 	if (!payload.targetId || !payload.wireModelId || typeof payload.tokenCount !== "number") {
 		return;
 	}
-	telemetry.record("counter", "tokens.total", payload.tokenCount);
 	// Dispatch terminal payloads carry the same full split as receipts. Preserve
 	// it so /usage and the footer agree with the fleet board instead of showing
 	// zero input/output/cache for worker-only sessions.
@@ -151,7 +143,6 @@ export function createObservabilityBundle(
 	context: DomainContext,
 	options: ObservabilityBundleOptions = {},
 ): DomainBundle<ObservabilityContract> {
-	const telemetry = createTelemetry();
 	const cost = createCostTracker();
 	const trace: DispatchTraceMirror =
 		options.dispatchTrace === false
@@ -159,23 +150,15 @@ export function createObservabilityBundle(
 			: createDispatchTraceMirror(traceDatabasePath(clioStateDir()));
 	const unsubscribes: Array<() => void> = [];
 	let latestThroughput: TokenThroughputSnapshot | null = null;
-	const readSessionAccountability = () =>
-		readAccountabilitySummary(clioStateDir(), {
-			sessionId: context.getContract<SessionContract>("session")?.current()?.id ?? null,
-			cwd: process.cwd(),
-		});
 
-	// The product-facing projection folds the bus channels plus the session
-	// cost/telemetry trackers into a single bounded snapshot. It reads these
-	// accessors at snapshot-build time, so it always observes the latest state
-	// regardless of bus-handler ordering.
+	// The product-facing projection folds the bus channels plus the session cost
+	// tracker into a single bounded snapshot. It reads these accessors at
+	// snapshot-build time, so it always observes the latest state regardless of
+	// bus-handler ordering.
 	const projection = createObservabilityProjection(context.bus, {
-		metrics: () => aggregateMetrics(telemetry.snapshot()),
-		sessionCost: () => cost.sessionTotal(),
 		sessionCostSummary: () => cost.sessionCost(),
 		sessionTokens: () => cost.sessionTokens(),
 		latestThroughput: () => latestThroughput,
-		readAccountability: readSessionAccountability,
 	});
 
 	// In-flight forensic builds. The terminal event is emitted after the receipt
@@ -202,7 +185,6 @@ export function createObservabilityBundle(
 
 	const extension: DomainExtension = {
 		async start() {
-			unsubscribes.push(context.bus.on(BusChannels.SessionResumed, () => projection.refreshAccountability()));
 			for (const channel of [
 				BusChannels.DispatchEnqueued,
 				BusChannels.DispatchStarted,
@@ -215,11 +197,7 @@ export function createObservabilityBundle(
 			unsubscribes.push(
 				context.bus.on(BusChannels.DispatchCompleted, (raw) => {
 					const payload: DispatchTerminalLike = raw ?? {};
-					telemetry.record("counter", "dispatch.completed", 1);
-					if (typeof payload.durationMs === "number") {
-						telemetry.record("histogram", "dispatch.duration_ms", payload.durationMs);
-					}
-					recordDispatchCost(telemetry, cost, payload);
+					recordDispatchCost(cost, payload);
 					// Kick off the heavy forensic build without blocking the bus.
 					// buildAndIndexEvidence swallows all failures; stop() flushes it.
 					if (typeof payload.runId === "string" && payload.runId.length > 0) {
@@ -230,24 +208,12 @@ export function createObservabilityBundle(
 			unsubscribes.push(
 				context.bus.on(BusChannels.DispatchFailed, (raw) => {
 					const payload: DispatchTerminalLike = raw ?? {};
-					telemetry.record("counter", "dispatch.failed", 1);
-					if (typeof payload.durationMs === "number") {
-						telemetry.record("histogram", "dispatch.duration_ms", payload.durationMs);
-					}
-					recordDispatchCost(telemetry, cost, payload);
+					recordDispatchCost(cost, payload);
 					// A failed run is never a first-pass success; still build the
 					// bundle so its failure-cause tags exist for the index.
 					if (typeof payload.runId === "string" && payload.runId.length > 0 && dispatchHasEvidenceLedger(payload)) {
 						trackBuild(payload.runId, false, payload.lineage?.attempt);
 					}
-				}),
-			);
-			unsubscribes.push(
-				context.bus.on(BusChannels.SafetyClassified, () => {
-					telemetry.record("counter", "safety.classified", 1);
-					// The projection reads metrics off telemetry; nudge it so the
-					// safety-classification counter reaches the snapshot.
-					projection.refresh();
 				}),
 			);
 		},
@@ -269,21 +235,15 @@ export function createObservabilityBundle(
 	};
 
 	const contract: ObservabilityContract = {
-		telemetry: () => telemetry.snapshot(),
-		metrics: () => aggregateMetrics(telemetry.snapshot()),
 		sessionCost: () => cost.sessionTotal(),
 		sessionCostSummary: () => cost.sessionCost(),
-		sessionTokens: () => cost.sessionTokens(),
 		costEntries: () => cost.entries(),
-		accountability: readSessionAccountability,
-		latestTokenThroughput: () => latestThroughput,
 		resetSession() {
 			cost.reset();
 			latestThroughput = null;
-			projection.refreshAccountability();
+			projection.refresh();
 		},
 		recordTokens(providerId, attributedModelId, tokens, costUsd, breakdown, costProvenance, modelIdFacts, label) {
-			telemetry.record("counter", "tokens.total", tokens);
 			cost.accumulate(providerId, attributedModelId, tokens, costUsd, breakdown, costProvenance, modelIdFacts, label);
 			projection.refresh();
 		},
@@ -292,8 +252,6 @@ export function createObservabilityBundle(
 		},
 		recordTokenThroughput(snapshot) {
 			latestThroughput = snapshot;
-			telemetry.record("histogram", "tokens.output_per_second", snapshot.tokensPerSecond);
-			telemetry.record("histogram", "tokens.ttft_ms", snapshot.ttftMs ?? 0);
 			projection.refresh();
 		},
 		bindRunReaders: (readers) => projection.bindRunReaders(readers),

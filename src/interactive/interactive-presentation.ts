@@ -7,11 +7,7 @@ import { isUserVisibleAgent } from "../domains/agents/spec.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
-import type {
-	ObservabilityContract,
-	ObservabilitySnapshot,
-	TokenThroughputSnapshot,
-} from "../domains/observability/index.js";
+import type { ObservabilityContract, TokenThroughputSnapshot } from "../domains/observability/index.js";
 import { type ProvidersContract, resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { UsageSnapshot } from "../domains/quota/types.js";
@@ -162,7 +158,6 @@ export interface InteractivePresentation {
 	root: Component;
 	changeOutputStyle(mutation: () => void): void;
 	setLocalBashRunning(running: boolean): void;
-	getObservabilitySnapshot(): ObservabilitySnapshot;
 	getQuotaSnapshots(): ReadonlyArray<UsageSnapshot>;
 	/** Fold one raw chat event into the ephemeral throughput shown only while this turn is active. */
 	recordChatEvent(event: ChatLoopEvent): void;
@@ -352,15 +347,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		const outputTokens = liveThroughput.settledOutputTokens + liveThroughput.partialOutputTokens;
 		if (outputTokens <= 0) return null;
 		const { durationMs, ttftMs } = timing;
-		const settings = deps.getSettings?.();
 		return {
 			tokensPerSecond: outputTokens / (durationMs / 1000),
 			outputTokens,
 			durationMs,
 			ttftMs,
-			providerId: settings?.chat?.target ?? "",
-			modelId: settings?.chat?.model ?? "",
-			recordedAt: Date.now(),
 		};
 	};
 	let footer: FooterDashboardPanel;
@@ -696,7 +687,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		changeOutputStyle: (mutation) =>
 			chatRenderer.mutate(() => preserveTranscriptScroll(transcriptView, deps.terminal.columns, mutation), "output-style"),
-		getObservabilitySnapshot: () => observabilitySnapshot,
 		getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
 		recordChatEvent,
 		recordToolStart: (toolCallId, toolName) => {

@@ -5,23 +5,17 @@ import type { DispatchSnapshot } from "../dispatch/contract.js";
 import type { DispatchRequestOrigin, RunKind } from "../dispatch/types.js";
 import type { TrustSummaryProjection } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
-import type { TargetStatus } from "../providers/contract.js";
 import type { CostProvenance } from "../providers/index.js";
-import type { AccountabilitySummary } from "./accountability.js";
 import type { CostAggregate, CostEntry, CostEntryLabel, UsageBreakdown } from "./cost.js";
-import type { MetricsView } from "./metrics.js";
-import type { TelemetrySnapshot } from "./telemetry.js";
 import type { SessionTurnTrace } from "./trace-store.js";
 import type { WorkerProgressSnapshot } from "./worker-progress.js";
 
+/** The footer speed row reads every field: rate, generation time, TTFT and output count. */
 export interface TokenThroughputSnapshot {
 	tokensPerSecond: number;
 	outputTokens: number;
 	durationMs: number;
 	ttftMs?: number;
-	providerId: string;
-	modelId: string;
-	recordedAt: number;
 }
 
 /**
@@ -36,8 +30,6 @@ export interface TokenThroughputSnapshot {
  * `message` is a short rendered line and `ref` links back to the run.
  */
 export interface ObservabilityNotice {
-	id: string;
-	at: number;
 	kind: "evidence";
 	level: "info" | "warning" | "error";
 	message: string;
@@ -84,49 +76,45 @@ export interface ObservabilityRunSummary {
 	writeRecordDowngrade?: { reason: "opaque_tool_succeeded"; tool: string; toolCallId: string };
 	phase?: { wave: number; stepId: string };
 	startedAtMs: number;
-	updatedAtMs: number;
 	finishedAtMs: number | null;
 	durationMs: number | null;
 	tokens: {
 		input: number;
 		output: number;
-		reasoning: number;
 		total: number;
 	};
 	costUsd: number;
 	costProvenance: CostProvenance;
-	outcome?: string | null;
 	outcomeDetail?: string | null;
-	evidence?: {
-		evidenceId: string;
-		firstPassSuccess: boolean;
-		findingCount: number;
-		tags: readonly string[];
-	} | null;
+	/** The landed bundle, which the board links to by id. */
+	evidence?: { evidenceId: string } | null;
 }
 
-/** Evidence-readiness detail attached to a run summary once its bundle lands. */
-export type ObservabilityRunEvidence = NonNullable<ObservabilityRunSummary["evidence"]>;
+/**
+ * The evidence-readiness facts an evidence build reports once its bundle lands.
+ * It is the `accountability.evidenceReady` payload ACP forwards; the run
+ * summary keeps only `evidenceId`.
+ */
+export interface ObservabilityRunEvidence {
+	evidenceId: string;
+	firstPassSuccess: boolean;
+	findingCount: number;
+	tags: readonly string[];
+}
 
 /**
  * Single product-facing projection of the observability domain. A materialized,
- * bounded read model folded from the event bus plus the session cost/telemetry
- * trackers. `revision` is monotonic so consumers can cheaply detect change;
+ * bounded read model folded from the event bus plus the session cost tracker.
  * `generatedAt` is the wall-clock time the snapshot object was assembled.
  */
 export interface ObservabilitySnapshot {
-	revision: number;
 	generatedAt: number;
 	session: {
-		costUsd: number;
 		cost: CostAggregate;
 		tokens: UsageBreakdown;
 		latestThroughput: TokenThroughputSnapshot | null;
 	};
-	metrics: MetricsView;
-	accountability: AccountabilitySummary;
 	runs: readonly ObservabilityRunSummary[];
-	providerHealth: Readonly<Record<string, TargetStatus>>;
 	notices: readonly ObservabilityNotice[];
 	pendingEvidenceBuildRunIds: readonly string[];
 }
@@ -150,34 +138,19 @@ export interface ObservabilityRunProjection {
 }
 
 export interface ObservabilityContract extends ObservabilityRunProjection {
-	/** Raw counter + histogram view. */
-	telemetry(): TelemetrySnapshot;
-	/** Aggregated view the TUI consumes. */
-	metrics(): MetricsView;
 	/** Running session USD cost. */
 	sessionCost(): number;
 	sessionCostSummary(): CostAggregate;
-	/** Running session token totals broken down by kind, including reasoning when exposed. */
-	sessionTokens(): UsageBreakdown;
 	/** Running session cost log entries. */
 	costEntries(): ReadonlyArray<CostEntry>;
-	/**
-	 * Rolling first-pass-success rate, unverified successes, ungrounded claims,
-	 * and failure-cause histogram, aggregated
-	 * from the sidecar evidence index on call. It folds rows written at dispatch
-	 * completion and recomputes no evidence.
-	 */
-	accountability(): AccountabilitySummary;
-	/** Latest completed assistant stream throughput for compact footer display. */
-	latestTokenThroughput(): TokenThroughputSnapshot | null;
 	/** Reset the running session token and cost totals. */
 	resetSession(): void;
 	/**
 	 * Record a token count. Used by dispatch glue, diags, and the chat loop's
 	 * `agent_end` handler. `breakdown` is optional for call sites (dispatch
 	 * bus payloads) that only know the total token count; callers with a
-	 * pi-ai `Usage` object should pass the full breakdown so
-	 * `sessionTokens()` can surface input/output/reasoning separately.
+	 * pi-ai `Usage` object should pass the full breakdown so the snapshot's
+	 * session tokens can surface input/output/reasoning separately.
 	 */
 	recordTokens(
 		providerId: string,
@@ -209,8 +182,8 @@ export interface ObservabilityContract extends ObservabilityRunProjection {
 	recordSessionTurn(trace: SessionTurnTrace): void;
 	/**
 	 * Current product-facing projection. Cheap to call: it folds in-memory state
-	 * (active runs, bounded terminal history/notices, session cost/tokens, aggregated metrics, and the
-	 * cached accountability summary) into a fresh immutable snapshot.
+	 * (active runs, bounded terminal history/notices, session cost/tokens and the
+	 * latest throughput) into a fresh immutable snapshot.
 	 */
 	snapshot(): ObservabilitySnapshot;
 	/**

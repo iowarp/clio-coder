@@ -8,7 +8,9 @@
  * Per-entry token breakdown (input/output/cacheRead/cacheWrite/reasoning)
  * matches the shape of pi-ai's `Usage` plus provider-specific reasoning detail
  * fields. The /usage overlay aggregates it via `aggregateCostEntries`; the TUI
- * footer consumes the session sum through `ObservabilityContract.sessionTokens()`.
+ * footer reads the session sum from the observability snapshot's
+ * `session.tokens`, which carries the full breakdown although the footer shows
+ * only input, output and the total.
  */
 
 import type { ResponseModelIdObservationCounts } from "../../core/response-model-id.js";
@@ -152,7 +154,6 @@ export interface CostEntry {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
-	cacheWrite1h?: number;
 	reasoningTokens: number;
 	apiCalls?: number;
 	/** Absent on an ordinary turn's call. */
@@ -217,7 +218,6 @@ export function createCostTracker(): CostTracker {
 				output,
 				cacheRead,
 				cacheWrite,
-				...(breakdown?.cacheWrite1h === undefined ? {} : { cacheWrite1h: breakdown.cacheWrite1h }),
 				reasoningTokens,
 				...(apiCalls !== undefined ? { apiCalls } : {}),
 				...(label !== undefined ? { label } : {}),

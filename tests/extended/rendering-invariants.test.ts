@@ -432,7 +432,6 @@ describe("worker rendering invariants", () => {
 		const thinking = progress.snapshot();
 		strictEqual(thinking.phase, "thinking");
 		strictEqual(thinking.tailText, "");
-		strictEqual(progress.durableText(), "");
 		doesNotMatch(JSON.stringify(thinking), /worker chain of thought/u);
 	});
 
