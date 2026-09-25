@@ -19,7 +19,7 @@ import {
 } from "./theme/index.js";
 import { WELCOME_WORDMARK, WELCOME_WORDMARK_WIDE } from "./welcome-art.js";
 
-const WELCOME_TAGLINE = "Systems engineering beats vibes. Built by researchers who love to code!";
+const WELCOME_TAGLINE = "Systems engineering beats vibes! Built by researchers who love to code.";
 
 /**
  * What the route can honestly be said to be.
@@ -526,14 +526,18 @@ export function buildWelcomeDashboardLines(
 	const sideBySide = panelWidth >= 76;
 	const artWidth = sideBySide ? visibleWidth(wordmark[0] ?? "") : 0;
 	const showHints = panelWidth >= WELCOME_HINT_MIN_WIDTH;
-	const contentWidth = showHints ? Math.min(132, Math.floor((room - 3) * 0.58)) : room;
+	const contentWidth = showHints
+		? Math.max(artWidth + 3 + visibleWidth(WELCOME_TAGLINE), Math.min(132, Math.floor((room - 3) * 0.58)))
+		: room;
 	const hintWidth = room - contentWidth - 3;
 	const hints = showHints ? welcomeHints(theme, hintPage, getKeyLabel) : [];
 	const detailWidth = sideBySide ? contentWidth - artWidth - 3 : contentWidth;
 	const field = (label: string, value: string) => `${theme.fg("dim", `${label}  `)}${value}`;
+	const tagline = theme.fg("muted", WELCOME_TAGLINE);
+	const taglineLines = sideBySide ? wrapTextWithAnsi(tagline, Math.max(1, detailWidth)) : [tagline];
 	const details = [
-		sideBySide ? "" : theme.style("title", "CLIO CODER", { bold: true }),
-		"",
+		sideBySide ? (taglineLines[0] ?? "") : theme.style("title", "CLIO CODER", { bold: true }),
+		sideBySide ? (taglineLines[1] ?? "") : tagline,
 		theme.fg("dim", "Model"),
 		routeRow(theme, stats, detailWidth),
 		field("Workspace", workspaceLabel(theme, stats, Math.max(1, detailWidth - 11))),
@@ -571,7 +575,7 @@ export function buildWelcomeDashboardLines(
 	// one frame recipe and its action row sits under the standard inner divider.
 	return frame(
 		theme,
-		`Clio Coder v${version} · ${WELCOME_TAGLINE}`,
+		`Clio Coder v${version}`,
 		[...rows, innerDivider(theme, room), fit(actionRow(theme, stats, room))],
 		panelWidth,
 	);
