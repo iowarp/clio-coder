@@ -76,8 +76,3 @@ export function listGroupHeader(theme: ClioTheme, label: string): string {
 export function joinChips(theme: ClioTheme, parts: ReadonlyArray<string | null | undefined>): string {
 	return present(parts).join(dotSep(theme));
 }
-
-/** Join sections on one row with a frame bar, dropping empties. */
-export function joinSections(theme: ClioTheme, parts: ReadonlyArray<string | null | undefined>): string {
-	return present(parts).join(barSep(theme));
-}

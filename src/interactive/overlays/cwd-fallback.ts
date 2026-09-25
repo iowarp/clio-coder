@@ -22,11 +22,9 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme } from "../theme/index.js";
+import { clioTheme, GLYPH } from "../theme/index.js";
 
 export const CWD_FALLBACK_OVERLAY_WIDTH = 88;
-const ELLIPSIS = "…";
-
 /** Reasons surfaced by resolveSessionCwd. Overlay maps each to a description line. */
 export type CwdFallbackReason = "no-cwd" | "missing" | "not-a-directory";
 
@@ -74,18 +72,18 @@ function buildSelectPresentation(items: ReadonlyArray<SelectItem>): {
 				// The selected explanation is the recovery decision the operator is
 				// reading, so it renders in full beneath the list instead of appearing
 				// here as an ellipsized fragment.
-				if (isSelected) return truncateToWidth(label, maxWidth, ELLIPSIS, true);
+				if (isSelected) return truncateToWidth(label, maxWidth, GLYPH.ellipsis, true);
 				if (description.length === 0 || maxWidth < 32) {
-					return truncateToWidth(label, maxWidth, ELLIPSIS, true);
+					return truncateToWidth(label, maxWidth, GLYPH.ellipsis, true);
 				}
 
 				const theme = clioTheme();
 				const preferredLabelWidth = Math.max(24, Math.min(38, visibleWidth(label) + 2));
 				const labelWidth = Math.max(1, Math.min(preferredLabelWidth, maxWidth - 12));
-				const fittedLabel = truncateToWidth(label, labelWidth, ELLIPSIS, true);
+				const fittedLabel = truncateToWidth(label, labelWidth, GLYPH.ellipsis, true);
 				const spacing = " ".repeat(Math.max(1, labelWidth + 2 - visibleWidth(fittedLabel)));
 				const descWidth = Math.max(1, maxWidth - visibleWidth(fittedLabel) - visibleWidth(spacing));
-				const fittedDescription = truncateToWidth(description, descWidth, ELLIPSIS, true);
+				const fittedDescription = truncateToWidth(description, descWidth, GLYPH.ellipsis, true);
 				return `${fittedLabel}${theme.fg("muted", `${spacing}${fittedDescription}`)}`;
 			},
 		},

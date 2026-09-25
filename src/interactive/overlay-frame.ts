@@ -10,9 +10,10 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
+import { dockBodyRows, dockMount, dockRaise, dockUnmount, dockViewportRows } from "./dock.js";
 import { keyboardOwner } from "./keyboard-owner.js";
 import { enterModal, type ModalMarkerSink } from "./modal-marker.js";
-import { type ClioToken, clioTheme, padAnsi, screenTitle, selectListTheme } from "./theme/index.js";
+import { type ClioToken, clioTheme, GLYPH, padAnsi, screenTitle, selectListTheme } from "./theme/index.js";
 
 export const DEFAULT_SELECT_THEME: SelectListTheme = selectListTheme(clioTheme());
 
@@ -79,6 +80,48 @@ function clioTitle(text: string, token?: ClioToken): string {
 
 export function clioError(text: string): string {
 	return clioTheme().fg("error", text);
+}
+
+/**
+ * The selection rule for a self-drawn list row: the focused row carries the
+ * cursor in accent and its label in accent bold, and nothing else changes
+ * color. Decisions, tasks and the tree marked the row but left the label
+ * plain while help, model and view highlighted it, so the same key press read
+ * as three different things.
+ */
+export function selectionMark(focused: boolean): string {
+	return focused ? clioTheme().fg("accent", GLYPH.cursor) : " ";
+}
+
+export function selectionLabel(focused: boolean, label: string): string {
+	return focused ? clioTheme().style("accent", label, { bold: true }) : label;
+}
+
+/**
+ * Fit one body row: unchanged when it fits, cut on the ellipsis when it does
+ * not. Six overlays each carried a private copy under a different name.
+ */
+export function fitRow(text: string, width: number): string {
+	const safeWidth = Math.max(1, Math.floor(width));
+	return visibleWidth(text) <= safeWidth ? text : truncateToWidth(text, safeWidth, GLYPH.ellipsis, true);
+}
+
+/** Exactly `height` rows of `width` cells: fitted, then blank-filled. */
+export function fitRows(lines: ReadonlyArray<string>, width: number, height: number): string[] {
+	const out = lines.slice(0, height).map((line) => padAnsi(line, width, GLYPH.ellipsis));
+	while (out.length < height) out.push(" ".repeat(Math.max(0, width)));
+	return out;
+}
+
+/**
+ * The `[start, end)` slice of `total` rows that keeps `selected` centered in a
+ * window of `height`, pinned at either end of the list.
+ */
+export function centeredWindow(total: number, selected: number, height: number): [number, number] {
+	if (height <= 0 || total <= height) return [0, total];
+	const clamped = Math.max(0, Math.min(selected, total - 1));
+	const start = Math.max(0, Math.min(clamped - Math.floor(height / 2), total - height));
+	return [start, Math.min(total, start + height)];
 }
 
 function brandedTopBorder(label: string, innerWidth: number, tone?: ClioToken): string {
@@ -243,7 +286,7 @@ export function buildResponsiveHint(
  * labels but recovers the key, which is all the critical-key classification
  * needs, so a plain-string overlay gets the same protection as a structured one.
  */
-function elideHint(hint: string, maxCleanWidth: number): string {
+function fitHint(hint: string, maxCleanWidth: number): string {
 	const parts = hint.split(" · ");
 	if (parts.length <= 2) return hint;
 	const entries: HintEntry[] = parts.map((part) => {
@@ -267,7 +310,7 @@ function brandedBottomBorder(innerWidth: number, hint?: string, tone?: ClioToken
 	let clean = hint.trim();
 	const maxCleanWidth = innerWidth - 3;
 	if (clean.includes(" · ") && visibleWidth(`─ ${clean} `) > innerWidth) {
-		clean = elideHint(clean, maxCleanWidth);
+		clean = fitHint(clean, maxCleanWidth);
 	}
 	const formatted = `─ ${clean} `;
 	const clipped = visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, "…", true) : formatted;
@@ -297,19 +340,6 @@ export function diagnosticSeverityToken(severity: RuntimeResolutionDiagnostic["s
 export type FrameAlign = "left" | "center" | "right";
 
 /**
- * Horizontal half of an overlay anchor. The terminal engine composites an
- * overlay only across the columns it declares, so the frame claims the whole
- * row and places the box itself; this is what the box would have been anchored
- * to if the engine were still doing the placing.
- */
-function frameAlignForAnchor(anchor: OverlayOptions["anchor"]): FrameAlign {
-	if (anchor === undefined) return "center";
-	if (anchor === "left-center" || anchor.endsWith("-left")) return "left";
-	if (anchor === "right-center" || anchor.endsWith("-right")) return "right";
-	return "center";
-}
-
-/**
  * Trim a body to the rows the box has, keeping the count of what was dropped.
  *
  * A box taller than the terminal used to be cut off at the bottom by the
@@ -326,6 +356,20 @@ function fitBody(lines: ReadonlyArray<string>, rowBudget: number, contentWidth: 
 	const kept = lines.slice(0, bodyBudget - 1);
 	const hidden = lines.length - kept.length;
 	return [...kept, clioTheme().fg("dim", truncateToWidth(`… ${hidden} more rows`, contentWidth, "", true))];
+}
+
+/**
+ * A body that lays itself out for the rows the frame has. `fitBody` can only cut
+ * a body that is too tall, and a cut card has no key that reaches what it hid
+ * (BT-005), so a body that can scroll takes the budget and windows itself.
+ * Zero means the budget is not known yet.
+ */
+export interface RowBudgetedBody {
+	setBodyRows(rows: number): void;
+}
+
+function isRowBudgeted(child: Component): child is Component & RowBudgetedBody {
+	return typeof (child as Partial<RowBudgetedBody>).setBodyRows === "function";
 }
 
 export class ClioOverlayFrame implements Component {
@@ -385,6 +429,7 @@ export class ClioOverlayFrame implements Component {
 	render(width: number): string[] {
 		const boxWidth = Math.max(5, Math.min(this.boxWidth > 0 ? this.boxWidth : width, width));
 		const contentWidth = Math.max(1, boxWidth - 4);
+		if (isRowBudgeted(this.child)) this.child.setBodyRows(this.rowBudget > 0 ? Math.max(1, this.rowBudget - 2) : 0);
 		const childLines = this.child.render(contentWidth);
 		const titleText = typeof this.title === "function" ? this.title() : this.title;
 		const hint = typeof this.footerHint === "function" ? this.footerHint(contentWidth + 2) : this.footerHint;
@@ -435,6 +480,59 @@ export class ClioOverlayFrame implements Component {
 		return lines;
 	}
 
+	/**
+	 * The dock path: body rows only, fitted to `bodyRows` and padded to
+	 * `contentWidth`. The composer draws the title and the hint on its own rails,
+	 * so the box borders, the alignment slack and the fullscreen padding are all
+	 * gone; what is left is exactly what the child drew.
+	 */
+	private cachedDock: { contentWidth: number; bodyRows: number; childLines: string[]; lines: string[] } | undefined;
+
+	renderDockBody(contentWidth: number, bodyRows: number): string[] {
+		const safeWidth = Math.max(1, contentWidth);
+		const rows = Math.max(1, bodyRows);
+		this.rowBudget = rows + 2;
+		if (isRowBudgeted(this.child)) this.child.setBodyRows(rows);
+		const childLines = this.child.render(safeWidth);
+		const cached = this.cachedDock;
+		if (
+			cached !== undefined &&
+			cached.contentWidth === safeWidth &&
+			cached.bodyRows === rows &&
+			cached.childLines === childLines
+		) {
+			return cached.lines;
+		}
+		const lines = fitBody(childLines, rows + 2, safeWidth).map((line) => padAnsi(line, safeWidth));
+		this.cachedDock = { contentWidth: safeWidth, bodyRows: rows, childLines, lines };
+		return lines;
+	}
+
+	dockTitle(): string {
+		return typeof this.title === "function" ? this.title() : this.title;
+	}
+
+	/**
+	 * The hint fitted for a rail of `width`. A function hint narrows itself from
+	 * the inner width it is given; a plain string is narrowed here by the same
+	 * critical-key rule the box border used, so a narrow rail keeps Enter and
+	 * Esc and drops the conveniences.
+	 */
+	dockHint(width: number): string | undefined {
+		// The rail spends one space on each side of the hint and one cell on its tail.
+		const maxWidth = Math.max(1, width - 4);
+		const hint = typeof this.footerHint === "function" ? this.footerHint(maxWidth + 3) : this.footerHint;
+		if (hint === undefined || hint.trim().length === 0) return undefined;
+		const clean = hint.trim();
+		if (visibleWidth(clean) <= maxWidth) return clean;
+		const fitted = clean.includes(" · ") ? fitHint(clean, maxWidth) : clean;
+		return visibleWidth(fitted) <= maxWidth ? fitted : truncateToWidth(fitted, maxWidth, GLYPH.ellipsis, false);
+	}
+
+	dockTone(): ClioToken | undefined {
+		return resolveTone(this.tone);
+	}
+
 	get keyboardScope() {
 		return keyboardOwner(this.child).keyboardScope;
 	}
@@ -448,40 +546,25 @@ export class ClioOverlayFrame implements Component {
 
 	invalidate(): void {
 		this.cachedRender = undefined;
+		this.cachedDock = undefined;
 		this.child.invalidate?.();
 	}
 }
 
 /**
- * Show a framed overlay that owns every row it covers.
+ * Show a modal surface in the dock.
  *
- * The overlay used to declare only the box's own width, and the terminal engine
- * composites an overlay across exactly the columns it declares, so the
- * transcript stayed on both sides of the border. On a 193-column terminal a
- * write-approval modal landed inside a sentence and the row read "None of these
- * skills directly match the task \"escape works" on the left of the box and
- * "test message, possibly checking that the escape sequence or" on the right,
- * which is a sentence the model never wrote.
+ * The engine still gets an overlay, because its overlay stack is what owns
+ * focus, input routing and the nested-modal order, but that overlay renders no
+ * rows. The frame itself is registered with the dock and the composer draws
+ * it inline between its rails, so the transcript above keeps its rows, its
+ * scrollback and its mouse selection, and every modal opens in the one place
+ * the operator is already looking. Height is the dock's fixed budget; a body
+ * that can scroll takes it through `RowBudgetedBody` or the `visible`
+ * callback, and anything else is cut with a row count.
  *
- * The frame now claims the full row and blanks the columns beside the box, so
- * a modal reads as a modal. The caller's width becomes the box width and the
- * anchor's horizontal half becomes the box's alignment inside the row; margins
- * and vertical anchoring are still the engine's.
- *
- * The frame also fits itself to the rows available rather than letting the
- * engine cut its bottom off, which is what kept the `[Esc] close` hint on
- * screen at 40x12. It learns the terminal height through the `visible`
- * predicate, which the engine evaluates with the live dimensions in the same
- * pass that renders the overlay.
- *
- * This is also where the modal marker is claimed and released. Every framed
- * overlay is modal and every modal is framed: the only two overlays Clio shows
- * without a frame are the context and task islands, and both pass
- * `nonCapturing: true` straight to the engine. Hanging the marker here rather
- * than on the overlay lifecycle therefore covers the nested frames the
- * lifecycle's single `OverlayState` cannot see, and it cannot drift out of
- * sync with what actually owns the keyboard, because the same call that takes
- * the screen takes the marker.
+ * This is also where the modal marker is claimed and released: the same call
+ * that takes the keyboard takes the marker, so the two cannot drift.
  */
 export function showClioOverlayFrame(
 	tui: TUI,
@@ -500,50 +583,56 @@ export function showClioOverlayFrame(
 		 * really is fixed and surface-specific.
 		 */
 		markerId: string;
-		/** Cover the viewport, including unused rows, while background content updates. */
+		/** Formerly covered the viewport; the dock ignores it. */
 		fullscreen?: boolean;
+		/** Keep the composer's own text beneath the body (the permission card). */
+		keepComposer?: boolean;
 	},
 ): OverlayHandle {
-	const { title, footerHint, tone, width, visible, maxHeight, margin, markerId, fullscreen, ...overlayOptions } =
-		options;
-	const boxWidth = typeof width === "number" ? width : 0;
-	const frame = new ClioOverlayFrame(
-		child,
-		title,
-		footerHint,
-		boxWidth,
-		frameAlignForAnchor(options.anchor),
-		tone,
-		fullscreen,
-	);
-	const handle = tui.showOverlay(frame, {
+	const { title, footerHint, tone, visible, markerId, keepComposer, ...overlayOptions } = options;
+	const frame = new ClioOverlayFrame(child, title, footerHint, 0, "left", tone, false);
+	const entry = dockMount(tui, frame, keepComposer === true);
+	// The engine keeps this overlay for focus and input routing only. It paints
+	// nothing: the composer draws the frame inline, in normal flow, so the
+	// transcript keeps its rows and its mouse selection.
+	const proxy: Component & { keyboardScope?: unknown; undoInput(): boolean } = {
+		render: () => [],
+		invalidate: () => frame.invalidate(),
+		handleInput: (data: string) => frame.handleInput(data),
+		get keyboardScope() {
+			return frame.keyboardScope;
+		},
+		undoInput: () => frame.undoInput(),
+	};
+	const handle = tui.showOverlay(proxy, {
 		...overlayOptions,
-		...(margin !== undefined ? { margin } : {}),
+		anchor: "bottom-left",
 		width: "100%",
-		visible: (termWidth, termHeight) => {
-			const shown = visible ? visible(termWidth, termHeight) : true;
-			// A caller may update an object margin in its visibility callback to
-			// follow live content geometry. Read it after that callback, every frame.
-			const marginRows = typeof margin === "number" ? margin * 2 : (margin?.top ?? 0) + (margin?.bottom ?? 0);
-			const available = Math.max(1, termHeight - marginRows);
-			const requested = resolveRowSize(maxHeight, termHeight);
-			frame.setRowBudget(requested === null ? available : Math.min(requested, available));
-			return shown;
+		margin: 0,
+		visible: (termWidth) => {
+			frame.setRowBudget(dockBodyRows(tui) + 2);
+			// A body that lays itself out from the terminal height gets the dock's
+			// height instead, so it windows itself to the rows it will actually get.
+			return visible ? visible(termWidth, dockViewportRows(tui)) : true;
 		},
 	});
 	const marker = enterModal(markerId, modalMarkerSink(tui));
 	return {
 		hide(): void {
 			marker.release();
+			dockUnmount(tui, entry);
 			handle.hide();
 		},
 		setHidden(hidden: boolean): void {
 			marker.setActive(!hidden);
+			entry.hidden = hidden;
+			if (!hidden) dockRaise(tui, entry);
 			handle.setHidden(hidden);
 		},
 		isHidden: (): boolean => handle.isHidden(),
 		focus(): void {
 			marker.raise();
+			dockRaise(tui, entry);
 			handle.focus();
 		},
 		// A pure passthrough on purpose. The engine hands focus to the next
@@ -568,13 +657,4 @@ export function showClioOverlayFrame(
 function modalMarkerSink(tui: TUI): ModalMarkerSink | null {
 	const terminal: Partial<ModalMarkerSink> | undefined = tui.terminal;
 	return typeof terminal?.setTitle === "function" ? (terminal as ModalMarkerSink) : null;
-}
-
-/** Rows from an overlay size value, matching how the engine reads one. */
-function resolveRowSize(value: OverlayOptions["maxHeight"], termHeight: number): number | null {
-	if (typeof value === "number") return Math.max(1, Math.floor(value));
-	if (typeof value !== "string") return null;
-	const percent = /^(\d+(?:\.\d+)?)%$/u.exec(value.trim());
-	if (!percent?.[1]) return null;
-	return Math.max(1, Math.floor((termHeight * Number.parseFloat(percent[1])) / 100));
 }

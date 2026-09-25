@@ -1,16 +1,7 @@
 import { classifyDecisionPresentation, decisionFactsForAnswer } from "../../domains/safety/decision-presentation.js";
 import type { DecisionLedgerEntry, DecisionRecord } from "../../domains/session/entries.js";
-import {
-	type Component,
-	Input,
-	matchesKey,
-	type OverlayHandle,
-	type TUI,
-	truncateToWidth,
-	visibleWidth,
-	wrapTextWithAnsi,
-} from "../../engine/tui.js";
-import { buildHint, showClioOverlayFrame } from "../overlay-frame.js";
+import { type Component, Input, matchesKey, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
+import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, rule } from "../theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 88;
@@ -40,11 +31,6 @@ export interface OpenDecisionsOverlayOptions {
 interface SelectableDecision {
 	interview: DecisionLedgerEntry;
 	decision: DecisionRecord;
-}
-
-function fitLine(text: string, width: number): string {
-	const safeWidth = Math.max(1, Math.floor(width));
-	return visibleWidth(text) <= safeWidth ? text : truncateToWidth(text, safeWidth, "…", true);
 }
 
 function relativeTime(timestamp: string, now: number): string {
@@ -79,28 +65,32 @@ function interviewHeader(interview: DecisionLedgerEntry, width: number, now: num
 	const status =
 		interview.interviewStatus === "complete" ? theme.fg("success", "complete") : theme.fg("warning", "cancelled");
 	const heading = `${theme.style(presentation.semanticToken, presentation.tierLabel, { bold: true })}${theme.fg("dim", " · ")}${theme.fg("accent", relativeTime(interview.endedAt, now))}${theme.fg("dim", " · ")}${theme.fg("muted", rounds)}${theme.fg("dim", " · ")}${status}`;
-	const lines = [fitLine(heading, width)];
+	const lines = [fitRow(heading, width)];
 	if (interview.summary) {
-		lines.push(...wrapTextWithAnsi(theme.fg("dim", interview.summary), width).map((line) => fitLine(line, width)));
+		lines.push(...wrapTextWithAnsi(theme.fg("dim", interview.summary), width).map((line) => fitRow(line, width)));
 	}
 	return lines;
 }
 
 function decisionLines(decision: DecisionRecord, selected: boolean, expanded: boolean, width: number): string[] {
 	const theme = clioTheme();
-	const cursor = selected ? theme.fg("accent", GLYPH.cursor) : " ";
+	const cursor = selectionMark(selected);
 	const status = decision.status === "active" ? theme.fg("success", GLYPH.ok) : theme.fg("dim", GLYPH.cancelled);
 	const labelText = decision.label ?? decision.key;
-	const label = decision.status === "superseded" ? theme.fg("dim", labelText) : theme.fg("muted", labelText);
+	const label = selected
+		? selectionLabel(true, labelText)
+		: decision.status === "superseded"
+			? theme.fg("dim", labelText)
+			: theme.fg("muted", labelText);
 	const value = decision.status === "superseded" ? theme.fg("dim", decision.value) : decision.value;
-	const lines = [fitLine(`${cursor} ${status} ${label}${theme.fg("dim", ":")} ${value}`, width)];
+	const lines = [fitRow(`${cursor} ${status} ${label}${theme.fg("dim", ":")} ${value}`, width)];
 	// The indent belongs to the container, so this text wraps inside what is left
 	// of the row. Wrapping to the full width and then indenting cost every line
 	// its last six columns to a cut that landed mid-sentence.
 	const indent = "      ";
 	const indented = Math.max(1, width - indent.length);
 	const wrapIndented = (text: string): string[] =>
-		wrapTextWithAnsi(text, indented).map((line) => fitLine(`${indent}${line}`, width));
+		wrapTextWithAnsi(text, indented).map((line) => fitRow(`${indent}${line}`, width));
 	if (decision.status === "superseded" && decision.correction) {
 		lines.push(...wrapIndented(`${theme.fg("dim", "correction")} ${theme.fg("muted", decision.correction)}`));
 	}
@@ -127,7 +117,7 @@ function formatDecisionsOverlayBodyLines(
 			...wrapTextWithAnsi(theme.fg("muted", "No interview decisions have been recorded on this branch."), width),
 			"",
 			...wrapTextWithAnsi(theme.fg("dim", "Completed and cancelled ask_user interviews appear here."), width),
-		].map((line) => fitLine(line, width));
+		].map((line) => fitRow(line, width));
 	}
 	const selected = selectableRows(interviews)[selectedIndex];
 	const lines: string[] = [];
@@ -137,7 +127,7 @@ function formatDecisionsOverlayBodyLines(
 		if (interviewIndex > 0) lines.push(rule(theme, width));
 		lines.push(...interviewHeader(interview, width, now));
 		if (interview.decisions.length === 0) {
-			lines.push(fitLine(`  ${theme.fg("dim", "No compact decisions were recorded.")}`, width));
+			lines.push(fitRow(`  ${theme.fg("dim", "No compact decisions were recorded.")}`, width));
 			continue;
 		}
 		for (const decision of interview.decisions) {
@@ -174,12 +164,12 @@ class DecisionsOverlayBody implements Component {
 		);
 		if (this.correctionInput) {
 			const theme = clioTheme();
-			body.push("", fitLine(theme.fg("accent", "New direction"), width));
+			body.push("", fitRow(theme.fg("accent", "New direction"), width));
 			body.push(
 				...this.correctionInput
 					.render(Math.max(1, width))
 					.map((line) =>
-						fitLine(line.startsWith("> ") ? `${theme.fg("accent", `${GLYPH.cursor} `)}${line.slice(2)}` : line, width),
+						fitRow(line.startsWith("> ") ? `${theme.fg("accent", `${GLYPH.cursor} `)}${line.slice(2)}` : line, width),
 					),
 			);
 		}

@@ -259,7 +259,7 @@ test("the inspector wraps full text, accepts search letters, and supports Enter 
 	await new Promise((resolve) => setImmediate(resolve));
 	for (const key of "reasoning overview") view.handleInput(key);
 	const list = plain(view.render(44));
-	match(list, /filter: reasoning overview/u);
+	match(list, /^> reasoning overview/mu);
 	doesNotMatch(list, /Accountability|Receipts|\(empty\)/u);
 	view.handleInput("\r");
 	view.render(44);
@@ -271,7 +271,7 @@ test("the inspector wraps full text, accepts search letters, and supports Enter 
 	ok(bottom.every((line) => visibleWidth(line) <= 44));
 	view.handleInput("\x1b");
 	strictEqual(closed, false);
-	match(plain(view.render(44)), /filter: reasoning overview/u);
+	match(plain(view.render(44)), /^> reasoning overview/mu);
 	view.handleInput("\x1b");
 	strictEqual(closed, true);
 });

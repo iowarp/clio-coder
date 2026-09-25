@@ -31,15 +31,12 @@ import {
 	type ClioTheme,
 	type ClioToken,
 	clioTheme,
-	fitUnits,
 	formatCompactMs,
 	formatContextPercent,
 	GLYPH,
 	joinChips,
-	joinSections,
 	sectionTag,
 } from "../theme/index.js";
-import { fitIdentityLabel } from "../theme/labels.js";
 import { isHelperRun } from "../worker-stream.js";
 
 export interface ToolTallySnapshot {
@@ -143,14 +140,6 @@ export interface AgentWorkFacts {
 	localCapacity?: LocalCapacity | null;
 }
 
-/** Responsive bands for the expanded footer. */
-export const EXPANDED_WIDE = 80;
-export const EXPANDED_MID = 70;
-export const EXPANDED_ULTRAWIDE = 220;
-
-/** Compact footer shows the git section only when there is room for it. */
-const COMPACT_GIT_MIN_WIDTH = 72;
-
 /**
  * The `visibleWidth` guard looks redundant against `truncateToWidth`, which
  * measures internally, but it is not: dropping it pads wide-char truncations
@@ -170,18 +159,6 @@ function cell(text: string, width: number): string {
 	const safe = Math.max(0, width);
 	const clipped = truncateToWidth(text, safe, "…", true);
 	return `${clipped}${" ".repeat(Math.max(0, safe - visibleWidth(clipped)))}`;
-}
-
-function joinColumns(left: string, right: string, width: number): string {
-	const safe = Math.max(0, Math.floor(width));
-	if (safe === 0) return "";
-	if (visibleWidth(right) === 0) return cell(left, safe);
-	const rightWidth = visibleWidth(right);
-	if (rightWidth >= safe) return cell(right, safe);
-	const leftBudget = Math.max(0, safe - rightWidth - 1);
-	const fittedLeft = visibleWidth(left) > leftBudget ? truncateToWidth(left, leftBudget, "…", true) : left;
-	const gap = Math.max(1, safe - visibleWidth(fittedLeft) - rightWidth);
-	return cell(`${fittedLeft}${" ".repeat(gap)}${right}`, safe);
 }
 
 function finiteNonNegative(value: number | null | undefined): number {
@@ -221,105 +198,6 @@ export function formatUsd(value: number): string {
 	if (!Number.isFinite(value) || value <= 0) return "$0.00";
 	if (value < 0.01) return `$${value.toFixed(4)}`;
 	return `$${value.toFixed(2)}`;
-}
-
-function gitMarker(theme: ClioTheme, dirty: boolean | null): string {
-	if (dirty === false) return theme.fg("success", "✓");
-	if (dirty === true) return theme.fg("warning", "!");
-	return theme.fg("dim", "?");
-}
-
-/** Git chip carrying a `git` label so a version-shaped branch never reads as a duplicate version. */
-function gitChip(theme: ClioTheme, branch: string | null, dirty: boolean | null): string | null {
-	if (!branch) return null;
-	return `${theme.fg("dim", "git ")}${theme.fg("success", branch)} ${gitMarker(theme, dirty)}`;
-}
-
-function gitValue(theme: ClioTheme, branch: string | null, dirty: boolean | null): string | null {
-	if (!branch) return null;
-	return `${theme.fg("success", branch)} ${gitMarker(theme, dirty)}`;
-}
-
-/** `github.com/owner/repo` → `owner/repo`; otherwise the host or the raw value, trimmed. */
-function collapseRemote(remote: string | null): string | null {
-	if (!remote) return null;
-	const cleaned = remote
-		.replace(/^git@/, "")
-		.replace(/^[a-z]+:\/\//, "")
-		.replace(/\.git$/, "");
-	const parts = cleaned.split(/[/:]/).filter(Boolean);
-	if (parts.length >= 2) return parts.slice(-2).join("/");
-	return parts[0] ?? null;
-}
-
-/**
- * Workspace/status row helper: workspace identity on the left and a meaningful
- * work phase on the right. The active compact dashboard layout is composed in
- * dashboard.ts, including its route label.
- */
-export function compactPrimaryLine(
-	workspace: WorkspaceFacts,
-	_session: SessionFacts,
-	width: number,
-	theme: ClioTheme = clioTheme(),
-	status: AgentStatus = {
-		phase: "idle",
-		since: 0,
-		lastMeaningfulAt: 0,
-		watchdogTier: 0,
-		watchdogPeak: 0,
-		localRuntime: false,
-	},
-	toolCounts: ToolTallySnapshot = { tools: {}, errors: 0 },
-	dispatchRows: ReadonlyArray<DispatchBoardRow> = [],
-	tick = 0,
-	now = Date.now(),
-	localCapacity: LocalCapacity | null = null,
-): string {
-	const safeWidth = Math.max(1, Math.floor(width));
-	let git = safeWidth >= COMPACT_GIT_MIN_WIDTH ? gitChip(theme, workspace.branch, workspace.dirty) : null;
-	let right = buildHarnessStatePill(
-		theme,
-		status,
-		toolCounts,
-		dispatchRows,
-		tick,
-		now,
-		safeWidth,
-		true,
-		false,
-		localCapacity,
-	);
-	// A long temporary parent must yield before the active worker count.
-	const cwd = fitIdentityLabel(workspace.cwd, Math.max(8, safeWidth - visibleWidth(right) - 1));
-	let left = joinSections(theme, [theme.fg("muted", cwd), git]);
-
-	if (git && visibleWidth(left) + 1 + visibleWidth(right) > safeWidth) {
-		git = null;
-		left = theme.fg("muted", cwd);
-	}
-
-	if (visibleWidth(left) + 1 + visibleWidth(right) > safeWidth) {
-		right = buildHarnessStatePill(
-			theme,
-			status,
-			toolCounts,
-			dispatchRows,
-			tick,
-			now,
-			safeWidth,
-			false,
-			false,
-			localCapacity,
-		);
-	}
-
-	if (visibleWidth(left) + 1 + visibleWidth(right) > safeWidth) {
-		const maxCwdWidth = Math.max(1, safeWidth - visibleWidth(right) - 1);
-		left = theme.fg("muted", fitIdentityLabel(workspace.cwd, maxCwdWidth));
-	}
-
-	return joinColumns(left, right, safeWidth);
 }
 
 function contextBreakdownForBar(context: ContextEngineFacts): ContextUsageBreakdown | undefined {
@@ -461,78 +339,6 @@ function statusRow(value: string | null | undefined): DashboardRow {
 
 function legendRow(value: string | null | undefined): DashboardRow {
 	return { kind: "legend", value };
-}
-
-export function workspaceQuadrant(facts: WorkspaceFacts, _options: ExpandedQuadrantOptions = {}): string[] {
-	const theme = clioTheme();
-	const remote = collapseRemote(facts.remote);
-	return dashboardBlock(
-		theme,
-		"Workspace",
-		[
-			kv("cwd", facts.cwd),
-			styledKv("git", gitValue(theme, facts.branch, facts.dirty)),
-			kv("type", facts.projectType),
-			kv("remote", remote),
-		],
-		_options.width,
-	);
-}
-
-function sessionIdentity(facts: SessionFacts): { key: string; value: string } | null {
-	if (facts.id) return { key: "id", value: facts.id };
-	if (facts.name) return { key: "name", value: facts.name };
-	return null;
-}
-
-function capabilitiesValue(theme: ClioTheme, capabilities: string[] | null): string | null {
-	if (!capabilities || capabilities.length === 0) return null;
-	return joinChips(
-		theme,
-		capabilities.map((capability) => theme.fg("muted", capability)),
-	);
-}
-
-export function sessionQuadrant(facts: SessionFacts, _options: ExpandedQuadrantOptions = {}): string[] {
-	const theme = clioTheme();
-	const identity = sessionIdentity(facts);
-	const memory = facts.memoryIntervention;
-	const memoryValue = memory
-		? fitUnits(
-				theme,
-				"",
-				[
-					theme.fg(memory.enabled ? "success" : "dim", memory.enabled ? "on" : "off"),
-					theme.fg(memory.tier === "llm" ? "reason" : "muted", `tier ${memory.tier === "llm" ? "LLM" : "rules"}`),
-					theme.fg("muted", `bank ${memory.size}`),
-					// A background step runs for tens of seconds on a small local model.
-					// Saying so is the difference between a quiet feature and a dead one.
-					...(memory.stepInFlight ? [theme.fg("reason", "working")] : []),
-					...(memory.lastDecision ? [theme.fg("dim", memory.lastDecision)] : []),
-				],
-				Number.POSITIVE_INFINITY,
-			)
-		: null;
-	return dashboardBlock(
-		theme,
-		"Session",
-		[
-			identity ? kv(identity.key, identity.value, "accent") : statusRow(null),
-			kv("target", facts.target, "accent"),
-			styledKv("caps", capabilitiesValue(theme, facts.capabilities)),
-			// accentDeep is a structure color reserved for the section tag; the autonomy
-			// value is a plain fact and reads muted like the other neutral values.
-			kv("autonomy", facts.safety),
-			kv("profile", facts.toolProfile),
-			kv(
-				"output",
-				facts.outputStyle && facts.outputStyle !== "standard" ? facts.outputStyle : null,
-				facts.outputStyle === "detailed" ? "accent" : "muted",
-			),
-			styledKv("memory", memoryValue),
-		],
-		_options.width,
-	);
 }
 
 function expandedContextBarCells(width: number | undefined): number {
@@ -880,7 +686,6 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 				options.tick ?? 0,
 				options.now ?? Date.now(),
 				statusWidth,
-				true,
 				fleetSummaryIsAction,
 				facts.localCapacity ?? null,
 			),
@@ -950,19 +755,6 @@ export function zipColumns(
 	const lines: string[] = [];
 	for (let i = 0; i < rowCount; i += 1) {
 		lines.push(`${cell(left[i] ?? "", leftWidth)}${sep}${cell(right[i] ?? "", rightWidth)}`);
-	}
-	return lines;
-}
-
-export function zipColumnBlocks(blocks: ReadonlyArray<string[]>, widths: ReadonlyArray<number>, sep: string): string[] {
-	blocks = blocks.map((block, index) =>
-		block.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, widths[index] ?? 1))),
-	);
-	const rowCount = blocks.reduce((max, block) => Math.max(max, block.length), 0);
-	const lines: string[] = [];
-	for (let row = 0; row < rowCount; row += 1) {
-		const cells = blocks.map((block, index) => cell(block[row] ?? "", widths[index] ?? 0));
-		lines.push(cells.join(sep));
 	}
 	return lines;
 }
@@ -1101,14 +893,11 @@ function buildHarnessStatePill(
 	tick: number,
 	now: number,
 	width: number,
-	showBadge = true,
 	fleetSummaryIsAction = false,
 	localCapacity: LocalCapacity | null = null,
 ): string {
 	const safeWidth = Math.max(1, Math.floor(width));
-	const badge = showBadge
-		? harnessBadge(theme, status, toolCounts, dispatchRows, fleetSummaryIsAction, localCapacity)
-		: "";
+	const badge = harnessBadge(theme, status, toolCounts, dispatchRows, fleetSummaryIsAction, localCapacity);
 	// Idleness is absence of work, not a phase worth narrating. If a tool or
 	// fleet remains live while the harness settles, keep that activity without
 	// prefixing it with an idle glyph.

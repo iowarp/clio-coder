@@ -1,7 +1,14 @@
 import { type Component, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
+import { dockBodyRows } from "./dock.js";
 import type { LeaderKeyState, LeaderTarget } from "./leader-key.js";
-import { showClioOverlayFrame } from "./overlay-frame.js";
-import { clioTheme } from "./theme/index.js";
+import {
+	buildResponsiveHint,
+	centeredWindow,
+	selectionLabel,
+	selectionMark,
+	showClioOverlayFrame,
+} from "./overlay-frame.js";
+import { clioTheme, GLYPH } from "./theme/index.js";
 
 /** Noncapturing presentation: controller retains the underlying cancellation owner. */
 export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: LeaderTarget["id"]) => string) {
@@ -12,16 +19,24 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: L
 		render(width) {
 			if (state.status === "idle") return [];
 			const selected = state.selected;
-			const count = Math.max(1, Math.min(10, tui.terminal.rows - 8));
-			const start = Math.max(0, Math.min(selected - Math.floor(count / 2), targets.length - count));
+			const count = Math.max(1, Math.min(10, dockBodyRows(tui) - 2));
+			const [start, end] = centeredWindow(targets.length, selected, count);
+			const theme = clioTheme();
 			return [
 				`${scope()} · letters select actions · close, then /help for commands`,
-				...targets.slice(start, start + count).map((entry, index) => {
-					const text = `${start + index === selected ? "›" : " "} ${entry.key || "·"}  ${entry.label ?? entry.id}  ${keyLabel(entry.id)}${entry.disabledReason ? ` (${entry.disabledReason})` : ""}`;
-					return truncateToWidth(start + index === selected ? clioTheme().fg("accent", text) : text, width);
+				...targets.slice(start, end).map((entry, index) => {
+					const focused = start + index === selected;
+					const label = entry.label ?? entry.id;
+					const reason = entry.disabledReason ? theme.fg("dim", ` (${entry.disabledReason})`) : "";
+					// The selection rule: cursor and label in accent, nothing else recolored.
+					// An unbound key is a blank, because `·` is the internal-run mark in a
+					// board's first column and this is a first column.
+					const mark = selectionMark(focused);
+					const name = selectionLabel(focused, label);
+					return `${mark} ${entry.key || " "}  ${name}  ${theme.fg("dim", keyLabel(entry.id))}${reason}`;
 				}),
-				`${targets.length ? `${selected + 1}/${targets.length}` : "No actions in this scope"} · ${state.notice ?? "Up/Down select · Enter run · Esc close · Ctrl+C cancel"}`,
-			].map((line) => truncateToWidth(line, width));
+				`${targets.length ? `${selected + 1}/${targets.length}` : "No actions in this scope"}${state.notice ? ` · ${state.notice}` : ""}`,
+			].map((line) => truncateToWidth(line, width, GLYPH.ellipsis));
 		},
 		invalidate() {},
 	};
@@ -38,7 +53,15 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: L
 				anchor: "top-center",
 				width: 88,
 				nonCapturing: true,
-				footerHint: () => `${keyLabel("clio-coder.leader")} or Esc closes this menu`,
+				footerHint: buildResponsiveHint(
+					[
+						{ key: "↑↓", verb: "select" },
+						{ key: "Enter", verb: "run" },
+						{ key: "Ctrl+C", verb: "cancel" },
+						{ key: `${keyLabel("clio-coder.leader")}/Esc`, verb: "close", critical: true },
+					],
+					null,
+				),
 			});
 		tui.requestRender();
 	};

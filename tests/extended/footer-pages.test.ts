@@ -587,3 +587,23 @@ test("the footer spinner and live elapsed change once per animation step, not on
 		footer.dispose();
 	}
 });
+
+test("the compact footer shows the most severe live notice with its level glyph at every width", () => {
+	for (const width of [60, 80, 120, 200]) {
+		const snapshot = state();
+		const rows = renderCompactDashboard(
+			{
+				...snapshot,
+				notices: [
+					{ id: "e", level: "error", text: "provider down", key: null, addedAt: snapshot.now - 5_000, expiresAt: null },
+					{ id: "i", level: "info", text: "saved", key: null, addedAt: snapshot.now - 10, expiresAt: snapshot.now + 9_000 },
+				],
+			},
+			width,
+		);
+		const text = plain(rows);
+		match(text, /✗ provider/u, `${width}`);
+		doesNotMatch(text, /saved|•/u, `${width}`);
+		for (const row of rows) ok(visibleWidth(row) <= width, `${width}: ${stripTerminalSequences(row)}`);
+	}
+});

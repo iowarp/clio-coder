@@ -12,7 +12,14 @@ import {
 } from "../../engine/tui.js";
 import { clockLocal, dateLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
-import { buildHint, clioError, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import {
+	buildHint,
+	clioError,
+	FocusBox,
+	selectionLabel,
+	selectionMark,
+	showClioOverlayFrame,
+} from "../overlay-frame.js";
 import { type ClioTheme, clioTheme, GLYPH } from "../theme/index.js";
 
 export const TREE_OVERLAY_WIDTH = 88;
@@ -160,7 +167,7 @@ function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
 const ROW_PREVIEW_BUDGET = 55;
 
 /** @internal */
-function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; width: number }): string {
+function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; width: number; focused?: boolean }): string {
 	const theme = clioTheme();
 	const indent = "  ".repeat(row.depth);
 	// The active tip is where the next message lands; it gets its own glyph so
@@ -190,7 +197,7 @@ function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; width: num
 	const styledPrefix = `${indent}${glyphStyled}${theme.fg("dim", ` ${row.node.kind.padEnd(12)}`)} ${theme.fg("muted", turnId)}  `;
 	const styledLabel = labelText ? `${theme.fg("dim", " · label:")}${theme.fg("muted", `"${row.node.label}"`)}` : "";
 	const styledInert = inertText ? theme.fg("dim", inertText) : "";
-	const main = `${styledPrefix}${theme.fg("muted", preview)}${styledLabel}${styledInert}`;
+	const main = `${styledPrefix}${opts.focused ? selectionLabel(true, preview) : theme.fg("muted", preview)}${styledLabel}${styledInert}`;
 	if (!opts.showTimestamps) return truncateToWidth(main, opts.width, "", true);
 	const ts = `${dateLocal(row.node.at)} ${clockLocal(row.node.at)}`;
 	if (opts.width < ts.length + 12) return truncateToWidth(main, opts.width, "", true);
@@ -294,9 +301,10 @@ export class TreeOverlayView implements Component {
 				const row = this.rows[i];
 				if (!row) continue;
 				const focused = i === this.highlight;
-				const prefix = focused ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+				const prefix = `${selectionMark(focused)} `;
 				const body = formatTreeRow(row, {
 					showTimestamps: this.showTimestamps,
+					focused,
 					width: Math.max(1, contentWidth - visibleWidth(prefix)),
 				});
 				const full = `${prefix}${body}`;
@@ -305,6 +313,12 @@ export class TreeOverlayView implements Component {
 			for (let i = end - this.scrollTop; i < VISIBLE_ROWS; i++) {
 				lines.push("");
 			}
+		}
+		if (this.submode === "edit-label") {
+			// The label editor is the same `> text` input every list overlay shows;
+			// it used to be a footer string with a fake `_` caret that never moved.
+			this.labelInput.focused = true;
+			lines.push(...this.labelInput.render(contentWidth));
 		}
 		if (this.status) {
 			// A status is a bracketed notice: the tag reads dim and the message
@@ -321,7 +335,7 @@ export class TreeOverlayView implements Component {
 
 	private footerText(): string {
 		if (this.submode === "edit-label") {
-			return `label: ${this.labelBuffer}_  ${buildHint([{ key: "Enter", verb: "commit" }], "back")}`;
+			return buildHint([{ key: "Enter", verb: "commit label" }], "back");
 		}
 		const tsLabel = this.showTimestamps ? "on" : "off";
 		return buildHint([
