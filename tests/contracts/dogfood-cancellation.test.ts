@@ -29,6 +29,7 @@ import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer
 import { renderSessionHtml } from "../../src/interactive/export-html/index.js";
 import { expandInteractiveSubmitAsync } from "../../src/interactive/interactive-application.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
+import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { readRunJournal } from "../harness/run-journal.js";
@@ -425,6 +426,46 @@ it("loop-guard interruption keeps its own reason on the single partial assistant
 		await f.close();
 	}
 });
+
+// BT-013: the footer settles an operator cancel as `⊘ cancelled`, so the
+// transcript row closing the same hollow turn carries that mark in `dim`. A
+// loop-guard stop is Clio stopping a runaway turn, a warning, and keeps `⚠`.
+for (const source of ["stream_cancel", "loop_guard"] as const) {
+	const title =
+		source === "stream_cancel"
+			? "an operator cancel closes its hollow turn with the cancelled mark the footer uses"
+			: "a loop-guard stop closes its hollow turn with the warning mark";
+	it(title, { timeout: 15_000 }, async () => {
+		const f = fixture("empty");
+		try {
+			const started = new Promise<void>((resolve) =>
+				f.loop.onEvent((event) => {
+					if (event.type === "message_start" && event.message.role === "assistant") resolve();
+				}),
+			);
+			const pending = f.loop.submit("Start streaming");
+			await started;
+			if (source === "stream_cancel") f.loop.cancel();
+			else f.loop.cancel({ source, reason: "[Clio Coder] loop guard stopped repeated calls." });
+			await pending;
+			const rows = f.panel.render(120);
+			const live = rows.map(stripTerminalSequences).join("\n");
+			const theme = clioTheme();
+			if (source === "stream_cancel") {
+				match(live, /⊘ active response cancelled\./u);
+				doesNotMatch(live, new RegExp(GLYPH.warn, "u"));
+				const row = rows.find((line) => stripTerminalSequences(line).includes("active response cancelled"));
+				ok(row?.includes(`${theme.fg("dim", GLYPH.cancelled)} `), row);
+			} else {
+				match(live, /⚠ loop guard stopped repeated calls\./u);
+				const row = rows.find((line) => stripTerminalSequences(line).includes("loop guard stopped"));
+				ok(row?.includes(`${theme.fg("warning", GLYPH.warn)} `), row);
+			}
+		} finally {
+			await f.close();
+		}
+	});
+}
 
 it("a tool cancellation persists its result before exactly one closing assistant and permits the next turn", {
 	timeout: 15_000,

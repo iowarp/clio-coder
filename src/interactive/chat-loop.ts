@@ -193,6 +193,12 @@ export interface ChatNoticeEvent {
 	 * transcript keeps them for the run and the Detailed receipt states them.
 	 */
 	coldReasons?: ReadonlyArray<string>;
+	/**
+	 * Present only on the transcript notice that closes a turn the operator
+	 * cancelled. The level stays `warning` for headless and protocol surfaces;
+	 * the TUI transcript marks it cancelled, as the footer verb does (BT-013).
+	 */
+	operatorCancel?: true;
 }
 
 /**
@@ -1906,7 +1912,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							(closing as { usage?: unknown }).usage = state.interruptedUsage;
 						}
 						persistence.appendAssistantTurn(closing);
-						emitNotice(reason, "warning", "turn.interrupted");
+						emit({
+							type: "notice",
+							level: "warning",
+							surface: "transcript",
+							text: reason,
+							key: "turn.interrupted",
+							...(state.activeInterruptByOperator ? { operatorCancel: true as const } : {}),
+						});
 					}
 					state.interruptedAssistantMessage = null;
 					state.interruptedUsage = null;
@@ -1943,6 +1956,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// one synthetic closing record after an empty abort settles.
 				state.activeInterruptReason =
 					requestedReason && requestedReason.length > 0 ? requestedReason : "[Clio Coder] active response cancelled.";
+				state.activeInterruptByOperator = (options?.source ?? "stream_cancel") === "stream_cancel";
 				emitFooterNotice("warning", state.activeInterruptReason, "turn.interrupted");
 			}
 			state.runtime?.agent.abort();

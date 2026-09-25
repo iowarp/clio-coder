@@ -95,6 +95,11 @@ export interface ChatTurnState {
 	 * Cleared at settlement and defensively at the start of each submit.
 	 */
 	activeInterruptReason: string | null;
+	/**
+	 * Whether the operator asked for the interrupt, as opposed to the loop
+	 * guard. Read only while `activeInterruptReason` is set; cancel writes both.
+	 */
+	activeInterruptByOperator: boolean;
 	/** The provider's nonempty aborted message closes this interrupt without a synthetic second assistant. */
 	interruptedAssistantMessage: AgentMessage | null;
 	/**
@@ -150,6 +155,7 @@ export function createTurnState(initialThinkingLevel: ThinkingLevel): ChatTurnSt
 		replayedContextMessages: [],
 		activeUserTurnId: null,
 		activeInterruptReason: null,
+		activeInterruptByOperator: false,
 		interruptedAssistantMessage: null,
 		interruptedUsage: null,
 		synthesisToolLock: false,
