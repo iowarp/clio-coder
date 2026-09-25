@@ -79,8 +79,8 @@ A project declaration can be trusted with another class:
 asking, submissions and cancellations included, because the class is per
 server. Do that only in a workspace where an unattended `sbatch` is
 acceptable. `--action-class execute` routes the server's launch command
-through the bash policy and then follows the execute row of the
-[autonomy table](../architecture/safety-model.md#21-the-autonomy-axis-delegation-dial). There is no
+through the bash policy and then follows the command rows of the
+[autonomy table](../architecture/safety-model.md#autonomy). There is no
 per-tool class today.
 
 ## The skill

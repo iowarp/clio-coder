@@ -1718,8 +1718,8 @@ async function runCompete(
 }
 
 /**
- * Apply a preserved compete winner. Plan-scale by definition, so supervised
- * autonomy levels park this call for operator confirmation; the approval IS
+ * Apply a preserved compete winner. Plan-scale by definition, so default
+ * autonomy parks this call for operator confirmation; the approval IS
  * the winner confirmation. After a successful merge scratch worktrees are cleaned up; candidate recovery refs remain.
  */
 function runApplyWinner(

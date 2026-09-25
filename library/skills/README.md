@@ -52,9 +52,9 @@ discover the rest of the catalog. Source roots must remain inside the checkout;
 an unrelated nested Git repository does not inherit them.
 
 The session prompt recommends `clio-coder-dev` for source changes and
-`clio-coder-test` for validation. At `auto-edit` and `full-auto`, the model can
-load ready skills through `context(scope="skills", name="...")`. At `read-only`
-and `suggest`, operator activation is still required. This is automatic discovery
+`clio-coder-test` for validation. At `default` and `yolo`, the model can load
+ready skills through `context(scope="skills", name="...")`. A read-only run
+cannot load a skill. This is automatic discovery
 and task-aware guidance, not automatic body injection or a guarantee of a model's
 tool choice. `--no-skills`, hidden skills, and task/tool restrictions still apply.
 

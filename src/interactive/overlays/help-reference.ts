@@ -183,7 +183,7 @@ export function openHelpOverlay(
 				"**Mode** (`/settings`, persisted as `safety.autonomy`): default runs workspace edits and recognized checks, " +
 					"but asks for unfamiliar commands, outward actions, and larger dispatch plans. Yolo runs through ordinary confirmation rails automatically.",
 				"**Approvals**: a parked call waits for a one-shot operator decision; approving resumes only that call. " +
-					"Workers resolve asks per `workers.onPermission` (Approvals Routing); headless runs auto-deny.",
+					"Workers resolve asks per `fleet.permissions.mode` (Fleet approvals routing in /settings); headless runs auto-deny.",
 				"**Inspecting a mutation**: a parked `write` or `edit` card carries the target, the byte count, and a `sha256` digest of the exact call arguments. " +
 					"Press `v` to read the complete proposed content, or the complete effective diff against the file on disk, and `v` again to put it away; ↑/↓ and PageUp/PageDown scroll it. " +
 					"Enter still allows, `s` still stops, and Esc still denies while it is open. The mutation text is shown locally and never enters the transcript, a notice, a desktop notification, or the render trace. " +

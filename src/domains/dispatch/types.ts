@@ -288,7 +288,7 @@ export interface RunCouncilProvenance {
 
 /**
  * Plan-approval provenance for multi-task, compete, or remote dispatch.
- * `approval: "operator"` records that a supervised autonomy level parked the
+ * `approval: "operator"` records that default autonomy parked the
  * dispatch call and an operator approved the plan; `"yolo"` records that
  * yolo skipped the stop and the plan was logged instead. The hash covers
  * the rendered plan artifact so every run of the plan chains to the same

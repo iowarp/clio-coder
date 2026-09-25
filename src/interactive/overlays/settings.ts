@@ -1278,17 +1278,9 @@ export function buildSettingItems(
 	const keybindingCount = Object.keys(settings.interface.keybindings ?? {}).length;
 	const items: SettingsCenterItem[] = [
 		...maintenanceRows(),
-		settingItem(
-			"autonomy",
-			settings.safety.autonomy === "default"
-				? "default"
-				: settings.safety.autonomy === "yolo"
-					? "yolo"
-					: settings.safety.autonomy,
-			{
-				values: ["default", "yolo"],
-			},
-		),
+		settingItem("autonomy", settings.safety.autonomy, {
+			values: ["default", "yolo"],
+		}),
 		settingItem("workers.onPermission", settings.fleet.permissions.mode ?? "deny", {
 			values: ["deny", "fail", "escalate"],
 		}),

@@ -74,7 +74,7 @@ export interface PendingSkillToolPolicy {
 	 * installed) skills stay operator-gated at every level.
 	 */
 	modelActivation?: boolean;
-	/** Full-auto treats a skill's positive tool list as guidance; explicit denials still apply. */
+	/** Yolo treats a skill's positive tool list as guidance; explicit denials still apply. */
 	allowListAdvisory?: boolean;
 }
 

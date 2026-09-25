@@ -26,7 +26,7 @@ export interface RunTerminationEvidence {
 	stallKilled: boolean;
 	/** Turn or run timeout was exceeded (ACP turn request timeout). */
 	timedOut: boolean;
-	/** Worker exited because workers.onPermission="fail" and a permission was required. */
+	/** Worker exited because fleet.permissions.mode="fail" and a permission was required. */
 	permissionFailure: boolean;
 	/** Admission/budget/scope/cooldown rejection reason; non-null means policy denial. */
 	policyDenied: string | null;

@@ -89,7 +89,7 @@ Turn budget: all envelope-backed tools draw from one shared pool of 192KB per tu
 
 ## Search scope: read, ls, grep, and find outside the workspace
 
-`read`, `ls`, `grep`, and `find` run without asking on any path inside the session workspace. A path that resolves outside it, by an absolute path, a `..`, or a link at any component, asks for one-shot approval in `default` and runs in `yolo`. Headless runs deny the ask, so give a headless run `--autonomy yolo` or a `--cwd` that contains what it must read. Zero-access paths (`.env`, `~/.ssh/`, the credential store) are refused in both modes. Read-only dispatched runs deny outside reads and all non-read calls without asking. Workers run at `default`. Installed skill, plugin, and extension trees, the `full:` offload files a truncation notice names, and dispatch receipts stay readable without an ask. A search that starts inside the workspace never follows a linked directory out of it. See [the safety model](../architecture/safety-model.md#21-the-autonomy-axis-delegation-dial).
+`read`, `ls`, `grep`, and `find` run without asking on any path inside the session workspace. A path that resolves outside it, by an absolute path, a `..`, or a link at any component, asks for one-shot approval in `default` and runs in `yolo`. Headless runs deny the ask, so give a headless run `--autonomy yolo` or a `--cwd` that contains what it must read. Zero-access paths (`.env`, `~/.ssh/`, the credential store) are refused in both modes. Read-only dispatched runs deny outside reads and all non-read calls without asking. Workers run at `default`. Installed skill, plugin, and extension trees, the `full:` offload files a truncation notice names, and dispatch receipts stay readable without an ask. A search that starts inside the workspace never follows a linked directory out of it. See [the safety model](../architecture/safety-model.md#autonomy).
 
 ## read: page through a file with offset, limit, and tail
 
@@ -788,7 +788,7 @@ Arguments:
 - `reason` (required). `no-runner`, `blocked`, `out-of-scope`, `environment`, or `other`.
 - `paths` (optional). Repository-relative paths left unverified.
 
-Call it once, before the final reply, when files changed and validation could not run. The finish contract accepts a successful `limitation` receipt inside the same window as the mutation scan in place of validation evidence. A rejected call (empty scope, unknown reason) leaves no receipt and does not count, and the assistant's prose never does. The six mutating recipes carry the tool and the operating contract tells the model to call it; see [the finish gate](../architecture/safety-model.md#7-rigor-gates--deterministic-finish-contracts).
+Call it once, before the final reply, when files changed and validation could not run. The finish contract accepts a successful `limitation` receipt inside the same window as the mutation scan in place of validation evidence. A rejected call (empty scope, unknown reason) leaves no receipt and does not count, and the assistant's prose never does. The six mutating recipes carry the tool and the operating contract tells the model to call it; see [the finish gate](../architecture/safety-model.md#evidence-and-the-finish-contract).
 
 ```text
 limitation(scope="CUDA kernels changed but no GPU is available here", reason="environment", paths=["src/kernels/solve.cu"])

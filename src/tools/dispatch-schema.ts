@@ -289,7 +289,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 							},
 							{
 								description:
-									"Merge a preserved compete winner and clean up its group; supervised autonomy parks this for operator confirmation.",
+									"Merge a preserved compete winner and clean up its group; default autonomy parks this for operator confirmation.",
 							},
 						),
 					),

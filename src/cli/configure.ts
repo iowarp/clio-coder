@@ -1671,18 +1671,11 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 					io.out.write(
 						"  default edits the workspace and runs recognized checks; unfamiliar commands ask.\n  yolo clears ordinary prompts; damage-control rules and hard path protections still apply.\n",
 					);
-					const current = readSettings().safety.autonomy;
-					await askChoice(
-						io,
-						"Autonomy level",
-						["default", "yolo"],
-						current === "default" ? "default" : current === "yolo" ? "yolo" : current,
-						(value) => {
-							updateSettings((draft) => {
-								draft.safety.autonomy = autonomyFromUserInput(value) ?? draft.safety.autonomy;
-							});
-						},
-					);
+					await askChoice(io, "Autonomy level", ["default", "yolo"], readSettings().safety.autonomy, (value) => {
+						updateSettings((draft) => {
+							draft.safety.autonomy = autonomyFromUserInput(value) ?? draft.safety.autonomy;
+						});
+					});
 				},
 			},
 			{
