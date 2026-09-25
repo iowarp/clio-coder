@@ -59,6 +59,8 @@ Clio divides worker output into two isolated streams to protect control signals 
    * **Permission Escalation:** Emitted when a tool requires approval under the `escalate` posture.
    * **Completion / Failure:** Marks the final state of the run, providing execution receipts.
 
+   The orchestrator reads the bulk lane through a bounded queue of 4096 frames ([worker-protocol.ts](../../src/domains/dispatch/worker-protocol.ts)). At the bound it drops the oldest display-only frame, such as a `message_update`. It never drops a receipt-bearing frame: `message_end`, the tool frames (`tool_execution_start`, `tool_execution_end`, `clio_coder_tool_start`, `clio_coder_tool_finish`), `clio_coder_run_outcome`, `clio_coder_helper_result`, the permission escalation and resolution frames, `clio_coder_steer_received`, and `spawn_error`. The set is `RECEIPT_BEARING_BULK_TYPES` in [protocol.ts](../../src/worker/protocol.ts).
+
 2. **Control Lane (`stderr`)**:
    Emits out-of-band control frames prefixed by `@clio-control/1 `, capped at `WORKER_CONTROL_FRAME_MAX_BYTES` (16 KiB). Because control frames travel over `stderr`, they bypass backpressured bulk stdout streams and reach orchestrator watchdogs immediately. Control frame kinds include:
    * **Announce:** `{"kind": "announce", "attestation": ...}` sent immediately upon startup.
@@ -219,6 +221,8 @@ Receipts carry the current integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 2
 - **Object Key Sorting**: Keys are sorted lexicographically before serialization (`Object.keys(obj).sort()`).
 - **Strict Primitive Handling**: `undefined` object properties are omitted; non-finite numbers (`NaN`, `Infinity`) or `bigint` throw an explicit serialization error.
 - **Coverage**: Includes every current receipt field and reconstructible ledger field, including route intent/decision/quality, execution role, worker identity, result-contract conformance, node/reroute/gate/plan/council provenance, briefing, steering, task worktree application, and `outcomeCode`.
+
+Startup orphan recovery ([orphan-recovery.ts](../../src/domains/dispatch/orphan-recovery.ts)) rebuilds the ledger row a sealed receipt was verified against and adopts it when the digest matches. The adopted row also carries the receipt's council provenance and `costProvenance`. Neither is in the ledger digest, so they cannot change verification, and without them an adopted run left its council and was priced with unknown provenance.
 
 Integrity is only the artifact-integrity axis of the canonical trust status.
 The other axes are validation grounding, independent review, context

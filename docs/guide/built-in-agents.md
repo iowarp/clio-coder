@@ -269,7 +269,7 @@ Subagent runs that terminate with retryable outcomes are placed in an in-memory 
 - `failed`: The subagent process exited non-zero or returned an error receipt.
 - `timed_out`: The run or delegation turn exceeded its timeout limit.
 - `stalled`: The run exceeded the event-inactivity window without progress or stopped responding to heartbeats.
-- `spawn_failed`: The runtime failed to spawn the subprocess or establish connection.
+- `spawn_failed`: The runtime failed to spawn the subprocess or establish connection. The spawn error's own text, such as `spawn <path> ENOENT`, is sealed in the receipt's `outcomeDetail` and `failureMessage`.
 
 ### 2. Backoff and Cooldown
 Scheduled retries use an exponential backoff state to calculate subsequent retry delays. Furthermore, targets that fail are subject to a cooldown period. The retry engine ensures that a retried task waits for the maximum of the exponential backoff delay or the remaining target cooldown duration. Retries are brand-new runs that must re-pass all admission checks. If target policies or budgets deny a retry, the task chain terminates as denied.

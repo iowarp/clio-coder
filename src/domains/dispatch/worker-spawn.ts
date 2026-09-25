@@ -316,10 +316,12 @@ function attachWorkerChannel(
 
 	child.once("error", (err) => {
 		sawSpawnError = true;
-		push({
-			type: "spawn_error",
-			error: err instanceof Error ? err.message : String(err),
-		});
+		const message = err instanceof Error ? err.message : String(err);
+		// The receipt's diagnostics read the stderr tail, and the spawn_error
+		// frame alone reached only the `run --json` stream, so the one fact that
+		// says why the worker never started was missing from the sealed receipt.
+		appendStderr(`[worker] spawn error: ${message}\n`);
+		push({ type: "spawn_error", error: message });
 		signalProcessGroup(child, "SIGKILL");
 	});
 
