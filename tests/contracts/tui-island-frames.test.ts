@@ -92,12 +92,15 @@ const stats: WelcomeDashboardStats = {
 	quota: "Claude 5h 23% used · Codex wk 21% used",
 };
 
-test("the launchpad fills the width exactly and paints only palette tokens", () => {
+test("the launchpad is a standard island at every width and keeps its action row", () => {
 	for (const width of WIDTHS) {
 		const lines = buildWelcomeDashboardLines(stats, "0.5.6", width, "launchpad");
-		for (const row of lines) strictEqual(visibleWidth(row), width, stripTerminalSequences(row));
-		assertTokensOnly(lines);
-		match(stripTerminalSequences(lines[0] ?? ""), /Clio Coder v0\.5\.6/u);
+		assertIsland(lines, width, "Clio Coder v0.5.6");
+		const plain = lines.map(stripTerminalSequences);
+		// The action row sits under an inner divider, as in every other island.
+		match(plain.at(-3) ?? "", new RegExp(`^│ ${GLYPH.innerDivider}+ │$`, "u"));
+		match(plain.at(-2) ?? "", /Enter/u);
+		ok(!plain.some((row) => /[╭╮╰╯├┤]/u.test(row)), "no bespoke corners or tees");
 	}
 });
 

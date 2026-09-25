@@ -125,9 +125,9 @@ Trust verdicts on a dispatch card print `✓` for reviewed and `✗` for comprom
 ## 3. Structural Layouts
 
 ### 3.1 The Island (Framed Block)
-Every framed block is built by `frame()` and `innerDivider()` in [rules.ts](../../src/interactive/theme/rules.ts): the fleet and task islands, the council card, the dispatch cards and the steering queue. The launchpad is the one exception; it still draws its own rounded frame.
+Every framed block is built by `frame()` and `innerDivider()` in [rules.ts](../../src/interactive/theme/rules.ts): the launchpad, the fleet and task islands, the council card, the dispatch cards and the steering queue. No surface draws its own corners, tees or rounded frame.
 - **Header**: Embedded in the top border in the bold `title` token: `┌─ Title ─────────── meta ─┐`. Optional right metadata is `dim`. A title wider than the island is clipped with `…` before the corner.
-- **Body**: `│ ` + content padded to the inner width + ` │`. Sections inside one island are separated by a full-width `╌` row.
+- **Body**: `│ ` + content padded to the inner width + ` │`. Sections inside one island are separated by a full-width `╌` row, never by a `├┤` tee.
 - **Width**: Every row is exactly the island width in visible cells. Content is truncated with `…`, never wrapped past the rail.
 
 ### 3.2 Overlays & Modals
@@ -178,7 +178,7 @@ The visual hierarchy coordinates four primary screen surfaces: Header, Transcrip
 ### 4.1 Welcome Launchpad & Session Header
 
 The header operates in two distinct modes:
-- **Launchpad (before the first prompt)**: A rounded panel enclosed by `╭─ Clio Coder v<version> ─╮`, with the action row under a `├┤` divider. Displays model route status, workspace path, autonomy level, target inventory, fleet recipes, and cached subscription quotas.
+- **Launchpad (before the first prompt)**: A standard island titled `Clio Coder v<version>`, with the action row under an inner divider. Displays model route status, workspace path, autonomy level, target inventory, fleet recipes, and cached subscription quotas.
 - **Session Header (after prompt admission)**: Collapses into a single compact line showing the active route and directory, preserving vertical space for the transcript.
 
 ### 4.2 Composer (ClioEditor)
