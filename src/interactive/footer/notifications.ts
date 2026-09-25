@@ -10,11 +10,11 @@
  *
  * Rendering is split from state so the formatters stay pure and unit-testable:
  * callers build a snapshot via {@link NotificationCenter.list}, then format it
- * with {@link formatNotificationBadge} / {@link formatNotificationPanel}. All
+ * with {@link topNotification} / {@link formatNotificationPanel}. All
  * color lives in `theme/**`; every emitted line is width-clamped.
  */
 
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { fitFooterText } from "../footer-panel.js";
 import { type ClioTheme, type ClioToken, clioTheme, GLYPH, rule } from "../theme/index.js";
 
@@ -429,63 +429,10 @@ export function createNotificationCenter(options: NotificationCenterOptions = {}
 	};
 }
 
-function highestSeverity(entries: ReadonlyArray<Notification>): NotificationLevel {
-	let level: NotificationLevel = "info";
-	for (const entry of entries) {
-		if (SEVERITY[entry.level] > SEVERITY[level]) level = entry.level;
-	}
-	return level;
-}
-
-/**
- * Compact one-line badge for the always-on footer. Returns null when there is
- * nothing to show. Shows the most-severe glyph, a count, the leading message,
- * and the dismiss affordance, balanced to the available width.
- */
-export function formatNotificationBadge(
-	entries: ReadonlyArray<Notification>,
-	width: number,
-	options: { dismissKeyLabel?: string; theme?: ClioTheme } = {},
-): string | null {
-	if (entries.length === 0) return null;
-	const theme = options.theme ?? clioTheme();
-	const level = highestSeverity(entries);
-	const token = notificationToken(level);
-	const glyph = notificationGlyph(level);
-	const count = entries.length;
-	const noun = count === 1 ? "notice" : "notices";
-	const lead = (entries[0]?.text ?? "").replace(/\s+/gu, " ").trim();
-	const dismiss = options.dismissKeyLabel ?? "/notifications dismiss";
-	const compactHead = theme.fg(token, `${glyph} ${count}`);
-	const head = theme.fg(token, `${glyph} ${count} ${noun}`);
-	const separator = ` ${theme.fg("dim", "·")} `;
-	const hint = theme.fg("dim", `[${dismiss}] dismiss`);
-	const safeWidth = Math.max(1, Math.floor(width));
-	const minimum = `${compactHead}${separator}${hint}`;
-	const compactHint = `${compactHead}${separator}${theme.fg("dim", `[${dismiss}]`)}`;
-	const fallback = [minimum, compactHint, compactHead, theme.fg(token, glyph)].find(
-		(candidate) => visibleWidth(candidate) <= safeWidth,
-	);
-	const messageWidth = safeWidth - visibleWidth(head) - visibleWidth(separator) * 2 - visibleWidth(hint);
-	// A one-column message can show only an ellipsis, which says less than the
-	// compact head/action fallback. The explicit ladder also keeps narrow
-	// footers from hard-clipping the dismiss key in the middle of a word.
-	if (messageWidth < 2) return fallback ?? theme.fg(token, glyph);
-	let body: string;
-	if (visibleWidth(lead) <= messageWidth) {
-		body = theme.fg("muted", lead);
-	} else {
-		const clipped = truncateToWidth(lead, messageWidth - 1, "", false);
-		if (visibleWidth(clipped) === 0) return fallback ?? theme.fg(token, glyph);
-		body = `${theme.fg("muted", clipped)}${theme.fg("muted", "…")}`;
-	}
-	return `${head}${separator}${body}${separator}${hint}`;
-}
-
 /**
  * Expanded notices panel for the dashboard. The entry count is capped so a
  * noisy boot cannot take over the dashboard, but every included notice wraps
- * in full: this is the detail surface that the compact badge points toward.
+ * in full: this is the detail surface that the compact notice points toward.
  */
 export function formatNotificationPanel(
 	entries: ReadonlyArray<Notification>,

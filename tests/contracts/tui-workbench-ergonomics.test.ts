@@ -4,7 +4,7 @@ import { resolveToolBudgetEnvelope } from "../../src/domains/dispatch/budget-env
 import { stripTerminalSequences, type Terminal, TuiMainScreen, visibleWidth } from "../../src/engine/tui.js";
 import { ClioEditor } from "../../src/interactive/clio-editor.js";
 import { createDispatchBoardView, type DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
-import { compactPrimaryLine, type SessionFacts } from "../../src/interactive/footer/widgets.js";
+import { renderCompactDashboard } from "../../src/interactive/footer/pages.js";
 import {
 	createOverlayGeneralOpeners,
 	type OverlayGeneralOpenersDeps,
@@ -18,6 +18,7 @@ import {
 } from "../../src/interactive/theme/labels.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import type { WorkerEntryState } from "../../src/interactive/worker-stream.js";
+import { footerState } from "../harness/footer-fixture.js";
 
 const widths = [40, 44, 60, 92, 120];
 const plain = (rows: string[]) => rows.map(stripTerminalSequences).join("\n");
@@ -131,28 +132,14 @@ for (const width of widths) {
 	});
 
 	test(`footer keeps worktree suffix and current phase at ${width} columns`, () => {
-		const line = compactPrimaryLine(
-			{
-				cwd: `/tmp/${"very-long-parent/".repeat(5)}研究-worktree`,
-				branch: "feature/long-branch",
-				dirty: true,
-				projectType: null,
-				remote: null,
-			},
-			{} as SessionFacts,
-			width,
-			undefined,
-			{
-				phase: "tool_blocked",
-				since: 0,
-				lastMeaningfulAt: 0,
-				watchdogTier: 0,
-				watchdogPeak: 0,
-				localRuntime: false,
-			},
-		);
-		bounded([line], width);
-		assert.match(stripTerminalSequences(line), /worktree.*Needs approval/u);
+		const snapshot = footerState();
+		snapshot.workspace.cwd = `/tmp/${"very-long-parent/".repeat(5)}研究-worktree`;
+		snapshot.agent.statusText = "Needs approval";
+		snapshot.dispatchRows = [];
+		const rows = renderCompactDashboard(snapshot, width);
+		bounded(rows, width);
+		assert.match(plain(rows), /Needs approval/u);
+		assert.match(plain(rows), /tree/u);
 	});
 
 	test(`empty board and multiple-worker navigation fit ${width} columns`, () => {
@@ -277,20 +264,17 @@ for (const width of widths) {
 
 for (const width of widths) {
 	test(`idle footer still names live workers at ${width} columns`, () => {
-		const line = compactPrimaryLine(
-			{ cwd: `/tmp/${"parent/".repeat(15)}worktree`, branch: null, dirty: false, projectType: null, remote: null },
-			{} as SessionFacts,
-			width,
-			undefined,
-			undefined,
-			undefined,
-			[
-				{ ...boardRow("one"), status: "running" },
-				{ ...boardRow("two"), status: "running" },
-			],
-		);
-		bounded([line], width);
-		assert.match(stripTerminalSequences(line), /worktree.*2 workers/u);
+		const snapshot = footerState();
+		snapshot.workspace.cwd = `/tmp/${"parent/".repeat(15)}worktree`;
+		snapshot.agent.statusText = "Ready";
+		snapshot.dispatchRows = [
+			{ ...boardRow("one"), status: "running" },
+			{ ...boardRow("two"), status: "running" },
+		];
+		const rows = renderCompactDashboard(snapshot, width);
+		bounded(rows, width);
+		assert.match(plain(rows), /2 active/u);
+		assert.match(plain(rows), /tree/u);
 	});
 }
 
@@ -319,12 +303,11 @@ for (const width of widths) {
 			);
 			const cwd = `/tmp/${"a".repeat(80)}${controls}/leaf`;
 			const cleanCwd = `/tmp/${"a".repeat(80)}${replacement}/leaf`;
-			const render = (path: string) =>
-				compactPrimaryLine(
-					{ cwd: path, branch: null, dirty: false, projectType: null, remote: null },
-					{} as SessionFacts,
-					width,
-				);
+			const render = (path: string) => {
+				const snapshot = footerState();
+				snapshot.workspace.cwd = path;
+				return renderCompactDashboard(snapshot, width)[1] ?? "";
+			};
 			const actual = render(cwd);
 			assert.equal(actual, render(cleanCwd));
 			bounded([actual], width);
