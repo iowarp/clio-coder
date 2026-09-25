@@ -187,11 +187,20 @@ function classifyTags(draft: RunReceiptDraft, envelope: RunEnvelope): Set<Eviden
 	return tags;
 }
 
+function isValidationTool(tool: string): boolean {
+	const name = tool.toLowerCase();
+	return VALIDATION_TOOL_NEEDLES.some((needle) => name.includes(needle));
+}
+
+/** A validation tool the run was observed to call, whatever it answered. */
+function ranValidationTool(draft: Pick<RunReceiptDraft, "toolStats">): boolean {
+	return draft.toolStats.some((stat) => stat.count > 0 && isValidationTool(stat.tool));
+}
+
 function hasValidationEvidence(draft: Pick<RunReceiptDraft, "toolStats">): boolean {
 	return draft.toolStats.some((stat) => {
 		if (stat.ok <= 0 || stat.errors > 0) return false;
-		const tool = stat.tool.toLowerCase();
-		return VALIDATION_TOOL_NEEDLES.some((needle) => tool.includes(needle));
+		return isValidationTool(stat.tool);
 	});
 }
 
@@ -209,6 +218,15 @@ export function deriveReceiptVerification(
 	}
 	if (hasValidationEvidence(draft)) {
 		return { state: "verified", basis: "validation-tool" };
+	}
+	// The basis names the claimant that answered and the state carries its
+	// verdict (glossary: grounded is "observed to run and pass, named by its
+	// claimant"). A validation tool that ran and failed was still observed, so
+	// reporting `no-validation-tool` contradicted the receipt's own typed
+	// validations (BT-012). It also outranks the ACP basis, which exists for a
+	// peer whose validation Clio could not see.
+	if (ranValidationTool(draft)) {
+		return { state: "unverified", basis: "validation-tool" };
 	}
 	if (context.acpDelegation === true) {
 		return { state: "unknown", basis: "acp-external-unobserved" };
