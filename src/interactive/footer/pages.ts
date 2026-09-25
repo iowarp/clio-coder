@@ -25,6 +25,7 @@ import {
 
 export const DASHBOARD_PAGES = ["Activity", "Context", "Status"] as const;
 export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
+const FOOTER_SPLIT_COLUMNS = 84;
 const ACTIVE_AGENT_STATUSES = new Set(["running", "enqueued", "cancelling", "retrying", "stale"]);
 const clean = (value: string) => sanitizeCallTargetText(redactSecretString(value));
 
@@ -204,10 +205,10 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 		),
 	];
 	out.push(theme.fg("dim", "Context occupancy is per request; subscription limits are account-wide · /usage"));
-	const gridWidth = Math.max(12, Math.min(64, width >= 76 ? Math.floor(width * 0.38) : width));
-	const gridHeight = width >= 76 ? 8 : 3;
+	const gridWidth = Math.max(12, Math.min(64, width >= FOOTER_SPLIT_COLUMNS ? Math.floor(width * 0.38) : width));
+	const gridHeight = width >= FOOTER_SPLIT_COLUMNS ? 8 : 3;
 	const grid = renderContextMeterGrid(ledger, gridWidth, gridHeight, theme);
-	const legendWidth = width >= 76 ? width - gridWidth - 4 : width;
+	const legendWidth = width >= FOOTER_SPLIT_COLUMNS ? width - gridWidth - 4 : width;
 	const legend = ledger.meter
 		.filter((group) => group.tokens > 0)
 		.flatMap((group) =>
@@ -223,7 +224,11 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 			leftToken: "accent",
 		}),
 	);
-	out.push(...(width >= 76 ? zipColumns(grid, legend, gridWidth, legendWidth, "    ") : [...grid, "", ...legend]));
+	out.push(
+		...(width >= FOOTER_SPLIT_COLUMNS
+			? zipColumns(grid, legend, gridWidth, legendWidth, "    ")
+			: [...grid, "", ...legend]),
+	);
 	out.push(
 		...wrapTextWithAnsi(
 			theme.fg("muted", "Filled = context · empty = available · shaded = reserve; small buckets receive one cell."),
@@ -509,7 +514,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 				: "unknown",
 		],
 	];
-	if (width < 76)
+	if (width < FOOTER_SPLIT_COLUMNS)
 		return [
 			...quotaRows,
 			...section("COST & CONNECTIONS", left, width),
