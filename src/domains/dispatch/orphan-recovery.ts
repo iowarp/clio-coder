@@ -98,6 +98,11 @@ function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath
 	if (receipt.reroutes !== undefined) envelope.reroutes = receipt.reroutes;
 	if (receipt.pipeline !== undefined) envelope.pipeline = receipt.pipeline;
 	if (receipt.gate !== undefined) envelope.gate = receipt.gate;
+	// Neither field is in the ledger digest, so restoring them cannot change
+	// verification. Without them an adopted orphan left its council and was
+	// priced with unknown provenance.
+	if (receipt.council !== undefined) envelope.council = receipt.council;
+	if (receipt.costProvenance !== undefined) envelope.costProvenance = receipt.costProvenance;
 	if (receipt.plan !== undefined) envelope.plan = receipt.plan;
 	if (receipt.personaOverride !== undefined) envelope.personaOverride = receipt.personaOverride;
 	if (receipt.decisionRefs !== undefined) envelope.decisionRefs = receipt.decisionRefs;

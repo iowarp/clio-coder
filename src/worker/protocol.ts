@@ -558,6 +558,12 @@ export function parseControlFrame(line: string): FrameParseResult<WorkerControlF
  * Bulk frames whose loss would destroy receipt evidence. Everything else on
  * the bulk lane exists to drive a live display and may be dropped under
  * pressure.
+ *
+ * Every entry must name a frame some worker emits and the receipt fold reads.
+ * The tool frames stand in for five legacy names nothing emits any more
+ * (`clio_coder_tool_activity` and its siblings), which left the frames that
+ * feed `toolStats`, `skillActivations`, safety decisions, in-flight tool
+ * coverage and finish-contract entries droppable above the queue bound.
  */
 const RECEIPT_BEARING_BULK_TYPES = new Set([
 	"clio_coder_helper_result",
@@ -566,11 +572,9 @@ const RECEIPT_BEARING_BULK_TYPES = new Set([
 	"clio_coder_permission_escalated",
 	"clio_coder_permission_resolved",
 	"clio_coder_steer_received",
-	"clio_coder_tool_activity",
-	"clio_coder_skill_activation",
-	"clio_coder_safety_decision",
-	"clio_coder_verification",
-	"clio_coder_usage",
+	"clio_coder_tool_start",
+	"clio_coder_tool_finish",
+	"tool_execution_start",
 	"tool_execution_end",
 	"spawn_error",
 ]);
