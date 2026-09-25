@@ -265,3 +265,5 @@ Status meters paint structured, bounded cells using the shared meter glyphs.
 Board and context spinners use the shared animation cadence.
 
 Activity status respects the 40-column minimum before choosing its layout.
+
+Council selection follows the visible newest-member projection and transfers to replacement rounds.

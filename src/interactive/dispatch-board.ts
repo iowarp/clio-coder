@@ -986,6 +986,19 @@ function dispatchBoardItems(rows: ReadonlyArray<DispatchBoardRow>, selectedRunId
 	return items;
 }
 
+/** Use the same folded, sorted council projection for focus as for visible cards. */
+function selectableBoardRows(rows: ReadonlyArray<DispatchBoardRow>): DispatchBoardRow[] {
+	const byRunId = new Map(rows.map((row) => [row.runId, row]));
+	return dispatchBoardItems(rows).flatMap((item) => {
+		if (item.kind === "run") return [item.row];
+		const members = item.group.synthesis === null ? item.group.members : [...item.group.members, item.group.synthesis];
+		return members.flatMap((member) => {
+			const row = byRunId.get(member.runId);
+			return row ? [row] : [];
+		});
+	});
+}
+
 /** The framed council card: the member grid or stack, with the synthesis run full width under it. */
 function renderCouncilCard(group: CouncilGroupView, width: number): string[] {
 	const theme = clioTheme();
@@ -1075,23 +1088,37 @@ export function createDispatchBoardView(
 	// follows the cursor rather than pinning to the row it was opened on.
 	let expanded = false;
 
-	const normalizeSelection = (currentRows: ReadonlyArray<DispatchBoardRow>): DispatchBoardRow | null => {
-		if (currentRows.length === 0) {
+	const normalizeSelection = (
+		currentRows: ReadonlyArray<DispatchBoardRow>,
+		visibleRows = selectableBoardRows(currentRows),
+	): DispatchBoardRow | null => {
+		if (visibleRows.length === 0) {
 			selectedRunId = null;
 			return null;
 		}
-		const selected = currentRows.find((row) => row.runId === selectedRunId) ?? currentRows[0] ?? null;
+		const previous = currentRows.find((row) => row.runId === selectedRunId);
+		const selected =
+			visibleRows.find((row) => row.runId === selectedRunId) ??
+			visibleRows.find(
+				(row) =>
+					previous?.council !== undefined &&
+					row.council?.group === previous.council.group &&
+					row.council.label === previous.council.label,
+			) ??
+			visibleRows[0] ??
+			null;
 		selectedRunId = selected?.runId ?? null;
 		return selected;
 	};
 
 	const moveSelection = (delta: -1 | 1): void => {
 		const currentRows = rows();
-		const selected = normalizeSelection(currentRows);
-		if (!selected || currentRows.length < 2) return;
-		const index = currentRows.findIndex((row) => row.runId === selected.runId);
-		const nextIndex = (index + delta + currentRows.length) % currentRows.length;
-		selectedRunId = currentRows[nextIndex]?.runId ?? selected.runId;
+		const visibleRows = selectableBoardRows(currentRows);
+		const selected = normalizeSelection(currentRows, visibleRows);
+		if (!selected || visibleRows.length < 2) return;
+		const index = visibleRows.findIndex((row) => row.runId === selected.runId);
+		const nextIndex = (index + delta + visibleRows.length) % visibleRows.length;
+		selectedRunId = visibleRows[nextIndex]?.runId ?? selected.runId;
 	};
 
 	return {
