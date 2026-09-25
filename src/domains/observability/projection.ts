@@ -1,9 +1,9 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
 /**
- * Reactive observability projection. Folds the dispatch, provider, and
- * diagnostic bus channels plus the session cost/telemetry trackers into a
- * single bounded {@link ObservabilitySnapshot} that product surfaces (footer,
- * overlays, CLI status) can consume through one seam.
+ * Reactive observability projection. Folds the dispatch and evidence bus
+ * channels plus the session cost tracker into a single bounded
+ * {@link ObservabilitySnapshot} that product surfaces (footer, overlays, the
+ * dispatch board) consume through one seam.
  *
  * Design constraints for this slice:
  * - Bus listeners stay cheap. The bus is synchronous, so each handler only
@@ -25,10 +25,8 @@ import { cloneRunToolBudgetEnvelope, type RunToolBudgetEnvelope } from "../dispa
 import type { DispatchSnapshot } from "../dispatch/contract.js";
 import type { DispatchRequestOrigin, RunKind } from "../dispatch/types.js";
 import { summarizeTrustStatus } from "../evidence/trust-projection.js";
-import type { TargetStatus } from "../providers/contract.js";
 import { type CostProvenance, resolveCostProvenance } from "../providers/types/cost-provenance.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
-import type { AccountabilitySummary } from "./accountability.js";
 import type {
 	ObservabilityNotice,
 	ObservabilityRunEvidence,
@@ -39,7 +37,6 @@ import type {
 	TokenThroughputSnapshot,
 } from "./contract.js";
 import type { CostAggregate, UsageBreakdown } from "./cost.js";
-import type { MetricsView } from "./metrics.js";
 import { createWorkerProgressFold, type WorkerProgressFold } from "./worker-progress.js";
 
 /** Settled run summaries retained, in addition to all active runs. */
@@ -51,27 +48,21 @@ export const PROJECTION_FLUSH_DEBOUNCE_MS = 16;
 
 /**
  * Read model the projection folds session-local state from. The extension owns
- * the cost/telemetry trackers and the latest-throughput register; the
- * projection reads them at snapshot-build time so ordering with the extension's
- * own bus handlers never matters (both run synchronously before the debounced
- * build).
+ * the cost tracker and the latest-throughput register; the projection reads
+ * them at snapshot-build time so ordering with the extension's own bus handlers
+ * never matters (both run synchronously before the debounced build).
  */
 export interface ProjectionReadModel extends ObservabilityRunReaders {
-	metrics(): MetricsView;
-	sessionCost(): number;
 	sessionCostSummary(): CostAggregate;
 	sessionTokens(): UsageBreakdown;
 	latestThroughput(): TokenThroughputSnapshot | null;
-	readAccountability(): AccountabilitySummary;
 }
 
 export interface ObservabilityProjection extends ObservabilityRunProjection {
 	snapshot(): ObservabilitySnapshot;
 	subscribe(listener: (snapshot: ObservabilitySnapshot) => void): () => void;
-	/** Recompute after a direct session mutation (recordTokens/resetSession/safety counter). */
+	/** Recompute after a direct session mutation (recordTokens/resetSession/throughput). */
 	refresh(): void;
-	/** Re-read the current session's persisted evidence after a session switch. */
-	refreshAccountability(): void;
 	/** A forensic evidence build for `runId` has started. */
 	evidenceBuildStarted(runId: string): void;
 	/** The evidence build for `runId` failed; surface a bounded notice. */
@@ -82,10 +73,6 @@ export interface ObservabilityProjection extends ObservabilityRunProjection {
 
 // --- small runtime coercions. Bus payloads that crossed a process boundary
 // (DispatchProgress.event) are not validated, so every read is defensive. ---
-
-function str(value: unknown, fallback: string): string {
-	return typeof value === "string" && value.length > 0 ? value : fallback;
-}
 
 function num(value: unknown, fallback: number): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -293,29 +280,19 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 	const fleetPhases = new Map<string, NonNullable<ObservabilityRunSummary["phase"]>>();
 	let runReaders: ObservabilityRunReaders = deps;
 	const notices: ObservabilityNotice[] = [];
-	const providerHealth = new Map<string, TargetStatus>();
 	const pendingEvidence = new Set<string>();
-	let accountability: AccountabilitySummary = deps.readAccountability();
-	let revision = 0;
-	let noticeSeq = 0;
 
 	const listeners = new Set<(snapshot: ObservabilitySnapshot) => void>();
 	let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function buildSnapshot(): ObservabilitySnapshot {
-		const providerHealthRecord: Record<string, TargetStatus> = {};
-		for (const [id, status] of providerHealth) providerHealthRecord[id] = status;
 		return {
-			revision,
 			generatedAt: Date.now(),
 			session: {
-				costUsd: deps.sessionCost(),
 				cost: deps.sessionCostSummary(),
 				tokens: deps.sessionTokens(),
 				latestThroughput: deps.latestThroughput(),
 			},
-			metrics: deps.metrics(),
-			accountability,
 			// Newest-first: Map preserves first-seen (enqueue) order, so reversing
 			// surfaces the most recently started runs at the head of the list.
 			runs: [...runs.values()].reverse().map((entry) => {
@@ -326,7 +303,6 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 					progress: progressFold.snapshot(),
 				});
 			}),
-			providerHealth: providerHealthRecord,
 			notices: [...notices],
 			pendingEvidenceBuildRunIds: [...pendingEvidence],
 		};
@@ -371,7 +347,6 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			runs.delete(oldest);
 			fleetPhases.delete(oldest);
 		}
-		revision += 1;
 		scheduleFlush();
 	}
 
@@ -392,10 +367,9 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			...(phase !== undefined ? { phase: { ...phase } } : {}),
 			status: "enqueued",
 			startedAtMs: now,
-			updatedAtMs: now,
 			finishedAtMs: null,
 			durationMs: null,
-			tokens: { input: 0, output: 0, reasoning: 0, total: 0 },
+			tokens: { input: 0, output: 0, total: 0 },
 			costUsd: 0,
 			costProvenance: "unknown",
 		};
@@ -436,7 +410,6 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			summary.tokens.input = num(payload.inputTokenCount, summary.tokens.input) + num(payload.cacheReadTokenCount, 0);
 		}
 		summary.tokens.output = num(payload.outputTokenCount, summary.tokens.output);
-		summary.tokens.reasoning = num(payload.reasoningTokenCount, summary.tokens.reasoning);
 		summary.costUsd = num(payload.costUsd, summary.costUsd);
 		summary.costProvenance = resolveCostProvenance(payload.costProvenance, summary.costProvenance);
 	}
@@ -448,8 +421,6 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 		ref?: ObservabilityNotice["ref"],
 	): void {
 		const notice: ObservabilityNotice = {
-			id: `n${noticeSeq++}`,
-			at: Date.now(),
 			kind,
 			level,
 			message,
@@ -545,8 +516,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 	function evidenceBuildSucceeded(runId: string, evidence: ObservabilityRunEvidence): void {
 		pendingEvidence.delete(runId);
 		const summary = runs.get(runId);
-		if (summary) summary.evidence = { ...evidence, tags: [...evidence.tags] };
-		accountability = deps.readAccountability();
+		if (summary) summary.evidence = { evidenceId: evidence.evidenceId };
 		markChanged();
 	}
 
@@ -560,7 +530,6 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
 			summary.status = "enqueued";
 			delete summary.retry;
-			summary.updatedAtMs = now;
 			putRun(runId, summary);
 			markChanged();
 		}),
@@ -575,7 +544,6 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			summary.startedAtMs = now;
 			summary.startedAtClockMs = performance.now();
 			delete summary.retry;
-			summary.updatedAtMs = now;
 			summary.finishedAtMs = null;
 			summary.durationMs = null;
 			putRun(runId, summary);
@@ -588,7 +556,6 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			const summary = runs.get(runId);
 			if (!summary) return;
 			const now = Date.now();
-			summary.updatedAtMs = now;
 			const event = (payload.event ?? {}) as Record<string, unknown>;
 			const type = typeof event.type === "string" ? event.type : "";
 			if (type === "heartbeat_status") {
@@ -667,12 +634,10 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			const summary = runs.get(runId) ?? emptyRun(runId, now);
 			applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
 			summary.status = "completed";
-			summary.updatedAtMs = now;
 			summary.finishedAtMs = now;
 			summary.durationMs = num(payload.durationMs, Math.max(0, now - summary.startedAtMs));
 			applyTerminalTokens(summary, payload);
 			applyTerminalDetail(summary, payload);
-			summary.outcome = str(payload.outcome, "succeeded");
 			summary.outcomeDetail = typeof payload.outcomeDetail === "string" ? payload.outcomeDetail : null;
 			putRun(runId, summary);
 			markChanged();
@@ -685,12 +650,10 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			const summary = runs.get(runId) ?? emptyRun(runId, now);
 			applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
 			summary.status = resolveDispatchFailureStatus(payload.reason);
-			summary.updatedAtMs = now;
 			summary.finishedAtMs = now;
 			summary.durationMs = num(payload.durationMs, Math.max(0, now - summary.startedAtMs));
 			applyTerminalTokens(summary, payload);
 			applyTerminalDetail(summary, payload);
-			summary.outcome = str(payload.outcome, str(payload.reason, "failed"));
 			summary.outcomeDetail = typeof payload.outcomeDetail === "string" ? payload.outcomeDetail : null;
 			putRun(runId, summary);
 			markChanged();
@@ -710,20 +673,11 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 				summary.status = "cancelling";
 			}
 			summary.outcomeDetail = typeof raw.reason === "string" ? raw.reason : (summary.outcomeDetail ?? null);
-			summary.updatedAtMs = Date.now();
 			markChanged();
 		}),
 		bus.on(BusChannels.AccountabilityEvidenceReady, (payload) => {
 			const runId = asRunId(payload?.runId);
 			if (runId) evidenceBuildSucceeded(runId, payload);
-		}),
-		bus.on(BusChannels.ProviderHealth, (raw: unknown) => {
-			const payload = (raw ?? {}) as Record<string, unknown>;
-			if (typeof payload.id !== "string" || payload.id.length === 0) return;
-			// status is the full TargetStatus record (an object); store it as-is.
-			if (payload.status === null || typeof payload.status !== "object") return;
-			providerHealth.set(payload.id, payload.status as TargetStatus);
-			markChanged();
 		}),
 	];
 
@@ -755,10 +709,6 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			};
 		},
 		refresh() {
-			markChanged();
-		},
-		refreshAccountability() {
-			accountability = deps.readAccountability();
 			markChanged();
 		},
 		evidenceBuildStarted(runId) {

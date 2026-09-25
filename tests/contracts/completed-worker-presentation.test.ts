@@ -62,7 +62,6 @@ function board(entry: WorkerEntryState, width: number): string[] {
 		ttftMs: null,
 		...(kind && contract ? { resultContract: { kind, conformance: contract } } : {}),
 		progress: {
-			revision: 1,
 			phase: entry.pending ? "writing" : "settled",
 			settled: !entry.pending,
 			tailText: entry.text,

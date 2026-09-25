@@ -1,17 +1,17 @@
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual } from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
-import type { DomainContext } from "../../src/core/domain-loader.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import { writeEvidenceIndexRowQueued } from "../../src/domains/observability/evidence-index.js";
-import { createObservabilityBundle } from "../../src/domains/observability/extension.js";
+import { AccountabilityArtifactProvider } from "../../src/interactive/view/artifacts.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-test("footer accountability follows the current session, excluding sibling, foreign, and legacy runs", async () => {
+// The evidence index is machine-wide. `/view` is the surface that reads it for a
+// session, so it must fold only the runs that session can see: its own, plus
+// runs recorded in the same project, never another project's.
+test("/view accountability folds the runs the session sees and excludes other projects", async () => {
 	const home = await isolateClioEnv("clio-session-accountability-");
 	try {
 		const project = join(home.dir, "project");
@@ -47,23 +47,32 @@ test("footer accountability follows the current session, excluding sibling, fore
 			});
 		}
 		await ledger.persist();
-		let active = "session-a";
-		const context = {
-			bus: createSafeEventBus(),
-			getContract: (name: string) => (name === "session" ? { current: () => ({ id: active }) } : undefined),
-		} as unknown as DomainContext;
-		const bundle = createObservabilityBundle(context, { dispatchTrace: false });
-		await bundle.extension.start();
-		const observability = bundle.contract;
-		strictEqual(observability.accountability().totalRuns, 1);
-		strictEqual(observability.accountability().firstPassRate, 1);
-		strictEqual(observability.snapshot().accountability.totalRuns, 1);
-		active = "session-b";
-		context.bus.emit(BusChannels.SessionResumed, { sessionId: active, via: "resume", at: Date.now() });
-		strictEqual(observability.accountability().totalRuns, 1);
-		strictEqual(observability.accountability().firstPassRate, 0);
-		strictEqual(observability.snapshot().accountability.firstPassRate, 0);
-		await bundle.extension.stop?.();
+		const provider = new AccountabilityArtifactProvider({
+			stateDir: clioStateDir(),
+			sessionMeta: {
+				id: "session-a",
+				cwd: project,
+				cwdHash: "fixture",
+				createdAt: "2026-09-25T00:00:00Z",
+				endedAt: null,
+				model: null,
+				target: null,
+				clioCoderVersion: "0.5.6",
+				piMonoVersion: "fixture",
+				platform: "linux",
+				nodeVersion: process.version,
+				sessionFormatVersion: 4,
+			},
+		});
+		const [artifact] = await provider.list();
+		const loaded = await artifact?.load();
+		deepStrictEqual(loaded?.lines.slice(0, 5), [
+			"# Accountability",
+			"",
+			"first-pass success: 1/3 (33%)",
+			"unverified successes: 0",
+			"ungrounded claims: 0",
+		]);
 	} finally {
 		home.restore();
 	}

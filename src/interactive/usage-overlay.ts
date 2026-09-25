@@ -324,8 +324,8 @@ export interface CostSnapshot {
 }
 
 // Session totals come from the observability projection: when a snapshot is
-// supplied (the subscribe path holds the latest one), the running USD total is
-// read from `snapshot.session.costUsd`. The per-provider/model rows still fold
+// supplied (the subscribe path holds the latest one), the session cost is read
+// from `snapshot.session.cost`. The per-provider/model rows still fold
 // `costEntries()`, which the snapshot schema deliberately does not carry.
 function buildCostSnapshot(
 	observability: ObservabilityContract,
@@ -454,8 +454,8 @@ class UsageOverlayBody implements Component {
 }
 
 /**
- * Mount the read-only usage overlay. Quota comes from the shared presentation feed. The running USD total comes from the
- * observability projection's `snapshot().session.costUsd`, while the
+ * Mount the read-only usage overlay. Quota comes from the shared presentation feed. The session cost comes from the
+ * observability projection's `snapshot().session.cost`, while the
  * per-provider/model rows fold `observability.costEntries()`. The overlay is
  * kept live by `observability.subscribe()`: the projection already folds the
  * dispatch terminal channels and every `recordTokens()` into one coalesced

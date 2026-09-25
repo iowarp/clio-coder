@@ -37,7 +37,6 @@ function worker(): WorkerEntryState {
 		attempts: [],
 		pending: true,
 		progress: {
-			revision: 1,
 			phase: "tool",
 			tailText: "",
 			droppedLines: 0,

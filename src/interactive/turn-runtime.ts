@@ -750,10 +750,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const interruptedUsageByMessage = new WeakMap<object, Record<string, unknown>>();
 
 		handle.agent.subscribe(async (event) => {
-			// Wall anchor for the one field a human reads back (`recordedAt`);
-			// every span below is measured on the monotonic frame instead, so an
-			// NTP correction mid-turn cannot corrupt a tool duration or a TTFT.
-			const eventAt = Date.now();
+			// Every span below is measured on the monotonic frame, so an NTP
+			// correction mid-turn cannot corrupt a tool duration or a TTFT.
 			const eventClock = performance.now();
 			lastActivityAt = eventClock;
 			let enrichedEvent = event;
@@ -934,9 +932,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						outputTokens: summary.output,
 						durationMs,
 						ttftMs: Math.round(timing.ttftMs),
-						providerId: localRuntime.targetId,
-						modelId: localRuntime.wireModelId,
-						recordedAt: eventAt,
 					});
 				}
 			}

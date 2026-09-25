@@ -24,25 +24,9 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 	const bus = createSafeEventBus();
 	const projection = createObservabilityProjection(bus, {
 		readReceipt: () => facts,
-		metrics: () => ({
-			dispatchesCompleted: 0,
-			dispatchesFailed: 0,
-			safetyClassifications: 0,
-			totalTokens: 0,
-			histograms: {},
-		}),
-		sessionCost: () => 0,
 		sessionCostSummary: emptyCostAggregate,
 		sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
 		latestThroughput: () => null,
-		readAccountability: () => ({
-			totalRuns: 0,
-			firstPassRuns: 0,
-			firstPassRate: 0,
-			unverifiedSuccesses: 0,
-			ungroundedClaims: 0,
-			failureCauses: [],
-		}),
 	});
 	const store = createDispatchBoardStore(projection);
 	const event: DispatchCompletedPayload = {

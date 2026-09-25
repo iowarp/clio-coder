@@ -86,18 +86,16 @@ export interface WorkerAction {
 
 /**
  * Everything both surfaces read about a live worker, bounded. Snapshots are
- * immutable and `revision` changes only when a visible field does, so a
+ * immutable and a new one is built only when a visible field changes, so a
  * renderer can skip a repaint by identity rather than by diffing text.
  */
 export interface WorkerProgressSnapshot {
-	/** Measured totals for the current attempt, absent until the producer reports them. */
+	/** Measured input for the current attempt; absent until the producer reports usage. */
 	inputTokens?: number;
-	outputTokens?: number;
 	processedTokens?: number;
 	/** Occupancy from the last completed model call, never cumulative usage. */
 	contextTokens?: number;
 	toolCalls?: number;
-	revision: number;
 	phase: WorkerProgressPhase;
 	/** Bounded worker prose: the live tail while running, the sealed answer once settled. */
 	tailText: string;
@@ -133,8 +131,6 @@ export interface WorkerProgressFold {
 	 */
 	restart(): void;
 	snapshot(): WorkerProgressSnapshot;
-	/** The last durable assistant answer this run streamed, unbounded by the tail. */
-	durableText(): string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -252,7 +248,6 @@ export function boundSettledText(text: string): { text: string; dropped: number 
 }
 
 const EMPTY_SNAPSHOT: WorkerProgressSnapshot = {
-	revision: 0,
 	phase: "starting",
 	tailText: "",
 	droppedLines: 0,
@@ -264,9 +259,7 @@ const EMPTY_SNAPSHOT: WorkerProgressSnapshot = {
 };
 
 export function createWorkerProgressFold(): WorkerProgressFold {
-	let revision = 0;
 	let inputTokens: number | undefined;
-	let outputTokens: number | undefined;
 	let processedTokens: number | undefined;
 	let contextTokens: number | undefined;
 	let toolCalls: number | undefined;
@@ -290,7 +283,6 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	let cached: WorkerProgressSnapshot | null = EMPTY_SNAPSHOT;
 
 	const touch = (): true => {
-		revision += 1;
 		cached = null;
 		return true;
 	};
@@ -376,7 +368,6 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 					const input = count(usage.input) + count(usage.cacheRead);
 					const output = count(usage.output);
 					inputTokens = (inputTokens ?? 0) + input;
-					outputTokens = (outputTokens ?? 0) + output;
 					processedTokens = (processedTokens ?? 0) + input + output + count(usage.cacheWrite);
 					contextTokens = input + output + count(usage.cacheWrite);
 					changed = touch();
@@ -457,7 +448,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		},
 
 		restart(): void {
-			inputTokens = outputTokens = processedTokens = contextTokens = toolCalls = undefined;
+			inputTokens = processedTokens = contextTokens = toolCalls = undefined;
 			currentAction = null;
 			pendingActions.length = 0;
 			pendingActionsById.clear();
@@ -475,12 +466,10 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 					? {}
 					: {
 							inputTokens,
-							outputTokens: outputTokens ?? 0,
 							processedTokens: processedTokens ?? 0,
 							contextTokens: contextTokens ?? 0,
 						}),
 				...(toolCalls === undefined ? {} : { toolCalls }),
-				revision,
 				phase,
 				tailText,
 				droppedLines,
@@ -491,10 +480,6 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				settled,
 			};
 			return cached;
-		},
-
-		durableText(): string {
-			return durable;
 		},
 	};
 }

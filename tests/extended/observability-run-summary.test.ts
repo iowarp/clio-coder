@@ -13,31 +13,13 @@ import { BusChannels, type DispatchFailedPayload } from "../../src/core/bus-even
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
 import { dispatchHasEvidenceLedger } from "../../src/domains/observability/extension.js";
-import type { MetricsView } from "../../src/domains/observability/metrics.js";
 import { createObservabilityProjection, type ProjectionReadModel } from "../../src/domains/observability/projection.js";
 
 function stubReadModel(): ProjectionReadModel {
-	const metrics: MetricsView = {
-		dispatchesCompleted: 0,
-		dispatchesFailed: 0,
-		safetyClassifications: 0,
-		totalTokens: 0,
-		histograms: {},
-	};
 	return {
-		metrics: () => metrics,
-		sessionCost: () => 0,
 		sessionCostSummary: () => emptyCostAggregate(),
 		sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
 		latestThroughput: () => null,
-		readAccountability: () => ({
-			totalRuns: 0,
-			firstPassRuns: 0,
-			firstPassRate: 0,
-			unverifiedSuccesses: 0,
-			ungroundedClaims: 0,
-			failureCauses: [],
-		}),
 	};
 }
 

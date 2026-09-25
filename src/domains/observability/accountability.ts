@@ -7,14 +7,12 @@
  * forensic-derived and are the authority for user-visible first-pass-success
  * rates. The receipt summary is the conservative integrity-covered snapshot,
  * so a false receipt summary and a true forensic row is an intentional
- * divergence, not a contradiction. The `/view` overlay and the observability
- * contract surface this without re-running `buildEvidence`.
+ * divergence, not a contradiction. The `/view` accountability page and
+ * `clio-coder usage` surface this without re-running `buildEvidence`.
  */
 
-import { type DispatchOwner, dispatchOwnership } from "../dispatch/ownership.js";
-import { openLedger } from "../dispatch/state.js";
 import { type EvidenceTag, FAILURE_CAUSE_TAGS } from "../evidence/index.js";
-import { type EvidenceIndexRow, readEvidenceIndex } from "./evidence-index.js";
+import type { EvidenceIndexRow } from "./evidence-index.js";
 
 /**
  * Aggregated accountability snapshot.
@@ -71,23 +69,4 @@ export function summarizeEvidenceIndex(rows: ReadonlyArray<EvidenceIndexRow>): A
 		ungroundedClaims,
 		failureCauses,
 	};
-}
-
-/**
- * Read the sidecar index from the state dir and summarize it. Tolerant by way of
- * `readEvidenceIndex`: a missing or corrupt index yields the empty summary
- * with zero counters and an empty failure-cause histogram.
- */
-export function readAccountabilitySummary(stateDir: string, owner?: DispatchOwner): AccountabilitySummary {
-	const rows = readEvidenceIndex(stateDir);
-	if (owner === undefined) return summarizeEvidenceIndex(rows);
-	if (owner.sessionId === null) return summarizeEvidenceIndex([]);
-	const ownership = dispatchOwnership(owner);
-	const ownedIds = new Set(
-		openLedger()
-			.list()
-			.filter((run) => run.sessionId !== null && ownership.ownsRun(run))
-			.map((run) => run.id),
-	);
-	return summarizeEvidenceIndex(rows.filter((row) => ownedIds.has(row.runId)));
 }

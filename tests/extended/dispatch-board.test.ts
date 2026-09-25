@@ -124,25 +124,9 @@ function setup(readers: ObservabilityRunReaders = {}) {
 	const bus = createSafeEventBus();
 	const projection = createObservabilityProjection(bus, {
 		...readers,
-		metrics: () => ({
-			dispatchesCompleted: 0,
-			dispatchesFailed: 0,
-			safetyClassifications: 0,
-			totalTokens: 0,
-			histograms: {},
-		}),
-		sessionCost: () => 0,
 		sessionCostSummary: emptyCostAggregate,
 		sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
 		latestThroughput: () => null,
-		readAccountability: () => ({
-			totalRuns: 0,
-			firstPassRuns: 0,
-			firstPassRate: 0,
-			unverifiedSuccesses: 0,
-			ungroundedClaims: 0,
-			failureCauses: [],
-		}),
 	});
 	projections.push(projection);
 	const board = createDispatchBoardStore(projection);
@@ -153,17 +137,22 @@ function setup(readers: ObservabilityRunReaders = {}) {
 	return { bus, projection, board, progress, start };
 }
 
-/** Wait for the projection's existing coalesced publication, with no board reconciliation shortcut. */
-function nextRevision(projection: ObservabilityProjection, previous: number): Promise<void> {
+/** Wait for the projection's next coalesced publication, with no board reconciliation shortcut. */
+function nextPublication(projection: ObservabilityProjection): Promise<void> {
 	return new Promise((resolve, reject) => {
 		let unsubscribe = () => {};
+		let immediate = true;
 		const timeout = setTimeout(() => {
 			unsubscribe();
 			reject(new Error("projection did not publish"));
 		}, 1000);
-		unsubscribe = projection.subscribe((snapshot) => {
-			if (snapshot.revision <= previous) return;
-			// subscribe publishes immediately; let its unsubscribe assignment finish.
+		unsubscribe = projection.subscribe(() => {
+			// subscribe publishes the current snapshot at once; wait for the next one.
+			if (immediate) {
+				immediate = false;
+				return;
+			}
+			// Let the unsubscribe assignment finish before detaching.
 			queueMicrotask(() => {
 				clearTimeout(timeout);
 				unsubscribe();
@@ -243,8 +232,7 @@ describe("dispatch board uses the observability projection", () => {
 				}),
 		];
 		for (const publish of events) {
-			const previous = projection.snapshot().revision;
-			const flushed = nextRevision(projection, previous);
+			const flushed = nextPublication(projection);
 			publish();
 			await flushed;
 			deepStrictEqual(
@@ -265,7 +253,10 @@ describe("dispatch board uses the observability projection", () => {
 		const rendered = view.render(180).join("\n");
 		match(rendered, /coder/);
 		match(rendered, /check failed/);
-		strictEqual(projection.snapshot().runs.find((row) => row.runId === IDENTITY.runId)?.evidence?.findingCount, 2);
+		strictEqual(
+			projection.snapshot().runs.find((row) => row.runId === IDENTITY.runId)?.evidence?.evidenceId,
+			"run-board-run",
+		);
 		board.unsubscribe();
 		strictEqual(bus.listeners(BusChannels.DispatchCompleted).length, 1);
 	});
@@ -455,7 +446,7 @@ describe("dispatch board uses the observability projection", () => {
 	it("detaches the board subscription without stopping the shared projection", async () => {
 		const { bus, projection, board } = setup();
 		board.unsubscribe();
-		const published = nextRevision(projection, projection.snapshot().revision);
+		const published = nextPublication(projection);
 		bus.emit(BusChannels.DispatchEnqueued, IDENTITY);
 		await published;
 		strictEqual(board.rows().length, 0);
@@ -482,7 +473,7 @@ describe("dispatch board uses the observability projection", () => {
 		board.setFleetPhase(IDENTITY.runId, { wave: 1, stepId: "long-task" });
 		start();
 		progress({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "still working" } });
-		const published = nextRevision(projection, projection.snapshot().revision);
+		const published = nextPublication(projection);
 		for (let i = 0; i < MAX_PROJECTION_RUNS + 10; i += 1) {
 			bus.emit(BusChannels.DispatchEnqueued, { ...IDENTITY, runId: `run-${i}` });
 			bus.emit(BusChannels.DispatchCompleted, { ...COMPLETED, runId: `run-${i}` });
@@ -497,7 +488,7 @@ describe("dispatch board uses the observability projection", () => {
 		deepStrictEqual(board.activeRows()[0]?.phase, { wave: 1, stepId: "long-task" });
 		ok(!board.rows().some((row) => row.runId === "run-0"));
 
-		const settled = nextRevision(projection, projection.snapshot().revision);
+		const settled = nextPublication(projection);
 		bus.emit(BusChannels.DispatchCompleted, COMPLETED);
 		await settled;
 		strictEqual(board.activeRows().length, 0);
@@ -510,7 +501,6 @@ describe("dispatch board uses the observability projection", () => {
 		strictEqual(terminal.elapsedMs, COMPLETED.durationMs);
 		strictEqual(terminal.outcomeDetail, COMPLETED.outcomeDetail);
 		const canonical = projection.snapshot().runs.find((run) => run.runId === IDENTITY.runId);
-		strictEqual(canonical?.outcome, "succeeded");
 		ok(canonical);
 		ok(canonical.finishedAtMs !== null);
 		deepStrictEqual(commonRow(terminal), commonSummary(canonical));

@@ -173,7 +173,7 @@ Clio resolves directories under platform-specific XDG defaults (on Linux, these 
 
 | Category | Description | Backing Path |
 | --- | --- | --- |
-| **Accountability** | Current session's first-pass-success rate, unverified successes, ungrounded claims, and failure-cause histogram. Runs from sibling sessions and legacy runs without a session owner are excluded. | `<stateDir>/evidence-index.json` |
+| **Accountability** | First-pass-success rate, unverified successes, ungrounded claims, and failure-cause histogram over the runs this session can see: its own runs plus runs recorded in the same project. Runs from other projects are excluded. | `<stateDir>/evidence-index.json` |
 | **Evidence bundles** | Deterministic run or session overviews, findings, totals, and linked files. | `<dataDir>/evidence/<evidenceId>/` |
 | **Receipts** | Durable run receipts verified by SHA-256 integrity digests. | `<stateDir>/receipts/<runId>.json` |
 | **Dispatch outputs** | Logs and ledger records detailing worker execution. | `<stateDir>/runs.json` and `<stateDir>/receipts/<runId>.json` |
@@ -203,7 +203,7 @@ The TUI displays this rate as:
 `first-pass success: <succeeded-attempts>/<total-attempts> (<pct>%)`
 
 ### Unverified Successes and Ungrounded Claims
-Two counters sit beside the rate in `/view`, `clio-coder usage`, and the observability contract. An unverified success is a run whose terminal outcome succeeded while its bundle carries the `no-validation` or `proxy-validation` tag or a warning-level `completion-evidence` finding. Ungrounded claims are the sum, over integrity-verified receipts, of validation claims with no matching command (`validationGrounding.claimed` minus `grounded`). Both fold only the fields an index row holds: a historical row without `succeeded`, `completionEvidenceWarning`, or `ungroundedClaims` contributes zero.
+Two counters sit beside the rate in `/view` and `clio-coder usage`. An unverified success is a run whose terminal outcome succeeded while its bundle carries the `no-validation` or `proxy-validation` tag or a warning-level `completion-evidence` finding. Ungrounded claims are the sum, over integrity-verified receipts, of validation claims with no matching command (`validationGrounding.claimed` minus `grounded`). Both fold only the fields an index row holds: a historical row without `succeeded`, `completionEvidenceWarning`, or `ungroundedClaims` contributes zero.
 
 The TUI displays them as:
 `unverified successes: <count>` and `ungrounded claims: <count>`
