@@ -30,7 +30,15 @@ type EvidenceOutput = Awaited<ReturnType<typeof inspectEvidence>> &
 			open: number;
 		} | null;
 		toolEvents: { total: number; linked: number };
-		worktree?: { branch: string; changedPaths: string[] };
+		worktree?: {
+			branch?: string;
+			changedPaths?: string[];
+			apply?: "merge" | "preserve";
+			applied?: boolean;
+			snapshot?: "working-tree" | "unavailable";
+			reason?: string;
+			status?: "withheld";
+		};
 	};
 
 /** The fixture run's own session: evidence reads are scoped to the session and project asking. */
@@ -182,7 +190,6 @@ describe("evidence tool", () => {
 	});
 
 	it("exposes worktree fields only while the run receipt still verifies", async () => {
-		const envelope = fixtureEnvelope("worktree-fixture");
 		const worktree = {
 			path: "/workspace/.clio-coder/worktrees/worktree-fixture",
 			branch: "clio-coder/task/worktree-fixture",
@@ -190,19 +197,58 @@ describe("evidence tool", () => {
 			changedPaths: ["release-worktree-probe.txt"],
 			apply: "preserve" as const,
 			applied: false,
+			snapshot: "working-tree" as const,
 		};
+		const envelope = { ...fixtureEnvelope("worktree-fixture"), cwd: worktree.path };
 		const receipt = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), worktree }, envelope);
 		await mkdir(join(clioStateDir(), "receipts"), { recursive: true });
 		await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
 		const receiptPath = join(clioStateDir(), "receipts", "worktree-fixture.json");
 		await writeFile(receiptPath, JSON.stringify(receipt));
-		strictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree?.branch, worktree.branch);
-		deepStrictEqual(
-			output(await evidence({ mode: "run", runId: envelope.id })).worktree?.changedPaths,
-			worktree.changedPaths,
+		deepStrictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree, {
+			branch: worktree.branch,
+			changedPaths: worktree.changedPaths,
+			changedPathsOmitted: 0,
+			apply: "preserve",
+			applied: false,
+			snapshot: "working-tree",
+		});
+		const failedApply = {
+			path: worktree.path,
+			branch: worktree.branch,
+			diffHash: worktree.diffHash,
+			changedPaths: worktree.changedPaths,
+			apply: "merge" as const,
+			applied: false,
+			reason: "worktree_merge_conflict",
+		};
+		const failedReceipt = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), worktree: failedApply }, envelope);
+		await writeFile(receiptPath, JSON.stringify(failedReceipt));
+		strictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree?.reason, "worktree_merge_conflict");
+		const mergedWorktree = {
+			path: worktree.path,
+			branch: worktree.branch,
+			diffHash: worktree.diffHash,
+			changedPaths: worktree.changedPaths,
+			apply: "merge" as const,
+			applied: true,
+		};
+		const mergedReceipt = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), worktree: mergedWorktree }, envelope);
+		await writeFile(receiptPath, JSON.stringify(mergedReceipt));
+		strictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree?.applied, true);
+		await writeFile(
+			receiptPath,
+			JSON.stringify({ ...mergedReceipt, worktree: { ...mergedReceipt.worktree, branch: "forged" } }),
 		);
-		await writeFile(receiptPath, JSON.stringify({ ...receipt, worktree: { ...worktree, branch: "forged" } }));
-		strictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree, undefined);
+		deepStrictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree, {
+			status: "withheld",
+			reason: "receipt-integrity",
+		});
+	});
+
+	it("does not infer worktree placement from a failed seal on a regular run", async () => {
+		await fixture(true);
+		strictEqual(output(await evidence({ mode: "run", runId: "fixture" })).worktree, undefined);
 	});
 
 	it("returns a bounded redacted summary only to the owning session", async () => {
