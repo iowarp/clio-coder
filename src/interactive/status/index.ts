@@ -3,7 +3,6 @@ export { createStatusController } from "./controller.js";
 export {
 	compactReasoningTokens,
 	formatReasoningChip,
-	formatReasoningLabel,
 	type ReasoningProvenance,
 	type ReasoningUsageView,
 	reasoningFromSummary,
@@ -25,9 +24,7 @@ export {
 	type WatchdogTier,
 } from "./types.js";
 export {
-	INLINE_STATUS_INDENT_COLS,
 	resolveFooterVerb,
-	resolveInlineVerb,
 	spinnerFrame,
 	type VerbRender,
 } from "./verbs.js";

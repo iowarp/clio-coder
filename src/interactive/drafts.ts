@@ -68,9 +68,6 @@ export const DRAFT_SYSTEM_PROMPT = [
 /** Output budget per candidate. A draft is an answer to compare, not a document. */
 export const DRAFT_MAX_TOKENS = 4096;
 
-/** Bumped when the judge's wording changes. */
-export const DRAFT_JUDGE_VERSION = "drafts-v1";
-
 /** Code points of the request and of one candidate sent to the judge. */
 const MAX_REQUEST_CHARS = 1500;
 const MAX_CANDIDATE_CHARS = 6000;

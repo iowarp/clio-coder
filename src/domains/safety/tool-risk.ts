@@ -16,9 +16,6 @@
 
 import { type Decider, isTrue, rate, rating, yesNo } from "../providers/decisions.js";
 
-/** Bumped when the ladder or the wording changes. */
-export const TOOL_RISK_VERSION = "toolrisk-v2";
-
 /**
  * The blast-radius ladder, lowest rung first.
  *

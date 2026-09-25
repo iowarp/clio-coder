@@ -1,10 +1,6 @@
 import { ToolNames } from "../../core/tool-names.js";
-import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { formatCompactMs, GLYPH, spinnerFrame as themeSpinnerFrame } from "../theme/index.js";
 import type { AgentStatus } from "./types.js";
-
-/** Columns the chat panel spends indenting the inline status line under the reply. */
-export const INLINE_STATUS_INDENT_COLS = 2;
 
 export interface VerbRender {
 	text: string;
@@ -44,10 +40,6 @@ function elapsedSince(status: AgentStatus, now: number): string | null {
 	const from =
 		status.phase === "tool_running" && status.toolStartedAt !== undefined ? status.toolStartedAt : status.since;
 	return formatLiveElapsed(Math.max(0, now - from));
-}
-
-function noProgressSince(status: AgentStatus, now: number): string {
-	return formatLiveElapsed(Math.max(0, now - status.lastMeaningfulAt)) ?? "under a second";
 }
 
 function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["toneHint"] } | null {
@@ -118,60 +110,4 @@ export function resolveFooterVerb(status: AgentStatus, now: number, terminalCols
 	if (!showElapsed) return core;
 	const elapsed = elapsedSince(status, now);
 	return elapsed === null ? core : { text: `${core.text} · ${elapsed}`, toneHint: core.toneHint };
-}
-
-/**
- * The inline verb split into the part that must survive and the trailing hint
- * that may be dropped to make the line fit.
- */
-function inlineParts(
-	status: AgentStatus,
-	now: number,
-	terminalCols: number,
-): { text: string; hint: string | null; toneHint: VerbRender["toneHint"] } | null {
-	if (status.phase === "stuck")
-		return { text: `No output for ${noProgressSince(status, now)}.`, hint: "Press Esc to cancel.", toneHint: "error" };
-	const core = coreVerb(status);
-	if (!core) return null;
-	const text = core.text.replace(/^[a-z]/, (c) => c.toUpperCase());
-	if (status.watchdogTier >= 3) {
-		const hint = terminalCols < 50 ? null : `(no output for ${noProgressSince(status, now)}; press Esc to cancel)`;
-		return { text, hint, toneHint: core.toneHint };
-	}
-	if (terminalCols < 50 || status.phase === "tool_blocked") return { text, hint: null, toneHint: core.toneHint };
-	const elapsed = elapsedSince(status, now);
-	return { text, hint: elapsed === null ? null : `· ${elapsed}`, toneHint: core.toneHint };
-}
-
-/**
- * The terminal engine aborts the process when a rendered row is wider than the
- * terminal, so the composed line is measured against the columns the caller's
- * prefix leaves behind: the hint drops whole first, then the verb itself is cut
- * with an ellipsis. Without this, a tier-3 watchdog hint at 73 columns exited
- * the TUI mid-dispatch (issue #53).
- */
-function fitInlineVerb(text: string, hint: string | null, budget: number): string {
-	if (budget <= 0) return "";
-	const composed = hint === null ? text : `${text} ${hint}`;
-	if (visibleWidth(composed) <= budget) return composed;
-	if (visibleWidth(text) <= budget) return text;
-	return truncateToWidth(text, budget, GLYPH.ellipsis, false);
-}
-
-/**
- * `prefixCols` is what the caller prepends before this text on the same row
- * (transcript indent plus spinner), so the fit budget covers the whole line.
- */
-export function resolveInlineVerb(
-	status: AgentStatus,
-	now: number,
-	terminalCols: number,
-	prefixCols = 0,
-): VerbRender | null {
-	if (status.phase === "idle" || status.phase === "ended") return null;
-	const parts = inlineParts(status, now, terminalCols);
-	if (!parts) return null;
-	const budget = Math.max(0, Math.floor(terminalCols) - Math.max(0, Math.floor(prefixCols)));
-	const text = fitInlineVerb(parts.text, parts.hint, budget);
-	return text.length === 0 ? null : { text, toneHint: parts.toneHint };
 }

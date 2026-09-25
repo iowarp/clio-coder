@@ -31,7 +31,7 @@ type TurnPreviewInput = Pick<ClioTurnRecord, "kind" | "payload">;
  * Strip ANSI escape sequences. Tool outputs sometimes carry colour codes
  * that survive into the persisted payload; rendering them inside a single
  * row breaks the overlay's frame because pi-tui's truncateToWidth treats
- * them as zero-width control bytes but our brandedContentRow padding then
+ * them as zero-width control bytes but the overlay row padding then
  * miscounts. The regexes are constructed from String.fromCharCode(0x1b) so
  * the source file stays free of literal control bytes.
  */

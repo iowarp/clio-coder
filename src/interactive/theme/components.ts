@@ -1,4 +1,4 @@
-import type { EditorTheme, MarkdownTheme, SelectListTheme, SettingsListTheme } from "../../engine/tui.js";
+import type { EditorTheme, MarkdownTheme, SelectListTheme } from "../../engine/tui.js";
 import { GLYPH } from "./glyphs.js";
 import { screenTitle } from "./segments.js";
 import type { ClioTheme } from "./tokens.js";
@@ -34,16 +34,6 @@ export function selectListTheme(theme: ClioTheme): SelectListTheme {
 		description: (text) => theme.fg("muted", text),
 		scrollInfo: (text) => theme.fg("dim", text),
 		noMatch: (text) => theme.fg("warning", text),
-	};
-}
-
-export function settingsListTheme(theme: ClioTheme): SettingsListTheme {
-	return {
-		label: (text, selected) => (selected ? theme.style("accent", text, { bold: true }) : text),
-		value: (text, selected) => (selected ? theme.fg("success", text) : theme.fg("muted", text)),
-		description: (text) => theme.fg("muted", text),
-		cursor: GLYPH.cursor,
-		hint: (text) => theme.fg("dim", text),
 	};
 }
 

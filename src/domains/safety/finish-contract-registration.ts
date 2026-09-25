@@ -75,8 +75,7 @@ export function createFinishContractRegistration(
 			if (context?.priorEffects.some(isHardBlockEffect) === true) return [];
 			// Only settled stop turns make completion claims; aborted and error
 			// turns (including tool-prose interruptions) carry no finish contract.
-			// An absent stopReason is treated as "stop", mirroring
-			// finalAssistantStopMessage.
+			// An absent stopReason is treated as "stop".
 			const stopReason = input.metadata?.stopReason;
 			if (stopReason !== undefined && stopReason !== "stop") return [];
 			// An empty final text is not a completion claim. The assessor reads

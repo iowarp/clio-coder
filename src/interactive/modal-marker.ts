@@ -41,13 +41,6 @@ export interface ModalMarkerSink {
 /** What the title reads when nothing modal owns the keyboard. */
 export const MODAL_MARKER_BASE_TITLE = "clio";
 
-/**
- * The one regular expression an external reader needs. Exported so Clio's own
- * contract test and herdr's manifest rule are written against the same shape
- * rather than two hand-copied spellings of it.
- */
-export const MODAL_MARKER_TITLE_PATTERN = /^clio \[modal:([a-z0-9][a-z0-9-]*)(?:\+([1-9]\d*))?\]$/u;
-
 /** Render the title for a modal stack, outermost first. */
 function formatModalMarkerTitle(stack: readonly string[]): string {
 	const top = stack.at(-1);

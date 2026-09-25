@@ -1,4 +1,4 @@
-import { BusChannels, type PermissionRequestedPayload } from "../core/bus-events.js";
+import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import { nextOutputStyle } from "../core/defaults.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
@@ -35,7 +35,7 @@ import { createAgentProgress } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import { APPLICATION_DOUBLE_TAP_MS, type ApplicationController } from "./application-controller.js";
+import type { ApplicationController } from "./application-controller.js";
 import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
 import { warmTranscriptRender } from "./chat-panel.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
@@ -53,7 +53,7 @@ import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
 import { returnToLiveEdge } from "./layout.js";
 import type { createMuxBridge } from "./mux-bridge.js";
-import { createOverlayLifecycle, type OverlayLifecycleController, type OverlayState } from "./overlay-lifecycle.js";
+import { createOverlayLifecycle, type OverlayLifecycleController } from "./overlay-lifecycle.js";
 import { interopOverlaySurface } from "./overlays/interop.js";
 import { paneWatchDecision } from "./pane-policy.js";
 import { describePanesLeftBehind } from "./panes-runtime.js";
@@ -103,16 +103,6 @@ export {
 	type SlashCommandContext,
 	type SlashCommandKind,
 } from "./slash-commands.js";
-
-export function isLiveWorkerEscalationRequest(payload: PermissionRequestedPayload): boolean {
-	if (typeof payload.requestId !== "string") return false;
-	if (payload.escalation !== true) return false;
-	const origin = typeof payload.origin === "string" ? payload.origin : undefined;
-	const legacyWorkerEvent = origin === undefined && typeof payload.requestedBy === "string";
-	if (!(origin?.startsWith("worker:") || legacyWorkerEvent)) return false;
-	const runId = typeof payload.requestedBy === "string" ? payload.requestedBy : origin?.slice("worker:".length);
-	return typeof runId === "string" && runId.length > 0;
-}
 
 export interface InteractiveDeps {
 	getConnections?: () => { mcp: string[]; plugins: string[] };
@@ -284,9 +274,6 @@ export interface InteractiveDeps {
 	onShutdown: () => Promise<void>;
 }
 
-export const ENTER = "\r";
-export const ESC = "\x1b";
-
 export interface InteractiveSubmitExpansion {
 	text: string;
 	images: ImageContent[];
@@ -371,28 +358,6 @@ export interface KeyBindingDeps {
 	restoreQueuedFollowUps: () => void;
 }
 
-export type CtrlCAction = "cancel-stream" | "close-overlay" | "clear-editor" | "arm-shutdown" | "shutdown";
-
-export interface CtrlCActionDeps {
-	overlayState: OverlayState;
-	streaming: boolean;
-	editorText: string;
-	lastCtrlCAt: number;
-	now: number;
-}
-
-export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
-	// A modal is an input boundary. Never let a global double-tap or an active
-	// run escape through it; Ctrl+C cancels/closes the focused overlay instead.
-	if (deps.overlayState !== "closed") return "close-overlay";
-	if (deps.lastCtrlCAt > 0 && deps.now - deps.lastCtrlCAt <= APPLICATION_DOUBLE_TAP_MS) {
-		return "shutdown";
-	}
-	if (deps.streaming) return "cancel-stream";
-	if (deps.editorText.length > 0) return "clear-editor";
-	return "arm-shutdown";
-}
-
 const ACTION_FEATURES: Partial<Record<ClioKeybinding, string>> = {
 	"clio-coder.output.cycle": "output-style",
 	"clio-coder.model.select": "/model",
@@ -464,32 +429,6 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 		case "clio-coder.leader":
 			return false;
 	}
-}
-
-/** Pure key router: returns true when the input was consumed. */
-export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean {
-	const order: ClioKeybinding[] = [
-		"clio-coder.status.toggle",
-		"clio-coder.thinking.cycle",
-		"clio-coder.session.tree",
-		"clio-coder.dispatchBoard.toggle",
-		"clio-coder.files.toggle",
-		"clio-coder.tasks.open",
-		"clio-coder.decisions.open",
-		"clio-coder.dispatch.background",
-		"clio-coder.model.select",
-		"clio-coder.library.toggle",
-		// Match cycleBackward before cycleForward so a user rebind where one key
-		// is a prefix of the other resolves to the more specific binding first.
-		// The defaults (alt+k / alt+j) do not prefix-match each other.
-		"clio-coder.model.cycleBackward",
-		"clio-coder.model.cycleForward",
-		"clio-coder.exit",
-	];
-	for (const id of order) {
-		if (deps.matches(data, id)) return dispatchInteractiveAction(id, deps);
-	}
-	return false;
 }
 
 export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
