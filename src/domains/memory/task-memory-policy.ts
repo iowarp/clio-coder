@@ -529,11 +529,6 @@ function readPolicyStep(response: string): ReadPolicyStepResult {
 	};
 }
 
-export function parseTaskMemoryPolicyResponse(response: string): ParsedMemoryStep | null {
-	const read = readPolicyStep(response);
-	return read.ok ? read.step : null;
-}
-
 /**
  * Phase two after the operation list. Explicit silence, a missing decision, and
  * an empty reminder all resolve to silence: the prompt's documented default is

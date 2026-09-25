@@ -139,22 +139,6 @@ export function runtimeModelListSource(runtime: RuntimeDescriptor): RuntimeModel
 	return "none";
 }
 
-function modelListSourceForRuntimeId(runtimeId: string): RuntimeModelListSource {
-	const runtime = getRuntimeIfRegistered(runtimeId);
-	if (runtime) return runtimeModelListSource(runtime);
-	return listCatalogModelsForRuntime(runtimeId).length > 0 ? "catalog" : "none";
-}
-
-/**
- * The model id a caller may persist without being told which one to use.
- * Undefined for catalog-ordered runtimes: the head of that list is the
- * alphabetically first id, not the one anybody would choose.
- */
-export function defaultModelForRuntime(runtimeId: string): string | undefined {
-	if (modelListSourceForRuntimeId(runtimeId) === "catalog") return undefined;
-	return listKnownModelsForRuntime(runtimeId)[0];
-}
-
 /**
  * What a screen may say about a runtime's models. A catalog-ordered list gets
  * its size and its source instead of a sample, so nothing false is asserted

@@ -3,12 +3,6 @@ import type { MuxContract } from "./contract.js";
 import { createMuxBundle, type MuxDomainOptions } from "./extension.js";
 import { MuxManifest } from "./manifest.js";
 
-/** Zero-configuration module: guest when detected, `none` otherwise. */
-export const MuxDomainModule: DomainModule<MuxContract> = {
-	manifest: MuxManifest,
-	createExtension: (context) => createMuxBundle(context),
-};
-
 /** Parameterized module for callers that gate panes off or on explicitly. */
 export function createMuxDomainModule(options: MuxDomainOptions): DomainModule<MuxContract> {
 	return {

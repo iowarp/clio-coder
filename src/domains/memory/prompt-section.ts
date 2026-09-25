@@ -52,8 +52,8 @@ export interface MemoryPromptOptions {
 /**
  * Filter approved, non-regressed, evidence-linked memory and cap by scope,
  * deterministic token budget, repository identity, and item count. Stable
- * ordering is guaranteed by `selectApprovedMemory`'s inner sort and the fixed
- * scope list. Repository identities match on exact canonical keys only.
+ * ordering comes from the selection's inner sort and the fixed scope list.
+ * Repository identities match on exact canonical keys only.
  */
 export function selectMemoryForPrompt(
 	records: ReadonlyArray<MemoryRecord>,

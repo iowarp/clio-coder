@@ -3,7 +3,6 @@ import {
 	normalizePathBoundaryEntry,
 	PATH_BOUNDARY_MAX_ENTRIES,
 	type PathBoundary,
-	pathBoundariesOverlap,
 	pathBoundaryCovers,
 } from "../../core/path-boundary.js";
 
@@ -61,11 +60,6 @@ export function normalizeWriteBoundary(entries: ReadonlyArray<string>): string[]
 /** Whether the boundary permits a change to one repo-relative path. */
 export function writeBoundaryCovers(boundary: WriteBoundary, path: string): boolean {
 	return pathBoundaryCovers(boundary, path);
-}
-
-/** Whether two boundaries share any path. Empty boundaries never overlap. */
-export function writeBoundariesOverlap(left: WriteBoundary, right: WriteBoundary): boolean {
-	return pathBoundariesOverlap(left, right);
 }
 
 /** Operator-facing rendering, used verbatim in violation messages. */

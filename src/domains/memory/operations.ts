@@ -30,23 +30,6 @@ export async function pruneStaleMemory(dataDir: string, now: Date = new Date()):
 	return pruneStaleMemoryRecords(dataDir, now);
 }
 
-export function selectApprovedMemory(
-	records: ReadonlyArray<MemoryRecord>,
-	options: MemoryRetrievalOptions,
-): MemoryRecord[] {
-	if (options.tokenBudget <= 0) return [];
-	const candidates = eligibleMemoryRecords(records, options);
-	const selected: MemoryRecord[] = [];
-	let spent = 0;
-	for (const record of candidates) {
-		const cost = estimateMemoryTokens(record);
-		if (spent + cost > options.tokenBudget) continue;
-		selected.push(record);
-		spent += cost;
-	}
-	return selected;
-}
-
 /** Eligibility precedes ranking or budget truncation; output retains legacy priority. */
 export function eligibleMemoryRecords(
 	records: ReadonlyArray<MemoryRecord>,

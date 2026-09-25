@@ -30,12 +30,6 @@ export const SKILL_INSTALL_OFFER_OPTION_PROJECT = "Install for this project";
 export const SKILL_INSTALL_OFFER_OPTION_USER = "Install globally";
 export const SKILL_INSTALL_OFFER_OPTION_NOT_NOW = "Not now";
 export const SKILL_INSTALL_OFFER_OPTION_NEVER = "Never offer this skill";
-export const SKILL_INSTALL_OFFER_OPTIONS = [
-	SKILL_INSTALL_OFFER_OPTION_PROJECT,
-	SKILL_INSTALL_OFFER_OPTION_USER,
-	SKILL_INSTALL_OFFER_OPTION_NOT_NOW,
-	SKILL_INSTALL_OFFER_OPTION_NEVER,
-] as const;
 
 export interface PendingSkillRequest {
 	name: string;

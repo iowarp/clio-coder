@@ -22,7 +22,6 @@ import {
 } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import {
-	GUARDRAIL_DEFAULTS,
 	resolveGuardrail,
 	workerSynthesisReserveBlockReason,
 	workerSynthesisReserveDirective,
@@ -88,28 +87,6 @@ export const LOOP_SYNTHESIS_BACKSTOP_DENIALS = 2;
  */
 export const WIDE_BATCH_DENIAL_FLOOR = 32;
 
-/**
- * Default lifetime tool-call cap for a worker run. The configurable value lives
- * at `fleet.limits.toolCallsPerRun`; this default is re-exported for tests and
- * callers that reason about the guard's tuning in one place.
- */
-export const DEFAULT_WORKER_TOOL_CALL_CAP = GUARDRAIL_DEFAULTS.workerToolCallCap;
-
-/**
- * Default soft per-turn tool-call budget for the interactive orchestrator.
- * Crossing it blocks every further call this turn with a stop-and-summarize
- * directive; the orchestrator is otherwise uncapped on the premise that an
- * operator can intervene, which fails for weak local models that spray
- * distinct commands the identical-call detector never sees.
- *
- * Sized as a backstop, not a routine ceiling: verbatim retry spirals are the
- * identical-call detector's job, so this only has to catch a model spraying
- * DISTINCT unproductive calls. Legitimate deep work (a repo-wide audit runs
- * 25+ productive calls in one turn) must not be decapitated by it; mainstream
- * harnesses run 100+ calls per turn with no ceiling at all. Value and env
- * live at `safety.limits.chatToolCallsPerTurn`.
- */
-export const DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET = GUARDRAIL_DEFAULTS.turnToolCallBudget;
 /**
  * Hard ceiling sits this many calls above the soft budget. Reaching it
  * interrupts the turn outright instead of merely nudging, bounding a model

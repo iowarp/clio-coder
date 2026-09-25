@@ -120,26 +120,6 @@ function sameAccount(left: UsageSnapshot, right: UsageSnapshot): boolean {
 }
 
 /**
- * Lines for the welcome header: one per connected subscription, naming the
- * plan and whatever windows that provider actually reports.
- */
-export function welcomeQuotaLines(snapshots: ReadonlyArray<UsageSnapshot>): string[] {
-	const lines: string[] = [];
-	for (const snapshot of foldDuplicateAccounts(snapshots)) {
-		if (snapshot.status === "no_credentials") continue;
-		const head = snapshot.plan ? `${snapshot.displayName} · ${snapshot.plan}` : snapshot.displayName;
-		if (snapshot.status !== "ok") {
-			lines.push(`${head} · ${snapshot.message ?? snapshot.status}`);
-			continue;
-		}
-		const parts = snapshot.windows.map((window) => `${window.label} ${formatPct(window.usedPct)} used`);
-		if (snapshot.credits) parts.push(snapshot.credits.display);
-		lines.push(parts.length > 0 ? `${head} · ${parts.join(" · ")}` : `${head} · connected`);
-	}
-	return lines;
-}
-
-/**
  * One compact footer segment across providers.
  *
  * Weekly is the shared column because every provider observed so far
@@ -188,33 +168,6 @@ export function quotaSummaryLine(snapshots: ReadonlyArray<UsageSnapshot>): strin
 	const localPart = local?.credits ? `Local ${local.credits.display}` : null;
 	const parts = [paid, localPart].filter((part): part is string => part !== null);
 	return parts.length > 0 ? parts.join(" · ") : null;
-}
-
-/** Rows for the expanded dashboard's Status page, one provider per row. */
-export function statusPageQuotaRows(snapshots: ReadonlyArray<UsageSnapshot>): Array<{
-	label: string;
-	detail: string;
-	severity: QuotaSeverity;
-}> {
-	return foldDuplicateAccounts(snapshots).map((snapshot) => {
-		const label = snapshot.plan ? `${snapshot.displayName} (${snapshot.plan})` : snapshot.displayName;
-		if (snapshot.status !== "ok") {
-			return { label, detail: snapshot.message ?? snapshot.status, severity: "normal" as QuotaSeverity };
-		}
-		const windows = snapshot.windows.map(
-			(window) => `${window.label} ${formatPct(window.usedPct)} used${resetSuffix(window)}`,
-		);
-		if (snapshot.credits) windows.push(`credits ${snapshot.credits.display}`);
-		return {
-			label,
-			detail: windows.length > 0 ? windows.join(" · ") : "connected",
-			severity: snapshotSeverity(snapshot),
-		};
-	});
-}
-
-function resetSuffix(window: UsageWindow): string {
-	return window.resetsAt === null ? "" : ` (resets ${window.resetsAt.slice(0, 16).replace("T", " ")}Z)`;
 }
 
 /**

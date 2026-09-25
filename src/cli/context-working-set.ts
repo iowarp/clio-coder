@@ -312,7 +312,6 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 						threshold: parsed.threshold,
 						target: parsed.target,
 						settings,
-						seed: parsed.seed,
 						summaries: { keepRecentTokens: DEFAULT_KEEP_RECENT_TOKENS, summaryTokens: REPLAY_SUMMARY_TOKENS },
 					}),
 				}));

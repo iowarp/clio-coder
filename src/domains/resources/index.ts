@@ -38,7 +38,6 @@ export {
 	planLibraryInstall,
 	planLibraryUpdate,
 	releaseLibraryPlan,
-	removeLibraryEntry,
 	resolveLibraryPackage,
 	resolveLibraryRequirements,
 	syncLibrary,
@@ -58,9 +57,7 @@ export {
 	type LibraryStepStatus,
 	type LibraryStepVerification,
 	libraryImportOutcome,
-	libraryLifecyclePlanSummary,
 	planLibraryLifecycle,
-	pluginSnapshotRefreshHost,
 	releaseLibraryLifecycle,
 	retryLibraryRefresh,
 	verifyLibraryStep,
@@ -113,7 +110,6 @@ export {
 	type PromptTemplateRoot,
 	promptTemplateDisplayText,
 } from "./prompts/loader.js";
-export { parseCommandArgs, substituteArgs } from "./prompts/substitute.js";
 export { installedSkillNames, installedSkillPackages } from "./skills/availability.js";
 export {
 	buildSkillCatalogView,
@@ -129,10 +125,6 @@ export {
 	normalizedSkillHash,
 	parseSkillSourceSpec,
 	type SkillSourceSpec,
-	type SkillUpdateReport,
-	type SkillUpdateStatus,
-	type UpdateSkillsInput,
-	updateSkills,
 } from "./skills/install.js";
 export { type LexicalMatchMode, lexicalMatches } from "./skills/lexical-match.js";
 export {
@@ -167,7 +159,6 @@ export {
 	type MarketplaceSkillOrigin,
 	type MarketplaceStatus,
 	marketplaceInstallShaping,
-	resolveMarketplaceShaping,
 } from "./skills/marketplace.js";
 export {
 	checkSkillDrift,

@@ -4,7 +4,6 @@ export {
 	estimateMemoryTokens,
 	pruneStaleMemory,
 	rejectMemoryRecord,
-	selectApprovedMemory,
 } from "./operations.js";
 export {
 	applyScopeIdentity,
@@ -94,7 +93,6 @@ export {
 	taskMemoryHandoffSnapshot,
 } from "./task-memory-handoff.js";
 export {
-	parseTaskMemoryPolicyResponse,
 	runTaskMemoryPolicy,
 	TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
 	TASK_MEMORY_POLICY_MAX_OPERATIONS,

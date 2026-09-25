@@ -8,15 +8,7 @@
  * DEFAULT_SETTINGS tree and the chat-loop read at runtime.
  */
 
-import type { CompactionSettings } from "../../../core/defaults.js";
-
 export type { CompactionSettings } from "../../../core/defaults.js";
-
-export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
-	auto: true,
-	threshold: 0.8,
-	excludeLastTurns: 6,
-};
 
 /**
  * Tokens held in reserve for the summary response. Ported from

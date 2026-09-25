@@ -29,8 +29,6 @@ import {
  * no derived check runs nothing.
  */
 
-export const TOOLCHAIN_SOURCE_PATH = "(repository toolchain)";
-
 /** What discovery reads, named in the error an agent gets when nothing is found. */
 export const TOOLCHAIN_DISCOVERY_SOURCES =
 	"package.json scripts, .clio-coder/verifiers.yaml, pyproject.toml/pytest.ini/setup.cfg/tox.ini/noxfile.py, " +

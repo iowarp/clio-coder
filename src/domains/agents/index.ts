@@ -43,7 +43,6 @@ export {
 	fleetCodeSteps,
 	fleetLoopCheckStepId,
 	fleetLoopRepairStepId,
-	fleetLoopSteps,
 	fleetStepAncestors,
 	fleetStepBoundaries,
 	fleetStepWriteBoundary,
@@ -63,7 +62,7 @@ export type {
 	RecipeSource,
 } from "./recipe.js";
 export { parseAgentBudget } from "./recipe.js";
-export { parseAgentRecipeSchema, recipeSchemaFieldNames } from "./recipe-schema.js";
+export { parseAgentRecipeSchema } from "./recipe-schema.js";
 export type { AgentRecipeDiagnostic } from "./registry.js";
 export type {
 	CouncilReport,
@@ -111,6 +110,5 @@ export {
 	normalizeWriteBoundary,
 	normalizeWriteBoundaryEntry,
 	WRITE_BOUNDARY_MAX_ENTRIES,
-	writeBoundariesOverlap,
 	writeBoundaryCovers,
 } from "./write-boundary.js";

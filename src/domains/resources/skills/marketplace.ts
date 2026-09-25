@@ -341,22 +341,6 @@ export function marketplaceInstallShaping(skill: MarketplaceSkill): SkillInstall
 	return shaping;
 }
 
-/**
- * Recover the shaping for an installed skill by name and recorded source URL,
- * for `updateSkills`. Only a marketplace entry that still points at the same
- * upstream URL applies; a skill installed from a URL the index no longer
- * carries updates bare, as it was installed.
- */
-export function resolveMarketplaceShaping(options: DiscoverMarketplaceOptions = {}) {
-	return (installed: { name: string; sourceUrl: string }): SkillInstallShaping | undefined => {
-		const entry = getMarketplaceSkills(options).find(
-			(skill) => skill.name === installed.name && skill.sourceUrl === installed.sourceUrl,
-		);
-		if (!entry || (!entry.overlay && !entry.exclude)) return undefined;
-		return marketplaceInstallShaping(entry);
-	};
-}
-
 /** Skill-offer adapter: resolve a package and commit through the shared library engine. */
 export function installSkill(input: InstallSkillInput): InstallSkillResult {
 	const source = input.source.trim();

@@ -246,27 +246,6 @@ export interface ScopeUpdateInput {
 	pageSources: ReadonlyMap<string, ReadonlyArray<string>>;
 }
 
-/**
- * Decide what an update run owes. A page is rewritten when a source it claims
- * has changed or when its file is missing; everything else is already current
- * and is skipped. This is what replaces asking a model to guess which pages a
- * diff invalidates: the answer is computed from the sources each page recorded
- * in its own front matter.
- */
-export function scopePlanForUpdate(input: ScopeUpdateInput): WikiPlan {
-	const changedPrefixes = [...input.changedPaths];
-	const pages = input.plan.pages.map((page): WikiPlanPage => {
-		if (page.status !== "written") return page;
-		if (!input.existingPages.has(page.path)) return { ...page, status: "pending", attempts: 0 };
-		const claimed = [...(input.pageSources.get(page.path) ?? []), ...page.sources, ...(page.dependencies ?? [])];
-		const touched = claimed.some((source) =>
-			changedPrefixes.some((changed) => changed === source || changed.startsWith(`${source}/`)),
-		);
-		return touched ? { ...page, status: "pending", attempts: 0 } : { ...page, status: "written" };
-	});
-	return { ...input.plan, pages };
-}
-
 /** An explicit operator retry includes exhausted pages without erasing their attempt history. */
 export function pendingPages(plan: WikiPlan, retryExhausted = false): WikiPlanPage[] {
 	return plan.pages.filter((page) => page.status !== "written" && (retryExhausted || page.attempts < MAX_PAGE_ATTEMPTS));

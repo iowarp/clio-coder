@@ -17,8 +17,6 @@ import type {
 	ToolSpec,
 } from "./registry.js";
 
-export const ASK_USER_OTHER_LABEL = "Other (type your answer)";
-
 const MAX_DECISIONS = 24;
 const DEFAULT_MAX_ROUNDS = 6;
 const MAX_ROUNDS = 24;
