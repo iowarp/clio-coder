@@ -44,8 +44,6 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 		cacheReadTokenCount: 0,
 		cacheWriteTokenCount: 0,
 		reasoningTokenCount: 0,
-		sessionShellHash: null,
-		dynamicHash: null,
 		costUsd: 0,
 		durationMs: 1,
 		exitCode: 0,

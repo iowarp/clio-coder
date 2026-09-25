@@ -29,8 +29,7 @@ export interface SafetyContract {
 
 	/**
 	 * Full evaluation: classify + damage-control match + decision. Writes the
-	 * safety-net audit row, emits safety.classified, and emits safety.blocked
-	 * on a block. Registry admission writes any final autonomy disposition
+	 * safety-net audit row and emits safety.blocked on a block. Registry admission writes any final autonomy disposition
 	 * through `audit.recordToolCall`.
 	 */
 	evaluate(call: ClassifierCall, posture?: string): SafetyDecision;

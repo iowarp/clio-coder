@@ -105,8 +105,6 @@ const COMPLETED: DispatchCompletedPayload = {
 	costProvenance: "estimated",
 	durationMs: 1500,
 	exitCode: 0,
-	sessionShellHash: null,
-	dynamicHash: null,
 	toolActivity: null,
 	outcome: "succeeded",
 	outcomeCode: null,
