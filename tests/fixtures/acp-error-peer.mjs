@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 
-const modelPin = process.argv[2] === "model-pin";
+const mode = process.argv[2];
+const modelPin = mode === "model-pin" || mode === "model-variants";
 let selectedModel = "gpt-6-astra[medium]";
 
 function send(value) {
@@ -22,7 +23,11 @@ for await (const line of createInterface({ input: process.stdin })) {
 					? {
 							models: {
 								currentModelId: selectedModel,
-								availableModels: [{ modelId: selectedModel }, { modelId: "gpt-6-luna[medium]" }],
+								availableModels: [
+									{ modelId: selectedModel },
+									{ modelId: "gpt-6-luna[medium]" },
+									...(mode === "model-variants" ? [{ modelId: "gpt-6-luna[high]" }] : []),
+								],
 							},
 						}
 					: {}),
@@ -44,8 +49,12 @@ for await (const line of createInterface({ input: process.stdin })) {
 			send({
 				jsonrpc: "2.0",
 				id: request.id,
-				result: { stopReason: selectedModel === "gpt-6-luna[medium]" ? "end_turn" : "refusal" },
+				result: { stopReason: selectedModel.startsWith("gpt-6-luna[") ? "end_turn" : "refusal" },
 			});
+			continue;
+		}
+		if (mode === "missing-stop-reason") {
+			send({ jsonrpc: "2.0", id: request.id, result: {} });
 			continue;
 		}
 		send({
@@ -58,7 +67,9 @@ for await (const line of createInterface({ input: process.stdin })) {
 					content: {
 						type: "text",
 						text:
-							'Warning: model metadata missing.\n{"type":"error","status":400,"error":{"message":"The model is not supported."}}',
+							mode === "anthropic-error"
+								? '{"type":"error","error":{"type":"invalid_request_error","message":"The model is not supported."}}'
+								: 'Warning: model metadata missing.\n{"type":"error","status":400,"error":{"message":"The model is not supported."}}',
 					},
 				},
 			},

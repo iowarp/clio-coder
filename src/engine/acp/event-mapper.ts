@@ -55,10 +55,13 @@ export class AcpEventMapper {
 		} catch {
 			return null;
 		}
-		if (!isRecord(value) || value.type !== "error" || typeof value.status !== "number" || value.status < 400) return null;
+		if (!isRecord(value) || value.type !== "error") return null;
 		const error = isRecord(value.error) ? value.error : null;
 		if (typeof error?.message !== "string" || error.message.length === 0) return null;
-		return `ACP peer reported HTTP ${value.status}: ${error.message}`;
+		if (value.status !== undefined && (typeof value.status !== "number" || value.status < 400)) return null;
+		return typeof value.status === "number"
+			? `ACP peer reported HTTP ${value.status}: ${error.message}`
+			: `ACP peer reported error: ${error.message}`;
 	}
 
 	mapUpdate(params: unknown): Array<AgentEvent | ClioWorkerEvent> {
@@ -96,8 +99,10 @@ export class AcpEventMapper {
 	}
 
 	finalEvents(response: AcpPromptResponse | null, reportedFailure: string | null = null): AgentEvent[] {
-		const stopReason = typeof response?.stopReason === "string" ? response.stopReason : "end_turn";
-		const agentStopReason = reportedFailure === null ? stopReasonForAgent(stopReason) : "error";
+		const missingStopReason = typeof response?.stopReason !== "string" || response.stopReason.length === 0;
+		const stopReason = missingStopReason ? "error" : (response?.stopReason ?? "error");
+		const failure = reportedFailure ?? (missingStopReason ? "ACP prompt response missing stopReason" : null);
+		const agentStopReason = failure === null ? stopReasonForAgent(stopReason) : "error";
 		const content: Array<Record<string, unknown>> = [];
 		if (this.assistantThinking.length > 0) {
 			content.push({ type: "thinking", text: this.assistantThinking });
@@ -110,8 +115,8 @@ export class AcpEventMapper {
 			content,
 			timestamp: Date.now(),
 			stopReason: agentStopReason,
-			...(reportedFailure !== null || errorMessageForStopReason(stopReason) !== undefined
-				? { errorMessage: reportedFailure ?? errorMessageForStopReason(stopReason) }
+			...(failure !== null || errorMessageForStopReason(stopReason) !== undefined
+				? { errorMessage: failure ?? errorMessageForStopReason(stopReason) }
 				: {}),
 			...(response?.usage !== undefined ? { usage: response.usage } : {}),
 		} as unknown as AgentMessage;

@@ -31,6 +31,8 @@ export interface AcpDelegationRunInput {
 	task: string;
 	/** Explicit peer model requested for this run. */
 	model?: string;
+	/** Explicit effort for a peer model that advertises effort variants. */
+	thinkingLevel?: string;
 	systemPrompt?: string;
 	dynamicPromptMessages?: ReadonlyArray<{ body: string }>;
 	cwd: string;
@@ -337,6 +339,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	}
 
 	const promise = (async (): Promise<AcpDelegationResult> => {
+		let selectedModelId: string | null = null;
 		try {
 			emit({ type: "agent_start" } as AgentEvent);
 			initialized = await transport.request<AcpInitializeResponse>(
@@ -371,14 +374,33 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					.filter((id): id is string => typeof id === "string");
 				const current = typeof models?.currentModelId === "string" ? models.currentModelId : null;
 				const matches = (id: string): boolean => id === input.model || id.startsWith(`${input.model}[`);
-				const selected =
-					current !== null && ids.includes(current) && matches(current)
-						? current
-						: (ids.find((id) => id === input.model) ?? ids.find(matches));
-				if (selected === undefined) throw new Error(`ACP peer does not offer requested model '${input.model}'`);
+				const matching = ids.filter(matches);
+				const requested =
+					input.thinkingLevel !== undefined && !input.model.endsWith("]")
+						? `${input.model}[${input.thinkingLevel}]`
+						: input.model;
+				const selected = ids.includes(requested)
+					? requested
+					: input.thinkingLevel !== undefined || input.model.endsWith("]")
+						? undefined
+						: current !== null && matching.includes(current)
+							? current
+							: matching.length === 1
+								? matching[0]
+								: undefined;
+				if (selected === undefined) {
+					throw new Error(
+						matching.length > 1 && input.thinkingLevel === undefined
+							? `ACP peer offers multiple efforts for requested model '${input.model}'; specify thinkingLevel`
+							: `ACP peer does not offer requested model '${requested}'`,
+					);
+				}
 				if (selected !== current) {
 					await transport.request("session/set_model", { sessionId, modelId: selected }, connectTimeoutMs);
 				}
+				selectedModelId = selected;
+			} else if (isRecord(session) && isRecord(session.models) && typeof session.models.currentModelId === "string") {
+				selectedModelId = session.models.currentModelId;
 			}
 			if (aborted) {
 				transport.notify("session/cancel", { sessionId });
@@ -403,14 +425,18 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				mergeUsage(usage, promptResponse?.usage);
 				mergeUsage(usage, promptResponse?.tokenUsage);
 			}
-			const reportedFailure = mapper.reportedFailure();
+			const reportedFailure =
+				mapper.reportedFailure() ??
+				(typeof promptResponse?.stopReason === "string" && promptResponse.stopReason.length > 0
+					? null
+					: "ACP prompt response missing stopReason");
 			for (const event of mapper.finalEvents(promptResponse ?? null, reportedFailure)) emit(event);
 			const stopReason =
 				reportedFailure !== null
 					? "error"
 					: typeof promptResponse?.stopReason === "string"
 						? promptResponse.stopReason
-						: "end_turn";
+						: "error";
 			const toolSnapshot = mediator.snapshot();
 			return {
 				messages: [],
@@ -422,6 +448,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				usage,
 				delegation: {
 					acpSessionId: sessionId,
+					...(selectedModelId !== null ? { selectedModelId } : {}),
 					initialize: initialized,
 					toolCallsRequested: toolSnapshot.toolCallsRequested,
 					toolCallsApproved: toolSnapshot.toolCallsApproved,
@@ -445,6 +472,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				usage,
 				delegation: {
 					acpSessionId: sessionId,
+					...(selectedModelId !== null ? { selectedModelId } : {}),
 					initialize: initialized,
 					toolCallsRequested: toolSnapshot.toolCallsRequested,
 					toolCallsApproved: toolSnapshot.toolCallsApproved,
