@@ -378,6 +378,7 @@ function workspaceFacts(deps: FooterDashboardDeps, branchSlot: string | null): W
  */
 class FooterText extends Text {
 	private composedWidth: number | null = null;
+	private composedText = "";
 	private readonly compose: (width: number) => string;
 
 	constructor(compose: (width: number) => string) {
@@ -387,7 +388,10 @@ class FooterText extends Text {
 
 	composeAt(width: number): void {
 		this.composedWidth = width;
-		this.setText(this.compose(width));
+		const text = this.compose(width);
+		if (text === this.composedText) return;
+		this.composedText = text;
+		this.setText(text);
 	}
 
 	override render(width: number): string[] {
