@@ -1156,6 +1156,101 @@ function gitIgnored(paths: ReadonlyArray<string>): Set<string> {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// readme-shape: the README's structure is a contract (CONTRIBUTING.md,
+// "README contract"). Between April and September 2026 it was rewritten five
+// times and re-inflated by release and feature passes within weeks each time,
+// because nothing but the Install block was checked. Length is deliberately
+// not limited; sections, their order and the required elements are.
+// ---------------------------------------------------------------------------
+const README_SECTIONS = [
+	"Get started",
+	"Why Clio",
+	"Models",
+	"Everyday use",
+	"Safety",
+	"Install",
+	"Documentation",
+	"Contribute",
+	"Acknowledgements",
+] as const;
+const README_SCREENSHOT = "assets/readme/clio-session.png";
+const README_CONTRACT = "change CONTRIBUTING.md#readme-contract and README_SECTIONS in the same commit";
+
+function checkReadmeShape(): void {
+	const lines = readRoot("README.md").split(/\r?\n/);
+	const visible: string[] = [];
+	let fenced = false;
+	let detailsDepth = 0;
+	for (const line of lines) {
+		if (/^\s*```/.test(line)) fenced = !fenced;
+		if (fenced) continue;
+		detailsDepth += (line.match(/<details\b/g) ?? []).length;
+		if (detailsDepth === 0) visible.push(line);
+		detailsDepth -= (line.match(/<\/details>/g) ?? []).length;
+		if (detailsDepth < 0) {
+			fail("readme-shape", "README.md closes a <details> block it never opened");
+			return;
+		}
+	}
+
+	const h1 = visible.filter((line) => /^# /.test(line));
+	// Clio's docs-engine section index only reads Markdown headings; an HTML
+	// <h1> drops the "Clio Coder > …" breadcrumb from documentation search.
+	if (h1.length !== 1 || h1[0] !== "# Clio Coder") {
+		fail("readme-shape", `README.md needs exactly one Markdown H1, "# Clio Coder"; found ${JSON.stringify(h1)}`);
+	}
+	const h2 = visible.filter((line) => /^## /.test(line)).map((line) => line.slice(3).trim());
+	if (JSON.stringify(h2) !== JSON.stringify(README_SECTIONS)) {
+		fail(
+			"readme-shape",
+			`README.md sections must be ${JSON.stringify(README_SECTIONS)} in that order; found ${JSON.stringify(h2)}. Put new material in docs/ or inside an existing section, or ${README_CONTRACT}`,
+		);
+	}
+	const deeper = visible.filter((line) => /^#{3,6} /.test(line));
+	if (deeper.length > 0) {
+		fail(
+			"readme-shape",
+			`README.md adds sub-headings outside a <details> block: ${JSON.stringify(deeper)}. Use a bold lead sentence or a collapsed block, or ${README_CONTRACT}`,
+		);
+	}
+	for (const banner of visible.filter((line) => /^#+ .*\b(new in|what'?s new|what changed)\b/i.test(line))) {
+		fail("readme-shape", `release notes belong in CHANGELOG.md, not a README heading: ${JSON.stringify(banner)}`);
+	}
+
+	const text = lines.join("\n");
+	// The README ships to npm without assets/, so an image must be an absolute URL.
+	for (const match of text.matchAll(/<img\b[^>]*\bsrc="([^"]+)"|!\[[^\]]*\]\(([^)\s]+)/g)) {
+		const src = match[1] ?? match[2] ?? "";
+		if (!src.startsWith("https://")) {
+			fail(
+				"readme-shape",
+				`README.md image ${JSON.stringify(src)} must be an absolute https URL; npm renders it without assets/`,
+			);
+		}
+	}
+	if (!text.includes(`https://raw.githubusercontent.com/iowarp/clio-coder/main/${README_SCREENSHOT}`)) {
+		fail("readme-shape", `README.md must show the product screenshot ${README_SCREENSHOT} from main`);
+	} else if (!existsSync(join(root, README_SCREENSHOT))) {
+		fail("readme-shape", `${README_SCREENSHOT} is referenced by README.md but missing from the tree`);
+	}
+
+	const sectionText = (name: string) => text.split(/^## /m).find((part) => part.startsWith(`${name}\n`)) ?? "";
+	if (!/<details>\s*<summary><strong>For agents<\/strong><\/summary>/.test(sectionText("Documentation"))) {
+		fail(
+			"readme-shape",
+			"the agent orientation must stay a collapsed <details> block titled For agents under ## Documentation",
+		);
+	}
+	// Version numbers outside Install are release chronology that goes stale the
+	// day after a release; the Install pin is the one versioned line.
+	for (const name of README_SECTIONS.filter((section) => section !== "Install")) {
+		for (const version of sectionText(name).match(/\bv?\d+\.\d+\.\d+\b/g) ?? []) {
+			fail("readme-shape", `## ${name} names version ${version}; only the ## Install pin carries a release number`);
+		}
+	}
+}
+
 function checkPackaging(): void {
 	const manifest = JSON.parse(readRoot("scripts/release-manifest.json")) as ReleaseManifest;
 	const packageFiles = (JSON.parse(readRoot("package.json")) as { files: string[] }).files;
@@ -1708,6 +1803,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["configuration-reference", checkConfigurationReference],
 	["theme-discipline", checkThemeDiscipline],
 	["readme-install-block", checkReadmeInstallBlock],
+	["readme-shape", checkReadmeShape],
 	["packaging", checkPackaging],
 	["gitignored-reference", checkGitignoredReference],
 	["prompts", checkPromptsDocLinks],
