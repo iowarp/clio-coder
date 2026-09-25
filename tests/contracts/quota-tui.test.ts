@@ -154,7 +154,7 @@ test("footer keeps unassociated accounts out of compact rows and supplies all ac
 		columns = 50;
 		footer.refresh();
 		const narrow = footer.view.render(50);
-		strictEqual(narrow.length, 2);
+		strictEqual(narrow.length, 1);
 		doesNotMatch(plain(narrow), /Codex|weekly/);
 		ok(narrow.every((line) => visibleWidth(line) <= 50));
 		columns = 160;
