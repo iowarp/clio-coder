@@ -319,7 +319,7 @@ test("finished agents collapse into bounded history while retries retain live ca
 	const text = plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u"));
 	match(text, /Active retry task/);
 	match(text, /INVOCATION HISTORY · 8 finished/);
-	match(text, /Scout · completed.*internal.*1[2]s.*↑68k ↓2k/);
+	match(text, /Scout · completed.*internal.*1[2]s.*↑ 68k ↓ 2k/);
 	match(text, /4 more finished runs/);
 	doesNotMatch(text, /Historical verbose task/);
 	snapshot.dispatchRows = [{ ...row, status: "failed", outcomeDetail: "result_contract_exhausted" }];

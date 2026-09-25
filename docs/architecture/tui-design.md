@@ -271,3 +271,5 @@ Council selection follows the visible newest-member projection and transfers to 
 Fleet Runs offers Enter detail only for ordinary runs, because council rows have no member detail view.
 
 Live shortcut labels use the canonical formatter and reflect remapped bindings.
+
+Footer status and metric labels share retry, completion, token-rate and failure wording.

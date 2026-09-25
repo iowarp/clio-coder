@@ -46,7 +46,7 @@ export function tokensSegment(usage: UsageBreakdown | null | undefined): string 
 	const reasoningChip = formatReasoningChip({ tokens: reasoning, provenance: "provider" }, formatFooterTokens);
 	const reasoningPart = reasoningChip === null ? "" : ` ${reasoningChip}`;
 	const totalPart = total > 0 ? ` Σ${formatFooterTokens(total)}` : "";
-	return `${GLYPH.up}${formatFooterTokens(input)} ${GLYPH.down}${formatFooterTokens(output)}${reasoningPart}${totalPart}`;
+	return `${GLYPH.up} ${formatFooterTokens(input)} ${GLYPH.down} ${formatFooterTokens(output)}${reasoningPart}${totalPart}`;
 }
 
 export function throughputSegment(metric: TokenThroughputSnapshot | null | undefined): string | null {
@@ -61,7 +61,7 @@ export function throughputDetailSegment(metric: TokenThroughputSnapshot | null |
 	const parts = [`gen ${formatCompactMs(metric.durationMs)}`];
 	if (typeof metric.ttftMs === "number" && Number.isFinite(metric.ttftMs))
 		parts.push(`ttft ${formatCompactMs(metric.ttftMs)}`);
-	parts.push(`${GLYPH.down}${formatFooterTokens(metric.outputTokens)}`);
+	parts.push(`${GLYPH.down} ${formatFooterTokens(metric.outputTokens)}`);
 	return parts.join(" · ");
 }
 
@@ -112,7 +112,7 @@ export function dispatchSegment(rows: ReadonlyArray<DispatchBoardRow> | null | u
 			}
 			if (counts.active > 0) parts.push(`${counts.active} active`);
 			if (counts.completed > 0) parts.push(`${counts.completed} done`);
-			if (counts.failed > 0) parts.push(`${counts.failed} fail`);
+			if (counts.failed > 0) parts.push(`${counts.failed} failed`);
 			if (counts.tokens > 0) parts.push(`${formatFooterTokens(counts.tokens)}tok`);
 			return `${group.label} ${parts.length > 0 ? parts.join(" ") : `${group.rows.length} runs`}`;
 		})

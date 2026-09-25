@@ -161,7 +161,7 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 			const audience = row.agentAudience === "shadow" || row.agentAudience === "internal" ? "internal" : "fleet";
 			const usage =
 				row.inputTokens > 0 || row.outputTokens > 0
-					? ` · ${GLYPH.up}${formatFooterTokens(row.inputTokens)} ${GLYPH.down}${formatFooterTokens(row.outputTokens)}`
+					? ` · ${GLYPH.up} ${formatFooterTokens(row.inputTokens)} ${GLYPH.down} ${formatFooterTokens(row.outputTokens)}`
 					: "";
 			const compact = [
 				...wrapTextWithAnsi(
@@ -480,7 +480,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	const names = (items: string[] | undefined) =>
 		items === undefined ? "unreported" : items.length ? `${items.length} · ${items.join(", ")}` : "none";
 	const left: [string, string][] = [
-		["Target", state.session.target ?? "not selected"],
+		["Target", state.session.target ?? "No model selected"],
 		["Tracked cost", formatCostAggregate(state.sessionCost) ?? "not yet priced"],
 		["Clio ceiling", state.costCeilingUsd === undefined ? "unknown" : `$${state.costCeilingUsd} · tracked pricing only`],
 		["MCP connected", names(state.connections?.mcp)],
@@ -491,7 +491,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 				? `${state.context.extensions.active} active / ${state.context.extensions.installed} installed`
 				: "unreported",
 		],
-		["Workers", `${active.length} active · ${completed} done · ${failed} unsuccessful`],
+		["Workers", `${active.length} active · ${completed} done · ${failed} failed`],
 		["Tools", `${toolCalls} calls · ${state.toolCounts.active ?? 0} active · ${state.toolCounts.errors} failed`],
 		["Worker cap", capacity ? `${capacity.limit} · ${capacity.bound}` : "not sampled"],
 	];
@@ -523,7 +523,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 		[
 			"Network",
 			resource?.network
-				? `${resource.network.name} ${GLYPH.down}${throughput(resource.network.receivedPerSecond)} ${GLYPH.up}${throughput(resource.network.sentPerSecond)}`
+				? `${resource.network.name} ${GLYPH.down} ${throughput(resource.network.receivedPerSecond)} ${GLYPH.up} ${throughput(resource.network.sentPerSecond)}`
 				: "warming up / unavailable",
 		],
 		[

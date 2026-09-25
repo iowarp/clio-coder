@@ -69,7 +69,7 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 		case "retrying": {
 			const retry = status.retry;
 			const wait = retry && retry.waitMs > 0 ? ` · ${formatStatusElapsed(retry.waitMs)}` : "";
-			return { text: `retrying ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}${wait}`, toneHint: "warn" };
+			return { text: `Retrying ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}${wait}`, toneHint: "warn" };
 		}
 		case "compacting":
 			return { text: "Compacting context", toneHint: "normal" };
@@ -85,9 +85,9 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 			const stop = status.summary?.stopReason ?? "stop";
 			const elapsed = status.summary ? ` · ${formatStatusElapsed(status.summary.elapsedMs)}` : "";
 			if (stop === "cancelled" || stop === "aborted")
-				return { text: `${GLYPH.cancelled} cancelled${elapsed}`, toneHint: "muted" };
-			if (stop === "error") return { text: `${GLYPH.error} failed${elapsed}`, toneHint: "error" };
-			return { text: `${GLYPH.ok} done${elapsed}`, toneHint: "ok" };
+				return { text: `${GLYPH.cancelled} Cancelled${elapsed}`, toneHint: "muted" };
+			if (stop === "error") return { text: `${GLYPH.error} Failed${elapsed}`, toneHint: "error" };
+			return { text: `${GLYPH.ok} Done${elapsed}`, toneHint: "ok" };
 		}
 		default:
 			return null;

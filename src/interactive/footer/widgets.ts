@@ -536,7 +536,7 @@ function formattedThroughput(theme: ClioTheme, throughput: TokenThroughputSnapsh
 	const tps = finiteNonNegative(throughput?.tokensPerSecond);
 	if (tps <= 0) return null;
 	const rounded = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10;
-	const parts = [theme.fg("success", `${GLYPH.speed}${rounded}/s`)];
+	const parts = [theme.fg("success", `${GLYPH.speed}${rounded} Tk/s`)];
 	const ttft = finiteNonNegative(throughput?.ttftMs);
 	if (ttft > 0) parts.push(theme.fg("muted", `ttft ${formatCompactMs(ttft)}`));
 	return joinChips(theme, parts);
@@ -557,8 +557,8 @@ function liveTokenValue(
 		finiteNonNegative(lastTurn?.inputTokens) ||
 		finiteNonNegative(sessionTokens?.input);
 	const parts = [
-		output > 0 ? theme.fg("success", `${GLYPH.down}${formatFooterTokens(output)}`) : null,
-		input > 0 ? theme.fg("muted", `${GLYPH.up}${formatFooterTokens(input)}`) : null,
+		output > 0 ? theme.fg("success", `${GLYPH.down} ${formatFooterTokens(output)}`) : null,
+		input > 0 ? theme.fg("muted", `${GLYPH.up} ${formatFooterTokens(input)}`) : null,
 	];
 	const joined = joinChips(theme, parts);
 	return joined.length > 0 ? joined : null;
@@ -584,7 +584,7 @@ function lastTurnDetails(theme: ClioTheme, lastTurn: TurnSummary): string {
 	const parts: Array<string | null> = [
 		theme.fg(
 			"muted",
-			`${GLYPH.up}${formatFooterTokens(lastTurn.inputTokens)} ${GLYPH.down}${formatFooterTokens(lastTurn.outputTokens)}`,
+			`${GLYPH.up} ${formatFooterTokens(lastTurn.inputTokens)} ${GLYPH.down} ${formatFooterTokens(lastTurn.outputTokens)}`,
 		),
 		reasoningChip(theme, lastTurn),
 		lastTurn.cacheReadTokens > 0 || lastTurn.cacheWriteTokens > 0
@@ -755,7 +755,7 @@ function harnessPhasePresentation(status: AgentStatus, width: number, now: numbe
 			const maxAttempts = status.retry?.maxAttempts ?? 0;
 			return {
 				glyph: GLYPH.phaseRetry,
-				label: ultraNarrow ? "retry" : `retry ${attempt}/${maxAttempts}`,
+				label: ultraNarrow ? "Retrying" : `Retrying ${attempt}/${maxAttempts}`,
 				token: "warning",
 				live: false,
 			};
@@ -779,7 +779,7 @@ function harnessPhasePresentation(status: AgentStatus, width: number, now: numbe
 			if (stop === "aborted" || stop === "cancelled")
 				return { glyph: GLYPH.cancelled, label: "Cancelled", token: "muted", live: false };
 			if (stop === "length") return { glyph: GLYPH.warn, label: "Output limit", token: "warning", live: false };
-			return { glyph: GLYPH.ok, label: "Ready", token: "success", live: false };
+			return { glyph: GLYPH.ok, label: "Done", token: "success", live: false };
 		}
 	}
 }
