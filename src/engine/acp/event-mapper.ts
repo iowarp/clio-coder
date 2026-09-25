@@ -44,6 +44,8 @@ export class AcpEventMapper {
 	private assistantThinking = "";
 	/** Tool-call id to its `performance.now()` start mark; spans only, never an instant. */
 	private readonly toolStarts = new Map<string, number>();
+	/** ACP updates may omit kind after the first frame; titles can change. */
+	private readonly toolKinds = new Map<string, string>();
 
 	/** Some ACP bridges stream a provider error as text, then report `end_turn`. */
 	reportedFailure(): string | null {
@@ -126,6 +128,8 @@ export class AcpEventMapper {
 	private mapToolUpdate(update: AcpToolCallUpdate): Array<AgentEvent | ClioWorkerEvent> {
 		const toolCallId = update.toolCallId ?? update.title ?? `acp-tool-${this.toolStarts.size + 1}`;
 		const title = update.title ?? update.kind ?? "ACP tool";
+		if (!this.toolKinds.has(toolCallId)) this.toolKinds.set(toolCallId, update.kind ?? "other");
+		const tool = this.toolKinds.get(toolCallId) ?? "other";
 		const status = update.status ?? "pending";
 		const out: Array<AgentEvent | ClioWorkerEvent> = [];
 		if (!this.toolStarts.has(toolCallId) && (status === "pending" || status === "in_progress")) {
@@ -135,11 +139,11 @@ export class AcpEventMapper {
 			this.toolStarts.set(toolCallId, performance.now());
 			// A peer's `rawInput` is its own argument object and never reaches an
 			// operator surface. The descriptor composed from it here does.
-			const action = describeCallAction(update.kind ?? title, update.rawInput);
+			const action = describeCallAction(tool, update.rawInput);
 			out.push({
 				type: "clio_coder_tool_start",
 				payload: {
-					tool: update.kind ?? title,
+					tool,
 					toolCallId,
 					posture: "operating",
 					startedAt,
@@ -168,14 +172,14 @@ export class AcpEventMapper {
 			out.push({
 				type: "clio_coder_tool_finish",
 				payload: {
-					tool: update.kind ?? title,
+					tool,
 					toolCallId,
 					posture: "operating",
 					durationMs: Math.round(performance.now() - startedAtClock),
 					outcome: isError ? "error" : "ok",
-					decision: "allowed",
 				},
 			});
+			this.toolKinds.delete(toolCallId);
 		}
 		return out;
 	}

@@ -4684,7 +4684,12 @@ export function createDispatchBundle(
 				toolStats: finalToolStats,
 				// Clio-observed telemetry only: an external ACP agent executes its
 				// own tools, so no zero-activity note is derived from this record.
-				toolActivity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
+				toolActivity: summarizeToolActivity(toolStats, (tool) => {
+					if (tool === "edit" || tool === "delete" || tool === "move") return "write";
+					if (tool === "execute") return "execute";
+					if (tool === "read" || tool === "search" || tool === "think" || tool === "fetch") return "read";
+					return "unknown";
+				}),
 				verification: deriveReceiptVerification({ toolStats: finalToolStats }, { acpDelegation: true }),
 				routingIntent: req.routingIntent ?? defaultRoutingIntent(req),
 				quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
