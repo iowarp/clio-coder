@@ -588,7 +588,7 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 			? theme.fg("dim", isTerminalStatus(row.status) ? "receipt not read back" : "not sealed yet")
 			: theme.fg(
 					trustVerdictToken(row.trust.verdict),
-					`${trustVerdictGlyph(row.trust.verdict)} ${row.trust.verdict}; ${compact ? trustStateWord("validationGrounding", "absent") : row.trust.text}`,
+					`${trustVerdictMark(row.trust.verdict)}${row.trust.verdict}; ${compact ? trustStateWord("validationGrounding", "absent") : row.trust.text}`,
 				);
 	const host =
 		row.hostVerification === undefined ? "" : ` · ${theme.fg("muted", `host checks ${row.hostVerification}`)}`;
@@ -1188,15 +1188,14 @@ function trustVerdictToken(verdict: TrustVerdict): ClioToken {
 	}
 }
 
-function trustVerdictGlyph(verdict: TrustVerdict): string {
-	switch (verdict) {
-		case "reviewed":
-			return GLYPH.ok;
-		case "compromised":
-			return GLYPH.error;
-		default:
-			return "◇";
-	}
+/**
+ * Only the two settled verdicts carry a glyph. `◇` and `◆` already mark who
+ * started a run on this board, so a hollow diamond here read as an origin.
+ */
+function trustVerdictMark(verdict: TrustVerdict): string {
+	if (verdict === "reviewed") return `${GLYPH.ok} `;
+	if (verdict === "compromised") return `${GLYPH.error} `;
+	return "";
 }
 
 function terminalDetail(row: DispatchBoardRow): string | null {

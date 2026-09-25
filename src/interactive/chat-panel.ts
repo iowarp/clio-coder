@@ -1866,6 +1866,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const entryIsStable = (entry: TranscriptEntry): boolean =>
 		(entry.role === "user" && (entry.status?.() ?? "committed") === "committed") ||
 		(entry.role === "replayBlock" && entry.isLive?.() !== true) ||
+		entry.role === "retryStatus" ||
 		(entry.role === "worker" && !entry.state.pending) ||
 		(entry.role === "assistant" &&
 			!entry.pending &&
@@ -2569,6 +2570,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (event.type === "retry_status") {
 				const last = transcript[transcript.length - 1];
 				if (last?.role === "retryStatus" && last.status.attempt === event.status.attempt) {
+					// A retry row is stable, so it caches and can freeze; a new phase
+					// or countdown for the same attempt must drop that render first.
+					invalidateEntryCache(last);
 					last.status = event.status;
 				} else {
 					transcript.push({ role: "retryStatus", status: event.status, at: stamp() });
