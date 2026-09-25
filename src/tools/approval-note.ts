@@ -56,12 +56,39 @@ function capitalize(text: string): string {
 	return text.length === 0 ? text : `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
 }
 
-/** Prepend the note to a result's model-facing text without touching anything else. */
-export function withApprovalNote<T extends { kind: "ok"; output: string } | { kind: "error"; message: string }>(
-	result: T,
-	input: ApprovalNoteInput,
-): T {
-	const note = approvalNote(input);
-	if (result.kind === "ok") return { ...result, output: `${note}\n${result.output}` };
-	return { ...result, message: `${note}\n${result.message}` };
+type NotedResult = ({ kind: "ok"; output: string } | { kind: "error"; message: string }) & {
+	modelContext?: string;
+	details?: Record<string, unknown>;
+};
+
+/**
+ * Prepend the note to every text the result can show the model. A tool that
+ * declares a result disposition, bash among them, is read through its
+ * `modelContext` projection rather than `output`, and the live retest of
+ * BT-003 lost the note there. The note lands after the projection's byte cap,
+ * so it displaces none of the result, and `contextBytes` counts it so the
+ * recorded size stays the size the model received.
+ */
+export function withApprovalNote<T extends NotedResult>(result: T, input: ApprovalNoteInput): T {
+	const note = `${approvalNote(input)}\n`;
+	const text = result.kind === "ok" ? { output: `${note}${result.output}` } : { message: `${note}${result.message}` };
+	if (result.modelContext === undefined) return { ...result, ...text };
+	const disposition = result.details?.resultDisposition;
+	const details =
+		isRecord(disposition) && typeof disposition.contextBytes === "number"
+			? {
+					...result.details,
+					resultDisposition: { ...disposition, contextBytes: disposition.contextBytes + Buffer.byteLength(note) },
+				}
+			: result.details;
+	return {
+		...result,
+		...text,
+		modelContext: `${note}${result.modelContext}`,
+		...(details === undefined ? {} : { details }),
+	};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
