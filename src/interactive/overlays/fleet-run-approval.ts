@@ -22,7 +22,7 @@ import {
 import type { FleetRunPreview, FleetRunPreviewStep } from "../fleet-run-preview.js";
 import { formatUsd } from "../footer/widgets.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, rule } from "../theme/index.js";
+import { clioTheme, formatTargetLabel, rule } from "../theme/index.js";
 
 export const FLEET_RUN_APPROVAL_OVERLAY_TITLE = "Fleet run approval";
 
@@ -64,7 +64,10 @@ function formatFleetRunPreviewStep(step: FleetRunPreviewStep): string {
 		const gate = step.gate === undefined ? "" : ` · gate path ${step.gate.path}`;
 		return `code ${step.stepId}${loop} · command ${step.commandId ?? "?"}${gate} · ${step.scope} · ${formatWriteBoundary(step.writes)}`;
 	}
-	const route = step.route === undefined ? "route unresolved" : `${step.route.targetId} ▸ ${step.route.wireModelId}`;
+	const route =
+		step.route === undefined
+			? "route unresolved"
+			: formatTargetLabel(step.route.targetId, step.route.wireModelId, { abbreviate: false });
 	const node = step.route === undefined ? "" : ` · node ${step.route.nodeId}`;
 	const declaredRoute =
 		step.target !== undefined

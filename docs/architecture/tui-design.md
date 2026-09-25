@@ -253,3 +253,5 @@ Every transcript row follows a rigid 2-column gutter format:
 | Composer | [clio-editor.ts](../../src/interactive/clio-editor.ts) | `ClioEditor` |
 | Session transcript | [session-transcript.ts](../../src/interactive/session-transcript.ts) | `createSessionTranscript` |
 | Permission overlay | [permission-overlay.ts](../../src/interactive/permission-overlay.ts) | Permission presentation |
+
+Fleet cards and approvals share the target/model route spelling.

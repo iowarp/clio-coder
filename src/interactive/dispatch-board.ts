@@ -39,6 +39,7 @@ import {
 	dotSep,
 	fitUnits,
 	formatCompactMs,
+	formatTargetLabel,
 	frame,
 	GLYPH,
 	innerDivider,
@@ -652,7 +653,8 @@ function renderDispatchCard(
 	// The model id is user data and can outrun the card; mark the cut with `…`
 	// rather than hard-clipping it mid-token into a string that reads whole.
 	const targetKey = cardKvKey(theme, "target");
-	const targetLine = `${targetKey}${theme.fg("muted", fitIdentityLabel(sanitizeCallTargetText(`${row.runtimeKind}:${row.targetId} ▸ ${row.wireModelId}`), Math.max(1, contentWidth - visibleWidth(targetKey))))}`;
+	const route = `${sanitizeCallTargetText(String(row.runtimeKind))}${dotSep(theme)}${formatTargetLabel(row.targetId, row.wireModelId, { abbreviate: false })}`;
+	const targetLine = `${targetKey}${theme.fg("muted", fitIdentityLabel(route, Math.max(1, contentWidth - visibleWidth(targetKey))))}`;
 	// Fleet facts: node placement (absent means local), gate role badge, and
 	// reroute lineage. Whole units so overflow drops a fact, never clips one.
 	const statusUnits = [
@@ -692,12 +694,7 @@ function renderDispatchCard(
 		cardUnitsLine(theme, "run", [theme.fg("dim", row.runId)], contentWidth),
 		...(phaseCell === null ? [] : [cardUnitsLine(theme, "phase", [theme.fg("info", phaseCell)], contentWidth)]),
 		...(options.expanded === true
-			? cardWrappedValueLines(
-					theme,
-					"target",
-					theme.fg("muted", sanitizeCallTargetText(`${row.runtimeKind}:${row.targetId} ▸ ${row.wireModelId}`)),
-					contentWidth,
-				)
+			? cardWrappedValueLines(theme, "target", theme.fg("muted", route), contentWidth)
 			: [targetLine]),
 		...taskLines,
 		cardUnitsLine(theme, "status", statusUnits, contentWidth),
