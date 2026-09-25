@@ -36,14 +36,6 @@ export const TRUST_SUMMARY_MAX_REFS = 8;
  */
 export type TrustVerdict = "reviewed" | "grounded" | "unverified" | "compromised" | "unknown";
 
-export const TRUST_VERDICTS: ReadonlyArray<TrustVerdict> = [
-	"reviewed",
-	"grounded",
-	"unverified",
-	"compromised",
-	"unknown",
-];
-
 /** Bounded, versioned machine projection with references to the detailed artifacts. */
 export interface TrustSummaryProjection {
 	version: typeof TRUST_SUMMARY_VERSION;

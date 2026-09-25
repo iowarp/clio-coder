@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { finishContractEvidenceTags } from "../../src/domains/evidence/finish-contract-map.js";
+import { FINISH_CONTRACT_EVIDENCE_TAGS } from "../../src/domains/evidence/finish-contract-map.js";
 import { composeTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import { builtin } from "../../src/tools/builtin-tool-catalog.js";
@@ -189,7 +189,7 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 	});
 
 	it("projects the limitation kind onto the completion-evidence tag", () => {
-		deepStrictEqual(finishContractEvidenceTags("limitation"), ["completion-evidence"]);
+		deepStrictEqual(FINISH_CONTRACT_EVIDENCE_TAGS.limitation, ["completion-evidence"]);
 	});
 });
 

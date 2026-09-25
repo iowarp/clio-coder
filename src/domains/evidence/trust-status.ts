@@ -10,7 +10,6 @@ import type {
 	RunReceiptVerification,
 } from "../dispatch/types.js";
 import { normalizeYoloGateAuthority, normalizeYoloGateOutcome } from "../dispatch/yolo-ids.js";
-import type { FinishContractAssessment } from "../safety/finish-contract.js";
 
 /** Persisted version of the canonical, deliberately non-scalar trust model. */
 export const TRUST_STATUS_VERSION = 1 as const;
@@ -390,22 +389,6 @@ export function composeTrustStatus(...projections: ReadonlyArray<TrustStatusProj
 		if (projection.completionEvidence !== undefined) axes.completionEvidence = projection.completionEvidence;
 	}
 	return normalizeTrustStatus({ version: TRUST_STATUS_VERSION, ...axes });
-}
-
-/** Project only explicitly requested axes and preserve their exact states. */
-export function projectTrustStatus(
-	status: CanonicalTrustStatus,
-	axes: ReadonlyArray<TrustStatusAxis>,
-): TrustStatusProjection {
-	const normalized = normalizeTrustStatus(status);
-	const projection: TrustStatusProjection = {};
-	const requested = new Set(axes);
-	if (requested.has("artifactIntegrity")) projection.artifactIntegrity = normalized.artifactIntegrity;
-	if (requested.has("validationGrounding")) projection.validationGrounding = normalized.validationGrounding;
-	if (requested.has("independentReview")) projection.independentReview = normalized.independentReview;
-	if (requested.has("contextProvenance")) projection.contextProvenance = normalized.contextProvenance;
-	if (requested.has("completionEvidence")) projection.completionEvidence = normalized.completionEvidence;
-	return projection;
 }
 
 export type PersistedRunReceiptTrustFacts = Pick<RunReceipt, "runId"> &
@@ -940,31 +923,6 @@ export function adaptGroundedEvidenceValidationStatus(
 		{ kind: "clio", id: "evidence-grounding" },
 		uniqueBoundedReferences([{ kind: "evidence_bundle", id: input.evidenceId }, ...observed]),
 	);
-}
-
-export interface AdaptFinishContractTrustOptions {
-	sourceId?: string;
-	artifacts?: ReadonlyArray<TrustArtifactReference>;
-}
-
-/** Map the live finish contract onto completion evidence without inferring completion from autonomy. */
-export function adaptFinishContractCompletionStatus(
-	assessment: FinishContractAssessment,
-	options: AdaptFinishContractTrustOptions = {},
-): CompletionEvidenceStatus {
-	const artifacts = uniqueBoundedReferences(
-		options.artifacts ??
-			assessment.evidence.map((evidence, index) => ({
-				kind: evidence.turnId === undefined ? "finish_contract_evidence" : "session_entry",
-				id: evidence.turnId ?? `${evidence.kind}:${index + 1}`,
-			})),
-	);
-	const source: TrustStatusSource = { kind: "finish_contract", id: options.sourceId ?? assessment.reason };
-	const authority: TrustStatusAuthority = { kind: "clio", id: "finish-contract" };
-	if (assessment.reason === "no_mutation") return attributed("not_applicable", source, authority, artifacts);
-	if (assessment.reason === "validation_evidence") return attributed("evidenced", source, authority, artifacts);
-	if (assessment.reason === "explicit_limitation") return attributed("limited", source, authority, artifacts);
-	return attributed("incomplete", source, authority, artifacts);
 }
 
 function uniqueBoundedReferences(references: ReadonlyArray<TrustArtifactReference>): TrustArtifactReference[] {
