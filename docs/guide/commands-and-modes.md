@@ -689,3 +689,5 @@ Task-board guidance and ordinary continuation preserve proposal-only scope. Defe
 ## Library packages
 
 Use `/library`, `/skills`, `/agents`, and `/prompts` to browse resources. `/skill <name>` activates a loaded skill; `/interop` reviews external coding-agent peers; `/extensions` manages harness extensions. See [Resource library](resource-library.md), [Interop](interop.md), and [Extensions and sharing](extensions-and-sharing.md).
+
+With an empty composer, press `?` for the docked key card, `←` for Fleet Runs, or `↓` for Tasks. The next key closes the key card without taking another action. With a draft, `?` inserts text and the arrows move the cursor.

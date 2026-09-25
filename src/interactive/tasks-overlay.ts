@@ -19,7 +19,7 @@ import {
 } from "../engine/tui.js";
 import type { RowBudgetedBody } from "./overlay-frame.js";
 import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
-import { type ClioToken, clioTheme, fitUnits, GLYPH, rule } from "./theme/index.js";
+import { type ClioToken, clioTheme, fitUnits, GLYPH } from "./theme/index.js";
 
 /**
  * The `/tasks` overlay: one reopenable board for current agent work, prior
@@ -75,7 +75,7 @@ function taskOriginLabel(task: TaskBoardTask): string {
 // `dispatch:`/`evidence:` derivations were pure string echoes of the run id, so
 // the in-flight run ids render once, in their own header line, instead.
 function formatTaskProofLine(board: TaskBoardSnapshot, width: number): string {
-	return fitRow(`${dim("proof")} ${muted(taskLedgerProofRef(board))}`, width);
+	return fitRow(`${SECTION_GUTTER}${dim("proof")} ${muted(taskLedgerProofRef(board))}`, width);
 }
 
 function taskRow(task: TaskBoardTask, width: number, selected?: boolean): string {
@@ -166,12 +166,9 @@ function formatTasksOverlayBodyLines(
 		// was left with a fragment of the only instruction here.
 		return {
 			lines: [
-				...wrapTextWithAnsi(muted("No task board declared in this session."), width),
-				"",
-				...wrapTextWithAnsi(
-					dim('The agent declares one with the tasks tool (action="plan") before multi-step work.'),
-					width,
-				),
+				sectionHeading("Agent board", width),
+				...emptyRows(muted("No agent board in this session."), width),
+				...emptyRows(dim('The agent declares one with the tasks tool (action="plan") before multi-step work.'), width),
 			],
 			spans: [],
 		};
@@ -186,9 +183,8 @@ function formatTasksOverlayBodyLines(
 		counts.cancelled > 0 ? dim(`${counts.cancelled} dropped`) : null,
 	].filter((chip): chip is string => chip !== null);
 	const lines: string[] = [
-		fitRow(theme.fg("accent", board.title), width),
-		fitRow(chips.join(dim(" · ")), width),
-		rule(theme, width),
+		sectionHeading("Agent board", width),
+		fitRow(`${SECTION_GUTTER}${theme.fg("accent", board.title)}${dim(" · ")}${chips.join(dim(" · "))}`, width),
 		formatTaskProofLine(board, width),
 	];
 	// The in-flight run ids render once, right under the proof anchor: full ids
@@ -250,8 +246,20 @@ function selectableRows(state: CompositeTasksOverlayState): TasksOverlaySelectio
 	];
 }
 
+/**
+ * A section is a bold heading, its rows under a two-cell gutter that matches
+ * the selection mark, and a blank row before the next heading. An empty section
+ * says so in its own row rather than vanishing, so the operator sees what the
+ * surface covers before anything is in it.
+ */
+const SECTION_GUTTER = "  ";
+
 function sectionHeading(label: string, width: number): string {
-	return fitRow(clioTheme().style("accent", label, { bold: true }), width);
+	return fitRow(clioTheme().style("muted", label, { bold: true }), width);
+}
+
+function emptyRows(text: string, width: number): string[] {
+	return wrapTextWithAnsi(text, Math.max(1, width - SECTION_GUTTER.length)).map((line) => `${SECTION_GUTTER}${line}`);
 }
 
 function isSameSelection(left: TasksOverlaySelection | undefined, right: TasksOverlaySelection): boolean {
@@ -316,7 +324,7 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 
 	openSection("Task history");
 	const historyRows = terminalHistoryRows(state.board, state.history);
-	if (historyRows.length === 0) lines.push(fitRow(dim("No terminal tasks from prior boards."), width));
+	if (historyRows.length === 0) lines.push(...emptyRows(dim("No terminal tasks from prior boards."), width));
 	for (const row of historyRows) {
 		const rowSelection: TasksOverlaySelection = { kind: "history", board: row.board, task: row.task };
 		const presentation = unverifiedTaskChecks(row.task)
@@ -332,7 +340,7 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 	}
 
 	openSection("Artifacts");
-	if (state.artifacts.length === 0) lines.push(fitRow(dim("No workspace outputs recorded."), width));
+	if (state.artifacts.length === 0) lines.push(...emptyRows(dim("No workspace outputs recorded."), width));
 	const workspace = state.workspace ?? process.cwd();
 	for (const artifact of state.artifacts) {
 		const rowSelection: TasksOverlaySelection = { kind: "artifact", artifact };
@@ -346,7 +354,7 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 	}
 
 	openSection("Operator tasks");
-	if (state.userTasks.length === 0) lines.push(fitRow(dim("No operator tasks in this project."), width));
+	if (state.userTasks.length === 0) lines.push(...emptyRows(dim("No operator tasks in this project."), width));
 	for (const task of state.userTasks) {
 		const rowSelection: TasksOverlaySelection = { kind: "user", task };
 		const presentation = USER_TASK_PRESENTATION[task.status];

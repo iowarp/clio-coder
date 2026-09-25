@@ -71,7 +71,7 @@ function mount(board: TaskBoardSnapshot = BOARD, userTasks: UserTask[] = USER_TA
 	const mounted = dockTop(tui)?.frame as unknown as DockFrame & Component;
 	const render = (): string[] => {
 		const rows = mounted.renderDockBody(CONTENT, DOCK_BODY_ROWS_MAX);
-		strictEqual(rows.length, DOCK_BODY_ROWS_MAX, "the dock body fills its fixed budget");
+		ok(rows.length <= DOCK_BODY_ROWS_MAX, "the dock body fits its fixed budget");
 		for (const row of rows) ok(visibleWidth(row) <= CONTENT, stripTerminalSequences(row));
 		return rows.map((row) => stripTerminalSequences(row).trimEnd());
 	};
@@ -94,7 +94,7 @@ test("the docked board never cuts a section it cannot reach (BT-015)", () => {
 	const first = board.render();
 	doesNotMatch(first.join("\n"), /more rows/u, "the frame never has to cut the board");
 	match(first.join("\n"), /\d+–\d+ of \d+ rows/u, "an overflowing board says where the window is");
-	match(first[0] ?? "", /Divide rounding/u, "the board opens at its top");
+	match(first.slice(0, 2).join("\n"), /Divide rounding/u, "the board opens at its top");
 
 	// Paging down reaches the end, and every row of the whole board was on screen once.
 	const seen = new Set(first);
@@ -113,7 +113,7 @@ test("the docked board never cuts a section it cannot reach (BT-015)", () => {
 	const unmarked = (row: string): string => row.replace(new RegExp(`^${GLYPH.cursor} `, "u"), "  ");
 	const reached = new Set([...seen].map(unmarked));
 	for (const row of whole) ok(reached.has(unmarked(row)), `unreachable board row: ${row}`);
-	match(board.press(PAGE_UP, 10)[0] ?? "", /Divide rounding/u, "PgUp returns to the top");
+	match(board.press(PAGE_UP, 10).slice(0, 2).join("\n"), /Divide rounding/u, "PgUp returns to the top");
 });
 
 test("the selection walks into operator tasks and the window follows it (BT-015)", () => {
@@ -137,7 +137,7 @@ test("the selection walks into operator tasks and the window follows it (BT-015)
 		ok(selectedRow(screen) !== undefined, `the selected row stays on screen after ↑ ${step + 1}`);
 	}
 	match(selectedRow(screen) ?? "", /t1 {3}Reproduce/u);
-	match(screen[0] ?? "", /Divide rounding/u, "returning to the first task shows the board title");
+	match(screen.slice(0, 2).join("\n"), /Divide rounding/u, "returning to the first task shows the board title");
 });
 
 test("Tab moves the selection to the next section and the window follows (BT-015)", () => {

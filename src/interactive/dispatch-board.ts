@@ -1017,13 +1017,15 @@ function formatDispatchBoardLines(
 ): string[] {
 	if (rows.length === 0) {
 		const theme = clioTheme();
-		const lines = ["", "No fleet runs yet", "Use /run or /delegate to start a run.", ""];
-		return lines
-			.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)))
-			.map((line) => {
-				const padding = Math.max(0, Math.floor((width - visibleWidth(line)) / 2));
-				return theme.fg("dim", " ".repeat(padding) + line);
-			});
+		// Left-aligned under the same gutter every row uses, the way every other
+		// empty section reads; a centered sentence in a left-aligned dock was the
+		// one thing on the surface that floated.
+		return [
+			`  ${theme.fg("muted", "No fleet runs yet")}`,
+			...wrapTextWithAnsi(theme.fg("dim", "Use /run or /delegate to start a run."), Math.max(1, width - 2)).map(
+				(line) => `  ${line}`,
+			),
+		];
 	}
 
 	const endpointActive: Record<string, number> = { ...foregroundStreamUsage() };

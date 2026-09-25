@@ -21,6 +21,7 @@ import { focusedComponent, keyboardOwner } from "./keyboard-owner.js";
 import { createLeaderKeyController, type LeaderTarget } from "./leader-key.js";
 import { createLeaderMenu } from "./leader-menu.js";
 import { type OverlayState, routeOverlayKey } from "./overlay-lifecycle.js";
+import { createQuickHelp } from "./quick-help.js";
 import type { RenderInputAction } from "./render-trace.js";
 
 export interface InteractiveInputKeyActionDeps {
@@ -233,6 +234,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 				: {}),
 		}));
 	};
+	const quickHelp = deps.tui ? createQuickHelp(deps.tui, deps.keybindings) : undefined;
 	const menu = deps.tui
 		? createLeaderMenu(
 				deps.tui,
@@ -304,6 +306,28 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		routeComposerKey: (data) => {
 			if (deps.keybindings.matches(data, "tui.altScreen.search") && !(deps.tui instanceof TuiAltScreen)) {
 				deps.explainSearchUnavailable?.();
+				return true;
+			}
+			// The quick help card is a glance: whatever key comes next closes it
+			// and does nothing else, so a `/` typed to dismiss it does not open
+			// the command list underneath.
+			if (quickHelp?.isOpen()) {
+				quickHelp.close();
+				return true;
+			}
+			// Keys that mean something only on an empty composer. With a draft in
+			// the buffer they are text or cursor movement, as pi delivers them.
+			if (deps.editor.getText().length > 0 || (deps.editor.isShowingAutocomplete?.() ?? false)) return false;
+			if (quickHelp && data === "?") {
+				quickHelp.open();
+				return true;
+			}
+			if (matchesKey(data, "left")) {
+				deps.overlay.toggleDispatchBoardOverlay();
+				return true;
+			}
+			if (matchesKey(data, "down")) {
+				deps.overlay.openTasksOverlayState();
 				return true;
 			}
 			return false;

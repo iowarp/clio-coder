@@ -16,9 +16,9 @@ test("footer hydration does not read session metadata that no page renders", () 
 		resolveCurrentBranch: async () => null,
 	});
 	try {
-		for (const width of [60, 80, 120, 200]) {
+		for (const width of [40, 60, 80, 120, 200]) {
 			const compact = footer.view.render(width);
-			strictEqual(compact.length, 2);
+			strictEqual(compact.length, width <= 60 ? 1 : 2);
 			footer.setExpanded(true);
 			const expanded = footer.view.render(width);
 			ok(expanded.length > compact.length);

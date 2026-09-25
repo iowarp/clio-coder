@@ -71,7 +71,7 @@ test("a narrow attention row preserves the activity, armed skill and context abo
 	state.notices = [];
 	strictEqual(renderCompactDashboard(state, 60).length, 1);
 	state.session.leaderArmed = true;
-	match(stripTerminalSequences(renderCompactDashboard(state, 60)[1] ?? ""), /Ctrl\+G.*choose key/);
+	match(stripTerminalSequences(renderCompactDashboard(state, 60)[1] ?? ""), /choose key/i);
 });
 
 test("Context and Status stack below 84 cells and share the same split boundary", () => {

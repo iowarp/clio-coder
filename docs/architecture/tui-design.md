@@ -287,3 +287,5 @@ Context meters share single-cell glyph selection and stable largest-remainder ge
 Renderer-only presentation constants remain private to their owning modules.
 
 Renderer-only presentation constants remain private to their owning modules.
+
+On an empty composer, `?` opens a docked key card, `←` opens Fleet Runs and `↓` opens Tasks. The next key dismisses the key card and is consumed. With a draft, these keys keep their editing meaning. Task cards have bold section headings, a two-cell body gutter and an explicit empty state in each section; scrolling and section navigation keep every task reachable.
