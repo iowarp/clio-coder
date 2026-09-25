@@ -83,7 +83,7 @@ import {
 } from "../../engine/tui.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
-import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, DEFAULT_SELECT_THEME, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
 import { barSep, clioTheme, GLYPH, padAnsi, rule, screenTitle } from "../theme/index.js";
 import { modelsForTarget } from "./model-selector.js";
 
@@ -783,7 +783,7 @@ class ScopedModelChecklist implements Component {
 			if (row.kind === "group") return theme.style("dim", row.label, { bold: true });
 			const selected = start + offset === this.selectedRow;
 			const checked = this.selectedKeys.has(row.key);
-			const pointer = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+			const pointer = `${selectionMark(selected)} `;
 			const check = theme.fg(checked ? "accent" : "dim", checked ? "[x]" : "[ ]");
 			const label = selected ? theme.style("accent", row.label, { bold: true }) : theme.fg("muted", row.label);
 			return truncateToWidth(`${pointer}${check} ${label}`, Math.max(1, width), GLYPH.ellipsis, true);
@@ -2759,7 +2759,7 @@ function formatSettingRow(
 	if (item.id === "targets") return formatTargetConsoleHeader(width, indentWidth);
 	if (item.targetConsole) return formatTargetConsoleRow(item, width, selected, indentWidth);
 	if (item.id === "targets.add-cta") {
-		const prefix = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+		const prefix = `${selectionMark(selected)} `;
 		const label = theme.style("accentDeep", item.label, { bold: true });
 		return truncateToWidth(
 			`${indent}${prefix}${label}${ROW_GAP}${theme.fg(selected ? "accent" : "muted", item.currentValue)}`,
@@ -2768,7 +2768,7 @@ function formatSettingRow(
 			true,
 		);
 	}
-	const prefix = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+	const prefix = `${selectionMark(selected)} `;
 	const labelText = padAnsi(item.label, columns.label, GLYPH.ellipsis);
 	const label = selected
 		? theme.style("accent", labelText, { bold: true })
@@ -2885,7 +2885,7 @@ function formatTargetConsoleRow(
 	if (!console) return "";
 	const theme = clioTheme();
 	const indent = " ".repeat(Math.max(0, indentWidth));
-	const prefix = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+	const prefix = `${selectionMark(selected)} `;
 	const available = Math.max(1, width - visibleWidth(indent) - 2);
 	const cells = targetConsoleColumns(available).map((column) => {
 		const text = column.key === "health" ? console.health.text : console[column.key];
@@ -3636,7 +3636,7 @@ export class SettingsCenter implements Component {
 		const rows: Array<{ line: string; sectionId: SettingsSectionId | null }> = [];
 		for (const section of this.sections()) {
 			const selected = section.id === this.selectedSectionId;
-			const cursor = selected && this.level === "sections" ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+			const cursor = `${selectionMark(selected && this.level === "sections")} `;
 			const matchCount = section.items.filter((item) => this.isSelectableRow(item)).length;
 			const modifiedCount = section.items.filter(
 				(item) => !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue,

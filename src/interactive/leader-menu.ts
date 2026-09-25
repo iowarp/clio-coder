@@ -1,6 +1,6 @@
 import { type Component, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
 import type { LeaderKeyState, LeaderTarget } from "./leader-key.js";
-import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
+import { buildResponsiveHint, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 
 /** Noncapturing presentation: controller retains the underlying cancellation owner. */
@@ -24,8 +24,8 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: L
 					// The selection rule: cursor and label in accent, nothing else recolored.
 					// An unbound key is a blank, because `·` is the internal-run mark in a
 					// board's first column and this is a first column.
-					const mark = focused ? theme.fg("accent", GLYPH.cursor) : " ";
-					const name = focused ? theme.style("accent", label, { bold: true }) : label;
+					const mark = selectionMark(focused);
+					const name = selectionLabel(focused, label);
 					return `${mark} ${entry.key || " "}  ${name}  ${theme.fg("dim", keyLabel(entry.id))}${reason}`;
 				}),
 				`${targets.length ? `${selected + 1}/${targets.length}` : "No actions in this scope"}${state.notice ? ` · ${state.notice}` : ""}`,
