@@ -620,9 +620,13 @@ export class ViewOverlayView implements Component {
 	private renderList(width: number, height: number): string[] {
 		const theme = clioTheme();
 		const lines: string[] = [];
-		const filterLabel = this.focus === "list" ? theme.fg("accent", "filter") : theme.fg("dim", "filter");
-		const filterValue = this.filterText.length > 0 ? this.filterText : theme.fg("dim", "(empty)");
-		lines.push(padAnsi(`${filterLabel}: ${filterValue}`, width, GLYPH.ellipsis));
+		// The filter row appears with the first typed character and is the same
+		// `> text` input every other list overlay shows, rather than a permanent
+		// `filter: (empty)` caption.
+		if (this.filterText.length > 0) {
+			this.filterInput.focused = this.focus === "list";
+			lines.push(...this.filterInput.render(width));
+		}
 
 		if (this.loadingArtifacts) {
 			lines.push(padAnsi(theme.fg("dim", "loading artifacts…"), width, GLYPH.ellipsis));

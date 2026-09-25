@@ -3512,8 +3512,9 @@ export class SettingsCenter implements Component {
 	/** The one-line filter editor, shown at every width while it owns input. */
 	private filterEditorLines(width: number): string[] {
 		if (this.filterDraft === null) return [];
-		const theme = clioTheme();
-		return [truncateToWidth(theme.fg("accent", `Filter settings: ${this.filterDraft}_`), width, GLYPH.ellipsis, true)];
+		// The editor draws its own caret, so the row stops faking one with `_`.
+		this.filterInput.focused = true;
+		return this.filterInput.render(width);
 	}
 
 	private emptyFilterLines(width: number, height: number): string[] {

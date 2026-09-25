@@ -42,12 +42,12 @@ test("initial text filters global evidence, appends at the end, and clears at an
 	match(plain(view), /List · 1\/2/u);
 	doesNotMatch(plain(view), /Receipts/u);
 	view.handleInput(".md");
-	match(plain(view), /filter: DEMO-REPORT.md/u);
+	match(plain(view), /> DEMO-REPORT.md/u);
 	view.handleInput("\x01");
 	view.handleInput("\x15");
 	match(plain(view), /List · 2\/2/u);
 	view.undoInput();
-	match(plain(view), /filter: DEMO-REPORT.md/u);
+	match(plain(view), /> DEMO-REPORT.md/u);
 	view.handleInput("\x15");
 	view.handleInput("unfindable");
 	match(plain(view), /List · 0\/2/u);
@@ -63,7 +63,7 @@ test("initial text filters global evidence, appends at the end, and clears at an
 test("filter persists across preview, back, refresh, and terminal widths", async () => {
 	const { view, closed } = await open([artifact("report"), artifact("other")], "report");
 	for (const width of [40, 56, 57, 92, 160]) {
-		match(plain(view, width), /filter: report/u);
+		match(plain(view, width), /> report/u);
 		view.handleInput("\r");
 		view.render(width);
 		await settle();
@@ -73,7 +73,7 @@ test("filter persists across preview, back, refresh, and terminal widths", async
 		strictEqual(closed(), false);
 		view.refresh();
 		await settle();
-		match(plain(view, width), /filter: report/u);
+		match(plain(view, width), /> report/u);
 	}
 	view.handleInput("\x1b");
 	strictEqual(closed(), true);
@@ -317,21 +317,21 @@ test("Ctrl+U clears at any cursor with line-end remapped and undo restores the w
 			const { view } = await open([artifact("DEMO-REPORT"), artifact("other")], "DEMO-REPORT");
 			if (movement) view.handleInput(movement);
 			view.handleInput("\x15");
-			match(plain(view), /filter: \(empty\)/u);
+			doesNotMatch(plain(view), /^> |filter:/mu);
 			match(plain(view), /List · 2\/2/u);
 			view.handleInput("\x15");
 			view.undoInput();
-			match(plain(view), /filter: DEMO-REPORT/u);
+			match(plain(view), /> DEMO-REPORT/u);
 			match(plain(view), /List · 1\/2/u);
 			view.handleInput("\x15");
 			view.handleInput("other");
-			match(plain(view), /filter: other/u);
+			match(plain(view), /> other/u);
 			view.undoInput();
-			match(plain(view), /filter: \(empty\)/u);
+			doesNotMatch(plain(view), /^> |filter:/mu);
 			view.undoInput();
-			match(plain(view), /filter: DEMO-REPORT/u);
+			match(plain(view), /> DEMO-REPORT/u);
 			view.handleInput("!");
-			ok(plain(view).includes(`filter: ${restored}`));
+			ok(plain(view).includes(`> ${restored}`));
 		}
 	} finally {
 		setKeybindings(previousKeys);
