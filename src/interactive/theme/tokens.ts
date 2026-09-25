@@ -8,31 +8,31 @@ interface TokenColor {
 }
 
 const TOKENS: Record<ClioToken, TokenColor> = {
-	// The composer rails alone own the neon intensity tier.
-	editor: { rgb: [64, 255, 191], xterm: 85 },
-	editorDanger: { rgb: [255, 80, 88], xterm: 203 },
-	editorAction: { rgb: [255, 171, 69], xterm: 215 },
-	accent: { rgb: [83, 177, 150], xterm: 72 },
-	accentDeep: { rgb: [62, 147, 137], xterm: 66 },
-	tool: { rgb: [111, 173, 165], xterm: 109 },
-	agent: { rgb: [207, 144, 91], xterm: 173 },
-	// Secondary orange remains below the composer intensity tier. The token name teaches the rule: orange
+	// The composer rails carry the lightest sea-glass teal and clay orange.
+	editor: { rgb: [154, 203, 182], xterm: 115 },
+	editorDanger: { rgb: [224, 130, 120], xterm: 210 },
+	editorAction: { rgb: [215, 161, 111], xterm: 180 },
+	accent: { rgb: [121, 178, 155], xterm: 72 },
+	accentDeep: { rgb: [95, 150, 135], xterm: 66 },
+	tool: { rgb: [135, 170, 160], xterm: 109 },
+	agent: { rgb: [175, 121, 89], xterm: 137 },
+	// Secondary clay orange remains below the composer intensity tier. The token name teaches the rule: orange
 	// means Clio is acting. It fires only for Clio's signature actions
 	// (dispatching, queued and running fleet work, steering) and for the border
 	// of a prompt that has taken the keyboard and is waiting on a decision, never
 	// as decoration, and never a metric, at most one orange element per region of
 	// the screen. warning stays the soft amber for actual warnings.
-	action: { rgb: [217, 155, 98], xterm: 179 },
-	success: { rgb: [119, 184, 145], xterm: 108 },
-	warning: { rgb: [211, 176, 107], xterm: 179 },
-	error: { rgb: [219, 130, 137], xterm: 174 },
-	info: { rgb: [128, 167, 206], xterm: 110 },
-	reason: { rgb: [175, 155, 201], xterm: 146 },
-	dim: { rgb: [106, 122, 133], xterm: 59 },
-	muted: { rgb: [138, 153, 164], xterm: 102 },
-	title: { rgb: [114, 184, 173], xterm: 109 },
-	frame: { rgb: [47, 93, 90], xterm: 23 },
-	frameStrong: { rgb: [42, 171, 158], xterm: 37 },
+	action: { rgb: [189, 136, 98], xterm: 137 },
+	success: { rgb: [142, 185, 155], xterm: 108 },
+	warning: { rgb: [213, 180, 111], xterm: 179 },
+	error: { rgb: [210, 139, 135], xterm: 174 },
+	info: { rgb: [155, 185, 177], xterm: 109 },
+	reason: { rgb: [188, 169, 147], xterm: 144 },
+	dim: { rgb: [120, 129, 126], xterm: 244 },
+	muted: { rgb: [155, 166, 161], xterm: 247 },
+	title: { rgb: [142, 191, 174], xterm: 109 },
+	frame: { rgb: [70, 106, 97], xterm: 59 },
+	frameStrong: { rgb: [115, 168, 149], xterm: 73 },
 };
 
 export const SGR_RESET = "\u001b[0m";

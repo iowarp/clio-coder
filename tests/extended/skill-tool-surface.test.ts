@@ -127,7 +127,7 @@ function turnPolicy(
 	input: string,
 	root: string,
 	armed: PendingSkillToolPolicy | undefined,
-	autonomy: AutonomyLevel = "suggest",
+	autonomy: AutonomyLevel = "default",
 ): PendingSkillToolPolicy | undefined {
 	const list = loadSkills({ cwd: root, disableDiscovery: true, explicitSkillPaths: explicitPaths });
 	const requests = parsePendingSkillRequests(input, list, { cwd: root }).pendingSkillRequests;
@@ -255,7 +255,7 @@ describe("skill tool surface lifetime", () => {
 		);
 		const byModel = await context.run(
 			{ scope: "skills", name: "interview" },
-			invokeOptions(turnPolicy("look at the failing test", root, undefined, "full-auto")),
+			invokeOptions(turnPolicy("look at the failing test", root, undefined, "yolo")),
 		);
 		ok(byOperator.kind === "ok" && byModel.kind === "ok");
 		strictEqual((byOperator.details as { activation?: unknown }).activation, "operator");
@@ -408,7 +408,7 @@ describe("skill tool surface lifetime", () => {
 
 			// The next turn runs with the full surface back.
 			const turnTwo = turnPolicy("keep going", root, held);
-			strictEqual(turnTwo, undefined);
+			deepStrictEqual(skillSurfaceNames(turnTwo), []);
 			strictEqual(evaluateSkillToolSurface(turnTwo, ToolNames.Bash), null);
 			const registry = createRegistry({ safety: allowAllSafety([]) });
 			registry.register(bashSpec());
@@ -666,7 +666,7 @@ describe("model skill activation by autonomy level", () => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 
-	for (const autonomy of ["auto-edit", "full-auto"] as const) {
+	for (const autonomy of ["default", "yolo"] as const) {
 		it(`activates an installed skill on a model call at ${autonomy}`, async () => {
 			const root = scratchRoot();
 			explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
@@ -689,13 +689,13 @@ describe("model skill activation by autonomy level", () => {
 		});
 	}
 
-	for (const autonomy of ["read-only", "suggest"] as const) {
+	for (const autonomy of ["read-only"] as const) {
 		it(`keeps activation operator-gated at ${autonomy}`, async () => {
 			const root = scratchRoot();
 			explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
 			const context = contextToolFor(root);
 			const policy = turnPolicy("look at the failing test", root, undefined, autonomy);
-			strictEqual(policy, undefined);
+			deepStrictEqual(skillSurfaceNames(policy), []);
 			const refused = await context.run({ scope: "skills", name: "interview" }, invokeOptions(policy));
 			strictEqual(refused.kind, "error");
 			if (refused.kind === "error") {
@@ -737,7 +737,7 @@ describe("model skill activation by autonomy level", () => {
 			getCwd: () => root,
 			getSkillLoaderOptions: () => ({ explicitSkillPaths: explicitPaths }),
 		});
-		const policy = turnPolicy("do the thing", root, undefined, "full-auto");
+		const policy = turnPolicy("do the thing", root, undefined, "yolo");
 		ok(policy !== undefined);
 		const refused = await context.run({ scope: "skills", name: "marketplace-only" }, invokeOptions(policy));
 		strictEqual(refused.kind, "error");
@@ -761,14 +761,14 @@ describe("model skill activation by autonomy level", () => {
 			match(result.message, /^context: /u, "the model still reads the policy text");
 			return result.details?.refusal;
 		};
-		const auto = turnPolicy("look at the failing test", root, undefined, "full-auto");
+		const auto = turnPolicy("look at the failing test", root, undefined, "yolo");
 		deepStrictEqual(await refusal("manual", auto), { subject: "skill", name: "manual", kind: "manual-only" });
 		deepStrictEqual(await refusal("absent", auto), { subject: "skill", name: "absent", kind: "unknown" });
 		strictEqual((await context.run({ scope: "skills", name: "interview" }, invokeOptions(auto))).kind, "ok");
 		deepStrictEqual(await refusal("interview", auto), { subject: "skill", name: "interview", kind: "already-loaded" });
 		// An operator request this turn admits only the skill it names.
 		const requested = turnPolicy("/skill interview start", root, undefined);
-		deepStrictEqual(await refusal("manual", requested), { subject: "skill", name: "manual", kind: "not-requested" });
+		deepStrictEqual(await refusal("manual", requested), { subject: "skill", name: "manual", kind: "manual-only" });
 		strictEqual((await context.run({ scope: "skills", name: "interview" }, invokeOptions(requested))).kind, "ok");
 		deepStrictEqual(await refusal("interview", requested), {
 			subject: "skill",

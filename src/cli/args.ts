@@ -2,7 +2,7 @@ import { THINKING_LEVELS } from "../core/defaults.js";
 import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
-import { type AutonomyLevel, autonomyFromUserInput } from "../domains/safety/autonomy.js";
+import { autonomyFromUserInput, type OperatorAutonomyLevel } from "../domains/safety/autonomy.js";
 import { globalFlagPositionHint } from "./argv.js";
 
 export interface CliArgDiagnostic {
@@ -30,7 +30,7 @@ export interface RunCliArgs {
 	target?: string;
 	model?: string;
 	thinking?: JobThinkingLevel;
-	autonomy?: AutonomyLevel;
+	autonomy?: OperatorAutonomyLevel;
 	sampling?: RunSamplingArgs;
 	agentId?: string;
 	agentProfile?: string;
@@ -131,7 +131,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 				else
 					parsed.diagnostics.push({
 						type: "error",
-						message: "--autonomy must be capable|yolo (legacy: read-only|suggest|auto-edit|full-auto)",
+						message: "--autonomy must be default|yolo",
 					});
 			}
 			continue;

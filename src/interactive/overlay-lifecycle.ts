@@ -289,7 +289,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.toolRegistry ? { toolRegistry: deps.app.toolRegistry } : {}),
 		bus: deps.app.bus,
 		dispatch: deps.app.dispatch,
-		getAutonomy: () => deps.app.getSettings?.().safety.autonomy ?? "auto-edit",
+		getAutonomy: () => deps.app.getSettings?.().safety.autonomy ?? "default",
 		/**
 		 * The blast-radius sentence for one parked call, or nothing at all.
 		 *

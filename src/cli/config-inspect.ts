@@ -391,14 +391,14 @@ function inspectSafetyAndMemory(cwd: string, graph: CustomizationGraph): void {
 			reloadClass: "hot",
 			trust: "n/a",
 			precedence: "single",
-			detail: { autonomy: layered.settings.safety.autonomy ?? "auto-edit" },
+			detail: { autonomy: layered.settings.safety.autonomy ?? "default" },
 		});
 	} catch (err) {
 		graph.issues.push(`safety: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	try {
 		const path = memoryStorePath(clioDataDir());
-		const records = existsSync(path) ? loadMemoryRecordsSync(path) : [];
+		const records = existsSync(path) ? loadMemoryRecordsSync(clioDataDir()) : [];
 		graph.entries.push({
 			category: "memory",
 			id: "memory-store",

@@ -119,7 +119,7 @@ export const GUIDANCE_LESSONS: ReadonlyArray<GuidanceLesson> = [
 				? DIRECT_SCORE
 				: 0,
 		text: (context) =>
-			context.autonomy === "auto-edit" || context.autonomy === "full-auto"
+			context.autonomy === "default" || context.autonomy === "yolo"
 				? "Next time just ask: I can preview a Clio settings change for you to Apply. /model and /settings open the same controls."
 				: "/model switches the chat model, and /settings holds every other Clio option.",
 	},

@@ -430,7 +430,7 @@ function refusalFact(refusal: SkillLoadRefusal): string {
 /** The nested row a load states its tool surface on: `narrows tools to read, edit, bash`. */
 function skillSurfaceLine(skill: SkillLoadFacts): string | null {
 	if (skill.allowListAdvisory && skill.allowedTools.length > 0)
-		return `recommends ${skill.allowedTools.join(", ")} in full-auto${skill.disallowedTools.length > 0 ? `; blocks ${skill.disallowedTools.join(", ")}` : ""}`;
+		return `recommends ${skill.allowedTools.join(", ")} in yolo${skill.disallowedTools.length > 0 ? `; blocks ${skill.disallowedTools.join(", ")}` : ""}`;
 	if (skill.allowedTools.length > 0) return `narrows tools to ${skill.allowedTools.join(", ")}`;
 	if (skill.disallowedTools.length > 0) return `narrows tools to all but ${skill.disallowedTools.join(", ")}`;
 	return null;

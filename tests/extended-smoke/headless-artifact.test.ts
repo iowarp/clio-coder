@@ -95,9 +95,9 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 			mkdirSync(workspace);
 			const doctor = await run(["doctor", "--fix"], workspace, env);
 			strictEqual(doctor.code, 0, doctor.stderr);
-			seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "full-auto");
+			seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "yolo");
 			const direct = await run(
-				["run", "--json", "--autonomy", "full-auto", "Write a report artifact containing exactly: fixture report"],
+				["run", "--json", "--autonomy", "yolo", "Write a report artifact containing exactly: fixture report"],
 				workspace,
 				env,
 			);
@@ -187,11 +187,11 @@ test("built headless artifact: a completed dispatch builds its evidence under a 
 		mkdirSync(workspace);
 		const doctor = await run(["doctor", "--fix"], workspace, env);
 		strictEqual(doctor.code, 0, doctor.stderr);
-		seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "full-auto");
+		seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "yolo");
 		// Pinned the way an outer harness pins it: an empty directory with no runs.json.
 		const stateDir = mkdtempSync(join(scratch.dir, "pinned-state-"));
 		const direct = await run(
-			["run", "--json", "--autonomy", "full-auto", "Dispatch a worker, then write a report artifact"],
+			["run", "--json", "--autonomy", "yolo", "Dispatch a worker, then write a report artifact"],
 			workspace,
 			{ ...env, CLIO_CODER_STATE_DIR: stateDir },
 		);

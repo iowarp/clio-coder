@@ -46,11 +46,11 @@ test("context reads the current snapshot each time and refuses to invent a worke
 	const first = await tool.run({ scope: "settings", query: "autonomy" });
 	assert.equal(first.kind, "ok");
 	if (first.kind !== "ok") return;
-	assert.match(first.output, /auto-edit/);
-	settings.safety.autonomy = "read-only";
+	assert.match(first.output, /default/);
+	settings.safety.autonomy = "yolo";
 	const second = await tool.run({ scope: "settings", query: "autonomy" });
 	assert.equal(second.kind, "ok");
-	if (second.kind === "ok") assert.match(second.output, /"value": "read-only"/);
+	if (second.kind === "ok") assert.match(second.output, /"value": "yolo"/);
 	for (const args of [{ offset: -1 }, { limit: 13 }, { offset: 0.5 }, { limit: 0 }]) {
 		const result = await tool.run({ scope: "settings", ...args });
 		assert.equal(result.kind, "error");

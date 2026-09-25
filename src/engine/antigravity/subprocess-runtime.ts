@@ -64,22 +64,17 @@ export function antigravitySubprocessConfigForAutonomy(
 	level: AutonomyLevel | undefined,
 	env: NodeJS.ProcessEnv = process.env,
 ): AntigravitySubprocessConfig {
-	if (level === "full-auto" && env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
+	if (level === "yolo" && env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
 		return {
 			extraArgs: ["--dangerously-skip-permissions"],
 			dangerousBypass: true,
 			externalMode: "bypassPermissions",
 		};
 	}
-	if (level === "suggest") {
-		throw new Error(
-			"antigravity-code runtime cannot enforce autonomy 'suggest': it cannot park tool calls for approval. Dispatch to a native or claude-sdk worker, or use read-only or auto-edit.",
-		);
-	}
 	if (level === "read-only") {
 		return { extraArgs: ["--mode", "plan", "--sandbox"], dangerousBypass: false, externalMode: "plan+sandbox" };
 	}
-	// Both auto-edit and ungated full-auto stay at agy's explicit
+	// Both default and ungated yolo stay at agy's explicit
 	// accept-edits ceiling. Shell/network policy remains owned by agy.
 	return { extraArgs: ["--mode", "accept-edits"], dangerousBypass: false, externalMode: "accept-edits" };
 }

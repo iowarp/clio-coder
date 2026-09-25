@@ -7,7 +7,7 @@ const view: ApprovalRequestView = {
 	requestId: "req-1",
 	tool: "bash",
 	actionClass: "execute",
-	axis: { kind: "autonomy", level: "auto-edit" },
+	axis: { kind: "autonomy", level: "default" },
 	origin: { kind: "main" },
 	reason: "bash requests execute",
 	target: "rm -rf build/",

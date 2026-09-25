@@ -74,7 +74,7 @@ async function runScout(rounds: Call[][]) {
 				product: "orientation",
 				noSkills: true,
 				cwd: env.dir,
-				autonomy: "full-auto",
+				autonomy: "yolo",
 				helperResult: true,
 				resultContract: { kind: "scout-report" },
 			},

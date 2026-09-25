@@ -186,7 +186,7 @@ it("repo guidance tracks actual skill capability, autonomy and turn restrictions
 	const bundle = createPromptsBundle(context);
 	await bundle.extension.start();
 	t.after(() => bundle.extension.stop?.());
-	async function prompt(sessionInputs: SessionPromptInputs, autonomy = "auto-edit", workspace = cwd) {
+	async function prompt(sessionInputs: SessionPromptInputs, autonomy = "default", workspace = cwd) {
 		return bundle.contract.compileSessionPrompt({ sessionId: "self-dev", cwd: workspace, autonomy, sessionInputs });
 	}
 	const inputs = { toolNames: ["context"], providerSupportsTools: true, readySkillCount: 2 };
@@ -194,7 +194,7 @@ it("repo guidance tracks actual skill capability, autonomy and turn restrictions
 	match(automatic.systemPrompt, /# Self-development skills/);
 	match(automatic.systemPrompt, /without waiting for a separate skill request/);
 	strictEqual(automatic.systemPrompt.includes("## Establish the actual assignment"), false);
-	match((await prompt(inputs, "suggest")).systemPrompt, /Only the operator activates skills at this autonomy level/);
+	match((await prompt(inputs, "read-only")).systemPrompt, /Only the operator activates skills at this autonomy level/);
 	for (const disabled of [
 		{ ...inputs, skillDiscoveryEnabled: false },
 		{ ...inputs, providerSupportsTools: false },
@@ -211,7 +211,7 @@ it("repo guidance tracks actual skill capability, autonomy and turn restrictions
 		);
 	}
 	strictEqual(
-		(await prompt(inputs, "auto-edit", path.dirname(cwd))).systemPrompt.includes("# Self-development skills"),
+		(await prompt(inputs, "default", path.dirname(cwd))).systemPrompt.includes("# Self-development skills"),
 		false,
 	);
 	const noSkills = createPromptsBundle(context, { noSkills: true });

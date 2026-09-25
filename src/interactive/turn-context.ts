@@ -1834,7 +1834,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		async ensureSessionPrompt(agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null> {
 			if (!deps.prompts) return null;
 			const settings = deps.getSettings();
-			const autonomy = settings.safety.autonomy ?? "auto-edit";
+			const autonomy = settings.safety.autonomy ?? "default";
 			const sessionId = deps.session?.current()?.id ?? "";
 			const cwd = process.cwd();
 			const modelState = agentRuntime.agent.state.model as

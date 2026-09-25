@@ -261,7 +261,7 @@ for (const scenario of [
 						runtimeId: "openai-compat",
 						runtimeKind: "http",
 						wireModelId: "fixture-model",
-						autonomy: "full-auto",
+						autonomy: "yolo",
 						compiledPromptHash: null,
 						staticCompositionHash: null,
 						promptSignature: null,

@@ -203,7 +203,7 @@ for (const agent of ["scout", "coder"] as const) {
 			const tool = createDispatchTool({
 				dispatch: bundle.contract,
 				getAgentSpecs: () => specs,
-				getAutonomy: () => "full-auto",
+				getAutonomy: () => "yolo",
 				getSchemaComposition: () => dispatchSchemaCompositionFor(settings.fleet),
 			});
 			const args = {
@@ -297,7 +297,7 @@ for (const agent of ["scout", "coder"] as const) {
 			for (const receipt of receipts) {
 				strictEqual(receipt.gate?.role, "candidate");
 				strictEqual(receipt.outcome, "succeeded");
-				strictEqual(receipt.autonomyEnforcement?.autonomy, writer ? "auto-edit" : "read-only");
+				strictEqual(receipt.autonomyEnforcement?.autonomy, writer ? "default" : "read-only");
 				if (!writer) deepStrictEqual(receipt.intent?.writeRoots, []);
 			}
 			strictEqual(candidateBefore.length, 2);
@@ -458,7 +458,7 @@ for (const phase of ["candidates", "judge"] as const) {
 				const tool = createDispatchTool({
 					dispatch: bundle.contract,
 					getAgentSpecs: () => specs,
-					getAutonomy: () => "full-auto",
+					getAutonomy: () => "yolo",
 				});
 				const result = await tool.run(
 					{

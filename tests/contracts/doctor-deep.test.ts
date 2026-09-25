@@ -53,7 +53,7 @@ describe("doctor --deep validation contract dry run", () => {
 		});
 		const workspace = workspaceWithContract(["git status", "CI=1 mytool --check", "nosuchtool --x", "rm -rf /"]);
 
-		const autoEdit = contractDryRunFindings({ workspaceRoot: workspace, autonomy: "auto-edit" });
+		const autoEdit = contractDryRunFindings({ workspaceRoot: workspace, autonomy: "default" });
 		deepStrictEqual(
 			autoEdit.map((f) => [f.name, f.level]),
 			[
@@ -63,18 +63,18 @@ describe("doctor --deep validation contract dry run", () => {
 				["validator 4", "warn"],
 			],
 		);
-		match(autoEdit[0]?.detail ?? "", /^`git status`: git is \/\S+\/git; runs without approval at auto-edit$/);
+		match(autoEdit[0]?.detail ?? "", /^`git status`: git is \/\S+\/git; runs without approval at default$/);
 		strictEqual(
 			autoEdit[1]?.detail,
-			`\`CI=1 mytool --check\`: mytool is ${tool}; asks for approval at auto-edit; declare it in .clio-coder/safety.yaml to run it unattended`,
+			`\`CI=1 mytool --check\`: mytool is ${tool}; asks for approval at default; declare it in .clio-coder/safety.yaml to run it unattended`,
 		);
 		match(autoEdit[2]?.detail ?? "", /^`nosuchtool --x`: nosuchtool not found; /);
 		match(autoEdit[3]?.detail ?? "", /; blocked by the safety policy \(damage-control:/);
 		ok(autoEdit.every((f) => f.ok));
 
-		const fullAuto = contractDryRunFindings({ workspaceRoot: workspace, autonomy: "full-auto" });
+		const fullAuto = contractDryRunFindings({ workspaceRoot: workspace, autonomy: "yolo" });
 		strictEqual(fullAuto[1]?.level, "ok");
-		match(fullAuto[1]?.detail ?? "", /; runs without approval at full-auto$/);
+		match(fullAuto[1]?.detail ?? "", /; runs without approval at yolo$/);
 		match(fullAuto[3]?.detail ?? "", /; blocked by the safety policy/);
 
 		const readOnly = contractDryRunFindings({ workspaceRoot: workspace, autonomy: "read-only" });
@@ -86,7 +86,7 @@ describe("doctor --deep validation contract dry run", () => {
 
 	it("adds no rows without a parsed contract", () => {
 		strictEqual(
-			contractDryRunFindings({ workspaceRoot: scratch("clio-doctor-deep-empty-"), autonomy: "auto-edit" }).length,
+			contractDryRunFindings({ workspaceRoot: scratch("clio-doctor-deep-empty-"), autonomy: "default" }).length,
 			0,
 		);
 	});
@@ -193,7 +193,7 @@ describe("doctor --deep", () => {
 		match(tools?.detail ?? "", /^mock-model streamed a valid tool call in \d+ms$/);
 		strictEqual(server.requests.filter((request) => Array.isArray(request.tools)).length, 1);
 		const validator = report.findings.find((f) => f.name === "validator 1");
-		match(validator?.detail ?? "", /^`git status`: git is \S+; runs without approval at auto-edit$/);
+		match(validator?.detail ?? "", /^`git status`: git is \S+; runs without approval at default$/);
 		ok(report.findings.some((f) => f.name === "toolchain cc"));
 	});
 

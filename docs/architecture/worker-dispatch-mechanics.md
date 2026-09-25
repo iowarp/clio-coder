@@ -95,7 +95,7 @@ Even when a model is processing a long thinking phase or generating a heavy outp
 
 ## 4. Permission Escalation and Parking
 
-When a tool requires explicit confirmation (for example executing a mutating file change or running a bash command at `suggest` autonomy), the worker evaluates `onPermission`:
+When a tool requires explicit confirmation (for example running an unrecognized bash command in `default` mode), the worker evaluates `onPermission`:
 
 ```mermaid
 stateDiagram-v2

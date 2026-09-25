@@ -1,6 +1,6 @@
 /**
  * Rigor is a single attribute, orthogonal to the autonomy permission levels.
- * Permission (`read-only` / `suggest` / `auto-edit` / `full-auto`) says what an
+ * Operator permission (`default` / `yolo`) says what an
  * agent may touch; rigor says what evidence "done" requires. It has two values:
  *
  * - `normal`: the finish-contract advisory stays a soft `warn` reminder.

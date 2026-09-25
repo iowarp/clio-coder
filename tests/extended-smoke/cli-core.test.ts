@@ -492,7 +492,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			strictEqual(saved.code, 0, saved.stderr);
 			match(systemPromptOf(requests.at(-1)), /Autonomy: auto-edit\./u);
 			const overridden = await runCli(
-				["--no-context-files", "--no-skills", "run", "--autonomy", "full-auto", "--json", "CLI_CORE_FLAG_AUTONOMY"],
+				["--no-context-files", "--no-skills", "run", "--autonomy", "yolo", "--json", "CLI_CORE_FLAG_AUTONOMY"],
 				{ env: scratch.env },
 			);
 			strictEqual(overridden.code, 0, overridden.stderr);

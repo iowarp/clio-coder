@@ -87,7 +87,7 @@ export function DeleteSession({
 	);
 }
 type AutonomyLevel = NonNullable<SafeSettingsPatch["safety.autonomy"]>;
-const AUTONOMY_LEVELS: readonly AutonomyLevel[] = ["read-only", "suggest", "auto-edit", "full-auto"];
+const AUTONOMY_LEVELS: readonly AutonomyLevel[] = ["default", "yolo"];
 
 /**
  * Working freedom for this conversation and the saved default for new ones. Target, model and thinking

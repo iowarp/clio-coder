@@ -1,5 +1,5 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -24,7 +24,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
  * through `gateway call`.
  */
 
-const LEVELS: ReadonlyArray<AutonomyLevel> = ["read-only", "suggest", "auto-edit", "full-auto"];
+const LEVELS: ReadonlyArray<AutonomyLevel> = ["read-only", "default", "default", "yolo"];
 const roots: string[] = [];
 
 function scratch(): string {
@@ -156,40 +156,8 @@ describe("direct and gateway invocation preserve the same authority", () => {
 		deepStrictEqual(gateway.parks, []);
 	});
 
-	it("parks a write-class capability at suggest under the capability's name and honors the operator's answer identically", async () => {
-		for (const answer of ["approve", "deny"] as const) {
-			const directCwd = scratch();
-			const gatewayCwd = scratch();
-			const direct = harness(directCwd, "suggest", "direct", answer);
-			const gateway = harness(gatewayCwd, "suggest", "gateway", answer);
-			const viaDirect = await invokeDirect(direct.registry, ToolNames.Artifact, ARTIFACT_ARGS);
-			const viaGateway = await invokeGateway(gateway.registry, ToolNames.Artifact, ARTIFACT_ARGS);
-			deepStrictEqual(direct.parks, [{ tool: ToolNames.Artifact, actionClass: "write", short: direct.parks[0]?.short }]);
-			deepStrictEqual(gateway.parks, direct.parks, "the approval card names the capability, not the gateway");
-			deepStrictEqual(capabilityRows(gateway, ToolNames.Artifact), capabilityRows(direct, ToolNames.Artifact));
-			if (answer === "approve") {
-				const directResult = okResult(viaDirect);
-				const gatewayResult = okResult(viaGateway);
-				strictEqual(gatewayResult.output, directResult.output);
-				strictEqual(gatewayResult.terminate, true);
-				strictEqual(directResult.terminate, true);
-				ok(existsSync(join(directCwd, "notes", "REPORT.md")));
-				ok(existsSync(join(gatewayCwd, "notes", "REPORT.md")));
-				strictEqual(readFileSync(join(gatewayCwd, "notes", "REPORT.md"), "utf8"), ARTIFACT_ARGS.content);
-			} else {
-				strictEqual(viaDirect.kind, "blocked");
-				strictEqual(viaGateway.kind, "blocked");
-				if (viaDirect.kind !== "blocked" || viaGateway.kind !== "blocked") return;
-				strictEqual(viaGateway.reason, viaDirect.reason);
-				deepStrictEqual(blockedDecision(gateway, viaGateway), blockedDecision(direct, viaDirect));
-				ok(!existsSync(join(directCwd, "notes", "REPORT.md")));
-				ok(!existsSync(join(gatewayCwd, "notes", "REPORT.md")));
-			}
-		}
-	});
-
-	it("runs a write-class capability at auto-edit and full-auto with equal decisions, results, and audit rows", async () => {
-		for (const level of ["auto-edit", "full-auto"] as const) {
+	it("runs a write-class capability at default and yolo with equal decisions, results, and audit rows", async () => {
+		for (const level of ["default", "yolo"] as const) {
 			const directCwd = scratch();
 			const gatewayCwd = scratch();
 			const direct = harness(directCwd, level, "direct", "approve");
@@ -234,7 +202,7 @@ describe("direct and gateway invocation preserve the same authority", () => {
 
 	it("propagates the terminal artifact contract through the gateway so the turn ends and /view lists the document", async () => {
 		const cwd = scratch();
-		const gateway = harness(cwd, "full-auto", "gateway", "approve");
+		const gateway = harness(cwd, "yolo", "gateway", "approve");
 		const args = { op: "call", capability: ToolNames.Artifact, args: ARTIFACT_ARGS };
 		const verdict = await gateway.registry.invoke({ tool: ToolNames.Gateway, args });
 		const result = okResult(verdict);

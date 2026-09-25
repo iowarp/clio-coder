@@ -18,7 +18,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 
 type Reply = AskUserResult | ((questions: ReadonlyArray<AskUserQuestion>) => Promise<AskUserResult>);
 
-function fixture(replies: Reply[], autonomy: AutonomyLevel = "auto-edit") {
+function fixture(replies: Reply[], autonomy: AutonomyLevel = "default") {
 	const shown: Array<ReadonlyArray<AskUserQuestion>> = [];
 	const presentations: unknown[] = [];
 	const registry = createRegistry({ safety: createWorkerSafety(), autonomy: () => autonomy });
@@ -193,7 +193,7 @@ describe("ask_user tool", () => {
 				{ answers: [{ question: "Open the PR?", answer: "yes" }] },
 				{ answers: [{ question: "Draft title?", answer: "fine" }] },
 			],
-			"full-auto",
+			"yolo",
 		);
 		strictEqual(
 			interviewOf(await f.call({ exposure: "outward", questions: [{ question: "Open the PR?" }] })).exposure,

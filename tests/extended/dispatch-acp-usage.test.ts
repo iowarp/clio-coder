@@ -118,7 +118,7 @@ for (const scenario of [
 ]) {
 	it(`seals ACP usage: ${scenario.name}`, { timeout: 15_000 }, async (t) => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.safety.autonomy = "full-auto";
+		settings.safety.autonomy = "yolo";
 		settings.fleet.retry.maxRetries = 0;
 		settings.integrations.externalAgents.entries = [
 			{

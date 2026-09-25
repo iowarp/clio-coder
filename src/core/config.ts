@@ -15,6 +15,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { OPERATOR_AUTONOMY_LEVELS } from "../domains/safety/autonomy.js";
 import {
 	ACTIVE_AGENT_AUTOMATION_ROLES,
 	ACTIVE_ROUTING_POSTURES,
@@ -349,7 +350,6 @@ const THINKING_FORMATS = [
 	"harmony",
 ] as const;
 const STRUCTURED_OUTPUTS = ["json-schema", "gbnf", "xgrammar", "none"] as const;
-const AUTONOMY_LEVELS = ["read-only", "suggest", "auto-edit", "full-auto"] as const;
 const TOOL_GOVERNANCE = ["clio-coder-policy", "agent-managed", "deny-all"] as const;
 
 function normalizeLegacyNamingValue(value: unknown, legacy: string, canonical: string): unknown {
@@ -1866,7 +1866,12 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			const safety = raw.safety;
 			issues.unknownKeys("safety", safety, ["autonomy", "limits", "review"]);
 			if ("autonomy" in safety) {
-				const parsed = expectEnum(issues, "safety.autonomy", safety.autonomy, AUTONOMY_LEVELS);
+				const canonical = normalizeLegacyNamingValue(
+					normalizeLegacyNamingValue(safety.autonomy, "auto-edit", "default"),
+					"full-auto",
+					"yolo",
+				);
+				const parsed = expectEnum(issues, "safety.autonomy", canonical, OPERATOR_AUTONOMY_LEVELS);
 				if (parsed !== undefined) settings.safety.autonomy = parsed;
 			}
 			if ("limits" in safety) {

@@ -299,7 +299,6 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const phase = state.agent.statusText ?? "Ready";
 	const workerText = workers ? ` · ${workers} active` : "";
 	const identity = clean(state.session.target ?? "No model selected");
-	const thinking = theme.fg("reason", `think ${clean(state.session.thinking ?? "off")}`);
 	const usage = contextUsageText(state.context);
 	const meter = ledger || state.context.budget ? contextOccupancyBar(state.context, w >= 100 ? 14 : 8, theme) : "";
 	// A narrow row drops the absolute token counts before it would cut a number
@@ -315,8 +314,8 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
 	const leftRoom = Math.max(1, w - rightWidth - 3);
 	// An armed skill narrows the tools every turn uses until `/skill off`, so it
-	// rides next to the activity and outranks the identity, the quota badge and
-	// the thinking level. Where `skill <names>` does not fit, the knowledge mark
+	// rides next to the activity and outranks the identity and quota badge.
+	// Where `skill <names>` does not fit, the knowledge mark
 	// stands in for the word.
 	const skills = state.session.activeSkills ?? [];
 	const skillBudget = Math.max(5, Math.floor(leftRoom / 3));
@@ -332,8 +331,8 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				);
 	const skillRoom = skill ? visibleWidth(skill) + 3 : 0;
 	// The phase and the worker count are the live facts: the activity takes the
-	// room it needs beside the skill badge, before the identity, the quota badge
-	// and the thinking level get theirs. A row too narrow for both drops the
+	// room it needs beside the skill badge, before the identity and quota badge
+	// get theirs. A row too narrow for both drops the
 	// worker count before it cuts the phase.
 	const activityRoom = Math.max(5, leftRoom - skillRoom);
 	const activity =
@@ -351,13 +350,10 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const baseRoom = leftRoom - activityWidth - skillRoom - (badge ? visibleWidth(badge) + 3 : 0) - 5;
 	// Too narrow for a readable identity: drop it rather than cut it to a stub
 	// such as `bl…_m`, which names neither the target nor the model. The
-	// thinking level takes the room an identity leaves, or the room it drops.
+	// The composer rail now carries the thinking level.
 	const identityMin = Math.min(visibleWidth(identity), IDENTITY_MIN_CELLS);
 	const readable = baseRoom >= identityMin;
-	const showThinking = readable
-		? baseRoom - visibleWidth(thinking) - 3 >= identityMin
-		: baseRoom + 5 >= visibleWidth(thinking) + 3;
-	const identityRoom = Math.max(1, baseRoom - (showThinking ? visibleWidth(thinking) + 3 : 0));
+	const identityRoom = Math.max(1, baseRoom);
 	const fittedIdentity =
 		state.session.targetId || state.session.modelId
 			? formatTargetLabel(state.session.targetId, state.session.modelId, {
@@ -366,7 +362,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				})
 			: fitIdentityLabel(identity, identityRoom);
 	const shownIdentity = readable ? `  ·  ${theme.fg("muted", fittedIdentity)}` : "";
-	const left = `${activity}${skill ? ` · ${skill}` : ""}${shownIdentity}${badge ? ` · ${badge}` : ""}${showThinking ? ` · ${thinking}` : ""}`;
+	const left = `${activity}${skill ? ` · ${skill}` : ""}${shownIdentity}${badge ? ` · ${badge}` : ""}`;
 	const pair = (l: string, r: string, rw: number) => `${fit(l, w - rw - 3)}   ${fit(r, rw)}`;
 	const notice = [...state.notices]
 		.filter((n) => n.expiresAt === null || n.expiresAt > state.now)
@@ -561,7 +557,7 @@ export function renderDashboardPage(
 
 	const tabText = `${theme.style("accent", ">C_", { bold: true })} ${tabs.join(" ")}`;
 	const identityRoom = safeWidth - visibleWidth(tabText) - 4;
-	const identity = `${clean(state.session.target ?? "No model selected")} · think ${clean(state.session.thinking ?? "off")}`;
+	const identity = clean(state.session.target ?? "No model selected");
 	const heading = [
 		truncateToWidth(
 			identityRoom >= 20 ? `${tabText}    ${theme.fg("muted", fitIdentityLabel(identity, identityRoom))}` : tabText,

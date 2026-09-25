@@ -76,7 +76,7 @@ function installed(script?: string) {
 	const data = fixture(script);
 	const result = installExtension(data.source, { cwd: data.cwd, scope: "project" });
 	ok(result.extension?.loadable, JSON.stringify(result.diagnostics));
-	const registry = createRegistry({ safety: createWorkerSafety({ cwd: data.cwd }), autonomy: () => "full-auto" });
+	const registry = createRegistry({ safety: createWorkerSafety({ cwd: data.cwd }), autonomy: () => "yolo" });
 	deepStrictEqual(registerHarnessExtensionTools(registry, data.cwd), []);
 	registry.onPermissionRequired((_call, decision, meta) => {
 		void registry.resumeParkedCalls({
@@ -156,7 +156,7 @@ describe("harness extension executable capabilities", () => {
 		const { cwd } = installed();
 		for (const [autonomy, writeRoots] of [
 			["read-only", undefined],
-			["full-auto", ["outputs"]],
+			["yolo", ["outputs"]],
 		] as const) {
 			const registry = createRegistry({
 				safety: createWorkerSafety({ cwd, ...(writeRoots ? { writeRoots } : {}) }),
@@ -218,7 +218,7 @@ describe("harness extension executable capabilities", () => {
 					return base.evaluate(call, posture);
 				},
 			},
-			autonomy: () => "full-auto",
+			autonomy: () => "yolo",
 		});
 		registerHarnessExtensionTools(registry, data.cwd);
 		const verdict = await registry.invoke({ tool: testName, args: { text: "test" } });

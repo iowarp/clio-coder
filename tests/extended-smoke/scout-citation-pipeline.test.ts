@@ -136,13 +136,13 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 			for (const [path, content] of Object.entries(fixture.files)) writeFileSync(join(workspace, path), content);
 			const doctor = await run(["doctor", "--fix"], workspace, env);
 			strictEqual(doctor.code, 0, doctor.stderr);
-			seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), server.url, "full-auto");
+			seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), server.url, "yolo");
 			const settingsPath = join(scratch.dir, "config", "settings.yaml");
 			const settings = parse(readFileSync(settingsPath, "utf8"));
 			settings.fleet.default.target = "mock-chat";
 			settings.fleet.default.model = "mock-model";
 			writeFileSync(settingsPath, stringify(settings));
-			const result = await run(["run", "--json", "--autonomy", "full-auto", fixture.prompt], workspace, env);
+			const result = await run(["run", "--json", "--autonomy", "yolo", fixture.prompt], workspace, env);
 			strictEqual(result.code, 0, result.stderr);
 			const requests = server.requests.filter((request) => request.stream !== false);
 			const scoutRequests = requests.filter(isScout);

@@ -82,7 +82,7 @@ export function matchMarketplaceSkills(
 /**
  * The hard runtime gate on promotion-flow installs: only Clio's own
  * marketplace is ever an acceptable source, whether the install runs on
- * operator consent or autonomously at full-auto. A local path is the shipped
+ * operator consent or autonomously in yolo. A local path is the shipped
  * package catalog (install copies files, no network); the one acceptable URL
  * shape is this project's own repository tree. Public skill registries and
  * arbitrary GitHub sources are rejected here, in code — a prompt instruction

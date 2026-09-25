@@ -36,7 +36,7 @@ export function claudeSubprocessPermissionConfigForAutonomy(
 	level: AutonomyLevel | undefined,
 	env: NodeJS.ProcessEnv = process.env,
 ): ClaudeSubprocessPermissionConfig {
-	if (level === "full-auto" && env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
+	if (level === "yolo" && env.CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
 		return {
 			permissionMode: "bypassPermissions",
 			extraArgs: ["--allow-dangerously-skip-permissions"],
@@ -50,12 +50,7 @@ export function claudeSubprocessPermissionConfigForAutonomy(
 			dangerousBypass: false,
 		};
 	}
-	if (level === "suggest") {
-		throw new Error(
-			"claude-code runtime cannot enforce autonomy 'suggest': it cannot park tool calls for approval. Dispatch to a native or claude-sdk worker, or use read-only or auto-edit.",
-		);
-	}
-	if (level === "auto-edit") {
+	if (level === "default") {
 		return { permissionMode: "acceptEdits", extraArgs: [], dangerousBypass: false };
 	}
 	return { permissionMode: "default", extraArgs: [], dangerousBypass: false };

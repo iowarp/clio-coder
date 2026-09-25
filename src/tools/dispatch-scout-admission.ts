@@ -189,7 +189,7 @@ export function prepareScoutContinuation(input: {
 	});
 	if (transition.kind === "settled") throw new Error("dispatch: Scout phase unexpectedly settled during compilation");
 	if (input.authorization === "full-auto-policy" && transition.kind !== "ready") {
-		throw new Error("dispatch: full-auto policy does not grant every requested Scout authority");
+		throw new Error("dispatch: yolo policy does not grant every requested Scout authority");
 	}
 	const plan = transition.plan;
 	// Route estimates are advisory. Only a caller-supplied deadline grants stop authority.

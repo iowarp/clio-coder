@@ -135,7 +135,7 @@ export const askUserParameters = Type.Object({
 	exposure: Type.Optional(
 		StringEnum(["local", "outward"], {
 			description:
-				"local (default) stays inside the workspace; outward publishes or sends something the operator cannot take back (issue, PR, comment, push, release) and parks for the operator at auto-edit.",
+				"local (default) stays inside the workspace; outward publishes or sends something the operator cannot take back (issue, PR, comment, push, release) and parks for the operator in default mode.",
 		}),
 	),
 });

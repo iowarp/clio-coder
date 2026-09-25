@@ -61,8 +61,8 @@ describe("world-knowledge agent contract", () => {
 		deepStrictEqual(spec.toolRequirements.required, []);
 		equal(resolveAgentToolCompatibility(spec, [], { mediatesDispatch: true }).compatible, true);
 		equal(resolveAgentToolCompatibility(spec, ["read", "web_fetch"], { mediatesDispatch: true }).compatible, true);
-		equal(effectiveWorkerAutonomy("full-auto", "full-auto", spec.capabilityClass), "read-only");
-		equal(effectiveWorkerAutonomy("full-auto", "auto-edit", "workspace-edit"), "auto-edit");
+		equal(effectiveWorkerAutonomy("yolo", "yolo", spec.capabilityClass), "read-only");
+		equal(effectiveWorkerAutonomy("yolo", "default", "workspace-edit"), "default");
 	});
 
 	it("separates supported facts, synthesis, uncertainty, and follow-up without inventing citations", () => {

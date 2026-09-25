@@ -24,7 +24,7 @@ Turn it off under Settings → Appearance → Demo guidance (`interface.demo`), 
 | `clio-coder --no-context-files` / `clio-coder -nc` | Skip `CLIO-CODER.md` project-context injection for one invocation. |
 | `clio-coder --with-panes` | Activate guest pane integration for this invocation when Clio is inside a reachable herdr session. |
 | `clio-coder --no-panes` | Keep panes off even when settings turn them on. |
-| `clio-coder --autonomy <level>` | Start this interactive session at `capable` or `yolo` without modifying `settings.yaml`. Legacy `read-only`, `suggest`, `auto-edit`, and `full-auto` values remain accepted. Passing `--autonomy` before a subcommand is refused with exit 2 (`clio-coder run --autonomy` remains the headless form). |
+| `clio-coder --autonomy <level>` | Start this interactive session at `default` or `yolo` without modifying `settings.yaml`. Passing `--autonomy` before a subcommand is refused with exit 2 (`clio-coder run --autonomy` remains the headless form). |
 | `clio-coder --no-skills` | Disable skill discovery for one invocation and automatic skill/marketplace prompt guidance while still honoring explicit `--skill` paths. |
 | `clio-coder --skill <path>` | Make one explicit skill file or directory available for one invocation (repeatable). Clio loads its instructions when the skill is activated through `context(scope="skills", name=...)`. |
 | `clio-coder configure` | Run the configuration wizard. Ctrl+C reports `configuration cancelled`, writes no target, and exits 130; when first-run onboarding is cancelled, startup stops instead of opening the TUI with no usable target. |
@@ -105,7 +105,7 @@ Turn it off under Settings → Appearance → Demo guidance (`interface.demo`), 
 | `--target <id>` | One-run main-agent or dispatch target override. |
 | `--model <wireId>` | One-run model override. |
 | `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
-| `--autonomy <level>` | One-run autonomy override: `capable` (`auto-edit`) or `yolo` (`full-auto`); legacy values remain accepted. It does not change saved settings. |
+| `--autonomy <level>` | One-run autonomy override: `default` or `yolo`. It does not change saved settings. |
 | `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. |
 | `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. |
 | `--max-context-tokens <n>` | One-run context-window override for supported local runtimes. |
@@ -164,7 +164,7 @@ Every headless main-agent receipt carries a `safety` summary and a `noop` flag, 
 - at least one block remains unresolved and no mutating call succeeded, or
 - the run called tools and none of them succeeded.
 
-A mutating call is one the tool registry admitted with action class `write`, the class autonomy `auto-edit` runs without asking: `write`, `edit`, and an outward `web_fetch`. A terminating result does not count. The `artifact` tool's plan, review, or report is the turn's answer written to a file, so a run whose every edit was blocked and that then wrote a report about it is still a no-op. A successful `bash` call does not count, because its `execute` class says that a command ran, not that it wrote. A run that called no tool and answered in prose is not a no-op.
+A mutating call is one the tool registry admitted with action class `write`, which `default` runs without asking inside write roots: `write`, `edit`, and an outward `web_fetch` after its separate outward approval. A terminating result does not count. The `artifact` tool's plan, review, or report is the turn's answer written to a file, so a run whose every edit was blocked and that then wrote a report about it is still a no-op. A successful `bash` call does not count, because its `execute` class says that a command ran, not that it wrote. A run that called no tool and answered in prose is not a no-op.
 
 A later successful substantive read or command can recover a block of the same
 action class. Bookkeeping, discovery, and terminal reports do not count as that
@@ -212,7 +212,7 @@ clio-coder run \
 
 Headless runs can explicitly constrain one submitted turn and its continuations using host-enforced bounds ([turn-constraints.ts](../../src/core/turn-constraints.ts)). Turn constraints are never guessed from natural language or derived from model-generated arguments; they can only narrow existing safety, skill, and recipe policies.
 
-- **Workflow mode (`--turn-mode <mode>`):** Selects workflow guidance (`answer` | `proposal` | `change`). Mode guides system prompt rendering and turn continuation discipline (`turnAllowsContinuation` disables autonomous continuation turns for both `answer` and `proposal`). Under `proposal`, tasks board `plan` and `add` actions automatically record `initialStatus: "blocked"` with a note awaiting operator authorization. **Important:** `mode` is prompt and workflow guidance, not an authorization boundary. `turnAllowsTool` ignores mode entirely; mutating tools such as `write` or `edit` are *not* denied by `--turn-mode proposal` alone. To mechanically enforce read-only execution or restrict modifications, pass an explicit capability allowlist (`--allow-tools read,grep,find,ls`) or set `--autonomy read-only` / `suggest`.
+- **Workflow mode (`--turn-mode <mode>`):** Selects workflow guidance (`answer` | `proposal` | `change`). Mode guides system prompt rendering and turn continuation discipline (`turnAllowsContinuation` disables autonomous continuation turns for both `answer` and `proposal`). Under `proposal`, tasks board `plan` and `add` actions automatically record `initialStatus: "blocked"` with a note awaiting operator authorization. **Important:** `mode` is prompt and workflow guidance, not an authorization boundary. `turnAllowsTool` ignores mode entirely; mutating tools such as `write` or `edit` are *not* denied by `--turn-mode proposal` alone. To mechanically restrict execution, pass an explicit capability allowlist (`--allow-tools read,grep,find,ls`).
 - **Worker delegation (`--no-delegate`):** Sets `delegation: "forbidden"`. `turnAllowsTool` mechanically denies the `dispatch` tool, and prompt compilation instructs the model to work directly without spawning workers.
 - **Capability allowlist (`--allow-tools <names|none>`):** Restricts executable tools to an explicit comma-separated list of capability names, or disables all tools when passed `none`. Mechanically enforced by `turnAllowsTool` and tool execution admission. Naming a secondary capability (such as `data` or `clio_docs`) automatically admits its gateway transport wrapper, while naming `gateway` alone never admits every capability behind it.
 - **Skill discovery suppression (`--no-skills`):** Suppresses automatic skill discovery from catalog roots and marketplace guidance while still honoring explicitly specified skill paths (such as `--skill <path>`). Programmatic turn constraints can also set `skills: "disabled"`, which mechanically rejects `context(scope="skills")` calls at the tool boundary.
@@ -552,7 +552,7 @@ and are labeled accordingly.
 
 ## Operating Posture and Autonomy
 
-The settings UI offers **capable** (`auto-edit`) for supervised edits and **yolo** (`full-auto`) for work that should proceed without autonomy prompts. Safety rules remain active at both levels. Existing `read-only` and `suggest` values still load for older sessions and scripts. `--turn-mode proposal` is workflow guidance, not a read-only permission boundary; use `--allow-tools` or the legacy `--autonomy read-only` when execution must be restricted. An interactive capable or yolo session can preview a Clio settings change with `configure_clio`; only the host's Apply choice commits it, and at capable it cannot raise autonomy. See the [settings reference](configuration-reference.md#let-clio-propose-settings-changes), [safety model](../architecture/safety-model.md), and [Bash policy](tool-usage.md#bash-run-a-shell-command).
+The settings UI offers **default** for supervised workspace edits and **yolo** for work that should proceed without ordinary confirmation prompts. Hard blocks and damage-control asks remain active at both levels. `--turn-mode proposal` is workflow guidance, not a read-only permission boundary; use `--allow-tools` when execution must be restricted. An interactive session can preview a Clio settings change with `configure_clio`; `default` requests the host's Apply choice and cannot raise autonomy, while `yolo` applies the exact preview directly. See the [settings reference](configuration-reference.md#let-clio-propose-settings-changes), [safety model](../architecture/safety-model.md), and [Bash policy](tool-usage.md#bash-run-a-shell-command).
 
 ## Dispatch and Built-In Agents
 
@@ -641,7 +641,7 @@ actual behavior. Redact secrets and private repository content.
 
 Acceptance rows labeled Required declare expected checks and timeout limits; they are not pending executions or passing results. Inspect verification receipts for outcomes. Under high rigor, the finish gate requires the applicable passing checks or explicit limitations.
 
-Task-board guidance and ordinary continuation preserve proposal-only scope. Deferred implementation should be blocked or dropped while awaiting an explicit operator go-ahead. A skill-install decision is separate from implementation authorization, and full-auto capability does not expand the task. These are model instructions, not a guarantee of model adherence.
+Task-board guidance and ordinary continuation preserve proposal-only scope. Deferred implementation should be blocked or dropped while awaiting an explicit operator go-ahead. A skill-install decision is separate from implementation authorization, and yolo authority does not expand the task. These are model instructions, not a guarantee of model adherence.
 
 ## Library packages
 

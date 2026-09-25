@@ -13,7 +13,7 @@ test("rails preserve width and decision labels across animated and static phases
 				theme,
 				width,
 				{ left: "CONFIRM", right: "Enter allow" },
-				{ phase, fullAuto: true, animate: true, now: 1700 },
+				{ phase, yolo: true, animate: true, now: 1700 },
 			);
 			strictEqual(visibleWidth(row), width);
 			if (width >= 40) match(stripTerminalSequences(row), /CONFIRM.*Enter allow/);
@@ -22,14 +22,45 @@ test("rails preserve width and decision labels across animated and static phases
 });
 test("motion changes only styling, and reduced motion keeps working rails stable", () => {
 	const render = (now: number, animate: boolean) =>
-		renderEditorRail(theme, 80, {}, { phase: "working", fullAuto: true, animate, now });
+		renderEditorRail(theme, 80, {}, { phase: "working", yolo: true, animate, now });
 	notStrictEqual(render(400, true), render(1500, true));
 	strictEqual(stripTerminalSequences(render(400, true)), stripTerminalSequences(render(1500, true)));
 	strictEqual(render(400, false), render(1500, false));
 	ok(render(400, true).includes(theme.style("editorDanger", "━━━", { bold: true })));
 });
+test("thinking effort moves to the rail and follows transcript density", () => {
+	let level = "off";
+	let style: "compact" | "standard" | "detailed" = "standard";
+	let autonomy = "default";
+	const editor = new ClioEditor(new TuiMainScreen({ columns: 80, rows: 24, write() {} } as unknown as Terminal), {
+		getModelLabel: () => "model",
+		getThinkingLabel: () => level,
+		getOutputStyle: () => style,
+		getAutonomy: () => autonomy,
+	});
+	match(stripTerminalSequences(editor.render(80)[0] ?? ""), /think ▱▱▱▱▱/u);
+	level = "high";
+	match(stripTerminalSequences(editor.render(80)[0] ?? ""), /think ▰▰▰▱▱/u);
+	style = "compact";
+	match(stripTerminalSequences(editor.render(80)[0] ?? ""), /T ▰▰▰▱▱/u);
+	style = "detailed";
+	match(stripTerminalSequences(editor.render(80)[0] ?? ""), /think ▰▰▰▱▱ high/u);
+	autonomy = "yolo";
+	match(stripTerminalSequences(editor.render(80)[0] ?? ""), /^YOLO .*think ▰▰▰▱▱ high/u);
+	level = "forced";
+	match(stripTerminalSequences(editor.render(80)[0] ?? ""), /think forced/u);
+	doesNotMatch(stripTerminalSequences(editor.render(80)[0] ?? ""), /▰/u);
+});
+test("permission rail carries a moving orange spectrum", () => {
+	const paint = (now: number, animate: boolean) =>
+		renderEditorRail(theme, 80, { left: "CONFIRM" }, { phase: "attention", yolo: false, animate, now });
+	notStrictEqual(paint(400, true), paint(1500, true));
+	strictEqual(stripTerminalSequences(paint(400, true)), stripTerminalSequences(paint(1500, true)));
+	strictEqual(paint(400, false), paint(1500, false));
+	ok(paint(1500, true).includes(theme.style("warning", "━", { bold: true }).split("━")[0] ?? ""));
+});
 test("composer reads live autonomy and holds the rail steady around an existing draft", () => {
-	let autonomy = "full-auto";
+	let autonomy = "yolo";
 	let now = 400;
 	const editor = new ClioEditor(new TuiMainScreen({ columns: 80, rows: 24, write() {} } as unknown as Terminal), {
 		getModelLabel: () => "model",
@@ -38,14 +69,14 @@ test("composer reads live autonomy and holds the rail steady around an existing 
 		getAutonomy: () => autonomy,
 		getAnimationTime: () => now,
 	});
-	match(stripTerminalSequences(editor.render(80)[0] ?? ""), /FULL-AUTO/);
+	match(stripTerminalSequences(editor.render(80)[0] ?? ""), /YOLO/);
 	editor.setText("Do not change this draft");
 	const before = editor.render(80)[0];
 	now = 2200;
 	strictEqual(editor.render(80)[0], before);
 	strictEqual(editor.getText(), "Do not change this draft");
-	autonomy = "auto-edit";
-	doesNotMatch(stripTerminalSequences(editor.render(80)[0] ?? ""), /FULL-AUTO/);
+	autonomy = "default";
+	doesNotMatch(stripTerminalSequences(editor.render(80)[0] ?? ""), /YOLO/);
 });
 test("the working pulse steps with the shared animation clock, not with every frame", (t) => {
 	const env = { TERM: process.env.TERM, reduce: process.env.CLIO_CODER_REDUCE_MOTION };

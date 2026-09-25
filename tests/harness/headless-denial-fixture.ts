@@ -12,13 +12,13 @@ export const inline = `python3 -c "from pathlib import Path; Path('sentinel.txt'
 
 export async function runtimeFixture(cwd: string) {
 	const safety = createWorkerSafety({ cwd });
-	const registry = createRegistry({ safety, autonomy: () => "full-auto" });
+	const registry = createRegistry({ safety, autonomy: () => "default" });
 	registry.register(bashTool);
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	settings.chat.target = "fixture";
 	settings.chat.model = "fixture-model";
-	settings.safety.autonomy = "full-auto";
+	settings.safety.autonomy = "default";
 	const capabilities = {
 		chat: true,
 		tools: true,
@@ -116,11 +116,11 @@ export async function runtimeFixture(cwd: string) {
 						};
 						// Actual registry/adapter calls of the same tool finish in reverse start order.
 						const denied = begin("ask-first", inline);
-						await end("error-second", begin("error-second", "cat missing-blocked.txt"));
+						await end("error-second", begin("error-second", "ls missing-blocked.txt"));
 						ok(pendingRequest);
 						registry.cancelParkedCall(pendingRequest, HEADLESS_PERMISSION_DENIED_REASON);
 						await end("ask-first", denied);
-						await end("success", begin("success", "cat sentinel.txt"));
+						await end("success", begin("success", "ls sentinel.txt"));
 						await end("hard", begin("hard", "rm -f sentinel.txt"));
 						// Legacy producer controls have no admission telemetry. Words never classify them.
 						for (const isError of [false, true])

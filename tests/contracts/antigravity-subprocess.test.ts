@@ -461,14 +461,14 @@ describe("Antigravity external subprocess contract", () => {
 		deepStrictEqual(buildAgyArgs(input, {}), freshArgs);
 		deepStrictEqual(buildAgyArgs({ ...input, sessionId: "" }, {}), freshArgs);
 		deepStrictEqual(buildAgyArgs({ ...input, sessionId: "abc" }, {}), [...freshArgs, "--conversation", "abc"]);
-		deepStrictEqual(buildAgyArgs({ ...input, autonomy: "auto-edit" }, {}).slice(0, 2), ["--mode", "accept-edits"]);
-		deepStrictEqual(buildAgyArgs({ ...input, autonomy: "full-auto" }, {}).slice(0, 2), ["--mode", "accept-edits"]);
+		deepStrictEqual(buildAgyArgs({ ...input, autonomy: "default" }, {}).slice(0, 2), ["--mode", "accept-edits"]);
+		deepStrictEqual(buildAgyArgs({ ...input, autonomy: "yolo" }, {}).slice(0, 2), ["--mode", "accept-edits"]);
 		deepStrictEqual(
-			buildAgyArgs({ ...input, autonomy: "full-auto" }, { CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1" }).slice(0, 1),
+			buildAgyArgs({ ...input, autonomy: "yolo" }, { CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS: "1" }).slice(0, 1),
 			["--dangerously-skip-permissions"],
 		);
-		throws(() => buildAgyArgs({ ...input, autonomy: "suggest" }, {}), /cannot enforce autonomy 'suggest'/);
-		equal(antigravitySubprocessConfigForAutonomy("full-auto", {}).dangerousBypass, false);
+		deepStrictEqual(buildAgyArgs({ ...input, autonomy: "default" }, {}).slice(0, 2), ["--mode", "accept-edits"]);
+		equal(antigravitySubprocessConfigForAutonomy("yolo", {}).dangerousBypass, false);
 	});
 
 	it("resumes only when the actual init echoes the caller's id", async () => {

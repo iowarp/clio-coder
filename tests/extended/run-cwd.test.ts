@@ -30,7 +30,7 @@ async function writingHome(): Promise<{ scratch: HeadlessScratch; fixture: OpenA
 		toolCall: { name: "write", arguments: { path: "c1-proof.txt", content: PROOF } },
 	});
 	fixtures.push(fixture);
-	seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, "auto-edit");
+	seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, "default");
 	return { scratch, fixture };
 }
 
@@ -50,7 +50,7 @@ describe("clio-coder run --cwd", () => {
 				"--cwd",
 				relative(launch, project),
 				"--autonomy",
-				"auto-edit",
+				"default",
 				"Write the proof file.",
 			],
 			{ env: scratch.env, cwd: launch },
@@ -84,7 +84,7 @@ describe("clio-coder run --cwd", () => {
 				"--cwd",
 				project,
 				"--autonomy",
-				"auto-edit",
+				"default",
 				"--agent",
 				"coder",
 				"Write the proof file.",

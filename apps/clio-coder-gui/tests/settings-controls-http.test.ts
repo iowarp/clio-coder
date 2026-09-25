@@ -49,13 +49,13 @@ test("settings controls derive from the engine registry, write only the user lay
 		assert.equal(byPath.get("safety.review.enabled")?.timing, "hotReload");
 		assert.match(byPath.get("safety.review.enabled")?.note ?? "", /ACP runs never fire/);
 		assert.deepEqual(byPath.get("chat.target")?.suggestions, ["fixture-target"]);
-		assert.ok(Object.keys(byPath.get("safety.autonomy")?.valueHelp ?? {}).includes("full-auto"));
+		assert.ok(Object.keys(byPath.get("safety.autonomy")?.valueHelp ?? {}).includes("yolo"));
 
 		// A project layer outranks the user layer, so the app refuses rather than write a value that loses.
 		const autonomy = byPath.get("safety.autonomy");
 		assert.equal(autonomy?.source, "project");
 		assert.equal(autonomy?.access, "read-only");
-		assert.equal((await patch({ path: "safety.autonomy", value: "full-auto" })).status, 409);
+		assert.equal((await patch({ path: "safety.autonomy", value: "yolo" })).status, 409);
 
 		const thinking = byPath.get("chat.thinkingLevel");
 		assert.equal(thinking?.value, "high");

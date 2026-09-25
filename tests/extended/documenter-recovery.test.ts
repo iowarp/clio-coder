@@ -35,7 +35,7 @@ const report = (summary?: string, passed = true) =>
 function setup(outputs: readonly string[]) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
-	settings.safety.autonomy = "full-auto";
+	settings.safety.autonomy = "yolo";
 	const context = dispatchStubContext({ settings });
 	const agents = context.getContract<AgentsContract>("agents");
 	ok(agents);
@@ -60,7 +60,7 @@ function setup(outputs: readonly string[]) {
 		dispatch: bundle.contract,
 		bus: context.bus,
 		getAgentSpecs: () => agents.listSpecs(),
-		getAutonomy: () => "full-auto",
+		getAutonomy: () => "yolo",
 	});
 	const monitor = createMonitorTool({ dispatch: bundle.contract });
 	return { bundle, dispatch, monitor, specs };

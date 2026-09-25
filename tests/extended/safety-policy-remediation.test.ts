@@ -49,7 +49,7 @@ test("S1-02 hidden paths require confirmation", () => {
 function admitted(
 	policy: ReturnType<typeof createSafetyPolicyEngine>,
 	command: string,
-	level = "auto-edit" as const,
+	level = "default" as const,
 ): string {
 	const decision = policy.evaluate({ tool: "bash", args: { command } });
 	if (decision.kind !== "allow") return decision.kind;

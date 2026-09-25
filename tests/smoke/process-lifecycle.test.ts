@@ -142,7 +142,7 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 			seedTarget(root, fixture.url);
 			child = spawn(
 				process.execPath,
-				[CLI, "--no-context-files", "--no-skills", "run", "--autonomy", "full-auto", "start child"],
+				[CLI, "--no-context-files", "--no-skills", "run", "--autonomy", "yolo", "start child"],
 				{ cwd: project, env, stdio: ["ignore", "pipe", "pipe"] },
 			);
 			let stderr = "";
@@ -201,7 +201,7 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 			seedTarget(root, fixture.url);
 			child = spawn(
 				process.execPath,
-				[CLI, "--no-context-files", "--no-skills", "run", "--autonomy", "full-auto", "--timeout", "4", "start child"],
+				[CLI, "--no-context-files", "--no-skills", "run", "--autonomy", "yolo", "--timeout", "4", "start child"],
 				{ cwd: project, env, stdio: ["ignore", "pipe", "pipe"] },
 			);
 			let stderr = "";

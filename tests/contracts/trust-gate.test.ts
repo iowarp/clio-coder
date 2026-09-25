@@ -70,7 +70,7 @@ test("S3-01: approved safety, settings, and hooks take effect, and changed bytes
 		strictEqual(readEnv().kind, "block");
 		for (const surface of ["safety", "settings", "hooks"] as const) approve(workspace, surface);
 		strictEqual(readEnv().kind, "allow");
-		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "full-auto");
+		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "yolo");
 		const hooks = buildUserHookRegistrations({ cwd: workspace, recordReceipt: () => undefined });
 		strictEqual(hooks.registrations.length, 1);
 		// Even a comment change needs fresh consent. No parser normalization can
@@ -81,7 +81,7 @@ test("S3-01: approved safety, settings, and hooks take effect, and changed bytes
 			strictEqual(captureProjectSurface(workspace, surface).verdict, "changed");
 		}
 		strictEqual(readEnv().kind, "block");
-		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "auto-edit");
+		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "default");
 		deepStrictEqual(buildUserHookRegistrations({ cwd: workspace, recordReceipt: () => undefined }).registrations, []);
 		deepStrictEqual(hooks.registrations[0]?.evaluate({ hook: "before_tool", toolName: "read" }), []);
 	} finally {
@@ -195,9 +195,9 @@ test("S3-01: CLI review is read-only and approval refuses a stale digest", async
 		const current = captureProjectSurface(workspace, "settings");
 		ok(current.contentHash);
 		strictEqual(command(["settings", "--hash", current.contentHash]).status, 0);
-		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "suggest");
+		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "default");
 		strictEqual(command(["settings", "--revoke"]).status, 0);
-		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "auto-edit");
+		strictEqual(readLayeredSettings(workspace).settings.safety.autonomy, "default");
 	} finally {
 		home.restore();
 	}
@@ -246,7 +246,7 @@ test("S3-01: untrusted project hooks and settings cannot acquire operator author
 		deepStrictEqual(hooks.registrations, []);
 		ok(hooks.fileIssues.some((issue) => issue.message.includes("hooks.yaml") && issue.message.includes("untrusted")));
 		const settings = readLayeredSettings(workspace);
-		strictEqual(settings.settings.safety.autonomy, "auto-edit");
+		strictEqual(settings.settings.safety.autonomy, "default");
 		ok(settings.issues.some((issue) => issue.message.includes("settings.yaml") && issue.message.includes("untrusted")));
 	} finally {
 		home.restore();

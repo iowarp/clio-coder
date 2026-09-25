@@ -22,7 +22,7 @@ function rolePrompt(
 		return compile(table, {
 			identity: "identity.clio",
 			operatingContract: "operating.contract",
-			safety: "safety.auto-edit",
+			safety: "safety.default",
 			sessionInputs: { providerSupportsTools: true, toolNames, toolPromptHints },
 		}).systemPrompt;
 	}
@@ -34,7 +34,7 @@ function rolePrompt(
 		dynamic: false,
 	};
 	return compileWorker(table, {
-		autonomy: "auto-edit",
+		autonomy: "default",
 		providerSupportsTools: true,
 		toolNames,
 		toolPromptHints,
@@ -78,7 +78,7 @@ describe("role-aware prompt hints", () => {
 		const compiled = compile(table, {
 			identity: "identity.clio",
 			operatingContract: "operating.contract",
-			safety: "safety.auto-edit",
+			safety: "safety.default",
 			sessionInputs: {
 				providerSupportsTools: true,
 				toolNames: [ToolNames.Read],

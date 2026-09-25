@@ -200,7 +200,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 /** Longer, optional guidance shown beneath the one-line description when there is room. */
 export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	autonomy:
-		"read-only observes; suggest parks non-read calls; auto-edit edits, dispatches, and runs recognized commands; full-auto skips autonomy prompts. Safety rules can still block or require approval. A confirmation marked exposure=outward parks for you at suggest and auto-edit.",
+		"Default edits the workspace, dispatches routine work, and runs recognized commands; unfamiliar execution, outward actions, and larger dispatch plans ask. Yolo clears ordinary approval prompts, while damage-control rules and hard path protections still apply.",
 	"defaults.maxTokens":
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
 	"context.toolResultMaxBytes":
@@ -284,13 +284,9 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 /** Per-value meaning, surfaced for the current value of an enum knob. */
 export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, string>>> = {
 	autonomy: {
-		"read-only": "observe and answer only; never edits files or runs commands",
-		suggest:
-			"propose every edit and command for your approval; confirmations marked exposure=outward (filing an issue or PR, pushing, releasing) park here as well",
-		"auto-edit":
+		default:
 			"edits and dispatches run; recognized commands (tests, lint, build, .clio-coder/safety.yaml entries) run; other commands ask, as do confirmations marked exposure=outward (filing an issue or PR, pushing, releasing)",
-		"full-auto":
-			"skips autonomy prompts, including outward-facing confirmations; safety rules can still block or require approval",
+		yolo: "runs without ordinary approval prompts; damage-control rules and hard path protections still apply",
 	},
 	"workers.onPermission": {
 		deny: "a worker permission ask becomes a tool denial; the run continues",
@@ -424,7 +420,7 @@ export interface SettingControl {
 }
 
 const CHOICES: Record<string, readonly string[]> = {
-	"safety.autonomy": ["read-only", "suggest", "auto-edit", "full-auto"],
+	"safety.autonomy": ["default", "yolo"],
 	"chat.thinkingLevel": THINKING_LEVELS,
 	"fleet.default.thinkingLevel": THINKING_LEVELS,
 	"fleet.permissions.mode": ["deny", "escalate", "fail"],

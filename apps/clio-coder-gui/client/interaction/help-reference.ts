@@ -106,23 +106,14 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 			"Autonomy is the freedom Clio Coder has to act without asking. The bound session keeps the level Clio Coder says it is enforcing; the settings value reaches the next session.",
 		entries: [
 			{
-				term: "read-only",
-				meaning:
-					"Read-class tools run. Write, execute, and dispatch calls are refused, and Clio Coder proposes them instead. The safety net still runs first.",
-			},
-			{
-				term: "suggest",
-				meaning: "Read-class tools run. Every write, execute, and dispatch call waits for your approval.",
-			},
-			{
-				term: "auto-edit",
+				term: "default",
 				meaning:
 					"Reads, edits, and recognised commands run. Unrecognised shell commands, plan-scale dispatch, and anything that publishes outside the project wait for your approval.",
 			},
 			{
-				term: "full-auto",
+				term: "yolo",
 				meaning:
-					"Everything runs without asking. The safety net still blocks what it always blocks and still confirms what it always confirms.",
+					"Ordinary approval stops are skipped. Damage-control rules can still ask or block, and hard path protections remain active.",
 			},
 		],
 	},

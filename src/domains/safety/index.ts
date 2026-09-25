@@ -21,6 +21,8 @@ export {
 	isAutonomyLevel,
 	mapAutonomy,
 	modelMayActivateSkills,
+	OPERATOR_AUTONOMY_LEVELS,
+	type OperatorAutonomyLevel,
 } from "./autonomy.js";
 export type { SafetyContract, SafetyDecision } from "./contract.js";
 export type {

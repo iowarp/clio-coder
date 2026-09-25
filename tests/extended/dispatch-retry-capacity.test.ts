@@ -38,7 +38,7 @@ async function retryFixture(
 	options: { native?: boolean; previousNode?: string; maxWorkers?: number; beforeRebind?: () => void } = {},
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.safety.autonomy = "full-auto";
+	settings.safety.autonomy = "yolo";
 	settings.integrations.externalAgents.entries = [
 		{ id: "retry-fixture", command: "unused-fixture", args: [], toolGovernance: "clio-coder-policy" },
 	];

@@ -53,7 +53,7 @@ describe("active decisions on actual operator dispatch paths", () => {
 					return board;
 				};
 				const settings = structuredClone(DEFAULT_SETTINGS);
-				settings.safety.autonomy = "full-auto";
+				settings.safety.autonomy = "yolo";
 				settings.fleet.retry.maxRetries = 0;
 				const context = dispatchStubContext({ settings });
 				const agents = context.getContract<AgentsContract>("agents");
@@ -111,7 +111,7 @@ describe("active decisions on actual operator dispatch paths", () => {
 						const result = await createDispatchTool({
 							dispatch,
 							getAgentSpecs: () => agents.listSpecs(),
-							getAutonomy: () => "full-auto",
+							getAutonomy: () => "yolo",
 							getDecisionBoard,
 						}).run({ agent: "coder", task: TASK });
 						strictEqual(result.kind, "ok", JSON.stringify(result));

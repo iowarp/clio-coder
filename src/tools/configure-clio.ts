@@ -4,12 +4,7 @@ import { readSettings, updateSettings } from "../core/config.js";
 import { getAtPath } from "../core/session-routing.js";
 import { applyControlValue, formatControlValue, settingControl } from "../core/settings-controls.js";
 import { ToolNames } from "../core/tool-names.js";
-import {
-	AUTONOMY_LEVELS,
-	type AutonomyLevel,
-	autonomyFromUserInput,
-	isAutonomyLevel,
-} from "../domains/safety/autonomy.js";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { StringEnum } from "../engine/ai.js";
 import type { AskUserHandler } from "./ask-user.js";
 import type { ToolSpec } from "./registry.js";
@@ -33,7 +28,8 @@ const ELIGIBLE_PATH =
 
 /**
  * An interactive settings transaction. The model can prepare the proposal,
- * but only the host's answer to the exact preview can authorize its commit.
+ * Default mode asks the host to approve the exact preview. Yolo applies the
+ * preview directly; both modes retain expiry and stale-value checks.
  * One pending proposal per session keeps both the UI and stale-value check
  * unambiguous. It deliberately never accepts credentials or arbitrary paths.
  */
@@ -42,7 +38,7 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 	return {
 		name: ToolNames.ConfigureClio,
 		description:
-			"Preview a Clio routing or fleet setting, then ask the operator to apply the exact proposal. Available in interactive capable (auto-edit) and yolo (full-auto) sessions; at capable it cannot raise autonomy. Use action=preview with a settings path and text value; action=apply with proposalId.",
+			"Preview a Clio routing or fleet setting, then apply the exact proposal. Default asks the operator to approve; yolo applies directly. Default cannot raise autonomy. Use action=preview with a settings path and text value; action=apply with proposalId.",
 		placement: "gateway",
 		parameters: Type.Object({
 			action: StringEnum(["preview", "apply"]),
@@ -54,10 +50,10 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 		executionMode: "sequential",
 		async run(args) {
 			const autonomy = deps.getAutonomy?.();
-			if (autonomy !== "auto-edit" && autonomy !== "full-auto") {
+			if (autonomy !== "default" && autonomy !== "yolo") {
 				return {
 					kind: "error",
-					message: "configure_clio is available only at capable (auto-edit) or yolo (full-auto) autonomy",
+					message: "configure_clio is available only in default or yolo mode",
 				};
 			}
 			if (args.action === "preview") {
@@ -74,15 +70,10 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 					return { kind: "error", message: "settings value exceeds 8192 bytes" };
 				}
 				try {
-					const value = args.path === "safety.autonomy" ? (autonomyFromUserInput(args.value) ?? args.value) : args.value;
+					const value = args.value;
 					// Below yolo the model may lower its own autonomy but never propose
 					// raising it: one hurried Apply would hand it the authority it asked for.
-					if (
-						autonomy !== "full-auto" &&
-						args.path === "safety.autonomy" &&
-						isAutonomyLevel(value) &&
-						AUTONOMY_LEVELS.indexOf(value) > AUTONOMY_LEVELS.indexOf(autonomy)
-					) {
+					if (autonomy === "default" && args.path === "safety.autonomy" && value === "yolo") {
 						return {
 							kind: "error",
 							message: `configure_clio cannot raise autonomy above ${autonomy}; the operator changes that in /settings`,
@@ -113,7 +104,7 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 					};
 					return {
 						kind: "ok",
-						output: `Proposed saved settings change:\n${pending.preview}\n\nCall configure_clio(action="apply", proposalId="${pending.id}") to request direct operator approval. This proposal expires in 10 minutes.`,
+						output: `Proposed saved settings change:\n${pending.preview}\n\nCall configure_clio(action="apply", proposalId="${pending.id}") to ${autonomy === "yolo" ? "save it" : "request operator approval"}. This proposal expires in 10 minutes.`,
 					};
 				} catch (error) {
 					return { kind: "error", message: error instanceof Error ? error.message : String(error) };
@@ -130,18 +121,20 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 				if (JSON.stringify(getAtPath(readSettings(), proposal.path)) !== proposal.before) {
 					return { kind: "error", message: "saved setting changed since preview; preview it again" };
 				}
-				const answer = await deps.askUser([
-					{
-						question: `Apply this saved Clio setting?\n${proposal.preview}`,
-						header: "Clio settings",
-						options: [
-							{ label: "Apply", description: "Save the exact previewed change." },
-							{ label: "Cancel", description: "Keep the current setting." },
-						],
-					},
-				]);
-				if (answer.cancelled || !answer.answers[0]?.options?.includes("Apply")) {
-					return { kind: "ok", output: "Settings change cancelled; nothing was saved." };
+				if (autonomy !== "yolo") {
+					const answer = await deps.askUser([
+						{
+							question: `Apply this saved Clio setting?\n${proposal.preview}`,
+							header: "Clio settings",
+							options: [
+								{ label: "Apply", description: "Save the exact previewed change." },
+								{ label: "Cancel", description: "Keep the current setting." },
+							],
+						},
+					]);
+					if (answer.cancelled || !answer.answers[0]?.options?.includes("Apply")) {
+						return { kind: "ok", output: "Settings change cancelled; nothing was saved." };
+					}
 				}
 				updateSettings((current) => {
 					if (JSON.stringify(getAtPath(current, proposal.path)) !== proposal.before) {

@@ -56,7 +56,7 @@ describe("gateway in the session prompt", () => {
 			const compiled = compile(loadFragments(), {
 				identity: "identity.clio",
 				operatingContract: "operating.contract",
-				safety: "safety.auto-edit",
+				safety: "safety.default",
 				sessionInputs: {
 					provider: "local",
 					model: "stable-model",
@@ -115,7 +115,7 @@ describe("gateway in the session prompt", () => {
 			const compiled = compile(loadFragments(), {
 				identity: "identity.clio",
 				operatingContract: "operating.contract",
-				safety: "safety.auto-edit",
+				safety: "safety.default",
 				sessionInputs: {
 					provider: "local",
 					model: "stable-model",

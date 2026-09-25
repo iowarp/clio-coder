@@ -25,11 +25,11 @@ Clio evaluates every proposed action along two orthogonal axes: **Autonomy** and
                                ▲
                                │  [Hard Blocked: rm -rf /, disk wipes]
                                │
-                               │  [Confirm Required: curl, force push]
+                               │  [Confirm Required: matched damage-control ask rules]
                                │
                                │  [Admitted Non-Destructive]
                                ┼────────────────────────────────────────► Autonomy Axis
-                       read-only    suggest    auto-edit (default)   full-auto
+                       default (supervised)                yolo
 ```
 
 ### 2.1 The Autonomy Axis (Delegation Dial)
@@ -37,17 +37,17 @@ Autonomy governs when the agent may act automatically versus when it must reques
 
 | Autonomy Level | Read Workspace | Mutate Files | Shell Commands | Network Calls |
 | :--- | :--- | :--- | :--- | :--- |
-| `read-only` | Allowed | Refused / Parks | Refused / Parks | Refused |
-| `suggest` | Allowed | Parks for review | Parks for review | Parks for review |
-| `auto-edit` *(Default)* | Allowed | Allowed (in write roots) | Parks for confirmation* | Parks for confirmation |
-| `full-auto` | Allowed | Allowed (in write roots) | Allowed (non-destructive) | Allowed |
+| `default` | Allowed | Allowed (in write roots) | Unrecognized commands ask* | Outward calls ask |
+| `yolo` | Allowed | Allowed (in write roots) | Allowed unless blocked by damage control | Allowed unless blocked by damage control |
 
-*\*Test Runner Recognition*: Standard test suites (`npm test`, `pytest`, `cargo test`, `go test`) are recognized by the policy engine as read-safe execution and run without confirmation at `auto-edit`.
+*Test Runner Recognition*: Standard test suites (`npm test`, `pytest`, `cargo test`, `go test`) run without confirmation in `default`.
+
+Internal inspection workers may use a separate `read-only` posture; it is not an operator mode.
 
 ### 2.2 The Safety Net (Invariant Policy)
 The safety net operates independently of the autonomy dial:
 - **Hard Blocks**: Actions that are permanently forbidden regardless of autonomy level (e.g., recursive deletion of root or home, writing to block devices, fork bombs).
-- **Confirmation Rails**: Actions that require explicit operator approval even under `full-auto` (e.g., force pushing branches, executing remote untrusted scripts).
+- **Confirmation Rails**: Ordinary confirmation asks are skipped in `yolo`. A damage-control rule can still require approval at either operator mode.
 
 ### 2.3 Advisory Presentation vs Authoritative Code
 - **Consequence Tiers** (`low`, `medium`, `high`, `critical`) are purely advisory visual signals rendered in the TUI to inform human judgment.

@@ -1,7 +1,7 @@
 /**
  * What a headless run answers a tool call that needs an approval nobody can
  * give. There is no operator on the other end of `clio-coder run`, so every ask-rail
- * call below `full-auto` is denied with this sentence.
+ * call in `default` that needs approval is denied with this sentence.
  *
  * It lives here rather than inline at the deny site because two surfaces read
  * it: the orchestrator writes it, and the tool registry recognizes its stable

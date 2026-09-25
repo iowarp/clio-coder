@@ -64,8 +64,7 @@ it("lets the main agent ask an explicit image question through the configured si
 it("advertises the explicit image question behind gateway only when a sidecar is bound", async () => {
 	const env = await isolateClioEnv("vision-gateway-");
 	try {
-		const makeRegistry = () =>
-			createRegistry({ safety: createWorkerSafety({ cwd: env.dir }), autonomy: () => "full-auto" });
+		const makeRegistry = () => createRegistry({ safety: createWorkerSafety({ cwd: env.dir }), autonomy: () => "yolo" });
 		const unbound = makeRegistry();
 		registerCoreTools(unbound);
 		strictEqual(unbound.get(ToolNames.Vision), undefined);

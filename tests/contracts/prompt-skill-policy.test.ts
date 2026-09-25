@@ -164,10 +164,10 @@ it("autonomy transitions change the existing prompt cache identity and compiled 
 			attachedToolSchemas: [],
 		}),
 	);
-	assert.equal(new Set(keys).size, 4);
-	const before = prompt("suggest");
-	const after = prompt("auto-edit");
-	const restored = prompt("suggest");
+	assert.equal(new Set(keys).size, AUTONOMY_LEVELS.length);
+	const before = prompt("read-only");
+	const after = prompt("default");
+	const restored = prompt("read-only");
 	assert.notEqual(before.systemPromptHash, after.systemPromptHash);
 	assert.equal(before.systemPrompt, restored.systemPrompt);
 	assert.match(before.systemPrompt, /only the operator activates skills/);

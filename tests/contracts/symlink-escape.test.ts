@@ -60,7 +60,7 @@ describe("symlink escape admission", () => {
 		});
 		strictEqual(decision.actionClass, "system_modify");
 		strictEqual(decision.kind, "ask");
-		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "auto-edit" });
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "default" });
 		registry.register(writeTool);
 		registry.onPermissionRequired((_call, _decision, meta) => {
 			registry.cancelParkedCall(meta.requestId, "contract: denied");
@@ -197,7 +197,7 @@ describe("park without a permission listener", () => {
 	});
 
 	function autoEditRegistry() {
-		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "auto-edit" });
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "default" });
 		registry.register(writeTool);
 		return registry;
 	}

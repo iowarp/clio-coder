@@ -1,6 +1,7 @@
 import { type Static, Type } from "typebox";
 
 export const Id = Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" });
+export const MAX_SERVED_ARTIFACT_IDS = 64;
 export const PageCursor = Type.String({ maxLength: 1024, pattern: "^[A-Za-z0-9_-]+$" });
 export const Empty = Type.Object({}, { additionalProperties: false });
 export const ProblemCode = Type.Union([

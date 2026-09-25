@@ -351,7 +351,7 @@ export function prepareScoutContinuation(input: {
 	});
 	if (transition.kind === "settled") throw new Error("dispatch: Scout phase unexpectedly settled during compilation");
 	if (input.authorization === "full-auto-policy" && transition.kind !== "ready") {
-		throw new Error("dispatch: full-auto policy does not grant every requested Scout authority");
+		throw new Error("dispatch: yolo policy does not grant every requested Scout authority");
 	}
 	const plan = transition.plan;
 	const p95ByStep = new Map(
@@ -380,7 +380,7 @@ export function prepareScoutContinuation(input: {
 	}
 	const priorDeadlineMs = input.source.receipt.routingIntent.deadlineMs;
 	if (input.authorization === "full-auto-policy" && priorDeadlineMs !== null && predictedDeadlineMs > priorDeadlineMs) {
-		throw new Error("dispatch: full-auto Scout continuation exceeds the previously granted deadline");
+		throw new Error("dispatch: yolo Scout continuation exceeds the previously granted deadline");
 	}
 	const deadlineMs = Math.max(priorDeadlineMs ?? 0, predictedDeadlineMs);
 	const requests: DispatchRequest[] = [];

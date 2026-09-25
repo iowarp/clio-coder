@@ -106,7 +106,7 @@ describe("clio-coder run --timeout", () => {
 	}
 
 	it("ends a stalled run with exit 124 and a sealed timed_out receipt", async () => {
-		const { turn, scratch, provider } = await headlessTurn([{ kind: "stall" }], "auto-edit", ["--timeout", "2"]);
+		const { turn, scratch, provider } = await headlessTurn([{ kind: "stall" }], "default", ["--timeout", "2"]);
 		strictEqual(turn.code, 124, turn.stderr);
 		ok(provider.streams >= 1, "the run must have been waiting on the model");
 		ok(turn.elapsedMs >= 2_000, `exited before the limit: ${turn.elapsedMs}ms`);
@@ -123,7 +123,7 @@ describe("clio-coder run --timeout", () => {
 	});
 
 	it("leaves a run that finishes inside the limit untouched and does not hold the process open", async () => {
-		const { turn, scratch } = await headlessTurn([], "auto-edit", ["--timeout", "300"]);
+		const { turn, scratch } = await headlessTurn([], "default", ["--timeout", "300"]);
 		strictEqual(turn.code, 0, turn.stderr);
 		ok(turn.elapsedMs < 30_000, `an unref'd timer must not hold the process: ${turn.elapsedMs}ms`);
 		const { receipt } = sealedReceipt(scratch.stateDir);
@@ -132,11 +132,11 @@ describe("clio-coder run --timeout", () => {
 	});
 
 	it("reports a timeout, not a no-op, when --fail-on-noop is also set", async () => {
-		// The write is denied at suggest, which would make the run a no-op; the
+		// Hidden shell content asks in default, which makes a headless run a no-op; the
 		// model then stalls, and the timeout is what ends it.
 		const { turn, scratch } = await headlessTurn(
-			[{ kind: "tool", name: "write", arguments: { path: "c3.txt", content: "x\n" } }, { kind: "stall" }],
-			"suggest",
+			[{ kind: "tool", name: "bash", arguments: { command: "python3 -c \"print('hidden')\"" } }, { kind: "stall" }],
+			"default",
 			["--timeout", "2", "--fail-on-noop"],
 		);
 		strictEqual(turn.code, 124, turn.stderr);

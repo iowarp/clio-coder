@@ -37,7 +37,7 @@ export async function realAcpHome() {
 				code === 0 ? resolve() : reject(new Error(`Scratch initialization failed (${code}): ${stderr}`)),
 			);
 		});
-		seedOpenAICompatToolOrchestrator(join(home.path, "config"), provider.url, "suggest");
+		seedOpenAICompatToolOrchestrator(join(home.path, "config"), provider.url, "default");
 	} catch (error) {
 		await closeServer(provider.server);
 		await home.close();

@@ -55,10 +55,10 @@ test("built native timing includes delayed response headers", async () => {
 		mkdirSync(workspace);
 		const doctor = await run(["doctor", "--fix"], workspace, env);
 		strictEqual(doctor.code, 0, doctor.stderr);
-		seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "full-auto");
+		seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "yolo");
 		const prompt = "Write timing-probe.txt containing exactly native timing fixture followed by a newline.";
 		const direct = await run(
-			["--no-context-files", "--no-skills", "run", "--json", "--autonomy", "full-auto", prompt],
+			["--no-context-files", "--no-skills", "run", "--json", "--autonomy", "yolo", prompt],
 			workspace,
 			env,
 		);

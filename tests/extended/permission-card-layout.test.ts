@@ -19,7 +19,7 @@ const WRITE_VIEW: ApprovalRequestView = {
 	requestId: "req-1",
 	tool: "write",
 	actionClass: "write",
-	axis: { kind: "autonomy", level: "suggest" },
+	axis: { kind: "autonomy", level: "default" },
 	origin: { kind: "main" },
 	reason: "write blocked: write",
 	target: DEEP_TARGET,
@@ -57,7 +57,7 @@ for (const columns of [80, 120, 160]) {
 		ok(!joined.includes("Consequence:"), "standing terms are folded");
 		match(joined, /Allow runs this one write call/u);
 		match(joined, /Press \? for the full terms/u);
-		match(joined, /Requested by: main agent through autonomy level \(suggest\)/u);
+		match(joined, /Requested by: main agent through autonomy level \(default\)/u);
 
 		body.toggleTerms();
 		const opened = plain(body.render(width)).join(" ");

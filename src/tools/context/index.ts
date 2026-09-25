@@ -210,7 +210,7 @@ function pendingSkillPolicyError(name: string, options: ToolInvokeOptions | unde
 		return operatorOnly();
 	}
 	const recipeBound = policyIsRecipeBound(policy);
-	// auto-edit / full-auto: the operator already chose to let the model act
+	// default / yolo: the operator already chose to let the model act
 	// without being asked, and a skill only ever narrows the tool surface, so
 	// the model activates an installed skill itself under the same per-run
 	// policy `/skill` produces. A skill that is not installed still fails the

@@ -77,7 +77,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `context.memory.trajectorySteps` | `8` |
 | `context.memory.maxOutputTokens` | `2000` |
 | `context.memory.timeoutMs` | `60000` |
-| `safety.autonomy` | `"auto-edit"` |
+| `safety.autonomy` | `"default"` |
 | `safety.limits.sessionCostUsd` | `5` |
 | `safety.limits.chatToolCallsPerTurn` | `60` |
 | `safety.limits.readBytesPerCall` | `51200` |
@@ -169,15 +169,15 @@ User MCP declarations are stored at `<config>/mcp.yaml`; project declarations ar
 | Changed declaration | Editing command, args, cwd, environment, or timeout makes trust stale; review and trust it again. |
 | Trust boundary | Trust enables launch; it is not operating-system isolation. Server annotations do not grant authority. |
 
-Only user declarations may set `actionClass`; project declarations receive their class from the explicit trust record. Classify the entire server by its most powerful tool, since the declaration applies to every tool it exposes. For example, a locally installed literature-search server whose tools only query or transform citation metadata can use `actionClass: read` to work in full-auto without a headless approval dead end.
+Only user declarations may set `actionClass`; project declarations receive their class from the explicit trust record. Classify the entire server by its most powerful tool, since the declaration applies to every tool it exposes. For example, a locally installed literature-search server whose tools only query or transform citation metadata can use `actionClass: read` to work in `yolo` without a headless approval dead end.
 
 Trust and declaration loading are implemented in [`src/domains/gateway/mcp/trust.ts`](../../src/domains/gateway/mcp/trust.ts). The model-facing discovery and call contract is in [gateway tool usage](tool-usage.md#gateway-discover-and-call-secondary-capabilities).
 
 ## Let Clio propose settings changes
 
-In an interactive `capable` (`auto-edit`) or `yolo` (`full-auto`) session, ask Clio to change a chat model, fleet route, profile, or autonomy setting. At `capable`, Clio can lower autonomy but never propose raising it. Clio can discover `configure_clio` through the gateway, preview one saved setting change, and then request an **Apply** or **Cancel** decision from the host UI. Applying checks that the saved value still matches the preview; expired or stale proposals need a fresh preview. The tool excludes credentials and connection definitions. The running session keeps its current routing, so reload Clio to use a newly saved route in that session. Other settings reload where the live settings loader supports it.
+In an interactive `default` or `yolo` session, ask Clio to change a chat model, fleet route, profile, or autonomy setting. In `default`, Clio can lower autonomy but never propose raising it. Clio can discover `configure_clio` through the gateway and preview one saved setting change. In `default`, applying requests an **Apply** or **Cancel** decision from the host UI; in `yolo`, the exact preview applies directly. Applying checks that the saved value still matches the preview; expired or stale proposals need a fresh preview. The tool excludes credentials and connection definitions. The running session keeps its current routing, so reload Clio to use a newly saved route in that session. Other settings reload where the live settings loader supports it.
 
-The settings UI presents two everyday choices: **capable** maps to the persisted `auto-edit` level, and **yolo** maps to `full-auto`. Older `read-only` and `suggest` values remain readable for existing sessions and configuration files.
+The settings UI presents two choices: **default** and **yolo**. Saved older `auto-edit` and `full-auto` spellings are read as those canonical values. An explicit v1 upgrade converts its old `suggest` value to `default` and records that change in the migration report.
 
 ## Exact CLI and tool contracts
 

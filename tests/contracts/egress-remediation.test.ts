@@ -11,9 +11,8 @@ test("write-shaped fetches cannot use the read-only rail", () => {
 		const action = classify({ tool: "web_fetch", args }).actionClass;
 		strictEqual(action, "write");
 		strictEqual(mapAutonomy("read-only", action, { exposure: "outward" }), "deny");
-		strictEqual(mapAutonomy("suggest", action, { exposure: "outward" }), "ask");
-		strictEqual(mapAutonomy("auto-edit", action, { exposure: "outward" }), "ask");
-		strictEqual(mapAutonomy("full-auto", action, { exposure: "outward" }), "allow");
+		strictEqual(mapAutonomy("default", action, { exposure: "outward" }), "ask");
+		strictEqual(mapAutonomy("yolo", action, { exposure: "outward" }), "allow");
 	}
 	for (const level of AUTONOMY_LEVELS)
 		strictEqual(mapAutonomy(level, classify({ tool: "web_fetch", args: {} }).actionClass), "allow");
@@ -180,7 +179,7 @@ test("registry parks outward HTTP requests and executes GET at every autonomy le
 			});
 			const result = registry.invoke({ tool: "web_fetch", args });
 			const outward = "method" in args || "body" in args;
-			const shouldPark = outward && (level === "suggest" || level === "auto-edit");
+			const shouldPark = outward && level === "default";
 			strictEqual(registry.hasParkedCalls(), shouldPark);
 			if (shouldPark) {
 				strictEqual(ran, false);

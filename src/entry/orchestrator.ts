@@ -1758,7 +1758,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		options.headless?.autonomy ??
 		options.autonomy ??
 		(config?.get() ?? readSettings()).safety.autonomy ??
-		"auto-edit";
+		"default";
 	const resolveEffectiveAutonomy = (): AutonomyLevel => activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
 	const skillDiscoveryEnabled = options.noSkills !== true && options.headless?.noSkills !== true;
 	let readySkillSnapshot: { key: string; count: number } | undefined;
@@ -1783,8 +1783,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 	// First-turn skills reminder: user-message-visible text is the one channel
 	// the battery-tested local models act on. Which protocol it teaches follows
-	// the effective autonomy level, resolved one line up: suggest-and-wait at
-	// read-only and suggest, load-it-yourself at auto-edit and full-auto.
+	// the effective autonomy level, resolved one line up: internal read-only
+	// workers suggest; default and yolo can load trusted installed skills.
 	if (resources && skillDiscoveryEnabled) {
 		middleware.registerHook(
 			createSkillsReminderRegistration({
@@ -2091,7 +2091,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Overrides are keyed by settings path, the same ids the /settings overlay
 	// commits (`setAtPath` walks the dotted path). The headless `--autonomy`
 	// flag was keyed by the bare word, which wrote a top-level `autonomy` key
-	// nothing reads, so `run --autonomy full-auto` compiled and admitted at
+	// nothing reads, so `run --autonomy yolo` compiled and admitted at
 	// whatever settings.yaml said.
 	// The interactive `clio-coder --autonomy <level>` seeds the same override.
 	const startupAutonomy = options.headless?.autonomy ?? options.autonomy;

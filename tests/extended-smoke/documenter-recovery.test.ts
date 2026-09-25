@@ -209,14 +209,14 @@ for (const scenario of ["dependent-repair", "independent-recovery", "exhausted"]
 			seedOpenAICompatToolOrchestrator(
 				join(scratch.dir, "config"),
 				`http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-				"full-auto",
+				"yolo",
 			);
 			const result = await run(
 				[
 					"run",
 					"--json",
 					"--autonomy",
-					"full-auto",
+					"yolo",
 					"Use a read-only Scout then Documenter pipeline for grid.py; report the explanation or a precise limitation. Independent recovery is authorized if Scout fails.",
 				],
 				workspace,

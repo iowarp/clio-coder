@@ -86,7 +86,7 @@ describe("blocked tool errors surface recovery guidance to the model", () => {
 			createWorkerSafety({ cwd: process.cwd() }),
 			undefined,
 			[],
-			"full-auto",
+			"yolo",
 		);
 		await rejects(
 			invokeRegisteredTool(registry, ToolNames.Read, { path: ".env" }),

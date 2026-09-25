@@ -1029,7 +1029,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				import assert from "node:assert/strict";
 				import { pathToFileURL } from "node:url";
 				const { createWorkerToolRegistry } = await import(pathToFileURL(process.argv[2]).href);
-				const registry = createWorkerToolRegistry(undefined, undefined, undefined, undefined, "full-auto");
+				const registry = createWorkerToolRegistry(undefined, undefined, undefined, undefined, "yolo");
 				const result = await registry.invoke({ tool: "extension_measurements__summarize", args: { values: [1,2,3], units: "seconds" } });
 				assert.equal(result.kind, "ok", JSON.stringify(result));
 				assert.equal(result.result.kind, "ok", JSON.stringify(result));
