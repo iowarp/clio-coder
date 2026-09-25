@@ -141,7 +141,7 @@ export interface AgentWorkFacts {
  * visible output, so the extra measurement stays.
  */
 export function fitDashboardLine(line: string, width: number): string {
-	return visibleWidth(line) > width ? truncateToWidth(line, width, "…", true) : line;
+	return visibleWidth(line) > width ? truncateToWidth(line, width, GLYPH.ellipsis, true) : line;
 }
 
 /**
@@ -151,7 +151,7 @@ export function fitDashboardLine(line: string, width: number): string {
  */
 function cell(text: string, width: number): string {
 	const safe = Math.max(0, width);
-	const clipped = truncateToWidth(text, safe, "…", true);
+	const clipped = truncateToWidth(text, safe, GLYPH.ellipsis, true);
 	return `${clipped}${" ".repeat(Math.max(0, safe - visibleWidth(clipped)))}`;
 }
 
@@ -610,7 +610,8 @@ function cumulativeTokens(sessionTokens: UsageBreakdown | null | undefined): num
 }
 
 function meaningfulToolTally(value: string): string | null {
-	return /^(?:none(?: · 0✗)?|0✗)$/u.test(value.trim()) ? null : value;
+	const text = value.trim();
+	return text === "none" || text === `none · 0${GLYPH.error}` || text === `0${GLYPH.error}` ? null : value;
 }
 
 /** Task-board progress chips: `2/5 done`, with a warning chip when tasks are blocked. */
@@ -715,7 +716,7 @@ function shortToolLabel(status: AgentStatus, width: number): string {
 	const nameWidth = width >= 100 ? 18 : 12;
 	// The pill label is never padded; truncate without pad so the tool name is
 	// followed by a single space before the badge, not a column of blanks.
-	return `Running ${truncateToWidth(name, nameWidth, "…", false)}`;
+	return `Running ${truncateToWidth(name, nameWidth, GLYPH.ellipsis, false)}`;
 }
 
 function harnessPhasePresentation(status: AgentStatus, width: number, now: number): HarnessPhasePresentation {

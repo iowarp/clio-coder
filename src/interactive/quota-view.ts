@@ -13,7 +13,7 @@ import { redactSecretString } from "../domains/safety/redaction.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
 import { formatFooterTokens } from "./footer-panel.js";
-import { type ClioToken, clioTheme, formatCompactMs } from "./theme/index.js";
+import { type ClioToken, clioTheme, formatCompactMs, GLYPH } from "./theme/index.js";
 
 const clean = (text: string) => sanitizeCallTargetText(redactSecretString(text));
 const tone = (severity: QuotaSeverity): ClioToken =>
@@ -25,7 +25,9 @@ export function quotaMeter(usedPct: number, cells: number, severity: QuotaSeveri
 	const used = Math.max(0, Math.min(100, Number.isFinite(usedPct) ? usedPct : 0));
 	const filled = Math.round((used / 100) * count);
 	const theme = clioTheme();
-	return theme.fg(tone(severity), "━".repeat(filled)) + theme.fg("frame", "─".repeat(count - filled));
+	return (
+		theme.fg(tone(severity), GLYPH.meterFull.repeat(filled)) + theme.fg("frame", GLYPH.meterEmpty.repeat(count - filled))
+	);
 }
 
 export function quotaResetLabel(
@@ -99,7 +101,7 @@ export function renderQuotaAccounts(
 				truncateToWidth(
 					`${meter}${theme.fg(account.status !== "ok" || account.stale ? "warning" : "muted", `${account.stale ? "STALE · " : ""}${title}`)}  ${clean(detail)}`,
 					width,
-					"…",
+					GLYPH.ellipsis,
 					true,
 				),
 			);

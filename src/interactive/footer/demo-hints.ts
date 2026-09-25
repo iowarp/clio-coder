@@ -3,6 +3,8 @@
  * a time. No timers or model calls; a tip whose feature the operator already
  * uses (the harness profile) is skipped.
  */
+import { GLYPH } from "../theme/index.js";
+
 export function createDemoHints() {
 	const seen = new Set<string>();
 	let current: { id: string; until: number } | null = null;
@@ -24,7 +26,7 @@ export function createDemoHints() {
 		}
 		const learned = input.learned ?? (() => false);
 		const choices: [string, boolean, string][] = [
-			["agents", input.agentActive, `${input.dashboardKey} → Activity shows agents' current actions.`],
+			["agents", input.agentActive, `${input.dashboardKey} ${GLYPH.next} Activity shows agents' current actions.`],
 			["context", input.contextBusy && !learned("/context"), "/context shows what occupies your context window."],
 			["tools", input.toolsUsed && !learned("/view"), "/view lets you inspect recorded tool calls and results."],
 			["welcome", !learned("/help"), "Explore /help · guidance in /settings"],

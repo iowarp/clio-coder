@@ -42,7 +42,7 @@ function agentCard(
 		(_, gap: string, letter: string) => `${gap ? " " : ""}${letter.toUpperCase()}`,
 	);
 	const audience = row.agentAudience === "shadow" || row.agentAudience === "internal" ? "internal agent" : "fleet agent";
-	const heading = theme.style("agent", `↳ ${name}`, { bold: true });
+	const heading = theme.style("agent", `${GLYPH.subProcess} ${name}`, { bold: true });
 	const lines = wrapTextWithAnsi(
 		`${heading}  ${theme.fg(presentation.token, `${presentation.glyph} ${presentation.label}`)}  ${theme.fg("dim", `${formatCompactMs(row.elapsedMs)} · ${audience}`)}`,
 		width,
@@ -59,7 +59,10 @@ function agentCard(
 	lines.push(...(compact ? activity.slice(0, 2) : activity));
 	const usage: string[] = [];
 	if (row.progress?.inputTokens !== undefined || row.inputTokens > 0 || row.outputTokens > 0)
-		usage.push(`↑ ${formatFooterTokens(row.inputTokens)} input`, `↓ ${formatFooterTokens(row.outputTokens)} output`);
+		usage.push(
+			`${GLYPH.up} ${formatFooterTokens(row.inputTokens)} input`,
+			`${GLYPH.down} ${formatFooterTokens(row.outputTokens)} output`,
+		);
 	const context = row.progress?.contextTokens ?? row.lastContextTokens;
 	lines.push(...field("Tokens", usage.length ? usage.join(" · ") : "awaiting reported measurements"));
 	const workload: string[] = [];
@@ -126,7 +129,7 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 					agentCard(second, width - col - 5, true, state.quota),
 					col,
 					width - col - 5,
-					`  ${theme.fg("frame", "│")}  `,
+					`  ${theme.fg("frame", GLYPH.rail)}  `,
 				),
 				"",
 			);
@@ -153,7 +156,7 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 			const audience = row.agentAudience === "shadow" || row.agentAudience === "internal" ? "internal" : "fleet";
 			const usage =
 				row.inputTokens > 0 || row.outputTokens > 0
-					? ` · ↑${formatFooterTokens(row.inputTokens)} ↓${formatFooterTokens(row.outputTokens)}`
+					? ` · ${GLYPH.up}${formatFooterTokens(row.inputTokens)} ${GLYPH.down}${formatFooterTokens(row.outputTokens)}`
 					: "";
 			const compact = [
 				...wrapTextWithAnsi(
@@ -245,7 +248,7 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 	if (ledger.lastCompaction)
 		out.push(
 			...wrapTextWithAnsi(
-				`Last compaction: ${formatFooterTokens(ledger.lastCompaction.tokensBefore)} → ${formatFooterTokens(ledger.lastCompaction.tokensAfter)} · ${clean(ledger.lastCompaction.trigger)}`,
+				`Last compaction: ${formatFooterTokens(ledger.lastCompaction.tokensBefore)} ${GLYPH.next} ${formatFooterTokens(ledger.lastCompaction.tokensAfter)} · ${clean(ledger.lastCompaction.trigger)}`,
 				width,
 			),
 		);
@@ -285,10 +288,10 @@ const IDENTITY_MIN_CELLS = 12;
  */
 function fitNames(prefix: string, names: readonly string[], room: number): string {
 	for (let kept = names.length; kept > 0; kept -= 1) {
-		const candidate = `${prefix}${names.slice(0, kept).join(", ")}${kept < names.length ? "…" : ""}`;
+		const candidate = `${prefix}${names.slice(0, kept).join(", ")}${kept < names.length ? GLYPH.ellipsis : ""}`;
 		if (visibleWidth(candidate) <= room) return candidate;
 	}
-	return truncateToWidth(`${prefix}${names[0] ?? ""}`, Math.max(1, room), "…");
+	return truncateToWidth(`${prefix}${names[0] ?? ""}`, Math.max(1, room), GLYPH.ellipsis);
 }
 
 /** At 60 cells and below, workspace and tips yield; only attention needs a second row. */
@@ -296,7 +299,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const theme = clioTheme();
 	const w = Math.max(1, width);
 	const narrow = w <= 60;
-	const fit = (s: string, n = w) => truncateToWidth(s, Math.max(1, n), "…", true);
+	const fit = (s: string, n = w) => truncateToWidth(s, Math.max(1, n), GLYPH.ellipsis, true);
 	const ledger = state.context.ledger;
 	const workers = state.dispatchRows.filter((row) => ACTIVE_AGENT_STATUSES.has(row.status)).length;
 	const phase = state.agent.statusText ?? "Ready";
@@ -355,7 +358,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const activity =
 		visibleWidth(`${phase}${workerText}`) <= activityRoom
 			? `${theme.fg("accent", phase)}${theme.fg("agent", workerText)}`
-			: theme.fg("accent", truncateToWidth(phase, activityRoom, "…"));
+			: theme.fg("accent", truncateToWidth(phase, activityRoom, GLYPH.ellipsis));
 	const activityWidth = visibleWidth(activity);
 	const badge =
 		weekly && leftRoom - activityWidth - skillRoom - visibleWidth(weekly.label) >= 16
@@ -387,7 +390,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const urgent = state.session.shutdownArmed
 		? "Ctrl+C again to quit"
 		: state.session.leaderArmed
-			? "Ctrl+G → choose key"
+			? `Ctrl+G ${GLYPH.next} choose key`
 			: null;
 	const foot = urgent
 		? theme.fg("warning", urgent)
@@ -418,6 +421,8 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 
 function statusPage(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
+	type MeterCell = { kind: "meter"; percent: number | null; suffix: string };
+	type SectionEntry = readonly [label: string, value: string | MeterCell];
 
 	const quotaRows = [
 		theme.style(
@@ -436,28 +441,30 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
 	const capacity = state.agent.localCapacity;
 	const memory = state.session.memoryIntervention;
-	const section = (title: string, entries: ReadonlyArray<readonly [string, string]>, columns: number) => {
+	const section = (title: string, entries: ReadonlyArray<SectionEntry>, columns: number) => {
 		const labelWidth = Math.min(17, Math.floor(columns * 0.4));
 		return [
 			theme.fg("accent", title),
 			"",
 			...entries.map(([label, value]) => {
-				let rendered = truncateToWidth(clean(value), Math.max(1, columns - labelWidth - 2), "…", true);
-				if (label === "CPU" || label === "RAM")
-					rendered = rendered
-						.replace(/━+/g, (part) => theme.fg("accent", part))
-						.replace(/─+/g, (part) => theme.fg("frame", part));
-				return `${theme.fg("dim", truncateToWidth(label, labelWidth, "…", true))}  ${rendered}`;
+				const room = Math.max(1, columns - labelWidth - 2);
+				let rendered: string;
+				if (typeof value === "string") rendered = truncateToWidth(clean(value), room, GLYPH.ellipsis, true);
+				else if (value.percent === null) rendered = "warming up";
+				else {
+					const percent = Number.isFinite(value.percent) ? Math.max(0, Math.min(100, value.percent)) : 0;
+					const filled = Math.round(percent / 10);
+					rendered = `${theme.fg("accent", GLYPH.meterFull.repeat(filled))}${theme.fg("frame", GLYPH.meterEmpty.repeat(10 - filled))} ${percent.toFixed(0)}%${value.suffix ? `  ${clean(value.suffix)}` : ""}`;
+					rendered = truncateToWidth(rendered, room, GLYPH.ellipsis, true);
+				}
+				return `${theme.fg("dim", truncateToWidth(label, labelWidth, GLYPH.ellipsis, true))}  ${rendered}`;
 			}),
 			"",
 		];
 	};
 	const throughput = (value: number) =>
 		value >= 1024 ** 2 ? `${(value / 1024 ** 2).toFixed(1)} MiB/s` : `${(value / 1024).toFixed(1)} KiB/s`;
-	const meter = (percent: number | null) =>
-		percent === null
-			? "warming up"
-			: `${theme.fg("accent", "━".repeat(Math.round(percent / 10)))}${theme.fg("frame", "─".repeat(10 - Math.round(percent / 10)))} ${percent.toFixed(0)}%`;
+	const meter = (percent: number | null, suffix = ""): MeterCell => ({ kind: "meter", percent, suffix });
 	const names = (items: string[] | undefined) =>
 		items === undefined ? "unreported" : items.length ? `${items.length} · ${items.join(", ")}` : "none";
 	const left: [string, string][] = [
@@ -476,13 +483,16 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 		["Tools", `${toolCalls} calls · ${state.toolCounts.active ?? 0} active · ${state.toolCounts.errors} failed`],
 		["Worker cap", capacity ? `${capacity.limit} · ${capacity.bound}` : "not sampled"],
 	];
-	const right: [string, string][] = [
+	const right: [string, string | MeterCell][] = [
 		["Scope", resource?.scope ?? "local OS · sampling"],
 		["CPU", resource ? meter(resource.cpuPercent) : "sampling"],
 		[
 			"RAM",
 			resource
-				? `${meter((1 - resource.hostFreeBytes / resource.hostTotalBytes) * 100)}  ${gib(resource.hostTotalBytes - resource.hostFreeBytes)} / ${gib(resource.hostTotalBytes)}`
+				? meter(
+						(1 - resource.hostFreeBytes / resource.hostTotalBytes) * 100,
+						`${gib(resource.hostTotalBytes - resource.hostFreeBytes)} / ${gib(resource.hostTotalBytes)}`,
+					)
 				: "sampling",
 		],
 		["Clio RSS", resource ? gib(resource.processRssBytes) : "sampling"],
@@ -501,7 +511,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 		[
 			"Network",
 			resource?.network
-				? `${resource.network.name} ↓${throughput(resource.network.receivedPerSecond)} ↑${throughput(resource.network.sentPerSecond)}`
+				? `${resource.network.name} ${GLYPH.down}${throughput(resource.network.receivedPerSecond)} ${GLYPH.up}${throughput(resource.network.sentPerSecond)}`
 				: "warming up / unavailable",
 		],
 		[
@@ -550,7 +560,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 			section("LOCAL MACHINE", right, width - col - 5),
 			col,
 			width - col - 5,
-			`  ${theme.fg("frame", "│")}  `,
+			`  ${theme.fg("frame", GLYPH.rail)}  `,
 		),
 		theme.fg("accent", "CONTEXT ENGINE"),
 		...wrapTextWithAnsi(extras.map(([label, value]) => `${theme.fg("dim", label)} ${clean(value)}`).join("  ·  "), width),
@@ -574,13 +584,14 @@ export function renderDashboardPage(
 	);
 
 	const tabText = `${brandMark(theme)} ${tabs.join(" ")}`;
+
 	const identityRoom = safeWidth - visibleWidth(tabText) - 4;
 	const identity = clean(state.session.target ?? "No model selected");
 	const heading = [
 		truncateToWidth(
 			identityRoom >= 20 ? `${tabText}    ${theme.fg("muted", fitIdentityLabel(identity, identityRoom))}` : tabText,
 			safeWidth,
-			"…",
+			GLYPH.ellipsis,
 			true,
 		),
 	];
@@ -588,10 +599,10 @@ export function renderDashboardPage(
 	const hint = truncateToWidth(
 		theme.fg(
 			"muted",
-			`${cycleKey || "Dashboard"} → ${next}   ·   ${page === "Status" ? "/usage · /mcp · /library" : "composer stays active"}`,
+			`${cycleKey || "Dashboard"} ${GLYPH.next} ${next}   ·   ${page === "Status" ? "/usage · /mcp · /library" : "composer stays active"}`,
 		),
 		safeWidth,
-		"…",
+		GLYPH.ellipsis,
 		true,
 	);
 	const available = budget - 4;
@@ -609,7 +620,7 @@ export function renderDashboardPage(
 					: "/usage · /context";
 		content = [
 			...content.slice(0, available - 1),
-			truncateToWidth(theme.fg("dim", `More detail: ${detail}`), safeWidth, "…", true),
+			truncateToWidth(theme.fg("dim", `More detail: ${detail}`), safeWidth, GLYPH.ellipsis, true),
 		];
 	}
 	while (content.length < available) content.push("");
