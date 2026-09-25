@@ -8,31 +8,37 @@ interface TokenColor {
 }
 
 const TOKENS: Record<ClioToken, TokenColor> = {
-	// The composer rails carry the lightest sea-glass teal and clay orange.
-	editor: { rgb: [154, 203, 182], xterm: 115 },
-	editorDanger: { rgb: [224, 130, 120], xterm: 210 },
-	editorAction: { rgb: [215, 161, 111], xterm: 180 },
-	accent: { rgb: [121, 178, 155], xterm: 72 },
-	accentDeep: { rgb: [95, 150, 135], xterm: 66 },
-	tool: { rgb: [135, 170, 160], xterm: 109 },
-	agent: { rgb: [175, 121, 89], xterm: 137 },
-	// Secondary clay orange remains below the composer intensity tier. The token name teaches the rule: orange
-	// means Clio is acting. It fires only for Clio's signature actions
+	// Every token is a foreground on a background Clio cannot see: a dark theme
+	// (black, One Dark, Solarized Dark) or a light one (white, Solarized Light).
+	// Each sits in the middle luminance band, relative luminance 0.19 to 0.26,
+	// where it keeps about 3:1 or better on both. A pastel reads on dark and
+	// vanishes on light; a deep tone does the reverse. Roles are therefore told
+	// apart by hue and saturation rather than lightness, and subdued roles can
+	// recede only so far on either side. The xterm fallbacks are picked for the
+	// same two-sided contrast, not for nearest color.
+	editor: { rgb: [15, 156, 130], xterm: 30 },
+	editorDanger: { rgb: [236, 62, 69], xterm: 196 },
+	editorAction: { rgb: [214, 102, 15], xterm: 166 },
+	accent: { rgb: [14, 150, 127], xterm: 30 },
+	accentDeep: { rgb: [12, 140, 118], xterm: 29 },
+	tool: { rgb: [74, 135, 147], xterm: 66 },
+	agent: { rgb: [195, 103, 43], xterm: 130 },
+	// Orange means Clio is acting. It fires only for Clio's signature actions
 	// (dispatching, queued and running fleet work, steering) and for the border
 	// of a prompt that has taken the keyboard and is waiting on a decision, never
 	// as decoration, and never a metric, at most one orange element per region of
-	// the screen. warning stays the soft amber for actual warnings.
-	action: { rgb: [189, 136, 98], xterm: 137 },
-	success: { rgb: [142, 185, 155], xterm: 108 },
-	warning: { rgb: [213, 180, 111], xterm: 179 },
-	error: { rgb: [210, 139, 135], xterm: 174 },
-	info: { rgb: [155, 185, 177], xterm: 109 },
-	reason: { rgb: [188, 169, 147], xterm: 144 },
-	dim: { rgb: [120, 129, 126], xterm: 244 },
-	muted: { rgb: [155, 166, 161], xterm: 247 },
-	title: { rgb: [142, 191, 174], xterm: 109 },
-	frame: { rgb: [70, 106, 97], xterm: 59 },
-	frameStrong: { rgb: [115, 168, 149], xterm: 73 },
+	// the screen. warning stays amber for actual warnings.
+	action: { rgb: [214, 102, 15], xterm: 166 },
+	success: { rgb: [43, 151, 63], xterm: 28 },
+	warning: { rgb: [177, 124, 0], xterm: 136 },
+	error: { rgb: [233, 65, 70], xterm: 160 },
+	info: { rgb: [58, 127, 232], xterm: 32 },
+	reason: { rgb: [150, 107, 206], xterm: 98 },
+	dim: { rgb: [124, 124, 124], xterm: 244 },
+	muted: { rgb: [120, 130, 140], xterm: 102 },
+	title: { rgb: [14, 150, 127], xterm: 30 },
+	frame: { rgb: [112, 122, 133], xterm: 243 },
+	frameStrong: { rgb: [15, 156, 130], xterm: 30 },
 };
 
 export const SGR_RESET = "\u001b[0m";
