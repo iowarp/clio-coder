@@ -490,7 +490,6 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		...(deps.operatorExtensions ? { operatorExtensions: deps.operatorExtensions } : {}),
 		...(deps.showExtensionOutput ? { showExtensionOutput: deps.showExtensionOutput } : {}),
 		listAgents: () => deps.agents?.listSpecs().filter((spec) => spec.audience !== "internal") ?? [],
-		listDelegationAgents: () => deps.getSettings?.().integrations.externalAgents.entries ?? [],
 		exportShareArchive: (outPath) => {
 			if (!deps.share) throw new Error("share domain is not loaded");
 			const path = resolve(outPath);
