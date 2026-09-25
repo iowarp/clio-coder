@@ -10,7 +10,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
-import { buildHint, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, selectionLabel, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, rule } from "../theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 88;
@@ -88,10 +88,14 @@ function interviewHeader(interview: DecisionLedgerEntry, width: number, now: num
 
 function decisionLines(decision: DecisionRecord, selected: boolean, expanded: boolean, width: number): string[] {
 	const theme = clioTheme();
-	const cursor = selected ? theme.fg("accent", GLYPH.cursor) : " ";
+	const cursor = selectionMark(selected);
 	const status = decision.status === "active" ? theme.fg("success", GLYPH.ok) : theme.fg("dim", GLYPH.cancelled);
 	const labelText = decision.label ?? decision.key;
-	const label = decision.status === "superseded" ? theme.fg("dim", labelText) : theme.fg("muted", labelText);
+	const label = selected
+		? selectionLabel(true, labelText)
+		: decision.status === "superseded"
+			? theme.fg("dim", labelText)
+			: theme.fg("muted", labelText);
 	const value = decision.status === "superseded" ? theme.fg("dim", decision.value) : decision.value;
 	const lines = [fitLine(`${cursor} ${status} ${label}${theme.fg("dim", ":")} ${value}`, width)];
 	// The indent belongs to the container, so this text wraps inside what is left

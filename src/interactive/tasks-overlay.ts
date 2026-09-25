@@ -18,7 +18,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../engine/tui.js";
-import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
+import { buildHint, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
 import { type ClioToken, clioTheme, fitUnits, GLYPH, rule } from "./theme/index.js";
 
 /**
@@ -89,8 +89,12 @@ function taskRow(task: TaskBoardTask, width: number, selected?: boolean): string
 		? { glyph: GLYPH.phaseBlocked, token: "warning" as const }
 		: STATUS_PRESENTATION[task.status];
 	const glyph = theme.fg(presentation.token, presentation.glyph);
-	const title = task.status === "completed" || task.status === "cancelled" ? dim(task.title) : muted(task.title);
-	const cursor = selected === undefined ? "" : `${selected ? theme.fg("accent", GLYPH.cursor) : " "} `;
+	const title = selected
+		? selectionLabel(true, task.title)
+		: task.status === "completed" || task.status === "cancelled"
+			? dim(task.title)
+			: muted(task.title);
+	const cursor = selected === undefined ? "" : `${selectionMark(selected)} `;
 	return fitContentLine(
 		`${cursor}${glyph} ${dim(task.id.padEnd(4))} ${title} ${dim(`· ${taskOriginLabel(task)}${unverified ? " · unverified" : ""}`)}`,
 		width,
@@ -241,9 +245,7 @@ function isSameSelection(left: TasksOverlaySelection | undefined, right: TasksOv
 	return left.kind === "user" && right.kind === "user" && left.task.id === right.task.id;
 }
 
-function selectionCursor(selected: boolean): string {
-	return selected ? clioTheme().fg("accent", GLYPH.cursor) : " ";
-}
+const selectionCursor = selectionMark;
 
 function displayArtifactPath(path: string, workspace: string): string {
 	const root = resolve(workspace);

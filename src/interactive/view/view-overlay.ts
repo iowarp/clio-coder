@@ -13,7 +13,7 @@ import {
 } from "../../engine/tui.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
-import { buildHint, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, markdownTheme, padAnsi } from "../theme/index.js";
 import {
 	type ArtifactProvider,
@@ -678,7 +678,7 @@ export class ViewOverlayView implements Component {
 			}
 			if (!row.item) continue;
 			const selected = row.itemIndex === this.selectedIndex;
-			const cursor = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+			const cursor = `${selectionMark(selected)} `;
 			const safeTitle = redactSecretString(sanitizeCallTargetText(row.item.title));
 			const title = selected ? theme.style("accent", safeTitle, { bold: true }) : safeTitle;
 			const metaParts = [formatRelativeTime(row.item.timestamp), formatArtifactSize(row.item.sizeBytes)].filter(Boolean);

@@ -12,7 +12,7 @@ import {
 } from "../engine/tui.js";
 import { keyboardOwner } from "./keyboard-owner.js";
 import { enterModal, type ModalMarkerSink } from "./modal-marker.js";
-import { type ClioToken, clioTheme, padAnsi, screenTitle, selectListTheme } from "./theme/index.js";
+import { type ClioToken, clioTheme, GLYPH, padAnsi, screenTitle, selectListTheme } from "./theme/index.js";
 
 export const DEFAULT_SELECT_THEME: SelectListTheme = selectListTheme(clioTheme());
 
@@ -79,6 +79,21 @@ function clioTitle(text: string, token?: ClioToken): string {
 
 export function clioError(text: string): string {
 	return clioTheme().fg("error", text);
+}
+
+/**
+ * The selection rule for a self-drawn list row: the focused row carries the
+ * cursor in accent and its label in accent bold, and nothing else changes
+ * colour. Decisions, tasks and the tree marked the row but left the label
+ * plain while help, model and view highlighted it, so the same key press read
+ * as three different things.
+ */
+export function selectionMark(focused: boolean): string {
+	return focused ? clioTheme().fg("accent", GLYPH.cursor) : " ";
+}
+
+export function selectionLabel(focused: boolean, label: string): string {
+	return focused ? clioTheme().style("accent", label, { bold: true }) : label;
 }
 
 function brandedTopBorder(label: string, innerWidth: number, tone?: ClioToken): string {
