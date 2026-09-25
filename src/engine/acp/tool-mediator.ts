@@ -139,23 +139,28 @@ function stringField(record: Record<string, unknown>, ...keys: string[]): string
 	return undefined;
 }
 
-function optionByKind(options: ReadonlyArray<AcpPermissionOption>, kinds: ReadonlyArray<string>): string | null {
-	for (const kind of kinds) {
-		const exact = options.find((option) => option.kind === kind);
-		if (exact) return exact.optionId;
-	}
-	for (const option of options) {
-		if (kinds.some((kind) => option.kind.startsWith(kind.split("_")[0] ?? kind))) return option.optionId;
-	}
-	return null;
+/**
+ * Clio approves one call at a time, so only `allow_once` answers an approval.
+ * `allow_always` would turn that approval into a standing grant inside the
+ * peer that Clio's policy never gave, and no allow kind is matched by prefix.
+ */
+function allowOnceOption(options: ReadonlyArray<AcpPermissionOption>): string | null {
+	return options.find((option) => option.kind === "allow_once")?.optionId ?? null;
+}
+
+/** A denial prefers `reject_once`; any reject kind is acceptable, since none grants anything. */
+function rejectOption(options: ReadonlyArray<AcpPermissionOption>): string | null {
+	return (
+		options.find((option) => option.kind === "reject_once")?.optionId ??
+		options.find((option) => option.kind === "reject_always")?.optionId ??
+		options.find((option) => typeof option.kind === "string" && option.kind.startsWith("reject"))?.optionId ??
+		null
+	);
 }
 
 function responseFor(decision: "approved" | "denied" | "cancelled", options: ReadonlyArray<AcpPermissionOption>) {
 	if (decision === "cancelled") return { outcome: { outcome: "cancelled" as const } };
-	const optionId =
-		decision === "approved"
-			? optionByKind(options, ["allow_once", "allow_always"])
-			: optionByKind(options, ["reject_once", "reject_always"]);
+	const optionId = decision === "approved" ? allowOnceOption(options) : rejectOption(options);
 	if (!optionId) return { outcome: { outcome: "cancelled" as const } };
 	return { outcome: { outcome: "selected" as const, optionId } };
 }
@@ -655,6 +660,12 @@ export class AcpToolMediator {
 			}
 		}
 
+		let noAllowOnce = false;
+		if (decision === "approved" && allowOnceOption(options) === null) {
+			decision = "denied";
+			noAllowOnce = true;
+			reason = `approved by Clio policy (${reason ?? "allowed"}), but the peer offered no allow_once option and Clio never selects allow_always, so the call was rejected`;
+		}
 		if (decision === "approved") this.approved += 1;
 		else this.denied += 1;
 		const loggedSafety = logSafety(safetyDecision);
@@ -669,7 +680,7 @@ export class AcpToolMediator {
 			durationMs: Math.round(performance.now() - startedAt),
 			timestamp: new Date().toISOString(),
 		});
-		if (decision === "denied" && reason?.startsWith("permission_required:")) {
+		if (decision === "denied" && (noAllowOnce || reason?.startsWith("permission_required:"))) {
 			this.input.onPermissionResolved?.({
 				requestId: callId,
 				tool: mapped.tool,

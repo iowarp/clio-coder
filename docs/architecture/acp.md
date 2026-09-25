@@ -418,11 +418,15 @@ enumeration in [server.ts](../../src/engine/acp/server.ts):
 
 [adapter.ts](../../src/engine/acp/adapter.ts) constructs `AcpToolMediator` when Clio acts as an
 ACP client for an outbound delegation. Under `clio-coder-policy` governance:
-1. Tool calls evaluate through the 10-step safety net policy engine.
+1. Tool calls evaluate through the [safety policy engine](safety-model.md).
 2. The mediator uses default autonomy for every delegated peer. If the safety net or default autonomy yields an `ask` verdict, it resolves the ask as a **non-stall denial**. A read-only delegation also denies every non-read request and outside read.
 3. This non-stall behavior prevents external non-interactive client connections from hanging indefinitely while preserving safety boundaries.
 
+An approved call is answered with the peer's `allow_once` option only. Clio never selects `allow_always`, because it would turn one approval into a standing grant inside the peer. When a peer offers no `allow_once`, the approved call is answered with a reject option instead, and the delegation tool log in the receipt records the call as denied with that reason. A denied call is answered with `reject_once`, or another reject option when that is all the peer offers. With no usable option the answer is `cancelled`.
+
 A delegation with `toolGovernance: agent-managed` remains an explicit operator opt-in. It cannot enforce `--read-only`, so admission refuses that combination before starting the peer.
+
+As a client, Clio advertises no client capability in `initialize`, because it serves no `fs/*` or `terminal/*` method to a peer. When a delegation names a model, Clio picks it from the peer's first `select` config option in category `model` and sets it with `session/set_config_option`; a peer without that option cannot take a named model, and the delegation fails before the prompt. If the peer's response reports another current model, the delegation fails. The receipt's `delegation.selectedModelId` records the value Clio selected, or the option's current value when no model was named.
 
 This outbound path is distinct from the hosted server's
 `installPermissionBridge`. The hosted server sends `session/request_permission`
