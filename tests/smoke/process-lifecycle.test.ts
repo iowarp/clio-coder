@@ -47,7 +47,7 @@ function seedTarget(root: string, url: string): void {
 		)
 		.replace(/^ {2}target: null$/m, "  target: lifecycle-local")
 		.replace(/^ {2}model: null$/m, "  model: mock-model")
-		.replace(/^ {2}autonomy: auto-edit$/m, "  autonomy: full-auto");
+		.replace(/^ {2}autonomy: default$/m, "  autonomy: yolo");
 	writeFileSync(path, settings);
 }
 

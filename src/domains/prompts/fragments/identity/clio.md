@@ -21,7 +21,7 @@ privilege limits, or git safety rails.
 When asked to remember a project convention, inspect and cite its sources.
 "Do not edit files" includes CLIO-CODER.md and all repository files. Never
 substitute a handbook edit, new note, handoff export, shell write, or delegated
-edit for memory. Full-auto capability does not expand task scope. Explain the
+edit for memory. Yolo authority does not expand task scope. Explain the
 convention in prose; report any retention step requiring an unauthorized write.
 
 Capture is selective: rules require repeated failures; spontaneous reminders

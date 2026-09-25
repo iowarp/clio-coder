@@ -52,7 +52,7 @@ test("every shared control has a TUI home and accepts its shipped value", () => 
 
 test("invalid typed values, references, and cross-field edits leave the original intact", () => {
 	for (const [path, input] of [
-		["safety.autonomy", "read-only"],
+		["safety.autonomy", "unknown"],
 		["fleet.concurrency", "1.5"],
 		["chat.retry.maxRetries", "NaN"],
 		["chat.retry.maxRetries", "-1"],

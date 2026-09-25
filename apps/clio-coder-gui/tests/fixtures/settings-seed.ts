@@ -44,7 +44,7 @@ writeFileSync(
 mkdirSync(join(cwd, ".clio-coder"), { recursive: true });
 writeFileSync(
 	join(cwd, ".clio-coder/settings.yaml"),
-	JSON.stringify({ chat: { model: "fixture-project-model" }, safety: { autonomy: "default" } }),
+	JSON.stringify({ chat: { model: "fixture-project-model" }, fleet: { concurrency: 2 } }),
 );
 writeFileSync(join(cwd, ".clio-coder/settings.local.yaml"), JSON.stringify({ chat: { model: "fixture-local-model" } }));
 writeFileSync(

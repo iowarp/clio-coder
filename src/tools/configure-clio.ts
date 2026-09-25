@@ -24,7 +24,7 @@ interface Proposal {
 }
 
 const ELIGIBLE_PATH =
-	/^(?:chat\.(?:target|model|thinkingLevel|modelPicker\.[a-zA-Z.]+)|fleet\.(?:default\.[a-zA-Z]+|profiles|agentProfiles|concurrency|limits\.[a-zA-Z]+)|context\.memory\.(?:target|model)|safety\.autonomy)$/u;
+	/^(?:chat\.(?:target|model|thinkingLevel|modelPicker\.[a-zA-Z.]+)|fleet\.(?:default\.[a-zA-Z]+|profiles|agentProfiles|concurrency|limits\.[a-zA-Z]+)|context\.memory\.(?:target|model))$/u;
 
 /**
  * An interactive settings transaction. The model can prepare the proposal,
@@ -38,7 +38,7 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 	return {
 		name: ToolNames.ConfigureClio,
 		description:
-			"Preview a Clio routing or fleet setting, then apply the exact proposal. Default asks the operator to approve; yolo applies directly. Default cannot raise autonomy. Use action=preview with a settings path and text value; action=apply with proposalId.",
+			"Preview a Clio routing or fleet setting, then apply the exact proposal. Default asks the operator to approve; yolo applies directly. Autonomy is changed only by the operator through /settings, clio-coder configure, or --autonomy. Use action=preview with a settings path and text value; action=apply with proposalId.",
 		placement: "gateway",
 		parameters: Type.Object({
 			action: StringEnum(["preview", "apply"]),
@@ -49,6 +49,14 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 		baseActionClass: "write",
 		executionMode: "sequential",
 		async run(args) {
+			const path = typeof args.path === "string" ? args.path.trim() : undefined;
+			const inputValue = typeof args.value === "string" ? args.value.trim() : undefined;
+			if (path === "safety.autonomy" || pending?.path === "safety.autonomy") {
+				return {
+					kind: "error",
+					message: "autonomy is changed only by the operator through /settings, clio-coder configure, or --autonomy",
+				};
+			}
 			const autonomy = deps.getAutonomy?.();
 			if (autonomy !== "default" && autonomy !== "yolo") {
 				return {
@@ -57,46 +65,37 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 				};
 			}
 			if (args.action === "preview") {
-				if (typeof args.path !== "string" || typeof args.value !== "string") {
+				if (path === undefined || inputValue === undefined) {
 					return { kind: "error", message: "preview requires path and value strings" };
 				}
-				if (!ELIGIBLE_PATH.test(args.path) || !settingControl(args.path)) {
+				if (!ELIGIBLE_PATH.test(path) || !settingControl(path)) {
 					return {
 						kind: "error",
 						message: "this setting cannot be changed through configure_clio; use /settings or configure",
 					};
 				}
-				if (Buffer.byteLength(args.value, "utf8") > 8192) {
+				if (Buffer.byteLength(inputValue, "utf8") > 8192) {
 					return { kind: "error", message: "settings value exceeds 8192 bytes" };
 				}
 				try {
-					const value = args.value;
-					// Below yolo the model may lower its own autonomy but never propose
-					// raising it: one hurried Apply would hand it the authority it asked for.
-					if (autonomy === "default" && args.path === "safety.autonomy" && value === "yolo") {
-						return {
-							kind: "error",
-							message: `configure_clio cannot raise autonomy above ${autonomy}; the operator changes that in /settings`,
-						};
-					}
+					const value = inputValue;
 					const saved = readSettings();
 					const candidate = structuredClone(saved);
-					applyControlValue(candidate, args.path, value);
-					const before = JSON.stringify(getAtPath(saved, args.path));
-					const after = JSON.stringify(getAtPath(candidate, args.path));
-					if (before === after)
-						return { kind: "ok", output: `${args.path} already has the requested value; nothing to apply.` };
+					applyControlValue(candidate, path, value);
+					const before = JSON.stringify(getAtPath(saved, path));
+					const after = JSON.stringify(getAtPath(candidate, path));
+					if (before === after) return { kind: "ok", output: `${path} already has the requested value; nothing to apply.` };
 					const affected = [
-						`${args.path}: ${formatControlValue(getAtPath(saved, args.path))} → ${formatControlValue(getAtPath(candidate, args.path))}`,
+						`${path}: ${formatControlValue(getAtPath(saved, path))} → ${formatControlValue(getAtPath(candidate, path))}`,
 					];
-					if (args.path === "chat.target" && saved.chat.model !== candidate.chat.model) {
+					if (path === "chat.target" && saved.chat.model !== candidate.chat.model) {
 						affected.push(
 							`chat.model: ${formatControlValue(saved.chat.model)} → ${formatControlValue(candidate.chat.model)}`,
 						);
 					}
 					pending = {
 						id: randomUUID(),
-						path: args.path,
+						path,
 						value,
 						before,
 						preview: affected.join("\n"),

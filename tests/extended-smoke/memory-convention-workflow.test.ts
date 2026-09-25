@@ -174,13 +174,9 @@ test("operator promotion persists a convention and only approval admits it into 
 				false,
 			);
 			const prompt = JSON.stringify(messages);
-			ok(prompt.includes("Full-auto capability does not expand task scope"));
-			ok(prompt.includes("Autonomy: full-auto"));
-			deepStrictEqual(
-				repositoryFiles(),
-				beforeFiles,
-				"full-auto memory consumption leaves every repository file unchanged",
-			);
+			ok(prompt.includes("Yolo authority does not expand task scope"));
+			ok(prompt.includes("Autonomy: yolo"));
+			deepStrictEqual(repositoryFiles(), beforeFiles, "yolo memory consumption leaves every repository file unchanged");
 			strictEqual(prompt.includes(TRANSCRIPT_ONLY), false, "transcript recovery is not memory consumption");
 			return prompt;
 		};
@@ -237,7 +233,7 @@ test("operator promotion persists a convention and only approval admits it into 
 			JSON.stringify({
 				capture: "scripted policy output; uncited reminder gated",
 				fileScope: "all repository file paths and contents unchanged, including handbook",
-				autonomy: "full-auto consumer; constant loopback response, no tool attempts",
+				autonomy: "yolo consumer; constant loopback response, no tool attempts",
 				sourceSession: origin.id,
 				consumerSessions,
 				proposal: convention.id,

@@ -172,13 +172,9 @@ function migrateRosters(value: unknown, transform: SettingsV2DocumentTransform):
 }
 
 function migrateAutonomy(value: unknown, transform: SettingsV2DocumentTransform): unknown {
-	if (value === "suggest") {
-		transform.notes.push("legacy suggest autonomy became default; review the new supervised workspace permissions");
-		return "default";
-	}
-	if (value === "auto-edit") return "default";
-	if (value === "full-auto") return "yolo";
-	return cloneValue(value);
+	if (value === "default" || value === "yolo") return value;
+	transform.notes.push("non-canonical v1 autonomy was reset to default; review the operator setting");
+	return "default";
 }
 
 function migrateFleetNodeAliases(transform: SettingsV2DocumentTransform): void {

@@ -51,11 +51,14 @@ test("settings controls derive from the engine registry, write only the user lay
 		assert.deepEqual(byPath.get("chat.target")?.suggestions, ["fixture-target"]);
 		assert.ok(Object.keys(byPath.get("safety.autonomy")?.valueHelp ?? {}).includes("yolo"));
 
-		// A project layer outranks the user layer, so the app refuses rather than write a value that loses.
+		// Autonomy comes from the operator layer, while project overrides still block user writes to their own controls.
 		const autonomy = byPath.get("safety.autonomy");
-		assert.equal(autonomy?.source, "project");
-		assert.equal(autonomy?.access, "read-only");
-		assert.equal((await patch({ path: "safety.autonomy", value: "yolo" })).status, 409);
+		assert.equal(autonomy?.source, "built-in");
+		assert.equal(autonomy?.access, "writable");
+		assert.equal((await patch({ path: "safety.autonomy", value: "yolo" })).status, 200);
+		assert.equal(byPath.get("fleet.concurrency")?.source, "project");
+		assert.equal(byPath.get("fleet.concurrency")?.access, "read-only");
+		assert.equal((await patch({ path: "fleet.concurrency", value: "3" })).status, 409);
 
 		const thinking = byPath.get("chat.thinkingLevel");
 		assert.equal(thinking?.value, "high");

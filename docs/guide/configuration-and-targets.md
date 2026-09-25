@@ -163,11 +163,11 @@ Configure `context.memory.target` and `context.memory.model` to opt into model-b
 
 ### Safety
 
-The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the current schema. Resolution follows the normal settings stack, from session or project layers where supported through user `settings.yaml`, then the compiled default.
+The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the current schema. Resolution follows the normal settings stack, from session or project layers where supported through user `settings.yaml`, then the compiled default. `safety.autonomy` is an operator choice: only the user layer and operator session controls can set it.
 
 | Key | Default | When it applies |
 | --- | --- | --- |
-| `safety.autonomy` | `default` | immediately |
+| `safety.autonomy` | `default` | immediately; user layer or operator session control only |
 | `safety.limits.sessionCostUsd` | `5` | next turn |
 | `safety.limits.chatToolCallsPerTurn` | `60` | next turn |
 | `safety.limits.readBytesPerCall` | `51200` | next turn |
