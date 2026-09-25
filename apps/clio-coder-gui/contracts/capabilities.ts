@@ -27,7 +27,7 @@ export const SteeringCapability = Type.Object(
 );
 export type SteeringCapability = Static<typeof SteeringCapability>;
 export const CommandsCapability = Type.Object(
-	{ version: Type.Literal(1), list: method, invoke: method, count: Type.Integer({ minimum: 0 }) },
+	{ version: Type.Literal(1), list: method, invoke: method, count: Type.Optional(Type.Integer({ minimum: 0 })) },
 	closed,
 );
 export type CommandsCapability = Static<typeof CommandsCapability>;

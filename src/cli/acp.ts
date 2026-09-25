@@ -1,6 +1,7 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
+import { createStdioServerTransport } from "../engine/acp/transport.js";
 import { runClioCommand } from "./clio.js";
 import { restoreStdout, takeOverStdout, writeRawStdout } from "./output-guard.js";
 import { printError } from "./shared.js";
@@ -9,7 +10,8 @@ const HELP = `clio-coder acp [--cwd PATH] [--permission-timeout MS]
 
 Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
 
-  --cwd PATH               Workspace root the server boots in and opens sessions at.
+  --cwd PATH               Bind this workspace before initialize. Without it,
+                           the first workspace request selects the root.
   --permission-timeout MS  How long a mediated permission request may wait for the
                            client before the prompt expires. Defaults to the configured
                            delegation.defaults.permissionTimeoutMs.
@@ -82,11 +84,8 @@ export async function runAcpCommand(
 		process.stderr.write(HELP);
 		return 2;
 	}
-	// Boot has to happen in the workspace the sessions will use: settings
-	// resolution, project context, and the session ledger all read process.cwd(),
-	// and the server refuses a session whose cwd is not the one it booted in.
-	// The path is canonicalized before the chdir so the launch root and every
-	// later comparison against process.cwd() speak the same physical path.
+	// An explicit root binds eagerly. Without one, the open transport selects
+	// the root at the first workspace request before any project graph loads.
 	if (flags.cwd !== undefined) {
 		try {
 			process.chdir(resolveAcpCwd(flags.cwd));
@@ -98,6 +97,61 @@ export async function runAcpCommand(
 	if (terminalAuth) return (await import("./configure.js")).runConfigureCommand(["--quick"]);
 	takeOverStdout();
 	try {
+		if (flags.cwd === undefined) {
+			const launchCwd = process.cwd();
+			process.stdin.pause();
+			const transport = createStdioServerTransport({
+				write: writeRawStdout,
+				diagnostics: (line) => process.stderr.write(`[clio-coder:acp] ${line}\n`),
+			});
+			process.stdin.pause();
+			try {
+				const [{ ACP_COMMANDS_CAPABILITY }, { serveDeferredAcp }, { createAcpHandshake }, { getVersionInfo }] =
+					await Promise.all([
+						import("../engine/acp/commands.js"),
+						import("../engine/acp/deferred-boot.js"),
+						import("../engine/acp/server.js"),
+						import("../domains/lifecycle/version.js"),
+					]);
+				const handshake = createAcpHandshake({
+					version: getVersionInfo().clio,
+					session: true,
+					loadSession: true,
+					settings: true,
+					providers: true,
+					commandsCapability: ACP_COMMANDS_CAPABILITY,
+					steer: true,
+					dispatch: true,
+					toolRegistry: true,
+					bus: true,
+				});
+				const serving = serveDeferredAcp({
+					transport,
+					handshake,
+					launchCwd,
+					boot: async (_cwd, ready) =>
+						await runClioCommand({
+							...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
+							...(options.noContextFiles ? { noContextFiles: true } : {}),
+							...(options.noSkills ? { noSkills: true } : {}),
+							...(options.skillPaths && options.skillPaths.length > 0 ? { skillPaths: options.skillPaths } : {}),
+							acp: {
+								transport,
+								handshake,
+								onReady: ready,
+								...(flags.permissionTimeoutMs === undefined ? {} : { permissionTimeoutMs: flags.permissionTimeoutMs }),
+							},
+						}),
+				});
+				process.stdin.resume();
+				return await serving;
+			} catch (error) {
+				transport.close();
+				throw error;
+			} finally {
+				process.stdin.resume();
+			}
+		}
 		return await runClioCommand({
 			...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
 			...(options.noContextFiles ? { noContextFiles: true } : {}),

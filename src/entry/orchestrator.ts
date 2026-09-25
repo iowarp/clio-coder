@@ -2759,6 +2759,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const transport = options.acp.transport ?? createStdioServerTransport(options.acp.transportOptions);
 			const code = await serveClioAcpAgent({
 				transport,
+				...(options.acp.handshake ? { handshake: options.acp.handshake } : {}),
+				...(options.acp.onReady ? { onReady: options.acp.onReady } : {}),
 				chat,
 				...(session ? { session } : {}),
 				...(session
@@ -2857,6 +2859,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}
 					: {}),
 				toolRegistry,
+				...(toolBootstrap.mcpCapabilities ? { mcpCapabilities: toolBootstrap.mcpCapabilities } : {}),
 				bus,
 				autonomy: resolveBaselineAutonomy,
 				routing: () => {
@@ -2893,6 +2896,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			await chat.whenSettled();
 			chat.dispose();
 			await dispatch.drain();
+			await toolBootstrap.close();
 			// A client that closes the session ends ACP here, outside the
 			// termination coordinator, so its terminate hook never runs. Release
 			// the Ollama models this process and its workers loaded on this path

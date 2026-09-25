@@ -385,6 +385,8 @@ export interface PermissionRequiredMeta {
 
 export interface ToolRegistry {
 	register(spec: ToolSpec): void;
+	/** Remove a session scoped dynamic capability after its owner closes. */
+	unregister?(name: ToolName): void;
 	/** Direct-placed tools: the ones whose schemas the model sees attached. */
 	listVisible(): ReadonlyArray<ToolSpec>;
 	/** Tools registered overall, direct and gateway. For /audit, /doctor, and the bootstrap policy assertion. */
@@ -849,6 +851,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	return {
 		register(spec) {
 			tools.set(spec.name, spec);
+		},
+		unregister(name) {
+			tools.delete(name);
 		},
 		listAll: () => Array.from(tools.values()),
 		get: (name) => tools.get(name),

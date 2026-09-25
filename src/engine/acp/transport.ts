@@ -97,6 +97,14 @@ export interface AcpJsonRpcPeerTransport {
 	close(): void;
 }
 
+/** The server side can hold requests while an ACP workspace graph boots. */
+export interface AcpBootablePeerTransport extends AcpJsonRpcPeerTransport {
+	setRequestGate(gate: (() => Promise<void>) | null): void;
+	setRequestGuard(guard: ((method: string, params: unknown) => void) | null): void;
+	setFallbackRequestHandler(handler: ((method: string, params: unknown) => Promise<unknown>) | null): void;
+	invokeRegistered(method: string, params: unknown): Promise<unknown>;
+}
+
 export interface StdioTransportOptions {
 	cwd?: string;
 	env?: Record<string, string>;
@@ -534,7 +542,7 @@ export function createStdioTransport(
 	return new StdioJsonRpcTransport(command, args, options);
 }
 
-class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
+class StreamJsonRpcPeerTransport implements AcpBootablePeerTransport {
 	private outputPaused = false;
 	private queuedOutputBytes = 0;
 	private sinkOutputBytes = 0;
@@ -547,6 +555,9 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 	private readonly pending = new Map<string | number, PendingRequest>();
 	private readonly notificationHandlers = new Map<string, Set<NotificationHandler>>();
 	private readonly requestHandlers = new Map<string, RequestHandler>();
+	private requestGate: (() => Promise<void>) | null = null;
+	private requestGuard: ((method: string, params: unknown) => void) | null = null;
+	private fallbackRequestHandler: ((method: string, params: unknown) => Promise<unknown>) | null = null;
 	private readonly closeHandlers = new Set<CloseHandler>();
 	private readonly input: Readable;
 	private readonly output: Writable;
@@ -619,7 +630,30 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 		};
 	}
 
+	setRequestGate(gate: (() => Promise<void>) | null): void {
+		this.requestGate = gate;
+	}
+
+	setRequestGuard(guard: ((method: string, params: unknown) => void) | null): void {
+		this.requestGuard = guard;
+	}
+
+	setFallbackRequestHandler(handler: ((method: string, params: unknown) => Promise<unknown>) | null): void {
+		this.fallbackRequestHandler = handler;
+	}
+
+	async invokeRegistered(method: string, params: unknown): Promise<unknown> {
+		const handler = this.requestHandlers.get(method);
+		if (handler) return await handler(params);
+		if (this.fallbackRequestHandler) return await this.fallbackRequestHandler(method, params);
+		throw new AcpRequestError(-32601, ACP_METHOD_NOT_FOUND_MESSAGE, { code: "method_not_found" });
+	}
+
 	onClose(handler: CloseHandler): () => void {
+		if (this.closed) {
+			queueMicrotask(handler);
+			return () => {};
+		}
 		this.closeHandlers.add(handler);
 		return () => {
 			this.closeHandlers.delete(handler);
@@ -780,8 +814,15 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 			this.write(jsonRpcError(null, -32600, "request id must not be null", acpErrorData({ code: "invalid_request_id" })));
 			return;
 		}
+		try {
+			if (this.requestGate !== null) await this.requestGate();
+			this.requestGuard?.(method, params);
+		} catch (err) {
+			this.write(handlerErrorFrame(id, err, this.diagnostics));
+			return;
+		}
 		const handler = this.requestHandlers.get(method);
-		if (!handler) {
+		if (!handler && !this.fallbackRequestHandler) {
 			// The method name never goes back out. Bounding it was not enough: it is
 			// peer-controlled text on a channel where every message is authored by this
 			// process, and the client already knows which method it called. The frame
@@ -790,7 +831,7 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 			return;
 		}
 		try {
-			const result = await handler(params);
+			const result = await (handler ? handler(params) : this.fallbackRequestHandler?.(method, params));
 			this.write({ jsonrpc: "2.0", id, result });
 		} catch (err) {
 			this.write(handlerErrorFrame(id, err, this.diagnostics));
@@ -816,6 +857,6 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 	}
 }
 
-export function createStdioServerTransport(options: StdioServerTransportOptions = {}): AcpJsonRpcPeerTransport {
+export function createStdioServerTransport(options: StdioServerTransportOptions = {}): AcpBootablePeerTransport {
 	return new StreamJsonRpcPeerTransport(options);
 }

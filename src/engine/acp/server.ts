@@ -35,6 +35,7 @@ import type { MessageEntry, SessionEntry } from "../../domains/session/entries.j
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import { askUserExposure } from "../../tools/ask-user.js";
 import type { ToolRegistry } from "../../tools/registry.js";
+import type { McpCapabilitySource, McpClientServerSpec } from "../../tools/gateway/mcp-capabilities.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import type { AgentMessage } from "../types.js";
 import type { AcpCommandCatalog, AcpCommandControl } from "./commands.js";
@@ -155,8 +156,13 @@ export interface ClioAcpServerOptions {
 	 */
 	commands?: AcpCommandControl;
 	toolRegistry?: ToolRegistry;
+	mcpCapabilities?: Pick<McpCapabilitySource, "attachClientServers" | "detachClientServers">;
 	bus?: SafeEventBus;
 	autonomy?: () => AutonomyLevel;
+	/** Shared with the deferred front when the workspace binds after initialize. */
+	handshake?: AcpHandshake;
+	/** Resolves the first queued workspace request after every handler is installed. */
+	onReady?: () => void;
 	/** Initial effective next-turn route captured when a session is bound. */
 	routing?: () => AcpRoutingSnapshot;
 	/** Durable rich-entry reader used by standard session/load. */
@@ -1974,13 +1980,259 @@ function dispatchSteerReason(message: string): string {
 	return "steer-failed";
 }
 
+export interface AcpHandshakeFeatures {
+	version?: string;
+	session: boolean;
+	loadSession: boolean;
+	settings: boolean;
+	providers: boolean;
+	commandsCapability?: Readonly<Record<string, unknown>>;
+	steer: boolean;
+	dispatch: boolean;
+	toolRegistry: boolean;
+	bus: boolean;
+}
+
+/** ACP stdio declarations are client authority for one session, never saved settings. */
+function parseClientMcpServers(value: unknown, required: boolean): McpClientServerSpec[] {
+	if (value === undefined && !required) return [];
+	if (!Array.isArray(value) || value.length > 32) {
+		throw new AcpRequestError(-32602, "mcpServers must be an array of at most 32 stdio servers", { code: "invalid_params" });
+	}
+	return value.map((raw: unknown) => {
+		if (!isRecord(raw) || (raw.type !== undefined && raw.type !== "stdio") ||
+			typeof raw.name !== "string" || raw.name.trim().length === 0 || Buffer.byteLength(raw.name) > 128 ||
+			typeof raw.command !== "string" || !isAbsolute(raw.command) || Buffer.byteLength(raw.command) > 512 ||
+			!Array.isArray(raw.args) || raw.args.length > 64 ||
+			!raw.args.every((arg: unknown) => typeof arg === "string" && Buffer.byteLength(arg) <= 4096) ||
+			!Array.isArray(raw.env) || raw.env.length > 64) {
+			throw new AcpRequestError(-32602, "invalid stdio MCP server declaration", { code: "invalid_params" });
+		}
+		const env: Record<string, string> = {};
+		for (const entry of raw.env) {
+			if (!isRecord(entry) || typeof entry.name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.name) ||
+				typeof entry.value !== "string" || Buffer.byteLength(entry.value) > 4096) {
+				throw new AcpRequestError(-32602, "invalid stdio MCP server environment", { code: "invalid_params" });
+			}
+			env[entry.name] = entry.value;
+		}
+		return { name: raw.name, command: raw.command, args: raw.args as string[], env };
+	});
+}
+
+function assertNoAdditionalDirectories(value: unknown): void {
+	if (value === undefined || (Array.isArray(value) && value.length === 0)) return;
+	throw new AcpRequestError(-32602, "additionalDirectories are not supported by this host", { code: "invalid_params" });
+}
+
+export interface AcpHandshake {
+	readonly initialized: boolean;
+	readonly loggedOut: boolean;
+	readonly enabledEventKinds: ReadonlySet<AcpForwardableEventKind>;
+	readonly toolProgressEnabled: boolean;
+	readonly workspaceInstanceId: string;
+	initialize(params: unknown): AcpInitializeResponse;
+	authenticate(params: unknown): never;
+	logout(params: unknown): Record<string, never>;
+}
+
+/** The front and the bound server use one handshake and one capability projection. */
+export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake {
+	let initialized = false;
+	let loggedOut = false;
+	let toolProgressEnabled = false;
+	const enabledEventKinds = new Set<AcpForwardableEventKind>();
+	const workspaceInstanceId = randomUUID();
+	const requireInitialized = (): void => {
+		if (!initialized) throw new AcpRequestError(-32600, "initialize must be called first", { code: "not_initialized" });
+	};
+	const assertHandshakeParams = (params: unknown, keys: ReadonlySet<string>): Record<string, unknown> => {
+		if (params === undefined) return {};
+		if (!isRecord(params) || Object.keys(params).some((key) => key !== "_meta" && !keys.has(key))) {
+			throw new AcpRequestError(-32602, "invalid method parameters", { code: "invalid_params" });
+		}
+		return params;
+	};
+	return {
+		get initialized() { return initialized; },
+		get loggedOut() { return loggedOut; },
+		get enabledEventKinds() { return enabledEventKinds; },
+		get toolProgressEnabled() { return toolProgressEnabled; },
+		workspaceInstanceId,
+		initialize(params) {
+			if (initialized) throw new AcpRequestError(-32600, "already initialized", { code: "already_initialized" });
+			const clientCapabilities = isRecord(params) && isRecord(params.clientCapabilities) ? params.clientCapabilities : null;
+			const clientMeta =
+				clientCapabilities !== null && isRecord(clientCapabilities._meta) ? clientCapabilities._meta : null;
+			const eventRequest =
+				clientMeta !== null && isRecord(clientMeta["clio-coder/events"]) ? clientMeta["clio-coder/events"] : null;
+			const requestedEventKinds = eventRequest !== null ? eventRequest.kinds : null;
+			// A malformed request refuses the whole opt-in rather than the offending
+			// entry: a client that sent an unrepresentable kind does not know what it
+			// asked for, and silently honouring the rest of its list hides that.
+			enabledEventKinds.clear();
+			if (
+				eventRequest !== null &&
+				eventRequest.version === 1 &&
+				Array.isArray(requestedEventKinds) &&
+				requestedEventKinds.length <= ACP_MAX_REQUESTED_EVENT_KINDS &&
+				requestedEventKinds.every((kind) => typeof kind === "string" && utf8Bytes(kind) <= 64 && !hasControlCharacters(kind))
+			) {
+				for (const kind of ACP_FORWARDABLE_EVENT_KINDS) {
+					if (requestedEventKinds.includes(kind)) enabledEventKinds.add(kind);
+				}
+			}
+			// Repeated in-progress frames for one call are only useful to a client
+			// that collapses them onto the row it already drew. One that appends
+			// every frame it receives would grow a tool segment by a full output
+			// snapshot several times a second, so nothing streams until it asks.
+			const toolProgressRequest =
+				clientMeta !== null && isRecord(clientMeta[ACP_TOOL_PROGRESS_META_KEY])
+					? clientMeta[ACP_TOOL_PROGRESS_META_KEY]
+					: null;
+			toolProgressEnabled = toolProgressRequest !== null && toolProgressRequest.version === 1;
+			const canLoadSession = features.loadSession;
+			initialized = true;
+			return {
+				protocolVersion: 1,
+				agentInfo: {
+					name: "clio-coder",
+					title: "Clio Coder",
+					...(features.version !== undefined ? { version: features.version } : {}),
+				},
+				agentCapabilities: {
+					loadSession: canLoadSession,
+					promptCapabilities: { audio: false, embeddedContext: false, image: false },
+					mcpCapabilities: { http: false, sse: false },
+					sessionCapabilities: {
+						close: {},
+						...(features.session ? { list: {}, delete: {} } : {}),
+						...(canLoadSession ? { resume: {} } : {}),
+					},
+					auth: { logout: {} },
+					// Clio mediates every tool through its own safety policy. Extensions
+					// are advertised through _meta while stable capabilities use schema fields.
+					_meta: {
+						[ACP_SESSION_META_KEY]: {
+							close: true,
+							label: features.session,
+						},
+						"clio-coder/settings": {
+							get_safe: features.settings,
+							patch_safe: features.settings,
+						},
+						"clio-coder/targets": {
+							list: features.providers,
+							probe: features.providers,
+						},
+						...(features.commandsCapability !== undefined
+							? { [ACP_COMMANDS_META_KEY]: Object.fromEntries(
+									Object.entries(features.commandsCapability).filter(([key]) => key !== "count"),
+								) }
+							: {}),
+						// Steering is announced, never negotiated: every method here is
+						// namespaced and additive, so a client that ignores this block
+						// keeps the exact v1 surface it had. `main` and `dispatch` report
+						// which queues this build actually wired, because an embedder may
+						// pass a chat that cannot steer and a server with no fleet.
+						"clio-coder/steering": {
+							version: 1,
+							main: features.steer,
+							dispatch: features.dispatch,
+							modes: ACP_STEERING_MODES,
+							interrupt: true,
+							methods: {
+								steer: "_clio-coder/session/steer",
+								queue: "_clio-coder/session/queue",
+								clear: "_clio-coder/session/queue_clear",
+								interrupt: "_clio-coder/session/interrupt",
+								dispatch: "_clio-coder/dispatch/steer",
+							},
+						},
+						// Per-frame agent attribution on `session/update`. Announced so a
+						// client can tell "this agent produced nothing" apart from "this
+						// peer does not report identity at all".
+						[ACP_AGENT_META_KEY]: { version: 1, meta: ACP_AGENT_META_KEY },
+						// The bounds are announced, not just applied: a client sizing a
+						// progress buffer needs to know where the stream stops, and a
+						// client that never receives a second frame has to be able to
+						// tell "the tool printed once" from "the floor suppressed it".
+						[ACP_TOOL_PROGRESS_META_KEY]: {
+							version: 1,
+							minIntervalMs: ACP_MIN_TOOL_PROGRESS_INTERVAL_MS,
+							maxFramesPerCall: ACP_MAX_TOOL_PROGRESS_FRAMES_PER_CALL,
+							maxContentBytes: ACP_MAX_CHUNK_BYTES,
+						},
+						...(features.toolRegistry
+							? {
+									[ACP_DECISION_META_KEY]: {
+										version: 1,
+										meta: ACP_DECISION_META_KEY,
+										options: ACP_PERMISSION_OPTION_IDS,
+									},
+								}
+							: {}),
+						...(features.bus
+							? {
+									"clio-coder/events": {
+										version: 1,
+										notification: "_clio-coder/event",
+										kinds: ACP_FORWARDABLE_EVENT_KINDS,
+										workspaceInstanceId,
+									},
+								}
+							: {}),
+						...(features.toolRegistry ? { "clio-coder/tools": "mediated" } : {}),
+					},
+				},
+				authMethods:
+					isRecord(clientCapabilities?.auth) && clientCapabilities.auth.terminal === true
+						? [
+								{
+									id: "clio-login",
+									name: "Clio Target Auth & Setup",
+									description: "Configure models, API keys, and target endpoints in terminal",
+									type: "terminal",
+									args: ["auth", "login"],
+								},
+							]
+						: [],
+			} satisfies AcpInitializeResponse;
+		},
+		authenticate(params) {
+			requireInitialized();
+			const request = assertHandshakeParams(params, new Set(["methodId"]));
+			if (typeof request.methodId !== "string" || request.methodId.length === 0) {
+				throw new AcpRequestError(-32602, "unknown authentication method", { code: "invalid_params" });
+			}
+			// Terminal authentication runs in a separate process.
+			throw new AcpRequestError(-32602, "unknown authentication method", { code: "invalid_params" });
+		},
+		logout(params) {
+			requireInitialized();
+			assertHandshakeParams(params, new Set());
+			loggedOut = true;
+			return {};
+		},
+	};
+}
+
 export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<number> {
 	const sessions = new Map<string, AcpServerSession>();
-	const workspaceInstanceId = randomUUID();
-	let initialized = false;
-	const enabledEventKinds = new Set<AcpForwardableEventKind>();
-	/** Negotiated at initialize and read when each prompt builds its turn state. */
-	let toolProgressEnabled = false;
+	const handshake = options.handshake ?? createAcpHandshake({
+		...(options.version === undefined ? {} : { version: options.version }),
+		session: options.session !== undefined,
+		loadSession: options.session !== undefined && options.readSessionEntries !== undefined &&
+			options.buildReplayMessages !== undefined && options.chat.resetForSession !== undefined,
+		settings: options.settings !== undefined,
+		providers: options.providers !== undefined,
+		...(options.commands === undefined ? {} : { commandsCapability: options.commands.capability }),
+		steer: options.chat.steer !== undefined,
+		dispatch: options.dispatch !== undefined,
+		toolRegistry: options.toolRegistry !== undefined,
+		bus: options.bus !== undefined,
+	});
+	const workspaceInstanceId = handshake.workspaceInstanceId;
 	const now = options.now ?? Date.now;
 	let eventSequence = 0;
 	/**
@@ -2055,7 +2307,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		payload: Record<string, unknown>,
 	): void => {
 		const sessionId = activeSessionId ?? boundSessionId;
-		if (!initialized || !enabledEventKinds.has(kind) || sessionId === null) return;
+		if (!handshake.initialized || !handshake.enabledEventKinds.has(kind) || sessionId === null) return;
 		eventSequence += 1;
 		try {
 			options.transport.notify("_clio-coder/event", {
@@ -2362,11 +2614,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	}
 
 	const requireInitialized = (): void => {
-		if (!initialized) throw new AcpRequestError(-32600, "initialize must be called first", { code: "not_initialized" });
+		if (!handshake.initialized) throw new AcpRequestError(-32600, "initialize must be called first", { code: "not_initialized" });
 	};
-	let loggedOut = false;
 	const requireAuthenticated = (): void => {
-		if (loggedOut) throw new AcpRequestError(-32000, "authentication required", { code: "authentication_required" });
+		if (handshake.loggedOut) throw new AcpRequestError(-32000, "authentication required", { code: "authentication_required" });
 	};
 
 	const sessionIdOf = (params: unknown): string => {
@@ -2387,7 +2638,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	const canonicalSessionCwd = (requested: unknown): string => {
 		const mismatch = (): AcpRequestError =>
-			new AcpRequestError(-32602, "session cwd does not match the server workspace", {
+			new AcpRequestError(-32602, `session cwd does not match bound workspace root ${canonicalCwd}`, {
 				code: "session_cwd_mismatch",
 			});
 		if (typeof requested !== "string" || requested.trim().length === 0 || !isAbsolute(requested)) throw mismatch();
@@ -2399,6 +2650,19 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		if (sessionCwd !== canonicalCwd) throw mismatch();
 		return sessionCwd;
+	};
+	const attachClientMcpServers = async (servers: ReadonlyArray<McpClientServerSpec>): Promise<void> => {
+		if (servers.length === 0) return;
+		if (!options.mcpCapabilities) {
+			throw new AcpRequestError(-32602, "client MCP servers are unavailable in this host", { code: "invalid_params" });
+		}
+		try {
+			await options.mcpCapabilities.attachClientServers(servers);
+		} catch (error) {
+			await options.mcpCapabilities.detachClientServers();
+			options.diagnostics?.(`client MCP launch failed: ${acpErrorMessage(error)}`);
+			throw new AcpRequestError(-32603, "client MCP servers could not start", { code: "internal_error" });
+		}
 	};
 
 	const workspaceHistory = (): SessionMeta[] => {
@@ -2526,166 +2790,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		});
 	};
 
-	options.transport.onRequest("initialize", (params) => {
-		if (initialized) throw new AcpRequestError(-32600, "already initialized", { code: "already_initialized" });
-		const clientCapabilities = isRecord(params) && isRecord(params.clientCapabilities) ? params.clientCapabilities : null;
-		const clientMeta =
-			clientCapabilities !== null && isRecord(clientCapabilities._meta) ? clientCapabilities._meta : null;
-		const eventRequest =
-			clientMeta !== null && isRecord(clientMeta["clio-coder/events"]) ? clientMeta["clio-coder/events"] : null;
-		const requestedEventKinds = eventRequest !== null ? eventRequest.kinds : null;
-		// A malformed request refuses the whole opt-in rather than the offending
-		// entry: a client that sent an unrepresentable kind does not know what it
-		// asked for, and silently honouring the rest of its list hides that.
-		enabledEventKinds.clear();
-		if (
-			eventRequest !== null &&
-			eventRequest.version === 1 &&
-			Array.isArray(requestedEventKinds) &&
-			requestedEventKinds.length <= ACP_MAX_REQUESTED_EVENT_KINDS &&
-			requestedEventKinds.every((kind) => typeof kind === "string" && utf8Bytes(kind) <= 64 && !hasControlCharacters(kind))
-		) {
-			for (const kind of ACP_FORWARDABLE_EVENT_KINDS) {
-				if (requestedEventKinds.includes(kind)) enabledEventKinds.add(kind);
-			}
-		}
-		// Repeated in-progress frames for one call are only useful to a client
-		// that collapses them onto the row it already drew. One that appends
-		// every frame it receives would grow a tool segment by a full output
-		// snapshot several times a second, so nothing streams until it asks.
-		const toolProgressRequest =
-			clientMeta !== null && isRecord(clientMeta[ACP_TOOL_PROGRESS_META_KEY])
-				? clientMeta[ACP_TOOL_PROGRESS_META_KEY]
-				: null;
-		toolProgressEnabled = toolProgressRequest !== null && toolProgressRequest.version === 1;
-		const canLoadSession =
-			options.session !== undefined &&
-			options.readSessionEntries !== undefined &&
-			options.buildReplayMessages !== undefined &&
-			options.chat.resetForSession !== undefined;
-		initialized = true;
-		return {
-			protocolVersion: 1,
-			agentInfo: {
-				name: "clio-coder",
-				title: "Clio Coder",
-				...(options.version !== undefined ? { version: options.version } : {}),
-			},
-			agentCapabilities: {
-				loadSession: canLoadSession,
-				promptCapabilities: { audio: false, embeddedContext: false, image: false },
-				mcpCapabilities: { http: false, sse: false },
-				sessionCapabilities: {
-					close: {},
-					...(options.session ? { list: {}, delete: {} } : {}),
-					...(canLoadSession ? { resume: {} } : {}),
-				},
-				auth: { logout: {} },
-				// Clio mediates every tool through its own safety policy. Extensions
-				// are advertised through _meta while stable capabilities use schema fields.
-				_meta: {
-					[ACP_SESSION_META_KEY]: {
-						close: true,
-						label: options.session !== undefined,
-					},
-					"clio-coder/settings": {
-						get_safe: options.settings !== undefined,
-						patch_safe: options.settings !== undefined,
-					},
-					"clio-coder/targets": {
-						list: options.providers !== undefined,
-						probe: options.providers !== undefined,
-					},
-					...(options.commands !== undefined ? { [ACP_COMMANDS_META_KEY]: options.commands.capability } : {}),
-					// Steering is announced, never negotiated: every method here is
-					// namespaced and additive, so a client that ignores this block
-					// keeps the exact v1 surface it had. `main` and `dispatch` report
-					// which queues this build actually wired, because an embedder may
-					// pass a chat that cannot steer and a server with no fleet.
-					"clio-coder/steering": {
-						version: 1,
-						main: options.chat.steer !== undefined,
-						dispatch: options.dispatch !== undefined,
-						modes: ACP_STEERING_MODES,
-						interrupt: true,
-						methods: {
-							steer: "_clio-coder/session/steer",
-							queue: "_clio-coder/session/queue",
-							clear: "_clio-coder/session/queue_clear",
-							interrupt: "_clio-coder/session/interrupt",
-							dispatch: "_clio-coder/dispatch/steer",
-						},
-					},
-					// Per-frame agent attribution on `session/update`. Announced so a
-					// client can tell "this agent produced nothing" apart from "this
-					// peer does not report identity at all".
-					[ACP_AGENT_META_KEY]: { version: 1, meta: ACP_AGENT_META_KEY },
-					// The bounds are announced, not just applied: a client sizing a
-					// progress buffer needs to know where the stream stops, and a
-					// client that never receives a second frame has to be able to
-					// tell "the tool printed once" from "the floor suppressed it".
-					[ACP_TOOL_PROGRESS_META_KEY]: {
-						version: 1,
-						minIntervalMs: ACP_MIN_TOOL_PROGRESS_INTERVAL_MS,
-						maxFramesPerCall: ACP_MAX_TOOL_PROGRESS_FRAMES_PER_CALL,
-						maxContentBytes: ACP_MAX_CHUNK_BYTES,
-					},
-					...(options.toolRegistry !== undefined
-						? {
-								[ACP_DECISION_META_KEY]: {
-									version: 1,
-									meta: ACP_DECISION_META_KEY,
-									options: ACP_PERMISSION_OPTION_IDS,
-								},
-							}
-						: {}),
-					...(options.bus
-						? {
-								"clio-coder/events": {
-									version: 1,
-									notification: "_clio-coder/event",
-									kinds: ACP_FORWARDABLE_EVENT_KINDS,
-									workspaceInstanceId,
-								},
-							}
-						: {}),
-					...(options.toolRegistry !== undefined ? { "clio-coder/tools": "mediated" } : {}),
-				},
-			},
-			authMethods:
-				isRecord(clientCapabilities?.auth) && clientCapabilities.auth.terminal === true
-					? [
-							{
-								id: "clio-login",
-								name: "Clio Target Auth & Setup",
-								description: "Configure models, API keys, and target endpoints in terminal",
-								type: "terminal",
-								args: ["auth", "login"],
-							},
-						]
-					: [],
-		} satisfies AcpInitializeResponse;
-	});
+	options.transport.onRequest("initialize", (params) => handshake.initialize(params));
+	options.transport.onRequest("authenticate", (params) => handshake.authenticate(params));
+	options.transport.onRequest("logout", (params) => handshake.logout(params));
 
-	options.transport.onRequest("authenticate", (params) => {
-		requireInitialized();
-		const request = assertParamKeys(params, new Set(["methodId"]));
-		if (typeof request.methodId !== "string" || request.methodId.length === 0) {
-			throw new AcpRequestError(-32602, "unknown authentication method", { code: "invalid_params" });
-		}
-		// The only offered flow is terminal auth in a separate process. The ACP
-		// schema forbids passing a terminal method to authenticate.
-		throw new AcpRequestError(-32602, "unknown authentication method", { code: "invalid_params" });
-	});
-
-	options.transport.onRequest("logout", (params) => {
-		requireInitialized();
-		assertParamKeys(params, new Set());
-		loggedOut = true;
-		return {};
-	});
-
-	options.transport.onRequest("session/new", (params) => {
+	options.transport.onRequest("session/new", async (params) => {
 		requireInitialized();
 		requireAuthenticated();
 		// The chat instance can bind only one session at a time. Closing that
@@ -2693,14 +2802,25 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (sessionCreated) {
 			throw new AcpRequestError(-32602, "this server hosts one session per process", { code: "session_limit" });
 		}
-		const sessionCwd = canonicalSessionCwd(isRecord(params) ? params.cwd : undefined);
+		const request = assertParamKeys(params, new Set(["cwd", "mcpServers", "additionalDirectories"]));
+		assertNoAdditionalDirectories(request.additionalDirectories);
+		const sessionCwd = canonicalSessionCwd(request.cwd);
+		const clientMcpServers = parseClientMcpServers(request.mcpServers, false);
 		const route = routingSnapshot();
 		const createInput: { cwd: string; target?: string; model?: string } = { cwd: sessionCwd };
 		if (route.target !== null) createInput.target = route.target;
 		if (route.model !== null) createInput.model = route.model;
-		const meta = options.session?.create(createInput);
+		await attachClientMcpServers(clientMcpServers);
+		let meta: SessionMeta | undefined;
+		try {
+			meta = options.session?.create(createInput);
+		} catch (error) {
+			await options.mcpCapabilities?.detachClientServers();
+			throw error;
+		}
 		const id = meta?.id ?? randomUUID();
 		if (safeStoredIdentifier(id, ACP_MAX_SESSION_ID_BYTES) === null) {
+			await options.mcpCapabilities?.detachClientServers();
 			throw new AcpRequestError(-32603, "session creation failed", { code: "internal_error" });
 		}
 		options.chat.resetForSession?.(null);
@@ -2735,15 +2855,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (sessionCreated) {
 			throw new AcpRequestError(-32602, "this server hosts one session per process", { code: "session_limit" });
 		}
-		const request = assertParamKeys(params, new Set(["sessionId", "cwd", "mcpServers"]));
+		const request = assertParamKeys(params, new Set(["sessionId", "cwd", "mcpServers", "additionalDirectories"]));
+		assertNoAdditionalDirectories(request.additionalDirectories);
 		const id = sessionIdOf(request);
 		canonicalSessionCwd(request.cwd);
-		if (
-			(replayToClient && request.mcpServers === undefined) ||
-			(request.mcpServers !== undefined && (!Array.isArray(request.mcpServers) || request.mcpServers.length !== 0))
-		) {
-			throw new AcpRequestError(-32602, "mcpServers must be an empty array", { code: "invalid_params" });
-		}
+		const clientMcpServers = parseClientMcpServers(request.mcpServers, replayToClient);
 		const stored = workspaceMeta(id);
 		if (stored.endedAt === null) {
 			throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
@@ -2771,12 +2887,14 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
 		}
 
+		await attachClientMcpServers(clientMcpServers);
 		let resumed: SessionMeta;
 		try {
 			resumed = options.session.resume(id);
 			if (resumed.id !== id || options.session.current()?.id !== id) throw new Error("resume identity mismatch");
 			options.chat.resetForSession(leafTurnId, replayMessages);
 		} catch {
+			await options.mcpCapabilities?.detachClientServers();
 			if (options.session.current()?.id === id) {
 				try {
 					await options.session.close();
@@ -3196,7 +3314,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	options.transport.onNotification("session/cancel", (params) => {
 		// A notification has no reply channel, so an ordering or identity error
 		// has nowhere to go. Dropping it silently is the only conformant option.
-		if (!initialized) return;
+		if (!handshake.initialized) return;
 		const id = isRecord(params) && typeof params.sessionId === "string" ? params.sessionId : null;
 		const session = id === null ? undefined : sessions.get(id);
 		if (session) cancelSession(session, "prompt cancelled");
@@ -3366,6 +3484,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				if (promptSettled) await promptSettled;
 			}
 			if (options.session?.current()?.id === session.id) await options.session.close();
+			await options.mcpCapabilities?.detachClientServers();
 			sessions.delete(session.id);
 			if (boundSessionId === session.id) boundSessionId = null;
 			sessionCreated = false;
@@ -3401,7 +3520,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			});
 		}
 		if (options.session?.current()?.id !== session.id && options.session) options.session.resume(session.id);
-		const active = createActivePromptState({ enabled: toolProgressEnabled, now });
+		const active = createActivePromptState({ enabled: handshake.toolProgressEnabled, now });
 		session.activePrompt = active;
 		activePromptState = active;
 		activeSessionId = session.id;
@@ -3497,6 +3616,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return promptResponse(active.stopReason, active);
 	});
 
+	options.onReady?.();
 	return await new Promise<number>((resolve) => {
 		options.transport.onClose(() => {
 			permission.unregister();

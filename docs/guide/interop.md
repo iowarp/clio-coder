@@ -37,6 +37,8 @@ operator-configured ACP peer entry when a compatible adapter is available.
 
 When Clio herself serves an ACP frontend, she advertises stable session listing, deletion, resume, modes, and configuration options. Loading a session streams its full active history; resuming restores it without replay. The `default` and `yolo` modes control the hosted session's autonomy. Model and thinking options change the hosted session's route without saving a new default. See [ACP architecture](../architecture/acp.md) for the wire contract.
 
+With `clio-coder acp`, the first session request can select a workspace different from the directory where the frontend launched Clio. Clio loads that workspace's settings, trust, context, hooks, and tools before answering the request. A frontend can pass stdio MCP servers with a session; Clio makes their tools available through her gateway and closes them with that session. `acp --cwd PATH` binds the root at launch when the frontend already knows it.
+
 Install and authenticate the peer's own CLI first. Run
 `clio-coder interop inspect --json` or open `/interop` to see the installed binary, configured
 target, ACP adapter, and available commands. `clio-coder configure --interop`

@@ -23,6 +23,16 @@ import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
 import type { ImageContent } from "../../engine/types.js";
 import type { ToolRegistry, ToolResult, ToolSpec } from "../registry.js";
 
+/** An ACP client's declaration lives only for its hosted session. */
+export interface McpClientServerSpec {
+	name: string;
+	command: string;
+	args: string[];
+	env: Record<string, string>;
+}
+
+type GatewayMcpServer = ResolvedMcpServer | (Omit<ResolvedMcpServer, "scope"> & { scope: "client" });
+
 /** Model-visible bytes of one MCP result before the rest is offloaded. */
 const MCP_RESULT_CONTEXT_BYTES = 16 * 1024;
 
@@ -47,7 +57,7 @@ export type McpCatalogProvenance = "live" | "cached" | "missing";
 /** What the gateway's find listing says about one declared server. */
 export interface McpServerListing {
 	id: string;
-	scope: ResolvedMcpServer["scope"];
+	scope: GatewayMcpServer["scope"];
 	/** connected: launched this session; failed: launched and lost; trusted: not launched yet. */
 	status: "connected" | "trusted" | "failed" | "untrusted" | "stale";
 	actionClass: McpTrustActionClass;
@@ -135,6 +145,10 @@ export interface McpCapabilitySourceOptions {
 }
 
 export interface McpCapabilitySource {
+	/** Connect client supplied stdio servers without persisting their declarations or catalogs. */
+	attachClientServers(servers: ReadonlyArray<McpClientServerSpec>): Promise<void>;
+	/** Tear down only the servers supplied by the ACP client for this session. */
+	detachClientServers(): Promise<void>;
 	/** Launch every trusted server not yet launched, register its tools, and describe every declared server. */
 	list(options?: { signal?: AbortSignal }): Promise<McpListing>;
 	/**
@@ -186,7 +200,7 @@ export interface McpCloseReport {
 }
 
 interface ServerState {
-	declaration: ResolvedMcpServer;
+	declaration: GatewayMcpServer;
 	client: McpClient | null;
 	connecting: Promise<void> | null;
 	closing: Promise<McpTeardownOutcome> | null;
@@ -223,7 +237,10 @@ function objectiveOf(tool: NamedTool): string {
  * discovery reads identically whether the metadata came off a live listing or
  * off disk and a caller can never tell the two apart by shape alone.
  */
-function describeTool(declaration: ResolvedMcpServer, tool: NamedTool): string {
+function describeTool(declaration: GatewayMcpServer, tool: NamedTool): string {
+	if (declaration.scope === "client") {
+		return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id}, supplied by the ACP client for this session. Its calls use the gateway's unknown action class and session autonomy.`;
+	}
 	return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id} (${declaration.scope} scope), trusted with action class ${declaration.trust.actionClass}; launching it does not sandbox it.`;
 }
 
@@ -325,11 +342,11 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	// realpathSync touches disk, and every catalog identity in this session must
 	// resolve to the same project the trust record bound to.
 	let projectRoot: string | null = null;
-	const catalogIdentity = (declaration: ResolvedMcpServer): McpCatalogIdentity => {
+	const catalogIdentity = (declaration: GatewayMcpServer): McpCatalogIdentity => {
 		projectRoot ??= canonicalProjectRoot(options.cwd);
 		return {
 			projectRoot,
-			scope: declaration.scope,
+			scope: declaration.scope === "client" ? "user" : declaration.scope,
 			declarationPath: declaration.path,
 			serverId: declaration.id,
 			digest: declaration.digest,
@@ -345,6 +362,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	 * and listing its tools would suggest they are reachable.
 	 */
 	const cachedCatalog = (state: ServerState): McpServerCatalog | null => {
+		if (state.declaration.scope === "client") return null;
 		if (state.catalog !== undefined) return state.catalog;
 		state.catalog =
 			state.declaration.trust.status === "trusted" ? readMcpServerCatalog(catalogIdentity(state.declaration)) : null;
@@ -357,6 +375,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	 * written must never fail the connection that produced it.
 	 */
 	const publishCatalog = (state: ServerState, listing: McpToolListing): void => {
+		if (state.declaration.scope === "client") return;
 		writeMcpServerCatalog(catalogIdentity(state.declaration), listing);
 		// Drop the memo of whatever the file said before this listing replaced it.
 		state.catalog = undefined;
@@ -594,6 +613,52 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	};
 
 	return {
+		async attachClientServers(servers) {
+			if (closed) throw new Error("MCP capability source is closed");
+			if (servers.length > 0 && !registry.unregister) {
+				throw new Error("MCP registry cannot remove session scoped tools");
+			}
+			const all = resolveStates();
+			const added: ServerState[] = [];
+			for (const server of servers) {
+				const slug = server.name.toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 24);
+				const base = `acp_${slug || "server"}`;
+				let id = base;
+				for (let suffix = 2; all.has(id); suffix += 1) id = `${base.slice(0, 28)}_${suffix}`;
+				const declaration: GatewayMcpServer = {
+					id,
+					scope: "client",
+					path: "ACP client session",
+					command: server.command,
+					args: [...server.args],
+					cwd: options.cwd,
+					cwdRoot: options.cwd,
+					env: { ...server.env },
+					timeoutMs: null,
+					actionClass: "unknown",
+					digest: "session-only",
+					trust: { status: "trusted", actionClass: "unknown" },
+				};
+				const state: ServerState = {
+					declaration, client: null, connecting: null, closing: null, tools: [], truncated: false,
+					registered: [], unregistrable: [], failure: null, catalog: null,
+				};
+				all.set(id, state);
+				added.push(state);
+			}
+			await Promise.all(added.map((state) => discover(state)));
+		},
+		async detachClientServers() {
+			if (states === null) return;
+			const all = states;
+			const clients = [...all.values()].filter((state) => state.declaration.scope === "client");
+			await Promise.all(clients.map(closeClient));
+			await Promise.all(clients.map((state) => state.connecting));
+			for (const state of clients) {
+				for (const name of state.registered) registry.unregister?.(name);
+				all.delete(state.declaration.id);
+			}
+		},
 		async list(invokeOptions) {
 			if (invokeOptions?.signal?.aborted) throw new McpError("aborted", "MCP discovery aborted");
 			const all = [...resolveStates().values()];
@@ -734,6 +799,9 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			const owner = ownerOf(name);
 			if (owner === null) return null;
 			const { declaration } = owner;
+			if (declaration.scope === "client") {
+				return `Local stdio MCP server ${declaration.id}, supplied by the ACP client for this session. Calls use the unknown action class, ask at default autonomy, and run at yolo. The server closes with the session.`;
+			}
 			return `Local stdio MCP server ${declaration.id} (${declaration.scope} scope, declared in ${declaration.path}), trusted with action class ${declaration.trust.actionClass}: ${
 				declaration.trust.actionClass === "unknown"
 					? "every call asks for approval and read-only denies it"
