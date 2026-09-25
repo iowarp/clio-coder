@@ -45,7 +45,6 @@ export const BusChannels = {
 	ConfigReloadFailed: "config.reloadFailed",
 	PermissionRequested: "permission.requested",
 	PermissionResolved: "permission.resolved",
-	SafetyClassified: "safety.classified",
 	SafetyBlocked: "safety.blocked",
 	LoopBlocked: "safety.loopBlocked",
 	ToolBudgetExceeded: "safety.toolBudgetExceeded",
@@ -465,20 +464,6 @@ export interface ConfigReloadFailedPayload {
 // ---------------------------------------------------------------------------
 
 /**
- * Published on {@link BusChannels.SafetyClassified} for every policy
- * evaluation, regardless of verdict.
- */
-export interface SafetyClassifiedPayload {
-	tool: string;
-	actionClass: string;
-	reasons: ReadonlyArray<string>;
-	ruleId?: string | undefined;
-	posture?: string | undefined;
-	policySource: string;
-	reasonCode: string;
-}
-
-/**
  * Published on {@link BusChannels.PermissionRequested} when policy parks a
  * tool call pending operator confirmation.
  */
@@ -649,8 +634,6 @@ export interface DispatchTerminalStats {
 	cacheWriteTokenCount: number;
 	cacheWrite1hTokenCount?: number;
 	reasoningTokenCount: number;
-	sessionShellHash: string | null;
-	dynamicHash: string | null;
 	costUsd: number;
 	costProvenance?: CostProvenance;
 	durationMs: number;
@@ -851,7 +834,6 @@ export type BusPayloadMap = {
 	[BusChannels.ConfigReloadFailed]: ConfigReloadFailedPayload;
 	[BusChannels.PermissionRequested]: PermissionRequestedPayload;
 	[BusChannels.PermissionResolved]: PermissionResolvedPayload;
-	[BusChannels.SafetyClassified]: SafetyClassifiedPayload;
 	[BusChannels.SafetyBlocked]: SafetyBlockedPayload;
 	[BusChannels.LoopBlocked]: LoopBlockedPayload;
 	[BusChannels.ToolBudgetExceeded]: ToolBudgetExceededPayload;

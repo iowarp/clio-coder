@@ -282,16 +282,6 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			const policy = activePolicyEngine().evaluate(call, posture);
 			const classification = policy.classification;
 
-			context.bus.emit(BusChannels.SafetyClassified, {
-				tool: call.tool,
-				actionClass: classification.actionClass,
-				reasons: classification.reasons,
-				ruleId: policy.ruleId,
-				posture,
-				policySource: policy.policySource,
-				reasonCode: policy.reasonCode,
-			});
-
 			if (policy.kind === "block") {
 				const auditInput: Parameters<typeof buildAuditRecord>[0] = {
 					tool: call.tool,
