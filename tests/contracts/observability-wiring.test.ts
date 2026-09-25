@@ -161,7 +161,6 @@ describe("evidence build failure", () => {
 describe("prewarm usage rows", () => {
 	const row = (overrides: Partial<OutOfTurnUsageRow>): OutOfTurnUsageRow => ({
 		label: "prewarm",
-		sessionId: "session-1",
 		repoIdentity: "repo-1",
 		timestamp: "2026-09-25T12:00:00.000Z",
 		target: "local",
@@ -174,7 +173,6 @@ describe("prewarm usage rows", () => {
 			reasoning: null,
 			totalTokens: null,
 			costUsd: null,
-			costProvenance: "unknown",
 		},
 		...overrides,
 	});
@@ -195,7 +193,6 @@ describe("prewarm usage rows", () => {
 					reasoning: null,
 					totalTokens: 12,
 					costUsd: 0,
-					costProvenance: "unknown",
 				},
 			}),
 		);
@@ -209,7 +206,6 @@ describe("prewarm usage rows", () => {
 				reasoning: 0,
 				totalTokens: 4,
 				costUsd: 0,
-				costProvenance: "unknown",
 			},
 		});
 		appendOutOfTurnUsageRow(stateDir, legacy);

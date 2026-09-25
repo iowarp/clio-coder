@@ -59,7 +59,6 @@ import {
 	acceptsImageInput,
 	canonicalEndpointKey,
 	modelCandidatesForStatus,
-	normalizeCostProvenance,
 	registerForegroundStream,
 	resolveModelCapabilities,
 	runtimeTargetSnapshot,
@@ -1314,7 +1313,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const meta = deps.session?.current() ?? null;
 		writeOutOfTurnUsageRow({
 			label,
-			sessionId: meta?.id ?? null,
 			// The identity the session ledger is filed under, so `usage report
 			// --repo` selects these rows with the same hash it selects ledgers with.
 			repoIdentity: meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null,
@@ -1330,7 +1328,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				reasoning: usage.reasoning,
 				totalTokens: usage.totalTokens,
 				costUsd: usage.costUsd,
-				costProvenance: normalizeCostProvenance(costProvenance),
 			},
 		});
 	};

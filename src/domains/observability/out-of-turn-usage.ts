@@ -14,10 +14,12 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
  * disk, could not see it at all.
  *
  * So the spend gets its own file. One JSON line per priced out-of-turn call
- * under `<stateDir>/usage/out-of-turn.jsonl`, carrying the label, the session
- * it sat beside, the repo identity the session ledger is filed under (so
- * `usage report --repo` filters these rows the same way it filters ledgers),
- * the target and attributed model, and the provider-reported usage.
+ * under `<stateDir>/usage/out-of-turn.jsonl`, carrying the label, the repo
+ * identity the session ledger is filed under (so `usage report --repo` filters
+ * these rows the same way it filters ledgers), the target and attributed model,
+ * and the provider-reported usage. Rows hold only what `usage report` reads.
+ * Earlier builds also wrote `sessionId`, `timing`, `promptCache` and
+ * `usage.costProvenance`; the reader ignores them.
  *
  * Writes follow the audit-row conventions: one append-mode `writeSync` per
  * row, so a line lands whole even with concurrent writers, and a failure is
@@ -32,7 +34,6 @@ import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } fr
 import { dirname, join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
-import type { CostProvenance } from "../providers/index.js";
 import type { CostEntryLabel } from "./cost.js";
 
 /** Directory under the state dir that holds cross-session usage side-cars. */
@@ -52,27 +53,6 @@ export const MAX_OUT_OF_TURN_USAGE_ROWS = 1000;
  */
 const BOUND_CHECK_INTERVAL = 64;
 
-/** Wall-clock facts about one out-of-turn call. */
-export interface OutOfTurnTiming {
-	/** Duration of the model call itself, as the caller measured it. */
-	durationMs: number;
-}
-
-/**
- * Backend prefill facts for one out-of-turn call, in the shape brief #247
- * established for assistant entries. A background memory step re-sends a whole
- * trajectory to a server that has just been serving the chat prefix, so whether
- * that prefill was cached is the difference between a cheap step and a step
- * that re-prefills thousands of tokens on the operator's own machine.
- */
-export interface OutOfTurnPromptCache {
-	promptTokens: number;
-	cachedTokens: number | null;
-	uncachedPrefillTokens: number | null;
-	promptMs: number;
-	source: string;
-}
-
 /** Provider-reported usage for one out-of-turn call. */
 export interface OutOfTurnUsage {
 	input: number | null;
@@ -83,14 +63,11 @@ export interface OutOfTurnUsage {
 	reasoning: number | null;
 	totalTokens: number | null;
 	costUsd: number | null;
-	costProvenance: CostProvenance;
 }
 
 /** One priced model call that was billed beside a session rather than inside it. */
 export interface OutOfTurnUsageRow {
 	label: CostEntryLabel;
-	/** Session the round sat beside, or null when no session was current. */
-	sessionId: string | null;
 	/** The cwd hash the session ledger is filed under, so `--repo` can filter these rows. */
 	repoIdentity: string | null;
 	/** ISO-8601 timestamp of the call. */
@@ -105,10 +82,6 @@ export interface OutOfTurnUsageRow {
 	 * Legacy rows without it are unchanged.
 	 */
 	callOutcome?: "success" | "error" | "aborted";
-	/** Present when the caller measured the call. */
-	timing?: OutOfTurnTiming;
-	/** Present when the serving backend reported prefill facts. */
-	promptCache?: OutOfTurnPromptCache;
 }
 
 export interface OutOfTurnUsageReadResult {
@@ -245,11 +218,8 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 	// they always did, because a number parses the same either way.
 	const keepsOutcome = label === "failed-compaction" || label === "prewarm";
 	const reading = keepsOutcome ? nullableNumber : numberOr0;
-	const timing = asTiming(value.timing);
-	const promptCache = asPromptCache(value.promptCache);
 	return {
 		label,
-		sessionId: typeof value.sessionId === "string" ? value.sessionId : null,
 		repoIdentity: typeof value.repoIdentity === "string" ? value.repoIdentity : null,
 		timestamp: value.timestamp,
 		target: typeof value.target === "string" && value.target.length > 0 ? value.target : "unknown",
@@ -266,34 +236,9 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 			reasoning: reading(usage.reasoning),
 			totalTokens: reading(usage.totalTokens),
 			costUsd: reading(usage.costUsd),
-			costProvenance: asCostProvenance(usage.costProvenance),
 		},
 		...(keepsOutcome && callOutcome !== undefined ? { callOutcome } : {}),
-		...(timing === null ? {} : { timing }),
-		...(promptCache === null ? {} : { promptCache }),
 	};
-}
-
-function asTiming(value: unknown): OutOfTurnTiming | null {
-	if (!isRecord(value)) return null;
-	const durationMs = numberOr0(value.durationMs);
-	return durationMs === 0 ? null : { durationMs };
-}
-
-function asPromptCache(value: unknown): OutOfTurnPromptCache | null {
-	if (!isRecord(value)) return null;
-	if (typeof value.source !== "string" || value.source.length === 0) return null;
-	return {
-		promptTokens: numberOr0(value.promptTokens),
-		cachedTokens: typeof value.cachedTokens === "number" ? value.cachedTokens : null,
-		uncachedPrefillTokens: typeof value.uncachedPrefillTokens === "number" ? value.uncachedPrefillTokens : null,
-		promptMs: numberOr0(value.promptMs),
-		source: value.source,
-	};
-}
-
-function asCostProvenance(value: unknown): CostProvenance {
-	return value === "known" || value === "known_free" || value === "estimated" ? value : "unknown";
 }
 
 function nullableNumber(value: unknown): number | null {

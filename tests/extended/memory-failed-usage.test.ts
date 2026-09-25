@@ -139,7 +139,6 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 				captureStepUsage: () =>
 					captureTaskMemoryUsage({
 						stateDir: join(env.dir, "state"),
-						sessionId: origin.id,
 						repoIdentity: origin.cwdHash,
 						observability: {
 							recordTokens: (_target, _model, tokens) => {
@@ -164,7 +163,6 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 				const rows = readOutOfTurnUsageRows(join(env.dir, "state")).rows;
 				assert.equal(rows.length, ending === "no-usage" ? 0 : 1);
 				if (ending !== "no-usage") {
-					assert.equal(rows[0]?.sessionId, origin.id);
 					assert.equal(rows[0]?.repoIdentity, origin.cwdHash);
 					assert.equal(rows[0]?.target, "origin-target");
 					assert.equal(rows[0]?.attributedModelId, "memory-model");
@@ -176,9 +174,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 						reasoning: 1,
 						totalTokens: 17,
 						costUsd: 0.375,
-						costProvenance: "unknown",
 					});
-					assert.equal(rows[0]?.promptCache?.cachedTokens, 5);
 				}
 				assert.deepEqual(live, switched || ending === "no-usage" ? [] : [17]);
 				const usable = ending === "stop" && !switched;

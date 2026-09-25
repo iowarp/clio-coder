@@ -1,5 +1,6 @@
 /** Preserve spending from summary streams that did not produce a checkpoint. */
 
+import type { CostProvenance } from "../providers/index.js";
 import type { CompactionCallObservation } from "../session/compaction/compact.js";
 import { extractReasoningTokens } from "../session/context-accounting.js";
 import type { BackgroundMemoryUsageSink } from "./background-memory-usage.js";
@@ -7,14 +8,13 @@ import { appendOutOfTurnUsageRow, type OutOfTurnUsage, type OutOfTurnUsageRow } 
 
 export interface CompactionUsageOrigin {
 	stateDir: string;
-	sessionId: string;
 	repoIdentity: string;
 	target: string;
 	model: string;
 }
 
 /** Failed adapter zeros cannot distinguish absent usage from a reported zero. */
-function observedUsage(call: CompactionCallObservation): OutOfTurnUsage {
+function observedUsage(call: CompactionCallObservation): OutOfTurnUsage & { costProvenance: CostProvenance } {
 	const raw = isRecord(call.usage) ? call.usage : {};
 	const reading = (value: unknown): number | null =>
 		typeof value === "number" && Number.isFinite(value) && value >= 0 && (call.outcome === "success" || value > 0)
@@ -52,17 +52,17 @@ export function recordFailedCompactionCalls(
 		const row: OutOfTurnUsageRow = {
 			label: "failed-compaction",
 			callOutcome: call.outcome,
-			sessionId: origin.sessionId,
 			repoIdentity: origin.repoIdentity,
 			timestamp: call.timestamp,
 			target: origin.target,
 			attributedModelId: origin.model,
-			usage,
-			timing: { durationMs: call.durationMs },
+			// Provenance labels the live `/usage` entry below; no reader of the
+			// durable row reads it, so the row does not carry it.
+			usage: storedUsage(usage),
 		};
 		appendOutOfTurnUsageRow(origin.stateDir, row, { required: true });
 		// Do not create a measured-zero live entry for a wholly unobserved call.
-		if (!Object.values(usage).some((value) => typeof value === "number" && value > 0)) continue;
+		if (!Object.values(storedUsage(usage)).some((value) => typeof value === "number" && value > 0)) continue;
 		observability?.recordTokens(
 			origin.target,
 			origin.model,
@@ -83,6 +83,11 @@ export function recordFailedCompactionCalls(
 			"failed-compaction",
 		);
 	}
+}
+
+function storedUsage(usage: OutOfTurnUsage & { costProvenance: CostProvenance }): OutOfTurnUsage {
+	const { costProvenance: _costProvenance, ...stored } = usage;
+	return stored;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

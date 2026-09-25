@@ -217,7 +217,6 @@ for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as con
 			captureStepUsage: () =>
 				captureTaskMemoryUsage({
 					stateDir: env.dir,
-					sessionId: required(session.current()).id,
 					repoIdentity: required(session.current()).cwdHash,
 					appendRow: (_dir, row) => rows.push(row),
 					observability: {
@@ -260,7 +259,6 @@ for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as con
 			assert.equal(proposals.length, 0);
 			assert.deepEqual(registration.recentActivity(), []);
 			assert.equal(rows.length, 1);
-			assert.equal(required(rows[0]).sessionId, origin.id);
 			assert.equal(required(rows[0]).repoIdentity, origin.cwdHash);
 			assert.equal(required(rows[0]).usage.totalTokens, 10);
 			assert.deepEqual(live, [], "old spend must not inflate successor live totals, even after A->B->A");
@@ -270,7 +268,7 @@ for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as con
 			assert.equal(bank.snapshot().knowledge.length, 1);
 			assert.equal(reminders.length, 1);
 			assert.equal(required(proposals[0]).sessionId, successor);
-			assert.equal(required(rows[1]).sessionId, successor);
+			assert.equal(rows.length, 2);
 			assert.deepEqual(live, [10]);
 		} finally {
 			dispose();
