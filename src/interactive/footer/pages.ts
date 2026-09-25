@@ -6,7 +6,7 @@ import { redactSecretString } from "../../domains/safety/redaction.js";
 import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { contextCategorySwatch, renderContextMeterGrid } from "../context-meter.js";
 import { type DispatchBoardRow, dispatchStatusPresentation, renderDispatchActivity } from "../dispatch-board.js";
-import { formatFooterTokens } from "../footer-panel.js";
+import { ACTIVE_DISPATCH_STATUSES, FAILED_DISPATCH_STATUSES, formatFooterTokens } from "../footer-panel.js";
 import { formatKeyLabel } from "../keybinding-manager.js";
 import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
 import { previewRows } from "../renderers/preview.js";
@@ -27,7 +27,6 @@ import {
 export const DASHBOARD_PAGES = ["Activity", "Context", "Status"] as const;
 export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
 const FOOTER_SPLIT_COLUMNS = 84;
-const ACTIVE_AGENT_STATUSES = new Set(["running", "enqueued", "cancelling", "retrying", "stale"]);
 const clean = (value: string) => sanitizeCallTargetText(redactSecretString(value));
 
 function agentCard(
@@ -105,8 +104,8 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 		tick: state.tick,
 		now: state.now,
 	}).slice(1);
-	const active = state.dispatchRows.filter((row) => ACTIVE_AGENT_STATUSES.has(row.status));
-	const history = state.dispatchRows.filter((row) => !ACTIVE_AGENT_STATUSES.has(row.status));
+	const active = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
+	const history = state.dispatchRows.filter((row) => !ACTIVE_DISPATCH_STATUSES.has(row.status));
 	if (!state.dispatchRows.length)
 		return [...summary, "", theme.fg("dim", "No agent invocations yet. Worker cards appear here as agents start.")];
 	const midpoint = Math.ceil(summary.length / 2);
@@ -306,7 +305,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const narrow = w <= 60;
 	const fit = (s: string, n = w) => truncateToWidth(s, Math.max(1, n), GLYPH.ellipsis, true);
 	const ledger = state.context.ledger;
-	const workers = state.dispatchRows.filter((row) => ACTIVE_AGENT_STATUSES.has(row.status)).length;
+	const workers = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
 	const phase = state.agent.statusText ?? "Ready";
 	const workerText = workers ? ` · ${workers} active` : "";
 	const identity = clean(state.session.target ?? "No model selected");
@@ -445,9 +444,9 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 		...renderQuotaAccounts(state.quota ?? [], width, { compact: true, now: state.now }),
 	];
 
-	const active = state.dispatchRows.filter((row) => ACTIVE_AGENT_STATUSES.has(row.status));
+	const active = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
 	const completed = state.dispatchRows.filter((row) => row.status === "completed").length;
-	const failed = state.dispatchRows.filter((row) => ["failed", "dead", "aborted"].includes(row.status)).length;
+	const failed = state.dispatchRows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status)).length;
 	const toolCalls = Object.values(state.toolCounts.tools).reduce((a, b) => a + b, 0);
 	const resource = state.resources;
 	const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;

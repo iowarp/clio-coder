@@ -6,6 +6,16 @@ import { formatReasoningChip } from "./status/reasoning.js";
 import { type ClioTheme, formatContextPercent, GLYPH } from "./theme/index.js";
 import { isHelperRun } from "./worker-stream.js";
 
+/** Shared footer projection of live and failed worker states. */
+export const ACTIVE_DISPATCH_STATUSES: ReadonlySet<DispatchBoardStatus> = new Set([
+	"running",
+	"enqueued",
+	"cancelling",
+	"retrying",
+	"stale",
+]);
+export const FAILED_DISPATCH_STATUSES: ReadonlySet<DispatchBoardStatus> = new Set(["failed", "aborted", "dead"]);
+
 /**
  * Render a token count with a single-letter magnitude suffix so the footer
  * stays short on long-running sessions. Values under 1,000 render as the
@@ -62,16 +72,14 @@ function dispatchStatusCounts(rows: ReadonlyArray<DispatchBoardRow>): {
 	failed: number;
 	tokens: number;
 } {
-	const activeStatuses = new Set<DispatchBoardStatus>(["running", "stale", "enqueued"]);
-	const failedStatuses = new Set<DispatchBoardStatus>(["failed", "aborted", "dead"]);
 	let active = 0;
 	let completed = 0;
 	let failed = 0;
 	let tokens = 0;
 	for (const row of rows) {
-		if (activeStatuses.has(row.status)) active += 1;
+		if (ACTIVE_DISPATCH_STATUSES.has(row.status)) active += 1;
 		else if (row.status === "completed") completed += 1;
-		else if (failedStatuses.has(row.status)) failed += 1;
+		else if (FAILED_DISPATCH_STATUSES.has(row.status)) failed += 1;
 		tokens += Math.max(0, row.tokenCount);
 	}
 	return { active, completed, failed, tokens };
