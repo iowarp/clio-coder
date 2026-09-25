@@ -147,7 +147,7 @@ test("resolved dashboard shortcut cycles Activity, Context, Status and closed wi
 			modes.push(footer.toggleExpanded());
 			const text = plain(footer.view.render(120));
 			match(text, new RegExp(page.toUpperCase()));
-			match(text, /ctrl\+u/);
+			match(text, /Ctrl\+U/);
 		}
 		modes.push(footer.toggleExpanded());
 		deepStrictEqual(modes, ["expanded", "expanded", "expanded", "compact"]);
@@ -401,8 +401,8 @@ test("footer hints resolve remapped bindings and omit unbound actions", () => {
 	});
 	try {
 		const hints = Array.from({ length: 40 }, (_, i) => footerKeyHint(i * 12000)).join("\n");
-		match(hints, /ctrl\+m Model picker/);
-		doesNotMatch(hints, /alt\+m|alt\+l|Library/);
+		match(hints, /Ctrl\+M Model picker/);
+		doesNotMatch(hints, /Alt\+M|Alt\+L|Library/);
 		match(hints, /newline/);
 		match(hints, /Thinking effort/);
 		match(hints, /Send after the active run/);

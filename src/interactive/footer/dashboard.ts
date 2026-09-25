@@ -33,6 +33,7 @@ import {
 	throughputSegment,
 	tokensSegment,
 } from "../footer-panel.js";
+import { formatKeyLabel } from "../keybinding-manager.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
 import { animationStep, clioTheme, collapseHomePath, formatTargetLabel } from "../theme/index.js";
@@ -360,7 +361,11 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				agentActive: dispatch.some((row) => row.status === "running"),
 				toolsUsed: Object.values(tools.tools).some((count) => count > 0),
 				contextBusy: (contextLedger?.usedTokens ?? 0) > (contextLedger?.contextWindow ?? Infinity) * 0.4,
-				dashboardKey: getKeybindings().getKeys("clio-coder.status.toggle").join("/") || "Dashboard",
+				dashboardKey:
+					getKeybindings()
+						.getKeys("clio-coder.status.toggle")
+						.map((key) => formatKeyLabel(key))
+						.join("/") || "Dashboard",
 			}),
 			notices,
 			status: status ?? {
@@ -407,7 +412,10 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 							notices.length -
 							extensionLine.length -
 							lifecycleLine.length,
-						getKeybindings().getKeys("clio-coder.status.toggle").join(" / "),
+						getKeybindings()
+							.getKeys("clio-coder.status.toggle")
+							.map((key) => formatKeyLabel(key))
+							.join(" / "),
 					)
 				: renderCompactDashboard(current, width);
 		return [...grid, ...extensionLine, ...lifecycleLine, ...notices].join("\n");

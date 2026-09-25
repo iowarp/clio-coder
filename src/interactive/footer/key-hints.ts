@@ -1,16 +1,17 @@
 import { CLIO_APP_KEYBINDINGS } from "../../domains/config/keybindings.js";
 import { getKeybindings } from "../../engine/tui.js";
+import { formatKeyLabel } from "../keybinding-manager.js";
 
 /** Small rotating slices of the actual binding catalog; never invent an unbound shortcut. */
 export function footerKeyHint(now: number, narrow = false): string | null {
 	const bindings = getKeybindings();
 	const entries = [
-		...bindings.getKeys("tui.input.submit").map((key) => `${key} send`),
-		...bindings.getKeys("tui.input.newLine").map((key) => `${key} newline`),
+		...bindings.getKeys("tui.input.submit").map((key) => `${formatKeyLabel(key)} send`),
+		...bindings.getKeys("tui.input.newLine").map((key) => `${formatKeyLabel(key)} newline`),
 		...Object.entries(CLIO_APP_KEYBINDINGS).flatMap(([id, spec]) => {
 			if (spec.scope !== "composer") return [];
 			const keys = bindings.getKeys(id as keyof typeof CLIO_APP_KEYBINDINGS);
-			return keys.length ? [`${keys.join("/")} ${spec.description}`] : [];
+			return keys.length ? [`${keys.map((key) => formatKeyLabel(key)).join("/")} ${spec.description}`] : [];
 		}),
 	];
 	const count = narrow ? 1 : 2;

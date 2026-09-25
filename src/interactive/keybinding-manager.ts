@@ -516,9 +516,14 @@ function buildManager(
 	const actionLabel = (id: Keybinding): string => {
 		const keys = inner.getKeys(id);
 		const suffix = leaderTargets().find((entry) => entry.id === id)?.key;
+		const leader = inner.getKeys("clio-coder.leader")[0];
 		return (
-			[keys.join(" / "), suffix ? `${inner.getKeys("clio-coder.leader")[0]} ${suffix}` : ""].filter(Boolean).join(" · ") ||
-			"unbound; see /help"
+			[
+				keys.map((key) => formatKeyLabel(key)).join(" / "),
+				leader && suffix ? `${formatKeyLabel(leader)} ${formatKeyLabel(suffix)}` : "",
+			]
+				.filter(Boolean)
+				.join(" · ") || "unbound; see /help"
 		);
 	};
 	return {

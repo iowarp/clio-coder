@@ -269,3 +269,5 @@ Activity status respects the 40-column minimum before choosing its layout.
 Council selection follows the visible newest-member projection and transfers to replacement rounds.
 
 Fleet Runs offers Enter detail only for ordinary runs, because council rows have no member detail view.
+
+Live shortcut labels use the canonical formatter and reflect remapped bindings.

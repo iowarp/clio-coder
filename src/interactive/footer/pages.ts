@@ -7,6 +7,7 @@ import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from 
 import { contextCategorySwatch, renderContextMeterGrid } from "../context-meter.js";
 import { type DispatchBoardRow, dispatchStatusPresentation, renderDispatchActivity } from "../dispatch-board.js";
 import { formatFooterTokens } from "../footer-panel.js";
+import { formatKeyLabel } from "../keybinding-manager.js";
 import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
 import { previewRows } from "../renderers/preview.js";
 import { brandMark, clioTheme, formatCompactMs, formatContextPercent, GLYPH, rule } from "../theme/index.js";
@@ -114,7 +115,11 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 		: summary;
 	const cardBudget = budget - summaryRows.length - 1;
 	const cards: string[] = [];
-	const inspectAll = getKeybindings().getKeys("clio-coder.dispatchBoard.toggle").join("/") || "Workers shortcut";
+	const inspectAll =
+		getKeybindings()
+			.getKeys("clio-coder.dispatchBoard.toggle")
+			.map((key) => formatKeyLabel(key))
+			.join("/") || "Workers shortcut";
 	if (active.length) cards.push(rule(theme, width, { left: "AGENT ACTIVITY", leftToken: "agent" }));
 	else cards.push(theme.fg("muted", "No agents running."));
 	let shown = 0;
@@ -386,11 +391,18 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const left = `${activity}${skill ? ` · ${skill}` : ""}${shownIdentity}${badge ? ` · ${badge}` : ""}`;
 	const pair = (l: string, r: string, rw: number) => `${fit(l, w - rw - 3)}   ${fit(r, rw)}`;
 	const notice = topNotification(state.notices, state.now);
-	const key = getKeybindings().getKeys("clio-coder.status.toggle").join("/") || "Dashboard";
+	const key =
+		getKeybindings()
+			.getKeys("clio-coder.status.toggle")
+			.map((key) => formatKeyLabel(key))
+			.join("/") || "Dashboard";
+	const leaderKey = formatKeyLabel(getKeybindings().getKeys("clio-coder.leader")[0], "");
 	const urgent = state.session.shutdownArmed
 		? "Ctrl+C again to quit"
 		: state.session.leaderArmed
-			? `Ctrl+G ${GLYPH.next} choose key`
+			? leaderKey
+				? `${leaderKey} ${GLYPH.next} choose key`
+				: "Choose key"
 			: null;
 	const foot = urgent
 		? theme.fg("warning", urgent)
@@ -614,7 +626,12 @@ export function renderDashboardPage(
 	if (content.length > available) {
 		const detail =
 			page === "Activity"
-				? `${getKeybindings().getKeys("clio-coder.dispatchBoard.toggle").join("/") || "Fleet Runs"} · /view`
+				? `${
+						getKeybindings()
+							.getKeys("clio-coder.dispatchBoard.toggle")
+							.map((key) => formatKeyLabel(key))
+							.join("/") || "Fleet Runs"
+					} · /view`
 				: page === "Context"
 					? "/context"
 					: "/usage · /context";

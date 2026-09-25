@@ -7,19 +7,8 @@ export interface FollowUpQueuePanel extends Component {
 }
 
 export interface FollowUpQueuePanelOptions {
+	/** The action label already formatted from the live binding manager. */
 	getDequeueKey?: () => string | undefined;
-}
-
-/**
- * Keybindings are stored lowercase (`alt+q`), but the hint vocabulary spells
- * modifiers and keys in title case (`[Alt+Q]`). Format the bound key for
- * display so the panel reads the same whether or not the binding is customized.
- */
-function displayKey(key: string): string {
-	return key
-		.split("+")
-		.map((part) => (part.length > 0 ? `${part[0]?.toUpperCase()}${part.slice(1)}` : part))
-		.join("+");
 }
 
 export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}): FollowUpQueuePanel {
@@ -52,7 +41,7 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 				message.kind === "steer" ? theme.fg("action", `${GLYPH.user} steer`) : theme.fg("muted", `${GLYPH.queued} queued`);
 			lines.push(`${marker} ${theme.fg("muted", preview)}`);
 		}
-		const restoreKey = key && key.length > 0 ? displayKey(key) : "see /help";
+		const restoreKey = key && key.length > 0 ? key : "see /help";
 		lines.push(theme.fg("dim", `[${restoreKey}] restore to editor`));
 
 		cachedLines = frame(theme, "Steering Queue", lines, bodyWidth + 4);
