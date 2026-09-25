@@ -57,17 +57,6 @@ export interface HealthSummary {
 	readonly worst: StatusTone;
 }
 
-export const EMPTY_HEALTH: HealthSummary = {
-	contextWarning: null,
-	compaction: null,
-	toolBudget: null,
-	providers: [],
-	unknown: [],
-	rows: [],
-	attention: false,
-	worst: "neutral",
-};
-
 const SEVERITY: Readonly<Record<StatusTone, number>> = {
 	fail: 5,
 	warn: 4,

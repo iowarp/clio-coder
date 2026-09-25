@@ -51,15 +51,6 @@ export const RESOLUTION_SUMMARY: Readonly<Record<string, string>> = {
 export const resolutionSummary = (status: string): string =>
 	RESOLUTION_SUMMARY[status] ?? "Clio Coder recorded an outcome this GUI does not classify.";
 
-export const RESOLUTION_TONES: Readonly<Record<string, StatusTone>> = {
-	allowed: "success",
-	rejected: "neutral",
-	cancelled: "unverified",
-	expired: "fail",
-};
-
-export const resolutionTone = (status: string): StatusTone => RESOLUTION_TONES[status] ?? "neutral";
-
 export interface ApprovalTimings {
 	/** True once the declared escalation window has passed, or once the server said so. */
 	readonly escalated: boolean;

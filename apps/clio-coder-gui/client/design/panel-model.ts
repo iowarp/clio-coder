@@ -152,8 +152,6 @@ export const PANELS = {
 	},
 } as const satisfies Record<string, PanelCopy>;
 
-export type PanelId = keyof typeof PANELS;
-
 /** Dispatch history belongs to the installation. It is never one project's, and it is never live. */
 export const DISPATCH_SCOPE =
 	"This is global installation state, not a fact about the selected project and not a live event stream.";

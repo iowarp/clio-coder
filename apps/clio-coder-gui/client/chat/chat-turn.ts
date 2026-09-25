@@ -200,6 +200,3 @@ export function resetObservedStarts(): void {
 
 /** The context warning is standing session chrome, not a point in the transcript. */
 export const CONTEXT_WARNING_LABEL = "Context is filling up";
-
-/** What the provider strip says when nothing reported a target's health at all. */
-export const PROVIDER_UNREPORTED = "No target health reported";

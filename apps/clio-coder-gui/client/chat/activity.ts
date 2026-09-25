@@ -279,5 +279,3 @@ export function workerLabel(provenance: readonly ProvenanceEntry[] | undefined):
 	if (last === undefined || last.role !== "worker") return null;
 	return last.node == null ? last.agentId : `${last.agentId} · ${last.node}`;
 }
-
-export const WORKER_LABEL_TITLE = "Reported by Clio Coder as the agent that ran this call";

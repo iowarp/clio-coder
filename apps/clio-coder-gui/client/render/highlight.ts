@@ -123,7 +123,3 @@ export async function highlightCode(code: string, language: string): Promise<rea
 		return null;
 	}
 }
-
-export function isHighlightable(language: string): boolean {
-	return language in GRAMMAR_LOADERS;
-}
