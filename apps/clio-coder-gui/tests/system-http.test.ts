@@ -70,6 +70,7 @@ test("interop lists all registered kinds, runs nothing until asked and then prob
 			"cursor",
 			"gemini",
 			"opencode",
+			"pi",
 		]);
 		const codex = report.agents.find((row) => row.kind === "codex");
 		assert.equal(codex?.presence, "present");
