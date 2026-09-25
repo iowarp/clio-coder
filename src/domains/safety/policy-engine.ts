@@ -1321,12 +1321,69 @@ function damageControlScans(call: ClassifierCall): string[] {
 		const pathArg = call.args?.path;
 		return typeof pathArg === "string" ? [pathArg] : [];
 	}
+	// `bash` is the only tool with a `command` argument, and its others (`cwd`,
+	// `timeout_ms`, `output_policy`) are not commands. Scanning the blob as well
+	// would let a bare `cwd: "."` complete a pathspec the command did not write,
+	// so a call that carries a command is scanned as a command. `cwd` keeps its
+	// own path policy.
 	const command = call.args?.command;
-	const candidates = typeof command === "string" ? [command] : [];
-	const serialized = serializeArgs(call.args);
-	if (!candidates.includes(serialized)) candidates.push(serialized);
-	return candidates;
+	if (typeof command === "string") return [command, ...shellCommandSegments(command)];
+	return [serializeArgs(call.args)];
 }
+
+/**
+ * Source text of each command a shell string would actually execute, including
+ * the ones inside a `$(...)` substitution or an `sh -c` script.
+ *
+ * A damage-control pattern anchored with `$` matches only at the end of the
+ * string it is tested against, so `git restore . && echo RESTORED` hid its
+ * destructive segment and ran at yolo with no card, discarding a dirty tracked
+ * file (BT-002). Every operator opened the same hole, and the audit blamed
+ * `bash-shell-operators` because no rule had matched.
+ *
+ * Segments are sliced out of the original text rather than rebuilt from tokens,
+ * so quoting survives and a rule cannot fire on a word that merely spells a
+ * command inside a quoted argument.
+ */
+function shellCommandSegments(command: string, depth = 0): string[] {
+	const segments: string[] = [];
+	let start: number | null = null;
+	let end = 0;
+	const flush = (): void => {
+		if (start === null) return;
+		const segment = command.slice(start, end).trim();
+		if (segment !== "" && segment !== command) segments.push(segment);
+		start = null;
+	};
+	for (const token of scanShellLike(command)) {
+		if (token.operator) {
+			flush();
+			continue;
+		}
+		start ??= token.start;
+		end = token.end;
+		if (depth >= SEGMENT_MAX_DEPTH) continue;
+		for (const script of token.substitutions ?? []) {
+			segments.push(script.trim(), ...shellCommandSegments(script, depth + 1));
+		}
+	}
+	flush();
+	if (depth < SEGMENT_MAX_DEPTH) {
+		for (const segment of [...segments]) {
+			const inner = inlineShellScript(segment);
+			if (inner === null || inner.trim() === "") continue;
+			segments.push(inner.trim(), ...shellCommandSegments(inner, depth + 1));
+		}
+		const inner = inlineShellScript(command);
+		if (inner !== null && inner.trim() !== "") {
+			segments.push(inner.trim(), ...shellCommandSegments(inner, depth + 1));
+		}
+	}
+	return segments.filter((segment) => segment !== "");
+}
+
+/** Matches the inner-shell depth the trust and write-target scanners already use. */
+const SEGMENT_MAX_DEPTH = 3;
 
 function serializeArgs(args?: Record<string, unknown>): string {
 	if (!args) return "";

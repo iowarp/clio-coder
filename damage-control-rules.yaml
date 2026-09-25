@@ -365,13 +365,13 @@ packs:
         block: true
       - id: git-checkout-discard-all
         description: "git checkout -- . discards all uncommitted changes"
-        pattern: "\\bgit\\s+checkout\\s+--\\s*\\.\\s*$"
+        pattern: "\\bgit\\s+checkout\\b[^;&|]*\\s--\\s*(?:\\.|\\./|:/)\\s*$"
         class: git_destructive
         block: false
         ask: true
       - id: git-restore-discard-all
         description: "git restore . discards all uncommitted changes"
-        pattern: "\\bgit\\s+restore\\s+\\.\\s*$"
+        pattern: "\\bgit\\s+restore\\b[^;&|]*\\s(?:\\.|\\./|:/)\\s*$"
         class: git_destructive
         block: false
         ask: true
