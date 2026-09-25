@@ -192,3 +192,11 @@ test("a dispatch card spends the hollow diamond on origin only, never on a trust
 		}
 	}
 });
+
+test("a title or meta wider than the island is clipped so the top border keeps the island width", () => {
+	for (const width of WIDTHS) {
+		const lines = frame(clioTheme(), "council ".repeat(32), ["body"], width, { rightMeta: "12m 04s" });
+		for (const row of lines) strictEqual(visibleWidth(row), width, stripTerminalSequences(row));
+		match(stripTerminalSequences(lines[0] ?? ""), /^┌─ council .*…┐$/u);
+	}
+});
