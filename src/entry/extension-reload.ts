@@ -28,7 +28,6 @@
 
 import { realpathSync } from "node:fs";
 import path from "node:path";
-import type { ExtensionsReloadedPayload } from "../core/bus-events.js";
 import type {
 	ExtensionReloadCommitted,
 	ExtensionReloadRejection,
@@ -60,6 +59,15 @@ export type ExtensionReloadOutcome =
 	| (ExtensionReloadCommitted & { hooks: ExtensionReloadHookSummary; lines: ReadonlyArray<string> })
 	| (ExtensionReloadRejection & { lines: ReadonlyArray<string> });
 
+/** The extension generation that both references serve after a commit. */
+export interface ExtensionGenerationCommitted {
+	generation: number;
+	previousGeneration: number;
+	changed: boolean;
+	/** Content identity of the committed snapshot. */
+	digest: string;
+}
+
 export interface ExtensionReloadCoordinatorDeps {
 	/** Absent on a degraded boot where the extensions domain failed to start. */
 	extensions: Pick<ExtensionsContract, "prepareReload" | "snapshot"> | undefined;
@@ -72,7 +80,7 @@ export interface ExtensionReloadCoordinatorDeps {
 	/** One operator line per issue; stderr in headless runs, dropped or noticed by the host in interactive runs. */
 	report: (line: string) => void;
 	/** Called once per published generation, after both references are live. */
-	onCommitted?: (event: ExtensionsReloadedPayload) => void;
+	onCommitted?: (event: ExtensionGenerationCommitted) => void;
 }
 
 export interface ExtensionReloadCoordinator {

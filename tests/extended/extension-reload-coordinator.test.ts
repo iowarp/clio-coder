@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
-import type { ExtensionsReloadedPayload } from "../../src/core/bus-events.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { createExtensionsBundle } from "../../src/domains/extensions/extension.js";
@@ -27,6 +26,7 @@ import type {
 } from "../../src/domains/middleware/index.js";
 import {
 	createExtensionReloadCoordinator,
+	type ExtensionGenerationCommitted,
 	type ExtensionReloadCoordinatorDeps,
 } from "../../src/entry/extension-reload.js";
 
@@ -84,7 +84,7 @@ interface LiveHarness {
 	middleware: MiddlewareContract;
 	receipts: HookReceipt[];
 	lines: string[];
-	events: ExtensionsReloadedPayload[];
+	events: ExtensionGenerationCommitted[];
 	coordinator(overrides?: Partial<ExtensionReloadCoordinatorDeps>): ReturnType<typeof createExtensionReloadCoordinator>;
 	stop(): void;
 }
@@ -95,7 +95,7 @@ function liveHarness(project: string): LiveHarness {
 	const middleware = createMiddlewareBundle().contract;
 	const receipts: HookReceipt[] = [];
 	const lines: string[] = [];
-	const events: ExtensionsReloadedPayload[] = [];
+	const events: ExtensionGenerationCommitted[] = [];
 	return {
 		bundle,
 		extensions: bundle.contract,
@@ -517,9 +517,9 @@ function stubDeps(
 	project: string,
 	script: StubScript,
 	calls: StubCalls,
-): { deps: ExtensionReloadCoordinatorDeps; lines: string[]; events: ExtensionsReloadedPayload[] } {
+): { deps: ExtensionReloadCoordinatorDeps; lines: string[]; events: ExtensionGenerationCommitted[] } {
 	const lines: string[] = [];
-	const events: ExtensionsReloadedPayload[] = [];
+	const events: ExtensionGenerationCommitted[] = [];
 	const extensions: NonNullable<ExtensionReloadCoordinatorDeps["extensions"]> = {
 		prepareReload: () => {
 			calls.extensions.push("prepare");

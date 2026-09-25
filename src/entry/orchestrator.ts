@@ -1716,7 +1716,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// The coordinator is the only writer of the "user-hooks" owner and the only
 	// caller of the extensions reload; it publishes the extension generation
 	// and the hook registrations with two adjacent assignments on one stack
-	// and emits extensions.reloaded only after both. The boot generation is
+	// and reloads plugin resources only after both. The boot generation is
 	// published here too (the extensions bundle publishes nothing at start),
 	// so no consumer ever sees extension resources paired with hooks from a
 	// different generation. The owner slot is anchored here, so user hooks
@@ -1735,9 +1735,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			else if (bootHookNotices) initialNotices.push(line);
 			else bus.emit(BusChannels.ExtensionsLoadIssue, { message: line });
 		},
-		onCommitted: (event) => {
+		onCommitted: () => {
 			reloadPlugins();
-			bus.emit(BusChannels.ExtensionsReloaded, event);
 		},
 	});
 	await bootPhaseBoundary?.();

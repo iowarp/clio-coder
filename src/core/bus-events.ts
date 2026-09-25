@@ -47,7 +47,6 @@ export const BusChannels = {
 	PermissionResolved: "permission.resolved",
 	SafetyClassified: "safety.classified",
 	SafetyBlocked: "safety.blocked",
-	SafetyAllowed: "safety.allowed",
 	LoopBlocked: "safety.loopBlocked",
 	ToolBudgetExceeded: "safety.toolBudgetExceeded",
 	ProviderHealth: "provider.health",
@@ -63,7 +62,6 @@ export const BusChannels = {
 	CompactionBegin: "compaction.begin",
 	CompactionEnd: "compaction.end",
 	MiddlewareHookFailed: "middleware.hookFailed",
-	ExtensionsReloaded: "extensions.reloaded",
 	PluginsReloaded: "plugins.reloaded",
 	ExtensionsLoadIssue: "extensions.loadIssue",
 	ContextActivity: "context.activity",
@@ -534,16 +532,6 @@ export interface PermissionResolvedPayload {
 	at?: number | undefined;
 }
 
-/** Published on {@link BusChannels.SafetyAllowed} when policy allows a call outright. */
-export interface SafetyAllowedPayload {
-	tool: string;
-	actionClass: string;
-	posture?: string | undefined;
-	ruleId?: string | undefined;
-	policySource: string;
-	reasonCode: string;
-}
-
 // ---------------------------------------------------------------------------
 // Providers
 // ---------------------------------------------------------------------------
@@ -740,22 +728,14 @@ export interface CompactionPayload {
 // Extensions
 // ---------------------------------------------------------------------------
 
-/**
- * Published on {@link BusChannels.ExtensionsReloaded} by the composition
- * root after a new extension generation and its user-hook registrations
- * have both been committed. Never published between the two commits.
- * Recipe and prompt consumers subscribe to PluginsReloaded instead.
- */
-export interface ExtensionsReloadedPayload {
+/** Data-only plugin generation publication, independent of extension hook generations. */
+export interface PluginsReloadedPayload {
 	generation: number;
 	previousGeneration: number;
 	changed: boolean;
 	/** Content identity of the committed snapshot. */
 	digest: string;
 }
-
-/** Data-only plugin generation publication, independent of extension hook generations. */
-export type PluginsReloadedPayload = ExtensionsReloadedPayload;
 
 /** Operator diagnostics for skipped extension or project-hook configuration. */
 export interface ExtensionsLoadIssuePayload {
@@ -873,7 +853,6 @@ export type BusPayloadMap = {
 	[BusChannels.PermissionResolved]: PermissionResolvedPayload;
 	[BusChannels.SafetyClassified]: SafetyClassifiedPayload;
 	[BusChannels.SafetyBlocked]: SafetyBlockedPayload;
-	[BusChannels.SafetyAllowed]: SafetyAllowedPayload;
 	[BusChannels.LoopBlocked]: LoopBlockedPayload;
 	[BusChannels.ToolBudgetExceeded]: ToolBudgetExceededPayload;
 	[BusChannels.ProviderHealth]: ProviderHealthPayload;
@@ -889,7 +868,6 @@ export type BusPayloadMap = {
 	[BusChannels.CompactionBegin]: CompactionPayload;
 	[BusChannels.CompactionEnd]: CompactionPayload;
 	[BusChannels.MiddlewareHookFailed]: MiddlewareHookFailedPayload;
-	[BusChannels.ExtensionsReloaded]: ExtensionsReloadedPayload;
 	[BusChannels.PluginsReloaded]: PluginsReloadedPayload;
 	[BusChannels.ExtensionsLoadIssue]: ExtensionsLoadIssuePayload;
 	[BusChannels.ContextActivity]: ContextActivityPayload;

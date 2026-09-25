@@ -48,7 +48,6 @@ it("refreshes agent recipes and prompt inputs only on plugin resource reload", a
 		mkdirSync(join(env.dir, "config/agents"), { recursive: true });
 		writeFileSync(join(env.dir, "config/agents/reload-owned-agent.md"), recipe);
 		const generation = { generation: 2, previousGeneration: 1, changed: true, digest: "fixture" };
-		bus.emit(BusChannels.ExtensionsReloaded, generation);
 		strictEqual(agents.contract.get("reload-owned-agent"), null);
 		strictEqual(agents.contract.revision(), revision);
 		strictEqual(prompts.contract.inputEpoch(), epoch);
