@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { rawDurationMs } from "../../core/timers.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
 import { effectiveToolCall } from "../../tools/surface.js";
@@ -1622,20 +1622,38 @@ async function readRunLedger(stateDir: string): Promise<RunLedgerRows> {
 export async function authenticatedRunWorktree(
 	stateDir: string,
 	runId: string,
-): Promise<{
-	branch: string;
-	changedPaths?: string[];
-	changedPathsOmitted?: number;
-} | null> {
+): Promise<
+	| {
+			branch: string;
+			changedPaths?: string[];
+			changedPathsOmitted?: number;
+			apply: "merge" | "preserve";
+			applied: boolean;
+			snapshot?: "working-tree" | "unavailable";
+			reason?: string;
+	  }
+	| { status: "withheld"; reason: "receipt-integrity" }
+	| null
+> {
 	try {
 		const [envelope] = selectRunEnvelopes(await readRunLedger(stateDir), { kind: "run", runId });
 		if (!envelope) return null;
-		const { receipt, error } = await readReceipt(stateDir, envelope);
-		if (error !== null || !receipt?.worktree) return null;
+		const { receipt, error, integrityFailed } = await readReceipt(stateDir, envelope);
+		if (error !== null) {
+			const worktreeSegment = `${sep}.clio-coder${sep}worktrees${sep}${runId}`;
+			const ledgerHasTaskWorktree =
+				envelope.cwd.endsWith(worktreeSegment) || envelope.cwd.includes(`${worktreeSegment}${sep}`);
+			return integrityFailed && ledgerHasTaskWorktree ? { status: "withheld", reason: "receipt-integrity" } : null;
+		}
+		if (!receipt?.worktree) return null;
 		const { branch } = receipt.worktree;
 		const changedPaths = receipt.worktree.changedPaths;
 		return {
 			branch,
+			apply: receipt.worktree.apply,
+			applied: receipt.worktree.applied,
+			...(receipt.worktree.snapshot !== undefined ? { snapshot: receipt.worktree.snapshot } : {}),
+			...(receipt.worktree.reason !== undefined ? { reason: receipt.worktree.reason } : {}),
 			...(changedPaths === undefined
 				? {}
 				: {
