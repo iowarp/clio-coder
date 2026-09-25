@@ -9,6 +9,7 @@ import {
 	type TUI,
 	visibleWidth,
 } from "../../src/engine/tui.js";
+import { dockTop } from "../../src/interactive/dock.js";
 import { createLeaderMenu } from "../../src/interactive/leader-menu.js";
 import { createAskUserViewForTesting } from "../../src/interactive/overlays/ask-user.js";
 import { formatCompositeTasksOverlayBodyLines } from "../../src/interactive/tasks-overlay.js";
@@ -51,8 +52,9 @@ function mountLeaderMenu() {
 		{ key: "b", id: "clio-coder.leader", label: "Leader" },
 		{ key: "", id: "clio-coder.exit", label: "Unbound action" },
 	]);
-	// The frame wraps the body in `ClioOverlayFrame`; reach the body through it.
-	const frame = component as Component & { child?: Component };
+	// The engine overlay is a zero-row focus proxy; the frame itself lives in the dock.
+	void component;
+	const frame = dockTop(tui)?.frame as unknown as Component;
 	return { frame, options };
 }
 

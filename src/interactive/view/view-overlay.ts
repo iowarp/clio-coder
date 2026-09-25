@@ -11,6 +11,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
+import { dockBodyRows } from "../dock.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
 import { buildHint, fitRows, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
@@ -885,7 +886,7 @@ export class ViewOverlayView implements Component {
 }
 
 function viewBodyHeight(tui: TUI): number {
-	return Math.max(1, tui.terminal.rows - VIEW_OVERLAY_MARGIN.top - VIEW_OVERLAY_MARGIN.bottom - 2);
+	return dockBodyRows(tui);
 }
 
 export function openViewOverlay(

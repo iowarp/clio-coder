@@ -7,12 +7,13 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
+import { type DockEntry, dockBodyRows, dockTop } from "./dock.js";
 import { guardPastedEditorOperator } from "./editor-bash.js";
 import { type EditorRailState, renderEditorRail } from "./editor-rails.js";
 import { fitHintEntries } from "./overlay-frame.js";
 import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
 import type { ClioTheme } from "./theme/index.js";
-import { ANIMATION_STEP_MS, animationStep, clioTheme, editorTheme, GLYPH } from "./theme/index.js";
+import { ANIMATION_STEP_MS, animationStep, clioTheme, editorTheme, GLYPH, padAnsi } from "./theme/index.js";
 import type { TargetIdentity } from "./theme/labels.js";
 import type { TurnPreparationPhase } from "./turn-state.js";
 
@@ -204,20 +205,88 @@ export class ClioEditor extends Editor {
 		this.pastedBangOffsets = remapPastedBangOffsets(before, this.getText(), this.pastedBangOffsets, operation === "undo");
 	}
 
+	/** The dock registry key; the base class keeps its own reference under a wider type. */
+	private readonly dockHost: TUI;
+
 	constructor(
 		tui: TUI,
 		private readonly chrome: EditorChrome,
 	) {
 		super(tui, editorTheme(clioTheme()));
+		this.dockHost = tui;
+	}
+
+	/** Two-column gutter on each side of a docked body, the autocomplete's own indent. */
+	private static readonly DOCK_GUTTER = 2;
+
+	/**
+	 * The dock: a modal surface drawn in the composer's slot.
+	 *
+	 * ```
+	 * Title ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+	 *   > filter
+	 *   ❯ row
+	 *     row
+	 * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ [↑↓] select · [Enter] use · [Esc] close ━
+	 * ```
+	 *
+	 * The title sits where the composer's mode label sits, because the dock is
+	 * the composer's mode while it is open. The hint sits where the CONFIRM keys
+	 * sit. A frame that keeps the composer (the permission card) draws its body
+	 * and then the composer's own rows, whose CONFIRM rail already carries the
+	 * decision keys, so the card's hint rail is not drawn twice.
+	 */
+	private renderDock(entry: DockEntry, width: number, theme: ClioTheme, rail: EditorRailState): string[] {
+		const gutter = ClioEditor.DOCK_GUTTER;
+		const contentWidth = Math.max(1, width - gutter * 2);
+		const body = entry.frame.renderDockBody(contentWidth, dockBodyRows(this.dockHost));
+		const pad = " ".repeat(gutter);
+		const tone = entry.frame.dockTone();
+		const title = entry.frame.dockTitle();
+		const top = renderEditorRail(
+			theme,
+			width,
+			{
+				...(title.length > 0 ? { left: title, leftToken: tone ?? ("accentDeep" as const) } : {}),
+				fillToken: "editor",
+			},
+			rail,
+		);
+		const lines = [top, ...body.map((row) => padAnsi(`${pad}${row}${pad}`, width))];
+		if (entry.keepComposer) return lines;
+		const hint = entry.frame.dockHint(width);
+		lines.push(
+			renderEditorRail(
+				theme,
+				width,
+				{
+					...(hint && hint.trim().length > 0
+						? { right: hint, rightRaw: true, rightTail: theme.style("editor", "─", { bold: true }) }
+						: {}),
+					fillToken: "editor",
+				},
+				rail,
+			),
+		);
+		return lines;
 	}
 
 	override render(width: number): string[] {
-		const lines = super.render(width);
-		if (lines.length === 0) return lines;
 		const theme = clioTheme();
 		const safeWidth = Math.max(0, width);
 		const text = this.getText();
 		const mode = composerMode(this.chrome, text);
+		const docked = dockTop(this.dockHost);
+		if (docked !== null && !docked.keepComposer) {
+			return this.renderDock(docked, safeWidth, theme, {
+				phase: docked.frame.dockTone() === "warning" ? "attention" : "idle",
+				yolo: this.chrome.getAutonomy?.() === "yolo",
+				animate: false,
+				now: 0,
+			});
+		}
+		const lines = super.render(width);
+		if (lines.length === 0) return lines;
 		const rail: EditorRailState = {
 			phase: mode === "CONFIRM" ? "attention" : mode === "MESSAGE" ? "idle" : "working",
 			yolo: this.chrome.getAutonomy?.() === "yolo",
@@ -283,6 +352,7 @@ export class ClioEditor extends Editor {
 		}
 
 		if (bottomRail >= 0 && mode !== "CONFIRM") lines[bottomRail] = renderEditorRail(theme, safeWidth, {}, rail);
+		if (docked !== null) return [...this.renderDock(docked, safeWidth, theme, rail), ...lines];
 		return lines;
 	}
 

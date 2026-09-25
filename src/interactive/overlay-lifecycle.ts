@@ -15,10 +15,8 @@ import { createOverlaySessionLifecycle } from "./overlay-session-lifecycle.js";
 import { createOverlayTransitions } from "./overlay-transitions.js";
 import {
 	createPermissionOverlayBody,
-	PERMISSION_OVERLAY_WIDTH,
 	type PermissionOverlayBodyHandle,
 	permissionOverlayHint,
-	permissionOverlayPlacement,
 	permissionOverlayTitle,
 	permissionOverlayTone,
 } from "./permission-overlay.js";
@@ -320,8 +318,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			const body = createPermissionOverlayBody(view, inspect, invocation, advisory);
 			permissionBody = body;
 			const handle = showOverlayFrame(tui, body, {
-				...permissionOverlayPlacement(tui, editor, footer.view),
-				width: PERMISSION_OVERLAY_WIDTH,
+				// The card docks above the composer's own rows: a steer typed while
+				// the call is parked is what the CONFIRM rail is for.
+				keepComposer: true,
 				// Not derived from the title: that one is classified per decision
 				// axis and is one of five strings for the same modal.
 				markerId: "permission-confirm",

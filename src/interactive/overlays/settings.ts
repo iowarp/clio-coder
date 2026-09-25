@@ -81,6 +81,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
+import { dockBodyRows } from "../dock.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
 import {
@@ -3914,7 +3915,7 @@ export interface SettingsOverlayHandle extends OverlayHandle {
 }
 
 function settingsBodyHeight(tui: TUI): number {
-	return Math.max(1, tui.terminal.rows - SETTINGS_OVERLAY_MARGIN.top - SETTINGS_OVERLAY_MARGIN.bottom - 2);
+	return dockBodyRows(tui);
 }
 
 export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): SettingsOverlayHandle {
