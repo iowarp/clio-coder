@@ -51,8 +51,10 @@ test("production Stage 0 static closure stays within its measured bundle budget"
 		}
 	}
 	// Pi 0.87.1 bundled TUI: 13 chunks / 670,404 B, including 156,272 B of Clio.
+	// 0.5.6 measured 15 chunks and 171,937 B of Clio: the composer dock and the
+	// terminal background probe both draw the first frame, so they belong here.
 	// Keep vendor bytes visible, with a separate cap so they cannot hide Clio growth.
 	ok(closure.size <= 16, `Stage 0 chunks: ${closure.size} > 16`);
 	ok(totalBytes <= 700_000, `Stage 0 bytes: ${totalBytes} > 700,000`);
-	ok(clioBytes <= 165_000, `Stage 0 Clio source bytes: ${clioBytes} > 165,000`);
+	ok(clioBytes <= 175_000, `Stage 0 Clio source bytes: ${clioBytes} > 175,000`);
 });
