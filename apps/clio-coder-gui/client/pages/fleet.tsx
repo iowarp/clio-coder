@@ -10,7 +10,7 @@ import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { DISPATCH_SCOPE, emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
-import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE } from "./artifact-pagination.js";
+import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE, admittedPages, retainedLinksLive } from "./artifact-pagination.js";
 
 function Topologies({
 	councils,
@@ -125,6 +125,8 @@ export function FleetPage({ client }: { client: Client }) {
 		queryFn: () => client.call(routes.fleetCouncils, emptyInput),
 	});
 	const gates = useQuery({ queryKey: ["fleet-gates"], queryFn: () => client.call(routes.fleetGates, emptyInput) });
+	const rootsLive = retainedLinksLive(roots),
+		runsLive = retainedLinksLive(runs);
 	return (
 		<section>
 			<PanelHeading panel={PANELS.fleet} level={1} />
@@ -141,13 +143,11 @@ export function FleetPage({ client }: { client: Client }) {
 			{roots.isPending && <p>Reading fleet history…</p>}
 			{roots.data?.pages[0]?.items.length === 0 && <PanelEmpty>{emptyState.emptyStore("fleet run")}</PanelEmpty>}
 			<div className="config-entries">
-				{roots.data?.pages
+				{admittedPages(roots)
 					.flatMap((page) => page.items)
 					.map((run) => (
 						<article className="trace-panel" key={run.id}>
-							<h3>
-								<Link to={`/fleet/${run.id}`}>{run.fleet}</Link>
-							</h3>
+							<h3>{rootsLive ? <Link to={`/fleet/${run.id}`}>{run.fleet}</Link> : run.fleet}</h3>
 							<p>{run.id}</p>
 							<StatusMark tone={run.endedAt ? "neutral" : "running"} label={run.endedAt ? "Finished" : "Running"} />
 							<p>
@@ -157,8 +157,8 @@ export function FleetPage({ client }: { client: Client }) {
 						</article>
 					))}
 			</div>
-			{roots.hasNextPage && (
-				<button type="button" disabled={roots.isFetchingNextPage} onClick={() => void roots.fetchNextPage()}>
+			{roots.hasNextPage && !roots.isRefetchError && (
+				<button type="button" disabled={roots.isFetching} onClick={() => void roots.fetchNextPage()}>
 					Load more fleet runs
 				</button>
 			)}
@@ -166,12 +166,12 @@ export function FleetPage({ client }: { client: Client }) {
 			{runs.isPending && <p>Reading dispatch history…</p>}
 			{runs.data?.pages[0]?.items.length === 0 && <PanelEmpty>{emptyState.emptyStore("dispatch run")}</PanelEmpty>}
 			<dl className="settings-list">
-				{runs.data?.pages
+				{admittedPages(runs)
 					.flatMap((page) => page.items)
 					.map((run) => (
 						<div key={run.id}>
 							<dt>
-								<Link to={`/fleet/dispatches/${run.id}`}>{run.id}</Link>
+								{runsLive ? <Link to={`/fleet/dispatches/${run.id}`}>{run.id}</Link> : run.id}
 								<br />
 								<small>{run.agentId}</small>
 							</dt>
@@ -184,8 +184,8 @@ export function FleetPage({ client }: { client: Client }) {
 						</div>
 					))}
 			</dl>
-			{runs.hasNextPage && (
-				<button type="button" disabled={runs.isFetchingNextPage} onClick={() => void runs.fetchNextPage()}>
+			{runs.hasNextPage && !runs.isRefetchError && (
+				<button type="button" disabled={runs.isFetching} onClick={() => void runs.fetchNextPage()}>
 					Load more dispatch runs
 				</button>
 			)}

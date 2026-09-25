@@ -17,6 +17,7 @@ register(
 	)}`,
 );
 const { CollectedEvidence, EvidencePage } = await import("../client/pages/evidence.js");
+const { FleetPage } = await import("../client/pages/fleet.js");
 
 const client = { token: "t", call: () => new Promise(() => {}) } as unknown as Client;
 
@@ -68,4 +69,58 @@ test("newly collected evidence is named, never linked to its unlisted detail", (
 	const html = render(new QueryClient(), <CollectedEvidence id="evidence-new" />);
 	assert.match(html, /<code>evidence-new<\/code>/);
 	assert.doesNotMatch(html, /href=/);
+});
+
+test("both fleet lists offer links only while settled, and render nothing after a failed refresh", () => {
+	const fleet = (staleTime: number) => {
+		const queries = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime } } });
+		const page = <T,>(item: T) => ({ pageParams: [undefined], pages: [{ nextCursor: "next", items: [item] }] });
+		queries.setQueryData(
+			["fleet-roots"],
+			page({
+				id: "root-1",
+				fleet: "nightly",
+				endedAt: null,
+				completedCount: 0,
+				stepCount: 1,
+				startedAt: "2026-09-24T00:00:00.000Z",
+			}),
+		);
+		queries.setQueryData(
+			["fleet-dispatches"],
+			page({
+				id: "run-1",
+				agentId: "worker",
+				outcome: null,
+				status: "running",
+				targetId: "local",
+				wireModelId: "m",
+				tokenCount: 1,
+			}),
+		);
+		return queries;
+	};
+	const links = /href="\/fleet\/(root-1|dispatches\/run-1)"/g;
+	const settled = render(fleet(Number.POSITIVE_INFINITY), <FleetPage client={client} />);
+	assert.equal(settled.match(links)?.length, 2);
+	assert.match(settled, /<button type="button">Load more fleet runs<\/button>/);
+	assert.match(settled, /<button type="button">Load more dispatch runs<\/button>/);
+	// Stale data refetches on mount: a fresh first page may already have replaced
+	// each family's window, so the retained ids are text and load-more waits.
+	const refreshing = render(fleet(0), <FleetPage client={client} />);
+	assert.match(refreshing, /nightly/);
+	assert.match(refreshing, /run-1/);
+	assert.equal(refreshing.match(links), null);
+	assert.match(refreshing, /<button type="button" disabled="">Load more fleet runs<\/button>/);
+	assert.match(refreshing, /<button type="button" disabled="">Load more dispatch runs<\/button>/);
+	// A refresh that failed after narrowing leaves stale pages cached; none renders.
+	const failed = fleet(Number.POSITIVE_INFINITY);
+	for (const key of ["fleet-roots", "fleet-dispatches"])
+		failed
+			.getQueryCache()
+			.find({ queryKey: [key] })
+			?.setState({ status: "error", error: new Error("refresh failed"), fetchStatus: "idle" });
+	const broken = render(failed, <FleetPage client={client} />);
+	assert.doesNotMatch(broken, /nightly|run-1|Load more/);
+	assert.match(broken, /refresh failed/);
 });
