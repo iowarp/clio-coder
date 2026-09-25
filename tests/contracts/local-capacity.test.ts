@@ -14,11 +14,11 @@ import {
 	WORKER_MEMORY_ESTIMATE_BYTES,
 } from "../../src/domains/scheduling/local-capacity.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
-import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
-import { compactPrimaryLine, type SessionFacts } from "../../src/interactive/footer/widgets.js";
+import { renderDashboardPage } from "../../src/interactive/footer/pages.js";
 import { fleetNodeRows } from "../../src/interactive/overlays/settings.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { footerState } from "../harness/footer-fixture.js";
 
 const GiB = 1024 * 1024 * 1024;
 
@@ -162,20 +162,11 @@ describe("fleet.concurrency auto placement surfaces", () => {
 		strictEqual(scheduling.fleet?.get("local")?.capacityBound, "configured");
 	});
 
-	it("names the binding limit in the worker chip only when it holds demand back", () => {
-		const row = (id: string, node?: string): DispatchBoardRow =>
-			({ runId: id, agentId: "scout", status: "running", ...(node ? { node } : {}) }) as DispatchBoardRow;
-		const workspace = { cwd: "/work", branch: null, dirty: false, projectType: null, remote: null };
-		const line = (rows: DispatchBoardRow[], limit: number) =>
-			stripTerminalSequences(
-				compactPrimaryLine(workspace, {} as SessionFacts, 120, undefined, undefined, undefined, rows, 0, 0, {
-					limit,
-					bound: "memory",
-				}),
-			);
-		match(line([row("a"), row("b"), row("c")], 2), /3 workers · memory-bound at 2/u);
-		strictEqual(line([row("a"), row("b")], 2).includes("bound"), false);
-		strictEqual(line([row("a"), row("b", "blade"), row("c", "blade")], 2).includes("bound"), false);
+	it("names the local worker limit and its binding input in the live Status page", () => {
+		const snapshot = footerState();
+		snapshot.agent.localCapacity = { limit: 2, bound: "memory" };
+		const text = renderDashboardPage(snapshot, "Status", 120, 240, "Alt+U").map(stripTerminalSequences).join("\n");
+		match(text, /Worker cap\s+2 · memory/u);
 	});
 });
 

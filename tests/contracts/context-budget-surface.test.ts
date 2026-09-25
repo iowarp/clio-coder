@@ -382,7 +382,7 @@ describe("native budget inspection through the registered context tool", () => {
 			resolveCurrentBranch: async () => null,
 		});
 		try {
-			const text = panel.statusLines(120).map(stripTerminalSequences).join("\n");
+			const text = panel.view.render(120).map(stripTerminalSequences).join("\n");
 			match(text, /\? \/ 32\.8k/);
 			doesNotMatch(text, /free 32\.8k/);
 		} finally {
