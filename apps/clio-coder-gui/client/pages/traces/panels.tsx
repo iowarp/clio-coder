@@ -5,6 +5,7 @@ import { clock, formatCost, formatDuration, formatTime, formatTokens } from "../
 import { Facts as RecordFacts } from "../../design/facts.js";
 import { humanizeKey } from "../../design/facts-model.js";
 import { StatusMark } from "../../design/status.js";
+import { provenanceFacts } from "./trace-model.js";
 export function object(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
@@ -283,22 +284,7 @@ export function ReceiptPanel({
 					</div>
 					<div>
 						<h3>Provenance</h3>
-						<Facts
-							entries={[
-								"clioVersion",
-								"platform",
-								"nodeVersion",
-								"runtimeKind",
-								"skillActivations",
-								"integrity",
-								"lineage",
-								"node",
-								"gate",
-								"plan",
-								"pipeline",
-								"reroutes",
-							].map((key) => [key, r[key]])}
-						/>
+						<Facts entries={provenanceFacts(r)} />
 					</div>
 				</div>
 			)}
