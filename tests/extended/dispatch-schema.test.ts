@@ -41,7 +41,7 @@ describe("dispatch schema composition", () => {
 					{ agent: "coder", task: "Review and fix the tests." },
 				],
 			},
-			{ auto: { approvedAuthorities: ["read-only", "workspace-edit"], authorityBasis: "full-auto-policy" } },
+			{ auto: { approvedAuthorities: ["read-only", "workspace-edit"], authorityBasis: "yolo-policy" } },
 		);
 		assert.ok(parsed.ok);
 		assert.deepEqual(

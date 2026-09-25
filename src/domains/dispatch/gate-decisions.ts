@@ -18,6 +18,7 @@ import { atomicWrite } from "../../engine/session.js";
 import { parseVerifierResult, type VerifierCheck, type VerifierResult } from "../agents/result-contract.js";
 import type { GateRouteCorrelation } from "./execution-role.js";
 import type { RunGateSubjectRef } from "./types.js";
+import { normalizeYoloGateOutcome } from "./yolo-ids.js";
 
 export type GateDecisionOutcome =
 	| "pass"
@@ -27,7 +28,7 @@ export type GateDecisionOutcome =
 	| "winner"
 	| "no-winner"
 	| "operator-confirmed"
-	| "full-auto-applied";
+	| "yolo-applied";
 
 export interface GateDecisionRef {
 	id: string;
@@ -361,6 +362,7 @@ function isCorrelation(value: unknown): value is GateDecisionCorrelation {
 
 function semanticError(value: unknown): string | null {
 	if (!isRecord(value)) return "gate decision is not an object";
+	const outcome = normalizeYoloGateOutcome(value.outcome);
 	if (value.version !== 2) return "unsupported gate decision version";
 	if (!isSafeDecisionId(value.id)) return "gate decision id invalid";
 	if (typeof value.group !== "string" || value.group.length === 0) return "gate decision group invalid";
@@ -368,13 +370,9 @@ function semanticError(value: unknown): string | null {
 	if (typeof value.cycle !== "number" || !Number.isInteger(value.cycle) || value.cycle < 1) {
 		return "gate decision cycle invalid";
 	}
-	const reviewOutcome =
-		value.outcome === "pass" || value.outcome === "fail" || value.outcome === "revise" || value.outcome === "exhausted";
+	const reviewOutcome = outcome === "pass" || outcome === "fail" || outcome === "revise" || outcome === "exhausted";
 	const competeOutcome =
-		value.outcome === "winner" ||
-		value.outcome === "no-winner" ||
-		value.outcome === "operator-confirmed" ||
-		value.outcome === "full-auto-applied";
+		outcome === "winner" || outcome === "no-winner" || outcome === "operator-confirmed" || outcome === "yolo-applied";
 	if ((value.topology === "review" && !reviewOutcome) || (value.topology === "compete" && !competeOutcome)) {
 		return "gate decision outcome is incompatible with topology";
 	}
@@ -390,8 +388,7 @@ function semanticError(value: unknown): string | null {
 	if (typeof value.createdAt !== "string" || !Number.isFinite(Date.parse(value.createdAt))) {
 		return "gate decision timestamp invalid";
 	}
-	const needsWinner =
-		value.outcome === "winner" || value.outcome === "operator-confirmed" || value.outcome === "full-auto-applied";
+	const needsWinner = outcome === "winner" || outcome === "operator-confirmed" || outcome === "yolo-applied";
 	if (needsWinner) {
 		if (
 			!isRecord(value.winner) ||
@@ -412,7 +409,7 @@ function semanticError(value: unknown): string | null {
 	} else if (value.winner !== undefined) {
 		return "gate decision winner is not valid for this outcome";
 	}
-	const needsConfirmation = value.outcome === "operator-confirmed" || value.outcome === "full-auto-applied";
+	const needsConfirmation = outcome === "operator-confirmed" || outcome === "yolo-applied";
 	if (needsConfirmation) {
 		if (
 			!isRecord(value.confirmation) ||
@@ -538,6 +535,8 @@ function buildGateDecisionArtifact(
 	id = newDecisionId(draft.group),
 	createdAt = draft.createdAt ?? new Date().toISOString(),
 ): GateDecisionArtifact {
+	if (draft.outcome !== normalizeYoloGateOutcome(draft.outcome))
+		throw new Error("gate decision outcome uses a legacy id");
 	if (draft.group.trim().length === 0) throw new Error("gate decision group is required");
 	if (!Number.isInteger(draft.cycle) || draft.cycle < 1)
 		throw new Error("gate decision cycle must be a positive integer");

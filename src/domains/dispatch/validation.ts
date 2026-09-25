@@ -543,7 +543,7 @@ export function validateJobSpec(spec: unknown): Validated {
 	if ("plan" in spec && spec.plan !== undefined) {
 		if (!isValidPlan(spec.plan)) {
 			errors.push(
-				"plan must carry hash (non-empty), topology (parallel|sequential|pipeline|review|compete|detached), taskCount >= 1, approval (operator|full-auto), optional costCeilingUsd > 0",
+				"plan must carry hash (non-empty), topology (parallel|sequential|pipeline|review|compete|detached), taskCount >= 1, approval (operator|yolo), optional costCeilingUsd > 0",
 			);
 		}
 	}

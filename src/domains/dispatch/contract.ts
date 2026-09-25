@@ -86,7 +86,7 @@ export interface DispatchRequest extends JobSpec {
 		mode: "auto";
 		baselineAgentId: string;
 		approvedAuthorities: ReadonlyArray<AgentAutomationAuthority>;
-		authorityBasis: "operator-plan-approval" | "full-auto-policy";
+		authorityBasis: "operator-plan-approval" | "yolo-policy";
 	};
 	systemPrompt?: string;
 	/** Trusted side-store lease reference; never serialized into a worker spec or receipt. */
@@ -186,7 +186,7 @@ export interface DispatchAgentPlanInput {
 	request: DispatchRequest;
 	expectedResultContract: ResultContract["kind"];
 	requestedAuthority: AgentAutomationAuthority;
-	authorization: "operator-plan-approval" | "full-auto-policy";
+	authorization: "operator-plan-approval" | "yolo-policy";
 }
 
 /**

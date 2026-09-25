@@ -26,6 +26,7 @@ import {
 	gateDecisionsDirectory,
 	verifyGateDecisionArtifact,
 } from "./gate-decisions.js";
+import { LEGACY_YOLO_IDS, normalizeYoloGateOutcome } from "./yolo-ids.js";
 
 /** How many decisions one projection reports, newest first. */
 export const GATE_TOPOLOGY_MAX_DECISIONS = 8;
@@ -67,7 +68,7 @@ export type GateDecisionReason =
 	| "judge-picked-failed-candidate"
 	| "winner-touches-protected-artifact"
 	| "operator-confirmed-winner"
-	| "full-auto-applied-winner"
+	| "yolo-applied-winner"
 	| "unclassified";
 
 export const GATE_DECISION_REASONS: ReadonlyArray<GateDecisionReason> = [
@@ -82,7 +83,7 @@ export const GATE_DECISION_REASONS: ReadonlyArray<GateDecisionReason> = [
 	"judge-picked-failed-candidate",
 	"winner-touches-protected-artifact",
 	"operator-confirmed-winner",
-	"full-auto-applied-winner",
+	"yolo-applied-winner",
 	"unclassified",
 ];
 
@@ -107,8 +108,8 @@ const REASON_RULES: ReadonlyArray<readonly [string, GateDecisionReason]> = [
 	["judge picked failed or missing candidate", "judge-picked-failed-candidate"],
 	["judge-selected candidate ", "winner-touches-protected-artifact"],
 	["operator confirmation ", "operator-confirmed-winner"],
-	["yolo applied ", "full-auto-applied-winner"],
-	["full-auto applied ", "full-auto-applied-winner"],
+	["yolo applied ", "yolo-applied-winner"],
+	[LEGACY_YOLO_IDS.gateDetailPrefix, "yolo-applied-winner"],
 ];
 
 /**
@@ -254,7 +255,7 @@ function projectDecision(artifact: GateDecisionArtifact): GateTopologyDecision |
 		group,
 		topology: artifact.topology,
 		cycle: artifact.cycle,
-		outcome: artifact.outcome,
+		outcome: normalizeYoloGateOutcome(artifact.outcome) as GateDecisionOutcome,
 		decidedAt: new Date(artifact.createdAt).toISOString(),
 		subjects,
 		subjectsTruncated: allSubjects.length > subjects.length,

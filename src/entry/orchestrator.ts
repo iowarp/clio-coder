@@ -62,6 +62,7 @@ import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/
 import { scheduleSpeculativeHold } from "../domains/dispatch/held-workers.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
+import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
 import {
@@ -1264,7 +1265,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					.filter(
 						({ artifact }) =>
 							artifact.topology === "compete" &&
-							(artifact.outcome === "operator-confirmed" || artifact.outcome === "full-auto-applied"),
+							(artifact.outcome === "operator-confirmed" || normalizeYoloGateOutcome(artifact.outcome) === "yolo-applied"),
 					)
 					.map(({ artifact }) => artifact.group),
 			);

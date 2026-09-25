@@ -1,5 +1,6 @@
 import type { RouteCandidate, RouteDecisionV1 } from "./route-decision.js";
 import type { RoutingPosture } from "./route-policy.js";
+import { normalizeYoloAuthorityBasis } from "./yolo-ids.js";
 
 export type RoutingLocality = "local-only" | "prefer-local" | "any";
 export type RoutingFailover = "none" | "approved";
@@ -248,6 +249,9 @@ export function explainRouteDecision(decision: RouteDecisionV1, intent: RoutingI
 					? null
 					: {
 							...decision.agentSelection.authorityTransition,
+							basis: normalizeYoloAuthorityBasis(decision.agentSelection.authorityTransition.basis) as NonNullable<
+								RouteDecisionV1["agentSelection"]["authorityTransition"]
+							>["basis"],
 							from: safeIdentity({
 								...decision.executedRoute,
 								agentId: decision.agentSelection.authorityTransition.from,

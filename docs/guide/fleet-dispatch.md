@@ -606,8 +606,10 @@ the SSH node's transport kind and host. A placement, host, capability, or
 cost-ceiling change fails before launch rather than silently choosing an
 unapproved alternative. Yolo skips the stop and seals the
 same plan hash into every run's receipt instead
-(`plan.approval: "full-auto"` is the stable receipt value). Read-only runs deny dispatch outright
+(`plan.approval: "yolo"` is the stable receipt value). Read-only runs deny dispatch outright
 because they deny every non-read action.
+Earlier sealed receipts and gate artifacts keep their historical bytes. Clio verifies them as stored
+and shows the yolo names in fleet views.
 
 The registry boundary is resolved dispatch plan v3. `deadlineMs` is required:
 a fleet plan carries a positive finite number and a non-fleet plan carries
