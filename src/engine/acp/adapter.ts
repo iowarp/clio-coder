@@ -29,6 +29,8 @@ const DEFAULT_CANCEL_GRACE_MS = 1_000;
 export interface AcpDelegationRunInput {
 	agent: DelegationAgentConfig;
 	task: string;
+	/** Explicit peer model requested for this run. */
+	model?: string;
 	systemPrompt?: string;
 	dynamicPromptMessages?: ReadonlyArray<{ body: string }>;
 	cwd: string;
@@ -360,6 +362,24 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			);
 			sessionId = sessionIdFrom(session);
 			if (!sessionId) throw new Error("ACP session/new response did not include sessionId");
+			if (input.model !== undefined) {
+				const models = isRecord(session) && isRecord(session.models) ? session.models : null;
+				const available = Array.isArray(models?.availableModels) ? models.availableModels : [];
+				const ids = available
+					.filter(isRecord)
+					.map((model) => model.modelId)
+					.filter((id): id is string => typeof id === "string");
+				const current = typeof models?.currentModelId === "string" ? models.currentModelId : null;
+				const matches = (id: string): boolean => id === input.model || id.startsWith(`${input.model}[`);
+				const selected =
+					current !== null && ids.includes(current) && matches(current)
+						? current
+						: (ids.find((id) => id === input.model) ?? ids.find(matches));
+				if (selected === undefined) throw new Error(`ACP peer does not offer requested model '${input.model}'`);
+				if (selected !== current) {
+					await transport.request("session/set_model", { sessionId, modelId: selected }, connectTimeoutMs);
+				}
+			}
 			if (aborted) {
 				transport.notify("session/cancel", { sessionId });
 			}
@@ -385,7 +405,12 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			}
 			const reportedFailure = mapper.reportedFailure();
 			for (const event of mapper.finalEvents(promptResponse ?? null, reportedFailure)) emit(event);
-			const stopReason = typeof promptResponse?.stopReason === "string" ? promptResponse.stopReason : "end_turn";
+			const stopReason =
+				reportedFailure !== null
+					? "error"
+					: typeof promptResponse?.stopReason === "string"
+						? promptResponse.stopReason
+						: "end_turn";
 			const toolSnapshot = mediator.snapshot();
 			return {
 				messages: [],

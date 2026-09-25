@@ -4428,6 +4428,7 @@ export function createDispatchBundle(
 			acp = startAcpRun({
 				agent: lifecycle.agentConfig,
 				task: req.task,
+				...(req.model !== undefined ? { model: req.model } : {}),
 				systemPrompt: lifecycle.systemPrompt,
 				dynamicPromptMessages: lifecycle.dynamicPromptMessages,
 				cwd: lifecycle.cwd,
