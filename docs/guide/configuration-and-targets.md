@@ -238,6 +238,8 @@ A target binds an id to a registered runtime, endpoint/auth, model defaults, and
     chat:
       target: lab
 
+`clio-coder doctor` reports a target whose runtime id is unknown and names a replacement for the retired `lmstudio-native` and `ollama-native` ids. Update that target's `runtime` in `settings.yaml` to `lmstudio` or `ollama`, respectively; `doctor --fix` does not rewrite it.
+
 Keep credentials in user settings or the credential store. Project settings deliberately discard credential-bearing keys.
 
 ## Target management
