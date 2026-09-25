@@ -153,19 +153,6 @@ export function routingIntentRejection(input: {
 	return null;
 }
 
-/** Soft locality order applied only after both candidates clear every hard filter and otherwise tie. */
-export function preferLocalTie(
-	left: RouteCandidate,
-	right: RouteCandidate,
-	locality: RoutingLocality,
-): RouteCandidate | null {
-	if (locality !== "prefer-local") return null;
-	const leftLocal = left.nodeId === "local";
-	const rightLocal = right.nodeId === "local";
-	if (leftLocal === rightLocal) return null;
-	return leftLocal ? left : right;
-}
-
 export const ROUTE_EXPLANATION_MAX_BYTES = 4_096;
 
 export interface RouteExplanation {

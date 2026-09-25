@@ -138,13 +138,6 @@ export type ExecutionPlanInput = Omit<ExecutionPlan, "version" | "waves" | "hash
 	loops?: ReadonlyArray<ExecutionPlanLoop>;
 };
 
-export function isCodeStep(step: ExecutionPlanStep): step is ExecutionPlanCodeStep {
-	return step.kind === "code";
-}
-export function isAgentStep(step: ExecutionPlanStep): step is ExecutionPlanAgentStep {
-	return step.kind === "agent";
-}
-
 /**
  * Narrow a plan to agent steps, refusing one that carries a code node. Callers
  * that model every step as a route (Scout continuation, the dispatch tool's
@@ -419,23 +412,5 @@ export function spliceExecutionPlan(
 		onFailure: plan.onFailure,
 		steps: [...plan.steps, ...inserted],
 		loops: plan.loops,
-	});
-}
-
-/** A linear step declares no dependencies; the compiler chains them by position. */
-export type ExecutionPlanLinearStepInput =
-	| (Omit<ExecutionPlanAgentStep, "kind" | "dependencies"> & { kind?: "agent" })
-	| Omit<ExecutionPlanCodeStep, "dependencies">;
-
-export function compileLinearExecutionPlan(
-	input: Omit<ExecutionPlanInput, "steps"> & { steps: ReadonlyArray<ExecutionPlanLinearStepInput> },
-): ExecutionPlan {
-	const parallel = input.topology === "parallel" || input.topology === "compete" || input.topology === "council";
-	return compileExecutionPlan({
-		...input,
-		steps: input.steps.map((step, index): ExecutionPlanStepInput => {
-			const dependencies = parallel || index === 0 ? [] : [input.steps[index - 1]?.id ?? ""];
-			return step.kind === "code" ? { ...step, dependencies } : { ...step, dependencies };
-		}),
 	});
 }

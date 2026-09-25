@@ -337,9 +337,10 @@ printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=custom-entry' 'state
 			scratch,
 			{ sshBinary: legacySsh },
 		);
-		strictEqual(legacy.ok, true);
-		strictEqual(legacy.checks.reachable, true);
-		strictEqual(legacy.checks.clioPresent, true);
+		// The script Clio sends always echoes the current marker, so a reply
+		// carrying only the released one did not come from that script.
+		strictEqual(legacy.ok, false);
+		strictEqual(legacy.checks.reachable, false);
 	});
 
 	it("formats fleet run approval budget line with shared cost formatting", () => {

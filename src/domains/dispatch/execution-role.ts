@@ -312,23 +312,3 @@ export function gateRouteCorrelation(
 		dimensions,
 	};
 }
-
-/**
- * Deterministic soft preference for an independent decider route.
- *
- * Independence is a tie-break, never a filter. The caller has already applied
- * every hard constraint and quality floor and passes only the survivors, so this
- * function cannot resurrect a rejected route: it returns one of its inputs or
- * nothing. When no eligible route is independent it returns the caller's first
- * preference unchanged, because a single-target fleet must still be able to run
- * its gate. The correlation is reported separately rather than hidden.
- */
-export function preferIndependentRoute<T>(
-	eligible: ReadonlyArray<T>,
-	subject: RouteCorrelationFacts,
-	factsOf: (candidate: T) => RouteCorrelationFacts,
-): T | null {
-	if (eligible.length === 0) return null;
-	const independent = eligible.find((candidate) => gateRouteCorrelation(subject, factsOf(candidate)).independent);
-	return independent ?? eligible[0] ?? null;
-}

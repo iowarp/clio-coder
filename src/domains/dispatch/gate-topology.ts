@@ -71,22 +71,6 @@ export type GateDecisionReason =
 	| "yolo-applied-winner"
 	| "unclassified";
 
-export const GATE_DECISION_REASONS: ReadonlyArray<GateDecisionReason> = [
-	"all-candidates-failed",
-	"builder-run-failed",
-	"reviewer-run-failed",
-	"reviewer-checks-failed",
-	"reviewer-report-invalid",
-	"judge-run-failed",
-	"judge-result-invalid",
-	"judge-winner-out-of-range",
-	"judge-picked-failed-candidate",
-	"winner-touches-protected-artifact",
-	"operator-confirmed-winner",
-	"yolo-applied-winner",
-	"unclassified",
-];
-
 /**
  * Prefix rules, first match wins, ordered so no rule shadows another.
  *

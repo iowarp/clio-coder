@@ -42,11 +42,6 @@ export function nextDelay(state: BackoffState, opts?: BackoffOptions): { state: 
 	return { state: next, delayMs };
 }
 
-export function reset(opts?: BackoffOptions): BackoffState {
-	const { baseMs } = resolve(opts);
-	return { attempts: 0, nextDelayMs: baseMs };
-}
-
 /** True only for typed terminal conditions that retrying unchanged cannot heal. */
 export function isDeterministicOutcomeCode(code: RunOutcomeCode | null | undefined): boolean {
 	return (

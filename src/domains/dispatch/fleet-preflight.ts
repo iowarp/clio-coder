@@ -169,7 +169,6 @@ export function routeFactVerdict(
 }
 
 const PREFLIGHT_MARKER = "clio-coder-preflight/1";
-const LEGACY_PREFLIGHT_MARKER = "clio-preflight/1";
 const DEFAULT_PREFLIGHT_TIMEOUT_MS = 20_000;
 
 /**
@@ -347,7 +346,7 @@ export async function runFleetNodePreflight(
 	// Probe latency is durable eligibility evidence compared across nodes and
 	// across passes, so it is measured on the monotonic clock.
 	const probeDurationMs = Math.round(performance.now() - probeStartedAt);
-	if (!result.stdout.includes(PREFLIGHT_MARKER) && !result.stdout.includes(LEGACY_PREFLIGHT_MARKER)) {
+	if (!result.stdout.includes(PREFLIGHT_MARKER)) {
 		const stderr = result.stderr.trim().split("\n").slice(-1)[0] ?? "";
 		record.detail = `unreachable (ssh exit ${result.code}${stderr.length > 0 ? `: ${stderr}` : ""})`;
 		return record;
@@ -369,9 +368,9 @@ export async function runFleetNodePreflight(
 	};
 	checks.pathParity = lines.includes("cwd=ok");
 	checks.stateDirWritable = lines.includes("state=ok");
-	const clioCoderLine = lines.find((line) => line.startsWith("clioCoder="));
-	const legacyClioLine = lines.find((line) => line.startsWith("clio="));
-	const clioValue = clioCoderLine?.slice("clioCoder=".length) ?? legacyClioLine?.slice("clio=".length) ?? "missing";
+	// The probe script is generated locally and always echoes `clioCoder=`, so
+	// no remote version can answer with another spelling.
+	const clioValue = lines.find((line) => line.startsWith("clioCoder="))?.slice("clioCoder=".length) ?? "missing";
 	if (clioValue === "custom-entry") {
 		// A custom clioCoderEntry that is not `<cli> worker` cannot be version-probed;
 		// the operator vouches for it. Presence is asserted, match is assumed.
