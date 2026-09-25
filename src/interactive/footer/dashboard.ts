@@ -1,21 +1,10 @@
 import type { ClioSettings } from "../../core/config.js";
 import { readHarnessProfile } from "../../core/harness-profile.js";
-import { readClioVersion } from "../../core/package-root.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { ContextState } from "../../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../../domains/memory/index.js";
-import {
-	type CostAggregate,
-	formatCostAggregate,
-	type TokenThroughputSnapshot,
-	type UsageBreakdown,
-} from "../../domains/observability/index.js";
-import {
-	acceptsImageInput,
-	type CapabilityFlags,
-	type ProvidersContract,
-	resolveModelCapabilities,
-} from "../../domains/providers/index.js";
+import type { CostAggregate, TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
+import { acceptsImageInput, type CapabilityFlags, type ProvidersContract } from "../../domains/providers/index.js";
 import type { UsageSnapshot } from "../../domains/quota/types.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
@@ -25,14 +14,7 @@ import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js
 import { getKeybindings, Text } from "../../engine/tui.js";
 import { getCurrentBranch } from "../../utils/git.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
-import {
-	dispatchSegment,
-	type FooterPanel,
-	formatFooterTokens,
-	throughputDetailSegment,
-	throughputSegment,
-	tokensSegment,
-} from "../footer-panel.js";
+import { dispatchSegment, type FooterPanel } from "../footer-panel.js";
 import { formatKeyLabel } from "../keybinding-manager.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
@@ -150,12 +132,6 @@ function statusText(status: AgentStatus | undefined, now: number, width: number,
 		: `${spinnerFrame(frame)} ${verb.text}`;
 }
 
-/** Null before anything has been priced, so the footer shows no cost field at all. */
-function costSegment(value: CostAggregate | undefined): string | null {
-	const cost = formatCostAggregate(value);
-	return cost === null ? null : `cost ${cost}`;
-}
-
 export interface FooterDashboardPanel extends FooterPanel {
 	mode(): FooterDashboardMode;
 	isExpanded(): boolean;
@@ -240,17 +216,12 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const status = deps.getAgentStatus?.();
 		const compactionActive = status?.phase === "compacting" || (status?.activePhases?.has("compacting") ?? false);
 		const usage = deps.getSessionTokens?.();
-		const tokens = tokensSegment(usage);
 		const throughputMetric = deps.getTokenThroughput?.();
-		const throughput = throughputSegment(throughputMetric);
-		const throughputDetail = throughputDetailSegment(throughputMetric);
 		const contextUsage = deps.getContextUsage?.();
 		const contextLedger = deps.getContextLedger?.() ?? null;
 		const settings = deps.getSettings?.();
 		const taskMemory = deps.getTaskMemoryStatus?.() ?? null;
-		const sessionInfo = deps.getSessionInfo?.() ?? { id: null, name: null, turns: null };
 		const contextState = deps.getContextState?.() ?? null;
-		const tokensLabel = tokens || (usage?.totalTokens ? `Σ${formatFooterTokens(usage.totalTokens)}` : null);
 
 		const statuses = deps.providers.list();
 		const current = settings?.chat?.target ? (statuses.find((s) => s.target.id === settings.chat?.target) ?? null) : null;
@@ -258,18 +229,6 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const target = formatTargetLabel(settings?.chat?.target, settings?.chat?.model, { abbreviate: false });
 
 		const wireModelId = settings?.chat?.model ?? current?.target.defaultModel ?? null;
-		const detectedReasoning =
-			wireModelId && typeof deps.providers.getDetectedReasoning === "function"
-				? deps.providers.getDetectedReasoning(settings?.chat?.target ?? "", wireModelId)
-				: null;
-		const caps = current
-			? resolveModelCapabilities(current, wireModelId, deps.providers.knowledgeBase, { detectedReasoning })
-			: null;
-		const capabilities = capabilityLabels(caps);
-
-		const safety = settings?.safety.autonomy ?? "default";
-		const toolProfile = settings?.integrations.externalAgents?.defaults?.toolGovernance ?? "clio-coder-policy";
-
 		return {
 			resources: machine.snapshot(),
 			quota: deps.getQuotaSnapshots?.() ?? [],
@@ -286,21 +245,9 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 
 			workspace: workspaceFacts(deps, branchSlot),
 			session: {
-				name: sessionInfo.name,
-				id: sessionInfo.id,
-				version: readClioVersion(),
-				turns: sessionInfo.turns,
-				tokens: tokensLabel,
-				throughput,
-				throughputDetail,
-				cost: costSegment(deps.getSessionCost?.()),
 				target,
 				targetId: settings?.chat?.target ?? null,
 				modelId: settings?.chat?.model ?? null,
-				capabilities,
-				safety,
-				toolProfile,
-				outputStyle: settings?.interface.outputDetail ?? "standard",
 				leaderArmed: deps.getLeaderArmed?.() ?? false,
 				shutdownArmed: deps.getShutdownArmed?.() ?? false,
 				activeSkills: deps.getActiveSkillSurface?.() ?? [],

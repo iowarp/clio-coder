@@ -58,18 +58,7 @@ function state(): FooterDashboardRenderState {
 			remote: "iowarp/clio-coder",
 		},
 		session: {
-			id: "session",
-			name: null,
-			version: "0.5.0",
-			turns: 2,
-			tokens: "70k",
-			throughput: null,
-			throughputDetail: null,
-			cost: null,
 			target: "blade · dynamo/qwopus3.8-27b-flash@q4_k_m",
-			capabilities: ["tools", "vision"],
-			safety: "default",
-			toolProfile: "agent-managed",
 		},
 		context: {
 			label: null,

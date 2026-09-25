@@ -3,7 +3,7 @@ import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { type Text, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
 import { formatReasoningChip } from "./status/reasoning.js";
-import { type ClioTheme, formatCompactMs, formatContextPercent, GLYPH } from "./theme/index.js";
+import { type ClioTheme, formatContextPercent, GLYPH } from "./theme/index.js";
 import { isHelperRun } from "./worker-stream.js";
 
 /**
@@ -54,15 +54,6 @@ export function throughputSegment(metric: TokenThroughputSnapshot | null | undef
 	if (typeof tps !== "number" || !Number.isFinite(tps) || tps <= 0) return null;
 	const rounded = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10;
 	return `${GLYPH.speed}${rounded} Tk/s`;
-}
-
-export function throughputDetailSegment(metric: TokenThroughputSnapshot | null | undefined): string | null {
-	if (!throughputSegment(metric) || !metric) return null;
-	const parts = [`gen ${formatCompactMs(metric.durationMs)}`];
-	if (typeof metric.ttftMs === "number" && Number.isFinite(metric.ttftMs))
-		parts.push(`ttft ${formatCompactMs(metric.ttftMs)}`);
-	parts.push(`${GLYPH.down} ${formatFooterTokens(metric.outputTokens)}`);
-	return parts.join(" · ");
 }
 
 function dispatchStatusCounts(rows: ReadonlyArray<DispatchBoardRow>): {

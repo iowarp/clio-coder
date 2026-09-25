@@ -1,4 +1,3 @@
-import type { OutputStyle } from "../../core/defaults.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import {
@@ -50,23 +49,10 @@ export interface WorkspaceFacts {
 }
 
 export interface SessionFacts {
-	name: string | null;
-	id: string | null;
-	version: string;
-	turns: number | null;
-	tokens: string | null;
-	throughput: string | null;
-	throughputDetail: string | null;
-	cost: string | null;
 	target: string | null;
 	/** Raw route fields for boundary-aware fitting in the compact footer. */
 	targetId?: string | null;
 	modelId?: string | null;
-	capabilities: string[] | null;
-	safety: string | null;
-	toolProfile: string | null;
-	/** Active transcript detail mode, shown in the dashboard so visibility is never implicit. */
-	outputStyle?: OutputStyle | null;
 	/**
 	 * Ctrl+G armed the portable leader and is waiting for the next key. Shown
 	 * because the frame between the two keystrokes was otherwise identical to

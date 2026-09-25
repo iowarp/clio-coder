@@ -273,3 +273,7 @@ Fleet Runs offers Enter detail only for ordinary runs, because council rows have
 Live shortcut labels use the canonical formatter and reflect remapped bindings.
 
 Footer status and metric labels share retry, completion, token-rate and failure wording.
+
+Footer snapshots omit session facts that no renderer consumes.
+
+Footer snapshots omit session facts that no renderer consumes.
