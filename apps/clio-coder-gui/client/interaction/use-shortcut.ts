@@ -1,23 +1,14 @@
 // The scoped shortcut dispatcher. A layer stack replaces the hand-threaded `modalIsOpen` boolean,
 // so a dialog silences every global binding for as long as it is open and the innermost layer wins.
 
-import {
-	type KeyboardEvent as ReactKeyboardEvent,
-	useCallback,
-	useEffect,
-	useId,
-	useRef,
-	useSyncExternalStore,
-} from "react";
+import { useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { KEYBINDINGS, type KeybindingId, matchesKeybinding, type ShortcutScope } from "./keybindings.js";
 
 /** Layers currently claiming the keyboard, in the order they were pushed. */
 const layers: { id: string; scope: ShortcutScope }[] = [];
 const listeners = new Set<() => void>();
-let revision = 0;
 
 function notify(): void {
-	revision += 1;
 	for (const listener of listeners) listener();
 }
 
@@ -62,15 +53,6 @@ export function useLayersActive(): boolean {
 	);
 }
 
-/** The current layer revision, for a caller that needs to recompute on any stack change. */
-export function useLayerRevision(): number {
-	return useSyncExternalStore(
-		subscribe,
-		() => revision,
-		() => 0,
-	);
-}
-
 export interface ShortcutOptions {
 	/** Default true. Pass the precondition: an approval exists, a turn is running. */
 	readonly enabled?: boolean;
@@ -101,21 +83,4 @@ export function useShortcut(
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
 	}, [id, enabled]);
-}
-
-/**
- * An element-local matcher for the bindings that must stay on their element rather than on the
- * document: composer send is the canonical case, because it depends on which field has focus.
- */
-export function useElementShortcut(id: KeybindingId, handler: (event: ReactKeyboardEvent) => void) {
-	const latest = useRef(handler);
-	latest.current = handler;
-	return useCallback(
-		(event: ReactKeyboardEvent) => {
-			if (!matchesKeybinding(KEYBINDINGS[id], event)) return;
-			event.preventDefault();
-			latest.current(event);
-		},
-		[id],
-	);
 }

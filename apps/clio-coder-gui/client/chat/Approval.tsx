@@ -14,12 +14,7 @@ import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js"
 import type { Client } from "../api/client.js";
 import { clock, formatDuration } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
-import {
-	announce,
-	announceEscalation,
-	postApprovalNotification,
-	setApprovalPending,
-} from "../interaction/announcer.js";
+import { announce, announceEscalation, setApprovalPending } from "../interaction/announcer.js";
 import { KEYBINDINGS } from "../interaction/keybindings.js";
 import { useShortcut } from "../interaction/use-shortcut.js";
 import {
@@ -341,11 +336,6 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 		announceEscalation(escalated && escalationWindow !== null ? escalationWindow : null);
 		return () => announceEscalation(null);
 	}, [escalated, escalationWindow]);
-	// One notification per card, never repeated, and only when the browser already granted it.
-	useEffect(() => {
-		if (id === null) return;
-		return postApprovalNotification(id, title);
-	}, [id, title]);
 
 	const enabled = permission !== undefined && !answering && !answerSent;
 	useShortcut("allowOnce", () => permission && answer.mutate({ id: permission.id, decision: "allow-once" }), {

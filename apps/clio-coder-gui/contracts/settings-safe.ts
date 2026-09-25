@@ -11,7 +11,6 @@ export const ThinkingLevel = Type.Union([
 	Type.Literal("xhigh"),
 	Type.Literal("max"),
 ]);
-export const SAFE_SETTINGS_KEYS = ["chat.target", "chat.model", "chat.thinkingLevel", "safety.autonomy"] as const;
 const target = Type.Union([
 	Type.String({ minLength: 1, maxLength: 128, pattern: "^[^\\u0000-\\u001f\\u007f]+$" }),
 	Type.Null(),

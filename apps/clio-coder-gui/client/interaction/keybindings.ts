@@ -198,8 +198,3 @@ export function formatKeybinding(binding: Keybinding): string {
 	parts.push(KEY_LABELS[binding.key] ?? binding.key.toUpperCase());
 	return parts.join(" + ");
 }
-
-/** A binding with its key replaced, for a hook that reuses one entry on a second axis. */
-export function withKey(binding: Keybinding, key: string): Keybinding {
-	return { ...binding, key };
-}

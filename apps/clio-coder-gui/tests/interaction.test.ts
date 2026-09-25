@@ -1,15 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-	applyFilter,
-	deriveFacets,
-	EMPTY_FILTER,
-	type FacetDefinition,
-	filterSummary,
-	isFilterActive,
-	matchesQuery,
-	prefixScore,
-} from "../client/interaction/facet-filter.js";
 import { HELP_SECTIONS, searchHelp, VIEW_GUIDE } from "../client/interaction/help-reference.js";
 import {
 	formatKeybinding,
@@ -18,6 +8,7 @@ import {
 	type KeyEventLike,
 	matchesKeybinding,
 } from "../client/interaction/keybindings.js";
+import { prefixScore } from "../client/interaction/prefix-score.js";
 
 function press(key: string, held: Partial<Omit<KeyEventLike, "key">> = {}): KeyEventLike {
 	return { key, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...held };
@@ -95,104 +86,6 @@ test("chords print the way the reference reads them", () => {
 	assert.equal(formatKeybinding(KEYBINDINGS.escape), "Esc");
 	assert.equal(formatKeybinding(KEYBINDINGS.tabNext), "Right arrow");
 	assert.equal(formatKeybinding(KEYBINDINGS.palette), "Ctrl or Cmd + K");
-});
-
-interface Run {
-	readonly id: string;
-	readonly outcome: string;
-	readonly agent: string;
-	readonly task: string;
-}
-
-const runs: readonly Run[] = [
-	{ id: "run-alpha", outcome: "failed", agent: "openai/gpt-4o", task: "Repair the ingest path" },
-	{ id: "run-beta", outcome: "settled", agent: "openai/gpt-4o", task: "Audit the receipts" },
-	{ id: "run-gamma", outcome: "settled", agent: "anthropic/opus", task: "Draft the migration" },
-	{ id: "run-delta", outcome: "running", agent: "anthropic/opus", task: "Rebuild the index" },
-	{ id: "run-epsilon", outcome: "settled", agent: "local/qwen", task: "Summarise the ledger" },
-];
-
-const definitions: readonly FacetDefinition<Run>[] = [
-	{
-		key: "outcome",
-		label: "Outcome",
-		of: (run) => run.outcome,
-		order: ["running", "settled", "failed", "abandoned"],
-		display: (value) => (value === "running" ? "Still running" : value === "settled" ? "Settled" : "Failed"),
-	},
-	{ key: "agent", label: "Agent", of: (run) => run.agent },
-];
-
-test("facets are derived from the rows present, ordered by declaration or by count", () => {
-	const facets = deriveFacets(runs, definitions);
-	// A closed vocabulary keeps its order and drops values no row has: "abandoned" is absent.
-	assert.deepEqual(facets.outcome, [
-		{ value: "running", label: "Still running", count: 1 },
-		{ value: "settled", label: "Settled", count: 3 },
-		{ value: "failed", label: "Failed", count: 1 },
-	]);
-	// An open facet sorts by count descending, then by label, so a tie does not shuffle between
-	// refreshes the way insertion order would.
-	assert.deepEqual(
-		facets.agent?.map((facet) => [facet.value, facet.count]),
-		[
-			["anthropic/opus", 2],
-			["openai/gpt-4o", 2],
-			["local/qwen", 1],
-		],
-	);
-});
-
-test("the query matches a prefix of the value or of any of its words", () => {
-	assert.ok(matchesQuery(["run-alpha"], "run-a"));
-	assert.ok(matchesQuery(["run-alpha"], "alpha"));
-	assert.ok(matchesQuery(["openai/gpt-4o"], "gpt"));
-	assert.ok(matchesQuery(["Repair the ingest path"], "ing"));
-	assert.ok(matchesQuery(["run-alpha"], "RUN-A"), "the match is case-insensitive");
-	assert.ok(!matchesQuery(["run-alpha"], "lpha"), "a mid-word substring is not a prefix");
-	assert.ok(!matchesQuery(["run-alpha"], "beta"));
-	assert.ok(matchesQuery(["run-alpha"], "   "), "an empty query matches everything");
-});
-
-test("the filter is an AND across every selected facet and the query", () => {
-	const haystacks = (run: Run) => [run.id, run.agent, run.task];
-	assert.equal(applyFilter(runs, definitions, EMPTY_FILTER, haystacks).length, 5);
-	const settled = applyFilter(runs, definitions, { query: "", facets: { outcome: "settled" } }, haystacks);
-	assert.deepEqual(
-		settled.map((run) => run.id),
-		["run-beta", "run-gamma", "run-epsilon"],
-	);
-	const narrowed = applyFilter(runs, definitions, { query: "opus", facets: { outcome: "settled" } }, haystacks);
-	assert.deepEqual(
-		narrowed.map((run) => run.id),
-		["run-gamma"],
-	);
-	assert.ok(!isFilterActive(EMPTY_FILTER));
-	assert.ok(!isFilterActive({ query: "  ", facets: { outcome: null } }));
-	assert.ok(isFilterActive({ query: "opus", facets: {} }));
-	assert.ok(isFilterActive({ query: "", facets: { outcome: "settled" } }));
-});
-
-test("the summary states the window, the narrowing, and any server-side cut separately", () => {
-	const noun = { one: "run", many: "runs" };
-	assert.equal(
-		filterSummary(5, 5, false, false, noun, "the ledger"),
-		"Showing all 5 most recent runs the ledger reports. Older runs are not in this window.",
-	);
-	assert.equal(
-		filterSummary(3, 5, false, true, noun, "the ledger"),
-		"Showing 3 of the 5 most recent runs the ledger reports. Older runs are not in this window.",
-	);
-	assert.equal(
-		filterSummary(0, 5, false, true, noun, "the ledger"),
-		"No runs in this window match. Clear the filter to see all 5.",
-	);
-	// The server's own bound is stated as its own fact, never folded into the filter's narrowing.
-	assert.equal(
-		filterSummary(3, 2000, true, true, noun, "the ledger"),
-		"Showing 3 of the 2,000 most recent runs the ledger reports. Older runs are not in this window. The window itself was cut at this bound.",
-	);
-	assert.match(filterSummary(1, 1, false, false, noun, "the ledger"), /1 most recent run the ledger/);
 });
 
 test("the launcher score ranks a whole-value prefix over a word prefix over a substring", () => {

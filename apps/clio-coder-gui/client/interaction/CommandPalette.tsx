@@ -4,8 +4,8 @@
 
 import { Fragment, useId, useMemo, useRef, useState } from "react";
 import { Dialog } from "./Dialog.js";
-import { prefixScore } from "./facet-filter.js";
 import { formatKeybinding, KEYBINDINGS, type KeybindingId } from "./keybindings.js";
+import { prefixScore } from "./prefix-score.js";
 import { useListNavigation } from "./use-list-navigation.js";
 import "./interaction.css";
 
