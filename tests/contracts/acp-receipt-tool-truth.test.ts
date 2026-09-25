@@ -33,20 +33,36 @@ require("node:readline").createInterface({input: process.stdin}).on("line", (lin
 it("records ACP tool kinds, completed spans, mutations, and only mediated safety decisions", async () => {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
-	settings.integrations.externalAgents.entries = [{
-		id: "receipt-fixture", command: process.execPath, args: ["-e", PEER], toolGovernance: "clio-coder-policy",
-	}];
+	settings.integrations.externalAgents.entries = [
+		{
+			id: "receipt-fixture",
+			command: process.execPath,
+			args: ["-e", PEER],
+			toolGovernance: "clio-coder-policy",
+		},
+	];
 	const bundle = makeDispatchBundle(dispatchStubContext({ settings }));
 	await bundle.extension.start();
 	try {
 		const run = await bundle.contract.dispatch({
-			agentId: "receipt-fixture", task: "Inspect and edit fixture.", executionRole: "researcher", requestOrigin: "internal",
+			agentId: "receipt-fixture",
+			task: "Inspect and edit fixture.",
+			executionRole: "researcher",
+			requestOrigin: "internal",
 		});
 		const receipt = await run.finalPromise;
-		strictEqual(receipt.outcome, "succeeded", JSON.stringify({ detail: receipt.outcomeDetail, failure: receipt.failureMessage }));
-		deepStrictEqual(receipt.toolStats?.map(({ tool, count, ok }) => ({ tool, count, ok })), [
-			{ tool: "edit", count: 1, ok: 1 }, { tool: "execute", count: 1, ok: 1 },
-		]);
+		strictEqual(
+			receipt.outcome,
+			"succeeded",
+			JSON.stringify({ detail: receipt.outcomeDetail, failure: receipt.failureMessage }),
+		);
+		deepStrictEqual(
+			receipt.toolStats?.map(({ tool, count, ok }) => ({ tool, count, ok })),
+			[
+				{ tool: "edit", count: 1, ok: 1 },
+				{ tool: "execute", count: 1, ok: 1 },
+			],
+		);
 		deepStrictEqual(receipt.safety?.toolTelemetry?.unfinished, []);
 		strictEqual(receipt.toolActivity?.mutatingSucceeded, true);
 		deepStrictEqual(receipt.safety?.decisions, { allowed: 0, blocked: 0, permissionRequested: 0 });
