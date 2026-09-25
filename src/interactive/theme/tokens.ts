@@ -8,18 +8,9 @@ interface TokenColor {
 }
 
 const TOKENS: Record<ClioToken, TokenColor> = {
-	// Every hue comes from the brand: the logo's mint and cyan, iowarp.ai's
-	// orange accent, steel-blue text and slate borders, and its success, warning
-	// and error tones. Each is shifted into the middle luminance band (relative
-	// luminance 0.16 to 0.25) because Clio cannot see whether the terminal runs
-	// a dark or a light theme, and a brand pastel that glows on dark vanishes on
-	// light. There every token keeps about 3:1 or better on both, except frame,
-	// which recedes on dark themes as the site's border does. The xterm
-	// fallbacks come from the same hue families and are picked for two-sided
-	// contrast rather than nearest color, except the brand pair: mint (36) and
-	// cyan (37) stay apart, as the logo's two tones do, at about 2.7:1 on a
-	// white 256-color terminal, because the stronger teals (29, 30) blur into
-	// one on dark.
+	// Brand hues (logo mint and cyan, iowarp.ai orange, steel and slate) moved
+	// into the mid-luminance band so each reads on dark and light themes. The
+	// xterm picks favor two-sided contrast; 36 and 37 keep mint and cyan apart.
 	editor: { rgb: [9, 150, 159], xterm: 37 },
 	editorDanger: { rgb: [227, 86, 86], xterm: 167 },
 	editorAction: { rgb: [208, 109, 37], xterm: 166 },
