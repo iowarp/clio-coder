@@ -31,9 +31,32 @@ export type DraftLabel = (typeof DRAFT_LABELS)[number];
  */
 export const DRAFT_TEMPERATURES = [0.3, 0.7, 1.0, 1.2] as const;
 
-/** Sonnet 5 rejects explicit sampling temperature with HTTP 400. */
+/**
+ * Claude removed `temperature`, `top_p`, and `top_k` with Opus 4.7. Opus 4.7
+ * and 4.8, Sonnet 5, and every Opus, Fable, and Mythos 5 model answer an
+ * explicit sampler with HTTP 400. pi-ai drops it only where its catalog says
+ * so, and its Sonnet 5 and Fable 5 entries do not; Bedrock's Converse
+ * transport forwards it for every model. Matching the family in the wire id
+ * covers the Anthropic, OpenRouter, Bedrock, and Vertex spellings of one model.
+ * A dated snapshot suffix is not a minor version.
+ */
+const CLAUDE_GENERATION = /claude-(?:opus|sonnet|haiku|fable|mythos)-(\d+)(?:[-.](\d{1,2}))?(?!\d)/u;
+
+function rejectsSamplingTemperature(modelId: string): boolean {
+	const match = CLAUDE_GENERATION.exec(modelId.toLowerCase());
+	if (!match) return false;
+	const major = Number(match[1]);
+	const minor = Number(match[2] ?? 0);
+	return major > 4 || (major === 4 && minor >= 7);
+}
+
+/**
+ * The temperature a candidate is sent with, or undefined where the model
+ * refuses one. Those candidates run at the provider's default and still vary
+ * between rounds; a request that fails outright has nothing to vary.
+ */
 export function draftTemperature(modelId: string, temperature: number): number | undefined {
-	return modelId === "claude-sonnet-5" ? undefined : temperature;
+	return rejectsSamplingTemperature(modelId) ? undefined : temperature;
 }
 
 export const DRAFT_SYSTEM_PROMPT = [
@@ -149,10 +172,15 @@ export function readDraftVerdict(
 	return { picked, probabilities, sound, source, elapsedMs };
 }
 
+/** A verdict, or the sentence the overlay shows in its place. */
+export type DraftJudgment = { verdict: DraftVerdict } | { reason: string };
+
 /**
- * Ask the judge. Null for every way this can fail to produce an opinion: the
- * candidates are still worth reading without one, and the overlay says why the
- * bars are missing rather than failing the whole draft.
+ * Ask the judge. Every way this can fail to produce an opinion resolves to a
+ * reason rather than rejecting: the candidates are still worth reading without
+ * one, and the overlay says why the bars are missing rather than failing the
+ * whole draft. The reason carries the provider's own error, so a rejected
+ * credential reads as one and not as a judge with nothing to say.
  */
 export async function judgeDrafts(
 	decider: Decider,
@@ -161,14 +189,18 @@ export async function judgeDrafts(
 	source: string,
 	signal?: AbortSignal,
 	now: () => number = () => performance.now(),
-): Promise<DraftVerdict | null> {
-	if (candidates.length < DRAFT_MIN) return null;
+): Promise<DraftJudgment> {
+	if (candidates.length < DRAFT_MIN) return { reason: `not judged: fewer than ${DRAFT_MIN} drafts to compare` };
 	const started = now();
+	let answers: Record<string, DecisionAnswer>;
 	try {
 		const { state, questions } = draftJudgeRequest(request, candidates);
-		const answers = await decider.ask(state, questions, signal ? { signal } : {});
-		return readDraftVerdict(answers, candidates.length, source, Math.round(now() - started));
-	} catch {
-		return null;
+		answers = await decider.ask(state, questions, signal ? { signal } : {});
+	} catch (error) {
+		if (signal?.aborted === true) return { reason: "not judged: cancelled" };
+		return { reason: `not judged: ${source} failed: ${error instanceof Error ? error.message : String(error)}` };
 	}
+	// The soundness answers alone would draw a judged row of empty bars.
+	if (answers.best?.type !== "choice") return { reason: `not judged: ${source} returned no pick` };
+	return { verdict: readDraftVerdict(answers, candidates.length, source, Math.round(now() - started)) };
 }

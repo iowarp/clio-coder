@@ -39,9 +39,23 @@ const LIVE_ANSWERS: Record<string, DecisionAnswer> = {
 };
 
 describe("/draft arguments", () => {
-	it("omits explicit temperature for Sonnet 5 while retaining local model variation", () => {
-		strictEqual(draftTemperature("claude-sonnet-5", 0.7), undefined);
-		strictEqual(draftTemperature("mercury-2.5", 0.7), 0.7);
+	it("omits temperature for every Claude model that answers one with HTTP 400, on every transport", () => {
+		for (const id of [
+			"claude-sonnet-5",
+			"anthropic/claude-sonnet-5",
+			"us.anthropic.claude-sonnet-5",
+			"claude-fable-5",
+			"claude-opus-4-7",
+			"anthropic/claude-opus-4.8:batch",
+			"claude-opus-5-5",
+		]) {
+			strictEqual(draftTemperature(id, 0.7), undefined, id);
+		}
+		// Models that still take a sampler keep the spread that makes drafts differ,
+		// including dated snapshots whose date is not a minor version.
+		for (const id of ["mercury-2.5", "claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-20250514"]) {
+			strictEqual(draftTemperature(id, 0.7), 0.7, id);
+		}
 	});
 	it("reads a leading count and defaults to three", () => {
 		deepStrictEqual(parseDraftArgs("2 write a retry helper"), { count: 2, request: "write a retry helper" });
@@ -82,16 +96,24 @@ describe("/draft judgment", () => {
 		strictEqual(verdict.picked, null);
 	});
 
-	it("resolves to null for a failing judge and for fewer than two candidates", async () => {
+	it("says why a judge failed instead of reporting it as an empty answer", async () => {
+		const rejected = "TypeSafe decide failed: HTTP 401: Unauthorized";
 		const failing: Decider = {
 			ask: async () => {
-				throw new Error("ECONNREFUSED");
+				throw new Error(rejected);
 			},
 			askDetailed: async () => {
-				throw new Error("ECONNREFUSED");
+				throw new Error(rejected);
 			},
 		};
-		strictEqual(await judgeDrafts(failing, "x", ["a", "b"], "jev"), null);
+		deepStrictEqual(await judgeDrafts(failing, "x", ["a", "b"], "jev/jev-latest"), {
+			reason: `not judged: jev/jev-latest failed: ${rejected}`,
+		});
+		const { best: _dropped, ...soundOnly } = LIVE_ANSWERS;
+		const noPick: Decider = { ask: async () => soundOnly, askDetailed: async () => ({ answers: soundOnly }) as never };
+		deepStrictEqual(await judgeDrafts(noPick, "x", ["a", "b", "c"], "jev"), {
+			reason: "not judged: jev returned no pick",
+		});
 		let asked = false;
 		const counting: Decider = {
 			ask: async () => {
@@ -100,7 +122,7 @@ describe("/draft judgment", () => {
 			},
 			askDetailed: async () => ({ answers: LIVE_ANSWERS }) as never,
 		};
-		strictEqual(await judgeDrafts(counting, "x", ["only one"], "jev"), null);
+		ok("reason" in (await judgeDrafts(counting, "x", ["only one"], "jev")));
 		strictEqual(asked, false, "one candidate is nothing to choose between, so the judge is never billed");
 	});
 });
