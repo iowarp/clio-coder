@@ -541,7 +541,8 @@ export function buildWelcomeDashboardLines(
 		theme.fg("dim", "Model"),
 		routeRow(theme, stats, detailWidth),
 		field("Workspace", workspaceLabel(theme, stats, Math.max(1, detailWidth - 11))),
-		field("Permissions", theme.fg(stats.autonomy === "yolo" ? "warning" : "muted", stats.autonomy)),
+		// yolo wears the composer rail caps' coral here too, so one color means yolo everywhere.
+		field("Permissions", theme.fg(stats.autonomy === "yolo" ? "editorDanger" : "muted", stats.autonomy)),
 		theme.fg("dim", "Ask Clio how to use or extend her."),
 		theme.fg("dim", "Targets"),
 		theme.fg("muted", stats.targets),

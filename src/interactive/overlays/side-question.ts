@@ -74,7 +74,7 @@ function formatSideQuestionBody(
 	if (phase.kind === "streaming") {
 		lines.push(theme.fg("dim", body.length > 0 ? spinner : `${spinner} asking…`));
 	} else if (phase.kind === "aborted") {
-		lines.push(theme.fg("warning", "cancelled"));
+		lines.push(theme.fg("muted", "cancelled"));
 	} else if (body.length === 0) {
 		lines.push(theme.fg("dim", "the model returned no text"));
 	}

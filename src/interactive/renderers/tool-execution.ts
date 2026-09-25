@@ -46,6 +46,7 @@ const dim = (text: string): string => theme.fg("dim", text);
 const red = (text: string): string => theme.fg("error", text);
 const green = (text: string): string => theme.fg("success", text);
 const yellow = (text: string): string => theme.fg("warning", text);
+const steel = (text: string): string => theme.fg("info", text);
 const cyan = (text: string): string => theme.fg("accent", text);
 const cyanBold = (text: string): string => theme.style("accent", text, { bold: true });
 
@@ -1283,7 +1284,8 @@ function highlightBashCommand(command: string): string {
 			if (/^\s+$/u.test(token)) return token;
 			if (/^'[^']*'$|^"[^"]*"$/u.test(token)) return green(token);
 			if (/^(?:\|\||&&|[|;&()<>])$/u.test(token)) return dim(token);
-			if (/^-{1,2}[\w-]+/u.test(token)) return yellow(token);
+			// A flag is a parameter, not a warning; it shares code ink's literal color.
+			if (/^-{1,2}[\w-]+/u.test(token)) return steel(token);
 			return token;
 		})
 		.join("");
@@ -1406,7 +1408,7 @@ function renderOutputFooter(finished: ToolExecutionFinished, width: number, isEr
 	const offloadPath = isNonExecutedOutcome(finished.outcome) ? null : offloadPathOf(finished);
 	if (offloadPath !== null) {
 		const pointer = offloadFileMissing(finished) ? "gone after the 14-day retention sweep" : offloadPath;
-		out.push(...indentAndWrap(`${yellow("full output")}  ${pointer}`, width, isError));
+		out.push(...indentAndWrap(`${steel("full output")}  ${pointer}`, width, isError));
 	}
 	const hint =
 		stringField(resultSizeOf(finished), "followUpHint") ?? stringField(finished.resultSummary ?? null, "followUpHint");
