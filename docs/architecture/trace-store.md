@@ -24,9 +24,14 @@ try to change it, because changing journal mode is a database write.
 
 ## Tables
 
-The seven Clio trace tables are `runs`, `phases`, `events`, `envelopes`,
-`gate_results`, `agent_sessions`, and `processes`; `meta` carries the schema
-version. Runs use terminal run ids. Interactive session turns are also recorded
+The six Clio trace tables are `runs`, `phases`, `events`, `gate_results`,
+`agent_sessions`, and `processes`; `meta` carries the schema version. A
+database written by an earlier build also has an `envelopes` table and four
+itemized phase cost columns (`input_cost_usd`, `output_cost_usd`,
+`cache_read_cost_usd`, `cache_write_cost_usd`). No writer ever filled them, so
+new databases do not create them. Older databases keep them without a schema
+version bump: readers name the phase columns they return, and prune deletes
+legacy envelope rows before their run. Runs use terminal run ids. Interactive session turns are also recorded
 as `runs` rows, distinguished by `runs.source` (`'dispatch'` or `'session'`;
 a session turn also carries the historical sentinel `assignment_id =
 "session"`, which predates the column and is unchanged). `runs.source` is an
@@ -34,9 +39,8 @@ additive column: a database created before it existed gains it in place on
 next open, backfilled from that sentinel, the same way `processes.host` and
 `processes.birth_token` were added without a schema-version bump. A phase belongs to a run and carries its
 assignment/worker-facing name, kind, owner, attempt, timing, status, itemized
-token spend, optional itemized dollar spend, total dollar spend, and context
-occupancy. Missing historical or unavailable component costs are `NULL`, never
-zero.
+token spend, total dollar spend, and context occupancy. A missing historical
+value is `NULL`, never zero.
 
 `events` is append-ordered by SQLite `rowid`. All events carry `run_id`,
 `phase_id`, `type`, `name`, `started_at`, and a bounded JSON payload. Only
@@ -129,7 +133,7 @@ When resolving the SQLite database path:
 2. **`inspect`**: Emits only `--json`, from the default database, with no caller-controlled path or window. The version-1 snapshot carries at most eight newest runs and bounded phase, event-kind, and process-kind aggregates. It omits request text, phase error prose, event payloads, command lines, PIDs, hosts, and database paths, and distinguishes an unavailable database from an available empty one through `available`.
 3. **`phases`**: Lists sequence phases for a designated `runId`. Displays status, attempt, owner, total tokens, USD cost, and phase name.
 4. **`tail`**: Displays append-ordered event rows for a designated `runId`. When `--follow` is specified, polls for new events every 500 ms until two consecutive idle polls observe a finished run status.
-5. **`procs`**: Lists orchestrator and worker process executions associated with a `runId`. Displays state (`live` or `ended`), PID, process kind, name, and command string.
+5. **`procs`**: Lists the worker process executions associated with a `runId`. Displays state (`live` or `ended`), PID, process kind, name, and command string.
 6. **`prune`**: Applies the resolved age and byte retention policy while protecting queued and running runs. Text and JSON results report the policy, removed runs and rows, physical bytes reclaimed, protected runs, and whether `VACUUM` ran.
 7. **`sql`**: Executes a single read-only `SELECT` or `WITH` SQL statement against the SQLite trace database. The subcommand enforces read-only access before opening storage: queries containing semicolons or data mutation keywords (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, etc.) are rejected with exit code 2. BigInt numbers in result objects format as JSON strings.
 
@@ -148,7 +152,6 @@ trace commands above continue to work independently of the web process.
 | `GET /api/traces/runs/:runId/events` | Rowid-cursor event history. |
 | `GET /api/traces/runs/:runId/live` | SSE event tail. |
 | `GET /api/traces/runs/:runId/gates` | Gate results. |
-| `GET /api/traces/runs/:runId/envelopes` | Trace envelopes. |
 | `GET /api/traces/runs/:runId/processes` | Process records. |
 | `GET /api/traces/runs/:runId/receipt` | Receipt and evidence-index sidecars. |
 

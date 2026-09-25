@@ -108,38 +108,39 @@ export function Waterfall({
 	);
 }
 export function CostPanel({ phase }: { phase: TracePhase }) {
+	// The trace records one dollar figure per phase, its total. Per-kind costs were never written,
+	// so the table carries tokens only and the total cost sits beside the context line.
 	return (
 		<section className="trace-panel">
 			<h2>Tokens & spend</h2>
 			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: A table wider than its column scrolls, and a scrolling region must take focus so the keyboard can move it. */}
-			<section className="table-scroll" tabIndex={0} aria-label="Tokens and spend table">
+			<section className="table-scroll" tabIndex={0} aria-label="Tokens table">
 				<table className="trace-table">
 					<thead>
 						<tr>
 							<th>Usage</th>
 							<th>Tokens</th>
-							<th>Cost</th>
 						</tr>
 					</thead>
 					<tbody>
 						{[
-							["Input", phase.input_tokens, phase.input_cost_usd],
-							["Output", phase.output_tokens, phase.output_cost_usd],
-							["Cache read", phase.cache_read_tokens, phase.cache_read_cost_usd],
-							["Cache write", phase.cache_write_tokens, phase.cache_write_cost_usd],
-							["Cache write (1h)", phase.cache_write_1h_tokens, null],
-							["Reasoning", phase.reasoning_tokens, null],
-							["Total", phase.total_tokens, phase.total_cost_usd],
-						].map(([label, tokens, cost]) => (
+							["Input", phase.input_tokens],
+							["Output", phase.output_tokens],
+							["Cache read", phase.cache_read_tokens],
+							["Cache write", phase.cache_write_tokens],
+							["Cache write (1h)", phase.cache_write_1h_tokens ?? null],
+							["Reasoning", phase.reasoning_tokens],
+							["Total", phase.total_tokens],
+						].map(([label, tokens]) => (
 							<tr key={String(label)}>
 								<th>{label}</th>
 								<td>{formatTokens(tokens as number | null)}</td>
-								<td>{formatCost(cost as number | null)}</td>
 							</tr>
 						))}
 					</tbody>
 				</table>
 			</section>
+			<p>Cost: {formatCost(phase.total_cost_usd)}</p>
 			<p>
 				Context: {formatTokens(phase.context_tokens)} / {formatTokens(phase.context_window)}
 			</p>

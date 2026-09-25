@@ -55,10 +55,6 @@ export const TracePhase = Type.Object(
 		cache_write_1h_tokens: Type.Optional(count),
 		reasoning_tokens: count,
 		total_tokens: count,
-		input_cost_usd: count,
-		output_cost_usd: count,
-		cache_read_cost_usd: count,
-		cache_write_cost_usd: count,
 		total_cost_usd: count,
 		context_tokens: count,
 		context_window: count,
@@ -93,20 +89,6 @@ export const TraceGate = Type.Object(
 		passed: Type.Integer({ minimum: 0, maximum: 1 }),
 		violations_json: text,
 		checks_json: optionalText,
-		created_at: text,
-	},
-	closed,
-);
-export const TraceEnvelope = Type.Object(
-	{
-		envelope_id: text,
-		run_id: text,
-		phase_id: text,
-		agent: text,
-		output_type: text,
-		payload_json: text,
-		valid: Type.Integer({ minimum: 0, maximum: 1 }),
-		attempt: Type.Integer(),
 		created_at: text,
 	},
 	closed,
@@ -165,5 +147,5 @@ export const TraceLiveBatch = Type.Object(
 export type TraceRequest =
 	| { kind: "status" }
 	| { kind: "runs"; query: Static<typeof TraceRunsQuery> }
-	| { kind: "run" | "phases" | "gates" | "envelopes" | "processes" | "receipt"; runId: string; full?: boolean }
+	| { kind: "run" | "phases" | "gates" | "processes" | "receipt"; runId: string; full?: boolean }
 	| { kind: "events" | "live"; runId: string; after: number; limit: number };

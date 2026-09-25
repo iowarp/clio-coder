@@ -25,7 +25,6 @@ test("trace read-only seams, public projections, Date, rowid bounds, and full re
 		["", routes.traceRun],
 		["/phases", routes.tracePhases],
 		["/gates", routes.traceGates],
-		["/envelopes", routes.traceEnvelopes],
 		["/processes", routes.traceProcesses],
 	] as const) {
 		const response = await h.request(`/api/traces/runs/run-0000${suffix}`);

@@ -8,7 +8,7 @@ import { clock, formatTime } from "../../api/clock.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../../design/panel.js";
 import { emptyState, PANELS } from "../../design/panel-model.js";
 import { StatusMark } from "../../design/status.js";
-import { CostPanel, EventRow, Facts, Gates, Json, parseJson, ReceiptPanel, Waterfall } from "./panels.js";
+import { CostPanel, EventRow, Facts, Gates, ReceiptPanel, Waterfall } from "./panels.js";
 import { histogram, orderedPhases, runTone, runTotals } from "./trace-model.js";
 export function TraceRunPage({ client }: { client: Client }) {
 	const { runId = "" } = useParams();
@@ -24,15 +24,14 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 	const detail = useQuery({
 		queryKey: ["trace-detail", runId, full],
 		queryFn: async () => {
-			const [run, phases, gates, processes, envelopes, receipt] = await Promise.all([
+			const [run, phases, gates, processes, receipt] = await Promise.all([
 				client.call(routes.traceRun, input),
 				client.call(routes.tracePhases, input),
 				client.call(routes.traceGates, input),
 				client.call(routes.traceProcesses, input),
-				client.call(routes.traceEnvelopes, input),
 				client.call(routes.traceReceipt, { ...input, query: full ? { include: "full" } : {} }),
 			]);
-			return { run, phases, gates, processes, envelopes, receipt };
+			return { run, phases, gates, processes, receipt };
 		},
 		refetchInterval: (query) => (query.state.data?.run.status === "running" ? 5000 : false),
 	});
@@ -91,7 +90,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 			</div>
 		);
 	if (!detail.data || !events.data) return <p>Loading run…</p>;
-	const { run, gates, processes, envelopes, receipt } = detail.data,
+	const { run, gates, processes, receipt } = detail.data,
 		phases = orderedPhases(detail.data.phases),
 		phase = phases.find((item) => item.phase_id === selected) ?? phases[0],
 		phaseEvents = events.data.filter((event) => !phase || event.phase_id === phase.phase_id),
@@ -203,18 +202,6 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 					</article>
 				))}
 				{!processes.length ? <PanelEmpty>{emptyState.emptyStore("process", "for this run")}</PanelEmpty> : null}
-			</section>
-			<section className="trace-panel">
-				<h2>Envelopes</h2>
-				{envelopes.map((envelope) => (
-					<details key={envelope.envelope_id}>
-						<summary>
-							{envelope.agent} · {envelope.output_type} · {envelope.valid ? "valid" : "invalid"}
-						</summary>
-						<Json value={parseJson(envelope.payload_json)} />
-					</details>
-				))}
-				{!envelopes.length ? <PanelEmpty>{emptyState.emptyStore("envelope", "for this run")}</PanelEmpty> : null}
 			</section>
 			<ReceiptPanel data={receipt} full={full} loadFull={() => setFull(true)} />
 			<Boundary panel={PANELS.traceRun} />
