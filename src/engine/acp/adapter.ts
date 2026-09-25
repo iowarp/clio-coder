@@ -126,6 +126,37 @@ function supportsSessionClose(init: AcpInitializeResponse | null): boolean {
 	return isRecord(meta) && meta.close === true;
 }
 
+interface PeerModelOption {
+	id: string;
+	currentValue: string | null;
+	values: string[];
+}
+
+/**
+ * The peer's model selector: the first `select` config option in category
+ * `model`. ACP v1 has no `models` field or `session/set_model`; the stable
+ * selector is a session config option, whose values may be grouped.
+ */
+function peerModelOption(configOptions: unknown): PeerModelOption | null {
+	if (!Array.isArray(configOptions)) return null;
+	for (const option of configOptions) {
+		if (!isRecord(option) || option.category !== "model" || option.type !== "select") continue;
+		if (typeof option.id !== "string" || option.id.length === 0) continue;
+		const values: string[] = [];
+		for (const entry of Array.isArray(option.options) ? option.options : []) {
+			if (!isRecord(entry)) continue;
+			if (typeof entry.value === "string") values.push(entry.value);
+			else if (Array.isArray(entry.options)) {
+				for (const grouped of entry.options) {
+					if (isRecord(grouped) && typeof grouped.value === "string") values.push(grouped.value);
+				}
+			}
+		}
+		return { id: option.id, currentValue: typeof option.currentValue === "string" ? option.currentValue : null, values };
+	}
+	return null;
+}
+
 function flattenPrompt(input: AcpDelegationRunInput): string {
 	const parts = [
 		input.systemPrompt?.trim() ?? "",
@@ -343,6 +374,9 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				"initialize",
 				{
 					protocolVersion: 1,
+					// Clio serves no client-side method (fs/*, terminal/*) to a peer,
+					// so it advertises no client capability; an omitted capability
+					// means unsupported.
 					clientCapabilities: {},
 					clientInfo: {
 						name: "clio-coder",
@@ -362,14 +396,10 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			);
 			sessionId = sessionIdFrom(session);
 			if (!sessionId) throw new Error("ACP session/new response did not include sessionId");
+			const modelOption = peerModelOption(isRecord(session) ? session.configOptions : undefined);
 			if (input.model !== undefined) {
-				const models = isRecord(session) && isRecord(session.models) ? session.models : null;
-				const available = Array.isArray(models?.availableModels) ? models.availableModels : [];
-				const ids = available
-					.filter(isRecord)
-					.map((model) => model.modelId)
-					.filter((id): id is string => typeof id === "string");
-				const current = typeof models?.currentModelId === "string" ? models.currentModelId : null;
+				const ids = modelOption?.values ?? [];
+				const current = modelOption?.currentValue ?? null;
 				const matches = (id: string): boolean => id === input.model || id.startsWith(`${input.model}[`);
 				const matching = ids.filter(matches);
 				const requested =
@@ -385,7 +415,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 							: matching.length === 1
 								? matching[0]
 								: undefined;
-				if (selected === undefined) {
+				if (selected === undefined || modelOption === null) {
 					throw new Error(
 						matching.length > 1 && input.thinkingLevel === undefined
 							? `ACP peer offers multiple efforts for requested model '${input.model}'; specify thinkingLevel`
@@ -393,11 +423,21 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					);
 				}
 				if (selected !== current) {
-					await transport.request("session/set_model", { sessionId, modelId: selected }, connectTimeoutMs);
+					const updated = await transport.request<unknown>(
+						"session/set_config_option",
+						{ sessionId, configId: modelOption.id, value: selected },
+						connectTimeoutMs,
+					);
+					// The response carries the complete option state; a peer that
+					// kept another model must not be recorded as running this one.
+					const applied = peerModelOption(isRecord(updated) ? updated.configOptions : undefined)?.currentValue;
+					if (typeof applied === "string" && applied !== selected) {
+						throw new Error(`ACP peer kept model '${applied}' after Clio selected '${selected}'`);
+					}
 				}
 				selectedModelId = selected;
-			} else if (isRecord(session) && isRecord(session.models) && typeof session.models.currentModelId === "string") {
-				selectedModelId = session.models.currentModelId;
+			} else if (modelOption?.currentValue) {
+				selectedModelId = modelOption.currentValue;
 			}
 			if (aborted) {
 				transport.notify("session/cancel", { sessionId });

@@ -141,6 +141,61 @@ test("ACP adapter uses the requested effort and rejects an ambiguous base model"
 	strictEqual(ambiguous.failureMessage?.includes("offers multiple efforts"), true);
 });
 
+test("ACP adapter selects models only through the stable config option, never session/set_model", async () => {
+	const cwd = process.cwd();
+	// A peer that offers only the unstable `models` field has no stable model
+	// selector, so an explicit model request fails before prompting, and
+	// session/set_model is never sent (the fixture refuses the prompt if it is).
+	const legacy = await startAcpDelegationRun({
+		agent: {
+			id: "legacy-model-fixture",
+			command: process.execPath,
+			args: [fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url)), "legacy-models"],
+			connectTimeoutMs: 5_000,
+		},
+		task: "report version",
+		model: "gpt-6-luna",
+		cwd,
+		safety: createWorkerSafety({ cwd }),
+	}).promise;
+	strictEqual(legacy.exitCode, 1);
+	strictEqual(
+		legacy.failureMessage?.includes("does not offer requested model 'gpt-6-luna'"),
+		true,
+		legacy.failureMessage,
+	);
+	strictEqual(legacy.delegation.selectedModelId, undefined);
+	// Without a requested model, the unstable field is not read as the selection either.
+	const unrequested = await startAcpDelegationRun({
+		agent: {
+			id: "legacy-model-fixture",
+			command: process.execPath,
+			args: [fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url)), "legacy-models"],
+			connectTimeoutMs: 5_000,
+		},
+		task: "report version",
+		cwd,
+		safety: createWorkerSafety({ cwd }),
+	}).promise;
+	strictEqual(unrequested.delegation.selectedModelId, undefined);
+});
+
+test("ACP adapter reports the config option's current model when none is requested", async () => {
+	const cwd = process.cwd();
+	const result = await startAcpDelegationRun({
+		agent: {
+			id: "model-fixture",
+			command: process.execPath,
+			args: [fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url)), "model-variants"],
+			connectTimeoutMs: 5_000,
+		},
+		task: "report version",
+		cwd,
+		safety: createWorkerSafety({ cwd }),
+	}).promise;
+	strictEqual(result.delegation.selectedModelId, "gpt-6-astra[medium]");
+});
+
 test("ACP adapter fails a prompt response missing stopReason", async () => {
 	const terminal = new AcpEventMapper().finalEvents({})[0] as {
 		message: { stopReason: string; errorMessage: string };
