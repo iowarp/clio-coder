@@ -1071,32 +1071,15 @@ describe("contracts/configure-sections", () => {
 		}
 	});
 
-	it("accepts the released ollama-native id, persists the canonical id, and warns once", async () => {
+	it("refuses the released ollama-native and lmstudio-native runtime ids", async () => {
 		const testEnv = isolatedEnv();
-		const server = await ollamaServer();
-		const warnings: Error[] = [];
-		const onWarning = (warning: Error) => {
-			if ((warning as Error & { code?: string }).code === "CLIO_CODER_LEGACY_NAMING") warnings.push(warning);
-		};
-		process.on("warning", onWarning);
 		try {
-			for (const id of ["legacy-a", "legacy-b"]) {
-				const res = await captureConfigure(
-					["--id", id, "--runtime", "ollama-native", "--url", server.url, "--model", "qwen3:8b"],
-					testEnv.env,
-				);
-				strictEqual(res.code, 0, res.stderr);
+			for (const id of ["ollama-native", "lmstudio-native"]) {
+				const res = await captureConfigure(["--runtime", id], testEnv.env, []);
+				strictEqual(res.code, 2);
+				match(res.stderr, new RegExp(`unknown runtime id: ${id}`, "u"));
 			}
-			await new Promise((resolve) => setImmediate(resolve));
-			const settings = readFileSync(testEnv.settingsFile, "utf8");
-			match(settings, /id: legacy-a\n\s+runtime: ollama\n/u);
-			match(settings, /id: legacy-b\n\s+runtime: ollama\n/u);
-			strictEqual(warnings.length, 1);
-			strictEqual(warnings[0]?.name, "DeprecationWarning");
-			match(warnings[0]?.message ?? "", /'ollama-native' is a deprecated Clio Coder identifier; use 'ollama'/u);
 		} finally {
-			process.off("warning", onWarning);
-			await server.close();
 			testEnv.cleanup();
 		}
 	});
@@ -1113,39 +1096,6 @@ describe("contracts/configure-sections", () => {
 			match(unrelated.stderr, /unknown runtime id: zzzzzzzz/u);
 			ok(!unrelated.stderr.includes("did you mean"), unrelated.stderr);
 		} finally {
-			testEnv.cleanup();
-		}
-	});
-
-	it("warns about deprecated lmstudio-native via warnLegacyNaming and dedups per process", async () => {
-		const testEnv = isolatedEnv();
-		const warnings: { message: string; code?: string | undefined; name: string }[] = [];
-		const onWarning = (warning: Error) => {
-			warnings.push({
-				message: warning.message,
-				code: (warning as unknown as { code?: string }).code,
-				name: warning.name,
-			});
-		};
-		process.on("warning", onWarning);
-		try {
-			await captureConfigure(["--runtime", "lmstudio-native"], testEnv.env, []);
-			await new Promise((resolve) => setImmediate(resolve));
-			const matching = warnings.filter((w) => w.code === "CLIO_CODER_LEGACY_NAMING");
-			strictEqual(matching.length, 1);
-			const first = matching[0];
-			ok(first !== undefined);
-			ok(first.message.includes("lmstudio-native"));
-			ok(first.message.includes("lmstudio"));
-			ok(first.message.includes("v0.7.0"));
-			strictEqual(first.name, "DeprecationWarning");
-
-			await captureConfigure(["--runtime", "lmstudio-native"], testEnv.env, []);
-			await new Promise((resolve) => setImmediate(resolve));
-			const afterSecond = warnings.filter((w) => w.code === "CLIO_CODER_LEGACY_NAMING");
-			strictEqual(afterSecond.length, 1);
-		} finally {
-			process.off("warning", onWarning);
 			testEnv.cleanup();
 		}
 	});

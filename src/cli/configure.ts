@@ -19,7 +19,6 @@ import {
 	type WorkerPermissionMode,
 } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
-import { warnLegacyNaming } from "../core/naming-compat.js";
 import { resolveSettingsSection, SETTINGS_SECTIONS, type SettingsSectionId } from "../core/settings-navigation.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
@@ -2364,8 +2363,6 @@ export async function runConfigureCommand(
 			process.stdout.write("run `clio-coder configure --list` to see registered runtimes\n");
 			return 2;
 		}
-		// Every registered alias is a released id kept for the compatibility window.
-		if (runtimeId !== runtime.id) warnLegacyNaming(runtimeId, runtime.id);
 	}
 	const hasTargetSetupFlag =
 		args.id !== undefined ||

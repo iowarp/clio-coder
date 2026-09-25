@@ -1,6 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { warnLegacyNaming } from "../../../core/naming-compat.js";
 import { resolvePackageRoot } from "../../../core/package-root.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { pluginResourcePath, readPluginManifest } from "../../plugins/index.js";
@@ -360,9 +359,7 @@ export function resolveMarketplaceShaping(options: DiscoverMarketplaceOptions = 
 
 /** Skill-offer adapter: resolve a package and commit through the shared library engine. */
 export function installSkill(input: InstallSkillInput): InstallSkillResult {
-	const requested = input.source.trim();
-	const source = requested === "clio-dev" ? "clio-coder-dev" : requested === "clio-test" ? "clio-coder-test" : requested;
-	if (source !== requested) warnLegacyNaming(requested, source);
+	const source = input.source.trim();
 	if (input.overlay || input.exclude?.length || input.configDir)
 		throw new Error("package installs use the prepared manifest tree and the active Clio profile");
 	const entry = resolveLibraryPackage(source, input.cwd ? { cwd: input.cwd } : {});

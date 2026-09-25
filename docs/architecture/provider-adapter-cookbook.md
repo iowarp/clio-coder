@@ -97,9 +97,9 @@ session ledger.
 
 ### 2.4 LM Studio as a reference adapter
 
-The built-in `lmstudio` adapter is an example of one canonical descriptor with a compatibility
-alias. Its descriptor declares `aliases: ["lmstudio-native"]`, while registry listing and persisted
-configuration use only `lmstudio`. The probe first requires the exact `/lmstudio-greeting` body for
+The built-in `lmstudio` adapter is an example of one canonical descriptor. It declares no aliases,
+so registry lookup, listing and persisted configuration all use `lmstudio`; the released
+`lmstudio-native` id is an unknown runtime. The probe first requires the exact `/lmstudio-greeting` body for
 a directly configured target. It lists keys, loaded instance ids, capabilities, and echoed load
 configuration through `GET /api/v1/models` (<https://lmstudio.ai/docs/developer/rest/list>), falls
 back to `/api/v0/models` for older servers, and uses `/v1/models` only when neither native model

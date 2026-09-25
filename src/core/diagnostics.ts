@@ -2,10 +2,6 @@ type DiagnosticSink = (text: string, level: "warning" | "error") => void;
 
 const sinks = new Set<DiagnosticSink>();
 
-export function hasDiagnosticSink(): boolean {
-	return sinks.size > 0;
-}
-
 /** The active terminal owner supplies a renderer; headless processes keep stderr. */
 export function installDiagnosticSink(sink: DiagnosticSink): () => void {
 	sinks.add(sink);

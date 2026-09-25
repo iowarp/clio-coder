@@ -133,7 +133,6 @@ async function probeModelContextWindow(
 
 const ollamaRuntime: RuntimeDescriptor = {
 	id: "ollama",
-	aliases: ["ollama-native"],
 	displayName: "Ollama (native)",
 	kind: "http",
 	tier: "local-native",

@@ -13,7 +13,6 @@ import {
 } from "../core/config.js";
 import { THINKING_LEVELS, type ThinkingLevel } from "../core/defaults.js";
 import { loadDomains } from "../core/domain-loader.js";
-import { warnLegacyNaming } from "../core/naming-compat.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
@@ -861,10 +860,8 @@ function runConvert(args: ReadonlyArray<string>): number {
 		);
 		return 2;
 	}
-	if (runtimeId !== runtime.id) {
-		warnLegacyNaming(runtimeId, runtime.id);
-		runtimeId = runtime.id;
-	}
+	// A plugin runtime may declare aliases; the target always stores the canonical id.
+	runtimeId = runtime.id;
 	const settings = readSettings();
 	const target = settings.targets.find((entry) => entry.id === id);
 	if (!target) {

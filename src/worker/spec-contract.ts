@@ -354,10 +354,9 @@ function validateProtectedModels(value: unknown): void {
 
 /**
  * The configured target names a runtime by whatever id the operator wrote, which
- * may be an alias the registry resolves to the canonical id. Comparing the two
- * spellings literally rejected every dispatch to a target whose settings still
- * said `lmstudio-native`, because the settings migration that rewrites it runs
- * only under `clio-coder upgrade`. An alias is the same runtime, so it passes.
+ * may be an alias a runtime plugin declares for its canonical id. Comparing the
+ * two spellings literally would reject every dispatch to such a target. An alias
+ * is the same runtime, so it passes.
  */
 function validateTarget(value: unknown, runtimeId: string, runtimeAliases: ReadonlyArray<string>): void {
 	const target = readRecord(value, "WorkerSpec.target");
@@ -365,7 +364,7 @@ function validateTarget(value: unknown, runtimeId: string, runtimeAliases: Reado
 	const targetRuntime = readString(target.runtime, "WorkerSpec.target.runtime");
 	if (targetRuntime !== runtimeId && !runtimeAliases.includes(targetRuntime)) {
 		throw new Error(
-			`WorkerSpec target runtime mismatch: target.runtime=${targetRuntime} runtimeId=${runtimeId}. Set the target's runtime to '${runtimeId}' in settings.yaml, or run 'clio-coder upgrade' to migrate a legacy runtime id.`,
+			`WorkerSpec target runtime mismatch: target.runtime=${targetRuntime} runtimeId=${runtimeId}. Set the target's runtime to '${runtimeId}' in settings.yaml.`,
 		);
 	}
 	if (targetId.length === 0) throw new Error("WorkerSpec.target.id must be a non-empty string");

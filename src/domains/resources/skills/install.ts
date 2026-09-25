@@ -160,25 +160,6 @@ interface ProvenanceFields {
 	installedBy?: "worker";
 }
 
-function canonicalizeProductMetadataBlock(lines: ReadonlyArray<string>): string[] {
-	const hasCanonical = lines.some((line) => /^clio-coder:/.test(line));
-	const canonical: string[] = [];
-	let dropLegacyChildren = false;
-	for (const line of lines) {
-		if (/^clio:/.test(line)) {
-			dropLegacyChildren = hasCanonical;
-			if (!hasCanonical) canonical.push(line.replace(/^clio:/, "clio-coder:"));
-			continue;
-		}
-		if (dropLegacyChildren) {
-			if (line.trim().length === 0 || /^[ \t]/.test(line)) continue;
-			dropLegacyChildren = false;
-		}
-		canonical.push(line);
-	}
-	return canonical;
-}
-
 /**
  * Replace install-lifecycle frontmatter with the recorded fields, written
  * nested under the reserved `clio-coder:` block (merged into an existing block-style
@@ -205,24 +186,21 @@ function injectProvenanceFrontmatter(rawText: string, fields: ProvenanceFields):
 		"audit: unknown",
 		...(fields.installedBy ? [`installed-by: ${yamlQuote(fields.installedBy)}`] : []),
 	];
-	const canonicalKept = canonicalizeProductMetadataBlock(kept);
-	const clioIndex = canonicalKept.findIndex((line) => /^clio-coder:/.test(line));
-	if (clioIndex >= 0 && !/^clio-coder:\s*$/.test(canonicalKept[clioIndex] as string)) {
-		return `${region.head}${[...canonicalKept, ...stamps].join("\n")}${region.tail}`;
+	const clioIndex = kept.findIndex((line) => /^clio-coder:/.test(line));
+	if (clioIndex >= 0 && !/^clio-coder:\s*$/.test(kept[clioIndex] as string)) {
+		return `${region.head}${[...kept, ...stamps].join("\n")}${region.tail}`;
 	}
 	const nested = stamps.map((line) => `  ${line}`);
 	if (clioIndex < 0) {
-		return `${region.head}${[...canonicalKept, "clio-coder:", ...nested].join("\n")}${region.tail}`;
+		return `${region.head}${[...kept, "clio-coder:", ...nested].join("\n")}${region.tail}`;
 	}
 	let blockEnd = clioIndex + 1;
-	while (blockEnd < canonicalKept.length) {
-		const line = canonicalKept[blockEnd] as string;
+	while (blockEnd < kept.length) {
+		const line = kept[blockEnd] as string;
 		if (line.trim().length > 0 && !/^[ \t]/.test(line)) break;
 		blockEnd += 1;
 	}
-	return `${region.head}${[...canonicalKept.slice(0, blockEnd), ...nested, ...canonicalKept.slice(blockEnd)].join(
-		"\n",
-	)}${region.tail}`;
+	return `${region.head}${[...kept.slice(0, blockEnd), ...nested, ...kept.slice(blockEnd)].join("\n")}${region.tail}`;
 }
 
 function resolveSkillDir(target: string): string {

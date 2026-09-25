@@ -2,7 +2,6 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { writeDiagnostic } from "../../core/diagnostics.js";
-import { warnLegacyNaming } from "../../core/naming-compat.js";
 
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 
@@ -32,11 +31,7 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 		canonical.add(desc.id);
 	};
 
-	const get = (id: string): RuntimeDescriptor | null => {
-		const runtime = byId.get(id) ?? null;
-		if (runtime && runtime.id !== id) warnLegacyNaming(id, runtime.id);
-		return runtime;
-	};
+	const get = (id: string): RuntimeDescriptor | null => byId.get(id) ?? null;
 
 	const list = (): ReadonlyArray<RuntimeDescriptor> =>
 		Array.from(canonical, (id) => byId.get(id)).filter((entry): entry is RuntimeDescriptor => entry !== undefined);

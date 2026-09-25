@@ -3,7 +3,6 @@ import { type Dirent, existsSync, readdirSync, readFileSync, realpathSync } from
 import { homedir } from "node:os";
 import path from "node:path";
 import { CLIO_SELF_DEVELOPMENT_SKILLS, detectClioCoderRepo } from "../../../core/clio-repo.js";
-import { warnLegacyNaming } from "../../../core/naming-compat.js";
 import type { PendingSkillRequest } from "../../../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../../../core/tool-names.js";
 import { clioConfigDir } from "../../../core/xdg.js";
@@ -483,16 +482,7 @@ function validateDescription(description: string | null): string[] {
 	return [];
 }
 
-/**
- * The deprecation names the file: a bare "clio: skill metadata" warning at
- * boot left the operator hunting across five compatibility roots for the
- * SKILL.md that carried the key, and `doctor` scanned only two of them.
- */
-function warnLegacySkillMetadata(filePath: string): void {
-	warnLegacyNaming(`clio: skill metadata in ${filePath}`, "clio-coder: skill metadata");
-}
-
-function extractMetadata(frontmatter: Record<string, unknown>, filePath: string): Record<string, unknown> {
+function extractMetadata(frontmatter: Record<string, unknown>): Record<string, unknown> {
 	const metadata: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(frontmatter)) {
 		if (CORE_FRONTMATTER_KEYS.has(key)) continue;
@@ -500,24 +490,16 @@ function extractMetadata(frontmatter: Record<string, unknown>, filePath: string)
 			metadata.clioCoder = value;
 			continue;
 		}
-		if (key === "clio") {
-			warnLegacySkillMetadata(filePath);
-			if (!("clio-coder" in frontmatter)) metadata.clioCoder = value;
-			continue;
-		}
 		metadata[key] = value;
 	}
 	return metadata;
 }
 
-function extractProvenance(frontmatter: Record<string, unknown>, filePath: string): SkillProvenance | undefined {
+function extractProvenance(frontmatter: Record<string, unknown>): SkillProvenance | undefined {
 	// Provenance lives nested under the reserved `clio-coder:` block; the flat
 	// top-level keys remain readable for already-installed copies stamped
 	// before the nested form existed.
-	const canonicalRaw = frontmatter["clio-coder"];
-	const legacyRaw = frontmatter.clio;
-	if (legacyRaw !== undefined) warnLegacySkillMetadata(filePath);
-	const clioCoderRaw = canonicalRaw ?? legacyRaw;
+	const clioCoderRaw = frontmatter["clio-coder"];
 	const clioCoder =
 		clioCoderRaw !== null && typeof clioCoderRaw === "object" && !Array.isArray(clioCoderRaw)
 			? (clioCoderRaw as Record<string, unknown>)
@@ -685,9 +667,7 @@ function loadSkillFile(
 
 	const pathSubject = validationSubject(filePath);
 	const frontmatterName = stringField(parsed.frontmatter, "name");
-	const rawName = frontmatterName ?? pathSubject;
-	const name = rawName === "clio-dev" ? "clio-coder-dev" : rawName === "clio-test" ? "clio-coder-test" : rawName;
-	if (name !== rawName) warnLegacyNaming(rawName, name);
+	const name = frontmatterName ?? pathSubject;
 	const description = stringField(parsed.frontmatter, "description");
 
 	for (const message of validateDescription(description)) diagnostics.push({ type: "warning", message, path: filePath });
@@ -711,7 +691,7 @@ function loadSkillFile(
 		scope,
 		...(root.origin ? { source: root.origin } : {}),
 	};
-	const provenance = extractProvenance(parsed.frontmatter, filePath);
+	const provenance = extractProvenance(parsed.frontmatter);
 	const allowedTools = declaredToolSurface(parsed.frontmatter, "allowed-tools", filePath, diagnostics);
 	const disallowedTools = declaredToolSurface(parsed.frontmatter, "disallowed-tools", filePath, diagnostics);
 	let content: string;
@@ -738,7 +718,7 @@ function loadSkillFile(
 		pathSubject,
 		trusted: root.trusted ?? true,
 		precedence: root.precedence ?? defaultPrecedenceForScope(scope),
-		metadata: extractMetadata(parsed.frontmatter, filePath),
+		metadata: extractMetadata(parsed.frontmatter),
 		diagnostics,
 		...(provenance ? { provenance } : {}),
 	};

@@ -12,7 +12,7 @@ import {
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
 import { hpcToolchainFindings } from "./doctor-hpc.js";
-import { namingFootprintFindings } from "./doctor-naming.js";
+import { namingHistoryFindings } from "./doctor-naming.js";
 import { panesFindings } from "./doctor-panes.js";
 import { slurmMcpFindings } from "./doctor-slurm.js";
 import { stateStorageFinding } from "./doctor-state-size.js";
@@ -152,7 +152,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	// journal directory it is asked about, which is inside the state root doctor
 	// has already agreed not to build on an untouched home.
 	const paneChecks = untouched ? [] : await panesFindings();
-	const namingChecks = namingFootprintFindings({ fix, yaziEnabled: filesEnabled });
+	const namingChecks = namingHistoryFindings();
 	// The validation contract lives in the workspace, not the home, so it is
 	// checked on every run: a broken contract is why rigor stayed normal.
 	const contractChecks = [validationContractFinding(workspaceRoot)];

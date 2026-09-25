@@ -1,11 +1,10 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
 import { isSkillActivation, skillActivationFromToolDetails } from "../../src/core/skill-activation.js";
-import { inspectInstalledNamingResources } from "../../src/domains/lifecycle/naming-resources.js";
 import {
 	installSkillFromSource,
 	normalizedSkillHash,
@@ -35,14 +34,6 @@ function writeSkill(root: string, name: string, description: string | null, body
 		"utf8",
 	);
 	return directory;
-}
-
-function rewriteTextTree(root: string, transform: (raw: string, path: string) => string): void {
-	for (const entry of readdirSync(root, { withFileTypes: true })) {
-		const target = join(root, entry.name);
-		if (entry.isDirectory()) rewriteTextTree(target, transform);
-		else if (entry.isFile()) writeFileSync(target, transform(readFileSync(target, "utf8"), target), "utf8");
-	}
 }
 
 describe("skill install and activation boundary", () => {
@@ -83,41 +74,6 @@ describe("skill install and activation boundary", () => {
 		strictEqual(loaded.provenance?.installedHash, result.installedHash);
 		strictEqual(loaded.normalizedHash, normalizedSkillHash(readFileSync(join(source, "SKILL.md"), "utf8")));
 		match(readFileSync(result.path, "utf8"), /^clio-coder:$/mu);
-	});
-
-	it("renames only a provenance-proven shipped legacy skill and canonicalizes its metadata", () => {
-		const root = scratchRoot();
-		const project = join(root, "project");
-		const legacy = join(project, ".clio-coder", "skills", "clio-dev");
-		const packageRoot = process.cwd();
-		cpSync(join(packageRoot, "library", "skills", "meta", "clio-coder-dev"), legacy, { recursive: true });
-		rewriteTextTree(legacy, (raw, file) => {
-			let released = raw
-				.replaceAll("clio-coder-dev", "clio-dev")
-				.replaceAll("clio-coder-test", "clio-test")
-				.replace(/^clio-coder:/gmu, "clio:");
-			if (file.endsWith("SKILL.md")) {
-				const hash = normalizedSkillHash(released);
-				released = released.replace(/^clio:$/mu, `clio:\n  installed-hash: "${hash}"`);
-			}
-			return released;
-		});
-
-		const reports = inspectInstalledNamingResources({
-			cwd: project,
-			configDir: join(root, "config"),
-			packageRoot,
-			fix: true,
-		});
-		ok(reports.some((entry) => entry.legacyPath === legacy && entry.status === "renamed"));
-		strictEqual(existsSync(legacy), false);
-		const canonical = join(project, ".clio-coder", "skills", "clio-coder-dev", "SKILL.md");
-		match(readFileSync(canonical, "utf8"), /^name: clio-coder-dev$/mu);
-		match(readFileSync(canonical, "utf8"), /^clio-coder:$/mu);
-		const loaded = loadSkills({ cwd: project }).items.find((skill) => skill.name === "clio-coder-dev");
-		ok(loaded !== undefined);
-		strictEqual(loaded.source, "clio-coder");
-		ok(typeof loaded.metadata.clioCoder === "object");
 	});
 
 	it("preserves the installed copy when a forced replacement is invalid", () => {

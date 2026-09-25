@@ -31,8 +31,6 @@ export interface TargetCacheSettings {
 	warm?: { startup?: boolean; maxInputTokens?: number; maxDurationMs?: number; cooldownMs?: number };
 }
 
-// Canonical persisted lifecycle name. Readers temporarily normalize the
-// released `clio-managed` spelling at the settings boundary.
 export type TargetLifecycle = "user-managed" | "clio-coder-managed";
 
 /**
