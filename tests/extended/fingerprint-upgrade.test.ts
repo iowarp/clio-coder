@@ -1,20 +1,16 @@
-import { deepStrictEqual, notStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { chmodSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { enumerateWorkspaceFiles } from "../../src/core/workspace-files.js";
 import { codewikiPath, writeCodewiki } from "../../src/domains/context/codewiki/artifact.js";
-import { executeCodewikiBuild } from "../../src/domains/context/codewiki/build-operation.js";
+import { executeCodewikiBuildOutcome } from "../../src/domains/context/codewiki/build-operation.js";
 import { buildCodewiki, updateCodewikiPaths } from "../../src/domains/context/codewiki/indexer.js";
 import { isIndexablePath } from "../../src/domains/context/codewiki/paths.js";
 import type { Codewiki } from "../../src/domains/context/codewiki/schema.js";
 import { EXCLUDED_DIRS } from "../../src/domains/context/excluded-dirs.js";
-import {
-	computeFingerprint,
-	computeFingerprintAsync,
-	computeFingerprintCached,
-} from "../../src/domains/context/fingerprint.js";
+import { computeFingerprint, computeFingerprintCached } from "../../src/domains/context/fingerprint.js";
 import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
 import { readClioState, statePath, writeClioState } from "../../src/domains/context/state.js";
 import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
@@ -128,7 +124,7 @@ describe("context fingerprint upgrade", () => {
 		const current = await buildCodewiki({ cwd, language: "typescript" });
 		const previous = { ...computeFingerprint(cwd, current), treeHash: legacyTreeHash(cwd) };
 		const reads: string[] = [];
-		const result = await executeCodewikiBuild(
+		const result = await executeCodewikiBuildOutcome(
 			{ kind: "ensure", cwd, current, previous },
 			{
 				readFile: (path) => {
@@ -141,7 +137,7 @@ describe("context fingerprint upgrade", () => {
 		strictEqual(result.codewiki, current);
 		strictEqual(result.changed, true);
 		notStrictEqual(result.fingerprint.treeHash, previous.treeHash);
-		const next = await executeCodewikiBuild(
+		const next = await executeCodewikiBuildOutcome(
 			{ kind: "ensure", cwd, current, previous: result.fingerprint },
 			{
 				readFile: () => {
@@ -169,11 +165,11 @@ describe("context fingerprint upgrade", () => {
 		strictEqual(legacyTreeHash(cwd, "clio-codewiki-tree:v2\n"), metadata);
 		const after = computeFingerprint(cwd, current);
 		notStrictEqual(after.treeHash, before.treeHash);
-		deepStrictEqual(await computeFingerprintAsync(cwd, current), after);
 		deepStrictEqual(computeFingerprintCached(cwd, current), before);
 		t.mock.timers.tick(5_000);
 		deepStrictEqual(computeFingerprintCached(cwd, current), after);
-		const result = await executeCodewikiBuild({ kind: "ensure", cwd, current, previous: before });
+		const result = await executeCodewikiBuildOutcome({ kind: "ensure", cwd, current, previous: before });
+		ok(result.codewiki);
 		ok(result.codewiki.symbols.some((symbol) => symbol.name === "after_"));
 		deepStrictEqual(result.fingerprint, computeFingerprint(cwd, result.codewiki));
 	});
@@ -184,7 +180,7 @@ describe("context fingerprint upgrade", () => {
 		writeFileSync(path, "export const current = true;\n");
 		const current = await buildCodewiki({ cwd, language: "typescript" });
 		const previous = { ...computeFingerprint(cwd, current), treeHash: legacyTreeHash(cwd, "clio-codewiki-tree:v2\n") };
-		const result = await executeCodewikiBuild({ kind: "ensure", cwd, current, previous });
+		const result = await executeCodewikiBuildOutcome({ kind: "ensure", cwd, current, previous });
 		strictEqual(result.changed, true);
 		notStrictEqual(result.fingerprint.treeHash, previous.treeHash);
 		if (process.platform !== "win32" && process.getuid?.() !== 0) {
@@ -194,7 +190,6 @@ describe("context fingerprint upgrade", () => {
 			chmodSync(path, 0);
 			try {
 				throws(() => computeFingerprint(cwd, current), { code: "EACCES" });
-				await rejects(computeFingerprintAsync(cwd, current), { code: "EACCES" });
 				const prompt = renderPromptContext(cwd);
 				ok(prompt.text.includes("Keep authored guidance."));
 				ok(prompt.text.includes("available (stale; run /context refresh)"));
@@ -206,11 +201,10 @@ describe("context fingerprint upgrade", () => {
 	});
 
 	for (const hasSource of [false, true]) {
-		it(`keeps sync, async, and cached fingerprints equal for ${hasSource ? "populated" : "empty"} trees`, async () => {
+		it(`keeps sync and cached fingerprints equal for ${hasSource ? "populated" : "empty"} trees`, async () => {
 			const cwd = isolated.dir;
 			if (hasSource) writeFileSync(join(cwd, "a.ts"), "export const present = true;\n");
 			const fingerprint = computeFingerprint(cwd, null);
-			deepStrictEqual(await computeFingerprintAsync(cwd, null), fingerprint);
 			deepStrictEqual(computeFingerprintCached(cwd, null), fingerprint);
 			deepStrictEqual(computeFingerprintCached(cwd, null), fingerprint);
 			notStrictEqual(fingerprint.treeHash, legacyTreeHash(cwd));

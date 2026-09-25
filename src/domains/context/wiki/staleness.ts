@@ -1,9 +1,6 @@
-import { execFile, execFileSync } from "node:child_process";
-import { promisify } from "node:util";
+import { execFileSync } from "node:child_process";
 import { readWikiMeta, type WikiMeta } from "./meta.js";
-import { captureWikiSourceContent, captureWikiSourceContentAsync, wikiSourcesMatch } from "./source-content.js";
-
-const execFileAsync = promisify(execFile);
+import { captureWikiSourceContent, wikiSourcesMatch } from "./source-content.js";
 
 export type WikiStaleness =
 	| { state: "absent"; warning?: string }
@@ -23,16 +20,6 @@ function currentGitHead(cwd: string): string | null {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "ignore"],
 		}).trim();
-		return out.length > 0 ? out : null;
-	} catch {
-		return null;
-	}
-}
-
-async function currentGitHeadAsync(cwd: string): Promise<string | null> {
-	try {
-		const { stdout } = await execFileAsync("git", ["rev-parse", "--verify", "HEAD"], { cwd, encoding: "utf8" });
-		const out = stdout.trim();
 		return out.length > 0 ? out : null;
 	} catch {
 		return null;
@@ -79,23 +66,6 @@ export function changedPathsSince(cwd: string, gitHead: string | null): string[]
 	}
 }
 
-async function collectChangedPathsAsync(cwd: string, gitHead: string): Promise<Set<string>> {
-	const run = async (args: string[]): Promise<string> => {
-		const { stdout } = await execFileAsync("git", args, { cwd, encoding: "utf8" });
-		return stdout;
-	};
-	const [committed, trackedWorking, untracked] = await Promise.all([
-		run(["diff", "--name-only", "-z", `${gitHead}..HEAD`]),
-		run(["diff", "--name-only", "-z", "HEAD"]),
-		run(["ls-files", "--others", "--exclude-standard", "-z"]),
-	]);
-	return new Set([
-		...splitNullTerminatedPaths(committed),
-		...splitNullTerminatedPaths(trackedWorking),
-		...splitNullTerminatedPaths(untracked),
-	]);
-}
-
 type ChangedFileCount = { count: number; warning?: string } | { warning: string };
 
 function capChangedPaths(paths: Set<string>): ChangedFileCount {
@@ -111,14 +81,6 @@ const CHANGED_COUNT_FAILURE = "wiki staleness unavailable: git diff failed for t
 function changedFileCount(cwd: string, gitHead: string): ChangedFileCount {
 	try {
 		return capChangedPaths(collectChangedPaths(cwd, gitHead));
-	} catch {
-		return { warning: CHANGED_COUNT_FAILURE };
-	}
-}
-
-async function changedFileCountAsync(cwd: string, gitHead: string): Promise<ChangedFileCount> {
-	try {
-		return capChangedPaths(await collectChangedPathsAsync(cwd, gitHead));
 	} catch {
 		return { warning: CHANGED_COUNT_FAILURE };
 	}
@@ -183,27 +145,5 @@ export function wikiStaleness(cwd: string): WikiStaleness {
 	if (wikiSourcesMatch(meta.plan?.sourceContent, captureWikiSourceContent(cwd)) && head === meta.gitHead) {
 		return { state: "fresh" };
 	}
-	return { state: "stale", changedFiles: diff.count, ...(diff.warning ? { warning: diff.warning } : {}) };
-}
-
-/**
- * Same verdict, off the event loop. The sync form costs a `git rev-parse`, a
- * bounded workspace content read, and three more `git` subprocesses, which is
- * a fifth of a second on a large repository. That is fine for a one-shot CLI
- * read and unacceptable for a status surface that polls, which is what this
- * variant exists for.
- */
-export async function wikiStalenessAsync(cwd: string): Promise<WikiStaleness> {
-	const meta = readWikiMeta(cwd);
-	if (!meta) return { state: "absent" };
-	const pending = pendingRefresh(meta);
-	if (pending) return pending;
-	if (!meta.gitHead) return unavailableStaleness(MISSING_RECORDED_HEAD);
-	const head = await currentGitHeadAsync(cwd);
-	if (!head) return unavailableStaleness(MISSING_CURRENT_HEAD);
-	const diff = await changedFileCountAsync(cwd, meta.gitHead);
-	if (!("count" in diff)) return unavailableStaleness(diff.warning);
-	if (wikiSourcesMatch(meta.plan?.sourceContent, await captureWikiSourceContentAsync(cwd)) && head === meta.gitHead)
-		return { state: "fresh" };
 	return { state: "stale", changedFiles: diff.count, ...(diff.warning ? { warning: diff.warning } : {}) };
 }

@@ -51,9 +51,7 @@ export {
 export { CODEWIKI_VERSION } from "./codewiki/schema.js";
 export type { ContextContract, ContextState, ProjectPromptContext, ProjectStructuredContext } from "./contract.js";
 export {
-	type ComputeFingerprintAsyncOptions,
 	computeFingerprint,
-	computeFingerprintAsync,
 	isStale,
 } from "./fingerprint.js";
 export {
@@ -154,5 +152,4 @@ export {
 	wikiCompleteness,
 	wikiCompletenessFromMeta,
 	wikiStaleness,
-	wikiStalenessAsync,
 } from "./wiki/staleness.js";

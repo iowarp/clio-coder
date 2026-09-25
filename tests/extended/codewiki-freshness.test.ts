@@ -6,10 +6,7 @@ import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { runContextClear } from "../../src/domains/context/clear.js";
 import { codewikiPath, readCodewiki } from "../../src/domains/context/codewiki/artifact.js";
-import {
-	executeCodewikiBuild,
-	executeCodewikiBuildOutcome,
-} from "../../src/domains/context/codewiki/build-operation.js";
+import { executeCodewikiBuildOutcome } from "../../src/domains/context/codewiki/build-operation.js";
 import { coordinateCodewikiWrite } from "../../src/domains/context/codewiki/coordinator.js";
 import { buildCodewiki, syncCodewiki, updateCodewikiPaths } from "../../src/domains/context/codewiki/indexer.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
@@ -179,7 +176,7 @@ describe("codewiki global freshness", () => {
 		const previous = computeFingerprint(cwd, current);
 		for (const paths of [["README.md"], ["a.ts"]]) {
 			const reads: string[] = [];
-			const result = await executeCodewikiBuild(
+			const result = await executeCodewikiBuildOutcome(
 				{ kind: "incremental", cwd, current, paths, previous },
 				{
 					readFile: (path) => {
@@ -199,7 +196,7 @@ describe("codewiki global freshness", () => {
 			strictEqual(result.changed, false);
 			deepStrictEqual(reads, paths[0] === "a.ts" ? [join(cwd, "a.ts")] : []);
 		}
-		const ensured = await executeCodewikiBuild(
+		const ensured = await executeCodewikiBuildOutcome(
 			{ kind: "ensure", cwd, current, previous },
 			{
 				readFile: () => {
@@ -368,7 +365,7 @@ describe("codewiki global freshness", () => {
 			writeFileSync(path, "export function before() {}\n");
 			const current = await buildCodewiki({ cwd, language: "typescript" });
 			let reads = 0;
-			const result = await executeCodewikiBuild(
+			const result = await executeCodewikiBuildOutcome(
 				kind === "build"
 					? { kind, cwd, language: "typescript" }
 					: kind === "ensure"
@@ -384,6 +381,7 @@ describe("codewiki global freshness", () => {
 				},
 			);
 			strictEqual(reads, 2);
+			ok(result.codewiki);
 			ok(result.codewiki.symbols.some((symbol) => symbol.name === "afterLonger"));
 			deepStrictEqual(result.fingerprint, computeFingerprint(cwd, result.codewiki));
 		});
@@ -395,7 +393,7 @@ describe("codewiki global freshness", () => {
 			writeFileSync(join(cwd, "a.ts"), "export const a = true;\n");
 			if (mutation === "delete") writeFileSync(join(cwd, "b.ts"), "export const b = true;\n");
 			let changed = false;
-			const result = await executeCodewikiBuild(
+			const result = await executeCodewikiBuildOutcome(
 				{ kind: "build", cwd, language: "typescript" },
 				{
 					readFile: (source) => {
@@ -423,7 +421,7 @@ describe("codewiki global freshness", () => {
 		const state = readFileSync(join(cwd, ".clio-coder", "state.json"), "utf8");
 		let reads = 0;
 		await rejects(
-			executeCodewikiBuild(
+			executeCodewikiBuildOutcome(
 				{ kind: "build", cwd, language: "typescript" },
 				{
 					readFile: (source) => {
@@ -438,7 +436,7 @@ describe("codewiki global freshness", () => {
 		);
 		strictEqual(reads, 3);
 		await rejects(
-			executeCodewikiBuild({ kind: "build", cwd, language: "typescript" }, { readFile: () => null }),
+			executeCodewikiBuildOutcome({ kind: "build", cwd, language: "typescript" }, { readFile: () => null }),
 			/did not stabilize/,
 		);
 		strictEqual(readFileSync(codewikiPath(cwd), "utf8"), committed);

@@ -7,7 +7,7 @@ import { computeFingerprint } from "../../src/domains/context/fingerprint.js";
 import { runWikiGenerate, type WikiGenerate } from "../../src/domains/context/wiki/generate.js";
 import { readWikiMeta, writeWikiMeta } from "../../src/domains/context/wiki/meta.js";
 import { writeWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
-import { changedPathsSince, wikiStaleness, wikiStalenessAsync } from "../../src/domains/context/wiki/staleness.js";
+import { changedPathsSince, wikiStaleness } from "../../src/domains/context/wiki/staleness.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("wiki source freshness without a usable Git comparison", () => {
@@ -63,7 +63,6 @@ describe("wiki source freshness without a usable Git comparison", () => {
 	}
 	async function assertVerdict(state: "fresh" | "stale") {
 		const sync = wikiStaleness(cwd);
-		assert.deepEqual(await wikiStalenessAsync(cwd), sync);
 		assert.equal(sync.state, state);
 		return sync;
 	}

@@ -9,7 +9,7 @@ import { runWikiGenerate } from "../../src/domains/context/wiki/generate.js";
 import { computeWikiContentHash, readWikiMeta } from "../../src/domains/context/wiki/meta.js";
 import type { WikiPlan, WikiPlanPage } from "../../src/domains/context/wiki/plan.js";
 import { readWikiPlanFile, sanitizeWikiPlan, writeWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
-import { wikiCompleteness, wikiStaleness, wikiStalenessAsync } from "../../src/domains/context/wiki/staleness.js";
+import { wikiCompleteness, wikiStaleness } from "../../src/domains/context/wiki/staleness.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { JobSpec } from "../../src/domains/dispatch/validation.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -257,7 +257,7 @@ describe("wiki generation outcomes", () => {
 			writeFileSync(join(cwd, path), value);
 			utimesSync(join(cwd, path), before.atime, before.mtime);
 			assert.equal(wikiStaleness(cwd).state, "stale");
-			assert.equal((await wikiStalenessAsync(cwd)).state, "stale");
+			assert.equal(wikiStaleness(cwd).state, "stale");
 			const attempted: string[] = [];
 			await run(
 				generator((_spec, output) => {
@@ -324,7 +324,7 @@ describe("wiki generation outcomes", () => {
 		assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.status, "pending");
 		assert.equal(wikiCompleteness(cwd)?.owed, 1);
 		assert.equal(wikiStaleness(cwd).state, "stale");
-		assert.equal((await wikiStalenessAsync(cwd)).state, "stale");
+		assert.equal(wikiStaleness(cwd).state, "stale");
 		assert.match(readFileSync(join(cwd, ".clio-coder/wiki/a.md"), "utf8"), /a version 1/u);
 	});
 	it("persists new pending pages and attempts when page content is unchanged", async () => {
