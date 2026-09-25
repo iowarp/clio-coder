@@ -246,10 +246,12 @@ import {
 } from "./path-scope.js";
 import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
+import type { VerifyCallOutcome } from "./receipt-findings.js";
 import {
 	createRunReceiptQuality,
 	deriveReceiptVerification,
-	typedValidationFactsFromToolStats,
+	typedValidationFactsFromVerifyCalls,
+	verifyCheckIdentity,
 } from "./receipt-findings.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
@@ -732,6 +734,38 @@ function recordWorkerRunEffect(recorder: RunEffectsRecorder, event: Record<strin
 		return;
 	}
 	if (event.type === "tool_execution_end") recorder.finish(toolCallId, event.isError === true);
+}
+
+interface VerifyCallLog {
+	/** Check identity of each started `verify` call, by engine call id, until its finish arrives. */
+	pending: Map<string, string | null>;
+	calls: VerifyCallOutcome[];
+}
+
+/**
+ * Tie each finished `verify` call to the check it ran. The engine start event
+ * carries the arguments and the Clio finish carries the authoritative outcome;
+ * the engine's own `isError` cannot tell a blocked call, which never ran the
+ * check, from one that ran and failed. The two are joined on the call id.
+ * BT-017: the receipt judges each check by its latest run.
+ */
+function recordWorkerVerifyCall(log: VerifyCallLog, event: Record<string, unknown>): void {
+	if (event.type === "tool_execution_start") {
+		const toolCallId = readStringOrNull(event.toolCallId);
+		if (toolCallId === null || readStringOrNull(event.toolName) !== ToolNames.Verify) return;
+		log.pending.set(toolCallId, verifyCheckIdentity(event.args));
+		return;
+	}
+	if (event.type !== "clio_coder_tool_finish" || !isRecord(event.payload)) return;
+	if (event.payload.tool !== ToolNames.Verify) return;
+	const toolCallId = readStringOrNull(event.payload.toolCallId);
+	const check = toolCallId === null ? null : (log.pending.get(toolCallId) ?? null);
+	if (toolCallId !== null) log.pending.delete(toolCallId);
+	const outcome = event.payload.outcome;
+	log.calls.push({
+		check,
+		outcome: outcome === "ok" || outcome === "error" || outcome === "blocked" ? outcome : null,
+	});
 }
 
 /**
@@ -5406,6 +5440,7 @@ export function createDispatchBundle(
 		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
 		const skillActivations: SkillActivation[] = [];
 		const finishContractEntries: unknown[] = [];
+		const verifyCalls: VerifyCallLog = { pending: new Map(), calls: [] };
 		let runIdForPermissionAudit: string | null = null;
 		// The worker's own tool calls, folded into what this run changed and what
 		// it validated. The sealed mutation-report contract is measured against
@@ -5538,6 +5573,7 @@ export function createDispatchBundle(
 					finishContractAssistantTurnId = finishEntry.assistantTurnId;
 				}
 				recordWorkerRunEffect(runEffects, event);
+				recordWorkerVerifyCall(verifyCalls, event);
 			}
 			if (
 				event.type === "clio_coder_permission_escalated" &&
@@ -5944,6 +5980,7 @@ export function createDispatchBundle(
 				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
 			const protectedArtifacts = protectedArtifactReceiptSummary(spec.protectedArtifactState);
 			const finalToolStats = snapshotToolStats(toolStats);
+			const typedValidations = typedValidationFactsFromVerifyCalls(finalToolStats, verifyCalls.calls);
 			const unfinished = snapshotUnfinishedTools(inFlightTools);
 			const telemetryIngestionErrors = toolTelemetryIngestionErrors + malformedWorkerStdoutLineCount(result);
 			const workspaceMutationPossible =
@@ -6036,7 +6073,7 @@ export function createDispatchBundle(
 				toolStats: finalToolStats,
 				toolActivity,
 				verification: deriveReceiptVerification(
-					{ toolStats: finalToolStats },
+					{ toolStats: finalToolStats, typedValidations },
 					{ capabilityClass: lifecycle.capabilityClass },
 				),
 				routingIntent: req.routingIntent ?? defaultRoutingIntent(req),
@@ -6048,7 +6085,7 @@ export function createDispatchBundle(
 						lifecycle.target.modelCapabilities?.structuredOutputs === "json-schema",
 					enforcementPassed:
 						req.responseSchema === undefined ? null : outcome === "succeeded" && capturedOutput?.state === "final",
-					typedValidations: typedValidationFactsFromToolStats(finalToolStats),
+					typedValidations,
 					resultContract,
 				}),
 				...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
