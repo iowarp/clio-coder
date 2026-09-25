@@ -8,7 +8,8 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { APPROVAL_NOTE_PREFIX, approvalNote, OPERATOR_APPROVAL_NOTE_PREFIX } from "../../src/tools/approval-note.js";
-import { createRegistry } from "../../src/tools/registry.js";
+import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
+import { toolResultContextText } from "../../src/tools/result-disposition.js";
 import { writeTool } from "../../src/tools/write.js";
 
 /**
@@ -39,11 +40,28 @@ describe("a granted call tells the model who granted it", () => {
 		rmSync(base, { recursive: true, force: true });
 	});
 
-	function defaultRegistry() {
+	function defaultRegistry(spec: ToolSpec = writeTool) {
 		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "default" });
-		registry.register(writeTool);
+		registry.register(spec);
 		return registry;
 	}
+
+	/**
+	 * A tool that declares a result disposition, as bash does. The model reads
+	 * its `modelContext` projection instead of `output`, which is where the
+	 * live BT-003 retest lost the note: the TUI showed the grant and the model
+	 * read a `[tool-result bounded]` header with no approval line.
+	 */
+	const dispositionedWrite: ToolSpec = {
+		...writeTool,
+		metadata: {
+			...(writeTool.metadata ?? {}),
+			resultDisposition: {
+				presentation: { foldDefault: "folded", showDiffWhenFolded: false, failureExcerpt: true, maxBytes: 8_192 },
+				context: { mode: "bounded", maxBytes: 4_096 },
+			},
+		},
+	} as ToolSpec;
 
 	async function settledWithin<T>(promise: Promise<T>, ms: number): Promise<T | "pending"> {
 		let timer: NodeJS.Timeout | undefined;
@@ -58,8 +76,8 @@ describe("a granted call tells the model who granted it", () => {
 	}
 
 	/** Park an outside-workspace write, release it from `requestedBy`, and return the model-facing text. */
-	async function grantedText(requestedBy: string): Promise<string> {
-		const registry = defaultRegistry();
+	async function grantedText(requestedBy: string, spec: ToolSpec = writeTool): Promise<string> {
+		const registry = defaultRegistry(spec);
 		const asked: Array<{ actionClass: ActionClass; requestId: string }> = [];
 		registry.onPermissionRequired((_call, decision, meta) => {
 			asked.push({ actionClass: decision.classification.actionClass, requestId: meta.requestId });
@@ -75,7 +93,7 @@ describe("a granted call tells the model who granted it", () => {
 		const settled = await verdict;
 		strictEqual(settled.kind, "ok", requestedBy);
 		if (settled.kind !== "ok") return "";
-		return settled.result.kind === "ok" ? settled.result.output : settled.result.message;
+		return toolResultContextText(settled.result);
 	}
 
 	it("keeps the BT-003 operator wording for the TUI card", async () => {
@@ -86,6 +104,17 @@ describe("a granted call tells the model who granted it", () => {
 			),
 			text,
 		);
+	});
+
+	it("reaches the model through a dispositioned tool's bounded projection", async () => {
+		const text = await grantedText("tool:one_shot", dispositionedWrite);
+		ok(
+			text.startsWith(
+				`${OPERATOR_APPROVAL_NOTE_PREFIX} The operator approved this system_modify call once (rail: system-modify-confirm).`,
+			),
+			text,
+		);
+		match(text, /\[tool-result /u);
 	});
 
 	it("names a forwarded worker escalation as the operator answering", async () => {
