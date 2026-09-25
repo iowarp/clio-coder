@@ -882,11 +882,9 @@ export const SETTINGS_V1_PATH_MOVES = Object.freeze([
 	["delegation.agents[].env.*", "integrations.externalAgents.entries[].env.*"],
 	["delegation.agents[].connectTimeoutMs", "integrations.externalAgents.entries[].connectTimeoutMs"],
 	["delegation.agents[].turnTimeoutMs", "integrations.externalAgents.entries[].turnTimeoutMs"],
-	["delegation.agents[].permissionTimeoutMs", "integrations.externalAgents.entries[].permissionTimeoutMs"],
 	["delegation.agents[].stallTimeoutMs", "integrations.externalAgents.entries[].stallTimeoutMs"],
 	["delegation.agents[].toolGovernance", "integrations.externalAgents.entries[].toolGovernance"],
 	["delegation.agents[].projectContext", "integrations.externalAgents.entries[].projectContext"],
-	["delegation.agents[].labels.*", "integrations.externalAgents.entries[].labels.*"],
 	["runtimePlugins[]", "integrations.runtimePlugins[]"],
 	["library.catalog", "integrations.library.catalog"],
 	["library.remote", "integrations.library.remote"],
@@ -896,11 +894,22 @@ export const SETTINGS_V1_PATH_MOVES = Object.freeze([
 	["fleet.nodes[].clioEntry", "fleet.nodes[].clioCoderEntry"],
 ] as const);
 
+const EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED =
+	"a delegated agent's permission ask is decided at once and never waits for the operator; integrations.externalAgents.defaults.permissionTimeoutMs still bounds Clio's own ACP server";
+const EXTERNAL_AGENT_LABELS_RETIRED = "nothing read or displayed external agent labels";
+
 export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	identity: "it was accepted and ignored; no behavior is lost",
 	"background.thinkingLevel": "proactive memory always resolves thinking off",
 	theme: "the only registered theme was not read by runtime rendering",
 	"compaction.excludeLastTurns": "only the temporary legacy mask used it; context.workingSet.protectLastTurns remains",
+	"delegation.agents[].permissionTimeoutMs": EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED,
+	"delegation.agents[].labels": EXTERNAL_AGENT_LABELS_RETIRED,
+	// Version-2 keys retired without a replacement. They share this table so a
+	// file naming one gets the same targeted removal message.
+	"integrations.externalAgents.entries[].permissionTimeoutMs": EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED,
+	"integrations.externalAgents.entries[].labels": EXTERNAL_AGENT_LABELS_RETIRED,
+	"fleet.decisionProfiles.routing": "dispatch routes every task with its rules and never asks a decision model",
 } as const);
 
 const V1_ONLY_ROOTS = new Set([
@@ -1071,6 +1080,8 @@ function validateExternalAgent(
 		issues.add(path, `expected a map, got ${describe(value)}`);
 		return null;
 	}
+	// permissionTimeoutMs and labels are retired; they stay known here so the
+	// tombstone's removal message is the one issue their path gets.
 	issues.unknownKeys(path, value, [
 		"id",
 		"command",
@@ -1105,14 +1116,13 @@ function validateExternalAgent(
 		args: [],
 		connectTimeoutMs: defaults.connectTimeoutMs,
 		turnTimeoutMs: defaults.turnTimeoutMs,
-		permissionTimeoutMs: defaults.permissionTimeoutMs,
 		toolGovernance: defaults.toolGovernance,
 	};
 	if ("args" in value) {
 		const parsed = expectStringArray(issues, `${path}.args`, value.args);
 		if (parsed !== undefined) agent.args = parsed;
 	}
-	for (const key of ["connectTimeoutMs", "turnTimeoutMs", "permissionTimeoutMs"] as const) {
+	for (const key of ["connectTimeoutMs", "turnTimeoutMs"] as const) {
 		if (!(key in value)) continue;
 		const parsed = expectInteger(issues, `${path}.${key}`, value[key], {
 			min: key === "turnTimeoutMs" ? 0 : 1,
@@ -1137,10 +1147,9 @@ function validateExternalAgent(
 		const parsed = expectString(issues, `${path}.${key}`, value[key]);
 		if (parsed !== undefined) agent[key] = parsed;
 	}
-	for (const key of ["env", "labels"] as const) {
-		if (!(key in value)) continue;
-		const parsed = expectStringRecord(issues, `${path}.${key}`, value[key]);
-		if (parsed !== undefined && Object.keys(parsed).length > 0) agent[key] = parsed;
+	if ("env" in value) {
+		const parsed = expectStringRecord(issues, `${path}.env`, value.env);
+		if (parsed !== undefined && Object.keys(parsed).length > 0) agent.env = parsed;
 	}
 	return agent;
 }
@@ -1525,6 +1534,8 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				const bindings: ClioSettings["fleet"]["decisionProfiles"] = {};
 				for (const [rawSite, rawProfileName] of Object.entries(rawFleet.decisionProfiles)) {
 					const site = rawSite.trim();
+					// A retired site is reported by the tombstone check, once.
+					if (Object.hasOwn(SETTINGS_V1_RETIRED_PATHS, `fleet.decisionProfiles.${site}`)) continue;
 					if (!DECISION_SITES.includes(site as DecisionSite)) {
 						issues.add(
 							"fleet.decisionProfiles",

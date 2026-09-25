@@ -217,6 +217,8 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 
 The retired v1-only paths `identity`, `background.thinkingLevel`, `theme`, and `compaction.excludeLastTurns` have no v2 replacement. Fresh v2 files naming them receive targeted removal diagnostics. The v1 migrator drops them with the reason recorded in its migration report; they are tombstones, not executable aliases.
 
+Three version-2 keys are retired the same way. `integrations.externalAgents.entries[].permissionTimeoutMs` did nothing, because a delegated agent's permission ask is decided at once and never waits for the operator; `integrations.externalAgents.defaults.permissionTimeoutMs` still bounds Clio's own ACP server. `integrations.externalAgents.entries[].labels` was never read or displayed. `fleet.decisionProfiles.routing` bound a site dispatch never asks, because dispatch routes every task with its rules. A user `settings.yaml` naming any of them is refused with a targeted removal message, and a project or local layer drops the leaf with the same diagnostic. The v1 migrator drops the two per-agent keys from moved `delegation.agents` entries and records why.
+
 ---
 
 ## Configure targets

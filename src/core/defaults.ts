@@ -64,9 +64,8 @@ export type FleetAgentProfiles = Record<string, string>;
 
 /**
  * Harness decisions a System One model may answer instead of a chat model.
- * Each names a moment in the turn, not an agent: `routing` is retired, still
- * accepted and never asked, because dispatch never awaits a decision model; `skills` and
- * `memory` narrow what the prompt carries,
+ * Each names a moment in the turn, not an agent: `skills` and `memory` narrow
+ * what the prompt carries,
  * `toolRisk` rates a command's blast radius for the approval prompt,
  * `drafts` picks the strongest of the candidates `/draft` generated,
  * `turnScope` and `dispatchForecast` hint the main agent before a turn about
@@ -76,7 +75,6 @@ export type FleetAgentProfiles = Record<string, string>;
  * for every choice; a site only informs it.
  */
 export const DECISION_SITES = [
-	"routing",
 	"skills",
 	"memory",
 	"toolRisk",
@@ -368,7 +366,6 @@ export interface DelegationAgentConfig {
 	connectTimeoutMs?: number;
 	/** Explicit elapsed turn deadline; 0 (default) leaves work to completion/stall/cancel. */
 	turnTimeoutMs?: number;
-	permissionTimeoutMs?: number;
 	/**
 	 * Event-inactivity stall window: when no session/update arrives for this
 	 * long, the reconciler cancels the turn and finalizes the run as stalled.
@@ -382,7 +379,6 @@ export interface DelegationAgentConfig {
 	 * unless the operator opts this agent into the bounded projection.
 	 */
 	projectContext?: "none" | "bounded";
-	labels?: Record<string, string>;
 }
 
 export interface DelegationDefaults {

@@ -30,9 +30,9 @@ const noProviders = {} as ProvidersContract;
 
 describe("fleet.decisionProfiles validation", () => {
 	it("accepts a site bound to a defined profile", () => {
-		const { settings, issues } = settingsWith({ routing: "system-one" });
+		const { settings, issues } = settingsWith({ skills: "system-one" });
 		deepStrictEqual(issues, []);
-		strictEqual(settings.fleet.decisionProfiles.routing, "system-one");
+		strictEqual(settings.fleet.decisionProfiles.skills, "system-one");
 	});
 
 	it("leaves every site unbound by default", () => {
@@ -43,28 +43,28 @@ describe("fleet.decisionProfiles validation", () => {
 	// A typo in a site name would otherwise be silently inert, and the operator
 	// would be left debugging a feature they believe they enabled.
 	it("rejects an unknown decision site by name", () => {
-		const { settings, issues } = settingsWith({ rooting: "system-one" });
-		ok(issues.some((issue) => /unknown decision site 'rooting'/.test(issue.message)));
-		strictEqual(settings.fleet.decisionProfiles.routing, undefined);
+		const { settings, issues } = settingsWith({ skils: "system-one" });
+		ok(issues.some((issue) => /unknown decision site 'skils'/.test(issue.message)));
+		strictEqual(settings.fleet.decisionProfiles.skills, undefined);
 	});
 
 	// The binding must fail where the operator wrote it, not later at a call
 	// site that cannot explain which line was wrong.
 	it("rejects a profile that fleet.profiles does not define", () => {
-		const { settings, issues } = settingsWith({ routing: "does-not-exist" });
+		const { settings, issues } = settingsWith({ skills: "does-not-exist" });
 		ok(issues.some((issue) => /profile 'does-not-exist' is not defined/.test(issue.message)));
-		strictEqual(settings.fleet.decisionProfiles.routing, undefined);
+		strictEqual(settings.fleet.decisionProfiles.skills, undefined);
 	});
 
 	it("rejects a non-map decisionProfiles", () => {
-		const { issues } = validateSettings({ fleet: { decisionProfiles: ["routing"] } });
+		const { issues } = validateSettings({ fleet: { decisionProfiles: ["skills"] } });
 		ok(issues.some((issue) => issue.path === "fleet.decisionProfiles"));
 	});
 
 	it("names every site the harness knows", () => {
 		deepStrictEqual(
 			[...DECISION_SITES],
-			["routing", "skills", "memory", "toolRisk", "drafts", "turnScope", "dispatchForecast", "capabilities", "consult"],
+			["skills", "memory", "toolRisk", "drafts", "turnScope", "dispatchForecast", "capabilities", "consult"],
 		);
 	});
 });
@@ -295,7 +295,7 @@ describe("decision site resolution", () => {
 	// until an operator binds the site.
 	it("resolves an unbound site to null without consulting providers", () => {
 		const { settings } = settingsWith({});
-		strictEqual(resolveDecider("routing", { settings, providers: noProviders, ctx }), null);
+		strictEqual(resolveDecider("skills", { settings, providers: noProviders, ctx }), null);
 		deepStrictEqual(inspectDecisionSite("memory", { settings, providers: noProviders, ctx }), {
 			bound: false,
 			reason: "unbound",
@@ -338,30 +338,30 @@ describe("decision site resolution", () => {
 	});
 
 	it("reports a binding whose profile disappeared", () => {
-		const { settings } = settingsWith({ routing: "system-one" });
+		const { settings } = settingsWith({ skills: "system-one" });
 		delete settings.fleet.profiles["system-one"];
-		const status = inspectDecisionSite("routing", { settings, providers: noProviders, ctx });
+		const status = inspectDecisionSite("skills", { settings, providers: noProviders, ctx });
 		strictEqual(status.bound, false);
 		strictEqual(status.bound === false ? status.reason : null, "profile-missing");
 	});
 
 	it("reports a target that does not resolve", () => {
-		const { settings } = settingsWith({ routing: "system-one" });
+		const { settings } = settingsWith({ skills: "system-one" });
 		const providers = {
 			getTarget: () => null,
 		} as unknown as ProvidersContract;
-		const status = inspectDecisionSite("routing", { settings, providers, ctx });
+		const status = inspectDecisionSite("skills", { settings, providers, ctx });
 		strictEqual(status.bound, false);
 		strictEqual(status.bound === false ? status.reason : null, "target-unresolved");
 	});
 
 	it("reports a runtime the registry does not know", () => {
-		const { settings } = settingsWith({ routing: "system-one" });
+		const { settings } = settingsWith({ skills: "system-one" });
 		const providers = {
 			getTarget: () => ({ id: "jev", runtime: "typesafe-jev" }),
 			getRuntime: () => null,
 		} as unknown as ProvidersContract;
-		const status = inspectDecisionSite("routing", { settings, providers, ctx });
+		const status = inspectDecisionSite("skills", { settings, providers, ctx });
 		strictEqual(status.bound, false);
 		strictEqual(status.bound === false ? status.reason : null, "target-unresolved");
 	});
@@ -370,29 +370,29 @@ describe("decision site resolution", () => {
 	// decision binding through the conversational target resolver made every Jev
 	// target unresolvable and the whole setting inert.
 	it("binds a target that does not advertise chat", () => {
-		const { settings } = settingsWith({ routing: "system-one" });
+		const { settings } = settingsWith({ skills: "system-one" });
 		const providers = {
 			getTarget: () => ({ id: "jev", runtime: "typesafe-jev", defaultModel: "jev-latest" }),
 			getRuntime: () => typesafeJev,
 		} as unknown as ProvidersContract;
 		strictEqual(typesafeJev.defaultCapabilities.chat, false);
-		const status = inspectDecisionSite("routing", { settings, providers, ctx });
+		const status = inspectDecisionSite("skills", { settings, providers, ctx });
 		strictEqual(status.bound, true);
 		strictEqual(status.bound === true ? status.targetId : null, "jev");
 		strictEqual(status.bound === true ? status.model : null, "jev-latest");
-		ok(resolveDecider("routing", { settings, providers, ctx }));
+		ok(resolveDecider("skills", { settings, providers, ctx }));
 	});
 
 	// Declaring the capability and implementing the verb are separate claims, and
 	// a target bound here by mistake is likelier to be an ordinary chat model.
 	it("refuses a runtime that declares decisions but has no decide verb", () => {
 		const { decide: _decide, ...withoutVerb } = typesafeJev;
-		const { settings } = settingsWith({ routing: "system-one" });
+		const { settings } = settingsWith({ skills: "system-one" });
 		const providers = {
 			getTarget: () => ({ id: "jev", runtime: "typesafe-jev" }),
 			getRuntime: () => withoutVerb,
 		} as unknown as ProvidersContract;
-		const status = inspectDecisionSite("routing", { settings, providers, ctx });
+		const status = inspectDecisionSite("skills", { settings, providers, ctx });
 		strictEqual(status.bound, false);
 		strictEqual(status.bound === false ? status.reason : null, "runtime-cannot-decide");
 	});
