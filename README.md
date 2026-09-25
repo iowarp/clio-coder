@@ -185,14 +185,14 @@ you need it.
 <summary><strong>Scripts, CI and editors</strong></summary>
 
 ```bash
-clio-coder run --autonomy read-only "Summarize this repository's entry points."
+clio-coder run "Summarize this repository's entry points."
 clio-coder run --json --timeout 300 "Run the existing parser tests and report the results."
 ```
 
 Text mode writes the final answer to stdout and diagnostics to stderr. `--json`
-emits JSONL events and `--timeout` limits the run in seconds. Headless runs
-cannot answer permission prompts, so actions that still need confirmation are
-denied; choose the autonomy level before unattended work. See
+emits JSONL events and `--timeout` limits the run in seconds. A headless run
+cannot answer an approval prompt, so a call that would ask is denied; add
+`--autonomy yolo` only for unattended work you trust. See
 [output and exit codes](docs/guide/exit-codes-and-output.md).
 
 For an editor or agent host that speaks the Agent Client Protocol, configure it
@@ -218,26 +218,20 @@ explanations before committing to one; the requests count toward usage.
 
 ## Safety
 
-| Autonomy | What it allows |
-| --- | --- |
-| **capable** (default; saved as `auto-edit`) | Edit within permitted roots, dispatch workers, run recognized commands; ask for anything else. |
-| **yolo** (saved as `full-auto`) | Skip routine prompts, including outward actions; safety rules still apply. |
-| `read-only` | Inspect and answer; deny commands, edits and delegation. |
-| `suggest` | Inspect within the workspace; ask before edits, commands or delegation. |
+By default Clio edits inside your workspace and runs recognized checks such as
+your test runner. Anything unfamiliar waits for your approval on a card that
+shows the exact invocation.
 
-In the default mode a bare test runner runs directly. A test runner behind a
-pipe, redirect or `&&` chain, or a command Clio does not recognize, asks first,
-and the approval card shows the exact invocation. Settings offers **capable** and **yolo**; the CLI also accepts
-`read-only`, `suggest`, `auto-edit` and `full-auto`.
+**Yolo mode** (`clio-coder --autonomy yolo`, or **yolo** in `/settings`) clears
+those prompts, including for outward actions such as a push. Use it at your own
+discretion. The safety net stays on in yolo: banned commands are still blocked,
+damage-control rules still stop to confirm, and protected paths stay protected.
 
-**Clio is not an operating-system sandbox.** Commands run with your user's
-permissions. Protected paths, damage-control rules and explicit task constraints
-apply at every level. A passing check shows what ran and what it returned, not
-that the science is right: review changes and validate results against your own
-reference tests and data. Reported costs depend on available pricing data, and a
-Clio budget is not a provider billing cap. Read the
-[safety model](docs/architecture/safety-model.md) before unattended runs, and
-report security problems privately through [SECURITY.md](SECURITY.md).
+Clio is not an operating-system sandbox; commands run with your user's
+permissions. A passing check shows what ran, not that the science is right, so
+validate results against your own reference tests and data. See the
+[safety model](docs/architecture/safety-model.md), and report security problems
+privately through [SECURITY.md](SECURITY.md).
 
 ## Install
 
