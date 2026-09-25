@@ -1,4 +1,5 @@
 import { type Component, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
+import { dockBodyRows } from "./dock.js";
 import type { LeaderKeyState, LeaderTarget } from "./leader-key.js";
 import {
 	buildResponsiveHint,
@@ -18,7 +19,7 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: L
 		render(width) {
 			if (state.status === "idle") return [];
 			const selected = state.selected;
-			const count = Math.max(1, Math.min(10, tui.terminal.rows - 8));
+			const count = Math.max(1, Math.min(10, dockBodyRows(tui) - 2));
 			const [start, end] = centeredWindow(targets.length, selected, count);
 			const theme = clioTheme();
 			return [

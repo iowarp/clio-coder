@@ -18,6 +18,7 @@ import {
 } from "../../engine/tui.js";
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { cancelledAskUserResult } from "../../tools/ask-user.js";
+import { dockBodyRows } from "../dock.js";
 import {
 	buildHint,
 	DEFAULT_SELECT_THEME,
@@ -1289,7 +1290,8 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 
 	const view = new AskUserOverlayView({
 		...deps,
-		getTerminalRows: () => tui.terminal?.rows ?? 0,
+		// The dock budget, spelled as the terminal height the body subtracts its frame rows from.
+		getTerminalRows: () => dockBodyRows(tui) + ASK_USER_FRAME_AND_MARGIN_ROWS,
 		requestRender: () => tui.requestRender(),
 		tui,
 	});
@@ -1298,7 +1300,6 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 		anchor: "top-left",
 		width: "100%",
 		margin: 0,
-		fullscreen: true,
 		// Not derived from the title: this modal swaps between a waiting title
 		// and a classified decision title without ever changing hands.
 		markerId: "ask-user",

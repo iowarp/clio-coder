@@ -128,9 +128,6 @@ class RegularRoot implements Component {
 	 */
 	private heldPrefix: readonly string[] | null = null;
 	private heldPrefixAt = -1;
-	private frameWidth = -1;
-	private composerTop = 0;
-	private frameHeight = 0;
 
 	constructor(private readonly parts: LayoutParts) {}
 
@@ -167,17 +164,10 @@ class RegularRoot implements Component {
 			}
 		}
 		if (this.parts.pending) write(this.parts.pending.render(width));
-		this.composerTop = row;
 		write(this.parts.editor.render(width));
 		write(this.parts.footer.render(width));
 		out.length = row;
-		this.frameWidth = width;
-		this.frameHeight = row;
 		return out;
-	}
-
-	frameGeometry(width: number): { height: number; composerTop: number } | null {
-		return this.frameWidth === width ? { height: this.frameHeight, composerTop: this.composerTop } : null;
 	}
 
 	invalidate(): void {
@@ -188,17 +178,6 @@ class RegularRoot implements Component {
 		this.parts.editor.invalidate();
 		this.parts.footer.invalidate();
 	}
-}
-
-const regularRoots = new WeakMap<object, RegularRoot>();
-
-/** The overlay uses the geometry from the root the engine has already rendered. */
-export function registerRegularRoot(tui: object, root: Component): void {
-	if (root instanceof RegularRoot) regularRoots.set(tui, root);
-}
-
-export function regularFrameGeometry(tui: object, width: number): { height: number; composerTop: number } | null {
-	return regularRoots.get(tui)?.frameGeometry(width) ?? null;
 }
 
 export function buildLayout(parts: LayoutParts, options: LayoutOptions = {}): Component {

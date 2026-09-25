@@ -5,8 +5,7 @@ import {
 	type DecisionPresentation,
 	decisionFactsForPermission,
 } from "../domains/safety/decision-presentation.js";
-import { type Component, type OverlayOptions, type TUI, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
-import { regularFrameGeometry } from "./layout.js";
+import { type Component, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import {
 	MUTATION_PREVIEW_VISIBLE_ROWS,
 	type MutationFacts,
@@ -71,47 +70,6 @@ export interface ApprovalRequestView {
 const PERMISSION_OVERLAY_CONTENT_WIDTH = 78;
 
 export const PERMISSION_OVERLAY_WIDTH = PERMISSION_OVERLAY_CONTENT_WIDTH + 4;
-
-/**
- * Place a permission frame immediately above the live composer in both TUI
- * modes. The editor grows with wrapped and multiline drafts, while the footer
- * can add notice rows, so their rendered heights are the bottom dock rather
- * than a fixed clearance. Regular mode preserves terminal scrollback and may
- * leave that dock above the viewport bottom when the transcript is short.
- * Recompute its viewport row on every frame so draft changes and terminal
- * resizes move the dialog with the composer.
- */
-export function permissionOverlayPlacement(
-	tui: Pick<TUI, "mode" | "render">,
-	editor: Pick<Component, "render">,
-	footer: Pick<Component, "render">,
-): OverlayOptions {
-	const margin = { bottom: 0 };
-	return {
-		anchor: "bottom-center",
-		margin,
-		visible: (termWidth, termHeight) => {
-			if (tui.mode === "fullscreen") {
-				margin.bottom = editor.render(termWidth).length + footer.render(termWidth).length;
-				return true;
-			}
-
-			const geometry = regularFrameGeometry(tui, termWidth);
-			const baseHeight = geometry?.height ?? tui.render(termWidth).length;
-			const dockHeight = geometry
-				? baseHeight - geometry.composerTop
-				: editor.render(termWidth).length + footer.render(termWidth).length;
-			const composerTop = geometry?.composerTop ?? Math.max(0, baseHeight - dockHeight);
-			const viewportStart = Math.max(0, baseHeight - termHeight);
-			const composerViewportRow = composerTop - viewportStart;
-			margin.bottom =
-				composerViewportRow >= 0 && composerViewportRow < termHeight
-					? Math.max(0, termHeight - composerViewportRow)
-					: dockHeight;
-			return true;
-		},
-	};
-}
 
 /**
  * The overlay body, plus the inspection state the key router drives. The

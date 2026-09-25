@@ -10,6 +10,7 @@ import {
 	type TUI,
 	visibleWidth,
 } from "../../src/engine/tui.js";
+import { dockTop } from "../../src/interactive/dock.js";
 import { openDecisionsOverlay } from "../../src/interactive/overlays/decisions.js";
 import { TreeOverlayView } from "../../src/interactive/overlays/tree-selector.js";
 import { formatCompositeTasksOverlayBodyLines } from "../../src/interactive/tasks-overlay.js";
@@ -64,7 +65,9 @@ test("decisions follow the selection rule", () => {
 	} as DecisionLedgerEntry;
 	openDecisionsOverlay(tui, () => [entry], { onSupersede: () => {}, onCorrection: () => {}, onClose: () => {} });
 	ok(component);
-	for (const width of WIDTHS) assertSelectionRule(component.render(width), width, "Runtime choice", "Database pick");
+	// The engine overlay is a zero-row focus proxy; the frame itself lives in the dock.
+	const frame = dockTop(tui)?.frame as unknown as Component;
+	for (const width of WIDTHS) assertSelectionRule(frame.render(width), width, "Runtime choice", "Database pick");
 });
 
 test("the task board follows the selection rule", () => {

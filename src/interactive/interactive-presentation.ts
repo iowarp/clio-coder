@@ -33,7 +33,7 @@ import { createNotificationCenter, type NotificationCenter } from "./footer/noti
 import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import { type ClioKeybindingManager, createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js";
-import { buildLayout, preserveTranscriptScroll, registerRegularRoot } from "./layout.js";
+import { buildLayout, preserveTranscriptScroll } from "./layout.js";
 import type { SessionTranscript } from "./session-transcript.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import { parseSlashCommand, type RunIo } from "./slash-commands.js";
@@ -602,7 +602,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			},
 		},
 	);
-	registerRegularRoot(deps.tui, root);
 	deps.mount?.(root, editor);
 
 	const scheduleInterval = deps.scheduleInterval ?? ((callback, intervalMs) => setInterval(callback, intervalMs));
