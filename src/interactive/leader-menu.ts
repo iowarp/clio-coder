@@ -1,6 +1,12 @@
 import { type Component, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
 import type { LeaderKeyState, LeaderTarget } from "./leader-key.js";
-import { buildResponsiveHint, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
+import {
+	buildResponsiveHint,
+	centeredWindow,
+	selectionLabel,
+	selectionMark,
+	showClioOverlayFrame,
+} from "./overlay-frame.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 
 /** Noncapturing presentation: controller retains the underlying cancellation owner. */
@@ -13,11 +19,11 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: L
 			if (state.status === "idle") return [];
 			const selected = state.selected;
 			const count = Math.max(1, Math.min(10, tui.terminal.rows - 8));
-			const start = Math.max(0, Math.min(selected - Math.floor(count / 2), targets.length - count));
+			const [start, end] = centeredWindow(targets.length, selected, count);
 			const theme = clioTheme();
 			return [
 				`${scope()} · letters select actions · close, then /help for commands`,
-				...targets.slice(start, start + count).map((entry, index) => {
+				...targets.slice(start, end).map((entry, index) => {
 					const focused = start + index === selected;
 					const label = entry.label ?? entry.id;
 					const reason = entry.disabledReason ? theme.fg("dim", ` (${entry.disabledReason})`) : "";

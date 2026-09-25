@@ -96,6 +96,33 @@ export function selectionLabel(focused: boolean, label: string): string {
 	return focused ? clioTheme().style("accent", label, { bold: true }) : label;
 }
 
+/**
+ * Fit one body row: unchanged when it fits, cut on the ellipsis when it does
+ * not. Six overlays each carried a private copy under a different name.
+ */
+export function fitRow(text: string, width: number): string {
+	const safeWidth = Math.max(1, Math.floor(width));
+	return visibleWidth(text) <= safeWidth ? text : truncateToWidth(text, safeWidth, GLYPH.ellipsis, true);
+}
+
+/** Exactly `height` rows of `width` cells: fitted, then blank-filled. */
+export function fitRows(lines: ReadonlyArray<string>, width: number, height: number): string[] {
+	const out = lines.slice(0, height).map((line) => padAnsi(line, width, GLYPH.ellipsis));
+	while (out.length < height) out.push(" ".repeat(Math.max(0, width)));
+	return out;
+}
+
+/**
+ * The `[start, end)` slice of `total` rows that keeps `selected` centered in a
+ * window of `height`, pinned at either end of the list.
+ */
+export function centeredWindow(total: number, selected: number, height: number): [number, number] {
+	if (height <= 0 || total <= height) return [0, total];
+	const clamped = Math.max(0, Math.min(selected, total - 1));
+	const start = Math.max(0, Math.min(clamped - Math.floor(height / 2), total - height));
+	return [start, Math.min(total, start + height)];
+}
+
 function brandedTopBorder(label: string, innerWidth: number, tone?: ClioToken): string {
 	const frame = (text: string): string => clioFrame(text, tone ?? "frame");
 	const clean = label.replace(/^[┌┐└┘├┤─│\s]+/, "").replace(/[┌┐└┘├┤─│\s]+$/, "");
