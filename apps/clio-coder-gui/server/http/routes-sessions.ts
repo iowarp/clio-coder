@@ -154,7 +154,7 @@ export function sessionRoutes(
 	});
 	register(app, hub, routes.turn, ({ params, body }, context) =>
 		commands.run(`turn:${params.id}`, idempotencyKey(context), body, async () =>
-			supervisor.startTurn(params.id, body.text, body.images),
+			supervisor.startTurn(params.id, body.text, body.images, body.files),
 		),
 	);
 	register(app, hub, routes.closeSession, ({ params }, context) =>

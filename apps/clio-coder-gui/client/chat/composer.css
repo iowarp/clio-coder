@@ -482,7 +482,7 @@
 	}
 }
 
-/* Images waiting to go with the next request: a quiet row above the actions, each removable. */
+/* Images and text files waiting to go with the next request: a quiet row above the actions, each removable. */
 .composer__attachments {
 	list-style: none;
 	margin: 0;
@@ -504,6 +504,19 @@
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-xs);
 	background: var(--surface-sunken);
+}
+.composer__attachment-file {
+	display: grid;
+	place-items: center;
+	flex: none;
+	width: 48px;
+	height: 48px;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-xs);
+	background: var(--surface-sunken);
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
 }
 .composer__attachment-name {
 	display: grid;

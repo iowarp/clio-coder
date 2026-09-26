@@ -15,6 +15,7 @@
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import type { SessionSnapshot, Turn, Usage } from "../../contracts/sessions.js";
 import {
+	type CommandCatalog,
 	QUEUE_MAX_ENTRIES,
 	type QueueSnapshot,
 	STEER_TEXT_MAX_BYTES,
@@ -392,6 +393,40 @@ export function submitLabel(intent: SubmitIntent, situation: ComposerSituation, 
 	// A blocked button (empty draft) still names what the chosen delivery mode would do.
 	if (!(situation.turnRunning && situation.steering.steer)) return "Send";
 	return mode === "end-of-turn" ? "Queue for after" : "Send now";
+}
+
+// ---------------------------------------------------------------------------
+// A /name the session cannot run
+// ---------------------------------------------------------------------------
+
+/** The terminal parser's command-shaped token; `/home/me` is a path, not a command. */
+const SLASH_TOKEN = /^\/([A-Za-z][A-Za-z0-9:-]*)(?:\s|$)/u;
+
+/**
+ * Says before sending what the agent will say after: a `/name` that no command
+ * and no loaded prompt template owns is refused and never reaches the model.
+ * It warns and does not block, because the agent screens the line itself and
+ * a template loaded since the catalog was read is still honored there. A
+ * catalog without its template list cannot tell a template from a typo, so it
+ * says nothing rather than guess.
+ */
+export function slashNotice(text: string, catalog: CommandCatalog | undefined): ComposerNotice | null {
+	const token = SLASH_TOKEN.exec(text.trim())?.[1];
+	if (token === undefined || catalog?.prompts === undefined) return null;
+	const command = catalog.commands.find((entry) => entry.name === token);
+	if (command) {
+		// The agent invokes a command typed in a prompt only when its result belongs to that prompt.
+		if (command.streams === undefined || command.injectsUserTurn || command.promptTurn) return null;
+		return {
+			tone: "warn",
+			message: `/${token} runs from the command list, not from a message. Sending it will be refused.`,
+		};
+	}
+	if (catalog.prompts.includes(token)) return null;
+	return {
+		tone: "warn",
+		message: `/${token} is not a command or prompt template in this session, so sending it will be refused. Start the line with \\/ to send it as text.`,
+	};
 }
 
 // ---------------------------------------------------------------------------

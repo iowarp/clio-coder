@@ -406,7 +406,29 @@ export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "pro
 			text: string,
 			cwd?: string,
 		) => { text: string; pendingSkillRequests: PendingSkillRequest[] };
+		/** `resources.expandPromptTemplate`, read structurally: whether a loaded template claims a `/name` line. */
+		expandPromptTemplate?: (text: string, cwd?: string) => AcpPromptTemplateVerdict;
+		/** Names of the loaded prompt templates, for a composer that warns before it sends. */
+		listPromptNames?: () => ReadonlyArray<string>;
 	};
+
+/** The fields of `PromptTemplateExpansion` the prompt screen reads. */
+export interface AcpPromptTemplateVerdict {
+	expanded: boolean;
+	refusal?: { message: string };
+	display?: { template: { name: string }; text: string };
+}
+
+/**
+ * What a prompt line is before any of it reaches the model: text to send
+ * (with a `\/` escape already removed), a reference the operator reads and the
+ * model never sees, or a refusal. An admitted command never reaches this; the
+ * server invokes it first.
+ */
+export type AcpPromptLineVerdict =
+	| { kind: "send"; text: string }
+	| { kind: "reference"; lines: string[] }
+	| { kind: "refuse"; code: "unknown_command" | "command_unavailable"; message: string };
 
 export interface AcpCommandResult {
 	level: NoticeLevel;
@@ -763,6 +785,56 @@ export interface AcpCommandControl {
 	promptTurn?(command: unknown, argv?: unknown): boolean;
 	/** Announced verbatim under `clio-coder/commands`. */
 	capability: Readonly<Record<string, unknown>>;
+	/** Screen a prompt line that did not name an admitted command. */
+	screenPrompt?(text: string): AcpPromptLineVerdict;
+	/** Names of the loaded prompt templates; read per call because a library reload changes them. */
+	promptNames?(): string[];
+}
+
+const MAX_PROMPT_NAMES = 256;
+
+/**
+ * The terminal editor's verdict on a typed line, minus the overlays: a
+ * command-shaped `/token` that no command and no loaded template owns is a
+ * typo the model should not answer, and a terminal command this host does not
+ * run is named as one rather than sent as prose (`dispatchSlashCommand`'s
+ * `unknown-command` branch is the authority this mirrors).
+ */
+function screenAcpPromptLine(text: string, host: AcpCommandHost): AcpPromptLineVerdict {
+	const trimmed = text.trim();
+	const parsed = parseSlashCommand(trimmed);
+	if (parsed.kind === "unknown") return { kind: "send", text: trimmed.startsWith("\\/") ? parsed.text : text };
+	if (parsed.kind === "empty") return { kind: "send", text };
+	const token = /^\/(\S+)/u.exec(trimmed)?.[1] ?? "";
+	if (parsed.kind === "usage-error" && !BUILTIN_SLASH_COMMANDS.some((entry) => entry.name === token)) {
+		// A retired spelling (`/resources`, `/output`) says where its job went.
+		return { kind: "refuse", code: "command_unavailable", message: `${parsed.reason}.` };
+	}
+	if (parsed.kind !== "unknown-command") {
+		const offered = availableRules(host).some((rule) => rule.name === token);
+		return {
+			kind: "refuse",
+			code: "command_unavailable",
+			message: offered
+				? `/${token} runs from the command list, not from a prompt.`
+				: `/${token} is a terminal command and is not available in this client. Start the line with \\/ to send it as text.`,
+		};
+	}
+	const template = host.expandPromptTemplate?.(trimmed, host.cwd);
+	if (template?.expanded === true) return { kind: "send", text };
+	if (template?.display) {
+		return {
+			kind: "reference",
+			lines: [`/${bounded(template.display.template.name, ACP_MAX_COMMAND_NAME_BYTES)}`, template.display.text],
+		};
+	}
+	return {
+		kind: "refuse",
+		code: "unknown_command",
+		message:
+			template?.refusal?.message ??
+			`/${parsed.token} is not a command or a loaded prompt template. Start the line with \\/ to send it as text.`,
+	};
 }
 
 /** Binds one host to the control the ACP server takes. */
@@ -785,5 +857,14 @@ export function acpCommandControl(host: AcpCommandHost): AcpCommandControl {
 			return typeof subcommand === "string" && rule?.promptTurnSubcommands?.includes(subcommand) === true;
 		},
 		capability: { ...ACP_COMMANDS_CAPABILITY, count: availableRules(host).length },
+		screenPrompt: (text) => screenAcpPromptLine(text, host),
+		...(host.listPromptNames
+			? {
+					promptNames: () =>
+						(host.listPromptNames?.() ?? [])
+							.slice(0, MAX_PROMPT_NAMES)
+							.map((name) => bounded(name, ACP_MAX_COMMAND_NAME_BYTES)),
+				}
+			: {}),
 	};
 }

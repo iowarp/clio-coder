@@ -160,6 +160,11 @@ export const ChatTurnView = memo(function ChatTurnView({
 							{row.images} {row.images === 1 ? "image" : "images"} attached
 						</span>
 					) : null}
+					{row?.files ? (
+						<span className="chat-request__images">
+							{row.files} {row.files === 1 ? "file" : "files"} attached
+						</span>
+					) : null}
 					{startedAt === null ? (
 						<span className="chat-request__time">{formatTime(null)}</span>
 					) : (

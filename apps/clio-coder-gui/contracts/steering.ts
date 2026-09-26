@@ -128,7 +128,12 @@ export const CommandDescriptor = Type.Object(
 );
 export type CommandDescriptor = Static<typeof CommandDescriptor>;
 export const CommandCatalog = Type.Object(
-	{ version: Type.Literal(1), commands: Type.Array(CommandDescriptor, { maxItems: 64 }) },
+	{
+		version: Type.Literal(1),
+		commands: Type.Array(CommandDescriptor, { maxItems: 64 }),
+		/** Loaded prompt templates a `/name` line expands to; absent from a build that does not say. */
+		prompts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 })),
+	},
 	closed,
 );
 export type CommandCatalog = Static<typeof CommandCatalog>;

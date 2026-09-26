@@ -107,6 +107,8 @@ export const AgentCapabilities = Type.Object(
 		library: Type.Optional(LibraryCapability),
 		/** ACP promptCapabilities.image: the agent accepts image blocks with a request. */
 		images: Type.Optional(Type.Boolean()),
+		/** ACP promptCapabilities.embeddedContext: the agent accepts text files as embedded resources. */
+		embeddedContext: Type.Optional(Type.Boolean()),
 		/** True when the agent mediates every tool through its own safety policy. */
 		mediatedTools: Type.Boolean(),
 	},

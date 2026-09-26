@@ -475,6 +475,21 @@ project scope uses the target catalog and says “Saved for every project. This 
 from its next request, and so do new conversations, the CLI and the TUI.” Its button reads “Save for
 every project”; conversation scope reads “Apply to this conversation”. Both are disabled while a
 turn runs. An older agent without config options retains only the saved scope it supports.
+A draft that starts with a command-shaped `/name` is checked against the agent's command list and
+its loaded prompt templates. A name neither owns gets a warn line under the field saying that
+sending it will be refused and that `\/` sends the line as text; a command that runs only from
+the command list says so. The line warns and never disables Send, because the agent screens the
+line itself and honors a template loaded since the list was read. An agent that reports no
+template list gets no warning, since the composer cannot tell a template from a typo.
+The attach control appears only for what the agent announced: images when ACP `promptCapabilities`
+has `image`, and UTF-8 text files when it has `embeddedContext`. Its label says which ("Attach
+images", "Attach text files" or "Attach files"). A picked file is read as UTF-8 in the browser and
+refused, with the file named, when it is binary, holds terminal control bytes, is empty or is over
+128 KiB. Files go to the agent as embedded resources beside the request text and share one budget
+with images, a file weighing twice its size because escaping can double it on the agent's line.
+Each waiting file shows as a tile with its extension, its name and its size, and the sent request
+says how many files went with it. The agent inlines each file for the model after the typed text and
+never expands `@path` or `/name` inside it.
 The menu holds the project path, switching,
 the conversation's label and working freedom (for this conversation, and the saved default for new
 ones, again "Saved for every project"), a pointer to the route beside Send and to the Targets page,

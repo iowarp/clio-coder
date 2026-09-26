@@ -18,6 +18,7 @@ import {
 	resetDraftStores,
 	restoredDraft,
 	type SteeringAffordances,
+	slashNotice,
 	steeringAffordances,
 	steerModeOffers,
 	submitIntent,
@@ -405,4 +406,27 @@ test("a failed turn shows its problem detail and its stop reason; a stopped one 
 	assert.equal(stopped.label, "Turn stopped");
 	assert.equal(stopped.stopReason, null);
 	assert.equal(turnOutcome(turn({ status: "running", usage: null, finishedAt: null }), 0).tone, "running");
+});
+
+test("a /name the session cannot run is flagged before it is sent, and nothing else is", () => {
+	const command = (name: string, extra: Record<string, unknown> = {}) =>
+		({ name, summary: "", usage: `/${name}`, group: "Work", args: {}, ...extra }) as never;
+	const catalog = {
+		version: 1 as const,
+		commands: [command("share", { injectsUserTurn: true }), command("run", { streams: "dispatch" }), command("doctor")],
+		prompts: ["review-pr", "wtfp:new-paper"],
+	};
+	assert.equal(slashNotice("/share", catalog), null);
+	assert.equal(slashNotice("/doctor --deep", catalog), null);
+	assert.equal(slashNotice("/review-pr 42", catalog), null);
+	assert.equal(slashNotice("/wtfp:new-paper", catalog), null);
+	assert.equal(slashNotice("\\/tmp is full", catalog), null);
+	assert.equal(slashNotice("/home/me/notes.md says why", catalog), null);
+	assert.equal(slashNotice("plain text /tpyo", catalog), null);
+	assert.match(slashNotice("/tpyo fix it", catalog)?.message ?? "", /\/tpyo is not a command or prompt template/);
+	assert.match(slashNotice("/model gpt", catalog)?.message ?? "", /Start the line with \\\//);
+	assert.match(slashNotice("/run verifier", catalog)?.message ?? "", /runs from the command list/);
+	// Without the template list the composer cannot tell a template from a typo, so it says nothing.
+	assert.equal(slashNotice("/tpyo", { version: 1, commands: catalog.commands }), null);
+	assert.equal(slashNotice("/tpyo", undefined), null);
 });

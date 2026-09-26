@@ -605,6 +605,12 @@ try {
 		});
 		assert.ok(grownComposer.composerBottom <= 1050, "a growing draft pushed the composer below the viewport");
 		assert.ok(grownComposer.bottomGap <= 32, "a growing draft moved a followed transcript away from its live edge");
+		// A `/name` nothing owns is flagged before it is sent; a loaded template is not.
+		await composerField.fill("/tpyo fix the build");
+		await page.getByText("/tpyo is not a command or prompt template in this session").waitFor();
+		await check("composer-unknown-command");
+		await composerField.fill("/review-pr 42");
+		await page.getByText("is not a command or prompt template").waitFor({ state: "detached" });
 		await composerField.fill("");
 		await page.waitForFunction(
 			(before) =>
@@ -765,9 +771,11 @@ try {
 		if (width === 1600) await page.screenshot({ path: join(output, "session-board.png"), fullPage: true });
 		await page.getByText("Tasks and decisions", { exact: true }).click();
 		await page.locator(".conversation__tools > summary").click();
-		// An image rides a request when the agent announces image prompts: attach, see it listed, send, see it counted.
-		await page.getByRole("button", { name: "Attach images", exact: true }).waitFor();
-		await page.locator('.composer input[type="file"]').setInputFiles({
+		// An image and a text file ride a request when the agent announces image prompts and embedded
+		// context: attach both, see them listed, send, see each counted. A binary is refused by name.
+		await page.getByRole("button", { name: "Attach files", exact: true }).waitFor();
+		const picker = page.locator('.composer input[type="file"]');
+		await picker.setInputFiles({
 			name: "fixture.png",
 			mimeType: "image/png",
 			buffer: Buffer.from(
@@ -775,16 +783,28 @@ try {
 				"base64",
 			),
 		});
-		await page
-			.getByRole("list", { name: "Images to send with this request" })
-			.locator(".composer__attachment-name", { hasText: "fixture.png" })
-			.waitFor();
+		await picker.setInputFiles({
+			name: "field-notes.md",
+			mimeType: "text/markdown",
+			buffer: Buffer.from("sample A: 4.2\n"),
+		});
+		const attachments = page.getByRole("list", { name: "Attachments to send with this request" });
+		await attachments.locator(".composer__attachment-name", { hasText: "fixture.png" }).waitFor();
+		await attachments.locator(".composer__attachment-name", { hasText: "field-notes.md" }).waitFor();
+		await picker.setInputFiles({
+			name: "archive.zip",
+			mimeType: "application/zip",
+			buffer: Buffer.from([0x50, 0x4b, 0x00, 0x03]),
+		});
+		await page.locator(".composer__notice", { hasText: "archive.zip is not a text file." }).waitFor();
 		await check("composer-attachment");
-		await page.getByLabel("Message Clio Coder", { exact: true }).fill("Describe the attached image.");
+		await page.getByLabel("Message Clio Coder", { exact: true }).fill("Describe the attached image and notes.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
 		await page.getByText("Received 1 image with the request.", { exact: true }).waitFor();
+		await page.getByText("Received 1 file with the request.", { exact: true }).waitFor();
 		await page.locator(".chat-request__images", { hasText: "1 image attached" }).waitFor();
-		assert.equal(await page.getByRole("list", { name: "Images to send with this request" }).count(), 0);
+		await page.locator(".chat-request__images", { hasText: "1 file attached" }).waitFor();
+		assert.equal(await attachments.count(), 0);
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[approval] Write the fixture file.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
 		await page.getByRole("button", { name: "Allow once", exact: true }).first().waitFor();

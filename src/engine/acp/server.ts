@@ -538,8 +538,9 @@ function contentText(value: unknown): string {
  * The prompt text of one `session/prompt`. ACP v1 carries it as `params.prompt`,
  * an array of content blocks. Text and resource links are the baseline prompt
  * types in ACP v1; a link becomes a reference the model can see. Image blocks
- * are read by {@link promptImages} when the host expands prompts; audio and
- * embedded resources require capabilities this server does not advertise.
+ * are read by {@link promptImages} when the host expands prompts, and embedded
+ * resources by {@link promptResources}; audio requires a capability this
+ * server does not advertise.
  * Nothing else is accepted: tolerating
  * `params.content`, `params.message`, or a bare string meant this server
  * answered request shapes no ACP client sends and no schema describes, so a
@@ -557,6 +558,76 @@ function promptText(params: unknown): string {
 		}
 	}
 	return parts.join("\n").trim();
+}
+
+/** At most this many embedded resources ride one prompt, each at most this many UTF-8 bytes. */
+export const ACP_MAX_PROMPT_RESOURCES = 8;
+export const ACP_MAX_PROMPT_RESOURCE_BYTES = 256 * 1024;
+const ACP_MAX_RESOURCE_NAME_BYTES = 512;
+
+/**
+ * The name a resource is shown to the model under. A `file:` URI names its
+ * path, and a GUI attachment (`attachment:<name>`) names the file the operator
+ * picked; anything else is shown as its URI. Quotes and control characters are
+ * dropped so the name cannot close the `<file name="…">` attribute early.
+ */
+function resourceName(uri: string): string {
+	let name = uri;
+	try {
+		if (uri.startsWith("file://")) name = decodeURIComponent(new URL(uri).pathname);
+		else if (uri.startsWith("attachment:")) name = decodeURIComponent(uri.slice("attachment:".length));
+	} catch {
+		// A malformed escape leaves the URI as it was sent, which still names the resource.
+	}
+	let safe = "";
+	for (const character of name) {
+		const code = character.codePointAt(0) ?? 0;
+		if (code > 0x1f && code !== 0x7f && character !== '"') safe += character;
+	}
+	return boundString(safe, ACP_MAX_RESOURCE_NAME_BYTES) || "resource";
+}
+
+/**
+ * The embedded text resources of one `session/prompt`, rendered in the
+ * `<file name>` shape an `@path` reference expands to. They are appended after
+ * the host's expansion, never passed through it: a `@path` or `/name` inside a
+ * file the client attached is that file's content, not operator syntax, and
+ * expanding it would let an attached file make the host read other files.
+ * Binary (`blob`) resources are refused rather than dropped, so a client never
+ * believes the model saw a file it did not.
+ */
+function promptResources(params: unknown): { rendered: string; names: string[] } {
+	if (!isRecord(params) || !Array.isArray(params.prompt)) return { rendered: "", names: [] };
+	const files: string[] = [];
+	const names: string[] = [];
+	for (const block of params.prompt) {
+		if (!isRecord(block) || block.type !== "resource") continue;
+		const resource = isRecord(block.resource) ? block.resource : {};
+		if (typeof resource.blob === "string")
+			throw new AcpRequestError(-32602, "binary resources are not accepted; embed text", { code: "invalid_params" });
+		if (typeof resource.uri !== "string" || resource.uri.length === 0 || typeof resource.text !== "string")
+			throw new AcpRequestError(-32602, "an embedded resource needs a uri and text", { code: "invalid_params" });
+		if (Buffer.byteLength(resource.text, "utf8") > ACP_MAX_PROMPT_RESOURCE_BYTES)
+			throw new AcpRequestError(
+				-32602,
+				`an embedded resource is larger than ${ACP_MAX_PROMPT_RESOURCE_BYTES / 1024} KiB`,
+				{ code: "invalid_params" },
+			);
+		const name = resourceName(resource.uri);
+		names.push(name);
+		files.push(`<file name="${name}">\n${resource.text}\n</file>`);
+	}
+	if (files.length > ACP_MAX_PROMPT_RESOURCES)
+		throw new AcpRequestError(-32602, `a prompt carries at most ${ACP_MAX_PROMPT_RESOURCES} embedded resources`, {
+			code: "invalid_params",
+		});
+	return { rendered: files.join("\n"), names };
+}
+
+/** Typed text, then the embedded files after a blank line. */
+function withResources(text: string, resources: { rendered: string }): string {
+	if (resources.rendered === "") return text;
+	return text === "" ? resources.rendered : `${text}\n\n${resources.rendered}`;
 }
 
 /** At most this many image blocks ride one prompt; the stdio line bounds their bytes. */
@@ -2350,7 +2421,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 				},
 				agentCapabilities: {
 					loadSession: canLoadSession,
-					promptCapabilities: { audio: false, embeddedContext: false, image: features.images === true },
+					promptCapabilities: { audio: false, embeddedContext: true, image: features.images === true },
 					mcpCapabilities: { http: false, sse: false },
 					sessionCapabilities: {
 						close: {},
@@ -4090,7 +4161,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (listed === undefined) {
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
-		return listed;
+		const prompts = options.commands?.promptNames?.();
+		return prompts === undefined ? listed : { ...listed, prompts };
 	});
 
 	options.transport.onRequest(ACP_COMMANDS_INVOKE_METHOD, (params) => {
@@ -4408,8 +4480,19 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32602, "this session already has an active prompt", { code: "prompt_active" });
 		}
 		const text = promptText(params);
-		if (text.length === 0) throw new AcpRequestError(-32602, "prompt text is required", { code: "invalid_params" });
+		const resources = promptResources(params);
+		if (text.length === 0 && resources.names.length === 0)
+			throw new AcpRequestError(-32602, "prompt text is required", { code: "invalid_params" });
 		const images = promptImages(params);
+		// A line that names an admitted command is invoked below; anything else
+		// that looks like one is screened before it can reach the model.
+		const typed = /^\/([a-z][a-z0-9_-]*)(?:\s|$)/u.exec(text.trim())?.[1];
+		const screened =
+			text.length === 0 || (typed !== undefined && availableCommands().some((entry) => entry.name === typed))
+				? undefined
+				: options.commands?.screenPrompt?.(text);
+		if (screened?.kind === "refuse") throw new AcpRequestError(-32602, screened.message, { code: screened.code });
+		const sentText = screened?.kind === "send" ? screened.text : text;
 		if (images.length > 0 && options.expandPrompt === undefined)
 			throw new AcpRequestError(-32602, "this agent does not accept image blocks", { code: "invalid_params" });
 		// Check the same credential authority as the runtime, without resolving or
@@ -4454,7 +4537,15 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			const trimmed = text.trim();
 			const commandMatch = /^\/([a-z][a-z0-9_-]*)(?:\s+([\s\S]*))?$/u.exec(trimmed);
 			const command = commandMatch?.[1];
-			if (command !== undefined && availableCommands().some((entry) => entry.name === command)) {
+			if (screened?.kind === "reference") {
+				// A display-only template is for the operator: no turn, no session entry, no tokens.
+				sendTextChunks(options.transport, session.id, active, "agent_message_chunk", screened.lines.join("\n"));
+				active.sawTurnEnd = true;
+			} else if (
+				command !== undefined &&
+				resources.names.length === 0 &&
+				availableCommands().some((entry) => entry.name === command)
+			) {
 				const argv = commandMatch?.[2]?.trim().split(/\s+/u) ?? [];
 				const result = await options.commands?.invoke({ command, argv });
 				if (options.commands?.injectsUserTurn(command)) await options.chat.whenSettled?.();
@@ -4472,15 +4563,27 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				}
 				active.sawTurnEnd = true;
 			} else if (options.expandPrompt === undefined) {
-				await options.chat.submit(text);
+				await options.chat.submit(withResources(sentText, resources));
 			} else {
 				let expansion: AcpPromptExpansion;
 				try {
-					expansion = await options.expandPrompt(text, images);
+					expansion = await options.expandPrompt(sentText, images);
 				} catch (err) {
 					throw new AcpRequestError(-32602, err instanceof Error ? err.message : String(err), {
 						code: "invalid_params",
 					});
+				}
+				// The transcript paints what the operator typed and names attached files, not their bodies.
+				if (resources.names.length > 0) {
+					const attached = `attached ${resources.names.length} ${resources.names.length === 1 ? "file" : "files"}: ${resources.names.join(", ")}`;
+					expansion = {
+						...expansion,
+						text: withResources(expansion.text, resources),
+						display: {
+							text: expansion.display?.text ?? sentText,
+							note: expansion.display?.note ? `${expansion.display.note}; ${attached}` : attached,
+						},
+					};
 				}
 				await options.chat.submit(expansion.text, {
 					...(expansion.images.length > 0 ? { images: expansion.images } : {}),

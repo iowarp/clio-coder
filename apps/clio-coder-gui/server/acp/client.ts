@@ -1,6 +1,6 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
-import type { TurnImage } from "../../contracts/attachments.js";
+import type { TurnFile, TurnImage } from "../../contracts/attachments.js";
 import { BoardCapability } from "../../contracts/board.js";
 import { BranchesCapability } from "../../contracts/branches.js";
 import {
@@ -48,6 +48,7 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		loadSession: capabilities.loadSession === true,
 		mediatedTools: meta["clio-coder/tools"] === "mediated",
 		...(record(capabilities.promptCapabilities).image === true ? { images: true } : {}),
+		...(record(capabilities.promptCapabilities).embeddedContext === true ? { embeddedContext: true } : {}),
 		...(Object.keys(stableSession).length > 0 || Object.keys(extensionSession).length > 0
 			? {
 					session: {
@@ -109,6 +110,16 @@ export function acpProblem(error: unknown) {
 			return new AppProblem(
 				"upstream_acp",
 				"Clio could not complete this turn. Probe the selected target and check this session's trace for the cause, then retry. (turn_failed)",
+			);
+		if (code === "unknown_command")
+			return new AppProblem(
+				"upstream_acp",
+				"That /name is not a command or a loaded prompt template in this session, so nothing was sent to the model. Start the line with \\/ to send it as text.",
+			);
+		if (code === "command_unavailable")
+			return new AppProblem(
+				"upstream_acp",
+				"That command does not run from a message in this app. Use the command list, or start the line with \\/ to send it as text.",
 			);
 		return new AppProblem(
 			"upstream_acp",
@@ -209,7 +220,12 @@ export class AcpClient {
 		if (!current) throw new AppProblem("upstream_acp", "Clio did not provide a session mode.");
 		return current;
 	}
-	async prompt(sessionId: string, text: string, images: ReadonlyArray<TurnImage> = []) {
+	async prompt(
+		sessionId: string,
+		text: string,
+		images: ReadonlyArray<TurnImage> = [],
+		files: ReadonlyArray<TurnFile> = [],
+	) {
 		const result = await this.request<unknown>(
 			"session/prompt",
 			{
@@ -217,6 +233,11 @@ export class AcpClient {
 				prompt: [
 					{ type: "text", text },
 					...images.map((image) => ({ type: "image", mimeType: image.mimeType, data: image.data })),
+					// A picked file has a name and no path; the URI says so rather than inventing one.
+					...files.map((file) => ({
+						type: "resource",
+						resource: { uri: `attachment:${encodeURIComponent(file.name)}`, mimeType: "text/plain", text: file.text },
+					})),
 				],
 			},
 			24 * 60 * 60 * 1000,

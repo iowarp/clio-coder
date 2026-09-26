@@ -1,5 +1,5 @@
 import { type Static, type TSchema, Type } from "typebox";
-import { TURN_IMAGE_MAX, TurnImage } from "./attachments.js";
+import { TURN_FILE_MAX, TURN_IMAGE_MAX, TurnFile, TurnImage } from "./attachments.js";
 import {
 	DecisionSuperseded,
 	DecisionSupersedeRequest,
@@ -732,11 +732,12 @@ export const routes = {
 			{
 				text: Type.String({ minLength: 1, maxLength: 32000, pattern: "\\S" }),
 				images: Type.Optional(Type.Array(TurnImage, { minItems: 1, maxItems: TURN_IMAGE_MAX })),
+				files: Type.Optional(Type.Array(TurnFile, { minItems: 1, maxItems: TURN_FILE_MAX })),
 			},
 			{ additionalProperties: false },
 		),
 		response: Type.Object({ turnId: Id }, { additionalProperties: false }),
-		summary: "Start a streamed turn, with any images the request carries",
+		summary: "Start a streamed turn, with any images and text files the request carries",
 	}),
 	closeSession: defineRoute({
 		...post,

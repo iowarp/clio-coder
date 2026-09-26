@@ -24,7 +24,12 @@ test("ACP problems explain missing credentials and failed turns without forwardi
 	assert.match(missing.detail, /clio-coder auth login/);
 	assert.match(missing.detail, /close and reopen/);
 	assert.match(failure("turn_failed").detail, /session's trace/);
+	// A screened `/name` line is explained in the app's own words; the agent's sentence is not forwarded.
+	assert.match(failure("unknown_command").detail, /not a command or a loaded prompt template.*nothing was sent/);
+	assert.match(failure("command_unavailable").detail, /command list/);
 	for (const problem of [
+		failure("unknown_command"),
+		failure("command_unavailable"),
 		missing,
 		failure("turn_failed"),
 		failure("prompt_not_admitted", "private-provider-secret"),
@@ -148,6 +153,74 @@ test("concurrent admission allows four ACP children and refuses the fifth withou
 	assert.equal((await h.supervisor.children.rows()).length, 4);
 	await h.supervisor.shutdown();
 	assert.deepEqual(await h.files.read("children"), []);
+});
+
+test("a request carries text files to the agent as ACP embedded resources, only when it accepts them", {
+	timeout: 20000,
+}, async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), routes.openWorkspace.response);
+	const session = await json(
+		await h.post(`/api/workspaces/${workspace.id}/sessions`, {}, "files-session"),
+		routes.newSession.response,
+	);
+	const capabilities = await json(
+		await h.request(`/api/sessions/${session.id}/capabilities`),
+		routes.sessionCapabilities.response,
+	);
+	assert.equal(capabilities.embeddedContext, true);
+	const turn = await h.post(
+		`/api/sessions/${session.id}/turns`,
+		{ text: "Summarize these.", files: [{ name: "field notes.md", text: "sample A: 4.2\n" }] },
+		"files-turn",
+	);
+	assert.equal(turn.status, 202);
+	let log = "";
+	for (let i = 0; i < 200 && !log.includes('"session/prompt"'); i++) {
+		await setTimeout(25);
+		log = await readFile(join(h.home.path, "acp.jsonl"), "utf8").catch(() => "");
+	}
+	const prompt = log
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line) as { method?: string; params?: { prompt?: Array<Record<string, unknown>> } })
+		.find((frame) => frame.method === "session/prompt");
+	assert.deepEqual(prompt?.params?.prompt?.[1], {
+		type: "resource",
+		resource: { uri: "attachment:field%20notes.md", mimeType: "text/plain", text: "sample A: 4.2\n" },
+	});
+	const snapshot = await json(await h.request(`/api/sessions/${session.id}`), routes.session.response);
+	assert.equal(snapshot.turns.at(-1)?.files, 1);
+	// Too many, or a control character in a name, is refused before anything reaches the agent.
+	const tooMany = await h.post(
+		`/api/sessions/${session.id}/turns`,
+		{ text: "Too many.", files: Array.from({ length: 5 }, (_, index) => ({ name: `${index}.md`, text: "x" })) },
+		"files-too-many",
+	);
+	assert.equal(tooMany.status, 422);
+	const badName = await h.post(
+		`/api/sessions/${session.id}/turns`,
+		{ text: "Bad.", files: [{ name: "a\u001b.md", text: "x" }] },
+		"files-bad-name",
+	);
+	assert.equal(badName.status, 422);
+});
+
+test("an agent that did not announce embedded context is never sent a file", { timeout: 20000 }, async (t) => {
+	const h = await harness();
+	t.after(h.close);
+	const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), routes.openWorkspace.response);
+	const session = await json(
+		await h.post(`/api/workspaces/${workspace.id}/sessions`, {}, "plain-session"),
+		routes.newSession.response,
+	);
+	const refused = await h.post(
+		`/api/sessions/${session.id}/turns`,
+		{ text: "Read this.", files: [{ name: "a.md", text: "x" }] },
+		"plain-files",
+	);
+	assert.equal(refused.status, 409);
 });
 
 test("a request carries images to the agent as ACP image blocks, within the one-line bound", {

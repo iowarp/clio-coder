@@ -3229,6 +3229,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 									? {
 											parsePendingSkillRequests: (text: string, commandCwd?: string) =>
 												resources.parsePendingSkillRequests(text, commandCwd ?? process.cwd()),
+											// The prompt screen asks the same question the terminal editor
+											// does before refusing a `/name` line: does a loaded template own it.
+											expandPromptTemplate: (text: string, commandCwd?: string) =>
+												resources.expandPromptTemplate(text, commandCwd ?? process.cwd()),
+											listPromptNames: () => resources.promptsForDisplay(process.cwd()).items.map((prompt) => prompt.name),
 										}
 									: {}),
 								submitTurn: (text, submitOptions) => {

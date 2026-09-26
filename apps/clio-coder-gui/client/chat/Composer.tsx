@@ -21,7 +21,15 @@ import { StatusMark } from "../design/status.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
 import { readAttachment } from "./attachment-image.js";
-import { type Attachment, admitAttachment, attachmentRefusal, attachmentSummary } from "./attachments-model.js";
+import {
+	type Attachment,
+	admitAttachment,
+	attachmentRefusal,
+	attachmentSummary,
+	decodeTextFile,
+	type FileAttachment,
+	type ImageAttachment,
+} from "./attachments-model.js";
 import {
 	capabilityRefusal,
 	composerKeyAction,
@@ -32,6 +40,7 @@ import {
 	queueSummary,
 	restoredDraft,
 	type SubmitIntent,
+	slashNotice,
 	steeringAffordances,
 	steerModeOffers,
 	submitIntent,
@@ -61,6 +70,12 @@ function fitComposerField(field: HTMLTextAreaElement | null): void {
 	field.style.height = "auto";
 	field.style.height = `${field.scrollHeight}px`;
 	field.style.overflowY = field.scrollHeight > field.clientHeight ? "auto" : "hidden";
+}
+
+/** Up to four letters of a file's extension, for the tile beside its name. */
+function fileBadge(name: string): string {
+	const extension = /\.([A-Za-z0-9]{1,4})$/u.exec(name)?.[1];
+	return extension ? extension.toUpperCase() : "TXT";
 }
 
 /** Fill the composer for this session and put the caret in it. Used by Try again and the starters. */
@@ -145,6 +160,18 @@ export const Composer = memo(function Composer({
 	const steering = steeringAffordances(capabilities.data);
 	const modes = steerModeOffers(steering);
 
+	// Read only once a draft starts with a slash. The template list changes on a
+	// library reload, so this observer lets it go stale where the palette does not.
+	const slashDraft = draft.text.trimStart().startsWith("/");
+	const commandCatalog = useQuery({
+		queryKey: ["session-commands", sessionId],
+		queryFn: () => client.call(routes.sessionCommands, params),
+		enabled: slashDraft && sessionState === "open" && !!capabilities.data?.commands,
+		staleTime: 30_000,
+		retry: false,
+	});
+	const slash = slashDraft ? slashNotice(draft.text, commandCatalog.data) : null;
+
 	const queue = useQuery({
 		queryKey: ["session-queue", sessionId],
 		queryFn: () => client.call(routes.sessionQueue, params),
@@ -157,13 +184,15 @@ export const Composer = memo(function Composer({
 	const send = useMutation({
 		mutationFn: async ({
 			intent,
-			images,
+			attachments: sent,
 		}: {
 			intent: Exclude<SubmitIntent, { kind: "blocked" }>;
 			draft: typeof draft;
-			images: readonly Attachment[];
+			attachments: readonly Attachment[];
 		}) => {
 			if (intent.kind === "prompt") {
+				const images = sent.filter((item): item is ImageAttachment => item.kind === "image");
+				const files = sent.filter((item): item is FileAttachment => item.kind === "file");
 				await client.call(
 					routes.turn,
 					{
@@ -171,6 +200,7 @@ export const Composer = memo(function Composer({
 						body: {
 							text: intent.text,
 							...(images.length > 0 ? { images: images.map(({ mimeType, data }) => ({ mimeType, data })) } : {}),
+							...(files.length > 0 ? { files: files.map(({ name, text }) => ({ name, text })) } : {}),
 						},
 					},
 					intent.idempotencyKey,
@@ -186,8 +216,8 @@ export const Composer = memo(function Composer({
 		onSuccess: (result, submitted) => {
 			if (result !== null && !result.accepted) store.refuse(submitted.draft);
 			else store.acknowledge(submitted.draft);
-			if (result === null && submitted.images.length > 0) {
-				const sent = new Set(submitted.images.map((image) => image.id));
+			if (result === null && submitted.attachments.length > 0) {
+				const sent = new Set(submitted.attachments.map((item) => item.id));
 				attached.current = attached.current.filter((image) => !sent.has(image.id));
 				setAttachments(attached.current);
 			}
@@ -239,26 +269,38 @@ export const Composer = memo(function Composer({
 		...(steeringUnavailable === undefined ? {} : { steeringUnavailable }),
 	} as const;
 	const intent = submitIntent(draft, situation);
-	const canAttach = capabilities.data?.images === true && sessionState === "open";
+	const canAttachImages = capabilities.data?.images === true && sessionState === "open";
+	const canAttachFiles = capabilities.data?.embeddedContext === true && sessionState === "open";
+	const canAttach = canAttachImages || canAttachFiles;
 	const attachBlock = attachmentRefusal(attachments, running);
-	// One at a time, so each admission sees the images the previous one added.
+	// An image goes as an image when the agent takes them; anything else is offered as text.
+	const readPicked = async (file: File): Promise<Attachment> => {
+		if (file.type.startsWith("image/") && canAttachImages) return readAttachment(file, crypto.randomUUID());
+		const name = file.name || "Pasted file";
+		if (!canAttachFiles) throw new Error(`${name} is not a PNG, JPEG, GIF or WebP image.`);
+		const read = decodeTextFile(name, new Uint8Array(await file.arrayBuffer()));
+		if (!read.ok) throw new Error(read.reason);
+		return { id: crypto.randomUUID(), kind: "file", name, text: read.text, bytes: read.bytes };
+	};
+	// One at a time, so each admission sees the attachments the previous one added.
 	const attach = async (files: readonly File[]) => {
 		setAttachProblem(null);
 		for (const file of files) {
 			try {
-				const image = await readAttachment(file, crypto.randomUUID());
-				const admitted = admitAttachment(attached.current, image);
+				const item = await readPicked(file);
+				const admitted = admitAttachment(attached.current, item);
 				if (!admitted.ok) {
 					setAttachProblem(admitted.reason);
 					break;
 				}
-				attached.current = [...attached.current, image];
+				attached.current = [...attached.current, item];
 				setAttachments(attached.current);
 			} catch (error) {
 				setAttachProblem(error instanceof Error ? error.message : String(error));
 			}
 		}
 	};
+	const attachLabel = canAttachFiles ? (canAttachImages ? "Attach files" : "Attach text files") : "Attach images";
 	const detach = (id: string) => {
 		attached.current = attached.current.filter((image) => image.id !== id);
 		setAttachments(attached.current);
@@ -273,7 +315,7 @@ export const Composer = memo(function Composer({
 		if (next.kind !== "blocked" && attachmentRefusal(attached.current, running) === null) {
 			sending.current = true;
 			store.markSubmitted(current);
-			send.mutate({ intent: next, draft: current, images: attached.current });
+			send.mutate({ intent: next, draft: current, attachments: attached.current });
 		}
 	};
 
@@ -324,7 +366,7 @@ export const Composer = memo(function Composer({
 				}}
 				onPaste={(event) => {
 					const images = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
-					if (!canAttach || images.length === 0) return;
+					if (!canAttachImages || images.length === 0) return;
 					event.preventDefault();
 					void attach(images);
 				}}
@@ -377,18 +419,26 @@ export const Composer = memo(function Composer({
 				</fieldset>
 			) : null}
 			{attachments.length > 0 ? (
-				<ul className="composer__attachments" aria-label="Images to send with this request">
-					{attachments.map((image) => (
-						<li key={image.id}>
-							<img src={`data:${image.mimeType};base64,${image.data}`} alt="" width={48} height={48} />
+				<ul className="composer__attachments" aria-label="Attachments to send with this request">
+					{attachments.map((item) => (
+						<li key={item.id}>
+							{item.kind === "image" ? (
+								<img src={`data:${item.mimeType};base64,${item.data}`} alt="" width={48} height={48} />
+							) : (
+								<span className="composer__attachment-file" aria-hidden="true">
+									{fileBadge(item.name)}
+								</span>
+							)}
 							<span className="composer__attachment-name">
-								{image.name}
+								{item.name}
 								<small>
-									{image.width}×{image.height}
+									{item.kind === "image"
+										? `${item.width}×${item.height}`
+										: `text, ${Math.max(1, Math.round(item.bytes / 1024))} KiB`}
 								</small>
 							</span>
-							<button type="button" className="composer__secondary" onClick={() => detach(image.id)}>
-								Remove<span className="sr-only"> {image.name}</span>
+							<button type="button" className="composer__secondary" onClick={() => detach(item.id)}>
+								Remove<span className="sr-only"> {item.name}</span>
 							</button>
 						</li>
 					))}
@@ -416,7 +466,7 @@ export const Composer = memo(function Composer({
 							id={pickerId}
 							hidden
 							type="file"
-							accept="image/png,image/jpeg,image/gif,image/webp"
+							{...(canAttachFiles ? {} : { accept: "image/png,image/jpeg,image/gif,image/webp" })}
 							multiple
 							onChange={(event) => {
 								const files = [...(event.target.files ?? [])];
@@ -428,12 +478,12 @@ export const Composer = memo(function Composer({
 							type="button"
 							className="composer__secondary composer__attach"
 							onClick={() => picker.current?.click()}
-							aria-label="Attach images"
-							title="Attach images to this request. You can also paste or drop them here."
+							aria-label={attachLabel}
+							title={`${attachLabel} to this request. You can also ${canAttachImages ? "paste or " : ""}drop them here.`}
 						>
 							<span aria-hidden="true">+</span>
 							<span className="composer__attach-label" aria-hidden="true">
-								Attach images
+								{attachLabel}
 							</span>
 						</button>
 					</>
@@ -496,6 +546,12 @@ export const Composer = memo(function Composer({
 							Retry control check
 						</button>
 					) : null}
+				</p>
+			) : null}
+			{slash && !send.isPending ? (
+				<p className="composer__notice" role="status">
+					<StatusMark tone={slash.tone} label="Not a command" />
+					{slash.message}
 				</p>
 			) : null}
 			{notice ? (

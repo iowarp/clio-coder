@@ -132,6 +132,8 @@ export const Turn = Type.Object(
 		problem: Type.Union([Problem, Type.Null()]),
 		/** How many images this app sent with the request; a replayed turn does not know. */
 		images: Type.Optional(Type.Integer({ minimum: 1, maximum: 4 })),
+		/** How many text files this app sent with the request; a replayed turn does not know. */
+		files: Type.Optional(Type.Integer({ minimum: 1, maximum: 4 })),
 	},
 	closed,
 );
