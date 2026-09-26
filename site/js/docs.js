@@ -27,10 +27,20 @@
 			const query = search.value.trim().toLowerCase();
 			hits.replaceChildren();
 			if (query.length < 2) return;
+			const rank = (item) => {
+				const title = item.title.toLowerCase();
+				return (
+					(title === query ? 100 : title.startsWith(query) ? 60 : title.includes(query) ? 40 : 0) +
+					(item.path.toLowerCase().includes(query) ? 30 : 0) +
+					((item.headings || []).join(" ").toLowerCase().includes(query) ? 10 : 0) +
+					(item.path.startsWith("guide/") ? 5 : 0)
+				);
+			};
 			const found = index
 				.filter((item) =>
 					`${item.title} ${item.excerpt} ${(item.headings || []).join(" ")} ${item.path}`.toLowerCase().includes(query),
 				)
+				.sort((a, b) => rank(b) - rank(a))
 				.slice(0, 10);
 			for (const item of found) {
 				const row = document.createElement("li"),
