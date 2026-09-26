@@ -164,8 +164,10 @@ export function MobileNavigation({
 	ref?: Ref<MobileNavigationHandle> | undefined;
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
+	const [mounted, setMounted] = useState(false);
 	const layered = useLayersActive();
 	const open = useCallback(() => {
+		setMounted(true);
 		if (!dialog.current?.open) dialog.current?.showModal();
 		requestAnimationFrame(() => dialog.current?.querySelector<HTMLElement>(".sidebar-back")?.focus());
 	}, []);
@@ -199,7 +201,7 @@ export function MobileNavigation({
 						<Icon name="close" />
 					</button>
 				</div>
-				{content ? (
+				{!mounted ? null : content ? (
 					content(() => dialog.current?.close())
 				) : (
 					<Navigation close={() => dialog.current?.close()} onHelp={onHelp} />

@@ -23,7 +23,7 @@ export function SessionDashboard({
 				<dd title={model ?? undefined}>{model ?? "Not selected"}</dd>
 			</div>
 			<div>
-				<dt>Turns</dt>
+				<dt>Turns shown</dt>
 				<dd>{session.turns.length.toLocaleString("en-US")}</dd>
 			</div>
 			{usage ? (
@@ -34,7 +34,7 @@ export function SessionDashboard({
 			) : null}
 			<div>
 				<dt>Workers</dt>
-				<dd>{workers ? `${workers} active` : "None active"}</dd>
+				<dd>{workers ? `${workers} active recorded` : "None recorded"}</dd>
 			</div>
 			{health.contextWarning ? (
 				<div data-attention="true">
