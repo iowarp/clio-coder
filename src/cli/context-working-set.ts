@@ -36,6 +36,8 @@ Options:
   --target <ratio>    post-eviction pressure target (default: 0.6)
   --protect-last-turns <n>
                       protected recent turns (default: ${DEFAULT_WORKING_SET_SETTINGS.protectLastTurns})
+  --protect-last-steps <n>
+                      protected recent assistant steps (default: ${DEFAULT_WORKING_SET_SETTINGS.protectLastSteps})
   --min-evictable-tokens <n>
                       minimum tool-result body tokens (default: ${DEFAULT_WORKING_SET_SETTINGS.minEvictableTokens})
   --seed <integer>    deterministic random-policy seed (default: 0)
@@ -69,6 +71,7 @@ interface ReplayArgs {
 	threshold: number;
 	target: number;
 	protectLastTurns: number;
+	protectLastSteps: number;
 	minEvictableTokens: number;
 	seed: number;
 	synthetic: string[];
@@ -120,6 +123,7 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 		threshold: 0.8,
 		target: 0.6,
 		protectLastTurns: DEFAULT_WORKING_SET_SETTINGS.protectLastTurns,
+		protectLastSteps: DEFAULT_WORKING_SET_SETTINGS.protectLastSteps,
 		minEvictableTokens: DEFAULT_WORKING_SET_SETTINGS.minEvictableTokens,
 		seed: 0,
 		synthetic: [],
@@ -149,6 +153,7 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 			arg === "--threshold" ||
 			arg === "--target" ||
 			arg === "--protect-last-turns" ||
+			arg === "--protect-last-steps" ||
 			arg === "--min-evictable-tokens" ||
 			arg === "--seed"
 		) {
@@ -188,6 +193,11 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 				parsed.protectLastTurns = numberValue(value, arg);
 				if (!Number.isInteger(parsed.protectLastTurns) || parsed.protectLastTurns < 1) {
 					throw new CliUsageError("--protect-last-turns must be an integer at least 1");
+				}
+			} else if (arg === "--protect-last-steps") {
+				parsed.protectLastSteps = numberValue(value, arg);
+				if (!Number.isInteger(parsed.protectLastSteps) || parsed.protectLastSteps < 1) {
+					throw new CliUsageError("--protect-last-steps must be an integer at least 1");
 				}
 			} else if (arg === "--min-evictable-tokens") {
 				parsed.minEvictableTokens = numberValue(value, arg);
@@ -297,6 +307,7 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 			...DEFAULT_WORKING_SET_SETTINGS,
 			target: parsed.target,
 			protectLastTurns: parsed.protectLastTurns,
+			protectLastSteps: parsed.protectLastSteps,
 			minEvictableTokens: parsed.minEvictableTokens,
 		};
 		const results: ReplayPolicyResult[] = [];

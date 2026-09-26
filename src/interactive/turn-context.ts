@@ -44,7 +44,7 @@ import {
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
-import { isTurnStart } from "../domains/context/working-set/horizon.js";
+import { isTurnStart, protectionCutoffIndex } from "../domains/context/working-set/horizon.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
@@ -340,14 +340,18 @@ export interface TurnContext {
  */
 function evictionSkipMessage(
 	visibleEntries: ReadonlyArray<SessionEntry>,
-	workingSet: Readonly<{ protectLastTurns: number; policy: string }>,
+	workingSet: Readonly<{ protectLastTurns: number; protectLastSteps: number; policy: string }>,
 	policyId: string,
 ): string {
 	const turns = visibleEntries.filter(isTurnStart).length;
+	// The window is the narrower of the turn and step horizons, so only the
+	// cutoff itself says whether the policy was offered anything at all.
+	const allProtected = protectionCutoffIndex(visibleEntries, workingSet) === 0;
 	return renderEvictionSkipLine({
-		reason: turns <= workingSet.protectLastTurns ? "all-protected" : "nothing-evictable",
+		reason: allProtected ? "all-protected" : "nothing-evictable",
 		turns,
 		protectLastTurns: workingSet.protectLastTurns,
+		protectLastSteps: workingSet.protectLastSteps,
 		policyId,
 	});
 }
@@ -1453,6 +1457,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						reason: "disabled",
 						turns: 0,
 						protectLastTurns: settings.context.workingSet.protectLastTurns,
+						protectLastSteps: settings.context.workingSet.protectLastSteps,
 						policyId: settings.context.workingSet.policy,
 					});
 				}

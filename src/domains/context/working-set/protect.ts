@@ -70,6 +70,23 @@ export function findLaterSuccess(observation: PathObservation, index: PathIndex)
 	return null;
 }
 
+/**
+ * A later call of the same tool with byte-identical arguments, whatever its
+ * outcome. The newer run is the live evidence for that command; the older
+ * output is a claim about a state the session has since re-observed. Shared
+ * with `structural.ts` rung 4 and with the unresolved-failure protection below,
+ * so a failure that was re-run and failed again is superseded rather than
+ * pinned forever.
+ */
+export function findLaterRun(observation: PathObservation, index: PathIndex): PathObservation | null {
+	if (observation.argsKey.length === 0) return null;
+	for (const candidate of index.observations) {
+		if (candidate.entryIndex <= observation.entryIndex || candidate.isBlocked) continue;
+		if (candidate.toolName === observation.toolName && candidate.argsKey === observation.argsKey) return candidate;
+	}
+	return null;
+}
+
 /** A write or edit the turn in flight is still standing on. */
 function isActiveTurnMutation(observation: PathObservation, index: PathIndex): boolean {
 	if (observation.op !== "write" && observation.op !== "edit") return false;
@@ -104,6 +121,11 @@ export function isProtected(entry: SessionEntry, ctx: ProtectionContext): boolea
 	if (observation === undefined) return isErrorResult(entry.payload);
 
 	if (isActiveTurnMutation(observation, ctx.index)) return true;
-	if (observation.isError && findLaterSuccess(observation, ctx.index) === null) return true;
+	if (
+		observation.isError &&
+		findLaterSuccess(observation, ctx.index) === null &&
+		findLaterRun(observation, ctx.index) === null
+	)
+		return true;
 	return false;
 }

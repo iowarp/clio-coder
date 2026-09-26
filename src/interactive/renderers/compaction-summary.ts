@@ -57,6 +57,7 @@ export interface EvictionSkipLineInput {
 	/** Turn starts in the visible slice the policy was offered. */
 	turns: number;
 	protectLastTurns: number;
+	protectLastSteps: number;
 	policyId: string;
 }
 
@@ -69,12 +70,13 @@ export interface EvictionSkipLineInput {
  */
 export function renderEvictionSkipLine(input: EvictionSkipLineInput): string {
 	const turnWord = input.turns === 1 ? "turn" : "turns";
+	const window = `protectLastTurns ${input.protectLastTurns}, protectLastSteps ${input.protectLastSteps}`;
 	const cause =
 		input.reason === "disabled"
 			? "eviction is off (context.workingSet.enabled false)"
 			: input.reason === "all-protected"
-				? `nothing evictable, all ${input.turns} ${turnWord} are inside the protected window (protectLastTurns ${input.protectLastTurns})`
-				: `nothing evictable by ${input.policyId} above the protected window (protectLastTurns ${input.protectLastTurns})`;
+				? `nothing evictable, all ${input.turns} ${turnWord} are inside the protected window (${window})`
+				: `nothing evictable by ${input.policyId} above the protected window (${window})`;
 	return `[context engine] working set: ${cause}; llm_summary runs instead`;
 }
 

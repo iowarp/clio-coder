@@ -11,8 +11,8 @@
  * Rule order is the policy. Each rung emits candidates newest-first, every
  * candidate passes `isProtected`, and no unit is claimed twice, so a read that
  * is both stale and superseded is evicted for the reason that came first and
- * carries the ref that explains it. Rungs 1 to 5 are unconditional: redundant
- * content is free to drop, whatever the pressure. Rung 6 is the only one that
+ * carries the ref that explains it. Rungs 1 to 6 are unconditional: redundant
+ * content is free to drop, whatever the pressure. Rung 7 is the only one that
  * looks at token counts, and it stops the moment the projection reaches
  * `target`.
  *
@@ -26,11 +26,17 @@ import { tokensFreedByEviction } from "../engine.js";
 import { protectionCutoffIndex } from "../horizon.js";
 import { buildPathIndex, callPathsByToolCallId, covers, type PathIndex, type PathObservation } from "../path-index.js";
 import { hasThinking } from "../payload.js";
-import { findLaterSuccess, isProtected } from "../protect.js";
+import { findLaterRun, findLaterSuccess, isProtected } from "../protect.js";
 
 /** Ops that observe content rather than change it. */
 const READ_CLASS = new Set<PathObservation["op"]>(["read", "grep", "find", "ls", "code_nav"]);
 const MUTATING = new Set<PathObservation["op"]>(["write", "edit"]);
+/**
+ * Ops whose output is superseded by re-running the identical call. `read` is
+ * left to rung 2, which supersedes by line coverage rather than by arguments;
+ * a mutation re-run is a different edit, not a fresher copy of the same one.
+ */
+const RERUNNABLE = new Set<PathObservation["op"]>(["bash", "grep", "find", "ls", "code_nav"]);
 
 /**
  * The mutation that invalidated this observation: the first successful one
@@ -73,7 +79,7 @@ export const structuralPolicy: WorkingSetPolicy = {
 		const { entries, view, settings, pressure, estimateTokens } = input;
 		const index = buildPathIndex(entries, { cwd: input.cwd });
 		const callPaths = callPathsByToolCallId(entries);
-		const cutoffIndex = protectionCutoffIndex(entries, settings.protectLastTurns);
+		const cutoffIndex = protectionCutoffIndex(entries, settings);
 		const candidates: EvictionCandidate[] = [];
 		const claimed = new Set<string>();
 		let freed = 0;
@@ -127,20 +133,29 @@ export const structuralPolicy: WorkingSetPolicy = {
 			if (success !== null) emit(observation.ref.entry, "failure_resolved", success.ref.entry);
 		}
 
-		// 4. The listing has been walked. One surfaced path still unread and it
+		// 4. The same command ran again. Test, build and lint loops re-run one
+		//    command many times and every older output is the fattest stale
+		//    thing in the ledger; the newest run is the one the model acts on.
+		for (const observation of newestFirst) {
+			if (!RERUNNABLE.has(observation.op)) continue;
+			const rerun = findLaterRun(observation, index);
+			if (rerun !== null) emit(observation.ref.entry, "superseded_call", rerun.ref.entry);
+		}
+
+		// 5. The listing has been walked. One surfaced path still unread and it
 		//    stays: that is the path the agent comes back to.
 		for (const observation of newestFirst) {
 			if (isListingConsumed(observation, index)) emit(observation.ref.entry, "listing_consumed");
 		}
 
-		// 5. Reasoning from a closed turn, the same rule age-horizon applies.
+		// 6. Reasoning from a closed step, the same rule age-horizon applies.
 		for (let i = cutoffIndex - 1; i >= 0; i -= 1) {
 			const entry = entries[i];
 			if (entry?.kind !== "message" || entry.role !== "assistant") continue;
 			if (hasThinking(entry.payload)) emit(entry.turnId, "thinking_turn_closed");
 		}
 
-		// 6. Age, and only under pressure. Everything above is redundancy the
+		// 7. Age, and only under pressure. Everything above is redundancy the
 		//    session can lose for free; this rung loses content that is still
 		//    good, so it runs only when the projection is still over threshold
 		//    and stops the moment it reaches target.

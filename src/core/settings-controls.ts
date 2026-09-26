@@ -69,6 +69,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"context.workingSet.policy": "Eviction policy",
 	"context.workingSet.target": "Eviction target pressure",
 	"context.workingSet.protectLastTurns": "Turns protected from eviction",
+	"context.workingSet.protectLastSteps": "Steps protected from eviction",
 	"context.workingSet.minEvictableTokens": "Minimum evictable tokens",
 	"retry.enabled": "Retry transient errors",
 	"retry.maxRetries": "Max retries",
@@ -163,6 +164,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"context.workingSet.policy": "Which candidates the eviction pass selects.",
 	"context.workingSet.target": "Context pressure an applied eviction batch brings the session down to.",
 	"context.workingSet.protectLastTurns": "Recent user turns whose observations are never evicted.",
+	"context.workingSet.protectLastSteps": "Recent assistant steps whose observations and reasoning are never evicted.",
 	"context.workingSet.minEvictableTokens":
 		"Results below this token estimate stay; the marker would cost more than it saves.",
 	"retry.enabled": "Retry transient provider errors on the next submit.",
@@ -214,6 +216,8 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"context.workingSet.target":
 		"An applied eviction batch keeps evicting until pressure reaches this ratio, so it sits below compaction.threshold. Greater than 0 and less than 1 · default: 0.6.",
 	"context.workingSet.protectLastTurns": "Counted in user turns. Whole number of at least 1 · default: 6.",
+	"context.workingSet.protectLastSteps":
+		"Counted in assistant steps inside the turn window, so a long agentic turn stays evictable. Whole number of at least 1 · default: 8.",
 	"context.workingSet.minEvictableTokens":
 		"The floor sweep put marker break-even near 50 tokens; 200 is the churn guard. Whole number, 0 evicts anything · default: 200.",
 	"guardrails.turnToolCallBudget":

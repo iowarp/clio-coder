@@ -21,6 +21,12 @@ export const DEFAULT_WORKING_SET_SETTINGS: WorkingSetSettings = {
 	policy: "structural-v1",
 	target: 0.6,
 	protectLastTurns: 6,
+	// Real ledgers put most of a session inside one to four user turns, with up
+	// to sixty tool results in a single turn. Six protected turns then cover the
+	// whole session and the summary stage does all the work. Eight steps keep
+	// the model's immediate working context (the last few reads and the edit
+	// they informed) while everything older in the same turn stays evictable.
+	protectLastSteps: 8,
 	// The procedural floor sweep found marker break-even near 50 tokens. A zero
 	// floor saved only 0.167 summaries at 64k and none at 128k while reducing
 	// covered retention by 0.0076 and 0.0237. Keep 200 as the churn guard.

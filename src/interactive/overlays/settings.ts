@@ -1476,6 +1476,9 @@ export function buildSettingItems(
 		settingItem("context.workingSet.protectLastTurns", String(workingSet.protectLastTurns), {
 			values: ["3", "6", "10", "15"],
 		}),
+		settingItem("context.workingSet.protectLastSteps", String(workingSet.protectLastSteps), {
+			values: ["4", "8", "12", "20"],
+		}),
 		settingItem("context.workingSet.minEvictableTokens", String(workingSet.minEvictableTokens), {
 			values: ["0", "100", "200", "500", "1000"],
 		}),
@@ -2407,6 +2410,11 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 		case "context.workingSet.protectLastTurns":
 			applyNonNegativeInteger(value, (next) => {
 				if (next >= 1) settings.context.workingSet.protectLastTurns = next;
+			});
+			return;
+		case "context.workingSet.protectLastSteps":
+			applyNonNegativeInteger(value, (next) => {
+				if (next >= 1) settings.context.workingSet.protectLastSteps = next;
 			});
 			return;
 		case "context.workingSet.minEvictableTokens":

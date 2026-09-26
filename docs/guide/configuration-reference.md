@@ -67,6 +67,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `context.workingSet.policy` | `"structural-v1"` |
 | `context.workingSet.target` | `0.6` |
 | `context.workingSet.protectLastTurns` | `6` |
+| `context.workingSet.protectLastSteps` | `8` |
 | `context.workingSet.minEvictableTokens` | `200` |
 | `context.compaction.auto` | `true` |
 | `context.compaction.threshold` | `0.8` |

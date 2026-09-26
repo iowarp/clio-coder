@@ -144,6 +144,7 @@ explains worker route selection.
 | `context.workingSet.policy` | `structural-v1` | next turn |
 | `context.workingSet.target` | `0.6` | next turn |
 | `context.workingSet.protectLastTurns` | `6` | next turn |
+| `context.workingSet.protectLastSteps` | `8` | next turn |
 | `context.workingSet.minEvictableTokens` | `200` | next turn |
 | `context.compaction.auto` | `true` | next turn |
 | `context.compaction.threshold` | `0.8` | next turn |

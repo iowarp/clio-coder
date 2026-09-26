@@ -63,6 +63,7 @@ export function renderReplayJson(input: ReplayReportInput): string {
 				policy: input.config.settings.policy,
 				target: input.config.settings.target,
 				protectLastTurns: input.config.settings.protectLastTurns,
+				protectLastSteps: input.config.settings.protectLastSteps,
 				minEvictableTokens: input.config.settings.minEvictableTokens,
 			},
 		},

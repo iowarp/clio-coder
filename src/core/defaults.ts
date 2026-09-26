@@ -184,6 +184,14 @@ export type DurableCompactionSettings = Omit<CompactionSettings, "excludeLastTur
  *   - policy: candidate selection rule set.
  *   - target: used/window ratio an applied event batches down to.
  *   - protectLastTurns: recent user turns whose observations are never evicted.
+ *   - protectLastSteps: recent assistant steps (an assistant message and the
+ *     tool results it produced) that are never evicted, inside the turn window.
+ *     A long agentic turn is many steps; without this floor one turn with fifty
+ *     tool calls would protect every one of them and eviction would never fire.
+ *   - protectLastSteps: recent assistant steps (an assistant message and the
+ *     tool results it produced) that are never evicted, inside the turn window.
+ *     A long agentic turn is many steps; without this floor one turn with fifty
+ *     tool calls would protect every one of them and eviction would never fire.
  *   - minEvictableTokens: protect smaller results from low-yield eviction.
  *     The engine separately rejects replacements that save no tokens.
  */
@@ -194,6 +202,7 @@ export interface WorkingSetSettings {
 	policy: WorkingSetPolicyId;
 	target: number;
 	protectLastTurns: number;
+	protectLastSteps: number;
 	minEvictableTokens: number;
 }
 
@@ -726,6 +735,7 @@ context:
     policy: structural-v1
     target: 0.6
     protectLastTurns: 6
+    protectLastSteps: 8
     minEvictableTokens: 200
   compaction:
     auto: true

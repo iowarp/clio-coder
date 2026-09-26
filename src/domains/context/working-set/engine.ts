@@ -126,7 +126,7 @@ function sumTokens(entries: ReadonlyArray<SessionEntry>, estimate: (entry: Sessi
  * does not apply to the entry, and never negative, because a marker longer than
  * the body it replaces is a bad trade, not a negative saving.
  *
- * Exported so a policy can do headroom arithmetic (`structural-v1` rung 6 needs
+ * Exported so a policy can do headroom arithmetic (`structural-v1` rung 7 needs
  * to know when to stop) against the same numbers `planEviction` will record.
  * A policy that priced evictions its own way would report headroom the ledger
  * then contradicts. Pass the same `callPaths` the plan will use, or the marker

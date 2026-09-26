@@ -1772,6 +1772,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"policy",
 						"target",
 						"protectLastTurns",
+						"protectLastSteps",
 						"minEvictableTokens",
 					]);
 					if ("enabled" in workingSet) {
@@ -1793,6 +1794,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					}
 					for (const [key, min] of [
 						["protectLastTurns", 1],
+						["protectLastSteps", 1],
 						["minEvictableTokens", 0],
 					] as const) {
 						if (!(key in workingSet)) continue;

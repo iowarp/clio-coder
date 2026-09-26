@@ -512,6 +512,7 @@ export const EVICTION_REASONS = [
 	"stale_after_mutation",
 	"listing_consumed",
 	"failure_resolved",
+	"superseded_call",
 	"thinking_turn_closed",
 	"age_horizon",
 	"operator",
