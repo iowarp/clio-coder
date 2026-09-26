@@ -57,6 +57,8 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Worker receipts record `effectiveFailover`, the failover mode the retry path actually used, beside the requested `routingIntent.failover`. Main-agent and print-mode receipts omit it, and earlier receipts verify unchanged.
 - A worker whose validation tool ran and failed now seals verification basis `validation-tool` with state `unverified` instead of `no-validation-tool`. Observed validation also outranks `acp-external-unobserved`.
 - ACP delegation receipts keep each peer call's ACP tool kind, so starts and finishes pair, successful edits count as mutations, and peer-owned completions no longer claim a safety approval. A call without a kind reads as `other`, and a title such as `npm test` no longer counts as verification.
+- A worker that runs `verify` more than once is judged by the latest run of each check. A check it fixed and re-ran seals as passed and verified, and a later failure of a check that had passed seals as failed. A check is the call's `check`, `path`, `cwd`, `browser` and `args` together, and a blocked call changes nothing.
+- Worker and ACP delegation receipts of a read-only run carry `safety.readOnly: true`, including runs whose worker never tried to write. Receipts of runs that could write are unchanged.
 
 ### Terminal interface
 
@@ -69,6 +71,10 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - A call the operator approved keeps an `allowed by you` line naming the rail on its live transcript row, and compact style no longer folds it into its neighbors. A resumed or replayed session does not show the line.
 - The Fleet runs island names a running run's phase in the words its inline card uses, and its live input count includes cache reads, so its totals match the card.
 - Self-drawn list rows share one selection style, view, settings and the session tree show the editor's live filter row, the footer stacks Context and Status below 84 columns, and help rows drop flags before the description at narrow widths.
+- `/tasks` scrolls inside the dock. The selection stays in view, PgUp and PgDn page, Tab and Shift+Tab jump between sections, and a position row shows where the window sits, so operator tasks stay reachable below a long agent board.
+- Alt+O now changes the composer's thinking rail along with the transcript: `T` in compact, `think` in standard, and the level spelled out in detailed.
+- An operator cancel closes its turn with `⊘` in the transcript, as the footer does, instead of the warning `⚠`. A loop-guard stop keeps `⚠`.
+- A settled worker card whose final answer outgrew the live preview shows its summary instead of the raw result JSON.
 
 ### Fixes
 
