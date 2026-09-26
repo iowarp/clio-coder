@@ -244,6 +244,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getThinkingLabel: () => editorChrome.getThinkingLabel(),
 		getThinking: () => editorChrome.getThinking?.() ?? { label: editorChrome.getThinkingLabel(), hasLevels: false },
 		getHarnessStatus: (width) => editorChrome.getHarnessStatus?.(width) ?? null,
+		getContextUsage: () => editorChrome.getContextUsage?.(),
 		getOutputStyle: () => editorChrome.getOutputStyle?.() ?? settings.interface.outputDetail,
 		getAutonomy: () => editorChrome.getAutonomy?.() ?? settings.safety.autonomy,
 		isStreaming: () => editorChrome.isStreaming?.() ?? false,

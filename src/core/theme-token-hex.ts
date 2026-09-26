@@ -38,6 +38,11 @@ export const TERMINAL_PALETTE = {
 		["#eeeae2", 255],
 		["#231f1a", 234],
 	],
+	ivorySubdued: [
+		["#807360", 243],
+		["#94836c", 244],
+		["#7a6850", 242],
+	],
 	ivorySupporting: [
 		["#8a8070", 244],
 		["#b5a58e", 144],

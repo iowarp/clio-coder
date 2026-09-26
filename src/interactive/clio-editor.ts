@@ -11,6 +11,7 @@ import {
 import { type DockEntry, dockBodyRows, dockTop } from "./dock.js";
 import { guardPastedEditorOperator } from "./editor-bash.js";
 import { type EditorRailState, renderEditorRail } from "./editor-rails.js";
+import { type ContextOccupancyFacts, contextRailHint } from "./footer/widgets.js";
 import { centeredWindow, fitHintEntries } from "./overlay-frame.js";
 import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
@@ -32,6 +33,8 @@ export interface EditorChrome {
 	getThinkingLabel: () => string;
 	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[] };
 	getHarnessStatus?: (width: number) => { label: string; glyph: string; token: ClioToken; live: boolean } | null;
+	/** Published context accounting; rendering never refreshes the estimate. */
+	getContextUsage?: () => ContextOccupancyFacts | undefined;
 	getOutputStyle?: () => OutputStyle;
 	/** Effective session autonomy, including live overrides. */
 	getAutonomy?: () => string;
@@ -263,7 +266,6 @@ export class ClioEditor extends Editor {
 		const text = this.getText();
 		const mode = composerMode(this.chrome, text);
 		const rail = this.railState(mode);
-		const room = this.railLabelRoom(width);
 		const status = this.chrome.getHarnessStatus?.(width);
 		const spinner = GLYPH.running;
 		let label = "";
@@ -280,14 +282,28 @@ export class ClioEditor extends Editor {
 		const suffix = [
 			hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "",
 			mode === "STEER" || (mode === "FOLLOW-UP" && text.length > 0) ? theme.fg("draftState", mode) : "",
-			rail.yolo ? theme.style("yoloLabel", "YOLO", { bold: true }) : "",
 		]
 			.filter(Boolean)
 			.join(theme.fg("border", " · "));
-		const labelRoom = Math.max(0, room - visibleWidth(suffix) - (label && suffix ? 3 : 0));
-		const fitted = truncateToWidth(label, labelRoom, GLYPH.ellipsis, false);
-		const right = [fitted, suffix].filter(Boolean).join(theme.fg("border", " · "));
-		return renderEditorRail(theme, width, { right, rightRaw: true }, rail);
+		return this.topRail(width, theme, rail, label, suffix);
+	}
+
+	/** Both the editable composer and its menus share mode, activity, and occupancy. */
+	private topRail(width: number, theme: ClioTheme, rail: EditorRailState, label: string, suffix = ""): string {
+		const left = rail.yolo ? `${theme.fg("composerRail", "━")} ${theme.style("yoloLabel", "YOLO", { bold: true })}` : "";
+		const room = Math.max(0, this.railLabelRoom(width) - (left ? visibleWidth(left) + 1 : 0));
+		const context = this.chrome.getContextUsage?.();
+		const contextRoom = Math.min(
+			30,
+			Math.max(0, room - visibleWidth(suffix) - (suffix ? 3 : 0) - (label ? Math.min(16, visibleWidth(label)) + 3 : 0)),
+		);
+		const usage = context ? contextRailHint(context, width >= 100 ? 14 : 8, contextRoom, theme) : "";
+		const tail = [suffix, usage].filter(Boolean).join(theme.fg("border", " · "));
+		const labelRoom = Math.max(0, room - visibleWidth(tail) - (label && tail ? 3 : 0));
+		const right = [truncateToWidth(label, labelRoom, GLYPH.ellipsis, false), tail]
+			.filter(Boolean)
+			.join(theme.fg("border", " · "));
+		return renderEditorRail(theme, width, { left, leftRaw: true, right, rightRaw: true }, rail);
 	}
 
 	private railLabelRoom(width: number): number {
@@ -353,11 +369,6 @@ export class ClioEditor extends Editor {
 				? `${theme.fg("composerRail", attentionCue(this.railAnimationTime))} ${titleText}`
 				: titleText;
 		const labelRoom = this.railLabelRoom(width);
-		const titleRoom = Math.max(0, labelRoom - (rail.yolo && !entry.keepComposer ? 7 : 0));
-		const label =
-			rail.yolo && !entry.keepComposer
-				? `${truncateToWidth(title, titleRoom, GLYPH.ellipsis, false)}${theme.fg("border", " · ")}${theme.style("yoloLabel", "YOLO", { bold: true })}`
-				: truncateToWidth(title, labelRoom, GLYPH.ellipsis, false);
 		const top = entry.keepComposer
 			? padAnsi(
 					`${theme.fg("attentionRail", "┌")}${rule(theme, Math.max(0, width - 2), {
@@ -367,7 +378,7 @@ export class ClioEditor extends Editor {
 					})}${theme.fg("attentionRail", "┐")}`,
 					width,
 				)
-			: renderEditorRail(theme, width, { right: label, rightRaw: true }, rail);
+			: this.topRail(width, theme, rail, title);
 		const lines = [
 			top,
 			...body.map((row) =>

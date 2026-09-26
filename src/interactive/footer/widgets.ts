@@ -101,6 +101,11 @@ export interface ContextEngineFacts {
 	ledger?: ContextLedger | null;
 }
 
+export type ContextOccupancyFacts = Pick<
+	ContextEngineFacts,
+	"budget" | "used" | "contextWindow" | "toolSchemaTokens" | "breakdown" | "ledger"
+>;
+
 /** Dynamic agent work: the live action quadrant. */
 export interface AgentWorkFacts {
 	statusText: string | null;
@@ -174,7 +179,7 @@ export function formatUsd(value: number): string {
 	return `$${value.toFixed(2)}`;
 }
 
-function contextBreakdownForBar(context: ContextEngineFacts): ContextUsageBreakdown | undefined {
+function contextBreakdownForBar(context: ContextOccupancyFacts): ContextUsageBreakdown | undefined {
 	const reportedUsed = finiteNonNegative(context.used);
 	const toolTokens = finiteNonNegative(context.toolSchemaTokens);
 	const source = context.breakdown;
@@ -243,14 +248,14 @@ export function contextUsageText(context: ContextEngineFacts): string {
 }
 
 /** The share of the window `contextUsageText` states, in percent; null when either number is unknown. */
-export function contextUsagePercent(context: ContextEngineFacts): number | null {
+export function contextUsagePercent(context: ContextOccupancyFacts): number | null {
 	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
 	const window = context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow);
 	return used === null || !window ? null : (used / window) * 100;
 }
 
 /** Reads published numbers only; never refreshes accounting from a renderer. */
-export function contextOccupancyBar(context: ContextEngineFacts, cells: number, theme: ClioTheme): string {
+export function contextOccupancyBar(context: ContextOccupancyFacts, cells: number, theme: ClioTheme): string {
 	if (!context.budget && context.ledger) return renderContextMeterBar(context.ledger, cells, theme);
 	return buildSegmentedContextBar(
 		theme,
@@ -258,6 +263,22 @@ export function contextOccupancyBar(context: ContextEngineFacts, cells: number, 
 		context.contextWindow ?? 0,
 		context.used === null ? undefined : contextBreakdownForBar(context),
 	);
+}
+
+/** Composer occupancy, with whole percentages and the same category ink as the dashboard. */
+export function contextRailHint(context: ContextOccupancyFacts, cells: number, room: number, theme: ClioTheme): string {
+	const percent = contextUsagePercent(context);
+	const source =
+		percent === null ? "" : context.budget?.inputSource === "historical" ? "saved " : context.budget ? "~" : "";
+	const label = `${theme.fg("fieldName", "ctx ")}${theme.fg(contextPercentRole(percent), `${source}${formatContextPercent(percent)}`)}`;
+	if (visibleWidth(label) > room) return "";
+	if (percent === null || (!context.ledger && !context.budget)) return label;
+	// The segmented bar already owns its percentage; the ledger bar does not.
+	const bar = contextOccupancyBar(context, cells, theme);
+	const full = context.budget
+		? `${theme.fg("fieldName", `ctx ${source}`)}${bar}`
+		: `${theme.fg("fieldName", "ctx ")}${bar}  ${theme.fg(contextPercentRole(percent), formatContextPercent(percent))}`;
+	return visibleWidth(full) <= room ? full : label;
 }
 
 type DashboardRow =

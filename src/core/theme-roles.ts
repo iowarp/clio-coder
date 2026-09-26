@@ -38,9 +38,9 @@ export const TEXT_ROLES = {
 	commandHint: text("supporting", "cyan", { yolo: "orange" }),
 	draftState: text("reading", "neutral", { yolo: "ivory" }),
 	thinkingLevel: text("reading", "neutral", { yolo: "ivory" }),
-	thinkingInactive: text("supporting", "ivory"),
-	thinkingActive: text("focal", "ivory", { bold: true }),
-	thinkingMaximum: text("focal", "action", { bold: true }),
+	thinkingInactive: text("subdued", "ivory"),
+	thinkingActive: text("focal", "action", { bold: true }),
+	thinkingMaximum: text("strong", "action", { bold: true }),
 	harnessAction: text("focal", "action", { bold: true }),
 	yoloLabel: text("strong", "action", { bold: true }),
 	decisionCue: text("focal", "action", { bold: true }),
@@ -186,7 +186,7 @@ const NEUTRAL: Record<TextIntensity, PaletteColor> = {
 	strong: "neutralStrong",
 };
 const IVORY: Record<TextIntensity, PaletteColor> = {
-	subdued: "ivorySupporting",
+	subdued: "ivorySubdued",
 	supporting: "ivorySupporting",
 	reading: "ivoryReading",
 	focal: "ivoryFocal",

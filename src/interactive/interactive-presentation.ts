@@ -483,6 +483,25 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
 			return status.phase === "idle" ? null : footerPhasePresentation(status, width, Date.now());
 		},
+		getContextUsage: () => {
+			const usage = deps.chat.contextUsage();
+			return {
+				used: usage.tokens,
+				contextWindow: usage.contextWindow,
+				toolSchemaTokens: usage.breakdown?.toolSchemaTokens ?? null,
+				breakdown: usage.breakdown ?? null,
+				ledger: usage.revision ? null : deps.chat.contextLedger(),
+				...(usage.revision
+					? {
+							budget: {
+								revision: usage.revision,
+								historical: usage.historical ?? true,
+								inputSource: usage.inputSource ?? "unknown",
+							},
+						}
+					: {}),
+			};
+		},
 		getThinking: () => {
 			const current = deps.getSettings?.();
 			const thinking = resolveModelRuntimeCapabilitiesForProviders(

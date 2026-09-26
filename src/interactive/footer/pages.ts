@@ -4,35 +4,19 @@ import type { UsageSnapshot } from "../../domains/quota/types.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import { contextCategorySwatch, contextPercentRole, renderContextMeterGrid } from "../context-meter.js";
+import { contextCategorySwatch, renderContextMeterGrid } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import { dispatchStatusPresentation, renderDispatchActivity } from "../dispatch-board.js";
 import { ACTIVE_DISPATCH_STATUSES, FAILED_DISPATCH_STATUSES, formatFooterTokens } from "../footer-panel.js";
 import { formatKeyLabel } from "../keybinding-manager.js";
 import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
 import { previewRows } from "../renderers/preview.js";
-import {
-	brandMark,
-	metricText,
-	clioTheme,
-	formatCompactMs,
-	formatContextPercent,
-	GLYPH,
-	padAnsi,
-	rule,
-} from "../theme/index.js";
+import { brandMark, metricText, clioTheme, formatCompactMs, GLYPH, padAnsi, rule } from "../theme/index.js";
 import { fitIdentityLabel, formatTargetLabel } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
 import { notificationGlyph, notificationToken, topNotification } from "./notifications.js";
-import {
-	activityQuadrant,
-	contextOccupancyBar,
-	contextQuadrant,
-	contextUsagePercent,
-	contextUsageText,
-	zipColumns,
-} from "./widgets.js";
+import { activityQuadrant, contextQuadrant, contextUsageText, zipColumns } from "./widgets.js";
 
 export const DASHBOARD_PAGES = ["Activity", "Context", "Status"] as const;
 export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
@@ -321,42 +305,13 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const w = Math.max(1, width);
 	const narrow = w <= 60;
 	const fit = (s: string, n = w) => theme.base("counter", truncateToWidth(s, Math.max(1, n), GLYPH.ellipsis, true));
-	const ledger = state.context.ledger;
 	const workers = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
 	const phase = workers ? `${workers} ${workers === 1 ? "worker" : "workers"}` : "Model";
 	const phaseToken = workers ? "activity" : "fieldName";
 	const identity = clean(state.session.target ?? "No model selected");
-	const usage = contextUsageText(state.context);
-	const meter = ledger || state.context.budget ? contextOccupancyBar(state.context, w >= 100 ? 14 : 8, theme) : "";
-	// A narrow row drops the absolute token counts before it would cut a number
-	// in half, and keeps the percent. The segmented meter states its percent;
-	// the ledger meter states only counts, so its percent joins it here.
-	const rightBudget = Math.floor(w * 0.48);
-	const percent =
-		state.context.budget || !ledger
-			? ""
-			: ` ${theme.fg(contextPercentRole(contextUsagePercent(state.context)), formatContextPercent(contextUsagePercent(state.context)))}`;
-	const withCounts = `${meter} ${usage}`;
-	const fullContext =
-		meter.length === 0 || visibleWidth(withCounts) <= rightBudget ? withCounts : `${meter}${percent}`.trimEnd();
-	// A label and percentage leave a narrow footer enough room to name the
-	// model, while preserving the provenance carried by the expanded counts.
-	const occupancy = contextUsagePercent(state.context);
-	const source =
-		occupancy === null
-			? ""
-			: state.context.budget?.inputSource === "historical"
-				? "saved "
-				: state.context.budget
-					? "~"
-					: "";
-	const context = narrow
-		? `${theme.fg("fieldName", "ctx ")}${theme.fg(contextPercentRole(occupancy), `${source}${formatContextPercent(occupancy)}`)}`
-		: fullContext;
-	const rightWidth = Math.min(rightBudget, visibleWidth(context));
 
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
-	const leftRoom = Math.max(1, w - rightWidth - 3);
+	const leftRoom = w;
 	// An armed skill narrows the tools every turn uses until `/skill off`, so it
 	// rides next to the activity and outranks the identity and quota badge.
 	// Where `skill <names>` does not fit, the knowledge mark
@@ -425,7 +380,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
 				: theme.fg("keyboardHint", (state.demo !== false ? footerKeyHint(state.now, w < 120) : null) ?? `${key} Dashboard`);
 	if (narrow) {
-		const rows = [fit(pair(left, context, rightWidth))];
+		const rows = [fit(left)];
 		if (urgent || notice) rows.push(fit(foot));
 		return rows;
 	}
@@ -442,7 +397,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	);
 	const cwdWidth = Math.max(1, workspaceWidth - gitWidth - 3);
 	const workspace = `${theme.fg("workspacePath", fitIdentityLabel(clean(state.workspace.cwd), cwdWidth))} · ${theme.fg("branch", fitIdentityLabel(git, Math.max(1, gitWidth - visibleWidth(dirtyMarker))))}${dirtyMarker}`;
-	return [fit(pair(left, context, rightWidth)), fit(pair(workspace, foot, hintWidth))];
+	return [fit(left), fit(pair(workspace, foot, hintWidth))];
 }
 
 function statusPage(state: FooterDashboardRenderState, width: number): string[] {
