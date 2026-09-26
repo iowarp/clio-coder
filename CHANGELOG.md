@@ -20,6 +20,16 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - `/context` shows the selected non-default profile and rearm percentage. Replay retains recorded recall evidence, uses the same projected-ledger headroom as live eviction, and pairs non-default profile results with default-profile runs over the same corpus in Markdown and JSON reports.
 - A reviewed handoff draft is bound to the active session and branch state. Switching branches or invoking session lifecycle commands directly through ACP invalidates it, so stale draft prose cannot create a successor session.
 
+### Graphical application and ACP
+
+The browser GUI remains opt-in alpha. These items add GUI/ACP access to shared runtime behavior; where a workflow already existed elsewhere, they are not new core capability. Controls are available only when the host advertises the required capability.
+
+- The session board brings operator tasks, the assistant plan, recorded decisions and task-memory status together. Operators can supersede a decision without erasing it and propose selected knowledge or procedural entries for review; a proposal is not accepted memory.
+- Conversation trees can continue from a selected turn or fork to a successor session, and reviewed handoff drafts can start the next session. Conversation branches do not rewind files or Git, and stale handoff drafts are invalidated after session or branch state changes.
+- Fleet controls preview waves, steps, routes, write boundaries, gates and budget before approval, then refuse execution when the approval identity changes. The approval identity and durable DAG hash remain distinct; routes and environment are not promised immutable for an entire multistep run.
+- New requests can carry supported images, workspace `@path` inputs and bounded UTF-8 text files. Model and thinking controls distinguish this conversation's next request from settings saved for every project; image usefulness still depends on model and server vision support.
+- Side questions avoid adding a conversation turn, while labelled alternative drafts can include a model judge's verdict, not independent correctness validation. Session usage and provider-reported quota stay separate, and extension eligibility, reload results and library updates are available to open sessions.
+
 ### Safety
 
 - Damage control no longer blocks a destructive command that appears only as quoted text in `echo` or `printf` arguments, a `git commit -m` or `git tag -m` message, or a `grep` or `rg` pattern, including when the bash call names a working directory. The exemption applies only when the whole command has no `eval`, pipe, heredoc, substitution, shell, interpreter or wrapper command, and never to SQL rules. Every other command is still scanned whole.
@@ -35,7 +45,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - A `verify` check whose only calls were blocked seals no typed validation fact, so a check that never ran no longer reads as failed, and read-only runs stop showing `quality validation failed` for denied checks.
 - Worker instructions leave denied checks out of `validations` and cite read sources in the summary. A report that changed nothing may use an empty `validations` array with unmeasured quality, and so may an editing report when every check it attempted was blocked. Receipts sealed by earlier builds still verify unchanged.
 - Validation grounding treats `npm test`, `pnpm test` and `yarn test` and their `run test` forms as one command, including the test command `verify` records and a claim that ends in a colon. Other script names stay distinct.
-- Fleet preview shows appended typed command arguments. Approval identity covers the selected recipes, resolved routes, and registered invocation details including command, working directory, environment, timeout, slots, and budget; it remains distinct from the durable DAG hash. The identity is an approval-boundary check, not a promise that routes or environment stay immutable throughout a multistep run.
+- Fleet preview shows appended typed command arguments; bounded previews explicitly mark omitted steps, argument entries and write paths as truncated. Approval identity covers the selected recipes, resolved routes, and registered invocation details including command, working directory, environment, timeout, slots, and budget; it remains distinct from the durable DAG hash. The identity is an approval-boundary check, not a promise that routes or environment stay immutable throughout a multistep run.
 
 ### Providers and doctor
 
@@ -48,6 +58,10 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 - **Behavior change:** When any Clio directory is relocated through `CLIO_CODER_HOME` or a `CLIO_CODER_*_DIR` variable, quota no longer reads the Codex, Claude Code or agy CLI credentials from your real home unless that product's own home is set (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `ANTIGRAVITY_HOME`). Default homes keep showing those accounts, and Clio's own Anthropic Max credentials work in either.
 - The Local AI `$0.00` row appears only when a local-runtime target is configured.
+
+### Lifecycle
+
+- Bare `clio-coder gui` opens or reuses this installation's owned background application when present and otherwise starts a private foreground server. An installed Linux background application can refresh its launch paths after an upgrade only while idle; macOS and Windows continue to use the private server path.
 
 ### Terminal interface
 
