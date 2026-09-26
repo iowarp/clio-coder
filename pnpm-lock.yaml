@@ -87,12 +87,6 @@ importers:
 
   apps/clio-coder-gui:
     dependencies:
-      '@fontsource-variable/atkinson-hyperlegible-next':
-        specifier: 5.3.0
-        version: 5.3.0
-      '@fontsource-variable/newsreader':
-        specifier: 5.3.0
-        version: 5.3.0
       '@hono/node-server':
         specifier: 2.1.1
         version: 2.1.1(hono@4.13.5)
@@ -571,12 +565,6 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
-
-  '@fontsource-variable/atkinson-hyperlegible-next@5.3.0':
-    resolution: {integrity: sha512-UnLzNUy1RWoLDfydAatP4NaRm99X/WbQEph7q/PymJnCFIOOwKOx3pBmp5ys8trO0dM+CKGuJgeZP9fAR4mQpA==}
-
-  '@fontsource-variable/newsreader@5.3.0':
-    resolution: {integrity: sha512-rrzYi43qMpbzwuFtf9OkWH8sxAPVPcQQQEwXpPtwaKYeJ8yVg5aLs5kawmo1f2Q1t1M38TLmEKCkGVDsYwgdFw==}
 
   '@google/genai@2.21.0':
     resolution: {integrity: sha512-+PDtco2/Z0ONdzCGekCoCT+O1VJS9xJQNN4XzQpXG/t3El/SWWMkCWlFRO1KmivOHPa4Q0VjUYu1HBKCZ/v33Q==}
@@ -2736,10 +2724,6 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.1':
     optional: true
-
-  '@fontsource-variable/atkinson-hyperlegible-next@5.3.0': {}
-
-  '@fontsource-variable/newsreader@5.3.0': {}
 
   '@google/genai@2.21.0(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))':
     dependencies:

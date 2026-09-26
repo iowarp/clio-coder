@@ -1,7 +1,7 @@
 /* The offline page loads without the token layer, so it restates the brand paper, ink and signal
    from client/design/tokens.css. Keep these values in step with it. */
 :root {
-	color-scheme: light dark;
+	color-scheme: light;
 	font-family: "Segoe UI", system-ui, sans-serif;
 	color: #1a1612;
 	background: #f3eee4;
@@ -55,27 +55,53 @@ button:focus-visible {
 	outline-offset: 2px;
 }
 @media (prefers-color-scheme: dark) {
-	:root {
+	:root:not([data-theme="light"]) {
+		color-scheme: dark;
 		color: #f0ece1;
 		background: #000000;
 	}
-	.eyebrow {
-		color: #00c2cb;
+	html:not([data-theme="light"]) .eyebrow {
+		color: #00d4db;
 	}
-	.note {
-		color: #a89e8f;
+	html:not([data-theme="light"]) .note {
+		color: #a3998a;
 	}
-	button {
+	html:not([data-theme="light"]) button {
 		border-color: #f0ece1;
 		background: #f0ece1;
 		color: #0d0d0c;
 	}
-	button:hover:not(:disabled) {
-		border-color: #00c2cb;
-		background: #00c2cb;
+	html:not([data-theme="light"]) button:hover:not(:disabled) {
+		border-color: #00d4db;
+		background: #00d4db;
 		color: #001a1c;
 	}
-	button:focus-visible {
-		outline-color: #00c2cb;
+	html:not([data-theme="light"]) button:focus-visible {
+		outline-color: #00d4db;
 	}
+}
+
+:root[data-theme="dark"] {
+	color-scheme: dark;
+	color: #f0ece1;
+	background: #000000;
+}
+html[data-theme="dark"] .eyebrow {
+	color: #00d4db;
+}
+html[data-theme="dark"] .note {
+	color: #a3998a;
+}
+html[data-theme="dark"] button {
+	border-color: #f0ece1;
+	background: #f0ece1;
+	color: #0d0d0c;
+}
+html[data-theme="dark"] button:hover:not(:disabled) {
+	border-color: #00d4db;
+	background: #00d4db;
+	color: #000000;
+}
+html[data-theme="dark"] button:focus-visible {
+	outline-color: #00d4db;
 }

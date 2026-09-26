@@ -1,66 +1,19 @@
+@import "./brand.css";
+
 /* Clio Coder GUI token layer. Every colour below is contrast-measured by
    scripts/check-contrast.mjs; no component sheet may introduce a raw hex.
    This file holds declarations only, never a component rule, so the cascade
    result does not depend on where it lands in the import graph. */
 
-@font-face {
-	font-family: "IBM Plex Mono";
-	font-style: normal;
-	font-weight: 400;
-	font-display: swap;
-	src: url("../assets/fonts/ibm-plex-mono-400.woff2") format("woff2");
-}
-
-@font-face {
-	font-family: "IBM Plex Mono";
-	font-style: normal;
-	font-weight: 500;
-	font-display: swap;
-	src: url("../assets/fonts/ibm-plex-mono-500.woff2") format("woff2");
-}
-
 :root {
 	/* ---- type faces. The fallbacks are real because the first paint happens
 	   before the local font files resolve. ------------------------------- */
-	--font-ui: "Atkinson Hyperlegible Next Variable", "Segoe UI", system-ui, sans-serif;
-	--font-editorial: "Newsreader Variable", Georgia, "Times New Roman", serif;
+	--font-ui: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+	--font-editorial: "Newsreader", Georgia, "Times New Roman", serif;
 	--font-mono: "IBM Plex Mono", "Cascadia Code", ui-monospace, monospace;
 
-	/* ---- surfaces (light: the brand's warm paper) ---------------------- */
-	--paper: #f3eee4;
-	--surface: #faf7f2;
-	--surface-sunken: #e8e1d3;
-	--overlay: #ffffff;
+	/* Canonical surfaces, ink, interaction roles and focus live in brand.css. */
 	--scrim: rgb(26 22 18 / 52%);
-
-	/* ---- ink ------------------------------------------------------------ */
-	--ink: #1a1612;
-	--ink-strong: #0d0b09;
-	--ink-muted: #524a42;
-	--ink-subtle: #766c61;
-
-	/* ---- rules. --line is decorative and may NEVER be the sole boundary of
-	   an interactive control; --line-strong clears WCAG 1.4.11 on paper,
-	   surface and sunken alike. ------------------------------------------ */
-	--line: #d4cbbd;
-	--line-strong: #857a6c;
-
-	/* ---- accent: the brand signal cyan of the logo. Interaction,
-	   connection, selection and focus; never a status. ------------------- */
-	--accent: #0a666c;
-	--accent-strong: #08555a;
-	--accent-soft: #e0eff0;
-	--on-accent: #f7fbfb;
-
-	/* ---- focus ---------------------------------------------------------- */
-	--focus: #0a666c;
-	--focus-halo: #faf7f2;
-
-	/* ---- the primary action: ink on paper, as on the brand site; it
-	   takes the signal only when hovered. ------------------------------- */
-	--primary-fill: #1a1612;
-	--on-primary: #faf7f2;
-	--selection: #cfe5e6;
 
 	/* ---- status ramp: neutral / running / success / warn / fail /
 	   unverified. Each tone is fg (text), tint (surface), line (boundary). */
@@ -139,12 +92,8 @@
 	--shadow-float: 0 24px 64px rgb(26 22 18 / 18%);
 
 	/* ---- motion --------------------------------------------------------- */
-	--motion-instant: 90ms;
-	--motion-fast: 120ms;
-	--motion-base: 150ms;
-	--motion-slow: 180ms;
-	--ease-standard: ease;
-	--ease-emphasis: cubic-bezier(0.2, 0.8, 0.2, 1);
+	--motion-instant: var(--motion-fast);
+	--motion-slow: var(--motion-base);
 
 	/* ---- shell metrics --------------------------------------------------- */
 	--masthead-height: 58px;
@@ -186,31 +135,7 @@
 }
 
 :root[data-theme="dark"] {
-	--paper: #000000;
-	--surface: #0d0d0c;
-	--surface-sunken: #151412;
-	--overlay: #1e1c19;
 	--scrim: rgb(0 0 0 / 72%);
-
-	--ink: #f0ece1;
-	--ink-strong: #fbf8f1;
-	--ink-muted: #a89e8f;
-	--ink-subtle: #8a8174;
-
-	--line: #23211d;
-	--line-strong: #7a7064;
-
-	--accent: #00c2cb;
-	--accent-strong: #4fd6dd;
-	--accent-soft: #052629;
-	--on-accent: #001a1c;
-
-	--focus: #00c2cb;
-	--focus-halo: #000000;
-
-	--primary-fill: #f0ece1;
-	--on-primary: #0d0d0c;
-	--selection: #06383c;
 
 	--status-neutral-fg: #a89e8f;
 	--status-neutral-tint: #151412;
@@ -256,31 +181,7 @@
    :not([data-theme="light"]) guard keeps an explicit light choice winning. */
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme="light"]) {
-		--paper: #000000;
-		--surface: #0d0d0c;
-		--surface-sunken: #151412;
-		--overlay: #1e1c19;
 		--scrim: rgb(0 0 0 / 72%);
-
-		--ink: #f0ece1;
-		--ink-strong: #fbf8f1;
-		--ink-muted: #a89e8f;
-		--ink-subtle: #8a8174;
-
-		--line: #23211d;
-		--line-strong: #7a7064;
-
-		--accent: #00c2cb;
-		--accent-strong: #4fd6dd;
-		--accent-soft: #052629;
-		--on-accent: #001a1c;
-
-		--focus: #00c2cb;
-		--focus-halo: #000000;
-
-		--primary-fill: #f0ece1;
-		--on-primary: #0d0d0c;
-		--selection: #06383c;
 
 		--status-neutral-fg: #a89e8f;
 		--status-neutral-tint: #151412;
@@ -324,23 +225,8 @@
 
 @media (prefers-contrast: more) {
 	:root {
-		--line: #a99e8e;
-		--line-strong: #5e554c;
-		--ink-muted: #3c342c;
-		--ink-subtle: #4a423a;
-	}
-	:root[data-theme="dark"] {
-		--line: #4a443c;
-		--line-strong: #a3998a;
-		--ink-muted: #d6cebf;
-		--ink-subtle: #bdb3a4;
-	}
-	@media (prefers-color-scheme: dark) {
-		:root:not([data-theme="light"]) {
-			--line: #4a443c;
-			--line-strong: #a3998a;
-			--ink-muted: #d6cebf;
-			--ink-subtle: #bdb3a4;
-		}
+		--line: var(--line-strong);
+		--ink-muted: var(--ink);
+		--ink-subtle: var(--ink);
 	}
 }

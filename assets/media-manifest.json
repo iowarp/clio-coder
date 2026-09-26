@@ -110,8 +110,7 @@
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": [
-				"site/assets/logo.webp",
-				"apps/clio-coder-gui/client/public/clio-coder-logo.webp"
+				"site/assets/logo.webp"
 			]
 		},
 		{
@@ -189,8 +188,8 @@
 		{
 			"id": "gui-icon-192",
 			"source": "assets/clio-coder-app-icon-192.png",
-			"sha256": "9d5fc6ac72ef58c65d27c08fac56a435367270bc469f3723dc7eea60c5fea609",
-			"provenance": "Canonical tracked copy of the existing GUI PWA 192-pixel application icon.",
+			"sha256": "2e2544d15cd9149fa0bb2bad04a561caf97e07a4db1127354e2e77deacc6e8e6",
+			"provenance": "Canonical cyan Clio ring with copper C; square safe-area projection from site/export-brand.mjs, unchanged geometry and colors.",
 			"dimensions": {
 				"width": 192,
 				"height": 192
@@ -208,8 +207,8 @@
 		{
 			"id": "gui-icon-512",
 			"source": "assets/clio-coder-app-icon-512.png",
-			"sha256": "1ecb31fe7b5bb782257a7f6beb5baec51e143af5ca3c913fcb472a26550e6250",
-			"provenance": "Canonical tracked copy of the existing GUI PWA 512-pixel application icon.",
+			"sha256": "fa5fadff9b50f8f6380032919be2e0d6be973696729304fa4e2f803c472815c3",
+			"provenance": "Canonical cyan Clio ring with copper C; square safe-area projection from site/export-brand.mjs, unchanged geometry and colors.",
 			"dimensions": {
 				"width": 512,
 				"height": 512
@@ -383,6 +382,44 @@
 			"representation": "real-product-capture",
 			"copies": [
 				"site/assets/gui-overview.webp"
+			]
+		},
+		{
+			"id": "gui-clio-mark",
+			"source": "assets/clio-mark-gui.webp",
+			"sha256": "0a9ad4f1015c4c0bb17dbe952841c915a39ca0cf5fc9ec06f403d1673357bd23",
+			"provenance": "Canonical Clio mark exported from site/export-brand.mjs; original provenance and derived hashes in the GUI brand/provenance.json.",
+			"dimensions": {
+				"width": 117,
+				"height": 128
+			},
+			"role": "GUI canonical Clio mark",
+			"channels": [
+				"gui"
+			],
+			"altTextSeed": "Cyan Clio ring with a copper C.",
+			"representation": "brand-artwork",
+			"copies": [
+				"apps/clio-coder-gui/client/public/clio-coder-logo.webp"
+			]
+		},
+		{
+			"id": "gui-favicon",
+			"source": "assets/clio-coder-app-favicon.png",
+			"sha256": "ad27cbf1df85b46eeff96cb8794e2fe31c461c8815ec84b80cdcad25c8aa682c",
+			"provenance": "Canonical Clio mark exported from site/export-brand.mjs; original provenance and derived hashes in the GUI brand/provenance.json.",
+			"dimensions": {
+				"width": 32,
+				"height": 32
+			},
+			"role": "GUI favicon",
+			"channels": [
+				"gui"
+			],
+			"altTextSeed": "Cyan Clio ring with a copper C.",
+			"representation": "brand-artwork",
+			"copies": [
+				"apps/clio-coder-gui/client/public/favicon.png"
 			]
 		}
 	],

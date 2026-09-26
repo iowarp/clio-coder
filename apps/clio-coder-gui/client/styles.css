@@ -151,7 +151,7 @@ h1 {
 	font-family: var(--font-editorial);
 }
 h1 {
-	font-weight: 450;
+	font-weight: 500;
 	font-size: clamp(42px, 4.2vw, 68px);
 	letter-spacing: -1.5px;
 	line-height: 1.06;
@@ -368,7 +368,7 @@ nav {
 	clip-path: inset(50%);
 	white-space: nowrap;
 }
-.workspace[data-sidebar="collapsed"] .sidebar :is(nav a, .sidebar-toggle) {
+.workspace[data-sidebar="collapsed"] .sidebar :is(nav a, .sidebar-toggle, .nav-help) {
 	position: relative;
 	justify-content: center;
 	padding-inline: 0;
@@ -376,7 +376,7 @@ nav {
 .workspace[data-sidebar="collapsed"] .desktop-navigation {
 	padding-inline: var(--space-2);
 }
-.workspace[data-sidebar="collapsed"] .sidebar :is(nav a, .sidebar-toggle):is(:hover, :focus-visible)::after {
+.workspace[data-sidebar="collapsed"] .sidebar :is(nav a, .sidebar-toggle, .nav-help):is(:hover, :focus-visible)::after {
 	content: attr(data-tip);
 	position: absolute;
 	left: calc(100% + 10px);
@@ -984,7 +984,7 @@ nav a[data-group="more"] .icon {
 .trace-filters button {
 	border: 1px solid var(--line-strong);
 	padding: 11px var(--space-4);
-	background: var(--surface-sunken);
+	background: var(--surface);
 	border-radius: var(--radius-sm);
 	color: var(--accent);
 }
@@ -1812,4 +1812,73 @@ main:has(> .conversation) {
 .reconnect__problem {
 	color: var(--status-fail-fg);
 	font-size: 14px;
+}
+
+/* Dense inspection pages share a compact title; expressive type remains on the overview. */
+main :is(.panel-heading, .page-heading) h1 {
+	font-family: var(--font-ui);
+	font-size: clamp(28px, 3vw, 38px);
+	font-weight: 600;
+	letter-spacing: -0.8px;
+	line-height: 1.2;
+}
+main > .panel-heading {
+	margin-bottom: var(--space-6);
+}
+main :is(section, article, .panel-heading, .page-heading) {
+	min-width: 0;
+}
+main :is(h1, h2, h3, p, li, dd, dt, a) {
+	overflow-wrap: anywhere;
+}
+main :is(pre, .table-scroll) {
+	max-width: 100%;
+	overflow-x: auto;
+}
+@media (pointer: coarse) {
+	button,
+	summary,
+	nav a {
+		min-height: 44px;
+	}
+}
+@media (max-width: 360px) {
+	.brand {
+		font-size: 16px;
+		gap: var(--space-1);
+	}
+	.brand img {
+		width: 30px;
+	}
+	.connection {
+		padding-inline: var(--space-1);
+	}
+	main {
+		padding-inline: var(--space-4);
+	}
+}
+
+.nav-help {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: 11px 14px;
+	min-height: 44px;
+	border: 0;
+	border-top: 1px solid var(--line);
+	border-radius: 0;
+	background: transparent;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+	text-align: left;
+}
+.nav-help:hover {
+	background: var(--surface-sunken);
+	color: var(--ink);
+}
+
+.trace-filters .primary {
+	background: var(--primary-fill);
+	color: var(--on-primary);
+	border-color: var(--primary-fill);
 }

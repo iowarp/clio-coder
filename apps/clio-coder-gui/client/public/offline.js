@@ -1,3 +1,9 @@
+try {
+	const saved = localStorage.getItem("clio-coder-gui-theme");
+	if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+} catch {
+	/* The system preference remains the fallback when storage is unavailable. */
+}
 const button = document.getElementById("retry"),
 	status = document.getElementById("status");
 let pending = false,

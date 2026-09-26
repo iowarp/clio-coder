@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -25,8 +24,14 @@ const { values } = parseArgs({
 	},
 });
 const widths = values.widths.split(",").map(Number);
-assert.ok(widths.length > 0 && widths.every((width) => [1600, 1050, 390].includes(width)), "widths: 1600, 1050, 390");
-const output = await mkdtemp(join(tmpdir(), "clio-web-browser-"));
+assert.ok(
+	widths.length > 0 && widths.every((width) => [1600, 1050, 390, 320].includes(width)),
+	"widths: 1600, 1050, 390, 320",
+);
+const scratch = fileURLToPath(new URL("../../../.superpowers/gui-validation/", import.meta.url));
+await mkdir(scratch, { recursive: true });
+process.env.TMPDIR ??= scratch;
+const output = await mkdtemp(join(scratch, "browser-"));
 let origin = "http://127.0.0.1:0";
 const h = await harness(
 	{ installDelayMs: 150 },
@@ -203,9 +208,9 @@ try {
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `toolchain-${width}.png`), fullPage: true });
 		await navigate("Traces");
-		await page.locator('a[href="/traces/run-0000"]').waitFor();
+		await page.locator('a[href^="/traces/run-0000"]').waitFor();
 		await check("traces");
-		await page.locator('a[href="/traces/run-0000"]').click();
+		await page.locator('a[href^="/traces/run-0000"]').click();
 		await page.getByRole("heading", { name: "Inspect fixture 0", exact: true }).waitFor();
 		await page.getByText("Fixture workspace", { exact: false }).first().waitFor({ state: "attached" });
 		// Format conformance and contract quality are separate facts; an unmeasured quality never reads as a pass.
@@ -219,21 +224,22 @@ try {
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `trace-run-${width}.png`), fullPage: true });
 		await navigate("Fleet");
-		await page.getByRole("heading", { name: "fixture-council", exact: true }).waitFor();
+		await page.getByRole("heading", { name: "Fleet executions", exact: true }).waitFor();
 		await page.getByText("not a live event stream", { exact: false }).waitFor();
 		await check("fleet");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `fleet-${width}.png`), fullPage: true });
-		await page.locator('a[href="/fleet/fleet-149"]').click();
+		await page.locator('a[href^="/fleet/fleet-149"]').click();
+		await page.getByText("Inspect worker output", { exact: true }).click();
 		await page.getByText("Fixture step passed.", { exact: true }).waitFor();
-		await page.getByRole("heading", { name: "review · pass", exact: true }).waitFor();
+		await page.getByRole("heading", { name: "review · pass", exact: true }).waitFor({ state: "attached" });
 		await check("fleet-run");
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("fleet-run-dark");
 		await page.goto(`${origin}/evidence`);
-		await page.locator('a[href="/evidence/evidence-039"]').waitFor();
+		await page.locator('a[href^="/evidence/evidence-039"]').waitFor();
 		await check("evidence");
-		await page.locator('a[href="/evidence/evidence-039"]').click();
+		await page.locator('a[href^="/evidence/evidence-039"]').click();
 		await page.getByRole("heading", { name: "Trust by run", exact: true }).waitFor();
 		await check("evidence-detail-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
@@ -253,28 +259,22 @@ try {
 				await page.screenshot({ path: join(output, `${name}-inspectors-${width}.png`), fullPage: true });
 		};
 		await openInspectors("evidence-detail");
-		await navigate("Docs");
-		await page.locator(".docs-page .markdown").waitFor();
-		await check("docs-map");
-		await page.getByLabel("Search the documentation", { exact: true }).fill("trace");
-		await page.getByRole("button", { name: "Search docs", exact: true }).click();
-		const docResults = page.getByRole("region", { name: "Search results" });
-		await docResults.getByRole("link", { name: /Trace Store/i }).click();
-		await page.locator(".docs-path").filter({ hasText: "architecture/trace-store.md" }).waitFor();
-		await check("docs-page");
-		assert.equal(await page.locator("iframe").count(), 0, "Docs render in the application without a legacy frame");
-		assert.equal(await page.getByRole("navigation", { name: "Reading view" }).count(), 0);
-		const outline = page.getByRole("navigation", { name: "On this page" });
-		// Wide screens keep the outline open beside the text; narrower ones start it collapsed.
-		if (!(await outline.locator("details").evaluate((element) => (element as HTMLDetailsElement).open)))
-			await outline.locator("summary").click();
-		await outline.getByRole("link", { name: "Tables", exact: true }).click();
-		await page.waitForURL(`${origin}/docs/architecture/trace-store.md#tables`);
-		await page.waitForFunction(() => {
-			const top = document.getElementById("tables")?.getBoundingClientRect().top;
-			return top !== undefined && top >= 0 && top < 120;
-		});
-		assert.equal(context.pages().length, 1);
+		await page.keyboard.press("Control+/");
+		await page.getByRole("heading", { name: "How this app works", exact: true }).waitFor();
+		const publicHelp = page.getByRole("link", { name: "Open public documentation ↗", exact: true });
+		assert.equal(await publicHelp.getAttribute("href"), "https://coder.iowarp.ai/docs.html");
+		assert.equal(await publicHelp.getAttribute("referrerpolicy"), "no-referrer");
+		await check("help");
+		await page.keyboard.press("Escape");
+		assert.equal(await page.getByRole("link", { name: "Docs", exact: true }).count(), 0);
+		await page.goto(`${origin}/docs/architecture/trace-store.md`);
+		await page.getByRole("heading", { name: "Documentation is on the public site.", exact: true }).waitFor();
+		assert.equal(await page.locator(".docs-page, iframe").count(), 0);
+		assert.equal(
+			await page.getByRole("link", { name: "Open documentation ↗", exact: true }).getAttribute("href"),
+			"https://coder.iowarp.ai/docs.html",
+		);
+		await check("legacy-help");
 		if (width > 750) {
 			// The rail collapses to icons, keeps every destination reachable by name, and expands again.
 			const rail = page.locator(".desktop-navigation");
@@ -285,8 +285,8 @@ try {
 				(before) => (document.querySelector(".desktop-navigation")?.getBoundingClientRect().width ?? before) < before / 2,
 				expanded,
 			);
-			await check("docs-rail-collapsed");
-			assert.equal(await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link").count(), 10);
+			await check("help-rail-collapsed");
+			assert.equal(await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link").count(), 9);
 			assert.equal(await page.getByRole("link", { name: "Settings", exact: true }).getAttribute("data-tip"), "Settings");
 			await page.getByRole("button", { name: "Expand sidebar", exact: true }).click();
 			await page.waitForFunction(
@@ -298,14 +298,6 @@ try {
 				"true",
 			);
 		}
-		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
-		await check("docs-page-dark");
-		await page.getByRole("button", { name: "Light theme", exact: true }).click();
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `docs-${width}.png`), fullPage: false });
-		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
-		await check("docs-dark");
-		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await navigate("Sessions");
 		await page.getByLabel("Project folder", { exact: true }).fill(h.home.path);
 		await page.getByRole("button", { name: "View saved sessions", exact: true }).click();
@@ -352,7 +344,7 @@ try {
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("settings-inspection-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
-		await page.getByRole("link", { name: "Why", exact: true }).click();
+		await page.getByRole("link", { name: "Sources & timing", exact: true }).click();
 		await page.getByRole("heading", { name: "fixture-hook", exact: true }).waitFor();
 		await page.getByRole("heading", { name: "From source to behavior", exact: true }).waitFor();
 		await check("config-graph");
