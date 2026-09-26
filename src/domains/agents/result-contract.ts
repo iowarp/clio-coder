@@ -996,9 +996,13 @@ function validateScoutCitation(
 	}
 	const content = input.filesystem.readFile(citedPath);
 	if (content === null) return { ok: false, reason: `Scout citation cannot be read: ${citation.path}` };
-	const lineCount = content.split(/\r\n|\r|\n/u).length;
+	const lineCount =
+		content.length === 0 ? 0 : content.split(/\r\n|\r|\n/u).length - (/(?:\r\n|\r|\n)$/u.test(content) ? 1 : 0);
 	if (citation.line > lineCount) {
-		return { ok: false, reason: `Scout citation is past end of file: ${citation.path}:${citation.line}` };
+		return {
+			ok: false,
+			reason: `Scout citation is past end of file: ${citation.path}:${citation.line}; current file has ${lineCount} lines (${lineCount > 0 ? `valid lines 1-${lineCount}` : "no source lines"}). Re-read the supporting source or remove the citation; do not move it to the last line just to pass.`,
+		};
 	}
 	// Grounding: a line that exists is not a line anyone looked at. Where the
 	// run's own read spans are known, the cited line has to fall inside one,

@@ -59,7 +59,7 @@ test("retained Scout citation: actual reads exclude the trailing newline and unr
 			});
 		const failure = validate(64);
 		strictEqual(failure.conformance, "fail");
-		match(failure.reason ?? "", /not grounded in a live read: findiff\/interface.py:64 \(this run read only 1-63\)/u);
+		match(failure.reason ?? "", /past end of file: findiff\/interface.py:64; current file has 63 lines/u);
 		strictEqual(validate(62).conformance, "pass");
 		// Range validity alone is not semantic validity: the fixture's expected
 		// claim is independently tied to the source statement, not clamped to 63.
@@ -108,4 +108,34 @@ test("Scout repair quotes the validator and inclusive ranges without inventing c
 	match(content, /remove that finding and keep the confirmed findings/u);
 	match(content, /Never shift a rejected citation into range/u);
 	ok(content.includes("findiff/interface.py:1-63"));
+});
+
+test("Scout repair reports current physical bounds after a source snapshot shrinks", () => {
+	const scratch = makeScratchHome("clio-scout-moving-source-");
+	try {
+		const file = join(scratch.dir, "moving.ts");
+		writeFileSync(file, "// heading\nexport const answer = 42;\n// footer\n");
+		const input = {
+			contract: { kind: "scout-report" as const },
+			cwd: scratch.dir,
+			networkAllowed: false,
+			filesystem: nodeResultContractFilesystem(),
+			observedReadRanges: new Map([[file, [[1, 3] as const]]]),
+		};
+		const output = (line: number) =>
+			JSON.stringify({
+				findings: [{ claim: "Exports answer", path: "moving.ts", line }],
+				needsSplit: false,
+				proposedSubtasks: [],
+			});
+		strictEqual(validateResultContract({ ...input, output: output(2) }).conformance, "pass");
+		writeFileSync(file, "export const answer = 42;\n");
+		const stale = validateResultContract({ ...input, output: output(2) });
+		strictEqual(stale.conformance, "fail");
+		match(stale.reason ?? "", /moving\.ts:2; current file has 1 lines \(valid lines 1-1\)/);
+		match(stale.reason ?? "", /Re-read.*remove the citation/);
+		strictEqual(validateResultContract({ ...input, output: output(1) }).conformance, "pass");
+	} finally {
+		scratch.cleanup();
+	}
 });
