@@ -40,6 +40,13 @@ const CHECKS = [
 	["--accent", "--paper", TEXT],
 	["--accent", "--surface", TEXT],
 	["--on-accent", "--accent-strong", TEXT],
+	["--on-accent", "--accent", TEXT],
+	["--on-primary", "--primary-fill", TEXT],
+	["--primary-fill", "--paper", NON_TEXT],
+	["--ink", "--selection", TEXT],
+	["--accent", "--overlay", TEXT],
+	["--ink-muted", "--overlay", TEXT],
+	["--line-strong", "--overlay", NON_TEXT],
 	["--line-strong", "--paper", NON_TEXT],
 	["--line-strong", "--surface", NON_TEXT],
 	["--line-strong", "--surface-sunken", NON_TEXT],
@@ -61,6 +68,12 @@ const CHECKS = [
 	["--code-ink-muted", "--code-paper", TEXT],
 	["--code-ink-muted", "--code-surface", TEXT],
 	["--code-gutter", "--code-paper", NON_TEXT],
+	...["comment", "punctuation", "keyword", "string", "number", "function", "property", "deleted", "inserted"].flatMap(
+		(kind) => [
+			[`--syntax-${kind}`, "--code-paper", TEXT],
+			[`--syntax-${kind}`, "--code-surface", TEXT],
+		],
+	),
 ];
 
 const tokensUrl = new URL("../client/design/tokens.css", import.meta.url);
@@ -74,6 +87,24 @@ const block = (selector) => {
 
 const light = block(":root {");
 const dark = { ...light, ...block(':root[data-theme="dark"] {') };
+// The dark palette is written twice, once for an explicit choice and once for the system preference,
+// because CSS cannot share one declaration block between a selector and a media query. The copies
+// must agree, or a reader's theme would depend on how they chose it.
+const systemDark = (() => {
+	const start = css.indexOf("@media (prefers-color-scheme: dark)");
+	if (start < 0) throw new Error("Missing the prefers-color-scheme block in tokens.css");
+	const body = css.slice(
+		css.indexOf("{", css.indexOf(":root", start)) + 1,
+		css.indexOf("}", css.indexOf(":root", start)),
+	);
+	return Object.fromEntries([...body.matchAll(/(--[a-z0-9-]+)\s*:\s*(#[0-9a-f]{3,8})\s*;/gi)].map((m) => [m[1], m[2]]));
+})();
+const explicitDark = block(':root[data-theme="dark"] {');
+for (const key of new Set([...Object.keys(explicitDark), ...Object.keys(systemDark)]))
+	if (explicitDark[key] !== systemDark[key]) {
+		console.error(`dark: ${key} is ${explicitDark[key]} when chosen and ${systemDark[key]} from the system preference`);
+		process.exitCode = 1;
+	}
 const verbose = process.argv.includes("--verbose");
 let failed = 0;
 for (const [theme, tokens] of [
@@ -97,8 +128,8 @@ for (const [theme, tokens] of [
 		}
 	}
 }
-if (failed > 0) {
-	console.error(`${failed} contrast failures.`);
+if (failed > 0 || process.exitCode) {
+	console.error(failed > 0 ? `${failed} contrast failures.` : "The two dark palettes disagree.");
 	process.exit(1);
 }
 console.log(`Contrast floor holds across ${CHECKS.length * 2} pairs.`);

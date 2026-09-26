@@ -10,70 +10,77 @@
 	--font-editorial: "Newsreader Variable", Georgia, "Times New Roman", serif;
 	--font-mono: "Commit Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
 
-	/* ---- surfaces (light: warm cream paper) ---------------------------- */
-	--paper: #f2efe1;
-	--surface: #f8f6ea;
-	--surface-sunken: #e7e4d3;
-	--overlay: #fbfaf3;
-	--scrim: rgb(24 33 28 / 52%);
+	/* ---- surfaces (light: the brand's warm paper) ---------------------- */
+	--paper: #f3eee4;
+	--surface: #faf7f2;
+	--surface-sunken: #e8e1d3;
+	--overlay: #ffffff;
+	--scrim: rgb(26 22 18 / 52%);
 
 	/* ---- ink ------------------------------------------------------------ */
-	--ink: #1f2b24;
-	--ink-strong: #121b16;
-	--ink-muted: #55604f;
-	--ink-subtle: #6b7268;
+	--ink: #1a1612;
+	--ink-strong: #0d0b09;
+	--ink-muted: #524a42;
+	--ink-subtle: #766c61;
 
 	/* ---- rules. --line is decorative and may NEVER be the sole boundary of
 	   an interactive control; --line-strong clears WCAG 1.4.11 on paper,
 	   surface and sunken alike. ------------------------------------------ */
-	--line: #d9d6c4;
-	--line-strong: #7d8170;
+	--line: #d4cbbd;
+	--line-strong: #857a6c;
 
-	/* ---- accent: interaction, connection, the evidence spine ----------- */
-	--accent: #2c5c3c;
-	--accent-strong: #1f5133;
-	--accent-soft: #e6ecdf;
-	--on-accent: #f6f4e8;
+	/* ---- accent: the brand signal cyan of the logo. Interaction,
+	   connection, selection and focus; never a status. ------------------- */
+	--accent: #0a666c;
+	--accent-strong: #08555a;
+	--accent-soft: #e0eff0;
+	--on-accent: #f7fbfb;
 
 	/* ---- focus ---------------------------------------------------------- */
-	--focus: #1f5133;
-	--focus-halo: #fbfaf3;
+	--focus: #0a666c;
+	--focus-halo: #faf7f2;
+
+	/* ---- the primary action: ink on paper, as on the brand site; it
+	   takes the signal only when hovered. ------------------------------- */
+	--primary-fill: #1a1612;
+	--on-primary: #faf7f2;
+	--selection: #cfe5e6;
 
 	/* ---- status ramp: neutral / running / success / warn / fail /
 	   unverified. Each tone is fg (text), tint (surface), line (boundary). */
-	--status-neutral-fg: #55604f;
-	--status-neutral-tint: #eae8da;
-	--status-neutral-line: #7d8170;
+	--status-neutral-fg: #524a42;
+	--status-neutral-tint: #ebe4d7;
+	--status-neutral-line: #857a6c;
 
-	--status-running-fg: #2f5d8a;
-	--status-running-tint: #e3eaf2;
+	--status-running-fg: #2d5a86;
+	--status-running-tint: #e4ebf2;
 	--status-running-line: #4a7cae;
 
-	--status-success-fg: #2f6b45;
-	--status-success-tint: #e2ecdf;
-	--status-success-line: #4c8a60;
+	--status-success-fg: #14573a;
+	--status-success-tint: #e3efe6;
+	--status-success-line: #3b8a5d;
 
-	--status-warn-fg: #8a5a10;
-	--status-warn-tint: #f4ead2;
-	--status-warn-line: #a8791f;
+	--status-warn-fg: #8a4b12;
+	--status-warn-tint: #f6ead6;
+	--status-warn-line: #b06e24;
 
-	--status-fail-fg: #8f3a22;
-	--status-fail-tint: #f6e3da;
-	--status-fail-line: #b05436;
+	--status-fail-fg: #8c3a32;
+	--status-fail-tint: #f6e6e2;
+	--status-fail-line: #b8574a;
 
-	--status-unverified-fg: #5f6a72;
-	--status-unverified-tint: #eaeae6;
-	--status-unverified-line: #7b858c;
+	--status-unverified-fg: #5a534b;
+	--status-unverified-tint: #ece7de;
+	--status-unverified-line: #8a8074;
 
 	/* ---- reported reasoning / narrative provenance --------------------- */
-	--reason-fg: #6a4a7a;
-	--reason-tint: #ece6f0;
+	--reason-fg: #674677;
+	--reason-tint: #efe7f0;
 	--reason-line: #8c6b9c;
 
 	/* ---- consequential action and pending approval (restrained amber) -- */
-	--action-fg: #8a5a10;
-	--action-tint: #f4ead2;
-	--action-line: #a8791f;
+	--action-fg: #8a4b12;
+	--action-tint: #f6ead6;
+	--action-line: #b06e24;
 
 	/* ---- spacing scale (4px base) --------------------------------------- */
 	--space-1: 4px;
@@ -111,9 +118,9 @@
 
 	/* ---- elevation. Shell hierarchy only; a card never floats. --------- */
 	--shadow-none: none;
-	--shadow-raised: 0 1px 2px rgb(24 33 28 / 6%);
-	--shadow-panel: 0 12px 32px rgb(24 33 28 / 10%);
-	--shadow-float: 0 24px 64px rgb(24 33 28 / 18%);
+	--shadow-raised: 0 1px 2px rgb(26 22 18 / 6%);
+	--shadow-panel: 0 12px 32px rgb(26 22 18 / 10%);
+	--shadow-float: 0 24px 64px rgb(26 22 18 / 18%);
 
 	/* ---- motion --------------------------------------------------------- */
 	--motion-instant: 90ms;
@@ -132,12 +139,22 @@
 	--conversation-max: 820px;
 
 	/* ---- code surface: a contained dark instrument in BOTH themes ------- */
-	--code-paper: #15201c;
-	--code-surface: #1d2b24;
-	--code-ink: #e2eee5;
-	--code-ink-muted: #a8bbad;
-	--code-line: #3b5146;
-	--code-gutter: #53745f;
+	--code-paper: #12100d;
+	--code-surface: #1c1915;
+	--code-ink: #f3ecdf;
+	--code-ink-muted: #b0a594;
+	--code-line: #36302a;
+	--code-gutter: #6f6558;
+	/* Syntax inside the code well: the brand signal for keywords, warm neutrals for structure. */
+	--syntax-comment: #9a8f80;
+	--syntax-punctuation: #cfc5b6;
+	--syntax-keyword: #5fd4db;
+	--syntax-string: #f2c07e;
+	--syntax-number: #d8c2ed;
+	--syntax-function: #9cc9ee;
+	--syntax-property: #8fd1a7;
+	--syntax-deleted: #f58e85;
+	--syntax-inserted: #8fd1a7;
 
 	/* ---- compatibility aliases. client/pages/*.css, render/markdown.css and
 	   public/offline.css still reference these two names; they are out of this
@@ -153,59 +170,63 @@
 }
 
 :root[data-theme="dark"] {
-	--paper: #18211c;
-	--surface: #1f2a23;
-	--surface-sunken: #27332b;
-	--overlay: #232f27;
-	--scrim: rgb(8 12 10 / 68%);
+	--paper: #000000;
+	--surface: #0d0d0c;
+	--surface-sunken: #151412;
+	--overlay: #1e1c19;
+	--scrim: rgb(0 0 0 / 72%);
 
-	--ink: #e3e7d9;
-	--ink-strong: #f2f5e9;
-	--ink-muted: #a8b5a4;
-	--ink-subtle: #8c9a89;
+	--ink: #f0ece1;
+	--ink-strong: #fbf8f1;
+	--ink-muted: #a89e8f;
+	--ink-subtle: #8a8174;
 
-	--line: #2f3f35;
-	--line-strong: #6d8472;
+	--line: #23211d;
+	--line-strong: #7a7064;
 
-	--accent: #a8d0ad;
-	--accent-strong: #c3e0c5;
-	--accent-soft: #26362b;
-	--on-accent: #16241a;
+	--accent: #00c2cb;
+	--accent-strong: #4fd6dd;
+	--accent-soft: #052629;
+	--on-accent: #001a1c;
 
-	--focus: #a8d0ad;
-	--focus-halo: #101814;
+	--focus: #00c2cb;
+	--focus-halo: #000000;
 
-	--status-neutral-fg: #9fae9c;
-	--status-neutral-tint: #242e27;
-	--status-neutral-line: #6d8472;
+	--primary-fill: #f0ece1;
+	--on-primary: #0d0d0c;
+	--selection: #06383c;
 
-	--status-running-fg: #8fb6e0;
-	--status-running-tint: #1e2a35;
-	--status-running-line: #4f7fae;
+	--status-neutral-fg: #a89e8f;
+	--status-neutral-tint: #151412;
+	--status-neutral-line: #7a7064;
 
-	--status-success-fg: #8fcf9b;
-	--status-success-tint: #1c2d22;
-	--status-success-line: #4f8a5e;
+	--status-running-fg: #8ab8e6;
+	--status-running-tint: #0b1722;
+	--status-running-line: #4a78a6;
 
-	--status-warn-fg: #e2b562;
-	--status-warn-tint: #30281a;
-	--status-warn-line: #9a7a30;
+	--status-success-fg: #58b380;
+	--status-success-tint: #0a2517;
+	--status-success-line: #3a8f5f;
 
-	--status-fail-fg: #efa08c;
-	--status-fail-tint: #331f1c;
-	--status-fail-line: #a85c48;
+	--status-warn-fg: #f09a3e;
+	--status-warn-tint: #2a1705;
+	--status-warn-line: #a8631c;
 
-	--status-unverified-fg: #a9b2b8;
-	--status-unverified-tint: #252b2e;
-	--status-unverified-line: #6f7c83;
+	--status-fail-fg: #f26d63;
+	--status-fail-tint: #2c0e0b;
+	--status-fail-line: #c04a3c;
 
-	--reason-fg: #c2a6d8;
-	--reason-tint: #2a2433;
-	--reason-line: #8d6fa3;
+	--status-unverified-fg: #aba192;
+	--status-unverified-tint: #151412;
+	--status-unverified-line: #7a7064;
 
-	--action-fg: #e2b562;
-	--action-tint: #30281a;
-	--action-line: #9a7a30;
+	--reason-fg: #c6a9dd;
+	--reason-tint: #1c1424;
+	--reason-line: #8566a0;
+
+	--action-fg: #f09a3e;
+	--action-tint: #2a1705;
+	--action-line: #a8631c;
 
 	--shadow-raised: 0 1px 2px rgb(0 0 0 / 28%);
 	--shadow-panel: 0 16px 40px rgb(0 0 0 / 38%);
@@ -219,59 +240,63 @@
    :not([data-theme="light"]) guard keeps an explicit light choice winning. */
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme="light"]) {
-		--paper: #18211c;
-		--surface: #1f2a23;
-		--surface-sunken: #27332b;
-		--overlay: #232f27;
-		--scrim: rgb(8 12 10 / 68%);
+		--paper: #000000;
+		--surface: #0d0d0c;
+		--surface-sunken: #151412;
+		--overlay: #1e1c19;
+		--scrim: rgb(0 0 0 / 72%);
 
-		--ink: #e3e7d9;
-		--ink-strong: #f2f5e9;
-		--ink-muted: #a8b5a4;
-		--ink-subtle: #8c9a89;
+		--ink: #f0ece1;
+		--ink-strong: #fbf8f1;
+		--ink-muted: #a89e8f;
+		--ink-subtle: #8a8174;
 
-		--line: #2f3f35;
-		--line-strong: #6d8472;
+		--line: #23211d;
+		--line-strong: #7a7064;
 
-		--accent: #a8d0ad;
-		--accent-strong: #c3e0c5;
-		--accent-soft: #26362b;
-		--on-accent: #16241a;
+		--accent: #00c2cb;
+		--accent-strong: #4fd6dd;
+		--accent-soft: #052629;
+		--on-accent: #001a1c;
 
-		--focus: #a8d0ad;
-		--focus-halo: #101814;
+		--focus: #00c2cb;
+		--focus-halo: #000000;
 
-		--status-neutral-fg: #9fae9c;
-		--status-neutral-tint: #242e27;
-		--status-neutral-line: #6d8472;
+		--primary-fill: #f0ece1;
+		--on-primary: #0d0d0c;
+		--selection: #06383c;
 
-		--status-running-fg: #8fb6e0;
-		--status-running-tint: #1e2a35;
-		--status-running-line: #4f7fae;
+		--status-neutral-fg: #a89e8f;
+		--status-neutral-tint: #151412;
+		--status-neutral-line: #7a7064;
 
-		--status-success-fg: #8fcf9b;
-		--status-success-tint: #1c2d22;
-		--status-success-line: #4f8a5e;
+		--status-running-fg: #8ab8e6;
+		--status-running-tint: #0b1722;
+		--status-running-line: #4a78a6;
 
-		--status-warn-fg: #e2b562;
-		--status-warn-tint: #30281a;
-		--status-warn-line: #9a7a30;
+		--status-success-fg: #58b380;
+		--status-success-tint: #0a2517;
+		--status-success-line: #3a8f5f;
 
-		--status-fail-fg: #efa08c;
-		--status-fail-tint: #331f1c;
-		--status-fail-line: #a85c48;
+		--status-warn-fg: #f09a3e;
+		--status-warn-tint: #2a1705;
+		--status-warn-line: #a8631c;
 
-		--status-unverified-fg: #a9b2b8;
-		--status-unverified-tint: #252b2e;
-		--status-unverified-line: #6f7c83;
+		--status-fail-fg: #f26d63;
+		--status-fail-tint: #2c0e0b;
+		--status-fail-line: #c04a3c;
 
-		--reason-fg: #c2a6d8;
-		--reason-tint: #2a2433;
-		--reason-line: #8d6fa3;
+		--status-unverified-fg: #aba192;
+		--status-unverified-tint: #151412;
+		--status-unverified-line: #7a7064;
 
-		--action-fg: #e2b562;
-		--action-tint: #30281a;
-		--action-line: #9a7a30;
+		--reason-fg: #c6a9dd;
+		--reason-tint: #1c1424;
+		--reason-line: #8566a0;
+
+		--action-fg: #f09a3e;
+		--action-tint: #2a1705;
+		--action-line: #a8631c;
 
 		--shadow-raised: 0 1px 2px rgb(0 0 0 / 28%);
 		--shadow-panel: 0 16px 40px rgb(0 0 0 / 38%);
@@ -283,23 +308,23 @@
 
 @media (prefers-contrast: more) {
 	:root {
-		--line: #b7b3a0;
-		--line-strong: #5f6455;
-		--ink-muted: #3f4a3b;
-		--ink-subtle: #4a5346;
+		--line: #a99e8e;
+		--line-strong: #5e554c;
+		--ink-muted: #3c342c;
+		--ink-subtle: #4a423a;
 	}
 	:root[data-theme="dark"] {
-		--line: #4c6051;
-		--line-strong: #8ba490;
-		--ink-muted: #c6d2c2;
-		--ink-subtle: #b0bdac;
+		--line: #4a443c;
+		--line-strong: #a3998a;
+		--ink-muted: #d6cebf;
+		--ink-subtle: #bdb3a4;
 	}
 	@media (prefers-color-scheme: dark) {
 		:root:not([data-theme="light"]) {
-			--line: #4c6051;
-			--line-strong: #8ba490;
-			--ink-muted: #c6d2c2;
-			--ink-subtle: #b0bdac;
+			--line: #4a443c;
+			--line-strong: #a3998a;
+			--ink-muted: #d6cebf;
+			--ink-subtle: #bdb3a4;
 		}
 	}
 }

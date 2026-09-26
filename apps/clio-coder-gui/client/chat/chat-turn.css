@@ -515,6 +515,10 @@
    inside the filled primary one. */
 .approval-card .primary .approval-card__chord,
 .approval-strip__actions .primary .approval-card__chord {
+	color: var(--on-primary);
+}
+.approval-card .primary:hover:not(:disabled) .approval-card__chord,
+.approval-strip__actions .primary:hover:not(:disabled) .approval-card__chord {
 	color: var(--on-accent);
 }
 

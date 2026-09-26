@@ -58,6 +58,10 @@ pre,
 		display: none;
 	}
 }
+::selection {
+	background: var(--selection);
+	color: var(--ink);
+}
 body {
 	margin: 0;
 	color: var(--ink);
@@ -290,8 +294,8 @@ main {
 	left: var(--space-4);
 	top: -90px;
 	z-index: 20;
-	background: var(--accent-strong);
-	color: var(--on-accent);
+	background: var(--primary-fill);
+	color: var(--on-primary);
 	padding: var(--space-3) var(--space-4);
 }
 .skip-link:focus {
@@ -446,9 +450,9 @@ nav a[data-group="more"] .icon {
 	margin-top: var(--space-5);
 }
 .primary {
-	background: var(--accent-strong);
-	color: var(--on-accent);
-	border: 1px solid var(--accent-strong);
+	background: var(--primary-fill);
+	color: var(--on-primary);
+	border: 1px solid var(--primary-fill);
 	padding: 11px 14px;
 	font-size: var(--text-meta);
 	text-decoration: none;

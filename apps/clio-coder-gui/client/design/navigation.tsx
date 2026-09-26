@@ -6,8 +6,8 @@ import { Icon } from "./icons.js";
 
 /** `--paper` from client/design/tokens.css, light and dark. Keep these two in step with it. */
 export const THEME_COLORS: Readonly<Record<"light" | "dark", string>> = {
-	light: "#f2efe1",
-	dark: "#18211c",
+	light: "#f3eee4",
+	dark: "#000000",
 };
 
 /**
@@ -142,38 +142,62 @@ export function MobileNavigation() {
 		</>
 	);
 }
+type Theme = "light" | "dark";
+const THEME_KEY = "clio-coder-gui-theme";
+const DARK_QUERY = "(prefers-color-scheme: dark)";
+function chosenTheme(): Theme | null {
+	try {
+		const saved = localStorage.getItem(THEME_KEY);
+		return saved === "dark" || saved === "light" ? saved : null;
+	} catch {
+		return null;
+	}
+}
+function systemTheme(): Theme {
+	try {
+		return window.matchMedia(DARK_QUERY).matches ? "dark" : "light";
+	} catch {
+		return "light";
+	}
+}
+/**
+ * An explicit choice persists and wins in both directions. Without one the page follows the system
+ * preference as it changes, and nothing is saved: this toggle used to save whatever the system said
+ * on the first visit, which froze that theme as if the operator had chosen it.
+ */
 export function ThemeToggle() {
-	const [theme, setTheme] = useState<"light" | "dark">(() => {
-		try {
-			const saved = localStorage.getItem("clio-coder-gui-theme");
-			return saved === "dark" || saved === "light"
-				? saved
-				: window.matchMedia("(prefers-color-scheme: dark)").matches
-					? "dark"
-					: "light";
-		} catch {
-			return "light";
-		}
-	});
+	const [chosen, setChosen] = useState<Theme | null>(chosenTheme);
+	const [system, setSystem] = useState<Theme>(systemTheme);
+	useEffect(() => {
+		if (chosen) return;
+		const query = window.matchMedia(DARK_QUERY);
+		const change = () => setSystem(query.matches ? "dark" : "light");
+		query.addEventListener("change", change);
+		return () => query.removeEventListener("change", change);
+	}, [chosen]);
+	const theme = chosen ?? system;
 	useLayoutEffect(() => {
-		document.documentElement.dataset.theme = theme;
-		// The browser chrome must match the page ground exactly. These are the `--paper` values the
-		// token layer defines; the pair that used to be here predated the green palette and painted a
-		// visible seam above the page.
+		// Without a choice the token layer's own media query paints the theme, so no attribute is set.
+		if (chosen) document.documentElement.dataset.theme = chosen;
+		else delete document.documentElement.dataset.theme;
+		// The browser chrome must match the page ground exactly.
 		document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME_COLORS[theme]);
+	}, [chosen, theme]);
+	const choose = (next: Theme) => {
+		setChosen(next);
 		try {
-			localStorage.setItem("clio-coder-gui-theme", theme);
+			localStorage.setItem(THEME_KEY, next);
 		} catch {
-			/* Theme remains available for this tab. */
+			/* The choice holds for this tab. */
 		}
-	}, [theme]);
+	};
 	return (
 		<button
 			className="icon-button theme-toggle"
 			type="button"
 			aria-label={theme === "light" ? "Dark theme" : "Light theme"}
 			title={theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
-			onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+			onClick={() => choose(theme === "light" ? "dark" : "light")}
 		>
 			<Icon name={theme === "light" ? "moon" : "sun"} />
 		</button>

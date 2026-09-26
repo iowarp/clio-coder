@@ -264,10 +264,15 @@
 	color: var(--status-fail-fg);
 }
 .composer__submit {
-	border: 1px solid var(--accent-strong);
+	border: 1px solid var(--primary-fill);
+	background: var(--primary-fill);
+	color: var(--on-primary);
+	font-weight: 600;
+}
+.composer__submit:hover:not(:disabled) {
+	border-color: var(--accent);
 	background: var(--accent);
 	color: var(--on-accent);
-	font-weight: 600;
 }
 .composer__submit:disabled,
 .composer__secondary:disabled {

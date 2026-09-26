@@ -191,50 +191,50 @@
 .token.prolog,
 .token.doctype,
 .token.cdata {
-	color: #bac4be;
+	color: var(--syntax-comment);
 	font-style: italic;
 }
 .token.punctuation,
 .token.operator,
 .token.entity,
 .token.url {
-	color: #c6d6cd;
+	color: var(--syntax-punctuation);
 }
 .token.keyword,
 .token.atrule,
 .token.important {
-	color: #9bddcd;
+	color: var(--syntax-keyword);
 }
 .token.string,
 .token.char,
 .token.attr-value,
 .token.template-string {
-	color: #f2d39d;
+	color: var(--syntax-string);
 }
 .token.number,
 .token.boolean,
 .token.constant,
 .token.symbol {
-	color: #d8c2ed;
+	color: var(--syntax-number);
 }
 .token.function,
 .token.function-name,
 .token.class-name,
 .token.builtin {
-	color: #b2d4f1;
+	color: var(--syntax-function);
 }
 .token.property,
 .token.attr-name,
 .token.variable,
 .token.tag,
 .token.selector {
-	color: #b6dcbd;
+	color: var(--syntax-property);
 }
 .token.deleted {
-	color: #ffc0a8;
+	color: var(--syntax-deleted);
 }
 .token.inserted {
-	color: #c4edbe;
+	color: var(--syntax-inserted);
 }
 .token.bold {
 	font-weight: 700;

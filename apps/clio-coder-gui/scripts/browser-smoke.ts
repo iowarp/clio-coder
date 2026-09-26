@@ -107,10 +107,14 @@ try {
 		async function check(name: string) {
 			await page.evaluate(() => document.fonts.ready);
 			// A theme change lands as an attribute first; let the cascade and a paint settle before axe reads colours.
+			// Without an explicit choice no attribute is set and the system preference decides.
 			await page.waitForFunction(
 				() =>
 					getComputedStyle(document.body).color ===
-					(document.documentElement.dataset.theme === "dark" ? "rgb(227, 231, 217)" : "rgb(31, 43, 36)"),
+					((document.documentElement.dataset.theme ??
+						(matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark"
+						? "rgb(240, 236, 225)"
+						: "rgb(26, 22, 18)"),
 			);
 			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 			const builder = new AxeBuilder({ page });
