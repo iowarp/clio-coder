@@ -1029,11 +1029,25 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				import assert from "node:assert/strict";
 				import { pathToFileURL } from "node:url";
 				const { createWorkerToolRegistry } = await import(pathToFileURL(process.argv[2]).href);
-				const registry = createWorkerToolRegistry(undefined, undefined, undefined, undefined, "yolo");
+				const registry = createWorkerToolRegistry();
+				// Workers always admit at default, where an extension subprocess asks.
+				// Grant the one parked call the way a forwarded escalation would.
+				const asked = [];
+				registry.onPermissionRequired((_call, decision, meta) => {
+					asked.push(meta.requestId);
+					void registry.resumeParkedCalls({
+						actionClass: decision.classification.actionClass,
+						requestId: meta.requestId,
+						requestedBy: "escalation:operator",
+					});
+				});
 				const result = await registry.invoke({ tool: "extension_measurements__summarize", args: { values: [1,2,3], units: "seconds" } });
+				assert.equal(asked.length, 1, JSON.stringify(result));
 				assert.equal(result.kind, "ok", JSON.stringify(result));
 				assert.equal(result.result.kind, "ok", JSON.stringify(result));
-				const summary = JSON.parse(result.result.output);
+				const [note, ...body] = result.result.output.split("\\n");
+				assert.match(note, /^\\[operator approval\\] The operator approved this execute call once/);
+				const summary = JSON.parse(body.join("\\n"));
 				assert.equal(summary.mean, 2);
 				assert.equal(summary.sampleStandardDeviation, 1);
 				assert.equal(summary.units, "seconds");
