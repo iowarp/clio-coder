@@ -161,9 +161,7 @@ test("ACP session tree projects the ledger's branches with the active path marke
 		await agent.call("session/new", { cwd: agent.cwd, mcpServers: [] });
 		seed(agent.contract);
 		const sessionId = agent.contract.current()?.id as string;
-		const tree = (await agent.call("_clio-coder/session/tree", { sessionId })) as ReturnType<
-			typeof projectSessionTree
-		>;
+		const tree = (await agent.call("_clio-coder/session/tree", { sessionId })) as ReturnType<typeof projectSessionTree>;
 		strictEqual(tree.sessionId, sessionId);
 		strictEqual(tree.leafId, "a3");
 		deepStrictEqual(
