@@ -52,7 +52,8 @@ After the release tag exists, update `site/product.json` and the visible website
 version references. Generate the product-docs snapshot from that tag:
 
 ```bash
-python3 site/sync-docs.py --source-ref v<version>
+clio_release_version=$(node -p 'require("./package.json").version')
+python3 site/sync-docs.py --source-ref "v${clio_release_version}"
 python3 site/sync-docs.py --check
 node site/render-cards.mjs
 python3 scripts/media-assets.py --check

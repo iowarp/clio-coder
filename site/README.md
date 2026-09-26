@@ -41,7 +41,8 @@ and file hashes. The independent generated development Wiki is published
 separately. After creating the matching release tag:
 
 ```bash
-python3 site/sync-docs.py --source-ref v<version>
+clio_release_version=$(node -p 'require("./package.json").version')
+python3 site/sync-docs.py --source-ref "v${clio_release_version}"
 python3 site/sync-docs.py --check
 pnpm run release:readiness -- --release
 ```
