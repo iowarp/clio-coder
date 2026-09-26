@@ -23,7 +23,8 @@ const docs = new Set(index.map((item) => item.path));
 const sourceRef = docsManifest.source.ref;
 const sourceCommit = docsManifest.source.commit;
 const sourceVersion = docsManifest.source.version;
-if (sourceVersion !== product.version) throw new Error("Documentation source version differs from the website version.");
+if (sourceVersion !== product.version)
+	throw new Error("Documentation source version differs from the website version.");
 if (!/^[0-9a-f]{40}$/.test(sourceCommit)) throw new Error("Documentation source commit is not a full Git commit.");
 if (docsManifest.files.some((item) => item.path === "wiki" || item.path.startsWith("wiki/")))
 	throw new Error("Generated Wiki pages cannot enter the product documentation snapshot.");

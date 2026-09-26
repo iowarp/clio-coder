@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Read-only local readiness across package, website, docs, and media surfaces. */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,7 +44,8 @@ function checkVersions() {
 		return;
 	}
 	const installPin = /git clone --branch v(\d+\.\d+\.\d+)\b/.exec(readme)?.[1];
-	if (installPin !== stable) errors.push(`README source-install pin ${installPin ?? "<missing>"} differs from ${stable}`);
+	if (installPin !== stable)
+		errors.push(`README source-install pin ${installPin ?? "<missing>"} differs from ${stable}`);
 	if (product.version !== stable)
 		errors.push(`website version ${product.version} differs from the latest dated stable release ${stable}`);
 	if (docs.source?.version !== product.version)
@@ -63,7 +64,9 @@ function checkVersions() {
 		errors.push(`cannot resolve website docs ref ${docs.source?.ref ?? "<missing>"}: ${error.message}`);
 	}
 	const literals = [];
-	for (const name of readdirSync(join(root, "site")).filter((entry) => entry.endsWith(".html")).sort()) {
+	for (const name of readdirSync(join(root, "site"))
+		.filter((entry) => entry.endsWith(".html"))
+		.sort()) {
 		for (const match of read(`site/${name}`).matchAll(/\bv?(\d+\.\d+\.\d+)\b/g)) {
 			literals.push({ path: `site/${name}`, version: match[1] });
 		}
