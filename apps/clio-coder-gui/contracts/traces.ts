@@ -1,8 +1,10 @@
 import { type Static, Type } from "typebox";
-import { Id, PageCursor } from "./common.js";
+import { PageCursor } from "./common.js";
 
 const closed = { additionalProperties: false };
 const text = Type.String();
+/** Database identifiers include canonical session:<turn UUID> namespaces. These never authorize filesystem artifacts. */
+export const TraceId = Type.String({ minLength: 1, maxLength: 256, pattern: "^[A-Za-z0-9][A-Za-z0-9:._-]*$" });
 const optionalText = Type.Union([text, Type.Null()]);
 const count = Type.Union([Type.Number(), Type.Null()]);
 export const TraceStatus = Type.Object(
@@ -15,7 +17,7 @@ export const TraceStatus = Type.Object(
 );
 export const TraceRun = Type.Object(
 	{
-		run_id: text,
+		run_id: TraceId,
 		assignment_id: text,
 		request: optionalText,
 		status: text,
@@ -35,8 +37,8 @@ export const TraceRun = Type.Object(
 export type TraceRun = Static<typeof TraceRun>;
 export const TracePhase = Type.Object(
 	{
-		phase_id: text,
-		run_id: text,
+		phase_id: TraceId,
+		run_id: TraceId,
 		seq: Type.Integer(),
 		name: text,
 		kind: text,
@@ -66,8 +68,8 @@ export const TraceEvent = Type.Object(
 	{
 		rowid: Type.Integer({ minimum: 1 }),
 		event_id: text,
-		run_id: text,
-		phase_id: text,
+		run_id: TraceId,
+		phase_id: TraceId,
 		parent_id: optionalText,
 		type: text,
 		name: text,
@@ -82,8 +84,8 @@ export type TraceEvent = Static<typeof TraceEvent>;
 export const TraceGate = Type.Object(
 	{
 		id: Type.Integer(),
-		run_id: text,
-		phase_id: text,
+		run_id: TraceId,
+		phase_id: TraceId,
 		attempt: Type.Integer(),
 		gate: text,
 		passed: Type.Integer({ minimum: 0, maximum: 1 }),
@@ -96,7 +98,7 @@ export const TraceGate = Type.Object(
 export const TraceProcess = Type.Object(
 	{
 		id: Type.Integer(),
-		run_id: text,
+		run_id: TraceId,
 		kind: text,
 		name: text,
 		pid: Type.Integer(),
@@ -139,7 +141,7 @@ export const TraceEventsPage = Type.Object(
 	{ events: Type.Array(TraceEvent), cursor: RowCursor, hasMore: Type.Boolean() },
 	closed,
 );
-export const TraceParams = Type.Object({ runId: Id }, closed);
+export const TraceParams = Type.Object({ runId: TraceId }, closed);
 export const TraceLiveBatch = Type.Object(
 	{ run: TraceRun, events: Type.Array(TraceEvent), cursor: RowCursor, hasMore: Type.Boolean() },
 	closed,
