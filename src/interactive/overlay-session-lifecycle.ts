@@ -2,17 +2,12 @@ import { editTextExternally, resolveExternalEditor } from "../core/external-edit
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import {
-	buildHandoffReadLedger,
-	HANDOFF_NOTE_CUSTOM_TYPE,
-	HANDOFF_SEED_CUSTOM_TYPE,
-	type HandoffNoteData,
-	type HandoffSeedData,
-	mergeHandoffDecisions,
-	parseHandoffExtraction,
-	renderHandoffDocument,
-	validateHandoffFiles,
-	validateHandoffGoal,
-} from "../domains/session/handoff.js";
+	admitHandoff,
+	commitHandoff,
+	type HandoffDraft,
+	type HandoffServiceDeps,
+	prepareHandoff,
+} from "../domains/session/handoff-service.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import type { TUI } from "../engine/tui.js";
 import type { ChatLoop } from "./chat-loop.js";
@@ -373,145 +368,39 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 	/**
 	 * `/handoff <goal>`: carry this session's working state into a fresh one.
 	 *
-	 * A handoff is a session operation. It writes no memory promotion candidate,
-	 * touches no memory record, and never calls the task-memory bank; the only
-	 * things it writes are one seed entry plus replayed skill activations in the
-	 * new session and one terminal note in the old one, and it writes none of
-	 * them until the operator has accepted the document.
+	 * The lifecycle itself, admission, extraction with one repair, the review
+	 * document and the seeded successor, is the shared session service
+	 * (`src/domains/session/handoff-service.ts`). This adapter owns what only a
+	 * terminal has: the review overlay, `$EDITOR`, and redrawing the transcript.
 	 */
-	function startHandoff(goal: string): void {
-		if (deps.transitions.state !== "closed") return;
-		const notice = deps.getSlashNotice();
-		const verdict = validateHandoffGoal(goal);
-		if (!verdict.ok) {
-			emitCommandNotice(notice, "warn", "handoff", verdict.reason);
-			return;
-		}
-		if (!deps.session) {
-			emitCommandNotice(notice, "error", "handoff", "session contract unavailable");
-			return;
-		}
-		if (!deps.onNewSession) {
-			emitCommandNotice(notice, "error", "handoff", "no session-creation path is wired in this session");
-			return;
-		}
-		// Refused, never queued. The document describes a session that has
-		// stopped; a turn still in flight is about to change what it would say.
-		if (deps.chat.isStreaming()) {
-			emitCommandNotice(
-				notice,
-				"warn",
-				"handoff",
-				"a turn is in flight; /handoff cannot summarize a session that is still moving",
-			);
-			return;
-		}
-		const session = deps.session;
-		const fromSessionId = session.current()?.id ?? null;
-		if (fromSessionId === null) {
-			emitCommandNotice(notice, "warn", "handoff", "no current session to hand off; start one with /new or /resume");
-			return;
-		}
-		void runHandoffExtraction(session, fromSessionId, verdict.goal);
-	}
-
-	/** Characters of the second round's answer quoted in the terminal refusal. */
-	const HANDOFF_REFUSAL_QUOTE_CHARS = 200;
-
-	/**
-	 * A refusal that says what was asked for and what came back, not only that no
-	 * JSON object arrived. Both rounds are named, so an operator reading it knows
-	 * two model calls were spent and on what.
-	 */
-	function terminalHandoffRefusal(firstReason: string, secondReason: string, secondText: string): string {
-		const answered = secondText.replace(/\s+/g, " ").trim().slice(0, HANDOFF_REFUSAL_QUOTE_CHARS);
-		return [
-			"the extraction round could not produce a handoff record after one repair attempt.",
-			`Asked for: one JSON object with decisions, facts, files, commands, and openQuestions.`,
-			`Round 1: ${firstReason}.`,
-			`Round 2: ${secondReason}.`,
-			`Round 2 returned: ${answered.length > 0 ? answered : "(nothing)"}`,
-		].join(" ");
-	}
-
-	/**
-	 * Extract, then repair once.
-	 *
-	 * A local model that answers with prose around the object, or with nothing
-	 * parseable, used to end `/handoff` outright: every downstream behavior (the
-	 * dropped-path listing, the `e` editor, accept-mints-a-session) was
-	 * unreachable and the operator had paid for the round either way (issue
-	 * #223). Exactly one repair round follows, quoting what came back and what
-	 * the parser objected to, and both rounds bill through the same out-of-turn
-	 * usage store.
-	 */
-	async function extractWithOneRepair(
-		goal: string,
-	): Promise<
-		| { ok: true; parsed: Extract<ReturnType<typeof parseHandoffExtraction>, { ok: true }> }
-		| { ok: false; level: "error" | "warn"; reason: string }
-	> {
-		const first = await deps.chat.extractHandoff(goal);
-		if (first.status !== "answered") {
-			return {
-				ok: false,
-				level: first.status === "failed" ? "error" : "warn",
-				reason: first.status === "aborted" ? "the extraction round was cancelled" : first.reason,
-			};
-		}
-		const parsedFirst = parseHandoffExtraction(first.text);
-		if (parsedFirst.ok) return { ok: true, parsed: parsedFirst };
-
-		const second = await deps.chat.extractHandoff(goal, {
-			repair: { complaint: parsedFirst.reason, previous: first.text },
-		});
-		if (second.status !== "answered") {
-			return {
-				ok: false,
-				level: second.status === "failed" ? "error" : "warn",
-				reason:
-					second.status === "aborted"
-						? "the repair round was cancelled"
-						: `round 1 could not be read (${parsedFirst.reason}); the repair round then failed: ${second.reason}`,
-			};
-		}
-		const parsedSecond = parseHandoffExtraction(second.text);
-		if (parsedSecond.ok) return { ok: true, parsed: parsedSecond };
+	function handoffDeps(): HandoffServiceDeps {
 		return {
-			ok: false,
-			level: "error",
-			reason: terminalHandoffRefusal(parsedFirst.reason, parsedSecond.reason, second.text),
+			...(deps.session ? { session: deps.session } : {}),
+			extract: (goal, options) => deps.chat.extractHandoff(goal, options ?? {}),
+			readEntries: (sessionId) => deps.readStructuredEntries(sessionId),
+			isTurnInFlight: () => deps.chat.isStreaming(),
+			...(deps.onNewSession ? { createSession: deps.onNewSession } : {}),
+			...(deps.getDecisionBoard ? { getDecisionBoard: deps.getDecisionBoard } : {}),
 		};
 	}
 
-	async function runHandoffExtraction(session: SessionContract, fromSessionId: string, goal: string): Promise<void> {
-		const notice = deps.getSlashNotice();
-		const extraction = await extractWithOneRepair(goal);
-		if (!extraction.ok) {
-			emitCommandNotice(notice, extraction.level, "handoff", extraction.reason);
+	function startHandoff(goal: string): void {
+		if (deps.transitions.state !== "closed") return;
+		const admitted = admitHandoff(handoffDeps(), goal);
+		if (!admitted.ok) {
+			emitCommandNotice(deps.getSlashNotice(), admitted.level, "handoff", admitted.reason);
 			return;
 		}
-		const parsed = extraction.parsed;
-		const meta = session.current();
-		const cwd = typeof meta?.cwd === "string" && meta.cwd.length > 0 ? meta.cwd : null;
-		const entries = deps.readStructuredEntries(fromSessionId);
-		// The ledger is what this session's own tool calls touched, folded through
-		// the active path so an abandoned `/tree` branch is not evidence.
-		const ledger = buildHandoffReadLedger(entries, { cwd, leafTurnId: meta?.pinnedLeafTurnId ?? null });
-		const files = validateHandoffFiles(parsed.result.extraction.files, ledger, cwd);
-		const decisions = mergeHandoffDecisions(parsed.result.extraction.decisions, deps.getDecisionBoard?.() ?? []);
-		const document = renderHandoffDocument({
-			goal,
-			fromSessionId,
-			decisions,
-			facts: parsed.result.extraction.facts,
-			files: files.kept,
-			droppedFiles: files.dropped,
-			commands: parsed.result.extraction.commands,
-			openQuestions: parsed.result.extraction.openQuestions,
-			truncations: parsed.result.truncations,
-		});
-		openHandoffReview(session, fromSessionId, goal, document);
+		void runHandoffExtraction(admitted.session, admitted.goal);
+	}
+
+	async function runHandoffExtraction(session: SessionContract, goal: string): Promise<void> {
+		const prepared = await prepareHandoff(handoffDeps(), goal);
+		if (!prepared.ok) {
+			emitCommandNotice(deps.getSlashNotice(), prepared.level, "handoff", prepared.reason);
+			return;
+		}
+		openHandoffReview(session, prepared.draft);
 	}
 
 	/** Hand the document to `$EDITOR`, or say why it could not go. */
@@ -530,23 +419,18 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		return null;
 	}
 
-	function openHandoffReview(session: SessionContract, fromSessionId: string, goal: string, document: string): void {
+	function openHandoffReview(session: SessionContract, draft: HandoffDraft): void {
 		if (deps.transitions.state !== "closed") return;
 		const openReview = deps.openHandoffReviewOverlay ?? openHandoffReviewOverlay;
 		deps.transitions.state = "handoff-review";
 		deps.transitions.handle = openReview(deps.tui, {
-			document,
-			goal,
+			document: draft.document,
+			goal: draft.goal,
 			columns: deps.terminal?.columns ?? 80,
 			onEdit: editHandoffDocument,
 			onAccept: (reviewed) => {
 				deps.transitions.close();
-				const text = reviewed.trim();
-				if (text.length === 0) {
-					deps.notify("warning", "handoff: the reviewed document was empty; nothing was written", "handoff:empty");
-					return;
-				}
-				seedHandoffSession(session, fromSessionId, goal, text);
+				seedHandoffSession(session, draft, reviewed);
 			},
 			// Esc. Nothing has been written yet, so cancel really is free. The
 			// overlay settles itself on cancel and answers no further key, so the
@@ -559,67 +443,16 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		deps.requestRender();
 	}
 
-	/**
-	 * Mint the successor session and open it on the reviewed document.
-	 *
-	 * Order matters. The old session's terminal note is appended while it is
-	 * still current, because an append always lands in the current session. Then
-	 * the new session is minted through the one creation path the orchestrator
-	 * owns, the document goes in as bounded data labelled by its origin, and the
-	 * old session's skill activations are replayed so loaded skills carry
-	 * forward. The old session is otherwise untouched.
-	 */
-	function seedHandoffSession(session: SessionContract, fromSessionId: string, goal: string, document: string): void {
-		const notice = deps.getSlashNotice();
-		const activations = session.current()?.skillActivations ?? [];
-		let toSessionId: string;
-		try {
-			deps.onNewSession?.();
-			const minted = session.current()?.id ?? null;
-			if (minted === null || minted === fromSessionId) throw new Error("the new session was not created");
-			toSessionId = minted;
-			session.appendEntry({
-				kind: "custom",
-				parentTurnId: null,
-				customType: HANDOFF_SEED_CUSTOM_TYPE,
-				display: true,
-				data: { fromSessionId, goal, document } satisfies HandoffSeedData,
-			});
-			for (const activation of activations) session.recordSkillActivation(activation);
-		} catch (error) {
-			emitCommandNotice(
-				notice,
-				"error",
-				"handoff",
-				`could not seed the new session: ${error instanceof Error ? error.message : String(error)}`,
-			);
+	/** Seed the successor through the shared service, then open it on screen. */
+	function seedHandoffSession(session: SessionContract, draft: HandoffDraft, reviewed: string): void {
+		const committed = commitHandoff(handoffDeps(), draft, reviewed);
+		if (!committed.ok) {
+			if (committed.code === "empty") deps.notify("warning", `handoff: ${committed.reason}`, "handoff:empty");
+			else emitCommandNotice(deps.getSlashNotice(), committed.level, "handoff", committed.reason);
 			return;
 		}
-		// The note names the target, so it can only be written once the target
-		// exists. Appends land in the current session, so the old session is made
-		// current for exactly one append and then handed back. A failure here
-		// costs the note and nothing else: the successor session is already
-		// seeded and is where the operator continues.
-		try {
-			session.switchBranch(fromSessionId);
-			session.appendEntry({
-				kind: "custom",
-				parentTurnId: null,
-				customType: HANDOFF_NOTE_CUSTOM_TYPE,
-				display: true,
-				data: { toSessionId, goal } satisfies HandoffNoteData,
-			});
-		} catch (error) {
-			deps.stderr(`[/handoff] handoff note failed: ${error instanceof Error ? error.message : String(error)}\n`);
-		} finally {
-			try {
-				session.switchBranch(toSessionId);
-			} catch (error) {
-				deps.stderr(
-					`[/handoff] could not return to the new session: ${error instanceof Error ? error.message : String(error)}\n`,
-				);
-			}
-		}
+		for (const warning of committed.warnings) deps.stderr(`[/handoff] ${warning}\n`);
+		const toSessionId = committed.toSessionId;
 		try {
 			const turns = deps.readStructuredEntries(toSessionId);
 			deps.resetTranscript();
@@ -631,7 +464,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			deps.stderr(`[/handoff] seeding replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
 			deps.chat.resetForSession(null);
 		}
-		emitCommandNotice(notice, "info", "handoff", `handed off to session ${toSessionId}`);
+		emitCommandNotice(deps.getSlashNotice(), "info", "handoff", `handed off to session ${toSessionId}`);
 		deps.refreshFooter();
 		deps.requestRender();
 	}
