@@ -93,10 +93,12 @@ export function resolveRecallByPath(
 	const wanted = canonicalize(path, cwd);
 	if (wanted.length === 0) return { ok: false, error: { kind: "no_evicted_read", ref: path, path } };
 	const index = buildPathIndex(active, { cwd });
+	const visible = new Set(compactionCut(active).visible.map((entry) => entry.turnId));
 	for (let i = index.observations.length - 1; i >= 0; i -= 1) {
 		const observation = index.observations[i];
 		if (observation === undefined || observation.op !== "read" || observation.isError) continue;
-		if (observation.path !== wanted || !view.evicted.has(observation.ref.entry)) continue;
+		if (observation.path !== wanted || !visible.has(observation.ref.entry) || !view.evicted.has(observation.ref.entry))
+			continue;
 		return resolveRecall(entries, view, observation.ref.entry, activeLeafTurnId);
 	}
 	return { ok: false, error: { kind: "no_evicted_read", ref: path, path } };

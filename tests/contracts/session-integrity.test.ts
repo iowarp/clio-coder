@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { DEFAULT_WORKING_SET_SETTINGS } from "../../src/domains/context/working-set/defaults.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
+import { resolveRecall, resolveRecallByPath } from "../../src/domains/context/working-set/recall.js";
 import { loadClioTraces } from "../../src/domains/context/working-set/replay/load-clio.js";
 import { replayTrace } from "../../src/domains/context/working-set/replay/runner.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
@@ -117,7 +118,7 @@ function rereadLedger(): SessionEntry[] {
 			parentTurnId: parent,
 			timestamp: at,
 			role: "assistant",
-			payload: { text: "read" },
+			payload: { content: [{ type: "toolCall", id: call, name: "read", arguments: { path: "a.ts" } }] },
 		});
 		if (ref !== null)
 			entries.push({
@@ -137,6 +138,7 @@ function rereadLedger(): SessionEntry[] {
 			role: "tool_result",
 			payload: {
 				toolName: "read",
+				toolCallId: call,
 				result: {
 					content: [{ type: "text", text: "body".repeat(1000) }],
 					details: ref === null ? {} : { recall: { ref } },
@@ -181,6 +183,36 @@ describe("session integrity", () => {
 		strictEqual(earlier.recalls, 1);
 		strictEqual(earlier.recallsByRef.get("original"), 1);
 		strictEqual(earlier.recallsByRef.has("copy-two"), false);
+	});
+
+	it("requires an explicit ref after an evicted read falls behind a summary", () => {
+		const entries = rereadLedger();
+		entries.push({
+			kind: "contextEviction",
+			turnId: "eviction",
+			parentTurnId: "later",
+			timestamp: at,
+			policyId: "structural-v2",
+			trigger: "pressure",
+			tokensBefore: 3000,
+			tokensAfter: 2000,
+			pressureBefore: 0.9,
+			snapshotIdBefore: null,
+			evicted: [{ ref: { entry: "original" }, reason: "age_horizon", tokensFreed: 1000, marker: "evicted" }],
+		});
+		strictEqual(resolveRecallByPath(entries, foldWorkingSet(entries), "a.ts", "/project").ok, true);
+		entries.push({
+			kind: "compactionSummary",
+			turnId: "summary",
+			parentTurnId: "later",
+			timestamp: at,
+			summary: "kept",
+			tokensBefore: 2000,
+			firstKeptTurnId: "later",
+		});
+		const view = foldWorkingSet(entries);
+		strictEqual(resolveRecallByPath(entries, view, "a.ts", "/project").ok, false);
+		strictEqual(resolveRecall(entries, view, "original").ok, true, "historical bytes remain recallable by ref");
 	});
 
 	it("preserves recorded recall evidence through loading and replay", async () => {
