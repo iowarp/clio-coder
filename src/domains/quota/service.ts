@@ -11,7 +11,10 @@
  * status says so, which is what the surfaces render.
  */
 
-import { createQuotaCache, DEFAULT_QUOTA_CACHE_TTL_MS, type QuotaCache } from "./cache.js";
+import { readSettings } from "../../core/config.js";
+import { getRuntimeRegistry } from "../providers/index.js";
+import type { QuotaCache } from "./cache.js";
+import { createQuotaCache, DEFAULT_QUOTA_CACHE_TTL_MS } from "./cache.js";
 import { localQuotaSnapshot } from "./presentation.js";
 import { buildQuotaProviders } from "./registry.js";
 import type { QuotaProvider, UsageSnapshot } from "./types.js";
@@ -20,7 +23,7 @@ export interface QuotaServiceOptions {
 	providers?: QuotaProvider[];
 	cache?: QuotaCache;
 	ttlMs?: number;
-	/** Include the free local-inference row; surfaces that list paid accounts only can opt out. */
+	/** Override local-inference visibility; by default a configured local-native target is required (BT-006). */
 	includeLocal?: boolean;
 	localRuntimeLabel?: string;
 }
@@ -37,7 +40,9 @@ export interface QuotaService {
 export function createQuotaService(options: QuotaServiceOptions = {}): QuotaService {
 	const providers = options.providers ?? buildQuotaProviders();
 	const cache = options.cache ?? createQuotaCache({ ttlMs: options.ttlMs ?? DEFAULT_QUOTA_CACHE_TTL_MS });
-	const includeLocal = options.includeLocal ?? true;
+	const includeLocal =
+		options.includeLocal ??
+		readSettings().targets.some((target) => getRuntimeRegistry().get(target.runtime)?.tier === "local-native");
 
 	const withLocal = (snapshots: UsageSnapshot[]): UsageSnapshot[] => {
 		if (!includeLocal) return snapshots;

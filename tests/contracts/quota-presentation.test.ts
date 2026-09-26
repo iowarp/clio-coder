@@ -134,6 +134,7 @@ it("reads every provider concurrently and appends the free local row", async () 
 	const paid = { calls: 0 };
 	const absent = { calls: 0 };
 	const service = createQuotaService({
+		includeLocal: true,
 		providers: [
 			fakeProvider("codex", snapshot("codex", "Codex", [window("weekly", "Weekly", 76)]), paid),
 			fakeProvider("copilot", snapshot("copilot", "Copilot", [], { status: "no_credentials", message: "none" }), absent),
@@ -145,7 +146,7 @@ it("reads every provider concurrently and appends the free local row", async () 
 	assert.deepEqual(
 		snapshots.map((entry) => entry.providerId),
 		["codex", "local"],
-		"a provider with no credentials is dropped, and local is always shown",
+		"a provider with no credentials is dropped, and local is explicitly included",
 	);
 	assert.equal(paid.calls, 1);
 	assert.equal(absent.calls, 1);
