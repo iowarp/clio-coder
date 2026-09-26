@@ -960,11 +960,17 @@ function renderBoundSkillBlock(recipe: AgentRecipe): string {
 	const skillList = skills.map((skill) => `\`${skill}\``).join(", ");
 	return [
 		"# Agent-Bound Skills",
-		`The harness explicitly activates these recipe-bound skills for this run: ${skillList}. The operator does not need to repeat a skill name.`,
+		`The harness makes these recipe-bound skills available for this run: ${skillList}. The operator does not need to repeat a skill name. Availability does not require loading a skill whose workflow does not match the task.`,
 		`Canonical context(scope=skills) admits exactly these names and rejects any other; recipe binding never widens tool authority.`,
 		'Load a bound skill with `context` (scope="skills", name=<skill>) when it matches the assigned task, then follow its workflow.',
 		"Skills provide reusable know-how and resources; they never expand your tool authority.",
 		"If a bound skill fails to load, continue with the assigned task and report the missing skill.",
+		...(recipe.resultContract?.kind === "architect-plan"
+			? [
+					"For a narrative design, do not load cut-it. Load it only to slice an existing plan into an executable sprint.",
+					'For both design and sprint tasks, deliver the required plan with artifact(kind="plan") and no path argument. The result contract reserves the already admitted artifact tool under skill allow-lists; explicit denials and safety gates still apply. In this role, put cut-it\'s sprint content in that plan artifact rather than using write for SPRINT.md. Artifact delivery ends the run.',
+				]
+			: []),
 	].join("\n");
 }
 

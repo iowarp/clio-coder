@@ -435,7 +435,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// exactly the admitted set.
 	const agentSkillPolicy =
 		input.allowedTools.includes(ToolNames.Context) && input.noSkills !== true
-			? agentSkillToolPolicy(input.agentSkills ?? [])
+			? agentSkillToolPolicy(
+					input.agentSkills ?? [],
+					input.resultContract?.kind === "architect-plan" && input.allowedTools.includes(ToolNames.Artifact)
+						? [ToolNames.Artifact]
+						: [],
+				)
 			: undefined;
 	const activeWorkerTools = workerProviderSupportsTools(input) ? input.allowedTools : [];
 

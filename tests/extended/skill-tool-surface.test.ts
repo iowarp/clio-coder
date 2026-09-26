@@ -7,6 +7,7 @@ import { afterEach, describe, it } from "node:test";
 import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import {
+	agentSkillToolPolicy,
 	armedSkillSurface,
 	evaluateSkillToolSurface,
 	type PendingSkillToolPolicy,
@@ -49,6 +50,26 @@ import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
+
+it("keeps Architect's admitted artifact available under cut-it without widening other tools", () => {
+	const catalog = loadSkills({
+		cwd: process.cwd(),
+		disableDiscovery: true,
+		explicitSkillPaths: [new URL("../../library/skills/workflow/cut-it", import.meta.url).pathname],
+	});
+	const skill = catalog.items.find((entry) => entry.name === "cut-it");
+	ok(skill);
+	const policy = agentSkillToolPolicy(["cut-it"], [ToolNames.Artifact]);
+	ok(policy);
+	policy.loadedSkillNames.add(skill.name);
+	policy.loadedSkillPolicies.set(skill.name, skill);
+	strictEqual(evaluateSkillToolSurface(policy, ToolNames.Artifact), null);
+	ok(evaluateSkillToolSurface(policy, ToolNames.Bash));
+	strictEqual(evaluateSkillToolSurface(armedSkillSurface(policy), ToolNames.Artifact), null);
+	policy.loadedSkillPolicies.set(skill.name, { ...skill, disallowedTools: [ToolNames.Artifact] });
+	ok(evaluateSkillToolSurface(policy, ToolNames.Artifact));
+	strictEqual(agentSkillToolPolicy([]), undefined);
+});
 
 it("keeps yolo skill allow lists advisory while honoring explicit denials", () => {
 	const policy: PendingSkillToolPolicy = {

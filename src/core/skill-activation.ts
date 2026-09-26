@@ -70,6 +70,8 @@ export interface PendingSkillToolPolicy {
 	modelActivation?: boolean;
 	/** Yolo treats a skill's positive tool list as guidance; explicit denials still apply. */
 	allowListAdvisory?: boolean;
+	/** Already admitted tools needed to deliver the worker's required result. Explicit skill denials still win. */
+	resultTools?: ReadonlyArray<string>;
 }
 
 /**
@@ -98,6 +100,7 @@ export function armedSkillSurface(policy: PendingSkillToolPolicy | undefined): P
 		loadedSkillPolicies: new Map(declared),
 		carriedSurface: true,
 		...(policy.allowListAdvisory === undefined ? {} : { allowListAdvisory: policy.allowListAdvisory }),
+		...(policy.resultTools === undefined ? {} : { resultTools: policy.resultTools }),
 	};
 }
 
@@ -289,6 +292,7 @@ export function evaluateSkillToolSurface(
 	// A finish receipt records a limitation without performing another action.
 	// Keep it available under allow-narrowing, while honoring explicit denials.
 	if (tool === "limitation") return null;
+	if (policy.resultTools?.includes(tool)) return null;
 	if (policy.allowListAdvisory === true) return null;
 	const allowLists = entries.map(([, declared]) => declared.allowedTools);
 	if (allowLists.some((list) => list === undefined || list.length === 0)) return null;
@@ -302,7 +306,10 @@ export function evaluateSkillToolSurface(
  * skills. The worker may load exactly these skill names; anything else gets
  * the same deterministic rejection an unrequested skill gets interactively.
  */
-export function agentSkillToolPolicy(skillNames: ReadonlyArray<string>): PendingSkillToolPolicy | undefined {
+export function agentSkillToolPolicy(
+	skillNames: ReadonlyArray<string>,
+	resultTools: ReadonlyArray<string> = [],
+): PendingSkillToolPolicy | undefined {
 	const allowedSkillNames = [...new Set(skillNames.map((name) => name.trim()).filter((name) => name.length > 0))];
 	if (allowedSkillNames.length === 0) return undefined;
 	return {
@@ -310,6 +317,7 @@ export function agentSkillToolPolicy(skillNames: ReadonlyArray<string>): Pending
 		requests: allowedSkillNames.map((name) => ({ name, args: "", source: "recipe" as const, installed: true })),
 		loadedSkillNames: new Set<string>(),
 		loadedSkillPolicies: new Map<string, SkillDeclaredToolPolicy>(),
+		resultTools: [...new Set(resultTools)],
 	};
 }
 
