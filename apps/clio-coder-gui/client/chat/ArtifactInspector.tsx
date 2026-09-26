@@ -290,7 +290,7 @@ export function ArtifactInspector({
 							<section className="artifact-inspector__selected" aria-label="Selected file records">
 								<div className="artifact-inspector__selected-heading">
 									<h3>{basename(selectedFile)}</h3>
-									<button type="button" onClick={() => setSelectedFile(null)}>
+									<button type="button" onClick={() => updateSelection({ selectedFile: null })}>
 										Clear selection
 									</button>
 								</div>

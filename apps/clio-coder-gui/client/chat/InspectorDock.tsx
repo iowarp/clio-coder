@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { useShortcutLayer } from "../interaction/use-shortcut.js";
-import { ArtifactInspector } from "./ArtifactInspector.js";
+import { ArtifactInspector, type InspectorSelection } from "./ArtifactInspector.js";
 import "./inspector-dock.css";
 
 export function InspectorDock({
@@ -20,6 +20,7 @@ export function InspectorDock({
 	workspaceRoot?: string | undefined;
 }) {
 	const [wide, setWide] = useState(() => typeof window === "undefined" || matchMedia("(min-width: 1200px)").matches);
+	const [selection, setSelection] = useState<InspectorSelection>({ view: "files", selectedFile: null, filter: "" });
 	const dialog = useRef<HTMLDialogElement>(null);
 	const dock = useRef<HTMLDivElement>(null);
 	useEffect(() => {
@@ -50,7 +51,14 @@ export function InspectorDock({
 	}, [open, wide]);
 	if (!open) return null;
 	const content = (
-		<ArtifactInspector client={client} session={session} workspaceRoot={workspaceRoot} onClose={onClose} />
+		<ArtifactInspector
+			client={client}
+			session={session}
+			workspaceRoot={workspaceRoot}
+			onClose={onClose}
+			selection={selection}
+			onSelectionChange={setSelection}
+		/>
 	);
 	if (wide)
 		return (
