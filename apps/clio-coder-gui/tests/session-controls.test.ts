@@ -275,6 +275,31 @@ test("a discarded or overtaken handoff draft cannot be committed", async (t) => 
 	assert.equal(h.supervisor.get(session.id).state, "open");
 });
 
+test("a dispatch ask carries the admitted plan to the permission, and an unknown plan field costs nothing", async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	assert.equal((await h.post(`/api/sessions/${session.id}/turns`, { text: "[plan] Survey and report" })).status, 202);
+	await until(() => h.supervisor.get(session.id).permissions.some((permission) => permission.status === "pending"));
+	const permission = h.supervisor.get(session.id).permissions.find((row) => row.status === "pending");
+	assert.equal(permission?.plan?.planScale, true);
+	assert.equal(permission?.plan?.hash.slice(0, 12), "3f2a9c1e04b7");
+	assert.deepEqual(
+		permission?.plan?.tasks.map((task) => [task.agent, task.worktree ?? false]),
+		[
+			["scout", false],
+			["writer", true],
+		],
+	);
+	assert.equal(
+		(await h.post(`/api/sessions/${session.id}/permissions/${permission?.id}`, { decision: "allow-once" })).status,
+		200,
+	);
+	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status !== "running");
+	assert.match(await readFile(join(h.home.path, "acp.jsonl"), "utf8"), /"planPermission".*"approved":true/);
+});
+
 test("an older ACP peer has no branches and refuses tree, switch and fork before sending", async (t) => {
 	const h = await harness();
 	t.after(h.close);

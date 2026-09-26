@@ -212,6 +212,45 @@
 	font-size: var(--text-meta);
 	overflow-wrap: anywhere;
 }
+/* A dispatch plan: one row per run, the agent as an exact key, the task as the value approved,
+   placement and gates as a quiet line under it. */
+.approval-plan {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	border-top: 1px solid var(--line);
+}
+.approval-plan > li {
+	display: grid;
+	grid-template-columns: minmax(5rem, auto) minmax(0, 1fr);
+	gap: var(--space-3);
+	padding-block: var(--space-2);
+	border-bottom: 1px solid var(--line);
+	font-size: var(--text-meta);
+}
+.approval-plan__agent {
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+	overflow-wrap: anywhere;
+}
+.approval-plan__task {
+	min-width: 0;
+	overflow-wrap: anywhere;
+	white-space: pre-line;
+}
+.approval-plan__hash {
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink);
+}
+.approval-plan__task small {
+	display: block;
+	color: var(--ink-muted);
+	font-size: var(--text-exact);
+	white-space: normal;
+}
 .approval-preview__code,
 .approval-proposed__side,
 .approval-raw__code {

@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { Value } from "typebox/value";
-import { type Permission, type PermissionDecision, PermissionDecisionFacts } from "../../contracts/permissions.js";
+import {
+	DispatchPlanFacts,
+	type Permission,
+	type PermissionDecision,
+	PermissionDecisionFacts,
+} from "../../contracts/permissions.js";
 import type { TimelineItem } from "../../contracts/sessions.js";
 import type { AcpRequestPermissionResponse } from "../clio/http-shims.js";
 import { AppProblem } from "../services/problem.js";
@@ -29,6 +34,13 @@ function decisionFacts(meta: unknown): Permission["decision"] {
 	if (value === undefined) return undefined;
 	const projected = Value.Clean(PermissionDecisionFacts, structuredClone(value));
 	return Value.Check(PermissionDecisionFacts, projected) ? projected : undefined;
+}
+/** The plan the agent admitted for a dispatch ask, read as leniently as the decision facts. */
+function dispatchPlan(meta: unknown): Permission["plan"] {
+	const value = record(meta)["clio-coder/dispatchPlan"];
+	if (value === undefined) return undefined;
+	const projected = Value.Clean(DispatchPlanFacts, structuredClone(value));
+	return Value.Check(DispatchPlanFacts, projected) ? projected : undefined;
 }
 export class Permissions {
 	private pending: Pending | undefined;
@@ -81,6 +93,7 @@ export class Permissions {
 			throw new AppProblem("upstream_acp", "Permission does not match an active tool call and one-time choices.");
 		const now = Date.now();
 		const facts = decisionFacts(params._meta);
+		const plan = dispatchPlan(params._meta);
 		const permission: Permission = {
 			id: randomUUID(),
 			turnId,
@@ -93,6 +106,7 @@ export class Permissions {
 			status: "pending",
 			canStopTurn: stop !== undefined,
 			...(facts ? { decision: facts } : {}),
+			...(plan ? { plan } : {}),
 		};
 		return new Promise<AcpRequestPermissionResponse>((resolve) => {
 			const pending: Pending = {

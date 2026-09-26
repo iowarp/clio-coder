@@ -785,6 +785,21 @@ try {
 		assert.match(await refused.innerText(), /approved/, "The refused content stays readable.");
 		await check("permission-rejected");
 		if (width === 1600) await page.screenshot({ path: join(output, "permission-rejected.png"), fullPage: true });
+		// A plan-scale dispatch: the card names every run and the hash the runs will seal.
+		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[plan] Survey the samples and draft a report.");
+		await page.getByRole("button", { name: "Send", exact: true }).click();
+		const planCard = page.locator(".approval-card", { hasText: "Dispatch plan · 2 runs · in parallel" }).first();
+		await planCard.waitFor();
+		assert.match(await planCard.innerText(), /Draft the comparison report/);
+		assert.match(await planCard.innerText(), /kept for review/);
+		assert.match(await planCard.innerText(), /3f2a9c1e04b7/);
+		await check("permission-plan");
+		if (width === 1600 || width === 390) {
+			await planCard.scrollIntoViewIfNeeded();
+			await page.screenshot({ path: join(output, `permission-plan-${width}.png`) });
+		}
+		await page.getByRole("button", { name: "Allow once", exact: true }).first().click();
+		await page.getByText("The plan is running.", { exact: true }).waitFor();
 		// Dispatch steering. The fixture holds one live worker until it is stopped, so both write
 		// paths on a run are pressed for real: guidance is queued, then the run is stopped.
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[fleet] Survey the fixture.");

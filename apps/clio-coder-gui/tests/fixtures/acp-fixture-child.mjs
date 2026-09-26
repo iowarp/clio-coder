@@ -104,6 +104,63 @@ const permission = async () => {
 	update(settledWrite(toolCallId, executed));
 	if (!cancelled) text(executed ? "Tool executed." : "Permission rejected.");
 };
+// A plan-scale dispatch the agent parks for approval, carrying the plan admission rendered.
+const PLAN_HASH = "3f2a9c1e04b7d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e";
+const planPermission = async () => {
+	const toolCallId = `dispatch-plan-${++writeCalls}`;
+	const tasks = [
+		{ agent: "scout", task: "Survey the soil samples" },
+		{ agent: "writer", task: "Draft the comparison report" },
+	];
+	const toolCall = {
+		sessionUpdate: "tool_call",
+		toolCallId,
+		title: "dispatch",
+		kind: "other",
+		status: "pending",
+		rawInput: { tasks },
+	};
+	update(toolCall);
+	const id = `permission-${randomUUID()}`;
+	const promise = new Promise((resolve) => pending.set(id, resolve));
+	send({
+		id,
+		method: "session/request_permission",
+		params: {
+			sessionId,
+			toolCall,
+			options: [
+				{ optionId: "allow-once", kind: "allow_once", name: "Approve plan" },
+				{ optionId: "reject-once", kind: "reject_once", name: "Deny" },
+			],
+			_meta: {
+				"clio-coder/dispatchPlan": {
+					version: 1,
+					topology: "parallel",
+					taskCount: 2,
+					planScale: true,
+					hash: PLAN_HASH,
+					tasks: [
+						{ ...tasks[0], target: "fixture", model: "fixture-model", dependencies: [] },
+						{ ...tasks[1], target: "fixture", model: "fixture-small", worktree: true, apply: "preserve", dependencies: [] },
+					],
+					truncated: false,
+					unknownFutureField: "ignored",
+				},
+			},
+		},
+	});
+	const result = await promise;
+	const approved = result?.outcome?.optionId === "allow-once";
+	log({ planPermission: result, approved });
+	update({
+		sessionUpdate: "tool_call_update",
+		toolCallId,
+		status: approved ? "completed" : "failed",
+		content: [{ type: "content", content: { type: "text", text: approved ? "Plan dispatched." : "Plan not approved." } }],
+	});
+	if (!cancelled) text(approved ? "The plan is running." : "The plan was not approved.");
+};
 const event = (kind, payload, terminal = false) =>
 	send({
 		method: "_clio-coder/event",
@@ -510,13 +567,15 @@ async function handle(frame) {
 				const turnScenario =
 					scenario === "markdown" && promptText.includes("[approval]")
 						? "permission"
-						: scenario === "markdown" && promptText.includes("[stream]")
-							? "loop"
-							: scenario === "markdown" && promptText.includes("[workload")
-								? "workload"
-								: STEERING && promptText.includes("[fleet]")
-									? "held-worker"
-									: scenario;
+						: scenario === "markdown" && promptText.includes("[plan]")
+							? "plan-permission"
+							: scenario === "markdown" && promptText.includes("[stream]")
+								? "loop"
+								: scenario === "markdown" && promptText.includes("[workload")
+									? "workload"
+									: STEERING && promptText.includes("[fleet]")
+										? "held-worker"
+										: scenario;
 				cancelled = false;
 				if (scenario === "crash") process.exit(9);
 				if (promptText.startsWith("/tasks ") || promptText.startsWith("/skill ")) {
@@ -535,7 +594,8 @@ async function handle(frame) {
 					result = { stopReason: cancelled ? "cancelled" : "end_turn", _meta: { "clio-coder/usage": usage } };
 					break;
 				}
-				if (turnScenario.startsWith("permission")) await permission();
+				if (turnScenario === "plan-permission") await planPermission();
+				else if (turnScenario.startsWith("permission")) await permission();
 				else if (turnScenario === "held-worker") await heldWorker();
 				else if (turnScenario === "slow") {
 					while (!cancelled) await delay(100);

@@ -386,6 +386,12 @@ export interface PermissionRequiredMeta {
 	 * read it.
 	 */
 	toolCallId?: string;
+	/**
+	 * The plan admission rendered for a dispatch call, the same view whose hash
+	 * a plan-scale run seals. Carried so a surface shows the operator what
+	 * admission judged rather than re-rendering it from the arguments.
+	 */
+	dispatchPlan?: DispatchPlanView;
 }
 
 export interface ToolRegistry {
@@ -590,7 +596,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	type AdmitOutcome =
 		| { kind: "terminal"; verdict: RegistryVerdict }
 		| { kind: "execute"; spec: ToolSpec; decision: SafetyDecision }
-		| { kind: "park"; decision: SafetyDecision; axis: string };
+		| { kind: "park"; decision: SafetyDecision; axis: string; dispatchPlan?: DispatchPlanView };
 
 	const admit = (call: ClassifierCall, grant?: OneShotGrant, options?: ToolInvokeOptions): AdmitOutcome => {
 		const spec = tools.get(call.tool as ToolName);
@@ -719,7 +725,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				planScale && dispatchPlan !== null
 					? toDispatchPlanAskDecision(decision, level, dispatchPlan)
 					: toAutonomyAskDecision(decision, level, call.tool, actionClass, exposure, readOutside);
-			return { kind: "park", decision: askDecision, axis: approvalAxisId(askDecision, level) };
+			return {
+				kind: "park",
+				decision: askDecision,
+				axis: approvalAxisId(askDecision, level),
+				...(dispatchPlan !== null ? { dispatchPlan } : {}),
+			};
 		}
 		recordRegistryDisposition(call, decision, "allowed");
 		return { kind: "execute", spec, decision };
@@ -906,6 +917,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					requestId: nextApprovalRequestId(),
 					axis: outcome.axis,
 					...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
+					...(outcome.dispatchPlan !== undefined ? { dispatchPlan: outcome.dispatchPlan } : {}),
 				};
 				recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", { requestId: meta.requestId });
 				// The park ends when the operator decides, not when the verdict

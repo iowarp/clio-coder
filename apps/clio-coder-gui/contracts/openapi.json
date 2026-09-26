@@ -14968,6 +14968,122 @@
 														},
 														"additionalProperties": false
 													},
+													"plan": {
+														"type": "object",
+														"required": ["topology", "taskCount", "planScale", "hash", "tasks", "truncated"],
+														"properties": {
+															"topology": {
+																"type": "string",
+																"maxLength": 32
+															},
+															"taskCount": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"planScale": {
+																"type": "boolean"
+															},
+															"hash": {
+																"type": "string",
+																"pattern": "^[0-9a-f]{64}$"
+															},
+															"costCeilingUsd": {
+																"type": "number",
+																"minimum": 0
+															},
+															"deadlineMs": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"tasks": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["agent", "task", "dependencies"],
+																	"properties": {
+																		"agent": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"task": {
+																			"type": "string",
+																			"maxLength": 1100
+																		},
+																		"role": {
+																			"type": "string",
+																			"maxLength": 32
+																		},
+																		"position": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"target": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"model": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"node": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"nodeKind": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "local"
+																				},
+																				{
+																					"type": "string",
+																					"const": "ssh"
+																				}
+																			]
+																		},
+																		"worktree": {
+																			"type": "boolean",
+																			"const": true
+																		},
+																		"apply": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "merge"
+																				},
+																				{
+																					"type": "string",
+																					"const": "preserve"
+																				}
+																			]
+																		},
+																		"stepId": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"dependencies": {
+																			"type": "array",
+																			"items": {
+																				"type": "string",
+																				"maxLength": 300
+																			},
+																			"maxItems": 8
+																		},
+																		"wave": {
+																			"type": "integer",
+																			"minimum": 0
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																"maxItems": 32
+															},
+															"truncated": {
+																"type": "boolean"
+															}
+														},
+														"additionalProperties": false
+													},
 													"canStopTurn": {
 														"type": "boolean"
 													}
@@ -17512,6 +17628,122 @@
 														},
 														"additionalProperties": false
 													},
+													"plan": {
+														"type": "object",
+														"required": ["topology", "taskCount", "planScale", "hash", "tasks", "truncated"],
+														"properties": {
+															"topology": {
+																"type": "string",
+																"maxLength": 32
+															},
+															"taskCount": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"planScale": {
+																"type": "boolean"
+															},
+															"hash": {
+																"type": "string",
+																"pattern": "^[0-9a-f]{64}$"
+															},
+															"costCeilingUsd": {
+																"type": "number",
+																"minimum": 0
+															},
+															"deadlineMs": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"tasks": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["agent", "task", "dependencies"],
+																	"properties": {
+																		"agent": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"task": {
+																			"type": "string",
+																			"maxLength": 1100
+																		},
+																		"role": {
+																			"type": "string",
+																			"maxLength": 32
+																		},
+																		"position": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"target": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"model": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"node": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"nodeKind": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "local"
+																				},
+																				{
+																					"type": "string",
+																					"const": "ssh"
+																				}
+																			]
+																		},
+																		"worktree": {
+																			"type": "boolean",
+																			"const": true
+																		},
+																		"apply": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "merge"
+																				},
+																				{
+																					"type": "string",
+																					"const": "preserve"
+																				}
+																			]
+																		},
+																		"stepId": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"dependencies": {
+																			"type": "array",
+																			"items": {
+																				"type": "string",
+																				"maxLength": 300
+																			},
+																			"maxItems": 8
+																		},
+																		"wave": {
+																			"type": "integer",
+																			"minimum": 0
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																"maxItems": 32
+															},
+															"truncated": {
+																"type": "boolean"
+															}
+														},
+														"additionalProperties": false
+													},
 													"canStopTurn": {
 														"type": "boolean"
 													}
@@ -18982,6 +19214,122 @@
 														},
 														"additionalProperties": false
 													},
+													"plan": {
+														"type": "object",
+														"required": ["topology", "taskCount", "planScale", "hash", "tasks", "truncated"],
+														"properties": {
+															"topology": {
+																"type": "string",
+																"maxLength": 32
+															},
+															"taskCount": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"planScale": {
+																"type": "boolean"
+															},
+															"hash": {
+																"type": "string",
+																"pattern": "^[0-9a-f]{64}$"
+															},
+															"costCeilingUsd": {
+																"type": "number",
+																"minimum": 0
+															},
+															"deadlineMs": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"tasks": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["agent", "task", "dependencies"],
+																	"properties": {
+																		"agent": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"task": {
+																			"type": "string",
+																			"maxLength": 1100
+																		},
+																		"role": {
+																			"type": "string",
+																			"maxLength": 32
+																		},
+																		"position": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"target": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"model": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"node": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"nodeKind": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "local"
+																				},
+																				{
+																					"type": "string",
+																					"const": "ssh"
+																				}
+																			]
+																		},
+																		"worktree": {
+																			"type": "boolean",
+																			"const": true
+																		},
+																		"apply": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "merge"
+																				},
+																				{
+																					"type": "string",
+																					"const": "preserve"
+																				}
+																			]
+																		},
+																		"stepId": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"dependencies": {
+																			"type": "array",
+																			"items": {
+																				"type": "string",
+																				"maxLength": 300
+																			},
+																			"maxItems": 8
+																		},
+																		"wave": {
+																			"type": "integer",
+																			"minimum": 0
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																"maxItems": 32
+															},
+															"truncated": {
+																"type": "boolean"
+															}
+														},
+														"additionalProperties": false
+													},
 													"canStopTurn": {
 														"type": "boolean"
 													}
@@ -20412,6 +20760,122 @@
 																"target": {
 																	"type": "string",
 																	"maxLength": 512
+																}
+															},
+															"additionalProperties": false
+														},
+														"plan": {
+															"type": "object",
+															"required": ["topology", "taskCount", "planScale", "hash", "tasks", "truncated"],
+															"properties": {
+																"topology": {
+																	"type": "string",
+																	"maxLength": 32
+																},
+																"taskCount": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"planScale": {
+																	"type": "boolean"
+																},
+																"hash": {
+																	"type": "string",
+																	"pattern": "^[0-9a-f]{64}$"
+																},
+																"costCeilingUsd": {
+																	"type": "number",
+																	"minimum": 0
+																},
+																"deadlineMs": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"tasks": {
+																	"type": "array",
+																	"items": {
+																		"type": "object",
+																		"required": ["agent", "task", "dependencies"],
+																		"properties": {
+																			"agent": {
+																				"type": "string",
+																				"maxLength": 300
+																			},
+																			"task": {
+																				"type": "string",
+																				"maxLength": 1100
+																			},
+																			"role": {
+																				"type": "string",
+																				"maxLength": 32
+																			},
+																			"position": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"target": {
+																				"type": "string",
+																				"maxLength": 300
+																			},
+																			"model": {
+																				"type": "string",
+																				"maxLength": 300
+																			},
+																			"node": {
+																				"type": "string",
+																				"maxLength": 300
+																			},
+																			"nodeKind": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "local"
+																					},
+																					{
+																						"type": "string",
+																						"const": "ssh"
+																					}
+																				]
+																			},
+																			"worktree": {
+																				"type": "boolean",
+																				"const": true
+																			},
+																			"apply": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "merge"
+																					},
+																					{
+																						"type": "string",
+																						"const": "preserve"
+																					}
+																				]
+																			},
+																			"stepId": {
+																				"type": "string",
+																				"maxLength": 300
+																			},
+																			"dependencies": {
+																				"type": "array",
+																				"items": {
+																					"type": "string",
+																					"maxLength": 300
+																				},
+																				"maxItems": 8
+																			},
+																			"wave": {
+																				"type": "integer",
+																				"minimum": 0
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	"maxItems": 32
+																},
+																"truncated": {
+																	"type": "boolean"
 																}
 															},
 															"additionalProperties": false
@@ -22070,6 +22534,122 @@
 															"target": {
 																"type": "string",
 																"maxLength": 512
+															}
+														},
+														"additionalProperties": false
+													},
+													"plan": {
+														"type": "object",
+														"required": ["topology", "taskCount", "planScale", "hash", "tasks", "truncated"],
+														"properties": {
+															"topology": {
+																"type": "string",
+																"maxLength": 32
+															},
+															"taskCount": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"planScale": {
+																"type": "boolean"
+															},
+															"hash": {
+																"type": "string",
+																"pattern": "^[0-9a-f]{64}$"
+															},
+															"costCeilingUsd": {
+																"type": "number",
+																"minimum": 0
+															},
+															"deadlineMs": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"tasks": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["agent", "task", "dependencies"],
+																	"properties": {
+																		"agent": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"task": {
+																			"type": "string",
+																			"maxLength": 1100
+																		},
+																		"role": {
+																			"type": "string",
+																			"maxLength": 32
+																		},
+																		"position": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"target": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"model": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"node": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"nodeKind": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "local"
+																				},
+																				{
+																					"type": "string",
+																					"const": "ssh"
+																				}
+																			]
+																		},
+																		"worktree": {
+																			"type": "boolean",
+																			"const": true
+																		},
+																		"apply": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "merge"
+																				},
+																				{
+																					"type": "string",
+																					"const": "preserve"
+																				}
+																			]
+																		},
+																		"stepId": {
+																			"type": "string",
+																			"maxLength": 300
+																		},
+																		"dependencies": {
+																			"type": "array",
+																			"items": {
+																				"type": "string",
+																				"maxLength": 300
+																			},
+																			"maxItems": 8
+																		},
+																		"wave": {
+																			"type": "integer",
+																			"minimum": 0
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																"maxItems": 32
+															},
+															"truncated": {
+																"type": "boolean"
 															}
 														},
 														"additionalProperties": false
@@ -29109,6 +29689,122 @@
 												},
 												"additionalProperties": false
 											},
+											"plan": {
+												"type": "object",
+												"required": ["topology", "taskCount", "planScale", "hash", "tasks", "truncated"],
+												"properties": {
+													"topology": {
+														"type": "string",
+														"maxLength": 32
+													},
+													"taskCount": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"planScale": {
+														"type": "boolean"
+													},
+													"hash": {
+														"type": "string",
+														"pattern": "^[0-9a-f]{64}$"
+													},
+													"costCeilingUsd": {
+														"type": "number",
+														"minimum": 0
+													},
+													"deadlineMs": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"tasks": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["agent", "task", "dependencies"],
+															"properties": {
+																"agent": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"task": {
+																	"type": "string",
+																	"maxLength": 1100
+																},
+																"role": {
+																	"type": "string",
+																	"maxLength": 32
+																},
+																"position": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"target": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"model": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"node": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"nodeKind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "local"
+																		},
+																		{
+																			"type": "string",
+																			"const": "ssh"
+																		}
+																	]
+																},
+																"worktree": {
+																	"type": "boolean",
+																	"const": true
+																},
+																"apply": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "merge"
+																		},
+																		{
+																			"type": "string",
+																			"const": "preserve"
+																		}
+																	]
+																},
+																"stepId": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"dependencies": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 300
+																	},
+																	"maxItems": 8
+																},
+																"wave": {
+																	"type": "integer",
+																	"minimum": 0
+																}
+															},
+															"additionalProperties": false
+														},
+														"maxItems": 32
+													},
+													"truncated": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
 											"canStopTurn": {
 												"type": "boolean"
 											}
@@ -29302,6 +29998,122 @@
 													"target": {
 														"type": "string",
 														"maxLength": 512
+													}
+												},
+												"additionalProperties": false
+											},
+											"plan": {
+												"type": "object",
+												"required": ["topology", "taskCount", "planScale", "hash", "tasks", "truncated"],
+												"properties": {
+													"topology": {
+														"type": "string",
+														"maxLength": 32
+													},
+													"taskCount": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"planScale": {
+														"type": "boolean"
+													},
+													"hash": {
+														"type": "string",
+														"pattern": "^[0-9a-f]{64}$"
+													},
+													"costCeilingUsd": {
+														"type": "number",
+														"minimum": 0
+													},
+													"deadlineMs": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"tasks": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["agent", "task", "dependencies"],
+															"properties": {
+																"agent": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"task": {
+																	"type": "string",
+																	"maxLength": 1100
+																},
+																"role": {
+																	"type": "string",
+																	"maxLength": 32
+																},
+																"position": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"target": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"model": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"node": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"nodeKind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "local"
+																		},
+																		{
+																			"type": "string",
+																			"const": "ssh"
+																		}
+																	]
+																},
+																"worktree": {
+																	"type": "boolean",
+																	"const": true
+																},
+																"apply": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "merge"
+																		},
+																		{
+																			"type": "string",
+																			"const": "preserve"
+																		}
+																	]
+																},
+																"stepId": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"dependencies": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 300
+																	},
+																	"maxItems": 8
+																},
+																"wave": {
+																	"type": "integer",
+																	"minimum": 0
+																}
+															},
+															"additionalProperties": false
+														},
+														"maxItems": 32
+													},
+													"truncated": {
+														"type": "boolean"
 													}
 												},
 												"additionalProperties": false
@@ -29503,6 +30315,122 @@
 												},
 												"additionalProperties": false
 											},
+											"plan": {
+												"type": "object",
+												"required": ["topology", "taskCount", "planScale", "hash", "tasks", "truncated"],
+												"properties": {
+													"topology": {
+														"type": "string",
+														"maxLength": 32
+													},
+													"taskCount": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"planScale": {
+														"type": "boolean"
+													},
+													"hash": {
+														"type": "string",
+														"pattern": "^[0-9a-f]{64}$"
+													},
+													"costCeilingUsd": {
+														"type": "number",
+														"minimum": 0
+													},
+													"deadlineMs": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"tasks": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["agent", "task", "dependencies"],
+															"properties": {
+																"agent": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"task": {
+																	"type": "string",
+																	"maxLength": 1100
+																},
+																"role": {
+																	"type": "string",
+																	"maxLength": 32
+																},
+																"position": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"target": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"model": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"node": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"nodeKind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "local"
+																		},
+																		{
+																			"type": "string",
+																			"const": "ssh"
+																		}
+																	]
+																},
+																"worktree": {
+																	"type": "boolean",
+																	"const": true
+																},
+																"apply": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "merge"
+																		},
+																		{
+																			"type": "string",
+																			"const": "preserve"
+																		}
+																	]
+																},
+																"stepId": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"dependencies": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 300
+																	},
+																	"maxItems": 8
+																},
+																"wave": {
+																	"type": "integer",
+																	"minimum": 0
+																}
+															},
+															"additionalProperties": false
+														},
+														"maxItems": 32
+													},
+													"truncated": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
 											"canStopTurn": {
 												"type": "boolean"
 											}
@@ -29696,6 +30624,122 @@
 													"target": {
 														"type": "string",
 														"maxLength": 512
+													}
+												},
+												"additionalProperties": false
+											},
+											"plan": {
+												"type": "object",
+												"required": ["topology", "taskCount", "planScale", "hash", "tasks", "truncated"],
+												"properties": {
+													"topology": {
+														"type": "string",
+														"maxLength": 32
+													},
+													"taskCount": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"planScale": {
+														"type": "boolean"
+													},
+													"hash": {
+														"type": "string",
+														"pattern": "^[0-9a-f]{64}$"
+													},
+													"costCeilingUsd": {
+														"type": "number",
+														"minimum": 0
+													},
+													"deadlineMs": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"tasks": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["agent", "task", "dependencies"],
+															"properties": {
+																"agent": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"task": {
+																	"type": "string",
+																	"maxLength": 1100
+																},
+																"role": {
+																	"type": "string",
+																	"maxLength": 32
+																},
+																"position": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"target": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"model": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"node": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"nodeKind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "local"
+																		},
+																		{
+																			"type": "string",
+																			"const": "ssh"
+																		}
+																	]
+																},
+																"worktree": {
+																	"type": "boolean",
+																	"const": true
+																},
+																"apply": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "merge"
+																		},
+																		{
+																			"type": "string",
+																			"const": "preserve"
+																		}
+																	]
+																},
+																"stepId": {
+																	"type": "string",
+																	"maxLength": 300
+																},
+																"dependencies": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 300
+																	},
+																	"maxItems": 8
+																},
+																"wave": {
+																	"type": "integer",
+																	"minimum": 0
+																}
+															},
+															"additionalProperties": false
+														},
+														"maxItems": 32
+													},
+													"truncated": {
+														"type": "boolean"
 													}
 												},
 												"additionalProperties": false

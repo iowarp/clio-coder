@@ -41,6 +41,46 @@ export const PermissionDecisionFacts = Type.Object(
 	closed,
 );
 export type PermissionDecisionFacts = Static<typeof PermissionDecisionFacts>;
+const planField = Type.String({ maxLength: 300 });
+/**
+ * The dispatch plan admission rendered, carried under `clio-coder/dispatchPlan`. A plan-scale
+ * approval covers every run in it, so the ask names each run's agent, task and placement, and the
+ * hash the runs will seal. The agent bounds tasks at 32, a task at 1 KiB and a field at 256 bytes.
+ */
+export const DispatchPlanFacts = Type.Object(
+	{
+		topology: Type.String({ maxLength: 32 }),
+		taskCount: Type.Integer({ minimum: 0 }),
+		planScale: Type.Boolean(),
+		hash: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+		costCeilingUsd: Type.Optional(Type.Number({ minimum: 0 })),
+		deadlineMs: Type.Optional(Type.Integer({ minimum: 0 })),
+		tasks: Type.Array(
+			Type.Object(
+				{
+					agent: planField,
+					task: Type.String({ maxLength: 1100 }),
+					role: Type.Optional(Type.String({ maxLength: 32 })),
+					position: Type.Optional(Type.Integer({ minimum: 0 })),
+					target: Type.Optional(planField),
+					model: Type.Optional(planField),
+					node: Type.Optional(planField),
+					nodeKind: Type.Optional(Type.Union([Type.Literal("local"), Type.Literal("ssh")])),
+					worktree: Type.Optional(Type.Literal(true)),
+					apply: Type.Optional(Type.Union([Type.Literal("merge"), Type.Literal("preserve")])),
+					stepId: Type.Optional(planField),
+					dependencies: Type.Array(planField, { maxItems: 8 }),
+					wave: Type.Optional(Type.Integer({ minimum: 0 })),
+				},
+				closed,
+			),
+			{ maxItems: 32 },
+		),
+		truncated: Type.Boolean(),
+	},
+	closed,
+);
+export type DispatchPlanFacts = Static<typeof DispatchPlanFacts>;
 export const Permission = Type.Object(
 	{
 		id: Id,
@@ -61,6 +101,8 @@ export const Permission = Type.Object(
 		]),
 		/** Absent when the agent announced no decision facts, or sent none it could parse. */
 		decision: Type.Optional(PermissionDecisionFacts),
+		/** Present for a dispatch ask from an agent that reports the plan it admitted. */
+		plan: Type.Optional(DispatchPlanFacts),
 		/** True when the agent offered a third, turn-ending refusal for this ask. */
 		canStopTurn: Type.Boolean(),
 	},

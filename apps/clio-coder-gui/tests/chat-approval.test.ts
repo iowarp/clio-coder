@@ -487,3 +487,69 @@ test("the first second of a wait says the request just arrived instead of printi
 	assert.equal(at(999), "Asked just now.");
 	assert.match(at(30_000), /^Waiting 30s\.$/);
 });
+
+const PLAN_FACTS = {
+	topology: "parallel",
+	taskCount: 3,
+	planScale: true,
+	hash: "3f2a9c1e04b7d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e",
+	costCeilingUsd: 2.5,
+	tasks: [
+		{ agent: "scout", task: "Survey the samples", target: "mini", model: "gemma", dependencies: [] },
+		{
+			agent: "builder",
+			task: "Write the report",
+			role: "builder",
+			node: "lab-box",
+			nodeKind: "ssh" as const,
+			worktree: true as const,
+			apply: "merge" as const,
+			dependencies: ["survey"],
+		},
+	],
+	truncated: true,
+};
+
+test("an admitted dispatch plan names every run, its placement and the hash its runs seal", () => {
+	const preview = gatedPreview(
+		{ title: "dispatch", toolKind: "other", rawInput: { agent: "ignored", task: "x" } },
+		PLAN_FACTS,
+	);
+	assert.equal(preview.kind, "plan");
+	if (preview.kind !== "plan") return;
+	assert.equal(preview.label, "Dispatch plan");
+	assert.equal(preview.heading, "3 runs · in parallel");
+	assert.match(preview.scope, /One approval starts every run/);
+	assert.deepEqual(
+		preview.rows.map((row) => [row.agent, row.task, row.placement, row.notes]),
+		[
+			["scout", "Survey the samples", "mini · gemma", []],
+			[
+				"builder",
+				"Write the report",
+				"on lab-box over SSH",
+				["Builder", "In its own worktree, merged back when it passes", "After survey"],
+			],
+		],
+	);
+	assert.equal(preview.more, 1, "a run the agent did not send is counted");
+	assert.deepEqual(preview.hash, { short: "3f2a9c1e04b7", full: PLAN_FACTS.hash });
+	assert.equal(preview.ceiling, "Scheduling stops at a cost of $2.50.");
+});
+
+test("a single-run dispatch says one approval starts one run, and an older agent still gets the argument summary", () => {
+	const single = gatedPreview(
+		{ title: "dispatch", toolKind: "other", rawInput: {} },
+		{
+			...PLAN_FACTS,
+			taskCount: 1,
+			planScale: false,
+			tasks: [PLAN_FACTS.tasks[0] as (typeof PLAN_FACTS.tasks)[0]],
+			truncated: false,
+		},
+	);
+	assert.equal(single.kind === "plan" && single.scope, "This approval starts one run.");
+	assert.equal(single.kind === "plan" && single.more, 0);
+	const legacy = gatedPreview({ title: "dispatch", toolKind: "other", rawInput: { agent: "scout", task: "Survey" } });
+	assert.deepEqual(legacy, { kind: "summary", label: "Dispatch", summary: "scout · Survey" });
+});

@@ -40,6 +40,7 @@ import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import type { AgentMessage, ImageContent } from "../types.js";
 import { ACP_BOARD_META_KEY, ACP_BOARD_METHOD, type AcpBoardSource, projectSessionBoard } from "./board.js";
 import type { AcpCommandCatalog, AcpCommandControl } from "./commands.js";
+import { ACP_DISPATCH_PLAN_META_KEY, projectDispatchPlanMeta } from "./dispatch-plan-meta.js";
 import { ACP_TURN_FAILED_MESSAGE, AcpRequestError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
 import {
 	ACP_SESSION_FORK_METHOD,
@@ -1939,7 +1940,13 @@ function installPermissionBridge(input: {
 										kind: "reject_once",
 									},
 								],
-								_meta: decisionMeta(facts, presentation, call),
+								_meta: {
+									...decisionMeta(facts, presentation, call),
+									// The plan admission rendered, whose hash a plan-scale run seals.
+									...(meta.dispatchPlan !== undefined
+										? { [ACP_DISPATCH_PLAN_META_KEY]: projectDispatchPlanMeta(meta.dispatchPlan) }
+										: {}),
+								},
 							},
 							input.permissionTimeoutMs,
 						),

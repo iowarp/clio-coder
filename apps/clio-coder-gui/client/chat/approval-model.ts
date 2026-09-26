@@ -16,7 +16,12 @@
 //  - No model-authored prose reaches this card. Every sentence below is either fixed copy or a
 //    value the agent already classified and bounded upstream.
 
-import type { Permission, PermissionDecision, PermissionDecisionFacts } from "../../contracts/permissions.js";
+import type {
+	DispatchPlanFacts,
+	Permission,
+	PermissionDecision,
+	PermissionDecisionFacts,
+} from "../../contracts/permissions.js";
 import { formatDuration, formatTime } from "../api/clock.js";
 import type { StatusTone } from "../design/status.js";
 
@@ -344,7 +349,90 @@ export type GatedPreview =
 			readonly truncated: boolean;
 	  }
 	| { readonly kind: "summary"; readonly label: string; readonly summary: string }
+	| PlanPreview
 	| { readonly kind: "none"; readonly label: string; readonly note: string };
+
+/** A dispatch plan as the agent admitted it: what one approval starts, run by run. */
+export interface PlanPreview {
+	readonly kind: "plan";
+	readonly label: string;
+	/** "2 runs · in parallel". */
+	readonly heading: string;
+	/** What one approval covers, in a sentence. */
+	readonly scope: string;
+	readonly rows: ReadonlyArray<{
+		readonly key: string;
+		readonly agent: string;
+		readonly task: string;
+		/** Target, model and node where the agent reported them; null when it reported none. */
+		readonly placement: string | null;
+		readonly notes: readonly string[];
+	}>;
+	/** Runs in the plan the agent did not send; counted, never silently dropped. */
+	readonly more: number;
+	/** The first twelve hex digits, and the whole hash for anyone auditing the receipt. */
+	readonly hash: { readonly short: string; readonly full: string };
+	readonly ceiling: string | null;
+}
+
+const TOPOLOGY_WORDS: Readonly<Record<string, string>> = {
+	parallel: "in parallel",
+	sequential: "one after another",
+	pipeline: "as a pipeline",
+	review: "with a review gate",
+	compete: "as competing candidates",
+	council: "as a council",
+	detached: "detached from this turn",
+	fleet: "as a dependency plan",
+};
+const ROLE_WORDS: Readonly<Record<string, string>> = {
+	builder: "Builder",
+	reviewer: "Reviewer",
+	candidate: "Candidate",
+	judge: "Judge",
+	member: "Council member",
+	synthesis: "Synthesis",
+};
+
+export function planPreview(plan: DispatchPlanFacts): PlanPreview {
+	const runs = `${plan.taskCount} ${plan.taskCount === 1 ? "run" : "runs"}`;
+	const rows = plan.tasks.map((task, index) => {
+		const where = [task.target, task.model].filter((value): value is string => value !== undefined);
+		if (task.node !== undefined && task.node !== "local")
+			where.push(`on ${task.node}${task.nodeKind === "ssh" ? " over SSH" : ""}`);
+		const notes: string[] = [];
+		if (task.role !== undefined && ROLE_WORDS[task.role] !== undefined) notes.push(ROLE_WORDS[task.role] as string);
+		if (task.worktree === true)
+			notes.push(
+				task.apply === "merge"
+					? "In its own worktree, merged back when it passes"
+					: task.apply === "preserve"
+						? "In its own worktree, kept for review"
+						: "In its own worktree",
+			);
+		if (task.dependencies.length > 0) notes.push(`After ${task.dependencies.join(", ")}`);
+		return {
+			key: task.stepId ?? `${index}`,
+			agent: clampText(task.agent, 1, 256).text,
+			task: clampText(task.task, 6, 600).text,
+			placement: where.length === 0 ? null : clampText(where.join(" · "), 1, 512).text,
+			notes,
+		};
+	});
+	return {
+		kind: "plan",
+		label: plan.planScale ? "Dispatch plan" : "Dispatch",
+		heading: `${runs} · ${TOPOLOGY_WORDS[plan.topology] ?? plan.topology}`,
+		scope: plan.planScale
+			? "One approval starts every run in this plan, including remote placements."
+			: "This approval starts one run.",
+		rows,
+		more: Math.max(0, plan.taskCount - rows.length),
+		hash: { short: plan.hash.slice(0, 12), full: plan.hash },
+		ceiling:
+			plan.costCeilingUsd === undefined ? null : `Scheduling stops at a cost of $${plan.costCeilingUsd.toFixed(2)}.`,
+	};
+}
 
 /** A synthesized block never renders more than this; the operator scrolls the real diff instead. */
 export const PREVIEW_MAX_LINES = 400;
@@ -394,7 +482,7 @@ const PATH_TOOLS = new Set(["read", "ls", "grep", "find", "code_nav"]);
  * hint and is the fallback. A tool this build has never seen produces a readable `none` rather than
  * an empty body, because an approval card that shows nothing is the bug being fixed.
  */
-export function gatedPreview(call: GatedCall | undefined): GatedPreview {
+export function gatedPreview(call: GatedCall | undefined, plan?: DispatchPlanFacts): GatedPreview {
 	if (call === undefined)
 		return {
 			kind: "none",
@@ -471,6 +559,8 @@ export function gatedPreview(call: GatedCall | undefined): GatedPreview {
 		}
 	}
 	if (name === "dispatch") {
+		// The admitted plan wins over the arguments: it is what the run seals, and it names every run.
+		if (plan !== undefined) return planPreview(plan);
 		const agent = text(input.agent) ?? text(input.recipe) ?? "an unnamed agent";
 		const task = text(input.task);
 		const preview = task === null ? "no task preview" : clampText(task, 1, 160).text;

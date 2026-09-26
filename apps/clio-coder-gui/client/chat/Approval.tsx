@@ -166,6 +166,41 @@ function Preview({ preview }: { preview: GatedPreview }) {
 				) : null}
 			</div>
 		);
+	if (preview.kind === "plan")
+		return (
+			<div className="approval-preview">
+				<p className="approval-preview__label">
+					{preview.label} · {preview.heading}
+				</p>
+				<p className="approval-preview__note">{preview.scope}</p>
+				<ol className="approval-plan">
+					{preview.rows.map((row) => (
+						<li key={row.key}>
+							<span className="approval-plan__agent">{row.agent}</span>
+							<span className="approval-plan__task">
+								{row.task}
+								{row.placement !== null || row.notes.length > 0 ? (
+									<small>{[row.placement, ...row.notes].filter(Boolean).join(" · ")}</small>
+								) : null}
+							</span>
+						</li>
+					))}
+				</ol>
+				{preview.more > 0 ? (
+					<p className="approval-preview__note">
+						{preview.more} more {preview.more === 1 ? "run is" : "runs are"} in this plan; the terminal lists them all.
+					</p>
+				) : null}
+				<p className="approval-preview__note">
+					{preview.ceiling ? `${preview.ceiling} ` : ""}
+					The runs will seal plan{" "}
+					<span className="approval-plan__hash" title={preview.hash.full}>
+						{preview.hash.short}
+					</span>
+					.
+				</p>
+			</div>
+		);
 	if (preview.kind === "summary")
 		return (
 			<div className="approval-preview">
@@ -277,7 +312,7 @@ function ApprovalCard({ sessionId, permission, call, answer, eyebrow, hint, vari
 					<StatusMark tone="warn" label="Unclassified" detail={NO_DECISION_FACTS} />
 				</p>
 			)}
-			<Preview preview={gatedPreview(call)} />
+			<Preview preview={gatedPreview(call, permission.plan)} />
 			<RawRequest input={call?.rawInput} />
 			{rows.length > 0 ? (
 				<dl className="approval-decision">

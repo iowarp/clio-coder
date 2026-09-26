@@ -261,7 +261,12 @@ neither may show an item the other lacks.
    page, the pinned banner above the transcript is a one-line strip: what is asked, the time left,
    Review (which brings the card into view), and the same two buttons. When the call is not in the
    timeline or its group is folded, the banner carries the full card instead. The banner owns the
-   announcement and the keyboard chords either way.
+   announcement and the keyboard chords either way. A dispatch ask from an agent that reports the
+   plan it admitted shows that plan instead of the call's arguments: "Dispatch plan · 2 runs · in
+   parallel", one sentence on what one approval starts, one row per run (the agent as an exact key,
+   the task, and a quiet line with target, model, a remote node, the worktree posture and the
+   dependencies), a count of runs the agent did not send, and the first twelve digits of the hash
+   the runs will seal, with the whole hash on hover. An older agent keeps the argument summary.
 6. Workers running right now stand at the transcript's live edge, after the last turn, so a run an
    earlier turn dispatched still shows where the operator reads. Each is one row (glyph, agent,
    task, state in sentence case) with Guide and a two-press Stop at its end; the stop question puts
@@ -565,8 +570,8 @@ Every UI change must preserve:
 
 Covered states the smoke must visit: home in both themes, toolchain, traces and run detail,
 workspaces and sessions, a Markdown/code/Mermaid conversation, session controls, the branch view,
-a branch switch and a fork, a handoff review and its successor, permission and cancellation, and a
-problem notification. This design work adds three: the six status tones rendered
+a branch switch and a fork, a handoff review and its successor, a dispatch plan approval, permission
+and cancellation, and a problem notification. This design work adds three: the six status tones rendered
 side by side, a focus-visible capture of a button, an input and a table cell, and one forced-colors
 pass.
 
