@@ -4,14 +4,14 @@
  * free of a backward domain dependency; this module pairs it with the value
  * the DEFAULT_SETTINGS tree and the engine read at runtime.
  *
- * `structural-v1` is the default: typed path-keyed rules first, the age rule
- * last and batched to `target`. On the reproducible 24-trace procedural grid,
- * it meets the recorded default rule at 32k, 64k, and 128k: retention is no
- * lower than `age-horizon`, precision is higher than random, and the target
- * stop remains active above 32k. `age-horizon` stays available as the exact
- * pre-layer selection recorded through the ledger. `structural-v2` is the
- * rung composition under measurement; it becomes the default only once its
- * ablation and ordering tables are recorded.
+ * `structural-v2` is the default: the path-keyed rungs of `structural-v1`,
+ * then the offloaded-body rung, then closed-step thinking, then age batched
+ * to `target`, with bodies the model recalled twice pinned. On the 39 real
+ * ledgers and the 24-trace procedural grid at 32k to 200k it summarizes no
+ * more often than `structural-v1` and retains at least as much of what a
+ * later request goes back to; the ablation and ordering tables live in the
+ * commit that made it the default. `structural-v1` stays as the recorded
+ * previous default and `age-horizon` as the exact pre-layer selection.
  */
 
 import type { WorkingSetSettings } from "../../../core/defaults.js";
@@ -20,7 +20,7 @@ export type { WorkingSetPolicyId, WorkingSetProfileId, WorkingSetSettings } from
 
 export const DEFAULT_WORKING_SET_SETTINGS: WorkingSetSettings = {
 	enabled: true,
-	policy: "structural-v1",
+	policy: "structural-v2",
 	// The protection profile: `default` adds nothing to the absolute predicates.
 	// `data-analysis` and `web-design` pin what those kinds of work come back
 	// to; see policies/profiles.ts.

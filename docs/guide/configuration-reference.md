@@ -64,7 +64,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `fleet.history.journal` | `true` |
 | `context.toolResultMaxBytes` | `65536` |
 | `context.workingSet.enabled` | `true` |
-| `context.workingSet.policy` | `"structural-v1"` |
+| `context.workingSet.policy` | `"structural-v2"` |
 | `context.workingSet.profile` | `"default"` |
 | `context.workingSet.target` | `0.6` |
 | `context.workingSet.protectLastTurns` | `6` |

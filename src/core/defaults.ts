@@ -741,7 +741,7 @@ context:
   toolResultMaxBytes: 65536
   workingSet:
     enabled: true
-    policy: structural-v1
+    policy: structural-v2
     profile: default
     target: 0.6
     protectLastTurns: 6

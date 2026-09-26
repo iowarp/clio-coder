@@ -217,7 +217,7 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"context.workingSet.enabled":
 		"Eviction moves stale tool-result bodies and thinking blocks out of the model's working set and records a ledger entry; history is never rewritten. Off skips eviction and goes straight to summary compaction. Legal values: true, false · default: true.",
 	"context.workingSet.policy":
-		"structural-v1 selects by message structure; structural-v2 adds the offloaded-body rung and pins bodies the model recalled twice; age-horizon is the older age-based rule. Legal values: structural-v1, structural-v2, age-horizon · default: structural-v1.",
+		"structural-v1 selects by message structure; structural-v2 adds the offloaded-body rung and pins bodies the model recalled twice; age-horizon is the older age-based rule. Legal values: structural-v1, structural-v2, age-horizon · default: structural-v2.",
 	"context.workingSet.profile":
 		"default pins nothing extra; data-analysis keeps the last three bash outputs that printed numbers; web-design keeps the last read of every stylesheet and component under edit and lets bash output leave first. Main agent only. Legal values: default, data-analysis, web-design · default: default.",
 	"context.workingSet.target":

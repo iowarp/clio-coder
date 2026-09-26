@@ -79,16 +79,25 @@ function retainedThrough(evictedAt: number | undefined, point: ReferencePoint): 
 	return evictedAt === undefined || evictedAt > point.position;
 }
 
+/**
+ * A surviving newer observation that carries what the evicted one carried:
+ * for a read, a later read covering the same lines; for a search or listing,
+ * a later identical call (same tool, same arguments). Either one is what a
+ * recall of the evicted body would have shown, so the pair counts as covered.
+ */
 function hasSurvivingCoveringRead(input: ReplayMeasurement, ref: string, point: ReferencePoint): boolean {
 	const original = input.index.byRef.get(ref);
-	if (original?.op !== "read" || original.path.length === 0) return false;
+	if (original === undefined || original.path.length === 0) return false;
+	const coversOriginal = (later: PathObservation): boolean =>
+		original.op === "read"
+			? later.op === "read" && covers(later.range, original.range)
+			: original.argsKey.length > 0 && later.toolName === original.toolName && later.argsKey === original.argsKey;
 	return (input.index.byPath.get(original.path) ?? []).some(
 		(later: PathObservation) =>
-			later.op === "read" &&
 			!later.isError &&
 			later.entryIndex > original.entryIndex &&
 			later.entryIndex < point.entryIndex &&
-			covers(later.range, original.range) &&
+			coversOriginal(later) &&
 			retainedThrough(input.replay.evictedAt.get(later.ref.entry), point),
 	);
 }
