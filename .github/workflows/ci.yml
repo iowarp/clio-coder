@@ -70,6 +70,29 @@ jobs:
           echo "$command"
           sh -c "$command"
 
+  installed-package:
+    name: installed package (22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Pack and test the installed package
+        # The scratch install resolves relative tarball paths under its prefix.
+        run: |
+          pack_dir="$(mktemp -d)"
+          trap 'rm -rf "$pack_dir"' EXIT
+          tarball="$(npm pack --pack-destination "$pack_dir" --silent)"
+          CLIO_CODER_RELEASE_TARBALL="$pack_dir/$tarball" pnpm run test:package
+
   runtime-compatibility:
     name: ci (24)
     runs-on: ubuntu-latest
@@ -104,7 +127,7 @@ jobs:
 
   ci:
     name: ci (22)
-    needs: [checks, core-tests, windows-subprocess]
+    needs: [checks, core-tests, windows-subprocess, installed-package]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -114,6 +137,7 @@ jobs:
           test '${{ needs.checks.result }}' = success
           test '${{ needs.core-tests.result }}' = success
           test '${{ needs.windows-subprocess.result }}' = success
+          test '${{ needs.installed-package.result }}' = success
 
   candidate-qualification:
     if: ${{ startsWith(github.ref, 'refs/heads/ci-scratch-') }}

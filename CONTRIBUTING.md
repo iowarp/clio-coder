@@ -90,3 +90,5 @@ pnpm run skills:pin && pnpm run skills:check
 ## Developing with Agents
 
 Source code, TypeScript types, and schemas are authoritative. Prefer `rg` and targeted source reads over lengthy prose documentation. Do not invent commands, configuration settings, or benchmark numbers.
+
+Hosted CI also requires the Node 22 installed-package gate on every configured push and pull request. Within a six-minute timeout, it builds, runs `npm pack` into a temporary directory, and runs `pnpm run test:package` with `CLIO_CODER_RELEASE_TARBALL` set to the absolute tarball path. Its result is required by `ci (22)`. The local `pnpm run ci` command remains the source gate; run the installed-package suite separately against a packed build.

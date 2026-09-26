@@ -12,6 +12,7 @@ Use Node >=22.19 and the pnpm version pinned in `package.json`.
 | `pnpm skills:pin` / `skills:check` | Skill-only authoring commands; use library:pin to refresh the complete catalog after changes | Same as above | Via library check |
 | `pnpm pi:surface-diff` / `pi:surface-snapshot` | Compare / deliberately refresh the consumed dependency API snapshot | Snapshot writes `docs/pi-surface.json` | Comparison included in lint, including same-version patches |
 | `pnpm test:maintenance` | Focused keyboard routing and draft contracts | Isolated deterministic fixtures; no model calls | Routine CI |
+| `pnpm test:package` | Installed tarball and native call timing contracts | Scratch installs from an absolute `CLIO_CODER_RELEASE_TARBALL`; no model calls | Hosted CI on pushes and pull requests; release qualification |
 | `pnpm ci:release` | `release-candidate.mjs`: clean committed source, CI, package audit, installed-package checks, exact tarball qualification | npm registry audit; scratch installs; receipt and tarball in user cache | Release qualification |
 | `pnpm release:preflight` | Check source, Node version, age and package digest against the qualified artifact | Temporary tarball; no rebuild | Publication |
 | `node scripts/check-release.mjs` | Package contents, budgets, versions, recipe contracts and dependency advisories | npm pack dry run and registry audit | Called by qualification |
@@ -23,7 +24,7 @@ Use Node >=22.19 and the pnpm version pinned in `package.json`.
 | `bash scripts/verify-portable-hosts.sh [output-directory]` | Exercise installed Claude/Codex host interoperability | Requires host CLIs; isolated homes, local package install and saved evidence; no model calls | Optional integration evidence |
 
 Hosted CI runs the source checks and three shards of the core tests in parallel.
-The `ci (22)` status combines those results with Windows subprocess tests; the
+The `ci (22)` status combines those results with Windows subprocess tests and a six-minute installed-package job that builds, packs into a temporary directory, and runs `pnpm run test:package` with an absolute tarball path; the
 separate `ci (24)` status covers the newer Node runtime. A tag release calls that
 same CI workflow, then rebuilds and audits the exact tarball before publishing
 it. The local `pnpm ci:release` command still runs the complete gate and records

@@ -467,7 +467,12 @@ function checkCiScripts(): void {
 		fail("ci-scripts", "release must be able to call the same CI gates as pull requests");
 	if (ci.jobs?.ci?.name !== "ci (22)" || ci.jobs?.["runtime-compatibility"]?.name !== "ci (24)")
 		fail("ci-scripts", "keep the required branch-protection status names");
-	if (!isDeepStrictEqual([...(ci.jobs?.ci?.needs ?? [])].sort(), ["checks", "core-tests", "windows-subprocess"].sort()))
+	if (
+		!isDeepStrictEqual(
+			[...(ci.jobs?.ci?.needs ?? [])].sort(),
+			["checks", "core-tests", "windows-subprocess", "installed-package"].sort(),
+		)
+	)
 		fail("ci-scripts", "the required Node 22 status must depend on all routine checks");
 	if (release.jobs?.ci?.uses !== "./.github/workflows/ci.yml" || release.jobs?.qualify?.needs !== "ci")
 		fail("ci-scripts", "tag qualification must wait for the reusable CI workflow");
