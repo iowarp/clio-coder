@@ -53,7 +53,7 @@ A project `.clio-coder/safety.yaml` can declare commands and path entries, but i
 
 Hard blocks include recursive or forced `rm`, `sudo rm`, `find -delete`, `rsync --delete`, `shred`, `chmod 777`, `dd` to a device, `mkfs`, fork bombs, forced process kills, clearing shell history, force pushes, `git reset --hard`, forced `git clean`, stash and reflog destruction, `git filter-branch`, `curl` or `wget` piped to a shell, writes to system roots, cloud deletion commands (AWS, gcloud, Firebase, Vercel, Netlify, Wrangler), and SQL `DROP`, `TRUNCATE` and unbounded `DELETE`.
 
-Confirmation rules ask at both levels: `git checkout -- .`, `git restore .`, `git stash drop`, `git branch -D`, deleting a remote branch with `git push`, `gcloud iam policies`, SQL `DELETE` by id, `truncate -s 0`, and `:>`. The whole-worktree spellings `./`, `:/` and a pathspec after `--` count as `.` for the two git rules.
+Confirmation rules ask at both levels: `git checkout -- .`, `git restore .`, `git stash drop`, `git branch -d` or `-D`, deleting a remote branch with `git push`, `gcloud iam policies`, SQL `DELETE` by id, `truncate -s 0`, and `:>`. The whole-worktree spellings `./`, `:/` and a pathspec after `--` count as `.` for the two git rules.
 
 Every rule is matched against each command a shell string would run, not only the string as a whole, so an operator cannot hide one: `git restore . && echo ok`, `git restore .; ls`, `sh -c "git restore ."` and `$(git restore .)` all ask. Command substitutions using `$(...)` or backticks are scanned inside double quotes too ([protected-artifacts.ts](../../src/domains/safety/protected-artifacts.ts)).
 
@@ -108,3 +108,5 @@ Inert quoted-argument exemptions inspect the shell command alone. A bash call’
 `git clean` previews with `-n` or `--dry-run` run at both autonomy levels, including combined short flags and previews that also carry force flags. Forced deletion without a preview flag remains blocked. Each command in a shell chain is checked separately.
 
 `git push --force-with-lease`, including an explicit lease value, uses the recognized Git command rail and runs at both autonomy levels. Unconditional `--force`, `-f`, and plus-prefixed force refspecs remain blocked.
+
+Restoring a named file from an explicit `--source` uses the same recognized Git command rail as an ordinary single-path restore. Whole-worktree restores, including `--staged .`, and branch deletion with either `-d` or `-D` still ask at both autonomy levels. These operations change repository state across the selected scope.

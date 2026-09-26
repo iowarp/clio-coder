@@ -40,7 +40,7 @@ const GIT_DESTRUCTIVE_PATTERNS: ReadonlyArray<NamedPattern> = [
 	// Preview flags can follow force flags; the damage-control rule checks the whole clean command.
 	{ name: "git-checkout-dot", re: /\bgit\s+checkout\s+--\s+\./i },
 	{ name: "git-branch-D", re: /\bgit\s+branch\s+-D\b/i },
-	{ name: "git-restore-source", re: /\bgit\s+restore\s+--source\b/i },
+	// A source ref changes which content is restored; whole-tree pathspecs own the confirmation rail.
 ];
 
 const SYSTEM_MODIFY_PATTERNS: ReadonlyArray<NamedPattern> = [
