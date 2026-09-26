@@ -3,7 +3,7 @@ import { inspectDecisionSite } from "../domains/providers/decision-sites.js";
 import type { LibraryEntryKind } from "../domains/resources/index.js";
 import { describeToolRisk as readToolRisk, toolRiskAdvisoryLine } from "../domains/safety/tool-risk.js";
 import { appendInterviewRecord, appendNotice } from "./command-output.js";
-import { judgeDrafts } from "./drafts.js";
+import { judgeDraftsAtSite } from "./drafts.js";
 import type { OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
@@ -29,11 +29,6 @@ import {
  * a card keeps a request alive before giving up on ever showing the line.
  */
 const TOOL_RISK_DECISION_TIMEOUT_MS = 5_000;
-/**
- * Bound on the `/draft` judgment. The operator is watching the overlay for it,
- * and a live three-candidate judgment answered in 264ms.
- */
-const DRAFT_JUDGE_TIMEOUT_MS = 5_000;
 
 export * from "./overlay-key-routing.js";
 
@@ -507,24 +502,13 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		 * Read per call, like the toolRisk site, so binding or unbinding `drafts`
 		 * mid-session applies to the next draft.
 		 */
-		judgeDrafts: async (request, candidates, signal) => {
-			const settings = deps.app.getSettings?.();
-			if (!settings || !deps.app.providers) return { reason: "not judged: settings are not loaded" };
-			const status = inspectDecisionSite("drafts", {
-				settings,
-				providers: deps.app.providers,
-				ctx: () => ({ credentialsPresent: credentialsPresent(), httpTimeoutMs: DRAFT_JUDGE_TIMEOUT_MS }),
-			});
-			if (!status.bound) {
-				return {
-					reason:
-						status.reason === "unbound"
-							? "not judged: bind fleet.decisionProfiles.drafts to a System One profile"
-							: `not judged: ${status.detail}`,
-				};
-			}
-			return judgeDrafts(status.decider, request, candidates, `${status.targetId}/${status.model ?? "default"}`, signal);
-		},
+		judgeDrafts: (request, candidates, signal) =>
+			judgeDraftsAtSite(
+				{ settings: deps.app.getSettings?.(), providers: deps.app.providers },
+				request,
+				candidates,
+				signal,
+			),
 		...(deps.app.agents ? { agents: deps.app.agents } : {}),
 		...(scheduling ? { getBudgetPreflight: () => scheduling.preflight() } : {}),
 		isTurnInFlight: () => deps.app.chat.isStreaming(),

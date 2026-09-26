@@ -73,6 +73,16 @@ export function sessionRoutes(
 			supervisor.reloadExtensions(params.id),
 		),
 	);
+	// A retried side question or draft answers from the ledger instead of billing a second round.
+	register(app, hub, routes.askAside, ({ params, body }, context) =>
+		commands.run(`aside.ask:${params.id}`, idempotencyKey(context), body, () =>
+			supervisor.askAside(params.id, body.question),
+		),
+	);
+	register(app, hub, routes.draftAside, ({ params, body }, context) =>
+		commands.run(`aside.draft:${params.id}`, idempotencyKey(context), body, () => supervisor.draftAside(params.id, body)),
+	);
+	register(app, hub, routes.cancelAside, ({ params }) => supervisor.cancelAside(params.id));
 	register(app, hub, routes.sessionContext, ({ params }) => supervisor.contextLedger(params.id));
 	register(app, hub, routes.previewFleetRun, ({ params, body }) => supervisor.fleetPreview(params.id, body));
 	// A retried start answers from the ledger rather than starting the plan twice.

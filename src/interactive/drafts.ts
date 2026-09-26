@@ -12,6 +12,10 @@
  * the candidate texts. Closing the overlay ends the exchange.
  */
 
+import type { ClioSettings } from "../core/config.js";
+import type { ProvidersContract } from "../domains/providers/contract.js";
+import { credentialsPresent } from "../domains/providers/credentials.js";
+import { inspectDecisionSite } from "../domains/providers/decision-sites.js";
 import { type Decider, isTrue, pick, yesNo } from "../domains/providers/decisions.js";
 import type { DecisionAnswer, DecisionQuestion } from "../domains/providers/types/inference.js";
 
@@ -200,4 +204,53 @@ export async function judgeDrafts(
 	// The soundness answers alone would draw a judged row of empty bars.
 	if (answers.best?.type !== "choice") return { reason: `not judged: ${source} returned no pick` };
 	return { verdict: readDraftVerdict(answers, candidates.length, source, Math.round(now() - started)) };
+}
+
+/**
+ * The texts a judgment compares, or why there is none. The judge runs only
+ * once every candidate has settled with text, because a `choice` over a
+ * failed or empty draft is a judgment about a gap.
+ */
+export function draftsToJudge(
+	candidates: ReadonlyArray<{ status: "drafted"; text: string } | { status: "failed"; reason: string }>,
+): { texts: string[] } | { reason: string } {
+	const texts = candidates.flatMap((candidate) =>
+		candidate.status === "drafted" && candidate.text.trim().length > 0 ? [candidate.text] : [],
+	);
+	return texts.length === candidates.length ? { texts } : { reason: "not judged: a draft failed or came back empty" };
+}
+
+/**
+ * Bound on the `/draft` judgment. The operator is watching for it, and a live
+ * three-candidate judgment answered in 264ms.
+ */
+const DRAFT_JUDGE_TIMEOUT_MS = 5_000;
+
+/**
+ * Judge settled drafts with the `drafts` decision site, bound per call so
+ * binding or unbinding `fleet.decisionProfiles.drafts` mid-session applies to
+ * the next draft. The terminal overlay and the ACP host both judge through
+ * this, so an unbound site reads the same sentence on both.
+ */
+export async function judgeDraftsAtSite(
+	input: { settings: Readonly<ClioSettings> | undefined; providers: ProvidersContract | undefined },
+	request: string,
+	candidates: ReadonlyArray<string>,
+	signal?: AbortSignal,
+): Promise<DraftJudgment> {
+	if (!input.settings || !input.providers) return { reason: "not judged: settings are not loaded" };
+	const status = inspectDecisionSite("drafts", {
+		settings: input.settings as ClioSettings,
+		providers: input.providers,
+		ctx: () => ({ credentialsPresent: credentialsPresent(), httpTimeoutMs: DRAFT_JUDGE_TIMEOUT_MS }),
+	});
+	if (!status.bound) {
+		return {
+			reason:
+				status.reason === "unbound"
+					? "not judged: bind fleet.decisionProfiles.drafts to a System One profile"
+					: `not judged: ${status.detail}`,
+		};
+	}
+	return judgeDrafts(status.decider, request, candidates, `${status.targetId}/${status.model ?? "default"}`, signal);
 }

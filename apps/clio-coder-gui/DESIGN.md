@@ -582,6 +582,17 @@ was refused and which generation stays. Installing a package on the Library page
 conversation in that project to reload its library, as /library reload does; the result says the open
 conversations reloaded, or how many did not and why, and never claims a reload that failed.
 
+Ask beside the conversation in Session tools is the terminal's /btw and /draft. A side question and a
+set of drafts both read the conversation as it stands and answer inside the panel; the panel says
+that nothing either produces is added to the conversation and that each is billed like a request.
+One runs at a time, Stop cancels it, and both wait while a turn runs because the agent refuses them
+then. Answers and drafts render as untrusted Markdown, as the transcript does. Drafts start at two,
+since one draft leaves the judge nothing to compare. Each draft card shows its label, the judge's
+share as a percentage and whether the judge read it as sound; the pick carries an accent rule and a
+Picked mark, never an action colour. When nothing was judged the summary says why in the agent's
+words, for example that `fleet.decisionProfiles.drafts` is unbound. "Put in composer" fills the
+composer with a draft and sends nothing; that is the only way a draft reaches the conversation.
+
 A model is always picked from its target's catalog, never typed from memory. The route picker, the
 Settings page (`chat.model`, `fleet.default.model`, `context.memory.model` and
 `context.compaction.model`, which runs on the chat target) and the new-connection form share one

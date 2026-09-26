@@ -39,6 +39,17 @@ import type { McpCapabilitySource, McpClientServerSpec } from "../../tools/gatew
 import type { ToolRegistry } from "../../tools/registry.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import type { AgentMessage, ImageContent } from "../types.js";
+import {
+	ACP_ASIDE_ASK_METHOD,
+	ACP_ASIDE_CANCEL_METHOD,
+	ACP_ASIDE_DRAFT_COUNTS,
+	ACP_ASIDE_DRAFT_METHOD,
+	ACP_ASIDE_META_KEY,
+	ACP_ASIDE_QUESTION_MAX_CHARS,
+	type AcpAsideControl,
+	projectAsideAnswer,
+	projectDraftOutcome,
+} from "./aside.js";
 import { ACP_BOARD_META_KEY, ACP_BOARD_METHOD, type AcpBoardSource, projectSessionBoard } from "./board.js";
 import type { AcpCommandCatalog, AcpCommandControl } from "./commands.js";
 import { ACP_CONTEXT_LEDGER_METHOD, ACP_CONTEXT_META_KEY, projectContextLedger } from "./context-ledger.js";
@@ -263,6 +274,11 @@ export interface ClioAcpServerOptions {
 	 * `_clio-coder/extensions/list` and `/reload`. Absent means both refuse.
 	 */
 	extensions?: AcpExtensionsControl;
+	/**
+	 * The chat loop's out-of-turn rounds, for `_clio-coder/aside/*` (`/btw` and
+	 * `/draft`). Absent means the three methods refuse.
+	 */
+	aside?: AcpAsideControl;
 	/**
 	 * The plugin-resource reload /library reload runs, so a library change made
 	 * elsewhere reaches this open session. Absent means the method refuses.
@@ -2281,6 +2297,8 @@ export interface AcpHandshakeFeatures {
 	extensions?: boolean;
 	/** Whether `_clio-coder/library/reload` answers; absent reads as false. */
 	libraryReload?: boolean;
+	/** Whether the side-question and draft methods answer; absent reads as false. */
+	aside?: boolean;
 	/** Whether prompts are expanded, which is what admits image blocks; absent reads as false. */
 	images?: boolean;
 }
@@ -2535,6 +2553,17 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 								}
 							: {}),
 						...(features.libraryReload ? { [ACP_LIBRARY_META_KEY]: { version: 1, reload: ACP_LIBRARY_RELOAD_METHOD } } : {}),
+						...(features.aside
+							? {
+									[ACP_ASIDE_META_KEY]: {
+										version: 1,
+										ask: ACP_ASIDE_ASK_METHOD,
+										draft: ACP_ASIDE_DRAFT_METHOD,
+										cancel: ACP_ASIDE_CANCEL_METHOD,
+										draftCounts: { ...ACP_ASIDE_DRAFT_COUNTS },
+									},
+								}
+							: {}),
 						...(features.contextLedger ? { [ACP_CONTEXT_META_KEY]: { version: 1, ledger: ACP_CONTEXT_LEDGER_METHOD } } : {}),
 						...(features.fleet
 							? {
@@ -2623,6 +2652,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			contextLedger: options.contextLedger !== undefined,
 			extensions: options.extensions !== undefined,
 			libraryReload: options.libraryReload !== undefined,
+			aside: options.aside !== undefined,
 			images: options.expandPrompt !== undefined,
 		});
 	const workspaceInstanceId = handshake.workspaceInstanceId;
@@ -3743,6 +3773,71 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const cancelled = pendingHandoff?.handoffId === handoffId && pendingHandoff.sessionId === bound.id;
 		if (cancelled) pendingHandoff = null;
 		return { cancelled };
+	});
+
+	// /btw and /draft: one round beside the session at a time, cancellable, and
+	// never a turn. The chat loop refuses while a turn is in flight and says so;
+	// that refusal is a reported outcome, not a protocol error.
+	let asideRound: AbortController | null = null;
+	const runAside = async <T>(round: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+		if (asideRound !== null)
+			throw new AcpRequestError(-32602, "a side question or draft is already running", { code: "aside_active" });
+		const controller = new AbortController();
+		asideRound = controller;
+		try {
+			return await round(controller.signal);
+		} finally {
+			if (asideRound === controller) asideRound = null;
+		}
+	};
+	const requireAside = () => {
+		if (options.aside === undefined) throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		return options.aside;
+	};
+	const asideText = (value: unknown, field: string) => {
+		const text = typeof value === "string" ? value.trim() : "";
+		if (text.length === 0 || text.length > ACP_ASIDE_QUESTION_MAX_CHARS)
+			throw new AcpRequestError(-32602, `${field} must be 1 to ${ACP_ASIDE_QUESTION_MAX_CHARS} characters`, {
+				code: "invalid_params",
+			});
+		return text;
+	};
+	options.transport.onRequest(ACP_ASIDE_ASK_METHOD, async (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "question"]));
+		const aside = requireAside();
+		getSession(request);
+		const question = asideText(request.question, "question");
+		return projectAsideAnswer(await runAside((signal) => aside.ask(question, signal)));
+	});
+	options.transport.onRequest(ACP_ASIDE_DRAFT_METHOD, async (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "request", "count"]));
+		const aside = requireAside();
+		getSession(request);
+		const text = asideText(request.request, "request");
+		const count = request.count ?? ACP_ASIDE_DRAFT_COUNTS.default;
+		if (
+			typeof count !== "number" ||
+			!Number.isInteger(count) ||
+			count < ACP_ASIDE_DRAFT_COUNTS.min ||
+			count > ACP_ASIDE_DRAFT_COUNTS.max
+		)
+			throw new AcpRequestError(-32602, `count must be ${ACP_ASIDE_DRAFT_COUNTS.min} to ${ACP_ASIDE_DRAFT_COUNTS.max}`, {
+				code: "invalid_params",
+			});
+		return projectDraftOutcome(await runAside((signal) => aside.draft(text, count, signal)));
+	});
+	options.transport.onRequest(ACP_ASIDE_CANCEL_METHOD, (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		requireAside();
+		getSession(request);
+		const round = asideRound;
+		round?.abort();
+		return { cancelled: round !== null };
 	});
 
 	// The /extensions view: what this session loaded, never paths or provenance.

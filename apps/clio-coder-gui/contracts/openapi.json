@@ -10028,6 +10028,51 @@
 											},
 											"additionalProperties": false
 										},
+										"aside": {
+											"type": "object",
+											"required": ["version", "ask", "draft", "cancel", "draftCounts"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"ask": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"draft": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"cancel": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"draftCounts": {
+													"type": "object",
+													"required": ["min", "max", "default"],
+													"properties": {
+														"min": {
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 4
+														},
+														"max": {
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 4
+														},
+														"default": {
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 4
+														}
+													},
+													"additionalProperties": false
+												}
+											},
+											"additionalProperties": false
+										},
 										"library": {
 											"type": "object",
 											"required": ["version", "reload"],
@@ -12690,6 +12735,701 @@
 											"additionalProperties": false
 										}
 									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/aside/ask": {
+			"post": {
+				"operationId": "askAside",
+				"summary": "Ask a side question that never enters the conversation (/btw)",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["question"],
+								"properties": {
+									"question": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 8000,
+										"pattern": "\\S"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["status", "text", "truncated"],
+											"properties": {
+												"status": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "answered"
+														},
+														{
+															"type": "string",
+															"const": "aborted"
+														}
+													]
+												},
+												"text": {
+													"type": "string",
+													"maxLength": 66000
+												},
+												"truncated": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status", "reason"],
+											"properties": {
+												"status": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "refused"
+														},
+														{
+															"type": "string",
+															"const": "failed"
+														}
+													]
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 1100
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/aside/draft": {
+			"post": {
+				"operationId": "draftAside",
+				"summary": "Draft answers in parallel and judge them, beside the conversation (/draft)",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["request", "count"],
+								"properties": {
+									"request": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 8000,
+										"pattern": "\\S"
+									},
+									"count": {
+										"type": "integer",
+										"minimum": 1,
+										"maximum": 4
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["status", "aborted", "candidates"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "drafted"
+												},
+												"aborted": {
+													"type": "boolean"
+												},
+												"candidates": {
+													"type": "array",
+													"items": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["label", "status", "text", "truncated"],
+																"properties": {
+																	"label": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "A"
+																			},
+																			{
+																				"type": "string",
+																				"const": "B"
+																			},
+																			{
+																				"type": "string",
+																				"const": "C"
+																			},
+																			{
+																				"type": "string",
+																				"const": "D"
+																			}
+																		]
+																	},
+																	"status": {
+																		"type": "string",
+																		"const": "drafted"
+																	},
+																	"text": {
+																		"type": "string",
+																		"maxLength": 66000
+																	},
+																	"truncated": {
+																		"type": "boolean"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "object",
+																"required": ["label", "status", "reason"],
+																"properties": {
+																	"label": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "A"
+																			},
+																			{
+																				"type": "string",
+																				"const": "B"
+																			},
+																			{
+																				"type": "string",
+																				"const": "C"
+																			},
+																			{
+																				"type": "string",
+																				"const": "D"
+																			}
+																		]
+																	},
+																	"status": {
+																		"type": "string",
+																		"const": "failed"
+																	},
+																	"reason": {
+																		"type": "string",
+																		"maxLength": 1100
+																	}
+																},
+																"additionalProperties": false
+															}
+														]
+													},
+													"maxItems": 4
+												},
+												"judgment": {
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["status", "picked", "probabilities", "sound", "source", "elapsedMs"],
+															"properties": {
+																"status": {
+																	"type": "string",
+																	"const": "judged"
+																},
+																"picked": {
+																	"anyOf": [
+																		{
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "A"
+																				},
+																				{
+																					"type": "string",
+																					"const": "B"
+																				},
+																				{
+																					"type": "string",
+																					"const": "C"
+																				},
+																				{
+																					"type": "string",
+																					"const": "D"
+																				}
+																			]
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"probabilities": {
+																	"type": "object",
+																	"patternProperties": {
+																		"^.*$": {
+																			"type": "number",
+																			"minimum": 0
+																		}
+																	}
+																},
+																"sound": {
+																	"type": "object",
+																	"patternProperties": {
+																		"^.*$": {
+																			"anyOf": [
+																				{
+																					"type": "boolean"
+																				},
+																				{
+																					"type": "null"
+																				}
+																			]
+																		}
+																	}
+																},
+																"source": {
+																	"type": "string",
+																	"maxLength": 1100
+																},
+																"elapsedMs": {
+																	"type": "integer",
+																	"minimum": 0
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "object",
+															"required": ["status", "reason"],
+															"properties": {
+																"status": {
+																	"type": "string",
+																	"const": "unjudged"
+																},
+																"reason": {
+																	"type": "string",
+																	"maxLength": 1100
+																}
+															},
+															"additionalProperties": false
+														}
+													]
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status", "reason"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "refused"
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 1100
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/aside/cancel": {
+			"post": {
+				"operationId": "cancelAside",
+				"summary": "Cancel the side question or draft that is running",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["cancelled"],
+									"properties": {
+										"cancelled": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
 								}
 							}
 						},

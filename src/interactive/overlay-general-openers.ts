@@ -30,6 +30,7 @@ import { openContextOverlay } from "./context-overlay.js";
 import type { createDispatchBoardView } from "./dispatch-board.js";
 import { isDispatchBoardRowCancellable, isDispatchBoardRowSteerable } from "./dispatch-board.js";
 import type { DraftVerdict } from "./drafts.js";
+import { draftsToJudge } from "./drafts.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
 import type { HintEntry } from "./overlay-frame.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
@@ -468,11 +469,9 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				);
 			});
 			if (outcome.aborted) return;
-			const drafted = outcome.candidates.flatMap((candidate) =>
-				candidate.status === "drafted" && candidate.text.trim().length > 0 ? [candidate.text] : [],
-			);
-			if (drafted.length !== outcome.candidates.length) {
-				session.setJudge({ kind: "unjudged", reason: "not judged: a draft failed or came back empty" });
+			const drafted = draftsToJudge(outcome.candidates);
+			if ("reason" in drafted) {
+				session.setJudge({ kind: "unjudged", reason: drafted.reason });
 				return;
 			}
 			if (!deps.judgeDrafts) {
@@ -480,7 +479,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				return;
 			}
 			session.setJudge({ kind: "judging" });
-			const judged = await deps.judgeDrafts(request, drafted, controller.signal);
+			const judged = await deps.judgeDrafts(request, drafted.texts, controller.signal);
 			session.setJudge(
 				"verdict" in judged ? { kind: "judged", verdict: judged.verdict } : { kind: "unjudged", reason: judged.reason },
 			);

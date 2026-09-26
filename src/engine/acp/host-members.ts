@@ -25,6 +25,7 @@ import type { CouncilDispatchOutcome } from "../../interactive/slash-commands.js
 import type { ToolRegistry } from "../../tools/registry.js";
 import type { AcpBoardActions } from "./server.js";
 
+export { draftsToJudge, judgeDraftsAtSite } from "../../interactive/drafts.js";
 export { oracleBriefingFromEntries } from "../../interactive/oracle.js";
 export { followWorkerRuns } from "../../interactive/worker-run-ledger.js";
 

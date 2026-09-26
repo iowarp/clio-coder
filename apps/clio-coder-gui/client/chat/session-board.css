@@ -216,3 +216,77 @@
 	font-size: var(--text-meta);
 	color: var(--ink-muted);
 }
+
+/* Beside the conversation: a side question and a set of drafts, each answered in place. The answers
+   are untrusted Markdown like the transcript's; the pick is marked, never coloured as an action. */
+.aside-panel__form {
+	display: grid;
+	gap: var(--space-2);
+	margin-block: var(--space-3);
+}
+.aside-panel__form > label,
+.aside-panel__form .session-board__actions label {
+	font-size: var(--text-meta);
+}
+.aside-panel__form textarea {
+	width: 100%;
+	min-height: 4rem;
+	resize: vertical;
+	font: inherit;
+	font-size: var(--text-meta);
+	line-height: var(--leading-body);
+}
+.aside-panel__form .session-board__actions {
+	grid-column: auto;
+	align-items: center;
+}
+.aside-panel__form button,
+.aside-panel__form select {
+	min-height: 32px;
+	padding: 0 var(--space-3);
+	font-size: var(--text-exact);
+}
+.aside-panel__result {
+	display: grid;
+	gap: var(--space-2);
+	padding: var(--space-3);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-sm);
+	background: var(--surface-sunken);
+	min-width: 0;
+}
+.aside-panel__status {
+	margin: 0;
+	font-size: var(--text-meta);
+}
+.aside-panel__drafts {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: var(--space-3);
+}
+.aside-panel__drafts > li {
+	display: grid;
+	gap: var(--space-2);
+	min-width: 0;
+	padding-block-start: var(--space-2);
+	border-top: 1px solid var(--line);
+}
+.aside-panel__drafts > li.is-picked {
+	box-shadow: inset 2px 0 0 var(--accent);
+	padding-inline-start: var(--space-2);
+}
+.aside-panel__draft-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+	margin: 0;
+	font-size: var(--text-meta);
+}
+.aside-panel__share {
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	font-variant-numeric: tabular-nums;
+}

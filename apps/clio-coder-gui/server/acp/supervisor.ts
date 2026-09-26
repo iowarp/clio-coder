@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
+import { AsideAnswer, AsideCancelled, AsideDrafts } from "../../contracts/aside.js";
 import {
 	attachmentWeight,
 	TURN_IMAGES_MAX_BASE64,
@@ -100,6 +101,8 @@ type Entry = {
 };
 /** A branch change reads and replays a whole session, which a long one makes slow. */
 const BRANCH_TIMEOUT_MS = 60_000;
+/** Four parallel drafts on a slow local target plus a judgment; past this the round is treated as lost. */
+const ASIDE_TIMEOUT_MS = 15 * 60_000;
 /** Longest a command reply may take; see invokeCommand. */
 const COMMAND_TIMEOUT_MS = 10 * 60_000;
 
@@ -767,6 +770,25 @@ export class Supervisor {
 		} finally {
 			delete entry.rebase;
 		}
+	}
+	private asiding(id: string) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.aside)
+			throw new AppProblem("conflict", "This Clio Coder build cannot answer beside the conversation.");
+		return entry;
+	}
+	// A round beside the conversation reads the history and bills a model; it waits as long as a turn might.
+	askAside(id: string, question: string) {
+		this.asiding(id);
+		return this.projected(id, "_clio-coder/aside/ask", { sessionId: id, question }, AsideAnswer, ASIDE_TIMEOUT_MS);
+	}
+	draftAside(id: string, body: { request: string; count: number }) {
+		this.asiding(id);
+		return this.projected(id, "_clio-coder/aside/draft", { sessionId: id, ...body }, AsideDrafts, ASIDE_TIMEOUT_MS);
+	}
+	cancelAside(id: string) {
+		this.asiding(id);
+		return this.projected(id, "_clio-coder/aside/cancel", { sessionId: id }, AsideCancelled);
 	}
 	private extending(id: string) {
 		const entry = this.active(id);

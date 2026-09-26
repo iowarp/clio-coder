@@ -197,6 +197,39 @@ test("a conversation lists the extensions it loaded and reloads them only when i
 	assert.equal((await h.post(`${base}/reload`)).status, 409);
 });
 
+test("a side question and drafts answer beside the conversation and never become a turn", async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const base = `/api/sessions/${session.id}/aside`;
+	const capabilities = await json(
+		await h.request(`/api/sessions/${session.id}/capabilities`),
+		routes.sessionCapabilities.response,
+	);
+	assert.deepEqual(capabilities.aside?.draftCounts, { min: 1, max: 4, default: 3 });
+	const answer = await json(
+		await h.post(`${base}/ask`, { question: "Which file holds the readings?" }, "aside-ask"),
+		routes.askAside.response,
+	);
+	assert.deepEqual(answer, { status: "answered", text: "The readings are in README.md.", truncated: false });
+	const drafts = await json(
+		await h.post(`${base}/draft`, { request: "How should the report show readings?", count: 3 }, "aside-draft"),
+		routes.draftAside.response,
+	);
+	assert.equal(drafts.status, "drafted");
+	assert.deepEqual(drafts.status === "drafted" ? drafts.candidates.map((row) => [row.label, row.status]) : [], [
+		["A", "drafted"],
+		["B", "drafted"],
+		["C", "failed"],
+	]);
+	assert.equal(drafts.status === "drafted" && drafts.judgment?.status, "unjudged");
+	assert.equal(h.supervisor.get(session.id).turns.length, 0, "an aside is not a turn");
+	assert.deepEqual(await json(await h.post(`${base}/cancel`), routes.cancelAside.response), { cancelled: false });
+	assert.equal((await h.post(`${base}/draft`, { request: "x", count: 5 })).status, 422);
+	assert.equal((await h.post(`${base}/ask`, { question: "   " })).status, 422);
+});
+
 test("an older command peer refuses injected turns without submitting unrecognised slash text", async (t) => {
 	const h = await harness({}, { scenario: "markdown", env: { CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS: "0" } });
 	t.after(h.close);
@@ -457,9 +490,10 @@ test("an older ACP peer has no branches and refuses tree, switch and fork before
 	assert.equal((await h.post(`${base}/fleet/preview`, { name: "survey" })).status, 409);
 	assert.equal((await h.request(`${base}/context`)).status, 409);
 	assert.equal((await h.request(`${base}/extensions`)).status, 409);
+	assert.equal((await h.post(`${base}/aside/ask`, { question: "Which file?" })).status, 409);
 	assert.doesNotMatch(
 		await readFile(join(h.home.path, "acp.jsonl"), "utf8"),
-		/session\/(tree|switch_turn|fork|handoff)|fleet\//,
+		/session\/(tree|switch_turn|fork|handoff)|fleet\/|aside\//,
 	);
 });
 

@@ -1,4 +1,5 @@
 import { type Static, Type } from "typebox";
+import { AsideCapability } from "./aside.js";
 import { BoardCapability } from "./board.js";
 import { BranchesCapability } from "./branches.js";
 import { ContextCapability } from "./context-ledger.js";
@@ -103,6 +104,8 @@ export const AgentCapabilities = Type.Object(
 		context: Type.Optional(ContextCapability),
 		/** The session's extensions and their reload. */
 		extensions: Type.Optional(ExtensionsCapability),
+		/** A side question and parallel drafts, answered beside the conversation. */
+		aside: Type.Optional(AsideCapability),
 		/** Plugin reload, so a library change reaches an open session. */
 		library: Type.Optional(LibraryCapability),
 		/** ACP promptCapabilities.image: the agent accepts image blocks with a request. */

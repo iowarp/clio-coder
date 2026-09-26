@@ -214,7 +214,9 @@ import { type AcpHostReport, acpCommandControl } from "../engine/acp/commands.js
 import {
 	bindBoardActions,
 	createHostToolEvents,
+	draftsToJudge,
 	followWorkerRuns,
+	judgeDraftsAtSite,
 	oracleBriefingFromEntries,
 	runHostDispatch,
 } from "../engine/acp/host-members.js";
@@ -3273,6 +3275,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							},
 						}
 					: {}),
+				// /btw and /draft run the chat loop's own out-of-turn rounds, and a
+				// draft is judged by the same `drafts` decision site the overlay uses.
+				aside: {
+					ask: (question, signal) => chat.askSideQuestion(question, { signal }),
+					draft: async (request, count, signal) => {
+						const outcome = await chat.draftCandidates(request, count, { signal });
+						if (outcome.status === "refused" || outcome.aborted) return outcome;
+						const drafted = draftsToJudge(outcome.candidates);
+						const judgment =
+							"reason" in drafted
+								? drafted
+								: await judgeDraftsAtSite({ settings: getCurrentSettings(), providers }, request, drafted.texts, signal);
+						return { ...outcome, judgment };
+					},
+				},
 				// The same reload /library reload runs, with the generation change the
 				// PluginsReloaded event reports. A throw is a failed reload.
 				libraryReload: () => {

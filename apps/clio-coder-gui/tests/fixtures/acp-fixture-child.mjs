@@ -594,6 +594,13 @@ async function handle(frame) {
 														reload: "_clio-coder/extensions/reload",
 													},
 													"clio-coder/library": { version: 1, reload: "_clio-coder/library/reload" },
+													"clio-coder/aside": {
+														version: 1,
+														ask: "_clio-coder/aside/ask",
+														draft: "_clio-coder/aside/draft",
+														cancel: "_clio-coder/aside/cancel",
+														draftCounts: { min: 1, max: 4, default: 3 },
+													},
 													"clio-coder/fleet": {
 														version: 1,
 														preview: "_clio-coder/fleet/preview",
@@ -888,6 +895,44 @@ async function handle(frame) {
 				};
 				break;
 			}
+			// Rounds beside the conversation: nothing here touches the transcript or the turn state.
+			case "_clio-coder/aside/ask":
+				result = { status: "answered", text: "The readings are in README.md.", truncated: false };
+				break;
+			case "_clio-coder/aside/draft": {
+				const drafts = [
+					"Show the readings in one table with a unit column.",
+					"List each sample with its reading and the date it was taken.",
+					"endpoint reset",
+					"Plot the readings and cite the table under the plot.",
+				].slice(0, frame.params.count);
+				const candidates = drafts.map((text, index) =>
+					index === 2
+						? { label: "C", status: "failed", reason: text }
+						: { label: "ABCD"[index], status: "drafted", text, truncated: false },
+				);
+				result = {
+					status: "drafted",
+					aborted: false,
+					candidates,
+					judgment: candidates.some((candidate) => candidate.status === "failed")
+						? { status: "unjudged", reason: "not judged: a draft failed or came back empty" }
+						: {
+								status: "judged",
+								picked: "A",
+								probabilities: Object.fromEntries(
+									candidates.map((c, i) => [c.label, i === 0 ? 0.7 : 0.3 / (candidates.length - 1 || 1)]),
+								),
+								sound: Object.fromEntries(candidates.map((c, i) => [c.label, i === 0])),
+								source: "fixture/judge",
+								elapsedMs: 12,
+							},
+				};
+				break;
+			}
+			case "_clio-coder/aside/cancel":
+				result = { cancelled: false };
+				break;
 			case "_clio-coder/extensions/list":
 				result = {
 					version: 1,

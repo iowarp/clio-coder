@@ -1,5 +1,6 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
+import { AsideCapability } from "../../contracts/aside.js";
 import type { TurnFile, TurnImage } from "../../contracts/attachments.js";
 import { BoardCapability } from "../../contracts/board.js";
 import { BranchesCapability } from "../../contracts/branches.js";
@@ -73,6 +74,7 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("fleet", optional(FleetCapability, meta["clio-coder/fleet"])),
 		...maybe("context", optional(ContextCapability, meta["clio-coder/context"])),
 		...maybe("extensions", optional(ExtensionsCapability, meta["clio-coder/extensions"])),
+		...maybe("aside", optional(AsideCapability, meta["clio-coder/aside"])),
 		...maybe("library", optional(LibraryCapability, meta["clio-coder/library"])),
 	};
 }

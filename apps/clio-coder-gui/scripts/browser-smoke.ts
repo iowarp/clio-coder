@@ -964,6 +964,36 @@ try {
 		await check("extensions");
 		await page.getByText("Extensions", { exact: true }).click();
 		await page.keyboard.press("Escape");
+		// Beside the conversation: a side question and drafts answer in place and add no turn.
+		await page.locator(".conversation__tools > summary").click();
+		await page.getByText("Ask beside the conversation", { exact: true }).click();
+		const aside = page.locator(".aside-panel");
+		const turnsBefore = await page.locator(".chat-request").count();
+		await aside.getByLabel("Side question", { exact: true }).fill("Which file holds the readings?");
+		await aside.getByRole("button", { name: "Ask", exact: true }).click();
+		await aside.getByText("The readings are in README.md.", { exact: true }).waitFor();
+		await aside.getByLabel("Request to draft", { exact: true }).fill("How should the report show readings?");
+		await aside.getByLabel("Drafts", { exact: true }).selectOption("2");
+		await aside.getByRole("button", { name: "Draft", exact: true }).click();
+		await aside.getByText("fixture/judge picked A in 12 ms.", { exact: true }).waitFor();
+		await check("aside");
+		if (width === 1600 || width === 390) {
+			await aside.scrollIntoViewIfNeeded();
+			await page.screenshot({ path: join(output, `aside-${width}.png`) });
+		}
+		assert.equal(await page.locator(".chat-request").count(), turnsBefore, "an aside added a turn");
+		await aside.getByRole("button", { name: "Put in composer", exact: true }).first().click();
+		assert.equal(
+			await page.getByLabel("Message Clio Coder", { exact: true }).inputValue(),
+			"Show the readings in one table with a unit column.",
+		);
+		await page.getByLabel("Message Clio Coder", { exact: true }).fill("");
+		// Filling the composer moves focus out of Session tools; reopen it if that closed it, then fold the panel.
+		if (!(await page.locator(".conversation__tools").evaluate((element) => (element as HTMLDetailsElement).open)))
+			await page.locator(".conversation__tools > summary").click();
+		await page.getByText("Ask beside the conversation", { exact: true }).click();
+		await page.keyboard.press("Escape");
+		await page.waitForFunction(() => !(document.querySelector(".conversation__tools") as HTMLDetailsElement).open);
 		// The context window: Clio Coder's own accounting, worded and never recomputed.
 		await page.locator(".conversation__tools > summary").click();
 		await page.getByText("Context window", { exact: true }).click();

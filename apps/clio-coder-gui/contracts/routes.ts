@@ -1,4 +1,5 @@
 import { type Static, type TSchema, Type } from "typebox";
+import { AsideAnswer, AsideAskRequest, AsideCancelled, AsideDraftRequest, AsideDrafts } from "./aside.js";
 import { TURN_FILE_MAX, TURN_IMAGE_MAX, TurnFile, TurnImage } from "./attachments.js";
 import {
 	DecisionSuperseded,
@@ -503,6 +504,32 @@ export const routes = {
 		params: operationParams,
 		response: ExtensionReload,
 		summary: "Reload this conversation's extensions and hooks together",
+	}),
+	askAside: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/aside/ask",
+		params: operationParams,
+		body: AsideAskRequest,
+		response: AsideAnswer,
+		summary: "Ask a side question that never enters the conversation (/btw)",
+	}),
+	draftAside: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/aside/draft",
+		params: operationParams,
+		body: AsideDraftRequest,
+		response: AsideDrafts,
+		summary: "Draft answers in parallel and judge them, beside the conversation (/draft)",
+	}),
+	cancelAside: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/aside/cancel",
+		params: operationParams,
+		response: AsideCancelled,
+		summary: "Cancel the side question or draft that is running",
 	}),
 	sessionContext: defineRoute({
 		...get,

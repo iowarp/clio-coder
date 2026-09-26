@@ -9,6 +9,7 @@ import { clock, formatTime } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
 import { sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
+import { AsidePanel } from "../chat/AsidePanel.js";
 import { BranchPanel } from "../chat/BranchPanel.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { CommandPanel } from "../chat/CommandPanel.js";
@@ -419,6 +420,13 @@ function SessionTools({
 						running={session.turns.at(-1)?.status === "running"}
 					/>
 					<CommandPanel client={client} sessionId={session.id} sessionOpen={session.state === "open"} />
+					<AsidePanel
+						client={client}
+						sessionId={session.id}
+						sessionOpen={session.state === "open"}
+						capabilities={capabilities}
+						running={session.turns.at(-1)?.status === "running"}
+					/>
 					<ExtensionsPanel
 						client={client}
 						sessionId={session.id}
