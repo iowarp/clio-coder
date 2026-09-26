@@ -32,7 +32,6 @@ import { AppFiles } from "./state/files.js";
 import { WorkerHost } from "./worker/host.js";
 
 export { prepareGuiUninstall } from "./launcher/uninstall.js";
-// The docs command opens its page through the same opener, so there is one policy for what may be launched.
 export { openBrowser } from "./process-policy.js";
 
 declare const __CLIO_GUI_BUNDLED__: boolean;
