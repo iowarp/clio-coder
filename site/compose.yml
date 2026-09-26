@@ -1,0 +1,23 @@
+name: clio-coder-site
+
+services:
+  site:
+    build: .
+    image: clio-coder-site:local
+    container_name: clio-coder-site
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:8096:80
+    healthcheck:
+      test: [CMD, wget, --quiet, --tries=1, --spider, http://127.0.0.1/]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

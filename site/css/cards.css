@@ -1,0 +1,136 @@
+@import url("/css/brand.css");
+* {
+	box-sizing: border-box;
+}
+html,
+body {
+	margin: 0;
+	overflow: hidden;
+}
+body {
+	width: 1200px;
+	height: 630px;
+	display: grid;
+	grid-template-columns: 1fr 360px;
+	background: var(--paper);
+	color: var(--ink);
+	font-family: var(--font-ui);
+	border-left: 10px solid var(--cyan);
+}
+main {
+	padding: 44px 42px 36px;
+	display: flex;
+	flex-direction: column;
+}
+.brand {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+}
+.brand span {
+	font: italic 36px var(--font-display);
+	letter-spacing: -0.03em;
+}
+:where(.brand) small {
+	margin-left: auto;
+	font: 14px var(--font-mono);
+	letter-spacing: 0.12em;
+	color: var(--muted);
+}
+.kicker {
+	margin: 34px 0 18px;
+	font: 13px var(--font-mono);
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	color: var(--cyan);
+}
+h1 {
+	margin: 0;
+	font: 500 92px / 0.95 var(--font-display);
+	letter-spacing: -0.045em;
+}
+h1 em {
+	font-weight: 480;
+}
+.promise {
+	margin: 28px 0 0;
+	font-size: 28px;
+	line-height: 1.5;
+	color: var(--ink-soft);
+}
+footer {
+	margin-top: auto;
+	display: flex;
+	justify-content: space-between;
+	gap: 20px;
+	font: 12px var(--font-mono);
+	color: var(--muted);
+}
+aside {
+	background: var(--paper-raised);
+	border-left: 1px solid var(--line);
+	padding: 50px 30px 36px;
+	display: flex;
+	flex-direction: column;
+}
+aside header {
+	color: var(--cyan);
+	font: 13px var(--font-mono);
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	padding-bottom: 26px;
+	border-bottom: 1px solid var(--line);
+}
+ol {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+li {
+	border-bottom: 1px solid var(--line);
+	padding: 25px 0;
+	font-size: 22px;
+}
+li small {
+	display: block;
+	font: 12px var(--font-mono);
+	text-transform: uppercase;
+	color: var(--sage);
+	margin-bottom: 10px;
+}
+aside p {
+	margin-top: auto;
+	font: 12px var(--font-mono);
+	color: var(--muted);
+}
+body.square {
+	width: 1080px;
+	height: 1080px;
+	grid-template-columns: 1fr;
+	grid-template-rows: 660px 1fr;
+}
+.square main {
+	padding: 58px;
+}
+.square h1 {
+	font-size: 124px;
+}
+.square .promise {
+	font-size: 34px;
+}
+.square aside {
+	border-left: 0;
+	border-top: 1px solid var(--line);
+	padding: 32px 58px;
+}
+.square ol {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	column-gap: 36px;
+}
+.square aside header {
+	padding-bottom: 12px;
+}
+.square li {
+	padding-block: 18px;
+}

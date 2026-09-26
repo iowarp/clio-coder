@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Clio Coder works — runtime, policy, and evidence</title>
+<meta name="description" content="Clio Coder is an experimental composable harness: domains, recipes, plugins, extensions, and a loop you can read.">
+<meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/harness.html">
+<link rel="icon" href="assets/logo.webp" type="image/webp">
+<link rel="apple-touch-icon" href="assets/logo-512.webp">
+<link rel="preload" href="assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/site.css">
+<script src="js/theme.js"></script>
+<meta property="og:site_name" content="Clio Coder">
+<meta property="og:type" content="website">
+<meta property="og:title" content="The harness — Clio Coder">
+<meta property="og:description" content="Experimental, composable, and honest about what is not enforced yet.">
+<meta property="og:url" content="https://coder.iowarp.ai/harness.html">
+<meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Clio Coder. Your models. Your science. Local or cloud models, bounded workers, and work you can inspect.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="The harness — Clio Coder">
+<meta name="twitter:description" content="Experimental, composable, and honest about what is not enforced yet.">
+<meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png">
+<meta name="twitter:image:alt" content="Clio Coder. Your models. Your science. Local or cloud models, bounded workers, and work you can inspect.">
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<p class="spine">IOWarp · Clio Coder · field instrument</p>
+<header class="mast">
+  <div class="mast-row">
+    <a class="brand" href="index.html">
+      <img src="assets/logo.webp" width="36" height="36" alt="">
+      <span class="brand-name">Clio Coder</span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="capabilities.html">Capabilities</a>
+      <a href="harness.html" aria-current="page">Harness</a>
+      <a href="library.html">Library</a>
+      <a href="docs.html">Docs</a>
+      <a href="learn.html">Learn</a>
+      <a href="compare.html">Compare</a>
+      <a href="vision.html">Vision</a>
+    </nav>
+    <div class="mast-actions">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to paper theme">
+        <span class="theme-icon" aria-hidden="true">□</span> <span>Paper</span>
+      </button>
+      <a class="btn" href="start.html">Install</a>
+      <details class="nav-more">
+        <summary>Menu</summary>
+        <div class="nav-more-menu">
+          <a href="capabilities.html">Capabilities</a>
+          <a href="harness.html">Harness</a>
+          <a href="library.html">Library</a>
+          <a href="docs.html">Docs</a>
+          <a href="learn.html">Learn</a>
+          <a href="compare.html">Compare</a>
+          <a href="vision.html">Vision</a>
+          <a href="start.html">Install</a>
+          <a href="share.html">Post on X</a>
+        </div>
+      </details>
+    </div>
+  </div>
+  <p class="issue"><b>Issue 0.5.6</b><span>Experimental composable harness</span><span>Terminal-first</span><span>Not an OS sandbox</span><span>Self-edit gate deferred</span></p>
+</header>
+<main class="page" id="content">
+  <p class="kicker">How the pieces fit</p>
+  <h1 class="display">Composable,<br><em>not finished.</em></h1>
+  <p class="lede">“Composable harness” is a status, not a slogan. The loop is split so a local model, a scientific workflow, and a foreign agent can change without collapsing the safety boundary. Some seams are enforced by the linter. One important gate is deliberately not enforced yet.</p>
+
+  <ol class="flow">
+    <li><strong>Operator</strong> The terminal, a headless <code>clio-coder run</code>, or an editor speaking ACP.</li>
+    <li><strong>Session</strong> A ledger, a working set, a routing overlay. Settings stay settings.</li>
+    <li><strong>Prompt</strong> Fragments compiled into one envelope, hashed, reused byte for byte.</li>
+    <li><strong>Tools</strong> One registry. Typed. Admitted. The same path for the main agent and a worker.</li>
+    <li><strong>Safety</strong> Policy, then autonomy. The prompt does not get a vote at execution time.</li>
+    <li><strong>Engine</strong> Pi, behind a boundary. Domains do not import the vendor SDK.</li>
+    <li><strong>Target</strong> Whatever model you pointed at. Localhost means the machine the worker is on.</li>
+    <li><strong>Dispatch</strong> A recipe, a node, a ceiling, a receipt. SSH is a transport, not a second product.</li>
+  </ol>
+
+  <section class="section">
+    <h2 class="section-title">Five things people mix up</h2>
+    <dl class="defn">
+      <div><dt>Skill</dt><dd>A procedure the agent can be told to follow. <code>/skill</code>. It is text and supporting files, not an executable tool.</dd></div>
+      <div><dt>Agent</dt><dd>A worker recipe: role, tools, budget, result contract. <code>/run</code>.</dd></div>
+      <div><dt>Fleet</dt><dd>A multi-step contract. Dependencies, gates, write boundaries. <code>/fleet run</code>.</dd></div>
+      <div><dt>Plugin</dt><dd>A domain bundle released together. Materio is the flagship: skills the peers can load, and Clio Coder-native agents, prompts, and a fleet that peers do not pretend to understand.</dd></div>
+      <div><dt>Extension</dt><dd>An executable capability. A declared Node or Python command, digest-checked, still passed through safety. Installing one does not register a skill, and browsing a skill does not register a tool.</dd></div></dl>
+    <p>That split is the intellectual bet. Vendor products collapse procedure, tool, and persona into one install. Clio Coder keeps them apart so a materials workflow can travel into Claude Code as skills, while the fleet that enforces a write boundary stays here, where the boundary is real.</p>
+  </section>
+
+  <section class="section">
+    <h2 class="section-title">What “experimental” means today</h2>
+    <dl class="defn">
+      <div><dt>Enforced</dt><dd>Import boundaries. Workers do not pull the interactive app into a subprocess. Tools do not import the terminal. Pi stays in the engine. A project safety file is inert until its bytes are trusted. Receipts seal. Workers stay at default.</dd></div>
+      <div><dt>Shipped and early</dt><dd>The terminal is the product. The GUI is an opt-in alpha. Panes require Herdr. Some peer ACP recipes are pinned; some peers have only a headless path. Windows is best effort.</dd></div>
+      <div><dt>Designed, not enforced</dt><dd>The self-edit gate. High-authority edits to Clio Coder’s own harness were meant to require an evidence-linked change manifest. There is no signal yet that distinguishes “you asked Clio Coder to edit this repo” from “Clio Coder is editing itself.” A path glob would have blocked ordinary work. The gate waits. The note is in the repository on purpose.</dd></div>
+      <div><dt>Not claimed</dt><dd>An operating-system sandbox. Production GUI parity. That a local model outcodes a frontier model. That a peer’s shell is confined because Clio Coder asked nicely.</dd></div></dl>
+  </section>
+
+  <section class="split">
+    <div class="prose">
+      <h2>Add a capability without forking the loop</h2>
+      <p>Write a skill if the missing thing is a procedure. Write an agent recipe if it is a bounded worker. Write a fleet if the steps and the gates are the product. Write a plugin if a domain should travel as one package. Write an extension only when the model must run a program you declared, with a schema, a timeout, and a digest.</p>
+      <p>Do not start by patching the chat loop. The architecture exists so you do not have to.</p>
+    </div>
+    <p class="pull">The harness is experimental because the seams are still being proven, not because the seams are a mood.</p>
+  </section>
+  <p class="actions"><a class="btn" href="library.html">See the library</a> <a class="btn btn-ghost" href="docs.html?d=architecture/architecture.md">Architecture guide</a></p>
+
+  <footer class="colophon">
+    <div><span class="brand-name">Clio Coder</span><p>Built on <a href="https://github.com/earendil-works/pi">Pi</a>. Policy stays here.</p></div>
+    <div><p><a href="docs.html?d=guide/harness-extensions.md">Harness extensions</a> · <a href="docs.html?d=architecture/pi-boundary.md">Pi boundary</a></p></div>
+    <div class="colo-links"><a href="vision.html">Vision</a><a href="capabilities.html">Capabilities</a><a href="start.html">Install</a></div>
+    <p class="colo-fine">Boundary checks run in <code>pnpm run lint</code>. They are executable specifications, not comments. If this site and the installed package disagree, the package, schemas, and contract tests win.</p>
+  </footer>
+</main>
+<script src="js/site.js"></script>
+</body>
+</html>

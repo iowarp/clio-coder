@@ -1,0 +1,14 @@
+services:
+  site:
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=web
+      - traefik.http.routers.clio-coder-site.rule=Host(`coder.iowarp.ai`)
+      - traefik.http.routers.clio-coder-site.entrypoints=http
+      - traefik.http.services.clio-coder-site.loadbalancer.server.port=80
+
+networks:
+  web:
+    external: true

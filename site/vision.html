@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clio Coder roadmap — scientific software and agent workflows</title>
+<meta name="description" content="Clio Coder in the IOWarp ecosystem: what is shipped, what is alpha, what is deferred, and how to take part.">
+<meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/vision.html">
+<link rel="icon" href="assets/logo.webp" type="image/webp">
+<link rel="apple-touch-icon" href="assets/logo-512.webp">
+<link rel="preload" href="assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/site.css">
+<script src="js/theme.js"></script>
+<meta property="og:site_name" content="Clio Coder">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Vision — Clio Coder">
+<meta property="og:description" content="An experimental harness in a scientific ecosystem. Open about what is not done.">
+<meta property="og:url" content="https://coder.iowarp.ai/vision.html">
+<meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Clio Coder. Your models. Your science. Local or cloud models, bounded workers, and work you can inspect.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Vision — Clio Coder">
+<meta name="twitter:description" content="An experimental harness in a scientific ecosystem. Open about what is not done.">
+<meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png">
+<meta name="twitter:image:alt" content="Clio Coder. Your models. Your science. Local or cloud models, bounded workers, and work you can inspect.">
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<p class="spine">IOWarp · Clio Coder · field instrument</p>
+<header class="mast">
+  <div class="mast-row">
+    <a class="brand" href="index.html">
+      <img src="assets/logo.webp" width="36" height="36" alt="">
+      <span class="brand-name">Clio Coder</span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="capabilities.html">Capabilities</a>
+      <a href="harness.html">Harness</a>
+      <a href="library.html">Library</a>
+      <a href="docs.html">Docs</a>
+      <a href="learn.html">Learn</a>
+      <a href="compare.html">Compare</a>
+      <a href="vision.html" aria-current="page">Vision</a>
+    </nav>
+    <div class="mast-actions">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to paper theme">
+        <span class="theme-icon" aria-hidden="true">□</span> <span>Paper</span>
+      </button>
+      <a class="btn" href="start.html">Install</a>
+      <details class="nav-more">
+        <summary>Menu</summary>
+        <div class="nav-more-menu">
+          <a href="capabilities.html">Capabilities</a>
+          <a href="harness.html">Harness</a>
+          <a href="library.html">Library</a>
+          <a href="docs.html">Docs</a>
+          <a href="learn.html">Learn</a>
+          <a href="compare.html">Compare</a>
+          <a href="vision.html">Vision</a>
+          <a href="start.html">Install</a>
+          <a href="share.html">Post on X</a>
+        </div>
+      </details>
+    </div>
+  </div>
+  <p class="issue"><b>Issue 0.5.6</b><span>Open development</span><span>NSF Award 2411318</span><span>Apache-2.0</span></p>
+</header>
+<main class="page" id="content">
+  <p class="kicker">CLIO · Context Layer for Input/Output</p>
+  <h1 class="display">A muse,<br><em>and a ledger.</em></h1>
+  <p class="lede">Clio is the muse of history. The architecture is a context layer for input and output. The product on this site is Clio Coder, not clio-agent, not clio-core, and not clio-kit. Those names stay distinct so a scientist can tell which instrument they are holding.</p>
+
+  <section class="section">
+    <h2 class="section-title">The ecosystem</h2>
+    <div class="eco">
+      <a href="https://iowarp.ai"><strong>iowarp.ai</strong><span>The project. Context for scientific work, not a chat brand.</span></a>
+      <a href="https://toolkit.iowarp.ai"><strong>toolkit.iowarp.ai</strong><span>Live. MCP servers for Slurm, HDF5, ADIOS, Spack, and the rest of the kit.</span></a>
+      <div><strong>coder.iowarp.ai</strong><span>Recommended home for this site. The product name is Clio Coder. The host should say so.</span></div>
+      <div><strong>clio.iowarp.ai</strong><span>Optional alias. Fine as a redirect. Risky as the only name, because bare Clio already means other things in this ecosystem.</span></div>
+      <div><strong>agent.iowarp.ai</strong><span>Not this product, and not claimed as live from this draft. A future agent surface should not borrow Coder’s receipts.</span></div>
+      <a href="https://grc.iit.edu"><strong>grc.iit.edu</strong><span>Gnosis Research Center, Illinois Tech, with the University of Utah.</span></a>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2 class="section-title">Status, without a roadmap costume</h2>
+    <div class="status-board">
+      <article>
+        <h3>Shipped</h3>
+        <ul>
+          <li>Terminal agent</li>
+          <li>Targets, including local and ALCF</li>
+          <li>Coded safety, two levels</li>
+          <li>Sealed receipts</li>
+          <li>Workers and SSH fleets</li>
+          <li>Library with pins</li>
+          <li>ACP server and peer connectors</li>
+          <li>Docs inside the package</li>
+        </ul>
+      </article>
+      <article>
+        <h3>Alpha</h3>
+        <ul>
+          <li>Graphical application</li>
+          <li>Herdr panes and Yazi</li>
+          <li>Some peer ACP recipes</li>
+          <li>This website</li>
+        </ul>
+      </article>
+      <article>
+        <h3>Deferred</h3>
+        <ul>
+          <li>Self-edit gate</li>
+          <li>Container or cloud worker transport</li>
+        </ul>
+      </article>
+      <article>
+        <h3>Not claimed</h3>
+        <ul>
+          <li>OS sandbox</li>
+          <li>GUI parity</li>
+          <li>Windows as a primary platform</li>
+          <li>Better code than a frontier model</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <section class="split">
+    <div class="prose">
+      <h2>Why it is public</h2>
+      <p>The IOWarp CLIO architecture is supported by the National Science Foundation under Award 2411318, 2024–2029. Principal Investigator Xian-He Sun. Co-Principal Investigators Anthony Kougkas, Jake Hochhalter, and Vivek Srikumar. The harness is Apache-2.0 because a scientific instrument that you cannot read is a vendor relationship.</p>
+      <p>Contributions target the current version branch. <code>main</code> advances when a release ships. A difficult build, a bad connection, or a workflow that needs too much babysitting is a useful bug report. Include versions, steps, and <code>clio-coder doctor</code> output, with credentials removed.</p>
+      <p class="quote">The work has to remain inspectable after the grant, the model, and the vendor have all changed.</p>
+    </div>
+    <div>
+      <p class="margin-note"><strong>Cite it.</strong> Clio Coder. Gnosis Research Center, Illinois Institute of Technology, with the University of Utah. <a href="https://github.com/iowarp/clio-coder">github.com/iowarp/clio-coder</a>. Apache-2.0. NSF Award 2411318.</p>
+      <p class="actions"><a class="btn" href="https://github.com/iowarp/clio-coder/issues">Open an issue</a></p>
+      <p><a href="https://github.com/iowarp/clio-coder/blob/main/CONTRIBUTING.md">Contributing</a> · <a href="https://github.com/iowarp/clio-coder/blob/main/CODE_OF_CONDUCT.md">Code of conduct</a> · <a href="https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318">NSF award</a></p>
+    </div>
+  </section>
+
+  <footer class="colophon">
+    <div><span class="brand-name">Clio Coder</span><p>Part of <a href="https://iowarp.ai">IOWarp</a>.</p></div>
+    <div><p>This page is a field note, not a funded-deliverable checklist.</p></div>
+    <div class="colo-links"><a href="share.html">Post on X</a><a href="harness.html">Harness</a><a href="compare.html">Compare</a></div>
+    <p class="colo-fine">If a future site uses clio.iowarp.ai as the only name, keep the product title Clio Coder on the page. The muse can share a host. She should not share a binary name. If this site and the installed package disagree, the package, schemas, and contract tests win.</p>
+  </footer>
+</main>
+<script src="js/site.js"></script>
+</body>
+</html>

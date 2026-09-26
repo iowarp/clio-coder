@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install Clio Coder — local and cloud AI coding agent</title>
+<meta name="description" content="Install Clio Coder, connect a model, and ask a first question that does not edit anything.">
+<meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/start.html">
+<link rel="icon" href="assets/logo.webp" type="image/webp">
+<link rel="apple-touch-icon" href="assets/logo-512.webp">
+<link rel="preload" href="assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/site.css">
+<script src="js/theme.js"></script>
+<meta property="og:site_name" content="Clio Coder">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Install Clio Coder">
+<meta property="og:description" content="Node 22.19 or newer, a model that can call tools, and one question that does not edit files.">
+<meta property="og:url" content="https://coder.iowarp.ai/start.html">
+<meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Clio Coder. Your models. Your science. Local or cloud models, bounded workers, and work you can inspect.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Install Clio Coder">
+<meta name="twitter:description" content="Node 22.19 or newer, a model that can call tools, and one question that does not edit files.">
+<meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png">
+<meta name="twitter:image:alt" content="Clio Coder. Your models. Your science. Local or cloud models, bounded workers, and work you can inspect.">
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<p class="spine">IOWarp · Clio Coder · field instrument</p>
+<header class="mast">
+  <div class="mast-row">
+    <a class="brand" href="index.html">
+      <img src="assets/logo.webp" width="36" height="36" alt="">
+      <span class="brand-name">Clio Coder</span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="capabilities.html">Capabilities</a>
+      <a href="harness.html">Harness</a>
+      <a href="library.html">Library</a>
+      <a href="docs.html">Docs</a>
+      <a href="learn.html">Learn</a>
+      <a href="compare.html">Compare</a>
+      <a href="vision.html">Vision</a>
+    </nav>
+    <div class="mast-actions">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to paper theme">
+        <span class="theme-icon" aria-hidden="true">□</span> <span>Paper</span>
+      </button>
+      <a class="btn" href="start.html" aria-current="page">Install</a>
+      <details class="nav-more">
+        <summary>Menu</summary>
+        <div class="nav-more-menu">
+          <a href="capabilities.html">Capabilities</a>
+          <a href="harness.html">Harness</a>
+          <a href="library.html">Library</a>
+          <a href="docs.html">Docs</a>
+          <a href="learn.html">Learn</a>
+          <a href="compare.html">Compare</a>
+          <a href="vision.html">Vision</a>
+          <a href="start.html">Install</a>
+          <a href="share.html">Post on X</a>
+        </div>
+      </details>
+    </div>
+  </div>
+  <p class="issue"><b>Issue 0.5.6</b><span>Node ≥ 22.19</span><span>Linux and macOS</span><span>Windows: best effort</span><span>Not an OS sandbox</span></p>
+</header>
+<main class="page" id="content">
+  <p class="kicker">First hour</p>
+  <h1 class="display">Connect a<br><em>model.</em></h1>
+  <p class="lede">You need Node.js 22.19 or newer and a model that can call tools. Linux and macOS are the primary platforms. Windows is best effort. Nothing here starts a graphical app unless you ask.</p>
+
+  <div class="install-bar">
+    <p class="cmd"><span>$</span> npm install -g @iowarp/clio-coder</p>
+    <button class="copy" type="button" data-copy="npm install -g @iowarp/clio-coder">Copy</button>
+  </div>
+
+  <dl class="defn">
+    <div><dt>npm</dt><dd><code>npm install -g @iowarp/clio-coder</code></dd></div>
+    <div><dt>pnpm</dt><dd><code>pnpm add -g @iowarp/clio-coder</code></dd></div>
+    <div><dt>Try once</dt><dd><code>npx --yes @iowarp/clio-coder@latest</code></dd></div>
+    <div><dt>Without Claude SDK</dt><dd><code>npm install -g @iowarp/clio-coder --omit=optional</code>. Chat and native workers do not need it.</dd></div>
+    <div><dt>From source</dt><dd>Clone tag <code>v0.5.6</code>, then <code>pnpm run install:local</code>. The launcher lands in <code>~/.local/bin</code>.</dd></div>
+  </dl>
+
+  <section class="section">
+    <h2 class="section-title">Then this</h2>
+    <pre><code>cd /path/to/your/project
+clio-coder configure
+clio-coder</code></pre>
+    <p>In Quick Connect, give an endpoint such as <code>http://localhost:11434</code> for Ollama or <code>http://localhost:1234</code> for LM Studio, a key if the server wants one, and a model that supports tool calling. Subscriptions and other providers are under Settings → Connections.</p>
+    <p>First question, copied from the project’s own getting-started path. It is deliberately not allowed to edit:</p>
+    <pre><code>Explain how this repository builds and runs its tests. Find the main entry
+points and suggest one useful verification task. Do not change files yet.</code></pre>
+    <p>If it does not connect, <code>clio-coder doctor</code> is a read-only check. <code>doctor --fix</code> performs only the repairs it reports.</p>
+  </section>
+
+  <div class="note note-amber">
+    <p><strong>Upgrading to 0.5.6.</strong> <code>safety.autonomy</code> accepts only <code>default</code> and <code>yolo</code>. Older values are refused and Clio Coder will not start while your user <code>settings.yaml</code> holds one. <code>auto-edit</code>, <code>suggest</code>, and <code>read-only</code> become <code>default</code>. <code>full-auto</code> becomes <code>yolo</code>. Edit the file by hand. <code>clio-coder paths</code> shows where it is. Project settings can no longer set autonomy.</p>
+  </div>
+
+  <section class="section">
+    <h2 class="section-title">Inside the session</h2>
+    <dl class="defn">
+      <div><dt>/help</dt><dd>Commands and your keybindings.</dd></div>
+      <div><dt>/model</dt><dd>Switch the model for this session without rewriting the saved default, unless you ask it to.</dd></div>
+      <div><dt>/run verifier</dt><dd>An independent pass that should not edit. The recipe’s ceiling is the point.</dd></div>
+      <div><dt>Enter, Ctrl+Q, Escape</dt><dd>Steer, queue, interrupt.</dd></div>
+      <div><dt>clio-coder docs</dt><dd>Opens the installed documentation in a browser. No model required. This website is a public reading room. The package you installed is the authority.</dd></div></dl>
+    <p class="actions"><a class="btn" href="learn.html">Continue in the labs</a> <a class="btn btn-ghost" href="docs.html?d=guide/installation-and-lifecycle.md">Installation guide</a></p>
+  </section>
+
+  <section class="section" id="gui">
+    <div class="section-head"><h2 class="section-title">Open the graphical application</h2><p>An opt-in alpha, included with the package.</p></div>
+    <p>The GUI uses a local browser interface and the same Clio runtime. For a foreground session, run:</p>
+    <pre><code>clio-coder gui --open</code></pre>
+    <p>On Linux, install the persistent user service to keep a stable local origin and reopen the application without holding a terminal open:</p>
+    <pre><code>clio-coder gui background install --open</code></pre>
+    <p>Use <code>clio-coder gui --help</code> for the options supported by your installed version. The GUI currently covers a subset of terminal workflows. Its local launch link contains a private token; keep that link private.</p>
+  </section>
+  <footer class="colophon">
+    <div><span class="brand-name">Clio Coder</span><p><a href="https://www.npmjs.com/package/@iowarp/clio-coder">@iowarp/clio-coder</a> · Apache-2.0</p></div>
+    <div><p>Source install and lifecycle: <a href="docs.html?d=guide/installation-and-lifecycle.md">the guide</a>.</p></div>
+    <div class="colo-links"><a href="https://github.com/iowarp/clio-coder">Source</a><a href="learn.html">Labs</a><a href="compare.html">Compare</a></div>
+    <p class="colo-fine">A quiet footer hint may say an update exists. It never upgrades on its own. Commands run with your user permissions. If this site and the installed package disagree, the package, schemas, and contract tests win.</p>
+  </footer>
+</main>
+<script src="js/site.js"></script>
+</body>
+</html>

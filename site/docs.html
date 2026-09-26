@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Documentation — Clio Coder</title>
+<meta name="description" content="The Clio Coder guides and architecture notes, hosted with the site. The installed package remains the authority.">
+<meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/docs.html">
+<link rel="icon" href="assets/logo.webp" type="image/webp">
+<link rel="apple-touch-icon" href="assets/logo-512.webp">
+<link rel="preload" href="assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/site.css">
+<script src="js/theme.js"></script>
+<meta property="og:site_name" content="Clio Coder">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Documentation — Clio Coder">
+<meta property="og:description" content="Operator guides and architecture contracts, readable in the browser.">
+<meta property="og:url" content="https://coder.iowarp.ai/docs.html">
+<meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Clio Coder. Your models. Your science. Local or cloud models, bounded workers, and work you can inspect.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Documentation — Clio Coder">
+<meta name="twitter:description" content="Operator guides and architecture contracts, readable in the browser.">
+<meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png">
+<meta name="twitter:image:alt" content="Clio Coder. Your models. Your science. Local or cloud models, bounded workers, and work you can inspect.">
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<p class="spine">IOWarp · Clio Coder · field instrument</p>
+<header class="mast">
+  <div class="mast-row">
+    <a class="brand" href="index.html">
+      <img src="assets/logo.webp" width="36" height="36" alt="">
+      <span class="brand-name">Clio Coder</span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="capabilities.html">Capabilities</a>
+      <a href="harness.html">Harness</a>
+      <a href="library.html">Library</a>
+      <a href="docs.html" aria-current="page">Docs</a>
+      <a href="learn.html">Learn</a>
+      <a href="compare.html">Compare</a>
+      <a href="vision.html">Vision</a>
+    </nav>
+    <div class="mast-actions">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to paper theme">
+        <span class="theme-icon" aria-hidden="true">□</span> <span>Paper</span>
+      </button>
+      <a class="btn" href="start.html">Install</a>
+      <details class="nav-more">
+        <summary>Menu</summary>
+        <div class="nav-more-menu">
+          <a href="capabilities.html">Capabilities</a>
+          <a href="harness.html">Harness</a>
+          <a href="library.html">Library</a>
+          <a href="docs.html">Docs</a>
+          <a href="learn.html">Learn</a>
+          <a href="compare.html">Compare</a>
+          <a href="vision.html">Vision</a>
+          <a href="start.html">Install</a>
+          <a href="share.html">Post on X</a>
+        </div>
+      </details>
+    </div>
+  </div>
+  <p class="issue"><b>Issue 0.5.6</b><span>Docs snapshot</span><span>Snapshot is not the authority</span><span>Installed package wins</span></p>
+</header>
+<main class="page" id="content">
+  <div class="docs-shell">
+    <aside class="docs-nav" aria-label="Documentation">
+      <details class="docs-menu">
+      <summary>Browse documentation</summary>
+      <div class="docs-menu-body">
+      <input id="doc-search" type="search" placeholder="Search titles and topics" aria-label="Search documentation titles">
+      <ul class="search-hits" id="search-hits"></ul>
+      <h2>Start</h2>
+      <a href="docs.html?d=README.md">Documentation map</a>
+      <a href="docs.html?d=guide/installation-and-lifecycle.md">Install</a>
+      <a href="docs.html?d=guide/configuration-and-targets.md">Targets</a>
+      <a href="docs.html?d=guide/commands-and-modes.md">Commands</a>
+      <a href="docs.html?d=architecture/safety-model.md">Safety</a>
+      <a href="docs.html?d=guide/troubleshooting.md">Troubleshooting</a>
+      <a href="docs.html?d=guide/doctor.md">Doctor</a>
+      <h2>Use</h2>
+      <a href="docs.html?d=guide/fleet-dispatch.md">Fleet dispatch</a>
+      <a href="docs.html?d=guide/built-in-agents.md">Built-in agents</a>
+      <a href="docs.html?d=guide/interop.md">Interop</a>
+      <a href="docs.html?d=guide/skills-marketplace.md">Skills</a>
+      <a href="docs.html?d=guide/plugins.md">Plugins</a>
+      <a href="docs.html?d=guide/harness-extensions.md">Extensions</a>
+      <a href="docs.html?d=guide/slurm.md">Slurm</a>
+      <a href="docs.html?d=guide/tool-usage.md">Tools</a>
+      <h2>All pages</h2>
+      <div id="all-docs"></div>
+      </div>
+      </details>
+    </aside>
+    <article>
+      <div class="doc-toolbar">
+        <p id="doc-path">README.md</p>
+        <p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/main/docs/README.md" target="_blank" rel="noopener noreferrer">View on GitHub</a></p>
+      </div>
+      <div class="note note-dash">
+        <p><strong>This snapshot is not the authority.</strong> <code>clio-coder docs</code> reads the copy installed with your binary. If they disagree, the package, schemas, and contract tests win. Diagrams are labeled and shown as source.</p>
+      </div>
+      <div class="doc" id="doc"><p>Opening the page…</p></div>
+    </article>
+  </div>
+  <footer class="colophon">
+    <div><span class="brand-name">Clio Coder</span><p>Docs ship in the package so an agent can answer from the version you are running.</p></div>
+    <div><p>Guides for working with Clio Coder, from the first model connection to runtime architecture. Every page can be read without JavaScript.</p></div>
+    <div class="colo-links"><a href="https://github.com/iowarp/clio-coder/tree/main/docs">docs/ on GitHub</a><a href="learn.html">Labs</a><a href="capabilities.html">Capabilities</a></div>
+    <p class="colo-fine">This website publishes a documentation snapshot. The package, schemas, and contract tests for your installed version remain the authority.</p>
+  </footer>
+</main>
+<script src="js/site.js"></script>
+<script src="js/docs.js"></script>
+</body>
+</html>

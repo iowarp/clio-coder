@@ -1,0 +1,147 @@
+# Doctor
+
+`runDoctorCommand` in [doctor.ts](../../src/cli/doctor.ts) runs the CLI checks. The [safety model](../architecture/safety-model.md) explains command authority.
+
+`clio-coder doctor` diagnoses a Clio install and the workspace it runs in. It
+reads, probes, and reports; plain `doctor` writes nothing. This page covers
+what the checks are, the deep checks, the in-session `/doctor`, and how to
+read the rows.
+
+## Running it
+
+| Command | What it does |
+| --- | --- |
+| `clio-coder doctor` | Every standard check. Read-only. |
+| `clio-coder doctor --fix` | Also repairs missing directories, template files, and credential permissions, and records fleet preflight results. |
+| `clio-coder doctor --json` | The same findings as JSON on stdout: `{ ok, fix, deep, findings: [{ ok, name, level, detail }] }`. |
+| `clio-coder doctor --deep` | The standard checks plus the live tool probe on every configured target and a dry run of the validation contract. |
+| `clio-coder doctor --deep --tools-timeout <seconds>` | Bounds each tool probe's generation. The default is 120 seconds, enough for a cold load of a large local model. |
+| `/doctor` | The standard checks, rendered in the session as one notice. |
+| `/doctor deep` | The deep checks against the session's targets and autonomy. |
+
+`--deep` composes with `--json` and `--fix`. `--tools-timeout` without
+`--deep` is a usage error (exit 2).
+
+## Reading a row
+
+Each row has a level:
+
+| Level | Badge | Meaning | Affects exit code |
+| --- | --- | --- | --- |
+| `ok` | `OK` | Healthy. | No |
+| `info` | `INFO` | A fact that needs no action, such as an optional tool that is not installed. | No |
+| `warn` | `WARN` | Worth attention; Clio still works. | No |
+| `error` | `!!` | Broken. | Yes: doctor exits 1 |
+
+Doctor exits 0 when no row is an error. See
+[Exit Codes and Output](exit-codes-and-output.md).
+
+## HPC toolchain rows
+
+Every run reports one `toolchain <name>` row for each of `cc`, `c++`, `clang`,
+`gfortran`, `mpicc`, `mpicxx`, `mpirun`, `nvcc`, `cmake`, `make`, `ninja`,
+`meson`, `python3`, and `sbatch`. The `cc` row accepts `gcc` when `cc` is
+absent, and the `c++` row accepts `g++`.
+
+A present tool shows its resolved path and the first line of `--version`
+output that carries a version number. Each `--version` runs for at most two
+seconds from a scratch directory, and all of them run at once.
+
+- An absent tool is `INFO`. Most workspaces need none of these.
+- An absent tool is `WARN` when the workspace
+  [validation contract](tool-usage.md#verify-run-declared-verification-checks) names it in a
+  validator command, or when the contract declares `runtime.kind: slurm` and
+  `sbatch` is missing.
+- An installed tool whose `--version` exits nonzero is `WARN`. An
+  unconfigured Slurm client, which cannot reach its controller, shows up this
+  way. Slurm client version timeouts also warn; other HPC version timeouts
+  retain their informational detail on an OK row. The scheduler row reuses
+  the bounded sbatch result rather than spawning a second probe.
+
+## Task worktree rows
+
+In a git checkout, the `task worktree root` row gives the directory
+`fleet.worktrees.root` resolves to, its filesystem type, and its free space,
+and warns when an off-disk setting fell back to disk. Doctor then lists every `worktree: true` task worktree that
+outlived its run, one `task worktree <runId>` row each, or a single
+`task worktrees` row reading `none preserved`. A `settled` row is a worktree
+its run kept on purpose and is informational. An `abandoned` row is a crashed
+run's worktree that restart recovery kept because it holds work, and it is a
+warning, as is a claim whose owner is gone or that predates recovery. Each row
+gives the branch, the age, the `git log <base>..<branch>` command to inspect
+it, and the commands to drop it. Doctor never removes one. See
+[worktree per task](fleet-dispatch.md#worktree-per-task).
+
+## Slurm MCP rows
+
+`slurm clio-kit` names the `clio-kit` binary on `PATH` and whether its build
+ships the Slurm MCP server. `slurm mcp server` names the `mcp.yaml` that
+declares `clio-kit mcp-server slurm`, its scope, and its trust. `slurm
+scheduler` reports `sbatch` and `squeue`. An install with none of the three
+gets a single informational `slurm mcp` row. These rows never fail doctor. See
+[Slurm](slurm.md).
+
+## Deep checks
+
+`--deep` and `/doctor deep` add two groups of rows.
+
+### Tool probe: `tools <target>`
+
+The same streamed tool-call probe as `clio-coder targets --probe --tools` runs
+on every configured target. It checks that the target's chat model, or its
+default model when chat uses another target, streams a schema-valid tool call
+through the path a real turn uses.
+
+| Result | Level |
+| --- | --- |
+| The model streamed a valid tool call | `OK`, with the model and latency |
+| The probe ran and the call was missing or malformed | `WARN`, with the reason |
+| The probe could not run: no model is set, or the runtime does not stream through the engine | `INFO` |
+| An available runtime has no live probe | `INFO`, with the credential source |
+| Credentials are missing or the target did not answer its health probe | `WARN`, with the actual error |
+
+The probe generates tokens and can load a cold model on a local server. It
+unloads afterwards only the model it loaded itself, on the server it probed.
+A model that was already resident stays, and so does a model a chat turn
+loads while an in-session probe runs.
+
+### Validation contract dry run: `validator <n>`
+
+For each command under `validators:` in the workspace validation contract,
+doctor resolves the program (the first word after any `NAME=value`
+assignments) on PATH, or relative to the workspace when it contains a `/`.
+Then it evaluates the command as a bash call the way tool admission does, at
+the configured `safety.autonomy` or at the session's level for `/doctor deep`.
+The safety policy engine decides under that level's posture, so yolo clears
+the ordinary rails, and the autonomy mapping at that level decides the rest.
+Nothing is executed.
+
+The row is `OK` when the program resolves and the command would run without an
+approval ask at that level. Otherwise it is `WARN`. The verdict says what
+really happens:
+
+| Verdict | What happens |
+| --- | --- |
+| `runs without approval at <level>` | The command runs at the evaluated level. |
+| `asks for approval at default and runs at yolo` | An ordinary rail, such as `$(...)` command substitution or an unrecognized command. Default asks and yolo runs it. |
+| `asks for confirmation at default and yolo` | A damage-control confirmation rule matched. It asks at both levels. |
+| `blocked by the safety policy` | A block. It holds at both levels. |
+
+A verdict that comes from a safety rule names the rule's reason code in
+parentheses. A command that asks only because it is unrecognized gets a hint
+instead: declare it in `.clio-coder/safety.yaml` to run it unattended at
+default. The project safety file takes effect only after you approve it with
+`clio-coder config trust safety`.
+
+With no contract, or a contract with no validators, the dry run adds no rows.
+
+## In the session
+
+`/doctor` runs the same checks as the CLI and shows them as one notice headed
+by a tally, for example `doctor: 58 checks, 0 error(s), 3 warning(s)`. The
+notice takes the level of the worst row. `/doctor` never repairs anything;
+run `clio-coder doctor --fix` from a shell for that.
+
+Deep tool-probe rows report INFO when an available runtime has no live probe, naming the credential source. A failed health probe remains WARN and reports its last error.
+
+If the managed Yazi cache cannot be written, profile generation returns a profile error. Its diagnostic failure marker is best-effort; a cache failure does not crash either launcher.

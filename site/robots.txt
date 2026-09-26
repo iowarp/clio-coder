@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /cards/
+Disallow: /content/
+
+Sitemap: https://coder.iowarp.ai/sitemap.xml
