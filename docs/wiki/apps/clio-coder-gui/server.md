@@ -11,14 +11,12 @@ sources:
   - "apps/clio-coder-gui/server/services/targets-cli.ts"
   - "apps/clio-coder-gui/server/services/cli-runner.ts"
   - "apps/clio-coder-gui/server/clio/adapters/settings-controls.ts"
-  - "apps/clio-coder-gui/server/clio/adapters/docs.ts"
   - "apps/clio-coder-gui/server/state/files.ts"
   - "apps/clio-coder-gui/server/network-policy.ts"
 tests:
   - "apps/clio-coder-gui/tests/boundaries.test.ts"
   - "apps/clio-coder-gui/tests/worker-rpc.test.ts"
   - "apps/clio-coder-gui/tests/process-policy.test.ts"
-  - "apps/clio-coder-gui/tests/docs.test.ts"
   - "apps/clio-coder-gui/tests/targets-http.test.ts"
   - "apps/clio-coder-gui/tests/background.test.ts"
 invariants:
@@ -111,11 +109,9 @@ The `AcpClient` in `apps/clio-coder-gui/server/acp/client.ts` speaks JSON-RPC ov
 
 `OperationRegistry` in `apps/clio-coder-gui/server/services/operations.ts` tracks long-running operations with idempotency. `create` builds a key from `[kind, scope, key]` and a fingerprint from the canonicalized input; a second create with the same key but a different fingerprint is a conflict. Operations run on a microtask, and progress lines are capped at 256 or 64 KiB per operation. Terminal operations are retained up to 256 or 16 MiB, then evicted oldest-first.
 
-## Settings and documentation adapters
+## Settings adapters
 
 `readSettingsControls` and `writeSettingControl` in `apps/clio-coder-gui/server/clio/adapters/settings-controls.ts` are the only way the GUI reads and writes settings. They sit on top of the engine's `SETTING_CONTROLS` registry and the layered settings store. The file declares a `HIDDEN` list of paths the browser must not show, a `READ_ONLY` list with reasons (file paths and terminal-only settings), a `NOTES` map of ACP-specific caveats, and a `CONFIRM` map of destructive settings that require an explicit confirmation. Writes land in the user layer only, and a write that the engine rejects with a higher-precedence conflict is reported as a conflict problem.
-
-`DocsAdapter` in `apps/clio-coder-gui/server/clio/adapters/docs.ts` reads the package's `docs/` tree. `contained` resolves the real path of every requested document and refuses anything outside the docs root, including symlink escapes. Files are capped at 1 MiB, the index at 16 MiB or 10,000 pages, and search scores terms by their presence in titles, paths, and headings. Link rewriting maps internal paths to `/docs/...` URLs and external repository references to GitHub.
 
 ## Boundaries and security
 
@@ -141,7 +137,6 @@ The `AcpClient` in `apps/clio-coder-gui/server/acp/client.ts` speaks JSON-RPC ov
 - `apps/clio-coder-gui/tests/boundaries.test.ts` — parses the entire GUI source tree and asserts no direct socket, process, or worker access outside the chokepoints and no root import outside the seams.
 - `apps/clio-coder-gui/tests/worker-rpc.test.ts` — asserts that 65 concurrent reads overflow the 64-call queue with a retryable 503; that an expired synchronous read keeps capacity until completion; that a crashed worker fails pending reads and restarts; that two warm lanes overlap two 120 ms reads; and that a queued read spends its deadline on its own work.
 - `apps/clio-coder-gui/tests/process-policy.test.ts` — asserts that the pinned fetcher refuses URLs outside the allowlist before the injected fetcher is called; that static assets refuse a symlink escape; and that the checkout launcher binds loopback, serves authenticated meta, and exits on SIGTERM.
-- `apps/clio-coder-gui/tests/docs.test.ts` — builds a fixture docs tree with a symlink escape, asserts 403 for every path that resolves outside the docs root, and verifies link rewriting and heading outlines.
 - `apps/clio-coder-gui/tests/targets-http.test.ts` — exercises real CLI `use`/`remove` through the HTTP surface, verifies idempotent operation keys, redaction of secrets, and probe cancellation that reaps the child.
 - `apps/clio-coder-gui/tests/background.test.ts` — installs a background service in a temp directory, verifies the stable port and token survive re-install, refuses a foreign port change, and proves that uninstall removes only files whose ownership matches the manifest hash.
 

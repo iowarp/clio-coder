@@ -55,7 +55,8 @@ The router defines these top-level routes. Pages are lazy-loaded except for `Hom
 - `/evidence`, `/evidence/:id` — `EvidencePage`, `EvidenceDetail`
 - `/usage`, `/library`, `/system`, `/system/interop`, `/fleet`, `/fleet/:id`, `/fleet/dispatches/:id`
 - `/settings`, `/settings/targets`, `/settings/routing`, `/settings/effective`, `/settings/why`
-- `/traces`, `/traces/:runId`, `/toolchain`, `/docs/*`
+- `/traces`, `/traces/:runId`, `/toolchain`
+- `/docs/*` — a compatibility Help destination that links to the public documentation
 
 The API client (`createClient` in `apps/clio-coder-gui/client/api/client.ts`) wraps `fetch` with Bearer token auth, `Idempotency-Key` headers for non-GET routes, clock adoption from the `Date` response header, and `ApiProblem` error mapping. Route definitions in `apps/clio-coder-gui/contracts/routes.ts` use TypeBox schemas and are typed end-to-end: `client.call<R extends Route>(route, input)` returns `Output<R>`.
 
@@ -160,7 +161,7 @@ The wire cap is tighter, so in practice the wire marker is what an operator sees
 
 **Mermaid.** `MermaidBlock` waits for the turn to settle and the block to be near the viewport before calling `renderMermaid` from `apps/clio-coder-gui/client/render/mermaid.ts`. The diagram source is bounded by `MERMAID_MAX_SOURCE_BYTES` (16 KiB) and `MERMAID_MAX_LINES` (400). The rendered SVG is sanitized by DOMPurify before DOM import.
 
-**Links.** Only `http:`, `https:`, and `mailto:` protocols are live. Relative paths render as text. Internal document links (`/docs/...`) route through the React Router via `onNavigate` rather than causing a full page load.
+**Links.** Only `http:`, `https:`, and `mailto:` protocols are live. Relative paths render as text. Help opens the public documentation with no referrer; it maps only supported public guides and does not forward private launch credentials.
 
 ## Session view
 
