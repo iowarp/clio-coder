@@ -3097,6 +3097,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								getDecisionBoard: () => decisionBoard.snapshot(),
 								isTurnInFlight: () => chat.isStreaming(),
 								seedTaskMemory: seedCurrentTaskMemoryFromHandoff,
+								// Recovery continues the engine without new input. It runs inside the
+								// prompt turn that asked for it, so its output streams there, and the
+								// reply waits for it so the next prompt cannot race it.
+								runHandoffRecovery: async (handoffId: string, action: "reduce" | "deliver"): Promise<AcpHostReport> => {
+									if (chat.isStreaming())
+										return { level: "error", text: "Wait for the current turn to settle before recovery." };
+									await chat.recoverHandoff(handoffId, action);
+									return {
+										level: "success",
+										text: action === "deliver" ? "Handoff delivered." : "Handoff reduced; the paused turn continued.",
+									};
+								},
 								// `/council` enters the registry as the dispatch call a model makes, under
 								// a call id the turn announces, so its plan approval binds to that call.
 								runCouncilDispatch: (args) => runHostDispatch(toolRegistry, acpHostToolEvents, args),
@@ -3180,6 +3192,29 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 												await contextDomain.runContextRefresh({ cwd: process.cwd(), io: capture.io });
 												return capture.report("Project context refreshed.");
 											},
+											// The terminal confirms a reset in its chooser; over ACP the operator's
+											// confirmation is the --yes flag, checked by the command bridge.
+											runContextClear: async (clear: {
+												all?: boolean;
+												confirmed?: boolean;
+												confirmedAll?: boolean;
+											}): Promise<AcpHostReport> => {
+												// The command bridge refuses an unconfirmed reset before it gets here.
+												if (clear.confirmed !== true) return { level: "warn", text: "Nothing was changed." };
+												if (chat.isStreaming())
+													return { level: "error", text: "Wait for the current turn to finish before resetting context." };
+												const capture = captureRunIo();
+												await contextDomain.runContextClear({
+													cwd: process.cwd(),
+													all: clear.all === true,
+													io: capture.io,
+													confirmContext: () => true,
+													confirmAll: () => clear.confirmedAll === true,
+												});
+												return capture.report(
+													clear.all === true ? "Project context and CLIO-CODER.md reset." : "Project context reset.",
+												);
+											},
 											runInit: async (initOptions: Parameters<typeof runContextInit>[0]): Promise<AcpHostReport> => {
 												const capture = captureRunIo();
 												await runContextInit(initOptions, capture.io);
@@ -3213,6 +3248,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					: {}),
 				toolRegistry,
 				hostToolEvents: acpHostToolEvents,
+				contextLedger: () => chat.contextLedger(),
 				...(toolBootstrap.mcpCapabilities ? { mcpCapabilities: toolBootstrap.mcpCapabilities } : {}),
 				bus,
 				autonomy: resolveBaselineAutonomy,

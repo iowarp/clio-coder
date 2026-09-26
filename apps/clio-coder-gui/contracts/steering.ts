@@ -121,6 +121,8 @@ export const CommandDescriptor = Type.Object(
 		injectsUserTurn: Type.Optional(Type.Literal(true)),
 		/** The command's calls and approvals belong to a conversation turn, so it is sent as one. */
 		promptTurn: Type.Optional(Type.Literal(true)),
+		/** Subcommands sent as a conversation turn, as promptTurn does for a whole command. */
+		promptTurnSubcommands: Type.Optional(Type.Array(Type.String({ maxLength: 64 }), { maxItems: 16 })),
 	},
 	closed,
 );

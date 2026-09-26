@@ -165,3 +165,39 @@
 	margin: var(--space-2) 0 0;
 	padding-inline-start: var(--space-5);
 }
+
+/* The context window: one sentence of accounting, then the parts that fill it as a small table
+   whose numbers are exact values. */
+.context-panel__total {
+	margin: var(--space-2) 0;
+	font-size: var(--text-meta);
+}
+.context-panel__rows {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: var(--text-meta);
+}
+.context-panel__rows caption {
+	text-align: start;
+	padding-block-end: var(--space-1);
+}
+.context-panel__rows th,
+.context-panel__rows td {
+	padding: var(--space-1) var(--space-2);
+	border-bottom: 1px solid var(--line);
+	text-align: start;
+	font-weight: normal;
+}
+.context-panel__rows thead th {
+	color: var(--ink-muted);
+	font-size: var(--text-exact);
+}
+.context-panel__rows thead th:not(:first-child) {
+	text-align: end;
+}
+.context-panel__rows td {
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	font-variant-numeric: tabular-nums;
+	text-align: end;
+}

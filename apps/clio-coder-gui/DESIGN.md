@@ -539,6 +539,15 @@ action. Run this plan carries amber, is disabled while a turn runs, and starts t
 still hashes to the one shown; when it does not, nothing is dispatched, the panel says so, and the new
 plan replaces the old one for another review. The started runs appear in the fleet history beside it.
 
+Context window in Session tools is the terminal's /context view, read from Clio Coder's ledger when
+it opens and again when a turn settles. It says the route and the window with where the window size
+came from, then one sentence of accounting that says whether the total was measured by the provider
+or estimated, then a small table of what fills the window with exact, tabular numbers, then reserve,
+free space, compaction and the prompt cache in sentences. An unknown window is written as not
+reported, never as zero. Resetting project context from the commands panel takes the `--yes` flag,
+and `--all` only widens a confirmed reset; without it Clio Coder answers that nothing was changed.
+`/context recover` is sent as a conversation turn, because it continues the paused turn.
+
 A model is always picked from its target's catalog, never typed from memory. The route picker, the
 Settings page (`chat.model`, `fleet.default.model`, `context.memory.model` and
 `context.compaction.model`, which runs on the chat target) and the new-connection form share one
@@ -582,7 +591,8 @@ Every UI change must preserve:
 Covered states the smoke must visit: home in both themes, toolchain, traces and run detail,
 workspaces and sessions, a Markdown/code/Mermaid conversation, session controls, the branch view,
 a branch switch and a fork, a handoff review and its successor, a dispatch plan approval, a fleet
-contract preview and run, permission and cancellation, and a problem notification. This design work adds three: the six status tones rendered
+contract preview and run, the context window, permission and cancellation, and a problem
+notification. This design work adds three: the six status tones rendered
 side by side, a focus-visible capture of a button, an input and a table cell, and one forced-colors
 pass.
 

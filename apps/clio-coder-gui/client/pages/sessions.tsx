@@ -13,6 +13,7 @@ import { BranchPanel } from "../chat/BranchPanel.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { CommandPanel } from "../chat/CommandPanel.js";
 import { Composer, fillComposer } from "../chat/Composer.js";
+import { ContextPanel } from "../chat/ContextPanel.js";
 import {
 	CONTEXT_WARNING_LABEL,
 	EMPTY_EYEBROW,
@@ -393,6 +394,13 @@ function SessionTools({
 						capabilities={capabilities}
 						settledTurns={session.turns.filter((turn) => turn.status !== "running").length}
 						running={session.turns.at(-1)?.status === "running"}
+					/>
+					<ContextPanel
+						client={client}
+						sessionId={session.id}
+						sessionOpen={session.state === "open"}
+						capabilities={capabilities}
+						settledTurns={session.turns.filter((turn) => turn.status !== "running").length}
 					/>
 					<BranchPanel
 						client={client}

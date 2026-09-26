@@ -5,6 +5,7 @@ import { TURN_IMAGES_MAX_BASE64, type TurnImage } from "../../contracts/attachme
 import { SessionBoard } from "../../contracts/board.js";
 import { SessionTree } from "../../contracts/branches.js";
 import { Id } from "../../contracts/common.js";
+import { ContextLedger } from "../../contracts/context-ledger.js";
 import {
 	FleetPreview,
 	type FleetPreviewRequest,
@@ -745,6 +746,12 @@ export class Supervisor {
 			delete entry.rebase;
 		}
 	}
+	contextLedger(id: string) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.context)
+			throw new AppProblem("conflict", "This Clio Coder build does not report its context window.");
+		return this.projected(id, "_clio-coder/context/ledger", { sessionId: id }, ContextLedger);
+	}
 	private fleeting(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.fleet)
@@ -822,7 +829,13 @@ export class Supervisor {
 			throw new AppProblem("conflict", "This Clio build exposes no operator commands.");
 		const catalog = await this.commands(id);
 		const command = catalog.commands.find((row) => row.name === body.command);
-		if ((command?.injectsUserTurn && (body.command !== "tasks" || body.argv?.[0] === "hand")) || command?.promptTurn) {
+		// A command, or one of its subcommands, whose work belongs to a conversation turn is sent as one.
+		const subcommand = body.argv?.[0];
+		if (
+			(command?.injectsUserTurn && (body.command !== "tasks" || subcommand === "hand")) ||
+			command?.promptTurn ||
+			(subcommand !== undefined && command?.promptTurnSubcommands?.includes(subcommand))
+		) {
 			if (entry.client.capabilities.commands.promptTurns !== true)
 				throw new AppProblem(
 					"conflict",

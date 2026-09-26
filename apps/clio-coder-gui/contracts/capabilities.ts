@@ -1,6 +1,7 @@
 import { type Static, Type } from "typebox";
 import { BoardCapability } from "./board.js";
 import { BranchesCapability } from "./branches.js";
+import { ContextCapability } from "./context-ledger.js";
 import { FleetCapability } from "./fleet-run.js";
 import { HandoffCapability } from "./handoff.js";
 
@@ -97,6 +98,8 @@ export const AgentCapabilities = Type.Object(
 		handoff: Type.Optional(HandoffCapability),
 		/** Preview a fleet contract and start only the approved plan. */
 		fleet: Type.Optional(FleetCapability),
+		/** The context window accounting, read for the Context view. */
+		context: Type.Optional(ContextCapability),
 		/** ACP promptCapabilities.image: the agent accepts image blocks with a request. */
 		images: Type.Optional(Type.Boolean()),
 		/** True when the agent mediates every tool through its own safety policy. */

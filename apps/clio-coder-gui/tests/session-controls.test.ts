@@ -117,6 +117,26 @@ test("a prompt-turn command runs as a visible turn with its dispatch call inside
 	);
 });
 
+test("the context window is read from the agent, and recovery runs as a visible turn", async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const base = `/api/sessions/${session.id}`;
+	const ledger = await json(await h.request(`${base}/context`), routes.sessionContext.response);
+	assert.equal(ledger.usedTokens, 20480);
+	assert.equal(ledger.measured, true);
+	const recovered = await h.post(`${base}/commands`, { command: "context", argv: ["recover", "h1", "deliver"] });
+	assert.equal(recovered.status, 200);
+	const turn = h.supervisor.get(session.id).turns.at(-1);
+	assert.equal(turn?.prompt, "/context recover h1 deliver");
+	assert.equal(turn?.status, "succeeded");
+	assert.ok(h.supervisor.get(session.id).timeline.some((item) => item.text.includes("The paused turn continued")));
+	const reset = await h.post(`${base}/commands`, { command: "context", argv: ["reset", "--yes"] });
+	assert.equal(reset.status, 200);
+	assert.equal(h.supervisor.get(session.id).turns.length, 1, "a reset is a control reply, not a turn");
+});
+
 test("an older command peer refuses injected turns without submitting unrecognised slash text", async (t) => {
 	const h = await harness({}, { scenario: "markdown", env: { CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS: "0" } });
 	t.after(h.close);
@@ -375,6 +395,7 @@ test("an older ACP peer has no branches and refuses tree, switch and fork before
 	assert.equal((await h.post(`${base}/fork`, { turnId: "a1" })).status, 409);
 	assert.equal((await h.post(`${base}/handoff`, { goal: "Finish the survey report" })).status, 409);
 	assert.equal((await h.post(`${base}/fleet/preview`, { name: "survey" })).status, 409);
+	assert.equal((await h.request(`${base}/context`)).status, 409);
 	assert.doesNotMatch(
 		await readFile(join(h.home.path, "acp.jsonl"), "utf8"),
 		/session\/(tree|switch_turn|fork|handoff)|fleet\//,

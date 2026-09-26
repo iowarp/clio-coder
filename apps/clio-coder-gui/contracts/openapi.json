@@ -9937,6 +9937,21 @@
 											},
 											"additionalProperties": false
 										},
+										"context": {
+											"type": "object",
+											"required": ["version", "ledger"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"ledger": {
+													"type": "string",
+													"maxLength": 128
+												}
+											},
+											"additionalProperties": false
+										},
 										"images": {
 											"type": "boolean"
 										},
@@ -11793,6 +11808,426 @@
 				}
 			}
 		},
+		"/api/sessions/{id}/context": {
+			"get": {
+				"operationId": "sessionContext",
+				"summary": "The context window as Clio Coder accounts for it",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": [
+										"version",
+										"provider",
+										"model",
+										"contextWindow",
+										"contextWindowSource",
+										"contextWindowSlots",
+										"usedTokens",
+										"reserveTokens",
+										"freeTokens",
+										"percent",
+										"measured",
+										"compactionThreshold",
+										"compactionAuto",
+										"projectPreload",
+										"projectHandbookFiles",
+										"toolCount",
+										"groups",
+										"lastCompaction",
+										"promptCache"
+									],
+									"properties": {
+										"version": {
+											"type": "number",
+											"const": 1
+										},
+										"provider": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 300
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"model": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 300
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"contextWindow": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"contextWindowSource": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 300
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"contextWindowSlots": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["slots", "totalTokens"],
+													"properties": {
+														"slots": {
+															"type": "integer",
+															"minimum": 0
+														},
+														"totalTokens": {
+															"type": "integer",
+															"minimum": 0
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"usedTokens": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"reserveTokens": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"freeTokens": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"percent": {
+											"anyOf": [
+												{
+													"type": "number",
+													"minimum": 0
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"measured": {
+											"type": "boolean"
+										},
+										"compactionThreshold": {
+											"anyOf": [
+												{
+													"type": "number"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"compactionAuto": {
+											"type": "boolean"
+										},
+										"projectPreload": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 300
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"projectHandbookFiles": {
+											"anyOf": [
+												{
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 300
+													},
+													"maxItems": 16
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"toolCount": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"groups": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["category", "label", "tokens", "percent"],
+												"properties": {
+													"category": {
+														"type": "string",
+														"maxLength": 32
+													},
+													"label": {
+														"type": "string",
+														"maxLength": 300
+													},
+													"tokens": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"percent": {
+														"anyOf": [
+															{
+																"type": "number",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 32
+										},
+										"lastCompaction": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["stage", "tokensBefore", "tokensAfter", "trigger"],
+													"properties": {
+														"stage": {
+															"type": "string",
+															"maxLength": 300
+														},
+														"tokensBefore": {
+															"type": "integer",
+															"minimum": 0
+														},
+														"tokensAfter": {
+															"type": "integer",
+															"minimum": 0
+														},
+														"trigger": {
+															"type": "string",
+															"maxLength": 300
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"promptCache": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": [
+														"shellReused",
+														"cacheReadTokens",
+														"cacheWriteTokens",
+														"uncachedInputTokens",
+														"backendVerdict"
+													],
+													"properties": {
+														"shellReused": {
+															"type": "boolean"
+														},
+														"cacheReadTokens": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"cacheWriteTokens": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"uncachedInputTokens": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"backendVerdict": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "hot"
+																},
+																{
+																	"type": "string",
+																	"const": "partial"
+																},
+																{
+																	"type": "string",
+																	"const": "cold"
+																},
+																{
+																	"type": "string",
+																	"const": "small"
+																},
+																{
+																	"type": "string",
+																	"const": "unknown"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/sessions/{id}/fleet/preview": {
 			"post": {
 				"operationId": "previewFleetRun",
@@ -13256,6 +13691,14 @@
 													"promptTurn": {
 														"type": "boolean",
 														"const": true
+													},
+													"promptTurnSubcommands": {
+														"type": "array",
+														"items": {
+															"type": "string",
+															"maxLength": 64
+														},
+														"maxItems": 16
 													}
 												},
 												"additionalProperties": false

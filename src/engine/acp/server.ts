@@ -30,6 +30,7 @@ import {
 	classifyDecisionPresentation,
 	decisionFactsForPermission,
 } from "../../domains/safety/decision-presentation.js";
+import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../domains/session/entries.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
@@ -40,6 +41,7 @@ import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import type { AgentMessage, ImageContent } from "../types.js";
 import { ACP_BOARD_META_KEY, ACP_BOARD_METHOD, type AcpBoardSource, projectSessionBoard } from "./board.js";
 import type { AcpCommandCatalog, AcpCommandControl } from "./commands.js";
+import { ACP_CONTEXT_LEDGER_METHOD, ACP_CONTEXT_META_KEY, projectContextLedger } from "./context-ledger.js";
 import { ACP_DISPATCH_PLAN_META_KEY, projectDispatchPlanMeta } from "./dispatch-plan-meta.js";
 import { ACP_TURN_FAILED_MESSAGE, AcpRequestError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
 import {
@@ -226,6 +228,11 @@ export interface ClioAcpServerOptions {
 	 * the two fleet methods are not announced and refuse.
 	 */
 	fleet?: AcpFleetControl;
+	/**
+	 * The chat's context accounting, read for `_clio-coder/context/ledger`.
+	 * Absent means the method is not announced and refuses.
+	 */
+	contextLedger?: () => ContextLedger;
 	/**
 	 * Expands operator syntax in a prompt as the terminal does before it submits:
 	 * `@path` file and image references, prompt templates and `/skill` requests,
@@ -2152,6 +2159,8 @@ export interface AcpHandshakeFeatures {
 	handoff?: boolean;
 	/** Whether the fleet preview and run methods answer; absent reads as false. */
 	fleet?: boolean;
+	/** Whether `_clio-coder/context/ledger` answers; absent reads as false. */
+	contextLedger?: boolean;
 	/** Whether prompts are expanded, which is what admits image blocks; absent reads as false. */
 	images?: boolean;
 }
@@ -2386,6 +2395,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 									},
 								}
 							: {}),
+						...(features.contextLedger ? { [ACP_CONTEXT_META_KEY]: { version: 1, ledger: ACP_CONTEXT_LEDGER_METHOD } } : {}),
 						...(features.fleet
 							? {
 									[ACP_FLEET_META_KEY]: {
@@ -2469,6 +2479,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			branches: branchesWired(options),
 			handoff: handoffWired(options),
 			fleet: options.fleet !== undefined,
+			contextLedger: options.contextLedger !== undefined,
 			images: options.expandPrompt !== undefined,
 		});
 	const workspaceInstanceId = handshake.workspaceInstanceId;
@@ -3591,6 +3602,22 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return { cancelled };
 	});
 
+	// The terminal's /context window view, read and never recomputed.
+	options.transport.onRequest(ACP_CONTEXT_LEDGER_METHOD, (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		if (options.contextLedger === undefined) {
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		}
+		getSession(request);
+		try {
+			return projectContextLedger(options.contextLedger());
+		} catch (error) {
+			options.diagnostics?.(`context ledger failed: ${acpErrorMessage(error)}`);
+			throw new AcpRequestError(-32603, "context ledger could not be read", { code: "internal_error" });
+		}
+	});
+
 	const requireFleet = (): AcpFleetControl => {
 		if (options.fleet === undefined) throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		return options.fleet;
@@ -3910,7 +3937,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		// A prompt-turn command asks for approvals that bind to a call on the
 		// wire, and outside a prompt there is no turn to put that call in. It is
 		// refused here with the path that works, rather than admitted and denied.
-		if (options.commands.promptTurn?.(request.command) === true) {
+		if (options.commands.promptTurn?.(request.command, request.argv) === true) {
 			throw new AcpRequestError(-32602, "this command runs as a conversation turn; send it as a prompt", {
 				code: "prompt_turn_required",
 			});

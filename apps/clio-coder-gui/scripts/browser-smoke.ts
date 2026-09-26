@@ -906,6 +906,19 @@ try {
 		// Dismissing the notice is a press outside Session tools, which closes the menu.
 		await page.getByRole("button", { name: "Dismiss Fleet survey started", exact: true }).click();
 		await page.waitForFunction(() => !(document.querySelector(".conversation__tools") as HTMLDetailsElement).open);
+		// The context window: Clio Coder's own accounting, worded and never recomputed.
+		await page.locator(".conversation__tools > summary").click();
+		await page.getByText("Context window", { exact: true }).click();
+		const contextPanel = page.locator(".context-panel");
+		await contextPanel.getByText("20,480 tokens in use (16%), measured by the provider.", { exact: true }).waitFor();
+		await contextPanel.getByRole("rowheader", { name: "Conversation", exact: true }).waitFor();
+		await check("context-window");
+		if (width === 1600 || width === 390) {
+			await contextPanel.scrollIntoViewIfNeeded();
+			await page.screenshot({ path: join(output, `context-window-${width}.png`) });
+		}
+		await page.getByText("Context window", { exact: true }).click();
+		await page.keyboard.press("Escape");
 		// Branches: continuing from an earlier reply replays only that branch; forking moves the
 		// conversation to a new session and says the project's files were left alone.
 		await page.locator(".conversation__tools > summary").click();

@@ -210,10 +210,22 @@ const COMMANDS =
 					{
 						name: "context",
 						summary: "Work with project context",
-						usage: "/context <compact>",
+						usage: "/context <compact|reset|recover>",
 						group: "Session",
 						requiresSubcommand: true,
-						args: { subcommands: { compact: { positionals: [{ name: "instructions", required: false, rest: true }] } } },
+						promptTurnSubcommands: ["recover"],
+						args: {
+							subcommands: {
+								compact: { positionals: [{ name: "instructions", required: false, rest: true }] },
+								reset: { flags: [{ name: "--yes" }, { name: "--all" }] },
+								recover: {
+									positionals: [
+										{ name: "handoffId", required: true },
+										{ name: "action", required: true, values: ["reduce", "deliver"] },
+									],
+								},
+							},
+						},
 					},
 					{
 						name: "skill",
@@ -556,6 +568,7 @@ async function handle(frame) {
 														...(process.env.CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS !== "0" ? { promptTurns: true } : {}),
 													},
 													"clio-coder/board": { version: 1, method: "_clio-coder/session/board" },
+													"clio-coder/context": { version: 1, ledger: "_clio-coder/context/ledger" },
 													"clio-coder/fleet": {
 														version: 1,
 														preview: "_clio-coder/fleet/preview",
@@ -644,6 +657,12 @@ async function handle(frame) {
 										: scenario;
 				cancelled = false;
 				if (scenario === "crash") process.exit(9);
+				if (promptText.startsWith("/context recover ")) {
+					await delay(40);
+					text("The paused turn continued from the handoff.\n\nHandoff delivered.");
+					result = { stopReason: "end_turn", _meta: { "clio-coder/usage": usage } };
+					break;
+				}
 				if (promptText.startsWith("/council ")) {
 					// The council's dispatch call is announced in the turn, as the agent's host does.
 					update({
@@ -801,6 +820,39 @@ async function handle(frame) {
 				};
 				break;
 			}
+			case "_clio-coder/context/ledger":
+				if (!COMMANDS) throw Error("method_not_found");
+				result = {
+					version: 1,
+					provider: "fixture",
+					model: "fixture-model",
+					contextWindow: 131072,
+					contextWindowSource: "loaded",
+					contextWindowSlots: null,
+					usedTokens: 20480,
+					reserveTokens: 16384,
+					freeTokens: 94208,
+					percent: 15.625,
+					measured: true,
+					compactionThreshold: 0.8,
+					compactionAuto: true,
+					projectPreload: null,
+					projectHandbookFiles: ["CLIO-CODER.md"],
+					toolCount: 14,
+					groups: [
+						{ category: "system", label: "System prompt", tokens: 4096, percent: 3.125 },
+						{ category: "messages", label: "Conversation", tokens: 16384, percent: 12.5 },
+					],
+					lastCompaction: null,
+					promptCache: {
+						shellReused: true,
+						cacheReadTokens: 8000,
+						cacheWriteTokens: null,
+						uncachedInputTokens: 400,
+						backendVerdict: "hot",
+					},
+				};
+				break;
 			case "_clio-coder/fleet/preview":
 				if (!COMMANDS) throw Error("method_not_found");
 				result = fleetPreview(frame.params.name, frame.params.vars);

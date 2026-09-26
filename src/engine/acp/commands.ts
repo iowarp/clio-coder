@@ -97,6 +97,8 @@ export interface AcpCommandRule {
 	 * an approval with no visible call to bind to is refused.
 	 */
 	promptTurn?: true;
+	/** Subcommands whose work runs as a conversation turn, as {@link promptTurn} does for a whole command. */
+	promptTurnSubcommands?: ReadonlyArray<string>;
 }
 
 /**
@@ -117,7 +119,13 @@ export const ACP_COMMAND_RULES: ReadonlyArray<AcpCommandRule> = [
 	{ name: "council", streams: "dispatch", promptTurn: true },
 	// `/skill <name>` submits the expanded skill as a user turn; `/skill off` does not.
 	{ name: "skill", injectsUserTurn: true },
-	{ name: "context", subcommands: ["compact", "recall", "init", "refresh", "reset"] },
+	// `recover` continues the engine with no new input, so its model output
+	// streams inside the prompt turn that asked for it.
+	{
+		name: "context",
+		subcommands: ["compact", "recall", "init", "refresh", "reset", "recover"],
+		promptTurnSubcommands: ["recover"],
+	},
 	// `/tasks hand` submits the handoff text as a user turn; add/done/drop do not.
 	{ name: "tasks", subcommands: ["add", "hand", "done", "drop"], injectsUserTurn: true },
 	{ name: "memory", subcommands: ["seed"] },
@@ -142,6 +150,7 @@ const CONTEXT_REQUIREMENTS: Record<string, keyof AcpCommandHost> = {
 	init: "runInit",
 	refresh: "runContextRefresh",
 	reset: "runContextClear",
+	recover: "runHandoffRecovery",
 };
 function availableRules(host?: AcpCommandHost): ReadonlyArray<AcpCommandRule> {
 	if (!host) return ACP_COMMAND_RULES;
@@ -212,6 +221,7 @@ export interface AcpCommandDescriptor {
 	streams?: "dispatch";
 	injectsUserTurn?: true;
 	promptTurn?: true;
+	promptTurnSubcommands?: string[];
 }
 
 export interface AcpCommandCatalog {
@@ -305,6 +315,12 @@ export function acpCommandCatalog(host?: AcpCommandHost): AcpCommandCatalog {
 			...(rule.streams !== undefined ? { streams: rule.streams } : {}),
 			...(rule.injectsUserTurn === true ? { injectsUserTurn: true as const } : {}),
 			...(rule.promptTurn === true ? { promptTurn: true as const } : {}),
+			...(rule.promptTurnSubcommands !== undefined &&
+			rule.promptTurnSubcommands.some((name) => rule.subcommands?.includes(name) ?? true)
+				? {
+						promptTurnSubcommands: rule.promptTurnSubcommands.filter((name) => rule.subcommands?.includes(name) ?? true),
+					}
+				: {}),
 		});
 	}
 	return { version: 1, commands };
@@ -355,7 +371,6 @@ export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "pro
 			| "listWorkerRuns"
 			| "oracleBriefing"
 			| "getWorkerRosters"
-			| "runContextClear"
 			| "runCouncilDispatch"
 			| "runDoctor"
 			| "runLocalOperation"
@@ -369,6 +384,10 @@ export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "pro
 		runContextRefresh?: AcpHostOperation<[]>;
 		/** Write the session transcript; the reply says where, or why not. */
 		exportTranscript?: AcpHostOperation<[path?: string]>;
+		/** Reset generated project context; the options carry the operator's confirmation. */
+		runContextClear?: AcpHostOperation<Parameters<SlashCommandContext["runContextClear"]>>;
+		/** Resume a paused handoff; the reply waits for the turn it continues. */
+		runHandoffRecovery?: AcpHostOperation<[handoffId: string, action: "reduce" | "deliver"]>;
 		runInit?: AcpHostOperation<Parameters<SlashCommandContext["runInit"]>>;
 		cwd?: string;
 		/**
@@ -637,12 +656,31 @@ function headlessContext(
 			awaited("context init", () => runInit(options));
 		},
 		runContextClear: (options) => {
-			if (!host.runContextClear) {
+			const runContextClear = host.runContextClear;
+			if (!runContextClear) {
 				notice("error", "context reset is not wired in this session");
 				return;
 			}
-			host.runContextClear(options);
+			// A reset deletes generated project context. The terminal confirms it in
+			// a chooser; over the wire the confirmation is the flag, so no host is
+			// ever asked to reset without one.
+			if (options.confirmed !== true) {
+				notice(
+					"warn",
+					"Resetting removes generated project context. Confirm with /context reset --yes, or add --all to delete CLIO-CODER.md too. Nothing was changed.",
+				);
+				return;
+			}
+			awaited("context reset", () => runContextClear(options));
 		},
+		...(host.runHandoffRecovery
+			? {
+					runHandoffRecovery: (handoffId: string, action: "reduce" | "deliver") => {
+						const recover = host.runHandoffRecovery;
+						if (recover) awaited("context recover", () => recover(handoffId, action));
+					},
+				}
+			: {}),
 		runCompact: (instructions) => {
 			const runCompact = host.runCompact;
 			if (!runCompact) {
@@ -721,8 +759,8 @@ export interface AcpCommandControl {
 	invoke(request: { command: unknown; argv: unknown }): AcpCommandResult | Promise<AcpCommandResult>;
 	/** True when this command name submits a user turn, which a live prompt owns. */
 	injectsUserTurn(command: unknown): boolean;
-	/** True when this command's work must run inside a `session/prompt` turn; absent reads as false. */
-	promptTurn?(command: unknown): boolean;
+	/** True when this command, or its subcommand in `argv[0]`, must run inside a `session/prompt` turn; absent reads as false. */
+	promptTurn?(command: unknown, argv?: unknown): boolean;
 	/** Announced verbatim under `clio-coder/commands`. */
 	capability: Readonly<Record<string, unknown>>;
 }
@@ -739,7 +777,13 @@ export function acpCommandControl(host: AcpCommandHost): AcpCommandControl {
 			return invokeAcpCommand(request, host);
 		},
 		injectsUserTurn: (command) => typeof command === "string" && RULE_BY_NAME.get(command)?.injectsUserTurn === true,
-		promptTurn: (command) => typeof command === "string" && RULE_BY_NAME.get(command)?.promptTurn === true,
+		promptTurn: (command, argv) => {
+			if (typeof command !== "string") return false;
+			const rule = RULE_BY_NAME.get(command);
+			if (rule?.promptTurn === true) return true;
+			const subcommand = Array.isArray(argv) ? argv[0] : undefined;
+			return typeof subcommand === "string" && rule?.promptTurnSubcommands?.includes(subcommand) === true;
+		},
 		capability: { ...ACP_COMMANDS_CAPABILITY, count: availableRules(host).length },
 	};
 }

@@ -1811,7 +1811,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				recover: {
 					positionals: [
 						{ name: "handoffId", required: true },
-						{ name: "action", required: true },
+						{ name: "action", required: true, values: ["reduce", "deliver"] },
 					],
 				},
 				recall: { positionals: [...RECALL_POSITIONALS] },
@@ -1819,7 +1819,9 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					flags: CONTEXT_INIT_FLAG_TABLE.flatMap(({ flag, aliases = [] }) => [flag, ...aliases].map((name) => ({ name }))),
 				},
 				refresh: {},
-				reset: {},
+				// The terminal confirms a reset in its own chooser. A host with no chooser
+				// takes the confirmation as flags, and refuses a reset that carries none.
+				reset: { flags: [{ name: "--yes" }, { name: "--all" }] },
 			},
 		},
 		fromArgs(parsed) {
@@ -1847,8 +1849,18 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				}
 				case "refresh":
 					return { kind: "context-refresh" };
-				case "reset":
-					return { kind: "context-clear", options: {} };
+				case "reset": {
+					const confirmed = parsed.flags.has("--yes");
+					const all = parsed.flags.has("--all");
+					return {
+						kind: "context-clear",
+						options: {
+							...(all ? { all: true } : {}),
+							...(confirmed ? { confirmed: true } : {}),
+							...(all && confirmed ? { confirmedAll: true } : {}),
+						},
+					};
+				}
 				default:
 					return { kind: "context-view" };
 			}

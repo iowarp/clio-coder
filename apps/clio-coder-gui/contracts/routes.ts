@@ -4,6 +4,7 @@ import { SessionBoard } from "./board.js";
 import { BranchRequest, BranchSwitched, Forked, SessionTree } from "./branches.js";
 import { AgentCapabilities } from "./capabilities.js";
 import { Empty, Id } from "./common.js";
+import { ContextLedger } from "./context-ledger.js";
 import { DocPage, DocsSearch, DocsTree } from "./docs.js";
 import { EventCursor } from "./events.js";
 import { EvidenceDetail, EvidencePage } from "./evidence.js";
@@ -462,6 +463,13 @@ export const routes = {
 		body: BranchRequest,
 		response: Forked,
 		summary: "Start a new conversation from a turn; workspace files are not rewound",
+	}),
+	sessionContext: defineRoute({
+		...get,
+		path: "/api/sessions/:id/context",
+		params: operationParams,
+		response: ContextLedger,
+		summary: "The context window as Clio Coder accounts for it",
 	}),
 	previewFleetRun: defineRoute({
 		...post,
