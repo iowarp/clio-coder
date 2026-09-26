@@ -97,3 +97,6 @@ BT-014 exempts rule matches only when every span is inside an inert quoted argum
 Git damage-control scans also dequote simple-command words, join backslash-newline continuations, and skip recognized git global options to find the subcommand. Original scans remain active, so normalization adds coverage without removing conservative matches (review round 2 G).
 
 Each scan candidate must independently prove its matches inert before an exemption applies. Quoted prose cannot suppress a destructive normalized git command elsewhere in the same call (review round 2 A/G).
+
+
+For git clean, push and checkout, combined short flags are expanded for damage-control matching. Unique destructive long-option prefixes for reset and push are expanded; ambiguous prefixes and `--force-with-lease` are preserved (review round 2 G).

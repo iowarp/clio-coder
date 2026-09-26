@@ -21,3 +21,10 @@ it("review round 2 G: git word quoting, global options and continuations retain 
 		for (const level of ["default", "yolo"] as const)
 			strictEqual(engine.evaluate({ tool: "bash", args: { command } }, level).kind, expected, command);
 });
+
+it("review round 2 G: combined and abbreviated destructive git flags cannot bypass rules", () => {
+	const engine = createSafetyPolicyEngine({ cwd: process.cwd() });
+	for (const command of ["git clean -xfd", "git reset --har", "git push --forc"])
+		for (const level of ["default", "yolo"] as const)
+			strictEqual(engine.evaluate({ tool: "bash", args: { command } }, level).kind, "block", command);
+});
