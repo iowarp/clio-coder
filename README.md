@@ -98,18 +98,18 @@ and conversation views, session controls, fleet previews, traces, evidence, and
 configuration through the same runtime. The browser interface is in alpha.
 
 <p align="center">
-  <a href="assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.webp" alt="Clio Coder terminal boot screen with model and workspace information, fleet, shortcuts, composer and context footer" width="1000" /></a>
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/tui-boot.webp" alt="Clio Coder terminal boot screen with model and workspace information, fleet, shortcuts, composer and context footer" width="1000" /></a>
 </p>
 <p align="center"><sub>Terminal workspace. Select a capture to open its full-resolution image.</sub></p>
 <p align="center">
-  <a href="assets/screenshots/gui-overview.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-overview.webp" alt="Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings" width="1000" /></a>
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-overview.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-overview.webp" alt="Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings" width="1000" /></a>
 </p>
 
 <details>
 <summary><strong>Browser conversation view</strong></summary>
 
 <p align="center">
-  <a href="assets/screenshots/gui-conversation.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-conversation.webp" alt="Browser conversation with project prompts, session tools, file attachments and model selection" width="800" /></a>
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-conversation.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-conversation.webp" alt="Browser conversation with project prompts, session tools, file attachments and model selection" width="800" /></a>
 </p>
 
 ```bash

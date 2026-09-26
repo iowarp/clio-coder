@@ -1276,8 +1276,11 @@ function checkReadmeShape(): void {
 
 	const text = lines.join("\n");
 	// The README ships to npm without assets/, so an image must be an absolute URL.
-	for (const match of text.matchAll(/<img\b[^>]*\bsrc="([^"]+)"|!\[[^\]]*\]\(([^)\s]+)/g)) {
-		const src = match[1] ?? match[2] ?? "";
+	const imageSources = Array.from(
+		text.matchAll(/<img\b[^>]*\bsrc="([^"]+)"|!\[[^\]]*\]\(([^)\s]+)/g),
+		(match) => match[1] ?? match[2] ?? "",
+	);
+	for (const src of imageSources) {
 		if (!src.startsWith("https://")) {
 			fail(
 				"readme-shape",
@@ -1286,8 +1289,12 @@ function checkReadmeShape(): void {
 		}
 	}
 	for (const screenshot of README_SCREENSHOTS) {
-		if (!text.includes(`https://raw.githubusercontent.com/iowarp/clio-coder/main/${screenshot}`)) {
-			fail("readme-shape", `README.md must show the product screenshot ${screenshot} from main`);
+		if (
+			!imageSources.some(
+				(src) => src.startsWith("https://raw.githubusercontent.com/iowarp/clio-coder/") && src.endsWith(`/${screenshot}`),
+			)
+		) {
+			fail("readme-shape", `README.md must show the product screenshot ${screenshot} from a repository ref`);
 		} else if (!existsSync(join(root, screenshot))) {
 			fail("readme-shape", `${screenshot} is referenced by README.md but missing from the tree`);
 		}
