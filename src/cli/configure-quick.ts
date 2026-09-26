@@ -8,6 +8,11 @@ import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { targetRootUrl } from "../domains/providers/runtimes/common/local-synth.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
+import {
+	describeHostCapacity,
+	observeHostCapacityFacts,
+	resolveLocalConcurrency,
+} from "../domains/scheduling/local-capacity.js";
 import { ConfigureNavigation, type ConfigurePrompts } from "./configure-prompts.js";
 import {
 	applyTarget,
@@ -209,10 +214,17 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 				step = "save";
 				continue;
 			}
+			const hostFacts = observeHostCapacityFacts();
 			presenter.fields([
 				["Endpoint", url],
 				["Model", model],
-				["Connection", "live model discovery passed"],
+				[
+					"Connection",
+					connection.runtime.id === "alcf"
+						? "ALCF catalog read live; inference URL not checked; no generation request sent"
+						: "reachable; model list read live; no generation request sent",
+				],
+				["Machine", describeHostCapacity(hostFacts, resolveLocalConcurrency("auto", hostFacts))],
 			]);
 			if (first) {
 				const settings = readSettings();

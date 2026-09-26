@@ -6,7 +6,7 @@ Use this guide to connect a provider and choose where chat and workers run. Exac
 
 | Task | Entry point |
 | --- | --- |
-| Connect an endpoint | [First-run flow](#first-run-flow) or `clio-coder configure --quick` |
+| Connect a model | [First-run flow](#first-run-flow), or `clio-coder configure --quick` when you already know the endpoint |
 | Edit saved settings | `clio-coder configure --settings` or TUI `/settings` (alias `/config`) |
 | Inspect or probe targets | `clio-coder targets` |
 | Check a model list | `clio-coder models --target <id>` |
@@ -21,14 +21,17 @@ User settings are stored at `<configDir>/settings.yaml`. Project layers are `.cl
 
 ## First-run flow
 
-Run `clio-coder configure --quick` or start `clio-coder` without a chat target. Quick Connect asks for an endpoint, optional credential, and model, then probes model discovery before saving. It does not send a generation request. LM Studio and Ollama use their discovery APIs when available; other endpoints use their selected protocol runtime.
+Run `clio-coder configure` or start `clio-coder` without a chat target. Choose **Guided setup** and then the source you recognize: an app on this computer, a model server, an AI subscription, or a provider account/API. Clio chooses a unique internal connection id, fills known local addresses, and lists the relevant providers. An installed coding agent is a separate worker-only choice when adding another connection.
 
-1. Enter the endpoint URL and choose the matching runtime when prompted.
-2. Provide a key only when the endpoint requires one. Prefer an environment variable for secrets.
-3. Select an advertised model, or use Settings for an endpoint that needs a manually supplied model id or sign-in.
-4. Review and save the target. Start a session with `clio-coder`.
+1. Choose the provider or app. Provide a key or complete browser sign-in only when required.
+2. Confirm the server address when that provider has one. Clio performs a passive reachability and model-catalog probe when the runtime supports it; this sends no generation request.
+3. Select a model from the live or clearly labeled catalog/cache list. If a discoverable endpoint returns no models, the normal path is to start the server or load a model and choose **Check again**. Typing an unverified wire id is an explicitly advanced fallback.
+4. Review the evidence. The screen distinguishes reachable, live model discovery, catalog/cache fallback, and facts not checked. The compact summary keeps Save, Back, and Cancel visible on a short terminal. **Connection and machine details** shows usable CPUs, available memory, and automatic local-worker sizing. Clio states that GPU/VRAM, model fit, answer quality, and tool use were not tested.
+5. Save. The first connection becomes the chat and fleet model; shipped defaults handle the remaining settings.
 
-For the full editor use `clio-coder configure --settings`. Jump to a section with `clio-coder configure --section targets|chat|fleet|context|safety|interface|integrations|advanced`. Runtime IDs available in the installed build come from `clio-coder configure --list`.
+`clio-coder configure --quick` retains the URL-first shortcut. It identifies compatible local runtimes where possible, requires live model discovery, and is intended for users who already know the endpoint.
+
+For saved defaults use `clio-coder configure --settings`. Each area shows its complete setting catalog in one grouped menu; uncommon controls are not hidden behind a second page. Chat, fleet, and proactive-memory routes select a connection and then offer its discovered/catalog models instead of asking for a handwritten model id. **Use connection default** keeps inheritance, so later changes to that connection’s default also apply to the route. Proactive memory offers **Rules only** to avoid a background model call. Jump to a section with `clio-coder configure --section targets|chat|fleet|context|safety|interface|integrations|advanced`. Runtime IDs available in the installed build come from `clio-coder configure --list`.
 
 ## Advanced settings
 
@@ -228,7 +231,7 @@ Three version-2 keys are retired the same way. `integrations.externalAgents.entr
 
 In the TUI, open `/settings targets` (or `/config targets`), choose **Add target**, or open a target and choose **Edit URL, runtime and default model**. The existing configure wizard runs in the composer dock, with the same probing, model validation and review-before-save behavior. Enter advances, Esc goes back, and Ctrl+C cancels target setup. **Save target** writes global target settings and keeps explicit chat, fleet and memory route defaults. Browser sign-in stores credentials immediately; other target settings wait for Save.
 
-Use `clio-coder configure --quick` for discovery-led setup, `clio-coder configure --section targets` for the target console, or `clio-coder targets add` for the target wizard. The non-interactive flag surface is documented by `clio-coder configure --help` and implemented in [`src/cli/configure.ts`](../../src/cli/configure.ts).
+Use guided `clio-coder configure` for source-led setup, `clio-coder configure --quick` for the URL-first shortcut, `clio-coder configure --section targets` for the target console, or `clio-coder targets add` for the target wizard. The non-interactive flag surface is documented by `clio-coder configure --help` and implemented in [`src/cli/configure.ts`](../../src/cli/configure.ts).
 
 A target binds an id to a registered runtime, endpoint/auth, model defaults, and optional capability or runtime-specific settings. Example user settings:
 

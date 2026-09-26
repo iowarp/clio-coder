@@ -17,7 +17,7 @@ function maxLength(values: ReadonlyArray<string>): number {
 	return values.reduce((widest, value) => Math.max(widest, value.length), 0);
 }
 
-export type ConfigureCategory = "local-app" | "local-http" | "chatgpt" | "cloud-api" | "all";
+export type ConfigureCategory = "local-app" | "local-server" | "subscription" | "cloud-api" | "external-worker";
 
 export interface CategoryChoice {
 	category: ConfigureCategory;
@@ -30,34 +30,33 @@ export interface CategoryChoice {
 export const CONFIGURE_CATEGORY_CHOICES: readonly CategoryChoice[] = [
 	{
 		category: "local-app",
-		label: "Local app",
-		summary: "Ollama or LM Studio (recommended for new users)",
-		aliases: ["local"],
+		label: "An app on this computer",
+		summary: "Ollama, LM Studio, or Lemonade",
+		aliases: ["local", "app"],
 	},
 	{
-		category: "local-http",
-		label: "Local HTTP server",
-		summary: "llama.cpp / vLLM / SGLang / OpenAI/Anthropic-compatible",
-		aliases: ["http"],
+		category: "local-server",
+		label: "A model server",
+		summary: "llama.cpp, vLLM, SGLang, LiteLLM, or a compatible server",
+		aliases: ["local-http", "http", "server"],
 	},
 	{
-		category: "chatgpt",
-		label: "ChatGPT plan",
-		summary: "Plus or Pro via Codex OAuth",
-		aliases: ["codex"],
+		category: "subscription",
+		label: "An AI subscription",
+		summary: "ChatGPT Plus/Pro, Claude Pro/Max, or an installed Claude tool",
+		aliases: ["chatgpt", "codex", "subscription"],
 	},
 	{
 		category: "cloud-api",
-		label: "Cloud API key",
-		summary:
-			"Anthropic, OpenAI, OpenRouter, Groq, Google, DeepSeek, Mistral, Bedrock, or any OpenAI/Anthropic-compatible endpoint (e.g. Inception)",
-		aliases: ["cloud"],
+		label: "A provider account or API",
+		summary: "Anthropic, OpenAI, Google, OpenRouter, Groq, Mistral, Bedrock, ALCF, or a compatible API",
+		aliases: ["cloud", "api"],
 	},
 	{
-		category: "all",
-		label: "All runtimes",
-		summary: "advanced (full list)",
-		aliases: ["a"],
+		category: "external-worker",
+		label: "An installed coding agent",
+		summary: "Codex, OpenCode, Pi, or Antigravity as a worker (not chat)",
+		aliases: ["external", "worker", "agent"],
 	},
 ];
 

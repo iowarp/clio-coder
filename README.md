@@ -46,10 +46,11 @@ clio-coder configure
 clio-coder
 ```
 
-1. Choose **Quick Connect** and enter your model endpoint, credentials if required,
-   and model. LM Studio commonly uses `http://localhost:1234`; Ollama uses
-   `http://localhost:11434`. Cloud APIs and subscription sign-in are under
-   **Settings → Connections**.
+1. Choose **Guided setup**, then pick the description you recognize: an app on
+   this computer, a model server, an AI subscription, or a provider account.
+   Clio fills in the internal connection name, probes the endpoint when the
+   provider allows it, and lets you select from the model list instead of typing
+   an id. **Connect by endpoint** remains a shortcut when you already know a URL.
 2. Start Clio in your project and give a concrete request:
 
    > Explain how this repository builds and runs its tests. Identify the main

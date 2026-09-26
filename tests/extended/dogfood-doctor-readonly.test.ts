@@ -146,10 +146,10 @@ describe("contracts/DOG-001 doctor credential reads", () => {
 						match(credential?.detail ?? "", stored ? /^600$/ : /^missing /);
 						const model = report.findings.find((finding) => finding.name === "model fixture");
 						strictEqual(model?.ok, true);
-						match(model?.detail ?? "", /advertised by .* now$/);
+						match(model?.detail ?? "", /found in live list from /);
 					} else {
 						match(result.stdout, stored ? /OK\s+credentials\s+600/ : /!!\s+credentials\s+missing /);
-						match(result.stdout, /OK\s+model fixture\s+.*advertised by .* now/);
+						match(result.stdout, /OK\s+model fixture\s+.*found in live list from /);
 					}
 				}
 				strictEqual(requests.filter((request) => request === "GET /v1/model/info").length, 4);

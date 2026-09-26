@@ -625,7 +625,7 @@ export function inventoryGap(
 	return `${target.url ?? runtime.id} answered no model list${why}; type the id the server serves`;
 }
 
-const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama", "lmstudio"]);
+const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama", "lmstudio", "lemonade"]);
 
 // Generic protocol-compatible runtimes. They are classified local-http (they
 // carry a probe and no cloud catalog entry), but a hosted endpoint such as
@@ -640,10 +640,10 @@ export function runtimesForCategory(
 	switch (category) {
 		case "local-app":
 			return entries.filter((entry) => LOCAL_APP_RUNTIME_IDS.has(entry.runtimeId));
-		case "local-http":
+		case "local-server":
 			return entries.filter((entry) => entry.group === "local-http" && !LOCAL_APP_RUNTIME_IDS.has(entry.runtimeId));
-		case "chatgpt":
-			return entries.filter((entry) => entry.runtimeId === "openai-codex");
+		case "subscription":
+			return entries.filter((entry) => entry.group === "featured" || entry.group === "subscription");
 		case "cloud-api": {
 			const byLabel = (a: ProviderSupportEntry, b: ProviderSupportEntry) =>
 				a.label.localeCompare(b.label) || a.runtimeId.localeCompare(b.runtimeId);
@@ -651,16 +651,19 @@ export function runtimesForCategory(
 				.filter((entry) => entry.group === "cloud-api")
 				.slice()
 				.sort(byLabel);
-			// Surface the generic OpenAI/Anthropic-compatible runtimes here too,
-			// shown last and under the cloud heading rather than their native group.
+			// A compatible API may be hosted or self-managed, so it is intentionally
+			// reachable from both trajectories. This is classification, not a claim
+			// about where the endpoint runs.
 			const compat = entries
 				.filter((entry) => PROTOCOL_COMPAT_RUNTIME_IDS.has(entry.runtimeId))
 				.map((entry) => ({ ...entry, group: "cloud-api" as const }))
 				.sort(byLabel);
 			return [...named, ...compat];
 		}
-		case "all":
-			return entries.slice();
+		case "external-worker":
+			return entries.filter(
+				(entry) => entry.group === "external-worker" || (entry.group === "subscription" && !entry.connectable),
+			);
 	}
 }
 

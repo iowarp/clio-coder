@@ -33,9 +33,11 @@ architecture guides and current source for implementation decisions.
 | Submit, poll, and cancel Slurm jobs through the clio-kit MCP server | [Slurm](guide/slurm.md) |
 
 A minimal first run needs Node.js 22.19 or newer and a model to talk to: a
-local inference server such as Ollama or LM Studio, a lab gateway, or a cloud
-API. Quick Connect asks for the endpoint, a key when the server needs one, and
-a model.
+local app such as Ollama or LM Studio, a lab gateway, an AI subscription, or a
+cloud API. Guided setup starts from those recognizable choices, fills in Clio's
+internal connection name, checks the endpoint when possible, and offers the
+models it can discover. The endpoint shortcut is available for operators who
+already know a server URL.
 
 ```bash
 npm install -g @iowarp/clio-coder

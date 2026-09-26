@@ -52,11 +52,13 @@ function fixtures(): void {
 
 class ScriptedWizard extends TargetWizardSurface {
 	seen: string[] = [];
+	private inspected = false;
 	constructor(
 		private readonly runtime: string,
 		private readonly url: string,
 		private readonly model: string,
 		private readonly save = true,
+		private readonly inspect = false,
 	) {
 		super(
 			() => {},
@@ -78,13 +80,19 @@ class ScriptedWizard extends TargetWizardSurface {
 		);
 		this.seen.push(heading);
 		let value: unknown;
-		if (heading.includes("How will")) value = "local-http";
-		else if (heading.includes("Which runtime")) value = this.runtime;
+		if (heading.includes("Where does your model")) value = "local-server";
+		else if (heading.includes("Which provider")) value = this.runtime;
 		else if (heading.includes("Which model")) value = this.model;
-		else if (heading.includes("Review target")) {
-			value = this.save ? "save" : "cancel";
+		else if (heading.includes("Review what Clio could verify")) {
+			for (const width of [40, 60, 80]) {
+				const screen = this.render(width).map(stripTerminalSequences).join("\n");
+				for (const control of ["Save target", "Back", "Cancel setup", "No generation", "GPU/VRAM"])
+					ok(screen.includes(control), `${control} missing from ${width}-column review: ${screen}`);
+			}
+			value = this.inspect && !this.inspected ? "details" : this.save ? "save" : "cancel";
+			this.inspected = true;
 			ok(
-				!readSettings().targets.some((target) => target.id === "dock-target") || this.runtime === "wizard-two",
+				!readSettings().targets.some((target) => target.id === "wizard-one") || this.runtime === "wizard-two",
 				"Add remains a draft until Save",
 			);
 		} else value = options.choices[0]?.value;
@@ -103,11 +111,7 @@ class ScriptedWizard extends TargetWizardSurface {
 			typeof options.heading === "string" ? options.heading : (options.heading ?? []).join(" "),
 		);
 		this.seen.push(heading);
-		const value = heading.includes("Target id")
-			? "dock-target"
-			: heading.includes("server") || heading.includes("URL")
-				? this.url
-				: (options.initial ?? "");
+		const value = heading.includes("server") || heading.includes("URL") ? this.url : (options.initial ?? "");
 		this.handleInput("\x15");
 		if (value) this.handleInput(value);
 		this.handleInput("\r");
@@ -120,9 +124,9 @@ test("the dock hosts shared target add and URL/runtime/model editing through Sav
 	try {
 		fixtures();
 		initializeClioHome();
-		const add = new ScriptedWizard("wizard-one", "localhost:9911", "model-a");
+		const add = new ScriptedWizard("wizard-one", "localhost:9911", "model-a", true, true);
 		strictEqual(await add.start({ mode: "add" }), 0, add.render(200).map(stripTerminalSequences).join("\n"));
-		const target = readSettings().targets.find((entry) => entry.id === "dock-target");
+		const target = readSettings().targets.find((entry) => entry.id === "wizard-one");
 		ok(
 			target,
 			JSON.stringify({
@@ -134,6 +138,8 @@ test("the dock hosts shared target add and URL/runtime/model editing through Sav
 		strictEqual(target.runtime, "wizard-one");
 		strictEqual(target.url, "http://localhost:9911");
 		strictEqual(target.defaultModel, "model-a");
+		match(add.seen.join("\n"), /Machine observations.*usable CPUs.*available memory.*automatic local workers/u);
+		match(add.seen.join("\n"), /Connection address.*No generation request was sent/u);
 		updateSettings((settings) => {
 			settings.chat.target = target.id;
 			settings.chat.model = "model-a";
@@ -148,7 +154,7 @@ test("the dock hosts shared target add and URL/runtime/model editing through Sav
 		strictEqual(updated.defaultModel, "model-b");
 		strictEqual(settings.chat.target, target.id);
 		strictEqual(settings.chat.model, "model-a", "editing the target does not rewrite chat's explicit model");
-		match(edit.seen.join("\n"), /Which runtime/);
+		match(edit.seen.join("\n"), /Which provider/);
 	} finally {
 		env.restore();
 	}
@@ -259,7 +265,7 @@ test("closing setup during a probe cannot save a late target (#385)", async () =
 			wizard.cancel();
 			release();
 			strictEqual(await pending, 130);
-			ok(!readSettings().targets.some((target) => target.id === "dock-target"));
+			ok(!readSettings().targets.some((target) => target.id === "wizard-one"));
 		} finally {
 			if (original) runtime.probe = original;
 			else delete runtime.probe;

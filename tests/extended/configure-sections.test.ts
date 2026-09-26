@@ -370,6 +370,7 @@ async function runWizard(
 	registerBuiltinRuntimes(getRuntimeRegistry());
 	const pending = runOnboardingWizard({ in: tty.input, out: tty.output }, options);
 	let settled = false;
+	let cueOffset = 0;
 	void pending.then(() => {
 		settled = true;
 	});
@@ -379,10 +380,10 @@ async function runWizard(
 			if (step.waitFor !== undefined) {
 				const cue = step.waitFor;
 				const deadline = Date.now() + (step.optional ? 2_000 : 20_000);
-				while (!tty.transcript().includes(cue) && !settled && Date.now() < deadline) {
+				while (tty.transcript().indexOf(cue, cueOffset) < 0 && !settled && Date.now() < deadline) {
 					await new Promise((resolve) => setTimeout(resolve, 10));
 				}
-				if (!tty.transcript().includes(cue)) {
+				if (tty.transcript().indexOf(cue, cueOffset) < 0) {
 					if (step.optional) continue;
 					throw new Error(`wizard never showed ${JSON.stringify(cue)}:\n${plainText(tty.transcript())}`);
 				}
@@ -390,6 +391,7 @@ async function runWizard(
 				await new Promise((resolve) => setTimeout(resolve, step.settleMs ?? 100));
 			}
 			for (const key of step.keys) {
+				cueOffset = tty.transcript().length;
 				tty.input.push(key);
 				await new Promise((resolve) => setImmediate(resolve));
 			}
@@ -409,10 +411,12 @@ async function runWizard(
 function stepsDownToRuntime(runtimeId: string): string[] {
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
-	const entries = runtimesForCategory(listProviderSupportEntries(registry.list()), "local-http");
+	const entries = runtimesForCategory(listProviderSupportEntries(registry.list()), "local-server");
 	const index = entries.findIndex((entry) => entry.runtimeId === runtimeId);
 	ok(index >= 0, `${runtimeId} is not in the local HTTP category`);
-	return Array.from({ length: index }, () => DOWN);
+	const featured = entries.findIndex((entry) => entry.featured);
+	const initial = Math.max(0, featured);
+	return Array.from({ length: (index - initial + entries.length) % entries.length }, () => DOWN);
 }
 
 /** Everything the terminal drew, with the cursor and color escapes taken out. */
@@ -456,20 +460,17 @@ printf '%s\\n' 'agy 1.2.3'
 }
 
 describe("contracts/configure-onboarding", () => {
-	it("takes a fresh home through the wizard on arrow keys alone and writes what it says it wrote", async () => {
+	it("takes a fresh home through guided setup with listed choices and writes what it says it wrote", async () => {
 		const testEnv = unconfiguredEnv();
 		const server = await modelServer();
 		try {
 			const result = await runWizard(testEnv.env, [
-				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
-				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
-				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`wizard-target`.split(""), ENTER] },
+				{ waitFor: "Where does your model come from?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which provider or app do you use?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
 				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
 				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [DOWN, ENTER] },
-				{ waitFor: "How hard should it think?", keys: [DOWN, ENTER] },
-				{ waitFor: "Context window in tokens", keys: [ENTER] },
-				{ waitFor: "Review target", keys: [ENTER] },
+				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
 				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
@@ -477,12 +478,12 @@ describe("contracts/configure-onboarding", () => {
 			const screen = plainText(result.transcript());
 			for (const expected of [
 				"Welcome to Clio Coder",
-				"How will you connect Clio to a model?",
+				"Where does your model come from?",
 				"↑/↓ move",
 				"reachable, 2 models",
-				"target wizard-target saved",
-				"chat runs on wizard-target",
-				"fleet default is wizard-target",
+				"target openai-compat saved",
+				"chat runs on openai-compat",
+				"fleet default is openai-compat",
 				"settings written to",
 				"clio-coder configure",
 				"Done",
@@ -496,15 +497,17 @@ describe("contracts/configure-onboarding", () => {
 
 			ok(existsSync(testEnv.settingsFile), "the wizard must write settings.yaml");
 			const settings = readFileSync(testEnv.settingsFile, "utf8");
-			match(settings, /id: wizard-target/u);
+			match(settings, /id: openai-compat/u);
 			match(settings, /runtime: openai-compat/u);
 			match(settings, /defaultModel: beta-2/u, "the model the arrow keys landed on is the one saved");
-			match(settings, /target: wizard-target/u);
-			// The level picker opens on `low`, so one press down is `medium`.
-			match(settings, /thinkingLevel: medium/u);
-			// openai-compat reports nothing about reasoning, so the thinking answer
-			// is also what records whether the model has it.
-			match(settings, /reasoning: true/u);
+			match(settings, /target: openai-compat/u);
+			const saved = parse(settings);
+			strictEqual(saved.chat.thinkingLevel ?? "low", "low");
+			strictEqual(saved.fleet.default.thinkingLevel ?? "off", "off");
+			ok(!/reasoning: true/u.test(settings), "first-run defaults cannot establish reasoning capability");
+			ok(!screen.includes("Target id"));
+			ok(!screen.includes("How hard should it think?"));
+			ok(!screen.includes("Context window in tokens"));
 		} finally {
 			await server.close();
 			testEnv.cleanup();
@@ -517,16 +520,13 @@ describe("contracts/configure-onboarding", () => {
 		const env = { ...testEnv.env, PATH: fakeAgentOnPath(testEnv.root, "opencode") };
 		try {
 			const result = await runWizard(env, [
-				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
-				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
-				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`peer-target`.split(""), ENTER] },
+				{ waitFor: "Where does your model come from?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which provider or app do you use?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
 				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
 				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [ENTER] },
-				{ waitFor: "How hard should it think?", keys: [ENTER] },
-				{ waitFor: "Context window in tokens", keys: [ENTER] },
 				// Space ticks the row, enter confirms the whole list at once.
-				{ waitFor: "Review target", keys: [ENTER] },
+				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
 				{ waitFor: "Delegate to any of these?", keys: [" ", ENTER] },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
@@ -559,17 +559,14 @@ describe("contracts/configure-onboarding", () => {
 		const env = { ...testEnv.env, PATH: fakeAntigravityOnPath(testEnv.root) };
 		try {
 			const result = await runWizard(env, [
-				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
-				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
-				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`primary-target`.split(""), ENTER] },
+				{ waitFor: "Where does your model come from?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which provider or app do you use?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
 				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
 				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [ENTER] },
-				{ waitFor: "How hard should it think?", keys: [ENTER] },
-				{ waitFor: "Context window in tokens", keys: [ENTER] },
 				{ waitFor: "Add your local Antigravity research colleague?", keys: [DOWN, ENTER] },
 				{ waitFor: "Antigravity research model", keys: [ENTER] },
-				{ waitFor: "Review target", keys: [ENTER] },
+				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
 				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
@@ -578,8 +575,8 @@ describe("contracts/configure-onboarding", () => {
 			ok(screen.includes("optional, experimental, dispatch-only"), screen);
 			ok(screen.includes("agy-alpha — Agy Alpha"), screen);
 			const settings = readFileSync(testEnv.settingsFile, "utf8");
-			match(settings, /id: primary-target/u);
-			match(settings, /chat:[\s\S]*target: primary-target/u);
+			match(settings, /id: openai-compat/u);
+			match(settings, /chat:[\s\S]*target: openai-compat/u);
 			match(settings, /id: antigravity-code/u);
 			match(settings, /runtime: antigravity-code/u);
 			match(settings, /defaultModel: agy-alpha/u);
@@ -595,9 +592,9 @@ describe("contracts/configure-onboarding", () => {
 		const testEnv = unconfiguredEnv();
 		try {
 			const result = await runWizard(testEnv.env, [
-				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
-				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("llamacpp"), ENTER] },
-				{ waitFor: "Target id", keys: [ESCAPE] },
+				{ waitFor: "Where does your model come from?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which provider or app do you use?", keys: [...stepsDownToRuntime("llamacpp"), ENTER] },
+				{ waitFor: "How should Clio get the API key?", keys: [ESCAPE] },
 				// The runtime list is back, drawing the same words it drew before, so
 				// these two wait on the redraw rather than on text. The wait is longer
 				// than readline's 500ms escape-sequence timeout: a lone Escape is only
@@ -609,18 +606,18 @@ describe("contracts/configure-onboarding", () => {
 			strictEqual(result.code, 130, "backing out of the first step leaves Clio unconfigured");
 
 			const screen = plainText(result.transcript());
-			const askedTargetId = screen.lastIndexOf("Target id");
-			const reopened = screen.indexOf("Which runtime?", askedTargetId);
+			const credentialAt = screen.lastIndexOf("How should Clio get the API key?");
+			const reopened = screen.indexOf("Which provider or app do you use?", credentialAt);
 			ok(reopened > 0, `escape on step 3 did not reopen step 2:\n${screen}`);
 			// Reopened on the runtime that was already chosen, which is what "without
 			// losing the earlier answers" has to mean for a list step.
 			ok(
-				/❯ llamacpp/u.test(screen.slice(reopened)),
+				/❯ llama\.cpp/u.test(screen.slice(reopened)),
 				`step 2 reopened at the top of the list instead of on its answer:\n${screen.slice(reopened)}`,
 			);
 			// Step 1's answer was on the rail the whole time, and step 3 left no row
 			// behind when it was abandoned.
-			ok(screen.slice(0, reopened).includes("Local HTTP server"), `step 1's answer was lost:\n${screen}`);
+			ok(screen.slice(0, reopened).includes("A model server"), `step 1's answer was lost:\n${screen}`);
 			ok(!/Target id\s{4,}\S/u.test(screen), "the abandoned step must not leave an answer row behind");
 			ok(screen.includes("Cancelled; target settings not saved"), `no closing line:\n${screen}`);
 			strictEqual(existsSync(testEnv.settingsFile), false, "a cancelled wizard creates no settings file");
@@ -632,7 +629,7 @@ describe("contracts/configure-onboarding", () => {
 	it("exits 130 when the very first step is cancelled, because nothing is configured", async () => {
 		const testEnv = unconfiguredEnv();
 		try {
-			const result = await runWizard(testEnv.env, [{ waitFor: "How will you connect Clio to a model?", keys: [ESCAPE] }]);
+			const result = await runWizard(testEnv.env, [{ waitFor: "Where does your model come from?", keys: [ESCAPE] }]);
 			strictEqual(result.code, 130);
 			match(result.stderr, /configuration cancelled/u);
 			strictEqual(existsSync(testEnv.settingsFile), false);
@@ -651,7 +648,6 @@ describe("contracts/configure-onboarding", () => {
 			const result = await runWizard(
 				testEnv.env,
 				[
-					{ waitFor: "Target id", keys: [ENTER] },
 					{ waitFor: "Sign in to", keys: [DOWN, ENTER] },
 					{ waitFor: "ALCF gateway URL", keys: [ENTER] },
 					{ waitFor: "the ALCF gateway URL is required", keys: [CTRL_C] },
@@ -679,7 +675,7 @@ describe("contracts/configure-onboarding", () => {
 			}) as typeof process.stdout.write;
 			let numbered: Awaited<ReturnType<typeof captureConfigure>>;
 			try {
-				numbered = await captureConfigure([], testEnv.env, ["all\n", "alcf\n", "\n", "\n", "q\n"]);
+				numbered = await captureConfigure([], testEnv.env, ["cloud-api\n", "alcf\n", "\n", "\n", "q\n"]);
 			} finally {
 				process.stdout.write = origStdoutWrite;
 			}
@@ -706,7 +702,6 @@ describe("contracts/configure-onboarding", () => {
 			const result = await runWizard(
 				localEnv.env,
 				[
-					{ waitFor: "Target id", keys: [ENTER] },
 					{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
 					{ waitFor: "Where is the server?", keys: [CTRL_C] },
 				],
@@ -753,15 +748,14 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 		const env = { ...testEnv.env, [envVar]: token };
 		try {
 			const result = await runWizard(env, [
-				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
-				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("litellm"), ENTER] },
-				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`litellm-env-target`.split(""), ENTER] },
+				{ waitFor: "Where does your model come from?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which provider or app do you use?", keys: [...stepsDownToRuntime("litellm"), ENTER] },
 				// LiteLLM defaults to storing a key; UP selects an environment variable.
 				{ waitFor: "How should Clio get the API key?", keys: ["\x1b[A", ENTER] },
 				{ waitFor: "Which environment variable?", keys: [CLEAR_LINE, ...envVar.split(""), ENTER] },
 				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [ENTER] },
-				{ waitFor: "Review target", keys: [ENTER] },
+				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
 				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
@@ -776,7 +770,7 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 			ok(!screen.includes("not reachable"), `an authenticated gateway must not read as unreachable:\n${screen}`);
 
 			const settings = readFileSync(testEnv.settingsFile, "utf8");
-			match(settings, /id: litellm-env-target/u);
+			match(settings, /id: litellm/u);
 			match(settings, /runtime: litellm/u);
 			match(settings, /defaultModel: gateway-a/u, "the model picker must show the gateway's own catalog");
 			match(settings, new RegExp(`apiKeyEnvVar: ${envVar}`, "u"));
@@ -791,9 +785,8 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 		const server = await litellmServer("sk-a-key-this-run-never-sends");
 		try {
 			const result = await runWizard(testEnv.env, [
-				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
-				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("litellm"), ENTER] },
-				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`litellm-nokey-target`.split(""), ENTER] },
+				{ waitFor: "Where does your model come from?", keys: [DOWN, ENTER] },
+				{ waitFor: "Which provider or app do you use?", keys: [...stepsDownToRuntime("litellm"), ENTER] },
 				// Deliberately skip the default stored-key choice.
 				{ waitFor: "How should Clio get the API key?", keys: [DOWN, ENTER] },
 				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
@@ -801,7 +794,7 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 				{ waitFor: "Paste the API key", keys: [..."sk-a-key-this-run-never-sends".split(""), ENTER] },
 				{ waitFor: "Where is the server?", keys: [ENTER] },
 				{ waitFor: "Which model?", keys: [ENTER] },
-				{ waitFor: "Review target", keys: [ENTER] },
+				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
 				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
@@ -811,7 +804,7 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 			ok(!screen.includes("served no model catalog"), `the generic message must not survive an auth failure:\n${screen}`);
 
 			const settings = readFileSync(testEnv.settingsFile, "utf8");
-			match(settings, /id: litellm-nokey-target/u);
+			match(settings, /id: litellm/u);
 			match(settings, /runtime: litellm/u);
 			match(settings, /defaultModel: gateway-a/u, "the corrected credential retrieves the real catalog");
 			ok(!screen.includes("answered no model list"));
@@ -985,9 +978,9 @@ describe("contracts/configure-sections", () => {
 		const testEnv = isolatedEnv();
 		try {
 			// Top menu -> Chat -> chat thinking level -> high -> back -> quit.
-			const res = await captureConfigure([], testEnv.env, ["2\n", "1\n", "high\n", "b\n", "q\n"]);
+			const res = await captureConfigure([], testEnv.env, ["2\n", "2\n", "high\n", "Save\n", "b\n", "q\n"]);
 			strictEqual(res.code, 0, res.stderr);
-			match(res.stdout, /Chat thinking level set to high/u);
+			match(res.stdout, /Thinking level saved/u);
 			match(readFileSync(testEnv.settingsFile, "utf8"), /thinkingLevel: high/u);
 		} finally {
 			testEnv.cleanup();
@@ -997,9 +990,9 @@ describe("contracts/configure-sections", () => {
 	it("leaves a setting alone, and says so, when the answer is not one of its values", async () => {
 		const testEnv = isolatedEnv();
 		try {
-			const res = await captureConfigure([], testEnv.env, ["2\n", "1\n", "sideways\n", "b\n", "q\n"]);
+			const res = await captureConfigure([], testEnv.env, ["2\n", "2\n", "sideways\n", "b\n", "q\n"]);
 			strictEqual(res.code, 0, res.stderr);
-			match(res.stdout, /must be one of/u);
+			match(res.stdout, /Choose one of/u);
 			match(readFileSync(testEnv.settingsFile, "utf8"), /thinkingLevel: low/u);
 		} finally {
 			testEnv.cleanup();
@@ -1031,7 +1024,7 @@ describe("contracts/configure-sections", () => {
 	it("moved controls save only their own setting from the new menu location", async () => {
 		for (const [inputs, path, value] of [
 			[["6\n", "1\n", "on\n", "b\n", "q\n"], ["interface", "smoothStreaming"], "on"],
-			[["3\n", "2\n", "high\n", "b\n", "q\n"], ["fleet", "default", "thinkingLevel"], "high"],
+			[["3\n", "2\n", "high\n", "Save\n", "b\n", "q\n"], ["fleet", "default", "thinkingLevel"], "high"],
 			[["7\n", "1\n", "b\n", "q\n"], ["integrations", "git", "commitAttribution"], false],
 		] as const) {
 			const testEnv = isolatedEnv();

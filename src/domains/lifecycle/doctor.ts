@@ -640,30 +640,62 @@ function configuredModelRoles(
 	const roles: ConfiguredModelRole[] = [];
 	if (target.defaultModel) roles.push({ role: "defaultModel", model: target.defaultModel });
 	if (settings.chat.target === target.id && settings.chat.model) {
-		roles.push({ role: "orchestrator.model", model: settings.chat.model });
+		roles.push({ role: "chat.model", model: settings.chat.model });
 	}
 	if (settings.context.memory.target === target.id && settings.context.memory.model) {
-		roles.push({ role: "background.model", model: settings.context.memory.model });
+		roles.push({ role: "memory.model", model: settings.context.memory.model });
 	}
 	if (settings.fleet.default.target === target.id && settings.fleet.default.model) {
-		roles.push({ role: "workers.default.model", model: settings.fleet.default.model });
+		roles.push({ role: "fleet.default.model", model: settings.fleet.default.model });
+	}
+	for (const [name, profile] of Object.entries(settings.fleet.profiles)) {
+		if (profile.target === target.id && profile.model)
+			roles.push({ role: `fleet.profiles.${name}.model`, model: profile.model });
+	}
+	for (const [name, roster] of Object.entries(settings.fleet.rosters)) {
+		for (const member of roster.members) {
+			if (member.target === target.id && member.model)
+				roles.push({ role: `fleet.rosters.${name}.${member.label}.model`, model: member.model });
+		}
 	}
 	return roles;
 }
 
 /**
- * Per-request budget for the model sweep. A target that does not answer in
+ * Total probe budget for the model sweep. A target that does not answer in
  * this time falls back to the list configure recorded, so a black-holed
  * remote costs doctor a bounded wait rather than the probe's full timeout.
  */
 const DOCTOR_MODEL_PROBE_TIMEOUT_MS = 2_500;
 
-async function doctorProbeContext(target: TargetDescriptor, runtime: RuntimeDescriptor): Promise<ProbeContext> {
-	const ctx: ProbeContext = { credentialsPresent: credentialsPresent(), httpTimeoutMs: DOCTOR_MODEL_PROBE_TIMEOUT_MS };
+async function doctorProbeContext(
+	target: TargetDescriptor,
+	runtime: RuntimeDescriptor,
+	signal: AbortSignal,
+): Promise<ProbeContext> {
+	const ctx: ProbeContext = {
+		credentialsPresent: credentialsPresent(),
+		httpTimeoutMs: DOCTOR_MODEL_PROBE_TIMEOUT_MS,
+		signal,
+	};
 	if (!targetRequiresAuth(target, runtime)) return ctx;
 	try {
-		const resolution = await openAuthStorage().resolveForTarget(resolveAuthTarget(target, runtime), {
+		const auth = openAuthStorage();
+		const authTarget = resolveAuthTarget(target, runtime);
+		const stored = auth.get(authTarget.providerId);
+		// Standard doctor is read-only: resolving an expired OAuth credential
+		// would refresh it and persist the new token. Let the passive probe
+		// report missing auth instead, with the expiry explained in its row.
+		if (
+			auth.statusForTarget(authTarget, { includeFallback: false }).source === "stored-oauth" &&
+			stored?.type === "oauth"
+		) {
+			if (stored.expires > Date.now()) ctx.authToken = stored.access;
+			return ctx;
+		}
+		const resolution = await auth.resolveForTarget(authTarget, {
 			includeFallback: false,
+			signal,
 		});
 		if (resolution.apiKey) ctx.authToken = resolution.apiKey;
 	} catch {
@@ -672,31 +704,58 @@ async function doctorProbeContext(target: TargetDescriptor, runtime: RuntimeDesc
 	return ctx;
 }
 
-/** What the target advertises now, or null when it could not be asked. */
+interface DoctorProbeObservation {
+	probe: ProbeResult;
+	advertised: string[];
+	resident: string[];
+	cacheAdvisories: ReadonlyArray<string>;
+}
+
+/** Passive endpoint result and any model inventory it returned. Null means no check exists, not success. */
 async function probeAdvertisedModels(
 	target: TargetDescriptor,
 	runtime: RuntimeDescriptor,
-): Promise<{ advertised: string[]; resident: string[]; cacheAdvisories: ReadonlyArray<string> } | null> {
-	if (runtime.kind !== "http" || typeof runtime.probe !== "function" || !target.url) return null;
+): Promise<DoctorProbeObservation | null> {
+	const passiveProbe = runtime.probe;
+	const passiveTarget = { ...target };
+	// llama.cpp router /props?model=<id> can load an unloaded model. Metadata
+	// checks must not select weights or displace an already resident model.
+	if (runtime.id.startsWith("llamacpp")) delete passiveTarget.defaultModel;
+	if (runtime.kind !== "http" || typeof passiveProbe !== "function") return null;
 	let probe: ProbeResult;
 	try {
-		probe = await runtime.probe(target, await doctorProbeContext(target, runtime));
-	} catch {
-		return null;
+		const controller = new AbortController();
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			probe = await Promise.race([
+				(async () =>
+					passiveProbe.call(runtime, passiveTarget, await doctorProbeContext(target, runtime, controller.signal)))(),
+				new Promise<ProbeResult>((resolve) => {
+					timer = setTimeout(() => {
+						controller.abort();
+						resolve({ ok: false, error: `passive check timed out after ${DOCTOR_MODEL_PROBE_TIMEOUT_MS}ms` });
+					}, DOCTOR_MODEL_PROBE_TIMEOUT_MS);
+				}),
+			]);
+		} finally {
+			clearTimeout(timer);
+			controller.abort();
+		}
+	} catch (error) {
+		probe = { ok: false, error: error instanceof Error ? error.message : String(error) };
 	}
-	if (!probe.ok || !probe.models || probe.models.length === 0) return null;
-	const advertised = [...probe.models];
+	const advertised = probe.ok ? [...(probe.models ?? [])] : [];
 	const resident: string[] = [];
 	for (const [id, status] of Object.entries(probe.modelStates ?? {})) {
 		if (!advertised.includes(id)) advertised.push(id);
 		if (status.state === "loaded" || status.state === "loading") resident.push(id);
 	}
-	return { advertised, resident, cacheAdvisories: probe.cacheAdvisories ?? [] };
+	return { probe, advertised, resident, cacheAdvisories: probe.cacheAdvisories ?? [] };
 }
 
 /**
- * Model sweep: every model pointer settings.yaml aims at a target with no
- * static catalog is checked against what that target advertises. The live
+ * Connection/model sweep: passive HTTP metadata checks run for configured targets.
+ * Active routes fail on connection or credential errors; unused targets warn. The live
  * list wins when the target answers; the `wireModels` list configure recorded
  * stands in when it does not, so an unreachable server still gets the
  * placeholder id it was saved with called out. A target with neither list is
@@ -724,11 +783,13 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 		{ registerBuiltinRuntimes },
 		{ loadPluginRuntimes },
 		{ listKnownModelsForRuntime },
+		{ readTargetModelSnapshot },
 	] = await Promise.all([
 		import("../providers/registry.js"),
 		import("../providers/runtimes/builtins.js"),
 		import("../providers/plugins.js"),
 		import("../providers/support.js"),
+		import("../providers/target-model-cache.js"),
 	]);
 	const registry = getRuntimeRegistry();
 	// doctor never loads the providers domain, so the registry is empty here
@@ -751,48 +812,136 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 					{
 						ok: false,
 						name: `target ${target.id}`,
-						detail: `runtime '${target.runtime}' is unknown; ${replacement ? `use '${replacement}' instead` : "choose a registered runtime from \`clio-coder configure --list\`"} in settings.yaml`,
+						detail: `runtime '${target.runtime}' is unknown; ${replacement ? `use '${replacement}' instead` : "choose a registered runtime from `clio-coder configure --list`"} in settings.yaml`,
 					},
 				];
 			}
-			// Cloud runtimes are validated against their catalog at configure time.
-			if (listKnownModelsForRuntime(runtime.id).length > 0) return [];
 			const roles = configuredModelRoles(settings, target);
-			if (roles.length === 0) return [];
-			const live = await probeAdvertisedModels(target, runtime);
-			const cache = (live?.cacheAdvisories ?? []).map(
+			const active =
+				settings.chat.target === target.id ||
+				settings.context.memory.target === target.id ||
+				settings.fleet.default.target === target.id ||
+				Object.values(settings.fleet.profiles).some((profile) => profile.target === target.id) ||
+				Object.values(settings.fleet.rosters).some((roster) =>
+					roster.members.some((member) => member.target === target.id),
+				);
+			const requiredCredential = targetRequiresAuth(target, runtime);
+			let credentialAvailable = !requiredCredential;
+			let credentialDetail = requiredCredential
+				? "required credential not found"
+				: ["aws-sdk", "vertex-adc", "claude-cli"].includes(runtime.auth)
+					? "credentials managed by the SDK or installed app; availability not checked"
+					: "no credential required";
+			try {
+				const status = openAuthStorage().statusForTarget(resolveAuthTarget(target, runtime), {
+					includeFallback: false,
+				});
+				credentialAvailable = !requiredCredential || status.available;
+				const stored = openAuthStorage().get(status.providerId);
+				if (status.source === "stored-oauth" && stored?.type === "oauth" && stored.expires <= Date.now()) {
+					credentialAvailable = !requiredCredential;
+					credentialDetail = "stored sign-in expired; standard doctor does not refresh credentials";
+				} else if (status.available && status.source !== "not-required")
+					credentialDetail = `credential available from ${status.source}`;
+			} catch (error) {
+				credentialAvailable = false;
+				credentialDetail = `credential status unreadable: ${error instanceof Error ? error.message : String(error)}`;
+			}
+			const observation = await probeAdvertisedModels(target, runtime);
+			const where = target.url ?? `${runtime.displayName} provider endpoint`;
+			const connection: DoctorFinding =
+				observation === null
+					? {
+							ok: credentialAvailable || !active,
+							...(credentialAvailable ? { level: "info" as const } : !active ? { level: "warn" as const } : {}),
+							name: `connection ${target.id}`,
+							detail: `${credentialDetail}; ${
+								runtime.kind !== "http" && typeof runtime.probe === "function"
+									? "standard doctor does not run this runtime’s subprocess check; endpoint reachability is not verified"
+									: `${runtime.id} exposes no passive endpoint check, so reachability is not verified until a request`
+							}. No generation was attempted.`,
+						}
+					: observation.probe.ok
+						? {
+								ok: credentialAvailable || !active,
+								...(!credentialAvailable && !active ? { level: "warn" as const } : {}),
+								name: `connection ${target.id}`,
+								detail: `${runtime.id === "alcf" ? "ALCF catalog reachable; configured inference URL not checked" : `${where} reachable`}${
+									observation.probe.latencyMs === undefined ? "" : ` in ${observation.probe.latencyMs}ms`
+								}; ${credentialDetail}; passive metadata only, no generation was attempted${
+									observation.advertised.length > 0
+										? `; ${observation.advertised.length} models read live`
+										: "; no model list returned"
+								}`,
+							}
+						: {
+								ok: !active,
+								...(!active ? { level: "warn" as const } : {}),
+								name: `connection ${target.id}`,
+								detail: `${where} was not verified: ${observation.probe.error ?? "no reply"}. ${credentialDetail}. This was a passive metadata check; no generation was attempted.`,
+							};
+			const cache = (observation?.cacheAdvisories ?? []).map(
 				(detail): DoctorFinding => ({ ok: true, level: "warn", name: `cache ${target.id}`, detail }),
 			);
-			const recorded = target.wireModels ?? [];
-			if (live === null && recorded.length === 0) {
+			if (roles.length === 0) return [connection, ...cache];
+
+			const catalog = listKnownModelsForRuntime(runtime.id);
+			const live = observation?.probe.ok === true && observation.advertised.length > 0;
+			const snapshot = readTargetModelSnapshot(target, { cacheDir: resolveClioDirs().cache });
+			const cachedModels = snapshot?.models ?? [];
+			const advertised = live
+				? observation.advertised
+				: cachedModels.length > 0
+					? cachedModels
+					: (target.wireModels ?? []).length > 0
+						? (target.wireModels ?? [])
+						: catalog;
+			const source = live
+				? `live list from ${runtime.id === "alcf" ? "the ALCF catalog (inference URL not checked)" : where}`
+				: cachedModels.length > 0
+					? `cached list from ${snapshot?.observedAt}, not verified live now`
+					: (target.wireModels ?? []).length > 0
+						? "list recorded by configure, not verified live now"
+						: catalog.length > 0
+							? "provider catalog, not this account's live model list"
+							: "";
+			if (advertised.length === 0) {
 				return [
+					connection,
 					{
 						ok: true,
 						level: "warn",
 						name: `model ${target.id}`,
-						detail: `${roles.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} could not be verified: the target did not answer and configure recorded no model list; run \`clio-coder targets --probe\` once it is up`,
-					},
-				];
-			}
-			const advertised = live ? live.advertised : recorded;
-			const source = live ? `advertised by ${target.url ?? target.id} now` : "recorded by configure at last save";
-			const missing = roles.filter((entry) => !advertised.includes(entry.model));
-			if (missing.length === 0) {
-				return [
-					{
-						ok: true,
-						name: `model ${target.id}`,
-						detail: `${roles.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} ${source}`,
+						detail: `${roles.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} could not be checked: no live, cached, configured, or catalog model list is available; open Configure → Connections after the endpoint is up`,
 					},
 					...cache,
 				];
 			}
-			const resident = live && live.resident.length > 0 ? live.resident.join(", ") : live ? "none" : "unknown";
+			const missing = roles.filter((entry) => !advertised.includes(entry.model));
+			if (missing.length === 0) {
+				return [
+					connection,
+					{
+						ok: true,
+						...(live ? {} : { level: "info" as const }),
+						name: `model ${target.id}`,
+						detail: `${roles.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} found in ${source}`,
+					},
+					...cache,
+				];
+			}
+			const resident = live
+				? observation.resident.length > 0
+					? observation.resident.join(", ")
+					: "none reported"
+				: "not checked";
 			return [
+				connection,
 				{
-					ok: false,
+					ok: !active || !live,
+					...(!active || !live ? { level: "warn" as const } : {}),
 					name: `model ${target.id}`,
-					detail: `${missing.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} not ${source} (${advertised.length} ids). Resident instances: ${resident}. Re-run \`clio-coder configure --id ${target.id} --model <advertised id>\`; \`clio-coder targets --probe\` lists them`,
+					detail: `${missing.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} not found in ${source} (${advertised.length} ids). Resident instances: ${resident}. Open Configure → Chat, Fleet, or Context & Memory and choose from the listed models.`,
 				},
 				...cache,
 			];

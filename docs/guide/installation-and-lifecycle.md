@@ -16,7 +16,7 @@ lifecycle operations.
 
 | Task | Command | Result |
 | --- | --- | --- |
-| Set up a new installation | `clio-coder configure` | Quick Connect: endpoint, key if needed, model, Connect; then start `clio-coder`. |
+| Set up a new installation | `clio-coder configure` | Guided setup: choose the kind of model access you already have, select a discovered model, review what Clio checked, then start `clio-coder`. |
 | Change a connection | `clio-coder configure --section targets` | Open Connections to add or edit endpoints, credentials, and available models. |
 | Choose models for each role | `clio-coder configure --settings` | Open Chat, Fleet, or Context & Memory to choose the target and model used for that work. |
 | Change any setting or repair YAML | `clio-coder configure --edit` | Edit a draft, validate, and save with a backup. |
@@ -435,11 +435,15 @@ whatever is left. A partial delete never reports global success.
 
 ### E. Interactive Configuration (`clio-coder configure`)
 
-The interactive launcher starts with **Quick Connect**, followed by **Settings**
-and **Diagnostics**. Quick Connect asks for an endpoint URL, a key when needed,
-and a model when several are available. Review and **Connect**; the recommended
-defaults handle the rest. An unconfigured interactive `clio-coder` opens this
-same launcher and continues into chat after a successful setup.
+The interactive launcher starts with **Guided setup**, then **Connect by
+endpoint**, **Settings**, and **Check setup**. Guided setup first asks whether
+the model comes from a local app, model server, AI subscription, provider API,
+or installed coding agent. It then shows only providers in that category,
+creates the internal connection id automatically, and offers discovered or
+catalog models as a picker. **Connect by endpoint** is the shorter URL-first
+flow for an operator who already knows the endpoint. An unconfigured interactive
+`clio-coder` opens this launcher and continues into chat after a successful
+setup.
 
 ```bash
 clio-coder configure
@@ -458,10 +462,12 @@ clio-coder configure --settings
 7. **Integrations**: project skills, external agents, plugins, library, and Git attribution.
 8. **Advanced**: diagnostics, configuration files, and the validated full-file editor.
 
-Configure puts common actions first and offers **All controls in this section**
-for the shared settings catalog, with descriptions, defaults, validation, and
+Each section has one menu. Guided choices such as the chat, fleet, and memory
+model come first; every other setting follows in labeled groups on that same
+screen. There is no separate “all controls” page. Opening a setting shows its
+description, current value, shipped default, effect timing, validation, and
 explicit save review. Collections accept JSON; the full-file editor remains
-available in Advanced. The launcher also keeps its Diagnostics shortcut.
+available in Advanced. The launcher also keeps its **Check setup** shortcut.
 
 This menu reorganization preserves the version-2 settings schema, file paths,
 credentials, and defaults. It needs no new data migration or reset. Older

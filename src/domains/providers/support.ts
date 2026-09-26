@@ -99,11 +99,14 @@ export function supportGroupLabel(group: ProviderSupportGroup): string {
 function classifyGroup(runtime: RuntimeDescriptor): ProviderSupportGroup {
 	if (runtime.id === "openai-codex") return "featured";
 	if (runtime.externalAgentLoop !== undefined && runtime.auth !== "claude-cli") return "external-worker";
-	if (runtime.id === "alcf") return "cloud-api";
+	if (runtime.id === "anthropic-max" || runtime.tier === "subscription") return "subscription";
+	// A provider having a passive probe does not make it local. Inception is a
+	// hosted API with unusually good discovery, while generic compatible
+	// endpoints can be either hosted or self-managed. Deployment tier is the
+	// honest classifier when the descriptor knows it.
+	if (runtime.tier === "cloud" || runtime.id === "alcf") return "cloud-api";
 	if (runtime.auth === "oauth" || runtime.auth === "claude-cli") return "subscription";
-	if (catalogProviderForRuntime(runtime.id) || (runtime.auth === "api-key" && !runtime.probe)) {
-		return "cloud-api";
-	}
+	if (catalogProviderForRuntime(runtime.id) || (runtime.auth === "api-key" && !runtime.probe)) return "cloud-api";
 	return "local-http";
 }
 

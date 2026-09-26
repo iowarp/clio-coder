@@ -48,6 +48,8 @@ export interface SelectOptions<T> {
 	backLabel?: string;
 	/** Rows to show at once. Defaults to what the terminal has room for. */
 	maxVisible?: number;
+	/** Label column cap; settings can reserve more room for group-prefixed names. */
+	maxLabelWidth?: number;
 	/** Filter a long list by typing; q/j/k are text in this mode. */
 	searchable?: boolean;
 	/**
@@ -198,6 +200,7 @@ interface ChoiceRowSpec<T> {
 	output: NodeJS.WriteStream;
 	/** Printed width of everything drawn before the label, cursor included. */
 	markerWidth: number;
+	maxLabelWidth?: number;
 	marker: (index: number) => string;
 }
 
@@ -208,7 +211,7 @@ function choiceRows<T>(spec: ChoiceRowSpec<T>, index: number, windowStart: numbe
 	// the next keypress rather than at the width the menu opened on.
 	const room = terminalColumns(output) - railWidth;
 	const hasHints = choices.some((choice) => choice.hint !== undefined);
-	const labelWidth = Math.min(30, Math.max(...choices.map((choice) => choice.label.length)));
+	const labelWidth = Math.min(spec.maxLabelWidth ?? 30, Math.max(...choices.map((choice) => choice.label.length)));
 	const hintRoom = room - markerWidth - labelWidth - 2;
 	const end = Math.min(choices.length, windowStart + viewport);
 	const lines: string[] = [];
@@ -284,6 +287,7 @@ export async function promptSelect<T>(options: SelectOptions<T>): Promise<Select
 					railWidth,
 					output,
 					markerWidth: 2,
+					...(options.maxLabelWidth === undefined ? {} : { maxLabelWidth: options.maxLabelWidth }),
 					marker: (position) => `${position === index ? chalk.cyan("❯") : " "} `,
 				},
 				index,

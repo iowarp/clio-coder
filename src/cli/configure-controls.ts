@@ -61,72 +61,73 @@ export function saveControl(path: string, input: string): void {
 	});
 }
 
-/** A searchable, grouped editor shared with the TUI catalog. No raw whole-file edits are needed for these controls. */
-export async function runSectionControls(prompts: ConfigurePrompts, section: SettingsSectionId): Promise<void> {
+export interface GroupedSettingControl {
+	group: string;
+	control: SettingControl;
+}
+
+/**
+ * The complete section catalog in visual order. Groups are contiguous so a
+ * single menu can classify every setting without hiding the less common ones
+ * behind an "all controls" detour.
+ */
+export function orderedSectionControls(section: SettingsSectionId): GroupedSettingControl[] {
 	const controls = SETTING_CONTROLS.filter((control) => settingsSectionForPath(control.path) === section);
 	const groups = [...new Set(controls.map((control) => settingsGroupForPath(control.path)))];
+	return groups.flatMap((group) =>
+		controls.filter((control) => settingsGroupForPath(control.path) === group).map((control) => ({ group, control })),
+	);
+}
+
+/** Open one fully explained, validated global setting edit. */
+export async function editSettingControl(prompts: ConfigurePrompts, control: SettingControl): Promise<boolean> {
+	prompts.clearScreen();
+	const presenter = createLifecyclePresenter({ stream: prompts.output });
+	presenter.header(control.label, "configure");
+	for (const line of controlInstructions(control).split("\n")) presenter.note(line);
+	const current = getAtPath(readSettings(), control.path);
+	presenter.fields([
+		["Setting", control.path],
+		["Current", formatControlValue(current)],
+		["Shipped default", formatControlValue(getAtPath(DEFAULT_SETTINGS, control.path))],
+		["Save scope", "Global default; current sessions follow their reload rules"],
+	]);
+	if (control.readOnly) {
+		await prompts.text("Press Enter to return");
+		return false;
+	}
+	const values = control.choices ?? (control.kind === "boolean" ? ["true", "false"] : undefined);
+	const value = values
+		? await prompts.choose("New value", values, String(current))
+		: await prompts.text("New value", prompts.interactive ? editText(control, current) : "");
+	const proposed = readSettings();
+	applyControlValue(proposed, control.path, value);
+	if ((await prompts.choose(`Save ${control.label} globally?`, ["Save", "Cancel"], "Save")) !== "Save") return false;
+	saveControl(control.path, value);
+	return true;
+}
+
+/** Legacy direct entry retained for callers; it now uses one complete list instead of a group drill-down. */
+export async function runSectionControls(prompts: ConfigurePrompts, section: SettingsSectionId): Promise<void> {
+	const entries = orderedSectionControls(section);
 	const title = SETTINGS_SECTIONS.find((entry) => entry.id === section)?.label ?? section;
-	let group = groups[0] ?? "";
 	for (;;) {
 		try {
 			prompts.clearScreen();
 			const presenter = createLifecyclePresenter({ stream: prompts.output });
-			presenter.header(`${title} · All controls`, "configure");
-			presenter.note(
-				"Choose a group, then a setting. Each edit explains its effect and is validated before saving globally.",
-			);
-			group = await prompts.choose("Settings group", [...groups, "Back"], group, true);
-			if (group === "Back") return;
-			if (!groups.includes(group)) {
-				presenter.warn("Choose a group from the list.");
-				continue;
-			}
-			for (;;) {
-				const members = controls.filter((control) => settingsGroupForPath(control.path) === group);
-				const labels = members.map((control) => `${control.label} · ${control.path}`);
-				let chosen: string;
-				try {
-					chosen = await prompts.choose(group, [...labels, "Back"], labels[0] ?? "Back", true);
-				} catch (error) {
-					if (error instanceof ConfigureNavigation && error.kind === "back") break;
-					throw error;
-				}
-				if (chosen === "Back") break;
-				const control = members[labels.indexOf(chosen)];
-				if (!control) {
-					presenter.warn("Choose a setting from the list.");
-					continue;
-				}
-				try {
-					prompts.clearScreen();
-					presenter.header(control.label, "configure");
-					for (const line of controlInstructions(control).split("\n")) presenter.note(line);
-					const current = getAtPath(readSettings(), control.path);
-					presenter.fields([
-						["Setting", control.path],
-						["Current", formatControlValue(current)],
-						["Shipped default", formatControlValue(getAtPath(DEFAULT_SETTINGS, control.path))],
-						["Save scope", "Global default; current sessions follow their reload rules"],
-					]);
-					if (control.readOnly) {
-						await prompts.text("Press Enter to return");
-						continue;
-					}
-					const values = control.choices ?? (control.kind === "boolean" ? ["true", "false"] : undefined);
-					const value = values
-						? await prompts.choose("New value", values, String(current))
-						: await prompts.text("New value", prompts.interactive ? editText(control, current) : "");
-					const proposed = readSettings();
-					applyControlValue(proposed, control.path, value);
-					if ((await prompts.choose(`Save ${control.label} globally?`, ["Save", "Cancel"], "Save")) === "Save") {
-						saveControl(control.path, value);
-						presenter.completedStep(`${control.label} saved`);
-					}
-				} catch (error) {
-					if (error instanceof ConfigureNavigation) {
-						if (error.kind === "quit") throw error;
-					} else presenter.warn(`Not saved: ${error instanceof Error ? error.message : String(error)}`);
-				}
+			presenter.header(title, "configure");
+			presenter.note("Every setting in this area is listed here. Choose one to see its meaning, default, and timing.");
+			const labels = entries.map(({ group, control }) => `${group} · ${control.label}`);
+			const chosen = await prompts.choose("Setting", [...labels, "Back"], labels[0] ?? "Back", true);
+			if (chosen === "Back") return;
+			const entry = entries[labels.indexOf(chosen)];
+			if (!entry) continue;
+			try {
+				await editSettingControl(prompts, entry.control);
+			} catch (error) {
+				if (error instanceof ConfigureNavigation) {
+					if (error.kind === "quit") throw error;
+				} else presenter.warn(`Not saved: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		} catch (error) {
 			if (error instanceof ConfigureNavigation && error.kind === "back") return;

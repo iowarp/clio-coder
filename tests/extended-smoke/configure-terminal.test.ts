@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import { spawn } from "node-pty";
 import { parse, stringify } from "yaml";
+import { orderedSectionControls } from "../../src/cli/configure-controls.js";
 import { runtimesForCategory } from "../../src/cli/configure-target.js";
 import type { ClioSettings } from "../../src/core/config.js";
 import { listProviderSupportEntries } from "../../src/domains/providers/index.js";
@@ -22,12 +23,17 @@ const ENTER = "\r";
 const BACK = "\x1b";
 const CLEAR = "\x15";
 
-function terminal(home: ReturnType<typeof makeScratchHome>, args: string[] = [], env: NodeJS.ProcessEnv = {}) {
+function terminal(
+	home: ReturnType<typeof makeScratchHome>,
+	args: string[] = [],
+	env: NodeJS.ProcessEnv = {},
+	rows = 24,
+) {
 	const child = spawn(process.execPath, [CLI, "configure", ...args], {
 		cwd: home.dir,
 		env: { ...process.env, ...home.env, HOME: home.dir, TERM: "xterm-256color", PATH: "", ...env },
 		cols: 100,
-		rows: 45,
+		rows,
 	});
 	let output = "";
 	let expectedOffset = 0;
@@ -115,8 +121,8 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 		const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 		const tty = terminal(home);
 		try {
-			await tty.expect("❯ Quick Connect");
-			tty.send(ENTER);
+			await tty.expect("❯ Guided setup");
+			tty.send(DOWN + ENTER);
 			await tty.expect("Endpoint URL");
 			tty.send(`http://127.0.0.1:1${ENTER}`);
 			await tty.expect("Could not connect:");
@@ -324,30 +330,41 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 		}
 	});
 
-	it("edits settings after arrow menus, clears a value, and returns to the selected row", async () => {
+	it("opens existing homes at Settings and selects connection-default inheritance", async () => {
 		const home = makeScratchHome("clio-coder-configure-tty-");
-		const file = seed(home, "http://127.0.0.1:1");
+		const server = createServer((request, response) => {
+			response.setHeader("content-type", "application/json");
+			if (request.url === "/v1/models") response.end(JSON.stringify({ data: [{ id: "alpha" }] }));
+			else {
+				response.statusCode = 404;
+				response.end("{}");
+			}
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const file = seed(home, `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
 		const tty = terminal(home);
 		try {
-			await tty.expect("Quick Connect");
-			tty.send(DOWN + ENTER);
-			await tty.expect("esc back");
-			tty.send(DOWN + ENTER);
-			await tty.expect("esc back");
+			await tty.expect("❯ Settings");
 			tty.send(ENTER);
+			await tty.expect("esc back");
+			tty.send(DOWN + ENTER);
+			await tty.expect("Choose the chat model");
+			tty.send(DOWN + ENTER);
 			await tty.expect("❯ low");
 			tty.send(DOWN + DOWN + ENTER);
-			await tty.expect("Chat thinking level set to high");
-			await tty.expect("esc back");
-			tty.send(DOWN + DOWN + ENTER);
-			await tty.expect("enter accept");
-			tty.send(CLEAR + ENTER);
-			await tty.expect("Chat default model cleared");
-			await tty.expect("esc back");
+			await tty.expect("Save Thinking level globally?");
+			tty.send(ENTER);
+			await tty.expect("Thinking level saved");
+			tty.send(`\x1b[A${ENTER}`);
+			await tty.expect("Chat connection");
+			tty.send(ENTER);
+			await tty.expect("Use connection default");
+			tty.send(ENTER);
+			await tty.expect("Chat set to existing/alpha");
 			tty.send(BACK);
 			await tty.expect("❯ Chat");
 			tty.send(DOWN.repeat(3) + ENTER);
-			await tty.expect("Worker permission mode");
+			await tty.expect("Autonomy · Autonomy level");
 			tty.send(ENTER);
 			await tty.expect("❯ default");
 			tty.send(DOWN + ENTER);
@@ -359,6 +376,8 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			strictEqual(saved.safety.autonomy, "yolo");
 		} finally {
 			tty.close();
+			server.closeAllConnections();
+			await new Promise<void>((resolve) => server.close(() => resolve()));
 			home.cleanup();
 		}
 	});
@@ -369,19 +388,19 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 		const original = readFileSync(file, "utf8");
 		const tty = terminal(home, ["--section", "chat"]);
 		try {
-			await tty.expect("All controls in this section");
-			tty.send(DOWN.repeat(7) + ENTER);
-			await tty.expect("Settings group");
-			tty.send(ENTER);
-			await tty.expect("chat.maxOutputTokens");
-			tty.send(`chat.maxOutputTokens${ENTER}`);
+			const controls = orderedSectionControls("chat").filter(
+				({ control }) => !["chat.target", "chat.model"].includes(control.path),
+			);
+			const index = 1 + controls.findIndex(({ control }) => control.path === "chat.maxOutputTokens");
+			await tty.expect("Choose the chat model");
+			ok(!tty.screen().includes("All controls"));
+			tty.send(DOWN.repeat(index) + ENTER);
 			await tty.expect("Shipped default");
 			await tty.expect("New value");
 			tty.send(`${CLEAR}-1${ENTER}`);
-			await tty.expect("Not saved:");
+			await tty.expect("Change not saved:");
 			strictEqual(readFileSync(file, "utf8"), original);
-			await tty.expect("chat.maxOutputTokens");
-			tty.send(`chat.maxOutputTokens${ENTER}`);
+			tty.send(ENTER);
 			await tty.expect("New value");
 			tty.send(`${CLEAR}12345${ENTER}`);
 			await tty.expect("globally?");
@@ -391,10 +410,6 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			const saved = parse(readFileSync(file, "utf8")) as ClioSettings;
 			strictEqual(saved.chat.maxOutputTokens, 12345);
 			strictEqual(saved.chat.model, "alpha");
-			tty.send(BACK);
-			await tty.expect("Settings group");
-			tty.send(BACK);
-			await tty.expect("All controls in this section");
 			await tty.quit();
 		} finally {
 			tty.close();
@@ -441,20 +456,20 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 		try {
 			await tty.expect("esc or q quit");
 			tty.send(ENTER);
-			await tty.expect("How will you connect");
+			await tty.expect("Where does your model come from?");
 			tty.send(DOWN + ENTER);
-			await tty.expect("Which runtime?");
+			await tty.expect("Which provider or app do you use?");
 			const registry = getRuntimeRegistry();
 			registerBuiltinRuntimes(registry);
-			const entries = runtimesForCategory(listProviderSupportEntries(registry.list()), "local-http");
-			const index = entries.findIndex((entry) => entry.runtimeId === "openai-compat");
+			const entries = runtimesForCategory(listProviderSupportEntries(registry.list()), "local-server");
+			const picked = entries.findIndex((entry) => entry.runtimeId === "openai-compat");
+			const initial = Math.max(
+				0,
+				entries.findIndex((entry) => entry.featured),
+			);
+			const index = (picked - initial + entries.length) % entries.length;
 			ok(index >= 0);
 			tty.send(DOWN.repeat(index) + ENTER);
-			await tty.expect("Target id");
-			tty.send(`${CLEAR}existing${ENTER}`);
-			await tty.expect("already exists");
-			await tty.expect("enter accept");
-			tty.send(`${CLEAR}second${ENTER}`);
 			await tty.expect("How should Clio get the API key?");
 			tty.send(`\x1b[A${ENTER}`);
 			await tty.expect("Paste the API key");
@@ -463,26 +478,41 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			tty.send(CLEAR + url + ENTER);
 			await tty.expect("Which model?");
 			tty.send(DOWN + ENTER);
-			await tty.expect("How hard should it think?");
-			tty.send(ENTER);
-			await tty.expect("Context window in tokens");
-			tty.send(`16384${ENTER}`);
-			await tty.expect("Review target");
+			await tty.expect("Review what Clio could verify");
 			deepStrictEqual(parse(readFileSync(file, "utf8")), before, "a draft must not write settings");
 			strictEqual(readFileSync(credentialsFile, "utf8"), originalCredentials, "pasted keys wait for Save");
-			tty.send(BACK);
-			await tty.expect("Context window in tokens");
-			tty.send(`${CLEAR}24576${ENTER}`);
-			await tty.expect("Review target");
+			ok(tty.screen().includes("No generation or quality/tool tests."));
+			ok(tty.screen().includes("GPU/VRAM and model fit not checked."));
+			ok(tty.screen().slice(tty.screen().lastIndexOf("Review what Clio could verify")).split("\n").length <= 24);
+			tty.send(DOWN + ENTER);
+			await tty.expect("Connection details");
 			tty.send(ENTER);
-			await tty.expect("target second saved");
+			await tty.expect("Connection address");
+			tty.send(ENTER);
+			await tty.expect("Credential handling");
+			await tty.expect("Storage is not encrypted.");
+			tty.send(ENTER);
+			await tty.expect("Machine observations");
+			await tty.expect("usable CPUs");
+			await tty.expect("GPU/VRAM and model fit not checked.");
+			tty.send(ENTER);
+			await tty.expect("Review what Clio could verify");
+			tty.send(BACK);
+			await tty.expect("Which model?");
+			tty.send(ENTER);
+			await tty.expect("Review what Clio could verify");
+			tty.send(ENTER);
+			await tty.expect("target openai-compat saved");
 			await tty.expect("Edit a target");
 			const added = parse(readFileSync(file, "utf8")) as ClioSettings;
 			deepStrictEqual(added.chat, before.chat);
 			deepStrictEqual(added.fleet, before.fleet);
-			strictEqual(added.targets[1]?.capabilities?.contextWindow, 24576);
+			strictEqual(added.targets[1]?.id, "openai-compat");
+			strictEqual(added.targets[1]?.defaultModel, "beta");
 			tty.send(DOWN + ENTER);
 			await tty.expect("Target to edit");
+			tty.send(ENTER);
+			await tty.expect("Which provider or app do you use?");
 			tty.send(ENTER);
 			await tty.expect("How should Clio get the API key?");
 			tty.send(ENTER);
@@ -490,11 +520,9 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			tty.send(ENTER);
 			await tty.expect("Which model?");
 			tty.send(DOWN + ENTER);
-			await tty.expect("How hard should it think?");
-			tty.send(ENTER);
 			await tty.expect("Context window in tokens");
 			tty.send(ENTER);
-			await tty.expect("Review target");
+			await tty.expect("Review what Clio could verify");
 			tty.send(ENTER);
 			await tty.expect("Edit a target");
 			await tty.quit();
@@ -524,12 +552,10 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 		const home = makeScratchHome("clio-coder-configure-tty-");
 		const tty = terminal(home);
 		try {
-			await tty.expect("Quick Connect");
+			await tty.expect("❯ Guided setup");
 			tty.send(ENTER);
-			await tty.expect("Endpoint URL");
+			await tty.expect("Where does your model come from?");
 			tty.send(BACK);
-			await tty.expect("Everything else is optional");
-			tty.send("q");
 			await tty.finish(130);
 			strictEqual(existsSync(join(home.dir, "config/settings.yaml")), false);
 			strictEqual(existsSync(join(home.dir, "config/credentials.yaml")), false);

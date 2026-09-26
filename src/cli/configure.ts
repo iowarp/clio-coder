@@ -6,20 +6,18 @@ import {
 	readSettings,
 	removeTargetFromSettings,
 	settingsPath,
-	updateSavedSettingsDocument,
 	updateSettings,
 } from "../core/config.js";
-import {
-	type OutputStyle,
-	type PanesSettings,
-	type SmoothStreaming,
-	THINKING_LEVELS,
-	type ThinkingLevel,
-	type TuiMode,
-	type WorkerPermissionMode,
-} from "../core/defaults.js";
+import type { OutputStyle, PanesSettings, SmoothStreaming, TuiMode, WorkerPermissionMode } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
-import { resolveSettingsSection, SETTINGS_SECTIONS, type SettingsSectionId } from "../core/settings-navigation.js";
+import { getAtPath } from "../core/session-routing.js";
+import { formatControlValue, type SettingControl } from "../core/settings-controls.js";
+import {
+	resolveSettingsSection,
+	SETTINGS_SECTIONS,
+	type SettingsSectionId,
+	settingsGroupForPath,
+} from "../core/settings-navigation.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
@@ -49,7 +47,7 @@ import {
 } from "../domains/scheduling/local-capacity.js";
 import { registerClioOAuthProviders } from "../engine/oauth.js";
 import { ask, askYesNo } from "./ask.js";
-import { runSectionControls, saveControl } from "./configure-controls.js";
+import { editSettingControl, orderedSectionControls } from "./configure-controls.js";
 import { editSettings } from "./configure-editor.js";
 import { runInteropReview } from "./configure-interop.js";
 import {
@@ -64,6 +62,7 @@ import { loginOAuthRuntime } from "./configure-oauth.js";
 import { canRunOnboarding, runOnboardingWizard } from "./configure-onboarding.js";
 import { ConfigureNavigation, ConfigurePrompts } from "./configure-prompts.js";
 import { runQuickConnect } from "./configure-quick.js";
+import { assignTarget } from "./configure-routing.js";
 import {
 	applyTarget,
 	assertOrchestratorReplacementEligible,
@@ -102,7 +101,7 @@ const HELP = `clio-coder configure
 Configure model targets and runtime settings for chat and fleet dispatch.
 
 Usage:
-  clio-coder configure                   Quick Connect, Settings, or Diagnostics
+  clio-coder configure                   guided setup, endpoint shortcut, settings, or checks
   clio-coder configure --quick           connect an endpoint with recommended defaults
   clio-coder configure --settings        open the complete settings menu
   clio-coder configure --section <name>  open one section directly:
@@ -640,12 +639,6 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	return 0;
 }
 
-async function pickRuntime(rl: ConfigurePrompts): Promise<RuntimeDescriptor | null> {
-	const registry = getRuntimeRegistry();
-	const entries = listProviderSupportEntries(registry.list());
-	return pickRuntimeFromEntries(rl, entries, "\nSupported runtimes:");
-}
-
 async function pickRuntimeFromEntries(
 	rl: ConfigurePrompts,
 	entries: ReadonlyArray<ProviderSupportEntry>,
@@ -715,22 +708,10 @@ async function pickRuntimeViaCategory(rl: ConfigurePrompts): Promise<RuntimeDesc
 	const allEntries = listProviderSupportEntries(registry.list());
 	const category = await pickCategory(rl);
 	if (category === null) return null;
-	if (category === "all") return pickRuntime(rl);
 	const filtered = runtimesForCategory(allEntries, category);
 	if (filtered.length === 0) {
-		process.stderr.write("no runtimes available for that category; falling back to full list\n");
-		return pickRuntime(rl);
-	}
-	if (category === "chatgpt") {
-		const only = filtered[0];
-		if (only) {
-			const runtime = registry.get(only.runtimeId);
-			if (runtime) {
-				process.stdout.write(`\nUsing ${runtime.id} (${only.summary}).\n`);
-				return runtime;
-			}
-		}
-		return pickRuntime(rl);
+		process.stderr.write("no runtimes are available in that category in this installation\n");
+		return null;
 	}
 	if (filtered.length === 1) {
 		const only = filtered[0];
@@ -743,7 +724,15 @@ async function pickRuntimeViaCategory(rl: ConfigurePrompts): Promise<RuntimeDesc
 		}
 	}
 	const heading =
-		category === "local-app" ? "\nLocal apps:" : category === "local-http" ? "\nLocal HTTP servers:" : "\nCloud APIs:";
+		category === "local-app"
+			? "\nApps on this computer:"
+			: category === "local-server"
+				? "\nModel servers:"
+				: category === "subscription"
+					? "\nAI subscriptions:"
+					: category === "external-worker"
+						? "\nInstalled coding agents:"
+						: "\nProvider APIs:";
 	return pickRuntimeFromEntries(rl, filtered, heading);
 }
 
@@ -1183,8 +1172,9 @@ interface SectionIo {
 }
 
 interface SectionAction {
+	controlPath?: string;
 	label: string;
-	hint?: string;
+	hint?: string | (() => string);
 	run: (io: SectionIo) => Promise<void>;
 }
 
@@ -1410,85 +1400,9 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 		},
 		actions: [
 			{
-				label: "Chat thinking level",
-				hint: THINKING_LEVELS.join(" | "),
-				run: async (io) => {
-					await askChoice(io, "Chat thinking level", THINKING_LEVELS, readSettings().chat.thinkingLevel, (value) => {
-						updateSettings((draft) => {
-							draft.chat.thinkingLevel = value as ThinkingLevel;
-						});
-					});
-				},
-			},
-			{
-				label: "Set the chat target",
-				hint: "which target answers in chat",
-				run: async (io) => {
-					await assignTarget(io, "chat");
-				},
-			},
-			{
-				label: "Chat default model",
-				hint: "blank clears the override",
-				run: async (io) => {
-					const model = await ask(
-						io.rl,
-						"Chat default model (blank for the target default)",
-						readSettings().chat.model ?? "",
-					);
-					if (model === null) return;
-					// Keep null in the saved document. The effective reader resolves it
-					// to the target model, so writing that normalized result would pin it again.
-					updateSavedSettingsDocument((saved) => {
-						const document = saved as { chat?: Record<string, unknown> };
-						document.chat = { ...document.chat, model: model.length > 0 ? model : null };
-						return document;
-					});
-					io.ok(model.length > 0 ? `Chat default model set to ${model}` : "Chat default model cleared");
-				},
-			},
-			{
-				label: "Model favorites",
-				hint: "comma-separated",
-				run: async (io) => {
-					await askList(io, "Model favorites", readSettings().chat.modelPicker.favorites, (values) => {
-						saveControl("chat.modelPicker.favorites", values.join(", "));
-					});
-				},
-			},
-			{
-				label: "Cycle set",
-				hint: "comma-separated models for the scoped cycle actions",
-				run: async (io) => {
-					await askList(io, "Cycle set", readSettings().chat.modelPicker.cycleSet, (values) => {
-						updateSettings((draft) => {
-							draft.chat.modelPicker.cycleSet = values;
-						});
-					});
-				},
-			},
-			{
-				label: "Max output tokens",
-				hint: "0 for the runtime default",
-				run: async (io) => {
-					await askInteger(io, "Max output tokens", readSettings().chat.maxOutputTokens, (value) => {
-						updateSettings((draft) => {
-							draft.chat.maxOutputTokens = value;
-						});
-					});
-				},
-			},
-			{
-				label: "Prompt prewarm",
-				hint: "toggle",
-				run: async (io) => {
-					let next = false;
-					updateSettings((draft) => {
-						draft.chat.prewarm = !draft.chat.prewarm;
-						next = draft.chat.prewarm;
-					});
-					io.ok(`Prompt prewarm ${onOff(next)}`);
-				},
+				label: "Choose the chat model",
+				hint: "select a connection, then a model Clio can list for it",
+				run: async (io) => assignTarget(io, "chat"),
 			},
 		],
 	},
@@ -1514,97 +1428,9 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 		},
 		actions: [
 			{
-				label: "Set the fleet default target",
-				hint: "which target dispatched workers use",
-				run: async (io) => {
-					await assignTarget(io, "fleet");
-				},
-			},
-			{
-				label: "Fleet thinking level",
-				hint: THINKING_LEVELS.join(" | "),
-				run: async (io) => {
-					await askChoice(
-						io,
-						"Fleet thinking level",
-						THINKING_LEVELS,
-						readSettings().fleet.default.thinkingLevel,
-						(value) => {
-							updateSettings((draft) => {
-								draft.fleet.default.thinkingLevel = value as ThinkingLevel;
-							});
-						},
-					);
-				},
-			},
-			{
-				label: "Concurrency limit",
-				hint: "auto, or a positive integer",
-				run: async (io) => {
-					const current = String(readSettings().fleet.concurrency);
-					const answer = await ask(io.rl, "Concurrency limit [auto or a number]", current);
-					if (answer === null) return;
-					if (answer.trim().toLowerCase() === "auto") {
-						updateSettings((draft) => {
-							draft.fleet.concurrency = "auto";
-						});
-						io.ok("Concurrency limit set to auto");
-						return;
-					}
-					const parsed = Number(answer);
-					if (!Number.isFinite(parsed) || parsed < 1) {
-						io.warn(`Concurrency limit must be auto or at least 1; left at ${current}\n`);
-						return;
-					}
-					updateSettings((draft) => {
-						draft.fleet.concurrency = Math.floor(parsed);
-					});
-					io.ok(`Concurrency limit set to ${Math.floor(parsed)}`);
-				},
-			},
-			{
-				label: "Max retries",
-				run: async (io) => {
-					await askInteger(io, "Max retries", readSettings().fleet.retry.maxRetries, (value) => {
-						updateSettings((draft) => {
-							draft.fleet.retry.maxRetries = value;
-						});
-					});
-				},
-			},
-			{
-				label: "Tool calls per run",
-				run: async (io) => {
-					await askInteger(
-						io,
-						"Tool calls per run",
-						readSettings().fleet.limits.toolCallsPerRun,
-						(value) => {
-							updateSettings((draft) => {
-								draft.fleet.limits.toolCallsPerRun = value;
-							});
-						},
-						1,
-					);
-				},
-			},
-			{
-				label: "Run timeout",
-				hint: "seconds",
-				run: async (io) => {
-					const current = readSettings().fleet.limits.internalRunTimeoutMs / 1000;
-					const answer = await ask(io.rl, "Run timeout in seconds", String(current));
-					if (answer === null) return;
-					const parsed = Number(answer);
-					if (!Number.isFinite(parsed) || parsed < 1) {
-						io.warn(`Run timeout must be at least 1 second; left at ${current}s\n`);
-						return;
-					}
-					updateSettings((draft) => {
-						draft.fleet.limits.internalRunTimeoutMs = Math.floor(parsed * 1000);
-					});
-					io.ok(`Run timeout set to ${Math.floor(parsed)}s`);
-				},
+				label: "Choose the default fleet model",
+				hint: "select a connection, then a model Clio can list for it",
+				run: async (io) => assignTarget(io, "fleet"),
 			},
 		],
 	},
@@ -1624,20 +1450,9 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 		},
 		actions: [
 			{
-				label: "Set the background memory target",
+				label: "Choose the proactive-memory model",
+				hint: "optional; choose Rules only to avoid a second model call",
 				run: async (io) => assignTarget(io, "memory"),
-			},
-			{
-				label: "Auto-compaction",
-				hint: "toggle",
-				run: async (io) => {
-					let next = false;
-					updateSettings((draft) => {
-						draft.context.compaction.auto = !draft.context.compaction.auto;
-						next = draft.context.compaction.auto;
-					});
-					io.ok(`Auto-compaction ${onOff(next)}`);
-				},
 			},
 		],
 	},
@@ -1656,6 +1471,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 		actions: [
 			{
 				label: "Autonomy level",
+				controlPath: "safety.autonomy",
 				hint: "default | yolo",
 				run: async (io) => {
 					io.out.write(
@@ -1670,6 +1486,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Worker permission mode",
+				controlPath: "fleet.permissions.mode",
 				hint: "deny | fail | escalate",
 				run: async (io) => {
 					await askChoice(
@@ -1687,6 +1504,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Session cost limit",
+				controlPath: "safety.limits.sessionCostUsd",
 				hint: "USD",
 				run: async (io) => {
 					const current = readSettings().safety.limits.sessionCostUsd;
@@ -1705,6 +1523,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Turn tool budget",
+				controlPath: "safety.limits.chatToolCallsPerTurn",
 				run: async (io) => {
 					await askInteger(
 						io,
@@ -1721,6 +1540,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Turn-end review watchdog",
+				controlPath: "safety.review.enabled",
 				hint: "toggle",
 				run: async (io) => {
 					let next = false;
@@ -1749,6 +1569,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 		actions: [
 			{
 				label: "Smooth streaming",
+				controlPath: "interface.smoothStreaming",
 				hint: "off | auto | on",
 				run: async (io) => {
 					await askChoice(
@@ -1766,6 +1587,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Terminal progress indicator",
+				controlPath: "interface.terminalProgress",
 				hint: "toggle",
 				run: async (io) => {
 					let next = false;
@@ -1778,6 +1600,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Panes capability",
+				controlPath: "interface.panes.enabled",
 				hint: "off | auto (join an existing pane host)",
 				run: async (io) => {
 					await askChoice(io, "Panes capability", ["off", "auto"], readSettings().interface.panes.enabled, (value) => {
@@ -1789,6 +1612,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Startup layout",
+				controlPath: "interface.panes.layout",
 				hint: "off | workers | cockpit",
 				run: async (io) => {
 					await askChoice(
@@ -1806,6 +1630,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "TUI mode",
+				controlPath: "interface.mode",
 				hint: "regular | fullscreen",
 				run: async (io) => {
 					await askChoice(io, "TUI mode", ["regular", "fullscreen"], readSettings().interface.mode, (value) => {
@@ -1817,6 +1642,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Output style",
+				controlPath: "interface.outputDetail",
 				hint: "compact | standard | detailed",
 				run: async (io) => {
 					await askChoice(
@@ -1834,6 +1660,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Desktop notifications",
+				controlPath: "interface.desktopNotifications",
 				hint: "toggle",
 				run: async (io) => {
 					let next = false;
@@ -1863,6 +1690,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 		actions: [
 			{
 				label: "Git commit attribution",
+				controlPath: "integrations.git.commitAttribution",
 				hint: "toggle",
 				run: async (io) => {
 					let next = false;
@@ -1875,6 +1703,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Trust project imports",
+				controlPath: "integrations.projectResources.trustProjectImports",
 				hint: "toggle",
 				run: async (io) => {
 					let next = false;
@@ -1895,6 +1724,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Library remote sync",
+				controlPath: "integrations.library.sync",
 				hint: "toggle",
 				run: async (io) => {
 					let next = false;
@@ -1928,6 +1758,40 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 	},
 };
 
+const GUIDED_CONTROL_PATHS = new Set([
+	"chat.target",
+	"chat.model",
+	"fleet.default.target",
+	"fleet.default.model",
+	"context.memory.target",
+	"context.memory.model",
+	"safety.autonomy",
+	"fleet.permissions.mode",
+	"safety.limits.sessionCostUsd",
+	"safety.limits.chatToolCallsPerTurn",
+	"safety.review.enabled",
+	"interface.smoothStreaming",
+	"interface.terminalProgress",
+	"interface.panes.enabled",
+	"interface.panes.layout",
+	"interface.mode",
+	"interface.outputDetail",
+	"interface.desktopNotifications",
+	"integrations.projectResources.trustProjectImports",
+	"integrations.library.sync",
+	"integrations.git.commitAttribution",
+]);
+
+function settingControlAction(group: string, control: SettingControl): SectionAction {
+	return {
+		label: `${group} · ${control.label}`,
+		hint: () => `${formatControlValue(getAtPath(readSettings(), control.path))} · ${control.description}`,
+		run: async (io) => {
+			if (await editSettingControl(io.rl, control)) io.ok(`${control.label} saved`);
+		},
+	};
+}
+
 const SECTIONS: ReadonlyArray<SectionSpec> = SETTINGS_SECTIONS.map((section) => ({
 	id: section.id,
 	title: section.label,
@@ -1935,16 +1799,19 @@ const SECTIONS: ReadonlyArray<SectionSpec> = SETTINGS_SECTIONS.map((section) => 
 	aliases: section.aliases,
 	...SECTION_CONTENT[section.id],
 	actions: [
-		...SECTION_CONTENT[section.id].actions,
-		...(section.id === "targets" || section.id === "advanced"
-			? []
-			: [
-					{
-						label: "All controls in this section",
-						hint: "searchable groups, help, defaults, and validated edits",
-						run: async (io: SectionIo) => runSectionControls(io.rl, section.id),
-					},
-				]),
+		...SECTION_CONTENT[section.id].actions.map((action) => {
+			const path = action.controlPath;
+			if (!path) return action;
+			const control = orderedSectionControls(section.id).find(({ control }) => control.path === path)?.control;
+			return {
+				...action,
+				label: `${settingsGroupForPath(path)} · ${action.label}`,
+				hint: () => `${formatControlValue(getAtPath(readSettings(), path))} · ${control?.description ?? ""}`,
+			};
+		}),
+		...orderedSectionControls(section.id)
+			.filter(({ control }) => !GUIDED_CONTROL_PATHS.has(control.path))
+			.map(({ group, control }) => settingControlAction(group, control)),
 	],
 }));
 
@@ -1968,69 +1835,9 @@ function emptyArgs(): ParsedArgs {
 	};
 }
 
-async function askList(
-	io: SectionIo,
-	label: string,
-	current: ReadonlyArray<string>,
-	apply: (values: string[]) => void,
-): Promise<void> {
-	const answer = await ask(io.rl, `${label} (comma-separated, blank clears)`, current.join(", "));
-	if (answer === null) return;
-	const values = answer
-		.split(",")
-		.map((entry) => entry.trim())
-		.filter((entry) => entry.length > 0);
-	apply(values);
-	io.ok(values.length === 0 ? `${label} cleared` : `${label} set to ${values.join(", ")}`);
-}
-
-async function assignTarget(io: SectionIo, role: "chat" | "fleet" | "memory"): Promise<void> {
-	const settings = readSettings();
-	const ids = settings.targets
-		.filter((target) => {
-			const runtime = getRuntimeRegistry().get(target.runtime);
-			return role === "fleet" || (runtime !== null && isOrchestratorEligibleRuntime(runtime));
-		})
-		.map((target) => target.id);
-	if (ids.length === 0) {
-		io.warn("No eligible targets registered yet. Add one first.");
-		return;
-	}
-	io.out.write(`  Registered: ${ids.join(", ")}\n`);
-	const currentTarget =
-		role === "chat"
-			? settings.chat.target
-			: role === "fleet"
-				? settings.fleet.default.target
-				: settings.context.memory.target;
-	const label = role === "chat" ? "Chat" : role === "fleet" ? "Fleet" : "Background memory";
-	const chosen = await io.rl.choose(`${label} target`, ids, currentTarget ?? ids[0] ?? "");
-	if (chosen === null) return;
-	if (!ids.includes(chosen)) {
-		io.warn(`${chosen} is not a registered target; nothing changed.`);
-		return;
-	}
-	const target = settings.targets.find((entry) => entry.id === chosen);
-	const model = await ask(io.rl, `Model override (blank uses ${target?.defaultModel ?? "the target default"})`, "");
-	if (model === null) return;
-	updateSettings((draft) => {
-		if (role === "chat") {
-			draft.chat.target = chosen;
-			draft.chat.model = model.length > 0 ? model : null;
-		} else if (role === "fleet") {
-			draft.fleet.default.target = chosen;
-			draft.fleet.default.model = model.length > 0 ? model : null;
-		} else {
-			draft.context.memory.target = chosen;
-			draft.context.memory.model = model.length > 0 ? model : null;
-		}
-	});
-	io.ok(`${label} target set to ${chosen}`);
-}
-
 interface MenuEntry {
 	label: string;
-	hint?: string;
+	hint?: string | (() => string);
 }
 
 type MenuChoice = { kind: "index"; index: number } | { kind: "back" } | { kind: "quit" };
@@ -2053,11 +1860,12 @@ async function pickEntry(
 	if (canSelect(io.in as NodeJS.ReadStream, out as NodeJS.WriteStream)) {
 		const result = await promptSelect({
 			initialIndex,
+			maxLabelWidth: Math.floor((terminalColumns(out as NodeJS.WriteStream) - 8) * 0.75),
 			clearOnExit: true,
 			choices: entries.map((entry, index) => ({
 				value: index,
 				label: entry.label,
-				...(entry.hint === undefined ? {} : { hint: entry.hint }),
+				...(entry.hint === undefined ? {} : { hint: typeof entry.hint === "function" ? entry.hint() : entry.hint }),
 			})),
 			railPrefix: railPrefix(plain),
 			backLabel,
@@ -2070,7 +1878,8 @@ async function pickEntry(
 
 	const rail = railPrefix(plain);
 	entries.forEach((entry, index) => {
-		out.write(`${rail}${index + 1}. ${entry.label}${entry.hint === undefined ? "" : `  (${entry.hint})`}\n`);
+		const hint = typeof entry.hint === "function" ? entry.hint() : entry.hint;
+		out.write(`${rail}${index + 1}. ${entry.label}${hint === undefined ? "" : `  (${hint})`}\n`);
 	});
 	out.write(`${rail}b. ${backLabel}\n${rail}q. Quit\n`);
 	const answer = await ask(rl, "\nSelection", "b");
@@ -2169,21 +1978,22 @@ async function runConfigSectionsMenu(
 }
 
 async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams): Promise<number> {
-	let selected = 0;
+	let selected = readSettings().targets.length === 0 ? 0 : 2;
 	const exitCode = () => (readSettings().chat.target ? 0 : 130);
 	for (;;) {
 		rl.clearScreen();
 		const presenter = createLifecyclePresenter({ stream: streams.out });
 		presenter.header("Clio Coder", "configure");
-		presenter.note("Connect a model and start coding. Everything else is optional.");
+		presenter.note("Start with what you recognize. Clio explains and checks the technical details.");
 		presenter.blank();
 		const choice = await pickEntry(
 			rl,
 			streams,
 			[
-				{ label: "Quick Connect", hint: "endpoint → model → ready" },
-				{ label: "Settings", hint: "all configuration options" },
-				{ label: "Diagnostics", hint: "check an existing installation" },
+				{ label: "Guided setup", hint: "choose your app, subscription, provider, or server" },
+				{ label: "Connect by endpoint", hint: "shortcut when you already know the server URL" },
+				{ label: "Settings", hint: "every saved default, grouped by what it changes" },
+				{ label: "Check setup", hint: "read-only connection, model, and machine checks" },
 			],
 			"quit",
 			presenter.isPlain(),
@@ -2192,10 +2002,15 @@ async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams
 		if (choice.kind !== "index") return exitCode();
 		selected = choice.index;
 		if (selected === 0) {
+			const first = readSettings().targets.length === 0;
+			const code = await runOnboardingWizard(streams, { mode: first ? "first" : "add" });
+			if (code === 0 && first) return 0;
+			if (code === 130 && first) return exitCode();
+		} else if (selected === 1) {
 			const result = await runQuickConnect(rl);
 			if (result === "connected") return 0;
 			if (result === "quit") return exitCode();
-		} else if (selected === 1) {
+		} else if (selected === 2) {
 			if ((await runConfigSectionsMenu(rl, streams, "back")) === "quit") return exitCode();
 		} else {
 			const section = findSection("diagnostics");

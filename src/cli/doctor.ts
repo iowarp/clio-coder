@@ -11,6 +11,11 @@ import {
 } from "../domains/lifecycle/doctor.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
+import {
+	describeHostCapacity,
+	observeHostCapacityFacts,
+	resolveLocalConcurrency,
+} from "../domains/scheduling/local-capacity.js";
 import { hpcToolchainFindings } from "./doctor-hpc.js";
 import { namingHistoryFindings } from "./doctor-naming.js";
 import { panesFindings } from "./doctor-panes.js";
@@ -114,6 +119,12 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	// gets every check on the home it just built.
 	const untouched = !fix && isUninitializedHome();
 	const findings = runDoctor({ fix });
+	const hostFacts = observeHostCapacityFacts();
+	const localCapacity: DoctorFinding = {
+		ok: true,
+		name: "local worker capacity",
+		detail: describeHostCapacity(hostFacts, resolveLocalConcurrency("auto", hostFacts)),
+	};
 	let panesEnabled = false;
 	let filesEnabled = false;
 	try {
@@ -163,6 +174,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	const deepChecks = options.deep ? await deepFindings(untouched, workspaceRoot, options.deep) : [];
 	return [
 		...findings,
+		localCapacity,
 		...storageChecks,
 		...runtimeChecks,
 		...modelChecks,

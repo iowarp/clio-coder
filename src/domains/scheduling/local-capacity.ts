@@ -96,6 +96,30 @@ export function describeLocalCapacity(capacity: LocalCapacity): string | null {
 	return `${capacity.bound}-bound at ${capacity.limit}`;
 }
 
+function gibibytes(bytes: number): string {
+	return (Math.max(0, bytes) / 1024 ** 3).toFixed(1);
+}
+
+/**
+ * User-facing account of automatic local worker sizing.
+ *
+ * CPU and currently available memory are facts Node can read reliably. GPU
+ * inventory, VRAM pressure, and whether a particular model fits are separate
+ * runtime concerns and are deliberately named as unobserved instead of being
+ * implied by a worker-count recommendation.
+ */
+export function describeHostCapacity(facts: HostCapacityFacts, capacity: LocalCapacity): string {
+	const bound =
+		capacity.bound === "configured"
+			? "configured limit"
+			: capacity.bound === "cap"
+				? "built-in safety cap"
+				: `${capacity.bound} limit`;
+	const cgroup =
+		facts.cgroupAvailableBytes === null ? "" : `, ${gibibytes(facts.cgroupAvailableBytes)} GiB available to this process`;
+	return `${facts.cpus} usable CPUs, ${gibibytes(facts.availableMemoryBytes)} GiB available memory${cgroup}; ${capacity.limit} local workers (${bound}). GPU/VRAM and model fit are not checked.`;
+}
+
 /** Read this process's host facts. Tests inject facts instead of calling this. */
 export function observeHostCapacityFacts(): HostCapacityFacts {
 	const available = freemem();

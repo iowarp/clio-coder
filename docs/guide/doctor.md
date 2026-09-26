@@ -3,9 +3,9 @@
 `runDoctorCommand` in [doctor.ts](../../src/cli/doctor.ts) runs the CLI checks. The [safety model](../architecture/safety-model.md) explains command authority.
 
 `clio-coder doctor` diagnoses a Clio install and the workspace it runs in. It
-reads, probes, and reports; plain `doctor` writes nothing. This page covers
-what the checks are, the deep checks, the in-session `/doctor`, and how to
-read the rows.
+reads, performs passive endpoint probes, and reports; plain `doctor` writes
+nothing and sends no model generation request. This page covers what the checks
+are, the deep checks, the in-session `/doctor`, and how to read the rows.
 
 ## Running it
 
@@ -35,6 +35,18 @@ Each row has a level:
 
 Doctor exits 0 when no row is an error. See
 [Exit Codes and Output](exit-codes-and-output.md).
+
+Standard checks include one `connection <id>` row for every configured target.
+It says whether a credential is available, whether the runtime offers a passive
+check, whether the endpoint answered, and whether a live model list was read.
+A target used by chat, fleet, or memory is an error when its passive check
+fails or required credentials are missing; an unused target is a warning. Successful public metadata does not prove that credentials are ready for inference. Each target’s passive probe has a 2.5-second total budget, including credential resolution and all metadata requests. Expired browser credentials are reported without refreshing or writing them. `model <id>` separately says whether each
+configured role model came from a live list, a cached list from an earlier check, a list recorded in settings by configure, or
+a provider catalog. A catalog match is not presented as live availability, and a model missing from an older catalog or recorded list is a warning, not proof that the endpoint rejects it. ALCF’s passive probe reads its catalog; it does not verify the configured inference URL.
+
+The `local worker capacity` row reports usable CPUs, currently available memory,
+any process/cgroup memory bound, and the worker count `auto` resolves to. It
+also states that Clio did not inspect GPU/VRAM or model fit.
 
 ## HPC toolchain rows
 

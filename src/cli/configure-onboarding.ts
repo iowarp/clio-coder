@@ -44,12 +44,14 @@ import {
 	listProviderSupportEntries,
 	recordTargetModelSnapshot,
 	resolveRuntimeAuthTarget,
+	runtimeListsModelsLive,
 } from "../domains/providers/index.js";
 import { fingerprintNativeRuntime } from "../domains/providers/probe/fingerprint.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { greetLmStudio } from "../domains/providers/runtimes/common/lmstudio-http.js";
 import type { ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
+import { observeHostCapacityFacts, resolveLocalConcurrency } from "../domains/scheduling/local-capacity.js";
 import type { ConfigureWizardHost } from "./configure-host.js";
 import { reviewInteropAgents } from "./configure-interop.js";
 import type { ConfigureCategory } from "./configure-layout.js";
@@ -233,10 +235,22 @@ const CATEGORY_STEP: Step = {
 	id: "category",
 	applies: (answers) => answers.mode !== "edit" && !answers.fixedRuntime,
 	run: async (wizard, answers) => {
-		const current = CONFIGURE_CATEGORY_CHOICES.findIndex((choice) => choice.category === answers.category);
+		const registry = getRuntimeRegistry();
+		const eligible = allEntries().filter((entry) => {
+			const runtime = registry.get(entry.runtimeId);
+			return runtime !== null && (answers.mode !== "first" || isOrchestratorEligibleRuntime(runtime));
+		});
+		const available = CONFIGURE_CATEGORY_CHOICES.filter(
+			(choice) => runtimesForCategory(eligible, choice.category).length > 0,
+		);
+		const current = available.findIndex((choice) => choice.category === answers.category);
 		const result = await wizard.select<ConfigureCategory>({
-			heading: ["", chalk.bold("How will you connect Clio to a model?")],
-			choices: CONFIGURE_CATEGORY_CHOICES.map((choice) => ({
+			heading: [
+				"",
+				chalk.bold("Where does your model come from?"),
+				chalk.dim("Choose the description you recognize; Clio shows the exact providers next."),
+			],
+			choices: available.map((choice) => ({
 				value: choice.category,
 				label: choice.label,
 				hint: choice.summary,
@@ -255,8 +269,8 @@ const CATEGORY_STEP: Step = {
 			answers.detected = undefined;
 		}
 		answers.category = result.value;
-		const choice = CONFIGURE_CATEGORY_CHOICES.find((entry) => entry.category === result.value);
-		wizard.answer("Connection", choice?.label ?? result.value);
+		const choice = available.find((entry) => entry.category === result.value);
+		wizard.answer("Source", choice?.label ?? result.value);
 		return "next";
 	},
 };
@@ -275,9 +289,18 @@ const RUNTIME_STEP: Step = {
 		const previous = usable.findIndex((entry) => entry.runtimeId === answers.runtime?.id);
 		const featured = usable.findIndex((entry) => entry.featured);
 		const result = await wizard.select<string>({
-			heading: ["", chalk.bold("Which runtime?")],
-			choices: usable.map((entry) => ({ value: entry.runtimeId, label: entry.runtimeId, hint: entry.summary })),
+			heading: [
+				"",
+				chalk.bold("Which provider or app do you use?"),
+				chalk.dim("The runtime id in each description is Clio's internal adapter name."),
+			],
+			choices: usable.map((entry) => ({
+				value: entry.runtimeId,
+				label: entry.label,
+				hint: `${entry.summary} · runtime ${entry.runtimeId}`,
+			})),
 			initialIndex: previous >= 0 ? previous : featured >= 0 ? featured : 0,
+			searchable: usable.length > 8,
 			railPrefix: wizard.rail,
 			backLabel: "back",
 			clearOnExit: true,
@@ -289,7 +312,8 @@ const RUNTIME_STEP: Step = {
 		const runtime = registry.get(result.value);
 		if (!runtime) return "back";
 		if (answers.runtime?.id !== runtime.id) {
-			answers.targetId = answers.mode === "edit" ? answers.existing?.id : undefined;
+			answers.targetId =
+				answers.mode === "edit" ? answers.existing?.id : deriveTargetId(runtime.id, readSettings().targets);
 			answers.url = undefined;
 			answers.detected = undefined;
 			answers.credential = undefined;
@@ -303,39 +327,8 @@ const RUNTIME_STEP: Step = {
 			answers.inventoryKey = undefined;
 		}
 		answers.runtime = runtime;
-		wizard.answer("Runtime", `${runtime.id}  ${chalk.dim(supportFor(runtime).summary)}`);
-		return "next";
-	},
-};
-
-const TARGET_ID_STEP: Step = {
-	id: "target-id",
-	applies: (answers) => answers.mode !== "edit",
-	run: async (wizard, answers) => {
-		const runtime = answers.runtime;
-		if (!runtime) return "back";
-		const result = await wizard.text({
-			heading: ["", chalk.bold("Target id")],
-			initial: answers.targetId ?? deriveTargetId(runtime.id, readSettings().targets),
-			hint: "the name you will use for this target in `clio-coder targets`",
-			railPrefix: wizard.rail,
-			backLabel: "back",
-			clearOnExit: true,
-			validate: (value) => {
-				if (value.length === 0) return "a target id is required";
-				if (/\s/u.test(value)) return "a target id cannot contain spaces";
-				if (readSettings().targets.some((target) => target.id === value))
-					return "that target id already exists; choose another or use Edit a target";
-				return null;
-			},
-			input: wizard.input,
-			output: wizard.output,
-		});
-		if (result.kind === "quit") return "quit";
-		if (result.kind === "back") return "back";
-		if (answers.targetId !== result.value) answers.inventoryKey = undefined;
-		answers.targetId = result.value;
-		wizard.answer("Target id", result.value);
+		answers.targetId ??= deriveTargetId(runtime.id, readSettings().targets);
+		wizard.answer("Provider", `${runtime.displayName}  ${chalk.dim(`(${runtime.id})`)}`);
 		return "next";
 	},
 };
@@ -408,7 +401,9 @@ async function reportReachability(
 	if (probe !== null) {
 		if (probe.ok) {
 			const readings = probeReadings(probe);
-			wizard.presenter.step(`reachable, ${readings.length > 0 ? readings.join(", ") : "no model list offered"}`);
+			wizard.presenter.step(
+				`${runtime.id === "alcf" ? "ALCF catalog reachable; inference URL not checked" : "reachable"}, ${readings.length > 0 ? readings.join(", ") : "no model list offered"}`,
+			);
 		} else if (probe.authFailed) {
 			wizard.presenter.warn("Authentication failed. Choose a credential for this server before selecting a model.");
 			return false;
@@ -474,9 +469,11 @@ function defaultCredentialSource(runtime: RuntimeDescriptor, targetId: string): 
 	if (status.source === "stored-api-key") return "keep";
 	if (status.source === "environment") return "env";
 	if (runtime.id === "litellm") return "stored";
-	// A local llama.cpp server wants no credential, and offering `env` sent the
-	// user to an unexplained variable name with nothing correct to type into it.
-	return targetRequiresAuth({ id: targetId, runtime: runtime.id }, runtime) ? "env" : "skip";
+	// New users can paste the credential they were given without first learning
+	// shell environment variables. The screen states the storage properties and
+	// keeps the environment-variable option available for managed deployments.
+	// A local server that needs no key still opens on No key.
+	return targetRequiresAuth({ id: targetId, runtime: runtime.id }, runtime) ? "stored" : "skip";
 }
 
 /**
@@ -663,11 +660,52 @@ const MODEL_STEP: Step = {
 		const preferred = answers.model ?? preferredModelFor(inventory, support);
 
 		if (inventory.models.length === 0) {
-			wizard.presenter.warn(inventoryGap(runtime, { url: answers.url }, inventory.probeError));
-			const result = await wizard.text({
-				heading: ["", chalk.bold("Which model?")],
+			const gap = inventoryGap(runtime, { url: answers.url }, inventory.probeError);
+			wizard.presenter.warn(gap);
+			const canDetect = runtimeListsModelsLive(runtime);
+			const result = await wizard.select<"retry" | "back" | "manual">({
+				heading: [
+					"",
+					chalk.bold("Clio could not read a model list"),
+					chalk.dim(
+						canDetect
+							? "Start the app or server and load a model, then retry. No generation request is sent."
+							: "This provider has no discovery API Clio can use.",
+					),
+				],
+				choices: [
+					...(canDetect
+						? [{ value: "retry" as const, label: "Check again", hint: "probe the endpoint and read its model list" }]
+						: []),
+					{ value: "back", label: "Change the connection", hint: "go back without saving" },
+					{
+						value: "manual",
+						label: "Enter an unverified model ID",
+						hint: "advanced: Clio cannot verify it before saving",
+					},
+				],
+				initialIndex: 0,
+				railPrefix: wizard.rail,
+				backLabel: "back",
+				clearOnExit: true,
+				input: wizard.input,
+				output: wizard.output,
+			});
+			if (result.kind === "quit") return "quit";
+			if (result.kind === "back" || result.value === "back") return "back";
+			if (result.value === "retry") {
+				answers.inventoryKey = undefined;
+				wizard.presenter.step("checking the endpoint and model list again");
+				return MODEL_STEP.run(wizard, answers);
+			}
+			const manual = await wizard.text({
+				heading: [
+					"",
+					chalk.bold("Unverified model id"),
+					chalk.dim("Clio will send this exact text. The endpoint and capabilities remain unverified."),
+				],
 				initial: preferred ?? "",
-				hint: "the wire id the provider documents; Clio sends it as written",
+				hint: "use only the exact wire id from the provider or server documentation",
 				railPrefix: wizard.rail,
 				backLabel: "back",
 				clearOnExit: true,
@@ -675,10 +713,9 @@ const MODEL_STEP: Step = {
 				input: wizard.input,
 				output: wizard.output,
 			});
-			if (result.kind === "quit") return "quit";
-			if (result.kind === "back") return "back";
-			answers.model = result.value;
-			wizard.answer("Model", result.value);
+			if (manual.kind !== "value") return manual.kind;
+			answers.model = manual.value;
+			wizard.answer("Model", `${manual.value}  ${chalk.dim("(unverified)")}`);
 			await readModelCapabilities(answers, runtime);
 			return "next";
 		}
@@ -701,6 +738,7 @@ const MODEL_STEP: Step = {
 				};
 			}),
 			initialIndex: selected >= 0 ? selected : 0,
+			searchable: inventory.models.length > 8,
 			railPrefix: wizard.rail,
 			backLabel: "back",
 			clearOnExit: true,
@@ -753,13 +791,9 @@ const THINKING_HINTS: Readonly<Record<ThinkingLevel, string>> = {
 const THINKING_STEP: Step = {
 	id: "thinking",
 	applies: (answers) => {
-		if (answers.mode !== "first" && !PROTOCOL_COMPAT_RUNTIME_IDS.has(answers.runtime?.id ?? "")) return false;
+		if (answers.mode !== "edit") return false;
 		const runtime = answers.runtime;
 		if (!runtime || answers.model === undefined) return false;
-		// A generic OpenAI/Anthropic-compatible endpoint reports nothing about
-		// reasoning, so the answer here is also what tells Clio whether the model
-		// has it at all.
-		if (PROTOCOL_COMPAT_RUNTIME_IDS.has(runtime.id)) return true;
 		return modelSupportsThinking(runtime, draftDescriptor(answers, runtime, true), answers.probe ?? null);
 	},
 	run: async (wizard, answers) => {
@@ -860,7 +894,7 @@ const ANTIGRAVITY_COLLEAGUE_STEP: Step = {
 
 const CONTEXT_STEP: Step = {
 	id: "context-window",
-	applies: (answers) => PROTOCOL_COMPAT_RUNTIME_IDS.has(answers.runtime?.id ?? "") || answers.mode === "edit",
+	applies: (answers) => answers.mode === "edit",
 	run: async (wizard, answers) => {
 		const result = await wizard.text({
 			heading: ["", chalk.bold("Context window in tokens")],
@@ -883,35 +917,124 @@ const CONTEXT_STEP: Step = {
 	},
 };
 
+function verificationSummary(answers: Answers): string[] {
+	const probe = answers.probe;
+	const endpoint = !probe
+		? "Endpoint: no passive check available"
+		: probe.ok
+			? answers.runtime?.id === "alcf"
+				? "ALCF catalog reachable; URL untested"
+				: "Endpoint: reachable (metadata only)"
+			: "Endpoint: reachability not verified";
+	const inventory = answers.inventory;
+	const models =
+		inventory?.source === "probe"
+			? `Models: ${inventory.models.length} listed live`
+			: inventory?.source === "catalog"
+				? "Models: provider catalog (not live)"
+				: inventory?.source === "cache"
+					? "Models: earlier cache (not live now)"
+					: inventory?.source === "legacy"
+						? "Models: existing settings (not live)"
+						: "Model ID: unverified";
+	return [endpoint, models];
+}
+
 const REVIEW_STEP: Step = {
 	id: "review",
 	applies: () => true,
 	run: async (wizard, answers) => {
-		const result = await wizard.select({
-			heading: [
-				"",
-				chalk.bold("Review target"),
-				`${answers.targetId} · ${answers.runtime?.id} · ${answers.model}`,
-				`URL: ${answers.url ?? "(none)"}`,
-				`Credential: ${answers.credential ?? "none"} · Context: ${answers.contextWindow ?? "detected / runtime default"}`,
-				answers.mode === "first"
-					? "Use for chat and fleet."
-					: "Existing chat, fleet, memory, and profile defaults stay in place.",
-				"Escape returns to the previous step; settings are saved only when you choose Save.",
-			],
-			choices: [
-				{ value: "save", label: "Save target" },
-				{ value: "back", label: "Back" },
-				{ value: "cancel", label: "Cancel setup" },
-			],
-			railPrefix: wizard.rail,
-			backLabel: "back",
-			clearOnExit: true,
-			input: wizard.input,
-			output: wizard.output,
-		});
-		if (result.kind !== "selected") return result.kind;
-		return result.value === "save" ? "next" : result.value === "back" ? "back" : "cancel";
+		const facts = observeHostCapacityFacts();
+		const capacity = resolveLocalConcurrency("auto", facts);
+		// The dock has 16 body rows and may be only 40 columns wide. Keep the
+		// summary compact; detailed observations are reachable before Save.
+		for (;;) {
+			const result = await wizard.select({
+				heading: [
+					"",
+					chalk.bold("Review what Clio could verify"),
+					truncate(`Connection: ${answers.targetId}`, wizard.host ? 36 : 70),
+					truncate(`Model: ${answers.model}`, wizard.host ? 36 : 70),
+					...verificationSummary(answers),
+					"No generation or quality/tool tests.",
+					"GPU/VRAM and model fit not checked.",
+					`Automatic local workers: ${capacity.limit}`,
+					answers.mode === "first" ? "Save sets the chat and fleet model." : "Existing routes stay in place.",
+				],
+				choices: [
+					{ value: "save", label: "Save target" },
+					{ value: "details", label: "Connection and machine details" },
+					{ value: "back", label: "Back" },
+					{ value: "cancel", label: "Cancel setup" },
+				],
+				railPrefix: wizard.rail,
+				backLabel: "back",
+				clearOnExit: true,
+				input: wizard.input,
+				output: wizard.output,
+			});
+			if (result.kind !== "selected") return result.kind;
+			if (result.value !== "details")
+				return result.value === "save" ? "next" : result.value === "back" ? "back" : "cancel";
+			const detailPages = [
+				["Connection details", answers.runtime?.displayName ?? "", `ID: ${answers.targetId}`, `Model: ${answers.model}`],
+				[
+					"Connection address",
+					answers.url ?? "Provider-managed address",
+					answers.probe ? "This was a passive metadata check." : "Endpoint reachability was not checked.",
+					"No generation request was sent.",
+				],
+				[
+					"Credential handling",
+					...(answers.credential === "stored"
+						? ["Key written only when you save.", "Local storage: mode 0600.", "Storage is not encrypted."]
+						: answers.credential === "env"
+							? [
+									`Read from $${answers.apiKeyEnv}`,
+									answers.apiKeyEnv && process.env[answers.apiKeyEnv] ? "Set in this process." : "Not set in this process.",
+								]
+							: answers.credential === "keep"
+								? ["Keep the saved credential."]
+								: answers.runtime?.auth === "oauth"
+									? ["Browser sign-in is saved immediately.", describeAuthStatus(answers.runtime, answers.existing)]
+									: ["No API key selected.", "SDK/app sessions are not inspected."]),
+					"No generation checked key validity.",
+				],
+				[
+					"Machine observations",
+					`${facts.cpus} usable CPUs`,
+					`${(facts.availableMemoryBytes / 1024 ** 3).toFixed(1)} GiB available memory`,
+					...(facts.cgroupAvailableBytes === null
+						? []
+						: [`${(facts.cgroupAvailableBytes / 1024 ** 3).toFixed(1)} GiB available to this process`]),
+					`${capacity.limit} automatic local workers`,
+					`Sizing bound: ${capacity.bound}`,
+					"GPU/VRAM and model fit not checked.",
+					"Answer quality and tool use untested.",
+				],
+			];
+			let page = 0;
+			while (page < detailPages.length) {
+				const detail = await wizard.select({
+					heading: detailPages[page] ?? [],
+					choices: [
+						{ value: "next", label: page === detailPages.length - 1 ? "Return to review" : "Next" },
+						{ value: "previous", label: page === 0 ? "Return to review" : "Previous" },
+					],
+					railPrefix: wizard.rail,
+					backLabel: "review",
+					clearOnExit: true,
+					input: wizard.input,
+					output: wizard.output,
+				});
+				if (detail.kind === "quit") return "quit";
+				if (detail.kind === "back") break;
+				if (detail.value === "previous") {
+					if (page === 0) break;
+					page--;
+				} else page++;
+			}
+		}
 	},
 };
 
@@ -924,7 +1047,6 @@ const REVIEW_STEP: Step = {
 const STEPS: ReadonlyArray<Step> = [
 	CATEGORY_STEP,
 	RUNTIME_STEP,
-	TARGET_ID_STEP,
 	CREDENTIAL_STEP,
 	CREDENTIAL_VALUE_STEP,
 	URL_STEP,
@@ -1006,8 +1128,9 @@ export async function runOnboardingWizard(
 				: "Add a target",
 		"configure",
 	);
-	presenter.note("Pick a model; escape goes back. Review and save when ready.");
-	presenter.note(`Result: ${shortenPath(settingsPath())}`);
+	presenter.note("Choose what you already use. Clio checks the endpoint and model list when the provider allows it.");
+	presenter.note("Escape goes back. Nothing is saved until the review, except a browser sign-in you complete.");
+	presenter.note(`Saved result: ${shortenPath(settingsPath())}`);
 
 	const existing = options.mode === "edit" ? options.target : undefined;
 	const answers: Answers = {
@@ -1019,7 +1142,11 @@ export async function runOnboardingWizard(
 				? options.runtime
 				: undefined,
 		fixedRuntime: options.mode !== "edit" && options.runtime !== undefined,
-		targetId: existing?.id,
+		targetId:
+			existing?.id ??
+			(options.mode !== "edit" && options.runtime
+				? deriveTargetId(options.runtime.id, readSettings().targets)
+				: undefined),
 		url: existing?.url,
 		model: existing?.defaultModel,
 		credential: existing?.auth?.apiKeyEnvVar ? "env" : existing?.auth?.apiKeyRef ? "keep" : undefined,
