@@ -12,7 +12,7 @@ import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../core/defaults.js";
 import { writeDiagnostic } from "../core/diagnostics.js";
 import { loadDomains } from "../core/domain-loader.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import { expandInlineFileReferencesAsync } from "../core/file-references.js";
+import { detectSupportedImageMimeType, expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { setCommitDecisionRefsProvider, setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
@@ -157,6 +157,7 @@ import {
 	modelVisibleSkills,
 	type ResourcesContract,
 } from "../domains/resources/index.js";
+import { expandSubmitText } from "../domains/resources/submit-expansion.js";
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
 import type { AutonomyLevel, SafetyContract } from "../domains/safety/index.js";
@@ -223,6 +224,7 @@ import {
 	buildModelReplayAgentMessagesFromTurns,
 	continuityContextFromSession,
 } from "../interactive/model-session-replay.js";
+import { resizeImage } from "../utils/image-resize.js";
 import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
@@ -2872,6 +2874,25 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				settings: {
 					read: readAcpSafeSettings,
 					commit: commitAcpSafeSettings,
+				},
+				// A request typed in an ACP client means what it means in the terminal: skills,
+				// prompt templates and `@path` references expand the same way. Attached images
+				// are judged by their bytes, never by the client's label, and resized like a
+				// referenced image file before the model sees them.
+				expandPrompt: async (text, attached) => {
+					const expansion = await expandSubmitText(text, resources, process.cwd());
+					const images = [...expansion.images];
+					for (const image of attached) {
+						const mimeType = detectSupportedImageMimeType(Buffer.from(image.data, "base64"));
+						if (!mimeType) throw new Error("An attached file is not a PNG, JPEG, GIF or WebP image.");
+						const resized = await resizeImage({ type: "image", mimeType, data: image.data });
+						images.push(
+							resized
+								? { type: "image", mimeType: resized.mimeType, data: resized.data }
+								: { type: "image", mimeType, data: image.data },
+						);
+					}
+					return { ...expansion, images };
 				},
 				// The read half of the terminal's /tasks, /decisions and /memory views.
 				board: () => {

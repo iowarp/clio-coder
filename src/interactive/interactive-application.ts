@@ -3,10 +3,8 @@ import type { ClioSettings } from "../core/config.js";
 import { nextOutputStyle } from "../core/defaults.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { recordHarnessFeature } from "../core/harness-profile.js";
 import { readClioVersion } from "../core/package-root.js";
-import type { PendingSkillRequest } from "../core/skill-activation.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
@@ -24,6 +22,7 @@ import type { ObservabilityContract } from "../domains/observability/index.js";
 import { appendOutOfTurnUsageRow } from "../domains/observability/out-of-turn-usage.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
+import { expandSubmitText, type SubmitExpansion } from "../domains/resources/submit-expansion.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
@@ -32,7 +31,6 @@ import type { ShareContract } from "../domains/share/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { setDiffusionFramesEnabled } from "../engine/apis/diffusion-frames.js";
 import { createAgentProgress } from "../engine/tui.js";
-import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ApplicationController } from "./application-controller.js";
@@ -274,51 +272,9 @@ export interface InteractiveDeps {
 	onShutdown: () => Promise<void>;
 }
 
-export interface InteractiveSubmitExpansion {
-	text: string;
-	images: ImageContent[];
-	workingContextPaths: string[];
-	pendingSkillRequests: PendingSkillRequest[];
-	/**
-	 * What the transcript paints as the operator's turn when `text` is a prompt
-	 * template's body: the line they typed, and a note naming the template. The
-	 * model still receives `text`; a `/wtfp:new-paper` body is several hundred
-	 * lines the operator never wrote, and painting it as their message buried
-	 * the command under it.
-	 */
-	display?: { text: string; note?: string };
-}
-
-export async function expandInteractiveSubmitAsync(
-	text: string,
-	resources: ResourcesContract | undefined,
-	cwd = process.cwd(),
-): Promise<InteractiveSubmitExpansion> {
-	const parsed = resources?.parsePendingSkillRequests(text, cwd) ?? {
-		text,
-		pendingSkillRequests: [],
-	};
-	const promptExpansion = resources?.expandPromptTemplate(parsed.text, cwd);
-	const promptText = promptExpansion?.expanded ? promptExpansion.text : parsed.text;
-	const fileExpansion = await expandInlineFileReferencesAsync(promptText, {
-		cwd,
-		includeImages: true,
-		missing: "leave",
-	});
-	const display = promptExpansion?.expanded
-		? {
-				text: parsed.text.trim(),
-				note: `expanded prompt template ${promptExpansion.template.name} (${promptExpansion.text.split("\n").length} lines)`,
-			}
-		: undefined;
-	return {
-		text: fileExpansion.text,
-		images: fileExpansion.images,
-		workingContextPaths: fileExpansion.referencedPaths,
-		pendingSkillRequests: parsed.pendingSkillRequests,
-		...(display ? { display } : {}),
-	};
-}
+/** The terminal's name for the shared submit expansion; see `expandSubmitText`. */
+export type InteractiveSubmitExpansion = SubmitExpansion;
+export const expandInteractiveSubmitAsync = expandSubmitText;
 
 function availableInteractiveThinkingLevels(deps: InteractiveDeps): ReadonlyArray<ThinkingLevel> {
 	const settings = deps.getSettings?.();

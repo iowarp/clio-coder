@@ -37,7 +37,7 @@ import { askUserExposure } from "../../tools/ask-user.js";
 import type { McpCapabilitySource, McpClientServerSpec } from "../../tools/gateway/mcp-capabilities.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
-import type { AgentMessage } from "../types.js";
+import type { AgentMessage, ImageContent } from "../types.js";
 import { ACP_BOARD_META_KEY, ACP_BOARD_METHOD, type AcpBoardSource, projectSessionBoard } from "./board.js";
 import type { AcpCommandCatalog, AcpCommandControl } from "./commands.js";
 import { ACP_TURN_FAILED_MESSAGE, AcpRequestError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
@@ -73,6 +73,15 @@ import {
 
 type AcpServerEvent = unknown;
 type AcpEventRecord = Record<string, unknown> & { type?: unknown };
+
+/** What the host's prompt expander hands back; the same fields the terminal submits with. */
+export interface AcpPromptExpansion {
+	text: string;
+	images: ReadonlyArray<ImageContent>;
+	workingContextPaths: ReadonlyArray<string>;
+	pendingSkillRequests: ReadonlyArray<unknown>;
+	display?: { text: string; note?: string };
+}
 
 export interface AcpServerChat {
 	submit(text: string, options?: unknown): Promise<void>;
@@ -162,6 +171,16 @@ export interface ClioAcpServerOptions {
 	 * announced and refuses.
 	 */
 	board?: () => AcpBoardSource;
+	/**
+	 * Expands operator syntax in a prompt as the terminal does before it submits:
+	 * `@path` file and image references, prompt templates and `/skill` requests,
+	 * plus the prompt's own image blocks. Absent means the text is submitted as
+	 * typed and image blocks are not accepted.
+	 */
+	expandPrompt?: (
+		text: string,
+		images: ReadonlyArray<{ type: "image"; mimeType: string; data: string }>,
+	) => Promise<AcpPromptExpansion>;
 	toolRegistry?: ToolRegistry;
 	mcpCapabilities?: Pick<McpCapabilitySource, "attachClientServers" | "detachClientServers">;
 	bus?: SafeEventBus;
@@ -400,8 +419,9 @@ function contentText(value: unknown): string {
 /**
  * The prompt text of one `session/prompt`. ACP v1 carries it as `params.prompt`,
  * an array of content blocks. Text and resource links are the baseline prompt
- * types in ACP v1; a link becomes a reference the model can see. Image, audio,
- * and embedded resources require capabilities this server does not advertise.
+ * types in ACP v1; a link becomes a reference the model can see. Image blocks
+ * are read by {@link promptImages} when the host expands prompts; audio and
+ * embedded resources require capabilities this server does not advertise.
  * Nothing else is accepted: tolerating
  * `params.content`, `params.message`, or a bare string meant this server
  * answered request shapes no ACP client sends and no schema describes, so a
@@ -419,6 +439,31 @@ function promptText(params: unknown): string {
 		}
 	}
 	return parts.join("\n").trim();
+}
+
+/** At most this many image blocks ride one prompt; the stdio line bounds their bytes. */
+export const ACP_MAX_PROMPT_IMAGES = 4;
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/u;
+
+/**
+ * The image blocks of one `session/prompt`, checked for shape only. The host's
+ * prompt expander decides from the bytes whether each is an image it accepts,
+ * so a client's `mimeType` is carried but never trusted.
+ */
+function promptImages(params: unknown): Array<{ type: "image"; mimeType: string; data: string }> {
+	if (!isRecord(params) || !Array.isArray(params.prompt)) return [];
+	const images: Array<{ type: "image"; mimeType: string; data: string }> = [];
+	for (const block of params.prompt) {
+		if (!isRecord(block) || block.type !== "image") continue;
+		if (typeof block.mimeType !== "string" || typeof block.data !== "string" || !BASE64.test(block.data))
+			throw new AcpRequestError(-32602, "an image block needs a mimeType and base64 data", { code: "invalid_params" });
+		images.push({ type: "image", mimeType: block.mimeType.slice(0, 64), data: block.data });
+	}
+	if (images.length > ACP_MAX_PROMPT_IMAGES)
+		throw new AcpRequestError(-32602, `a prompt carries at most ${ACP_MAX_PROMPT_IMAGES} images`, {
+			code: "invalid_params",
+		});
+	return images;
 }
 
 /** Marker appended to any value this server shortened before sending it. */
@@ -2000,6 +2045,8 @@ export interface AcpHandshakeFeatures {
 	bus: boolean;
 	/** Whether `_clio-coder/session/board` answers; absent reads as false. */
 	board?: boolean;
+	/** Whether prompts are expanded, which is what admits image blocks; absent reads as false. */
+	images?: boolean;
 }
 
 /** ACP stdio declarations are client authority for one session, never saved settings. */
@@ -2138,7 +2185,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 				},
 				agentCapabilities: {
 					loadSession: canLoadSession,
-					promptCapabilities: { audio: false, embeddedContext: false, image: false },
+					promptCapabilities: { audio: false, embeddedContext: false, image: features.images === true },
 					mcpCapabilities: { http: false, sse: false },
 					sessionCapabilities: {
 						close: {},
@@ -2276,6 +2323,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			toolRegistry: options.toolRegistry !== undefined,
 			bus: options.bus !== undefined,
 			board: options.board !== undefined,
+			images: options.expandPrompt !== undefined,
 		});
 	const workspaceInstanceId = handshake.workspaceInstanceId;
 	const now = options.now ?? Date.now;
@@ -3569,6 +3617,9 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		const text = promptText(params);
 		if (text.length === 0) throw new AcpRequestError(-32602, "prompt text is required", { code: "invalid_params" });
+		const images = promptImages(params);
+		if (images.length > 0 && options.expandPrompt === undefined)
+			throw new AcpRequestError(-32602, "this agent does not accept image blocks", { code: "invalid_params" });
 		// Check the same credential authority as the runtime, without resolving or
 		// echoing a secret. Desktop services do not inherit a terminal's API keys.
 		const targetId = routingSnapshot().target;
@@ -3609,8 +3660,23 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				if (result !== undefined)
 					sendTextChunks(options.transport, session.id, active, "agent_message_chunk", result.lines.join("\n"));
 				active.sawTurnEnd = true;
-			} else {
+			} else if (options.expandPrompt === undefined) {
 				await options.chat.submit(text);
+			} else {
+				let expansion: AcpPromptExpansion;
+				try {
+					expansion = await options.expandPrompt(text, images);
+				} catch (err) {
+					throw new AcpRequestError(-32602, err instanceof Error ? err.message : String(err), {
+						code: "invalid_params",
+					});
+				}
+				await options.chat.submit(expansion.text, {
+					...(expansion.images.length > 0 ? { images: expansion.images } : {}),
+					...(expansion.workingContextPaths.length > 0 ? { workingContextPaths: expansion.workingContextPaths } : {}),
+					...(expansion.pendingSkillRequests.length > 0 ? { pendingSkillRequests: expansion.pendingSkillRequests } : {}),
+					...(expansion.display ? { display: expansion.display } : {}),
+				});
 			}
 		} catch (err) {
 			if (err instanceof AcpRequestError) throw err;

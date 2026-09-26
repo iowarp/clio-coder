@@ -125,6 +125,7 @@ export async function runAcpCommand(
 					toolRegistry: true,
 					bus: true,
 					board: true,
+					images: true,
 				});
 				const serving = serveDeferredAcp({
 					transport,
