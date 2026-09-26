@@ -1,10 +1,13 @@
 import { isUtf8 } from "node:buffer";
+import { createHash } from "node:crypto";
 import { type FileHandle, open, stat } from "node:fs/promises";
 import { Type } from "typebox";
 import { detectSupportedImageMimeType, prepareBoundedImage } from "../core/file-references.js";
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
 import { ToolNames } from "../core/tool-names.js";
+import type { ReadRecallPort } from "../domains/context/working-set/reread.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
+import { ceilChars } from "../domains/session/context-accounting.js";
 import {
 	commitObservationReservation,
 	finalizeObservation,
@@ -15,6 +18,7 @@ import {
 } from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
+import { toolResultContextText } from "./result-disposition.js";
 import { isSessionOffloadPath } from "./result-shaping.js";
 import {
 	DEFAULT_MAX_LINES,
@@ -746,3 +750,59 @@ export const readTool: ToolSpec = {
 		}
 	},
 };
+
+/** sha256 of the text the ledger will hold for this result, hex; the same bytes `planEviction` hashes. */
+export function readBodyHash(text: string): string {
+	return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+/**
+ * The read tool with the one interception the working set asks for. When the
+ * body just produced is byte-identical to an evicted read of the same path
+ * (compared by the content hash the eviction item stored, never by mtime),
+ * the result still carries the body the model asked for, and a `contextRecall`
+ * with trigger `reread` is recorded in its name: `details.recall` names the
+ * ref, so provenance is exact and the churn pin can see the second reread.
+ * Without a port, or without a session, this is `readTool` unchanged.
+ */
+export function createReadTool(port?: ReadRecallPort): ToolSpec {
+	if (port === undefined) return readTool;
+	return {
+		...readTool,
+		async run(args, options): Promise<ToolResult> {
+			const result = await readTool.run(args, options);
+			if (result.kind !== "ok" || typeof args.path !== "string" || result.images !== undefined) return result;
+			const text = toolResultContextText(result);
+			const contentHash = readBodyHash(text);
+			let match: ReturnType<ReadRecallPort["matchEvictedRead"]>;
+			try {
+				match = port.matchEvictedRead(resolveReadPath(args.path), contentHash);
+			} catch {
+				// The interception is provenance, never the read: a port that
+				// cannot answer leaves an ordinary read result.
+				return result;
+			}
+			if (match === null) return result;
+			const recallTurnId = port.recordReread({
+				ref: match.ref,
+				...(options?.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }),
+				tokensReadmitted: ceilChars(text.length),
+			});
+			if (recallTurnId === null) return result;
+			return {
+				...result,
+				details: {
+					...(result.details ?? {}),
+					recall: {
+						ref: match.ref,
+						...(match.alias === undefined ? {} : { alias: match.alias }),
+						trigger: "reread",
+						recallTurnId,
+						tokensReadmitted: ceilChars(text.length),
+						contentHash,
+					},
+				},
+			};
+		},
+	};
+}

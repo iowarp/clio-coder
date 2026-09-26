@@ -12,7 +12,7 @@ import type { ToolSurface } from "../lazy-tool.js";
 export const contextToolSurface = {
 	name: ToolNames.Context,
 	description:
-		"Environment context: scope=settings explains effective settings, autonomy, limits and UI commands without credentials; workspace returns the git/project snapshot; budget inspects the native session's live request budget (read-only, shadow policy); skills lists ready skills, installed states and marketplace options, or loads a ready skill by name; recall retrieves persisted evicted/summarized tool results by ref, or discovers them by query with limit/offset pages. Clio docs and recipes: gateway capabilities clio_docs and clio_library. Repository code/wiki: code_nav (mode=wiki).",
+		"Environment context: scope=settings explains effective settings, autonomy, limits and UI commands without credentials; workspace returns the git/project snapshot; budget inspects the native session's live request budget (read-only); skills lists ready and installable skills, or loads one by name; recall returns an evicted/summarized result by ref or path, or lists them by query with limit/offset. Clio docs and recipes: gateway capabilities clio_docs and clio_library. Repository code/wiki: code_nav (mode=wiki).",
 	parameters: Type.Object({
 		scope: StringEnum(["workspace", "settings", "skills", "recall", "budget"], { description: "Context source." }),
 		// These three carry three scopes each. The attached-schema byte budget in
@@ -29,7 +29,8 @@ export const contextToolSurface = {
 		limit: Type.Optional(
 			Type.Number({ description: "scope=settings/recall: page size (max 12); scope=skills: rows (max 200)." }),
 		),
-		ref: Type.Optional(Type.String({ description: "scope=recall: exact persisted result ref; omit for discovery." })),
+		ref: Type.Optional(Type.String({ description: "scope=recall: result ref; omit to discover." })),
+		path: Type.Optional(Type.String({ description: "scope=recall: newest evicted read of a file." })),
 		offset: Type.Optional(
 			Type.Number({ description: "scope=settings, recall, or skills: 0-based offset; follow nextOffset." }),
 		),

@@ -4,6 +4,7 @@ import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { BudgetProvider } from "../domains/context/budget/inspection.js";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";
+import type { ReadRecallPort } from "../domains/context/working-set/reread.js";
 import type { VisionSidecar } from "../domains/providers/vision-sidecar.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -37,7 +38,7 @@ import { limitationTool } from "./limitation.js";
 import { lsTool } from "./ls.js";
 import { networkToolsDisabled } from "./network-policy.js";
 import { assertBuiltinToolPolicy } from "./policy.js";
-import { readTool } from "./read.js";
+import { createReadTool } from "./read.js";
 import type { ToolRegistry } from "./registry.js";
 import { runScriptToolSurface } from "./run-script.js";
 import { gitTool } from "./safe-exec.js";
@@ -57,6 +58,12 @@ export interface CoreToolBootstrapDeps {
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
 	/** Publishes a successful context(scope=recall) on the bus; absent where no bus is wired. */
 	onContextRecalled?: (payload: ContextRecalledPayload) => void;
+	/**
+	 * The reread interception for the read tool: a fresh read byte-identical to
+	 * an evicted read of the same path records a `reread` recall instead of a
+	 * second copy. Absent in worker registries, which never fold the working set.
+	 */
+	readRecall?: ReadRecallPort;
 	askUser?: AskUserHandler;
 	getAutonomy?: () => AutonomyLevel;
 	taskBoard?: TaskBoardStore;
@@ -118,7 +125,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	const includeNetworkTools = !networkToolsDisabled();
 	registry.register(builtin(evidenceTool, { path: "src/tools/evidence.ts", scope: "core" }));
 	registry.register({
-		...builtin(readTool, { path: "src/tools/read.ts", scope: "core" }),
+		...builtin(createReadTool(deps.readRecall), { path: "src/tools/read.ts", scope: "core" }),
 	});
 	registry.register({
 		...builtin(writeTool, { path: "src/tools/write.ts", scope: "core" }),
@@ -250,6 +257,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 										const meta = session.current();
 										return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
 									},
+									cwd: () => session.current()?.cwd ?? null,
 									appendEntry: (entry) => session.appendEntry(entry),
 									...(deps.onContextRecalled ? { onRecalled: deps.onContextRecalled } : {}),
 								},

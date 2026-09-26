@@ -165,7 +165,9 @@ export type RecallError =
 	| { kind: "not_on_active_path"; ref: string }
 	| { kind: "visible"; ref: string }
 	| { kind: "unavailable"; ref: string }
-	| { kind: "invalid_ref"; ref: string };
+	| { kind: "invalid_ref"; ref: string }
+	/** Recall by path found no evicted read of the file on the active path. */
+	| { kind: "no_evicted_read"; ref: string; path: string };
 
 export interface RecallResult {
 	ref: WorkingSetRef;

@@ -144,9 +144,11 @@ export interface PathIndexOptions {
 /**
  * Lexical canonicalization only: no realpath, no `process.cwd()`, no `~`
  * expansion. With a cwd, `src/a.ts`, `./src/a.ts`, and `/cwd/src/a.ts` all key
- * the same file; without one the first two still do.
+ * the same file; without one the first two still do. Exported as the one
+ * rule every path-keyed lookup shares (`byPath`, recall by path, the reread
+ * index), so a path spelled two ways cannot miss itself.
  */
-function canonicalize(value: string, cwd: string | null): string {
+export function canonicalize(value: string, cwd: string | null): string {
 	const trimmed = value.trim();
 	if (trimmed.length === 0) return "";
 	if (isAbsolute(trimmed)) return normalize(trimmed);

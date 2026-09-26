@@ -54,6 +54,8 @@ import { CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybind
 import type { ContextContract } from "../domains/context/contract.js";
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
+import type { ReadRecallPort } from "../domains/context/working-set/reread.js";
+import { createRereadRecallPort } from "../domains/context/working-set/reread.js";
 import { endpointCapacityUsage } from "../domains/dispatch/capacity-lease.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
@@ -762,6 +764,30 @@ async function resolveCompactionModel(
 function readSessionEntriesForCompact(sessionId: string): SessionEntry[] {
 	const reader = openSession(sessionId);
 	return collectSessionEntries(reader.turns(), sessionPaths(reader.meta()).current);
+}
+
+/**
+ * The read tool's reread port over the live session. The hash index it keeps
+ * is rebuilt only when an eviction event lands (`ContextPruned`) or the
+ * session changes, so an ordinary read never re-parses the ledger.
+ */
+function createSessionRereadPort(session: SessionContract, bus: SafeEventBus): ReadRecallPort {
+	const port = createRereadRecallPort({
+		sessionId: () => session.current()?.id ?? null,
+		readEntries: () => {
+			const meta = session.current();
+			return meta ? readSessionEntriesForCompact(meta.id) : [];
+		},
+		activeLeafTurnId: () => {
+			const meta = session.current();
+			return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
+		},
+		cwd: () => session.current()?.cwd ?? null,
+		appendEntry: (entry) => session.appendEntry(entry),
+		onRecalled: (payload) => bus.emit(BusChannels.ContextRecalled, payload),
+	});
+	bus.on(BusChannels.ContextPruned, () => port.invalidate());
+	return port;
 }
 
 /**
@@ -2030,6 +2056,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						return meta ? readSessionEntriesForCompact(meta.id) : [];
 					},
 					onContextRecalled: (payload) => bus.emit(BusChannels.ContextRecalled, payload),
+					readRecall: createSessionRereadPort(session, bus),
 				}
 			: {}),
 		taskBoard,

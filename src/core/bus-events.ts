@@ -366,7 +366,7 @@ export interface ContextPrunedPayload {
 /** Payload published on {@link BusChannels.ContextRecalled} after an exact working-set recall. */
 export interface ContextRecalledPayload {
 	ref: string;
-	trigger: "tool" | "operator";
+	trigger: "tool" | "operator" | "reread";
 	tokensReadmitted: number;
 	at: number;
 }

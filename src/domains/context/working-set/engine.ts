@@ -12,6 +12,7 @@
  * (`turnId`, `parentTurnId`, `timestamp`).
  */
 
+import { createHash } from "node:crypto";
 import type { EvictedItem, SessionEntry } from "../../session/entries.js";
 import type {
 	ContextEvictionFields,
@@ -162,6 +163,13 @@ export function tokensFreedByEviction(
 	return Math.max(0, estimateTokens(entry) - estimateTokens(projected));
 }
 
+/** sha256 of a tool result's body text, hex: `readBodyHash` in the read tool computes the same bytes. */
+function bodyHash(entry: SessionEntry): string | undefined {
+	if (entry.kind !== "message") return undefined;
+	const text = toolResultText(toolResultPayload(entry.payload).result);
+	return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
 export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): EvictionPlan | null {
 	const candidates = policy.select(input);
 	if (candidates.length === 0) return null;
@@ -193,6 +201,11 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 		if (tokensFreed <= 0) continue;
 		claimed.add(key);
 		if (alias !== undefined) aliasSequence += 1;
+		// The hash is over the body text as the ledger holds it, which is what
+		// the read tool hashes on a fresh read of the same path (`readBodyHash`):
+		// a match there is a reread of unchanged content. Thinking units carry
+		// no marker and no hash.
+		const contentHash = alias === undefined ? undefined : bodyHash(entry);
 		items.push({
 			...(alias === undefined ? {} : { alias }),
 			ref: candidate.ref,
@@ -200,6 +213,7 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 			tokensFreed,
 			marker,
 			...(candidate.by === undefined ? {} : { by: candidate.by }),
+			...(contentHash === undefined ? {} : { contentHash }),
 		});
 	}
 	if (items.length === 0) return null;
