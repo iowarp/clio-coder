@@ -26,6 +26,7 @@ import {
 } from "../../src/domains/safety/protected-artifacts.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { bashTool } from "../../src/tools/bash.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { writeTool } from "../../src/tools/write.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -266,6 +267,57 @@ describe("safety gate boundary", () => {
 			["gcloud iam policies", "ask"],
 		] as const) {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }, "yolo").kind, kind, command);
+		}
+	});
+
+	it("yolo admits temporary Python analysis without parking while preserving safety rails (#407)", async () => {
+		// A sibling of the workspace models /tmp analysis, including under the
+		// isolated test harness. Stub execution: this contract tests admission,
+		// not Python availability or a live model's ability to finish the task.
+		const script = join(tmpdir(), "analysis.py");
+		const calls = [
+			{ tool: ToolNames.Write, args: { path: script, content: "print(1)\n" } },
+			{ tool: ToolNames.Bash, args: { command: `python3 '${script}'`, cwd: scratch } },
+			{ tool: ToolNames.Bash, args: { command: "python3 - <<'PY'\nprint(1)\nPY", cwd: scratch } },
+			{ tool: ToolNames.Bash, args: { command: `cat > '${script}' <<'PY'\nprint(1)\nPY`, cwd: scratch } },
+		];
+		for (const level of ["default", "yolo"] as const) {
+			const registry = createRegistry({ safety: createWorkerSafety({ cwd: scratch }), autonomy: () => level });
+			let executed = 0;
+			let approvals = 0;
+			for (const spec of [writeTool, bashTool]) {
+				registry.register({
+					...spec,
+					async run() {
+						executed++;
+						return { kind: "ok", output: "admitted" };
+					},
+				});
+			}
+			registry.onPermissionRequired((_call, _decision, meta) => {
+				approvals++;
+				registry.cancelParkedCall(meta.requestId, "No operator approval in this contract");
+			});
+			for (const call of calls) {
+				strictEqual((await registry.invoke(call)).kind, level === "yolo" ? "ok" : "blocked", JSON.stringify(call));
+			}
+			strictEqual(executed, level === "yolo" ? calls.length : 0);
+			strictEqual(approvals, level === "yolo" ? 0 : calls.length);
+
+			const confirmation = await registry.invoke({
+				tool: ToolNames.Bash,
+				args: { command: "git restore .", cwd: scratch },
+			});
+			strictEqual(confirmation.kind, "blocked");
+			strictEqual(approvals, level === "yolo" ? 1 : calls.length + 1);
+			const blocked = await registry.invoke({
+				tool: ToolNames.Bash,
+				args: { command: "git reset --hard", cwd: scratch },
+			});
+			strictEqual(blocked.kind, "blocked");
+			strictEqual(executed, level === "yolo" ? calls.length : 0);
+			strictEqual(approvals, level === "yolo" ? 1 : calls.length + 1, "a hard block cannot become an approval");
+			strictEqual(registry.hasParkedCalls(), false);
 		}
 	});
 

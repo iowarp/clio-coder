@@ -58,6 +58,7 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ### Documentation and distribution
 
+- The safety model documents unattended analysis at `yolo`, temporary Python scripts, and the remaining damage-control and worker approval limits.
 - Removed `clio-coder docs`, its documentation server, and the browser application’s native Docs reader. Help opens the public documentation and identifies the installed Markdown reference; offline `clio_docs` retrieval and bundled resources remain available.
 - Product documentation describes the current architecture, configuration, context, verification, and delegation interfaces. Generated development wiki pages retain independent **v0.1** versioning.
 - Website documentation is linked to its release source. README and website include terminal and browser captures, and reusable media have checked hashes, dimensions, and delivery copies.

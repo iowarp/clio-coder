@@ -67,6 +67,33 @@ A parked call carries a request id. A main-agent approval resumes only that call
 - A dispatched worker: `fleet.permissions.mode`. `deny`, the default, turns the ask into a tool denial and the run continues; `fail` ends the run as `permission_required`; `escalate` forwards the ask to the operator and falls back to `deny` or `fail` on timeout. Subprocess runtimes admit only `deny`; Claude SDK admits `deny` or `fail`, but cannot park an `escalate` request.
 - An ACP delegation peer: the mediator denies the ask without stalling.
 
+### Unattended analysis
+
+For a main-agent run that should execute ordinary analysis commands without
+approval, the operator can choose `yolo` for that invocation:
+
+```bash
+clio-coder run --autonomy yolo "Inspect the locking code and report possible faults or hangs."
+```
+
+Writing an analysis script in `/tmp`, executing it with `python3`, and using a
+heredoc pass the ordinary approval rails at `yolo`. Keep the bash call's `cwd`
+inside the workspace; an external script path does not require moving `cwd`
+outside it. At `default`, the external write and unrecognized execution ask.
+
+`yolo` does not promise that every task can finish unattended. A damage-control
+confirmation still requires approval, and a headless run denies that call
+because no operator is attached. Hard blocks and protected paths still hold.
+Dispatched workers remain at `default`: `fleet.permissions.mode: deny` prevents
+an interactive stop by denying an approval-required call, and `escalate` can
+still ask the operator even when the main session uses `yolo`.
+
+When an ordinary analysis call unexpectedly asks, report the Clio version,
+effective session autonomy, exact tool arguments including `cwd`, and whether
+the call came from the main agent or a worker. Include the approval's rule or
+reason code when available. These distinguish a safety-net confirmation from
+a worker's `default` autonomy or a main-agent admission defect.
+
 ## Workers
 
 - Every worker runs at `default`. A read-only dispatch adds the restriction above, and its sealed receipt records it as `safety.readOnly: true`, whether or not the worker ever tried to write.
