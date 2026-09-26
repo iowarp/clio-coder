@@ -51,7 +51,7 @@ function fixture() {
 }
 
 for (const command of ["reset", "uninstall"] as const) {
-	test(`${command} leaves a docs server alive on preview and stops it before removing state`, {
+	test(`${command} leaves a legacy docs process alive on preview and stops it before removing state`, {
 		skip: process.platform !== "linux",
 	}, async (t) => {
 		const f = fixture();
@@ -78,7 +78,7 @@ for (const command of ["reset", "uninstall"] as const) {
 		assert.equal(existsSync(f.registry), false);
 	});
 
-	test(`${command} preserves every root and the record when docs process ownership is unverified`, async (t) => {
+	test(`${command} preserves every root and the record when legacy docs process ownership is unverified`, async (t) => {
 		const f = fixture();
 		t.after(f.home.cleanup);
 		const server = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });

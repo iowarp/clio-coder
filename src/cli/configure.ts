@@ -1912,7 +1912,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			return [
 				...DIAGNOSTICS_SECTION.fields(),
 				["Settings file", shortenPath(settingsPath())],
-				["Reference", "clio-coder docs configuration-reference"],
+				["Reference", "https://coder.iowarp.ai/docs/guide/configuration-reference.html"],
 			];
 		},
 		actions: [

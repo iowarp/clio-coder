@@ -10,11 +10,9 @@
 import type { Tokens } from "marked";
 import type { ReactNode, RefObject } from "react";
 import * as React from "react";
-import { documentHeadings } from "../../contracts/docs-headings.js";
 
 const { createContext, memo, useContext, useEffect, useMemo, useRef, useState } = React;
 
-import { type BlockNode, groupDetails, isDetails, summaryText } from "./details.js";
 import { type HighlightToken, highlightCode } from "./highlight.js";
 import {
 	codeLanguage,
@@ -222,13 +220,6 @@ interface MermaidBlockProps {
  * to settle rather than landing between text frames.
  */
 const StreamingContext = createContext(false);
-const DocumentContext = createContext<{
-	links: Readonly<Record<string, string | null>>;
-	headings: Map<MarkdownToken, string>;
-	onNavigate: ((href: string) => void) | undefined;
-} | null>(null);
-
-const DOCS_ROUTE = /^\/docs(?:\/|$)/;
 
 export const MermaidBlock = memo(function MermaidBlock({ source, settled }: MermaidBlockProps) {
 	const container = useRef<HTMLElement>(null);
@@ -321,7 +312,6 @@ function Inline({ tokens }: { tokens: readonly MarkdownToken[] }) {
 }
 
 function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
-	const document = useContext(DocumentContext);
 	switch (token.type) {
 		case "text": {
 			const text = token as Tokens.Text;
@@ -354,12 +344,7 @@ function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
 			return <br />;
 		case "link": {
 			const link = token as Tokens.Link;
-			const mapped = document?.links[link.href];
-			const href = document
-				? mapped && (DOCS_ROUTE.test(mapped) || safeHref(mapped))
-					? mapped
-					: null
-				: safeHref(link.href);
+			const href = safeHref(link.href);
 			if (href === null) {
 				return (
 					<span className="md-link md-link--blocked" title="This link was not activated: unsupported destination">
@@ -367,27 +352,8 @@ function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
 					</span>
 				);
 			}
-			const internal = DOCS_ROUTE.test(href);
-			const onNavigate = document?.onNavigate;
 			return (
-				<a
-					className="md-link"
-					href={href}
-					target={internal ? undefined : "_blank"}
-					rel="noopener noreferrer"
-					title={link.title ?? undefined}
-					onClick={
-						internal && onNavigate
-							? (event) => {
-									// Plain activation stays inside the router; modified clicks keep their native meaning.
-									if (event.defaultPrevented || event.button !== 0) return;
-									if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-									event.preventDefault();
-									onNavigate(href);
-								}
-							: undefined
-					}
-				>
+				<a className="md-link" href={href} target="_blank" rel="noopener noreferrer" title={link.title ?? undefined}>
 					<Inline tokens={link.tokens} />
 				</a>
 			);
@@ -436,7 +402,6 @@ function ListItems({ items, settled }: { items: readonly Tokens.ListItem[]; sett
 }
 
 function Block({ token, settled }: { token: MarkdownToken; settled: boolean }): ReactNode {
-	const document = useContext(DocumentContext);
 	switch (token.type) {
 		case "space":
 		case "def":
@@ -445,7 +410,7 @@ function Block({ token, settled }: { token: MarkdownToken; settled: boolean }): 
 			const heading = token as Tokens.Heading;
 			const Tag = headingTag(heading.depth);
 			return (
-				<Tag id={document?.headings.get(token)} className={`md-heading md-heading--${heading.depth}`}>
+				<Tag className={`md-heading md-heading--${heading.depth}`}>
 					<Inline tokens={heading.tokens} />
 				</Tag>
 			);
@@ -524,8 +489,6 @@ function Block({ token, settled }: { token: MarkdownToken; settled: boolean }): 
 			return <hr />;
 		case "html": {
 			const html = (token as Tokens.HTML).text;
-			// A shipped page may open with a centred logo for its Git host. It is decoration, and as text it reads as broken markup.
-			if (document && DECORATIVE_IMAGE.test(html)) return null;
 			return <p className="md-html">{html}</p>;
 		}
 		case "checkbox":
@@ -552,35 +515,16 @@ export const Blocks = memo(function Blocks({
 	tokens: readonly MarkdownToken[];
 	settled: boolean;
 }) {
-	// Collapsible sections are a reading feature of documents. In a conversation the same HTML stays text.
-	const inDocument = useContext(DocumentContext) !== null;
-	const nodes = useMemo<readonly BlockNode[]>(() => (inDocument ? groupDetails(tokens) : tokens), [inDocument, tokens]);
-	return <BlockNodes nodes={nodes} settled={settled} />;
-});
-
-function BlockNodes({ nodes, settled }: { nodes: readonly BlockNode[]; settled: boolean }) {
 	return (
 		<>
-			{nodes.map((node) =>
-				isDetails(node) ? (
-					<details className="md-details" open={node.open || undefined} key={tokenKey(node.key)}>
-						<summary>{decodeEntities(summaryText(node.summary))}</summary>
-						<div className="md-details__body">
-							<BlockNodes nodes={node.children} settled={settled} />
-						</div>
-					</details>
-				) : (
-					<Block token={node} settled={settled} key={tokenKey(node)} />
-				),
-			)}
+			{tokens.map((token) => (
+				<Block token={token} settled={settled} key={tokenKey(token)} />
+			))}
 		</>
 	);
-}
+});
 
 interface MarkdownContentProps {
-	readonly documentLinks?: Readonly<Record<string, string | null>>;
-	/** Receives application routes (`/docs…`) that a document link resolves to, so they stay inside the router. */
-	readonly onDocumentNavigate?: (href: string) => void;
 	readonly source: string;
 	/** True once the narrative can no longer grow; the whole source is then lexed once, canonically. */
 	readonly complete: boolean;
@@ -600,8 +544,6 @@ export const MarkdownContent = memo(function MarkdownContent({
 	source,
 	complete,
 	deferDiagrams = false,
-	documentLinks,
-	onDocumentNavigate,
 }: MarkdownContentProps) {
 	const incremental = useRef<IncrementalMarkdown | null>(null);
 	const split = useMemo(() => {
@@ -611,29 +553,19 @@ export const MarkdownContent = memo(function MarkdownContent({
 	}, [source, complete]);
 	const finalTokens = useMemo(() => (complete ? lexMarkdown(source) : null), [source, complete]);
 	// Complete messages are lexed once; streaming messages retain their settled prefix.
-	const document = useMemo(
-		() =>
-			documentLinks
-				? { links: documentLinks, headings: documentHeadings(finalTokens ?? []), onNavigate: onDocumentNavigate }
-				: null,
-		[documentLinks, finalTokens, onDocumentNavigate],
-	);
 	const settledTokens = finalTokens ?? split?.settled ?? NO_TOKENS;
 	const tailTokens = finalTokens === null ? (split?.tail ?? NO_TOKENS) : NO_TOKENS;
 	return (
-		<DocumentContext.Provider value={document}>
-			<StreamingContext.Provider value={finalTokens === null || deferDiagrams}>
-				<div className={`markdown ${finalTokens === null ? "is-streaming" : "is-complete"}`}>
-					<Blocks tokens={settledTokens} settled />
-					<Blocks tokens={tailTokens} settled={false} />
-				</div>
-			</StreamingContext.Provider>
-		</DocumentContext.Provider>
+		<StreamingContext.Provider value={finalTokens === null || deferDiagrams}>
+			<div className={`markdown ${finalTokens === null ? "is-streaming" : "is-complete"}`}>
+				<Blocks tokens={settledTokens} settled />
+				<Blocks tokens={tailTokens} settled={false} />
+			</div>
+		</StreamingContext.Provider>
 	);
 });
 
 const NO_TOKENS: readonly MarkdownToken[] = [];
-const DECORATIVE_IMAGE = /^\s*<(p|div)\b[^>]*>\s*<img\b[^>]*>\s*<\/\1>\s*$/i;
 
 /**
  * A table wider than its column scrolls inside this wrapper. A scrolling region has to take focus

@@ -127,14 +127,14 @@ export function App({ client }: { client: Client }) {
 						version={meta.data?.clio}
 						platform={meta.data?.platform}
 					/>
-					<MobileNavigation />
+					<MobileNavigation onHelp={() => setHelpOpen(true)} />
 				</div>
 			</header>
 			<div className="workspace" data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"} inert={layered}>
 				<aside className="desktop-navigation" id={SIDEBAR_ID}>
 					<div className="sidebar">
 						<SidebarToggle collapsed={sidebarCollapsed} toggle={toggleSidebar} />
-						<Navigation collapsed={sidebarCollapsed} />
+						<Navigation collapsed={sidebarCollapsed} onHelp={() => setHelpOpen(true)} />
 					</div>
 				</aside>
 				<main id="main" tabIndex={-1}>
@@ -159,7 +159,7 @@ export function App({ client }: { client: Client }) {
 			</div>
 
 			<CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
-			<HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+			<HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} bundledDocsPath={meta.data?.bundledDocsPath} />
 			<LiveRegions />
 			<NoticeToasts />
 		</div>

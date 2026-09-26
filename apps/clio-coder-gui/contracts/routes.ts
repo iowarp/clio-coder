@@ -12,7 +12,6 @@ import { BranchRequest, BranchSwitched, Forked, SessionTree } from "./branches.j
 import { AgentCapabilities } from "./capabilities.js";
 import { Empty, Id } from "./common.js";
 import { ContextLedger } from "./context-ledger.js";
-import { DocPage, DocsSearch, DocsTree } from "./docs.js";
 import { EventCursor } from "./events.js";
 import { EvidenceDetail, EvidencePage } from "./evidence.js";
 import { ExtensionReload, SessionExtensions } from "./extensions.js";
@@ -359,26 +358,6 @@ export const routes = {
 		params: operationParams,
 		response: ConfigGraph,
 		summary: "Read-only customization graph without secrets or hook argv",
-	}),
-	docsTree: defineRoute({
-		...get,
-		path: "/api/docs/tree",
-		response: DocsTree,
-		summary: "Documentation navigation and Markdown inventory",
-	}),
-	docsPage: defineRoute({
-		...get,
-		path: "/api/docs/page",
-		query: Type.Object({ path: Type.String({ minLength: 1, maxLength: 1024 }) }, { additionalProperties: false }),
-		response: DocPage,
-		summary: "Read a contained Markdown page and resolve its links",
-	}),
-	docsSearch: defineRoute({
-		...get,
-		path: "/api/docs/search",
-		query: Type.Object({ q: Type.String({ maxLength: 200 }) }, { additionalProperties: false }),
-		response: DocsSearch,
-		summary: "Search the package documentation",
 	}),
 	permission: defineRoute({
 		...post,

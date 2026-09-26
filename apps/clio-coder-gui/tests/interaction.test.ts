@@ -98,7 +98,7 @@ test("the launcher score ranks a whole-value prefix over a word prefix over a su
 });
 
 test("the reference covers every route and prints the keyboard table verbatim", () => {
-	for (const path of ["/", "/sessions", "/traces", "/toolchain", "/docs", "/settings", "/fleet"] as const)
+	for (const path of ["/", "/sessions", "/traces", "/toolchain", "/settings", "/fleet"] as const)
 		assert.ok(VIEW_GUIDE[path].meaning.length > 0, `${path} has no guide sentence`);
 	const keyboard = HELP_SECTIONS.find((section) => section.id === "keyboard");
 	assert.ok(keyboard);

@@ -12,7 +12,6 @@ See [the documentation map](../../docs/README.md) for operator guides and
 
 ```sh
 clio-coder gui --open       # reuse the owned background app or start a private server
-clio-coder docs [topic]      # the shipped documentation in your browser
 ```
 
 Bare `gui` reuses this installation's owned background application when present.

@@ -145,12 +145,6 @@ export const PANELS = {
 		boundary:
 			"Session history is read from the session store on this machine, and deleting a closed session removes it from that store for good. Opening a workspace records its path in this application's own state and changes nothing inside the folder.",
 	},
-	docs: {
-		eyebrow: eyebrow("Reference", "shipped with this build", READ_ONLY),
-		title: "Documentation",
-		boundary:
-			"These pages are the documentation files installed with Clio Coder on this machine. Search runs over them on this machine, and no query leaves it.",
-	},
 } as const satisfies Record<string, PanelCopy>;
 
 /** Dispatch history belongs to the installation. It is never one project's, and it is never live. */

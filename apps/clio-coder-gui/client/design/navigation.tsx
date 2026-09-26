@@ -24,7 +24,6 @@ export const navigation = [
 	{ label: "Toolchain", path: "/toolchain", icon: "toolchain", group: "more" },
 	{ label: "Settings", path: "/settings", icon: "settings", group: "more" },
 	{ label: "System", path: "/system", icon: "system", group: "more" },
-	{ label: "Docs", path: "/docs", icon: "docs", group: "more" },
 ] as const;
 const SIDEBAR_KEY = "clio-coder-gui-sidebar";
 
@@ -82,7 +81,15 @@ export function SidebarToggle({ collapsed, toggle }: { collapsed: boolean; toggl
  * Collapsed, the labels stay in the document for assistive technology and the icon carries the
  * link visually; `data-tip` shows the name on hover and on keyboard focus.
  */
-export function Navigation({ close, collapsed = false }: { close?: () => void; collapsed?: boolean }) {
+export function Navigation({
+	close,
+	collapsed = false,
+	onHelp,
+}: {
+	close?: () => void;
+	collapsed?: boolean;
+	onHelp: () => void;
+}) {
 	const location = useLocation();
 	const link = (item: (typeof navigation)[number]) => (
 		<NavLink
@@ -101,16 +108,31 @@ export function Navigation({ close, collapsed = false }: { close?: () => void; c
 		</NavLink>
 	);
 	return (
-		<nav aria-label="Main navigation">
-			{navigation.filter((item) => item.group === "work").map(link)}
-			<p className="nav-group" aria-hidden="true">
-				<span className="nav-label">Inspect &amp; configure</span>
-			</p>
-			{navigation.filter((item) => item.group === "more").map(link)}
-		</nav>
+		<>
+			<nav aria-label="Main navigation">
+				{navigation.filter((item) => item.group === "work").map(link)}
+				<p className="nav-group" aria-hidden="true">
+					<span className="nav-label">Inspect &amp; configure</span>
+				</p>
+				{navigation.filter((item) => item.group === "more").map(link)}
+			</nav>
+			<button
+				type="button"
+				className="nav-help"
+				aria-label="Help"
+				data-tip={collapsed ? "Help (Ctrl /)" : undefined}
+				onClick={() => {
+					close?.();
+					onHelp();
+				}}
+			>
+				<Icon name="docs" />
+				<span className="nav-label">Help</span>
+			</button>
+		</>
 	);
 }
-export function MobileNavigation() {
+export function MobileNavigation({ onHelp }: { onHelp: () => void }) {
 	const dialog = useRef<HTMLDialogElement>(null);
 	return (
 		<>
@@ -137,7 +159,7 @@ export function MobileNavigation() {
 						<Icon name="close" />
 					</button>
 				</div>
-				<Navigation close={() => dialog.current?.close()} />
+				<Navigation close={() => dialog.current?.close()} onHelp={onHelp} />
 			</dialog>
 		</>
 	);

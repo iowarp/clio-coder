@@ -5,8 +5,8 @@ import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
 import { type Installation, inspectInstallation, installationCommand } from "../domains/lifecycle/install-method.js";
-import { stopDocsBeforeRemoval } from "./docs-server.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
+import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
 import { createLifecyclePresenter, type LifecycleItem, measurePath, shortenPath } from "./lifecycle-presenter.js";
 import { type RemovalFailure, removePath, reportRemovalFailures } from "./removal.js";
 import { printError } from "./shared.js";
@@ -432,7 +432,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 
 	const failures: RemovalFailure[] = [];
 	try {
-		await stopDocsBeforeRemoval();
+		await stopLegacyDocsBeforeRemoval();
 		await web.remove();
 		for (const item of web.items) presenter.completedStep(`Removed ${item.label}`);
 	} catch (error) {

@@ -50,6 +50,8 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ### Documentation and distribution
 
+- Removed `clio-coder docs`, its documentation server, and the browser application’s native Docs reader. Help opens the public documentation and identifies the installed Markdown reference; offline `clio_docs` retrieval and bundled resources remain available.
+
 - Product documentation describes the current architecture, configuration, context, verification, and delegation interfaces. Generated development wiki pages retain independent **v0.1** versioning.
 - Website documentation is linked to its release source. README and website include terminal and browser captures, and reusable media have checked hashes, dimensions, and delivery copies.
 - The installed package contains authored product documentation and its corpus metadata; generated development wiki pages remain in the repository and GitHub Wiki.

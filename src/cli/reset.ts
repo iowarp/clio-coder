@@ -3,8 +3,8 @@ import { join } from "node:path";
 
 import { initializeClioHome } from "../core/init.js";
 import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
-import { stopDocsBeforeRemoval } from "./docs-server.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
+import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
 import { createLifecyclePresenter, type LifecycleItem, measurePath } from "./lifecycle-presenter.js";
 import { type RemovalFailure, removePath, reportRemovalFailures } from "./removal.js";
 import { printError } from "./shared.js";
@@ -355,7 +355,7 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 
 	if (resetState) {
 		try {
-			await stopDocsBeforeRemoval();
+			await stopLegacyDocsBeforeRemoval();
 			await web?.remove();
 		} catch (error) {
 			presenter.fail(

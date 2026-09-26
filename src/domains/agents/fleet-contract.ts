@@ -944,7 +944,7 @@ export const FLEET_COMMANDS_REPO_PATH = ".clio-coder/fleets/commands.yaml";
 
 /** How to produce that file, for the surfaces that report it missing by name. */
 export const FLEET_COMMANDS_REMEDY =
-	"declare each id there under `commands:` with an `argv` list; `clio-coder docs fleet_dispatch` has the schema";
+	"declare each id there under `commands:` with an `argv` list; see bundled `docs/guide/fleet-dispatch.md` for the schema";
 
 /**
  * A well-formed contract binding code steps in a repo that declares no command

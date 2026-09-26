@@ -14,6 +14,8 @@ export const Meta = Type.Object(
 		epoch: Type.String(),
 		pwa: Type.Boolean(),
 		idle: Type.Boolean(),
+		/** Fixed installed reference root; no arbitrary file reads are exposed. */
+		bundledDocsPath: Type.String(),
 	},
 	{ additionalProperties: false },
 );

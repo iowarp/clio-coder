@@ -1,5 +1,5 @@
-import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
 import {
 	copyFileSync,
 	existsSync,
@@ -344,6 +344,19 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 	const env: NodeJS.ProcessEnv = { ...isolatedEnv(home), NODE_ENV: "test", NODE_OPTIONS: "", NODE_PATH: "" };
 
 	ok(!existsSync(join(packageRoot, "docs/html")), "retired HTML documentation must not ship");
+	for (const name of [
+		"plex-sans.woff2",
+		"plex-400.woff2",
+		"plex-500.woff2",
+		"news-normal-500.woff2",
+		"news-italic-480.woff2",
+		"IBM-Plex-Sans-OFL.txt",
+		"IBM-Plex-Mono-OFL.txt",
+		"Newsreader-OFL.txt",
+	])
+		ok(existsSync(join(guiDist, "client", "fonts", name)), `installed brand font/resource ${name}`);
+	for (const name of ["favicon.png", "icon-192.png", "icon-512.png", "brand/provenance.json"])
+		ok(existsSync(join(guiDist, "client", name)), `installed brand resource ${name}`);
 
 	// The checkout's tsx loader must be unreachable from inside the install: a
 	// probe file under the prefix walks up through prefix/node_modules only.
@@ -382,8 +395,16 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		const request = (path: string, body?: unknown) => webRequest(origin, GUI_TEST_TOKEN, path, body);
 
 		strictEqual((await webRequest(origin, undefined, "/api/meta")).status, 401, "API requires the launch token");
-		const meta = (await (await request("/api/meta")).json()) as { clio: string; apiVersion: number; pwa: boolean };
+		const meta = (await (await request("/api/meta")).json()) as {
+			clio: string;
+			apiVersion: number;
+			pwa: boolean;
+			bundledDocsPath: string;
+		};
 		strictEqual(meta.clio, JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).version);
+		strictEqual(meta.bundledDocsPath, join(packageRoot, "docs"));
+		for (const path of ["/api/docs/tree", "/api/docs/page?path=guide/tool-usage.md", "/api/docs/search?q=safety"])
+			strictEqual((await request(path)).status, 404, "native documentation API is removed");
 		strictEqual(meta.apiVersion, 1);
 		strictEqual(meta.pwa, false, "a foreground server is not installable");
 
@@ -467,56 +488,12 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		deepStrictEqual(exit, { code: 0, signal: null }, `foreground server stops cleanly on SIGTERM:\n${server.stderr()}`);
 	}
 
-	// R3: the human docs command serves from the same installed app in the background, from a foreign cwd,
-	// returns control to the terminal, reuses that server on the next call, and stops it on request.
-	const runDocs = (args: string[]) =>
-		execFileSync(process.execPath, [bin, "docs", ...args], { cwd: foreign, env, encoding: "utf8", timeout: 30_000 });
-	let docsOrigin = "";
-	try {
-		const printed = runDocs(["safety", "--no-open"]);
-		const link = /(http:\/\/127\.0\.0\.1:\d+)\/docs\/architecture\/safety-model\.md#token=([\w-]+)/u.exec(printed);
-		ok(link, `docs prints an authenticated app launch link: ${printed}`);
-		const [, origin = "", token = ""] = link;
-		docsOrigin = origin;
-		strictEqual((await webRequest(origin, token, "/api/docs/blueprints")).status, 404);
-		const page = await webRequest(origin, token, "/api/docs/page?path=architecture/safety-model.md");
-		strictEqual(page.status, 200);
-		const document = (await page.json()) as {
-			markdown: string;
-			links: Record<string, string>;
-			headings: { id: string; title: string }[];
-		};
-		strictEqual(document.markdown, readFileSync(join(packageRoot, "docs/architecture/safety-model.md"), "utf8"));
-		ok(document.headings.length > 0, "the installed Markdown generates its page outline");
-		ok(Object.values(document.links).every((link) => !link?.includes("blueprint")));
-		strictEqual((await webRequest(origin, token, "/docs/architecture/safety-model.md")).status, 200);
-		const search = await webRequest(origin, token, "/api/docs/search?q=safety%20model");
-		strictEqual(search.status, 200);
-		const results = (await search.json()) as { path: string; excerpt: string }[];
-		strictEqual(results[0]?.path, "architecture/safety-model.md", "search ranks the page named for the query first");
-		ok(
-			results.every((row) => !/[`|]|^#{1,6}\s|<\/?(?:details|summary)/mu.test(row.excerpt)),
-			"search excerpts are reading text, not Markdown",
-		);
-
-		const again = runDocs(["--no-open"]);
-		strictEqual(again.trim(), `${origin}/docs#token=${token}`, "a second call reuses the running server");
-		match(runDocs(["--stop"]), /^Stopped the documentation server \(pid \d+\)\.\n$/u);
-		ok(!existsSync(join(home, "state", "gui", "docs-server.json")), "stopping removes the registry");
-		strictEqual(runDocs(["--stop"]), "No documentation server is running.\n");
-	} finally {
-		try {
-			runDocs(["--stop"]);
-		} catch {
-			// Already stopped or never started; either way nothing must remain.
-		}
-	}
-	ok(docsOrigin, "the docs command reported an origin");
-	await rejects(
-		webRequest(docsOrigin, undefined, "/api/meta"),
-		/fetch failed/u,
-		"the documentation server is gone after --stop",
-	);
+	// Removed command stays absent in the installed entry point; bundled reference survives.
+	const removedDocs = spawnSync(process.execPath, [bin, "docs", "--help"], { cwd: foreign, env, encoding: "utf8" });
+	strictEqual(removedDocs.status, 2, removedDocs.stdout + removedDocs.stderr);
+	match(removedDocs.stderr, /unknown subcommand.*docs/iu);
+	ok(existsSync(join(packageRoot, "docs/corpus.json")), "the offline corpus ships");
+	ok(readFileSync(join(packageRoot, "docs/architecture/safety-model.md"), "utf8").includes("#"));
 
 	// Service-configuration mode: the same file a background install would write,
 	// consumed by the installed CLI directly. No systemd, no browser.
@@ -571,6 +548,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 			["/offline.html", /^text\/html/u],
 			["/offline.js", /^text\/javascript/u],
 			["/offline.css", /^text\/css/u],
+			["/favicon.png", /^image\/png$/u],
 			["/icon-192.png", /^image\/png$/u],
 			["/icon-512.png", /^image\/png$/u],
 		];
@@ -598,7 +576,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 	const honoChunks = emittedFilesContaining(packageRoot, HONO_MARKER);
 	ok(honoChunks.size > 0, "the packed dist bundles Hono somewhere");
 	const coverage = join(work, "gui-coverage");
-	for (const args of [["--version"], ["--help"], ["gui", "--help"], ["docs", "--help"]]) {
+	for (const args of [["--version"], ["--help"], ["gui", "--help"]]) {
 		const loaded = filesLoadedBy(bin, args, foreign, isolatedEnv(home), coverage);
 		const guiLoaded = [...loaded].filter((file) => file.startsWith(`${guiDist}${sep}`) || honoChunks.has(file));
 		deepStrictEqual(guiLoaded, [], `${args.join(" ")} must not load the graphical server: ${guiLoaded.join(", ")}`);
@@ -628,7 +606,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 	// pnpm's store does not warm npm's cache. Allow a cold consumer install
 	// with normal registry freshness checks after dependency upgrades;
 	// the CLI subprocesses below retain their separate 20-second timeout.
-	// The graphical and docs checks below start three installed servers and run four
+	// The graphical checks below start two installed servers and run four
 	// coverage-traced CLI invocations, which is why the budget grew from 120s.
 	it("loads bundled library packages, agent recipes, and lazy codewiki from an installed package", {
 		timeout: 180_000,
@@ -1030,6 +1008,14 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				import { pathToFileURL } from "node:url";
 				const { createWorkerToolRegistry } = await import(pathToFileURL(process.argv[2]).href);
 				const registry = createWorkerToolRegistry();
+                // Offline product retrieval runs entirely from this installed prefix.
+                globalThis.fetch = async () => { throw new Error("offline package probe forbids network"); };
+                const reference = await registry.invoke({ tool: "gateway", args: { op: "call", capability: "clio_docs", args: { query: "configuration targets", limit: 3 } } });
+                assert.equal(reference.kind, "ok", JSON.stringify(reference));
+                assert.equal(reference.result.kind, "ok", JSON.stringify(reference));
+                const retrieved = JSON.parse(reference.result.output);
+                assert.ok(retrieved.results.length > 0, reference.result.output);
+                assert.ok(retrieved.results.some((row) => row.file.startsWith("docs/")), reference.result.output);
 				// Workers always admit at default, where an extension subprocess asks.
 				// Grant the one parked call the way a forwarded escalation would.
 				const asked = [];

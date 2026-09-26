@@ -129,7 +129,6 @@ The core files are created automatically during the first run. `credentials.yaml
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
 | **State** | `install.json` | Install metadata: Clio version, node, platform, `installedAt` (written once at first install) or `repairedAt` (when metadata is reconstructed over a preexisting config, data, or state root), `upgradedAt` and `upgradedFrom` (stamped on a version change), and `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown). | Writer/umask default | Removed by uninstall / `reset --state`. |
 | **State** | `migrations.json` | Log of successfully applied schema/state migrations. | Writer/umask default | Removed by uninstall / `reset --state`. |
-| **State** | `gui/docs-server.json`, `gui/docs-server.log` | The record and log of the background documentation server started by `clio-coder docs`. The record holds the private launch token, so it is written with mode 0600. | 0600 record | Removed by uninstall / `reset --state`; `clio-coder docs --stop` removes the record. The log stays until the next launch or purge. |
 | **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. | Writer/umask default | Removed by uninstall / `reset --data`. |
 | **Data** | `tools/<id>/<version>/` | One pinned external program Clio downloaded on request (`clio-coder tools install <id>`), with its upstream license text and a `clio-coder-install.json` recording url, sha256, platform and install time. Binaries `0o755`, documents `0o644`. Only the pinned version is kept: a successful install prunes the versions it supersedes. | `0o755` dir | `clio-coder tools remove <id>` deletes every version of one tool; removed by uninstall / `reset --data`. |
 | **State** | `audit/YYYY-MM-DD.jsonl` | Daily safety audit logs showing allowed/blocked tool actions. | Writer/umask default | Removed by uninstall / `reset --state`. |
@@ -337,13 +336,12 @@ clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--f
 ```
 Levels are combinable except `--all`. Each level clears exactly the root or file it names and nothing else, then bootstraps the missing structure again unless `--dry-run` is present. `--force` is required only for destructive execution.
 
-Before clearing state, reset stops the owned documentation server and removes an
-owned background app service through its ownership checks. Independent desktop
-launchers remain installed. If ownership cannot be verified or a server cannot be
+Before clearing state, reset removes an owned background app service through its
+ownership checks. Independent desktop launchers remain installed. If ownership cannot be verified or a server cannot be
 stopped, reset fails before deleting user roots and retains recovery records.
 Previews never stop processes. Reinstall the optional background service explicitly
-if needed after a state reset. Uninstall also stops the documentation server before
-removing user roots.
+if needed after a state reset. Reset and uninstall also stop a legacy documentation
+process only when its ownership can be verified, before removing user roots.
 
 Every run lists each selected root and then the entries inside it, read off the
 disk on that run, before removing anything; `--dry-run` prints the identical

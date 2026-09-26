@@ -230,9 +230,11 @@ budgets, and human review supply your acceptance criteria. See the
 
 ## Documentation
 
-Open the installed documentation with `clio-coder docs`, or ask Clio about her
-own configuration and source. The package includes authored guides, architecture
-documentation, prompt fragments, agent recipes, and runtime source.
+Read the [public documentation](https://coder.iowarp.ai/docs.html), open the
+installed package’s `docs/` files in your editor, or ask Clio about her own
+configuration and source through the offline `clio_docs` capability. The package
+includes authored guides, architecture documentation, prompt fragments, agent
+recipes, and runtime source.
 
 | Topic | Reference |
 | --- | --- |

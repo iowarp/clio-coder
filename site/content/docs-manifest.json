@@ -4,16 +4,16 @@
   "corpusPolicy": "site/public-docs.json",
   "source": {
     "version": "0.5.7",
-    "ref": "657dce13d6cbfdafe1d88fbd279086adc64329ef",
-    "commit": "657dce13d6cbfdafe1d88fbd279086adc64329ef",
-    "mode": "repository"
+    "ref": "feat/gui-brand-workflows",
+    "commit": "69a644924fe1b48a33e8184110315c634b676d29",
+    "mode": "working-tree"
   },
   "files": [
     {
       "path": "README.md",
       "source": "README.md",
       "sha256": "9b113d76b1f5a2b525d816eddff9b3dfb1e52ac5102a7f815c835fe561122c32",
-      "sourceSha256": "2806e1a8ff3fffa67b2c34a1aa2a8adb13c0efede0f25f5952e6383c6349fcfe"
+      "sourceSha256": "6d711cebb86dcc94ac0341b2d8021d186c32b6fac67d13a681a2c27391b9599b"
     },
     {
       "path": "guide/configuration-and-targets.md",
@@ -24,8 +24,8 @@
     {
       "path": "guide/commands-and-modes.md",
       "source": "docs/guide/commands-and-modes.md",
-      "sha256": "18858865518174b9b4ec0c520822844a276c1d7552179e1473bf45e1c7be9146",
-      "sourceSha256": "1c7d877a36b58c9a28fee3dd66d529bec747f7673291525e566955e617603990"
+      "sha256": "d27b0d352012dfec5d57037be61c5fb9f9e33cd85161ac0f1b5c8c85e67f943b",
+      "sourceSha256": "7b160e5ffcce8b934859afc951cbb915b4f62743ea357625be05c62289adf985"
     },
     {
       "path": "guide/tool-usage.md",
@@ -48,8 +48,8 @@
     {
       "path": "guide/fleet-dispatch.md",
       "source": "docs/guide/fleet-dispatch.md",
-      "sha256": "8b369379e3e4ae2a4c6ba8e2ca2074d65cec9f7c37fe21ad148255b279c6d00e",
-      "sourceSha256": "f6e755fd4c713964de41989276563633726dcc47e219a9b96740c53a4c9f62da"
+      "sha256": "ce3510eaf7a3cf691c3f549c5ad845808678de83c3cd27c8667ba796bc9350c4",
+      "sourceSha256": "e906b109c1183a8246de8a49948da7258e30b63d93a1233135db38d5bb159ee5"
     },
     {
       "path": "guide/resource-library.md",

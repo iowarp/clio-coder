@@ -120,7 +120,7 @@ describe("clio_docs and clio_library", () => {
 		strictEqual(defaultsResults[0]?.file, "docs/guide/configuration-reference.md");
 	});
 
-	it("returns heading anchors that match the docs renderer, including duplicates and Unicode", () => {
+	it("returns portable Markdown heading anchors, including duplicates and Unicode", () => {
 		const punctuation = searchDocs("Welcome Launchpad Session Header", 12);
 		ok(punctuation.ok, punctuation.ok ? "" : punctuation.message);
 		if (!punctuation.ok) return;

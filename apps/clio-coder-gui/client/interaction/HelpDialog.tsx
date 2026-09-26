@@ -5,15 +5,36 @@
 import { useId, useState } from "react";
 import { Dialog } from "./Dialog.js";
 import { searchHelp } from "./help-reference.js";
+import { PUBLIC_HELP } from "./public-help.js";
 import "./interaction.css";
 
-export function HelpReferenceBody() {
+export function HelpReferenceBody({ bundledDocsPath }: { bundledDocsPath?: string | undefined }) {
 	const [query, setQuery] = useState("");
 	const inputId = useId();
 	const matches = searchHelp(query);
 	const entryCount = matches.reduce((total, match) => total + match.entries.length, 0);
 	return (
 		<div className="help-reference">
+			<section aria-label="Documentation">
+				<h3>Documentation</h3>
+				<p>
+					<a href={PUBLIC_HELP} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
+						Open public documentation ↗
+					</a>
+				</p>
+				<p>
+					The installed Markdown reference is available offline
+					{bundledDocsPath ? (
+						<>
+							{" "}
+							at <code>{bundledDocsPath}</code>
+						</>
+					) : (
+						" in the package’s docs/ directory"
+					)}
+					. Ask Clio to retrieve it with the <code>clio_docs</code> capability, or read the bundled files with your editor.
+				</p>
+			</section>
 			<div className="help-reference__query">
 				<label htmlFor={inputId}>Filter this reference</label>
 				<div className="filter__field">
@@ -83,11 +104,19 @@ export function HelpReferenceBody() {
 	);
 }
 
-export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function HelpDialog({
+	open,
+	onClose,
+	bundledDocsPath,
+}: {
+	open: boolean;
+	onClose: () => void;
+	bundledDocsPath?: string | undefined;
+}) {
 	if (!open) return null;
 	return (
 		<Dialog title="How this app works" eyebrow="KEYBOARD AND VOCABULARY REFERENCE" size="wide" onClose={onClose}>
-			<HelpReferenceBody />
+			<HelpReferenceBody bundledDocsPath={bundledDocsPath} />
 		</Dialog>
 	);
 }

@@ -13,7 +13,6 @@ import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
 import { autoOpenBrowser, openBrowser } from "./process-policy.js";
 import { CliRunner } from "./services/cli-runner.js";
-import { DocsService } from "./services/docs.js";
 import { EventHub } from "./services/event-hub.js";
 import { EvidenceService } from "./services/evidence.js";
 import { FleetService } from "./services/fleet.js";
@@ -157,7 +156,6 @@ export async function main(args = process.argv.slice(2)) {
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
-		docs: new DocsService(reads),
 		settings: settingsService,
 		fleet: new FleetService(reads),
 		system: new SystemService(reads, workspaces, ops),
