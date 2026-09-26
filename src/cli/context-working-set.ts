@@ -346,23 +346,28 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 			rearmFraction: parsed.rearmFraction,
 		};
 		const results: ReplayPolicyResult[] = [];
-		for (const budgetTokens of parsed.budgets) {
-			for (const policyId of parsed.policies) {
-				const measurements: ReplayMeasurement[] = indexed.map(({ trace, index, graph }) => ({
-					trace,
-					index,
-					graph,
-					replay: replayTrace(trace, policyForTrace(policyId, graph, parsed.seed), {
-						policyId,
-						budgetTokens,
-						threshold: parsed.threshold,
-						target: parsed.target,
-						settings,
-						summaries: { keepRecentTokens: DEFAULT_KEEP_RECENT_TOKENS, summaryTokens: REPLAY_SUMMARY_TOKENS },
-						overflowFraction: parsed.overflowFraction,
-					}),
-				}));
-				results.push({ budgetTokens, policyId, metrics: aggregateReplayMetrics(measurements) });
+		const defaultResults: ReplayPolicyResult[] = [];
+		const profiles = parsed.profile === "default" ? [parsed.profile] : (["default", parsed.profile] as const);
+		for (const profile of profiles) {
+			for (const budgetTokens of parsed.budgets) {
+				for (const policyId of parsed.policies) {
+					const measurements: ReplayMeasurement[] = indexed.map(({ trace, index, graph }) => ({
+						trace,
+						index,
+						graph,
+						replay: replayTrace(trace, policyForTrace(policyId, graph, parsed.seed), {
+							policyId,
+							budgetTokens,
+							threshold: parsed.threshold,
+							target: parsed.target,
+							settings: { ...settings, profile },
+							summaries: { keepRecentTokens: DEFAULT_KEEP_RECENT_TOKENS, summaryTokens: REPLAY_SUMMARY_TOKENS },
+							overflowFraction: parsed.overflowFraction,
+						}),
+					}));
+					const destination = profile === parsed.profile ? results : defaultResults;
+					destination.push({ budgetTokens, policyId, metrics: aggregateReplayMetrics(measurements) });
+				}
 			}
 		}
 		const report: ReplayReportInput = {
@@ -378,6 +383,7 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 			},
 			cascade: loaded.cascade,
 			results,
+			...(parsed.profile === "default" ? {} : { defaultResults }),
 			gitSha: gitSha(),
 			commandLine: exactCommandLine(),
 		};

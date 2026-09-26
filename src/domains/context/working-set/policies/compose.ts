@@ -73,11 +73,16 @@ export interface ComposedPolicyOptions {
 	profile?: WorkingSetProfile;
 }
 
+export interface ComposedWorkingSetPolicy extends WorkingSetPolicy {
+	/** Effective churn pin, exposed so replay reports the same rule selection uses. */
+	readonly pinRecalledTwice: boolean;
+}
+
 export function composePolicy(
 	id: string,
 	rungIds: ReadonlyArray<RungId>,
 	options: ComposedPolicyOptions = {},
-): WorkingSetPolicy {
+): ComposedWorkingSetPolicy {
 	const rungs = rungIds.map((rungId) => {
 		const rung = RUNGS.get(rungId);
 		if (rung === undefined) throw new Error(`unknown working-set rung: ${rungId}`);
@@ -87,6 +92,7 @@ export function composePolicy(
 	return {
 		// The live enum is the shipped ids; a composed id only ever reaches the replay harness.
 		id: id as WorkingSetPolicyId,
+		pinRecalledTwice: options.profile?.pinRecalledTwice ?? pinsChurn,
 		select(raw: PolicyInput): ReadonlyArray<EvictionCandidate> {
 			const profile = options.profile ?? resolveWorkingSetProfile(raw.settings);
 			const input: PolicyInput = { ...raw, settings: settingsUnderProfile(raw.settings, profile) };
@@ -148,7 +154,10 @@ function withoutTail(ids: ReadonlyArray<RungId>): { head: RungId[]; tail: RungId
  * Resolve a composition id. Returns null for an id this module does not
  * spell (`age-horizon` and the replay controls live elsewhere).
  */
-export function resolveComposedPolicy(id: string, options: ComposedPolicyOptions = {}): WorkingSetPolicy | null {
+export function resolveComposedPolicy(
+	id: string,
+	options: ComposedPolicyOptions = {},
+): ComposedWorkingSetPolicy | null {
 	const shipped = SHIPPED.get(id);
 	if (shipped !== undefined) return composePolicy(id, shipped, options);
 	if (id.startsWith("rungs:")) {

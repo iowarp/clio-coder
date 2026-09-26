@@ -1,4 +1,6 @@
 import type { WorkingSetSettings } from "../../../../core/defaults.js";
+import { resolveComposedPolicy } from "../policies/compose.js";
+import { resolveWorkingSetProfile, settingsUnderProfile } from "../policies/profiles.js";
 import type { ReplayLoadCascade } from "./load-clio.js";
 import type { ReplayMetricAggregate, ReplayMetrics } from "./metrics.js";
 
@@ -24,6 +26,8 @@ export interface ReplayReportInput {
 	config: ReplayReportConfig;
 	cascade: ReplayLoadCascade;
 	results: ReadonlyArray<ReplayPolicyResult>;
+	/** Same corpus and settings with only the profile reset to default. */
+	defaultResults?: ReadonlyArray<ReplayPolicyResult>;
 	gitSha: string | null;
 	commandLine: ReadonlyArray<string>;
 }
@@ -53,6 +57,36 @@ function metricObject(metrics: ReplayMetrics, turnsToFirstSummaryCount: number):
 
 function reasonObject(result: ReplayPolicyResult): Record<string, { items: number; tokens: number }> {
 	return Object.fromEntries([...result.metrics.byReason].map(([reason, tally]) => [reason, { ...tally }]));
+}
+
+function profileObject(input: ReplayReportInput) {
+	const profile = resolveWorkingSetProfile(input.config.settings);
+	const effective = settingsUnderProfile(input.config.settings, profile);
+	return {
+		id: profile.id,
+		protectLastSteps: effective.protectLastSteps,
+		minEvictableTokens: effective.minEvictableTokens,
+		pinLastNumericBash: profile.pinLastNumericBash ?? 0,
+		pinLastReadOfEdited: [...(profile.pinLastReadOfEdited ?? [])],
+		pinRecalledTwice: Object.fromEntries(
+			input.config.policies.map((id) => [id, resolveComposedPolicy(id, { profile })?.pinRecalledTwice ?? false]),
+		),
+		ageOrder: profile.ageOrder,
+	};
+}
+
+function resultObject(result: ReplayPolicyResult) {
+	return {
+		budgetTokens: result.budgetTokens,
+		policyId: result.policyId,
+		metrics: {
+			mean: metricObject(result.metrics.mean, result.metrics.turnsToFirstSummaryCount),
+			pooledRetention: result.metrics.pooledRetention,
+			pooledRetentionCovered: result.metrics.pooledRetentionCovered,
+			pooledRetentionAt10: result.metrics.pooledRetentionAt10,
+		},
+		byReason: reasonObject(result),
+	};
 }
 
 export function renderReplayJson(input: ReplayReportInput): string {
@@ -88,17 +122,15 @@ export function renderReplayJson(input: ReplayReportInput): string {
 			filtered,
 			kept: input.cascade.kept,
 		},
-		results: input.results.map((result) => ({
-			budgetTokens: result.budgetTokens,
-			policyId: result.policyId,
-			metrics: {
-				mean: metricObject(result.metrics.mean, result.metrics.turnsToFirstSummaryCount),
-				pooledRetention: result.metrics.pooledRetention,
-				pooledRetentionCovered: result.metrics.pooledRetentionCovered,
-				pooledRetentionAt10: result.metrics.pooledRetentionAt10,
-			},
-			byReason: reasonObject(result),
-		})),
+		...(input.config.settings.profile === "default"
+			? {}
+			: {
+					profile: {
+						...profileObject(input),
+						defaultResults: (input.defaultResults ?? []).map(resultObject),
+					},
+				}),
+		results: input.results.map(resultObject),
 	};
 	return `${JSON.stringify(artifact, null, "\t")}\n`;
 }
@@ -181,6 +213,26 @@ export function renderReplayMarkdown(input: ReplayReportInput): string {
 		"| --- | ---: |",
 		...cascadeRows(input.cascade),
 	];
+	const profile = profileObject(input);
+	if (profile.id !== "default") {
+		lines.push(
+			"",
+			`## Profile ${profile.id}`,
+			"",
+			"Pins and age ordering apply to composed structural policies; controls and age-horizon keep their own selection.",
+			"",
+			"| setting | effective value |",
+			"| --- | --- |",
+			`| protectLastSteps | ${profile.protectLastSteps} |`,
+			`| minEvictableTokens | ${profile.minEvictableTokens} |`,
+			`| pinLastNumericBash | ${profile.pinLastNumericBash} |`,
+			`| pinLastReadOfEdited | ${profile.pinLastReadOfEdited.join(", ") || "none"} |`,
+			`| pinRecalledTwice | ${Object.entries(profile.pinRecalledTwice)
+				.map(([id, pin]) => `${id}: ${pin}`)
+				.join(", ")} |`,
+			`| ageOrder | ${profile.ageOrder} |`,
+		);
+	}
 	for (const budget of input.config.budgets) {
 		const results = input.config.policies
 			.map((policy) => ({
@@ -188,8 +240,12 @@ export function renderReplayMarkdown(input: ReplayReportInput): string {
 				result: input.results.find((entry) => entry.budgetTokens === budget && entry.policyId === policy),
 			}))
 			.filter((entry): entry is { policy: string; result: ReplayPolicyResult } => entry.result !== undefined);
-		lines.push("", `## Budget ${budget}`, "", METRIC_HEADER, METRIC_RULE);
-		for (const { policy, result } of results) lines.push(metricRow(policy, result));
+		lines.push("", `${profile.id === "default" ? "##" : "###"} Budget ${budget}`, "", METRIC_HEADER, METRIC_RULE);
+		for (const { policy, result } of results) {
+			const baseline = input.defaultResults?.find((entry) => entry.budgetTokens === budget && entry.policyId === policy);
+			if (profile.id !== "default" && baseline) lines.push(metricRow(`${policy} (default)`, baseline));
+			lines.push(metricRow(profile.id === "default" ? policy : `${policy} (${profile.id})`, result));
+		}
 		const reasons = results.flatMap(({ policy, result }) => reasonRows(policy, result));
 		if (reasons.length > 0) {
 			lines.push(
