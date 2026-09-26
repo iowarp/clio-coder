@@ -638,6 +638,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			emit({ type: "clio_coder_tool_start", payload: event });
 		},
 		onFinish(event) {
+			if (event.toolCallId !== undefined) runEffects.checkOutcome(event.toolCallId, event.outcome);
 			emit({ type: "clio_coder_tool_finish", payload: event });
 			if (event.outcome !== "blocked" || typeof event.reason !== "string") return;
 			// Lifetime-cap lockout: record the bound (the run must not seal as an

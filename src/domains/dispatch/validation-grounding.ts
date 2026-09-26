@@ -64,6 +64,8 @@ export interface ValidationGrounding {
 
 export interface ValidationGroundingInput {
 	contractKind: ResultContract["kind"] | null;
+	/** BT-016: read claims in restricted runs are not command validation claims. */
+	readOnly?: boolean;
 	/** The run's terminal assistant text, or null when none was captured. */
 	output: string | null;
 	/** Canonical validation commands the run ran to a clean exit. */
@@ -124,7 +126,13 @@ function isExecuted(name: string, executed: ReadonlySet<string>): boolean {
  */
 export function groundClaimedValidations(input: ValidationGroundingInput): ValidationGrounding | null {
 	if (input.contractKind === null || !GROUNDED_CONTRACT_KINDS.has(input.contractKind)) return null;
-	const claims = claimedValidationNames(input.output);
+	const claims = claimedValidationNames(input.output).filter((name) => {
+		if (!input.readOnly || input.contractKind !== "mutation-report") return true;
+		if (detectValidationCommand(name, "grounding").kind === "validation") return true;
+		return !/^(?:read|inspect(?:ed)?|review(?:ed)?|source|file)\b|^checked\s+\S+\.(?:[cm]?[jt]sx?|md|txt|json|yaml|yml)\b/iu.test(
+			name,
+		);
+	});
 	if (claims.length === 0) return null;
 	const ungrounded: string[] = [];
 	let grounded = 0;

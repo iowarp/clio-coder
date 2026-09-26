@@ -169,7 +169,7 @@ describe("typed validation follows each check's latest run (BT-017)", () => {
 		]);
 		deepStrictEqual(verdicts(passed), [true]);
 		const neverRan = await sealedReceipt([{ args: { check: "test" }, outcome: "blocked" }]);
-		deepStrictEqual(verdicts(neverRan), [false]);
+		deepStrictEqual(verdicts(neverRan), []);
 	});
 
 	it("a finish that cannot be tied to its check keeps the conservative aggregate", async () => {

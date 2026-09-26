@@ -47,6 +47,8 @@ export interface RunEffects {
 	failedMutationPaths: ReadonlySet<string>;
 	/** Canonical validation commands the run ran to a clean exit. */
 	validationCommands: ReadonlySet<string>;
+	/** Review round 2 F: true only when every observed checking call has an authoritative blocked outcome. */
+	checksAllBlocked?: boolean;
 	/**
 	 * The same commands read under the wider `grounding` vocabulary, which adds
 	 * read verification (`git diff`), ad-hoc checks (`node -e`) and the runners
@@ -100,6 +102,7 @@ export interface RunEffectsRecorder {
 	start(toolCallId: string, toolName: string, args: Record<string, unknown> | undefined): void;
 	/** Commit a call's effects, or drop them when the call did not succeed. */
 	finish(toolCallId: string, failed: boolean): void;
+	checkOutcome(toolCallId: string, outcome: "ok" | "error" | "blocked"): void;
 	snapshot(): RunEffects;
 }
 
@@ -209,6 +212,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const failedMutationPaths = new Set<string>();
 	const validationCommands = new Set<string>();
 	const verificationCommands = new Set<string>();
+	const checkingCalls = new Map<string, "ok" | "error" | "blocked" | null>();
 	const writeRecordDowngrades = new Map<string, WriteRecordDowngrade>();
 	return {
 		start(toolCallId, toolName, args) {
@@ -216,6 +220,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			const validationCommand = validationCommandOf(toolName, args, "finish-contract");
 			const verificationCommand = validationCommandOf(toolName, args, "grounding");
 			const opaque = toolWritesOpaquely(toolName);
+			if (toolName === ToolNames.Verify || verificationCommand !== null) checkingCalls.set(toolCallId, null);
 			// An opaque call is tracked even when it exposed no path and no
 			// command, because the fact that it ran at all is the finding.
 			if (!opaque && paths.length === 0 && validationCommand === null && verificationCommand === null) return;
@@ -255,6 +260,9 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			if (effects.validationCommand !== null) validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
 		},
+		checkOutcome(toolCallId, outcome) {
+			if (checkingCalls.has(toolCallId)) checkingCalls.set(toolCallId, outcome);
+		},
 		snapshot() {
 			// A path written after an earlier attempt was refused is written, so
 			// the successful set always wins the overlap.
@@ -262,6 +270,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				mutatedPaths: new Set(mutatedPaths),
 				failedMutationPaths: new Set([...failedMutationPaths].filter((target) => !mutatedPaths.has(target))),
 				validationCommands: new Set(validationCommands),
+				checksAllBlocked: checkingCalls.size > 0 && [...checkingCalls.values()].every((outcome) => outcome === "blocked"),
 				verificationCommands: new Set(verificationCommands),
 				writeRecordComplete: writeRecordDowngrades.size === 0,
 				writeRecordDowngrades: [...writeRecordDowngrades.values()].map((entry) => ({ ...entry })),

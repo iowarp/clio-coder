@@ -725,6 +725,13 @@ function appendDispatchFinishContractEntry(
  * report against the run rather than re-reading the model's word for it.
  */
 function recordWorkerRunEffect(recorder: RunEffectsRecorder, event: Record<string, unknown>): void {
+	if (event.type === "clio_coder_tool_finish" && isRecord(event.payload)) {
+		const id = readStringOrNull(event.payload.toolCallId);
+		const outcome = event.payload.outcome;
+		if (id !== null && (outcome === "ok" || outcome === "error" || outcome === "blocked"))
+			recorder.checkOutcome(id, outcome);
+		return;
+	}
 	const toolCallId = readStringOrNull(event.toolCallId);
 	if (toolCallId === null) return;
 	if (event.type === "tool_execution_start") {
@@ -6309,6 +6316,7 @@ export function createDispatchBundle(
 					// measured judgement above.
 					executedCommands: observedRunEffects.verificationCommands,
 					executedCheckingCalls: countCheckingCalls(toolStats),
+					readOnly: lifecycle.readOnly,
 				});
 				const sealedResultContractFact: RunReceiptResultContractFact | null =
 					resultContract === null

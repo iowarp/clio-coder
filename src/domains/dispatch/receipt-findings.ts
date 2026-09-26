@@ -69,11 +69,11 @@ function typedValidationFactsFromToolStats(
 	toolStats: ReadonlyArray<Pick<RunReceiptDraft["toolStats"][number], "tool" | "count" | "ok" | "errors" | "blocked">>,
 ): RunReceiptTypedValidationFact[] {
 	return toolStats
-		.filter((stat) => stat.tool === "verify" && stat.count > 0)
+		.filter((stat) => stat.tool === "verify" && stat.count > stat.blocked)
 		.map((stat) => ({
 			sourceId: "tool:verify",
 			validatorDigest: createHash("sha256").update(canonicalJson(stat), "utf8").digest("hex"),
-			passed: stat.ok === stat.count && stat.errors === 0 && stat.blocked === 0,
+			passed: stat.ok === stat.count - stat.blocked && stat.errors === 0,
 		}));
 }
 
@@ -154,11 +154,11 @@ function typedVerifyFact(
  * latest executed outcome decides it: an earlier failure the run fixed and
  * re-ran clean seals as passed, and a pass the run later broke seals as failed
  * (BT-017). A blocked attempt never ran the check, so it supersedes nothing,
- * and a check with no executed call was never observed to pass.
+ * and a check with only blocked calls seals no validation fact (BT-016).
  *
  * Calls that cannot be tied to a check share one fact that passes only when
  * every such call passed. When no call can be tied to a check, the result is
- * exactly the per-tool aggregate earlier builds sealed.
+ * the per-tool aggregate, excluding checks whose calls were all blocked.
  */
 export function typedValidationFactsFromVerifyCalls(
 	toolStats: ReadonlyArray<Pick<RunReceiptDraft["toolStats"][number], "tool" | "count" | "ok" | "errors" | "blocked">>,
@@ -167,9 +167,10 @@ export function typedValidationFactsFromVerifyCalls(
 	if (!calls.some((call) => call.check !== null && call.outcome !== null)) {
 		return typedValidationFactsFromToolStats(toolStats);
 	}
-	const byCheck = new Map<string, Array<"ok" | "error" | "blocked">>();
+	const byCheck = new Map<string, Array<"ok" | "error">>();
 	const unattributed: Array<string | null> = [];
 	for (const call of calls) {
+		if (call.outcome === "blocked") continue;
 		if (call.check === null || call.outcome === null) {
 			unattributed.push(call.outcome);
 			continue;
@@ -180,8 +181,7 @@ export function typedValidationFactsFromVerifyCalls(
 	}
 	const facts: RunReceiptTypedValidationFact[] = [];
 	for (const [check, outcomes] of byCheck) {
-		const executed = outcomes.filter((outcome) => outcome !== "blocked");
-		facts.push(typedVerifyFact(check, outcomes, executed.at(-1) === "ok"));
+		facts.push(typedVerifyFact(check, outcomes, outcomes.at(-1) === "ok"));
 	}
 	if (unattributed.length > 0) {
 		facts.push(
