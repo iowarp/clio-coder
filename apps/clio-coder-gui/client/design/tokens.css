@@ -3,12 +3,28 @@
    This file holds declarations only, never a component rule, so the cascade
    result does not depend on where it lands in the import graph. */
 
+@font-face {
+	font-family: "IBM Plex Mono";
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url("../assets/fonts/ibm-plex-mono-400.woff2") format("woff2");
+}
+
+@font-face {
+	font-family: "IBM Plex Mono";
+	font-style: normal;
+	font-weight: 500;
+	font-display: swap;
+	src: url("../assets/fonts/ibm-plex-mono-500.woff2") format("woff2");
+}
+
 :root {
 	/* ---- type faces. The fallbacks are real because the first paint happens
-	   before the @fontsource files resolve. ------------------------------ */
+	   before the local font files resolve. ------------------------------- */
 	--font-ui: "Atkinson Hyperlegible Next Variable", "Segoe UI", system-ui, sans-serif;
 	--font-editorial: "Newsreader Variable", Georgia, "Times New Roman", serif;
-	--font-mono: "Commit Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+	--font-mono: "IBM Plex Mono", "Cascadia Code", ui-monospace, monospace;
 
 	/* ---- surfaces (light: the brand's warm paper) ---------------------- */
 	--paper: #f3eee4;
