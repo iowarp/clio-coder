@@ -166,6 +166,10 @@
 .workspace[data-sidebar="collapsed"] .sidebar-actions {
 	flex-direction: column;
 }
+.workspace[data-sidebar="collapsed"] .desktop-navigation .sidebar {
+	max-height: none;
+	overflow: visible;
+}
 .workspace[data-sidebar="collapsed"] .sidebar-compose {
 	flex: none;
 	justify-content: center;

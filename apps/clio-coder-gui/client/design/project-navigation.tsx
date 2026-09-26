@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot, Workspace } from "../../contracts/sessions.js";
@@ -27,7 +27,12 @@ export function ProjectNavigation({
 	useEffect(() => {
 		if (selectedWorkspace) setExpanded(selectedWorkspace);
 	}, [selectedWorkspace]);
-	const projects = [...(workspaces.data ?? [])].sort((a, b) => b.openedAt.localeCompare(a.openedAt)).slice(0, 6);
+	const projects = [...(workspaces.data ?? [])]
+		.sort(
+			(a, b) =>
+				Number(b.id === selectedWorkspace) - Number(a.id === selectedWorkspace) || b.openedAt.localeCompare(a.openedAt),
+		)
+		.slice(0, 6);
 	const open = expanded === undefined ? (selectedWorkspace ?? projects[0]?.id) : expanded;
 	return (
 		<section className="sidebar-projects" aria-label="Projects and conversations">
@@ -85,6 +90,7 @@ function ProjectGroup({
 	close?: (() => void) | undefined;
 }) {
 	const navigate = useNavigate();
+	const chatsId = useId();
 	const queries = useQueryClient();
 	const launch = useProjectLaunch(client);
 	const history = useQuery({
@@ -138,7 +144,7 @@ function ProjectGroup({
 					type="button"
 					onClick={expand}
 					aria-expanded={expanded}
-					aria-controls={expanded ? `project-chats-${project.id}` : undefined}
+					aria-controls={expanded ? chatsId : undefined}
 					title={project.path}
 				>
 					<Icon name="folder" />
@@ -156,7 +162,7 @@ function ProjectGroup({
 				</button>
 			</div>
 			{expanded ? (
-				<div className="sidebar-conversations" id={`project-chats-${project.id}`}>
+				<div className="sidebar-conversations" id={chatsId}>
 					{rows.map((row) =>
 						row.active ? (
 							<NavLink
