@@ -38,7 +38,17 @@ export function InspectionSelection({
 	}, [row?.id]);
 	return (
 		<section className="inspection-navigation__selection" aria-label={title}>
-			<button type="button" onClick={dismiss}>
+			<button
+				type="button"
+				onClick={() => {
+					const scope = heading.current?.closest(".inspection-navigation");
+					const origin = Array.from(scope?.querySelectorAll<HTMLButtonElement>("button[data-record-id]") ?? []).find(
+						(button) => button.dataset.recordId === row?.id,
+					);
+					dismiss();
+					requestAnimationFrame(() => origin?.focus());
+				}}
+			>
 				← Back to records
 			</button>
 			<h3 ref={heading} tabIndex={-1}>
@@ -148,6 +158,7 @@ export function InspectionRecords({
 						key={row.id}
 						onClick={() => onSelect(row)}
 						className="inspection-navigation__record"
+						data-record-id={row.id}
 						aria-current={row.id === selectedId ? "true" : undefined}
 						title={`${row.title} · ${row.id}`}
 					>
