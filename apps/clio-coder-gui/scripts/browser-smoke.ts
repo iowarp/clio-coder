@@ -314,11 +314,10 @@ try {
 		await check("settings-saved");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `settings-controls-${width}.png`), fullPage: true });
-		await page.getByRole("button", { name: /^Permissions & Limits · / }).click();
-		await setting("safety.autonomy").getByText("Set by the project layer").waitFor();
-		if (await setting("safety.autonomy").getByRole("combobox").count())
-			throw new Error("A project-set value still offers an editor.");
 		await page.getByRole("button", { name: /^Fleet · / }).click();
+		await setting("fleet.concurrency").getByText("Set by the project layer").waitFor();
+		if (await setting("fleet.concurrency").getByRole("combobox").count())
+			throw new Error("A project-set value still offers an editor.");
 		const history = setting("fleet.history.maxRuns");
 		await history.getByRole("spinbutton").fill(width === 1600 ? "900" : width === 1050 ? "800" : "700");
 		if (!(await history.getByRole("button", { name: "Save", exact: true }).isDisabled()))

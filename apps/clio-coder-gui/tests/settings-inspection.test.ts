@@ -32,7 +32,10 @@ test("settings: canonical layer origins, complete leaves, real credential store 
 		assert.equal(rows.get("chat.thinkingLevel")?.value, "high");
 		assert.equal(rows.get("chat.model")?.source, "project.local");
 		assert.equal(rows.get("chat.model")?.value, "fixture-local-model");
-		assert.equal(rows.get("safety.autonomy")?.source, "project");
+		assert.equal(rows.get("fleet.concurrency")?.source, "project");
+		assert.equal(rows.get("fleet.concurrency")?.value, 2);
+		// Project files cannot set autonomy since 20ffa1dd5, so the operator's own layers decide it.
+		assert.equal(rows.get("safety.autonomy")?.source, "built-in");
 		assert.equal(rows.get("safety.autonomy")?.value, "default");
 		assert.equal(rows.get("interface.smoothStreaming")?.source, "built-in");
 		assert.equal(

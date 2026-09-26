@@ -9760,7 +9760,7 @@
 										},
 										"commands": {
 											"type": "object",
-											"required": ["version", "list", "invoke", "count"],
+											"required": ["version", "list", "invoke"],
 											"properties": {
 												"version": {
 													"type": "number",
