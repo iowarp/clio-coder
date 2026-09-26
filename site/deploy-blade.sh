@@ -27,8 +27,16 @@ project="$HOME/webhosting/clio-coder-site"
 backup="$HOME/webhosting/clio-coder-site-backups/$revision"
 mkdir -p "$project" "$backup"
 if docker inspect clio-coder-site >/dev/null 2>&1; then
-  docker inspect --format '{{.Image}}' clio-coder-site > "$backup/image-id"
-  docker image tag "$(cat "$backup/image-id")" "clio-coder-site:rollback-$revision"
+  running_image=$(docker inspect --format '{{.Image}}' clio-coder-site)
+  rollback_tag="clio-coder-site:rollback-$revision"
+  if docker image inspect "$running_image" >/dev/null 2>&1; then
+    docker image tag "$running_image" "$rollback_tag"
+  else
+    # Image pruning can remove the record while the container still serves its
+    # immutable filesystem. Capture that filesystem without pausing the site.
+    docker commit --no-pause clio-coder-site "$rollback_tag" >/dev/null
+  fi
+  docker image inspect --format '{{.Id}}' "$rollback_tag" > "$backup/image-id"
 fi
 tar -czf "$backup/source.tar.gz" -C "$project" .
 REMOTE
