@@ -15,10 +15,15 @@ authoritative—and please fix or report the documentation drift.
 
 The reference is organized by purpose:
 
+The [generated development wiki](wiki/index.md) maps source areas, symbols, and
+tests. Its public mirror is the [GitHub Wiki](https://github.com/iowarp/clio-coder/wiki).
+See [Publishing the wiki](guide/publishing-wiki.md) to update that mirror.
+
 ```text
 docs/
 ├── guide/          Operator and user workflows
-└── architecture/   Runtime contracts and design
+├── architecture/   Runtime contracts and design
+└── wiki/           Generated development reference
 ```
 
 For the v0.5.0 launch, Clio Coder is first and foremost a terminal coding agent.

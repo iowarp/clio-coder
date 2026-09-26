@@ -1,0 +1,56 @@
+# Publishing the generated wiki to GitHub
+
+The generated pages live in `docs/wiki/`. GitHub Wiki stores its pages in a
+**separate Git repository**, so committing these files to the source repository
+does not publish them as wiki pages.
+
+For the first publication, enable Wiki in the repository settings, open
+<https://github.com/iowarp/clio-coder/wiki>, and save a placeholder page titled
+**Home**. GitHub creates the wiki Git repository only after that first save.
+
+Clone it beside the source checkout:
+
+```bash
+git clone https://github.com/iowarp/clio-coder.wiki.git ../clio-coder-public-wiki
+```
+
+For each publication, commit the reviewed generated pages to the source branch,
+then export them from the source checkout:
+
+```bash
+git -C ../clio-coder-public-wiki pull --ff-only
+node scripts/export-github-wiki.mjs ../clio-coder-public-wiki main
+git -C ../clio-coder-public-wiki diff --stat
+git -C ../clio-coder-public-wiki status --short
+```
+
+The exporter preserves page prose and code fences, flattens nested paths into
+unique GitHub page names, rewrites relative links, moves YAML front matter into
+an expandable metadata panel, and adds Home navigation, a sidebar, and a footer.
+It exports all Markdown pages, including section indexes. The generator's
+`meta.json` stays in the source repository; generation checkpoints are not
+public wiki pages.
+
+The optional final argument selects a **published** source branch or commit for
+links back to repository files. It defaults to `main`. Do not supply a local
+branch or commit that GitHub cannot resolve. The footer records the local source
+commit used for the export separately.
+
+Review the diff, then commit and push the wiki repository:
+
+```bash
+git -C ../clio-coder-public-wiki add -- '*.md'
+git -C ../clio-coder-public-wiki commit -m "docs: publish generated Clio Coder wiki"
+git -C ../clio-coder-public-wiki push origin HEAD
+```
+
+Verify Home and several nested pages at
+<https://github.com/iowarp/clio-coder/wiki>. GitHub renders Mermaid fences itself.
+The exporter replaces pages with matching generated names and leaves other pages
+alone. When generated pages are renamed or removed, review and remove their
+previous exported counterparts explicitly.
+
+The source commit and the wiki commit are each atomic. Because they belong to
+separate repositories, Git cannot make both commits or pushes one transaction.
+Preserve the generation metadata honestly: present Markdown pages do not imply
+that every planned page passed the generator's evidence checks.

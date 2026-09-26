@@ -46,6 +46,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### Development
 
+- The generated development wiki is checked into `docs/wiki/`, with a repeatable exporter for the public GitHub Wiki that preserves diagrams and metadata while adapting page links and navigation.
 - CI runs the installed-package suite on every push as part of the required `ci (22)` check, so a packaging break no longer waits for release qualification to surface.
 
 ## 0.5.6 - 2026-09-25
