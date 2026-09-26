@@ -30,7 +30,7 @@ export const SystemReport = Type.Object(
 				{
 					name: Type.String(),
 					ok: Type.Boolean(),
-					level: Type.Union([Type.Literal("ok"), Type.Literal("warn"), Type.Literal("error")]),
+					level: Type.Union([Type.Literal("ok"), Type.Literal("info"), Type.Literal("warn"), Type.Literal("error")]),
 					detail: Type.String(),
 					detailRedacted: Type.Boolean(),
 				},

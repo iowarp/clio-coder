@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SettingControl, SettingsControls, SettingWritten } from "../../contracts/settings-controls.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
@@ -140,6 +141,7 @@ function ControlRow({
 	const edit = (next: string) => {
 		onDraft(next === control.value ? null : next);
 		setSaved(null);
+		setConfirmed(false);
 		write.reset();
 	};
 	const writable = control.access === "writable";
@@ -150,8 +152,12 @@ function ControlRow({
 				<p id={helpId}>{control.description}</p>
 				{control.help && <p className="setting-control__help">{control.help}</p>}
 				{control.note && <p className="setting-control__note">{control.note}</p>}
-				<small>
-					<code>{control.path}</code> · {sourceLabel(control.source)} · {TIMING_LABEL[control.timing]}
+				<small className="setting-control__source">
+					<code>{control.path}</code>
+					<Link to={`/settings/effective?${new URLSearchParams({ workspace: workspaceId, q: control.path })}`}>
+						{sourceLabel(control.source)} · inspect effective value
+					</Link>
+					<span title={TIMING_SENTENCE[control.timing]}>{TIMING_LABEL[control.timing]}</span>
 				</small>
 			</div>
 			<div className="setting-control__edit">
@@ -269,9 +275,22 @@ function ControlRow({
 
 export function SettingsControlsView({ client, workspaceId }: { client: Client; workspaceId: string }) {
 	const queries = useQueryClient();
-	const [section, setSection] = useState<string | null>(null),
-		[filter, setFilter] = useState(""),
-		[showDrafts, setShowDrafts] = useState(false),
+	const [search, setSearch] = useSearchParams();
+	const section = search.get("section"),
+		filter = search.get("q") ?? "";
+	const discover = (sectionId: string | null, query: string, replace = false) =>
+		setSearch(
+			(current) => {
+				const next = new URLSearchParams(current);
+				if (sectionId) next.set("section", sectionId);
+				else next.delete("section");
+				if (query) next.set("q", query);
+				else next.delete("q");
+				return next;
+			},
+			{ replace },
+		);
+	const [showDrafts, setShowDrafts] = useState(false),
 		[drafts, setDrafts] = useState<Record<string, string>>({});
 	const key = ["settings-controls", workspaceId];
 	const report = useQuery({
@@ -389,7 +408,10 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 	const unsaved = controls.filter(
 		(control) => drafts[control.path] !== undefined && drafts[control.path] !== control.value,
 	);
-	const active = showDrafts || filter.trim() ? null : (section ?? sections[0]?.id ?? null);
+	const active =
+		showDrafts || filter.trim()
+			? null
+			: (sections.find((candidate) => candidate.id === section)?.id ?? sections[0]?.id ?? null);
 	const visible = showDrafts
 		? unsaved
 		: controls.filter((control) => (active ? control.section === active : matchesControl(control, filter)));
@@ -404,24 +426,23 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 					</button>
 				</div>
 			) : null}
-			<p>
-				These user settings can affect other projects. The selected project determines which effective values and sources
-				are shown. Changes are checked against the whole configuration and saved to your user settings
+			<div className="settings-write-scope">
+				<strong>Save to your user settings</strong>
+				<p>Applies across projects. Project and command-line overrides take precedence.</p>
 				{userFile && (
-					<>
-						{" "}
-						at <code className="inline-path">{userFile}</code>
-					</>
+					<details>
+						<summary>Saved settings file</summary>
+						<code>{userFile}</code>
+					</details>
 				)}
-				. Project files are never written from here.
-			</p>
+			</div>
 			<label className="settings-filter">
 				Find a setting
 				<input
 					type="search"
 					value={filter}
 					onChange={(event) => {
-						setFilter(event.target.value);
+						discover(section, event.target.value, true);
 						setShowDrafts(false);
 					}}
 				/>
@@ -433,8 +454,7 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 						key={candidate.id}
 						aria-pressed={active === candidate.id}
 						onClick={() => {
-							setSection(candidate.id);
-							setFilter("");
+							discover(candidate.id, "");
 							setShowDrafts(false);
 						}}
 					>
@@ -446,7 +466,7 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 						type="button"
 						aria-pressed={showDrafts}
 						onClick={() => {
-							setFilter("");
+							discover(section, "");
 							setShowDrafts(true);
 						}}
 					>
@@ -458,6 +478,14 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 				{showDrafts ? `Unsaved changes · ${visible.length}` : current ? current.label : `Matches · ${visible.length}`}
 			</h2>
 			{current && <p>{current.description}</p>}
+			{unsaved.length > 0 && (
+				<p className="settings-draft-note" role="status">
+					{unsaved.length} unsaved {unsaved.length === 1 ? "change" : "changes"}. Save each control to apply it; filtering
+					preserves drafts in this workspace.
+				</p>
+			)}
+			{startCheck.error && <p role="alert">Could not start the model check: {startCheck.error.message}</p>}
+			{checkOperation.error && <p role="alert">Model check progress is unavailable: {checkOperation.error.message}</p>}
 			{!visible.length && <p>{showDrafts ? "No unsaved changes." : "No settings match."}</p>}
 			{groupControls(visible).map(({ group, controls: rows }) => (
 				<section key={group} className="setting-group" aria-label={group}>

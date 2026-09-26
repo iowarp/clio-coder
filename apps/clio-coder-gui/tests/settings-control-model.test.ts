@@ -60,6 +60,9 @@ test("search covers path, label, description and group; groups keep registry ord
 	assert.equal(matchesControl(control(), " REASONING "), true);
 	assert.equal(matchesControl(control(), "model & resp"), true);
 	assert.equal(matchesControl(control(), "fleet"), false);
+	assert.equal(matchesControl(control({ source: "project" }), "project file"), true);
+	assert.equal(matchesControl(control(), "next request"), true);
+	assert.equal(matchesControl(control({ help: "maximum token budget" }), "token budget"), true);
 	assert.deepEqual(
 		groupControls([
 			control({ group: "B" }),

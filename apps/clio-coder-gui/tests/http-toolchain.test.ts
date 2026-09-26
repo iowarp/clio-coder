@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Value } from "typebox/value";
@@ -9,6 +10,7 @@ import { Accepted, Operation } from "../contracts/operations.js";
 import { Tools } from "../contracts/toolchain.js";
 import { PINNED_TOOLS } from "./fixtures/toolchain.js";
 import { harness, json, terminal } from "./harness/app.js";
+import { scratchHome } from "./harness/scratch-home.js";
 
 test("real domain workers: inventory, fabricated install over SSE, idempotency, cancel, removal", async (t) => {
 	const h = await harness();
@@ -122,4 +124,30 @@ test("production toolStatuses and removeTool execute in separate workers without
 	assert.equal((await terminal(h.operations, accepted.operationId)).status, "succeeded");
 	assert.ok((h.ops.threadId ?? 0) > 0);
 	assert.notEqual(h.ops.threadId, h.reads.threadId);
+});
+
+test("removing the vendored copy preserves the compatible executable on the operator's PATH", async (t) => {
+	const pathHome = await scratchHome();
+	t.after(pathHome.close);
+	const directory = join(pathHome.path, "path");
+	await mkdir(directory);
+	const executable = join(directory, "herdr");
+	const source = `#!/bin/sh\nprintf 'herdr ${PINNED_TOOLS[0]?.version}\\n'\n`;
+	await writeFile(executable, source);
+	await chmod(executable, 0o755);
+	const h = await harness({}, { env: { PATH: directory } });
+	t.after(h.close);
+	const installed = await json(await h.post("/api/toolchain/tools/herdr/install"), Accepted);
+	assert.equal((await terminal(h.operations, installed.operationId)).status, "succeeded");
+	const before = await json(await h.request("/api/toolchain/tools"), Tools);
+	assert.equal(before[0]?.installed, true);
+	assert.equal(before[0]?.resolution.source, "path");
+	assert.equal(before[0]?.resolution.binaryPath, executable);
+	const removed = await json(await h.post("/api/toolchain/tools/herdr/remove"), Accepted);
+	assert.equal((await terminal(h.operations, removed.operationId)).status, "succeeded");
+	const after = await json(await h.request("/api/toolchain/tools"), Tools);
+	assert.equal(after[0]?.installed, false);
+	assert.equal(after[0]?.resolution.source, "path");
+	assert.equal(after[0]?.resolution.binaryPath, executable);
+	assert.equal(await readFile(executable, "utf8"), source);
 });

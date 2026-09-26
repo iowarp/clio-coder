@@ -65,7 +65,19 @@ export function matchesPackage(pkg: Package, query: string): boolean {
 	const needle = query.trim().toLocaleLowerCase("en-US");
 	if (!needle) return true;
 	const provided = (pkg.provides ?? []).map((item) => `${String(item.kind)} ${String(item.name)}`);
-	return [pkg.ref, pkg.name, pkg.description, ...provided].join(" ").toLocaleLowerCase("en-US").includes(needle);
+	return [
+		pkg.ref,
+		pkg.name,
+		pkg.description,
+		pkg.sourceUrl,
+		originSentence(pkg),
+		...(pkg.requires ?? []),
+		...pkg.copies.map((copy) => `${String(copy.scope)} ${String(copy.state)}`),
+		...provided,
+	]
+		.join(" ")
+		.toLocaleLowerCase("en-US")
+		.includes(needle);
 }
 
 export function originSentence(pkg: Package): string {
