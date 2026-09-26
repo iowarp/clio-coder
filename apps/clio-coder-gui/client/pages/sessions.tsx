@@ -389,6 +389,7 @@ function SessionTools({
 						sessionOpen={session.state === "open"}
 						capabilities={capabilities}
 						settledTurns={session.turns.filter((turn) => turn.status !== "running").length}
+						running={session.turns.at(-1)?.status === "running"}
 					/>
 					<CommandPanel client={client} sessionId={session.id} sessionOpen={session.state === "open"} />
 					<FleetStrip client={client} session={session} />

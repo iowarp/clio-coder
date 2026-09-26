@@ -139,8 +139,8 @@ export const CommandPanel = memo(function CommandPanel({
 		<details className="command-panel" onToggle={(event) => setExpanded(event.currentTarget.open)}>
 			<summary>Clio Coder commands</summary>
 			<p id={helpId} className="command-panel__note">
-				Only commands exposed by this session appear here. Review the arguments before sending; commands are not chat
-				messages.
+				Only commands exposed by this session appear here. Review the arguments before sending. Commands that start work
+				record their request and response in the conversation.
 			</p>
 			{!sessionOpen ? <p>This session is not open. Start or load a session to use commands.</p> : null}
 			{sessionOpen && capabilities.isPending ? <p>Checking session capabilities…</p> : null}

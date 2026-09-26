@@ -488,6 +488,14 @@ than dots, so a narrow row that wraps them never starts a line with a separator.
 inspector eyebrow. Deleting a saved conversation takes two presses in place, and the second question
 puts focus on Keep.
 
+Tasks and decisions in Session tools offers Hand only for an open operator task. It is disabled
+while a turn runs or when the peer cannot record command turns. Hand submits a visible conversation
+request and keeps its output, tools, approvals, cancellation and final outcome in that turn. When
+the task changes state, focus moves to its remaining action. Commands that inject work, including
+skills, use the same prompt lifecycle and await settlement; task add, done and drop remain bounded
+control replies. An older peer refuses injecting commands locally rather than receiving slash text
+it would send to the model.
+
 A model is always picked from its target's catalog, never typed from memory. The route picker, the
 Settings page (`chat.model`, `fleet.default.model`, `context.memory.model` and
 `context.compaction.model`, which runs on the chat target) and the new-connection form share one

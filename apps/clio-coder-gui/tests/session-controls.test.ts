@@ -66,6 +66,49 @@ test("an older ACP peer has no conversation config and refuses the write locally
 	);
 	assert.equal(await readFile(join(h.home.path, "acp.jsonl"), "utf8"), before);
 });
+
+test("a task hand command owns a visible turn, waits for output, and admits the next request", async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const base = `/api/sessions/${session.id}`;
+	assert.equal((await h.post(`${base}/commands`, { command: "tasks", argv: ["add", "Proof task"] })).status, 200);
+	const command = h.post(`${base}/commands`, { command: "tasks", argv: ["hand", "u1"] }, "hand-task");
+	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status === "running");
+	assert.equal((await h.post(`${base}/turns`, { text: "Too soon" })).status, 409);
+	assert.equal((await command).status, 200);
+	assert.equal((await h.post(`${base}/commands`, { command: "tasks", argv: ["hand", "u1"] }, "hand-task")).status, 200);
+	const snapshot = h.supervisor.get(session.id);
+	assert.equal(snapshot.turns.length, 1);
+	assert.equal(snapshot.turns[0]?.prompt, "/tasks hand u1");
+	assert.equal(snapshot.turns[0]?.status, "succeeded");
+	assert.ok(snapshot.timeline.some((item) => item.kind === "text" && item.text.includes("Working on the handed task")));
+	assert.equal((await h.supervisor.board(session.id)).operatorTasks[0]?.status, "handed");
+	assert.equal(
+		(await readFile(join(h.home.path, "acp.jsonl"), "utf8")).match(/"method":"_clio-coder\/commands\/invoke"/g)?.length,
+		1,
+	);
+	assert.equal((await h.post(`${base}/turns`, { text: "Next" })).status, 202);
+	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status !== "running");
+	assert.equal(h.supervisor.get(session.id).turns.at(-1)?.status, "succeeded");
+});
+
+test("an older command peer refuses injected turns without submitting unrecognised slash text", async (t) => {
+	const h = await harness({}, { scenario: "markdown", env: { CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS: "0" } });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	assert.equal(
+		(await h.post(`/api/sessions/${session.id}/commands`, { command: "skill", argv: ["survey"] })).status,
+		409,
+	);
+	assert.equal(h.supervisor.get(session.id).turns.length, 0);
+	assert.doesNotMatch(
+		await readFile(join(h.home.path, "acp.jsonl"), "utf8"),
+		/"method":"session\/prompt"|"method":"_clio-coder\/commands\/invoke"/,
+	);
+});
 test("permission allows once, restores pending snapshot, and rejects stale/duplicate conflicting decisions", {
 	timeout: 15000,
 }, async (t) => {

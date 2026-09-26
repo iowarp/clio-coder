@@ -12,6 +12,7 @@ function fixture(
 	onSubmit?: (emit: (event: unknown) => void) => void,
 	commands?: AcpCommandControl,
 	saveSettings = false,
+	settlement?: { wait: () => Promise<void>; cancel?: () => void },
 ) {
 	const requests = new Map<string, (params: unknown) => unknown>();
 	const updates: Array<Record<string, unknown>> = [];
@@ -120,6 +121,7 @@ function fixture(
 		readSessionEntries: () => entries,
 		buildReplayMessages: () => [],
 		chat: {
+			...(settlement ? { whenSettled: settlement.wait } : {}),
 			submit: async () => {
 				if (onSubmit) {
 					onSubmit(eventHandler);
@@ -134,6 +136,7 @@ function fixture(
 			cancel: () => {
 				cancelled = true;
 				settlePrompt();
+				settlement?.cancel?.();
 			},
 			onEvent: (handler) => {
 				eventHandler = handler;
@@ -151,6 +154,7 @@ function fixture(
 	return {
 		cwd,
 		requests,
+		emit: (event: unknown) => eventHandler(event),
 		updates,
 		history,
 		routingChanges,
@@ -464,6 +468,121 @@ test("ACP slash command input errors keep the invalid-params code", async () => 
 		await rejects(
 			peer.call("session/prompt", { sessionId: opened.sessionId, prompt: [{ type: "text", text: "/doctor bad" }] }),
 			(error: unknown) => (error as AcpRequestError).rpcCode === -32602,
+		);
+	} finally {
+		await peer.stop();
+	}
+});
+
+test("an injected command stays inside its ACP prompt until settlement, including cancellation", async () => {
+	for (const cancel of [false, true]) {
+		let finish = () => {};
+		let began = () => {};
+		const done = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		const started = new Promise<void>((resolve) => {
+			began = resolve;
+		});
+		const commands: AcpCommandControl = {
+			catalog: () => ({
+				version: 1,
+				commands: [
+					{
+						name: "skill",
+						summary: "Use a skill",
+						usage: "/skill <name>",
+						group: "Session",
+						args: {},
+						injectsUserTurn: true,
+					},
+				],
+			}),
+			invoke: () => {
+				began();
+				return { level: "info", lines: ["Skill started"] };
+			},
+			injectsUserTurn: () => true,
+			capability: {},
+		};
+		const peer = fixture([], () => {}, commands, false, { wait: () => done, cancel: finish });
+		try {
+			await peer.call("initialize", { protocolVersion: 1 });
+			await peer.call("session/new", { cwd: peer.cwd, mcpServers: [] });
+			const announcement = peer.updates.find(
+				(params) => (params.update as { sessionUpdate?: string }).sessionUpdate === "available_commands_update",
+			);
+			strictEqual(
+				(announcement?.update as { availableCommands: Array<{ name: string }> }).availableCommands.some(
+					(command) => command.name === "skill",
+				),
+				true,
+			);
+			let answered = false;
+			const prompt = peer
+				.call("session/prompt", { sessionId: "created", prompt: [{ type: "text", text: "/skill survey" }] })
+				.then((result) => {
+					answered = true;
+					return result as { stopReason: string };
+				});
+			await started;
+			await Promise.resolve();
+			strictEqual(answered, false);
+			peer.emit({ type: "text_delta", text: "Visible skill response" });
+			if (cancel) await peer.call("session/cancel", { sessionId: "created" });
+			else {
+				peer.emit({
+					type: "message_end",
+					message: { role: "assistant", content: [{ type: "text", text: "Visible skill response" }] },
+				});
+				finish();
+			}
+			strictEqual((await prompt).stopReason, cancel ? "cancelled" : "end_turn");
+			strictEqual(
+				peer.updates.some(
+					(params) => (params.update as { content?: { text: string } }).content?.text === "Visible skill response",
+				),
+				true,
+			);
+			const response = peer.updates
+				.filter((params) => (params.update as { sessionUpdate?: string }).sessionUpdate === "agent_message_chunk")
+				.map((params) => (params.update as { content: { text: string } }).content.text)
+				.join("");
+			strictEqual(response.includes("Visible skill response\n\nSkill started"), true);
+		} finally {
+			finish();
+			await peer.stop();
+		}
+	}
+});
+
+test("a refused injecting command does not produce a successful ACP turn", async () => {
+	const commands: AcpCommandControl = {
+		catalog: () => ({
+			version: 1,
+			commands: [
+				{
+					name: "skill",
+					summary: "Use a skill",
+					usage: "/skill <name>",
+					group: "Session",
+					args: {},
+					injectsUserTurn: true,
+				},
+			],
+		}),
+		invoke: () => ({ level: "error", lines: ["No such skill"] }),
+		injectsUserTurn: () => true,
+		capability: {},
+	};
+	const peer = fixture([], () => {}, commands, false, { wait: async () => {} });
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/new", { cwd: peer.cwd, mcpServers: [] });
+		await rejects(
+			peer.call("session/prompt", { sessionId: "created", prompt: [{ type: "text", text: "/skill missing" }] }),
+			(error: unknown) =>
+				error instanceof AcpRequestError && error.rpcCode === -32603 && error.message === "the prompt turn failed",
 		);
 	} finally {
 		await peer.stop();

@@ -624,10 +624,40 @@ export class Supervisor {
 			throw new AppProblem("conflict", "This Clio build exposes no operator commands.");
 		return this.projected(id, "_clio-coder/commands/list", {}, CommandCatalog);
 	}
-	invokeCommand(id: string, body: Static<typeof CommandRequest>) {
+	async invokeCommand(id: string, body: Static<typeof CommandRequest>) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.commands)
 			throw new AppProblem("conflict", "This Clio build exposes no operator commands.");
+		const catalog = await this.commands(id);
+		const command = catalog.commands.find((row) => row.name === body.command);
+		if (command?.injectsUserTurn && (body.command !== "tasks" || body.argv?.[0] === "hand")) {
+			if (entry.client.capabilities.commands.promptTurns !== true)
+				throw new AppProblem(
+					"conflict",
+					"This Clio Coder build cannot show a command's injected turn. Update it before sending this command.",
+				);
+			const argv = body.argv ?? [];
+			if (argv.some((arg) => /[\r\n]/u.test(arg)))
+				throw new AppProblem("validation", "Command arguments cannot contain line breaks.");
+			const { turnId } = this.startTurn(id, `/${body.command}${argv.length ? ` ${argv.join(" ")}` : ""}`);
+			await entry.prompt;
+			const turn = this.snapshot(id).turns.find((row) => row.id === turnId);
+			return {
+				level:
+					turn?.status === "failed"
+						? ("error" as const)
+						: turn?.status === "cancelled"
+							? ("warn" as const)
+							: ("info" as const),
+				lines: [
+					turn?.status === "failed"
+						? "The command's turn failed. See the conversation for its recorded outcome."
+						: turn?.status === "cancelled"
+							? "The command's turn was stopped. Its activity is recorded in the conversation."
+							: "The command's turn finished. Its response is recorded in the conversation.",
+				],
+			};
+		}
 		return this.projected(
 			id,
 			"_clio-coder/commands/invoke",

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useId, useState } from "react";
+import { memo, useId, useRef, useState } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
@@ -18,6 +18,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 	sessionOpen,
 	capabilities,
 	settledTurns,
+	running,
 }: {
 	client: Client;
 	sessionId: string;
@@ -25,10 +26,12 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 	capabilities: AgentCapabilities | undefined;
 	/** Changes when a turn settles, which is when the plan and the decisions can have changed. */
 	settledTurns: number;
+	running: boolean;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [title, setTitle] = useState("");
 	const titleId = useId();
+	const panel = useRef<HTMLDetailsElement>(null);
 	const queries = useQueryClient();
 	const params = { params: { id: sessionId }, query: {}, body: {} };
 	const supported = !!capabilities?.board;
@@ -41,15 +44,28 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 	const change = useMutation({
 		mutationFn: (argv: string[]) =>
 			client.call(routes.invokeSessionCommand, { ...params, body: { command: "tasks", argv } }, crypto.randomUUID()),
-		onSuccess: (result) => {
+		onSuccess: async (result, argv) => {
 			if (result.level !== "error") setTitle("");
-			void queries.invalidateQueries({ queryKey: ["session-board", sessionId] });
+			await queries.invalidateQueries({ queryKey: ["session-board", sessionId] });
+			if (argv[0] === "hand")
+				requestAnimationFrame(() => {
+					const active = document.activeElement;
+					if (active !== document.body && active?.getAttribute("data-task-id") !== argv[1]) return;
+					const next = Array.from(panel.current?.querySelectorAll<HTMLButtonElement>("button[data-task-id]") ?? []).find(
+						(button) => button.dataset.taskId === argv[1],
+					);
+					if (panel.current?.open) (next ?? panel.current.querySelector("summary"))?.focus();
+				});
 		},
 	});
 	const view = board.data ? boardView(board.data) : null;
 	const act = (id: string, action: OperatorTaskAction) => change.mutate([action, id]);
 	return (
-		<details className="command-panel session-board" onToggle={(event) => setExpanded(event.currentTarget.open)}>
+		<details
+			ref={panel}
+			className="command-panel session-board"
+			onToggle={(event) => setExpanded(event.currentTarget.open)}
+		>
 			<summary>Tasks and decisions</summary>
 			{!sessionOpen ? <p>This session is not open. Load it to read its tasks and decisions.</p> : null}
 			{sessionOpen && !supported ? <p>This Clio Coder session does not report tasks and decisions.</p> : null}
@@ -75,11 +91,14 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 												<button
 													type="button"
 													key={action}
-													disabled={change.isPending}
+													data-task-id={task.id}
+													disabled={
+														change.isPending || (action === "hand" && (running || capabilities?.commands?.promptTurns !== true))
+													}
 													onClick={() => act(task.id, action)}
-													aria-label={`${action === "done" ? "Mark done" : "Drop"}: ${task.title}`}
+													aria-label={`${action === "hand" ? "Hand to Clio Coder" : action === "done" ? "Mark done" : "Drop"}: ${task.title}`}
 												>
-													{action === "done" ? "Done" : "Drop"}
+													{action === "hand" ? "Hand" : action === "done" ? "Done" : "Drop"}
 												</button>
 											))}
 										</span>
@@ -107,6 +126,9 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 								Add
 							</button>
 						</form>
+						{view.tasks.some((task) => task.actions.includes("hand")) && capabilities?.commands?.promptTurns !== true ? (
+							<p className="session-board__note">Handing a task needs a Clio Coder build that records command turns.</p>
+						) : null}
 						{change.error ? <p role="alert">{change.error.message}</p> : null}
 						{change.data && change.data.level === "error" ? <p role="alert">{change.data.lines.join(" ")}</p> : null}
 					</section>

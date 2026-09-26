@@ -159,14 +159,24 @@ const COMMANDS =
 						args: { subcommands: { compact: { positionals: [{ name: "instructions", required: false, rest: true }] } } },
 					},
 					{
+						name: "skill",
+						summary: "Use a skill",
+						usage: "/skill <name>",
+						group: "Session",
+						injectsUserTurn: true,
+						args: { positionals: [{ name: "name", required: true }] },
+					},
+					{
 						name: "tasks",
 						summary: "Keep your own task list",
-						usage: "/tasks <add|done|drop>",
+						usage: "/tasks <add|hand|done|drop>",
+						injectsUserTurn: true,
 						group: "Session",
 						requiresSubcommand: true,
 						args: {
 							subcommands: {
 								add: { positionals: [{ name: "text", required: true, rest: true }] },
+								hand: { positionals: [{ name: "id", required: true }] },
 								done: { positionals: [{ name: "id", required: true }] },
 								drop: { positionals: [{ name: "id", required: true }] },
 							},
@@ -202,6 +212,19 @@ const BOARD = {
 	],
 	memory: { enabled: true, tier: "rules", entries: 2, stepInFlight: false },
 	truncated: false,
+};
+const invokeTask = (argv) => {
+	const [action, ...rest] = argv;
+	if (action === "add") {
+		const id = `u${BOARD.operatorTasks.length + 1}`;
+		BOARD.operatorTasks.push({ id, title: rest.join(" "), status: "open", expectedOutputs: [], verificationChecks: 0 });
+		return { level: "success", lines: [`added ${id}`] };
+	}
+	const task = BOARD.operatorTasks.find((row) => row.id === rest[0]);
+	if (task) task.status = action === "hand" ? "handed" : action === "done" ? "done" : "dropped";
+	return task
+		? { level: "success", lines: [`${task.id} ${task.status}`] }
+		: { level: "error", lines: [`no task ${rest[0]}`] };
 };
 // Visual review can ask the smoke scenario to advertise safe settings and targets, so the composer's
 // route chip shows a reported model. The smoke itself leaves it off and asserts the missing controls.
@@ -355,6 +378,7 @@ async function handle(frame) {
 														list: "_clio-coder/commands/list",
 														invoke: "_clio-coder/commands/invoke",
 														count: COMMANDS.commands.length,
+														...(process.env.CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS !== "0" ? { promptTurns: true } : {}),
 													},
 													"clio-coder/board": { version: 1, method: "_clio-coder/session/board" },
 												}
@@ -425,6 +449,22 @@ async function handle(frame) {
 									: scenario;
 				cancelled = false;
 				if (scenario === "crash") process.exit(9);
+				if (promptText.startsWith("/tasks ") || promptText.startsWith("/skill ")) {
+					if (promptText.startsWith("/tasks ")) {
+						const argv = promptText.slice(7).trim().split(/\s+/u);
+						const notice = invokeTask(argv);
+						if (argv[0] === "hand") {
+							await delay(120);
+							if (!cancelled) text("Working on the handed task");
+						}
+						text(`${argv[0] === "hand" ? "\n\n" : ""}${notice.lines.join("\n")}`);
+					} else {
+						await delay(120);
+						if (!cancelled) text("Visible skill response");
+					}
+					result = { stopReason: cancelled ? "cancelled" : "end_turn", _meta: { "clio-coder/usage": usage } };
+					break;
+				}
 				if (turnScenario.startsWith("permission")) await permission();
 				else if (turnScenario === "held-worker") await heldWorker();
 				else if (turnScenario === "slow") {
@@ -516,24 +556,7 @@ async function handle(frame) {
 				if (!COMMANDS?.commands.some((row) => row.name === frame.params.command)) throw Error("command_not_exposed");
 				const { command, argv = [] } = frame.params;
 				if (command === "tasks") {
-					const [action, ...rest] = argv;
-					if (action === "add") {
-						const id = `u${BOARD.operatorTasks.length + 1}`;
-						BOARD.operatorTasks.push({
-							id,
-							title: rest.join(" "),
-							status: "open",
-							expectedOutputs: [],
-							verificationChecks: 0,
-						});
-						result = { level: "success", lines: [`added ${id}`] };
-					} else {
-						const task = BOARD.operatorTasks.find((row) => row.id === rest[0]);
-						if (task) task.status = action === "done" ? "done" : "dropped";
-						result = task
-							? { level: "success", lines: [`${task.id} ${task.status}`] }
-							: { level: "error", lines: [`no task ${rest[0]}`] };
-					}
+					result = invokeTask(argv);
 					break;
 				}
 				result =

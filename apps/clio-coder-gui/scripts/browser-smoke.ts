@@ -722,6 +722,17 @@ try {
 		await board.getByRole("button", { name: "Add", exact: true }).click();
 		await board.getByRole("button", { name: "Mark done: Draft the summary", exact: true }).click();
 		await board.locator(".status-mark", { hasText: "Done" }).waitFor();
+		await board.getByLabel("Add a task", { exact: true }).fill("Survey the project");
+		await board.getByRole("button", { name: "Add", exact: true }).click();
+		await board.getByRole("button", { name: "Hand to Clio Coder: Survey the project", exact: true }).click();
+		await board.locator(".status-mark", { hasText: "Handed to Clio Coder" }).waitFor();
+		await page.locator(".chat-request", { hasText: "/tasks hand u2" }).waitFor();
+		await page.getByText("Working on the handed task", { exact: true }).waitFor();
+		await page.waitForFunction(
+			() => document.activeElement?.getAttribute("aria-label") === "Mark done: Survey the project",
+		);
+		await page.getByRole("button", { name: "Send", exact: true }).waitFor({ state: "visible" });
+		await check("session-board-hand");
 		await check("session-board");
 		if (width === 1600) await page.screenshot({ path: join(output, "session-board.png"), fullPage: true });
 		await page.getByText("Tasks and decisions", { exact: true }).click();

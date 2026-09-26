@@ -119,7 +119,7 @@ export async function runAcpCommand(
 					loadSession: true,
 					settings: true,
 					providers: true,
-					commandsCapability: ACP_COMMANDS_CAPABILITY,
+					commandsCapability: { ...ACP_COMMANDS_CAPABILITY, promptTurns: true },
 					steer: true,
 					dispatch: true,
 					toolRegistry: true,

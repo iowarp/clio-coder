@@ -85,6 +85,8 @@ export interface AcpPromptExpansion {
 
 export interface AcpServerChat {
 	submit(text: string, options?: unknown): Promise<void>;
+	/** Wait for a command's host-injected turn while the ACP prompt owns its subscription. */
+	whenSettled?(): Promise<void>;
 	cancel(): void;
 	onEvent(handler: (event: AcpServerEvent) => void): () => void;
 	isStreaming(): boolean;
@@ -2317,7 +2319,14 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				options.chat.resetForSession !== undefined,
 			settings: options.settings !== undefined,
 			providers: options.providers !== undefined,
-			...(options.commands === undefined ? {} : { commandsCapability: options.commands.capability }),
+			...(options.commands === undefined
+				? {}
+				: {
+						commandsCapability: {
+							...options.commands.capability,
+							...(options.chat.whenSettled ? { promptTurns: true } : {}),
+						},
+					}),
 			steer: options.chat.steer !== undefined,
 			dispatch: options.dispatch !== undefined,
 			toolRegistry: options.toolRegistry !== undefined,
@@ -2882,7 +2891,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	};
 	const availableCommands = () =>
 		catalog()
-			?.commands.filter((command) => command.injectsUserTurn !== true && command.streams === undefined)
+			?.commands.filter(
+				(command) =>
+					(command.injectsUserTurn !== true || options.chat.whenSettled !== undefined) &&
+					(command.streams === undefined || command.injectsUserTurn === true),
+			)
 			.map((command) => ({
 				name: command.name,
 				description: command.summary,
@@ -3671,8 +3684,19 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			if (command !== undefined && availableCommands().some((entry) => entry.name === command)) {
 				const argv = commandMatch?.[2]?.trim().split(/\s+/u) ?? [];
 				const result = await options.commands?.invoke({ command, argv });
+				if (options.commands?.injectsUserTurn(command)) await options.chat.whenSettled?.();
 				if (result !== undefined)
-					sendTextChunks(options.transport, session.id, active, "agent_message_chunk", result.lines.join("\n"));
+					sendTextChunks(
+						options.transport,
+						session.id,
+						active,
+						"agent_message_chunk",
+						`${active.sentAssistantChars > 0 ? "\n\n" : ""}${result.lines.join("\n")}`,
+					);
+				if (result?.level === "error" && options.commands?.injectsUserTurn(command)) {
+					active.errored = true;
+					active.errorMessage = result.lines.join("\n");
+				}
 				active.sawTurnEnd = true;
 			} else if (options.expandPrompt === undefined) {
 				await options.chat.submit(text);
