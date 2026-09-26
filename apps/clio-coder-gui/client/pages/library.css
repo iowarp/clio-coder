@@ -84,7 +84,7 @@
 .library-copy__actions button:not(.primary) {
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-sm);
-	background: var(--surface-sunken);
+	background: var(--surface);
 	color: var(--accent);
 	padding: 6px var(--space-3);
 	font-size: var(--text-meta);
