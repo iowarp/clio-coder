@@ -12,6 +12,7 @@
  * (`turnId`, `parentTurnId`, `timestamp`).
  */
 
+import { createHash } from "node:crypto";
 import type { EvictedItem, SessionEntry } from "../../session/entries.js";
 import type {
 	ContextEvictionFields,
@@ -88,9 +89,31 @@ function soloView(key: string, state: EvictedState): WorkingSetView {
 		evictionEvents: 0,
 		itemsEvicted: 1,
 		recalls: 0,
+		recallsByRef: new Map(),
 		lastPolicyId: null,
 		lastEvictionTurnId: null,
+		lastEvictionTokensAfter: null,
 	};
+}
+
+function sumTokens(entries: ReadonlyArray<SessionEntry>, estimate: (entry: SessionEntry) => number): number {
+	let total = 0;
+	for (const entry of entries) total += estimate(entry);
+	return total;
+}
+
+/**
+ * The projection priced the way `tokensBefore` and `tokensAfter` are recorded:
+ * the visible slice with the view applied, chars/4 per entry. The live engine
+ * and the replay runner both feed this number to the rearm band, so growth
+ * since the last event is measured on the same bytes the event recorded.
+ */
+export function projectedWorkingSetTokens(
+	entries: ReadonlyArray<SessionEntry>,
+	view: WorkingSetView,
+	estimateTokens: (entry: SessionEntry) => number,
+): number {
+	return sumTokens(projectWorkingSet(entries, view), estimateTokens);
 }
 
 /**
@@ -114,19 +137,13 @@ function viewWithItems(view: WorkingSetView, items: ReadonlyArray<EvictedItem>, 
 	return { ...view, evicted, itemsEvicted: view.itemsEvicted + items.length };
 }
 
-function sumTokens(entries: ReadonlyArray<SessionEntry>, estimate: (entry: SessionEntry) => number): number {
-	let total = 0;
-	for (const entry of entries) total += estimate(entry);
-	return total;
-}
-
 /**
  * What one candidate takes out of the working set: the entry as it stands now
  * minus the entry as the projection would render it. Zero when the candidate
  * does not apply to the entry, and never negative, because a marker longer than
  * the body it replaces is a bad trade, not a negative saving.
  *
- * Exported so a policy can do headroom arithmetic (`structural-v1` rung 6 needs
+ * Exported so a policy can do headroom arithmetic (`structural-v1` rung 7 needs
  * to know when to stop) against the same numbers `planEviction` will record.
  * A policy that priced evictions its own way would report headroom the ledger
  * then contradicts. Pass the same `callPaths` the plan will use, or the marker
@@ -144,6 +161,13 @@ export function tokensFreedByEviction(
 	const key = refKey(candidate.ref);
 	const projected = projectWorkingSet([entry], soloView(key, pendingState(candidate, marker, "")))[0] ?? entry;
 	return Math.max(0, estimateTokens(entry) - estimateTokens(projected));
+}
+
+/** sha256 of a tool result's body text, hex: `readBodyHash` in the read tool computes the same bytes. */
+function bodyHash(entry: SessionEntry): string | undefined {
+	if (entry.kind !== "message") return undefined;
+	const text = toolResultText(toolResultPayload(entry.payload).result);
+	return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
 export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): EvictionPlan | null {
@@ -177,6 +201,11 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 		if (tokensFreed <= 0) continue;
 		claimed.add(key);
 		if (alias !== undefined) aliasSequence += 1;
+		// The hash is over the body text as the ledger holds it, which is what
+		// the read tool hashes on a fresh read of the same path (`readBodyHash`):
+		// a match there is a reread of unchanged content. Thinking units carry
+		// no marker and no hash.
+		const contentHash = alias === undefined ? undefined : bodyHash(entry);
 		items.push({
 			...(alias === undefined ? {} : { alias }),
 			ref: candidate.ref,
@@ -184,6 +213,7 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 			tokensFreed,
 			marker,
 			...(candidate.by === undefined ? {} : { by: candidate.by }),
+			...(contentHash === undefined ? {} : { contentHash }),
 		});
 	}
 	if (items.length === 0) return null;
@@ -191,9 +221,10 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 	return {
 		policyId: policy.id,
 		items,
-		tokensBefore: sumTokens(projectWorkingSet(input.entries, input.view), input.estimateTokens),
-		tokensAfter: sumTokens(
-			projectWorkingSet(input.entries, viewWithItems(input.view, items, policy.id)),
+		tokensBefore: projectedWorkingSetTokens(input.entries, input.view, input.estimateTokens),
+		tokensAfter: projectedWorkingSetTokens(
+			input.entries,
+			viewWithItems(input.view, items, policy.id),
 			input.estimateTokens,
 		),
 	};

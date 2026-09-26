@@ -26,8 +26,14 @@ export interface ReplayLoadCascade {
 	kept: number;
 }
 
+/**
+ * Two turns is the floor at which a turn boundary exists for the live pressure
+ * check to run on; the previous eight-turn floor excluded 264 of 281 recorded
+ * sessions, which is to say the sessions the layer is for. Tool-result volume
+ * is the size signal, not the operator's message count.
+ */
 const DEFAULT_FILTER = {
-	minTurns: 8,
+	minTurns: 2,
 	minToolResults: 8,
 	requireFileReread: true,
 } as const;
@@ -97,9 +103,7 @@ async function pinnedLeafTurnId(source: string): Promise<string | undefined> {
 }
 
 function cleanActiveEntries(entries: ReadonlyArray<SessionEntry>, activeLeafTurnId?: string): SessionEntry[] {
-	return filterEntriesToActivePath(entries, activeLeafTurnId).filter(
-		(entry) => entry.kind !== "contextEviction" && entry.kind !== "contextRecall",
-	);
+	return filterEntriesToActivePath(entries, activeLeafTurnId).filter((entry) => entry.kind !== "contextEviction");
 }
 
 function toolResultCount(entries: ReadonlyArray<SessionEntry>): number {
@@ -132,9 +136,19 @@ export async function loadClioTraces(
 		}
 	}
 
+	const filter =
+		options.filter === false
+			? null
+			: {
+					minTurns: options.filter?.minTurns ?? DEFAULT_FILTER.minTurns,
+					minToolResults: options.filter?.minToolResults ?? DEFAULT_FILTER.minToolResults,
+					requireFileReread: options.filter?.requireFileReread ?? DEFAULT_FILTER.requireFileReread,
+				};
+	const turnsStage = `turns_lt_${filter?.minTurns ?? DEFAULT_FILTER.minTurns}`;
+	const resultsStage = `tool_results_lt_${filter?.minToolResults ?? DEFAULT_FILTER.minToolResults}`;
 	const filtered: Record<string, number> = {
-		turns_lt_8: 0,
-		tool_results_lt_8: 0,
+		[turnsStage]: 0,
+		[resultsStage]: 0,
 		no_file_reread: 0,
 	};
 	const cascade: ReplayLoadCascade = {
@@ -144,14 +158,6 @@ export async function loadClioTraces(
 		kept: 0,
 	};
 	const traces: Trace[] = [];
-	const filter =
-		options.filter === false
-			? null
-			: {
-					minTurns: options.filter?.minTurns ?? DEFAULT_FILTER.minTurns,
-					minToolResults: options.filter?.minToolResults ?? DEFAULT_FILTER.minToolResults,
-					requireFileReread: options.filter?.requireFileReread ?? DEFAULT_FILTER.requireFileReread,
-				};
 
 	for (const source of [...discovered].sort((a, b) => a.localeCompare(b))) {
 		let raw: string;
@@ -177,11 +183,11 @@ export async function loadClioTraces(
 		};
 		if (filter !== null) {
 			if (trace.turnCount < filter.minTurns) {
-				filtered.turns_lt_8 = (filtered.turns_lt_8 ?? 0) + 1;
+				filtered[turnsStage] = (filtered[turnsStage] ?? 0) + 1;
 				continue;
 			}
 			if (toolResultCount(entries) < filter.minToolResults) {
-				filtered.tool_results_lt_8 = (filtered.tool_results_lt_8 ?? 0) + 1;
+				filtered[resultsStage] = (filtered[resultsStage] ?? 0) + 1;
 				continue;
 			}
 			if (filter.requireFileReread) {

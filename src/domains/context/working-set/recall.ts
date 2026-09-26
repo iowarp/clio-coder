@@ -15,7 +15,7 @@ import {
 	type WorkingSetView,
 } from "./contract.js";
 import { parseRefKey, refKey } from "./fold.js";
-import { callPathsByToolCallId } from "./path-index.js";
+import { buildPathIndex, callPathsByToolCallId, canonicalize } from "./path-index.js";
 import {
 	hasLegacyCompactionMarker,
 	offloadPathOf,
@@ -72,6 +72,36 @@ export function resolveRecall(
 			...(offloadPath !== undefined ? { offloadPath } : {}),
 		},
 	};
+}
+
+/**
+ * Recall by path: the newest evicted read of `path` on the active path. The
+ * path is canonicalized the way the path index keys it, so `src/x.ts`,
+ * `./src/x.ts` and the absolute form all find the same file. A visible read
+ * is not a match (its content is already in context), and a summarized one
+ * is not either: only an evicted read has a marker the model can be pointing
+ * at when it names a file rather than a ref.
+ */
+export function resolveRecallByPath(
+	entries: ReadonlyArray<SessionEntry>,
+	view: WorkingSetView,
+	path: string,
+	cwd: string | null,
+	activeLeafTurnId?: string,
+): RecallOutcome {
+	const active = filterEntriesToActivePath(entries, activeLeafTurnId);
+	const wanted = canonicalize(path, cwd);
+	if (wanted.length === 0) return { ok: false, error: { kind: "no_evicted_read", ref: path, path } };
+	const index = buildPathIndex(active, { cwd });
+	const visible = new Set(compactionCut(active).visible.map((entry) => entry.turnId));
+	for (let i = index.observations.length - 1; i >= 0; i -= 1) {
+		const observation = index.observations[i];
+		if (observation === undefined || observation.op !== "read" || observation.isError) continue;
+		if (observation.path !== wanted || !visible.has(observation.ref.entry) || !view.evicted.has(observation.ref.entry))
+			continue;
+		return resolveRecall(entries, view, observation.ref.entry, activeLeafTurnId);
+	}
+	return { ok: false, error: { kind: "no_evicted_read", ref: path, path } };
 }
 
 /**
@@ -199,5 +229,7 @@ export function recallErrorMessage(
 			}
 			return `ref ${error.ref} has no recallable original tool result (unsupported entry or legacy destructive compaction).${listing}`;
 		}
+		case "no_evicted_read":
+			return `no evicted read of ${error.path} on the active path; a visible read is already in context, and a summarized one is recalled by ref.${listing}`;
 	}
 }

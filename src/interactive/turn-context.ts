@@ -42,9 +42,10 @@ import {
 	resolveLiveBudgetPolicy,
 } from "../domains/context/budget/live-view.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
-import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
+import { withinRearmBand } from "../domains/context/working-set/checkpoint.js";
+import { buildEvictionFields, planEviction, projectedWorkingSetTokens } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
-import { isTurnStart } from "../domains/context/working-set/horizon.js";
+import { isTurnStart, protectionCutoffIndex } from "../domains/context/working-set/horizon.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
@@ -340,14 +341,18 @@ export interface TurnContext {
  */
 function evictionSkipMessage(
 	visibleEntries: ReadonlyArray<SessionEntry>,
-	workingSet: Readonly<{ protectLastTurns: number; policy: string }>,
+	workingSet: Readonly<{ protectLastTurns: number; protectLastSteps: number; policy: string }>,
 	policyId: string,
 ): string {
 	const turns = visibleEntries.filter(isTurnStart).length;
+	// The window is the narrower of the turn and step horizons, so only the
+	// cutoff itself says whether the policy was offered anything at all.
+	const allProtected = protectionCutoffIndex(visibleEntries, workingSet) === 0;
 	return renderEvictionSkipLine({
-		reason: turns <= workingSet.protectLastTurns ? "all-protected" : "nothing-evictable",
+		reason: allProtected ? "all-protected" : "nothing-evictable",
 		turns,
 		protectLastTurns: workingSet.protectLastTurns,
+		protectLastSteps: workingSet.protectLastSteps,
 		policyId,
 	});
 }
@@ -1336,13 +1341,30 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						const policy = resolveWorkingSetPolicy(settings.context.workingSet.policy);
 						policyId = policy.id;
 						visibleEntries = selectVisibleEntries(entries, state.lastTurnId ?? undefined);
+						const projectedTokens = projectedWorkingSetTokens(visibleEntries, view, estimateTokens);
+						// The hysteresis band. A checkpoint runs before every request, so
+						// without it a policy with unconditional rungs fires an event per
+						// step and cold-starts the prefix cache each time. Inside the band
+						// the automatic path does nothing at all, summary included; the
+						// overflow path still forces a fit, and the request-fit admission
+						// remains the safety net. The replay runner gates identically.
+						if (
+							!requiredFit &&
+							withinRearmBand({
+								projectedTokens,
+								contextWindow: estimate.contextWindow,
+								rearmFraction: settings.context.workingSet.rearmFraction,
+								lastEvictionTokensAfter: view.lastEvictionTokensAfter,
+							})
+						)
+							return false;
 						planned = (deps.planEviction ?? planEviction)(policy, {
 							entries: visibleEntries,
 							view,
 							cwd: deps.session.current()?.cwd ?? null,
 							settings: settings.context.workingSet,
 							pressure: {
-								tokens: estimate.tokens,
+								tokens: projectedTokens,
 								contextWindow: estimate.contextWindow,
 								threshold: requiredFit
 									? Math.min(
@@ -1453,6 +1475,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						reason: "disabled",
 						turns: 0,
 						protectLastTurns: settings.context.workingSet.protectLastTurns,
+						protectLastSteps: settings.context.workingSet.protectLastSteps,
 						policyId: settings.context.workingSet.policy,
 					});
 				}

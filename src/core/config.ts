@@ -29,6 +29,7 @@ import {
 	THEME_NAMED_COLORS,
 	THINKING_LEVELS,
 	type ThinkingLevel,
+	WORKING_SET_PROFILE_IDS,
 } from "./defaults.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
@@ -1770,9 +1771,12 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					issues.unknownKeys("context.workingSet", workingSet, [
 						"enabled",
 						"policy",
+						"profile",
 						"target",
 						"protectLastTurns",
+						"protectLastSteps",
 						"minEvictableTokens",
+						"rearmFraction",
 					]);
 					if ("enabled" in workingSet) {
 						const parsed = expectBoolean(issues, "context.workingSet.enabled", workingSet.enabled);
@@ -1782,8 +1786,13 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						const parsed = expectEnum(issues, "context.workingSet.policy", workingSet.policy, [
 							"age-horizon",
 							"structural-v1",
+							"structural-v2",
 						] as const);
 						if (parsed !== undefined) settings.context.workingSet.policy = parsed;
+					}
+					if ("profile" in workingSet) {
+						const parsed = expectEnum(issues, "context.workingSet.profile", workingSet.profile, WORKING_SET_PROFILE_IDS);
+						if (parsed !== undefined) settings.context.workingSet.profile = parsed;
 					}
 					if ("target" in workingSet) {
 						const parsed = expectNumber(issues, "context.workingSet.target", workingSet.target);
@@ -1793,11 +1802,18 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					}
 					for (const [key, min] of [
 						["protectLastTurns", 1],
+						["protectLastSteps", 1],
 						["minEvictableTokens", 0],
 					] as const) {
 						if (!(key in workingSet)) continue;
 						const parsed = expectInteger(issues, `context.workingSet.${key}`, workingSet[key], { min });
 						if (parsed !== undefined) settings.context.workingSet[key] = parsed;
+					}
+					if ("rearmFraction" in workingSet) {
+						const parsed = expectNumber(issues, "context.workingSet.rearmFraction", workingSet.rearmFraction);
+						if (parsed !== undefined && (parsed < 0 || parsed >= 1))
+							issues.add("context.workingSet.rearmFraction", `expected a number >= 0 and < 1, got ${parsed}`);
+						else if (parsed !== undefined) settings.context.workingSet.rearmFraction = parsed;
 					}
 				}
 			}

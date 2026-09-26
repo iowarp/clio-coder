@@ -211,7 +211,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			},
 			getWorkingSetConfig: () => {
 				const workingSet = deps.getSettings?.().context.workingSet;
-				return workingSet ? { enabled: workingSet.enabled, policy: workingSet.policy } : null;
+				return workingSet ?? null;
 			},
 		});
 		deps.requestRender();

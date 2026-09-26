@@ -512,6 +512,11 @@ export const EVICTION_REASONS = [
 	"stale_after_mutation",
 	"listing_consumed",
 	"failure_resolved",
+	"superseded_call",
+	"search_narrowed",
+	"diff_applied",
+	"offloaded_body",
+	"dispatch_receipt_settled",
 	"thinking_turn_closed",
 	"age_horizon",
 	"operator",
@@ -521,7 +526,13 @@ export type EvictionReason = (typeof EVICTION_REASONS)[number];
 export const EVICTION_TRIGGERS = ["pressure", "operator"] as const;
 export type EvictionTrigger = (typeof EVICTION_TRIGGERS)[number];
 
-export const RECALL_TRIGGERS = ["tool", "operator"] as const;
+/**
+ * `tool` is context(scope=recall), `operator` is /context recall, and `reread`
+ * is the read tool noticing that the file it just read is byte-identical to
+ * an evicted read of the same path: the body goes back through the read
+ * result and this record is the exact provenance.
+ */
+export const RECALL_TRIGGERS = ["tool", "operator", "reread"] as const;
 export type RecallTrigger = (typeof RECALL_TRIGGERS)[number];
 
 /**
@@ -548,6 +559,14 @@ export interface EvictedItem {
 	marker: string;
 	/** Ref key of the entry that superseded or resolved this one, when the reason names one. */
 	by?: string;
+	/**
+	 * sha256 of the tool-result body text the marker replaced, hex. The read
+	 * tool compares it against what it just produced for the same path; a
+	 * match is a reread of unchanged content and records a `contextRecall`
+	 * instead of a second copy. Absent on thinking units and on ledgers
+	 * written before format version 6.
+	 */
+	contentHash?: string;
 }
 
 export interface ContextEvictionEntry extends BaseSessionEntry {
@@ -802,7 +821,9 @@ function isEvictedItem(value: unknown): value is EvictedItem {
 		isNumber(value.tokensFreed) &&
 		isString(value.marker) &&
 		(value.alias === undefined || (typeof value.alias === "string" && /^r[1-9]\d*$/.test(value.alias))) &&
-		isOptionalString(value.by)
+		isOptionalString(value.by) &&
+		(value.contentHash === undefined ||
+			(typeof value.contentHash === "string" && /^[0-9a-f]{64}$/.test(value.contentHash)))
 	);
 }
 

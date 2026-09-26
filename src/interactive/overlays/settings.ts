@@ -1468,7 +1468,10 @@ export function buildSettingItems(
 			values: ["true", "false"],
 		}),
 		settingItem("context.workingSet.policy", workingSet.policy, {
-			values: ["structural-v1", "age-horizon"],
+			values: ["structural-v1", "structural-v2", "age-horizon"],
+		}),
+		settingItem("context.workingSet.profile", workingSet.profile, {
+			values: ["default", "data-analysis", "web-design"],
 		}),
 		settingItem("context.workingSet.target", formatThreshold(workingSet.target, "0.6"), {
 			values: ["0.4", "0.5", "0.6", "0.7"],
@@ -1476,8 +1479,14 @@ export function buildSettingItems(
 		settingItem("context.workingSet.protectLastTurns", String(workingSet.protectLastTurns), {
 			values: ["3", "6", "10", "15"],
 		}),
+		settingItem("context.workingSet.protectLastSteps", String(workingSet.protectLastSteps), {
+			values: ["4", "8", "12", "20"],
+		}),
 		settingItem("context.workingSet.minEvictableTokens", String(workingSet.minEvictableTokens), {
 			values: ["0", "100", "200", "500", "1000"],
+		}),
+		settingItem("context.workingSet.rearmFraction", formatThreshold(workingSet.rearmFraction, "0.1"), {
+			values: ["0", "0.02", "0.05", "0.1"],
 		}),
 		settingItem("retry.enabled", String(retry.enabled), {
 			values: ["true", "false"],
@@ -2395,7 +2404,12 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 			if (value === "true" || value === "false") settings.context.workingSet.enabled = value === "true";
 			return;
 		case "context.workingSet.policy":
-			if (value === "structural-v1" || value === "age-horizon") settings.context.workingSet.policy = value;
+			if (value === "structural-v1" || value === "structural-v2" || value === "age-horizon")
+				settings.context.workingSet.policy = value;
+			return;
+		case "context.workingSet.profile":
+			if (value === "default" || value === "data-analysis" || value === "web-design")
+				settings.context.workingSet.profile = value;
 			return;
 		case "context.workingSet.target": {
 			// The validator's bound is exclusive at both ends, so an eviction target
@@ -2409,11 +2423,22 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 				if (next >= 1) settings.context.workingSet.protectLastTurns = next;
 			});
 			return;
+		case "context.workingSet.protectLastSteps":
+			applyNonNegativeInteger(value, (next) => {
+				if (next >= 1) settings.context.workingSet.protectLastSteps = next;
+			});
+			return;
 		case "context.workingSet.minEvictableTokens":
 			applyNonNegativeInteger(value, (next) => {
 				settings.context.workingSet.minEvictableTokens = next;
 			});
 			return;
+		case "context.workingSet.rearmFraction": {
+			// Zero disables the band; the validator refuses 1 and above.
+			const parsed = Number(value);
+			if (Number.isFinite(parsed) && parsed >= 0 && parsed < 1) settings.context.workingSet.rearmFraction = parsed;
+			return;
+		}
 		case "retry.streamStallMs":
 			applyNonNegativeInteger(value, (next) => {
 				settings.chat.retry.streamStallMs = next;

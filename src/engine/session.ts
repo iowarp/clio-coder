@@ -62,7 +62,7 @@ export interface ClioSessionMeta {
 	platform: string;
 	nodeVersion: string;
 	/**
-	 * Version 5 on every new session. Readers reject earlier versions, sessions
+	 * Version 6 on every new session. Readers reject earlier versions, sessions
 	 * that omit this field, and versions from the future.
 	 */
 	sessionFormatVersion?: number;
@@ -72,16 +72,22 @@ export interface ClioSessionMeta {
  * Version 4 added the working-set ledger kinds (`contextEviction`,
  * `contextRecall`). Version 5 adds the durable continuity kinds
  * (`handoffTransaction`, `continuityCommit`) and the optional continuity
- * payload a compaction summary carries.
+ * payload a compaction summary carries. Version 6 widens the working-set
+ * records: four eviction reasons (`search_narrowed`, `diff_applied`,
+ * `offloaded_body`, `dispatch_receipt_settled`), the `reread` recall trigger,
+ * and the optional `contentHash` on an evicted item that the read tool
+ * compares against a fresh read of the same path.
  *
  * Each bump exists for the same reason: an older reader would parse the new
  * records as unknown kinds and replay the session as if the state they record
  * had never happened. A v4 build reading a v5 ledger would show no accepted
- * handoff note and no paused transaction, so it refuses the file instead of
- * misreading it. Both steps are additive to the ledger, so no historical entry
- * is rewritten; only the metadata stamp moves.
+ * handoff note and no paused transaction, and a v5 build reading a v6 ledger
+ * would drop every eviction event carrying a new reason and replay the bodies
+ * it evicted, so each refuses the file instead of misreading it. Every step is
+ * additive to the ledger, so no historical entry is rewritten; only the
+ * metadata stamp moves.
  */
-export const CURRENT_SESSION_FORMAT_VERSION = 5;
+export const CURRENT_SESSION_FORMAT_VERSION = 6;
 
 export interface ClioSessionJsonlHeader {
 	type: "session";

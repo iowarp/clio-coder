@@ -5,6 +5,12 @@ import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { DomainContext } from "../../src/core/domain-loader.js";
+import { DEFAULT_WORKING_SET_SETTINGS } from "../../src/domains/context/working-set/defaults.js";
+import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
+import { resolveRecall, resolveRecallByPath } from "../../src/domains/context/working-set/recall.js";
+import { loadClioTraces } from "../../src/domains/context/working-set/replay/load-clio.js";
+import { replayTrace } from "../../src/domains/context/working-set/replay/runner.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import {
 	appendSessionFileEntry,
@@ -97,6 +103,61 @@ function withWriteFault(
 	}
 }
 
+function rereadLedger(): SessionEntry[] {
+	const entries: SessionEntry[] = [];
+	let parent: string | null = null;
+	for (const [id, ref] of [
+		["original", null],
+		["copy-one", "original"],
+		["copy-two", "copy-one"],
+	] as const) {
+		const call = `${id}-call`;
+		entries.push({
+			kind: "message",
+			turnId: call,
+			parentTurnId: parent,
+			timestamp: at,
+			role: "assistant",
+			payload: { content: [{ type: "toolCall", id: call, name: "read", arguments: { path: "a.ts" } }] },
+		});
+		if (ref !== null)
+			entries.push({
+				kind: "contextRecall",
+				turnId: `${id}-recall`,
+				parentTurnId: call,
+				timestamp: at,
+				ref: { entry: ref },
+				trigger: "reread",
+				tokensReadmitted: 1000,
+			});
+		entries.push({
+			kind: "message",
+			turnId: id,
+			parentTurnId: call,
+			timestamp: at,
+			role: "tool_result",
+			payload: {
+				toolName: "read",
+				toolCallId: call,
+				result: {
+					content: [{ type: "text", text: "body".repeat(1000) }],
+					details: ref === null ? {} : { recall: { ref } },
+				},
+			},
+		});
+		parent = id;
+	}
+	entries.push({
+		kind: "message",
+		turnId: "later",
+		parentTurnId: parent,
+		timestamp: at,
+		role: "assistant",
+		payload: { text: "done" },
+	});
+	return entries;
+}
+
 describe("session integrity", () => {
 	let scratch: IsolatedClioEnv;
 	let restoreDescriptors: () => void;
@@ -110,6 +171,81 @@ describe("session integrity", () => {
 		} finally {
 			restoreDescriptors();
 		}
+	});
+
+	it("counts reread copies as one recall lineage on the active branch", () => {
+		const entries = rereadLedger();
+		const current = foldWorkingSet(entries);
+		strictEqual(current.recalls, 2);
+		strictEqual(current.recallsByRef.get("original"), 2);
+		strictEqual(current.recallsByRef.get("copy-one"), 2);
+		const earlier = foldWorkingSet(entries, "copy-one");
+		strictEqual(earlier.recalls, 1);
+		strictEqual(earlier.recallsByRef.get("original"), 1);
+		strictEqual(earlier.recallsByRef.has("copy-two"), false);
+	});
+
+	it("requires an explicit ref after an evicted read falls behind a summary", () => {
+		const entries = rereadLedger();
+		entries.push({
+			kind: "contextEviction",
+			turnId: "eviction",
+			parentTurnId: "later",
+			timestamp: at,
+			policyId: "structural-v2",
+			trigger: "pressure",
+			tokensBefore: 3000,
+			tokensAfter: 2000,
+			pressureBefore: 0.9,
+			snapshotIdBefore: null,
+			evicted: [{ ref: { entry: "original" }, reason: "age_horizon", tokensFreed: 1000, marker: "evicted" }],
+		});
+		strictEqual(resolveRecallByPath(entries, foldWorkingSet(entries), "a.ts", "/project").ok, true);
+		entries.push({
+			kind: "compactionSummary",
+			turnId: "summary",
+			parentTurnId: "later",
+			timestamp: at,
+			summary: "kept",
+			tokensBefore: 2000,
+			firstKeptTurnId: "later",
+		});
+		const view = foldWorkingSet(entries);
+		strictEqual(resolveRecallByPath(entries, view, "a.ts", "/project").ok, false);
+		strictEqual(resolveRecall(entries, view, "original").ok, true, "historical bytes remain recallable by ref");
+	});
+
+	it("preserves recorded recall evidence through loading and replay", async () => {
+		const path = resolve(scratch.dir, "recalls.jsonl");
+		fs.writeFileSync(
+			path,
+			`${rereadLedger()
+				.map((record) => JSON.stringify(record))
+				.join("\n")}\n`,
+		);
+		const loaded = await loadClioTraces([path], { filter: false });
+		const trace = loaded.traces[0];
+		ok(trace);
+		strictEqual(trace.entries.filter((record) => record.kind === "contextRecall").length, 2);
+		let observed = 0;
+		replayTrace(
+			trace,
+			{
+				id: "structural-v2",
+				select: (input) => {
+					observed = Math.max(observed, input.view.recallsByRef.get("copy-one") ?? 0);
+					return [];
+				},
+			},
+			{
+				policyId: "structural-v2",
+				budgetTokens: 1000,
+				threshold: 0.8,
+				target: 0.6,
+				settings: DEFAULT_WORKING_SET_SETTINGS,
+			},
+		);
+		strictEqual(observed, 2, "the next selection must see the recorded recalls");
 	});
 
 	for (const transition of ["resume", "switchBranch"] as const) {
@@ -151,7 +287,7 @@ describe("session integrity", () => {
 		}
 	}
 
-	for (const version of [2, 3, 4, 5, 6]) {
+	for (const version of [2, 3, 4, 5, CURRENT_SESSION_FORMAT_VERSION, CURRENT_SESSION_FORMAT_VERSION + 1]) {
 		it(`preserves version ${version} admission and torn-tail recovery`, async () => {
 			const current = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
 			const old = current.create({ cwd: scratch.dir });
@@ -168,7 +304,7 @@ describe("session integrity", () => {
 			if (version === 3) fs.writeFileSync(paths.current, `${JSON.stringify(entry("candidate"))}\n`);
 			fs.appendFileSync(paths.current, '{"interrupted":');
 			try {
-				if (version === 2 || version === 6) {
+				if (version === 2 || version > CURRENT_SESSION_FORMAT_VERSION) {
 					const before = fs.readFileSync(paths.meta, "utf8");
 					throws(() => current.resume(candidate.meta.id), /unsupported format version|newer Clio/u);
 					strictEqual(current.current()?.id, old.id);
@@ -505,7 +641,7 @@ describe("session integrity", () => {
 	}
 
 	for (const transition of ["resume", "switchBranch"] as const) {
-		for (const version of [2, 6]) {
+		for (const version of [2, CURRENT_SESSION_FORMAT_VERSION + 1]) {
 			it(`${transition} refuses version ${version} before publishing recovery files`, async () => {
 				const events: unknown[] = [];
 				const current = createSessionBundle({

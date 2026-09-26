@@ -29,7 +29,7 @@ export const ageHorizonPolicy: WorkingSetPolicy = {
 	id: "age-horizon",
 	select(input: PolicyInput): ReadonlyArray<EvictionCandidate> {
 		const { entries, view, settings } = input;
-		const cutoff = protectionCutoffIndex(entries, settings.protectLastTurns);
+		const cutoff = protectionCutoffIndex(entries, settings);
 		const candidates: EvictionCandidate[] = [];
 		// Newest-safe-first: the entry closest to the protection horizon is the
 		// least likely to be re-read, and a caller that stops early has then

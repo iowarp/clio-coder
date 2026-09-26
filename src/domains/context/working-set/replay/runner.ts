@@ -7,6 +7,7 @@ import type {
 	EvictedItem,
 	SessionEntry,
 } from "../../../session/entries.js";
+import { isPressureCheckpointBefore, withinRearmBand } from "../checkpoint.js";
 import { EMPTY_WORKING_SET_VIEW, type PolicyInput, type WorkingSetPolicy, type WorkingSetView } from "../contract.js";
 import { buildEvictionFields, planEviction } from "../engine.js";
 import { foldWorkingSet } from "../fold.js";
@@ -46,10 +47,23 @@ export interface ReplayConfig {
 	settings: WorkingSetSettings;
 	/** Absent: summaries are counted as `turnsToFirstSummary` but never applied. */
 	summaries?: ReplaySummaryModel;
+	/**
+	 * The modeled request-fit limit as a share of the budget. Live, a request
+	 * must fit input plus the output reserve inside the window, and a checkpoint
+	 * that fails that check reduces regardless of the rearm band. The real
+	 * reserve is an absolute token count (32,768 by default), which would swallow
+	 * the whole of a 32k replay budget, so the fit is modeled as a fraction.
+	 * Absent: 0.95.
+	 */
+	overflowFraction?: number;
 }
+
+const DEFAULT_OVERFLOW_FRACTION = 0.95;
 
 export interface ReplayEvictionEvent {
 	turnIndex: number;
+	/** The pressure checkpoint the event fired at, in `checkpointPositions` coordinates. */
+	checkpointIndex: number;
 	items: ReadonlyArray<EvictedItem>;
 	tokensBefore: number;
 	tokensAfter: number;
@@ -68,12 +82,22 @@ export interface ReplayTraceResult {
 	policyId: string;
 	budgetTokens: number;
 	turnCount: number;
+	/** Pressure checkpoints the trace offered: one per model request, as `isPressureCheckpointBefore` counts them. */
+	checkpointCount: number;
 	events: ReadonlyArray<ReplayEvictionEvent>;
-	/** Tool-result refs only; thinking-unit evictions are intentionally absent. */
-	evictedAtTurn: ReadonlyMap<string, number>;
+	/** Tool-result refs only, keyed to the checkpoint that removed them; thinking-unit evictions are intentionally absent. */
+	evictedAt: ReadonlyMap<string, number>;
 	turnsToFirstSummary: number | null;
 	/** Summary compactions applied under `config.summaries`. */
 	summaries: number;
+	/** Checkpoints where the projection exceeded `overflowFraction` and reduction was forced past the rearm band. */
+	overflowReductions: number;
+	/**
+	 * Projected tokens after each applied summary, summed: a summary rewrites
+	 * the prompt from its cut, so an exact-prefix cache re-prefills all of it.
+	 * The summary side of the cache-miss bill, beside `coldPrefixTokens`.
+	 */
+	summaryColdPrefixTokens: number;
 	/** Original entries plus synthetic append-only contextEviction and compactionSummary records. */
 	entries: ReadonlyArray<SessionEntry>;
 }
@@ -101,16 +125,14 @@ function eventSaturated(
 	plan: { items: ReadonlyArray<EvictedItem>; tokensAfter: number },
 ): boolean {
 	if (policy.id === "age-horizon") return true;
-	const targetTokens = input.pressure.target * input.pressure.contextWindow;
-	if (policy.id === "structural-v1") {
-		const thresholdTokens = input.pressure.threshold * input.pressure.contextWindow;
-		const usedAgeRung = plan.items.some((item) => item.reason === "age_horizon");
-		// Rungs 1-5 can legitimately stop between target and threshold. Saturation
-		// means rung 6 actually ran and exhausted its pool before reaching target.
-		return plan.tokensAfter > targetTokens && (plan.tokensAfter > thresholdTokens || usedAgeRung);
-	}
 	if (hasCandidatePool(policy)) return plan.items.length === policy.replayCandidateCount(input);
-	return plan.tokensAfter > targetTokens;
+	const targetTokens = input.pressure.target * input.pressure.contextWindow;
+	const thresholdTokens = input.pressure.threshold * input.pressure.contextWindow;
+	const usedAgeRung = plan.items.some((item) => item.reason === "age_horizon");
+	// A structural composition's unconditional rungs can legitimately stop
+	// between target and threshold. Saturation means the age rung actually ran
+	// and exhausted its pool before reaching target.
+	return plan.tokensAfter > targetTokens && (plan.tokensAfter > thresholdTokens || usedAgeRung);
 }
 
 interface IncrementalProjection {
@@ -197,11 +219,17 @@ function coldPrefixTokens(state: IncrementalProjection, items: ReadonlyArray<Evi
 	return tokens;
 }
 
-/** Live plan/fold/project code driven at deterministic ledger turn boundaries. */
+/**
+ * Live plan/fold/project code driven at every pressure checkpoint the ledger
+ * offers: the turn start and every tool-batch boundary, exactly where the chat
+ * loop asks (`isPressureCheckpointBefore`). The rearm band gates a checkpoint
+ * the same way `performAutoCompact` does, so the harness fires where the
+ * product fires and stays quiet where the product stays quiet.
+ */
 export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: ReplayConfig): ReplayTraceResult {
 	const soFar: SessionEntry[] = [];
 	const events: ReplayEvictionEvent[] = [];
-	const evictedAtTurn = new Map<string, number>();
+	const evictedAt = new Map<string, number>();
 	const toolResults = new Set(
 		trace.entries
 			.filter((entry) => entry.kind === "message" && entry.role === "tool_result")
@@ -209,19 +237,38 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 	);
 	let evictionSequence = 0;
 	let summaries = 0;
+	let summaryColdPrefixTokens = 0;
+	let overflowReductions = 0;
 	let turnIndex = 0;
+	let checkpointIndex = 0;
 	let turnsToFirstSummary: number | null = null;
 	let lastMessageTurnId: string | null = null;
 	let view: WorkingSetView = EMPTY_WORKING_SET_VIEW;
 	let visible: IncrementalProjection = { raw: [], projected: [], indexByTurnId: new Map(), tokens: 0 };
 	const pressureLimit = config.threshold * config.budgetTokens;
+	const overflowLimit = (config.overflowFraction ?? DEFAULT_OVERFLOW_FRACTION) * config.budgetTokens;
 
-	for (const entry of trace.entries) {
-		if (isTurnStart(entry)) {
-			turnIndex += 1;
+	for (let entryIndex = 0; entryIndex < trace.entries.length; entryIndex += 1) {
+		const entry = trace.entries[entryIndex];
+		if (entry === undefined) continue;
+		if (isTurnStart(entry)) turnIndex += 1;
+		if (isPressureCheckpointBefore(trace.entries, entryIndex)) {
+			checkpointIndex += 1;
 			const leaf = lastMessageTurnId;
 			const tokens = visible.tokens;
-			if (tokens > pressureLimit) {
+			// The overflow path ignores the band, as the live fit check does.
+			const overflow = tokens > overflowLimit;
+			if (overflow) overflowReductions += 1;
+			const attempt =
+				overflow ||
+				(tokens > pressureLimit &&
+					!withinRearmBand({
+						projectedTokens: tokens,
+						contextWindow: config.budgetTokens,
+						rearmFraction: config.settings.rearmFraction,
+						lastEvictionTokensAfter: view.lastEvictionTokensAfter,
+					}));
+			if (attempt) {
 				const input: PolicyInput = {
 					entries: visible.raw,
 					view,
@@ -256,6 +303,7 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 					applyEvictionProjection(visible, synthetic, view, plan.items);
 					events.push({
 						turnIndex,
+						checkpointIndex,
 						items: plan.items,
 						tokensBefore: plan.tokensBefore,
 						tokensAfter: plan.tokensAfter,
@@ -263,8 +311,8 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 						coldPrefixTokens: coldPrefixTokens(visible, plan.items),
 					});
 					for (const item of plan.items) {
-						if (toolResults.has(item.ref.entry) && !evictedAtTurn.has(item.ref.entry)) {
-							evictedAtTurn.set(item.ref.entry, turnIndex);
+						if (toolResults.has(item.ref.entry) && !evictedAt.has(item.ref.entry)) {
+							evictedAt.set(item.ref.entry, checkpointIndex);
 						}
 					}
 				}
@@ -293,11 +341,14 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 							firstKeptTurnId,
 						};
 						soFar.push(synthetic);
+						// The summary moved the baseline: the fold drops the band anchor.
+						view = foldWorkingSet(soFar, leaf ?? undefined);
 						visible = rebuildProjection(soFar, lastMessageTurnId, view);
+						summaryColdPrefixTokens += visible.tokens;
 						const visibleAfter = new Set(visible.raw.map((candidate) => candidate.turnId));
 						for (const removed of visibleBefore) {
-							if (toolResults.has(removed) && !visibleAfter.has(removed) && !evictedAtTurn.has(removed)) {
-								evictedAtTurn.set(removed, turnIndex);
+							if (toolResults.has(removed) && !visibleAfter.has(removed) && !evictedAt.has(removed)) {
+								evictedAt.set(removed, checkpointIndex);
 							}
 						}
 					}
@@ -305,6 +356,12 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 			}
 		}
 		soFar.push(entry);
+		// Recorded recalls are observed demand, not a policy's eviction plan.
+		// Fold them before the next selection; real summaries reset the band
+		// just as the synthetic summary path above does.
+		if (entry.kind === "contextRecall" || entry.kind === "compactionSummary") {
+			view = foldWorkingSet(soFar, lastMessageTurnId ?? undefined);
+		}
 		if (entry.kind === "compactionSummary") visible = rebuildProjection(soFar, lastMessageTurnId, view);
 		else appendVisibleEntry(entry, visible, view);
 		if (entry.kind === "message") lastMessageTurnId = entry.turnId;
@@ -315,10 +372,13 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 		policyId: config.policyId,
 		budgetTokens: config.budgetTokens,
 		turnCount: trace.turnCount,
+		checkpointCount: checkpointIndex,
 		events,
-		evictedAtTurn,
+		evictedAt,
 		turnsToFirstSummary,
 		summaries,
+		overflowReductions,
+		summaryColdPrefixTokens,
 		entries: soFar,
 	};
 }

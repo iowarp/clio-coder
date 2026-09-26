@@ -64,10 +64,13 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `fleet.history.journal` | `true` |
 | `context.toolResultMaxBytes` | `65536` |
 | `context.workingSet.enabled` | `true` |
-| `context.workingSet.policy` | `"structural-v1"` |
+| `context.workingSet.policy` | `"structural-v2"` |
+| `context.workingSet.profile` | `"default"` |
 | `context.workingSet.target` | `0.6` |
 | `context.workingSet.protectLastTurns` | `6` |
+| `context.workingSet.protectLastSteps` | `8` |
 | `context.workingSet.minEvictableTokens` | `200` |
+| `context.workingSet.rearmFraction` | `0.1` |
 | `context.compaction.auto` | `true` |
 | `context.compaction.threshold` | `0.8` |
 | `context.memory.enabled` | `true` |
@@ -200,7 +203,7 @@ Tool schemas are registered in [`src/tools/`](../../src/tools/registry.ts). Use 
 | `--min-evictable-tokens` | For `context replay`, non-negative integer tool-result size in tokens below which results are never evicted. |
 | `--model` | For `context wiki`, wire model id for the documenter model instead of the configured one; pair with `--target`. |
 | `--no-filter` | For `context replay`, include every readable transcript instead of only the filtered active-path sessions. |
-| `--policies` | For `context replay`, comma-separated policy ids from none, random, age-horizon, structural-v1, oracle. |
+| `--policies` | For `context replay`, comma-separated policy ids from none, random, age-horizon, structural-v1, structural-v2, oracle, or a rung composition (`<id>+<rung>`, `<id>-<rung>`, `rungs:<a>/<b>`). |
 | `--protect-last-turns` | For `context replay`, integer (at least 1) count of recent user turns whose observations are never evicted. |
 | `--seed` | For `context replay`, integer seed for the deterministic random policy. |
 | `--session` | For `context working-set`, the session id or path whose working-set fold and path index are printed (required). |

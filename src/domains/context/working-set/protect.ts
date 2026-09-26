@@ -15,7 +15,7 @@
 import type { SessionEntry } from "../../session/entries.js";
 import type { PolicyInput } from "./contract.js";
 import type { PathIndex, PathObservation } from "./path-index.js";
-import { hasLegacyCompactionMarker, isRecord, toolResultBodyTokens } from "./payload.js";
+import { hasLegacyCompactionMarker, isRecord, recalledRef, toolResultBodyTokens } from "./payload.js";
 
 export interface ProtectionContext {
 	entryIndex: number;
@@ -23,6 +23,14 @@ export interface ProtectionContext {
 	cutoffIndex: number;
 	input: PolicyInput;
 	index: PathIndex;
+	/** Units a protection profile pins (`profilePins` in policies/profiles.ts); absent means none. */
+	pins?: ReadonlySet<string>;
+	/**
+	 * The churn pin: a body the model recalled more than once stays where the
+	 * recall put it. The recalled body lives in the recall tool result, so the
+	 * pin protects that result, keyed by the ref it readmitted.
+	 */
+	pinRecalledTwice?: boolean;
 }
 
 /** Ops whose identity is the file they touched, so a retry on the same path counts as the same call. */
@@ -70,6 +78,23 @@ export function findLaterSuccess(observation: PathObservation, index: PathIndex)
 	return null;
 }
 
+/**
+ * A later call of the same tool with byte-identical arguments, whatever its
+ * outcome. The newer run is the live evidence for that command; the older
+ * output is a claim about a state the session has since re-observed. Shared
+ * with `structural.ts` rung 4 and with the unresolved-failure protection below,
+ * so a failure that was re-run and failed again is superseded rather than
+ * pinned forever.
+ */
+export function findLaterRun(observation: PathObservation, index: PathIndex): PathObservation | null {
+	if (observation.argsKey.length === 0) return null;
+	for (const candidate of index.observations) {
+		if (candidate.entryIndex <= observation.entryIndex || candidate.isBlocked) continue;
+		if (candidate.toolName === observation.toolName && candidate.argsKey === observation.argsKey) return candidate;
+	}
+	return null;
+}
+
 /** A write or edit the turn in flight is still standing on. */
 function isActiveTurnMutation(observation: PathObservation, index: PathIndex): boolean {
 	if (observation.op !== "write" && observation.op !== "edit") return false;
@@ -88,6 +113,14 @@ export function isProtected(entry: SessionEntry, ctx: ProtectionContext): boolea
 	if (ctx.entryIndex >= ctx.cutoffIndex) return true;
 	if (entry.role === "assistant") return false;
 
+	// Profile pins and the churn pin come before the floor: a pinned unit stays
+	// whatever its size.
+	if (ctx.pins?.has(entry.turnId)) return true;
+	if (ctx.pinRecalledTwice === true) {
+		const ref = recalledRef(entry.payload);
+		if (ref !== null && (ctx.input.view.recallsByRef.get(ref) ?? 0) >= 2) return true;
+	}
+
 	// The floor protects low-yield bodies from churn. The engine separately
 	// rejects any candidate whose marker would free zero or negative tokens, so
 	// this setting may stay above the literal marker break-even point. The floor
@@ -104,6 +137,11 @@ export function isProtected(entry: SessionEntry, ctx: ProtectionContext): boolea
 	if (observation === undefined) return isErrorResult(entry.payload);
 
 	if (isActiveTurnMutation(observation, ctx.index)) return true;
-	if (observation.isError && findLaterSuccess(observation, ctx.index) === null) return true;
+	if (
+		observation.isError &&
+		findLaterSuccess(observation, ctx.index) === null &&
+		findLaterRun(observation, ctx.index) === null
+	)
+		return true;
 	return false;
 }

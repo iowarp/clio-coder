@@ -67,9 +67,12 @@ export const SETTINGS_LABELS_BY_ID = {
 	"compaction.threshold": "Compaction threshold",
 	"context.workingSet.enabled": "Working-set eviction",
 	"context.workingSet.policy": "Eviction policy",
+	"context.workingSet.profile": "Protection profile",
 	"context.workingSet.target": "Eviction target pressure",
 	"context.workingSet.protectLastTurns": "Turns protected from eviction",
+	"context.workingSet.protectLastSteps": "Steps protected from eviction",
 	"context.workingSet.minEvictableTokens": "Minimum evictable tokens",
+	"context.workingSet.rearmFraction": "Eviction rearm band",
 	"retry.enabled": "Retry transient errors",
 	"retry.maxRetries": "Max retries",
 	"retry.baseDelayMs": "Base delay (ms)",
@@ -161,10 +164,14 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"compaction.threshold": "Pressure at which compaction masks stale observations, then summarizes.",
 	"context.workingSet.enabled": "Non-destructive eviction of stale tool results before a summary is ever needed.",
 	"context.workingSet.policy": "Which candidates the eviction pass selects.",
+	"context.workingSet.profile": "What this kind of work never gives up, on top of the absolute protections.",
 	"context.workingSet.target": "Context pressure an applied eviction batch brings the session down to.",
 	"context.workingSet.protectLastTurns": "Recent user turns whose observations are never evicted.",
+	"context.workingSet.protectLastSteps": "Recent assistant steps whose observations and reasoning are never evicted.",
 	"context.workingSet.minEvictableTokens":
 		"Results below this token estimate stay; the marker would cost more than it saves.",
+	"context.workingSet.rearmFraction":
+		"After an eviction event, wait until the projection has grown by this share of the window before evicting again.",
 	"retry.enabled": "Retry transient provider errors on the next submit.",
 	"retry.maxRetries": "Retry attempts after the initial failure.",
 	"retry.baseDelayMs": "Initial retry delay in milliseconds.",
@@ -210,12 +217,18 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"context.workingSet.enabled":
 		"Eviction moves stale tool-result bodies and thinking blocks out of the model's working set and records a ledger entry; history is never rewritten. Off skips eviction and goes straight to summary compaction. Legal values: true, false · default: true.",
 	"context.workingSet.policy":
-		"structural-v1 selects by message structure; age-horizon is the older age-based rule. Legal values: structural-v1, age-horizon · default: structural-v1.",
+		"structural-v1 selects by message structure; structural-v2 adds the offloaded-body rung and pins bodies the model recalled twice; age-horizon is the older age-based rule. Legal values: structural-v1, structural-v2, age-horizon · default: structural-v2.",
+	"context.workingSet.profile":
+		"default pins nothing extra; data-analysis keeps the last three bash outputs that printed numbers; web-design keeps the last read of every stylesheet and component under edit and lets bash output leave first. Main agent only. Legal values: default, data-analysis, web-design · default: default.",
 	"context.workingSet.target":
 		"An applied eviction batch keeps evicting until pressure reaches this ratio, so it sits below compaction.threshold. Greater than 0 and less than 1 · default: 0.6.",
 	"context.workingSet.protectLastTurns": "Counted in user turns. Whole number of at least 1 · default: 6.",
+	"context.workingSet.protectLastSteps":
+		"Counted in assistant steps inside the turn window, so a long agentic turn stays evictable. Whole number of at least 1 · default: 8.",
 	"context.workingSet.minEvictableTokens":
 		"The floor sweep put marker break-even near 50 tokens; 200 is the churn guard. Whole number, 0 evicts anything · default: 200.",
+	"context.workingSet.rearmFraction":
+		"A pressure checkpoint runs before every model request and each applied event cold-starts the prefix cache, so a second event waits until the projection has grown by this fraction of the context window. Overflow recovery ignores the band. At least 0 and less than 1, 0 disables · default: 0.1.",
 	"guardrails.turnToolCallBudget":
 		"Crossing it blocks further calls in the turn with a stop-and-summarize directive, and the hard interrupt ceiling sits a fixed margin above. A backstop against a model spraying unproductive calls, not a routine ceiling: a repo-wide audit legitimately runs dozens. Whole number of at least 1 · default: 60.",
 	"guardrails.workerToolCallCap":
@@ -309,7 +322,13 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 	},
 	"context.workingSet.policy": {
 		"structural-v1": "select eviction candidates by message structure",
+		"structural-v2": "the structural rungs plus the offloaded-body rung and the churn pin",
 		"age-horizon": "the older rule: select by age alone",
+	},
+	"context.workingSet.profile": {
+		default: "no pins beyond the absolute protections",
+		"data-analysis": "keep the last three bash outputs that printed numbers",
+		"web-design": "keep the last read of each stylesheet and component under edit; bash output leaves first",
 	},
 	"library.sync": {
 		true: "allow `clio-coder library sync` and `push` to reach the confirmed remote",
@@ -435,7 +454,8 @@ const CHOICES: Record<string, readonly string[]> = {
 	"interface.panes.notifications": ["failures", "all", "off"],
 	"interface.panes.files.mode": ["companion", "chooser"],
 	"interface.panes.files.profile": ["managed", "user"],
-	"context.workingSet.policy": ["structural-v1", "age-horizon"],
+	"context.workingSet.policy": ["structural-v1", "structural-v2", "age-horizon"],
+	"context.workingSet.profile": ["default", "data-analysis", "web-design"],
 	"integrations.externalAgents.defaults.toolGovernance": ["clio-coder-policy", "agent-managed", "deny-all"],
 };
 const STRUCTURED = new Set([

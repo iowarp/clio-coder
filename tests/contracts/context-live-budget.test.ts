@@ -368,6 +368,20 @@ describe("live budget adapter", () => {
 		return f;
 	}
 
+	it("prices eviction selection from the ledger slice while admission includes fixed prompt costs", async () => {
+		let selectedTokens: number | undefined;
+		const f = reconciledFixture({
+			planEviction: (_policy, input) => {
+				selectedTokens = input.pressure.tokens;
+				return null;
+			},
+		});
+		f.context.reconcileUsage(usage(29_000, 100));
+		ok(f.context.liveContextEstimate(f.runtime).tokens > WINDOW * 0.85);
+		await f.context.runAutoCompact(f.runtime, false);
+		strictEqual(selectedTokens, 0, "the empty ledger has no age-rung headroom to reclaim");
+	});
+
 	it("budgets against the same live estimate admission uses, with truthful anchored provenance", () => {
 		const f = reconciledFixture();
 		const view = f.context.refreshLiveBudget();

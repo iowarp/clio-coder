@@ -5,7 +5,6 @@ import { protectionCutoffIndex } from "../horizon.js";
 import { buildPathIndex, callPathsByToolCallId } from "../path-index.js";
 import { isProtected } from "../protect.js";
 import type { ReferenceGraph } from "./reference-graph.js";
-import { countReplayTurns } from "./trace.js";
 
 /** Replay-only diagnostic surface; it does not widen the live policy contract. */
 export interface ReplayCandidatePoolPolicy extends WorkingSetPolicy {
@@ -18,7 +17,7 @@ function controlId(id: string): WorkingSetPolicyId {
 }
 
 function eligibleToolResults(input: PolicyInput): SessionEntry[] {
-	const cutoff = protectionCutoffIndex(input.entries, input.settings.protectLastTurns);
+	const cutoff = protectionCutoffIndex(input.entries, input.settings);
 	const index = buildPathIndex(input.entries, { cwd: input.cwd });
 	const out: SessionEntry[] = [];
 	for (let entryIndex = cutoff - 1; entryIndex >= 0; entryIndex -= 1) {
@@ -45,21 +44,36 @@ function takeToTarget(input: PolicyInput, entries: ReadonlyArray<SessionEntry>):
 	return selected;
 }
 
+/**
+ * The checkpoint the oracle is being asked at: one past the position of the
+ * newest trace entry the model can see. Synthetic replay records (evictions,
+ * summaries) carry no position and are skipped.
+ */
+function currentCheckpoint(input: PolicyInput, graph: ReferenceGraph): number {
+	for (let index = input.entries.length - 1; index >= 0; index -= 1) {
+		const entry = input.entries[index];
+		if (entry === undefined) continue;
+		const position = graph.positionOf.get(entry.turnId);
+		if (position !== undefined) return position + 1;
+	}
+	return 1;
+}
+
 export function makeOraclePolicy(graph: ReferenceGraph): ReplayCandidatePoolPolicy {
 	let lastInput: PolicyInput | null = null;
 	let lastCandidateCount = 0;
 	const safeEntries = (input: PolicyInput): SessionEntry[] => {
-		const currentTurn = countReplayTurns(input.entries) + 1;
+		const checkpoint = currentCheckpoint(input, graph);
 		return eligibleToolResults(input).filter((entry) => {
-			const futureTurns = graph.futureTurnsOf.get(entry.turnId) ?? [];
-			return futureTurns.every((turn) => turn < currentTurn);
+			const future = graph.futureReferencesOf.get(entry.turnId) ?? [];
+			return future.every((point) => point.position < checkpoint);
 		});
 	};
 	return {
 		id: controlId("oracle"),
 		select(input): ReadonlyArray<EvictionCandidate> {
-			// Replay calls before the next turn-start entry is appended. A reference
-			// in that next turn is therefore still future from the model's view.
+			// Replay calls before the entry the checkpoint precedes is appended. A
+			// reference at that position or later is still future from the model's view.
 			const safe = safeEntries(input);
 			lastInput = input;
 			lastCandidateCount = safe.length;

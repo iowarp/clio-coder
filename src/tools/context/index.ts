@@ -15,6 +15,7 @@ import {
 	recallErrorMessage,
 	recallParentTurnId,
 	resolveRecall,
+	resolveRecallByPath,
 } from "../../domains/context/working-set/recall.js";
 import { withPluginDiscoveryPass } from "../../domains/plugins/index.js";
 import {
@@ -72,6 +73,8 @@ export interface ContextSessionDeps {
 	readEntries(): ReadonlyArray<SessionEntry>;
 	/** The live append point (`/tree` pin or tree leaf); undefined lets the fold infer it. */
 	activeLeafTurnId(): string | undefined;
+	/** Session working directory, so recall by path keys the file the way the path index does; null when unknown. */
+	cwd?: () => string | null;
 	appendEntry(entry: SessionEntryInput): SessionEntry;
 	/** Called after the recall entry is recorded; the orchestrator publishes it as BusChannels.ContextRecalled. */
 	onRecalled?: (payload: ContextRecalledPayload) => void;
@@ -732,7 +735,8 @@ function runRecallScope(
 	const entries = session.readEntries();
 	const leaf = session.activeLeafTurnId();
 	const view = foldWorkingSet(entries, leaf);
-	if (args.ref === undefined) {
+	const byPath = typeof args.path === "string" && args.path.trim().length > 0;
+	if (args.ref === undefined && !byPath) {
 		const listing = recallableRefListing(entries, view, {
 			...(leaf === undefined ? {} : { activeLeafTurnId: leaf }),
 			...(typeof args.query === "string" ? { query: args.query } : {}),
@@ -760,7 +764,11 @@ function runRecallScope(
 			...(options ? { options } : {}),
 		});
 	}
-	const resolved = resolveRecall(entries, view, ref, leaf);
+	// By path: the newest evicted read of the file, then exactly the by-ref path.
+	const resolved =
+		ref.length === 0 && byPath && typeof args.path === "string"
+			? resolveRecallByPath(entries, view, args.path, session.cwd?.() ?? null, leaf)
+			: resolveRecall(entries, view, ref, leaf);
 	if (!resolved.ok)
 		return { kind: "error", message: `context: ${recallErrorMessage(resolved.error, entries, view, leaf)}` };
 	const { result } = resolved;
