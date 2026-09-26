@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
@@ -17,6 +17,7 @@ import {
 	ThemeToggle,
 	useSidebarCollapsed,
 } from "./design/navigation.js";
+import { AREA_LABELS, navigationArea } from "./design/navigation-area.js";
 import { dismissAll, LiveRegions, NoticeToasts, reportProblem, useNotices } from "./design/notifications.js";
 import { ProjectNavigation } from "./design/project-navigation.js";
 import { AppPreferences } from "./design/pwa.js";
@@ -26,6 +27,24 @@ import { appCommands } from "./interaction/commands.js";
 import { HelpDialog } from "./interaction/HelpDialog.js";
 import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
 import "./design/context-navigation.css";
+
+const areaViews = {
+	traces: lazy(() => import("./design/trace-navigation.js").then((module) => ({ default: module.TraceNavigation }))),
+	fleet: lazy(() => import("./design/fleet-navigation.js").then((module) => ({ default: module.FleetNavigation }))),
+	evidence: lazy(() =>
+		import("./design/evidence-navigation.js").then((module) => ({ default: module.EvidenceNavigation })),
+	),
+	library: lazy(() =>
+		import("./design/library-navigation.js").then((module) => ({ default: module.LibraryNavigation })),
+	),
+	toolchain: lazy(() =>
+		import("./design/toolchain-navigation.js").then((module) => ({ default: module.ToolchainNavigation })),
+	),
+	settings: lazy(() =>
+		import("./design/settings-navigation.js").then((module) => ({ default: module.SettingsNavigation })),
+	),
+	system: lazy(() => import("./design/system-navigation.js").then((module) => ({ default: module.SystemNavigation }))),
+};
 
 /** `/sessions/:id` and nothing else. The palette's session rows exist only on a conversation. */
 function sessionIdFrom(pathname: string): string | null {
@@ -52,8 +71,8 @@ export function App({ client }: { client: Client }) {
 	// not be reachable by Tab either, or the focus order silently leaves the thing that has focus.
 	const layered = useLayersActive();
 	const refused = useTokenRejected() || (!client.token && lastTokenWasRefused());
-	const sessionArea = /^\/(sessions|workspaces)(\/|$)/.test(location.pathname);
-	const showSessions = !!client.token && !refused && sessionArea && navigationAt !== location.pathname;
+	const area = navigationArea(location.pathname);
+	const showArea = !!client.token && !refused && area !== null && navigationAt !== location.pathname;
 	const meta = useQuery({
 		queryKey: ["meta"],
 		queryFn: () => client.call(routes.meta, emptyInput),
@@ -115,16 +134,14 @@ export function App({ client }: { client: Client }) {
 		[client, navigate, notices.length, queries, runningTurnId, sessionId, snapshot?.state, toggleSidebar],
 	);
 	const selectArea = (path: string) => {
-		if (path === "/sessions") {
+		if (navigationArea(path)) {
 			setNavigationAt(null);
 			if (sidebarCollapsed) toggleSidebar();
-			requestAnimationFrame(() =>
-				document.querySelector<HTMLElement>(".desktop-navigation .sidebar-projects__compose")?.focus(),
-			);
+			requestAnimationFrame(() => document.querySelector<HTMLElement>(".desktop-navigation .sidebar-back")?.focus());
 		}
 	};
 	const navigationContent = (close?: () => void, collapsed = false) =>
-		showSessions && !collapsed ? (
+		showArea && area && !collapsed ? (
 			<>
 				<div className="sidebar-area-actions">
 					<button
@@ -154,7 +171,23 @@ export function App({ client }: { client: Client }) {
 					</button>
 					{!close ? <SidebarToggle collapsed={sidebarCollapsed} toggle={toggleSidebar} /> : null}
 				</div>
-				<ProjectNavigation client={client} activeWorkspace={snapshot?.workspaceId} close={close} />
+				<h2 className="sidebar-area-title">{AREA_LABELS[area]}</h2>
+				<Suspense
+					fallback={
+						<p className="sidebar-note" role="status">
+							Loading {AREA_LABELS[area].toLocaleLowerCase()}…
+						</p>
+					}
+				>
+					{area === "sessions" ? (
+						<ProjectNavigation client={client} activeWorkspace={snapshot?.workspaceId} close={close} />
+					) : (
+						(() => {
+							const AreaView = areaViews[area];
+							return <AreaView client={client} close={close} />;
+						})()
+					)}
+				</Suspense>
 			</>
 		) : (
 			<>
@@ -192,7 +225,7 @@ export function App({ client }: { client: Client }) {
 			<div
 				className="workspace"
 				data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"}
-				data-area={showSessions ? "sessions" : "navigation"}
+				data-area={showArea && area ? area : "navigation"}
 				inert={layered}
 			>
 				<aside className="desktop-navigation" id={SIDEBAR_ID}>
