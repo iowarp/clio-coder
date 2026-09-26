@@ -298,7 +298,3 @@ what" above.
 | `<state>/runs/<runId>/events.ndjson` | The journal the logs pane follows. |
 
 Resolve `<data>`, `<cache>`, and `<state>` with `clio-coder paths`.
-
-Doctor reports an absent managed Yazi profile as INFO before first use or after a profile reset. With the files pane enabled and usable `yazi` and `ya` binaries, `doctor --fix` regenerates missing or stale profiles and validates them with Yazi before installation. A stale profile or failed regeneration remains WARN.
-
-A failed managed-profile generation leaves a failure marker in Clio’s cache. Later doctor runs keep reporting WARN "generation failed" until regeneration succeeds or the operator explicitly resets the profile. A profile that was never generated remains INFO.

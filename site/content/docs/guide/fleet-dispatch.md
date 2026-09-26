@@ -996,14 +996,7 @@ failure, and a later failure of a check that passed seals as failed. A narrower
 `verify(check="test", args=[...])` is a different check, so its pass clears
 nothing, and a blocked call never ran its check, so it changes nothing. The
 receipt's `quality.typedValidations` carries one `tool:verify` fact per check,
-and evidence verification agrees with those facts. A check whose only calls
-were blocked seals no typed validation fact because it never ran. Workers leave
-denied checks out of mutation-report validations and place source reads and
-citations in summary. When no files changed and no check ran, validations may be empty and quality
-remains unmeasured. Editing reports may use empty validations when every attempted check was blocked; otherwise they require a concrete executed check. For receipts carrying `safety.readOnly: true`, mutation-report read claims
-do not require command evidence; verifier verdicts and executable path claims
-retain command grounding; executable validation claims still do.
-Previously sealed receipts retain their stored facts and verify unchanged.
+and evidence verification agrees with those facts.
 
 The canonical terminology for these facts is the five-axis trust status in
 [`evidence-and-memory.md`](../architecture/evidence-and-memory.md#canonical-trust-status).
@@ -1213,11 +1206,3 @@ The Scout recipe instructs the model to return structured findings with source p
 Ordinary dispatcher, council, and wiki planning time and tool estimates are advisory during execution rather than automatic aborts. Enforced bounds are explicit caller deadlines (`timeout_ms`), operator cancellation, contract output bounds, and capacity rules. In ordinary advisory dispatch, `fleet.limits.toolCallsPerRun` is a recorded baseline, not an enforced cutoff, despite the legacy `hardCap` field name. Repetition guards still apply; legacy enforced budget envelopes retain their tool-call cap. The `fleet.limits.internalRunTimeoutMs` setting bounds internal CLI dispatch; it does not impose a wall-clock deadline on ordinary TUI dispatch workers.
 
 A pipeline stops before admitting a dependent when a completed step reports failed quality. Execution success, result conformance, and deliverable quality remain separate facts. An independent recovery has its own receipt and does not replace the failed pipeline result. When delivery is missing or incomplete, report the terminal result and limitation; a successful process exit alone does not establish the requested deliverable.
-
-An editing mutation report may omit all validations when every checking call it attempted has an observed blocked outcome. It conforms with unmeasured quality. No attempts, unknown outcomes, or any executed check retain the concrete validation requirement.
-
-Validation grounding treats `npm test`, `pnpm test`, and `yarn test` as aliases of the canonical `npm run test` command across all three managers. The test aliases also match the package-manager-neutral `verify(check="test")` summary recorded as `npm run test`. Other script names remain distinct; `npm run test:unit` does not ground a claim of `npm test`.
-
-A terminal colon in a validation claim, such as `npm test:`, is punctuation and grounds against `npm run test`. Script suffixes such as `test:unit` remain distinct.
-
-Typed-scope replacement warnings appear in the transcript for the first attempt of user and agent dispatches. Harness-owned internal dispatches retain one diagnostic per root run and receipt provenance without transcript path inventories. Retries, including retries of user dispatches and `context init` schema fallback, are quiet in both diagnostics and transcript notices. This presentation rule does not change working-context paths, rule selection, or worker authority.

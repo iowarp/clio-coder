@@ -92,7 +92,3 @@ declared, looks at the partition, submits once, polls
 fetches bounded output, and ends its answer with
 `Slurm job <id>: <state>, exit <code>, stdout <path>, stderr <path>`. It never
 falls back to `sbatch` through `bash`.
-
-Doctor checks the installed Slurm clients with bounded version probes before marking the scheduler row OK. A client that cannot discover its configuration or controller reports WARN with "host has no Slurm configuration or controller to reach"; installing client binaries alone does not establish a working scheduler.
-
-The scheduler row reuses the HPC toolchain row's `sbatch --version` result, so each doctor run probes that client once.

@@ -3,13 +3,14 @@
 The public product website at **https://coder.iowarp.ai/** is a static Node build served by Nginx. Product pages and all 49 documentation pages contain readable HTML before JavaScript runs. JavaScript enhances theme switching, menus, copying, documentation search, and legacy query links.
 
 ```bash
-node site/build.mjs
-python3 site/check.py
-pnpm run lint
-python3 -m http.server 4173 --bind 127.0.0.1 --directory site/public
+python3 site/sync-docs.py --check
+out=$(mktemp -d)
+node site/build.mjs --out "$out/public"
+python3 site/check.py "$out/public"
+python3 -m http.server 4173 --bind 127.0.0.1 --directory "$out/public"
 ```
 
-Open http://127.0.0.1:4173/. Preview the generated output, not the source directory. The builder derives shared navigation and footer markup from `index.html`, renders the documentation snapshot through `docs.html`, and generates canonical URLs, structured data, the sitemap, and search metadata. `product.json` supplies the public version, origin, and repository identity.
+Open http://127.0.0.1:4173/. Preview the generated output, not the source directory, and remove the temporary directory afterward. The builder derives shared navigation and footer markup from `index.html`, renders the documentation snapshot through `docs.html`, and generates canonical URLs, structured data, the sitemap, and search metadata. `product.json` supplies the public version, origin, and repository identity.
 
 `site/public/` is generated and ignored by Git. A custom output directory must be empty or carry this builder’s `.clio-coder-site-build` ownership marker. The builder refuses source replacement and nonempty directories it does not own. Never point it at the repository’s root `dist/`.
 
@@ -19,7 +20,9 @@ Open http://127.0.0.1:4173/. Preview the generated output, not the source direct
 
 The homepage workflow is explicitly illustrative. `assets/session.png` is the original terminal capture from the repository; `assets/session.webp` is a smaller derivative for inline display and links to the original. Do not substitute invented run outcomes or performance claims.
 
-Documentation snapshots are under `content/docs/`. Refresh them deliberately with `python3 site/sync-docs.py`; the installed package remains the authority for its own version. The written labs in `learn.html` remain useful without recordings. Add a supplied YouTube ID to `content/recordings.json`; the builder renders only valid, published recordings and omits empty entries.
+Documentation snapshots are under `content/docs/`. Public docs are release-pinned: `content/docs-manifest.json` records the product corpus, release version, source ref, full commit, and every content hash. The product corpus is defined in `docs/corpus.json`; generated development reference under `docs/wiki/**` is never included. `python3 site/sync-docs.py --check` reports missing, extra, changed, index, and provenance drift without writing. At a release cut, refresh only from the matching published tag, for example `python3 site/sync-docs.py --source-ref v0.5.6`. The command refuses an unreleased branch or a ref that differs from `site/product.json`.
+
+The installed package remains the authority for its own version. Website “view source” links use the manifest's declared release ref rather than `main`, and every rendered docs page displays that provenance. The written labs in `learn.html` remain useful without recordings. Add a supplied YouTube ID to `content/recordings.json`; the builder renders only valid, published recordings and omits empty entries.
 
 ## Social previews
 

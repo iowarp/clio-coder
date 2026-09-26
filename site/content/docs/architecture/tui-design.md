@@ -149,14 +149,13 @@ Compact inline lifecycle indicators:
 
 ### 3.4 Width Degradation
 
-No row exceeds the terminal width in visible cells at any width. The contracts in `tests/contracts/tui-island-frames.test.ts`, `tests/contracts/transcript-retry-prefix.test.ts` and `tests/contracts/footer-notice-priority.test.ts` render at 40, 60, 80, 120 and 200 columns.
+No row exceeds the terminal width in visible cells at any width. The contracts in `tests/contracts/tui-island-frames.test.ts`, `tests/contracts/transcript-retry-prefix.test.ts` and `tests/contracts/footer-notice-priority.test.ts` render at 60, 80, 120 and 200 columns.
 
 | Surface | 60 | 80 | 120 | 200 |
 | :--- | :--- | :--- | :--- | :--- |
 | Launchpad | Stacked details, no wordmark | Wordmark beside details (from 76) | Wide wordmark (from 100) | Hint column added (from 160) |
 | Session header | One row | One row | One row | One row |
-| Fleet runs | Docked above the composer while live | Same | Same | Same |
-| Task island | Hidden | Shown at 48 cells when the screen has 18 rows and no run is live | Same | Same |
+| Fleet or task island | Hidden | Shown at 48 cells when the screen has 18 rows | Same | Same |
 | Context island | Hidden | Hidden | Shown at 52 cells when the screen has 20 rows (from 92) | Same |
 | Council card | Stacked members | Stacked until each column holds 34 cells | Grid | Grid |
 | Compact footer | Two rows, 8-cell context meter | Two rows, 8-cell meter | Two rows, 14-cell meter, full hints | Two rows, wider identity |
@@ -169,7 +168,7 @@ The minimum supported width is 40 columns. Gutters stay 2 columns with hanging i
 
 The viewport has two kinds of content.
 
-- **Pinned**: the composer and footer dock below the transcript in [layout.ts](../../src/interactive/layout.ts). While runs are live, Fleet renders in normal flow just above the composer, reserving its own rows in both regular and fullscreen modes. It uses the same phase wording, counts and council projection as the run cards. It shows one card and a count of additional cards, which remain inspectable through Fleet Runs. With no live run, Fleet takes no rows. The task island and context island remain non-capturing top-right summaries owned by `interactive-tickers.ts`; the task island shows only when no run is live and yields to context only when context fits. These floating summaries hide while an overlay is open or the footer is expanded. Fleet never paints over a transcript row and never takes the keyboard. The decision board stays a capturing docked surface (`/decisions`).
+- **Pinned**: the composer and the footer dock below the transcript in [layout.ts](../../src/interactive/layout.ts). Two islands float at the top right as non-capturing overlays owned by `interactive-tickers.ts`: the fleet island (live dispatch rows and councils, one card per council) or, when no run is live, the task island, and the context island while a context operation runs. Only one island shows at a time, the context island taking precedence, and every island hides while an overlay is open or the footer is expanded. An island never takes the keyboard. Known gap: from 80 to 91 columns, context activity hides the fleet or task island while the context island still needs 92, so neither shows.
 - **Dynamic**: everything in the transcript. Dispatch, council and worker state render as transcript blocks that update in place; the islands summarize them and never become a second history. The decision board stays a capturing overlay (`/decisions`), because a decision needs the keyboard and an island may not hold it.
 
 **Hydration.** The instant shell paints `createBootWelcome` with the settings already read, at the same geometry as the hydrated launchpad. A resumed session replays its turns through the same panel operations a live turn uses (`rehydrateChatPanelFromTurns` in `chat-renderer.ts`), and the settled entries are pre-rendered in the other output styles while idle.
@@ -237,9 +236,8 @@ Every transcript row follows a rigid 2-column gutter format:
 
 ## 6. Overlays & Inspection
 
-- **`/settings` and `/config`**: settings share one docked surface. Targets offers Add target and an Edit action for URL, runtime and default model. The host supplies docked prompts to the existing CLI wizard through `src/cli/configure-host.ts`, loaded only when setup starts. Save writes global target settings; Esc goes back, and Ctrl+C cancels setup without quitting Clio. Browser sign-in stores credentials immediately. Existing explicit routing defaults remain in place.
 - **`/view transcript`**: Inspect complete un-truncated output, tool payloads, and raw responses.
-- **`/usage`**: 5 tabs (Activity, Accounts, Session, Models, Workers) with consumption vs budget percentages.
+- **`/usage`**: 4 tabs (Accounts, Session, Models, Workers) with consumption vs budget percentages.
 - **`/tasks`**: Interactive task board tracking parent/child subagent execution status.
 - **`/doctor`**: In-session diagnostic reports with severity-ordered findings.
 
@@ -255,37 +253,3 @@ Every transcript row follows a rigid 2-column gutter format:
 | Composer | [clio-editor.ts](../../src/interactive/clio-editor.ts) | `ClioEditor` |
 | Session transcript | [session-transcript.ts](../../src/interactive/session-transcript.ts) | `createSessionTranscript` |
 | Permission overlay | [permission-overlay.ts](../../src/interactive/permission-overlay.ts) | Permission presentation |
-
-Fleet cards and approvals share the target/model route spelling.
-
-The model picker uses an accent check for the active model; scoped and default state appear in details.
-
-The task summary yields to context activity only when the context summary fits the viewport.
-
-Status meters paint structured, bounded cells using the shared meter glyphs.
-
-Board and context spinners use the shared animation cadence.
-
-Activity status respects the 40-column minimum before choosing its layout.
-
-Council selection follows the visible newest-member projection and transfers to replacement rounds.
-
-Fleet Runs offers Enter detail only for ordinary runs, because council rows have no member detail view.
-
-Live shortcut labels use the canonical formatter and reflect remapped bindings.
-
-Footer status and metric labels share retry, completion, token-rate and failure wording.
-
-Footer snapshots omit session facts that no renderer consumes.
-
-Machine counters are sampled only while Status is visible; samples from a previous visible period are discarded.
-
-Compact and expanded worker counts include retrying and cancelling runs in the shared active-status set.
-
-Context meters share single-cell glyph selection and stable largest-remainder geometry.
-
-Renderer-only presentation constants remain private to their owning modules.
-
-On an empty composer, `?` opens a docked key card, `←` opens Fleet Runs and `↓` opens Tasks. The next key dismisses the key card and is consumed. With a draft, these keys keep their editing meaning. Task cards have bold section headings, a two-cell body gutter and an explicit empty state in each section; scrolling and section navigation keep every task reachable.
-
-Usage opens on Activity with a Monday-first workspace session heatmap, working-tree changes, session consumption and the first reported plan window. The graph shows up to 182 days, narrowing to recent weeks on small terminals. Git changes load asynchronously; every tab scrolls within the dock.

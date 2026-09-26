@@ -14,11 +14,21 @@ const { values } = parseArgs({ options: { out: { type: "string" } } });
 const out = resolve(values.out ?? join(root, "public"));
 if (out === "/" || out === root || root.startsWith(`${out}/`)) throw new Error("Output must not replace source files.");
 const product = JSON.parse(await readFile(join(root, "product.json"), "utf8"));
+const docsManifest = JSON.parse(await readFile(join(root, "content/docs-manifest.json"), "utf8"));
 const origin = product.origin;
 const escapeHtml = (text) =>
 	String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const index = JSON.parse(await readFile(join(root, "content/index.json"), "utf8"));
 const docs = new Set(index.map((item) => item.path));
+const sourceRef = docsManifest.source.ref;
+const sourceCommit = docsManifest.source.commit;
+const sourceVersion = docsManifest.source.version;
+if (sourceVersion !== product.version) throw new Error("Documentation source version differs from the website version.");
+if (!/^[0-9a-f]{40}$/.test(sourceCommit)) throw new Error("Documentation source commit is not a full Git commit.");
+if (docsManifest.files.some((item) => item.path === "wiki" || item.path.startsWith("wiki/")))
+	throw new Error("Generated Wiki pages cannot enter the product documentation snapshot.");
+const sourceRefPath = sourceRef.split("/").map(encodeURIComponent).join("/");
+const repository = product.repository.replace(/\/$/, "");
 const docUrl = (path) => (path === "README.md" ? "/docs.html" : `/docs/${path.replace(/\.md$/, ".html")}`);
 const version = product.version;
 const recordings = JSON.parse(await readFile(join(root, "content/recordings.json"), "utf8"));
@@ -146,7 +156,10 @@ function renderDoc(path, markdown) {
 		const local = posix.normalize(posix.join(posix.dirname(path), file));
 		if (docs.has(local)) return `${docUrl(local)}${hash ? `#${hash}` : ""}`;
 		const repo = posix.normalize(posix.join("docs", posix.dirname(path), file));
-		return `https://${image ? "raw.githubusercontent.com" : "github.com"}/iowarp/clio-coder/${image ? "main" : "blob/main"}/${repo}${hash ? `#${hash}` : ""}`;
+		const base = image
+			? `https://raw.githubusercontent.com/iowarp/clio-coder/${sourceRefPath}`
+			: `${repository}/blob/${sourceRefPath}`;
+		return `${base}/${repo}${hash ? `#${hash}` : ""}`;
 	};
 	renderer.heading = function ({ tokens, depth }) {
 		depth = Math.min(depth, previousDepth + 1);
@@ -250,10 +263,19 @@ for (const item of index) {
 	const mobileToc = headings.length
 		? `<details class="doc-toc-mobile"><summary>On this page</summary>${tocLinks}</details>`
 		: "";
-	let html = shell(template, docUrl(item.path)).replace(
-		/<div class="doc" id="doc">\s*<p>Opening the page…<\/p>\s*<\/div>/,
-		`<div class="doc" id="doc" data-doc="${escapeHtml(item.path)}">${mobileToc}${rendered}</div>`,
-	);
+	let html = shell(template, docUrl(item.path))
+		.replace(
+			/<div class="doc" id="doc">\s*<p>Opening the page…<\/p>\s*<\/div>/,
+			`<div class="doc" id="doc" data-doc="${escapeHtml(item.path)}">${mobileToc}${rendered}</div>`,
+		)
+		.replace(
+			/id="doc-snapshot-source"\s+href="[^"]*"/,
+			`id="doc-snapshot-source" href="${repository}/tree/${sourceRefPath}/docs" data-source-version="${escapeHtml(sourceVersion)}" data-source-ref="${escapeHtml(sourceRef)}" data-source-commit="${escapeHtml(sourceCommit)}"`,
+		)
+		.replace(
+			'<span id="doc-snapshot-label">declared release source</span>',
+			`<span id="doc-snapshot-label">v${escapeHtml(sourceVersion)} at ${escapeHtml(sourceRef)} (${escapeHtml(sourceCommit.slice(0, 12))})</span>`,
+		);
 	html = html.replace(
 		'<div id="doc-toc"></div>',
 		headings.length ? `<div id="doc-toc"><h2>On this page</h2>${tocLinks}</div>` : '<div id="doc-toc"></div>',
@@ -266,7 +288,7 @@ for (const item of index) {
 		.replace('<p id="doc-path">README.md</p>', `<p id="doc-path">${escapeHtml(item.path)}</p>`)
 		.replace(
 			/id="doc-github"\s+href="[^"]*"/,
-			`id="doc-github" href="https://github.com/iowarp/clio-coder/blob/main/docs/${item.path}"`,
+			`id="doc-github" href="${repository}/blob/${sourceRefPath}/docs/${item.path}"`,
 		);
 	html = links(html).replaceAll("/assets/clio-coder-logo-128.webp", "/assets/logo.webp");
 	const path = docUrl(item.path);
