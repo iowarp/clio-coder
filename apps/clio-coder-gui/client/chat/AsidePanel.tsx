@@ -98,7 +98,9 @@ export const AsidePanel = memo(function AsidePanel({
 							{answer.text ? (
 								<>
 									<MarkdownContent source={answer.text} complete />
-									<CopyButton text={answer.text} label="Copy answer" />
+									<span className="session-board__actions">
+										<CopyButton text={answer.text} label="Copy answer" />
+									</span>
 								</>
 							) : null}
 						</section>

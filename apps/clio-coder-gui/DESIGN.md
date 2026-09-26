@@ -593,6 +593,21 @@ Picked mark, never an action colour. When nothing was judged the summary says wh
 words, for example that `fleet.decisionProfiles.drafts` is unbound. "Put in composer" fills the
 composer with a draft and sends nothing; that is the only way a draft reaches the conversation.
 
+Usage and quota in Session tools is the terminal's /usage for the conversation. Its totals and its
+rows per provider and model are the agent's own fold of the cost ledger, never a sum the page makes;
+cost reads "about" when any call was estimated, names unpriced calls rather than rounding them into a
+figure, and says "Nothing recorded yet" rather than "$0.00" before any call. Calls made beside the
+conversation (side questions, handoff rounds, pre-warms, memory steps) are named on their row. Each
+signed-in provider's windows are native meters with the reset time beside them; a stale reading says
+it was not refreshed, and a quota read that failed says so while the spend still shows. The note says
+that quota covers every tool on that plan, not only Clio Coder.
+
+Other coding agents (the Interop page) answers an offer the way the terminal review's `a` and `d` do.
+Only an agent waiting for an answer shows the two buttons, "Wire <agent> as a peer" and "Decline",
+under a sentence saying that accepting adds a delegation entry to the saved settings every project
+reads, and that the peer's ACP adapter is fetched on first use when it is not installed. The result
+is a status line; an answer to an agent no longer on offer changes nothing and says why.
+
 A model is always picked from its target's catalog, never typed from memory. The route picker, the
 Settings page (`chat.model`, `fleet.default.model`, `context.memory.model` and
 `context.compaction.model`, which runs on the chat target) and the new-connection form share one

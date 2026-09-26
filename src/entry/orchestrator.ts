@@ -119,6 +119,7 @@ import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
 import type { MuxContract } from "../domains/mux/index.js";
 import type { BackgroundMemoryUsageSink } from "../domains/observability/background-memory-usage.js";
 import { recordFailedCompactionCalls } from "../domains/observability/compaction-usage.js";
+import { aggregateCostEntries } from "../domains/observability/cost-rows.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import { PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
@@ -2886,6 +2887,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		});
 		const acpWorkerRuns = followWorkerRuns(bus);
 		const acpHostToolEvents = createHostToolEvents();
+		// Built on the first usage read: provider adapters and the quota cache are
+		// not worth constructing for a session that never opens the view.
+		let acpQuota: { read(): Promise<ReadonlyArray<import("../domains/quota/types.js").UsageSnapshot>> } | null = null;
 		try {
 			const transport = options.acp.transport ?? createStdioServerTransport(options.acp.transportOptions);
 			const code = await serveClioAcpAgent({
@@ -3272,6 +3276,25 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							extensions: {
 								list: () => extensions.list(process.cwd(), { all: true }),
 								reload: () => extensionReload.reload(),
+							},
+						}
+					: {}),
+				// /usage: the overlay's own fold of the cost ledger, and the quota service
+				// behind its cache, so reopening the view does not spend a provider read.
+				...(observability
+					? {
+							usage: {
+								session: () => ({
+									cost: observability.sessionCostSummary(),
+									rows: aggregateCostEntries(observability.costEntries()),
+								}),
+								quota: async () => {
+									if (acpQuota === null) {
+										const { createQuotaService } = await import("../domains/quota/service.js");
+										acpQuota = createQuotaService();
+									}
+									return acpQuota.read();
+								},
 							},
 						}
 					: {}),

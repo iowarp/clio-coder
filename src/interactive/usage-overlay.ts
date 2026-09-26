@@ -1,15 +1,11 @@
-import type { ResponseModelIdObservationCounts } from "../core/response-model-id.js";
-import {
-	addResponseModelIdObservationCounts,
-	responseModelIdObservationCountsLabel,
-} from "../core/response-model-id.js";
-import type {
-	CostAggregate,
-	CostEntry,
-	ObservabilityContract,
-	ObservabilitySnapshot,
-} from "../domains/observability/index.js";
-import { aggregateCostAmounts, formatCostAggregate } from "../domains/observability/index.js";
+import { responseModelIdObservationCountsLabel } from "../core/response-model-id.js";
+import { aggregateCostEntries, type CostRow } from "../domains/observability/cost-rows.js";
+import type { CostAggregate, ObservabilityContract, ObservabilitySnapshot } from "../domains/observability/index.js";
+
+// The fold moved to the observability domain so the ACP host can report the same rows without this overlay.
+export { aggregateCostEntries, type CostRow };
+
+import { formatCostAggregate } from "../domains/observability/index.js";
 import type { UsageSnapshot } from "../domains/quota/types.js";
 import type { PromptCacheTelemetry, SessionEntry } from "../domains/session/index.js";
 import { foldPromptCacheTelemetry, hasPromptCacheTelemetry } from "../domains/session/index.js";
@@ -26,105 +22,8 @@ const DEFAULT_CONTENT_WIDTH = 104;
 
 export const USAGE_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
-export interface CostRow {
-	providerId: string;
-	attributedModelId: string;
-	requestedModelIds: string[];
-	responseModelIdObservationCounts: ResponseModelIdObservationCounts;
-	runs: number;
-	tokens: number;
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	reasoningTokens: number;
-	apiCalls: number;
-	/** Calls in this row that were `/btw` side questions rather than turns. */
-	sideQuestions: number;
-	/** Calls in this row that were `/handoff` extraction rounds rather than turns. */
-	handoffs: number;
-	/** Calls in this row that were session pre-warms rather than turns. */
-	prewarms: number;
-	/** Calls in this row that were proactive-memory steps on the background target. */
-	backgroundMemory: number;
-	failedCompaction: number;
-	cost: CostAggregate;
-}
-
 function formatTokens(n: number): string {
 	return n.toLocaleString("en-US");
-}
-
-export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow[] {
-	const grouped = new Map<
-		string,
-		{
-			row: Omit<CostRow, "cost" | "requestedModelIds" | "responseModelIdObservationCounts">;
-			requestedModelIds: Set<string>;
-			responseModelIdObservationCounts: ResponseModelIdObservationCounts;
-			entries: CostEntry[];
-		}
-	>();
-	for (const entry of entries) {
-		const key = `${entry.providerId}::${entry.attributedModelId}`;
-		const existing = grouped.get(key);
-		if (existing) {
-			existing.row.runs += 1;
-			existing.row.tokens += entry.tokens;
-			existing.row.input += entry.input;
-			existing.row.output += entry.output;
-			existing.row.cacheRead += entry.cacheRead;
-			existing.row.cacheWrite += entry.cacheWrite;
-			existing.row.reasoningTokens += entry.reasoningTokens;
-			existing.row.apiCalls += entry.apiCalls ?? 1;
-			if (entry.label === "side-question") existing.row.sideQuestions += 1;
-			if (entry.label === "handoff") existing.row.handoffs += 1;
-			if (entry.label === "prewarm") existing.row.prewarms += 1;
-			if (entry.label === "background-memory") existing.row.backgroundMemory += 1;
-			if (entry.label === "failed-compaction") existing.row.failedCompaction += 1;
-			for (const requestedModelId of entry.requestedModelIds) existing.requestedModelIds.add(requestedModelId);
-			addResponseModelIdObservationCounts(
-				existing.responseModelIdObservationCounts,
-				entry.responseModelIdObservationCounts,
-			);
-			existing.entries.push(entry);
-			continue;
-		}
-		grouped.set(key, {
-			row: {
-				providerId: entry.providerId,
-				attributedModelId: entry.attributedModelId,
-				runs: 1,
-				tokens: entry.tokens,
-				input: entry.input,
-				output: entry.output,
-				cacheRead: entry.cacheRead,
-				cacheWrite: entry.cacheWrite,
-				reasoningTokens: entry.reasoningTokens,
-				apiCalls: entry.apiCalls ?? 1,
-				sideQuestions: entry.label === "side-question" ? 1 : 0,
-				handoffs: entry.label === "handoff" ? 1 : 0,
-				prewarms: entry.label === "prewarm" ? 1 : 0,
-				backgroundMemory: entry.label === "background-memory" ? 1 : 0,
-				failedCompaction: entry.label === "failed-compaction" ? 1 : 0,
-			},
-			requestedModelIds: new Set(entry.requestedModelIds),
-			responseModelIdObservationCounts: { ...entry.responseModelIdObservationCounts },
-			entries: [entry],
-		});
-	}
-	const rows = Array.from(grouped.values(), ({ row, entries, requestedModelIds, responseModelIdObservationCounts }) => ({
-		...row,
-		requestedModelIds: [...requestedModelIds].sort(),
-		responseModelIdObservationCounts,
-		cost: aggregateCostAmounts(entries.map((entry) => ({ usd: entry.usd, provenance: entry.provenance }))),
-	}));
-	rows.sort((a, b) => {
-		if (a.providerId !== b.providerId) return a.providerId < b.providerId ? -1 : 1;
-		if (a.attributedModelId !== b.attributedModelId) return a.attributedModelId < b.attributedModelId ? -1 : 1;
-		return 0;
-	});
-	return rows;
 }
 
 function sumRows(

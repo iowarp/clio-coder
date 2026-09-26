@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Meta } from "../contracts/meta.js";
-import { Interop, SystemReport } from "../contracts/system.js";
+import { Interop, InteropDecided, SystemReport } from "../contracts/system.js";
 import { harness, json } from "./harness/app.js";
 
 test("system exposes canonical versions and four roots; doctor cannot repair and parser details cannot leak credentials", async () => {
@@ -94,5 +94,49 @@ test("interop lists all registered kinds, runs nothing until asked and then prob
 	} finally {
 		await h.close();
 		await rm(bin, { recursive: true, force: true });
+	}
+});
+
+test("a proposed agent is accepted or declined through the terminal review's own decision, once", async () => {
+	for (const decision of ["accept", "decline"] as const) {
+		const bin = await mkdtemp(join(tmpdir(), "clio-web-interop-"));
+		const executable = join(bin, "codex");
+		await writeFile(executable, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex 1.2.3"; else exit 9; fi\n');
+		await chmod(executable, 0o700);
+		const h = await harness({}, { env: { PATH: bin } });
+		try {
+			const workspace = await h.workspaces.open(h.home.path);
+			const path = `/api/workspaces/${workspace.id}/interop`;
+			assert.equal(
+				(await json(await h.request(path), Interop)).agents.find((row) => row.kind === "codex")?.wiring,
+				"proposed",
+			);
+			assert.equal((await h.post(`${path}/decisions`, { kind: "codex", decision: "maybe" })).status, 422);
+			const decided = await json(
+				await h.post(`${path}/decisions`, { kind: "codex", decision }, `interop-${decision}`),
+				InteropDecided,
+			);
+			assert.deepEqual(decided, {
+				decided: ["codex"],
+				wired: decision === "accept" ? ["codex"] : [],
+				diagnostics: [],
+			});
+			const after = (await json(await h.request(path), Interop)).agents.find((row) => row.kind === "codex");
+			assert.deepEqual(
+				[after?.wiring, after?.decision],
+				decision === "accept" ? ["configured", "accepted"] : ["decided", "declined"],
+			);
+			const settings = await readFile(join(h.home.path, "config/settings.yaml"), "utf8").catch(() => "");
+			assert.equal(/id: codex/.test(settings), decision === "accept");
+			// A second answer to an agent that is no longer offered is reported, not applied.
+			const again = await json(
+				await h.post(`${path}/decisions`, { kind: "codex", decision: "accept" }, `interop-again-${decision}`),
+				InteropDecided,
+			);
+			assert.deepEqual(again, { decided: [], wired: [], diagnostics: ["codex is not a pending proposal"] });
+		} finally {
+			await h.close();
+			await rm(bin, { recursive: true, force: true });
+		}
 	}
 });

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { Link } from "react-router";
 import { routes } from "../../contracts/routes.js";
@@ -10,6 +10,9 @@ import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark } from "../design/status.js";
 import {
 	adapterText,
+	decisionOffer,
+	decisionOutcome,
+	type InteropAgent,
 	interopSummary,
 	orderedAgents,
 	presenceMark,
@@ -107,6 +110,47 @@ export function SystemPage({ client }: { client: Client }) {
 		</section>
 	);
 }
+/** The terminal review's `a` and `d` for one offered agent; the outcome stays until the page is read again. */
+function InteropAnswer({ client, workspaceId, agent }: { client: Client; workspaceId: string; agent: InteropAgent }) {
+	const queries = useQueryClient();
+	const decide = useMutation({
+		mutationFn: (decision: "accept" | "decline") =>
+			client.call(
+				routes.decideInterop,
+				{ params: { id: workspaceId }, query: {}, body: { kind: agent.kind, decision } },
+				crypto.randomUUID(),
+			),
+		onSuccess: () => void queries.invalidateQueries({ queryKey: ["interop", workspaceId] }),
+	});
+	const offer = decisionOffer(agent);
+	const outcome = decide.data && decide.variables ? decisionOutcome(decide.data, decide.variables) : null;
+	if (!offer && !outcome && !decide.error) return null;
+	return (
+		<div className="interop-answer">
+			{offer ? (
+				<>
+					<p className="interop-answer__consequence">{offer.consequence}</p>
+					<span className="interop-answer__actions">
+						<button type="button" disabled={decide.isPending} onClick={() => decide.mutate("accept")}>
+							{decide.isPending && decide.variables === "accept" ? "Wiring…" : offer.accept}
+						</button>
+						<button type="button" disabled={decide.isPending} onClick={() => decide.mutate("decline")}>
+							{offer.decline}
+						</button>
+					</span>
+				</>
+			) : null}
+			{outcome ? (
+				<p role="status">
+					<StatusMark tone={outcome.tone} label={outcome.tone === "warn" ? "Not changed" : "Recorded"} />
+					{outcome.text}
+				</p>
+			) : null}
+			{decide.error ? <p role="alert">{decide.error.message}</p> : null}
+		</div>
+	);
+}
+
 export function InteropPage({ client }: { client: Client }) {
 	const selection = useWorkspaceSelection(client);
 	// Opening the page never runs a foreign executable. Only the button asks for the version probe,
@@ -168,6 +212,7 @@ export function InteropPage({ client }: { client: Client }) {
 										<StatusMark tone={wiring.tone} label={wiring.label} />
 									</p>
 									<p>{wiringSentence(agent)}</p>
+									{selection.id ? <InteropAnswer client={client} workspaceId={selection.id} agent={agent} /> : null}
 									<dl className="facts">
 										<div className="fact">
 											<dt>Version</dt>

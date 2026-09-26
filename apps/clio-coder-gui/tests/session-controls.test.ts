@@ -225,6 +225,8 @@ test("a side question and drafts answer beside the conversation and never become
 	]);
 	assert.equal(drafts.status === "drafted" && drafts.judgment?.status, "unjudged");
 	assert.equal(h.supervisor.get(session.id).turns.length, 0, "an aside is not a turn");
+	const usage = await json(await h.request(`/api/sessions/${session.id}/usage`), routes.sessionUsage.response);
+	assert.deepEqual([usage.session.tokens, usage.session.cost.calls, usage.quota.status], [5200, 3, "read"]);
 	assert.deepEqual(await json(await h.post(`${base}/cancel`), routes.cancelAside.response), { cancelled: false });
 	assert.equal((await h.post(`${base}/draft`, { request: "x", count: 5 })).status, 422);
 	assert.equal((await h.post(`${base}/ask`, { question: "   " })).status, 422);
@@ -491,9 +493,10 @@ test("an older ACP peer has no branches and refuses tree, switch and fork before
 	assert.equal((await h.request(`${base}/context`)).status, 409);
 	assert.equal((await h.request(`${base}/extensions`)).status, 409);
 	assert.equal((await h.post(`${base}/aside/ask`, { question: "Which file?" })).status, 409);
+	assert.equal((await h.request(`${base}/usage`)).status, 409);
 	assert.doesNotMatch(
 		await readFile(join(h.home.path, "acp.jsonl"), "utf8"),
-		/session\/(tree|switch_turn|fork|handoff)|fleet\/|aside\//,
+		/session\/(tree|switch_turn|fork|handoff)|fleet\/|aside\/|usage\//,
 	);
 });
 

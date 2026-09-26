@@ -2,9 +2,12 @@ import { homedir } from "node:os";
 import { readLayeredSettings } from "../../../../../src/core/settings-layers.js";
 import { resolveClioDirs } from "../../../../../src/core/xdg.js";
 import {
+	acceptInteropAgents,
+	declineInteropAgents,
 	detectInteropAgents,
 	discoverInteropInventory,
 	INTEROP_AGENT_KINDS,
+	type InteropAgentId,
 	interopProposals,
 	resolveOnPath,
 } from "../../../../../src/domains/interop/index.js";
@@ -84,4 +87,22 @@ export async function inspectInterop(cwd: string, probe: boolean, fixture = fals
 			};
 		}),
 	};
+}
+
+/**
+ * The terminal review's `a` and `d`, for one agent. Detection runs again first, without a version
+ * probe, so the decision is recorded against the facts the page just showed; accepting only wires an
+ * agent the review would still offer, and the domain says so when it would not.
+ */
+export async function decideInterop(cwd: string, kind: string, decision: "accept" | "decline", fixture = false) {
+	if (!INTEROP_AGENT_KINDS.some((entry) => entry.id === kind))
+		return { decided: [], wired: [], diagnostics: [`${kind} is not a known agent`] };
+	const home = fixture ? process.env.CLIO_CODER_HOME : undefined;
+	const report = await detectInteropAgents({ cwd, inventory: false, probeVersion: false, ...(home ? { home } : {}) });
+	const ids = [kind as InteropAgentId];
+	if (decision === "accept") return acceptInteropAgents(ids, report);
+	// A declined answer applies only to an agent that is on offer, as the review's `d` does.
+	if (!interopProposals(report, readLayeredSettings(cwd).settings).some((proposal) => proposal.kind === kind))
+		return { decided: [], wired: [], diagnostics: [`${kind} is not a pending proposal`] };
+	return declineInteropAgents(ids, report);
 }

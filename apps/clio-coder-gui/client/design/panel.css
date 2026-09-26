@@ -64,3 +64,23 @@
 .panel-summary {
 	margin-block: var(--space-4);
 }
+/* An offered agent's answer: the consequence first, then the two answers the terminal review gives. */
+.interop-answer {
+	display: grid;
+	gap: var(--space-2);
+	margin-block: var(--space-2);
+}
+.interop-answer__consequence {
+	margin: 0;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.interop-answer__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+.interop-answer > p[role="status"] {
+	margin: 0;
+	font-size: var(--text-meta);
+}

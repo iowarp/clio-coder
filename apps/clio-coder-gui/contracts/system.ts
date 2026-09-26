@@ -40,6 +40,22 @@ export const SystemReport = Type.Object(
 	},
 	closed,
 );
+/** An answer to a proposed delegation peer, the same one the terminal review records with `a` or `d`. */
+export const InteropDecision = Type.Object(
+	{
+		kind: Type.String({ minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9-]*$" }),
+		decision: Type.Union([Type.Literal("accept"), Type.Literal("decline")]),
+	},
+	closed,
+);
+export const InteropDecided = Type.Object(
+	{
+		decided: Type.Array(Type.String({ maxLength: 64 }), { maxItems: 16 }),
+		wired: Type.Array(Type.String({ maxLength: 128 }), { maxItems: 16 }),
+		diagnostics: Type.Array(Type.String({ maxLength: 512 }), { maxItems: 16 }),
+	},
+	closed,
+);
 /** `?probe=versions` is the only way this read runs a foreign executable, and only its `--version`. */
 export const InteropQuery = Type.Object({ probe: Type.Optional(Type.Literal("versions")) }, closed);
 export type InteropWiring = Static<typeof InteropWiring>;

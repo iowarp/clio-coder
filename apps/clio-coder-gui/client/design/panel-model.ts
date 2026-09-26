@@ -27,6 +27,7 @@ export const MUTABILITIES = [
 	"read offline",
 	"check only",
 	"detect only",
+	"detect and answer offers",
 	"collect and recheck",
 	"install and remove",
 	"edit your user layer",
@@ -121,10 +122,10 @@ export const PANELS = {
 			"These checks read this machine and repair nothing. A parser message that could quote a credential or a settings line is withheld here; run clio-coder doctor in a terminal to read it.",
 	},
 	interop: {
-		eyebrow: eyebrow("External coding agents", "installation-wide", "detect only"),
+		eyebrow: eyebrow("External coding agents", "installation-wide", "detect and answer offers"),
 		title: "Other coding agents",
 		boundary:
-			"Opening this page reads files on this machine and runs nothing. Detect again runs one bounded command per installed agent, its --version, inside a scratch home. Neither starts an agent's work, reads its sessions or history, or wires anything: run clio-coder configure --interop in a terminal to answer an offer.",
+			"Opening this page reads files on this machine and runs nothing. Detect again runs one bounded command per installed agent, its --version, inside a scratch home. Neither starts an agent's work or reads its sessions or history. Answering an offer records the same decision the terminal review does; accepting adds a delegation entry to your saved settings, and nothing else is wired.",
 	},
 	fleet: {
 		eyebrow: eyebrow("Fleet and dispatch history", "installation-wide", READ_ONLY),

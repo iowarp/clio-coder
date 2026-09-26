@@ -149,7 +149,7 @@ export async function main(args = process.argv.slice(2)) {
 		docs: new DocsService(reads),
 		settings: settingsService,
 		fleet: new FleetService(reads),
-		system: new SystemService(reads, workspaces),
+		system: new SystemService(reads, workspaces, ops),
 		library: new LibraryService(reads, cli, workspaces, ops),
 		reports: new ReportsService(cli, workspaces),
 		evidence: new EvidenceService(reads, cli, workspaces, operations),

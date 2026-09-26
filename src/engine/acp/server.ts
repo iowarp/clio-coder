@@ -111,6 +111,13 @@ import {
 	ACP_TOOL_PROGRESS_META_KEY,
 	ACP_USAGE_META_KEY,
 } from "./types.js";
+import {
+	ACP_ACCOUNTING_META_KEY,
+	ACP_USAGE_READ_METHOD,
+	type AcpUsageSource,
+	projectQuota,
+	projectSessionUsage,
+} from "./usage.js";
 
 type AcpServerEvent = unknown;
 type AcpEventRecord = Record<string, unknown> & { type?: unknown };
@@ -279,6 +286,11 @@ export interface ClioAcpServerOptions {
 	 * `/draft`). Absent means the three methods refuse.
 	 */
 	aside?: AcpAsideControl;
+	/**
+	 * The session's cost ledger, folded as /usage folds it, and the quota
+	 * service, for `_clio-coder/usage/read`. Absent means the method refuses.
+	 */
+	usage?: AcpUsageSource;
 	/**
 	 * The plugin-resource reload /library reload runs, so a library change made
 	 * elsewhere reaches this open session. Absent means the method refuses.
@@ -2299,6 +2311,8 @@ export interface AcpHandshakeFeatures {
 	libraryReload?: boolean;
 	/** Whether the side-question and draft methods answer; absent reads as false. */
 	aside?: boolean;
+	/** Whether `_clio-coder/usage/read` answers; absent reads as false. */
+	usage?: boolean;
 	/** Whether prompts are expanded, which is what admits image blocks; absent reads as false. */
 	images?: boolean;
 }
@@ -2553,6 +2567,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 								}
 							: {}),
 						...(features.libraryReload ? { [ACP_LIBRARY_META_KEY]: { version: 1, reload: ACP_LIBRARY_RELOAD_METHOD } } : {}),
+						...(features.usage ? { [ACP_ACCOUNTING_META_KEY]: { version: 1, read: ACP_USAGE_READ_METHOD } } : {}),
 						...(features.aside
 							? {
 									[ACP_ASIDE_META_KEY]: {
@@ -2653,6 +2668,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			extensions: options.extensions !== undefined,
 			libraryReload: options.libraryReload !== undefined,
 			aside: options.aside !== undefined,
+			usage: options.usage !== undefined,
 			images: options.expandPrompt !== undefined,
 		});
 	const workspaceInstanceId = handshake.workspaceInstanceId;
@@ -3773,6 +3789,23 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const cancelled = pendingHandoff?.handoffId === handoffId && pendingHandoff.sessionId === bound.id;
 		if (cancelled) pendingHandoff = null;
 		return { cancelled };
+	});
+
+	// /usage: the session's own accounting and each provider's quota. A quota
+	// read that throws fails only the quota half; the session numbers still answer.
+	options.transport.onRequest(ACP_USAGE_READ_METHOD, async (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		if (options.usage === undefined) throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		getSession(request);
+		const session = projectSessionUsage(options.usage.session());
+		let quota: ReturnType<typeof projectQuota> | { status: "failed"; reason: string };
+		try {
+			quota = projectQuota(await options.usage.quota());
+		} catch (err) {
+			quota = { status: "failed", reason: boundString(err instanceof Error ? err.message : String(err), 256) };
+		}
+		return { version: 1, session, quota };
 	});
 
 	// /btw and /draft: one round beside the session at a time, cancellable, and

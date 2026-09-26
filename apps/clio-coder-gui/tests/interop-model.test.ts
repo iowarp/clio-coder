@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
 	adapterText,
+	decisionOffer,
+	decisionOutcome,
 	type InteropAgent,
 	interopSummary,
 	orderedAgents,
@@ -115,4 +117,33 @@ test("a version says whether it was probed now or only recorded, and a missing o
 	assert.equal(versionText(agent({ versionSource: "recorded" })), "1.2.3 · last recorded");
 	assert.match(versionText(agent({ version: null, versionSource: null })), /Detect again/u);
 	assert.equal(versionText(agent({ version: null, versionSource: null, presence: "absent" })), "Not reported");
+});
+
+test("only an agent on offer can be answered, and accepting names the settings entry and any adapter fetch", () => {
+	assert.equal(decisionOffer({ wiring: "configured", adapter: "present", label: "Codex" }), null);
+	assert.equal(decisionOffer({ wiring: "decided", adapter: "present", label: "Codex" }), null);
+	assert.deepEqual(decisionOffer({ wiring: "proposed", adapter: "present", label: "Codex" }), {
+		accept: "Wire Codex as a peer",
+		decline: "Decline",
+		consequence: "Accepting adds a delegation entry for Codex to your saved settings for every project.",
+	});
+	assert.match(
+		decisionOffer({ wiring: "proposed", adapter: "absent", label: "Codex" })?.consequence ?? "",
+		/fetch its ACP adapter from the network on first use/,
+	);
+	assert.deepEqual(decisionOutcome({ decided: ["codex"], wired: ["codex"], diagnostics: [] }, "accept"), {
+		tone: "success",
+		text: "Wired as a delegation peer.",
+	});
+	assert.deepEqual(decisionOutcome({ decided: ["codex"], wired: [], diagnostics: [] }, "decline"), {
+		tone: "neutral",
+		text: "Declined. Clio Coder stays quiet about it until its facts change.",
+	});
+	assert.deepEqual(
+		decisionOutcome({ decided: [], wired: [], diagnostics: ["codex is not a pending proposal"] }, "accept"),
+		{
+			tone: "warn",
+			text: "Nothing changed: codex is not a pending proposal.",
+		},
+	);
 });

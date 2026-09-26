@@ -108,3 +108,33 @@ export function interopSummary(report: Interop): InteropFigure[] {
 export function orderedAgents(report: Interop): InteropAgent[] {
 	return [...report.agents.filter(isDetected), ...report.agents.filter((agent) => !isDetected(agent))];
 }
+
+/**
+ * The terminal review's `a` and `d`, offered only while an agent is on offer. Accepting writes a
+ * delegation entry into the saved settings every project reads, so the offer says that before it
+ * is pressed, and says when the peer's ACP adapter would be fetched on first use.
+ */
+export function decisionOffer(
+	agent: Pick<InteropAgent, "wiring" | "adapter" | "label">,
+): { accept: string; decline: string; consequence: string } | null {
+	if (agent.wiring !== "proposed") return null;
+	const fetch = agent.adapter === "present" ? "" : " It will fetch its ACP adapter from the network on first use.";
+	return {
+		accept: `Wire ${agent.label} as a peer`,
+		decline: "Decline",
+		consequence: `Accepting adds a delegation entry for ${agent.label} to your saved settings for every project.${fetch}`,
+	};
+}
+
+export function decisionOutcome(
+	result: { decided: readonly string[]; wired: readonly string[]; diagnostics: readonly string[] },
+	decision: "accept" | "decline",
+): { tone: StatusTone; text: string } {
+	if (result.decided.length === 0)
+		return { tone: "warn", text: `Nothing changed: ${result.diagnostics.join("; ") || "no answer was recorded"}.` };
+	if (decision === "decline")
+		return { tone: "neutral", text: "Declined. Clio Coder stays quiet about it until its facts change." };
+	return result.wired.length > 0
+		? { tone: "success", text: "Wired as a delegation peer." }
+		: { tone: "neutral", text: "Accepted; a delegation entry already named it." };
+}

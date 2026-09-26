@@ -50,6 +50,7 @@ import {
 	SteerResult,
 } from "../../contracts/steering.js";
 import { SessionTargets, TargetProbe } from "../../contracts/targets.js";
+import { SessionUsage } from "../../contracts/usage.js";
 import { childRunning, startAcpChild } from "../process-policy.js";
 import type { EventHub } from "../services/event-hub.js";
 import { AppProblem } from "../services/problem.js";
@@ -770,6 +771,13 @@ export class Supervisor {
 		} finally {
 			delete entry.rebase;
 		}
+	}
+	usage(id: string) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.usage)
+			throw new AppProblem("conflict", "This Clio Coder build does not report its usage.");
+		// A quota read may reach each signed-in provider once its cache has expired.
+		return this.projected(id, "_clio-coder/usage/read", { sessionId: id }, SessionUsage, BRANCH_TIMEOUT_MS);
 	}
 	private asiding(id: string) {
 		const entry = this.active(id);

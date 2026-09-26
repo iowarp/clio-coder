@@ -590,6 +590,193 @@
 				}
 			}
 		},
+		"/api/workspaces/{id}/interop/decisions": {
+			"post": {
+				"operationId": "decideInterop",
+				"summary": "Accept or decline a proposed delegation peer; accepting adds its settings entry",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["kind", "decision"],
+								"properties": {
+									"kind": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 64,
+										"pattern": "^[a-z][a-z0-9-]*$"
+									},
+									"decision": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "accept"
+											},
+											{
+												"type": "string",
+												"const": "decline"
+											}
+										]
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["decided", "wired", "diagnostics"],
+									"properties": {
+										"decided": {
+											"type": "array",
+											"items": {
+												"type": "string",
+												"maxLength": 64
+											},
+											"maxItems": 16
+										},
+										"wired": {
+											"type": "array",
+											"items": {
+												"type": "string",
+												"maxLength": 128
+											},
+											"maxItems": 16
+										},
+										"diagnostics": {
+											"type": "array",
+											"items": {
+												"type": "string",
+												"maxLength": 512
+											},
+											"maxItems": 16
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/workspaces/{id}/library": {
 			"get": {
 				"operationId": "library",
@@ -10073,6 +10260,21 @@
 											},
 											"additionalProperties": false
 										},
+										"usage": {
+											"type": "object",
+											"required": ["version", "read"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"read": {
+													"type": "string",
+													"maxLength": 128
+												}
+											},
+											"additionalProperties": false
+										},
 										"library": {
 											"type": "object",
 											"required": ["version", "reload"],
@@ -12735,6 +12937,460 @@
 											"additionalProperties": false
 										}
 									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/usage": {
+			"get": {
+				"operationId": "sessionUsage",
+				"summary": "This conversation's spend per provider and model, and each provider's quota",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["version", "session", "quota"],
+									"properties": {
+										"version": {
+											"type": "number",
+											"const": 1
+										},
+										"session": {
+											"type": "object",
+											"required": ["cost", "tokens", "rows", "truncated"],
+											"properties": {
+												"cost": {
+													"type": "object",
+													"required": ["knownUsd", "calls", "estimated", "unknown", "free"],
+													"properties": {
+														"knownUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"calls": {
+															"type": "integer",
+															"minimum": 0
+														},
+														"estimated": {
+															"type": "boolean"
+														},
+														"unknown": {
+															"type": "boolean"
+														},
+														"free": {
+															"type": "boolean"
+														}
+													},
+													"additionalProperties": false
+												},
+												"tokens": {
+													"type": "integer",
+													"minimum": 0
+												},
+												"rows": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["provider", "model", "runs", "calls", "tokens", "beside", "cost"],
+														"properties": {
+															"provider": {
+																"type": "string",
+																"maxLength": 260
+															},
+															"model": {
+																"type": "string",
+																"maxLength": 260
+															},
+															"runs": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"calls": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"tokens": {
+																"type": "object",
+																"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning", "total"],
+																"properties": {
+																	"input": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"output": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"cacheRead": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"cacheWrite": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"reasoning": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"total": {
+																		"type": "integer",
+																		"minimum": 0
+																	}
+																},
+																"additionalProperties": false
+															},
+															"beside": {
+																"type": "object",
+																"required": ["sideQuestions", "handoffs", "prewarms", "backgroundMemory"],
+																"properties": {
+																	"sideQuestions": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"handoffs": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"prewarms": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"backgroundMemory": {
+																		"type": "integer",
+																		"minimum": 0
+																	}
+																},
+																"additionalProperties": false
+															},
+															"cost": {
+																"type": "object",
+																"required": ["knownUsd", "calls", "estimated", "unknown", "free"],
+																"properties": {
+																	"knownUsd": {
+																		"type": "number",
+																		"minimum": 0
+																	},
+																	"calls": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"estimated": {
+																		"type": "boolean"
+																	},
+																	"unknown": {
+																		"type": "boolean"
+																	},
+																	"free": {
+																		"type": "boolean"
+																	}
+																},
+																"additionalProperties": false
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 32
+												},
+												"truncated": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										"quota": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["status", "providers"],
+													"properties": {
+														"status": {
+															"type": "string",
+															"const": "read"
+														},
+														"providers": {
+															"type": "array",
+															"items": {
+																"type": "object",
+																"required": [
+																	"provider",
+																	"name",
+																	"status",
+																	"plan",
+																	"message",
+																	"credits",
+																	"stale",
+																	"fetchedAt",
+																	"retryAfterSeconds",
+																	"windows"
+																],
+																"properties": {
+																	"provider": {
+																		"type": "string",
+																		"maxLength": 260
+																	},
+																	"name": {
+																		"type": "string",
+																		"maxLength": 260
+																	},
+																	"status": {
+																		"type": "string",
+																		"maxLength": 260
+																	},
+																	"plan": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 260
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"message": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 260
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"credits": {
+																		"anyOf": [
+																			{
+																				"type": "object",
+																				"required": ["display", "usedPct"],
+																				"properties": {
+																					"display": {
+																						"type": "string",
+																						"maxLength": 260
+																					},
+																					"usedPct": {
+																						"anyOf": [
+																							{
+																								"type": "number",
+																								"minimum": 0,
+																								"maximum": 100
+																							},
+																							{
+																								"type": "null"
+																							}
+																						]
+																					}
+																				},
+																				"additionalProperties": false
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"stale": {
+																		"type": "boolean"
+																	},
+																	"fetchedAt": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 260
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"retryAfterSeconds": {
+																		"anyOf": [
+																			{
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"windows": {
+																		"type": "array",
+																		"items": {
+																			"type": "object",
+																			"required": ["label", "usedPct", "resetsAt", "scope", "active"],
+																			"properties": {
+																				"label": {
+																					"type": "string",
+																					"maxLength": 260
+																				},
+																				"usedPct": {
+																					"type": "number",
+																					"minimum": 0,
+																					"maximum": 100
+																				},
+																				"resetsAt": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"maxLength": 260
+																						},
+																						{
+																							"type": "null"
+																						}
+																					]
+																				},
+																				"scope": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"maxLength": 260
+																						},
+																						{
+																							"type": "null"
+																						}
+																					]
+																				},
+																				"active": {
+																					"type": "boolean"
+																				}
+																			},
+																			"additionalProperties": false
+																		},
+																		"maxItems": 8
+																	}
+																},
+																"additionalProperties": false
+															},
+															"maxItems": 16
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"required": ["status", "reason"],
+													"properties": {
+														"status": {
+															"type": "string",
+															"const": "failed"
+														},
+														"reason": {
+															"type": "string",
+															"maxLength": 260
+														}
+													},
+													"additionalProperties": false
+												}
+											]
+										}
+									},
+									"additionalProperties": false
 								}
 							}
 						},

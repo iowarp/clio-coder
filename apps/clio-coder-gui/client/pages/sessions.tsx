@@ -33,6 +33,7 @@ import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/hea
 import { routeFacts } from "../chat/route.js";
 import { SessionBoardPanel } from "../chat/SessionBoard.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
+import { UsagePanel } from "../chat/UsagePanel.js";
 import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
@@ -396,6 +397,13 @@ function SessionTools({
 						capabilities={capabilities}
 						settledTurns={session.turns.filter((turn) => turn.status !== "running").length}
 						running={session.turns.at(-1)?.status === "running"}
+					/>
+					<UsagePanel
+						client={client}
+						sessionId={session.id}
+						sessionOpen={session.state === "open"}
+						capabilities={capabilities}
+						settledTurns={session.turns.filter((turn) => turn.status !== "running").length}
 					/>
 					<ContextPanel
 						client={client}

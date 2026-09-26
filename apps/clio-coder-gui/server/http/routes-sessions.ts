@@ -73,6 +73,7 @@ export function sessionRoutes(
 			supervisor.reloadExtensions(params.id),
 		),
 	);
+	register(app, hub, routes.sessionUsage, ({ params }) => supervisor.usage(params.id));
 	// A retried side question or draft answers from the ledger instead of billing a second round.
 	register(app, hub, routes.askAside, ({ params, body }, context) =>
 		commands.run(`aside.ask:${params.id}`, idempotencyKey(context), body, () =>

@@ -20,6 +20,7 @@ import { FleetCapability } from "../../contracts/fleet-run.js";
 import { HandoffCapability } from "../../contracts/handoff.js";
 import type { SessionConfig } from "../../contracts/session-config.js";
 import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
+import { UsageCapability } from "../../contracts/usage.js";
 import { type AcpJsonRpcTransport, AcpProtocolError, AcpTimeoutError } from "../clio/http-shims.js";
 import { AppProblem } from "../services/problem.js";
 import { projectConfigOptions } from "./session-config.js";
@@ -75,6 +76,7 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("context", optional(ContextCapability, meta["clio-coder/context"])),
 		...maybe("extensions", optional(ExtensionsCapability, meta["clio-coder/extensions"])),
 		...maybe("aside", optional(AsideCapability, meta["clio-coder/aside"])),
+		...maybe("usage", optional(UsageCapability, meta["clio-coder/accounting"])),
 		...maybe("library", optional(LibraryCapability, meta["clio-coder/library"])),
 	};
 }

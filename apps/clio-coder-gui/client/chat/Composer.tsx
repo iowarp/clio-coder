@@ -217,6 +217,8 @@ export const Composer = memo(function Composer({
 			if (result !== null && !result.accepted) store.refuse(submitted.draft);
 			else store.acknowledge(submitted.draft);
 			if (result === null && submitted.attachments.length > 0) {
+				// A refusal from an earlier pick described a file that is not going anywhere now.
+				setAttachProblem(null);
 				const sent = new Set(submitted.attachments.map((item) => item.id));
 				attached.current = attached.current.filter((image) => !sent.has(image.id));
 				setAttachments(attached.current);

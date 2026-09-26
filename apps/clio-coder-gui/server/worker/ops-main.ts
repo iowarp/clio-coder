@@ -23,6 +23,10 @@ serveWorker(async (call, progress) => {
 	if (call.method === "library.plan") return library.plan(call.params.cwd, call.params.request);
 	if (call.method === "library.apply") return library.apply(call.params.cwd, call.params.planId);
 	if (call.method === "library.release") return library.release(call.params.cwd, call.params.planId);
+	if (call.method === "interop.decide") {
+		const { decideInterop } = await import("../clio/adapters/system.js");
+		return decideInterop(call.params.cwd, call.params.kind, call.params.decision, settings.fixture);
+	}
 	if (call.method === "settings.write") {
 		const { writeSettingControl } = await import("../clio/adapters/settings-controls.js");
 		return writeSettingControl(call.params.cwd, call.params.write);

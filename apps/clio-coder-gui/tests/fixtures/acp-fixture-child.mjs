@@ -594,6 +594,7 @@ async function handle(frame) {
 														reload: "_clio-coder/extensions/reload",
 													},
 													"clio-coder/library": { version: 1, reload: "_clio-coder/library/reload" },
+													"clio-coder/accounting": { version: 1, read: "_clio-coder/usage/read" },
 													"clio-coder/aside": {
 														version: 1,
 														ask: "_clio-coder/aside/ask",
@@ -927,6 +928,49 @@ async function handle(frame) {
 								source: "fixture/judge",
 								elapsedMs: 12,
 							},
+				};
+				break;
+			}
+			case "_clio-coder/usage/read": {
+				const cost = { knownUsd: 0.0421, calls: 3, estimated: false, unknown: false, free: false };
+				result = {
+					version: 1,
+					session: {
+						cost,
+						tokens: 5200,
+						rows: [
+							{
+								provider: "local",
+								model: "fixture-model",
+								runs: 2,
+								calls: 3,
+								tokens: { input: 4000, output: 1000, cacheRead: 150, cacheWrite: 50, reasoning: 0, total: 5200 },
+								beside: { sideQuestions: 1, handoffs: 0, prewarms: 0, backgroundMemory: 0 },
+								cost,
+							},
+						],
+						truncated: false,
+					},
+					quota: {
+						status: "read",
+						providers: [
+							{
+								provider: "fixture-plan",
+								name: "Fixture plan",
+								status: "ok",
+								plan: "Team",
+								message: null,
+								credits: null,
+								stale: false,
+								fetchedAt: "2026-09-26T10:00:00.000Z",
+								retryAfterSeconds: null,
+								windows: [
+									{ label: "5h", usedPct: 71.4, resetsAt: "2026-09-26T13:00:00.000Z", scope: null, active: true },
+									{ label: "Weekly", usedPct: 12, resetsAt: null, scope: null, active: false },
+								],
+							},
+						],
+					},
 				};
 				break;
 			}

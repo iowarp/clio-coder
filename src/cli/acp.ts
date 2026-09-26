@@ -133,6 +133,7 @@ export async function runAcpCommand(
 					extensions: true,
 					libraryReload: true,
 					aside: true,
+					usage: true,
 					images: true,
 				});
 				const serving = serveDeferredAcp({

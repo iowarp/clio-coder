@@ -26,6 +26,7 @@ export interface Methods {
 	"runtime.info": { params: Record<string, never>; result: RuntimeInfo };
 	"system.read": { params: Record<string, never>; result: unknown };
 	"interop.read": { params: { cwd: string; probe: boolean }; result: unknown };
+	"interop.decide": { params: { cwd: string; kind: string; decision: "accept" | "decline" }; result: unknown };
 	"library.read": { params: { cwd: string; kind: "inventory" | "extensions" }; result: unknown };
 	"evidence.read": { params: EvidenceRequest; result: unknown };
 	"fleet.read": { params: FleetRequest; result: unknown };

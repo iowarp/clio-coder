@@ -68,7 +68,7 @@ import {
 	SteerRequest,
 	SteerResult,
 } from "./steering.js";
-import { Interop, InteropQuery, SystemReport } from "./system.js";
+import { Interop, InteropDecided, InteropDecision, InteropQuery, SystemReport } from "./system.js";
 import { SessionTargets, TargetProbe } from "./targets.js";
 import { CliTargets, Routing, TargetAdd, TargetRuntimes } from "./targets-cli.js";
 import { Install, Tools } from "./toolchain.js";
@@ -86,6 +86,7 @@ import {
 	TraceRunsQuery,
 	TraceStatus,
 } from "./traces.js";
+import { SessionUsage } from "./usage.js";
 
 export interface Route<
 	P extends TSchema = TSchema,
@@ -132,6 +133,15 @@ export const routes = {
 		query: InteropQuery,
 		response: Interop,
 		summary: "All registered external agents and bounded resource discovery; probe=versions runs each --version",
+	}),
+	decideInterop: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/workspaces/:id/interop/decisions",
+		params: operationParams,
+		body: InteropDecision,
+		response: InteropDecided,
+		summary: "Accept or decline a proposed delegation peer; accepting adds its settings entry",
 	}),
 	library: defineRoute({
 		...get,
@@ -504,6 +514,13 @@ export const routes = {
 		params: operationParams,
 		response: ExtensionReload,
 		summary: "Reload this conversation's extensions and hooks together",
+	}),
+	sessionUsage: defineRoute({
+		...get,
+		path: "/api/sessions/:id/usage",
+		params: operationParams,
+		response: SessionUsage,
+		summary: "This conversation's spend per provider and model, and each provider's quota",
 	}),
 	askAside: defineRoute({
 		...post,

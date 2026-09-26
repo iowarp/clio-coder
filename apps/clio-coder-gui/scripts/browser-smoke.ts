@@ -964,6 +964,21 @@ try {
 		await check("extensions");
 		await page.getByText("Extensions", { exact: true }).click();
 		await page.keyboard.press("Escape");
+		// Usage: the conversation's spend in the agent's own words, and each provider's windows.
+		await page.locator(".conversation__tools > summary").click();
+		await page.getByText("Usage and quota", { exact: true }).click();
+		const usagePanel = page.locator(".usage-panel");
+		await usagePanel.locator(".session-board__title", { hasText: "local · fixture-model" }).waitFor();
+		await usagePanel.getByText("Beside the conversation: 1 side question", { exact: true }).waitFor();
+		await usagePanel.getByRole("meter", { name: "5h used", exact: true }).waitFor();
+		await check("usage");
+		if (width === 1600 || width === 390) {
+			await usagePanel.scrollIntoViewIfNeeded();
+			await page.screenshot({ path: join(output, `usage-${width}.png`) });
+		}
+		await page.getByText("Usage and quota", { exact: true }).click();
+		await page.keyboard.press("Escape");
+		await page.waitForFunction(() => !(document.querySelector(".conversation__tools") as HTMLDetailsElement).open);
 		// Beside the conversation: a side question and drafts answer in place and add no turn.
 		await page.locator(".conversation__tools > summary").click();
 		await page.getByText("Ask beside the conversation", { exact: true }).click();
