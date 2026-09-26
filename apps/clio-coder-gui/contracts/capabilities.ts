@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 import { BoardCapability } from "./board.js";
+import { BranchesCapability } from "./branches.js";
 
 const closed = { additionalProperties: false };
 const method = Type.String({ maxLength: 128 });
@@ -88,6 +89,8 @@ export const AgentCapabilities = Type.Object(
 		decision: Type.Optional(DecisionCapability),
 		events: Type.Optional(EventsCapability),
 		board: Type.Optional(BoardCapability),
+		/** Session tree, branch switch and fork. */
+		branches: Type.Optional(BranchesCapability),
 		/** ACP promptCapabilities.image: the agent accepts image blocks with a request. */
 		images: Type.Optional(Type.Boolean()),
 		/** True when the agent mediates every tool through its own safety policy. */

@@ -2,6 +2,7 @@ import { type Static, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
 import type { TurnImage } from "../../contracts/attachments.js";
 import { BoardCapability } from "../../contracts/board.js";
+import { BranchesCapability } from "../../contracts/branches.js";
 import {
 	type AgentCapabilities,
 	CommandsCapability,
@@ -62,6 +63,7 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("decision", optional(DecisionCapability, meta["clio-coder/decision"])),
 		...maybe("events", optional(EventsCapability, meta["clio-coder/events"])),
 		...maybe("board", optional(BoardCapability, meta["clio-coder/board"])),
+		...maybe("branches", optional(BranchesCapability, meta["clio-coder/branches"])),
 	};
 }
 const closed = { additionalProperties: false };
@@ -164,6 +166,19 @@ export class AcpClient {
 			throw new AppProblem("upstream_acp", "Clio ACP returned an invalid session identity.");
 		if (mode === "default" || mode === "yolo") this.rememberMode(result.sessionId, mode);
 		return result.sessionId;
+	}
+	/**
+	 * The process now hosts `nextId` in place of `previousId`, after a fork or a
+	 * handoff. The new session reports its mode like a load does; a choice made
+	 * for the old conversation carries over, as the agent keeps it too.
+	 */
+	adopt(previousId: string, nextId: string, result: unknown) {
+		const previous = this.modes.get(previousId);
+		this.modes.delete(previousId);
+		const mode = record(record(result).modes).currentModeId;
+		if (mode === "default" || mode === "yolo")
+			this.modes.set(nextId, { level: mode, source: previous?.source ?? "settings" });
+		else if (previous) this.modes.set(nextId, previous);
 	}
 	private rememberMode(sessionId: string, level: "default" | "yolo") {
 		this.modes.set(sessionId, { level, source: "settings" });

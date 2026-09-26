@@ -94,3 +94,17 @@
 		gap: var(--space-1);
 	}
 }
+
+/* Branches indent one step per branch level, as /tree does, not per message. The current branch is
+   named in words under each row; the rule at its edge only repeats that. */
+.session-board__rows > li.branch-panel__row {
+	/* One column for the kind word, so a reply's text starts where its request's does. */
+	grid-template-columns: 4.5rem minmax(0, 1fr);
+	padding-inline-start: calc(var(--branch-depth, 0) * var(--space-4));
+}
+.branch-panel__row--active {
+	box-shadow: inset 2px 0 0 var(--accent);
+}
+.branch-panel__row--active > .session-board__id {
+	padding-inline-start: var(--space-2);
+}

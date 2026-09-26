@@ -174,6 +174,9 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 			return { ...state, state: event.payload.state, recoveredOrphan: event.payload.recoveredOrphan };
 		case "session.configured":
 			return { ...state, config: event.payload.config };
+		case "session.reset":
+			// Turns, their items and their approvals belong to the branch that was left.
+			return { ...state, timeline: [], timelineTruncated: false, turns: [], permissions: [] };
 		case "turn.started": {
 			const turn = event.payload.turn;
 			state = { ...state, turns: [...state.turns, turn].slice(-128) };

@@ -496,6 +496,19 @@ skills, use the same prompt lifecycle and await settlement; task add, done and d
 control replies. An older peer refuses injecting commands locally rather than receiving slash text
 it would send to the model.
 
+Branches in Session tools are the terminal's /tree and /fork. Requests and replies are rows,
+indented one step per branch level rather than per message, and tool steps are folded into the
+replies around them and counted. The current branch is named in words under each of its rows ("On
+the current branch", and "The next request continues here" on its tip); the accent rule at the
+row's edge only repeats that. A compaction or a returned-from branch is a row without actions.
+Continue here moves where the next request lands, keeps every other branch, and resets the
+transcript to the chosen branch through the same replay a load uses; focus returns to the Branches
+summary. Fork starts a new conversation from a turn, opens it, and says the project's files were not
+rewound; the conversation it left reads closed. Both are disabled while a turn runs, because each
+replaces the context that turn is reading, and a retried request is answered from the command ledger
+rather than switching or forking twice. A peer that does not announce branches gets a sentence
+instead of controls.
+
 A model is always picked from its target's catalog, never typed from memory. The route picker, the
 Settings page (`chat.model`, `fleet.default.model`, `context.memory.model` and
 `context.compaction.model`, which runs on the chat target) and the new-connection form share one
@@ -537,8 +550,8 @@ Every UI change must preserve:
 10. Screenshots inspected before being retained as slice evidence.
 
 Covered states the smoke must visit: home in both themes, toolchain, traces and run detail,
-workspaces and sessions, a Markdown/code/Mermaid conversation, session controls, permission and
-cancellation, and a problem notification. This design work adds three: the six status tones rendered
+workspaces and sessions, a Markdown/code/Mermaid conversation, session controls, the branch view,
+a branch switch and a fork, permission and cancellation, and a problem notification. This design work adds three: the six status tones rendered
 side by side, a focus-visible capture of a button, an input and a table cell, and one forced-colors
 pass.
 

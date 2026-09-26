@@ -207,6 +207,8 @@ export const SessionDeltas = {
 	"session.labelled": Type.Object({ ...base, label: nullableString }, closed),
 	"session.configured": Type.Object({ ...base, config: SessionConfig }, closed),
 	"session.changed": Type.Object({ ...base, state: SessionState, recoveredOrphan: Type.Boolean() }, closed),
+	/** The conversation moved to another branch; the replay that follows is the whole transcript. */
+	"session.reset": Type.Object({ ...base, reason: Type.Literal("branch") }, closed),
 };
 export type SessionDelta = {
 	[K in keyof typeof SessionDeltas]: { type: K; payload: Static<(typeof SessionDeltas)[K]> };

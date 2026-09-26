@@ -1,6 +1,7 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { TURN_IMAGE_MAX, TurnImage } from "./attachments.js";
 import { SessionBoard } from "./board.js";
+import { BranchRequest, BranchSwitched, Forked, SessionTree } from "./branches.js";
 import { AgentCapabilities } from "./capabilities.js";
 import { Empty, Id } from "./common.js";
 import { DocPage, DocsSearch, DocsTree } from "./docs.js";
@@ -427,6 +428,31 @@ export const routes = {
 		params: operationParams,
 		response: SessionBoard,
 		summary: "The operator's tasks, the session plan, its decisions and the memory tier",
+	}),
+	sessionTree: defineRoute({
+		...get,
+		path: "/api/sessions/:id/tree",
+		params: operationParams,
+		response: SessionTree,
+		summary: "The conversation's branches, as the terminal's /tree shows them",
+	}),
+	switchSessionBranch: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/branch",
+		params: operationParams,
+		body: BranchRequest,
+		response: BranchSwitched,
+		summary: "Continue this conversation from an earlier turn; other branches are kept",
+	}),
+	forkSession: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/fork",
+		params: operationParams,
+		body: BranchRequest,
+		response: Forked,
+		summary: "Start a new conversation from a turn; workspace files are not rewound",
 	}),
 	sessionCommands: defineRoute({
 		...get,

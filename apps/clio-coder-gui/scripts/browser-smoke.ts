@@ -872,6 +872,46 @@ try {
 		await page.getByRole("button", { name: "Stop turn", exact: true }).click();
 		await page.waitForFunction(() => !document.querySelector(".session-status")?.textContent?.includes("working"));
 		await check("cancelled");
+		// Branches: continuing from an earlier reply replays only that branch; forking moves the
+		// conversation to a new session and says the project's files were left alone.
+		await page.locator(".conversation__tools > summary").click();
+		await page.getByText("Branches", { exact: true }).click();
+		const branches = page.locator(".branch-panel");
+		await branches.getByText("The next request continues here", { exact: false }).waitFor();
+		await check("branches");
+		if (width === 1600 || width === 390) {
+			await branches.locator("ol").scrollIntoViewIfNeeded();
+			await page.screenshot({ path: join(output, `branches-${width}.png`) });
+		}
+		await branches
+			.getByRole("button", { name: "Continue from this reply: The second sample reads 4.2", exact: true })
+			.click();
+		await page.locator(".chat-request", { hasText: "Measure the second sample" }).waitFor();
+		assert.equal(
+			await page.locator(".chat-request", { hasText: "[stream] Show progress until cancelled." }).count(),
+			0,
+			"the branch left behind is not replayed",
+		);
+		await page.waitForFunction(() => document.activeElement?.textContent === "Branches", undefined, { timeout: 5000 });
+		const parentUrl = page.url();
+		await branches
+			.locator("li", { hasText: "The second sample reads 4.2" })
+			.getByText("The next request continues here", { exact: false })
+			.waitFor();
+		await branches
+			.getByRole("button", { name: "Fork a new conversation from this reply: Earlier reply", exact: true })
+			.click();
+		await page.waitForURL((url) => url.href !== parentUrl && url.pathname.startsWith("/sessions/"));
+		await page.locator(".notice-region .notice", { hasText: "Workspace files were not rewound" }).waitFor();
+		await page.locator(".chat-request", { hasText: "Earlier prompt" }).waitFor();
+		assert.equal(await page.locator(".chat-request", { hasText: "Measure the second sample" }).count(), 0);
+		await check("session-forked");
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `session-forked-${width}.png`), fullPage: true });
+		for (const title of [/^Dismiss Continuing from/, /^Dismiss Conversation forked$/]) {
+			const dismiss = page.getByRole("button", { name: title });
+			if (await dismiss.count()) await dismiss.click();
+		}
 		// Close lives at the foot of Session tools, away from the composer's Stop.
 		await page.locator(".conversation__tools > summary").click();
 		await page.getByRole("button", { name: "Close session", exact: true }).click();

@@ -44,6 +44,17 @@ export function sessionRoutes(
 		),
 	);
 	register(app, hub, routes.sessionBoard, ({ params }) => supervisor.board(params.id));
+	register(app, hub, routes.sessionTree, ({ params }) => supervisor.tree(params.id));
+	// A branch change resets the conversation, so a retried request answers from
+	// the command ledger instead of switching or forking a second time.
+	register(app, hub, routes.switchSessionBranch, ({ params, body }, context) =>
+		commands.run(`branch:${params.id}`, idempotencyKey(context), body, () =>
+			supervisor.switchTurn(params.id, body.turnId),
+		),
+	);
+	register(app, hub, routes.forkSession, ({ params, body }, context) =>
+		commands.run(`fork:${params.id}`, idempotencyKey(context), body, () => supervisor.fork(params.id, body.turnId)),
+	);
 	register(app, hub, routes.sessionCommands, ({ params }) => supervisor.commands(params.id));
 	register(app, hub, routes.invokeSessionCommand, ({ params, body }, context) =>
 		commands.run(`command:${params.id}:${body.command}`, idempotencyKey(context), body, () =>

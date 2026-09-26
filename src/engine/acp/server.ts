@@ -39,6 +39,13 @@ import type { ToolRegistry } from "../../tools/registry.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import type { AgentMessage, ImageContent } from "../types.js";
 import { ACP_BOARD_META_KEY, ACP_BOARD_METHOD, type AcpBoardSource, projectSessionBoard } from "./board.js";
+import {
+	ACP_SESSION_FORK_METHOD,
+	ACP_SESSION_SWITCH_TURN_METHOD,
+	ACP_SESSION_TREE_METHOD,
+	isSelectableTreeNode,
+	projectSessionTree,
+} from "./session-tree.js";
 import type { AcpCommandCatalog, AcpCommandControl } from "./commands.js";
 import { ACP_TURN_FAILED_MESSAGE, AcpRequestError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
 import type { AcpJsonRpcPeerTransport } from "./transport.js";
@@ -195,8 +202,16 @@ export interface ClioAcpServerOptions {
 	routing?: () => AcpRoutingSnapshot;
 	/** Durable rich-entry reader used by standard session/load. */
 	readSessionEntries?: (sessionId: string) => ReadonlyArray<SessionEntry>;
-	/** Builds the provider context; this is deliberately separate from client replay. */
-	buildReplayMessages?: (entries: ReadonlyArray<SessionEntry>, leafTurnId: string | null) => ReadonlyArray<AgentMessage>;
+	/**
+	 * Builds the provider context; this is deliberately separate from client
+	 * replay. `upto` is the historical cut a /tree switch makes: sidecars written
+	 * after the selected turn stay out, where a live leaf keeps them.
+	 */
+	buildReplayMessages?: (
+		entries: ReadonlyArray<SessionEntry>,
+		leafTurnId: string | null,
+		scope?: "leaf" | "upto",
+	) => ReadonlyArray<AgentMessage>;
 	/** Apply a route change only to this hosted session, leaving saved defaults alone. */
 	setSessionRouting?: (patch: { model?: string; thinkingLevel?: AcpThinkingLevel }) => void;
 	onActiveSessionAutonomyChange?: (level: AutonomyLevel | null) => void;
@@ -1285,6 +1300,17 @@ const ACP_MAX_TARGET_ID_BYTES = 128;
 const ACP_MAX_MODEL_ID_BYTES = 256;
 const ACP_MAX_LABEL_BYTES = 256;
 const ACP_REPLAY_META_KEY = "clio-coder/replay";
+const ACP_BRANCHES_META_KEY = "clio-coder/branches";
+
+/** Tree, switch and fork restore through the same readers `session/load` needs. */
+function branchesWired(options: ClioAcpServerOptions): boolean {
+	return (
+		options.session !== undefined &&
+		options.readSessionEntries !== undefined &&
+		options.buildReplayMessages !== undefined &&
+		options.chat.resetForSession !== undefined
+	);
+}
 
 function hasControlCharacters(value: string): boolean {
 	for (const character of value) {
@@ -2047,6 +2073,8 @@ export interface AcpHandshakeFeatures {
 	bus: boolean;
 	/** Whether `_clio-coder/session/board` answers; absent reads as false. */
 	board?: boolean;
+	/** Whether the session tree, branch switch and fork methods answer; absent reads as false. */
+	branches?: boolean;
 	/** Whether prompts are expanded, which is what admits image blocks; absent reads as false. */
 	images?: boolean;
 }
@@ -2271,6 +2299,16 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 							: {}),
 						...(features.toolRegistry ? { "clio-coder/tools": "mediated" } : {}),
 						...(features.board ? { [ACP_BOARD_META_KEY]: { version: 1, method: ACP_BOARD_METHOD } } : {}),
+						...(features.branches
+							? {
+									[ACP_BRANCHES_META_KEY]: {
+										version: 1,
+										tree: ACP_SESSION_TREE_METHOD,
+										switchTurn: ACP_SESSION_SWITCH_TURN_METHOD,
+										fork: ACP_SESSION_FORK_METHOD,
+									},
+								}
+							: {}),
 					},
 				},
 				authMethods:
@@ -2332,6 +2370,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			toolRegistry: options.toolRegistry !== undefined,
 			bus: options.bus !== undefined,
 			board: options.board !== undefined,
+			branches: branchesWired(options),
 			images: options.expandPrompt !== undefined,
 		});
 	const workspaceInstanceId = handshake.workspaceInstanceId;
@@ -2968,6 +3007,43 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		};
 	});
 
+	interface PreparedRestore {
+		leafTurnId: string | null;
+		replayMessages: ReadonlyArray<AgentMessage>;
+		replay: PreparedAcpReplay | undefined;
+	}
+	/**
+	 * Everything a restore reads, gathered before anything changes, so a read
+	 * failure leaves the bound session exactly as it was. `session/load`, a
+	 * fork, a /tree switch and a handoff all restore through here: one replay
+	 * projection, one provider context builder.
+	 */
+	const prepareRestore = (
+		id: string,
+		leafTurnId: string | null,
+		scope: "leaf" | "upto",
+		replayToClient: boolean,
+	): PreparedRestore => {
+		if (options.readSessionEntries === undefined || options.buildReplayMessages === undefined) {
+			throw new Error("session replay is not wired");
+		}
+		const entries = options.readSessionEntries(id);
+		return {
+			leafTurnId,
+			replayMessages: options.buildReplayMessages(entries, leafTurnId, scope),
+			replay: replayToClient ? prepareAcpReplay(entries, leafTurnId, id) : undefined,
+		};
+	};
+	/** Bind `session` as the one this process hosts, then replay its branch to the client. */
+	const bindRestored = (session: AcpServerSession, replay: PreparedAcpReplay | undefined): void => {
+		sessions.set(session.id, session);
+		boundSessionId = session.id;
+		announceCommands(session.id);
+		if (replay !== undefined) {
+			for (const replayParams of replay.params) options.transport.notify("session/update", replayParams);
+		}
+	};
+
 	const restoreSession = async (params: unknown, replayToClient: boolean) => {
 		requireInitialized();
 		requireAuthenticated();
@@ -2994,17 +3070,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
 
-		let leafTurnId: string | null;
-		let replayMessages: ReadonlyArray<AgentMessage>;
-		let replay: PreparedAcpReplay | undefined;
+		let restore: PreparedRestore;
 		try {
-			leafTurnId = options.session.tree(id).leafId;
-			const entries = options.readSessionEntries(id);
-			replayMessages = options.buildReplayMessages(entries, leafTurnId);
-			if (replayToClient) replay = prepareAcpReplay(entries, leafTurnId, id);
+			restore = prepareRestore(id, options.session.tree(id).leafId, "leaf", replayToClient);
 		} catch {
 			throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
 		}
+		const { leafTurnId, replayMessages, replay } = restore;
 
 		await attachClientMcpServers(clientMcpServers);
 		let resumed: SessionMeta;
@@ -3037,12 +3109,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			activePrompt: null,
 		};
 		sessionCreated = true;
-		sessions.set(id, session);
-		boundSessionId = id;
-		announceCommands(id);
-		if (replay !== undefined) {
-			for (const replayParams of replay.params) options.transport.notify("session/update", replayParams);
-		}
+		bindRestored(session, replay);
 		return {
 			...sessionConfig(session),
 			_meta: {
@@ -3134,6 +3201,151 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		getSession(request);
 		return projectSessionBoard(options.board());
+	});
+
+	const requireBranches = () => {
+		const session = options.session;
+		const resetForSession = options.chat.resetForSession;
+		if (!branchesWired(options) || session === undefined || resetForSession === undefined) {
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		}
+		return { session, resetForSession: resetForSession.bind(options.chat) };
+	};
+	/** A branch change rewrites the context a running turn is reading, so it waits for the turn. */
+	const requireIdle = (session: AcpServerSession, action: string): void => {
+		if (session.activePrompt !== null || activePromptState !== null || options.chat.isStreaming()) {
+			throw new AcpRequestError(-32602, `cannot ${action} during an active prompt`, { code: "prompt_active" });
+		}
+	};
+	const selectableTurn = (contract: SessionContract, sessionId: string, value: unknown): string => {
+		const turnId = requireBoundedClientString(value, "turnId", ACP_MAX_SESSION_ID_BYTES);
+		let kind: string | undefined;
+		try {
+			kind = contract.tree(sessionId).nodesById[turnId]?.kind;
+		} catch {
+			throw new AcpRequestError(-32603, "session tree could not be read", { code: "internal_error" });
+		}
+		if (kind === undefined || !isSelectableTreeNode(kind)) {
+			throw new AcpRequestError(-32602, "turn is not in this session", { code: "turn_unknown" });
+		}
+		return turnId;
+	};
+
+	options.transport.onRequest(ACP_SESSION_TREE_METHOD, (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		const { session } = requireBranches();
+		const bound = getSession(request);
+		try {
+			return projectSessionTree(session.tree(bound.id));
+		} catch {
+			throw new AcpRequestError(-32603, "session tree could not be read", { code: "internal_error" });
+		}
+	});
+
+	// Enter in /tree: the next request appends under the chosen turn, and the
+	// conversation is replayed as that branch. Sibling branches stay on disk.
+	options.transport.onRequest(ACP_SESSION_SWITCH_TURN_METHOD, (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "turnId"]));
+		const { session, resetForSession } = requireBranches();
+		const bound = getSession(request);
+		requireIdle(bound, "switch branches");
+		const turnId = selectableTurn(session, bound.id, request.turnId);
+		let restore: PreparedRestore;
+		try {
+			restore = prepareRestore(bound.id, turnId, "upto", true);
+		} catch {
+			throw new AcpRequestError(-32603, "branch could not be read", { code: "internal_error" });
+		}
+		try {
+			session.switchTurn(turnId);
+		} catch (error) {
+			options.diagnostics?.(`branch switch failed: ${acpErrorMessage(error)}`);
+			throw new AcpRequestError(-32603, "branch switch failed", { code: "internal_error" });
+		}
+		resetForSession(turnId, restore.replayMessages);
+		bindRestored(bound, restore.replay);
+		const replay = restore.replay;
+		return {
+			sessionId: bound.id,
+			leafId: turnId,
+			_meta: {
+				[ACP_SESSION_META_KEY]: sessionResultMeta(
+					bound,
+					true,
+					replay === undefined ? undefined : { turns: replay.turns, truncated: replay.truncated },
+				),
+			},
+		};
+	});
+
+	// /fork: a new session carrying the branch up to the chosen turn. The
+	// process follows the new session, as the terminal does, and the parent is
+	// closed on disk. Workspace files are never rewound.
+	options.transport.onRequest(ACP_SESSION_FORK_METHOD, (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "turnId"]));
+		const { session, resetForSession } = requireBranches();
+		const bound = getSession(request);
+		requireIdle(bound, "fork");
+		const turnId = selectableTurn(session, bound.id, request.turnId);
+		let meta: SessionMeta;
+		try {
+			meta = session.fork(turnId);
+		} catch (error) {
+			// The session domain keeps the parent current when a fork throws.
+			options.diagnostics?.(`fork failed: ${acpErrorMessage(error)}`);
+			throw new AcpRequestError(-32603, "fork failed", { code: "internal_error" });
+		}
+		if (
+			meta.id === bound.id ||
+			session.current()?.id !== meta.id ||
+			safeStoredIdentifier(meta.id, ACP_MAX_SESSION_ID_BYTES) === null
+		) {
+			throw new AcpRequestError(-32603, "fork failed", { code: "internal_error" });
+		}
+		// Route, autonomy and thinking are this process's, not the ledger's, so
+		// the child keeps what the parent's conversation was using.
+		const forked: AcpServerSession = {
+			...bound,
+			id: meta.id,
+			createdAt: meta.createdAt,
+			activePrompt: null,
+		};
+		sessions.delete(bound.id);
+		let replay: PreparedAcpReplay | undefined;
+		let replayFailed = false;
+		try {
+			const restore = prepareRestore(meta.id, session.tree(meta.id).leafId ?? turnId, "leaf", true);
+			resetForSession(restore.leafTurnId, restore.replayMessages);
+			replay = restore.replay;
+		} catch (error) {
+			// The child exists and is current. Binding follows it with an empty
+			// context, as the terminal does, rather than pointing at the parent.
+			options.diagnostics?.(`fork replay failed: ${acpErrorMessage(error)}`);
+			resetForSession(null);
+			replayFailed = true;
+		}
+		bindRestored(forked, replay);
+		return {
+			sessionId: forked.id,
+			parentSessionId: bound.id,
+			parentTurnId: turnId,
+			...sessionConfig(forked),
+			_meta: {
+				[ACP_SESSION_META_KEY]: {
+					...sessionResultMeta(
+						forked,
+						true,
+						replay === undefined ? undefined : { turns: replay.turns, truncated: replay.truncated },
+					),
+					...(replayFailed ? { replayFailed: true } : {}),
+				},
+			},
+		};
 	});
 
 	options.transport.onRequest("_clio-coder/session/label", (params) => {

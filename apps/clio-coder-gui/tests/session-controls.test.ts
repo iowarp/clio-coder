@@ -109,6 +109,87 @@ test("an older command peer refuses injected turns without submitting unrecognis
 		/"method":"session\/prompt"|"method":"_clio-coder\/commands\/invoke"/,
 	);
 });
+test("a branch switch replays only the chosen branch and a fork continues under the new session", {
+	timeout: 15000,
+}, async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const base = `/api/sessions/${session.id}`;
+	const events: Event[] = [];
+	t.after(h.hub.connect(undefined, (event) => events.push(event)));
+	const tree = await json(await h.request(`${base}/tree`), routes.sessionTree.response);
+	assert.equal(tree.leafId, "a3");
+	assert.deepEqual(
+		tree.nodes.filter((node) => node.active).map((node) => node.id),
+		["u1", "a1", "u3", "a3"],
+	);
+	assert.equal((await h.post(`${base}/turns`, { text: "A live request" })).status, 202);
+	assert.equal((await h.post(`${base}/branch`, { turnId: "a2" })).status, 409, "a running turn owns the context");
+	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status !== "running");
+	assert.equal((await h.post(`${base}/branch`, { turnId: "missing" })).status, 409);
+	assert.equal(h.supervisor.get(session.id).turns.length, 1, "a refused switch keeps the transcript");
+
+	const switched = await h.post(`${base}/branch`, { turnId: "a2" }, "switch-a2");
+	assert.equal(switched.status, 200);
+	assert.deepEqual(await switched.json(), { leafId: "a2", replayedTurns: 2 });
+	assert.equal((await h.post(`${base}/branch`, { turnId: "a2" }, "switch-a2")).status, 200);
+	const afterSwitch = h.supervisor.get(session.id);
+	assert.deepEqual(
+		afterSwitch.turns.map((turn) => [turn.id, turn.origin, turn.status]),
+		[
+			["replay-1", "replay", "succeeded"],
+			["replay-2", "replay", "succeeded"],
+		],
+	);
+	const words = afterSwitch.timeline.map((item) => item.text).join(" | ");
+	assert.match(words, /Measure the second sample/);
+	assert.doesNotMatch(words, /A live request|Try the other instrument/);
+	assert.equal(events.filter((event) => event.type === "session.reset").length, 1, "a retried switch is not replayed");
+
+	const forked = await h.post(`${base}/fork`, { turnId: "a1" });
+	assert.equal(forked.status, 200);
+	const result = await json(forked, routes.forkSession.response);
+	assert.notEqual(result.sessionId, session.id);
+	assert.deepEqual(
+		{ ...result, sessionId: "child" },
+		{ sessionId: "child", parentSessionId: session.id, parentTurnId: "a1", replayed: true },
+	);
+	assert.equal(h.supervisor.get(session.id).state, "closed");
+	const child = h.supervisor.get(result.sessionId);
+	assert.equal(child.state, "open");
+	assert.deepEqual(
+		child.timeline.map((item) => item.text),
+		["Earlier prompt", "Earlier reply"],
+	);
+	assert.ok(child.config?.options.some((option) => option.id === "model"));
+	const rows = JSON.parse(await readFile(join(h.home.path, "state", "gui", "children.json"), "utf8")) as Array<{
+		sessionId: string;
+	}>;
+	assert.ok(rows.some((row) => row.sessionId === result.sessionId));
+	assert.ok(!rows.some((row) => row.sessionId === session.id));
+	const mode = await h.request(`/api/sessions/${result.sessionId}/autonomy`);
+	assert.equal(mode.status, 200, "the forked conversation keeps its working freedom");
+	assert.deepEqual(await mode.json(), { level: "default", source: "settings" });
+	assert.equal((await h.post(`/api/sessions/${result.sessionId}/turns`, { text: "Continue here" })).status, 202);
+	await until(() => h.supervisor.get(result.sessionId).turns.at(-1)?.status !== "running");
+	assert.equal(h.supervisor.get(result.sessionId).turns.at(-1)?.status, "succeeded");
+	for (const event of events) assert.ok(Value.Check(Event, event), event.type);
+});
+
+test("an older ACP peer has no branches and refuses tree, switch and fork before sending", async (t) => {
+	const h = await harness();
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const base = `/api/sessions/${session.id}`;
+	assert.equal((await h.request(`${base}/tree`)).status, 409);
+	assert.equal((await h.post(`${base}/branch`, { turnId: "a1" })).status, 409);
+	assert.equal((await h.post(`${base}/fork`, { turnId: "a1" })).status, 409);
+	assert.doesNotMatch(await readFile(join(h.home.path, "acp.jsonl"), "utf8"), /session\/(tree|switch_turn|fork)/);
+});
+
 test("permission allows once, restores pending snapshot, and rejects stale/duplicate conflicting decisions", {
 	timeout: 15000,
 }, async (t) => {

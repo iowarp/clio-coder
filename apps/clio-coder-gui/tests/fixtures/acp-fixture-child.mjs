@@ -226,6 +226,60 @@ const invokeTask = (argv) => {
 		? { level: "success", lines: [`${task.id} ${task.status}`] }
 		: { level: "error", lines: [`no task ${rest[0]}`] };
 };
+// The /tree a real agent projects from its ledger: a first exchange, then two
+// branches under its reply. The newest, a sibling question, is where the next
+// request lands until a person moves the append point.
+const TREE_TURNS = {
+	u1: { parentId: null, kind: "user", preview: "Earlier prompt", reply: null },
+	a1: { parentId: "u1", kind: "assistant", preview: "Earlier reply", reply: null },
+	u2: { parentId: "a1", kind: "user", preview: "Measure the second sample", reply: null },
+	a2: { parentId: "u2", kind: "assistant", preview: "The second sample reads 4.2", reply: null },
+	u3: { parentId: "a1", kind: "user", preview: "Try the other instrument", reply: null },
+	a3: { parentId: "u3", kind: "assistant", preview: "The other instrument agrees", reply: null },
+};
+let treeLeaf = "a3";
+const treePath = (leaf) => {
+	const path = [];
+	for (let id = leaf; id; id = TREE_TURNS[id]?.parentId) path.unshift(id);
+	return path;
+};
+const sessionTree = () => {
+	const active = new Set(treePath(treeLeaf));
+	return {
+		version: 1,
+		sessionId,
+		leafId: treeLeaf,
+		parentSessionId: null,
+		parentTurnId: null,
+		nodes: Object.entries(TREE_TURNS).map(([id, node], index) => ({
+			id,
+			parentId: node.parentId,
+			kind: node.kind,
+			at: `2026-09-26T09:00:0${index}.000Z`,
+			label: id === "a1" ? "Baseline" : null,
+			preview: node.preview,
+			active: active.has(id),
+			selectable: true,
+		})),
+		truncated: false,
+	};
+};
+/** The replay `session/load` sends, restricted to one branch's path. */
+const replayPath = (leaf) => {
+	let turn = 0;
+	for (const id of treePath(leaf)) {
+		const node = TREE_TURNS[id];
+		if (node.kind === "user") turn++;
+		update(
+			{
+				sessionUpdate: node.kind === "user" ? "user_message_chunk" : "agent_message_chunk",
+				content: { type: "text", text: node.preview },
+			},
+			{ "clio-coder/replay": { turn } },
+		);
+	}
+	return turn;
+};
 // Visual review can ask the smoke scenario to advertise safe settings and targets, so the composer's
 // route chip shows a reported model. The smoke itself leaves it off and asserts the missing controls.
 const ROUTE = process.env.CLIO_CODER_WEB_FIXTURE_ROUTE === "1";
@@ -381,6 +435,12 @@ async function handle(frame) {
 														...(process.env.CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS !== "0" ? { promptTurns: true } : {}),
 													},
 													"clio-coder/board": { version: 1, method: "_clio-coder/session/board" },
+													"clio-coder/branches": {
+														version: 1,
+														tree: "_clio-coder/session/tree",
+														switchTurn: "_clio-coder/session/switch_turn",
+														fork: "_clio-coder/session/fork",
+													},
 												}
 											: {}),
 									},
@@ -569,6 +629,41 @@ async function handle(frame) {
 				if (!COMMANDS) throw Error("method_not_found");
 				result = BOARD;
 				break;
+			case "_clio-coder/session/tree":
+				if (!COMMANDS) throw Error("method_not_found");
+				result = sessionTree();
+				break;
+			case "_clio-coder/session/switch_turn": {
+				if (!COMMANDS) throw Error("method_not_found");
+				if (!TREE_TURNS[frame.params.turnId]) throw Error("turn_unknown");
+				treeLeaf = frame.params.turnId;
+				const turns = replayPath(treeLeaf);
+				result = {
+					sessionId,
+					leafId: treeLeaf,
+					_meta: { "clio-coder/session": { replayed: { turns, truncated: false } } },
+				};
+				break;
+			}
+			case "_clio-coder/session/fork": {
+				if (!COMMANDS) throw Error("method_not_found");
+				const turnId = frame.params.turnId;
+				if (!TREE_TURNS[turnId]) throw Error("turn_unknown");
+				const parentSessionId = sessionId;
+				sessionId = randomUUID();
+				treeLeaf = turnId;
+				update({ sessionUpdate: "available_commands_update", availableCommands: [] });
+				const turns = replayPath(turnId);
+				log({ forked: sessionId, from: parentSessionId, at: turnId });
+				result = {
+					sessionId,
+					parentSessionId,
+					parentTurnId: turnId,
+					configOptions: configOptions(),
+					_meta: { "clio-coder/session": { resumed: true, replayed: { turns, truncated: false } } },
+				};
+				break;
+			}
 			case "_clio-coder/session/steer": {
 				const followUp = frame.params.mode === "end-of-turn";
 				(followUp ? queues.followUp : queues.steer).push(frame.params.text);

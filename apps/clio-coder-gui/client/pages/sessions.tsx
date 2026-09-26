@@ -9,6 +9,7 @@ import { clock, formatTime } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
 import { sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
+import { BranchPanel } from "../chat/BranchPanel.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { CommandPanel } from "../chat/CommandPanel.js";
 import { Composer, fillComposer } from "../chat/Composer.js";
@@ -384,6 +385,14 @@ function SessionTools({
 						<p>Checking session controls…</p>
 					)}
 					<SessionBoardPanel
+						client={client}
+						sessionId={session.id}
+						sessionOpen={session.state === "open"}
+						capabilities={capabilities}
+						settledTurns={session.turns.filter((turn) => turn.status !== "running").length}
+						running={session.turns.at(-1)?.status === "running"}
+					/>
+					<BranchPanel
 						client={client}
 						sessionId={session.id}
 						sessionOpen={session.state === "open"}

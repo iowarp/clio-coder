@@ -2878,9 +2878,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							// can switch sessions between turns, and a fork opened this way
 							// must separate its own transactions from the ones it inherited
 							// exactly as the interactive path does.
-							buildReplayMessages: (entries: ReadonlyArray<SessionEntry>, leafTurnId: string | null) =>
+							// `upto` is the /tree switch's historical cut, the same option the
+							// terminal passes there; a live leaf keeps sidecars written after it.
+							buildReplayMessages: (
+								entries: ReadonlyArray<SessionEntry>,
+								leafTurnId: string | null,
+								scope: "leaf" | "upto" = "leaf",
+							) =>
 								buildModelReplayAgentMessagesFromTurns(entries, {
-									...(leafTurnId === null ? {} : { activeLeafTurnId: leafTurnId }),
+									...(leafTurnId === null
+										? {}
+										: scope === "upto"
+											? { uptoTurnId: leafTurnId }
+											: { activeLeafTurnId: leafTurnId }),
 									continuity: continuityContextFromSession(session),
 								}),
 						}

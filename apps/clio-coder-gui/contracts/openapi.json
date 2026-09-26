@@ -9872,6 +9872,29 @@
 											},
 											"additionalProperties": false
 										},
+										"branches": {
+											"type": "object",
+											"required": ["version", "tree", "switchTurn", "fork"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"tree": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"switchTurn": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"fork": {
+													"type": "string",
+													"maxLength": 128
+												}
+											},
+											"additionalProperties": false
+										},
 										"images": {
 											"type": "boolean"
 										},
@@ -11046,6 +11069,594 @@
 											]
 										},
 										"truncated": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/tree": {
+			"get": {
+				"operationId": "sessionTree",
+				"summary": "The conversation's branches, as the terminal's /tree shows them",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["version", "sessionId", "leafId", "parentSessionId", "parentTurnId", "nodes", "truncated"],
+									"properties": {
+										"version": {
+											"type": "number",
+											"const": 1
+										},
+										"sessionId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"leafId": {
+											"anyOf": [
+												{
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"parentSessionId": {
+											"anyOf": [
+												{
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"parentTurnId": {
+											"anyOf": [
+												{
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"nodes": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "parentId", "kind", "at", "label", "preview", "active", "selectable"],
+												"properties": {
+													"id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 128
+													},
+													"parentId": {
+														"anyOf": [
+															{
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"kind": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "user"
+															},
+															{
+																"type": "string",
+																"const": "assistant"
+															},
+															{
+																"type": "string",
+																"const": "tool_call"
+															},
+															{
+																"type": "string",
+																"const": "tool_result"
+															},
+															{
+																"type": "string",
+																"const": "system"
+															},
+															{
+																"type": "string",
+																"const": "checkpoint"
+															},
+															{
+																"type": "string",
+																"const": "compaction"
+															},
+															{
+																"type": "string",
+																"const": "branch"
+															}
+														]
+													},
+													"at": {
+														"type": "string",
+														"maxLength": 64
+													},
+													"label": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 300
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"preview": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 300
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"active": {
+														"type": "boolean"
+													},
+													"selectable": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 400
+										},
+										"truncated": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/branch": {
+			"post": {
+				"operationId": "switchSessionBranch",
+				"summary": "Continue this conversation from an earlier turn; other branches are kept",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["turnId"],
+								"properties": {
+									"turnId": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["leafId", "replayedTurns"],
+									"properties": {
+										"leafId": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 128
+										},
+										"replayedTurns": {
+											"type": "integer",
+											"minimum": 0
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/fork": {
+			"post": {
+				"operationId": "forkSession",
+				"summary": "Start a new conversation from a turn; workspace files are not rewound",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["turnId"],
+								"properties": {
+									"turnId": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["sessionId", "parentSessionId", "parentTurnId", "replayed"],
+									"properties": {
+										"sessionId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"parentSessionId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"parentTurnId": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 128
+										},
+										"replayed": {
 											"type": "boolean"
 										}
 									},
@@ -33196,6 +33807,50 @@
 									},
 									"recoveredOrphan": {
 										"type": "boolean"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "session.reset"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "reason"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"reason": {
+										"type": "string",
+										"const": "branch"
 									}
 								},
 								"additionalProperties": false
