@@ -25,5 +25,6 @@ export {
 	type ShareScope,
 	writeShareArchive,
 } from "./archive.js";
+export { archiveCommandHost } from "./archive-commands.js";
 export type { ShareContract } from "./contract.js";
 export { ShareManifest } from "./manifest.js";

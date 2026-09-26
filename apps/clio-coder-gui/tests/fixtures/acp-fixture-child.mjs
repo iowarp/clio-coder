@@ -224,6 +224,18 @@ const COMMANDS =
 						args: { positionals: [{ name: "name", required: true }] },
 					},
 					{
+						name: "council",
+						summary: "Ask a roster the same task",
+						usage: "/council [--roster <name>] <task>",
+						group: "Work",
+						streams: "dispatch",
+						promptTurn: true,
+						args: {
+							flags: [{ name: "--roster", takesValue: true }],
+							positionals: [{ name: "task", required: true, rest: true }],
+						},
+					},
+					{
 						name: "tasks",
 						summary: "Keep your own task list",
 						usage: "/tasks <add|hand|done|drop>",
@@ -632,6 +644,26 @@ async function handle(frame) {
 										: scenario;
 				cancelled = false;
 				if (scenario === "crash") process.exit(9);
+				if (promptText.startsWith("/council ")) {
+					// The council's dispatch call is announced in the turn, as the agent's host does.
+					update({
+						sessionUpdate: "tool_call",
+						toolCallId: "council-1",
+						title: "dispatch",
+						kind: "other",
+						status: "in_progress",
+						rawInput: { mode: "council", roster: "review", task: promptText.slice(9) },
+					});
+					await delay(60);
+					update({
+						sessionUpdate: "tool_call_update",
+						toolCallId: "council-1",
+						status: "completed",
+						content: [{ type: "content", content: { type: "text", text: "council dispatched: 2 members" } }],
+					});
+					result = { stopReason: "end_turn", _meta: { "clio-coder/usage": usage } };
+					break;
+				}
 				if (promptText.startsWith("/tasks ") || promptText.startsWith("/skill ")) {
 					if (promptText.startsWith("/tasks ")) {
 						const argv = promptText.slice(7).trim().split(/\s+/u);

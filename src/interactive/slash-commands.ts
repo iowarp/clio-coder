@@ -839,6 +839,13 @@ export interface SlashCommandContext {
 	/** Serialize a local async command so the next admitted slash command observes its committed state. */
 	runLocalOperation?: (operation: () => Promise<void>) => void;
 	/**
+	 * A command whose work outlives its handler (`/oracle`, `/council`) hands
+	 * that work here. A host that answers when the work ends, as ACP does, waits
+	 * for it; the terminal leaves this absent and the work runs on beside the
+	 * prompt, as it always has.
+	 */
+	holdReplyFor?: (operation: Promise<void>) => void;
+	/**
 	 * Apply a thinking level named on the command line. Returns why it was
 	 * refused so the caller can say so, because the level the operator typed may
 	 * not be one the active target supports.
@@ -1678,10 +1685,11 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			if (command.kind !== "oracle") return;
-			void (async () => {
+			const operation = (async () => {
 				await handleOracle(command.question, ctx);
 				ctx.render();
 			})();
+			ctx.holdReplyFor?.(operation);
 		},
 	},
 	{
@@ -1733,10 +1741,11 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind !== "council") return;
 			// The question the round answers sits above its cards, as a /run's does.
 			ctx.echoOperatorCommand?.(command.source);
-			void (async () => {
+			const operation = (async () => {
 				await handleCouncil(command.task, command.options, ctx);
 				ctx.render();
 			})();
+			ctx.holdReplyFor?.(operation);
 		},
 	},
 	{

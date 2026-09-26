@@ -498,7 +498,8 @@ while a turn runs or when the peer cannot record command turns. Hand submits a v
 request and keeps its output, tools, approvals, cancellation and final outcome in that turn. When
 the task changes state, focus moves to its remaining action. Commands that inject work, including
 skills, use the same prompt lifecycle and await settlement; task add, done and drop remain bounded
-control replies. An older peer refuses injecting commands locally rather than receiving slash text
+control replies. A command whose calls can need approval, `/council`, is sent as a conversation turn
+too, so its dispatch call and the plan approval it parks appear in that turn like a model's. An older peer refuses injecting commands locally rather than receiving slash text
 it would send to the model.
 
 Branches in Session tools are the terminal's /tree and /fork. Requests and replies are rows,

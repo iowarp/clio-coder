@@ -89,6 +89,14 @@ export interface AcpCommandRule {
 	 * prompted; that is the contract, not a protocol violation.
 	 */
 	injectsUserTurn?: true;
+	/**
+	 * The command's work runs as a conversation turn: the tool calls it makes on
+	 * the operator's behalf, and the approvals they park, belong to a
+	 * `session/prompt` the client can see. `/council` is one because a council
+	 * is a plan-scale dispatch that supervised autonomy parks for approval, and
+	 * an approval with no visible call to bind to is refused.
+	 */
+	promptTurn?: true;
 }
 
 /**
@@ -106,7 +114,7 @@ export const ACP_COMMAND_RULES: ReadonlyArray<AcpCommandRule> = [
 	{ name: "run", streams: "dispatch" },
 	{ name: "delegate", streams: "dispatch" },
 	{ name: "oracle", streams: "dispatch", injectsUserTurn: true },
-	{ name: "council", streams: "dispatch" },
+	{ name: "council", streams: "dispatch", promptTurn: true },
 	// `/skill <name>` submits the expanded skill as a user turn; `/skill off` does not.
 	{ name: "skill", injectsUserTurn: true },
 	{ name: "context", subcommands: ["compact", "recall", "init", "refresh", "reset"] },
@@ -203,6 +211,7 @@ export interface AcpCommandDescriptor {
 	requiresSubcommand?: true;
 	streams?: "dispatch";
 	injectsUserTurn?: true;
+	promptTurn?: true;
 }
 
 export interface AcpCommandCatalog {
@@ -295,6 +304,7 @@ export function acpCommandCatalog(host?: AcpCommandHost): AcpCommandCatalog {
 			...(rule.subcommands !== undefined ? { requiresSubcommand: true as const } : {}),
 			...(rule.streams !== undefined ? { streams: rule.streams } : {}),
 			...(rule.injectsUserTurn === true ? { injectsUserTurn: true as const } : {}),
+			...(rule.promptTurn === true ? { promptTurn: true as const } : {}),
 		});
 	}
 	return { version: 1, commands };
@@ -338,7 +348,6 @@ export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "pro
 			SlashCommandContext,
 			| "clearSkillSurface"
 			| "exportShareArchive"
-			| "exportTranscript"
 			| "getAgentRoleFacts"
 			| "getDecisionBoard"
 			| "importShareArchive"
@@ -358,6 +367,8 @@ export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "pro
 		runCompact?: AcpHostOperation<Parameters<SlashCommandContext["runCompact"]>>;
 		runContextRecall?: AcpHostOperation<[ref: string]>;
 		runContextRefresh?: AcpHostOperation<[]>;
+		/** Write the session transcript; the reply says where, or why not. */
+		exportTranscript?: AcpHostOperation<[path?: string]>;
 		runInit?: AcpHostOperation<Parameters<SlashCommandContext["runInit"]>>;
 		cwd?: string;
 		/**
@@ -510,7 +521,15 @@ export function invokeAcpCommand(
 	}
 	const pending: Promise<void>[] = [];
 	const ctx = headlessContext(host, notice, push, pending);
-	const outcome = dispatchSlashCommand(parsed, ctx);
+	let outcome: ReturnType<typeof dispatchSlashCommand>;
+	try {
+		outcome = dispatchSlashCommand(parsed, ctx);
+	} catch (error) {
+		// A handler that throws (an archive written to a path that cannot hold
+		// it) has an outcome a client can read, not a protocol fault.
+		notice("error", `${rule.name} failed: ${error instanceof Error ? error.message : String(error)}`);
+		return Promise.resolve(finish());
+	}
 	if (outcome === "rejected") rank = NOTICE_LEVELS.length - 1;
 	// A dispatch command returns before its worker produces anything, and a
 	// silent success would read as a control that did nothing.
@@ -554,6 +573,11 @@ function headlessContext(
 			notice("error", `${label} failed: ${error instanceof Error ? error.message : String(error)}`);
 			return;
 		}
+		// A host that finished at once answers at once; its report is the result too.
+		if (isHostReport(result)) {
+			notice(result.level, result.text);
+			return;
+		}
 		if (!(result instanceof Promise)) return;
 		pending.push(
 			result.then(
@@ -590,6 +614,15 @@ function headlessContext(
 			: {}),
 		...(runContextRefresh ? { runContextRefresh: () => awaited("context refresh", () => runContextRefresh()) } : {}),
 		...(host.runLocalOperation ? { runLocalOperation: host.runLocalOperation } : {}),
+		// The reply waits for a command's own long work, so `/oracle` answers with
+		// what it did and a prompt-turn command ends after the note it submits.
+		holdReplyFor: (operation) => {
+			pending.push(
+				operation.catch((error: unknown) => {
+					notice("error", `command failed: ${error instanceof Error ? error.message : String(error)}`);
+				}),
+			);
+		},
 		...(host.clearSkillSurface ? { clearSkillSurface: host.clearSkillSurface } : {}),
 		...(host.seedTaskMemory ? { seedTaskMemory: host.seedTaskMemory } : {}),
 		...(host.userTasks ? { userTasks: host.userTasks } : {}),
@@ -617,11 +650,12 @@ function headlessContext(
 			awaited("context compact", () => runCompact(instructions));
 		},
 		exportTranscript: (path) => {
-			if (!host.exportTranscript) {
+			const exportTranscript = host.exportTranscript;
+			if (!exportTranscript) {
 				notice("error", "export is not wired in this session; no session is bound to this process");
 				return;
 			}
-			host.exportTranscript(path);
+			awaited("export", () => exportTranscript(path));
 		},
 		submitChat: (text) => {
 			if (!submitTurn) {
@@ -685,6 +719,8 @@ export interface AcpCommandControl {
 	invoke(request: { command: unknown; argv: unknown }): AcpCommandResult | Promise<AcpCommandResult>;
 	/** True when this command name submits a user turn, which a live prompt owns. */
 	injectsUserTurn(command: unknown): boolean;
+	/** True when this command's work must run inside a `session/prompt` turn; absent reads as false. */
+	promptTurn?(command: unknown): boolean;
 	/** Announced verbatim under `clio-coder/commands`. */
 	capability: Readonly<Record<string, unknown>>;
 }
@@ -701,6 +737,7 @@ export function acpCommandControl(host: AcpCommandHost): AcpCommandControl {
 			return invokeAcpCommand(request, host);
 		},
 		injectsUserTurn: (command) => typeof command === "string" && RULE_BY_NAME.get(command)?.injectsUserTurn === true,
+		promptTurn: (command) => typeof command === "string" && RULE_BY_NAME.get(command)?.promptTurn === true,
 		capability: { ...ACP_COMMANDS_CAPABILITY, count: availableRules(host).length },
 	};
 }

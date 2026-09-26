@@ -13,9 +13,10 @@
  */
 
 import type { OracleResult } from "../domains/agents/index.js";
-import { decisionRationale } from "../domains/session/decision-board.js";
-import type { DecisionLedgerEntry } from "../domains/session/entries.js";
-import type { TaskBoardTask } from "../domains/session/task-board.js";
+import { decisionRationale, foldDecisionBoard } from "../domains/session/decision-board.js";
+import type { DecisionLedgerEntry, SessionEntry } from "../domains/session/entries.js";
+import { foldTaskBoard, type TaskBoardTask } from "../domains/session/task-board.js";
+import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 
 /** The recipe `/oracle` dispatches. Shadow, so `/run` can never reach it. */
 export const ORACLE_AGENT_ID = "oracle";
@@ -57,6 +58,30 @@ export interface OracleDigestSources {
 	/** The most recent compaction summary on the active branch, or null when the session never compacted. */
 	compactionSummary: string | null;
 	question: string;
+}
+
+/**
+ * The record `/oracle` briefs its advisor on, read off the active branch. The
+ * entries are filtered to the branch first, the same way the task board,
+ * compaction and the finish contract read them (issue #94): after a `/tree`
+ * switch the raw file still holds the abandoned turns, and an unscoped fold
+ * would brief the advisor on decisions the operator walked away from. The
+ * terminal and ACP hosts both read it here.
+ */
+export function oracleBriefingFromEntries(
+	entries: ReadonlyArray<SessionEntry>,
+	leafTurnId: string | undefined,
+): Omit<OracleDigestSources, "question"> {
+	const active = filterEntriesToActivePath(entries, leafTurnId);
+	let compactionSummary: string | null = null;
+	for (const entry of active) {
+		if (entry.kind === "compactionSummary") compactionSummary = entry.summary;
+	}
+	return {
+		decisions: foldDecisionBoard(active),
+		tasks: foldTaskBoard(active)?.tasks ?? [],
+		compactionSummary,
+	};
 }
 
 export interface OracleDigest {

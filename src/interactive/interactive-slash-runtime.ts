@@ -19,11 +19,8 @@ import {
 } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
-import { foldDecisionBoard } from "../domains/session/decision-board.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
-import { foldTaskBoard } from "../domains/session/task-board.js";
-import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
-import type { ShareContract } from "../domains/share/index.js";
+import { archiveCommandHost, type ShareContract } from "../domains/share/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { stripTerminalSequences } from "../engine/tui.js";
@@ -37,7 +34,7 @@ import { appendNotice, appendOperatorAside, appendOperatorCommand, appendReferen
 import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
 import { withContinuityReplay } from "./model-session-replay.js";
-import type { OracleDigestSources } from "./oracle.js";
+import { type OracleDigestSources, oracleBriefingFromEntries } from "./oracle.js";
 import type { PendingModelScope } from "./overlays/model-scope.js";
 import { renderDoctorReport } from "./renderers/doctor-report.js";
 import {
@@ -256,27 +253,11 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	const resources = deps.resources;
 	const userTasks = deps.userTasks;
 
-	/**
-	 * The record `/oracle` briefs its advisor on. Entries are filtered to the
-	 * active branch first, the same way the task board, compaction, and the
-	 * finish contract read them (issue #94): after a `/tree` switch the raw file
-	 * still holds the abandoned turns, and an unscoped fold would brief the
-	 * advisor on decisions the operator walked away from.
-	 */
 	const oracleBriefingSources = (): Omit<OracleDigestSources, "question"> => {
 		const sessionId = deps.chat.getSessionId();
 		if (sessionId === null) return { decisions: [], tasks: [], compactionSummary: null };
 		const leafTurnId = deps.session?.tree(sessionId).leafId ?? undefined;
-		const entries = filterEntriesToActivePath(deps.readStructuredEntries(sessionId), leafTurnId);
-		let compactionSummary: string | null = null;
-		for (const entry of entries) {
-			if (entry.kind === "compactionSummary") compactionSummary = entry.summary;
-		}
-		return {
-			decisions: foldDecisionBoard(entries),
-			tasks: foldTaskBoard(entries)?.tasks ?? [],
-			compactionSummary,
-		};
+		return oracleBriefingFromEntries(deps.readStructuredEntries(sessionId), leafTurnId);
 	};
 
 	const appendCommandNotice: SlashCommandContext["notice"] = (level, text) => {
@@ -490,28 +471,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		...(deps.operatorExtensions ? { operatorExtensions: deps.operatorExtensions } : {}),
 		...(deps.showExtensionOutput ? { showExtensionOutput: deps.showExtensionOutput } : {}),
 		listAgents: () => deps.agents?.listSpecs().filter((spec) => spec.audience !== "internal") ?? [],
-		exportShareArchive: (outPath) => {
-			if (!deps.share) throw new Error("share domain is not loaded");
-			const path = resolve(outPath);
-			const archive = deps.share.writeArchive(path, { scope: "project" });
-			return { fileCount: archive.files.length, path };
-		},
-		importShareArchive: (archivePath, options) => {
-			if (!deps.share) {
-				return {
-					archive: null,
-					actions: [],
-					diagnostics: [{ type: "error", message: "share domain is not loaded" }],
-				};
-			}
-			const importOptions = {
-				...(options.dryRun ? { dryRun: true } : {}),
-				...(options.force ? { force: true } : {}),
-			};
-			return options.dryRun
-				? deps.share.planImport(resolve(archivePath), importOptions)
-				: deps.share.importArchive(resolve(archivePath), importOptions);
-		},
+		...archiveCommandHost(deps.share),
 		openUsage: deps.openUsage,
 		openSideQuestion: deps.openSideQuestion,
 		openDraft: deps.openDraft,

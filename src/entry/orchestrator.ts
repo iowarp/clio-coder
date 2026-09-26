@@ -203,13 +203,20 @@ import {
 } from "../domains/session/protected-artifacts.js";
 import { resumedSessionRoute } from "../domains/session/resumed-route.js";
 import { createTaskBoardStore } from "../domains/session/task-board.js";
+import { writeTranscriptExport } from "../domains/session/transcript-export.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { latestUserImages } from "../domains/session/vision-images.js";
-import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
+import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
 import { type AcpHostReport, acpCommandControl } from "../engine/acp/commands.js";
+import {
+	createHostToolEvents,
+	followWorkerRuns,
+	oracleBriefingFromEntries,
+	runHostDispatch,
+} from "../engine/acp/host-members.js";
 import {
 	type AcpHandoffControl,
 	type AcpSafeSettingsPatch,
@@ -2874,6 +2881,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}
 			}
 		});
+		const acpWorkerRuns = followWorkerRuns(bus);
+		const acpHostToolEvents = createHostToolEvents();
 		try {
 			const transport = options.acp.transport ?? createStdioServerTransport(options.acp.transportOptions);
 			const code = await serveClioAcpAgent({
@@ -3088,6 +3097,37 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								getDecisionBoard: () => decisionBoard.snapshot(),
 								isTurnInFlight: () => chat.isStreaming(),
 								seedTaskMemory: seedCurrentTaskMemoryFromHandoff,
+								// `/council` enters the registry as the dispatch call a model makes, under
+								// a call id the turn announces, so its plan approval binds to that call.
+								runCouncilDispatch: (args) => runHostDispatch(toolRegistry, acpHostToolEvents, args),
+								// `/share` picks from the runs this process watched, folded from the
+								// dispatch lifecycle exactly as the terminal's worker blocks are.
+								listWorkerRuns: () => acpWorkerRuns.list(),
+								...(session
+									? {
+											exportTranscript: (path?: string): AcpHostReport =>
+												writeTranscriptExport({
+													sessionId: chat.getSessionId(),
+													leafTurnId: (id) => session.tree(id).leafId,
+													readEntries: readSessionEntriesForCompact,
+													cwd: process.cwd(),
+													...(path === undefined ? {} : { path }),
+												}),
+										}
+									: {}),
+								...(share ? archiveCommandHost(share) : {}),
+								...(session
+									? {
+											oracleBriefing: () => {
+												const sessionId = chat.getSessionId();
+												if (sessionId === null) return { decisions: [], tasks: [], compactionSummary: null };
+												return oracleBriefingFromEntries(
+													readSessionEntriesForCompact(sessionId),
+													session.tree(sessionId).leafId ?? undefined,
+												);
+											},
+										}
+									: {}),
 								// The context verbs the TUI reaches through its hub. Each answers the
 								// wire client with how it ended, because nothing else reaches one.
 								...(session
@@ -3172,6 +3212,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}
 					: {}),
 				toolRegistry,
+				hostToolEvents: acpHostToolEvents,
 				...(toolBootstrap.mcpCapabilities ? { mcpCapabilities: toolBootstrap.mcpCapabilities } : {}),
 				bus,
 				autonomy: resolveBaselineAutonomy,
@@ -3219,6 +3260,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			await result.stop();
 			return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
 		} finally {
+			acpWorkerRuns.dispose();
 			unsubscribeAcpRoutingNotices();
 			unsubscribeAcpLoopGuardStop();
 		}

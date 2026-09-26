@@ -822,7 +822,7 @@ export class Supervisor {
 			throw new AppProblem("conflict", "This Clio build exposes no operator commands.");
 		const catalog = await this.commands(id);
 		const command = catalog.commands.find((row) => row.name === body.command);
-		if (command?.injectsUserTurn && (body.command !== "tasks" || body.argv?.[0] === "hand")) {
+		if ((command?.injectsUserTurn && (body.command !== "tasks" || body.argv?.[0] === "hand")) || command?.promptTurn) {
 			if (entry.client.capabilities.commands.promptTurns !== true)
 				throw new AppProblem(
 					"conflict",

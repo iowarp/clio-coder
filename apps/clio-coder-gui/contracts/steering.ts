@@ -119,6 +119,8 @@ export const CommandDescriptor = Type.Object(
 		streams: Type.Optional(Type.Literal("dispatch")),
 		/** The command puts a user turn into the session outside any prompt. */
 		injectsUserTurn: Type.Optional(Type.Literal(true)),
+		/** The command's calls and approvals belong to a conversation turn, so it is sent as one. */
+		promptTurn: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );

@@ -95,6 +95,28 @@ test("a task hand command owns a visible turn, waits for output, and admits the 
 	assert.equal(h.supervisor.get(session.id).turns.at(-1)?.status, "succeeded");
 });
 
+test("a prompt-turn command runs as a visible turn with its dispatch call inside it", async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const response = await h.post(`/api/sessions/${session.id}/commands`, {
+		command: "council",
+		argv: ["--roster", "review", "Compare the samples"],
+	});
+	assert.equal(response.status, 200);
+	const snapshot = h.supervisor.get(session.id);
+	assert.equal(snapshot.turns.at(-1)?.prompt, "/council --roster review Compare the samples");
+	assert.equal(snapshot.turns.at(-1)?.status, "succeeded");
+	assert.ok(
+		snapshot.timeline.some((item) => item.kind === "tool" && item.title === "dispatch" && item.status === "completed"),
+	);
+	assert.doesNotMatch(
+		await readFile(join(h.home.path, "acp.jsonl"), "utf8"),
+		/"method":"_clio-coder\/commands\/invoke"/,
+	);
+});
+
 test("an older command peer refuses injected turns without submitting unrecognised slash text", async (t) => {
 	const h = await harness({}, { scenario: "markdown", env: { CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS: "0" } });
 	t.after(h.close);

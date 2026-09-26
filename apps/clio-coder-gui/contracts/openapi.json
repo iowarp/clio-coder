@@ -13252,6 +13252,10 @@
 													"injectsUserTurn": {
 														"type": "boolean",
 														"const": true
+													},
+													"promptTurn": {
+														"type": "boolean",
+														"const": true
 													}
 												},
 												"additionalProperties": false

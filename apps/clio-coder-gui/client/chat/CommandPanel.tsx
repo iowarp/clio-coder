@@ -82,6 +82,11 @@ function Arguments({ command, subcommand }: { command: CommandDescriptor; subcom
 			{command.injectsUserTurn ? (
 				<p className="command-panel__note">This action may add a user turn to the conversation.</p>
 			) : null}
+			{command.promptTurn ? (
+				<p className="command-panel__note">
+					This runs as a conversation turn, so the calls it makes and any approval they need appear there.
+				</p>
+			) : null}
 			{command.name === "doctor" ? <p className="command-panel__note">Deep checks may probe a live local model.</p> : null}
 		</>
 	);

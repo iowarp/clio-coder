@@ -237,6 +237,14 @@ export interface ClioAcpServerOptions {
 		images: ReadonlyArray<{ type: "image"; mimeType: string; data: string }>,
 	) => Promise<AcpPromptExpansion>;
 	toolRegistry?: ToolRegistry;
+	/**
+	 * Tool calls the host makes on the operator's behalf inside a prompt turn,
+	 * such as the dispatch a `/council` command starts. They arrive as the same
+	 * engine-shaped `tool_execution_*` events the chat emits and are announced
+	 * as the turn's own calls, so an approval one parks binds to a call the
+	 * client can see.
+	 */
+	hostToolEvents?: { onEvent(handler: (event: AcpServerEvent) => void): () => void };
 	mcpCapabilities?: Pick<McpCapabilitySource, "attachClientServers" | "detachClientServers">;
 	bus?: SafeEventBus;
 	autonomy?: () => AutonomyLevel;
@@ -3028,7 +3036,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			?.commands.filter(
 				(command) =>
 					(command.injectsUserTurn !== true || options.chat.whenSettled !== undefined) &&
-					(command.streams === undefined || command.injectsUserTurn === true),
+					(command.streams === undefined || command.injectsUserTurn === true || command.promptTurn === true),
 			)
 			.map((command) => ({
 				name: command.name,
@@ -3899,6 +3907,14 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				reason: "steer-instead",
 			});
 		}
+		// A prompt-turn command asks for approvals that bind to a call on the
+		// wire, and outside a prompt there is no turn to put that call in. It is
+		// refused here with the path that works, rather than admitted and denied.
+		if (options.commands.promptTurn?.(request.command) === true) {
+			throw new AcpRequestError(-32602, "this command runs as a conversation turn; send it as a prompt", {
+				code: "prompt_turn_required",
+			});
+		}
 		return options.commands.invoke({ command: request.command, argv: request.argv });
 	});
 
@@ -4217,13 +4233,18 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			settle = resolveSettled;
 		});
 		options.onActiveSessionAutonomyChange?.(session.autonomy);
-		const unsubscribe = options.chat.onEvent((event) =>
+		const onTurnEvent = (event: AcpServerEvent) =>
 			handleChatEvent(event, options.transport, session.id, active, canonicalCwd, options.diagnostics, () => {
 				permission.cancelPending("tool call limit exceeded");
 				options.toolRegistry?.cancelParkedCalls("tool call limit exceeded");
 				options.chat.cancel();
-			}),
-		);
+			});
+		const unsubscribeChat = options.chat.onEvent(onTurnEvent);
+		const unsubscribeHost = options.hostToolEvents?.onEvent(onTurnEvent);
+		const unsubscribe = () => {
+			unsubscribeChat();
+			unsubscribeHost?.();
+		};
 		try {
 			const trimmed = text.trim();
 			const commandMatch = /^\/([a-z][a-z0-9_-]*)(?:\s+([\s\S]*))?$/u.exec(trimmed);

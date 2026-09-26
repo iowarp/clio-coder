@@ -228,6 +228,12 @@ const STAGE0_SEAMS: ReadonlyArray<Stage0Seam> = [
 		allowStage0OverlapFrom: [ORCHESTRATOR],
 	},
 	{
+		module: "src/engine/acp/host-members.ts",
+		reason:
+			"the ACP host's members for /share, /oracle and /council: the worker-run fold and the oracle briefing the terminal also uses, and the host-made dispatch call. Only the Stage 1 composition root reaches it, the same root that already overlaps Stage 0 through the chat loop.",
+		allowStage0OverlapFrom: [ORCHESTRATOR],
+	},
+	{
 		module: "src/engine/acp/transport.ts",
 		reason: "the Stage 1 composition root owns ACP stdio transport construction.",
 	},
