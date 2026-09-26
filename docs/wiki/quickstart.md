@@ -8,12 +8,12 @@ Content pages include front matter naming their sources, symbols, and tests. Sta
 
 ## Source installation
 
-For the Clio Coder v0.5.7 release, install from its published tag:
+To inspect this developing reference alongside its source, build the `v057`
+development branch:
 
 ```bash
-git clone https://github.com/iowarp/clio-coder.git
+git clone --branch v057 https://github.com/iowarp/clio-coder.git
 cd clio-coder
-git checkout v0.5.7
 pnpm install --frozen-lockfile
 pnpm run install:local
 ```
