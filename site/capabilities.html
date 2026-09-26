@@ -1,177 +1,635 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Clio Coder capabilities — models, tools, safety, and fleets</title>
-<meta name="description" content="What Clio Coder actually does: targets, coded safety, sealed receipts, reversible context, fleets, scientific checks, and composition with other agents.">
-<meta name="theme-color" content="#000000">
-<link rel="canonical" href="https://coder.iowarp.ai/capabilities.html">
-<link rel="icon" href="assets/logo.webp" type="image/webp">
-<link rel="apple-touch-icon" href="assets/logo-512.webp">
-<link rel="preload" href="assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="css/site.css">
-<script src="js/theme.js"></script>
-<meta property="og:site_name" content="Clio Coder">
-<meta property="og:type" content="website">
-<meta property="og:title" content="Capabilities — Clio Coder">
-<meta property="og:description" content="The mechanisms, not the slogans. Targets, receipts, fleets, and the limits said on the same page.">
-<meta property="og:url" content="https://coder.iowarp.ai/capabilities.html">
-<meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Clio Coder. Your models. Your science. Local or cloud models, bounded workers, and work you can inspect.">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Capabilities — Clio Coder">
-<meta name="twitter:description" content="The mechanisms, not the slogans. Targets, receipts, fleets, and the limits said on the same page.">
-<meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png">
-<meta name="twitter:image:alt" content="Clio Coder. Your models. Your science. Local or cloud models, bounded workers, and work you can inspect.">
-</head>
-<body>
-<a class="skip" href="#content">Skip to content</a>
-<p class="spine">IOWarp · Clio Coder · field instrument</p>
-<header class="mast">
-  <div class="mast-row">
-    <a class="brand" href="index.html">
-      <img src="assets/logo.webp" width="36" height="36" alt="">
-      <span class="brand-name">Clio Coder</span>
-    </a>
-    <nav class="nav" aria-label="Primary">
-      <a href="capabilities.html" aria-current="page">Capabilities</a>
-      <a href="harness.html">Harness</a>
-      <a href="library.html">Library</a>
-      <a href="docs.html">Docs</a>
-      <a href="learn.html">Learn</a>
-      <a href="compare.html">Compare</a>
-      <a href="vision.html">Vision</a>
-    </nav>
-    <div class="mast-actions">
-      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to paper theme">
-        <span class="theme-icon" aria-hidden="true">□</span> <span>Paper</span>
-      </button>
-      <a class="btn" href="start.html">Install</a>
-      <details class="nav-more">
-        <summary>Menu</summary>
-        <div class="nav-more-menu">
-          <a href="capabilities.html">Capabilities</a>
-          <a href="harness.html">Harness</a>
-          <a href="library.html">Library</a>
-          <a href="docs.html">Docs</a>
-          <a href="learn.html">Learn</a>
-          <a href="compare.html">Compare</a>
-          <a href="vision.html">Vision</a>
-          <a href="start.html">Install</a>
-          <a href="share.html">Post on X</a>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Capabilities — Clio Coder</title>
+    <meta
+      name="description"
+      content="Explore local and cloud models, scientific verification, runtime safety policy, bounded workers, context, and run evidence in Clio Coder."
+    />
+    <meta name="theme-color" content="#000000" />
+    <link rel="canonical" href="https://coder.iowarp.ai/capabilities.html" />
+    <link rel="icon" href="assets/logo.webp" type="image/webp" />
+    <link rel="apple-touch-icon" href="assets/logo-512.webp" />
+    <link
+      rel="preload"
+      href="assets/fonts/plex-sans.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="css/brand.css" />
+    <link rel="stylesheet" href="css/site.css" />
+    <script src="js/theme.js"></script>
+    <meta property="og:site_name" content="Clio Coder" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Capabilities — Clio Coder" />
+    <meta
+      property="og:description"
+      content="The mechanisms, not the slogans. Targets, receipts, fleets, and the limits said on the same page."
+    />
+    <meta
+      property="og:url"
+      content="https://coder.iowarp.ai/capabilities.html"
+    />
+    <meta
+      property="og:image"
+      content="https://coder.iowarp.ai/assets/social-card.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Clio Coder. AI coding for the code science runs on. Local and cloud models, bounded workers, and inspectable checks."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Capabilities — Clio Coder" />
+    <meta
+      name="twitter:description"
+      content="The mechanisms, not the slogans. Targets, receipts, fleets, and the limits said on the same page."
+    />
+    <meta
+      name="twitter:image"
+      content="https://coder.iowarp.ai/assets/social-card.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="Clio Coder. AI coding for the code science runs on. Local and cloud models, bounded workers, and inspectable checks."
+    />
+  </head>
+  <body>
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="mast">
+      <div class="mast-row">
+        <a class="brand" href="index.html"
+          ><img src="assets/logo.webp" width="36" height="36" alt="" /><span
+            class="brand-name"
+            >Clio Coder</span
+          ></a
+        >
+        <nav class="nav" aria-label="Primary">
+          <details class="nav-product">
+            <summary>Product</summary>
+            <div class="nav-product-menu">
+              <a href="capabilities.html"
+                ><strong>Capabilities</strong
+                ><span>Models, tools, workers, and context</span></a
+              ><a href="harness.html"
+                ><strong>How it works</strong
+                ><span>Inside the open runtime</span></a
+              ><a href="compare.html"
+                ><strong>Integrations</strong
+                ><span>Work with other coding agents</span></a
+              ><a href="vision.html"
+                ><strong>About Clio</strong
+                ><span>Project, people, and status</span></a
+              >
+            </div>
+          </details>
+          <a href="docs.html">Docs</a><a href="learn.html">Learn</a
+          ><a href="library.html">Library</a>
+        </nav>
+        <div class="mast-actions">
+          <a
+            class="source-link"
+            href="https://github.com/iowarp/clio-coder"
+            aria-label="Clio Coder on GitHub"
+            >GitHub ↗</a
+          ><button
+            class="theme-toggle"
+            type="button"
+            data-theme-toggle
+            aria-label="Switch to light theme"
+          >
+            <span aria-hidden="true">◐</span></button
+          ><a class="btn btn-small" href="start.html"
+            >Get started <span aria-hidden="true">↗</span></a
+          >
+          <details class="nav-more">
+            <summary>Menu</summary>
+            <div class="nav-more-menu">
+              <a href="capabilities.html">Capabilities</a
+              ><a href="harness.html">How it works</a
+              ><a href="docs.html">Documentation</a
+              ><a href="learn.html">Learning labs</a
+              ><a href="library.html">Library</a
+              ><a href="compare.html">Integrations</a
+              ><a href="vision.html">About Clio</a
+              ><a href="start.html">Get started</a
+              ><a href="https://github.com/iowarp/clio-coder">GitHub ↗</a>
+            </div>
+          </details>
         </div>
-      </details>
-    </div>
-  </div>
-  <p class="issue"><b>Issue 0.5.6</b><span>Instrument index</span><span>Package and schemas outrank this page</span></p>
-</header>
-<main class="page" id="content">
-  <p class="kicker">What is actually built</p>
-  <h1 class="display">The loop,<br><em>opened.</em></h1>
-  <p class="lede">This is the catalog. It is not a promise that every path has been exercised on your cluster. Released behavior is the git tag. The guides linked here are a snapshot shipped with this draft of the site.</p>
-
-  <section class="section" id="targets">
-    <div class="section-head"><h2 class="section-title">Targets</h2><p>A saved connection is a target. Chat, workers, and optional memory can each use a different one.</p></div>
-    <dl class="defn">
-      <div><dt>On your machine</dt><dd>Ollama, LM Studio, llama.cpp, vLLM, SGLang, Lemonade. Tool calling has to be real. Clio Coder will not pretend a model that cannot call tools can.</dd></div>
-      <div><dt>A gateway</dt><dd>LiteLLM, OpenAI-compatible and Anthropic-compatible endpoints. The lab’s server is a first-class place to work, not a fallback.</dd></div>
-      <div><dt>Cloud and subscriptions</dt><dd>OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, DeepSeek, Amazon Bedrock, Inception Mercury. ChatGPT through <code>openai-codex</code>. Claude through <code>anthropic-max</code>.</dd></div>
-      <div><dt>Institutional inference</dt><dd>Argonne ALCF Sophia and Metis through Globus OAuth. <a href="docs.html?d=architecture/alcf-provider.md">ALCF provider</a>.</dd></div>
-      <div><dt>A warm prefix</dt><dd>The compiled prompt is reused byte for byte so a local server’s prefix cache stays warm. Clio Coder tells you when a turn went cold. <a href="docs.html?d=architecture/context-engine.md">Context engine</a>.</dd></div>
-      <div><dt>Session routing</dt><dd>The model you pick for this turn does not have to rewrite <code>settings.yaml</code>. Overlays are session-local. Persisted settings stay put.</dd></div></dl>
-  </section>
-
-  <section class="section" id="safety">
-    <div class="section-head"><h2 class="section-title">Safety is code</h2><p>The prompt describes the rules. The registry enforces them whether or not the model followed the description.</p></div>
-    <dl class="defn">
-      <div><dt>Two levels</dt><dd><code>default</code> runs workspace reads, edits, and recognized checks, and asks before unfamiliar commands, outward actions, and plan-scale dispatch. <code>yolo</code> clears those ordinary stops. It never outranks hard blocks, damage-control confirmations, or protected paths.</dd></div>
-      <div><dt>Who may set it</dt><dd>Only the operator, in user settings, <code>/settings</code>, <code>configure</code>, <code>--autonomy</code>, or an ACP session mode. Project settings cannot set autonomy. No tool, skill, worker, or model output can raise it. As of 0.5.6 the retired names <code>auto-edit</code>, <code>full-auto</code>, <code>suggest</code>, and <code>read-only</code> are refused.</dd></div>
-      <div><dt>Workers</dt><dd>Every dispatched worker and external peer runs at default, whatever the session level. Read-only is a dispatch restriction, not a third autonomy level.</dd></div>
-      <div><dt>Zero-access paths</dt><dd><code>.env</code>, <code>~/.ssh/</code>, <code>*.pem</code>, credentials, <code>.git/config</code>. Neither read nor written. A bash command that names one is blocked. Links are resolved before the judgment, so a symlink cannot walk out of scope.</dd></div>
-      <div><dt>Damage control</dt><dd>Recursive deletes, force pushes, <code>git reset --hard</code>, curl piped to a shell, cloud deletion commands, unbounded SQL deletes. Rules match each command a shell string would run, including chains, <code>sh -c</code>, and substitutions inside double quotes.</dd></div>
-      <div><dt>Project policy</dt><dd>A <code>.clio-coder/safety.yaml</code> takes effect only after the operator approves its exact bytes with <code>clio-coder config trust safety</code>.</dd></div>
-      <div><dt>Not an OS sandbox</dt><dd>Commands, hooks, and external agents run with your user permissions. Environment filtering narrows what a child inherits. It does not isolate the child. Vendor sandboxes do something Clio Coder does not. This page will not blur that.</dd></div></dl>
-    <p class="actions"><a class="btn btn-ghost" href="docs.html?d=architecture/safety-model.md">Safety model guide</a></p>
-  </section>
-
-  <section class="section" id="evidence">
-    <div class="section-head"><h2 class="section-title">Evidence</h2><p>A result you cannot reopen is a rumor.</p></div>
-    <dl class="defn">
-      <div><dt>Receipt</dt><dd>An immutable, cryptographically sealed record of a completed run: tools, tokens, validation grounding, outcome. Integrity version 20. The hash is the run’s, not a decoration on this website.</dd></div>
-      <div><dt>Trust algebra</dt><dd>Five axes: artifact integrity, validation grounding, independent review, context provenance, completion evidence. No axis promotes another. <code>absent</code>, <code>unknown</code>, and <code>not_applicable</code> are states. The compact line is fixed: who claims the result, what was observed, what was independently checked, what is still unknown.</dd></div>
-      <div><dt>Finish contract</dt><dd>A turn that changed files looks for validation evidence or a limitation receipt. With neither, the model is told to report the change as unverified.</dd></div>
-      <div><dt>Host checks</dt><dd>Checks named in a dispatch run on the host after the worker finishes. The worker’s report is a claim until then.</dd></div>
-      <div><dt>Trace</dt><dd>A SQLite mirror beside the ledger. Rebuildable. <code>clio-coder trace</code> can list runs, phases, and processes without pretending the trace is the science.</dd></div>
-      <div><dt>Memory</dt><dd>Approved, evidence-linked records. The rules-only tier is on by default and makes no model call. An LLM memory tier is opt-in, on its own target, and does not change the action agent’s tools. <a href="docs.html?d=guide/proactive-memory.md">Proactive memory</a>.</dd></div></dl>
-  </section>
-
-  <section class="section" id="context">
-    <div class="section-head"><h2 class="section-title">Context that can come back</h2><p>Summaries that throw the original away are how long sessions go quietly wrong.</p></div>
-    <dl class="defn">
-      <div><dt>Working set</dt><dd>The part of the ledger the model sees next. Eviction removes a body from that view. It does not delete the ledger entry, the transcript, <code>/resume</code>, <code>/fork</code>, or the HTML export.</dd></div>
-      <div><dt>Markers</dt><dd>The stub that replaces an evicted body is byte-stable. No timestamp, no counter. A marker that drifted would cold-start the prefix cache on a turn that evicted nothing new.</dd></div>
-      <div><dt>Recall</dt><dd><code>/context recall</code> or the context tool re-admits a body by ref. The marker stays, so the cache prefix is untouched.</dd></div>
-      <div><dt>Handbook</dt><dd><code>CLIO-CODER.md</code>, human-owned, versioned with the project. <code>clio-coder context init</code> drafts it. Runtime state stays under <code>.clio-coder/</code>.</dd></div>
-      <div><dt>Codewiki</dt><dd>A Tree-sitter index for large trees. Parsing does not run on the interactive input loop. A workspace that has never been indexed is not scanned in the background at session start.</dd></div>
-      <div><dt>Tree, fork, export</dt><dd><code>/tree</code>, <code>/fork</code>, <code>/resume</code>. <code>/export</code> writes HTML. <code>/export notes.md</code> writes Markdown. Compaction has a recovery path if a handoff is interrupted.</dd></div></dl>
-  </section>
-
-  <section class="section" id="fleets">
-    <div class="section-head"><h2 class="section-title">Workers and fleets</h2><p>A worker is a subprocess with a recipe, a ceiling, and a receipt. Distance does not change the protocol.</p></div>
-    <dl class="defn">
-      <div><dt>Capability class</dt><dd><code>read-only</code>, <code>verification</code>, <code>artifact-write</code>, <code>workspace-edit</code>. The class is the maximum mutation boundary, not a suggestion in the prompt.</dd></div>
-      <div><dt>Shipped agents</dt><dd>architect, coder, debugger, documenter, git-master, tester, verifier, wiki-writer. Shadow and internal: scout, researcher, world-knowledge, provenance, oracle, context-bootstrap. Scout may cite only a line it actually read.</dd></div>
-      <div><dt>Contracts</dt><dd>A recipe can require a result shape. A small model that gathered the right evidence gets two repair rounds with the validator’s own reason, then the run fails. It is not failed in silence for a shape mistake nobody named.</dd></div>
-      <div><dt>Topologies</dt><dd>Parallel, sequential, pipeline, review, compete, council, fleet. Shipped contracts: build-test, build-review, sdlc. Compete and council are gates, not vibes.</dd></div>
-      <div><dt>SSH</dt><dd>The same NDJSON protocol, tunneled. <code>localhost</code> in a worker target means that node’s inference server. Remote nodes are expected to see the project at the same absolute path. Doctor checks the parity.</dd></div>
-      <div><dt>Worktrees and leases</dt><dd>A task can run in its own git worktree. One checkout-writer lease per checkout. A second process is refused rather than interleaved.</dd></div>
-      <div><dt>Steering</dt><dd>Enter steers a live turn. Ctrl+Q queues. Escape interrupts. Alt+W is the fleet board. Origin glyphs: ◇ you asked, ◆ the model asked.</dd></div></dl>
-    <p class="actions"><a class="btn btn-ghost" href="docs.html?d=guide/fleet-dispatch.md">Fleet dispatch</a> <a class="btn btn-ghost" href="docs.html?d=guide/built-in-agents.md">Built-in agents</a></p>
-  </section>
-
-  <section class="section" id="science">
-    <div class="section-head"><h2 class="section-title">The code science runs on</h2><p>Ordinary engineering works. The extra surface is why this exists.</p></div>
-    <dl class="defn">
-      <div><dt>verify</dt><dd>Runs the checks the repository already declares: pytest, unittest, Cargo, Go, CMake presets, Make, just, CI scripts. Compares numerical results. Holds performance budgets.</dd></div>
-      <div><dt>Slurm</dt><dd>Through the clio-kit MCP server: submit, poll, cancel, fetch output. The skill stamps the scheduler result. It does not invent a second scheduler. <a href="docs.html?d=guide/slurm.md">Slurm guide</a>.</dd></div>
-      <div><dt>MCP gateway</dt><dd>One gateway in front of configured servers. Project servers need an explicit trust decision. <a href="https://toolkit.iowarp.ai">toolkit.iowarp.ai</a> is the scientific kit beside this harness.</dd></div>
-      <div><dt>Materio</dt><dd>A materials-research plugin: literature from a supplied corpus, a virtual lab, an assumption-driven task plan, inspected artifacts, a reviewed handoff. Domain knowledge, not a hidden host capability. <a href="library.html#materio">Library</a>.</dd></div>
-      <div><dt>Research skills</dt><dd>arXiv literature cards, experiment protocols, scientific debugging, scientific modernization, Slurm jobs. Procedures with a boundary, not a chatbot persona.</dd></div></dl>
-  </section>
-
-  <section class="section" id="compose">
-    <div class="section-head"><h2 class="section-title">Composition</h2><p>The other agent can be a worker. It does not have to be the landlord.</p></div>
-    <dl class="defn">
-      <div><dt>Peers</dt><dd>Claude Code, Codex, OpenCode, Antigravity CLI, Pi. ACP where a recipe exists, headless CLI, or a Herdr pane. A pane is a handoff and has no managed receipt. Selection is explicit.</dd></div>
-      <div><dt>Clio Coder as a peer</dt><dd><code>clio-coder acp</code> serves editors and hosts. Session list, resume, modes, and configuration are advertised. The custom methods live under the <code>_clio-coder/</code> prefix ACP reserves.</dd></div>
-      <div><dt>Library, both ways</dt><dd>This repository is a Claude Code marketplace. Codex can link the same skill trees. Nothing is converted. Packages that a peer would misread as native agents are left out of that projection, and the pin script says why.</dd></div>
-      <div><dt>Extensions</dt><dd>Command tools in Node or Python, declared, digest-checked, still subject to the safety policy. An extension is not a sandbox and not a plugin. Plugins are the domain bundles. <a href="harness.html">Harness</a>.</dd></div>
-      <div><dt>Panes</dt><dd>Optional Herdr panes beside the session, and a Yazi files pane. Off unless you turn them on. Clio Coder does not edit Herdr’s config for you.</dd></div></dl>
-  </section>
-
-  <section class="section" id="limits">
-    <div class="section-head"><h2 class="section-title">Limits, on the same page</h2><p>A capability page that omits these is an advertisement.</p></div>
-    <div class="stamps">
-      <span class="stamp stamp-dash">Experimental 0.5.6</span>
-      <span class="stamp stamp-dash">Terminal-first</span>
-      <span class="stamp stamp-amber">GUI alpha</span>
-      <span class="stamp stamp-brick">Not an OS sandbox</span>
-      <span class="stamp stamp-dash">Windows: best effort</span>
-      <span class="stamp stamp-dash">Self-edit gate deferred</span>
-    </div>
-    <p>The graphical application is an opt-in preview for docs, sessions, and telemetry. It claims no parity with the terminal. Commands run with your user permissions, not an operating-system sandbox. The self-edit gate — evidence required before Clio Coder edits its own high-authority harness paths — is designed and not enforced. A naive path glob would have blocked ordinary edits you asked for. That was refused. See <a href="vision.html">Vision</a>.</p>
-  </section>
-
-  <footer class="colophon">
-    <div><span class="brand-name">Clio Coder</span><p>Part of <a href="https://iowarp.ai">IOWarp</a>.</p></div>
-    <div><p>Guides: <a href="docs.html">documentation reader</a>. Source: <a href="https://github.com/iowarp/clio-coder">iowarp/clio-coder</a>.</p></div>
-    <div class="colo-links"><a href="learn.html">Labs</a><a href="harness.html">Harness</a><a href="compare.html">Compare</a></div>
-    <p class="colo-fine">If a sentence here and the installed package disagree, the package, schemas, and contract tests win.</p>
-  </footer>
-</main>
-<script src="js/site.js"></script>
-</body>
+      </div>
+    </header>
+    <main class="page" id="content">
+      <section class="page-intro">
+        <p class="eyebrow">Product / Capabilities</p>
+        <h1>A coding agent.<br />A complete working loop.</h1>
+        <p class="lede">
+          Read a repository, make a focused change, run its checks, and delegate
+          an independent review. Clio brings these steps into one inspectable
+          runtime.
+        </p>
+      </section>
+      <nav class="section-nav" aria-label="On this page">
+        <a href="#science">Scientific workflows</a><a href="#targets">Models</a
+        ><a href="#safety">Policy</a><a href="#fleets">Workers</a
+        ><a href="#context">Context</a><a href="#evidence">Evidence</a
+        ><a href="#compose">Integrations</a><a href="#limits">Status</a>
+      </nav>
+      <section class="detail-section" id="science">
+        <div class="detail-heading">
+          <h2>Built around your<br />verification workflow.</h2>
+          <p>
+            Use your project’s existing tests and scientific acceptance
+            criteria.
+          </p>
+        </div>
+        <div class="detail-body">
+          <dl class="defn">
+            <div>
+              <dt>Repository tools</dt>
+              <dd>
+                Read, search, edit, and run commands through typed tools. Tool
+                calls pass through a shared admission and safety policy.
+              </dd>
+            </div>
+            <div>
+              <dt>Declared verification</dt>
+              <dd>
+                The <code>verify</code> tool supports pytest, unittest, Cargo,
+                Go, CMake presets, Make, just, and scripts already used by CI.
+                It can compare numerical results and apply performance budgets.
+              </dd>
+            </div>
+            <div>
+              <dt>Scientific infrastructure</dt>
+              <dd>
+                Connect configured MCP servers through one gateway. Slurm job
+                workflows use the clio-kit MCP server to submit, poll, cancel,
+                and fetch job output.
+              </dd>
+            </div>
+            <div>
+              <dt>Research procedures</dt>
+              <dd>
+                Reusable skills cover scientific debugging, modernization,
+                literature cards, and experiment protocols. The
+                <a href="library.html#materio">Materio plugin</a> bundles a
+                materials-research workflow.
+              </dd>
+            </div>
+          </dl>
+          <a class="text-link" href="docs.html?d=guide/tool-usage.md"
+            >Tool usage guide <span aria-hidden="true">→</span></a
+          >
+        </div>
+      </section>
+      <section class="detail-section" id="targets">
+        <div class="detail-heading">
+          <h2>Your model is<br />a connection you choose.</h2>
+          <p>
+            A saved model connection is called a target. Chat, workers, and
+            optional model-assisted memory can each use a different target.
+          </p>
+        </div>
+        <div class="detail-body">
+          <dl class="defn">
+            <div>
+              <dt>Self-hosted</dt>
+              <dd>Ollama, LM Studio, llama.cpp, vLLM, SGLang, and Lemonade.</dd>
+            </div>
+            <div>
+              <dt>Gateways</dt>
+              <dd>
+                LiteLLM, OpenAI-compatible APIs, and Anthropic-compatible
+                endpoints.
+              </dd>
+            </div>
+            <div>
+              <dt>Cloud APIs</dt>
+              <dd>
+                OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, DeepSeek,
+                Amazon Bedrock, and Inception Mercury.
+              </dd>
+            </div>
+            <div>
+              <dt>Subscription sign-in</dt>
+              <dd>
+                ChatGPT through <code>openai-codex</code> and Claude through
+                <code>anthropic-max</code>.
+              </dd>
+            </div>
+            <div>
+              <dt>Institutional inference</dt>
+              <dd>Argonne ALCF Sophia and Metis through Globus OAuth.</dd>
+            </div>
+            <div>
+              <dt>Predictable routing</dt>
+              <dd>
+                Switch the session model without changing saved defaults.
+                Compiled prompts are reused byte for byte to support prefix
+                caching; cold turns are reported.
+              </dd>
+            </div>
+          </dl>
+          <p>
+            Tool calling, context size, and reasoning support depend on the
+            model and server.
+          </p>
+          <a
+            class="text-link"
+            href="docs.html?d=guide/configuration-and-targets.md"
+            >Configure connections and targets
+            <span aria-hidden="true">→</span></a
+          >
+        </div>
+      </section>
+      <section class="detail-section" id="safety">
+        <div class="detail-heading">
+          <h2>Explicit rules<br />for real tool calls.</h2>
+          <p>
+            The prompt explains policy. The runtime applies it at execution
+            time.
+          </p>
+        </div>
+        <div class="detail-body">
+          <dl class="defn">
+            <div>
+              <dt>Operator-controlled autonomy</dt>
+              <dd>
+                <code>default</code> admits workspace reads, edits, and
+                recognized checks, while asking before unfamiliar commands,
+                outward actions, and larger dispatches.
+                <code>yolo</code> removes ordinary approval stops; hard blocks,
+                protected paths, and damage-control rules still apply.
+              </dd>
+            </div>
+            <div>
+              <dt>Protected paths</dt>
+              <dd>
+                Credential paths such as <code>.env</code>,
+                <code>~/.ssh/</code>, and private keys are protected from tool
+                reads and writes. Paths and symlinks are checked before
+                execution.
+              </dd>
+            </div>
+            <div>
+              <dt>Damage control</dt>
+              <dd>
+                Shell commands are parsed and scanned for destructive
+                operations, including recursive deletes, force pushes, shell
+                chains, and substitutions.
+              </dd>
+            </div>
+            <div>
+              <dt>Trusted project policy</dt>
+              <dd>
+                A project <code>.clio-coder/safety.yaml</code> takes effect
+                after the operator approves its exact bytes with
+                <code>clio-coder config trust safety</code>.
+              </dd>
+            </div>
+            <div>
+              <dt>Worker limits</dt>
+              <dd>
+                Dispatched workers run at <code>default</code>, even when the
+                main session uses <code>yolo</code>. A read-only task is a
+                dispatch restriction, not another autonomy level.
+              </dd>
+            </div>
+          </dl>
+          <div class="note note-amber">
+            <p>
+              <strong>Commands run with your user permissions.</strong> Clio’s
+              tool policy is not an operating-system sandbox. Hooks and external
+              agents have their own execution boundaries.
+            </p>
+          </div>
+          <a class="text-link" href="docs.html?d=architecture/safety-model.md"
+            >Understand the safety model <span aria-hidden="true">→</span></a
+          >
+        </div>
+      </section>
+      <section class="detail-section" id="fleets">
+        <div class="detail-heading">
+          <h2>Small assignments.<br />Coordinated workflows.</h2>
+          <p>
+            A worker gets a role, model, tool ceiling, budget, and expected
+            result. A fleet combines workers into a repeatable workflow.
+          </p>
+        </div>
+        <div class="detail-body">
+          <dl class="defn">
+            <div>
+              <dt>Focused roles</dt>
+              <dd>
+                Use architect, coder, debugger, documenter, git-master, tester,
+                verifier, and wiki-writer recipes.
+              </dd>
+            </div>
+            <div>
+              <dt>Capability ceilings</dt>
+              <dd>
+                Read-only, verification, artifact-write, and workspace-edit
+                define the maximum mutation boundary for a task.
+              </dd>
+            </div>
+            <div>
+              <dt>Workflow topologies</dt>
+              <dd>
+                Parallel, sequential, pipeline, review, compete, council, and
+                fleet arrangements. Shipped contracts include build-test,
+                build-review, and sdlc.
+              </dd>
+            </div>
+            <div>
+              <dt>Independent host checks</dt>
+              <dd>
+                Checks declared in a dispatch run on the host after a worker
+                finishes, separately from the worker’s report.
+              </dd>
+            </div>
+            <div>
+              <dt>Worktrees and write leases</dt>
+              <dd>
+                A task can use its own Git worktree. A checkout-writer lease
+                prevents multiple writers from using the same checkout
+                concurrently.
+              </dd>
+            </div>
+            <div>
+              <dt>Across SSH nodes</dt>
+              <dd>
+                The worker protocol can run over SSH. Remote nodes must see the
+                project at the same absolute path; <code>localhost</code> refers
+                to that node’s model server.
+              </dd>
+            </div>
+          </dl>
+          <pre><code>/run verifier Review the current diff and run the relevant existing checks. Do not edit files.</code></pre>
+          <a class="text-link" href="docs.html?d=guide/fleet-dispatch.md"
+            >Workers and fleet dispatch <span aria-hidden="true">→</span></a
+          >
+        </div>
+      </section>
+      <section class="detail-section" id="context">
+        <div class="detail-heading">
+          <h2>A large project.<br />A recoverable conversation.</h2>
+          <p>
+            Control what enters the model’s context while retaining the
+            underlying session record.
+          </p>
+        </div>
+        <div class="detail-body">
+          <dl class="defn">
+            <div>
+              <dt>Project handbook</dt>
+              <dd>
+                Version your build commands, conventions, and validation rules
+                in <code>CLIO-CODER.md</code>.
+                <code>clio-coder context init</code> drafts the handbook and
+                builds the code index.
+              </dd>
+            </div>
+            <div>
+              <dt>Code index</dt>
+              <dd>
+                A Tree-sitter index helps navigate large code trees. Parsing
+                stays outside the interactive input loop.
+              </dd>
+            </div>
+            <div>
+              <dt>Working set and recall</dt>
+              <dd>
+                Eviction removes content from the next model view without
+                deleting the ledger or transcript. Stable markers support
+                prefix-cache reuse; <code>/context recall</code> can restore an
+                observation.
+              </dd>
+            </div>
+            <div>
+              <dt>Session continuity</dt>
+              <dd>
+                Use <code>/tree</code>, <code>/fork</code>, and
+                <code>/resume</code> to branch or recover a conversation.
+                <code>/export</code> writes HTML;
+                <code>/export notes.md</code> writes Markdown.
+              </dd>
+            </div>
+          </dl>
+          <a class="text-link" href="docs.html?d=guide/context-continuity.md"
+            >Context continuity guide <span aria-hidden="true">→</span></a
+          >
+        </div>
+      </section>
+      <section class="detail-section" id="evidence">
+        <div class="detail-heading">
+          <h2>Keep the record<br />behind the result.</h2>
+          <p>
+            Inspect changes and observed checks after a run, including what
+            remains unknown.
+          </p>
+        </div>
+        <div class="detail-body">
+          <dl class="defn">
+            <div>
+              <dt>Sealed run records</dt>
+              <dd>
+                Completed runs produce immutable receipts with integrity checks,
+                tool activity, token use, validation grounding, and outcome.
+              </dd>
+            </div>
+            <div>
+              <dt>Separate trust states</dt>
+              <dd>
+                Artifact integrity, validation grounding, independent review,
+                context provenance, and completion evidence are distinct.
+                Unknown, absent, and not applicable remain explicit states.
+              </dd>
+            </div>
+            <div>
+              <dt>Unverified changes stay visible</dt>
+              <dd>
+                After a file-changing turn, the finish contract looks for
+                validation evidence or a limitation record. Without either, the
+                model is instructed to report the change as unverified.
+              </dd>
+            </div>
+            <div>
+              <dt>Trace and memory</dt>
+              <dd>
+                A rebuildable SQLite trace mirrors the ledger. Memory records
+                are approved and linked to evidence; rules-only memory is
+                enabled by default, while model-assisted memory is opt-in.
+              </dd>
+            </div>
+          </dl>
+          <pre><code>clio-coder evidence list
+clio-coder evidence inspect &lt;evidenceId&gt;</code></pre>
+          <p>
+            Recorded checks establish observations, not scientific truth.
+            Validate against your own reference data and acceptance criteria.
+          </p>
+          <a
+            class="text-link"
+            href="docs.html?d=architecture/evidence-and-memory.md"
+            >Evidence and memory architecture
+            <span aria-hidden="true">→</span></a
+          >
+        </div>
+      </section>
+      <section class="detail-section" id="compose">
+        <div class="detail-heading">
+          <h2>Connect the rest<br />of your toolkit.</h2>
+          <p>
+            Reuse procedures and coordinate specialist tools without hiding
+            their limits.
+          </p>
+        </div>
+        <div class="detail-body">
+          <dl class="defn">
+            <div>
+              <dt>Coding-agent peers</dt>
+              <dd>
+                Claude Code, Codex, OpenCode, Pi, and Antigravity CLI can take
+                managed tasks or open in a companion pane, depending on the
+                connector. A pane handoff has no managed run receipt.
+              </dd>
+            </div>
+            <div>
+              <dt>Editors through ACP</dt>
+              <dd>
+                <code>clio-coder acp</code> exposes Clio to hosts using the
+                Agent Client Protocol, including session resume, modes, and
+                configuration.
+              </dd>
+            </div>
+            <div>
+              <dt>Skills and domain plugins</dt>
+              <dd>
+                Browse portable procedures and Clio-native agents, prompts, and
+                fleets in the <a href="library.html">resource library</a>.
+              </dd>
+            </div>
+            <div>
+              <dt>Declared extensions</dt>
+              <dd>
+                Node and Python command tools use declared schemas, timeouts,
+                and digests, with tool policy still applied.
+              </dd>
+            </div>
+            <div>
+              <dt>Optional panes</dt>
+              <dd>
+                Herdr provides companion panes; Yazi provides a file pane. Both
+                are opt-in.
+              </dd>
+            </div>
+          </dl>
+          <a class="text-link" href="compare.html">Integration options →</a>
+        </div>
+      </section>
+      <section class="detail-section" id="limits">
+        <div class="detail-heading">
+          <h2>Current product status.</h2>
+          <p>Experimental v0.5.6. The terminal is the primary interface.</p>
+        </div>
+        <div class="detail-body">
+          <dl class="defn">
+            <div>
+              <dt>GUI alpha</dt>
+              <dd>
+                The browser application is opt-in and still developing. Terminal
+                and GUI coverage differ.
+              </dd>
+            </div>
+            <div>
+              <dt>Platform support</dt>
+              <dd>
+                Linux and macOS are the primary platforms. Windows support is
+                best effort.
+              </dd>
+            </div>
+            <div>
+              <dt>Deferred work</dt>
+              <dd>
+                The high-authority self-edit gate is designed but not enforced.
+                Container and cloud worker transports are deferred.
+              </dd>
+            </div>
+            <div>
+              <dt>Practical boundaries</dt>
+              <dd>
+                Clio does not provide an OS sandbox, promise GUI parity, or
+                establish scientific correctness from a passing command.
+              </dd>
+            </div>
+          </dl>
+          <a class="text-link" href="vision.html#status"
+            >Project status and provenance →</a
+          >
+        </div>
+      </section>
+      <footer class="colophon">
+        <div class="footer-top">
+          <div class="footer-brand">
+            <a class="brand" href="index.html"
+              ><img src="assets/logo.webp" width="32" height="32" alt="" /><span
+                class="brand-name"
+                >Clio Coder</span
+              ></a
+            >
+            <p>
+              AI coding for the code science runs on.<br />Open source. Part of
+              <a href="https://iowarp.ai">IOWarp</a>.
+            </p>
+            <span class="status-label"
+              ><span class="status-dot"></span>Experimental · Terminal-first ·
+              GUI alpha</span
+            >
+          </div>
+          <div class="footer-links">
+            <div>
+              <h2>Product</h2>
+              <a href="capabilities.html">Capabilities</a
+              ><a href="harness.html">How it works</a
+              ><a href="compare.html">Integrations</a
+              ><a href="start.html">Install</a>
+            </div>
+            <div>
+              <h2>Resources</h2>
+              <a href="docs.html">Documentation</a
+              ><a href="learn.html">Learning labs</a
+              ><a href="library.html">Skills &amp; plugins</a
+              ><a href="share.html">Share Clio</a>
+            </div>
+            <div>
+              <h2>Project</h2>
+              <a href="vision.html">About &amp; status</a
+              ><a href="https://github.com/iowarp/clio-coder">Source code ↗</a
+              ><a href="https://github.com/iowarp/clio-coder/issues"
+                >Report an issue ↗</a
+              ><a
+                href="https://github.com/iowarp/clio-coder/blob/main/CONTRIBUTING.md"
+                >Contribute ↗</a
+              >
+            </div>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <p>Gnosis Research Center, Illinois Tech · University of Utah</p>
+          <p>
+            Apache-2.0 · NSF
+            <a href="https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318"
+              >2411318</a
+            >
+          </p>
+        </div>
+      </footer>
+    </main>
+    <script src="js/site.js"></script>
+  </body>
 </html>
