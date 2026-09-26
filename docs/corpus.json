@@ -1,0 +1,13 @@
+{
+	"schema": 1,
+	"product": {
+		"label": "Authored product, operator, and current architecture documentation",
+		"roots": ["README.md", "architecture/", "guide/"],
+		"excludes": ["html/**", "wiki/**"]
+	},
+	"developmentWiki": {
+		"label": "Generated development Wiki reference",
+		"root": "wiki/",
+		"generated": true
+	}
+}

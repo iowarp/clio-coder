@@ -8,32 +8,40 @@ This is the documentation map for Clio Coder. Start with the path closest to
 what you are trying to do; the deeper references are here when you need exact
 schemas, wire contracts, or architectural invariants.
 
-The guides track the current source tree. Released behavior is fixed by the
-corresponding Git tag and [changelog](../CHANGELOG.md). If prose and the checked
-source disagree, treat source, schema validation, and contract tests as
-authoritative—and please fix or report the documentation drift.
+The authored Markdown is authoritative for product documentation. The guides
+track the current source tree. Released behavior is fixed by the corresponding
+Git tag and [changelog](../CHANGELOG.md). If prose and the checked source
+disagree, treat source, schema validation, and contract tests as authoritative,
+and please fix or report the documentation drift.
 
-The reference is organized by purpose:
-
-The [generated development wiki](wiki/index.md) maps source areas, symbols, and
-tests. Its public mirror is the [GitHub Wiki](https://github.com/iowarp/clio-coder/wiki).
-See [Publishing the wiki](guide/publishing-wiki.md) to update that mirror.
+[`corpus.json`](corpus.json) defines two deliberately separate corpora:
 
 ```text
 docs/
-├── guide/          Operator and user workflows
-├── architecture/   Runtime contracts and design
-└── wiki/           Generated development reference
+├── README.md        Product documentation map
+├── guide/           Authored operator and user workflows
+├── architecture/    Authored current runtime contracts and design
+└── wiki/            Generated development reference, not product guidance
 ```
 
-For the v0.5.0 launch, Clio Coder is first and foremost a terminal coding agent.
-An opt-in alpha graphical application (`clio-coder gui`, and `clio-coder docs` for
-reading these pages in a browser) is available for power users; nothing starts it
-unless you run it, and it claims no parity with the terminal. Start with the [release notes](../CHANGELOG.md),
-[configuration and target guide](guide/configuration-and-targets.md), and
-[pre-release checks](../CONTRIBUTING.md#validation-reference).
-The current guides describe the working implementation, not a promise that the
-candidate has been published or that every server capability has been tested.
+The installed GUI is a direct renderer of the product Markdown. The public
+website is a generated, release-pinned snapshot with source ref and content-hash
+provenance. The [GitHub Wiki](https://github.com/iowarp/clio-coder/wiki) is the
+published mirror of `docs/wiki/`, a generated source, symbol, and test map for
+contributors. See [Publishing the wiki](guide/publishing-wiki.md) for its
+separate review and publication workflow. Generated Wiki pages do not compete
+with current product guidance in application navigation, search, agent
+retrieval, or the product website.
+
+Clio Coder is first and foremost a terminal coding agent. An opt-in alpha
+graphical application (`clio-coder gui`, and `clio-coder docs` for reading these
+pages in a browser) is available for power users; nothing starts it unless you
+run it, and it claims no parity with the terminal. Start with the [release
+notes](../CHANGELOG.md), [configuration and target
+guide](guide/configuration-and-targets.md), and [pre-release
+checks](../CONTRIBUTING.md#validation-reference). The current guides describe
+the working implementation, not a promise that an unreleased candidate has been
+published or that every server capability has been tested.
 
 ## Start here
 
@@ -133,6 +141,7 @@ validation, reference data, or human scientific judgment.
 | Package kinds, catalog resolution, integrity, and trust | [Library Architecture](architecture/library.md) |
 | Pi framework boundary and Clio-owned policy | [Pi Boundary](architecture/pi-boundary.md) |
 | Clock, duration, timestamp, and ordering conventions | [Time Conventions](architecture/time-conventions.md) |
+| Package, npm, GitHub, website, docs, Wiki, and communications checkpoints | [Release Readiness](guide/release-readiness.md) |
 | Core terms mapped to source concepts | [Glossary](guide/glossary.md) |
 
 ## Developer quick start
@@ -174,11 +183,14 @@ Clio's documentation ships with Clio, not with your workspace. Everything below
 resolves from the installed package root (`resolvePackageRoot()`,
 [package-root.ts](../src/core/package-root.ts)), never from the directory you launched in.
 
-**What is indexed.** Every `.md` file under `<package-root>/docs/`, plus root
-`README.md`, `CHANGELOG.md` and `CLIO-CODER.md` when each exists. The npm package
-ships the Markdown reference used by both the application and agents. A root `CLIO-CODER.md` is indexed
-only when present, such as in a source checkout. The index is deterministic and needs no
-network or embedding service ([docs-engine.ts](../src/tools/context/docs-engine.ts)).
+**What is indexed.** The product corpus named by `docs/corpus.json`: this map,
+`docs/guide/**/*.md`, and `docs/architecture/**/*.md`. Root `README.md`,
+`CHANGELOG.md`, and `CLIO-CODER.md` are supporting package documents when each
+exists. A root `CLIO-CODER.md` is indexed only when present, such as in a source
+checkout. Generated `docs/wiki/**` pages and retired `docs/html/**` pages are
+excluded and reported as exclusions. The index is deterministic and needs no
+network or embedding service
+([docs-engine.ts](../src/tools/context/docs-engine.ts)).
 
 **Searching and then reading.** `gateway(op="call", capability="clio_docs", args={query: "…"})` returns
 section headings with citations such as `docs/architecture/safety-model.md`.
@@ -211,13 +223,18 @@ until Ctrl+C. The command never installs a service.
 Clio Coder is designed primarily as a terminal coding agent; the bundled web
 application is an early preview for browsing documentation, reviewing sessions,
 and inspecting workspace telemetry, rather than claiming production GUI parity.
-The GUI renders these Markdown sources directly with the application's theme,
-syntax highlighting, copy controls, tables and diagrams. Navigation groups come
-from this map, search indexes the same pages, and each page's outline is generated
-from its headings. Internal references stay in the application.
+The GUI renders the authoritative product Markdown directly with the
+application's theme, syntax highlighting, copy controls, tables, and diagrams.
+Navigation groups come from this map, search indexes the same product pages, and
+each page's outline is generated from its headings. Internal product references
+stay in the application. The loopback document server is a renderer, not an
+independent manual.
 
-Edit the Markdown once to update both human and agent documentation. There is
-no separate HTML source tree, document server, or alternate reading view.
+Edit the authoritative Markdown once to update the installed human and agent
+documentation. The static product website has a separate generated snapshot
+because it deploys independently from npm; its manifest pins that copy to a
+released source ref. The generated development Wiki has separate generation and
+publication ownership.
 
 ```bash
 clio-coder docs

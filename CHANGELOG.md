@@ -18,6 +18,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Model recall accepts an evicted read's path while its marker remains visible; historical results behind a summary remain discoverable and recallable by ref. An unchanged reread records recall provenance, repeated reread copies retain the body's recall lineage, and recall-recording failures preserve a successful read.
 - **Compatibility:** Session format 6 adds eviction reasons, reread triggers, and optional content hashes. Supported older ledgers remain readable and are restamped when opened; older readers that support only format 5 refuse format 6. Upgrade clients together before reopening these sessions.
 - `/context` shows the selected non-default profile and rearm percentage. Replay retains recorded recall evidence, uses the same projected-ledger headroom as live eviction, and pairs non-default profile results with default-profile runs over the same corpus in Markdown and JSON reports.
+- A reviewed handoff draft is bound to the active session and branch state. Switching branches or invoking session lifecycle commands directly through ACP invalidates it, so stale draft prose cannot create a successor session.
 
 ### Safety
 
@@ -25,7 +26,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Git commands are normalized before rule matching. Quoted program, subcommand and option words, global options before the subcommand (`-C`, `--git-dir`, `-c`), combined short flags, unique abbreviations of destructive long options and backslash-newline continuations get the same handling as their plain spellings, so commands like these may now ask or hit a hard block where they used to run.
 - Checking out the whole worktree and forced checkout ask for confirmation, and a `+`-prefixed push refspec is blocked like `--force`.
 - `git push --force-with-lease` follows the ordinary git rail instead of being blocked as an unconditional force push.
-- `git clean` previews (`-n`, `--dry-run` and combined forms such as `-nd`) run, while a forced clean is still blocked.
+- `git clean` previews (`-n`, `--dry-run` and combined forms such as `-nd`) run, while a forced clean is still blocked. Git-accepted unique prefixes of force options in `clean` and `checkout` reach the same rail as their full spellings.
 - `git restore --source=<ref>` for named files follows the ordinary git rail. Whole-worktree restores and `git branch -d` still ask.
 
 ### Receipts and evidence
@@ -34,6 +35,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - A `verify` check whose only calls were blocked seals no typed validation fact, so a check that never ran no longer reads as failed, and read-only runs stop showing `quality validation failed` for denied checks.
 - Worker instructions leave denied checks out of `validations` and cite read sources in the summary. A report that changed nothing may use an empty `validations` array with unmeasured quality, and so may an editing report when every check it attempted was blocked. Receipts sealed by earlier builds still verify unchanged.
 - Validation grounding treats `npm test`, `pnpm test` and `yarn test` and their `run test` forms as one command, including the test command `verify` records and a claim that ends in a colon. Other script names stay distinct.
+- Fleet preview shows appended typed command arguments. Approval identity covers the selected recipes, resolved routes, and registered invocation details including command, working directory, environment, timeout, slots, and budget; it remains distinct from the durable DAG hash. The identity is an approval-boundary check, not a promise that routes or environment stay immutable throughout a multistep run.
 
 ### Providers and doctor
 
@@ -53,12 +55,13 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - `/settings targets` adds a target and edits a target's URL, runtime and default model inside the TUI through the configure wizard in the dock, and `/config` opens the same settings surface (#385).
 - With an empty composer, `?` opens a docked key card, `←` opens Fleet Runs and `↓` opens Tasks. With a draft, those keys type and move the cursor as before.
 - Task cards are grouped under section headings with empty states.
-- `/usage` opens on a new Activity tab with a workspace heatmap of session, git and quota activity, and the other tabs move to `2` through `5`.
+- `/usage` opens on a new Activity tab with a workspace heatmap of session, git and quota activity, and the other tabs move to `2` through `5`. Unknown or not-yet-recorded cost stays unavailable instead of becoming `$0.00`, and a pending or unavailable Git observation does not invent a repository label.
 - The footer, fleet route labels, model picker marks and council detail share one wording and one set of marks, and machine metrics are sampled only while Status is open.
 
 ### Fixes
 
 - Internal dispatches (bootstrap, wiki generation, oracle, watchdog and retries) report their typed-scope diagnostic once per root run instead of repeating the path inventory on every attempt.
+- ACP side-question and draft failures return host-authored failure text while retaining original provider details in diagnostics, rather than exposing raw provider prose to the conversation.
 
 ### Development
 

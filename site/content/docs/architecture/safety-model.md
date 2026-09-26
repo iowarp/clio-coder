@@ -51,9 +51,9 @@ A project `.clio-coder/safety.yaml` can declare commands and path entries, but i
 
 ### Damage-control rules
 
-Hard blocks include recursive or forced `rm`, `sudo rm`, `find -delete`, `rsync --delete`, `shred`, `chmod 777`, `dd` to a device, `mkfs`, fork bombs, forced process kills, clearing shell history, force pushes, `git reset --hard`, forced `git clean`, stash and reflog destruction, `git filter-branch`, `curl` or `wget` piped to a shell, writes to system roots, cloud deletion commands (AWS, gcloud, Firebase, Vercel, Netlify, Wrangler), and SQL `DROP`, `TRUNCATE` and unbounded `DELETE`.
+Hard blocks include recursive or forced `rm`, `sudo rm`, `find -delete`, `rsync --delete`, `shred`, `chmod 777`, `dd` to a device, `mkfs`, fork bombs, forced process kills, clearing shell history, force pushes, `git reset --hard`, `git clean` on directories, stash and reflog destruction, `git filter-branch`, `curl` or `wget` piped to a shell, writes to system roots, cloud deletion commands (AWS, gcloud, Firebase, Vercel, Netlify, Wrangler), and SQL `DROP`, `TRUNCATE` and unbounded `DELETE`.
 
-Confirmation rules ask at both levels: `git checkout -- .`, `git restore .`, `git stash drop`, `git branch -d` or `-D`, deleting a remote branch with `git push`, `gcloud iam policies`, SQL `DELETE` by id, `truncate -s 0`, and `:>`. The whole-worktree spellings `./`, `:/` and a pathspec after `--` count as `.` for the two git rules.
+Confirmation rules ask at both levels: `git checkout -- .`, `git restore .`, `git stash drop`, `git branch -D`, deleting a remote branch with `git push`, `gcloud iam policies`, SQL `DELETE` by id, `truncate -s 0`, and `:>`. The whole-worktree spellings `./`, `:/` and a pathspec after `--` count as `.` for the two git rules.
 
 Every rule is matched against each command a shell string would run, not only the string as a whole, so an operator cannot hide one: `git restore . && echo ok`, `git restore .; ls`, `sh -c "git restore ."` and `$(git restore .)` all ask. Command substitutions using `$(...)` or backticks are scanned inside double quotes too ([protected-artifacts.ts](../../src/domains/safety/protected-artifacts.ts)).
 
@@ -91,21 +91,3 @@ A parked call carries a request id. A main-agent approval resumes only that call
 | Read scope checks | [read-scope.ts](../../src/domains/safety/read-scope.ts) | `readScopeEscape`, `readScopeSpellings` |
 | Audit records | [audit.ts](../../src/domains/safety/audit.ts) | `buildAuditRecord`, `openAuditWriter` |
 | Finish contract and rigor | [finish-contract.ts](../../src/domains/safety/finish-contract.ts) | `assessFinishContract` |
-
-The policy exempts rule matches only when every span is inside an inert quoted argument to echo, printf, git commit/tag messages or grep/rg patterns. Whole-command and segment scans remain active. SQL and operator matches, substitutions, pipelines, heredocs and executable wrapper words prevent the exemption.
-
-Git damage-control scans also dequote simple-command words, join backslash-newline continuations, and skip recognized git global options to find the subcommand. Original scans remain active, so normalization adds coverage without removing conservative matches.
-
-Each scan candidate must independently prove its matches inert before an exemption applies. Quoted prose cannot suppress a destructive normalized git command elsewhere in the same call.
-
-For git clean, push and checkout, combined short flags are expanded for damage-control matching. Unique destructive long-option prefixes for reset and push are expanded; ambiguous prefixes and `--force-with-lease` are preserved.
-
-Whole-worktree `git checkout .` and forced checkout ask for confirmation at both autonomy levels. Plus-prefixed push refspecs such as `git push origin +main` hard-block as force updates.
-
-Inert quoted-argument exemptions inspect the shell command alone. A bash call’s `cwd` is path metadata and cannot turn quoted documentation into shell execution.
-
-`git clean` previews with `-n` or `--dry-run` run at both autonomy levels, including combined short flags and previews that also carry force flags. Forced deletion without a preview flag remains blocked. Each command in a shell chain is checked separately.
-
-`git push --force-with-lease`, including an explicit lease value, uses the recognized Git command rail and runs at both autonomy levels. Unconditional `--force`, `-f`, and plus-prefixed force refspecs remain blocked.
-
-Restoring a named file from an explicit `--source` uses the same recognized Git command rail as an ordinary single-path restore. Whole-worktree restores, including `--staged .`, and branch deletion with either `-d` or `-D` still ask at both autonomy levels. These operations change repository state across the selected scope.

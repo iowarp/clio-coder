@@ -119,7 +119,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | User `settings.yaml` | Personal defaults under the resolved Clio config directory. |
 | .clio-coder/settings.yaml | Shared project defaults. Credential-bearing keys are ignored. |
 | .clio-coder/settings.local.yaml | Untracked project overrides. Credential-bearing keys are ignored. |
-| Session controls | `/settings` (alias `/config`), `/model`, and `/thinking` change the active session where supported. |
+| Session controls | `/settings`, `/model`, and `/thinking` change the active session where supported. |
 | CLI options | Run-specific values such as `--target`, `--model`, and turn constraints. |
 
 The schema, validation, migration paths, and user settings path are in [`src/core/config.ts`](../../src/core/config.ts). Layering and project-file merge behavior are in [`src/core/settings-layers.ts`](../../src/core/settings-layers.ts). Settings control groups are defined in [`src/core/settings-controls.ts`](../../src/core/settings-controls.ts) and [`src/core/settings-navigation.ts`](../../src/core/settings-navigation.ts).

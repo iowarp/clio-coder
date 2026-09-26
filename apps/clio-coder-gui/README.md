@@ -3,9 +3,9 @@
 An alpha browser front end for Clio Coder, for power users. The terminal is the
 primary interface. This application is opt-in: nothing starts it unless you run one
 of the commands below, and the CLI, the TUI and `clio-coder acp` behave the same
-whether or not it is used. The operator guide is
-[`docs/gui/README.md`](../../docs/gui/README.md); [`DESIGN.md`](DESIGN.md) is the
-design authority for this folder.
+whether or not it is used. The canonical operator overview is
+[Reading in the application](../../docs/README.md#reading-in-the-application);
+[`DESIGN.md`](DESIGN.md) is the design authority for this folder.
 
 ## Running it
 

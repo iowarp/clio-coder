@@ -1,0 +1,439 @@
+{
+	"schema": 1,
+	"canonicalRoot": "assets",
+	"assets": [
+		{
+			"id": "brand-banner-png",
+			"source": "assets/banner.png",
+			"sha256": "b47abd537fdcf61809bd3b1b673a680346ef7d1c46fa5b5e350af384d757ed72",
+			"provenance": "Project-owned Clio Coder banner master retained in the repository; earlier design provenance is not separately recorded.",
+			"dimensions": {
+				"width": 2400,
+				"height": 750
+			},
+			"role": "Lossless brand banner master",
+			"channels": [
+				"repository",
+				"press"
+			],
+			"altTextSeed": "Clio Coder, IOWarp's terminal coding agent for scientific software.",
+			"representation": "brand-artwork",
+			"approval": "approved",
+			"approvalNotes": "Approved existing repository banner; retain as the lossless master.",
+			"supersessionNotes": "Not superseded.",
+			"copies": []
+		},
+		{
+			"id": "brand-banner-webp",
+			"source": "assets/banner.webp",
+			"sha256": "e423727b3dba8e67ca82381eb9d4a5a5b988b4a0907fcec6ca8a2b66775c6643",
+			"provenance": "Optimized WebP companion to the tracked banner PNG.",
+			"dimensions": {
+				"width": 2400,
+				"height": 750
+			},
+			"role": "Web brand banner",
+			"channels": [
+				"repository",
+				"website"
+			],
+			"altTextSeed": "Clio Coder, IOWarp's terminal coding agent for scientific software.",
+			"representation": "brand-artwork",
+			"approval": "approved",
+			"approvalNotes": "Approved for repository and website delivery.",
+			"supersessionNotes": "Not superseded.",
+			"copies": [
+				"site/assets/banner.webp"
+			]
+		},
+		{
+			"id": "brand-avatar-512",
+			"source": "assets/clio-coder-avatar-512.png",
+			"sha256": "9b9a428b2d99932a61b8300d5b22a65d3f6b5ed56e426c68c3bc6ead745b0c15",
+			"provenance": "Project-owned square Clio Coder avatar retained in the repository.",
+			"dimensions": {
+				"width": 512,
+				"height": 512
+			},
+			"role": "Profile avatar master",
+			"channels": [
+				"social-profile",
+				"press"
+			],
+			"altTextSeed": "Clio Coder logo.",
+			"representation": "brand-artwork",
+			"approval": "approved",
+			"approvalNotes": "Approved existing profile avatar.",
+			"supersessionNotes": "Not superseded.",
+			"copies": []
+		},
+		{
+			"id": "brand-logo-32",
+			"source": "assets/clio-coder-logo-32.webp",
+			"sha256": "569ae50e4fbad4494895249dda21873a5494889d627dc8a3edaaad45f7957dfb",
+			"provenance": "Project-owned Clio Coder logo size from the tracked logo family.",
+			"dimensions": {
+				"width": 32,
+				"height": 32
+			},
+			"role": "Small logo master",
+			"channels": [
+				"application"
+			],
+			"altTextSeed": "Clio Coder logo.",
+			"representation": "brand-artwork",
+			"approval": "approved",
+			"approvalNotes": "Approved existing logo family.",
+			"supersessionNotes": "Not superseded.",
+			"copies": []
+		},
+		{
+			"id": "brand-logo-64",
+			"source": "assets/clio-coder-logo-64.webp",
+			"sha256": "35ad057367ed924a3b5be022a624b263521128ff38a34942c96eedc9523f71b4",
+			"provenance": "Project-owned Clio Coder logo size from the tracked logo family.",
+			"dimensions": {
+				"width": 64,
+				"height": 64
+			},
+			"role": "Compact logo master",
+			"channels": [
+				"application"
+			],
+			"altTextSeed": "Clio Coder logo.",
+			"representation": "brand-artwork",
+			"approval": "approved",
+			"approvalNotes": "Approved existing logo family.",
+			"supersessionNotes": "Not superseded.",
+			"copies": []
+		},
+		{
+			"id": "brand-logo-128",
+			"source": "assets/clio-coder-logo-128.webp",
+			"sha256": "ad7c5736458496bc65da8544db780bd11bb4c71ab1e138ece5946445c0ca83ac",
+			"provenance": "Project-owned Clio Coder logo size from the tracked logo family.",
+			"dimensions": {
+				"width": 128,
+				"height": 128
+			},
+			"role": "Primary application and website logo master",
+			"channels": [
+				"application",
+				"website",
+				"social-card"
+			],
+			"altTextSeed": "Clio Coder logo.",
+			"representation": "brand-artwork",
+			"approval": "approved",
+			"approvalNotes": "Approved source for byte-identical website and GUI delivery copies.",
+			"supersessionNotes": "Not superseded.",
+			"copies": [
+				"site/assets/logo.webp",
+				"apps/clio-coder-gui/client/public/clio-coder-logo.webp"
+			]
+		},
+		{
+			"id": "brand-logo-256",
+			"source": "assets/clio-coder-logo-256.webp",
+			"sha256": "211c348913444dcf2eb7bb615eb2503d97fee94e937fb8197522babb503fbb46",
+			"provenance": "Project-owned Clio Coder logo size from the tracked logo family.",
+			"dimensions": {
+				"width": 256,
+				"height": 256
+			},
+			"role": "Medium logo master",
+			"channels": [
+				"application",
+				"press"
+			],
+			"altTextSeed": "Clio Coder logo.",
+			"representation": "brand-artwork",
+			"approval": "approved",
+			"approvalNotes": "Approved existing logo family.",
+			"supersessionNotes": "Not superseded.",
+			"copies": []
+		},
+		{
+			"id": "brand-logo-512",
+			"source": "assets/clio-coder-logo-512.webp",
+			"sha256": "4785b9c2821e93b7ade960faaa1b9b71d73a187b280bd84e3d0a83deda4f9e50",
+			"provenance": "Project-owned Clio Coder logo size from the tracked logo family.",
+			"dimensions": {
+				"width": 512,
+				"height": 512
+			},
+			"role": "Large website logo master",
+			"channels": [
+				"website",
+				"press"
+			],
+			"altTextSeed": "Clio Coder logo.",
+			"representation": "brand-artwork",
+			"approval": "approved",
+			"approvalNotes": "Approved source for the byte-identical website delivery copy.",
+			"supersessionNotes": "Not superseded.",
+			"copies": [
+				"site/assets/logo-512.webp"
+			]
+		},
+		{
+			"id": "brand-logo-1024",
+			"source": "assets/clio-coder-logo-1024.webp",
+			"sha256": "57bf7a7302f73b35c573266c5ef7fe0ec20e0758836bbe1e6280cd353303618f",
+			"provenance": "Project-owned Clio Coder logo size from the tracked logo family.",
+			"dimensions": {
+				"width": 1024,
+				"height": 1024
+			},
+			"role": "High-resolution logo master",
+			"channels": [
+				"press"
+			],
+			"altTextSeed": "Clio Coder logo.",
+			"representation": "brand-artwork",
+			"approval": "approved",
+			"approvalNotes": "Approved existing logo family.",
+			"supersessionNotes": "Not superseded.",
+			"copies": []
+		},
+		{
+			"id": "brand-logo-2048",
+			"source": "assets/clio-coder-logo-2048.webp",
+			"sha256": "a345940f255b6f1e2245f2c2043a778c1a5aea68d0a6dcb04f8f6a8e945e5bc8",
+			"provenance": "Project-owned Clio Coder logo size from the tracked logo family.",
+			"dimensions": {
+				"width": 2048,
+				"height": 2048
+			},
+			"role": "Maximum-resolution logo master",
+			"channels": [
+				"press"
+			],
+			"altTextSeed": "Clio Coder logo.",
+			"representation": "brand-artwork",
+			"approval": "approved",
+			"approvalNotes": "Approved existing logo family.",
+			"supersessionNotes": "Not superseded.",
+			"copies": []
+		},
+		{
+			"id": "gui-icon-192",
+			"source": "assets/clio-coder-app-icon-192.png",
+			"sha256": "9d5fc6ac72ef58c65d27c08fac56a435367270bc469f3723dc7eea60c5fea609",
+			"provenance": "Canonical tracked copy of the existing GUI PWA 192-pixel application icon.",
+			"dimensions": {
+				"width": 192,
+				"height": 192
+			},
+			"role": "GUI PWA application icon",
+			"channels": [
+				"gui"
+			],
+			"altTextSeed": "Clio Coder application icon.",
+			"representation": "brand-artwork",
+			"approval": "approved",
+			"approvalNotes": "Promoted from the existing GUI delivery asset to establish a canonical master.",
+			"supersessionNotes": "Not superseded.",
+			"copies": [
+				"apps/clio-coder-gui/client/public/icon-192.png"
+			]
+		},
+		{
+			"id": "gui-icon-512",
+			"source": "assets/clio-coder-app-icon-512.png",
+			"sha256": "1ecb31fe7b5bb782257a7f6beb5baec51e143af5ca3c913fcb472a26550e6250",
+			"provenance": "Canonical tracked copy of the existing GUI PWA 512-pixel application icon.",
+			"dimensions": {
+				"width": 512,
+				"height": 512
+			},
+			"role": "GUI PWA application icon",
+			"channels": [
+				"gui"
+			],
+			"altTextSeed": "Clio Coder application icon.",
+			"representation": "brand-artwork",
+			"approval": "approved",
+			"approvalNotes": "Promoted from the existing GUI delivery asset to establish a canonical master.",
+			"supersessionNotes": "Not superseded.",
+			"copies": [
+				"apps/clio-coder-gui/client/public/icon-512.png"
+			]
+		},
+		{
+			"id": "terminal-session-png",
+			"source": "assets/readme/clio-session.png",
+			"sha256": "cdcf75cacaabad836220bc447a2d99dff31727a2cf49ee43655d011e43e14f1c",
+			"provenance": "Actual Clio terminal session already approved for the project README; the README caption describes the local 27B scenario. Original capture command and date are not recorded.",
+			"dimensions": {
+				"width": 2012,
+				"height": 2104
+			},
+			"role": "Full-resolution terminal product capture",
+			"channels": [
+				"repository",
+				"website"
+			],
+			"altTextSeed": "A Clio Coder terminal session showing a failing numerical test, diagnosis, a two-line solver edit, and the passing test run.",
+			"representation": "real-product-capture",
+			"approval": "approved",
+			"approvalNotes": "Approved existing README capture; no general correctness or performance claim.",
+			"supersessionNotes": "Not superseded.",
+			"copies": [
+				"site/assets/session.png"
+			]
+		},
+		{
+			"id": "terminal-session-webp",
+			"source": "assets/readme/clio-session.webp",
+			"sha256": "60b5985f63dcc4e6394a0927a50672e4b7f3153b134c5d1b0f95bdef73410fc7",
+			"provenance": "Optimized half-size WebP derivative of the approved terminal session capture.",
+			"dimensions": {
+				"width": 1006,
+				"height": 1052
+			},
+			"role": "Inline website terminal capture",
+			"channels": [
+				"website"
+			],
+			"altTextSeed": "A Clio Coder terminal session showing a failing numerical test, diagnosis, a two-line solver edit, and the passing test run.",
+			"representation": "real-product-capture",
+			"approval": "approved",
+			"approvalNotes": "Approved optimized derivative of terminal-session-png.",
+			"supersessionNotes": "Not superseded.",
+			"copies": [
+				"site/assets/session.webp"
+			]
+		}
+	],
+	"socialExports": [
+		{
+			"id": "social-link-dark",
+			"template": "site/cards/link.html",
+			"output": "site/assets/social-card.png",
+			"sourceSha256": "f9a692fd4556ac0e19ba42499948994750932c074c6e7f8aef372eb7e387b85d",
+			"sha256": "05179b7c4717a63e12779b72354b63e683d8d723e43d84926e4f4f766dd8f543",
+			"sources": [
+				"site/cards/link.html",
+				"site/css/cards.css",
+				"site/css/brand.css",
+				"site/assets/logo.webp",
+				"site/assets/fonts/plex-sans.woff2",
+				"site/assets/fonts/plex-400.woff2",
+				"site/assets/fonts/plex-500.woff2"
+			],
+			"dimensions": {
+				"width": 1200,
+				"height": 630
+			},
+			"role": "Dark landscape social preview",
+			"channels": [
+				"open-graph",
+				"x",
+				"linkedin",
+				"release"
+			],
+			"altTextSeed": "Clio Coder social preview: AI coding for the code science runs on, with an illustrative request-to-review workflow.",
+			"representation": "illustrative",
+			"approval": "approved",
+			"approvalNotes": "Approved evergreen product card; workflow is illustrative, not a captured run.",
+			"supersessionNotes": "Not superseded."
+		},
+		{
+			"id": "social-link-light",
+			"template": "site/cards/link-light.html",
+			"output": "site/assets/social-card-light.png",
+			"sourceSha256": "8ec05b6d0a3190d31837781a3554956f9ffeaef7b3c0a279bc239947d98bac91",
+			"sha256": "49f8d6d3c2d0b258391b3465d8e3aca422e32d2cc645512cc9b61013fe0b8bc8",
+			"sources": [
+				"site/cards/link-light.html",
+				"site/css/cards.css",
+				"site/css/brand.css",
+				"site/assets/logo.webp",
+				"site/assets/fonts/plex-sans.woff2",
+				"site/assets/fonts/plex-400.woff2",
+				"site/assets/fonts/plex-500.woff2"
+			],
+			"dimensions": {
+				"width": 1200,
+				"height": 630
+			},
+			"role": "Light landscape social preview",
+			"channels": [
+				"open-graph",
+				"x",
+				"linkedin",
+				"release"
+			],
+			"altTextSeed": "Light Clio Coder social preview: AI coding for the code science runs on, with an illustrative request-to-review workflow.",
+			"representation": "illustrative",
+			"approval": "approved",
+			"approvalNotes": "Approved evergreen product card; workflow is illustrative, not a captured run.",
+			"supersessionNotes": "Not superseded."
+		},
+		{
+			"id": "social-square-dark",
+			"template": "site/cards/square.html",
+			"output": "site/assets/social-square.png",
+			"sourceSha256": "5fa3636e952516e175795c768b6509415dc4a49c7c70faa71d68cfaea3e1d260",
+			"sha256": "00169fe4399dcaf274e32a5c25d231ac10fe4e8876803d09ca8ec66de2e46bf2",
+			"sources": [
+				"site/cards/square.html",
+				"site/css/cards.css",
+				"site/css/brand.css",
+				"site/assets/logo.webp",
+				"site/assets/fonts/plex-sans.woff2",
+				"site/assets/fonts/plex-400.woff2",
+				"site/assets/fonts/plex-500.woff2"
+			],
+			"dimensions": {
+				"width": 1080,
+				"height": 1080
+			},
+			"role": "Dark square social preview",
+			"channels": [
+				"mastodon",
+				"bluesky",
+				"instagram",
+				"release"
+			],
+			"altTextSeed": "Square Clio Coder social preview: AI coding for the code science runs on, with an illustrative request-to-review workflow.",
+			"representation": "illustrative",
+			"approval": "approved",
+			"approvalNotes": "Approved evergreen product card; workflow is illustrative, not a captured run.",
+			"supersessionNotes": "Not superseded."
+		},
+		{
+			"id": "social-square-light",
+			"template": "site/cards/square-light.html",
+			"output": "site/assets/social-square-light.png",
+			"sourceSha256": "dbe1b6af6997d6861f7ee8f95adf99a34957b850094e3b47703908af98a170ce",
+			"sha256": "ed6bb9233ce59b931eb7b360bb0aeb34b007ee3cb668f4e9564bc9f89e3a1aaf",
+			"sources": [
+				"site/cards/square-light.html",
+				"site/css/cards.css",
+				"site/css/brand.css",
+				"site/assets/logo.webp",
+				"site/assets/fonts/plex-sans.woff2",
+				"site/assets/fonts/plex-400.woff2",
+				"site/assets/fonts/plex-500.woff2"
+			],
+			"dimensions": {
+				"width": 1080,
+				"height": 1080
+			},
+			"role": "Light square social preview",
+			"channels": [
+				"mastodon",
+				"bluesky",
+				"instagram",
+				"release"
+			],
+			"altTextSeed": "Light square Clio Coder social preview: AI coding for the code science runs on, with an illustrative request-to-review workflow.",
+			"representation": "illustrative",
+			"approval": "approved",
+			"approvalNotes": "Approved evergreen product card; workflow is illustrative, not a captured run.",
+			"supersessionNotes": "Not superseded."
+		}
+	]
+}

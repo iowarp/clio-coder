@@ -8,7 +8,13 @@ from pathlib import Path
 from urllib.parse import unquote, urljoin, urlsplit
 
 root = Path(sys.argv[1] if len(sys.argv) > 1 else Path(__file__).parent / 'public').resolve()
-origin = json.loads((Path(__file__).parent / 'product.json').read_text())['origin']
+site = Path(__file__).parent
+product = json.loads((site / 'product.json').read_text())
+origin = product['origin']
+manifest = json.loads((root / 'content/docs-manifest.json').read_text())
+docs_source = manifest['source']
+repository = product['repository'].rstrip('/')
+source_tree = f"{repository}/tree/{docs_source['ref']}/docs"
 errors = []
 
 
@@ -23,6 +29,10 @@ class Page(HTMLParser):
         self.social = {}
         self.doc_path = None
         self.doc_source = None
+        self.snapshot_source = None
+        self.snapshot_version = None
+        self.snapshot_ref = None
+        self.snapshot_commit = None
         self.jsonld = []
         self.in_jsonld = False
         self.title = ''
@@ -50,6 +60,11 @@ class Page(HTMLParser):
             self.doc_path = a.get('data-doc')
         if a.get('id') == 'doc-github':
             self.doc_source = a.get('href')
+        if a.get('id') == 'doc-snapshot-source':
+            self.snapshot_source = a.get('href')
+            self.snapshot_version = a.get('data-source-version')
+            self.snapshot_ref = a.get('data-source-ref')
+            self.snapshot_commit = a.get('data-source-commit')
         if tag == 'title':
             self.in_title = True
         if tag == 'script' and a.get('type') == 'application/ld+json':
@@ -67,6 +82,17 @@ class Page(HTMLParser):
         if self.in_jsonld:
             self.jsonld.append(data)
 
+
+if docs_source.get('version') != product.get('version'):
+    errors.append('Documentation source version differs from product.json')
+if not isinstance(docs_source.get('commit'), str) or len(docs_source['commit']) != 40:
+    errors.append('Documentation source commit is not a full Git commit')
+manifest_paths = [item.get('path') for item in manifest.get('files', [])]
+index_paths = [item.get('path') for item in json.loads((root / 'content/index.json').read_text())]
+if manifest_paths != index_paths:
+    errors.append('Documentation index paths differ from the provenance manifest')
+if any(path == 'wiki' or path.startswith('wiki/') for path in manifest_paths if isinstance(path, str)):
+    errors.append('Generated Wiki content entered the product documentation manifest')
 
 urls = [e.text for e in ET.parse(root / 'sitemap.xml').findall('.//{*}loc')]
 if len(urls) != len(set(urls)):
@@ -90,8 +116,15 @@ for url in urls:
     for key, value in [('og:title', page.title), ('twitter:title', page.title), ('og:description', page.description), ('twitter:description', page.description)]:
         if page.social.get(key) != value:
             errors.append(f'{path}: {key} does not match page metadata')
-    if page.doc_path and page.doc_source != f'https://github.com/iowarp/clio-coder/blob/main/docs/{page.doc_path}':
+    if page.doc_path and page.doc_source != f"{repository}/blob/{docs_source['ref']}/docs/{page.doc_path}":
         errors.append(f'{path}: source link points to the wrong document')
+    if page.doc_path and (
+        page.snapshot_source != source_tree
+        or page.snapshot_version != docs_source['version']
+        or page.snapshot_ref != docs_source['ref']
+        or page.snapshot_commit != docs_source['commit']
+    ):
+        errors.append(f'{path}: visible documentation provenance differs from the manifest')
     try:
         json.loads(''.join(page.jsonld))
     except (ValueError, TypeError):

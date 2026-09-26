@@ -1,0 +1,208 @@
+{
+  "schema": 1,
+  "corpus": "product",
+  "corpusPolicy": "docs/corpus.json#product",
+  "source": {
+    "version": "0.5.6",
+    "ref": "v0.5.6",
+    "commit": "33396b26b868d090f97daa8253e8085d4fe3e6cc"
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "c18223d141dd1f587a7b37ecaad84b8c6b6a18cd4df704213a69196af8ee053f"
+    },
+    {
+      "path": "architecture/acp.md",
+      "sha256": "f83248eeb250382cd2c3306e70acf006db5e1d7809f2a7652b9c235f857fb63c"
+    },
+    {
+      "path": "architecture/alcf-provider.md",
+      "sha256": "5991827d026b15d950cd9acf0be7c234615c6f708aa7fd0bc92a808d4e2fb70b"
+    },
+    {
+      "path": "architecture/architecture.md",
+      "sha256": "37b3fd589a86282715bcc4f9b3c229cabf967746ad72313943eb7f7a17257730"
+    },
+    {
+      "path": "architecture/artifact-placement.md",
+      "sha256": "6cf06a6d36e07ae7b9aa1c04a9413a2919f1ec91a936f33a250ac86d2c471605"
+    },
+    {
+      "path": "architecture/artifact-versions.md",
+      "sha256": "b5e7c84d564deeb8becbe21a344c2a02134ae0d6fa4f840debb74b2d01d3259c"
+    },
+    {
+      "path": "architecture/capacity-and-scheduling.md",
+      "sha256": "73b99422cc60ef3efd136d59be160b8beb58c6216a9635777883f7e2a358aba7"
+    },
+    {
+      "path": "architecture/context-engine.md",
+      "sha256": "3677de6d460207d5133058a794d457338b7fe6ec83f188512ca1d3fd0a374b73"
+    },
+    {
+      "path": "architecture/context-working-set.md",
+      "sha256": "e14beab5b1d74c75901f41d7f225aaf080493a072b5912e33b3a9d070f43b327"
+    },
+    {
+      "path": "architecture/dispatch-architecture-rationale.md",
+      "sha256": "81349ab73afb3232f5f8b0064f8acc1204cd130936bc607ccdea9d602c6ed725"
+    },
+    {
+      "path": "architecture/dispatch-typed-intent.md",
+      "sha256": "f617a172fa3b8120198750e2baf014695abc06c31cfc405268fdaf48aa1b68c4"
+    },
+    {
+      "path": "architecture/evidence-and-memory.md",
+      "sha256": "4fc5744d20c2c0ecd8f39b95d1a4be84567024b5c5187486057fbe42960744ff"
+    },
+    {
+      "path": "architecture/library.md",
+      "sha256": "f57b70a16153b1cdc61a83cdd1f5514a5b2db2b555e6695dcc1cc8432fe0ee27"
+    },
+    {
+      "path": "architecture/middleware-and-components.md",
+      "sha256": "162b4482ed68de8095b70c19254414293fe2d653a526f02dc015bfb8477c6881"
+    },
+    {
+      "path": "architecture/model-catalog.md",
+      "sha256": "9a27155c292f98ffa8f885d4c6b96667b5e4d0a9eb0ee4335cb0c801bb882ef2"
+    },
+    {
+      "path": "architecture/observability.md",
+      "sha256": "5023153736e204ca9a6f1d0195a2b9d6dd753004ae7cda6dc8c9f2db3031c6b0"
+    },
+    {
+      "path": "architecture/pi-boundary.md",
+      "sha256": "fcd1030d25680cea2cb2918c7f3126b968eb1df6c345c3342eb0ab00ca2f1e47"
+    },
+    {
+      "path": "architecture/prompt-envelope-and-tools.md",
+      "sha256": "aacbf0558902698d4005292e7abf8050244cbe5ad9cdac713dbdcbc4f5c7f3da"
+    },
+    {
+      "path": "architecture/provider-adapter-cookbook.md",
+      "sha256": "ebcb19fcb12db090842eaa04e5b57f28027aba96984e30635fece85619a34ecd"
+    },
+    {
+      "path": "architecture/safety-model.md",
+      "sha256": "601b56fea1108dc1d01e929e64ca265f7951fe2d52d14b69ac177cc7d9ea02b1"
+    },
+    {
+      "path": "architecture/session-lifecycle.md",
+      "sha256": "7a820f46b8422a42eec98a8e1286b8667c05cfeac5da9639ae599787a33649d7"
+    },
+    {
+      "path": "architecture/time-conventions.md",
+      "sha256": "74da9c3da6ed07588f923eb279fbaaf63961378dcf23de96b051d3c86bcf708d"
+    },
+    {
+      "path": "architecture/trace-store.md",
+      "sha256": "74165b33be17bd626c6f95e32783925fbcbc47778300a301a8936b67434e8e51"
+    },
+    {
+      "path": "architecture/tui-design.md",
+      "sha256": "ce89472139969255427e94b343108482faa688889591082e1dc05469ac8e6f0f"
+    },
+    {
+      "path": "architecture/worker-context.md",
+      "sha256": "6000492af9090637a7f289dc3b08ac6248e2a99d8dd80e2eb30403b5a560d3ff"
+    },
+    {
+      "path": "architecture/worker-dispatch-mechanics.md",
+      "sha256": "4ba05b0a48f3fa13890c2ab3ffa0f586b78150ffee935af892516d512b260dcd"
+    },
+    {
+      "path": "guide/authoring-plugins.md",
+      "sha256": "0bafb049a515e9c1b7f752fc2545c732e0e61777b1eeb9a74f916fbe8c565db0"
+    },
+    {
+      "path": "guide/built-in-agents.md",
+      "sha256": "f3906c81a38b4084e0cb510b05ab3dd1ac7dd34b67352fa7e028213acc545380"
+    },
+    {
+      "path": "guide/commands-and-modes.md",
+      "sha256": "f288812132fc67381824cbf74233d77f8d7f524a7e9a23d4116f83b7071e2947"
+    },
+    {
+      "path": "guide/configuration-and-targets.md",
+      "sha256": "e131cd75e860058834dfba3039de883ab78fb0be528bc05210ebf98dbe5cc342"
+    },
+    {
+      "path": "guide/configuration-reference.md",
+      "sha256": "d8cf1558b8fee5aa728c74a933cde07e0b7364af70b017edcb8758e02569eb48"
+    },
+    {
+      "path": "guide/context-continuity.md",
+      "sha256": "9095e698603b8cc10e931724f729ef18a4c9bfe0f8cee8ebed7f519fe9882fb0"
+    },
+    {
+      "path": "guide/doctor.md",
+      "sha256": "37577c25acdd65b122505fd9719a9f36d6bb629e2f7791f14a7444fd2c3686ec"
+    },
+    {
+      "path": "guide/environment-variables.md",
+      "sha256": "5f9f3ae88760eb43c0e3e4ba1c9db41957b5eb3f575d84464b7ff55b13303ac0"
+    },
+    {
+      "path": "guide/exit-codes-and-output.md",
+      "sha256": "ded351f4315450936e434c636200eefa278d8aeb1ae3721605c518013bf99be6"
+    },
+    {
+      "path": "guide/extensions-and-sharing.md",
+      "sha256": "c258ea1b60d3a81724a707fbf044417dc6fab693386e70c752b5db5d4dbdc178"
+    },
+    {
+      "path": "guide/fleet-dispatch.md",
+      "sha256": "9599ba67451229d974cd60153acc3a5facb8c5ae9ce23d3f6d68bcc0be20dfaf"
+    },
+    {
+      "path": "guide/glossary.md",
+      "sha256": "86060ad393742c225b0daa5d3b8a49752963accda3967271c795dfaafe332a6f"
+    },
+    {
+      "path": "guide/harness-extensions.md",
+      "sha256": "028b948c0bbccb0ce2735df56595139b0ce80c5491dca4bcfb5760842ee0d520"
+    },
+    {
+      "path": "guide/installation-and-lifecycle.md",
+      "sha256": "9555ac43b2a5e43a8bea59e80250320371ece47281889014e1683061c527958c"
+    },
+    {
+      "path": "guide/interop.md",
+      "sha256": "1354ed6b87143356a66cc384dacfbb749a650a54f0a1678911b054ced58c7ae1"
+    },
+    {
+      "path": "guide/panes-and-files.md",
+      "sha256": "75851685ec7690248075ce90edaa27f712bbb7f7c674b9ce15cbbbe583de3509"
+    },
+    {
+      "path": "guide/plugins.md",
+      "sha256": "d8e05bf6243bdd23ddaae39170c2cbc70eed26ef6a99c389e377c772a4a72dab"
+    },
+    {
+      "path": "guide/proactive-memory.md",
+      "sha256": "dc7013119716d6230652c1dc91b39b1143fc1efb0f19cb64f168c57a904ac9ec"
+    },
+    {
+      "path": "guide/resource-library.md",
+      "sha256": "1d2386d8b7e21b4eba48872a8116e9d7f6774b06601f13eb3df41c3b7509d2e6"
+    },
+    {
+      "path": "guide/skills-marketplace.md",
+      "sha256": "5a652d36b3801b9343035eda04bc543d218b88a9a951e2177f706e7344c39b85"
+    },
+    {
+      "path": "guide/slurm.md",
+      "sha256": "294690a7cde83da958db47cab2a8d8c3a828d4102f5016523601dafe17abeff8"
+    },
+    {
+      "path": "guide/tool-usage.md",
+      "sha256": "4e83a4e93fe55f679c192617a9984fde28f27abd45b22e7d066172123dcdf985"
+    },
+    {
+      "path": "guide/troubleshooting.md",
+      "sha256": "ff69beff99850ec264a163342b462eb82c62c0ef85db9eb5dc625ecfb9a6fced"
+    }
+  ]
+}
