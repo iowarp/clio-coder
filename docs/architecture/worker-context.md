@@ -6,6 +6,8 @@ Clio dispatch separates **what a worker inherits** from **how workers are schedu
 
 The default remains an isolated conversation. A native worker gets its own Pi Agent, worker system prompt, admitted tools, dynamic project context, task, and run-local accounting. Context inheritance does not grant additional tools, write roots, or autonomy. Conversation isolation is not a filesystem sandbox; use dispatch worktrees when filesystem isolation is required.
 
+With project-context tier `bounded`, workers also receive up to 2,400 characters of codemap, orientation, and wiki discovery fragments even when no handbook exists. Handbook selection remains separate. A task worktree supplies its own structural context when guidance falls back to the source checkout, and receipt provenance includes the orientation message. See [Project context](project-context.md) for freshness and current status retrieval.
+
 ## Dispatch API
 
 ```json
@@ -59,7 +61,7 @@ Non-isolated requests record context mode, parent session/leaf/workspace, snapsh
 
 The host persists the selected seed at `$XDG_STATE_HOME/clio-coder/context-seeds/<contentHash>.json`, using mode 0600 and durable writes. These are exact historical artifacts with the same sensitivity as session history; no automatic garbage collection is introduced in this change. Native seeds are self-contained over the wire, including for remote workers. Their metadata and contents are validated before model use and are covered by the existing whole-spec attestation.
 
-WorkerSpec version **4** is required. Rebuild/update remote workers together with the orchestrator; an older worker must reject the new specification rather than silently ignore inherited history. ACP and other runtime adapters receive bounded splice text but do not implement native history forking or Clio's native pressure/recall loop.
+WorkerSpec version **5** is required. Rebuild/update remote workers together with the orchestrator; an older worker must reject the new specification rather than silently ignore inherited history. ACP and other runtime adapters receive bounded splice text but do not implement native history forking or Clio's native pressure/recall loop.
 
 No extra LLM request is needed for capture or selection. Optional splice budgeting uses additive size estimates and one final serialization, rather than serializing the growing packet for every candidate. Stable projections help repeated requests retain an unchanged prefix, but provider cache reuse is measured behavior, not guaranteed: worker system prompts, tool surfaces, models, and provider cache rules can differ from the parent.
 
@@ -103,4 +105,3 @@ override, untrusted, changed-after-trust, malformed, and user settings only).
 ## Validation
 
 The worker-context contract tests cover incomplete multi-tool batches, copy isolation, path and explicit-ref selection, stale duplicate reads, mandatory constraints and errors, images, admission freezing, active-branch eviction replay, receipt tampering, scoped recall, and provider-usage reconciliation after eviction. Dispatch integration tests run the actual Pi worker against a controlled HTTP provider and verify single delivery, exclusion of later parent turns, absence of inherited fork events, wire validation, and rejection before a provider call when context is oversized. The normal full CI gate also exercises existing dispatch, session replay, worker transport, and operator behavior.
-

@@ -513,7 +513,7 @@ gateway(op="call", capability="git", args={op: "log", limit: 10})
 
 Direct OBSERVE retrieval of the working environment. Source: [index.ts](../../src/tools/context/index.ts).
 
-Arguments are `scope` (`workspace`, `settings`, `skills`, or `recall`), `name` and `include_tree` for skills, and `ref`, `offset`, and `limit` for recall. `query` can narrow recall. Workspace returns the cached session git/project snapshot and requires a bound session. Skills list or activate installed skills in `default` and `yolo`; read-only runs cannot activate them, and recipe-bound workers can load only their declared skills. Recall retrieves evicted observations without changing the eviction marker. Workspace, settings, and skills use a 50KB cap.
+Arguments are `scope` (`workspace`, `settings`, `skills`, or `recall`), `name` and `include_tree` for skills, and `ref`, `path`, `offset`, and `limit` for recall. `query` can narrow recall discovery. In a main session, supply either `ref` or `path`: a path selects the newest evicted read whose marker is still visible, while a ref also retrieves historical results behind a summary. Omit both for bounded discovery. An unchanged successful reread records recall provenance while returning the current read body. Workspace returns the cached session git/project snapshot and requires a bound session. Skills list or activate installed skills in `default` and `yolo`; read-only runs cannot activate them, and recipe-bound workers can load only their declared skills. Recall retrieves evicted observations without changing the eviction marker. Workspace, settings, and skills use a 50KB cap.
 
 `context(scope="settings")` reads an allowlisted view of the running session's
 effective configuration. It explains autonomy, worker approvals, and configured
@@ -529,6 +529,7 @@ error rather than guessed defaults.
 context(scope="workspace")
 context(scope="skills", name="context-prime", include_tree=true)
 context(scope="recall", ref="<turnId>", offset=0)
+context(scope="recall", path="src/solver.ts")
 ```
 
 ## clio_docs: retrieve bundled documentation through the gateway
@@ -585,7 +586,7 @@ Modes:
 - `deps`: returns one indexed file's internal and external imports.
 - `dependents`: returns indexed files that import the target file.
 - `wiki`: returns Markdown wiki pages plus absent/fresh/stale/unknown wiki state and checkpoint/layout warnings.
-- `project`: returns orientation, current Git observations and durable operator-task evidence.
+- `project`: returns orientation, current Git observations and durable operator-task evidence. If source indexing fails, orientation is unavailable and the codemap reason is returned alongside any readable Git/task observations.
 
 For `outline`, `deps`, and `dependents` the query must resolve to exactly one indexed file: an exact path or a substring matching one path. An ambiguous substring errors with the match count. Output is always parseable JSON (empty results carry empty arrays, an `omitted` count, and `next`); an omitted remainder suggests `next: limit=<2x>`. 16KB cap with the JSON stub on overflow.
 

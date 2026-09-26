@@ -30,6 +30,8 @@ TOON's tabular encoding does not help this ragged index enough to justify a new 
 
 Prompt compilation and bounded dispatch do not enumerate/hash the whole project, parse the map, read wiki Markdown, or call a model. When state has no recorded project type, the foreground uses root filenames as a hint; source classification belongs to indexing. Root orientation input identities are checked with bounded reads. A partial view includes only identity/command facts whose declared source input has a captured content identity; unknown inputs are named and never certified. The prompt explicitly says that the structural snapshot and wiki source freshness have not been certified there.
 
+CMake identity extraction ignores comments and quoted/bracket examples; it records literal declarations without evaluating CMake. Preset command hints preserve the declared name with POSIX shell quoting. Hidden presets and names over 80 characters or containing control characters are omitted rather than changed into a different command.
+
 Source reconciliation still runs in the existing build worker. Content identities, not mtimes alone, detect external edits, equal-size edits with restored mtimes, additions, deletions, renames, configuration/ignore changes and a different checked-out tree. Read-only navigation has a private, bounded artifact cache and reconciles current source before returning facts. A wiki read verifies its own broader source evidence and Git checkpoint. Background checks and tool retrieval perform the expensive work, so the prompt remains responsive.
 
 Changed-file notifications first check the named inputs without parsing or building dependencies. An irrelevant or unchanged notification retains the old global baseline; it cannot hide unrelated external drift. A real change enters one coherent global reconciliation rather than first building a speculative dependency graph and then reconciling it again. Stable before/after fingerprints and bounded retries protect publication when files change during generation.
@@ -37,6 +39,8 @@ Changed-file notifications first check the named inputs without parsing or build
 All codemap writers and reset share the existing queue and filesystem lease. Writes remain atomic replacements. A reader can observe state and map from adjacent commits because these are separate files; neither prompt availability nor a task status is a freshness certificate, and navigation repairs against source. Bootstrap completion preserves any newer leased index/state and records the handbook's separate `bootstrapFingerprint`. A late session timestamp cannot overwrite another process's newer source snapshot. Automatic updates preserve authored guidance.
 
 `code_nav mode=project` obtains current Git HEAD, branch and porcelain status asynchronously and reads the operator-task store through its existing validator. It labels the observation time and provenance, caps task output, and leaves unavailable observations unknown. These independently owned stores are not one filesystem transaction: concurrent Git/task changes may occur between observations. There is no invented project objective, synthesized global blocker or automatic verified-completion summary.
+
+Git output is bounded to 24 complete status records; a rename/copy record includes its source path after an embedded NUL in the same `porcelain` string. A failed codemap reconstruction returns `orientation: null` and a `codemap` unknown reason while retaining available Git and operator-task observations.
 
 ## Consumption
 
