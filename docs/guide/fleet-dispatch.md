@@ -1219,3 +1219,5 @@ An editing mutation report may omit all validations when every checking call it 
 Validation grounding treats `npm test`, `pnpm test`, and `yarn test` as aliases of the canonical `npm run test` command across all three managers. The test aliases also match the package-manager-neutral `verify(check="test")` summary recorded as `npm run test`. Other script names remain distinct; `npm run test:unit` does not ground a claim of `npm test`.
 
 A terminal colon in a validation claim, such as `npm test:`, is punctuation and grounds against `npm run test`. Script suffixes such as `test:unit` remain distinct (review round 2 C).
+
+Typed-scope replacement warnings appear in the transcript for user and agent dispatches. Harness-owned internal dispatches, including `context init` bootstrap schema retries, retain scope diagnostics and receipt provenance without printing generated prompt path inventories. This presentation rule does not change working-context paths, rule selection, or worker authority.

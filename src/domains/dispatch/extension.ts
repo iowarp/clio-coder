@@ -3902,7 +3902,9 @@ export function createDispatchBundle(
 		// approval artifact renders every inferred entry in full before a
 		// supervised dispatch runs, which is where an operator can still act on it.
 		const notice = declaredScopeReplacementNotice(pathScope);
-		if (notice !== null) {
+		// Operator bootstrap report: harness-owned prompts deliberately use typed scope;
+		// schema fallback retries must not repeat their prose path inventories in the transcript.
+		if (notice !== null && req.requestOrigin !== "internal") {
 			context.bus.emit(BusChannels.DispatchScopeNotice, {
 				...notice,
 				agentId: req.agentId,
