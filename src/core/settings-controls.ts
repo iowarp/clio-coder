@@ -71,6 +71,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"context.workingSet.protectLastTurns": "Turns protected from eviction",
 	"context.workingSet.protectLastSteps": "Steps protected from eviction",
 	"context.workingSet.minEvictableTokens": "Minimum evictable tokens",
+	"context.workingSet.rearmFraction": "Eviction rearm band",
 	"retry.enabled": "Retry transient errors",
 	"retry.maxRetries": "Max retries",
 	"retry.baseDelayMs": "Base delay (ms)",
@@ -167,6 +168,8 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"context.workingSet.protectLastSteps": "Recent assistant steps whose observations and reasoning are never evicted.",
 	"context.workingSet.minEvictableTokens":
 		"Results below this token estimate stay; the marker would cost more than it saves.",
+	"context.workingSet.rearmFraction":
+		"After an eviction event, wait until the projection has grown by this share of the window before evicting again.",
 	"retry.enabled": "Retry transient provider errors on the next submit.",
 	"retry.maxRetries": "Retry attempts after the initial failure.",
 	"retry.baseDelayMs": "Initial retry delay in milliseconds.",
@@ -220,6 +223,8 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 		"Counted in assistant steps inside the turn window, so a long agentic turn stays evictable. Whole number of at least 1 · default: 8.",
 	"context.workingSet.minEvictableTokens":
 		"The floor sweep put marker break-even near 50 tokens; 200 is the churn guard. Whole number, 0 evicts anything · default: 200.",
+	"context.workingSet.rearmFraction":
+		"A pressure checkpoint runs before every model request and each applied event cold-starts the prefix cache, so a second event waits until the projection has grown by this fraction of the context window. Overflow recovery ignores the band. At least 0 and less than 1, 0 disables · default: 0.1.",
 	"guardrails.turnToolCallBudget":
 		"Crossing it blocks further calls in the turn with a stop-and-summarize directive, and the hard interrupt ceiling sits a fixed margin above. A backstop against a model spraying unproductive calls, not a routine ceiling: a repo-wide audit legitimately runs dozens. Whole number of at least 1 · default: 60.",
 	"guardrails.workerToolCallCap":

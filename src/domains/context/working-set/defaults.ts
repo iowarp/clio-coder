@@ -31,4 +31,10 @@ export const DEFAULT_WORKING_SET_SETTINGS: WorkingSetSettings = {
 	// floor saved only 0.167 summaries at 64k and none at 128k while reducing
 	// covered retention by 0.0076 and 0.0237. Keep 200 as the churn guard.
 	minEvictableTokens: 200,
+	// A checkpoint runs before every model request, and each applied event
+	// cold-starts the prefix cache from the earliest evicted position. The band
+	// makes a second event wait until the projection has grown by this share
+	// of the window; the replay sweep over 0, 0.05, 0.1 and 0.15 is recorded in
+	// the commit that introduced it.
+	rearmFraction: 0.1,
 };

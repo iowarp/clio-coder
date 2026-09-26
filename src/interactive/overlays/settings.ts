@@ -1482,6 +1482,9 @@ export function buildSettingItems(
 		settingItem("context.workingSet.minEvictableTokens", String(workingSet.minEvictableTokens), {
 			values: ["0", "100", "200", "500", "1000"],
 		}),
+		settingItem("context.workingSet.rearmFraction", formatThreshold(workingSet.rearmFraction, "0.1"), {
+			values: ["0", "0.02", "0.05", "0.1"],
+		}),
 		settingItem("retry.enabled", String(retry.enabled), {
 			values: ["true", "false"],
 		}),
@@ -2422,6 +2425,12 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 				settings.context.workingSet.minEvictableTokens = next;
 			});
 			return;
+		case "context.workingSet.rearmFraction": {
+			// Zero disables the band; the validator refuses 1 and above.
+			const parsed = Number(value);
+			if (Number.isFinite(parsed) && parsed >= 0 && parsed < 1) settings.context.workingSet.rearmFraction = parsed;
+			return;
+		}
 		case "retry.streamStallMs":
 			applyNonNegativeInteger(value, (next) => {
 				settings.chat.retry.streamStallMs = next;

@@ -1,5 +1,6 @@
+import { EVICTION_REASONS, type EvictionReason } from "../../../session/entries.js";
 import { covers, type PathIndex, type PathObservation } from "../path-index.js";
-import type { ReferenceGraph } from "./reference-graph.js";
+import type { ReferenceGraph, ReferencePoint } from "./reference-graph.js";
 import type { ReplayTraceResult } from "./runner.js";
 import type { Trace } from "./trace.js";
 
@@ -11,16 +12,31 @@ export interface ReplayMetrics {
 	retentionAt10: number;
 	evictionPrecision: number;
 	tokensEvicted: number;
-	/** Tokens freed by evicting items a later turn referenced again: the re-discovery bill a perfect recall would pay. */
+	/** Tokens freed by evicting items a later request referenced again: the re-discovery bill a perfect recall would pay. */
 	recallTokens: number;
 	/** Sum over events of the projected tokens after the earliest evicted position: exact-prefix cache re-prefill cost. */
 	coldPrefixTokens: number;
+	/** Projected tokens after every applied summary, summed: the summary side of the same cache bill. */
+	summaryColdPrefixTokens: number;
+	/** `coldPrefixTokens + summaryColdPrefixTokens`: everything an exact-prefix cache re-prefills because of context reduction. */
+	cacheMissTokens: number;
+	/** Cold prefix tokens per eviction event; zero when a trace fired none. */
+	cacheMissPerEvent: number;
 	evictionEvents: number;
+	/** Pressure checkpoints the trace offered, one per model request. */
+	checkpoints: number;
+	/** Checkpoints where the projection exceeded the modeled fit limit, so reduction was forced past the rearm band. */
+	overflowReductions: number;
 	/** Fraction of applied events that exhausted the policy's usable candidates. */
 	saturatedEvents: number;
 	turnsToFirstSummary: number | null;
 	/** Summary compactions the modeled summary stage applied; what a policy exists to make rare. */
 	summaries: number;
+}
+
+export interface ReasonTally {
+	items: number;
+	tokens: number;
 }
 
 export interface ReplayMeasurement {
@@ -39,6 +55,8 @@ export interface ReplayMetricAggregate {
 	pooledRetention: number;
 	pooledRetentionCovered: number;
 	pooledRetentionAt10: number;
+	/** Items and tokens evicted per reason, totals over every trace, in `EVICTION_REASONS` order; absent reasons are omitted. */
+	byReason: ReadonlyMap<EvictionReason, ReasonTally>;
 }
 
 interface MeasuredTrace {
@@ -49,32 +67,29 @@ interface MeasuredTrace {
 	pairsAt10: number;
 	retainedPairsAt10: number;
 	saturatedEventCount: number;
+	byReason: Map<EvictionReason, ReasonTally>;
 }
 
 function safeFraction(numerator: number, denominator: number, empty: number): number {
 	return denominator === 0 ? empty : numerator / denominator;
 }
 
-function survivesThrough(
-	observation: PathObservation,
-	referenceTurn: number,
-	evictedAtTurn: ReadonlyMap<string, number>,
-): boolean {
-	const evictedAt = evictedAtTurn.get(observation.ref.entry);
-	return evictedAt === undefined || evictedAt > referenceTurn;
+/** An eviction fired at checkpoint `k` precedes every entry at position `k` or later. */
+function retainedThrough(evictedAt: number | undefined, point: ReferencePoint): boolean {
+	return evictedAt === undefined || evictedAt > point.position;
 }
 
-function hasSurvivingCoveringRead(input: ReplayMeasurement, ref: string, referenceTurn: number): boolean {
+function hasSurvivingCoveringRead(input: ReplayMeasurement, ref: string, point: ReferencePoint): boolean {
 	const original = input.index.byRef.get(ref);
 	if (original?.op !== "read" || original.path.length === 0) return false;
 	return (input.index.byPath.get(original.path) ?? []).some(
-		(later) =>
+		(later: PathObservation) =>
 			later.op === "read" &&
 			!later.isError &&
 			later.entryIndex > original.entryIndex &&
-			later.turnIndex < referenceTurn &&
+			later.entryIndex < point.entryIndex &&
 			covers(later.range, original.range) &&
-			survivesThrough(later, referenceTurn, input.replay.evictedAtTurn),
+			retainedThrough(input.replay.evictedAt.get(later.ref.entry), point),
 	);
 }
 
@@ -84,15 +99,15 @@ function measure(input: ReplayMeasurement): MeasuredTrace {
 	let coveredRetainedPairs = 0;
 	let pairsAt10 = 0;
 	let retainedPairsAt10 = 0;
-	for (const [ref, futureTurns] of input.graph.futureTurnsOf) {
+	for (const [ref, points] of input.graph.futureReferencesOf) {
 		const observationTurn = input.index.byRef.get(ref)?.turnIndex;
-		const evictedAt = input.replay.evictedAtTurn.get(ref);
-		for (const referenceTurn of futureTurns) {
+		const evictedAt = input.replay.evictedAt.get(ref);
+		for (const point of points) {
 			pairs += 1;
-			const retained = evictedAt === undefined || evictedAt > referenceTurn;
+			const retained = retainedThrough(evictedAt, point);
 			if (retained) retainedPairs += 1;
-			if (retained || hasSurvivingCoveringRead(input, ref, referenceTurn)) coveredRetainedPairs += 1;
-			if (observationTurn !== undefined && referenceTurn - observationTurn <= 10) {
+			if (retained || hasSurvivingCoveringRead(input, ref, point)) coveredRetainedPairs += 1;
+			if (observationTurn !== undefined && point.turnIndex - observationTurn <= 10) {
 				pairsAt10 += 1;
 				if (retained) retainedPairsAt10 += 1;
 			}
@@ -108,17 +123,24 @@ function measure(input: ReplayMeasurement): MeasuredTrace {
 	let recallTokens = 0;
 	let coldPrefixTokens = 0;
 	let saturatedEventCount = 0;
+	const byReason = new Map<EvictionReason, ReasonTally>();
 	for (const event of input.replay.events) {
 		if (event.saturated) saturatedEventCount += 1;
 		coldPrefixTokens += event.coldPrefixTokens;
 		for (const item of event.items) {
 			evictedItems += 1;
 			tokensEvicted += item.tokensFreed;
-			const future = input.graph.futureTurnsOf.get(item.ref.entry) ?? [];
-			if (!future.some((turn) => turn > event.turnIndex)) safelyEvictedItems += 1;
+			const tally = byReason.get(item.reason) ?? { items: 0, tokens: 0 };
+			tally.items += 1;
+			tally.tokens += item.tokensFreed;
+			byReason.set(item.reason, tally);
+			const future = input.graph.futureReferencesOf.get(item.ref.entry) ?? [];
+			if (!future.some((point) => point.position >= event.checkpointIndex)) safelyEvictedItems += 1;
 			else recallTokens += item.tokensFreed;
 		}
 	}
+	const events = input.replay.events.length;
+	const summaryColdPrefixTokens = input.replay.summaryColdPrefixTokens;
 
 	return {
 		metrics: {
@@ -130,8 +152,13 @@ function measure(input: ReplayMeasurement): MeasuredTrace {
 			tokensEvicted,
 			recallTokens,
 			coldPrefixTokens,
-			evictionEvents: input.replay.events.length,
-			saturatedEvents: safeFraction(saturatedEventCount, input.replay.events.length, 0),
+			summaryColdPrefixTokens,
+			cacheMissTokens: coldPrefixTokens + summaryColdPrefixTokens,
+			cacheMissPerEvent: safeFraction(coldPrefixTokens, events, 0),
+			evictionEvents: events,
+			checkpoints: input.replay.checkpointCount,
+			overflowReductions: input.replay.overflowReductions,
+			saturatedEvents: safeFraction(saturatedEventCount, events, 0),
 			turnsToFirstSummary: input.replay.turnsToFirstSummary,
 			summaries: input.replay.summaries,
 		},
@@ -141,6 +168,7 @@ function measure(input: ReplayMeasurement): MeasuredTrace {
 		pairsAt10,
 		retainedPairsAt10,
 		saturatedEventCount,
+		byReason,
 	};
 }
 
@@ -157,25 +185,45 @@ export function aggregateReplayMetrics(inputs: ReadonlyArray<ReplayMeasurement>)
 		measured.reduce((total, entry) => total + entry[field], 0);
 	const totalEvents = measured.reduce((total, entry) => total + entry.metrics.evictionEvents, 0);
 	const saturatedEvents = measured.reduce((total, entry) => total + entry.saturatedEventCount, 0);
+	const meanOf = (pick: (metrics: ReplayMetrics) => number): number =>
+		mean(measured.map((entry) => pick(entry.metrics)));
+	const byReason = new Map<EvictionReason, ReasonTally>();
+	for (const reason of EVICTION_REASONS) {
+		let items = 0;
+		let tokens = 0;
+		for (const entry of measured) {
+			const tally = entry.byReason.get(reason);
+			if (tally === undefined) continue;
+			items += tally.items;
+			tokens += tally.tokens;
+		}
+		if (items > 0) byReason.set(reason, { items, tokens });
+	}
 	return {
 		mean: {
 			traces: measured.length,
-			retention: measured.length === 0 ? 1 : mean(measured.map((entry) => entry.metrics.retention)),
-			retentionCovered: measured.length === 0 ? 1 : mean(measured.map((entry) => entry.metrics.retentionCovered)),
-			retentionAt10: measured.length === 0 ? 1 : mean(measured.map((entry) => entry.metrics.retentionAt10)),
-			evictionPrecision: measured.length === 0 ? 1 : mean(measured.map((entry) => entry.metrics.evictionPrecision)),
-			tokensEvicted: mean(measured.map((entry) => entry.metrics.tokensEvicted)),
-			recallTokens: mean(measured.map((entry) => entry.metrics.recallTokens)),
-			coldPrefixTokens: mean(measured.map((entry) => entry.metrics.coldPrefixTokens)),
-			evictionEvents: mean(measured.map((entry) => entry.metrics.evictionEvents)),
+			retention: measured.length === 0 ? 1 : meanOf((metrics) => metrics.retention),
+			retentionCovered: measured.length === 0 ? 1 : meanOf((metrics) => metrics.retentionCovered),
+			retentionAt10: measured.length === 0 ? 1 : meanOf((metrics) => metrics.retentionAt10),
+			evictionPrecision: measured.length === 0 ? 1 : meanOf((metrics) => metrics.evictionPrecision),
+			tokensEvicted: meanOf((metrics) => metrics.tokensEvicted),
+			recallTokens: meanOf((metrics) => metrics.recallTokens),
+			coldPrefixTokens: meanOf((metrics) => metrics.coldPrefixTokens),
+			summaryColdPrefixTokens: meanOf((metrics) => metrics.summaryColdPrefixTokens),
+			cacheMissTokens: meanOf((metrics) => metrics.cacheMissTokens),
+			cacheMissPerEvent: meanOf((metrics) => metrics.cacheMissPerEvent),
+			evictionEvents: meanOf((metrics) => metrics.evictionEvents),
+			checkpoints: meanOf((metrics) => metrics.checkpoints),
+			overflowReductions: meanOf((metrics) => metrics.overflowReductions),
 			// Event-pooled: zero-event traces must not dilute the saturation rate.
 			saturatedEvents: safeFraction(saturatedEvents, totalEvents, 0),
 			turnsToFirstSummary: firstSummaries.length === 0 ? null : mean(firstSummaries),
-			summaries: mean(measured.map((entry) => entry.metrics.summaries)),
+			summaries: meanOf((metrics) => metrics.summaries),
 		},
 		turnsToFirstSummaryCount: firstSummaries.length,
 		pooledRetention: safeFraction(sum("retainedPairs"), sum("pairs"), 1),
 		pooledRetentionCovered: safeFraction(sum("coveredRetainedPairs"), sum("pairs"), 1),
 		pooledRetentionAt10: safeFraction(sum("retainedPairsAt10"), sum("pairsAt10"), 1),
+		byReason,
 	};
 }

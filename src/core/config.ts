@@ -1774,6 +1774,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"protectLastTurns",
 						"protectLastSteps",
 						"minEvictableTokens",
+						"rearmFraction",
 					]);
 					if ("enabled" in workingSet) {
 						const parsed = expectBoolean(issues, "context.workingSet.enabled", workingSet.enabled);
@@ -1800,6 +1801,12 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						if (!(key in workingSet)) continue;
 						const parsed = expectInteger(issues, `context.workingSet.${key}`, workingSet[key], { min });
 						if (parsed !== undefined) settings.context.workingSet[key] = parsed;
+					}
+					if ("rearmFraction" in workingSet) {
+						const parsed = expectNumber(issues, "context.workingSet.rearmFraction", workingSet.rearmFraction);
+						if (parsed !== undefined && (parsed < 0 || parsed >= 1))
+							issues.add("context.workingSet.rearmFraction", `expected a number >= 0 and < 1, got ${parsed}`);
+						else if (parsed !== undefined) settings.context.workingSet.rearmFraction = parsed;
 					}
 				}
 			}

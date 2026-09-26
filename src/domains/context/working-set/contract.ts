@@ -71,10 +71,22 @@ export interface WorkingSetView {
 	itemsEvicted: number;
 	/** Recall entries on the active path. `churn = recalls / itemsEvicted`. */
 	recalls: number;
+	/**
+	 * Recalls per ref key on the active path. A ref recalled twice is the
+	 * churn signal a protection profile may pin on (`pinRecalledTwice`).
+	 */
+	recallsByRef: ReadonlyMap<string, number>;
 	/** Policy that produced the most recent event; null when none. */
 	lastPolicyId: string | null;
 	/** turnId of the most recent eviction event; null when none. */
 	lastEvictionTurnId: string | null;
+	/**
+	 * `tokensAfter` recorded by the most recent eviction event, the baseline
+	 * the rearm band measures growth from. Null when there is no event, and
+	 * null again once a compaction summary follows the event on the active
+	 * path, because the summary moved the baseline.
+	 */
+	lastEvictionTokensAfter: number | null;
 }
 
 export const EMPTY_WORKING_SET_VIEW: WorkingSetView = Object.freeze({
@@ -82,8 +94,10 @@ export const EMPTY_WORKING_SET_VIEW: WorkingSetView = Object.freeze({
 	evictionEvents: 0,
 	itemsEvicted: 0,
 	recalls: 0,
+	recallsByRef: new Map<string, number>(),
 	lastPolicyId: null,
 	lastEvictionTurnId: null,
+	lastEvictionTokensAfter: null,
 });
 
 export interface PressureInput {

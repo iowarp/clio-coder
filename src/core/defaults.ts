@@ -188,12 +188,13 @@ export type DurableCompactionSettings = Omit<CompactionSettings, "excludeLastTur
  *     tool results it produced) that are never evicted, inside the turn window.
  *     A long agentic turn is many steps; without this floor one turn with fifty
  *     tool calls would protect every one of them and eviction would never fire.
- *   - protectLastSteps: recent assistant steps (an assistant message and the
- *     tool results it produced) that are never evicted, inside the turn window.
- *     A long agentic turn is many steps; without this floor one turn with fifty
- *     tool calls would protect every one of them and eviction would never fire.
  *   - minEvictableTokens: protect smaller results from low-yield eviction.
  *     The engine separately rejects replacements that save no tokens.
+ *   - rearmFraction: hysteresis. After an eviction event, no further automatic
+ *     eviction or summary runs until the projection has grown by this fraction
+ *     of the context window; every event cold-starts the prefix cache, and a
+ *     checkpoint runs before every model request. Zero disables the band.
+ *     Overflow recovery ignores it.
  */
 export type WorkingSetPolicyId = "age-horizon" | "structural-v1";
 
@@ -204,6 +205,7 @@ export interface WorkingSetSettings {
 	protectLastTurns: number;
 	protectLastSteps: number;
 	minEvictableTokens: number;
+	rearmFraction: number;
 }
 
 /**
@@ -737,6 +739,7 @@ context:
     protectLastTurns: 6
     protectLastSteps: 8
     minEvictableTokens: 200
+    rearmFraction: 0.1
   compaction:
     auto: true
     threshold: 0.8

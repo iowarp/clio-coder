@@ -42,7 +42,8 @@ import {
 	resolveLiveBudgetPolicy,
 } from "../domains/context/budget/live-view.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
-import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
+import { withinRearmBand } from "../domains/context/working-set/checkpoint.js";
+import { buildEvictionFields, planEviction, projectedWorkingSetTokens } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { isTurnStart, protectionCutoffIndex } from "../domains/context/working-set/horizon.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
@@ -1340,6 +1341,22 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						const policy = resolveWorkingSetPolicy(settings.context.workingSet.policy);
 						policyId = policy.id;
 						visibleEntries = selectVisibleEntries(entries, state.lastTurnId ?? undefined);
+						// The hysteresis band. A checkpoint runs before every request, so
+						// without it a policy with unconditional rungs fires an event per
+						// step and cold-starts the prefix cache each time. Inside the band
+						// the automatic path does nothing at all, summary included; the
+						// overflow path still forces a fit, and the request-fit admission
+						// remains the safety net. The replay runner gates identically.
+						if (
+							!requiredFit &&
+							withinRearmBand({
+								projectedTokens: projectedWorkingSetTokens(visibleEntries, view, estimateTokens),
+								contextWindow: estimate.contextWindow,
+								rearmFraction: settings.context.workingSet.rearmFraction,
+								lastEvictionTokensAfter: view.lastEvictionTokensAfter,
+							})
+						)
+							return false;
 						planned = (deps.planEviction ?? planEviction)(policy, {
 							entries: visibleEntries,
 							view,

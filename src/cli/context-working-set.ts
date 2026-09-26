@@ -40,6 +40,10 @@ Options:
                       protected recent assistant steps (default: ${DEFAULT_WORKING_SET_SETTINGS.protectLastSteps})
   --min-evictable-tokens <n>
                       minimum tool-result body tokens (default: ${DEFAULT_WORKING_SET_SETTINGS.minEvictableTokens})
+  --rearm-fraction <ratio>
+                      projection growth, as a share of the window, before a second event may fire (default: ${DEFAULT_WORKING_SET_SETTINGS.rearmFraction})
+  --overflow-fraction <ratio>
+                      modeled request-fit limit as a share of the budget; past it reduction ignores the band (default: 0.95)
   --seed <integer>    deterministic random-policy seed (default: 0)
   --no-filter         include every readable transcript
   --json <path>       write the stable JSON report
@@ -73,6 +77,8 @@ interface ReplayArgs {
 	protectLastTurns: number;
 	protectLastSteps: number;
 	minEvictableTokens: number;
+	rearmFraction: number;
+	overflowFraction: number;
 	seed: number;
 	synthetic: string[];
 	noFilter: boolean;
@@ -125,6 +131,8 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 		protectLastTurns: DEFAULT_WORKING_SET_SETTINGS.protectLastTurns,
 		protectLastSteps: DEFAULT_WORKING_SET_SETTINGS.protectLastSteps,
 		minEvictableTokens: DEFAULT_WORKING_SET_SETTINGS.minEvictableTokens,
+		rearmFraction: DEFAULT_WORKING_SET_SETTINGS.rearmFraction,
+		overflowFraction: 0.95,
 		seed: 0,
 		synthetic: [],
 		noFilter: false,
@@ -155,6 +163,8 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 			arg === "--protect-last-turns" ||
 			arg === "--protect-last-steps" ||
 			arg === "--min-evictable-tokens" ||
+			arg === "--rearm-fraction" ||
+			arg === "--overflow-fraction" ||
 			arg === "--seed"
 		) {
 			const value = requiredValue(args, index, arg);
@@ -203,6 +213,16 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 				parsed.minEvictableTokens = numberValue(value, arg);
 				if (!Number.isInteger(parsed.minEvictableTokens) || parsed.minEvictableTokens < 0) {
 					throw new CliUsageError("--min-evictable-tokens must be a non-negative integer");
+				}
+			} else if (arg === "--rearm-fraction") {
+				parsed.rearmFraction = numberValue(value, arg);
+				if (parsed.rearmFraction < 0 || parsed.rearmFraction >= 1) {
+					throw new CliUsageError("--rearm-fraction must be at least 0 and less than 1");
+				}
+			} else if (arg === "--overflow-fraction") {
+				parsed.overflowFraction = numberValue(value, arg);
+				if (parsed.overflowFraction <= 0 || parsed.overflowFraction > 1) {
+					throw new CliUsageError("--overflow-fraction must be greater than 0 and at most 1");
 				}
 			} else {
 				parsed.seed = numberValue(value, arg);
@@ -309,6 +329,7 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 			protectLastTurns: parsed.protectLastTurns,
 			protectLastSteps: parsed.protectLastSteps,
 			minEvictableTokens: parsed.minEvictableTokens,
+			rearmFraction: parsed.rearmFraction,
 		};
 		const results: ReplayPolicyResult[] = [];
 		for (const budgetTokens of parsed.budgets) {
@@ -324,6 +345,7 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 						target: parsed.target,
 						settings,
 						summaries: { keepRecentTokens: DEFAULT_KEEP_RECENT_TOKENS, summaryTokens: REPLAY_SUMMARY_TOKENS },
+						overflowFraction: parsed.overflowFraction,
 					}),
 				}));
 				results.push({ budgetTokens, policyId, metrics: aggregateReplayMetrics(measurements) });

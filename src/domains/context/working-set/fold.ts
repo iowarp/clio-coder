@@ -39,16 +39,22 @@ export function foldWorkingSet(entries: ReadonlyArray<SessionEntry>, activeLeafT
 		}
 	const active = filterEntriesToActivePath(entries, activeLeafTurnId);
 	const evicted = new Map<string, EvictedState>();
+	const recallsByRef = new Map<string, number>();
 	let evictionEvents = 0;
 	let itemsEvicted = 0;
 	let recalls = 0;
 	let lastPolicyId: string | null = null;
 	let lastEvictionTurnId: string | null = null;
+	let lastEvictionTokensAfter: number | null = null;
 	for (const entry of active) {
+		// A summary re-based the prompt: the last event's `tokensAfter` no longer
+		// describes what the model receives, so the rearm band starts over.
+		if (entry.kind === "compactionSummary") lastEvictionTokensAfter = null;
 		if (entry.kind === "contextEviction") {
 			evictionEvents += 1;
 			lastPolicyId = entry.policyId;
 			lastEvictionTurnId = entry.turnId;
+			lastEvictionTokensAfter = entry.tokensAfter;
 			for (const item of entry.evicted) {
 				itemsEvicted += 1;
 				evicted.set(refKey(item.ref), {
@@ -69,7 +75,21 @@ export function foldWorkingSet(entries: ReadonlyArray<SessionEntry>, activeLeafT
 		// original position would duplicate the bytes and invalidate the cache
 		// for everything after it. The marker stays, byte-stable, and a second
 		// recall of the same ref is the churn signal.
-		if (entry.kind === "contextRecall") recalls += 1;
+		if (entry.kind === "contextRecall") {
+			recalls += 1;
+			const key = refKey(entry.ref);
+			recallsByRef.set(key, (recallsByRef.get(key) ?? 0) + 1);
+		}
 	}
-	return { recallAliasSequence, evicted, evictionEvents, itemsEvicted, recalls, lastPolicyId, lastEvictionTurnId };
+	return {
+		recallAliasSequence,
+		evicted,
+		evictionEvents,
+		itemsEvicted,
+		recalls,
+		recallsByRef,
+		lastPolicyId,
+		lastEvictionTurnId,
+		lastEvictionTokensAfter,
+	};
 }

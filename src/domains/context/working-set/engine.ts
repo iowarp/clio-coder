@@ -88,9 +88,31 @@ function soloView(key: string, state: EvictedState): WorkingSetView {
 		evictionEvents: 0,
 		itemsEvicted: 1,
 		recalls: 0,
+		recallsByRef: new Map(),
 		lastPolicyId: null,
 		lastEvictionTurnId: null,
+		lastEvictionTokensAfter: null,
 	};
+}
+
+function sumTokens(entries: ReadonlyArray<SessionEntry>, estimate: (entry: SessionEntry) => number): number {
+	let total = 0;
+	for (const entry of entries) total += estimate(entry);
+	return total;
+}
+
+/**
+ * The projection priced the way `tokensBefore` and `tokensAfter` are recorded:
+ * the visible slice with the view applied, chars/4 per entry. The live engine
+ * and the replay runner both feed this number to the rearm band, so growth
+ * since the last event is measured on the same bytes the event recorded.
+ */
+export function projectedWorkingSetTokens(
+	entries: ReadonlyArray<SessionEntry>,
+	view: WorkingSetView,
+	estimateTokens: (entry: SessionEntry) => number,
+): number {
+	return sumTokens(projectWorkingSet(entries, view), estimateTokens);
 }
 
 /**
@@ -112,12 +134,6 @@ function viewWithItems(view: WorkingSetView, items: ReadonlyArray<EvictedItem>, 
 		});
 	}
 	return { ...view, evicted, itemsEvicted: view.itemsEvicted + items.length };
-}
-
-function sumTokens(entries: ReadonlyArray<SessionEntry>, estimate: (entry: SessionEntry) => number): number {
-	let total = 0;
-	for (const entry of entries) total += estimate(entry);
-	return total;
 }
 
 /**
@@ -191,9 +207,10 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 	return {
 		policyId: policy.id,
 		items,
-		tokensBefore: sumTokens(projectWorkingSet(input.entries, input.view), input.estimateTokens),
-		tokensAfter: sumTokens(
-			projectWorkingSet(input.entries, viewWithItems(input.view, items, policy.id)),
+		tokensBefore: projectedWorkingSetTokens(input.entries, input.view, input.estimateTokens),
+		tokensAfter: projectedWorkingSetTokens(
+			input.entries,
+			viewWithItems(input.view, items, policy.id),
 			input.estimateTokens,
 		),
 	};
