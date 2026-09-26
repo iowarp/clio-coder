@@ -551,7 +551,7 @@ export function buildWelcomeDashboardLines(
 		routeRow(theme, stats, detailWidth),
 		field("Workspace", workspaceLabel(theme, stats, Math.max(1, detailWidth - 11))),
 		field("Permissions", theme.fg(stats.autonomy === "yolo" ? "yoloLabel" : "fieldValue", stats.autonomy)),
-		theme.fg("body", "Ask Clio how to use or extend her."),
+		"",
 		theme.fg("sectionHeading", "Targets"),
 		theme.fg("body", stats.targets),
 		// Keep the subscription field beside the wordmark, between Targets and
@@ -587,7 +587,13 @@ export function buildWelcomeDashboardLines(
 	return frame(
 		theme,
 		`Clio Coder v${version}`,
-		[...rows, innerDivider(theme, room), fit(actionRow(theme, stats, room))],
+		[
+			...rows,
+			innerDivider(theme, room),
+			fit(
+				`${actionRow(theme, stats, room)} ${theme.fg("divider", GLYPH.rail)} ${theme.fg("body", "Ask Clio how to use or extend her.")}`,
+			),
+		],
 		panelWidth,
 	);
 }

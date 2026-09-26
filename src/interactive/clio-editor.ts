@@ -1,4 +1,5 @@
 import type { OutputStyle } from "../core/defaults.js";
+import { colorDisabled } from "../core/terminal-preferences.js";
 import {
 	Editor,
 	getKeybindings,
@@ -97,25 +98,46 @@ function confirmRailHint(
 	return theme.fg("decisionKey", fitHintEntries(permissionHintEntries(hasDraft, inspection), Math.max(1, width - 3)));
 }
 
-/** One cell per supported effort level, without implying unavailable settings. */
+// Stable meaning across providers: ordinary effort occupies one through four
+// brains; an admitted maximum is four brains with explicit attention ink.
+// Minimal shares the lowest graphical step; settings retain the exact choice.
+const THINKING_BRAINS: Readonly<Record<string, number>> = {
+	off: 0,
+	minimal: 1,
+	low: 1,
+	medium: 2,
+	high: 3,
+	xhigh: 4,
+	max: 4,
+	ultra: 4,
+};
+const THINKING_BRAIN_SLOTS = 4;
+
+/** Four static marks; textual fallback preserves exact state when graphics cannot. */
 function thinkingRailHint(
 	theme: ClioTheme,
 	thinking: ReturnType<NonNullable<EditorChrome["getThinking"]>>,
 	width: number,
 ): string {
 	const level = thinking.label;
-	const levels = (thinking.supportedLevels ?? []).filter((value) => value !== "off");
-	const count = level === "off" ? 0 : levels.indexOf(level) + 1;
+	const levels = thinking.supportedLevels ?? [];
+	const count = Object.hasOwn(THINKING_BRAINS, level) ? THINKING_BRAINS[level] : undefined;
+	const glyphWidth = visibleWidth(GLYPH.brain);
+	const graphicalWidth = THINKING_BRAIN_SLOTS * glyphWidth + THINKING_BRAIN_SLOTS - 1;
 	if (
 		!thinking.hasLevels ||
 		levels.length === 0 ||
-		(level !== "off" && count === 0) ||
+		count === undefined ||
+		(level !== "off" && !levels.includes(level)) ||
 		process.env.CLIO_CODER_SCREEN_READER === "1" ||
-		width < visibleWidth(GLYPH.brain) + levels.length + 2 + visibleWidth(level)
+		colorDisabled() ||
+		width < graphicalWidth
 	)
 		return theme.fg("thinkingLevel", `think ${level}`);
-	const cells = `${theme.fg("meterFill", "▰".repeat(count))}${theme.fg("meterFree", "▱".repeat(levels.length - count))}`;
-	return `${theme.fg("thinkingLevel", GLYPH.brain)} ${cells} ${theme.fg("thinkingLevel", level)}`;
+	const activeRole = level === "max" || level === "ultra" ? "thinkingMaximum" : "thinkingActive";
+	return Array.from({ length: THINKING_BRAIN_SLOTS }, (_, index) =>
+		theme.fg(index < count ? activeRole : "thinkingInactive", GLYPH.brain),
+	).join(" ");
 }
 
 /** The line the empty composer shows for the mode it is in. */
