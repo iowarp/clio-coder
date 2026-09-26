@@ -17,7 +17,7 @@ The core thesis of Clio's context architecture is that **context management must
 | Inspect active token budget & pressure | `/context` or `context(scope="budget")` | Detailed token breakdown, reserve buffers, and cache measurements. |
 | Reversibly prune past observations | `/context compact` or `self_compact()` | Working-set eviction first; LLM summary handoff only if still over budget. |
 | Recover an interrupted compaction | `/context recover <handoffId> <reduce\|deliver>` | Branch-bound transaction recovery with preserved continuity identity. |
-| Restore an evicted tool observation | `/context recall <recordId>` | Re-hydrates evicted tool results into active context. |
+| Inspect an evicted tool observation | `/context recall <ref>` | Shows the original body in the transcript; model recall uses the context tool. |
 | Initialize or refresh structural index | `clio-coder context init` / `refresh` | Model-free indexing of symbols, files, and dependencies into `.clio-coder/codewiki.json`. |
 | Generate architectural Markdown wiki | `clio-coder context wiki` | Dispatched worker generation of persistent documentation under `.clio-coder/wiki/`. |
 | Inspect effective session settings | `context(scope="settings")` | Read-only view of active configuration, targets, and compaction thresholds. |
@@ -56,7 +56,7 @@ Token accounting in Clio is continuous and verifiable. Rather than guessing toke
 
 - **Pre-Call Estimation**: Calculated using calibrated tokenizer ratios before sending requests, ensuring prompts do not exceed the provider's hard ceiling.
 - **Post-Call Reconciliation**: When the provider returns actual usage (`usage.prompt_tokens`, `usage.completion_tokens`, and reasoning tokens), Clio reconciles the estimates against the exact reported numbers.
-- **Session Ledger**: Persisted in append-only session format v5 ([src/domains/session/context-ledger.ts](../../src/domains/session/context-ledger.ts)). Each turn records an immutable `contextAccounting` record capturing raw input, output, cache-read, cache-write, and reasoning token totals.
+- **Session Ledger**: Persisted in append-only session format v6 ([src/domains/session/context-ledger.ts](../../src/domains/session/context-ledger.ts)). Each turn records an immutable `contextAccounting` record capturing raw input, output, cache-read, cache-write, and reasoning token totals.
 
 <details>
 <summary>How estimates, provider counts, and snapshots fit together</summary>
@@ -72,37 +72,36 @@ Token accounting in Clio is continuous and verifiable. Rather than guessing toke
 
 ## Single-Threshold Compaction
 
-Automatic compaction triggers when session token occupancy exceeds `context.compaction.threshold` (default **80% of usable budget**). Compaction follows a deterministic three-stage pipeline designed to minimize information loss.
+Automatic reduction is checked before operator submission and at settled tool-batch boundaries before each continuation request. Live pressure includes the full prompt and uses `context.compaction.threshold` (default 0.8 of the context window). Working-set eviction runs first; summary handoff follows when more reduction is needed.
 
 ```mermaid
 flowchart TD
-    A["Token Pressure > 80%"] --> B["Stage 1: Working-Set Eviction"]
-    B --> C{"Under Budget?"}
-    C -- Yes --> D["Resume Active Turn"]
-    C -- No --> E["Stage 2: Targeted Recall Verification"]
-    E --> F{"Under Budget?"}
-    F -- Yes --> D
-    F -- No --> G["Stage 3: LLM Summary Handoff"]
-    G --> H["Append Session v5 Record"]
-    H --> D
+    A["Pressure checkpoint"] --> B{"Over threshold and rearmed, or forced fit?"}
+    B -- No --> C["Continue to request-fit admission"]
+    B -- Yes --> D["Working-set eviction"]
+    D --> E{"Enough space?"}
+    E -- Yes --> C
+    E -- No --> F["LLM summary handoff"]
+    F --> C
 ```
 
 ### 1. Working-Set Eviction (Reversible)
-Working-set eviction is Clio's primary defense against context exhaustion. Rather than summarizing the conversation into prose, eviction targets bulky tool observations:
-- Large tool outputs (`read`, `grep`, `bash`, `data`) from older turns are pruned and replaced with structured tombstone markers.
-- **Tombstone Structure**: Contains the tool name, target path/query, execution duration, output digest, and a persistent `recallId`.
-- **Protected Content**: Eviction never touches user prompts, assistant reasoning, file mutation diffs, or the most recent 2 turns of conversation.
 
-### 2. Targeted Recall
-Evicted observations remain accessible to both the operator and the language model:
-- The agent can inspect an evicted output by invoking `/context recall <recordId>`.
-- Recalled observations are restored into the active working set, triggering re-compaction of other older observations if budget pressure requires it.
+`structural-v2` replaces selected tool-result bodies with stable markers and removes eligible closed-step thinking. Operator messages, recent assistant steps, unresolved failures, active mutations and profile pins stay protected. Markers name the ref, reason, tool, path, size, recall call and optional preview or offload pointer. The ledger keeps the original bytes.
+
+The rearm band (`context.workingSet.rearmFraction`, default 0.1) postpones another automatic eviction or summary until the projection has grown by that fraction of the window since the last event. Summaries reset the baseline; overflow fit recovery bypasses it. Selection and rearm arithmetic use projected visible-ledger tokens, while admission continues to account for the full prompt.
+
+### 2. Exact Recall
+
+Recall is available on demand, not a compaction stage. The model uses `context(scope="recall", ref="r12")` or a canonical file path to fetch an evicted read. An unchanged reread also records recall provenance when its body hash matches an evicted read. Returned bodies arrive at the tail and are persisted again; original markers stay stable. `/context recall <ref>` displays the historical body in the operator transcript without adding it to model input.
+
+Profiles add numeric-output or edited-component pins to structural policies. See [Working Set](context-working-set.md) for the rung order, protection horizon, recall rules, replay reports and format-6 compatibility.
 
 ### 3. LLM Summary Handoff (Last Resort)
 When working-set eviction cannot reclaim sufficient space (e.g. extensive user prompts or hundreds of conversation turns), Clio executes an assistant-authored summary handoff:
 - The model (or a dedicated compaction model specified via `context.compaction.model`) synthesizes a structured `note_to_self`.
 - The summary captures critical operational state: task objectives, discovered constraints, modified files, active hypothesis, and immediate next steps.
-- The summary is appended to the ledger as a `self_compact` record in session format v5.
+- The summary is appended to the ledger as a `self_compact` record in session format v6.
 - Earlier conversation turns are retired from active context but remain completely intact in session logs and `/view transcript`.
 
 <details>
@@ -149,7 +148,7 @@ Settings configured under `context.*` in `settings.yaml`:
 | `context.compaction.model` | `null` | Optional dedicated route/model used exclusively for summary handoffs. |
 | `context.toolResultMaxBytes` | `65536` | Maximum bytes retained per tool call before scratch offload. |
 | `context.workingSet.enabled` | `true` | Enable reversible working-set observation eviction. |
-| `context.workingSet.policy` | `"structural-v1"` | Eviction strategy (`structural-v1` for dependency/class-aware, `age-horizon` for temporal). |
+| `context.workingSet.policy` | `"structural-v2"` | Composed structural policy; `structural-v1` preserves the previous composition and `age-horizon` the temporal selection. |
 
 ---
 
