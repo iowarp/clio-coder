@@ -4,8 +4,17 @@ import { once } from "node:events";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { legacyDocsBirthVerified } from "../../src/cli/legacy-docs-cleanup.js";
 import { processAlive, processBirthToken } from "../../src/core/process-identity.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
+
+test("legacy documentation cleanup refuses PID ownership without verified OS birth tokens", () => {
+	const currentBirth = processBirthToken(process.pid);
+	assert.equal(legacyDocsBirthVerified(process.pid, currentBirth, false), false);
+	assert.equal(legacyDocsBirthVerified(process.pid, `pid-${process.pid}`, false), false);
+	assert.equal(legacyDocsBirthVerified(process.pid, "stale-birth", true), false);
+	assert.equal(legacyDocsBirthVerified(process.pid, null, true), false);
+});
 
 function fixture() {
 	const home = makeScratchHome("clio-lifecycle-cleanup-");
