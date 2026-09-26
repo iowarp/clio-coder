@@ -11,7 +11,7 @@ import {
 import type { OutputStyle, PanesSettings, SmoothStreaming, TuiMode, WorkerPermissionMode } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
 import { getAtPath } from "../core/session-routing.js";
-import { formatControlValue, type SettingControl } from "../core/settings-controls.js";
+import { formatControlValue, orderSettingsEntries, type SettingControl } from "../core/settings-controls.js";
 import {
 	resolveSettingsSection,
 	SETTINGS_SECTIONS,
@@ -1401,6 +1401,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 		actions: [
 			{
 				label: "Choose the chat model",
+				controlPath: "chat.target",
 				hint: "select a connection, then a model Clio can list for it",
 				run: async (io) => assignTarget(io, "chat"),
 			},
@@ -1429,6 +1430,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 		actions: [
 			{
 				label: "Choose the default fleet model",
+				controlPath: "fleet.default.target",
 				hint: "select a connection, then a model Clio can list for it",
 				run: async (io) => assignTarget(io, "fleet"),
 			},
@@ -1451,6 +1453,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 		actions: [
 			{
 				label: "Choose the proactive-memory model",
+				controlPath: "context.memory.target",
 				hint: "optional; choose Rules only to avoid a second model call",
 				run: async (io) => assignTarget(io, "memory"),
 			},
@@ -1798,21 +1801,25 @@ const SECTIONS: ReadonlyArray<SectionSpec> = SETTINGS_SECTIONS.map((section) => 
 	summary: section.description,
 	aliases: section.aliases,
 	...SECTION_CONTENT[section.id],
-	actions: [
-		...SECTION_CONTENT[section.id].actions.map((action) => {
-			const path = action.controlPath;
-			if (!path) return action;
-			const control = orderedSectionControls(section.id).find(({ control }) => control.path === path)?.control;
-			return {
-				...action,
-				label: `${settingsGroupForPath(path)} · ${action.label}`,
-				hint: () => `${formatControlValue(getAtPath(readSettings(), path))} · ${control?.description ?? ""}`,
-			};
-		}),
-		...orderedSectionControls(section.id)
-			.filter(({ control }) => !GUIDED_CONTROL_PATHS.has(control.path))
-			.map(({ group, control }) => settingControlAction(group, control)),
-	],
+	actions: orderSettingsEntries(
+		section.id,
+		[
+			...SECTION_CONTENT[section.id].actions.map((action) => {
+				const path = action.controlPath;
+				if (!path) return action;
+				const control = orderedSectionControls(section.id).find(({ control }) => control.path === path)?.control;
+				return {
+					...action,
+					label: `${settingsGroupForPath(path)} · ${path.endsWith(".target") ? action.label : (control?.label ?? action.label)}`,
+					hint: () => `${formatControlValue(getAtPath(readSettings(), path))} · ${control?.description ?? ""}`,
+				};
+			}),
+			...orderedSectionControls(section.id)
+				.filter(({ control }) => !GUIDED_CONTROL_PATHS.has(control.path))
+				.map(({ group, control }) => ({ ...settingControlAction(group, control), controlPath: control.path })),
+		],
+		(action) => action.controlPath ?? "",
+	),
 }));
 
 /** A `ParsedArgs` with nothing set, for the target wizard called from a section. */

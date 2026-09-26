@@ -6,6 +6,10 @@ This page is a map to the implemented configuration surface. Source defines the 
 
 ## Settings keys
 
+The visible settings hierarchy is shared by `clio-coder configure --settings` and TUI `/settings`: **Connections → Chat → Fleet → Context & Memory → Permissions & Limits → Appearance → Integrations → Advanced**. Names describe what the settings change; YAML paths remain the version-2 schema below. For example, Connections manages `targets`, Appearance manages `interface.*`, and Permissions & Limits includes `fleet.permissions.*` and external-agent tool governance. See the [Settings Center walkthrough](configuration-and-targets.md#settings-center) for navigation, model inheritance, and save scopes.
+
+Section names and ownership come from [`settings-navigation.ts`](../../src/core/settings-navigation.ts). Control labels, descriptions, and ordering come from [`settings-controls.ts`](../../src/core/settings-controls.ts). UI adapters should consume these catalogs instead of deriving headings from schema roots or maintaining a separate list of names.
+
 Settings use one strict version-2 schema. Unknown keys and invalid values are errors; omitted keys take compiled defaults. Objects merge by key, while arrays and scalar values replace the lower layer.
 
 The table lists the leaves in `DEFAULT_SETTINGS`. Types, accepted values, optional schema fields, validation, and change timing live in [`src/core/defaults.ts`](../../src/core/defaults.ts) and [`src/core/config.ts`](../../src/core/config.ts).

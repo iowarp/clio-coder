@@ -35,7 +35,7 @@ For saved defaults use `clio-coder configure --settings`. Each area shows its co
 
 ## Advanced settings
 
-Configure and TUI `/settings` share the settings control catalog:
+Configure and TUI `/settings` share the section names, section order, control labels, descriptions, and grouped control order. The menu reads:
 
 | Section | Owns |
 | --- | --- |
@@ -64,7 +64,15 @@ Other settings apply at the boundary shown in the inventory. The routing classif
 
 ## Settings Center
 
-Open `/settings` in the TUI or `clio-coder configure --settings`. Edits offer apply-this-session, save for this project, save globally, or cancel when the control supports a session override. Restart-required controls say so before saving. Target and profile removal shows affected routes before confirmation.
+Open `/settings` in the TUI or `clio-coder configure --settings`. Both start with **Connections**, **Chat**, **Fleet**, **Context & Memory**, **Permissions & Limits**, **Appearance**, **Integrations**, and **Advanced**, in that order. A connection is the provider/app/server entry stored as a `target`; the CLI's `targets` commands and the YAML keys keep that technical name. You do not need to learn a second settings hierarchy after onboarding.
+
+Use **Connections → Add a target** to reopen Guided setup inside the TUI. It runs the same setup flow as configure, including model inventories, passive checks, and review before Save. **Chat** selects the connection and model that answer you. **Fleet → Default model** selects the connection, model, and thinking level for delegated work; profiles and agent routes stay in Fleet. Worker approvals and external-agent tool permissions live in **Permissions & Limits**, alongside autonomy and spending/tool limits.
+
+Each section keeps related controls together. Configure combines a route's connection and model into one guided action; the TUI offers separate connection and model pickers in the same group. Select **Use connection default** in a TUI model picker to clear that route's model override. A blank override in the text fallback has the same meaning; a typed model id is unverified. **Context & Memory → Proactive memory → Memory connection → Rules only** clears the background model route while leaving rules-based memory available when proactive memory is enabled.
+
+In the TUI, use arrows to move, Enter to open, and `/` to filter by name or canonical key. On wide terminals, Tab switches between sections and their controls; narrow terminals show one level at a time. Esc goes back. Previewing a value does not save it. Edits offer this session, this project, global, or cancel when the control supports that scope. Project saves require trusted project settings. Restart-required controls explain that timing before saving; target and profile removal shows affected routes before confirmation.
+
+Configure edits saved global defaults. It does not offer the TUI's session/project scope menu or redirect an already-running chat session. In **Advanced**, the TUI's **Check setup** and **Edit all settings** rows show the terminal commands for diagnostics and the validated file editor.
 
 ## Settings inventory
 
@@ -229,7 +237,7 @@ Three version-2 keys are retired the same way. `integrations.externalAgents.entr
 
 ## Configure targets
 
-In the TUI, open `/settings targets` (or `/config targets`), choose **Add target**, or open a target and choose **Edit URL, runtime and default model**. The existing configure wizard runs in the composer dock, with the same probing, model validation and review-before-save behavior. Enter advances, Esc goes back, and Ctrl+C cancels target setup. **Save target** writes global target settings and keeps explicit chat, fleet and memory route defaults. Browser sign-in stores credentials immediately; other target settings wait for Save.
+In the TUI, open `/settings connections` (or `/settings targets`, `/config targets`), choose **Add a target**, or open a connection and choose **Edit URL, runtime and default model**. The configure wizard runs in the composer dock, with the same probing, model validation and review-before-save behavior. Enter advances, Esc goes back, and Ctrl+C cancels target setup. **Save target** writes global target settings and keeps explicit chat, fleet and memory route defaults. Browser sign-in stores credentials immediately; other target settings wait for Save.
 
 Use guided `clio-coder configure` for source-led setup, `clio-coder configure --quick` for the URL-first shortcut, `clio-coder configure --section targets` for the target console, or `clio-coder targets add` for the target wizard. The non-interactive flag surface is documented by `clio-coder configure --help` and implemented in [`src/cli/configure.ts`](../../src/cli/configure.ts).
 

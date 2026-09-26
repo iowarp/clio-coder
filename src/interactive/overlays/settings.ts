@@ -3,6 +3,7 @@ import {
 	applyControlValue,
 	controlInstructions,
 	formatControlValue,
+	orderSettingsEntries,
 	SETTING_CONTROLS,
 	SETTINGS_DESCRIPTIONS_BY_ID,
 	SETTINGS_HELP_BY_ID,
@@ -414,7 +415,7 @@ function selectTargetSubmenu(providers: ProvidersContract): SettingSubmenuBuilde
 			value: status.target.id,
 			label: `${status.target.id} (${status.target.url ?? "no url"})`,
 		}));
-		return selectListSubmenu("Select target", items)(currentValue, done);
+		return selectListSubmenu("Select connection", items)(currentValue, done);
 	};
 }
 
@@ -422,14 +423,14 @@ function selectOptionalBackgroundTargetSubmenu(providers: ProvidersContract): Se
 	return (currentValue: string, done: (val?: string) => void) => {
 		const statuses = providers.list();
 		const items = [
-			{ value: "(unset)", label: "(unset — rules-only)" },
+			{ value: "(unset)", label: "Rules only" },
 			...statuses.map((status) => ({
 				value: status.target.id,
 				label: `${status.target.id} (${status.target.url ?? "no url"})`,
 			})),
 		];
 		const note = "Unset keeps the zero-cost rules-only tier.";
-		return selectListSubmenu("Select memory target", items, note)(currentValue, done);
+		return selectListSubmenu("Select memory connection", items, note)(currentValue, done);
 	};
 }
 
@@ -442,9 +443,15 @@ function selectModelSubmenu(
 		const status = providers.list().find((s) => s.target.id === targetId);
 		const models = status ? modelsForTarget(status) : [];
 		if (models.length === 0) {
-			return textInputSubmenu("Type model name")(currentValue, done);
+			return textInputSubmenu(
+				"Model override",
+				"Leave blank to use the connection default; a typed model id is unverified.",
+			)(currentValue, done);
 		}
-		const items = models.map((m) => ({ value: m, label: m }));
+		const items = [
+			{ value: "(unset)", label: "Use connection default" },
+			...models.map((model) => ({ value: model, label: model })),
+		];
 		return selectListSubmenu(`Select model for ${targetId}`, items)(currentValue, done);
 	};
 }
@@ -1113,7 +1120,7 @@ function groupHeader(
 function targetAddCta(): SettingsCenterItem {
 	return {
 		id: "targets.add-cta",
-		label: "Add target",
+		label: "Add a target",
 		currentValue: "Open target wizard",
 		description: "Add a target without leaving the TUI. Review and save its runtime, credentials, URL and model.",
 		section: "targets",
@@ -1195,13 +1202,13 @@ function maintenanceRows(): SettingsCenterItem[] {
 	return [
 		{
 			id: "maintenance.diagnostics" as const,
-			label: "Diagnostics",
-			currentValue: "clio-coder configure --section diagnostics",
+			label: "Check setup",
+			currentValue: "clio-coder configure --section advanced",
 			description: "Inspect version and directories, run doctor, or read settings.yaml from the configure wizard.",
 		},
 		{
 			id: "maintenance.editor" as const,
-			label: "All settings",
+			label: "Edit all settings",
 			currentValue: "clio-coder configure --edit",
 			description: "Open the complete settings.yaml in your editor, validate the draft, and review before saving.",
 		},
@@ -1252,7 +1259,7 @@ export function buildSettingItems(
 		(agentId) => selectListSubmenu(`Select the profile for ${agentId}`, profileNameChoices(live)),
 		(agentId, profile) => `${agentId} -> ${profile}`,
 	);
-	const targetSubmenu = options?.providers ? selectTargetSubmenu(options.providers) : editTextSubmenu("Type target id");
+	const targetSubmenu = options?.providers ? selectTargetSubmenu(options.providers) : editTextSubmenu("Connection id");
 	const orchestratorModelSubmenu = options?.providers
 		? selectModelSubmenu(options.providers, () => live().chat.target ?? undefined)
 		: editTextSubmenu("Type model name");
@@ -1261,7 +1268,7 @@ export function buildSettingItems(
 		: editTextSubmenu("Type model name");
 	const backgroundTargetSubmenu = options?.providers
 		? selectOptionalBackgroundTargetSubmenu(options.providers)
-		: editTextSubmenu("Type memory target id", "Leave blank for rules-only memory.");
+		: editTextSubmenu("Memory connection id", "Leave blank for rules-only memory.");
 	const backgroundModelSubmenu = options?.providers
 		? selectModelSubmenu(options.providers, () => live().context.memory.target ?? undefined)
 		: editTextSubmenu("Type memory model name");
@@ -1310,16 +1317,19 @@ export function buildSettingItems(
 			submenu: targetSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
-		settingItem("orchestrator.model", settings.chat.model ?? "(unset)", {
+		settingItem("orchestrator.model", settings.chat.model ?? "(connection default)", {
 			submenu: orchestratorModelSubmenu,
+			editValue: settings.chat.model ?? "",
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
-		settingItem("background.target", settings.context.memory.target ?? "(unset — rules-only)", {
+		settingItem("background.target", settings.context.memory.target ?? "Rules only", {
 			submenu: backgroundTargetSubmenu,
+			editValue: settings.context.memory.target ?? "",
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
-		settingItem("background.model", settings.context.memory.model ?? "(unset)", {
+		settingItem("background.model", settings.context.memory.model ?? "(connection default)", {
 			submenu: backgroundModelSubmenu,
+			editValue: settings.context.memory.model ?? "",
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
 		settingItem("memory.intervention.enabled", String(settings.context.memory.enabled), {
@@ -1344,8 +1354,9 @@ export function buildSettingItems(
 			submenu: targetSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
-		settingItem("workers.default.model", settings.fleet.default.model ?? "(unset)", {
+		settingItem("workers.default.model", settings.fleet.default.model ?? "(connection default)", {
 			submenu: workerModelSubmenu,
+			editValue: settings.fleet.default.model ?? "",
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
 		settingItem("workers.default.thinkingLevel", workerThinking.display, {
@@ -1627,6 +1638,10 @@ export function buildSettingItems(
 	];
 	for (const item of items) {
 		const control = settingControl(item.configPath);
+		if (control && item.presentationKind === "setting") {
+			item.label = control.label;
+			item.description = control.description;
+		}
 		if (
 			control?.kind === "number" ||
 			item.configPath === "fleet.concurrency" ||
@@ -1979,8 +1994,12 @@ function fleetEndpointRows(providers: ProvidersContract | undefined): SettingsCe
 
 export function buildSettingsSections(items: readonly SettingsCenterItem[]): SettingsCenterSection[] {
 	return SETTINGS_SECTIONS.map((section) => {
-		const rows = items.filter(
-			(item) => item.section === section.id && (item.id === "targets" || item.presentationKind !== "group-header"),
+		const rows = orderSettingsEntries(
+			section.id,
+			items.filter(
+				(item) => item.section === section.id && (item.id === "targets" || item.presentationKind !== "group-header"),
+			),
+			(item) => item.configPath ?? item.id,
 		);
 		if (section.id === "targets") return { id: section.id, label: section.label, items: rows };
 		const groups = new Map<string, SettingsCenterItem[]>();
@@ -3859,7 +3878,8 @@ export class SettingsCenter implements Component {
 
 	private footerScopeNote(item: SettingsCenterItem): string {
 		if (item.id.startsWith("maintenance.")) return `Run in a terminal: ${item.currentValue}`;
-		if (item.id === "targets.add-cta") return "Enter opens target setup in the dock; Save writes global target settings";
+		if (item.id === "targets.add-cta")
+			return "Enter opens Guided setup in the dock; Save writes global connection settings";
 		if (item.submenu && (item.presentationKind === "status" || item.presentationKind === "action"))
 			return "Enter opens actions · nothing changes until an action is confirmed";
 		if (item.readOnly) return "Read-only here · managed on the surface above";
@@ -3929,7 +3949,9 @@ export interface OpenSettingsOverlayDeps {
 function formatSettingChangeNotice(id: string, value: string, scope: "session" | "project" | "global"): string {
 	const scopedRefs = id === "scope" ? parseScopedModelSelection(value) : null;
 	const displayValue = scopedRefs ? (scopedRefs.length > 0 ? scopedRefs.join(", ") : "(empty)") : value;
-	return `${id} set to ${displayValue} (${scope === "global" ? "saved globally" : scope === "project" ? "saved for this project" : "this session"})`;
+	const path = settingsV2PathForRow(id);
+	const label = settingControl(path)?.label ?? SETTINGS_LABELS_BY_ID[id as keyof typeof SETTINGS_LABELS_BY_ID] ?? path;
+	return `${label} set to ${displayValue} (${scope === "global" ? "saved globally" : scope === "project" ? "saved for this project" : "this session"})`;
 }
 
 export interface SettingsOverlayHandle extends OverlayHandle {

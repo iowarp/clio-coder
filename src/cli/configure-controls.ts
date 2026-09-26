@@ -10,15 +10,10 @@ import {
 	applyControlValue,
 	controlInstructions,
 	formatControlValue,
-	SETTING_CONTROLS,
+	orderedSectionControls,
 	type SettingControl,
 } from "../core/settings-controls.js";
-import {
-	SETTINGS_SECTIONS,
-	type SettingsSectionId,
-	settingsGroupForPath,
-	settingsSectionForPath,
-} from "../core/settings-navigation.js";
+import { SETTINGS_SECTIONS, type SettingsSectionId } from "../core/settings-navigation.js";
 import { diffSettings } from "../domains/config/classify.js";
 import { ConfigureNavigation, type ConfigurePrompts } from "./configure-prompts.js";
 import { createLifecyclePresenter } from "./lifecycle-presenter.js";
@@ -61,23 +56,7 @@ export function saveControl(path: string, input: string): void {
 	});
 }
 
-export interface GroupedSettingControl {
-	group: string;
-	control: SettingControl;
-}
-
-/**
- * The complete section catalog in visual order. Groups are contiguous so a
- * single menu can classify every setting without hiding the less common ones
- * behind an "all controls" detour.
- */
-export function orderedSectionControls(section: SettingsSectionId): GroupedSettingControl[] {
-	const controls = SETTING_CONTROLS.filter((control) => settingsSectionForPath(control.path) === section);
-	const groups = [...new Set(controls.map((control) => settingsGroupForPath(control.path)))];
-	return groups.flatMap((group) =>
-		controls.filter((control) => settingsGroupForPath(control.path) === group).map((control) => ({ group, control })),
-	);
-}
+export { orderedSectionControls } from "../core/settings-controls.js";
 
 /** Open one fully explained, validated global setting edit. */
 export async function editSettingControl(prompts: ConfigurePrompts, control: SettingControl): Promise<boolean> {

@@ -4,25 +4,22 @@ import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { type ClioSettings, SETTINGS_V1_PATH_MOVES, SettingsValidationError, validateSettings } from "./config.js";
 import { DEFAULT_SETTINGS, THINKING_LEVELS } from "./defaults.js";
 import { getAtPath, setAtPath } from "./session-routing.js";
-import { settingsSectionForPath } from "./settings-navigation.js";
+import { type SettingsSectionId, settingsGroupForPath, settingsSectionForPath } from "./settings-navigation.js";
 
 export const SETTINGS_LABELS_BY_ID = {
 	autonomy: "Autonomy level",
-	// Labels follow the CLI's post-rename vocabulary: the config surface is the
-	// fleet, and `worker` is the runtime entity the descriptions still name. A
-	// section headed Fleet whose rows read "Worker profiles" and "Worker
-	// retries" made one setting look like two subsystems.
-	"workers.onPermission": "Fleet approvals routing",
+	// Legacy row ids stay internal; visible names are shared by every settings surface.
+	"workers.onPermission": "Worker permission mode",
 	"workers.escalation.timeoutMs": "Escalation timeout (ms)",
 	"workers.escalation.fallback": "Escalation fallback",
-	"delegation.defaults.toolGovernance": "Delegation governance",
-	"skills.trustProjectCompatRoots": "Trust imported skills and prompts",
-	"attribution.gitCommits": "Clio commit provenance",
+	"delegation.defaults.toolGovernance": "External agent permissions",
+	"skills.trustProjectCompatRoots": "Trust project imports",
+	"attribution.gitCommits": "Git commit attribution",
 	safetyNet: "Safety net",
 	"orchestrator.thinkingLevel": "Thinking level",
-	"orchestrator.target": "Target",
-	"orchestrator.model": "Model",
-	"background.target": "Memory target",
+	"orchestrator.target": "Chat connection",
+	"orchestrator.model": "Chat model",
+	"background.target": "Memory connection",
 	"background.model": "Memory model",
 	"memory.intervention.enabled": "Proactive memory",
 	"memory.intervention.everyNTools": "Memory cadence (tools)",
@@ -30,8 +27,8 @@ export const SETTINGS_LABELS_BY_ID = {
 	"memory.intervention.maxTokens": "Memory reminder tokens",
 	"memory.intervention.timeoutMs": "Memory timeout (ms)",
 	"prewarm.enabled": "Prompt pre-warm",
-	"workers.default.target": "Default target",
-	"workers.default.model": "Default model",
+	"workers.default.target": "Default fleet connection",
+	"workers.default.model": "Default fleet model",
 	"workers.default.thinkingLevel": "Default thinking level",
 	"workers.profiles": "Add profile",
 	"workers.agentBindings": "Bind agent",
@@ -40,9 +37,9 @@ export const SETTINGS_LABELS_BY_ID = {
 	"routing.activeRoles": "Active routing roles",
 	"routing.activePostures": "Active routing postures",
 	"routing.agentAutomation.activeAgentRoles": "Active agent routes",
-	"panes.enabled": "Panes",
+	"panes.enabled": "Panes capability",
 	"panes.notifications": "Pane notifications",
-	"panes.layout": "Boot layout",
+	"panes.layout": "Startup layout",
 	"panes.workers.ratio": "Workers dock share",
 	"panes.journal": "Run event journal",
 	"panes.yazi.enabled": "Files pane",
@@ -53,11 +50,11 @@ export const SETTINGS_LABELS_BY_ID = {
 	scope: "Model cycle set",
 	"modelSelector.recentLimit": "Recent models kept",
 	"modelSelector.favorites": "Pinned favorites",
-	"budget.sessionCeilingUsd": "Session ceiling (USD)",
+	"budget.sessionCeilingUsd": "Session cost limit",
 	"defaults.maxTokens": "Output budget (tokens)",
 	"context.toolResultMaxBytes": "Tool result cap (bytes)",
 	"budget.concurrency": "Fleet concurrency",
-	"guardrails.turnToolCallBudget": "Turn tool-call budget",
+	"guardrails.turnToolCallBudget": "Turn tool budget",
 	"guardrails.workerToolCallCap": "Worker tool-call cap",
 	"guardrails.maxDispatchRuns": "Run ledger retention",
 	"guardrails.readMaxBytes": "Read byte cap",
@@ -79,28 +76,28 @@ export const SETTINGS_LABELS_BY_ID = {
 	"retry.maxDelayMs": "Max delay (ms)",
 	"retry.streamStallMs": "Stream stall timeout (ms)",
 	"retry.firstTokenStallMs": "First token timeout (ms)",
-	"terminal.showTerminalProgress": "Terminal progress badges",
+	"terminal.showTerminalProgress": "Terminal progress indicator",
 	"terminal.outputVerbosity": "Output style",
 	"terminal.tuiMode": "TUI mode",
 	"terminal.fullscreenScrollbar": "Fullscreen scrollbar",
 	"terminal.smoothStreaming": "Smooth streaming",
 	"terminal.notify": "Desktop notifications",
-	"watchdog.enabled": "Turn-end watchdog",
-	"watchdog.target": "Watchdog target",
-	"watchdog.cadenceToolCalls": "Watchdog cadence (tools)",
+	"watchdog.enabled": "Turn-end review watchdog",
+	"watchdog.target": "Review connection",
+	"watchdog.cadenceToolCalls": "Review cadence (tools)",
 	runtimePlugins: "Runtime plugins",
 	"compaction.model": "Compaction model",
 	"compaction.systemPrompt": "Compaction prompt",
 	"delegation.defaults.connectTimeoutMs": "Delegate connect (ms)",
 	"delegation.defaults.turnTimeoutMs": "Delegate turn (ms)",
 	"delegation.defaults.permissionTimeoutMs": "Delegate permission (ms)",
-	targets: "Configured targets",
+	targets: "Configured connections",
 	keybindings: "Keybinding overrides",
-	"delegation.agents": "Delegation agents",
+	"delegation.agents": "External agents",
 	"library.catalog": "Library catalog path",
 	"library.remote": "Library remote",
 	"library.confirmedRemote": "Confirmed library remote",
-	"library.sync": "Library sync",
+	"library.sync": "Library remote sync",
 } as const;
 
 export const SETTINGS_DESCRIPTIONS_BY_ID = {
@@ -115,8 +112,8 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 		"Add evidence-backed assistance, testing, review, and contributor trailers to commits created through Clio.",
 	safetyNet: "Always-on rails; tuned in .clio-coder/safety.yaml.",
 	"orchestrator.thinkingLevel": "Reasoning budget for the chat loop.",
-	"orchestrator.target": "Active chat target id.",
-	"orchestrator.model": "Active chat wire model id.",
+	"orchestrator.target": "Connection that answers in chat.",
+	"orchestrator.model": "Chat model override; unset uses the connection default.",
 	"background.target": "Optional target for LLM memory steps; unset keeps rules-only memory.",
 	"background.model": "Small non-reasoning model used only for task memory steps.",
 	"memory.intervention.enabled": "Master switch for rules-only and model-backed task memory.",
@@ -125,8 +122,8 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"memory.intervention.maxTokens": "Hard cap for one visible memory reminder.",
 	"memory.intervention.timeoutMs": "Hard deadline for one background-model memory call.",
 	"prewarm.enabled": "Send the next turn's known prefix ahead of time so a local server has already prefilled it.",
-	"workers.default.target": "Default /run target id.",
-	"workers.default.model": "Default /run wire model id.",
+	"workers.default.target": "Default connection for delegated fleet work.",
+	"workers.default.model": "Default fleet model override; unset uses the connection default.",
 	"workers.default.thinkingLevel": "Reasoning budget for dispatched workers.",
 	"workers.profiles": "Named target/model/thinking choices that native workers can use. Enter adds one.",
 	"workers.agentBindings": "Pins native Clio agents, including shadow agents, to worker profiles. Enter adds one.",
@@ -194,7 +191,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"compaction.systemPrompt": "Path to a compaction prompt override; blank uses the built-in.",
 	"delegation.defaults.connectTimeoutMs": "How long to wait for a delegated agent to connect.",
 	"delegation.defaults.turnTimeoutMs": "How long a single delegated turn may run.",
-	"delegation.defaults.permissionTimeoutMs": "How long a delegated permission ask may wait.",
+	"delegation.defaults.permissionTimeoutMs": "How long Clio's ACP server waits for a permission response.",
 	targets: "Inference targets available for chat and workers. Add one with `clio-coder targets add`.",
 	keybindings: "Custom key overrides layered on the defaults.",
 	"delegation.agents": "External ACP agents available to /delegate.",
@@ -563,6 +560,38 @@ export const SETTING_CONTROLS: readonly SettingControl[] = (() => {
 			};
 		});
 })();
+
+/** Complete section catalog in the order used by configure and /settings. */
+export function orderedSectionControls(section: SettingsSectionId): Array<{ group: string; control: SettingControl }> {
+	const controls = SETTING_CONTROLS.filter((control) => settingsSectionForPath(control.path) === section);
+	const groups = [...new Set(controls.map((control) => settingsGroupForPath(control.path)))];
+	return groups.flatMap((group) =>
+		controls.filter((control) => settingsGroupForPath(control.path) === group).map((control) => ({ group, control })),
+	);
+}
+
+/** Guided actions and live collection entries stay beside the controls they represent. */
+export function orderSettingsEntries<T>(
+	section: SettingsSectionId,
+	entries: readonly T[],
+	pathFor: (entry: T) => string,
+): T[] {
+	const catalog = orderedSectionControls(section);
+	const groups = [...new Set(catalog.map((entry) => entry.group))];
+	const rank = (entry: T): [number, number] => {
+		const path = pathFor(entry);
+		const group = groups.indexOf(settingsGroupForPath(path));
+		const control = catalog.findIndex(
+			(entry) => path === entry.control.path || path.startsWith(`${entry.control.path}.`),
+		);
+		return [group < 0 ? groups.length : group, control < 0 ? catalog.length : control];
+	};
+	return [...entries].sort((a, b) => {
+		const left = rank(a);
+		const right = rank(b);
+		return left[0] - right[0] || left[1] - right[1];
+	});
+}
 
 export function settingControl(path: string): SettingControl | undefined {
 	return SETTING_CONTROLS.find((control) => control.path === path);

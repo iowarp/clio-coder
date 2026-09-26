@@ -10,7 +10,7 @@ The governing architectural principle: **the user reads state from color, struct
 
 ## Output Styles
 
-Toggle styles with **Alt+O** (`Compact` → `Standard` → `Detailed` → `Compact`). Standard is default. Configured via `/settings interface` or `clio-coder configure --section panes`.
+Toggle styles with **Alt+O** (`Compact` → `Standard` → `Detailed` → `Compact`). Standard is default. Configure **Appearance → Display & keyboard → Output style** through `/settings appearance` or `clio-coder configure --section appearance`.
 
 | Content | Compact | Standard (Default) | Detailed |
 | :--- | :--- | :--- | :--- |
@@ -237,7 +237,7 @@ Every transcript row follows a rigid 2-column gutter format:
 
 ## 6. Overlays & Inspection
 
-- **`/settings` and `/config`**: settings share one docked surface. Targets offers Add target and an Edit action for URL, runtime and default model. The host supplies docked prompts to the existing CLI wizard through `src/cli/configure-host.ts`, loaded only when setup starts. Save writes global target settings; Esc goes back, and Ctrl+C cancels setup without quitting Clio. Browser sign-in stores credentials immediately. Existing explicit routing defaults remain in place.
+- **`/settings` and `/config`**: settings share one docked surface and configure's ordered sections: Connections, Chat, Fleet, Context & Memory, Permissions & Limits, Appearance, Integrations, Advanced. Control names, explanations, and grouped order come from the shared core catalog; live profile/node entries and guided actions stay beside their owning controls. Connections offers **Add a target** and an Edit action for URL, runtime and default model. The host supplies docked prompts to the configure wizard through `src/cli/configure-host.ts`, loaded only when setup starts. Save writes global target settings; Esc goes back, and Ctrl+C cancels setup without quitting Clio. Browser sign-in stores credentials immediately. Existing explicit routing defaults remain in place. Route model pickers offer **Use connection default**; proactive memory offers **Rules only**. The [settings walkthrough](../guide/configuration-and-targets.md#settings-center) explains navigation and the TUI's session/project/global save scopes.
 - **`/view transcript`**: Inspect complete un-truncated output, tool payloads, and raw responses.
 - **`/usage`**: 5 tabs (Activity, Accounts, Session, Models, Workers) with consumption vs budget percentages.
 - **`/tasks`**: Interactive task board tracking parent/child subagent execution status.

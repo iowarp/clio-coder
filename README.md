@@ -57,7 +57,12 @@ clio-coder
    > entry points and suggest one verification task. Do not change files yet.
 
 3. Use `/help` for commands, `/model` for model selection, and `/settings` for
-   configuration. `clio-coder doctor` checks installation and connections.
+   configuration. `/settings` keeps configure's section names and order, from
+   **Connections** through **Advanced**. Reopen **Connections → Add a target**
+   for Guided setup, **Chat** to change the answering model, or **Fleet** for
+   worker defaults. See the [settings walkthrough](docs/guide/configuration-and-targets.md#settings-center)
+   for model inheritance and session, project, and global saves.
+   `clio-coder doctor` checks installation and connections.
 
 <details>
 <summary><strong>Package managers and source installation</strong></summary>
