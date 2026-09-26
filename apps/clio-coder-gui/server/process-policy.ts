@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access, readFile, realpath, stat } from "node:fs/promises";
-import { delimiter, isAbsolute, join } from "node:path";
+import { delimiter, isAbsolute, join, win32 } from "node:path";
 import { Worker } from "node:worker_threads";
 import { type CliCommand, commandPlan } from "./cli-commands.js";
 import { createStdioTransport, processAlive, processBirthToken, resolvePackageRoot } from "./clio/http-shims.js";
@@ -110,7 +110,11 @@ export function stopClioCommand(
 	return child.kill(signal);
 }
 
-export function browserCommand(url: string, platform: NodeJS.Platform = process.platform) {
+export function browserCommand(
+	url: string,
+	platform: NodeJS.Platform = process.platform,
+	env: NodeJS.ProcessEnv = process.env,
+) {
 	const parsed = new URL(url);
 	if (
 		parsed.protocol !== "http:" ||
@@ -122,14 +126,24 @@ export function browserCommand(url: string, platform: NodeJS.Platform = process.
 		throw new Error("The browser can only open this app's loopback HTTP URL.");
 	if (platform === "linux") return { file: "xdg-open", argv: [url] };
 	if (platform === "darwin") return { file: "open", argv: [url] };
-	// cmd.exe interprets shell metacharacters even with shell:false. Refuse until a native launcher is verified.
-	throw new Error("Automatic browser opening is supported on Linux and macOS. Open the printed URL in your browser.");
+	if (platform === "win32") {
+		// Never cmd.exe or `start`, which interpret shell metacharacters even with shell:false. The
+		// system rundll32 is named by absolute path so a PATH entry cannot stand in for it, and
+		// FileProtocolHandler hands the one URL argument to the registered browser. Not yet accepted
+		// on a Windows desktop, which is why a bare launch still prints the link instead.
+		const root = env.SystemRoot ?? env.SYSTEMROOT ?? "C:\\Windows";
+		if (!win32.isAbsolute(root)) throw new Error("SystemRoot is not an absolute Windows path.");
+		return { file: win32.join(root, "System32", "rundll32.exe"), argv: ["url.dll,FileProtocolHandler", url] };
+	}
+	throw new Error(
+		"Automatic browser opening is supported on Linux, macOS and Windows. Open the printed URL in your browser.",
+	);
 }
 
 /**
  * Whether a bare launch should open a browser without being asked. Only a person at an interactive
  * terminal with a desktop to open it on gets one: a pipe, a script, a test or an SSH session without
- * a forwarded display prints the link instead, and Windows prints it because its opener is refused.
+ * a forwarded display prints the link instead, and Windows prints it until its opener is accepted on a Windows desktop; --open still uses it.
  */
 export function autoOpenBrowser(
 	env: NodeJS.ProcessEnv = process.env,
@@ -145,7 +159,7 @@ export function autoOpenBrowser(
 
 /** The OS opener owns the browser. Reap only our short-lived opener, never the user's browser. */
 export async function openBrowser(url: string, env: NodeJS.ProcessEnv = process.env) {
-	const command = browserCommand(url);
+	const command = browserCommand(url, process.platform, env);
 	const child = spawn(command.file, command.argv, { env, shell: false, stdio: "ignore" });
 	await new Promise<void>((resolve, reject) => {
 		const timer = setTimeout(() => {

@@ -16,7 +16,14 @@ test("browser opener accepts only the loopback app and treats URL as one literal
 		"http://user@127.0.0.1:4321/",
 	])
 		assert.throws(() => browserCommand(url));
-	assert.throws(() => browserCommand("http://127.0.0.1:4321/", "win32"), /printed URL/);
+	// Windows opens through the system rundll32 by absolute path, never cmd.exe, and the URL stays one argument.
+	assert.deepEqual(browserCommand("http://127.0.0.1:4321/#token=abc_-", "win32", { SystemRoot: "D:\\Win" }), {
+		file: "D:\\Win\\System32\\rundll32.exe",
+		argv: ["url.dll,FileProtocolHandler", "http://127.0.0.1:4321/#token=abc_-"],
+	});
+	assert.equal(browserCommand("http://127.0.0.1:4321/", "win32", {}).file, "C:\\Windows\\System32\\rundll32.exe");
+	assert.throws(() => browserCommand("http://127.0.0.1:4321/", "win32", { SystemRoot: "relative\\dir" }), /SystemRoot/);
+	assert.throws(() => browserCommand("http://127.0.0.1:4321/", "freebsd"), /printed URL/);
 	const dir = await mkdtemp(join(tmpdir(), "clio-web-browser-command-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	const opener = join(dir, "xdg-open"),
