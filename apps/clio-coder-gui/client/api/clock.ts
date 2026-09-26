@@ -42,9 +42,10 @@ export function formatDay(value: string | null | undefined) {
 }
 export function formatDuration(value: number) {
 	const ms = Math.max(0, value || 0);
-	return ms < 1000
-		? `${Math.round(ms)}ms`
-		: ms < 60000
-			? `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`
-			: `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+	if (ms < 999.5) return `${Math.round(ms)}ms`;
+	// Round once at the unit shown, then split, so 599.6 s carries to 10m 0s rather than 9m 60s.
+	const tenths = Math.round(ms / 100);
+	if (tenths < 100) return `${(tenths / 10).toFixed(1)}s`;
+	const seconds = Math.round(ms / 1000);
+	return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
