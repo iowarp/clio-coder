@@ -114,7 +114,7 @@ function ControlRow({
 	save: (write: { path: string; value: string; confirmed?: boolean }) => Promise<SettingWritten>;
 	workspaceId: string;
 	draft: string | null;
-	onDraft: (value: string | null) => void;
+	onDraft: (value: string | null, submittedValue?: string) => void;
 	catalog?: ModelCatalog | undefined;
 	compact?: boolean;
 }) {
@@ -126,12 +126,12 @@ function ControlRow({
 	const write = useMutation({
 		scope: { id: `settings-write:${workspaceId}` },
 		mutationFn: save,
-		onSuccess: (result) => {
+		onSuccess: (result, variables) => {
 			setSaved({
 				sentences: writtenSentences(result.changed, result.controls.controls, control.path),
 				timing: result.timing,
 			});
-			onDraft(null);
+			onDraft(null, variables.value);
 			setConfirmed(false);
 		},
 		onSettled: () => {
@@ -310,7 +310,7 @@ export function SettingsControlsView({
 		);
 	};
 	const [showDrafts, setShowDrafts] = useState(false);
-	const [drafts, setDrafts] = useSettingsDrafts(client, workspaceId);
+	const [drafts, setDrafts, updateDraft] = useSettingsDrafts(client, workspaceId);
 	const key = ["settings-controls", workspaceId];
 	const report = useQuery({
 		queryKey: key,
@@ -397,14 +397,6 @@ export function SettingsControlsView({
 				</>
 			),
 		};
-	};
-	const updateDraft = (path: string, value: string | null) => {
-		setDrafts((current) => {
-			const next = { ...current };
-			if (value === null) delete next[path];
-			else next[path] = value;
-			return next;
-		});
 	};
 	if (report.isPending) return <p>Reading settings…</p>;
 	if (!report.data)
@@ -567,7 +559,7 @@ export function SettingsControlsView({
 							save={save}
 							workspaceId={workspaceId}
 							draft={drafts[control.path] ?? null}
-							onDraft={(value) => updateDraft(control.path, value)}
+							onDraft={(value, submittedValue) => updateDraft(control.path, value, submittedValue)}
 							catalog={catalogFor(control)}
 							compact={compact}
 						/>
