@@ -19,6 +19,7 @@ const { values } = parseArgs({
 		chrome: { type: "string", default: "/usr/bin/google-chrome" },
 		// A comma list, for rerunning one breakpoint while fixing it. The final gate includes 320px.
 		widths: { type: "string", default: "1600,1050,390,320" },
+		"zoom-only": { type: "boolean", default: false },
 		// A private build, so a concurrent `vite build` into dist/client cannot pull pages out from under a run.
 		client: { type: "string", default: fileURLToPath(new URL("../dist/client/", import.meta.url)) },
 	},
@@ -81,7 +82,7 @@ const failures: string[] = [],
 	}[] = [];
 // The last run uses Chrome's native 200% page zoom in a fresh profile. Its layout viewport
 // is 800 CSS pixels inside a 1600px window; neither CSS zoom nor pinch scaling is applied.
-const runs = [...widths.map((width) => ({ width, zoom: 1 })), { width: 800, zoom: 2 }];
+const runs = [...(values["zoom-only"] ? [] : widths.map((width) => ({ width, zoom: 1 }))), { width: 800, zoom: 2 }];
 const statuses: { path: string; status: number }[] = [];
 const zoomMeasurements: { outerWidth: number; innerWidth: number; devicePixelRatio: number; visualScale: number }[] =
 	[];
@@ -191,7 +192,7 @@ try {
 			const menu = page.getByRole("button", { name: "Open navigation", exact: true });
 			if (await menu.isVisible()) await menu.click();
 			await page
-				.getByRole("navigation", { name: "Main navigation" })
+				.getByRole("navigation", { name: /^(Main navigation|Inspection and settings)$/ })
 				.filter({ visible: true })
 				.getByRole("link", { name: label, exact: true })
 				.click();
@@ -366,7 +367,13 @@ try {
 				expanded,
 			);
 			await check("help-rail-collapsed");
-			assert.equal(await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link").count(), 9);
+			assert.equal(
+				await page
+					.getByRole("navigation", { name: /^(Main navigation|Inspection and settings)$/ })
+					.getByRole("link")
+					.count(),
+				9,
+			);
 			assert.equal(await page.getByRole("link", { name: "Settings", exact: true }).getAttribute("data-tip"), "Settings");
 			await page.getByRole("button", { name: "Expand sidebar", exact: true }).click();
 			await page.waitForFunction(
@@ -381,7 +388,7 @@ try {
 		await navigate("Sessions");
 		await page.getByLabel("Project folder", { exact: true }).fill(h.home.path);
 		await page.getByRole("button", { name: "View saved sessions", exact: true }).click();
-		await page.getByRole("button", { name: "New conversation", exact: true }).waitFor();
+		await page.locator("main").getByRole("button", { name: "New conversation", exact: true }).waitFor();
 		await check("sessions");
 		const workspaceUrl = page.url();
 		await navigate("Settings");
@@ -569,12 +576,14 @@ try {
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await page.goto(workspaceUrl);
-		await page.getByRole("button", { name: "New conversation", exact: true }).waitFor();
-		await page.getByRole("button", { name: "New conversation", exact: true }).click();
+		await page.locator("main").getByRole("button", { name: "New conversation", exact: true }).waitFor();
+		await page.locator("main").getByRole("button", { name: "New conversation", exact: true }).click();
 		await page
 			.getByLabel("Message Clio Coder", { exact: true })
 			.fill("Show the fixture findings with code and a diagram.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
+		// Diagrams, like highlighted code, render when they approach the transcript viewport.
+		await page.locator(".diagram").scrollIntoViewIfNeeded();
 		await page.locator(".diagram.is-rendered svg").waitFor();
 		// Highlighting waits until code nears the visible transcript; the composer is no longer
 		// displaced by page scrolling, so bring that block into the one reading viewport.
@@ -735,7 +744,11 @@ try {
 		await route.getByLabel("Thinking", { exact: true }).selectOption("high");
 		await check("route-picker-conversation");
 		await route.getByRole("button", { name: "Apply to this conversation", exact: true }).click();
-		await route.locator("summary").getByText("fixture · fixture-small", { exact: true }).waitFor();
+		await route.locator("summary .route-chip__text").getByText("fixture-small", { exact: true }).waitFor();
+		assert.match(
+			(await route.locator("summary").getAttribute("title")) ?? "",
+			/Target: fixture\. Model: fixture-small\./,
+		);
 		await page.waitForFunction(() => !(document.querySelector(".route-picker") as HTMLDetailsElement).open);
 		assert.match((await route.locator("summary").getAttribute("title")) ?? "", /Thinking: high/);
 		assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
@@ -749,7 +762,11 @@ try {
 		await check("route-picker");
 		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `route-picker-${width}.png`) });
 		await route.getByRole("button", { name: "Save for every project", exact: true }).click();
-		await route.locator("summary").getByText("field-station · survey-small", { exact: true }).waitFor();
+		await route.locator("summary .route-chip__text").getByText("survey-small", { exact: true }).waitFor();
+		assert.match(
+			(await route.locator("summary").getAttribute("title")) ?? "",
+			/Target: field-station\. Model: survey-small\./,
+		);
 		await page.waitForFunction(() => !(document.querySelector(".route-picker") as HTMLDetailsElement).open);
 		assert.equal(await route.evaluate((element) => (element as HTMLDetailsElement).open), false);
 		assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
@@ -970,7 +987,9 @@ try {
 		// Mid-turn steering from the composer: queue a message for after the turn, see it listed,
 		// take it back into the field, then hear the engine's refusal to interrupt as a sentence.
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("Then summarise it.");
+		await page.locator(".composer__options > summary").click();
 		await page.getByLabel("After this turn", { exact: true }).check();
+		await page.keyboard.press("Escape");
 		await page.locator(".composer__submit").click();
 		await page.locator(".composer__queue-row").getByText("Then summarise it.", { exact: true }).waitFor();
 		await check("composer-queue");
@@ -980,7 +999,9 @@ try {
 			() => (document.querySelector(".composer__field") as HTMLTextAreaElement | null)?.value === "Then summarise it.",
 		);
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("");
+		await page.locator(".composer__options > summary").click();
 		await page.getByRole("button", { name: "Interrupt", exact: true }).click();
+		await page.keyboard.press("Escape");
 		await page.getByText("A dispatched worker is attached; stop the turn instead.").waitFor();
 		// Stop takes two presses, and the question puts focus on the answer that keeps the work.
 		await workers.getByRole("button", { name: "Stop scout", exact: true }).click();

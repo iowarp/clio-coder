@@ -326,6 +326,12 @@ export const Composer = memo(function Composer({
 		}
 	};
 
+	const closeOptions = () => {
+		if (!options.current) return;
+		options.current.open = false;
+		options.current.querySelector("summary")?.focus();
+	};
+
 	const notice =
 		noticeForError(send.error ?? interrupt.error ?? stop.error ?? drain.error) ??
 		noticeForRefusal(send.data) ??
@@ -470,6 +476,11 @@ export const Composer = memo(function Composer({
 						className="composer__options"
 						ref={options}
 						onToggle={(event) => setOptionsOpen(event.currentTarget.open)}
+						onKeyDown={(event) => {
+							if (event.key !== "Escape") return;
+							event.preventDefault();
+							closeOptions();
+						}}
 					>
 						<summary aria-label="Message options" title="Keyboard and message delivery options">
 							<Icon name="keyboard" />
