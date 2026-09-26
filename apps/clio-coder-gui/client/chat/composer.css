@@ -482,6 +482,18 @@
 	}
 }
 
+/* At the narrowest supported width, the route uses the space left by the checkbox,
+   attachment and Send controls. Its complete target and model remain in the picker. */
+@media (max-width: 360px) {
+	.route-picker {
+		flex: 1 1 0;
+	}
+	.route-picker > summary {
+		width: 100%;
+		max-width: none;
+	}
+}
+
 /* Images and text files waiting to go with the next request: a quiet row above the actions, each removable. */
 .composer__attachments {
 	list-style: none;

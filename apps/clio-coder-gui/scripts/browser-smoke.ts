@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { AxeBuilder } from "@axe-core/playwright";
 import { serve } from "@hono/node-server";
-import { chromium } from "playwright-core";
+import { type BrowserContext, chromium } from "playwright-core";
 import { harness } from "../tests/harness/app.js";
 import { seedEvidence } from "../tests/harness/evidence-fixture.js";
 import { seedFleet } from "../tests/harness/fleet-fixture.js";
@@ -17,8 +17,8 @@ import { traceFixture } from "../tests/harness/trace-fixture.js";
 const { values } = parseArgs({
 	options: {
 		chrome: { type: "string", default: "/usr/bin/google-chrome" },
-		// A comma list, for rerunning one breakpoint while fixing it. The gate is all three.
-		widths: { type: "string", default: "1600,1050,390" },
+		// A comma list, for rerunning one breakpoint while fixing it. The final gate includes 320px.
+		widths: { type: "string", default: "1600,1050,390,320" },
 		// A private build, so a concurrent `vite build` into dist/client cannot pull pages out from under a run.
 		client: { type: "string", default: fileURLToPath(new URL("../dist/client/", import.meta.url)) },
 	},
@@ -71,14 +71,52 @@ const browser = await chromium
 	});
 const failures: string[] = [],
 	errors: string[] = [],
-	checks: { page: string; width: number; seriousOrCritical: number; minorOrModerate: string[]; overflow: boolean }[] =
-		[];
+	checks: {
+		page: string;
+		width: number;
+		zoom: number;
+		seriousOrCritical: number;
+		minorOrModerate: string[];
+		overflow: boolean;
+	}[] = [];
+// The last run uses Chrome's native 200% page zoom in a fresh profile. Its layout viewport
+// is 800 CSS pixels inside a 1600px window; neither CSS zoom nor pinch scaling is applied.
+const runs = [...widths.map((width) => ({ width, zoom: 1 })), { width: 800, zoom: 2 }];
 const statuses: { path: string; status: number }[] = [];
+const zoomMeasurements: { outerWidth: number; innerWidth: number; devicePixelRatio: number; visualScale: number }[] =
+	[];
+let zoomContext: BrowserContext | null = null;
+let zoomProfile: string | null = null;
 let success = false;
 let failedPage: { screenshot(options: { path: string; fullPage: boolean }): Promise<unknown> } | null = null;
 try {
-	for (const width of widths) {
-		const context = await browser.newContext({ viewport: { width, height: 1050 }, reducedMotion: "reduce" });
+	for (const [runIndex, { width, zoom }] of runs.entries()) {
+		let context: BrowserContext;
+		if (zoom === 2) {
+			zoomProfile = await mkdtemp(join(process.env.TMPDIR ?? scratch, "clio-zoom-"));
+			await mkdir(join(zoomProfile, "Default"));
+			// Chromium's persisted default zoom is log-base-1.2 of the zoom factor. The default
+			// storage partition's relative path is empty, represented by the preference key x.
+			await writeFile(
+				join(zoomProfile, "Default", "Preferences"),
+				JSON.stringify({ partition: { default_zoom_level: { x: Math.log(2) / Math.log(1.2) } } }),
+			);
+			zoomContext = await chromium.launchPersistentContext(zoomProfile, {
+				executablePath: values.chrome,
+				headless: true,
+				viewport: null,
+				colorScheme: "light",
+				reducedMotion: "reduce",
+				args: ["--disable-dev-shm-usage", "--window-size=1600,1050"],
+			});
+			context = zoomContext;
+		} else {
+			context = await browser.newContext({
+				viewport: { width, height: 1050 },
+				colorScheme: "light",
+				reducedMotion: "reduce",
+			});
+		}
 		// Turns on `client/render/render-probe.ts`, so the stream check below can count composer renders.
 		await context.addInitScript("globalThis.__clioRenderCounts = {};");
 		await context.route("**/*", async (route) => {
@@ -131,6 +169,7 @@ try {
 			checks.push({
 				page: name,
 				width,
+				zoom,
 				seriousOrCritical: serious.length,
 				minorOrModerate: axe.violations
 					.filter((item) => item.impact !== "serious" && item.impact !== "critical")
@@ -159,6 +198,18 @@ try {
 		}
 		await page.goto(`${origin}/#token=test-token`);
 		await page.getByRole("heading", { level: 1 }).waitFor();
+		if (zoom === 2) {
+			const measurement = await page.evaluate(() => ({
+				outerWidth,
+				innerWidth,
+				devicePixelRatio,
+				visualScale: visualViewport?.scale ?? 0,
+			}));
+			zoomMeasurements.push(measurement);
+			assert.deepEqual(measurement, { outerWidth: 1600, innerWidth: 800, devicePixelRatio: 2, visualScale: 1 });
+			assert.equal(await page.locator("body").evaluate((body) => getComputedStyle(body).zoom), "1");
+			await page.bringToFront();
+		}
 		await page.keyboard.press("Tab");
 		assert.equal(await page.locator(".skip-link").evaluate((element) => document.activeElement === element), true);
 		await page.keyboard.press("Enter");
@@ -184,6 +235,35 @@ try {
 				.evaluate((el) => document.activeElement === el),
 			true,
 		);
+		assert.equal(await page.evaluate(() => localStorage.getItem("clio-coder-gui-theme")), null);
+		await page.emulateMedia({ colorScheme: "dark" });
+		await page.getByRole("button", { name: "Light theme", exact: true }).waitFor();
+		assert.equal(await page.locator("html").getAttribute("data-theme"), null);
+		assert.equal(await page.evaluate(() => localStorage.getItem("clio-coder-gui-theme")), null);
+		await check("home-system-dark");
+		await page.emulateMedia({ colorScheme: "light", reducedMotion: "no-preference" });
+		await page.getByRole("button", { name: "Dark theme", exact: true }).waitFor();
+		await page.waitForFunction(() => {
+			const button = document.querySelector("button");
+			return (
+				button &&
+				getComputedStyle(button)
+					.transitionDuration.split(",")
+					.some((value) => parseFloat(value) > 0.001)
+			);
+		});
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		await page.waitForFunction(() => {
+			const button = document.querySelector("button");
+			return (
+				button &&
+				getComputedStyle(button)
+					.transitionDuration.split(",")
+					.every((value) => parseFloat(value) <= 0.000001)
+			);
+		});
+		assert.equal(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches), true);
+		await check("home-live-preferences");
 		await check("home");
 		if (width === 1600) await page.screenshot({ path: join(output, "home.png"), fullPage: true });
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
@@ -191,7 +271,7 @@ try {
 		await check("home-dark");
 		await page.screenshot({ path: join(output, `${width}-home-dark.png`), fullPage: true });
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
-		if (width === 390) {
+		if (width <= 390) {
 			await page.getByRole("button", { name: "Open navigation", exact: true }).click();
 			await check("navigation");
 			await page.keyboard.press("Escape");
@@ -322,7 +402,7 @@ try {
 		if (await setting("fleet.concurrency").getByRole("combobox").count())
 			throw new Error("A project-set value still offers an editor.");
 		const history = setting("fleet.history.maxRuns");
-		await history.getByRole("spinbutton").fill(width === 1600 ? "900" : width === 1050 ? "800" : "700");
+		await history.getByRole("spinbutton").fill(String(900 - runIndex * 100));
 		if (!(await history.getByRole("button", { name: "Save", exact: true }).isDisabled()))
 			throw new Error("A destructive setting saved without its confirmation.");
 		await history.getByRole("checkbox").check();
@@ -450,16 +530,24 @@ try {
 		// The collections are one tab stop: an arrow key moves the selection and the focus together.
 		await page.getByRole("tab", { name: /^Skills · / }).press("ArrowLeft");
 		const agentsTab = page.getByRole("tab", { name: /^Agents · / });
+		await agentsTab.and(page.locator('[aria-selected="true"]')).waitFor();
 		if ((await agentsTab.getAttribute("aria-selected")) !== "true")
 			throw new Error("ArrowLeft from Skills did not select the Agents tab.");
 		if (!(await agentsTab.evaluate((node) => node === document.activeElement)))
 			throw new Error("ArrowLeft moved the selection without moving focus.");
-		await page.getByText("Tool-call budget", { exact: true }).first().waitFor();
+		const agentDetails = page.locator(".library-resource__details").first();
+		await agentDetails.locator(":scope > summary").click();
+		await agentDetails.getByText("Tool-call budget", { exact: true }).waitFor();
+		await check("library-agent-details");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `library-agents-${width}.png`), fullPage: true });
 		for (const collection of ["Agents", "Prompts", "Fleets", "Extensions", "Verifiers"]) {
 			await page.getByRole("tab", { name: new RegExp(`^${collection} · [1-9]`) }).click();
-			await page.locator(".config-entries article").first().waitFor();
+			const resource = page.locator(".library-resource").first();
+			await resource.waitFor();
+			const details = resource.locator(".library-resource__details");
+			if (!(await details.evaluate((node) => (node as HTMLDetailsElement).open)))
+				await details.locator(":scope > summary").click();
 			await check(`library-${collection.toLowerCase()}`);
 		}
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
@@ -1112,11 +1200,12 @@ try {
 			.getByRole("heading", { name: "This browser is no longer connected", exact: true })
 			.waitFor({ state: "detached" });
 		await context.close();
+		if (zoom === 2) zoomContext = null;
 	}
 	assert.deepEqual(errors, []);
 	assert.deepEqual(failures, []);
 	// A refused stream must stop, not reconnect forever: EventSource retries on its own otherwise.
-	assert.ok(statuses.filter((item) => item.path === "/api/events" && item.status === 401).length <= 3);
+	assert.ok(statuses.filter((item) => item.path === "/api/events" && item.status === 401).length <= runs.length);
 	assert.deepEqual(
 		statuses.filter(
 			(item) =>
@@ -1134,6 +1223,7 @@ try {
 		output,
 		success,
 		chrome: browser.version(),
+		zoomMeasurements,
 		checks,
 		requestFailures: failures,
 		scriptErrors: errors,
@@ -1142,6 +1232,8 @@ try {
 	await writeFile(join(output, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
 	console.log(JSON.stringify(report, null, 2));
 	await browser.close();
+	await zoomContext?.close();
+	if (zoomProfile) await rm(zoomProfile, { recursive: true, force: true });
 	if ("closeAllConnections" in server) server.closeAllConnections();
 	await new Promise<void>((resolve) => server.close(() => resolve()));
 	fixture.close();
