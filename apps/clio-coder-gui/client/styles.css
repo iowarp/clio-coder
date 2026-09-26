@@ -1313,6 +1313,7 @@ main:has(> .conversation) {
 /* One line: where you are, what this conversation is, whether Clio Coder is working, and one
    control for everything else. The model sits in the composer, where the next request leaves. */
 .conversation__bar {
+	position: relative;
 	display: flex;
 	align-items: center;
 	gap: var(--space-2) var(--space-3);
@@ -1392,7 +1393,7 @@ main:has(> .conversation) {
 	font-size: var(--text-meta);
 }
 .conversation__tools {
-	position: relative;
+	position: static;
 	flex: none;
 }
 /* A labelled control in the header's own voice; its words identify it, so it needs no frame until
@@ -1430,7 +1431,7 @@ main:has(> .conversation) {
 	z-index: 6;
 	right: 0;
 	top: calc(100% + var(--space-2));
-	width: min(40rem, calc(100vw - 2 * var(--space-4)));
+	width: min(40rem, 100%);
 	max-height: min(75dvh, 44rem);
 	overflow: auto;
 	padding: var(--space-2) var(--space-5) var(--space-4);
@@ -1544,7 +1545,6 @@ main:has(> .conversation) {
 		padding-bottom: var(--space-3);
 	}
 	.conversation__bar {
-		position: relative;
 		flex-wrap: wrap;
 		row-gap: var(--space-1);
 	}
@@ -1574,10 +1574,7 @@ main:has(> .conversation) {
 	.conversation__tools > summary {
 		padding-inline: var(--space-2);
 	}
-	/* The header is the anchor when controls wrap. Keep the entire menu inside its gutters. */
-	.conversation__tools {
-		position: static;
-	}
+	/* Keep the menu inside the conversation gutters even when header controls wrap. */
 	.conversation__tools-body {
 		width: 100%;
 		max-height: min(70dvh, 44rem);
