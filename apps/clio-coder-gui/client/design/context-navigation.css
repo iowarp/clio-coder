@@ -1,0 +1,58 @@
+.workspace[data-area="sessions"][data-sidebar="expanded"] {
+	grid-template-columns: 300px minmax(0, 1fr);
+}
+.workspace[data-area="sessions"][data-sidebar="expanded"] > .desktop-navigation {
+	background: var(--surface);
+	padding: 12px 10px;
+}
+.workspace[data-area="sessions"][data-sidebar="expanded"] .sidebar {
+	display: flex;
+	flex-direction: column;
+	top: 70px;
+	height: calc(100dvh - 82px);
+	gap: 8px;
+	min-height: 0;
+}
+.sidebar-area-actions {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex: none;
+}
+.sidebar-back {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 1;
+	min-width: 0;
+	min-height: 44px;
+	border: 0;
+	background: transparent;
+	padding: 8px 10px;
+	text-align: left;
+	font-size: 13px;
+	color: var(--ink-muted);
+}
+.sidebar-area-actions .sidebar-toggle,
+.sidebar-area-actions .sidebar-search {
+	width: 36px;
+	min-height: 44px;
+	padding: 8px;
+	border: 0;
+	background: transparent;
+	color: var(--ink-muted);
+	flex: 0 0 36px;
+	justify-content: center;
+}
+.sidebar-area-actions .sidebar-toggle .nav-label {
+	display: none;
+}
+@media (max-width: 750px) {
+	.workspace[data-area="sessions"][data-sidebar="expanded"] {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.sidebar-area-actions .sidebar-search {
+		width: 44px;
+		flex-basis: 44px;
+	}
+}

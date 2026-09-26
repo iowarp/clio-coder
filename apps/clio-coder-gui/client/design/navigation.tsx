@@ -85,12 +85,12 @@ export function Navigation({
 	close,
 	collapsed = false,
 	onHelp,
-	projects,
+	onSelect,
 }: {
-	close?: () => void;
+	close?: (() => void) | undefined;
 	collapsed?: boolean;
 	onHelp: () => void;
-	projects?: ReactNode;
+	onSelect?: (path: string) => void;
 }) {
 	const location = useLocation();
 	const link = (item: (typeof navigation)[number]) => (
@@ -98,7 +98,10 @@ export function Navigation({
 			key={item.path}
 			to={item.path}
 			end={item.path === "/"}
-			onClick={close}
+			onClick={() => {
+				onSelect?.(item.path);
+				close?.();
+			}}
 			data-tip={collapsed ? item.label : undefined}
 			data-group={item.group}
 			className={({ isActive }) =>
@@ -111,9 +114,8 @@ export function Navigation({
 	);
 	return (
 		<>
-			<nav aria-label="Main navigation">{navigation.filter((item) => item.group === "work").map(link)}</nav>
-			{projects}
-			<nav aria-label="Inspection and settings">
+			<nav aria-label="Main navigation">
+				{navigation.filter((item) => item.group === "work").map(link)}
 				<p className="nav-group" aria-hidden="true">
 					<span className="nav-label">Inspect &amp; configure</span>
 				</p>
@@ -137,10 +139,10 @@ export function Navigation({
 }
 export function MobileNavigation({
 	onHelp,
-	projects,
+	content,
 }: {
 	onHelp: () => void;
-	projects?: ((close: () => void) => ReactNode) | undefined;
+	content?: ((close: () => void) => ReactNode) | undefined;
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const location = useLocation();
@@ -174,11 +176,11 @@ export function MobileNavigation({
 						<Icon name="close" />
 					</button>
 				</div>
-				<Navigation
-					close={() => dialog.current?.close()}
-					onHelp={onHelp}
-					projects={projects?.(() => dialog.current?.close())}
-				/>
+				{content ? (
+					content(() => dialog.current?.close())
+				) : (
+					<Navigation close={() => dialog.current?.close()} onHelp={onHelp} />
+				)}
 			</dialog>
 		</>
 	);

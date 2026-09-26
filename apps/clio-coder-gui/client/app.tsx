@@ -25,6 +25,7 @@ import { CommandPalette } from "./interaction/CommandPalette.js";
 import { appCommands } from "./interaction/commands.js";
 import { HelpDialog } from "./interaction/HelpDialog.js";
 import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
+import "./design/context-navigation.css";
 
 /** `/sessions/:id` and nothing else. The palette's session rows exist only on a conversation. */
 function sessionIdFrom(pathname: string): string | null {
@@ -36,6 +37,7 @@ export function App({ client }: { client: Client }) {
 	const queries = useQueryClient();
 	const navigate = useNavigate();
 	const location = useLocation();
+	const [navigationAt, setNavigationAt] = useState<string | null>(null);
 	const [connection, setConnection] = useState<ConnectionState>(client.token ? "Connecting…" : "Not connected");
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [helpOpen, setHelpOpen] = useState(false);
@@ -45,6 +47,8 @@ export function App({ client }: { client: Client }) {
 	// not be reachable by Tab either, or the focus order silently leaves the thing that has focus.
 	const layered = useLayersActive();
 	const refused = useTokenRejected() || (!client.token && lastTokenWasRefused());
+	const sessionArea = /^\/(sessions|workspaces)(\/|$)/.test(location.pathname);
+	const showSessions = !!client.token && !refused && sessionArea && navigationAt !== location.pathname;
 	const meta = useQuery({
 		queryKey: ["meta"],
 		queryFn: () => client.call(routes.meta, emptyInput),
@@ -105,6 +109,38 @@ export function App({ client }: { client: Client }) {
 			),
 		[client, navigate, notices.length, queries, runningTurnId, sessionId, snapshot?.state, toggleSidebar],
 	);
+	const selectArea = (path: string) => {
+		if (path === "/sessions") setNavigationAt(null);
+	};
+	const navigationContent = (close?: () => void, collapsed = false) =>
+		showSessions && !collapsed ? (
+			<>
+				<div className="sidebar-area-actions">
+					<button type="button" className="sidebar-back" onClick={() => setNavigationAt(location.pathname)}>
+						<span aria-hidden="true">←</span> Navigation
+					</button>
+					<button
+						type="button"
+						className="sidebar-search"
+						aria-label="Search commands"
+						title="Search commands (Ctrl K)"
+						onClick={() => {
+							close?.();
+							setPaletteOpen(true);
+						}}
+					>
+						<Icon name="search" />
+					</button>
+					{!close ? <SidebarToggle collapsed={sidebarCollapsed} toggle={toggleSidebar} /> : null}
+				</div>
+				<ProjectNavigation client={client} activeWorkspace={snapshot?.workspaceId} close={close} />
+			</>
+		) : (
+			<>
+				{!close ? <SidebarToggle collapsed={sidebarCollapsed} toggle={toggleSidebar} /> : null}
+				<Navigation collapsed={collapsed} close={close} onHelp={() => setHelpOpen(true)} onSelect={selectArea} />
+			</>
+		);
 
 	return (
 		<div className="shell">
@@ -129,45 +165,17 @@ export function App({ client }: { client: Client }) {
 						version={meta.data?.clio}
 						platform={meta.data?.platform}
 					/>
-					<MobileNavigation
-						onHelp={() => setHelpOpen(true)}
-						projects={
-							client.token && !refused
-								? (close) => <ProjectNavigation client={client} activeWorkspace={snapshot?.workspaceId} close={close} />
-								: undefined
-						}
-					/>
+					<MobileNavigation onHelp={() => setHelpOpen(true)} content={(close) => navigationContent(close)} />
 				</div>
 			</header>
-			<div className="workspace" data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"} inert={layered}>
+			<div
+				className="workspace"
+				data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"}
+				data-area={showSessions ? "sessions" : "navigation"}
+				inert={layered}
+			>
 				<aside className="desktop-navigation" id={SIDEBAR_ID}>
-					<div className="sidebar">
-						<div className="sidebar-actions">
-							<NavLink to="/" className="sidebar-compose" data-tip="New conversation">
-								<Icon name="plus" />
-								<span className="nav-label">New conversation</span>
-							</NavLink>
-							<button
-								type="button"
-								className="sidebar-search"
-								aria-label="Search commands"
-								title="Search commands (Ctrl K)"
-								onClick={() => setPaletteOpen(true)}
-							>
-								<Icon name="search" />
-							</button>
-							<SidebarToggle collapsed={sidebarCollapsed} toggle={toggleSidebar} />
-						</div>
-						<Navigation
-							collapsed={sidebarCollapsed}
-							onHelp={() => setHelpOpen(true)}
-							projects={
-								client.token && !refused ? (
-									<ProjectNavigation client={client} activeWorkspace={snapshot?.workspaceId} />
-								) : undefined
-							}
-						/>
-					</div>
+					<div className="sidebar">{navigationContent(undefined, sidebarCollapsed)}</div>
 				</aside>
 				<main id="main" tabIndex={-1}>
 					{!client.token || refused ? (
