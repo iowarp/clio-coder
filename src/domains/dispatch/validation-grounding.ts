@@ -75,7 +75,11 @@ export interface ValidationGroundingInput {
 }
 
 function normalize(value: string): string {
-	return value.trim().replace(/\s+/gu, " ").toLowerCase();
+	return value
+		.trim()
+		.replace(/\s+/gu, " ")
+		.toLowerCase()
+		.replace(/\b(?:npm|pnpm|yarn) (?:run )?test(?=\s|$|[^\w:-]|:(?:\s|$))/gu, "npm run test");
 }
 
 /**
@@ -113,7 +117,23 @@ function isExecuted(name: string, executed: ReadonlySet<string>): boolean {
 	for (const command of executed) {
 		const ran = normalize(command);
 		if (ran.length === 0) continue;
-		if (claim.includes(ran) || ran.includes(claim)) return true;
+		const contains = (text: string, command: string) => {
+			let start = text.indexOf(command);
+			while (start >= 0) {
+				const before = text[start - 1];
+				const end = start + command.length;
+				const after = text[end];
+				const beforeBoundary = before === undefined || !/[\w:-]/u.test(before);
+				const afterBoundary =
+					after === undefined ||
+					!/[\w:-]/u.test(after) ||
+					(after === ":" && (text[end + 1] === undefined || /\s/u.test(text[end + 1] ?? "")));
+				if (beforeBoundary && afterBoundary) return true;
+				start = text.indexOf(command, start + 1);
+			}
+			return false;
+		};
+		if (contains(claim, ran) || contains(ran, claim)) return true;
 	}
 	return false;
 }

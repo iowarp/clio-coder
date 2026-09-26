@@ -1169,12 +1169,12 @@ export type ValidationCommandLabel = (typeof VALIDATION_COMMAND_LABELS)[number];
 function validationMatch(
 	executable: string,
 	args: ReadonlyArray<string>,
-): ValidationCommandLabel | `npm run ${string}` | null {
+): ValidationCommandLabel | `${"npm" | "pnpm" | "yarn"} test` | `${"npm" | "pnpm" | "yarn"} run ${string}` | null {
 	if (executable === "node" && args[0] === "--test") return "node --test";
-	if (executable === "npm") {
-		if (args[0] === "test") return "npm test";
+	if (executable === "npm" || executable === "pnpm" || executable === "yarn") {
+		if (args[0] === "test") return `${executable} test`;
 		const script = args[0] === "run" && typeof args[1] === "string" ? args[1] : null;
-		if (script !== null && isVerificationScriptName(script)) return `npm run ${script}`;
+		if (script !== null && isVerificationScriptName(script)) return `${executable} run ${script}`;
 	}
 	if (executable === "pytest") return "pytest";
 	if (isPythonExecutable(executable) && moduleArg(args) === "pytest") return "python -m pytest";
