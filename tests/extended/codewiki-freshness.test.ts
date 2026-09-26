@@ -274,12 +274,19 @@ describe("codewiki global freshness", () => {
 		writeFileSync(codewikiPath(cwd), "{ not json");
 		const fresh = renderPromptContext(cwd);
 		strictEqual(fresh.supportFragments.includes("<project-type>rust</project-type>"), true);
-		strictEqual(fresh.supportFragments.includes("<codewiki>available; use code_nav</codewiki>"), true);
+		strictEqual(
+			fresh.supportFragments.includes(
+				"<codemap>available snapshot; freshness checked on retrieval; use code_nav</codemap>",
+			),
+			true,
+		);
 		deepStrictEqual(fresh.warnings, []);
 		writeClioState(cwd, { version: 1, projectType: "rust", fingerprint: { ...fingerprint, treeHash: "0".repeat(64) } });
 		const stale = renderPromptContext(cwd);
 		strictEqual(
-			stale.supportFragments.includes("<codewiki>available (stale; run /context refresh); use code_nav</codewiki>"),
+			stale.supportFragments.includes(
+				"<codemap>available snapshot; freshness checked on retrieval; use code_nav</codemap>",
+			),
 			true,
 		);
 		// What makes "available" truthful for an unparseable file: the tool path
@@ -343,7 +350,7 @@ describe("codewiki global freshness", () => {
 		ok(built);
 		strictEqual(built.wrote, true);
 		strictEqual(reset.action, "cleared");
-		deepStrictEqual(reset.removed, [".clio-coder/codewiki.json"]);
+		deepStrictEqual(reset.removed, [".clio-coder/codemap.json"]);
 		await bundle.extension.stop?.();
 		strictEqual(existsSync(codewikiPath(cwd)), false);
 		strictEqual(existsSync(statePath(cwd)), false);

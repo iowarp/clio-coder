@@ -10,7 +10,7 @@ export const CODE_NAV_MAX_LIMIT = 200;
 export const codeNavToolSurface = {
 	name: ToolNames.CodeNav,
 	description:
-		"Navigate the indexed codewiki: mode=symbol finds files by symbol, path finds files by glob/regex/substring, entries lists likely entry points, outline lists file symbols, deps lists imports, and dependents lists importers. mode=wiki without query lists generated Markdown wiki pages; with query it resolves a page id/title and returns its summary plus a path to open with read. For Clio's bundled product docs use the clio_docs capability through gateway.",
+		"Navigate a codemap: symbol finds definitions, path matches paths, entries lists entry candidates, outline lists symbols, deps lists imports, dependents lists importers. project returns orientation, current Git and operator tasks; recorded status is not verification. wiki lists pages or resolves query to a summary and readable path. For Clio product docs use clio_docs through gateway.",
 	parameters: Type.Object({
 		source: Type.Optional(
 			StringEnum(["workspace", "clio"], {
@@ -18,7 +18,7 @@ export const codeNavToolSurface = {
 				default: "workspace",
 			}),
 		),
-		mode: StringEnum(["symbol", "path", "entries", "outline", "deps", "dependents", "wiki"], {
+		mode: StringEnum(["symbol", "path", "entries", "outline", "deps", "dependents", "wiki", "project"], {
 			description: "Lookup mode.",
 		}),
 		query: Type.Optional(

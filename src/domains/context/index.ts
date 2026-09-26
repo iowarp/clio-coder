@@ -31,6 +31,7 @@ export {
 	tryReadClioMd,
 } from "./clio-md.js";
 export {
+	codemapPath,
 	codewikiEntries,
 	codewikiNeedsBackfill,
 	codewikiPath,

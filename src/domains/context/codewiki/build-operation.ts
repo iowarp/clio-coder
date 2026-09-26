@@ -7,7 +7,7 @@ import type {
 	CodewikiBuildWorkerOutcome,
 	CodewikiBuildWorkerRequest,
 } from "./build-worker-protocol.js";
-import { buildCodewiki, type CodewikiBuildOptions, syncCodewiki, updateCodewikiPaths } from "./indexer.js";
+import { buildCodewiki, type CodewikiBuildOptions, codewikiPathsNeedUpdate, syncCodewiki } from "./indexer.js";
 import type { Codewiki } from "./schema.js";
 
 function isArtifactRef(value: Codewiki | CodewikiArtifactRef | null): value is CodewikiArtifactRef {
@@ -70,10 +70,10 @@ export async function executeCodewikiBuildOutcome(
 	let current: Codewiki | null = handed === null ? null : resolveCurrent();
 	if (request.kind === "incremental") {
 		const base = requireCurrent();
-		current = await updateCodewikiPaths(request.cwd, base, request.paths, buildOptions);
+		const needsUpdate = codewikiPathsNeedUpdate(request.cwd, base, request.paths, buildOptions);
 		// An unchanged notification proves nothing about unrelated files. Retain
 		// the old global baseline so the next ensure still detects external edits.
-		if (current === base && request.previous && !unreadable) {
+		if (!needsUpdate && request.previous && !unreadable) {
 			return { codewiki: isArtifactRef(handed) ? null : base, fingerprint: request.previous, changed: false };
 		}
 	}

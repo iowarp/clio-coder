@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { classifyCHeaderLanguage } from "../../../core/c-header-language.js";
 import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
@@ -214,4 +214,28 @@ export function detectProjectProfile(cwd: string): ProjectTypeProfile {
 
 export function detectProjectType(cwd: string): ProjectType {
 	return detectProjectProfile(cwd).projectType;
+}
+
+/** A root-only hint for foreground prompts/startup; never reads or parses source. */
+export function detectProjectTypeHint(cwd: string): ProjectType {
+	let names: string[];
+	try {
+		names = readdirSync(cwd, { withFileTypes: true })
+			.filter((entry) => entry.isFile())
+			.map((entry) => entry.name);
+	} catch {
+		return "unknown";
+	}
+	const manifests: Partial<Record<SourceProjectType, number>> = {};
+	for (const name of names) countManifest(name, manifests);
+	const declared = SOURCE_LANGUAGES.filter((language) => (manifests[language] ?? 0) > 0);
+	if (declared.length > 1) return "polyglot";
+	if (declared.length === 1) return declared[0] ?? "unknown";
+	const hints = new Set(
+		names
+			.filter((name) => !name.endsWith(".h") && !name.endsWith(".d.ts"))
+			.map((name) => EXTENSION_LANGUAGES.get(extensionOf(name)))
+			.filter((language) => language !== undefined),
+	);
+	return hints.size > 1 ? "polyglot" : ([...hints][0] ?? "unknown");
 }

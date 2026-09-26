@@ -502,7 +502,7 @@ describe("explicit context operations refresh the running prompt", { concurrency
 			strictEqual(preserved.removed.includes("CLIO-CODER.md"), false);
 			const indexCleared = await f.prompt();
 			strictEqual(indexCleared.includes("LIVE_HANDBOOK"), true);
-			strictEqual(indexCleared.includes("<codewiki>available"), false);
+			strictEqual(indexCleared.includes("<codemap>available"), false);
 			const result = await f.context.runContextClear({
 				cwd: f.cwd,
 				all: true,
@@ -512,7 +512,7 @@ describe("explicit context operations refresh the running prompt", { concurrency
 			strictEqual(result.removed.includes("CLIO-CODER.md"), true);
 			const after = await f.prompt();
 			strictEqual(after.includes("LIVE_HANDBOOK"), false);
-			strictEqual(after.includes("<codewiki>available"), false);
+			strictEqual(after.includes("<codemap>available"), false);
 		} finally {
 			await f.close();
 		}

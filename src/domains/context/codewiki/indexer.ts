@@ -1035,22 +1035,22 @@ export async function buildCodewiki(input: BuildCodewikiInput, options: Codewiki
 	return buildFromPaths(input.cwd, input.language, files, { ...options, slicer });
 }
 
-/**
- * Apply an incremental update for a set of changed paths. The changed file
- * records and symbols are replaced in-place, and edges are rebuilt from stored
- * imports across the merged file set. Unchanged content retains its records;
- * a batch with no index changes returns the original artifact without parsing.
- */
-export async function updateCodewikiPaths(
+function inspectCodewikiPaths(
 	cwd: string,
 	codewiki: Codewiki,
 	paths: ReadonlyArray<string>,
-	options: CodewikiBuildOptions = {},
-): Promise<Codewiki> {
+	options: CodewikiBuildOptions,
+) {
 	const normalizedPaths = uniqueSorted(
 		paths.map(normalizeInputPath).filter((path) => path.length > 0 && !path.startsWith("..")),
 	);
-	if (normalizedPaths.length === 0) return codewiki;
+	if (normalizedPaths.length === 0)
+		return {
+			global: false,
+			currentTexts: new Map<string, string>(),
+			changedPathSet: new Set<string>(),
+			rebuildPaths: [] as string[],
+		};
 	if (
 		normalizedPaths.some(
 			(path) =>
@@ -1064,9 +1064,13 @@ export async function updateCodewikiPaths(
 		// Ignore and index metadata can add or remove paths that are not present in
 		// the mutation batch itself. Re-enumerate once so incremental visibility
 		// remains byte-equivalent to a full build.
-		return syncCodewiki(cwd, codewiki, options);
+		return {
+			global: true,
+			currentTexts: new Map<string, string>(),
+			changedPathSet: new Set<string>(),
+			rebuildPaths: [] as string[],
+		};
 	}
-	const slicer = options.slicer ?? createSlicer();
 	const existingFiles = new Map(codewiki.files.map((file) => [file.path, file]));
 	const visiblePaths = new Set(filterWorkspaceFileCandidates(cwd, normalizedPaths, EXCLUDED_DIRS));
 	const readFile = options.readFile ?? defaultReadFile;
@@ -1087,7 +1091,36 @@ export async function updateCodewikiPaths(
 		}
 		changedPathSet.add(relPath);
 	}
+	return { global: false, currentTexts, changedPathSet, rebuildPaths };
+}
+
+/** Check a notification without parsing files or rebuilding the dependency graph. */
+export function codewikiPathsNeedUpdate(
+	cwd: string,
+	codewiki: Codewiki,
+	paths: ReadonlyArray<string>,
+	options: CodewikiBuildOptions = {},
+): boolean {
+	const inspected = inspectCodewikiPaths(cwd, codewiki, paths, options);
+	return inspected.global || inspected.changedPathSet.size > 0;
+}
+
+/**
+ * Apply an incremental update for a set of changed paths. The changed file
+ * records and symbols are replaced in-place, and edges are rebuilt from stored
+ * imports across the merged file set. Unchanged content retains its records;
+ * a batch with no index changes returns the original artifact without parsing.
+ */
+export async function updateCodewikiPaths(
+	cwd: string,
+	codewiki: Codewiki,
+	paths: ReadonlyArray<string>,
+	options: CodewikiBuildOptions = {},
+): Promise<Codewiki> {
+	const { global, currentTexts, changedPathSet, rebuildPaths } = inspectCodewikiPaths(cwd, codewiki, paths, options);
+	if (global) return syncCodewiki(cwd, codewiki, options);
 	if (changedPathSet.size === 0) return codewiki;
+	const slicer = options.slicer ?? createSlicer();
 	const rebuiltFiles: BuiltFile[] = [];
 	if (rebuildPaths.length > 0) {
 		const treeSitterExtractor = await loadTreeSitterExtractor();

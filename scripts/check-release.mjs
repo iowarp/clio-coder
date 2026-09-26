@@ -35,7 +35,7 @@ const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 // node_modules or doubled dist, rather than policing documentation size or
 // enforcing an artificial package diet. Pack composition changed deliberately
 // in #66: about 19MB of vendored tree-sitter grammars (dist/assets/grammars/),
-// Clio's own source (src/**), and her code map (dist/assets/codewiki.json)
+// Clio's own source (src/**), and her code map (dist/assets/codemap.json)
 // ride inside the tarball so the install needs neither grammar collection.
 // Raised for 0.3.6 by operator decision: the unpacked ceiling moves to 50MB to
 // carry this release's added source, and the tarball ceiling tightens to 10MB

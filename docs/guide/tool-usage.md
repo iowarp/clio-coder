@@ -6,7 +6,7 @@ Operational reference for agents and readers using the web app. Sections summari
 
 | Purpose | Tools |
 | --- | --- |
-| Read and search the workspace | [`read`](#read-page-through-a-file-with-offset-limit-and-tail), [`grep`](#grep-search-file-contents-with-ripgrep), [`find`](#find-locate-files-and-directories-by-glob-pattern), [`ls`](#ls-list-one-directory), [`code_nav`](#codenav-navigate-the-codewiki-index) |
+| Read and search the workspace | [`read`](#read-page-through-a-file-with-offset-limit-and-tail), [`grep`](#grep-search-file-contents-with-ripgrep), [`find`](#find-locate-files-and-directories-by-glob-pattern), [`ls`](#ls-list-one-directory), [`code_nav`](#codenav-navigate-the-codemap) |
 | Change the workspace | [`edit`](#edit-exact-text-replacements-in-one-file), [`write`](#write-create-or-overwrite-a-whole-file), [`bash`](#bash-run-a-shell-command), [`run_script`](#runscript-stream-a-scientific-processing-step-to-disk) |
 | Prove something works | [`verify`](#verify-run-declared-verification-checks), [`evidence`](#evidence-inspect-canonical-evidence-and-trust-status), [`limitation`](#limitation-record-what-a-turn-could-not-verify) |
 | Delegate and supervise work | [`dispatch`](#dispatch-run-bounded-tasks-on-fleet-agents), [`monitor`](#monitor-inspect-dispatched-runs), [`steer`](#steer-guide-or-cancel-a-running-worker), [`ledger`](#ledger-coordinate-peer-workers-through-typed-entries) |
@@ -562,17 +562,18 @@ gateway(op="call", capability="clio_library", args={kind: "agent", query: "mater
 gateway(op="call", capability="clio_library", args={ref: "plugin:materio"})
 ```
 
-## code_nav: navigate the codewiki index
+## code_nav: navigate the codemap
 
-Structural navigation over the persisted codewiki index (`.clio-coder/codewiki.json`)
+Structural navigation over the persisted codemap index (`.clio-coder/codemap.json`)
 and the optional Markdown wiki metadata. The index is built by context init,
 refresh, or index commands and can be rebuilt/backfilled on tool demand. Source:
 [code-nav.ts](../../src/tools/codewiki/code-nav.ts).
 
 Arguments:
 
-- `mode` (required). `symbol`, `path`, `entries`, `outline`, `deps`, `dependents`, or `wiki`.
-- `query` (required for every mode except `entries` and `wiki`). Symbol name, indexed path, path pattern, or path substring.
+- `source` (optional). `workspace` (default) or `clio` for the installed product source. `project` and `wiki` describe the workspace.
+- `mode` (required). `symbol`, `path`, `entries`, `outline`, `deps`, `dependents`, `wiki`, or `project`.
+- `query` (required for every mode except `entries`, `wiki`, and `project`). Symbol name, indexed path, path pattern, or path substring.
 - `limit` (optional). Default 50 (25 for `entries`), max 200.
 
 Modes:
@@ -583,11 +584,12 @@ Modes:
 - `outline`: returns declarations in one indexed file, sorted by line.
 - `deps`: returns one indexed file's internal and external imports.
 - `dependents`: returns indexed files that import the target file.
-- `wiki`: returns Markdown wiki pages plus absent/fresh/stale wiki state and layout warnings.
+- `wiki`: returns Markdown wiki pages plus absent/fresh/stale/unknown wiki state and checkpoint/layout warnings.
+- `project`: returns orientation, current Git observations and durable operator-task evidence.
 
 For `outline`, `deps`, and `dependents` the query must resolve to exactly one indexed file: an exact path or a substring matching one path. An ambiguous substring errors with the match count. Output is always parseable JSON (empty results carry empty arrays, an `omitted` count, and `next`); an omitted remainder suggests `next: limit=<2x>`. 16KB cap with the JSON stub on overflow.
 
-Reach for code_nav instead of grep when you want a definition site, a file's structure, change-impact fan-out, or wiki inventory; it reads local artifacts, not the tree.
+Reach for code_nav instead of grep when you want a definition site, a file's structure, change-impact fan-out, or wiki inventory; it returns bounded navigation results and reconciles current source on demand.
 
 ```text
 code_nav(mode="symbol", query="finalizeObservation")
@@ -595,7 +597,10 @@ code_nav(mode="outline", query="src/tools/grep.ts")
 code_nav(mode="dependents", query="src/tools/observation.ts")
 code_nav(mode="entries")
 code_nav(mode="wiki")
+code_nav(mode="project")
 ```
+
+For project orientation and current recorded status, use `code_nav mode=project`. It returns bounded declared facts, current Git observations, and durable operator tasks with provenance. Recorded task status does not certify passing verification. Ordinary prompts contain snapshot hints, not the full codemap or wiki bodies. Wiki checkpoint coverage distinguishes validated pages from pending pages; consult current source and evidence before treating wiki claims as true. See [Project context](../architecture/project-context.md) for freshness and legacy filename compatibility.
 
 ## web_read and web_fetch: read web pages or make full HTTP requests
 

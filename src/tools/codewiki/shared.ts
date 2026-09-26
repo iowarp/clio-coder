@@ -79,7 +79,10 @@ function readCodewikiForTool(cwd: string): Codewiki | null {
 export async function loadCodewikiForTool(
 	cwd: string = process.cwd(),
 	options: { readOnly?: boolean } = {},
-): Promise<{ ok: true; codewiki: Codewiki } | { ok: false; message: string }> {
+): Promise<
+	| { ok: true; codewiki: Codewiki; fingerprint: import("../../domains/context/fingerprint.js").Fingerprint }
+	| { ok: false; message: string }
+> {
 	try {
 		if (options.readOnly) {
 			const workspace = resolve(cwd);
@@ -106,7 +109,7 @@ export async function loadCodewikiForTool(
 				const oldest = transientCodewikis.keys().next().value;
 				if (oldest !== undefined) transientCodewikis.delete(oldest);
 			}
-			return { ok: true, codewiki: result.codewiki };
+			return { ok: true, codewiki: result.codewiki, fingerprint: result.fingerprint };
 		}
 		const generatedAt = new Date().toISOString();
 		const coordinated = await coordinateCodewikiWrite(
@@ -125,32 +128,37 @@ export async function loadCodewikiForTool(
 				readCurrent: (workspace) => readCodewikiForTool(workspace) ?? undefined,
 				afterCommit: ({ codewiki: committed, fingerprint, changed }, workspace) => {
 					const prev = readClioState(workspace);
-					if (!changed && prev) return;
-					writeClioState(workspace, {
-						version: 1,
-						projectType: prev?.projectType ?? committed.language,
-						fingerprint,
-						codewikiVersion: committed.version,
-						...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
-						...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
-						...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
-						...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
-						lastSessionAt: prev?.lastSessionAt ?? generatedAt,
-						lastIndexedAt: generatedAt,
-					});
+					if (!changed && prev?.orientation) return;
+					writeClioState(
+						workspace,
+						{
+							version: 1,
+							projectType: prev?.projectType ?? committed.language,
+							fingerprint,
+							codewikiVersion: committed.version,
+							...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
+							...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+							...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
+							...(prev?.bootstrapFingerprint ? { bootstrapFingerprint: prev.bootstrapFingerprint } : {}),
+							...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
+							lastSessionAt: prev?.lastSessionAt ?? generatedAt,
+							lastIndexedAt: generatedAt,
+						},
+						committed,
+					);
 				},
 			},
 		);
 		if (!coordinated) throw new Error("codewiki coordinator did not admit the demand build");
 		// Not cached here: a post-write stat could pair a concurrent writer's identity
 		// with this object. The next call re-reads once and caches from a clean stat.
-		return { ok: true, codewiki: coordinated.codewiki };
+		return { ok: true, codewiki: coordinated.codewiki, fingerprint: coordinated.worker.fingerprint };
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		return { ok: false, message: `codewiki unavailable. run /context refresh to rebuild it. ${msg}` };
+		return { ok: false, message: `codemap unavailable. run /context refresh to rebuild it. ${msg}` };
 	}
 }
 
 export function renderJson(value: unknown): string {
-	return JSON.stringify(value, null, 2);
+	return JSON.stringify(value);
 }

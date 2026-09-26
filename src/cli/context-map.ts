@@ -10,7 +10,7 @@ import { buildArchitectureSeed, serializeArchitectureSeed } from "../domains/con
 const HELP = `Usage:
   clio-coder context map [--out <path>] [--json]
 
-Write an archify architecture seed for the current repository from the codewiki
+Write an archify architecture seed for the current repository from the codemap
 index, without model calls. The seed is the starting spec for the archify skill:
 components are the largest directory areas, connections are collapsed import
 edges. The index is reconciled with current files before mapping; sources are
@@ -133,7 +133,7 @@ export async function runContextMapCommand(args: string[]): Promise<number> {
 	}
 	if (!reconciled) {
 		process.stderr.write(
-			"clio-coder context map: no codewiki index in .clio-coder/codewiki.json; run `clio-coder context index` first\n",
+			"clio-coder context map: no codemap index in .clio-coder/codemap.json; run `clio-coder context index` first\n",
 		);
 		return 1;
 	}

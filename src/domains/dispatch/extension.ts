@@ -86,6 +86,7 @@ import {
 	resolveAgentToolCompatibility,
 } from "../agents/spec.js";
 import type { ConfigContract } from "../config/contract.js";
+import { renderProjectContextFragment } from "../context/clio-md.js";
 import type { ContextContract, ProjectPromptContext, ProjectStructuredContext } from "../context/contract.js";
 import { compileHandbook, selectWorkerHandbook, workerHandbookAudience } from "../context/handbook-units.js";
 import { enabledHarnessExtensionToolNames } from "../extensions/command-tools.js";
@@ -1011,7 +1012,16 @@ function workerProjectPrompt(
 	const inside = relative(remap.workerRoot, cwd);
 	if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return own;
 	const source = context.renderPromptContext(resolvePath(remap.sourceRoot, inside));
-	return source.handbookSources.length > 0 ? source : own;
+	return source.handbookSources.length > 0
+		? {
+				...source,
+				supportFragments: own.supportFragments,
+				text: [
+					...own.supportFragments,
+					...source.handbookSources.map(({ source: body, path }) => renderProjectContextFragment(body, path)),
+				].join("\n\n"),
+			}
+		: own;
 }
 
 /**
@@ -1207,7 +1217,10 @@ function projectContextProvenanceFor(
 		sections.push("clio-md");
 		if (workerProjectContextIncludesVerification(project.body)) sections.push("verification-expectations");
 	}
-	const sent = [workspace, project].filter((entry) => entry !== undefined);
+	const orientation =
+		tier === "bounded" ? messages.find((entry) => entry.id === "dispatch-project-orientation") : undefined;
+	if (orientation) sections.push("project-orientation");
+	const sent = [workspace, project, orientation].filter((entry) => entry !== undefined);
 	const chars = sent.reduce((total, entry) => total + entry.body.length, 0);
 	return {
 		tier: tier === "bounded" ? "bounded" : "none",
@@ -1363,6 +1376,16 @@ export function buildDynamicPromptMessages(
 	}
 	if (dynamicContext.projectContextTier === "bounded") {
 		const authored = dynamicContext.projectPrompt;
+		const support =
+			authored?.supportFragments.filter((fragment) => /^(?:<codemap>|<project-orientation>|<wiki>)/.test(fragment)) ?? [];
+		if (support.length > 0) {
+			const selected: string[] = [];
+			for (const fragment of support) {
+				if ([...selected, fragment].join("\n\n").length <= 2400) selected.push(fragment);
+			}
+			const body = selected.join("\n\n");
+			messages.push({ id: "dispatch-project-orientation", body, contentHash: sha256(body) });
+		}
 		// Authored instructions remain verbatim, including test guidance. Never
 		// duplicate them with a second projection of conventions or verification.
 		const compiled = authored?.handbookSources.map(({ source, path }) => compileHandbook(source, path)) ?? [];
@@ -1378,10 +1401,20 @@ export function buildDynamicPromptMessages(
 						maxChars: WORKER_HANDBOOK_MAX_CHARS,
 					}).text
 				: authored.handbookSources.length > 0
-					? selectProjectPreload(authored, dynamicContext.projectReadTools ?? null, {
-							maxChars: WORKER_PROJECT_CONTEXT_MAX_CHARS,
-							externalReadTools: dynamicContext.projectExternalReadTools === true,
-						}).text
+					? selectProjectPreload(
+							{
+								...authored,
+								text: authored.handbookSources
+									.map(({ source, path }) => renderProjectContextFragment(source, path))
+									.join("\n\n"),
+								supportFragments: [],
+							},
+							dynamicContext.projectReadTools ?? null,
+							{
+								maxChars: WORKER_PROJECT_CONTEXT_MAX_CHARS,
+								externalReadTools: dynamicContext.projectExternalReadTools === true,
+							},
+						).text
 					: ""
 			: dynamicContext.project
 				? renderWorkerProjectContext(dynamicContext.project, {

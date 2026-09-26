@@ -7,7 +7,7 @@ const HELP = `Usage:
   clio-coder context reset [--all] [--yes]
 
 Clear accumulated project context owned by the context engine:
-.clio-coder/codewiki.json, .clio-coder/state.json, .clio-coder/handoffs/, and .clio-coder/proposals/.
+.clio-coder/codemap.json, .clio-coder/state.json, .clio-coder/handoffs/, and .clio-coder/proposals/.
 
 Preserves by default: CLIO-CODER.md, CLIO-CODER.override.md, .clio-coder/agents/, .clio-coder/skills/, and .clio-coder/wiki/.
 
@@ -64,7 +64,7 @@ export async function runContextClearCommand(args: string[]): Promise<number> {
 			},
 			confirmContext: () =>
 				answer(
-					"Clear .clio-coder/codewiki.json, .clio-coder/state.json, .clio-coder/handoffs/, and .clio-coder/proposals/? [y/N] ",
+					"Clear .clio-coder/codemap.json, .clio-coder/state.json, .clio-coder/handoffs/, and .clio-coder/proposals/? [y/N] ",
 				),
 			confirmAll: () => answer("Also remove CLIO-CODER.md? [y/N] "),
 		});

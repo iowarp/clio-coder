@@ -1,4 +1,4 @@
-import { codewikiPath, structuralCodewikiHash } from "../domains/context/codewiki/artifact.js";
+import { codemapPath, codewikiPath, structuralCodewikiHash } from "../domains/context/codewiki/artifact.js";
 import { coordinateCodewikiWrite } from "../domains/context/codewiki/coordinator.js";
 import type { Codewiki } from "../domains/context/codewiki/schema.js";
 import { readClioState, statePath, writeClioState } from "../domains/context/state.js";
@@ -7,8 +7,8 @@ import { detectProjectProfile } from "../domains/session/workspace/project-type.
 const HELP = `Usage:
   clio-coder context index [--json]
 
-Build the structural codewiki index for the current repository without model calls.
-Writes .clio-coder/codewiki.json and .clio-coder/state.json, then prints source coverage.
+Build the structural codemap index for the current repository without model calls.
+Writes .clio-coder/codemap.json and .clio-coder/state.json, then prints source coverage.
 
 Options:
   --json          print machine-readable coverage and hash details
@@ -53,21 +53,26 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 	const coordinated = await coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: profile.projectType }), {
 		afterCommit: ({ codewiki, fingerprint }, workspace) => {
 			const prev = readClioState(workspace);
-			writeClioState(workspace, {
-				version: 1,
-				projectType: profile.projectType,
-				fingerprint,
-				codewikiVersion: codewiki.version,
-				...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
-				...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
-				...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
-				...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
-				lastSessionAt: prev?.lastSessionAt ?? now,
-				lastIndexedAt: now,
-			});
+			writeClioState(
+				workspace,
+				{
+					version: 1,
+					projectType: profile.projectType,
+					fingerprint,
+					codewikiVersion: codewiki.version,
+					...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
+					...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+					...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
+					...(prev?.bootstrapFingerprint ? { bootstrapFingerprint: prev.bootstrapFingerprint } : {}),
+					...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
+					lastSessionAt: prev?.lastSessionAt ?? now,
+					lastIndexedAt: now,
+				},
+				codewiki,
+			);
 		},
 	});
-	if (!coordinated) throw new Error("codewiki index transaction did not commit");
+	if (!coordinated) throw new Error("codemap index transaction did not commit");
 	const codewiki = coordinated.codewiki;
 	const indexed = indexedSourceCount(codewiki);
 	const coverage = profile.sourceFiles === 0 ? 1 : indexed / profile.sourceFiles;
@@ -78,6 +83,7 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 		indexedSourceFiles: indexed,
 		coverage,
 		languageCounts: counts,
+		codemapPath: codemapPath(cwd),
 		codewikiPath: codewikiPath(cwd),
 		statePath: statePath(cwd),
 		structuralHash: structuralCodewikiHash(codewiki),
@@ -90,7 +96,7 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 		[
 			`clio-coder context index indexed ${indexed}/${profile.sourceFiles} source file${profile.sourceFiles === 1 ? "" : "s"} (${(coverage * 100).toFixed(1)}%)`,
 			`  language ${profile.projectType}; counts ${formatCounts(counts)}`,
-			`  codewiki ${payload.codewikiPath}`,
+			`  codemap ${payload.codemapPath}`,
 			`  state ${payload.statePath}`,
 			`  structural hash ${payload.structuralHash}`,
 			"",

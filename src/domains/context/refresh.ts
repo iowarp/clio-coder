@@ -11,7 +11,7 @@ import { readWikiMeta } from "./wiki/meta.js";
 import { wikiCompleteness, wikiStaleness } from "./wiki/staleness.js";
 
 /**
- * `/context refresh` and `clio-coder context refresh`: rebuild the codewiki index and
+ * `/context refresh` and `clio-coder context refresh`: rebuild the codemap index and
  * `.clio-coder` state while preserving authored handbook bytes. Derived navigation
  * stays in codewiki and the optional Markdown wiki.
  */
@@ -70,7 +70,7 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 	const projectType = prev?.projectType ?? detectProjectType(cwd);
 	const indexedAt = now().toISOString();
 
-	input.onProgress?.({ phase: "codewiki", status: "started", message: "rebuilding codewiki" });
+	input.onProgress?.({ phase: "codewiki", status: "started", message: "rebuilding codemap" });
 	let fingerprint: Fingerprint | undefined;
 	let clioMd: ClioMdCuration = "absent";
 	const coordinated = await coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: projectType }), {
@@ -79,18 +79,23 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 			clioMd = tryReadClioMd(workspace)?.ok ? "unchanged" : "absent";
 			input.onProgress?.({ phase: "state", status: "running", message: "writing state" });
 			const latest = readClioState(workspace);
-			writeClioState(workspace, {
-				version: 1,
-				projectType,
-				fingerprint: result.fingerprint,
-				codewikiVersion: result.codewiki.version,
-				...(latest?.contextSources ? { contextSources: latest.contextSources } : {}),
-				...(latest?.contextSourceHash ? { contextSourceHash: latest.contextSourceHash } : {}),
-				...(latest?.lastBootstrap ? { lastBootstrap: latest.lastBootstrap } : {}),
-				...(latest?.lastInitAt ? { lastInitAt: latest.lastInitAt } : {}),
-				lastSessionAt: latest?.lastSessionAt ?? indexedAt,
-				lastIndexedAt: indexedAt,
-			});
+			writeClioState(
+				workspace,
+				{
+					version: 1,
+					projectType,
+					fingerprint: result.fingerprint,
+					codewikiVersion: result.codewiki.version,
+					...(latest?.contextSources ? { contextSources: latest.contextSources } : {}),
+					...(latest?.contextSourceHash ? { contextSourceHash: latest.contextSourceHash } : {}),
+					...(latest?.lastBootstrap ? { lastBootstrap: latest.lastBootstrap } : {}),
+					...(latest?.bootstrapFingerprint ? { bootstrapFingerprint: latest.bootstrapFingerprint } : {}),
+					...(latest?.lastInitAt ? { lastInitAt: latest.lastInitAt } : {}),
+					lastSessionAt: latest?.lastSessionAt ?? indexedAt,
+					lastIndexedAt: indexedAt,
+				},
+				result.codewiki,
+			);
 		},
 	});
 	if (!coordinated || !fingerprint) throw new Error("codewiki refresh transaction did not commit");
@@ -110,7 +115,7 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 		});
 	} else if (input.wiki === true) {
 		// --wiki with no wiki on disk used to return silently, so an operator who
-		// asked for an update got a bare "codewiki rebuilt" and no way to tell the
+		// asked for an update got a bare "codemap rebuilt" and no way to tell the
 		// request had been dropped.
 		hint = NO_WIKI_HINT;
 	} else if (hasWiki) {
@@ -120,7 +125,7 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 	}
 
 	const committedClioMd = clioMd as ClioMdCuration;
-	input.io?.stdout(`clio-coder context refresh: codewiki rebuilt (${entries} source file${entries === 1 ? "" : "s"})\n`);
+	input.io?.stdout(`clio-coder context refresh: codemap rebuilt (${entries} source file${entries === 1 ? "" : "s"})\n`);
 	input.onProgress?.({ phase: "done", status: "completed", message: "context refreshed" });
 	return {
 		action: "refreshed",
