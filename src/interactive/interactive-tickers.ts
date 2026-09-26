@@ -1,12 +1,12 @@
 import type { UsageSnapshot } from "../domains/quota/types.js";
-import { type TaskBoardSnapshot, type TaskBoardStore, taskBoardCounts } from "../domains/session/task-board.js";
-import { Text, type TUI, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
-import {
-	CONTEXT_ISLAND_WIDTH,
-	type ContextActivitySnapshot,
-	formatContextActivityIslandLines,
-} from "./context-activity.js";
-import { type DispatchBoardRow, formatTaskIslandLines, TASK_ISLAND_WIDTH } from "./dispatch-board.js";
+import type { TaskBoardSnapshot, TaskBoardStore } from "../domains/session/task-board.js";
+import { taskBoardCounts } from "../domains/session/task-board.js";
+import type { TUI } from "../engine/tui.js";
+import { Text, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import type { ContextActivitySnapshot } from "./context-activity.js";
+import { CONTEXT_ISLAND_WIDTH, formatContextActivityIslandLines } from "./context-activity.js";
+import type { DispatchBoardRow } from "./dispatch-board.js";
+import { formatTaskIslandLines, TASK_ISLAND_WIDTH } from "./dispatch-board.js";
 import { clioTheme, frame, GLYPH } from "./theme/index.js";
 import { isHelperRun } from "./worker-stream.js";
 

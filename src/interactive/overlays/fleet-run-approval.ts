@@ -11,14 +11,8 @@
  * without a TUI.
  */
 
-import {
-	type Component,
-	isKeyRelease,
-	matchesKey,
-	type OverlayHandle,
-	type TUI,
-	wrapTextWithAnsi,
-} from "../../engine/tui.js";
+import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
+import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { FleetRunPreview, FleetRunPreviewStep } from "../fleet-run-preview.js";
 import { formatUsd } from "../footer/widgets.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";

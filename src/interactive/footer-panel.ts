@@ -1,10 +1,12 @@
 import type { TokenThroughputSnapshot, UsageBreakdown } from "../domains/observability/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
-import { type Text, truncateToWidth, visibleWidth } from "../engine/tui.js";
+import type { Text } from "../engine/tui.js";
+import { truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { contextBarGlyphs, largestRemainderCells } from "./context-meter.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
 import { formatReasoningChip } from "./status/reasoning.js";
-import { type ClioTheme, formatContextPercent, GLYPH } from "./theme/index.js";
+import type { ClioTheme } from "./theme/index.js";
+import { formatContextPercent, GLYPH } from "./theme/index.js";
 import { isHelperRun } from "./worker-stream.js";
 
 /** Shared footer projection of live and failed worker states. */

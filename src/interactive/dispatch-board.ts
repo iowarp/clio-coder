@@ -1,41 +1,36 @@
 import type { AgentAudience } from "../domains/agents/spec.js";
+import type { RunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
 import {
 	formatBudgetPolicy,
 	formatBudgetReasons,
 	formatBudgetRequest,
 	formatEffectiveBudget,
-	type RunToolBudgetEnvelope,
 } from "../domains/dispatch/budget-envelope.js";
-import { type DispatchRequestOrigin, type RunKind, runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
+import type { DispatchRequestOrigin, RunKind } from "../domains/dispatch/types.js";
+import { runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
 import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/write-boundary.js";
-import {
-	type TrustSummaryProjection,
-	type TrustVerdict,
-	trustStateWord,
-} from "../domains/evidence/trust-projection.js";
+import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/trust-projection.js";
+import { trustStateWord } from "../domains/evidence/trust-projection.js";
 import type { ObservabilityContract, ObservabilityRunSummary } from "../domains/observability/contract.js";
-import {
-	COST_NOT_MEASURED,
-	costAggregateForAmount,
-	formatCostAggregate,
-	type ObservabilityNotice,
-	type ObservabilitySnapshot,
-} from "../domains/observability/index.js";
+import type { ObservabilityNotice, ObservabilitySnapshot } from "../domains/observability/index.js";
+import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
 import type { WorkerAction, WorkerProgressSnapshot } from "../domains/observability/worker-progress.js";
-import { type CostProvenance, foregroundStreamUsage } from "../domains/providers/index.js";
+import type { CostProvenance } from "../domains/providers/index.js";
+import { foregroundStreamUsage } from "../domains/providers/index.js";
 import type { UsageSnapshot } from "../domains/quota/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
-import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import type { Component } from "../engine/tui.js";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { formatWorkerContextMeter } from "./context-meter.js";
 import { COUNCIL_SYNTHESIS_LABEL } from "./council.js";
-import { type CouncilGroupView, type CouncilMemberView, councilGroupBody, councilIslandLines } from "./council-grid.js";
+import type { CouncilGroupView, CouncilMemberView } from "./council-grid.js";
+import { councilGroupBody, councilIslandLines } from "./council-grid.js";
 import { formatFooterTokens } from "./footer-panel.js";
 import { routeWeeklyQuota } from "./quota-view.js";
 import { presentWorkerContractAnswer, safeWorkerAnswerText } from "./renderers/worker-answer.js";
+import type { ClioTheme, ClioToken } from "./theme/index.js";
 import {
 	animationStep,
-	type ClioTheme,
-	type ClioToken,
 	clioTheme,
 	dotSep,
 	fitUnits,

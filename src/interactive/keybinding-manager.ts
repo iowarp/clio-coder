@@ -24,21 +24,10 @@
  */
 
 import type { ClioSettings } from "../core/config.js";
-import {
-	CLIO_APP_KEYBINDING_IDS,
-	CLIO_APP_KEYBINDINGS,
-	CLIO_KEYBINDINGS,
-	type ClioKeybinding,
-} from "../domains/config/keybindings.js";
-import {
-	getKeybindings,
-	type Keybinding,
-	type KeybindingConflict,
-	type KeybindingsConfig,
-	KeybindingsManager,
-	type KeyId,
-	setKeybindings,
-} from "../engine/tui.js";
+import type { ClioKeybinding } from "../domains/config/keybindings.js";
+import { CLIO_APP_KEYBINDING_IDS, CLIO_APP_KEYBINDINGS, CLIO_KEYBINDINGS } from "../domains/config/keybindings.js";
+import type { Keybinding, KeybindingConflict, KeybindingsConfig, KeyId } from "../engine/tui.js";
+import { getKeybindings, KeybindingsManager, setKeybindings } from "../engine/tui.js";
 
 export interface InvalidKeybinding {
 	/** Action id the user tried to rebind. */

@@ -16,7 +16,8 @@
 
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { fitFooterText } from "../footer-panel.js";
-import { type ClioTheme, type ClioToken, clioTheme, GLYPH, rule } from "../theme/index.js";
+import type { ClioTheme, ClioToken } from "../theme/index.js";
+import { clioTheme, GLYPH, rule } from "../theme/index.js";
 
 export type NotificationLevel = "info" | "success" | "warning" | "error";
 

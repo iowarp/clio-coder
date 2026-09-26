@@ -1,9 +1,9 @@
 import { costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
+import type { QuotaSeverity } from "../domains/quota/presentation.js";
 import {
 	foldDuplicateAccounts,
 	formatPct,
 	primaryWindow,
-	type QuotaSeverity,
 	severityForPct,
 	windowSeverity,
 } from "../domains/quota/presentation.js";
@@ -13,7 +13,8 @@ import { redactSecretString } from "../domains/safety/redaction.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
 import { formatFooterTokens } from "./footer-panel.js";
-import { type ClioToken, clioTheme, formatCompactMs, GLYPH } from "./theme/index.js";
+import type { ClioToken } from "./theme/index.js";
+import { clioTheme, formatCompactMs, GLYPH } from "./theme/index.js";
 
 const clean = (text: string) => sanitizeCallTargetText(redactSecretString(text));
 const tone = (severity: QuotaSeverity): ClioToken =>

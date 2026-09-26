@@ -4,6 +4,7 @@ import type { SafeEventBus } from "../../core/event-bus.js";
 import { listRecentModels } from "../../core/recent-models.js";
 import type {
 	CapabilityFlags,
+	ProviderModelSource,
 	ProvidersContract,
 	ResolvedRuntimeTarget,
 	RuntimeCapabilityDecision,
@@ -18,18 +19,15 @@ import {
 	modelCandidatesForStatus,
 	modelIdsForStatus,
 	modelListNoteForStatus,
-	type ProviderModelSource,
 	resolveRuntimeTarget,
 	supportsAgentRoleTools,
 } from "../../domains/providers/index.js";
+import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import {
-	type Component,
 	fuzzyFilter,
 	getKeybindings,
 	Input,
 	matchesKey,
-	type OverlayHandle,
-	type TUI,
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
@@ -43,7 +41,8 @@ import {
 	formatRuntimeResolutionDiagnostic,
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
-import { type ClioToken, clioTheme, fitIdentityLabel, GLYPH } from "../theme/index.js";
+import type { ClioToken } from "../theme/index.js";
+import { clioTheme, fitIdentityLabel, GLYPH } from "../theme/index.js";
 
 export const MODEL_OVERLAY_WIDTH = 82;
 const MODEL_OVERLAY_MAX_WIDTH = 120;

@@ -2,7 +2,8 @@ import { doesNotMatch, match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
-import { ModelOverlayView, type ModelRow } from "../../src/interactive/overlays/model-selector.js";
+import type { ModelRow } from "../../src/interactive/overlays/model-selector.js";
+import { ModelOverlayView } from "../../src/interactive/overlays/model-selector.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
 function selectableModelRow(): ModelRow {

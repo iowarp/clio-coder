@@ -1,3 +1,4 @@
+import type { SettingControl } from "../../core/settings-controls.js";
 import {
 	applyControlValue,
 	controlInstructions,
@@ -7,17 +8,17 @@ import {
 	SETTINGS_HELP_BY_ID,
 	SETTINGS_LABELS_BY_ID,
 	SETTINGS_VALUE_HELP_BY_ID,
-	type SettingControl,
 	settingControl,
 	settingsV2PathForRow,
 } from "../../core/settings-controls.js";
 import { settingsChangeKind } from "../../domains/config/classify.js";
+import { openTargetWizard } from "../target-wizard.js";
 
 export { SETTINGS_LABELS_BY_ID } from "../../core/settings-controls.js";
 
+import type { ClioSettings } from "../../core/config.js";
 import {
 	bindAgentProfileInSettings,
-	type ClioSettings,
 	removeFleetProfileFromSettings,
 	removeTargetFromSettings,
 	SettingsValidationError,
@@ -25,58 +26,45 @@ import {
 	useTargetInSettings,
 	validateSettings,
 } from "../../core/config.js";
+import type { ActiveRoutingPosture, ActiveRoutingRole, WorkerEscalationSettings } from "../../core/defaults.js";
 import {
 	ACTIVE_ROUTING_POSTURES,
 	ACTIVE_ROUTING_ROLES,
-	type ActiveRoutingPosture,
-	type ActiveRoutingRole,
 	DEFAULT_SETTINGS,
 	THINKING_LEVELS,
-	type WorkerEscalationSettings,
 } from "../../core/defaults.js";
 import { getAtPath, isRoutingPath } from "../../core/session-routing.js";
+import type { SettingsSectionId, SettingsSectionName } from "../../core/settings-navigation.js";
 import {
 	resolveSettingsSection,
 	SETTINGS_SECTIONS,
-	type SettingsSectionId,
-	type SettingsSectionName,
 	settingsGroupForPath,
 	settingsSectionForPath,
 } from "../../core/settings-navigation.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { capacityLeaseUsage } from "../../domains/dispatch/capacity-lease.js";
 import type { RouteBreakerView } from "../../domains/dispatch/contract.js";
+import type { InteropAgentId, InteropProposal } from "../../domains/interop/index.js";
+import { delegationEntryForKind, interopAgentKind } from "../../domains/interop/index.js";
+import type { CapabilityFlags, ProvidersContract, TargetHealth, TargetStatus } from "../../domains/providers/index.js";
 import {
-	delegationEntryForKind,
-	type InteropAgentId,
-	type InteropProposal,
-	interopAgentKind,
-} from "../../domains/interop/index.js";
-import {
-	type CapabilityFlags,
 	endpointCapacitiesForStatuses,
 	endpointCapacityForStatus,
 	isDispatchEligibleRuntime,
 	isOrchestratorEligibleRuntime,
-	type ProvidersContract,
 	resolveModelRuntimeCapabilitiesForProviders,
-	type TargetHealth,
-	type TargetStatus,
 	thinkingLevelChoiceLabel,
 	thinkingLevelFromChoiceLabel,
 } from "../../domains/providers/index.js";
 import type { FleetNodeSnapshot } from "../../domains/scheduling/cluster.js";
 import { describeLocalCapacity } from "../../domains/scheduling/local-capacity.js";
+import type { Component, OverlayHandle, SettingItem, TUI } from "../../engine/tui.js";
 import {
-	type Component,
 	getKeybindings,
 	Input,
 	isKeyRelease,
 	matchesKey,
-	type OverlayHandle,
 	SelectList,
-	type SettingItem,
-	type TUI,
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
@@ -300,6 +288,7 @@ interface BuildSettingItemsOptions {
 	getRouteBreakers?: () => ReadonlyArray<RouteBreakerView>;
 	/** Run the API-key / OAuth connect flow for a target; absent hides the action. */
 	connectTarget?: (targetId: string) => Promise<void> | void;
+	editTarget?: (targetId: string) => void;
 	/** The connect/probe operation currently acting on a target, if any. */
 	getTargetOperation?: (targetId: string) => "connect" | "probe" | null;
 	/** Keeps the row grammar synchronized with the lifetime of connect/probe work. */
@@ -969,6 +958,9 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 						},
 					]
 				: []),
+			...(options?.editTarget
+				? [{ value: "edit", label: "Edit URL, runtime and default model", presentationKind: "action" as const }]
+				: []),
 			{
 				value: "remove",
 				label: "Remove target",
@@ -983,6 +975,11 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 			note,
 		)(currentValue, (value) => {
 			const refresh = (): void => requestRefresh?.();
+			if (value === "edit") {
+				done();
+				options?.editTarget?.(targetId);
+				return;
+			}
 			if (value === "connect" && connectTarget) {
 				done();
 				const operationToken = {};
@@ -1117,15 +1114,15 @@ function targetAddCta(): SettingsCenterItem {
 	return {
 		id: "targets.add-cta",
 		label: "Add target",
-		currentValue: "`clio-coder targets add`",
-		description: "Launch the accepted target setup wizard from your shell.",
+		currentValue: "Open target wizard",
+		description: "Add a target without leaving the TUI. Review and save its runtime, credentials, URL and model.",
 		section: "targets",
 		configPath: "targets.add-cta",
-		affordance: "accepted CLI wizard",
+		affordance: "Enter: open target wizard",
 		scope: "live",
-		readOnly: true,
+		readOnly: false,
 		presentationKind: "action",
-		valueSegments: [{ text: "`clio-coder targets add`", tone: "neutral" }],
+		valueSegments: [{ text: "Open target wizard", tone: "neutral" }],
 	};
 }
 
@@ -1887,7 +1884,7 @@ export function targetRows(
 			description: `URL: ${target.url ?? "(none)"} · Default model: ${target.defaultModel ?? "(none)"}`,
 			help: `Last probe: ${lastProbe} · Failure reason: ${failureReason}${breakerText}`,
 			submenu: targetActionsSubmenu(target.id, options),
-			affordance: options?.connectTarget ? "Enter: use, connect, probe, remove" : "Enter: use, probe, remove",
+			affordance: options?.connectTarget ? "Enter: use, connect, probe, edit, remove" : "Enter: use, probe, edit, remove",
 			presentationKind: "status",
 			valueSegments,
 		});
@@ -2962,6 +2959,7 @@ export interface SettingsCenterOptions {
 	prepareChange: (item: SettingsCenterItem, newValue: string) => SettingsChangePlan | null;
 	onApply: (plan: SettingsChangePlan, scope: "session" | "project" | "global") => void;
 	onCancel: () => void;
+	onAddTarget?: () => void;
 	requestRender?: () => void;
 }
 
@@ -3317,6 +3315,10 @@ export class SettingsCenter implements Component {
 	private activateSelectedItem(): void {
 		const item = this.selectedItem();
 		if (!item || item.readOnly) return;
+		if (item.id === "targets.add-cta") {
+			this.options.onAddTarget?.();
+			return;
+		}
 		if (item.submenu) {
 			this.submenuComponent = item.submenu(item.editValue ?? item.currentValue, (selectedValue) => {
 				this.submenuComponent = null;
@@ -3832,7 +3834,7 @@ export class SettingsCenter implements Component {
 
 	private footerScopeNote(item: SettingsCenterItem): string {
 		if (item.id.startsWith("maintenance.")) return `Run in a terminal: ${item.currentValue}`;
-		if (item.id === "targets.add-cta") return "Run the command shown to open the accepted add wizard";
+		if (item.id === "targets.add-cta") return "Enter opens target setup in the dock; Save writes global target settings";
 		if (item.submenu && (item.presentationKind === "status" || item.presentationKind === "action"))
 			return "Enter opens actions · nothing changes until an action is confirmed";
 		if (item.readOnly) return "Read-only here · managed on the surface above";
@@ -3919,9 +3921,20 @@ function settingsBodyHeight(tui: TUI): number {
 }
 
 export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): SettingsOverlayHandle {
+	let wizard: OverlayHandle | null = null;
+	const launchWizard = (targetId?: string): void => {
+		const target = targetId ? deps.getSettings().targets.find((entry) => entry.id === targetId) : undefined;
+		if (targetId && !target) return;
+		wizard?.hide();
+		wizard = openTargetWizard(tui, target ? { mode: "edit", target: structuredClone(target) } : { mode: "add" }, () => {
+			wizard = null;
+			refreshRows();
+		});
+	};
 	const targetOperations = new Map<string, { operation: "connect" | "probe"; token: object }>();
 	const buildOptions: BuildSettingItemsOptions = {
 		getSettings: deps.getSettings,
+		editTarget: (targetId) => launchWizard(targetId),
 		requestRefresh: () => refreshRows(),
 		getTargetOperation: (targetId) => {
 			const keyboardOwningOperation = targetOperations.entries().next().value as
@@ -3951,6 +3964,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 			deps.notice?.("success", formatSettingChangeNotice(plan.rowId, plan.selectedValue, scope), `settings:${plan.rowId}`);
 			refreshRows();
 		},
+		onAddTarget: () => launchWizard(),
 		onCancel: () => deps.onClose(),
 		requestRender: () => tui.requestRender(),
 	});
@@ -4001,5 +4015,13 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 					);
 		},
 	});
-	return Object.assign(handle, { refreshRows });
+	return {
+		...handle,
+		refreshRows,
+		hide() {
+			wizard?.hide();
+			wizard = null;
+			handle.hide();
+		},
+	};
 }

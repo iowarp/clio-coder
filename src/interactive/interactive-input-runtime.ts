@@ -1,26 +1,23 @@
 import { getTerminationCoordinator } from "../core/termination.js";
-import { CLIO_APP_KEYBINDING_IDS, type ClioKeybinding } from "../domains/config/keybindings.js";
-import {
-	decodePrintableKey,
-	isKeyRelease,
-	type Keybinding,
-	matchesKey,
-	type TUI,
-	TuiAltScreen,
-} from "../engine/tui.js";
-import {
-	type ApplicationClock,
-	type ApplicationController,
-	type ApplicationInputResult,
-	type ApplicationIntervalCoordinator,
-	type ApplicationIntervalHandle,
-	type ApplicationSignalCoordinator,
-	createApplicationController,
+import type { ClioKeybinding } from "../domains/config/keybindings.js";
+import { CLIO_APP_KEYBINDING_IDS } from "../domains/config/keybindings.js";
+import type { Keybinding, TUI } from "../engine/tui.js";
+import { decodePrintableKey, isKeyRelease, matchesKey, TuiAltScreen } from "../engine/tui.js";
+import type {
+	ApplicationClock,
+	ApplicationController,
+	ApplicationInputResult,
+	ApplicationIntervalCoordinator,
+	ApplicationIntervalHandle,
+	ApplicationSignalCoordinator,
 } from "./application-controller.js";
+import { createApplicationController } from "./application-controller.js";
 import { focusedComponent, keyboardOwner } from "./keyboard-owner.js";
-import { createLeaderKeyController, type LeaderTarget } from "./leader-key.js";
+import type { LeaderTarget } from "./leader-key.js";
+import { createLeaderKeyController } from "./leader-key.js";
 import { createLeaderMenu } from "./leader-menu.js";
-import { type OverlayState, routeOverlayKey } from "./overlay-lifecycle.js";
+import type { OverlayState } from "./overlay-lifecycle.js";
+import { routeOverlayKey } from "./overlay-lifecycle.js";
 import { createQuickHelp } from "./quick-help.js";
 import type { RenderInputAction } from "./render-trace.js";
 

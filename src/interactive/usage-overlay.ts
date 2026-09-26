@@ -1,25 +1,21 @@
+import type { ResponseModelIdObservationCounts } from "../core/response-model-id.js";
 import {
 	addResponseModelIdObservationCounts,
-	type ResponseModelIdObservationCounts,
 	responseModelIdObservationCountsLabel,
 } from "../core/response-model-id.js";
-import {
-	aggregateCostAmounts,
-	type CostAggregate,
-	type CostEntry,
-	formatCostAggregate,
-	type ObservabilityContract,
-	type ObservabilitySnapshot,
+import type {
+	CostAggregate,
+	CostEntry,
+	ObservabilityContract,
+	ObservabilitySnapshot,
 } from "../domains/observability/index.js";
+import { aggregateCostAmounts, formatCostAggregate } from "../domains/observability/index.js";
 import type { UsageSnapshot } from "../domains/quota/types.js";
-import {
-	foldPromptCacheTelemetry,
-	hasPromptCacheTelemetry,
-	type PromptCacheTelemetry,
-	type SessionEntry,
-} from "../domains/session/index.js";
+import type { PromptCacheTelemetry, SessionEntry } from "../domains/session/index.js";
+import { foldPromptCacheTelemetry, hasPromptCacheTelemetry } from "../domains/session/index.js";
 import type { GitChanges } from "../domains/session/workspace/git-probe.js";
-import { type Component, matchesKey, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../engine/tui.js";
+import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
+import { matchesKey, wrapTextWithAnsi } from "../engine/tui.js";
 import { ACTIVITY_SPAN_DAYS, bucketActivity, renderActivityHeatmap } from "./activity-view.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";

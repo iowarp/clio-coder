@@ -11,18 +11,16 @@ import type { AssistantMessageEvent, Context, Model } from "@earendil-works/pi-a
 import { runConfigureCommand } from "../../src/cli/configure.js";
 import { runModelsCommand } from "../../src/cli/models.js";
 import { runTargetsCommand } from "../../src/cli/targets.js";
-import { type ClioSettings, readSettings, updateSettings } from "../../src/core/config.js";
+import type { ClioSettings } from "../../src/core/config.js";
+import { readSettings, updateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { loadDomains } from "../../src/core/domain-loader.js";
 import type { SafeEventBus } from "../../src/core/event-bus.js";
 import { ConfigDomainModule } from "../../src/domains/config/index.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import { isOrchestratorEligibleRuntime } from "../../src/domains/providers/eligibility.js";
-import {
-	listProviderSupportEntries,
-	type ProvidersContract,
-	ProvidersDomainModule,
-} from "../../src/domains/providers/index.js";
+import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import { listProviderSupportEntries, ProvidersDomainModule } from "../../src/domains/providers/index.js";
 import { loadPluginRuntimes } from "../../src/domains/providers/plugins.js";
 import { createRuntimeRegistry, getRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import antigravityCodeRuntime, {
@@ -55,7 +53,8 @@ import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
 import { createOverlayModelSelectors } from "../../src/interactive/overlay-model-selectors.js";
 import type { OpenModelScopeOverlayDeps } from "../../src/interactive/overlays/model-scope.js";
-import { ModelOverlayView, type ModelRow } from "../../src/interactive/overlays/model-selector.js";
+import type { ModelRow } from "../../src/interactive/overlays/model-selector.js";
+import { ModelOverlayView } from "../../src/interactive/overlays/model-selector.js";
 import { presentProviderError } from "../../src/interactive/renderers/provider-error.js";
 import { resolveWorkerRuntime } from "../../src/worker/runtime-registry.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";

@@ -1,6 +1,7 @@
 import type { ContextLedger, ContextLedgerCategory, ContextLedgerGroup } from "../domains/session/context-ledger.js";
 import { visibleWidth } from "../engine/tui.js";
-import { type ClioTheme, type ClioToken, clioTheme, GLYPH } from "./theme/index.js";
+import type { ClioTheme, ClioToken } from "./theme/index.js";
+import { clioTheme, GLYPH } from "./theme/index.js";
 
 /**
  * Shared visual language for the context window. Both the `/context-view`

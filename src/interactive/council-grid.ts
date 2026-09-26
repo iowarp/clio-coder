@@ -15,16 +15,8 @@
 
 import { truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { COUNCIL_SYNTHESIS_LABEL } from "./council.js";
-import {
-	type ClioTheme,
-	type ClioToken,
-	dotSep,
-	GLYPH,
-	innerDivider,
-	isClioToken,
-	padAnsi,
-	paintHex,
-} from "./theme/index.js";
+import type { ClioTheme, ClioToken } from "./theme/index.js";
+import { dotSep, GLYPH, innerDivider, isClioToken, padAnsi, paintHex } from "./theme/index.js";
 
 /**
  * The narrowest column an answer is still worth reading in. Below it the grid

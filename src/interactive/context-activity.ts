@@ -1,22 +1,14 @@
-import {
-	BusChannels,
-	type ContextActivityKind,
-	type ContextActivityPayload,
-	type ContextActivityPhase,
-	type ContextActivityStatus,
+import type {
+	ContextActivityKind,
+	ContextActivityPayload,
+	ContextActivityPhase,
+	ContextActivityStatus,
 } from "../core/bus-events.js";
+import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
-import {
-	animationStep,
-	type ClioTheme,
-	clioTheme,
-	formatCompactMs,
-	frame,
-	GLYPH,
-	padAnsi,
-	spinnerFrame,
-} from "./theme/index.js";
+import type { ClioTheme } from "./theme/index.js";
+import { animationStep, clioTheme, formatCompactMs, frame, GLYPH, padAnsi, spinnerFrame } from "./theme/index.js";
 
 export interface ContextActivitySnapshot {
 	kind: ContextActivityKind;

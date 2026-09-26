@@ -4,18 +4,21 @@ import type { LibraryEntryKind } from "../domains/resources/index.js";
 import { describeToolRisk as readToolRisk, toolRiskAdvisoryLine } from "../domains/safety/tool-risk.js";
 import { appendInterviewRecord, appendNotice } from "./command-output.js";
 import { judgeDrafts } from "./drafts.js";
-import { createOverlayAskUserLifecycle, type OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
+import type { OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
+import { createOverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
 import { createOverlayGeneralOpeners } from "./overlay-general-openers.js";
 import { createOverlayModelSelectors } from "./overlay-model-selectors.js";
-import { createOverlayPermissionLifecycle, type OverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
-import { createOverlayResourceOpeners, type LibraryOpenRequest } from "./overlay-resource-openers.js";
+import type { OverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
+import { createOverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
+import type { LibraryOpenRequest } from "./overlay-resource-openers.js";
+import { createOverlayResourceOpeners } from "./overlay-resource-openers.js";
 import { createOverlaySessionLifecycle } from "./overlay-session-lifecycle.js";
 import { createOverlayTransitions } from "./overlay-transitions.js";
+import type { PermissionOverlayBodyHandle } from "./permission-overlay.js";
 import {
 	createPermissionOverlayBody,
-	type PermissionOverlayBodyHandle,
 	permissionOverlayHint,
 	permissionOverlayTitle,
 	permissionOverlayTone,

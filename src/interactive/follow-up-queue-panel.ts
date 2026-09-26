@@ -1,4 +1,5 @@
-import { type Component, truncateToWidth } from "../engine/tui.js";
+import type { Component } from "../engine/tui.js";
+import { truncateToWidth } from "../engine/tui.js";
 import type { QueuedChatMessage } from "./chat-loop.js";
 import { clioTheme, frame, GLYPH } from "./theme/index.js";
 

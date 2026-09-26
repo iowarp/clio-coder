@@ -5,10 +5,10 @@ import type { AgentsContract } from "../domains/agents/contract.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/index.js";
 import { agentRoleFactsResolver, executeFleetRun, requestExecutionRole } from "../domains/dispatch/index.js";
+import type { MemoryRecord } from "../domains/memory/index.js";
 import {
 	canonicalMemoryRepositoryIdentity,
 	loadMemoryRecordsSync,
-	type MemoryRecord,
 	proposeMemoryPromotion,
 } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
@@ -19,27 +19,25 @@ import type { SessionMeta } from "../domains/session/index.js";
 import { foldSessionArtifacts } from "../domains/session/session-artifacts.js";
 import { foldSessionTaskHistory } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
-import { type GitChanges, probeGitChangesAsync } from "../domains/session/workspace/git-probe.js";
+import type { GitChanges } from "../domains/session/workspace/git-probe.js";
+import { probeGitChangesAsync } from "../domains/session/workspace/git-probe.js";
 import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { TUI } from "../engine/tui.js";
 import type { DraftOutcome } from "./chat-loop.js";
-import { type OpenContextOverlayOptions, openContextOverlay } from "./context-overlay.js";
-import {
-	type createDispatchBoardView,
-	isDispatchBoardRowCancellable,
-	isDispatchBoardRowSteerable,
-} from "./dispatch-board.js";
+import type { OpenContextOverlayOptions } from "./context-overlay.js";
+import { openContextOverlay } from "./context-overlay.js";
+import type { createDispatchBoardView } from "./dispatch-board.js";
+import { isDispatchBoardRowCancellable, isDispatchBoardRowSteerable } from "./dispatch-board.js";
 import type { DraftVerdict } from "./drafts.js";
-import { compileFleetRunPreview, type FleetRunPreview, type FleetRunPreviewInput } from "./fleet-run-preview.js";
+import type { FleetRunPreview, FleetRunPreviewInput } from "./fleet-run-preview.js";
+import { compileFleetRunPreview } from "./fleet-run-preview.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
-import { buildResponsiveHint, type HintEntry, showClioOverlayFrame } from "./overlay-frame.js";
+import type { HintEntry } from "./overlay-frame.js";
+import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
-import {
-	type ContextResetMutationChoice,
-	contextResetOptions,
-	openContextResetOverlay,
-} from "./overlays/context-reset.js";
+import type { ContextResetMutationChoice } from "./overlays/context-reset.js";
+import { contextResetOptions, openContextResetOverlay } from "./overlays/context-reset.js";
 import { formatDecisionCorrectionTurn, openDecisionsOverlay } from "./overlays/decisions.js";
 import { openDraftOverlay } from "./overlays/draft.js";
 import { openFleetRunApprovalOverlay } from "./overlays/fleet-run-approval.js";
@@ -47,7 +45,8 @@ import { openSideQuestionOverlay } from "./overlays/side-question.js";
 import type { ContextClearCommandOptions } from "./slash-commands.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
 import { openUsageOverlay } from "./usage-overlay.js";
-import { type ArtifactProviderDeps, createDefaultArtifactProviders } from "./view/artifacts.js";
+import type { ArtifactProviderDeps } from "./view/artifacts.js";
+import { createDefaultArtifactProviders } from "./view/artifacts.js";
 import { openViewOverlay } from "./view/view-overlay.js";
 
 export interface OverlayGeneralOpenersDeps {

@@ -4,31 +4,21 @@ import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createCostTracker } from "../../src/domains/observability/cost.js";
-import {
-	emptyCostAggregate,
-	type ObservabilityContract,
-	type ObservabilitySnapshot,
-} from "../../src/domains/observability/index.js";
+import type { ObservabilityContract, ObservabilitySnapshot } from "../../src/domains/observability/index.js";
+import { emptyCostAggregate } from "../../src/domains/observability/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import { localQuotaSnapshot } from "../../src/domains/quota/presentation.js";
 import { createQuotaSummaryFeed } from "../../src/domains/quota/summary-feed.js";
 import type { UsageSnapshot } from "../../src/domains/quota/types.js";
-import {
-	type Component,
-	type OverlayOptions,
-	stripTerminalSequences,
-	type TUI,
-	visibleWidth,
-} from "../../src/engine/tui.js";
+import type { Component, OverlayOptions, TUI } from "../../src/engine/tui.js";
+import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { dockTop } from "../../src/interactive/dock.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
-import { type OverlayKeyDeps, routeOverlayKey } from "../../src/interactive/overlay-key-routing.js";
+import type { OverlayKeyDeps } from "../../src/interactive/overlay-key-routing.js";
+import { routeOverlayKey } from "../../src/interactive/overlay-key-routing.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
-import {
-	dispatchSlashCommand,
-	parseSlashCommand,
-	type SlashCommandContext,
-} from "../../src/interactive/slash-commands.js";
+import type { SlashCommandContext } from "../../src/interactive/slash-commands.js";
+import { dispatchSlashCommand, parseSlashCommand } from "../../src/interactive/slash-commands.js";
 import { openUsageOverlay } from "../../src/interactive/usage-overlay.js";
 import { createWelcomeDashboard } from "../../src/interactive/welcome-dashboard.js";
 

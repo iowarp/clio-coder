@@ -237,6 +237,7 @@ Every transcript row follows a rigid 2-column gutter format:
 
 ## 6. Overlays & Inspection
 
+- **`/settings` and `/config`**: settings share one docked surface. Targets offers Add target and an Edit action for URL, runtime and default model. The host supplies docked prompts to the existing CLI wizard through `src/cli/configure-host.ts`, loaded only when setup starts. Save writes global target settings; Esc goes back, and Ctrl+C cancels setup without quitting Clio. Browser sign-in stores credentials immediately. Existing explicit routing defaults remain in place.
 - **`/view transcript`**: Inspect complete un-truncated output, tool payloads, and raw responses.
 - **`/usage`**: 5 tabs (Activity, Accounts, Session, Models, Workers) with consumption vs budget percentages.
 - **`/tasks`**: Interactive task board tracking parent/child subagent execution status.
@@ -277,15 +278,11 @@ Footer status and metric labels share retry, completion, token-rate and failure 
 
 Footer snapshots omit session facts that no renderer consumes.
 
-Footer snapshots omit session facts that no renderer consumes.
-
 Machine counters are sampled only while Status is visible; samples from a previous visible period are discarded.
 
 Compact and expanded worker counts include retrying and cancelling runs in the shared active-status set.
 
 Context meters share single-cell glyph selection and stable largest-remainder geometry.
-
-Renderer-only presentation constants remain private to their owning modules.
 
 Renderer-only presentation constants remain private to their owning modules.
 

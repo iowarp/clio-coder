@@ -4,7 +4,8 @@ import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { ContextState } from "../../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../../domains/memory/index.js";
 import type { CostAggregate, TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
-import { acceptsImageInput, type CapabilityFlags, type ProvidersContract } from "../../domains/providers/index.js";
+import type { CapabilityFlags, ProvidersContract } from "../../domains/providers/index.js";
+import { acceptsImageInput } from "../../domains/providers/index.js";
 import type { UsageSnapshot } from "../../domains/quota/types.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
@@ -14,15 +15,19 @@ import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js
 import { getKeybindings, Text } from "../../engine/tui.js";
 import { getCurrentBranch } from "../../utils/git.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
-import { dispatchSegment, type FooterPanel } from "../footer-panel.js";
+import type { FooterPanel } from "../footer-panel.js";
+import { dispatchSegment } from "../footer-panel.js";
 import { formatKeyLabel } from "../keybinding-manager.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
 import { animationStep, clioTheme, collapseHomePath, formatTargetLabel } from "../theme/index.js";
 import { createDemoHints } from "./demo-hints.js";
-import { formatNotificationPanel, type Notification, type NotificationCenter } from "./notifications.js";
-import { DASHBOARD_PAGES, type DashboardPage, renderCompactDashboard, renderDashboardPage } from "./pages.js";
-import { createLocalMachineSampler, type LocalMachineMetrics } from "./system-metrics.js";
+import type { Notification, NotificationCenter } from "./notifications.js";
+import { formatNotificationPanel } from "./notifications.js";
+import type { DashboardPage } from "./pages.js";
+import { DASHBOARD_PAGES, renderCompactDashboard, renderDashboardPage } from "./pages.js";
+import type { LocalMachineMetrics } from "./system-metrics.js";
+import { createLocalMachineSampler } from "./system-metrics.js";
 
 export function capabilityLabels(caps: CapabilityFlags | null): string[] {
 	if (!caps) return [];
@@ -37,15 +42,8 @@ export function capabilityLabels(caps: CapabilityFlags | null): string[] {
 	return out.slice(0, 5);
 }
 
-import {
-	type AgentWorkFacts,
-	type ContextEngineFacts,
-	fitDashboardLine,
-	formatToolTally,
-	type SessionFacts,
-	type ToolTallySnapshot,
-	type WorkspaceFacts,
-} from "./widgets.js";
+import type { AgentWorkFacts, ContextEngineFacts, SessionFacts, ToolTallySnapshot, WorkspaceFacts } from "./widgets.js";
+import { fitDashboardLine, formatToolTally } from "./widgets.js";
 
 export type { ToolTallySnapshot } from "./widgets.js";
 

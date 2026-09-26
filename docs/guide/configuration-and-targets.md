@@ -7,7 +7,7 @@ Use this guide to connect a provider and choose where chat and workers run. Exac
 | Task | Entry point |
 | --- | --- |
 | Connect an endpoint | [First-run flow](#first-run-flow) or `clio-coder configure --quick` |
-| Edit saved settings | `clio-coder configure --settings` or TUI `/settings` |
+| Edit saved settings | `clio-coder configure --settings` or TUI `/settings` (alias `/config`) |
 | Inspect or probe targets | `clio-coder targets` |
 | Check a model list | `clio-coder models --target <id>` |
 | Find exact keys, flags, and project file owners | [Configuration reference](configuration-reference.md) |
@@ -222,6 +222,8 @@ Three version-2 keys are retired the same way. `integrations.externalAgents.entr
 ---
 
 ## Configure targets
+
+In the TUI, open `/settings targets` (or `/config targets`), choose **Add target**, or open a target and choose **Edit URL, runtime and default model**. The existing configure wizard runs in the composer dock, with the same probing, model validation and review-before-save behavior. Enter advances, Esc goes back, and Ctrl+C cancels target setup. **Save target** writes global target settings and keeps explicit chat, fleet and memory route defaults. Browser sign-in stores credentials immediately; other target settings wait for Save.
 
 Use `clio-coder configure --quick` for discovery-led setup, `clio-coder configure --section targets` for the target console, or `clio-coder targets add` for the target wizard. The non-interactive flag surface is documented by `clio-coder configure --help` and implemented in [`src/cli/configure.ts`](../../src/cli/configure.ts).
 

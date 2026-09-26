@@ -1,15 +1,12 @@
 import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
-import {
-	type CostAggregate,
-	formatCostAggregate,
-	type TokenThroughputSnapshot,
-	type UsageBreakdown,
-} from "../../domains/observability/index.js";
+import type { CostAggregate, TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
+import { formatCostAggregate } from "../../domains/observability/index.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
 import type { ContextLedger, ContextLedgerCategory } from "../../domains/session/context-ledger.js";
-import { type TaskBoardSnapshot, taskBoardCounts } from "../../domains/session/task-board.js";
+import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
+import { taskBoardCounts } from "../../domains/session/task-board.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { CONTEXT_CATEGORY_TOKEN, contextCategorySwatch, renderContextMeterBar } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
@@ -20,16 +17,10 @@ import {
 	fitFooterText,
 	formatFooterTokens,
 } from "../footer-panel.js";
+import type { AgentStatus, TurnSummary } from "../status/index.js";
+import { formatReasoningChip, reasoningFromSummary, spinnerFrame } from "../status/index.js";
+import type { ClioTheme, ClioToken } from "../theme/index.js";
 import {
-	type AgentStatus,
-	formatReasoningChip,
-	reasoningFromSummary,
-	spinnerFrame,
-	type TurnSummary,
-} from "../status/index.js";
-import {
-	type ClioTheme,
-	type ClioToken,
 	clioTheme,
 	formatCompactMs,
 	formatContextPercent,

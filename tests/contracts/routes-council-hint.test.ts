@@ -2,10 +2,8 @@ import { doesNotMatch, match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { visibleWidth } from "../../src/engine/tui.js";
 import { createDispatchBoardView } from "../../src/interactive/dispatch-board.js";
-import {
-	createOverlayGeneralOpeners,
-	type OverlayGeneralOpenersDeps,
-} from "../../src/interactive/overlay-general-openers.js";
+import type { OverlayGeneralOpenersDeps } from "../../src/interactive/overlay-general-openers.js";
+import { createOverlayGeneralOpeners } from "../../src/interactive/overlay-general-openers.js";
 import { footerState } from "../harness/footer-fixture.js";
 
 test("fleet hint offers detail only for a row with rendered detail", () => {

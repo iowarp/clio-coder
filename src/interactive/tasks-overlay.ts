@@ -1,25 +1,14 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import type { SessionArtifact } from "../domains/session/session-artifacts.js";
-import {
-	type SessionTaskHistoryBoard,
-	type TaskBoardSnapshot,
-	type TaskBoardTask,
-	taskBoardCounts,
-	unverifiedTaskChecks,
-} from "../domains/session/task-board.js";
+import type { SessionTaskHistoryBoard, TaskBoardSnapshot, TaskBoardTask } from "../domains/session/task-board.js";
+import { taskBoardCounts, unverifiedTaskChecks } from "../domains/session/task-board.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
-import {
-	type Component,
-	Input,
-	matchesKey,
-	type OverlayHandle,
-	type TUI,
-	visibleWidth,
-	wrapTextWithAnsi,
-} from "../engine/tui.js";
+import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
+import { Input, matchesKey, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { RowBudgetedBody } from "./overlay-frame.js";
 import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
-import { type ClioToken, clioTheme, fitUnits, GLYPH } from "./theme/index.js";
+import type { ClioToken } from "./theme/index.js";
+import { clioTheme, fitUnits, GLYPH } from "./theme/index.js";
 
 /**
  * The `/tasks` overlay: one reopenable board for current agent work, prior

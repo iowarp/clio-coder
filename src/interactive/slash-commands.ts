@@ -3,18 +3,20 @@ import { acceptanceFromTaskFlags } from "../cli/tasks.js";
 import { BusChannels } from "../core/bus-events.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import { resolveSettingsSection, SETTINGS_SECTIONS, type SettingsSectionId } from "../core/settings-navigation.js";
+import type { SettingsSectionId } from "../core/settings-navigation.js";
+import { resolveSettingsSection, SETTINGS_SECTIONS } from "../core/settings-navigation.js";
 import { parseCouncilReport, parseOracleResult } from "../domains/agents/index.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
+import type { ContextInitOptions } from "../domains/context/init-options.js";
 import {
 	applyInitImplications,
 	CONTEXT_INIT_FLAG_TABLE,
-	type ContextInitOptions,
 	validateInitOptions,
 } from "../domains/context/init-options.js";
 import { AdmissionCanceledError } from "../domains/dispatch/admission-error.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
-import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
+import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
+import { requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { ReceiptIntegrityOutcome } from "../domains/evidence/trust-status.js";
@@ -25,16 +27,8 @@ import type { ExtensionOutput } from "../domains/extensions/public-api.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
 import { isInteropHeadlessRuntime } from "../domains/interop/peer-modes.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
-import {
-	PANE_PEER_IDS,
-	PANES_PRESET_IDS,
-	PANES_PRESETS,
-	type PanePeerId,
-	type PanesOperations,
-	type PanesPresetId,
-	type PanesStatus,
-	resolvePanesPresetId,
-} from "../domains/mux/operations.js";
+import type { PanePeerId, PanesOperations, PanesPresetId, PanesStatus } from "../domains/mux/operations.js";
+import { PANE_PEER_IDS, PANES_PRESET_IDS, PANES_PRESETS, resolvePanesPresetId } from "../domains/mux/operations.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { acceptsImageInput, resolveModelCapabilities, resolveModelReference } from "../domains/providers/index.js";
 import type {
@@ -52,35 +46,30 @@ import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
 import type { ExtensionReloadOutcome } from "../entry/extension-reload.js";
-import { isToolProfileName, TOOL_PROFILE_NAMES, type ToolProfileName } from "../tools/profiles.js";
+import type { ToolProfileName } from "../tools/profiles.js";
+import { isToolProfileName, TOOL_PROFILE_NAMES } from "../tools/profiles.js";
 import type { NoticeLevel } from "./command-output.js";
+import type { CouncilCommandOptions, CouncilRosters } from "./council.js";
 import {
 	buildCouncilDispatchArgs,
 	COUNCIL_MAX_ROUNDS,
 	COUNCIL_SYNTHESIS_LABEL,
 	COUNCIL_SYNTHESIS_MODES,
-	type CouncilCommandOptions,
-	type CouncilRosters,
 	isCouncilSynthesisMode,
 	resolveCouncilRoster,
 } from "./council.js";
 import { parseDraftArgs } from "./drafts.js";
-import {
-	formatOracleAnswer,
-	ORACLE_AGENT_ID,
-	ORACLE_TASK,
-	type OracleDigestSources,
-	packOracleDigest,
-} from "./oracle.js";
+import type { OracleDigestSources } from "./oracle.js";
+import { formatOracleAnswer, ORACLE_AGENT_ID, ORACLE_TASK, packOracleDigest } from "./oracle.js";
 import { promptSourceLabel } from "./prompt-source-label.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
+import type { WorkerShareFacts } from "./worker-share.js";
 import {
 	formatCouncilMemberShareNote,
 	formatCouncilShareNote,
 	formatWorkerShareNote,
 	selectWorkerRunToShare,
-	type WorkerShareFacts,
 	workerShareFactsFromEntry,
 } from "./worker-share.js";
 import type { WorkerEntryState } from "./worker-stream.js";
@@ -1018,7 +1007,7 @@ function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 	return lines;
 }
 
-export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
+const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "background",
 		description: "Detach the newest eligible attached dispatch",
@@ -2587,6 +2576,14 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 ];
 
+const settingsCommand = CANONICAL_SLASH_COMMANDS.find((entry) => entry.name === "settings");
+export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
+	...CANONICAL_SLASH_COMMANDS,
+	...(settingsCommand
+		? [{ ...settingsCommand, name: "config", kinds: [], description: "Open settings (alias for /settings)" }]
+		: []),
+];
+
 const HANDLER_BY_KIND = new Map<SlashCommandKind, BuiltinSlashCommand>();
 const COMMAND_NAMES = new Set<string>();
 for (const entry of BUILTIN_SLASH_COMMANDS) {
@@ -2840,6 +2837,7 @@ const COMMAND_ORDER = [
 	"model",
 	"thinking",
 	"settings",
+	"config",
 	"new",
 	"resume",
 	"handoff",

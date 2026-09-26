@@ -1,5 +1,6 @@
 import { visibleWidth } from "../engine/tui.js";
-import { type ClioToken, clioTheme, padAnsi } from "./theme/index.js";
+import type { ClioToken } from "./theme/index.js";
+import { clioTheme, padAnsi } from "./theme/index.js";
 
 /**
  * The activity heatmap: one cell per day, one column per week, the way a

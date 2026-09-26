@@ -20,27 +20,28 @@
  * model, and backing out of the model step lands on the runtime rather than on
  * a prompt that was never shown.
  */
+
 import { createInterface } from "node:readline/promises";
 import chalk from "chalk";
-
+import type { ClioSettings } from "../core/config.js";
 import {
 	bindAgentProfileInSettings,
-	type ClioSettings,
 	readSettings,
 	SettingsValidationError,
 	settingsPath,
 	updateSettings,
 	validateSettings,
 } from "../core/config.js";
-import { THINKING_LEVELS, type ThinkingLevel } from "../core/defaults.js";
+import type { ThinkingLevel } from "../core/defaults.js";
+import { THINKING_LEVELS } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
 import { resolveOnPath } from "../domains/interop/detect.js";
 import { authStoragePath, openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
+import type { ProviderSupportEntry } from "../domains/providers/index.js";
 import {
 	buildProviderSupportEntry,
 	isOrchestratorEligibleRuntime,
 	listProviderSupportEntries,
-	type ProviderSupportEntry,
 	recordTargetModelSnapshot,
 	resolveRuntimeAuthTarget,
 } from "../domains/providers/index.js";
@@ -49,11 +50,15 @@ import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { greetLmStudio } from "../domains/providers/runtimes/common/lmstudio-http.js";
 import type { ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
+import type { ConfigureWizardHost } from "./configure-host.js";
 import { reviewInteropAgents } from "./configure-interop.js";
-import { CONFIGURE_CATEGORY_CHOICES, type ConfigureCategory } from "./configure-layout.js";
+import type { ConfigureCategory } from "./configure-layout.js";
+import { CONFIGURE_CATEGORY_CHOICES } from "./configure-layout.js";
 import { loginOAuthRuntime } from "./configure-oauth.js";
+import type { WireModelInventory } from "./configure-target.js";
 import {
 	applyTarget,
+	assertOrchestratorReplacementEligible,
 	buildDescriptor,
 	contextWindowUndiscovered,
 	deriveTargetId,
@@ -76,9 +81,9 @@ import {
 	setWorkerDefaultPointer,
 	setWorkerProfilePointer,
 	targetApiKeyRef,
-	type WireModelInventory,
 } from "./configure-target.js";
-import { createLifecyclePresenter, type LifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
+import type { LifecyclePresenter } from "./lifecycle-presenter.js";
+import { createLifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
 import { canSelect, promptSelect, promptText } from "./select.js";
 import { credentialWriteFailed, printError, printPlaintextCredentialWarning } from "./shared.js";
 import { truncate } from "./text-layout.js";
@@ -131,6 +136,9 @@ interface Answers {
 type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential";
 
 interface Wizard {
+	select: ConfigureWizardHost["select"];
+	text: ConfigureWizardHost["text"];
+	host?: ConfigureWizardHost;
 	streams: OnboardingStreams;
 	presenter: LifecyclePresenter;
 	rail: string;
@@ -206,10 +214,12 @@ function draftDescriptor(answers: Answers, runtime: RuntimeDescriptor, withModel
 			? { oauthProfile: answers.existing?.auth?.oauthProfile ?? runtime.oauthProviderId ?? runtime.id }
 			: {}),
 	});
-	const descriptor = { ...answers.existing, ...configured };
+	const sameRuntime = answers.existing?.runtime === runtime.id;
+	const descriptor = { ...(sameRuntime ? answers.existing : {}), ...configured };
+	if (!supportFor(runtime).supportsCustomUrl) delete descriptor.url;
 	if (!withModel) delete descriptor.defaultModel;
-	if (answers.existing?.auth || configured.auth) {
-		descriptor.auth = { ...answers.existing?.auth, ...configured.auth };
+	if ((sameRuntime && answers.existing?.auth) || configured.auth) {
+		descriptor.auth = { ...(sameRuntime ? answers.existing?.auth : {}), ...configured.auth };
 		if (runtime.auth === "api-key") {
 			if (answers.credential !== "env") delete descriptor.auth.apiKeyEnvVar;
 			if (answers.credential !== "stored" && answers.credential !== "keep") delete descriptor.auth.apiKeyRef;
@@ -224,7 +234,7 @@ const CATEGORY_STEP: Step = {
 	applies: (answers) => answers.mode !== "edit" && !answers.fixedRuntime,
 	run: async (wizard, answers) => {
 		const current = CONFIGURE_CATEGORY_CHOICES.findIndex((choice) => choice.category === answers.category);
-		const result = await promptSelect<ConfigureCategory>({
+		const result = await wizard.select<ConfigureCategory>({
 			heading: ["", chalk.bold("How will you connect Clio to a model?")],
 			choices: CONFIGURE_CATEGORY_CHOICES.map((choice) => ({
 				value: choice.category,
@@ -253,7 +263,7 @@ const CATEGORY_STEP: Step = {
 
 const RUNTIME_STEP: Step = {
 	id: "runtime",
-	applies: (answers) => answers.mode !== "edit" && !answers.fixedRuntime,
+	applies: (answers) => !answers.fixedRuntime,
 	run: async (wizard, answers) => {
 		const registry = getRuntimeRegistry();
 		const chatEntries = allEntries().filter((entry) => {
@@ -264,7 +274,7 @@ const RUNTIME_STEP: Step = {
 		const usable = entries.length > 0 ? entries : chatEntries;
 		const previous = usable.findIndex((entry) => entry.runtimeId === answers.runtime?.id);
 		const featured = usable.findIndex((entry) => entry.featured);
-		const result = await promptSelect<string>({
+		const result = await wizard.select<string>({
 			heading: ["", chalk.bold("Which runtime?")],
 			choices: usable.map((entry) => ({ value: entry.runtimeId, label: entry.runtimeId, hint: entry.summary })),
 			initialIndex: previous >= 0 ? previous : featured >= 0 ? featured : 0,
@@ -279,7 +289,7 @@ const RUNTIME_STEP: Step = {
 		const runtime = registry.get(result.value);
 		if (!runtime) return "back";
 		if (answers.runtime?.id !== runtime.id) {
-			answers.targetId = undefined;
+			answers.targetId = answers.mode === "edit" ? answers.existing?.id : undefined;
 			answers.url = undefined;
 			answers.detected = undefined;
 			answers.credential = undefined;
@@ -304,7 +314,7 @@ const TARGET_ID_STEP: Step = {
 	run: async (wizard, answers) => {
 		const runtime = answers.runtime;
 		if (!runtime) return "back";
-		const result = await promptText({
+		const result = await wizard.text({
 			heading: ["", chalk.bold("Target id")],
 			initial: answers.targetId ?? deriveTargetId(runtime.id, readSettings().targets),
 			hint: "the name you will use for this target in `clio-coder targets`",
@@ -338,7 +348,7 @@ const URL_STEP: Step = {
 		if (!runtime) return "back";
 		const local = supportFor(runtime).group === "local-http";
 		const gateway = runtime.gatewayUrl;
-		const result = await promptText({
+		const result = await wizard.text({
 			heading: [
 				"",
 				chalk.bold(gateway?.label ?? (local ? "Where is the server?" : "Base URL")),
@@ -428,7 +438,7 @@ const DETECTED_RUNTIME_STEP: Step = {
 		if (!detected || !runtime) return "next";
 		const native = getRuntimeRegistry().get(detected.runtimeId);
 		if (!native) return "next";
-		const result = await promptSelect<boolean>({
+		const result = await wizard.select<boolean>({
 			heading: ["", chalk.bold(`That URL is serving ${detected.displayName}.`)],
 			choices: [
 				{
@@ -478,6 +488,7 @@ function defaultCredentialSource(runtime: RuntimeDescriptor, targetId: string): 
  * and the one flow that needs one opens and closes it around the call.
  */
 async function connectOAuth(wizard: Wizard, runtime: RuntimeDescriptor): Promise<boolean> {
+	if (wizard.host) return loginOAuthRuntime(null, runtime, wizard.host);
 	const rl = createInterface({ input: wizard.streams.in, output: wizard.streams.out });
 	try {
 		return await loginOAuthRuntime(rl, runtime);
@@ -494,7 +505,7 @@ const CREDENTIAL_STEP: Step = {
 		if (!runtime) return "back";
 		const stored = describeAuthStatus(runtime, answers.existing);
 		if (runtime.auth === "oauth") {
-			const result = await promptSelect<CredentialSource>({
+			const result = await wizard.select<CredentialSource>({
 				heading: [
 					"",
 					chalk.bold(`Sign in to ${runtime.displayName}`),
@@ -557,7 +568,7 @@ const CREDENTIAL_STEP: Step = {
 			0,
 			choices.findIndex((choice) => choice.value === current),
 		);
-		const result = await promptSelect<CredentialSource>({
+		const result = await wizard.select<CredentialSource>({
 			heading: ["", chalk.bold("How should Clio get the API key?"), chalk.dim(`currently: ${stored}`)],
 			choices,
 			initialIndex: initial,
@@ -586,7 +597,7 @@ const CREDENTIAL_VALUE_STEP: Step = {
 		const runtime = answers.runtime;
 		if (!runtime) return "back";
 		const wantsEnv = answers.credential === "env";
-		const result = await promptText({
+		const result = await wizard.text({
 			heading: ["", chalk.bold(wantsEnv ? "Which environment variable?" : "Paste the API key")],
 			initial: wantsEnv ? (answers.apiKeyEnv ?? runtime.credentialsEnvVar ?? "") : "",
 			hint: wantsEnv
@@ -653,7 +664,7 @@ const MODEL_STEP: Step = {
 
 		if (inventory.models.length === 0) {
 			wizard.presenter.warn(inventoryGap(runtime, { url: answers.url }, inventory.probeError));
-			const result = await promptText({
+			const result = await wizard.text({
 				heading: ["", chalk.bold("Which model?")],
 				initial: preferred ?? "",
 				hint: "the wire id the provider documents; Clio sends it as written",
@@ -673,7 +684,7 @@ const MODEL_STEP: Step = {
 		}
 
 		const selected = inventory.models.indexOf(preferred ?? "");
-		const result = await promptSelect<string>({
+		const result = await wizard.select<string>({
 			heading: [
 				"",
 				chalk.bold("Which model?"),
@@ -753,7 +764,7 @@ const THINKING_STEP: Step = {
 	},
 	run: async (wizard, answers) => {
 		const current = THINKING_LEVELS.indexOf(answers.thinking ?? "low");
-		const result = await promptSelect<ThinkingLevel>({
+		const result = await wizard.select<ThinkingLevel>({
 			heading: [
 				"",
 				chalk.bold("How hard should it think?"),
@@ -790,7 +801,7 @@ const ANTIGRAVITY_COLLEAGUE_STEP: Step = {
 	run: async (wizard, answers) => {
 		const runtime = getRuntimeRegistry().get("antigravity-code");
 		if (!runtime) return "next";
-		const choice = await promptSelect<boolean>({
+		const choice = await wizard.select<boolean>({
 			heading: [
 				"",
 				chalk.bold("Add your local Antigravity research colleague?"),
@@ -826,7 +837,7 @@ const ANTIGRAVITY_COLLEAGUE_STEP: Step = {
 			wizard.answer("Colleague", "not added; sign in with agy first");
 			return "next";
 		}
-		const picked = await promptSelect<string>({
+		const picked = await wizard.select<string>({
 			heading: ["", chalk.bold("Antigravity research model"), chalk.dim("live account catalog")],
 			choices: inventory.models.map((model) => ({
 				value: model,
@@ -851,7 +862,7 @@ const CONTEXT_STEP: Step = {
 	id: "context-window",
 	applies: (answers) => PROTOCOL_COMPAT_RUNTIME_IDS.has(answers.runtime?.id ?? "") || answers.mode === "edit",
 	run: async (wizard, answers) => {
-		const result = await promptText({
+		const result = await wizard.text({
 			heading: ["", chalk.bold("Context window in tokens")],
 			initial: answers.contextWindow === undefined ? "" : String(answers.contextWindow),
 			hint: "optional override; blank uses detected capabilities or the runtime default",
@@ -876,11 +887,13 @@ const REVIEW_STEP: Step = {
 	id: "review",
 	applies: () => true,
 	run: async (wizard, answers) => {
-		const result = await promptSelect({
+		const result = await wizard.select({
 			heading: [
 				"",
 				chalk.bold("Review target"),
 				`${answers.targetId} · ${answers.runtime?.id} · ${answers.model}`,
+				`URL: ${answers.url ?? "(none)"}`,
+				`Credential: ${answers.credential ?? "none"} · Context: ${answers.contextWindow ?? "detected / runtime default"}`,
 				answers.mode === "first"
 					? "Use for chat and fleet."
 					: "Existing chat, fleet, memory, and profile defaults stay in place.",
@@ -935,6 +948,7 @@ function applyAnswers(
 		if (JSON.stringify(current) !== JSON.stringify(answers.existing))
 			throw new Error("This target changed during setup; reopen Edit to keep those changes.");
 	} else if (current) throw new Error(`Target '${descriptor.id}' already exists; use Edit a target.`);
+	assertOrchestratorReplacementEligible(settings, descriptor);
 	applyTarget(settings, descriptor);
 	// The first target is the one everything points at. A second target is a
 	// choice, and that is what the settings menu is for; asking a new user
@@ -962,12 +976,18 @@ export async function runOnboardingWizard(
 	options: { mode: "first" | "add"; runtime?: RuntimeDescriptor } | { mode: "edit"; target: TargetDescriptor } = {
 		mode: "first",
 	},
+	host?: ConfigureWizardHost,
 ): Promise<number> {
-	const writer = railWriter(streams.out);
-	const presenter = createLifecyclePresenter({ stream: writer.stream });
+	const writer = host
+		? { stream: streams.out, mark: () => 0, rewindTo: () => host.clearMessages() }
+		: railWriter(streams.out);
+	const presenter = createLifecyclePresenter({ stream: writer.stream, ...(host ? { plain: true } : {}) });
 	const rail = railPrefix(presenter.isPlain());
 	const columns = (streams.out as { columns?: number }).columns ?? 80;
 	const wizard: Wizard = {
+		select: host?.select.bind(host) ?? promptSelect,
+		text: host?.text.bind(host) ?? promptText,
+		...(host ? { host } : {}),
 		streams,
 		presenter,
 		rail,
@@ -1016,6 +1036,7 @@ export async function runOnboardingWizard(
 	let direction = 1;
 
 	while (cursor < STEPS.length) {
+		if (host?.cancelled()) return cancel(presenter, answers, true);
 		const step = STEPS[cursor];
 		if (step === undefined) break;
 		if (!step.applies(answers)) {
@@ -1045,6 +1066,7 @@ export async function runOnboardingWizard(
 		cursor += 1;
 	}
 
+	if (host?.cancelled()) return cancel(presenter, answers, true);
 	const code = finish(wizard, answers);
 	if (code === 0 && answers.mode === "first") {
 		await reviewInteropAgents({ rl: null, streams, presenter, rail, quiet: true });
@@ -1090,11 +1112,17 @@ function finish(wizard: Wizard, answers: Answers): number {
 			auth.setApiKey(descriptor.auth.apiKeyRef, answers.apiKeyLiteral);
 			// The settings write is still ahead of us, so refusing here leaves the
 			// whole run without an effect rather than half of one.
-			if (credentialWriteFailed(auth, `credential for ${runtime.id} was not stored; target '${targetId}' not saved`)) {
+			if (
+				wizard.host
+					? auth.damageReason() !== null
+					: credentialWriteFailed(auth, `credential for ${runtime.id} was not stored; target '${targetId}' not saved`)
+			) {
+				if (wizard.host) presenter.fail("Credential not stored", auth.damageReason() ?? "unknown");
 				presenter.done("Nothing written");
 				return 1;
 			}
-			printPlaintextCredentialWarning();
+			if (wizard.host) presenter.warn("Credentials are stored with mode 0600, not encrypted.");
+			else printPlaintextCredentialWarning();
 		}
 
 		updateSettings((settings) => applyAnswers(settings, answers, descriptor, chatEligible));
@@ -1126,8 +1154,10 @@ function finish(wizard: Wizard, answers: Answers): number {
 		);
 	}
 
-	presenter.commandAdvice("Start Clio:", "clio-coder");
-	presenter.commandAdvice("Change any of this later:", "clio-coder configure");
+	if (!wizard.host) {
+		presenter.commandAdvice("Start Clio:", "clio-coder");
+		presenter.commandAdvice("Change any of this later:", "clio-coder configure");
+	}
 	presenter.done("Done");
 	return 0;
 }

@@ -293,7 +293,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
 | `/council` | `/council [--roster <name>] [--rounds <n>] [--synthesis <judge\|vote\|none>] <task>` | Ask a roster of read-only members the same task, with an optional vote or judge synthesis |
 | `/agents` | `/agents` | Open the Library on Agents. |
-| `/usage` | `/usage` | Show subscription quota, credits, and session token and cost totals |
+| `/usage` | `/usage` | Show workspace activity, subscription quota, credits, and session token and cost totals |
 | `/doctor` | `/doctor [deep]` | Show a diagnostic report with errors and warnings first and full wrapped check details; `deep` adds live tool probes on the session's targets and a validation-contract dry run at the session's autonomy. See [Doctor](doctor.md). |
 | `/context` | `/context compact [instructions] \| /context recall <ref> \| /context init [--preview] [--heuristic] [--adopt] [--global] [--propose\|--apply\|--rewrite] \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, init, refresh, and reset |
 | `/fleet` | `/fleet [run [--var <key=value>] <name>]` | Open Fleet Runs, or run a fleet contract with an approval preview. Configure fleets with `/settings fleet`. |
@@ -305,6 +305,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/files` | `/files [open\|close\|pick]` | Toggle the files pane docked below the session; picks land in the composer as `@` mentions. See [Panes and the Files Pane](panes-and-files.md) |
 | `/thinking` | `/thinking [level]` | Set the chat thinking level; bare `/thinking` opens a picker of the levels this route supports |
 | `/model` | `/model [pattern]` | Open model selector or set a model |
+| `/config` | `/config [area] [group]` | Open settings; alias for `/settings`, including target setup in the dock |
 | `/settings` | `/settings [chat\|fleet\|targets\|context\|safety\|interface\|integrations] [group]` | Open interactive settings, optionally at a durable area and UI group |
 | `/resume` | `/resume` | Resume a past session on the route it last ran on |
 | `/new` | `/new` | Start a fresh session |
@@ -695,3 +696,5 @@ With an empty composer, press `?` for the docked key card, `←` for Fleet Runs,
 `/usage` opens the docked Activity tab with workspace session history and current consumption. Its five tabs are Activity (`1`), Accounts (`2`), Session (`3`), Models (`4`) and Workers (`5`). Use Tab to switch tabs and PgUp/PgDn, Home or End to read a long tab.
 
 Live Fleet runs reserve a section just above the composer. This summary never covers transcript text and disappears when no run is live. Open Fleet Runs with the configured shortcut or `←` on an empty composer to inspect additional runs.
+
+Open `/settings targets` or `/config targets` to add or edit targets inside the TUI. Choose **Add target**, or select a target and choose **Edit URL, runtime and default model**. The shared configure wizard stays in the composer dock. Use arrows to select, type to edit or filter a model list, Enter to continue, Esc to go back, and Ctrl+C to cancel setup. Target settings remain a draft until **Save target**, which writes global settings; credentials are stored when browser sign-in succeeds. Editing a target preserves explicit chat, fleet and memory model defaults.

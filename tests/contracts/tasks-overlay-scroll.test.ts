@@ -1,10 +1,12 @@
-import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok } from "node:assert/strict";
 import { after, test } from "node:test";
 import type { SessionArtifact } from "../../src/domains/session/session-artifacts.js";
 import type { TaskBoardSnapshot } from "../../src/domains/session/task-board.js";
 import type { UserTask } from "../../src/domains/user-tasks/store.js";
-import { type Component, stripTerminalSequences, type TUI, visibleWidth } from "../../src/engine/tui.js";
-import { DOCK_BODY_ROWS_MAX, type DockFrame, dockTop } from "../../src/interactive/dock.js";
+import type { Component, TUI } from "../../src/engine/tui.js";
+import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
+import type { DockFrame } from "../../src/interactive/dock.js";
+import { DOCK_BODY_ROWS_MAX, dockTop } from "../../src/interactive/dock.js";
 import { formatCompositeTasksOverlayBodyLines, openTasksOverlay } from "../../src/interactive/tasks-overlay.js";
 import { GLYPH } from "../../src/interactive/theme/index.js";
 

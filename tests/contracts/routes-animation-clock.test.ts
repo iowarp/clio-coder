@@ -1,10 +1,8 @@
 import { deepStrictEqual, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
-import {
-	type ContextActivitySnapshot,
-	formatContextActivityIslandLines,
-} from "../../src/interactive/context-activity.js";
+import type { ContextActivitySnapshot } from "../../src/interactive/context-activity.js";
+import { formatContextActivityIslandLines } from "../../src/interactive/context-activity.js";
 import { createDispatchBoardView } from "../../src/interactive/dispatch-board.js";
 import { footerState } from "../harness/footer-fixture.js";
 

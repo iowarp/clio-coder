@@ -5,7 +5,8 @@ import { createWorkerProgressFold } from "../../src/domains/observability/worker
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import { getKeybindings, setKeybindings, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { contextCategorySwatch, renderContextMeterGrid } from "../../src/interactive/context-meter.js";
-import { buildFooterDashboard, type FooterDashboardRenderState } from "../../src/interactive/footer/dashboard.js";
+import type { FooterDashboardRenderState } from "../../src/interactive/footer/dashboard.js";
+import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import { DASHBOARD_PAGES, renderCompactDashboard, renderDashboardPage } from "../../src/interactive/footer/pages.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
