@@ -5,6 +5,7 @@ import { TURN_IMAGES_MAX_BASE64, type TurnImage } from "../../contracts/attachme
 import { SessionBoard } from "../../contracts/board.js";
 import { SessionTree } from "../../contracts/branches.js";
 import { Id } from "../../contracts/common.js";
+import { HandoffCancelled, HandoffCommitted, HandoffDraft } from "../../contracts/handoff.js";
 import type { PermissionDecision } from "../../contracts/permissions.js";
 import type { SetConfigOption } from "../../contracts/session-config.js";
 import { applySessionDelta, boundedText, emptySession } from "../../contracts/session-projection.js";
@@ -71,10 +72,12 @@ type Entry = {
 	retired?: Promise<void>;
 	/**
 	 * A branch change in flight. Its replay arrives before its response: a fork's
-	 * under the new session's id, which moves this child to that id, and a
-	 * switch's under the same id, after the old transcript is cleared.
+	 * or a handoff's under the new session's id, which moves this child to that
+	 * id, and a switch's under the same id, after the old transcript is cleared.
 	 */
-	rebase?: { mode: "fork"; moved: boolean } | { mode: "switch"; reset: boolean };
+	rebase?: { mode: "move"; moved: boolean } | { mode: "switch"; reset: boolean };
+	/** A handoff document is being drawn up; a request now would make it describe a moving session. */
+	drafting?: boolean;
 };
 /** A branch change reads and replays a whole session, which a long one makes slow. */
 const BRANCH_TIMEOUT_MS = 60_000;
@@ -297,6 +300,7 @@ export class Supervisor {
 		if (entry.turnId) throw new AppProblem("conflict", "A turn is already running in this session.");
 		if (this.configuring.has(id)) throw new AppProblem("conflict", "Session configuration is being changed.");
 		if (entry.rebase) throw new AppProblem("conflict", "The conversation is moving to another branch.");
+		if (entry.drafting) throw new AppProblem("conflict", "Clio Coder is drawing up a handoff for this conversation.");
 		if (images.length > 0 && !entry.client.capabilities.images)
 			throw new AppProblem("conflict", "This Clio Coder build does not accept images with a request.");
 		if (images.reduce((total, image) => total + image.data.length, 0) > TURN_IMAGES_MAX_BASE64)
@@ -370,7 +374,7 @@ export class Supervisor {
 			update.sessionUpdate === "available_commands_update";
 		// session/new can send metadata before its response binds the server's ID.
 		if (metadataUpdate && !entry.bound && params.sessionId !== entry.id) return;
-		if (entry.rebase?.mode === "fork" && !entry.rebase.moved && params.sessionId !== entry.id)
+		if (entry.rebase?.mode === "move" && !entry.rebase.moved && params.sessionId !== entry.id)
 			this.moveTo(entry, params.sessionId);
 		if (params.sessionId !== entry.id)
 			throw new AppProblem("upstream_acp", "ACP update has a different session identity.");
@@ -644,7 +648,7 @@ export class Supervisor {
 	}
 	private beginRebase(id: string, rebase: NonNullable<Entry["rebase"]>) {
 		const entry = this.branching(id);
-		if (entry.turnId || entry.rebase || this.configuring.has(id))
+		if (entry.turnId || entry.rebase || entry.drafting || this.configuring.has(id))
 			throw new AppProblem("conflict", "Wait for the current turn to finish before changing branches.");
 		entry.rebase = rebase;
 		return entry;
@@ -670,7 +674,7 @@ export class Supervisor {
 			throw new AppProblem("upstream_acp", "ACP returned an invalid forked session identity.");
 		const previous = this.snapshot(entry.id);
 		const parentId = entry.id;
-		if (entry.rebase?.mode === "fork") entry.rebase.moved = true;
+		if (entry.rebase?.mode === "move") entry.rebase.moved = true;
 		this.entries.delete(parentId);
 		entry.id = nextId;
 		entry.replay = null;
@@ -697,27 +701,33 @@ export class Supervisor {
 			delete entry.rebase;
 		}
 	}
+	/**
+	 * The child now hosts the session `result` names, after a fork or a handoff:
+	 * move to it if no frame already did, then carry the mode, the children row
+	 * and the reported configuration across.
+	 */
+	private async settleMove(entry: Entry, parentId: string, result: Record<string, unknown>) {
+		if (entry.rebase?.mode === "move" && !entry.rebase.moved) this.moveTo(entry, result.sessionId);
+		else if (result.sessionId !== entry.id)
+			throw new AppProblem("upstream_acp", "ACP returned a different session identity.");
+		const nextId = entry.id;
+		entry.client.adopt(parentId, nextId, result);
+		if (entry.replay !== null && entry.turnId) this.finish(entry, "end_turn", null, null, null);
+		await this.children.bind(entry.row, nextId);
+		const options = projectConfigOptions(result.configOptions);
+		if (options !== undefined) {
+			const config = { ...this.snapshot(nextId).config, options };
+			this.publish({ type: "session.configured", payload: { resource: nextId, revision: this.revision(nextId), config } });
+		}
+		return nextId;
+	}
 	async fork(id: string, turnId: string) {
-		const entry = this.beginRebase(id, { mode: "fork", moved: false });
+		const entry = this.beginRebase(id, { mode: "move", moved: false });
 		try {
 			const result = record(
 				await entry.client.request("_clio-coder/session/fork", { sessionId: id, turnId }, BRANCH_TIMEOUT_MS),
 			);
-			if (entry.rebase?.mode === "fork" && !entry.rebase.moved) this.moveTo(entry, result.sessionId);
-			else if (result.sessionId !== entry.id)
-				throw new AppProblem("upstream_acp", "ACP returned a different forked session identity.");
-			const forkedId = entry.id;
-			entry.client.adopt(id, forkedId, result);
-			if (entry.replay !== null && entry.turnId) this.finish(entry, "end_turn", null, null, null);
-			await this.children.bind(entry.row, forkedId);
-			const options = projectConfigOptions(result.configOptions);
-			if (options !== undefined) {
-				const config = { ...this.snapshot(forkedId).config, options };
-				this.publish({
-					type: "session.configured",
-					payload: { resource: forkedId, revision: this.revision(forkedId), config },
-				});
-			}
+			const forkedId = await this.settleMove(entry, id, result);
 			const sessionMeta = record(record(result._meta)["clio-coder/session"]);
 			return {
 				sessionId: forkedId,
@@ -728,6 +738,54 @@ export class Supervisor {
 		} finally {
 			delete entry.rebase;
 		}
+	}
+	private handing(id: string) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.handoff)
+			throw new AppProblem("conflict", "This Clio Coder build cannot hand a conversation off.");
+		return entry;
+	}
+	async prepareHandoff(id: string, goal: string) {
+		const entry = this.handing(id);
+		if (entry.turnId || entry.rebase || entry.drafting || this.configuring.has(id))
+			throw new AppProblem("conflict", "Wait for the current turn to finish before drawing up a handoff.");
+		entry.drafting = true;
+		try {
+			// The extraction is a model round with one repair, as long as a command's.
+			return await this.projected(
+				id,
+				"_clio-coder/session/handoff/prepare",
+				{ sessionId: id, goal },
+				HandoffDraft,
+				COMMAND_TIMEOUT_MS,
+			);
+		} finally {
+			delete entry.drafting;
+		}
+	}
+	async commitHandoff(id: string, handoffId: string, document: string) {
+		const entry = this.handing(id);
+		this.beginRebase(id, { mode: "move", moved: false });
+		try {
+			const raw = record(
+				await entry.client.request(
+					"_clio-coder/session/handoff/commit",
+					{ sessionId: id, handoffId, document },
+					BRANCH_TIMEOUT_MS,
+				),
+			);
+			if (raw.status === "committed") await this.settleMove(entry, id, raw);
+			const value = Value.Clean(HandoffCommitted, raw);
+			if (!Value.Check(HandoffCommitted, value))
+				throw new AppProblem("upstream_acp", "Clio returned an invalid handoff result.");
+			return value;
+		} finally {
+			delete entry.rebase;
+		}
+	}
+	cancelHandoff(id: string, handoffId: string) {
+		this.handing(id);
+		return this.projected(id, "_clio-coder/session/handoff/cancel", { sessionId: id, handoffId }, HandoffCancelled);
 	}
 	commands(id: string) {
 		const entry = this.active(id);

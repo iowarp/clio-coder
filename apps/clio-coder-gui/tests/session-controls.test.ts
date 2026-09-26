@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -178,6 +179,102 @@ test("a branch switch replays only the chosen branch and a fork continues under 
 	for (const event of events) assert.ok(Value.Check(Event, event), event.type);
 });
 
+test("a handoff is drawn up without writing, commits the reviewed edit once, and moves the conversation", {
+	timeout: 15000,
+}, async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const base = `/api/sessions/${session.id}`;
+	const refused = await json(await h.post(`${base}/handoff`, { goal: "continue" }), routes.prepareHandoff.response);
+	assert.equal(refused.status, "refused");
+	const prepare = h.post(`${base}/handoff`, { goal: "Finish the survey report" }, "draft-1");
+	// The second prepare on the wire is this one; the refused goal above was the first.
+	await until(() => (readFileSync(join(h.home.path, "acp.jsonl"), "utf8").match(/handoff\/prepare/g)?.length ?? 0) >= 2);
+	assert.equal(
+		(await h.post(`${base}/turns`, { text: "Too soon" })).status,
+		409,
+		"a request while drafting would leave the document describing a moving conversation",
+	);
+	const draft = await json(await prepare, routes.prepareHandoff.response);
+	assert.equal(draft.status, "ready");
+	if (draft.status !== "ready") return;
+	assert.match(draft.document, /Finish the survey report/);
+	const again = await json(
+		await h.post(`${base}/handoff`, { goal: "Finish the survey report" }, "draft-1"),
+		routes.prepareHandoff.response,
+	);
+	assert.deepEqual(again, draft, "a retried draft answers from the ledger");
+	const empty = await json(
+		await h.post(`${base}/handoff/commit`, { handoffId: draft.handoffId, document: " " }),
+		routes.commitHandoff.response,
+	);
+	assert.equal(empty.status === "refused" && empty.code, "empty");
+	assert.equal(h.supervisor.get(session.id).state, "open", "a refused commit leaves the conversation where it was");
+	const reviewed = `${draft.document}\nReviewed in the browser.\n`;
+	const committed = await json(
+		await h.post(`${base}/handoff/commit`, { handoffId: draft.handoffId, document: reviewed }, "commit-1"),
+		routes.commitHandoff.response,
+	);
+	assert.equal(committed.status, "committed");
+	if (committed.status !== "committed") return;
+	assert.equal(committed.fromSessionId, session.id);
+	assert.equal(h.supervisor.get(session.id).state, "closed");
+	assert.equal(h.supervisor.get(committed.sessionId).state, "open");
+	const log = await readFile(join(h.home.path, "acp.jsonl"), "utf8");
+	assert.match(log, /Reviewed in the browser/);
+	assert.equal(log.match(/"method":"_clio-coder\/session\/handoff\/commit"/g)?.length, 2);
+	assert.equal(
+		(await h.post(`${base}/handoff/commit`, { handoffId: draft.handoffId, document: reviewed }, "commit-1")).status,
+		200,
+		"a retried commit answers from the ledger",
+	);
+	assert.equal(
+		(await readFile(join(h.home.path, "acp.jsonl"), "utf8")).match(/"method":"_clio-coder\/session\/handoff\/commit"/g)
+			?.length,
+		2,
+	);
+	assert.equal((await h.request(`/api/sessions/${committed.sessionId}/autonomy`)).status, 200);
+	assert.equal((await h.post(`/api/sessions/${committed.sessionId}/turns`, { text: "Carry on" })).status, 202);
+	await until(() => h.supervisor.get(committed.sessionId).turns.at(-1)?.status !== "running");
+});
+
+test("a discarded or overtaken handoff draft cannot be committed", async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const base = `/api/sessions/${session.id}`;
+	const first = await json(
+		await h.post(`${base}/handoff`, { goal: "Finish the survey report" }),
+		routes.prepareHandoff.response,
+	);
+	assert.equal(first.status, "ready");
+	if (first.status !== "ready") return;
+	assert.deepEqual(await (await h.post(`${base}/handoff/cancel`, { handoffId: first.handoffId })).json(), {
+		cancelled: true,
+	});
+	const discarded = await json(
+		await h.post(`${base}/handoff/commit`, { handoffId: first.handoffId, document: first.document }),
+		routes.commitHandoff.response,
+	);
+	assert.equal(discarded.status === "refused" && discarded.code, "stale");
+	const second = await json(
+		await h.post(`${base}/handoff`, { goal: "Finish the survey report" }),
+		routes.prepareHandoff.response,
+	);
+	if (second.status !== "ready") throw new Error("expected a draft");
+	assert.equal((await h.post(`${base}/turns`, { text: "One more thing" })).status, 202);
+	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status !== "running");
+	const overtaken = await json(
+		await h.post(`${base}/handoff/commit`, { handoffId: second.handoffId, document: second.document }),
+		routes.commitHandoff.response,
+	);
+	assert.equal(overtaken.status === "refused" && overtaken.code, "stale");
+	assert.equal(h.supervisor.get(session.id).state, "open");
+});
+
 test("an older ACP peer has no branches and refuses tree, switch and fork before sending", async (t) => {
 	const h = await harness();
 	t.after(h.close);
@@ -187,7 +284,11 @@ test("an older ACP peer has no branches and refuses tree, switch and fork before
 	assert.equal((await h.request(`${base}/tree`)).status, 409);
 	assert.equal((await h.post(`${base}/branch`, { turnId: "a1" })).status, 409);
 	assert.equal((await h.post(`${base}/fork`, { turnId: "a1" })).status, 409);
-	assert.doesNotMatch(await readFile(join(h.home.path, "acp.jsonl"), "utf8"), /session\/(tree|switch_turn|fork)/);
+	assert.equal((await h.post(`${base}/handoff`, { goal: "Finish the survey report" })).status, 409);
+	assert.doesNotMatch(
+		await readFile(join(h.home.path, "acp.jsonl"), "utf8"),
+		/session\/(tree|switch_turn|fork|handoff)/,
+	);
 });
 
 test("permission allows once, restores pending snapshot, and rejects stale/duplicate conflicting decisions", {

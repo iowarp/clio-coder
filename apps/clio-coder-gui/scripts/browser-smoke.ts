@@ -912,6 +912,30 @@ try {
 			const dismiss = page.getByRole("button", { name: title });
 			if (await dismiss.count()) await dismiss.click();
 		}
+		// Handoff: a draft is reviewed and edited before anything is written; starting the new
+		// conversation moves there.
+		await page.locator(".conversation__tools > summary").click();
+		await page.getByText("Hand off to a new conversation", { exact: true }).click();
+		const handoff = page.locator(".handoff-panel");
+		await handoff
+			.getByLabel("What should the next conversation accomplish?", { exact: true })
+			.fill("Finish the survey report");
+		await handoff.getByRole("button", { name: "Draw up the handoff", exact: true }).click();
+		const reviewField = handoff.getByLabel("Handoff document", { exact: true });
+		await reviewField.waitFor();
+		assert.match(await reviewField.inputValue(), /Goal: Finish the survey report/);
+		await reviewField.fill(`${await reviewField.inputValue()}\nReviewed in the smoke.\n`);
+		await check("handoff-review");
+		if (width === 1600 || width === 390) {
+			await handoff.scrollIntoViewIfNeeded();
+			await page.screenshot({ path: join(output, `handoff-review-${width}.png`) });
+		}
+		const forkedUrl = page.url();
+		await handoff.getByRole("button", { name: "Start the new conversation", exact: true }).click();
+		await page.waitForURL((url) => url.href !== forkedUrl && url.pathname.startsWith("/sessions/"));
+		await page.locator(".notice-region .notice", { hasText: "Handed off" }).waitFor();
+		await check("handed-off");
+		await page.getByRole("button", { name: "Dismiss Handed off", exact: true }).click();
 		// Close lives at the foot of Session tools, away from the composer's Stop.
 		await page.locator(".conversation__tools > summary").click();
 		await page.getByRole("button", { name: "Close session", exact: true }).click();

@@ -13,6 +13,7 @@ import {
 	ToolProgressCapability,
 } from "../../contracts/capabilities.js";
 import { Id } from "../../contracts/common.js";
+import { HandoffCapability } from "../../contracts/handoff.js";
 import type { SessionConfig } from "../../contracts/session-config.js";
 import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
 import { type AcpJsonRpcTransport, AcpProtocolError, AcpTimeoutError } from "../clio/http-shims.js";
@@ -64,6 +65,7 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("events", optional(EventsCapability, meta["clio-coder/events"])),
 		...maybe("board", optional(BoardCapability, meta["clio-coder/board"])),
 		...maybe("branches", optional(BranchesCapability, meta["clio-coder/branches"])),
+		...maybe("handoff", optional(HandoffCapability, meta["clio-coder/handoff"])),
 	};
 }
 const closed = { additionalProperties: false };

@@ -9895,6 +9895,29 @@
 											},
 											"additionalProperties": false
 										},
+										"handoff": {
+											"type": "object",
+											"required": ["version", "prepare", "commit", "cancel"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"prepare": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"commit": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"cancel": {
+													"type": "string",
+													"maxLength": 128
+												}
+											},
+											"additionalProperties": false
+										},
 										"images": {
 											"type": "boolean"
 										},
@@ -11657,6 +11680,573 @@
 											"maxLength": 128
 										},
 										"replayed": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/handoff": {
+			"post": {
+				"operationId": "prepareHandoff",
+				"summary": "Draw up a handoff document for review; nothing is written",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["goal"],
+								"properties": {
+									"goal": {
+										"type": "string",
+										"maxLength": 2048
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["status", "handoffId", "goal", "fromSessionId", "document"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "ready"
+												},
+												"handoffId": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128
+												},
+												"goal": {
+													"type": "string",
+													"maxLength": 2048
+												},
+												"fromSessionId": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"document": {
+													"type": "string",
+													"maxLength": 131072
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status", "level", "code", "reason"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "refused"
+												},
+												"level": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "warn"
+														},
+														{
+															"type": "string",
+															"const": "error"
+														}
+													]
+												},
+												"code": {
+													"type": "string",
+													"maxLength": 64
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 2100
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/handoff/commit": {
+			"post": {
+				"operationId": "commitHandoff",
+				"summary": "Start a new conversation from the reviewed handoff document",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["handoffId", "document"],
+								"properties": {
+									"handoffId": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128
+									},
+									"document": {
+										"type": "string",
+										"maxLength": 131072
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["status", "sessionId", "fromSessionId", "warnings"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "committed"
+												},
+												"sessionId": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"fromSessionId": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"warnings": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 2100
+													},
+													"maxItems": 8
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status", "level", "code", "reason"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "refused"
+												},
+												"level": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "warn"
+														},
+														{
+															"type": "string",
+															"const": "error"
+														}
+													]
+												},
+												"code": {
+													"type": "string",
+													"maxLength": 64
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 2100
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/handoff/cancel": {
+			"post": {
+				"operationId": "cancelHandoff",
+				"summary": "Discard a handoff document awaiting review",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["handoffId"],
+								"properties": {
+									"handoffId": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["cancelled"],
+									"properties": {
+										"cancelled": {
 											"type": "boolean"
 										}
 									},

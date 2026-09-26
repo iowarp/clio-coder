@@ -196,7 +196,8 @@ test("handoff extraction reports both rounds when the repair also fails, and a c
 	const provider = deps(fakeSession(), [{ status: "failed", reason: "401 from provider" }]);
 	const failed = await prepareHandoff(provider.deps, GOAL);
 	strictEqual(failed.ok, false);
-	if (!failed.ok) deepStrictEqual([failed.level, failed.reason], ["error", "401 from provider"]);
+	if (!failed.ok)
+		deepStrictEqual([failed.level, failed.code, failed.reason], ["error", "provider", "401 from provider"]);
 });
 
 test("handoff commit seeds the successor, notes the source, replays skills and lands on the successor", () => {

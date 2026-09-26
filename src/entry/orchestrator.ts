@@ -185,6 +185,7 @@ import { continuityProjectionTokens, resolveContinuityProjection } from "../doma
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
 import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session/decision-board.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
+import { commitHandoff, type HandoffServiceDeps, prepareHandoff } from "../domains/session/handoff-service.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import {
 	clearPendingProtectedArtifact,
@@ -204,7 +205,12 @@ import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
 import { type AcpHostReport, acpCommandControl } from "../engine/acp/commands.js";
-import { type AcpSafeSettingsPatch, type AcpSafeSettingsSnapshot, serveClioAcpAgent } from "../engine/acp/server.js";
+import {
+	type AcpHandoffControl,
+	type AcpSafeSettingsPatch,
+	type AcpSafeSettingsSnapshot,
+	serveClioAcpAgent,
+} from "../engine/acp/server.js";
 import { createStdioServerTransport } from "../engine/acp/transport.js";
 import { completeEngineText, type EngineTextCompletionResult } from "../engine/ai.js";
 import {
@@ -2895,6 +2901,28 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								}),
 						}
 					: {}),
+				// /handoff runs the lifecycle the terminal runs. The successor is minted
+				// the way session/new mints one, so its route matches a fresh session.
+				...(session
+					? {
+							handoff: bindAcpHandoff({
+								session,
+								extract: (goal, extractOptions) => chat.extractHandoff(goal, extractOptions ?? {}),
+								readEntries: readSessionEntriesForCompact,
+								isTurnInFlight: () => chat.isStreaming(),
+								createSession: () => {
+									const settings = getCurrentSettings();
+									session.create({
+										cwd: process.cwd(),
+										...(settings.chat.target ? { target: settings.chat.target } : {}),
+										...(settings.chat.model ? { model: settings.chat.model } : {}),
+									});
+									taskBoard.snapshot();
+								},
+								getDecisionBoard: () => decisionBoard.snapshot(),
+							}),
+						}
+					: {}),
 				providers,
 				// The fleet controls `_clio-coder/dispatch/steer` reaches. The server
 				// takes the two operations by structure, never the whole contract, so
@@ -3405,6 +3433,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 	});
 	return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
+}
+
+/** The shared handoff service, bound to one host's session and chat for the ACP server. */
+function bindAcpHandoff(deps: HandoffServiceDeps): AcpHandoffControl {
+	return {
+		prepare: (goal) => prepareHandoff(deps, goal),
+		commit: (draft, document) => commitHandoff(deps, draft, document),
+	};
 }
 
 /** The configured task worktree root, or the default when settings cannot be read this early in boot. */

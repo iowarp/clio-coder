@@ -24,6 +24,7 @@ import {
 } from "../chat/chat-turn.js";
 import { FleetStrip, LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
+import { HandoffPanel } from "../chat/HandoffPanel.js";
 import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/health.js";
 import { routeFacts } from "../chat/route.js";
 import { SessionBoardPanel } from "../chat/SessionBoard.js";
@@ -398,6 +399,13 @@ function SessionTools({
 						sessionOpen={session.state === "open"}
 						capabilities={capabilities}
 						settledTurns={session.turns.filter((turn) => turn.status !== "running").length}
+						running={session.turns.at(-1)?.status === "running"}
+					/>
+					<HandoffPanel
+						client={client}
+						sessionId={session.id}
+						sessionOpen={session.state === "open"}
+						capabilities={capabilities}
 						running={session.turns.at(-1)?.status === "running"}
 					/>
 					<CommandPanel client={client} sessionId={session.id} sessionOpen={session.state === "open"} />

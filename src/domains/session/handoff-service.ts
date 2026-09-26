@@ -61,7 +61,16 @@ export interface HandoffServiceDeps {
 export interface HandoffRefusal {
 	ok: false;
 	level: "warn" | "error";
-	code: "goal" | "unavailable" | "turn_in_flight" | "no_session" | "extraction" | "empty" | "stale" | "seed_failed";
+	code:
+		| "goal"
+		| "unavailable"
+		| "turn_in_flight"
+		| "no_session"
+		| "extraction"
+		| "provider"
+		| "empty"
+		| "stale"
+		| "seed_failed";
 	reason: string;
 }
 
@@ -153,9 +162,10 @@ async function extractHandoffWithRepair(
 ): Promise<{ ok: true; parsed: HandoffParseResult } | HandoffRefusal> {
 	const first = await deps.extract(goal);
 	if (first.status !== "answered") {
+		// A failed round carries the provider's own words, which a wire host keeps off the wire.
 		return refuse(
 			first.status === "failed" ? "error" : "warn",
-			"extraction",
+			first.status === "failed" ? "provider" : "extraction",
 			first.status === "aborted" ? "the extraction round was cancelled" : first.reason,
 		);
 	}
@@ -166,7 +176,7 @@ async function extractHandoffWithRepair(
 	if (second.status !== "answered") {
 		return refuse(
 			second.status === "failed" ? "error" : "warn",
-			"extraction",
+			second.status === "failed" ? "provider" : "extraction",
 			second.status === "aborted"
 				? "the repair round was cancelled"
 				: `round 1 could not be read (${parsedFirst.reason}); the repair round then failed: ${second.reason}`,

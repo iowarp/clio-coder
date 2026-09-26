@@ -509,6 +509,20 @@ replaces the context that turn is reading, and a retried request is answered fro
 rather than switching or forking twice. A peer that does not announce branches gets a sentence
 instead of controls.
 
+Hand off to a new conversation in Session tools is the terminal's /handoff, run by the same session
+service. The operator says what the next conversation should accomplish; Draw up the handoff waits
+for the runtime's twelve-character floor and for an idle turn, and while the document is being
+drawn up a request is refused rather than queued, because the document would describe a moving
+conversation. The document arrives in an editable field in the interface face, since it is prose,
+with a sentence saying nothing is written until the new conversation starts. Start the new
+conversation carries amber as the consequential action; Discard is free and says so. The draft and
+its edit survive closing Session tools. A refusal is shown with a title naming what happened and the
+service's own sentence; a failed model round names no provider text, which stays in the agent's
+diagnostics. A request sent after the draft, a discard, or a retried commit makes the draft stale
+and nothing is written. On success the conversation moves to the successor and says the earlier one
+keeps a note naming it; the seeded document is model context, not a replayed turn, so the successor
+opens without an earlier record above the composer.
+
 A model is always picked from its target's catalog, never typed from memory. The route picker, the
 Settings page (`chat.model`, `fleet.default.model`, `context.memory.model` and
 `context.compaction.model`, which runs on the chat target) and the new-connection form share one
@@ -551,7 +565,8 @@ Every UI change must preserve:
 
 Covered states the smoke must visit: home in both themes, toolchain, traces and run detail,
 workspaces and sessions, a Markdown/code/Mermaid conversation, session controls, the branch view,
-a branch switch and a fork, permission and cancellation, and a problem notification. This design work adds three: the six status tones rendered
+a branch switch and a fork, a handoff review and its successor, permission and cancellation, and a
+problem notification. This design work adds three: the six status tones rendered
 side by side, a focus-visible capture of a button, an input and a table cell, and one forced-colors
 pass.
 

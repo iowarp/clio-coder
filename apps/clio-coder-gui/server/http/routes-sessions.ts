@@ -55,6 +55,22 @@ export function sessionRoutes(
 	register(app, hub, routes.forkSession, ({ params, body }, context) =>
 		commands.run(`fork:${params.id}`, idempotencyKey(context), body, () => supervisor.fork(params.id, body.turnId)),
 	);
+	// A retried draft answers from the ledger rather than spending a second model round.
+	register(app, hub, routes.prepareHandoff, ({ params, body }, context) =>
+		commands.run(`handoff:${params.id}`, idempotencyKey(context), body, () =>
+			supervisor.prepareHandoff(params.id, body.goal),
+		),
+	);
+	register(app, hub, routes.commitHandoff, ({ params, body }, context) =>
+		commands.run(`handoff.commit:${params.id}`, idempotencyKey(context), body, () =>
+			supervisor.commitHandoff(params.id, body.handoffId, body.document),
+		),
+	);
+	register(app, hub, routes.cancelHandoff, ({ params, body }, context) =>
+		commands.run(`handoff.cancel:${params.id}`, idempotencyKey(context), body, () =>
+			supervisor.cancelHandoff(params.id, body.handoffId),
+		),
+	);
 	register(app, hub, routes.sessionCommands, ({ params }) => supervisor.commands(params.id));
 	register(app, hub, routes.invokeSessionCommand, ({ params, body }, context) =>
 		commands.run(`command:${params.id}:${body.command}`, idempotencyKey(context), body, () =>

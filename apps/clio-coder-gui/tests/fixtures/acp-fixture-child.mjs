@@ -280,6 +280,9 @@ const replayPath = (leaf) => {
 	}
 	return turn;
 };
+// The /handoff lifecycle a real agent runs through its shared service: a draft is
+// held under an id until it is committed, discarded, or a request moves the session.
+let pendingHandoff = null;
 // Visual review can ask the smoke scenario to advertise safe settings and targets, so the composer's
 // route chip shows a reported model. The smoke itself leaves it off and asserts the missing controls.
 const ROUTE = process.env.CLIO_CODER_WEB_FIXTURE_ROUTE === "1";
@@ -435,6 +438,12 @@ async function handle(frame) {
 														...(process.env.CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS !== "0" ? { promptTurns: true } : {}),
 													},
 													"clio-coder/board": { version: 1, method: "_clio-coder/session/board" },
+													"clio-coder/handoff": {
+														version: 1,
+														prepare: "_clio-coder/session/handoff/prepare",
+														commit: "_clio-coder/session/handoff/commit",
+														cancel: "_clio-coder/session/handoff/cancel",
+													},
 													"clio-coder/branches": {
 														version: 1,
 														tree: "_clio-coder/session/tree",
@@ -496,6 +505,7 @@ async function handle(frame) {
 				);
 				break;
 			case "session/prompt": {
+				pendingHandoff = null;
 				const promptText = frame.params.prompt?.map((block) => block.text).join(" ") ?? "";
 				const turnScenario =
 					scenario === "markdown" && promptText.includes("[approval]")
@@ -643,6 +653,61 @@ async function handle(frame) {
 					leafId: treeLeaf,
 					_meta: { "clio-coder/session": { replayed: { turns, truncated: false } } },
 				};
+				break;
+			}
+			case "_clio-coder/session/handoff/prepare": {
+				if (!COMMANDS) throw Error("method_not_found");
+				const goal = frame.params.goal.trim();
+				if (goal.length < 12) {
+					result = {
+						status: "refused",
+						level: "warn",
+						code: "goal",
+						reason: `/handoff needs a goal of at least 12 characters; "${goal}" is ${goal.length}`,
+					};
+					break;
+				}
+				await delay(40);
+				pendingHandoff = { handoffId: randomUUID(), sessionId };
+				result = {
+					status: "ready",
+					handoffId: pendingHandoff.handoffId,
+					goal,
+					fromSessionId: sessionId,
+					document: `# Handoff\n\nGoal: ${goal}\n\n## Facts\n\n- The second sample reads 4.2.\n`,
+				};
+				break;
+			}
+			case "_clio-coder/session/handoff/commit": {
+				if (!COMMANDS) throw Error("method_not_found");
+				if (pendingHandoff?.handoffId !== frame.params.handoffId || pendingHandoff.sessionId !== sessionId) {
+					result = { status: "refused", level: "warn", code: "stale", reason: "draw it up again" };
+					break;
+				}
+				if (frame.params.document.trim() === "") {
+					result = { status: "refused", level: "warn", code: "empty", reason: "the reviewed document was empty" };
+					break;
+				}
+				pendingHandoff = null;
+				const fromSessionId = sessionId;
+				sessionId = randomUUID();
+				treeLeaf = "u1";
+				log({ handedOff: sessionId, from: fromSessionId, document: frame.params.document });
+				update({ sessionUpdate: "available_commands_update", availableCommands: [] });
+				result = {
+					status: "committed",
+					sessionId,
+					fromSessionId,
+					warnings: [],
+					configOptions: configOptions(),
+					_meta: { "clio-coder/session": { resumed: false } },
+				};
+				break;
+			}
+			case "_clio-coder/session/handoff/cancel": {
+				const cancelled = pendingHandoff?.handoffId === frame.params.handoffId;
+				if (cancelled) pendingHandoff = null;
+				result = { cancelled };
 				break;
 			}
 			case "_clio-coder/session/fork": {

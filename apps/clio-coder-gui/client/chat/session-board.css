@@ -108,3 +108,50 @@
 .branch-panel__row--active > .session-board__id {
 	padding-inline-start: var(--space-2);
 }
+
+/* Handoff: a goal, then the document a person reviews. The document is prose, so it reads in the
+   interface face; starting the new conversation is the consequential action and carries amber. */
+.handoff-panel__goal {
+	display: grid;
+	gap: var(--space-2);
+}
+.handoff-panel__goal label,
+.handoff-panel__review label {
+	font-size: var(--text-meta);
+}
+.handoff-panel__goal button {
+	justify-self: start;
+	min-height: 32px;
+	padding: 0 var(--space-3);
+	font-size: var(--text-exact);
+}
+.handoff-panel__review {
+	display: grid;
+	gap: var(--space-2);
+}
+.handoff-panel__review textarea {
+	width: 100%;
+	min-height: 14rem;
+	resize: vertical;
+	font: inherit;
+	font-size: var(--text-meta);
+	line-height: var(--leading-body);
+}
+.handoff-panel__review .session-board__actions {
+	grid-column: auto;
+}
+.handoff-panel__start:not(:disabled) {
+	border-color: var(--action-line);
+	background: var(--action-tint);
+	color: var(--action-fg);
+}
+.handoff-panel__refusal {
+	margin: var(--space-2) 0 0;
+	font-size: var(--text-meta);
+}
+.handoff-panel__refusal--error strong {
+	color: var(--status-fail-fg);
+}
+.handoff-panel__refusal--warning strong {
+	color: var(--status-warn-fg);
+}

@@ -1,6 +1,7 @@
 import { type Static, Type } from "typebox";
 import { BoardCapability } from "./board.js";
 import { BranchesCapability } from "./branches.js";
+import { HandoffCapability } from "./handoff.js";
 
 const closed = { additionalProperties: false };
 const method = Type.String({ maxLength: 128 });
@@ -91,6 +92,8 @@ export const AgentCapabilities = Type.Object(
 		board: Type.Optional(BoardCapability),
 		/** Session tree, branch switch and fork. */
 		branches: Type.Optional(BranchesCapability),
+		/** Draw up, review and commit a handoff to a new session. */
+		handoff: Type.Optional(HandoffCapability),
 		/** ACP promptCapabilities.image: the agent accepts image blocks with a request. */
 		images: Type.Optional(Type.Boolean()),
 		/** True when the agent mediates every tool through its own safety policy. */

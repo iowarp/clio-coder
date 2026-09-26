@@ -18,6 +18,14 @@ import {
 	FleetRoots,
 } from "./fleet.js";
 import {
+	HandoffCancelled,
+	HandoffCancelRequest,
+	HandoffCommitRequest,
+	HandoffCommitted,
+	HandoffDraft,
+	HandoffPrepareRequest,
+} from "./handoff.js";
+import {
 	LibraryAgents,
 	LibraryApplyResult,
 	LibraryExtensions,
@@ -453,6 +461,33 @@ export const routes = {
 		body: BranchRequest,
 		response: Forked,
 		summary: "Start a new conversation from a turn; workspace files are not rewound",
+	}),
+	prepareHandoff: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/handoff",
+		params: operationParams,
+		body: HandoffPrepareRequest,
+		response: HandoffDraft,
+		summary: "Draw up a handoff document for review; nothing is written",
+	}),
+	commitHandoff: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/handoff/commit",
+		params: operationParams,
+		body: HandoffCommitRequest,
+		response: HandoffCommitted,
+		summary: "Start a new conversation from the reviewed handoff document",
+	}),
+	cancelHandoff: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/handoff/cancel",
+		params: operationParams,
+		body: HandoffCancelRequest,
+		response: HandoffCancelled,
+		summary: "Discard a handoff document awaiting review",
 	}),
 	sessionCommands: defineRoute({
 		...get,
