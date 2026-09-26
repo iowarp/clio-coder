@@ -22,6 +22,7 @@ import type {
 import { normalizeClioCoderEventType } from "../../core/naming-events.js";
 import { processAlive, processBirthToken } from "../../core/process-identity.js";
 import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
+import { normalizeCostProvenance } from "../providers/types/cost-provenance.js";
 
 export const TRACE_SCHEMA_VERSION = 1;
 export const TRACE_DATABASE_FILE = "trace.sqlite";
@@ -850,6 +851,7 @@ export class TraceStore {
 		success: boolean,
 		at = new Date().toISOString(),
 	): void {
+		const costUsd = normalizeCostProvenance(input.costProvenance) === "unknown" ? null : (input.costUsd ?? null);
 		this.transaction(() => {
 			const fallbackStartedAt =
 				typeof input.durationMs === "number" ? new Date(Math.max(0, Date.parse(at) - input.durationMs)).toISOString() : at;
@@ -889,7 +891,7 @@ export class TraceStore {
 					success ? "success" : "fail",
 					at,
 					input.tokenCount ?? null,
-					input.costUsd ?? null,
+					costUsd,
 					input.runId,
 				);
 			this.db
@@ -909,7 +911,7 @@ export class TraceStore {
 					input.cacheWrite1hTokenCount ?? null,
 					input.reasoningTokenCount ?? null,
 					input.tokenCount ?? null,
-					input.costUsd ?? null,
+					costUsd,
 					input.runId,
 				);
 			this.db.prepare("UPDATE processes SET ended_at=? WHERE run_id=? AND ended_at IS NULL").run(at, input.runId);
