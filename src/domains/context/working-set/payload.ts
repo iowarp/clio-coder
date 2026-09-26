@@ -150,3 +150,12 @@ export function hasLegacyCompactionMarker(payload: unknown): boolean {
 	const result = payload.result ?? payload.output ?? payload.out;
 	return isRecord(nestedRecord(isRecord(result) ? result : null, "details")?.contextCompaction);
 }
+
+/** The ref a recall-shaped tool result readmitted: `details.recall.ref`, written by context(scope=recall) and by a reread. */
+export function recalledRef(payload: unknown): string | null {
+	if (!isRecord(payload)) return null;
+	const result = payload.result;
+	const details = isRecord(result) && isRecord(result.details) ? result.details : null;
+	const recall = details !== null && isRecord(details.recall) ? details.recall : null;
+	return recall !== null && typeof recall.ref === "string" && recall.ref.length > 0 ? recall.ref : null;
+}

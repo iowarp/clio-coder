@@ -15,7 +15,7 @@
 import type { SessionEntry } from "../../session/entries.js";
 import type { PolicyInput } from "./contract.js";
 import type { PathIndex, PathObservation } from "./path-index.js";
-import { hasLegacyCompactionMarker, isRecord, toolResultBodyTokens } from "./payload.js";
+import { hasLegacyCompactionMarker, isRecord, recalledRef, toolResultBodyTokens } from "./payload.js";
 
 export interface ProtectionContext {
 	entryIndex: number;
@@ -31,15 +31,6 @@ export interface ProtectionContext {
 	 * pin protects that result, keyed by the ref it readmitted.
 	 */
 	pinRecalledTwice?: boolean;
-}
-
-/** The ref a recall-shaped tool result readmitted: `details.recall.ref`, written by context(scope=recall) and by a reread. */
-function recalledRef(payload: unknown): string | null {
-	if (!isRecord(payload)) return null;
-	const result = payload.result;
-	const details = isRecord(result) && isRecord(result.details) ? result.details : null;
-	const recall = details !== null && isRecord(details.recall) ? details.recall : null;
-	return recall !== null && typeof recall.ref === "string" && recall.ref.length > 0 ? recall.ref : null;
 }
 
 /** Ops whose identity is the file they touched, so a retry on the same path counts as the same call. */

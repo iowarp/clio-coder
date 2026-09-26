@@ -72,7 +72,8 @@ export interface WorkingSetView {
 	/** Recall entries on the active path. `churn = recalls / itemsEvicted`. */
 	recalls: number;
 	/**
-	 * Recalls per ref key on the active path. A ref recalled twice is the
+	 * Recalls per body lineage on the active path, indexed by each copy's ref.
+	 * A body recalled twice is the
 	 * churn signal a protection profile may pin on (`pinRecalledTwice`).
 	 */
 	recallsByRef: ReadonlyMap<string, number>;

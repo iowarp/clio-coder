@@ -356,6 +356,12 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 			}
 		}
 		soFar.push(entry);
+		// Recorded recalls are observed demand, not a policy's eviction plan.
+		// Fold them before the next selection; real summaries reset the band
+		// just as the synthetic summary path above does.
+		if (entry.kind === "contextRecall" || entry.kind === "compactionSummary") {
+			view = foldWorkingSet(soFar, lastMessageTurnId ?? undefined);
+		}
 		if (entry.kind === "compactionSummary") visible = rebuildProjection(soFar, lastMessageTurnId, view);
 		else appendVisibleEntry(entry, visible, view);
 		if (entry.kind === "message") lastMessageTurnId = entry.turnId;

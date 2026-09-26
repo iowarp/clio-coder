@@ -5,6 +5,11 @@ import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { DomainContext } from "../../src/core/domain-loader.js";
+import { DEFAULT_WORKING_SET_SETTINGS } from "../../src/domains/context/working-set/defaults.js";
+import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
+import { loadClioTraces } from "../../src/domains/context/working-set/replay/load-clio.js";
+import { replayTrace } from "../../src/domains/context/working-set/replay/runner.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import {
 	appendSessionFileEntry,
@@ -97,6 +102,60 @@ function withWriteFault(
 	}
 }
 
+function rereadLedger(): SessionEntry[] {
+	const entries: SessionEntry[] = [];
+	let parent: string | null = null;
+	for (const [id, ref] of [
+		["original", null],
+		["copy-one", "original"],
+		["copy-two", "copy-one"],
+	] as const) {
+		const call = `${id}-call`;
+		entries.push({
+			kind: "message",
+			turnId: call,
+			parentTurnId: parent,
+			timestamp: at,
+			role: "assistant",
+			payload: { text: "read" },
+		});
+		if (ref !== null)
+			entries.push({
+				kind: "contextRecall",
+				turnId: `${id}-recall`,
+				parentTurnId: call,
+				timestamp: at,
+				ref: { entry: ref },
+				trigger: "reread",
+				tokensReadmitted: 1000,
+			});
+		entries.push({
+			kind: "message",
+			turnId: id,
+			parentTurnId: call,
+			timestamp: at,
+			role: "tool_result",
+			payload: {
+				toolName: "read",
+				result: {
+					content: [{ type: "text", text: "body".repeat(1000) }],
+					details: ref === null ? {} : { recall: { ref } },
+				},
+			},
+		});
+		parent = id;
+	}
+	entries.push({
+		kind: "message",
+		turnId: "later",
+		parentTurnId: parent,
+		timestamp: at,
+		role: "assistant",
+		payload: { text: "done" },
+	});
+	return entries;
+}
+
 describe("session integrity", () => {
 	let scratch: IsolatedClioEnv;
 	let restoreDescriptors: () => void;
@@ -110,6 +169,51 @@ describe("session integrity", () => {
 		} finally {
 			restoreDescriptors();
 		}
+	});
+
+	it("counts reread copies as one recall lineage on the active branch", () => {
+		const entries = rereadLedger();
+		const current = foldWorkingSet(entries);
+		strictEqual(current.recalls, 2);
+		strictEqual(current.recallsByRef.get("original"), 2);
+		strictEqual(current.recallsByRef.get("copy-one"), 2);
+		const earlier = foldWorkingSet(entries, "copy-one");
+		strictEqual(earlier.recalls, 1);
+		strictEqual(earlier.recallsByRef.get("original"), 1);
+		strictEqual(earlier.recallsByRef.has("copy-two"), false);
+	});
+
+	it("preserves recorded recall evidence through loading and replay", async () => {
+		const path = resolve(scratch.dir, "recalls.jsonl");
+		fs.writeFileSync(
+			path,
+			`${rereadLedger()
+				.map((record) => JSON.stringify(record))
+				.join("\n")}\n`,
+		);
+		const loaded = await loadClioTraces([path], { filter: false });
+		const trace = loaded.traces[0];
+		ok(trace);
+		strictEqual(trace.entries.filter((record) => record.kind === "contextRecall").length, 2);
+		let observed = 0;
+		replayTrace(
+			trace,
+			{
+				id: "structural-v2",
+				select: (input) => {
+					observed = Math.max(observed, input.view.recallsByRef.get("copy-one") ?? 0);
+					return [];
+				},
+			},
+			{
+				policyId: "structural-v2",
+				budgetTokens: 1000,
+				threshold: 0.8,
+				target: 0.6,
+				settings: DEFAULT_WORKING_SET_SETTINGS,
+			},
+		);
+		strictEqual(observed, 2, "the next selection must see the recorded recalls");
 	});
 
 	for (const transition of ["resume", "switchBranch"] as const) {

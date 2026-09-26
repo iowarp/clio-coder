@@ -103,9 +103,7 @@ async function pinnedLeafTurnId(source: string): Promise<string | undefined> {
 }
 
 function cleanActiveEntries(entries: ReadonlyArray<SessionEntry>, activeLeafTurnId?: string): SessionEntry[] {
-	return filterEntriesToActivePath(entries, activeLeafTurnId).filter(
-		(entry) => entry.kind !== "contextEviction" && entry.kind !== "contextRecall",
-	);
+	return filterEntriesToActivePath(entries, activeLeafTurnId).filter((entry) => entry.kind !== "contextEviction");
 }
 
 function toolResultCount(entries: ReadonlyArray<SessionEntry>): number {
