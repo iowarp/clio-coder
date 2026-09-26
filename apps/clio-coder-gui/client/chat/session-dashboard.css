@@ -1,0 +1,62 @@
+.session-dashboard {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px 20px;
+	margin: 0;
+	padding: 0 0 12px;
+	min-width: 0;
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+.session-dashboard > div {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	min-width: 0;
+}
+.session-dashboard > div:first-child {
+	max-width: min(100%, 36ch);
+}
+.session-dashboard dt {
+	flex: none;
+}
+.session-dashboard dd {
+	margin: 0;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--ink);
+	font-variant-numeric: tabular-nums;
+}
+.session-dashboard [data-attention="true"] dd {
+	color: var(--status-warn-fg);
+}
+.conversation__workspace-controls {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex: none;
+}
+.conversation__workspace-controls > button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 44px;
+	padding: 10px;
+	border: 0;
+	background: transparent;
+	color: var(--ink-muted);
+	border-radius: var(--radius-sm);
+}
+.conversation__workspace-controls > button:hover,
+.conversation__workspace-controls > button[aria-expanded="true"] {
+	background: var(--surface-sunken);
+	color: var(--ink);
+}
+.conversation__workspace-controls .icon {
+	width: 20px;
+	height: 20px;
+}

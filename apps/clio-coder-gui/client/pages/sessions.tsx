@@ -30,14 +30,17 @@ import { FleetStrip, LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import { HandoffPanel } from "../chat/HandoffPanel.js";
 import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/health.js";
+import { InspectorDock } from "../chat/InspectorDock.js";
 import { routeFacts } from "../chat/route.js";
 import { SessionBoardPanel } from "../chat/SessionBoard.js";
+import { SessionDashboard } from "../chat/SessionDashboard.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { UsagePanel } from "../chat/UsagePanel.js";
 import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark, type StatusTone } from "../design/status.js";
+import { useWorkspaceChrome } from "../design/workspace-chrome.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
@@ -352,6 +355,7 @@ function SessionTools({
 	onClose: () => void;
 }) {
 	const navigate = useNavigate();
+	const chrome = useWorkspaceChrome();
 	const panel = useRef<HTMLDetailsElement>(null);
 	const [open, setOpen] = useState(false);
 	useDetailsDismiss(panel, open);
@@ -367,7 +371,16 @@ function SessionTools({
 					<section className="conversation__place" aria-label="Where this conversation runs">
 						<p className="eyebrow">Project folder</p>
 						<code title={workspaceRoot}>{workspaceRoot ?? "Reading the project path…"}</code>
-						<Link className="conversation__settings-link" to={`/settings?workspace=${session.workspaceId}`}>
+						<Link
+							className="conversation__settings-link"
+							to={`/settings?workspace=${session.workspaceId}`}
+							onClick={(event) => {
+								if (chrome && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+									event.preventDefault();
+									chrome.openArea("settings");
+								}
+							}}
+						>
 							Project settings <span aria-hidden="true">→</span>
 						</Link>
 					</section>
@@ -498,6 +511,27 @@ function SessionHealth({ summary }: { summary: HealthSummary }) {
 }
 
 function SessionView({ client, id }: { client: Client; id: string }) {
+	const chrome = useWorkspaceChrome();
+	const navigate = useNavigate();
+	const inspectorButton = useId();
+	const [inspectorOpen, setInspectorOpen] = useState(() => {
+		try {
+			return localStorage.getItem("clio-coder-gui-artifacts") === "open";
+		} catch {
+			return false;
+		}
+	});
+	useEffect(() => {
+		try {
+			localStorage.setItem("clio-coder-gui-artifacts", inspectorOpen ? "open" : "closed");
+		} catch {
+			/* Preference holds in this tab. */
+		}
+	}, [inspectorOpen]);
+	const closeInspector = () => {
+		setInspectorOpen(false);
+		requestAnimationFrame(() => document.getElementById(inspectorButton)?.focus());
+	};
 	const connection = useOutletContext<ConnectionState>();
 	const queries = useQueryClient();
 	const input = { params: { id }, query: {}, body: {} };
@@ -607,12 +641,18 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						? { tone: "neutral" as const, label: "Session closed" }
 						: { tone: "fail" as const, label: "Session unavailable" };
 	return (
-		<section className="conversation">
+		<section className="conversation" data-inspector={inspectorOpen ? "open" : "closed"}>
 			<header className="conversation__header">
 				<div className="conversation__bar">
 					<Link
 						className="conversation__project"
 						to={`/workspaces/${snapshot.workspaceId}/sessions`}
+						onClick={(event) => {
+							if (chrome && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+								event.preventDefault();
+								chrome.openArea("sessions");
+							}
+						}}
 						title={workspaceRoot ? `Conversations in ${workspaceRoot}` : "Conversations in this project"}
 					>
 						<span aria-hidden="true">←</span>
@@ -626,6 +666,28 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						<StatusMark tone={activity.tone} label={activity.label} />
 						{snapshot.recoveredOrphan ? <span>Recovered after server interruption</span> : null}
 					</p>
+					<div className="conversation__workspace-controls">
+						<button
+							type="button"
+							aria-label="Configure harness"
+							title="Settings and harness configuration"
+							onClick={() =>
+								chrome ? chrome.openArea("settings") : void navigate(`/settings?workspace=${snapshot.workspaceId}`)
+							}
+						>
+							<Icon name="gear" />
+						</button>
+						<button
+							id={inspectorButton}
+							type="button"
+							aria-label={inspectorOpen ? "Hide artifacts" : "Show artifacts"}
+							aria-expanded={inspectorOpen}
+							title="Files, results and evidence"
+							onClick={() => setInspectorOpen((value) => !value)}
+						>
+							<Icon name="artifacts" />
+						</button>
+					</div>
 					<SessionTools
 						client={client}
 						session={snapshot}
@@ -637,6 +699,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						onClose={() => close.mutate()}
 					/>
 				</div>
+				<SessionDashboard session={snapshot} health={health} workers={liveWorkers} model={route.model} />
 				<SessionHealth summary={health} />
 			</header>
 			<div className="conversation__approval">
@@ -721,6 +784,13 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					route={route}
 				/>
 			</div>
+			<InspectorDock
+				open={inspectorOpen}
+				onClose={closeInspector}
+				client={client}
+				session={snapshot}
+				workspaceRoot={workspaceRoot}
+			/>
 		</section>
 	);
 }

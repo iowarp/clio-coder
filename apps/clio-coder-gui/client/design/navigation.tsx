@@ -1,7 +1,17 @@
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+	type ReactNode,
+	type Ref,
+	useCallback,
+	useEffect,
+	useImperativeHandle,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { NavLink, useLocation } from "react-router";
 import { announce, composeTitle, useLiveState } from "../interaction/announcer.js";
 import { formatKeybinding, KEYBINDINGS } from "../interaction/keybindings.js";
+import { useLayersActive } from "../interaction/use-shortcut.js";
 import { Icon } from "./icons.js";
 
 /** `--paper` from client/design/tokens.css, light and dark. Keep these two in step with it. */
@@ -99,6 +109,7 @@ export function Navigation({
 			to={item.path}
 			end={item.path === "/"}
 			onClick={(event) => {
+				if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 				if (onSelect?.(item.path)) {
 					event.preventDefault();
 					return;
@@ -140,14 +151,28 @@ export function Navigation({
 		</>
 	);
 }
+export interface MobileNavigationHandle {
+	open: () => void;
+}
 export function MobileNavigation({
 	onHelp,
 	content,
+	ref,
 }: {
 	onHelp: () => void;
 	content?: ((close: () => void) => ReactNode) | undefined;
+	ref?: Ref<MobileNavigationHandle> | undefined;
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
+	const layered = useLayersActive();
+	const open = useCallback(() => {
+		if (!dialog.current?.open) dialog.current?.showModal();
+		requestAnimationFrame(() => dialog.current?.querySelector<HTMLElement>(".sidebar-back")?.focus());
+	}, []);
+	useImperativeHandle(ref, () => ({ open }), [open]);
+	useEffect(() => {
+		if (layered) dialog.current?.close();
+	}, [layered]);
 	const location = useLocation();
 	const previousPath = useRef(location.pathname);
 	useEffect(() => {
@@ -156,12 +181,7 @@ export function MobileNavigation({
 	}, [location.pathname]);
 	return (
 		<>
-			<button
-				className="icon-button menu-toggle"
-				type="button"
-				onClick={() => dialog.current?.showModal()}
-				aria-label="Open navigation"
-			>
+			<button className="icon-button menu-toggle" type="button" onClick={open} aria-label="Open navigation">
 				<Icon name="menu" />
 			</button>
 			<dialog ref={dialog} className="navigation-dialog" aria-label="Navigation">

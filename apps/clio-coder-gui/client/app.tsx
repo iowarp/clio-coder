@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
@@ -10,6 +10,7 @@ import { lastTokenWasRefused } from "./api/token.js";
 import { Icon } from "./design/icons.js";
 import {
 	MobileNavigation,
+	type MobileNavigationHandle,
 	Navigation,
 	RouteFocus,
 	SIDEBAR_ID,
@@ -22,6 +23,7 @@ import { dismissAll, LiveRegions, NoticeToasts, reportProblem, useNotices } from
 import { ProjectNavigation } from "./design/project-navigation.js";
 import { AppPreferences } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
+import { WorkspaceChrome } from "./design/workspace-chrome.js";
 import { CommandPalette } from "./interaction/CommandPalette.js";
 import { appCommands } from "./interaction/commands.js";
 import { HelpDialog } from "./interaction/HelpDialog.js";
@@ -57,6 +59,7 @@ export function App({ client }: { client: Client }) {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const [navigationAt, setNavigationAt] = useState<string | null>(null);
+	const mobileNavigation = useRef<MobileNavigationHandle>(null);
 	const [selectedArea, setSelectedArea] = useState<{ path: string; area: NavigationArea } | null>(null);
 	const [conversationPath, setConversationPath] = useState<string | null>(null);
 	const previousPath = useRef(location.pathname);
@@ -94,15 +97,39 @@ export function App({ client }: { client: Client }) {
 	const session = useQuery({
 		queryKey: ["session", sessionId ?? ""],
 		queryFn: () => client.call(routes.session, { params: { id: sessionId ?? "" }, query: {}, body: {} }),
+		select: (value) => ({
+			workspaceId: value.workspaceId,
+			state: value.state,
+			runningTurnId: value.turns.at(-1)?.status === "running" ? (value.turns.at(-1)?.id ?? null) : null,
+		}),
 		enabled: false,
 	});
 	const snapshot = sessionId === null ? undefined : session.data;
-	const lastTurn = snapshot?.turns.at(-1);
-	const runningTurnId = lastTurn?.status === "running" ? lastTurn.id : null;
+	const runningTurnId = snapshot?.runningTurnId ?? null;
 
 	useShortcut("palette", () => setPaletteOpen(true));
 	useShortcut("help", () => setHelpOpen(true));
 	useShortcut("sidebar", toggleSidebar);
+
+	const selectArea = useCallback(
+		(path: string) => {
+			const nextArea = navigationArea(path);
+			if (nextArea) {
+				setNavigationAt(null);
+				if (sidebarCollapsed && !matchMedia("(max-width: 750px)").matches) toggleSidebar();
+				if (sessionIdFrom(location.pathname)) {
+					setSelectedArea({ path: location.pathname, area: nextArea });
+					requestAnimationFrame(() => {
+						if (matchMedia("(max-width: 750px)").matches) mobileNavigation.current?.open();
+						else document.querySelector<HTMLElement>(".desktop-navigation .sidebar-back")?.focus();
+					});
+					return true;
+				}
+			}
+			return false;
+		},
+		[location.pathname, sidebarCollapsed, toggleSidebar],
+	);
 
 	const commands = useMemo(
 		() =>
@@ -114,7 +141,9 @@ export function App({ client }: { client: Client }) {
 					hasNotices: notices.length > 0,
 				},
 				{
-					navigate: (path) => void navigate(path),
+					navigate: (path) => {
+						if (!selectArea(path)) void navigate(path);
+					},
 					openHelp: () => setHelpOpen(true),
 					toggleSidebar,
 					dismissNotices: dismissAll,
@@ -137,21 +166,17 @@ export function App({ client }: { client: Client }) {
 					},
 				},
 			),
-		[client, navigate, notices.length, queries, runningTurnId, sessionId, snapshot?.state, toggleSidebar],
+		[client, navigate, notices.length, queries, runningTurnId, sessionId, snapshot?.state, toggleSidebar, selectArea],
 	);
-	const selectArea = (path: string) => {
-		const nextArea = navigationArea(path);
-		if (nextArea) {
-			setNavigationAt(null);
-			if (sidebarCollapsed) toggleSidebar();
-			requestAnimationFrame(() => document.querySelector<HTMLElement>(".desktop-navigation .sidebar-back")?.focus());
-			if (sessionIdFrom(location.pathname)) {
-				setSelectedArea({ path: location.pathname, area: nextArea });
-				return true;
-			}
-		}
-		return false;
-	};
+	const workspaceChrome = useMemo(
+		() => ({
+			openArea: (next: NavigationArea) => {
+				if (!selectArea(`/${next}`)) void navigate(`/${next}`);
+			},
+		}),
+		[navigate, selectArea],
+	);
+
 	const navigationContent = (close?: () => void, collapsed = false) =>
 		showArea && area && !collapsed ? (
 			<>
@@ -196,12 +221,25 @@ export function App({ client }: { client: Client }) {
 						</p>
 					}
 				>
-					{area === "sessions" ? (
+					{sessionId && !snapshot?.workspaceId && ["settings", "library"].includes(area) ? (
+						<p className="sidebar-note" role={session.error ? "alert" : "status"}>
+							{session.error
+								? `Conversation project unavailable: ${session.error.message}`
+								: "Reading the conversation's project…"}
+						</p>
+					) : area === "sessions" ? (
 						<ProjectNavigation client={client} activeWorkspace={snapshot?.workspaceId} close={close} />
 					) : (
 						(() => {
 							const AreaView = areaViews[area];
-							return <AreaView client={client} close={close} workspaceId={snapshot?.workspaceId} />;
+							return (
+								<AreaView
+									client={client}
+									close={close}
+									workspaceId={snapshot?.workspaceId}
+									conversationPath={sessionId ? location.pathname : undefined}
+								/>
+							);
 						})()
 					)}
 				</Suspense>
@@ -236,7 +274,11 @@ export function App({ client }: { client: Client }) {
 						version={meta.data?.clio}
 						platform={meta.data?.platform}
 					/>
-					<MobileNavigation onHelp={() => setHelpOpen(true)} content={(close) => navigationContent(close)} />
+					<MobileNavigation
+						ref={mobileNavigation}
+						onHelp={() => setHelpOpen(true)}
+						content={(close) => navigationContent(close)}
+					/>
 				</div>
 			</header>
 			<div
@@ -264,7 +306,9 @@ export function App({ client }: { client: Client }) {
 					) : meta.data.apiVersion !== API_VERSION ? (
 						<div role="alert">The app and server versions differ. Rebuild the client and reload.</div>
 					) : (
-						<Outlet context={connection} />
+						<WorkspaceChrome.Provider value={workspaceChrome}>
+							<Outlet context={connection} />
+						</WorkspaceChrome.Provider>
 					)}
 				</main>
 			</div>
