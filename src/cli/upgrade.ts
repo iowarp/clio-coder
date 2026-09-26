@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { initializeClioHome } from "../core/init.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import {
@@ -123,19 +125,23 @@ async function lookUpAvailableVersion(channel: Channel, method: Installation["ki
  * slow registry. Draining also gives the failure something to say beyond an
  * exit code.
  */
-async function runChild(command: string, args: ReadonlyArray<string>, label: string): Promise<void> {
-	await new Promise<void>((resolve, reject) => {
+async function runChild(command: string, args: ReadonlyArray<string>, label: string): Promise<string> {
+	return new Promise<string>((resolve, reject) => {
 		const child = spawn(command, [...args], { stdio: ["ignore", "pipe", "pipe"] });
+		let stdout = "";
 		let tail = "";
 		const keepTail = (chunk: Buffer): void => {
 			tail = `${tail}${chunk.toString("utf8")}`.slice(-2000);
 		};
-		child.stdout?.on("data", keepTail);
+		child.stdout?.on("data", (chunk: Buffer) => {
+			stdout = `${stdout}${chunk.toString("utf8")}`.slice(0, 8192);
+			keepTail(chunk);
+		});
 		child.stderr?.on("data", keepTail);
 		child.on("error", reject);
 		child.on("close", (code) => {
 			if (code === 0) {
-				resolve();
+				resolve(stdout);
 				return;
 			}
 			const lastLine = tail.trimEnd().split("\n").at(-1) ?? "";
@@ -156,6 +162,20 @@ async function runPostInstallUpgrade(opts: UpgradeOptions, installation: Install
 	const args = [installation.entry, "upgrade", "--post-install", `--channel=${opts.channel}`];
 	if (opts.skipMigrations) args.push("--skip-migrations");
 	await runChild(process.execPath, args, "clio-coder upgrade --post-install");
+}
+
+async function runBackgroundRestart(installation: Installation): Promise<string> {
+	const output = await runChild(
+		process.execPath,
+		[installation.entry, "gui", "background", "restart", "--if-idle"],
+		"clio-coder gui background restart --if-idle",
+	);
+	const lines = output
+		.trim()
+		.split(/\r?\n/)
+		.filter(Boolean);
+	if (lines.length !== 1) throw new Error("background restart did not return its one-line result");
+	return lines[0] ?? "";
 }
 
 async function runRestart(installation: Installation): Promise<number> {
@@ -189,6 +209,7 @@ export interface UpgradeDependencies {
 	runNpmInstall: typeof runNpmInstall;
 	runDoctorFixAfterInstall: typeof runDoctorFixAfterInstall;
 	runPostInstallUpgrade: typeof runPostInstallUpgrade;
+	runBackgroundRestart: typeof runBackgroundRestart;
 	runPending: typeof runPending;
 	runRestart: typeof runRestart;
 	isInteractive: () => boolean;
@@ -200,6 +221,7 @@ const DEFAULT_DEPENDENCIES: UpgradeDependencies = {
 	runNpmInstall,
 	runDoctorFixAfterInstall,
 	runPostInstallUpgrade,
+	runBackgroundRestart,
 	runPending,
 	runRestart,
 	isInteractive: () => Boolean(process.stdin.isTTY && process.stdout.isTTY),
@@ -243,7 +265,28 @@ export async function runUpgradeCommand(
 					: method;
 	const updateCommand = installationCommand(installation, "upgrade", opts.channel);
 	const sourceAdvice = () => presenter.commandAdvice(SOURCE_UPGRADE_LEAD, updateCommand);
+	const backgroundOwner = join(stateDir, "gui/background/owner.json");
 	const finish = async (): Promise<number> => {
+		if (!opts.dryRun && existsSync(backgroundOwner)) {
+			if (opts.postInstall) {
+				presenter.commandAdvice(
+					"The background app is installed. Restart it when its open conversations can move to this version:",
+					"clio-coder gui background restart",
+				);
+			} else {
+				try {
+					presenter.note(await deps.runBackgroundRestart(installation));
+				} catch (error) {
+					presenter.warn(
+						`Upgrade succeeded, but the background app was not checked: ${error instanceof Error ? error.message : String(error)}`,
+					);
+					presenter.commandAdvice(
+						"Restart it when its open conversations can move to this version:",
+						"clio-coder gui background restart",
+					);
+				}
+			}
+		}
 		presenter.done("Done");
 		if (!opts.restart || opts.dryRun) return 0;
 		try {
