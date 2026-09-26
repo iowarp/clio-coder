@@ -69,7 +69,7 @@ A parked call carries a request id. A main-agent approval resumes only that call
 
 ## Workers
 
-- Every worker runs at `default`. A read-only dispatch adds the restriction above.
+- Every worker runs at `default`. A read-only dispatch adds the restriction above, and its sealed receipt records it as `safety.readOnly: true`, whether or not the worker ever tried to write.
 - A task that declares `write_roots` is confined to them and cannot run commands or dispatch.
 - A task with `worktree: true` runs in its own git worktree at `.clio-coder/worktrees/<runId>/` on branch `clio-coder/task/<runId>`. See [Fleet dispatch](../guide/fleet-dispatch.md#worktree-per-task).
 - A checkout writer lease lets one Clio process at a time dispatch workspace-edit workers into a checkout. A second process is refused with `checkout_writer_lease_held` ([checkout-writer-lease.ts](../../src/domains/dispatch/checkout-writer-lease.ts)).
