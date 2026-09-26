@@ -1,10 +1,23 @@
-/* Website typography. Semantic colors coordinate with the Clio GUI. */
 @font-face {
-	font-family: "IBM Plex Sans";
+	font-family: "Atkinson Hyperlegible";
 	font-style: normal;
-	font-weight: 100 700;
+	font-weight: 400;
 	font-display: swap;
-	src: url("../assets/fonts/plex-sans.woff2") format("woff2");
+	src: url("../assets/fonts/atkinson-400.woff2") format("woff2");
+}
+@font-face {
+	font-family: "Atkinson Hyperlegible";
+	font-style: italic;
+	font-weight: 400;
+	font-display: swap;
+	src: url("../assets/fonts/atkinson-400i.woff2") format("woff2");
+}
+@font-face {
+	font-family: "Atkinson Hyperlegible";
+	font-style: normal;
+	font-weight: 700;
+	font-display: swap;
+	src: url("../assets/fonts/atkinson-700.woff2") format("woff2");
 }
 @font-face {
 	font-family: "IBM Plex Mono";
@@ -20,6 +33,26 @@
 	font-display: swap;
 	src: url("../assets/fonts/plex-500.woff2") format("woff2");
 }
+@font-face {
+	font-family: "Newsreader";
+	font-style: normal;
+	font-weight: 500;
+	font-display: swap;
+	src: url("../assets/fonts/news-normal-500.woff2") format("woff2");
+}
+@font-face {
+	font-family: "Newsreader";
+	font-style: italic;
+	font-weight: 480;
+	font-display: swap;
+	src: url("../assets/fonts/news-italic-480.woff2") format("woff2");
+}
+
+/* ==========================================================================
+   Design Tokens
+   Dark is first (pure black default). Warm paper is deliberate persisted light mode.
+   Tokens only: No raw hex outside this token declaration block.
+   ========================================================================== */
 
 :root {
 	/* Dark Theme (Default) */
@@ -64,7 +97,6 @@
 	--well-cyan: #00c2cb;
 	--well-sage: #58b380;
 	--well-amber: #f09a3e;
-	--well-brick: #f26d63;
 
 	/* Code Wells (Stay Dark in Both Themes) */
 	--code: #0a0908;
@@ -73,20 +105,28 @@
 	--code-border: #2e2a24;
 	--code-sunk: #141210;
 
+	/* Notebook Rules & Texture */
+	--notebook-rule: rgba(88, 179, 128, 0.22);
+	--notebook-line: rgba(240, 236, 225, 0.035);
+	--noise-opacity: 0.035;
+
 	/* Selection */
 	--selection-bg: #093b2a;
 	--selection-ink: var(--ink);
+
+	/* Receipt Signature Object */
+	--receipt-shadow: 0 0 0 1px var(--line), 12px 12px 0 rgba(0, 0, 0, 0.95), 0 0 24px rgba(0, 194, 203, 0.08);
 
 	/* Overlays & Menus */
 	--menu-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
 
 	/* Layout & Type */
 	--measure: 66ch;
-	--page: 1248px;
-	--font-ui: "IBM Plex Sans", "Segoe UI", sans-serif;
-	--font-display: "IBM Plex Sans", "Segoe UI", sans-serif;
+	--page: 1120px;
+	--font-ui: "Atkinson Hyperlegible", "Segoe UI", sans-serif;
+	--font-display: "Newsreader", "Iowan Old Style", Palatino, Georgia, serif;
 	--font-mono: "IBM Plex Mono", "Cascadia Code", ui-monospace, monospace;
-	--header: 4.75rem;
+	--header: 6.4rem;
 }
 
 html[data-theme="light"] {
@@ -135,9 +175,17 @@ html[data-theme="light"] {
 	--code-border: #3c342c;
 	--code-sunk: #1e1a15;
 
+	/* Notebook Rules & Texture */
+	--notebook-rule: rgba(20, 87, 58, 0.28);
+	--notebook-line: rgba(26, 22, 18, 0.04);
+	--noise-opacity: 0.045;
+
 	/* Selection */
 	--selection-bg: #cfe3d6;
 	--selection-ink: #1a1612;
+
+	/* Receipt Signature Object */
+	--receipt-shadow: 12px 12px 0 rgba(26, 22, 18, 0.14);
 
 	/* Overlays & Menus */
 	--menu-shadow: 0 8px 24px rgba(26, 22, 18, 0.28);

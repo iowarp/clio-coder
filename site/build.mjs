@@ -21,7 +21,6 @@ const index = JSON.parse(await readFile(join(root, "content/index.json"), "utf8"
 const docs = new Set(index.map((item) => item.path));
 const docUrl = (path) => (path === "README.md" ? "/docs.html" : `/docs/${path.replace(/\.md$/, ".html")}`);
 const version = product.version;
-const recordings = JSON.parse(await readFile(join(root, "content/recordings.json"), "utf8"));
 const template = await readFile(join(root, "docs.html"), "utf8");
 const urls = [];
 const home = await readFile(join(root, "index.html"), "utf8");
@@ -59,11 +58,11 @@ function metadata(html, path, title, description, type = "WebPage") {
 	if (title) html = html.replace(/<title>.*?<\/title>/s, `<title>${escapeHtml(title)}</title>`);
 	if (description)
 		html = html.replace(
-			/<meta\s+name="description"[^>]*>/,
+			/<meta name="description"[^>]*>/,
 			`<meta name="description" content="${escapeHtml(description)}">`,
 		);
-	const pageTitle = title ?? html.match(/<title>(.*?)<\/title>/s)?.[1]?.trim();
-	const pageDescription = description ?? html.match(/<meta\s+name="description"\s+content="([^"]*)"/)?.[1];
+	const pageTitle = title ?? html.match(/<title>(.*?)<\/title>/s)?.[1];
+	const pageDescription = description ?? html.match(/<meta name="description" content="([^"]*)"/)?.[1];
 	html = html.replace(/<link rel="canonical"[^>]*>/, `<link rel="canonical" href="${canonical}">`);
 	for (const [key, value] of [
 		["og:url", canonical],
@@ -73,7 +72,7 @@ function metadata(html, path, title, description, type = "WebPage") {
 		["twitter:description", pageDescription],
 	]) {
 		html = html.replace(
-			new RegExp(`<meta\\s+(?:property|name)="${key}"[^>]*>`),
+			new RegExp(`<meta (?:property|name)="${key}"[^>]*>`),
 			`<meta ${key.startsWith("og:") ? "property" : "name"}="${key}" content="${escapeHtml(value)}">`,
 		);
 	}
@@ -207,13 +206,6 @@ for (const name of await readdir(root)) {
 	if (!name.endsWith(".html") || name === "docs.html") continue;
 	const path = name === "index.html" ? "/" : `/${name}`;
 	let html = links(shell(await readFile(join(root, name), "utf8"), path));
-	if (name === "learn.html") {
-		const published = recordings.filter((item) => /^[a-zA-Z0-9_-]{11}$/.test(item.id));
-		const films = published.length
-			? `<section class="published-recordings" aria-label="Video walkthroughs"><h2>Video walkthroughs</h2>${published.map((item) => `<figure><iframe loading="lazy" src="https://www.youtube-nocookie.com/embed/${item.id}" title="${escapeHtml(item.title)}" allowfullscreen></iframe><figcaption><a href="#${escapeHtml(item.lab)}">${escapeHtml(item.title)}</a></figcaption></figure>`).join("\n")}</section>`
-			: "";
-		html = html.replace("<!-- clio-coder-recordings -->", films);
-	}
 	let codeNumber = 0;
 	html = html.replace(/<pre>/g, () => `<pre tabindex="0" aria-label="Code example ${++codeNumber}">`);
 	if (name !== "404.html") {
@@ -223,40 +215,12 @@ for (const name of await readdir(root)) {
 		html = html.replace("</head>", '<meta name="robots" content="noindex">\n</head>');
 	await writeFile(join(out, name), html);
 }
-const startPaths = [
-	"README.md",
-	"guide/installation-and-lifecycle.md",
-	"guide/configuration-and-targets.md",
-	"guide/commands-and-modes.md",
-	"guide/tool-usage.md",
-	"guide/doctor.md",
-	"guide/troubleshooting.md",
-];
-const nav = [
-	["Start here", startPaths.map((path) => index.find((item) => item.path === path)).filter(Boolean)],
-	["Working with Clio", index.filter((item) => item.path.startsWith("guide/") && !startPaths.includes(item.path))],
-	["Architecture", index.filter((item) => item.path.startsWith("architecture/"))],
-]
-	.map(
-		([label, items]) =>
-			`<h2>${label}</h2>${items.map((item) => `<a href="${docUrl(item.path)}">${escapeHtml(item.title)}</a>`).join("\n")}`,
-	)
-	.join("\n");
+const nav = index.map((item) => `<a href="${docUrl(item.path)}">${escapeHtml(item.title)}</a>`).join("\n");
 for (const item of index) {
 	const markdown = await readFile(join(root, "content/docs", item.path), "utf8");
-	const rendered = renderDoc(item.path, markdown);
-	const headings = [...rendered.matchAll(/<h2 id="([^"]+)">([\s\S]*?)<\/h2>/g)];
-	const tocLinks = headings.map(([, id, text]) => `<a href="#${id}">${text.replace(/<[^>]+>/g, "")}</a>`).join("\n");
-	const mobileToc = headings.length
-		? `<details class="doc-toc-mobile"><summary>On this page</summary>${tocLinks}</details>`
-		: "";
 	let html = shell(template, docUrl(item.path)).replace(
-		/<div class="doc" id="doc">\s*<p>Opening the page…<\/p>\s*<\/div>/,
-		`<div class="doc" id="doc" data-doc="${escapeHtml(item.path)}">${mobileToc}${rendered}</div>`,
-	);
-	html = html.replace(
-		'<div id="doc-toc"></div>',
-		headings.length ? `<div id="doc-toc"><h2>On this page</h2>${tocLinks}</div>` : '<div id="doc-toc"></div>',
+		'<div class="doc" id="doc"><p>Opening the page…</p></div>',
+		`<div class="doc" id="doc" data-doc="${escapeHtml(item.path)}">${renderDoc(item.path, markdown)}</div>`,
 	);
 	html = html.replace(
 		'<div id="all-docs"></div>',
@@ -265,7 +229,7 @@ for (const item of index) {
 	html = html
 		.replace('<p id="doc-path">README.md</p>', `<p id="doc-path">${escapeHtml(item.path)}</p>`)
 		.replace(
-			/id="doc-github"\s+href="[^"]*"/,
+			/id="doc-github" href="[^"]*"/,
 			`id="doc-github" href="https://github.com/iowarp/clio-coder/blob/main/docs/${item.path}"`,
 		);
 	html = links(html).replaceAll("/assets/clio-coder-logo-128.webp", "/assets/logo.webp");

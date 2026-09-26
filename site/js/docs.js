@@ -4,15 +4,8 @@
 	const search = document.querySelector("#doc-search");
 	const hits = document.querySelector("#search-hits");
 	const menu = document.querySelector(".docs-menu");
-	if (menu) {
-		const compact = matchMedia("(max-width: 850px)");
-		menu.open = !compact.matches;
-		compact.addEventListener("change", (event) => {
-			menu.open = !event.matches;
-		});
-	}
+	if (menu) menu.open = !matchMedia("(max-width: 980px)").matches;
 	let index = [];
-	let unavailable = false;
 	const requested = new URLSearchParams(location.search).get("d");
 	const ready = fetch("/content/index.json")
 		.then((response) => {
@@ -26,13 +19,11 @@
 				location.replace(`${legacy.url}${location.hash}`);
 		})
 		.catch(() => {
-			unavailable = true;
 			if (hits) hits.textContent = "Search is unavailable. Browse the documentation links below.";
 		});
 	if (search && hits) {
 		search.addEventListener("input", async () => {
 			await ready;
-			if (unavailable) return;
 			const query = search.value.trim().toLowerCase();
 			hits.replaceChildren();
 			if (query.length < 2) return;

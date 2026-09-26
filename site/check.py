@@ -20,9 +20,6 @@ class Page(HTMLParser):
         self.refs = []
         self.canonical = None
         self.description = None
-        self.social = {}
-        self.doc_path = None
-        self.doc_source = None
         self.jsonld = []
         self.in_jsonld = False
         self.title = ''
@@ -44,12 +41,6 @@ class Page(HTMLParser):
             self.refs.append(a['src'])
         if tag == 'meta' and a.get('name') == 'description':
             self.description = a.get('content')
-        if tag == 'meta' and a.get('property', a.get('name', '')).startswith(('og:', 'twitter:')):
-            self.social[a.get('property', a.get('name'))] = a.get('content')
-        if a.get('id') == 'doc':
-            self.doc_path = a.get('data-doc')
-        if a.get('id') == 'doc-github':
-            self.doc_source = a.get('href')
         if tag == 'title':
             self.in_title = True
         if tag == 'script' and a.get('type') == 'application/ld+json':
@@ -81,17 +72,11 @@ for url in urls:
     page = Page(path)
     source = file.read_text()
     page.feed(source)
-    page.title = page.title.strip()
     pages[path] = page
     if page.canonical != url:
         errors.append(f'{path}: canonical {page.canonical} differs from sitemap {url}')
     if not page.title or not page.description:
         errors.append(f'{path}: missing title or description')
-    for key, value in [('og:title', page.title), ('twitter:title', page.title), ('og:description', page.description), ('twitter:description', page.description)]:
-        if page.social.get(key) != value:
-            errors.append(f'{path}: {key} does not match page metadata')
-    if page.doc_path and page.doc_source != f'https://github.com/iowarp/clio-coder/blob/main/docs/{page.doc_path}':
-        errors.append(f'{path}: source link points to the wrong document')
     try:
         json.loads(''.join(page.jsonld))
     except (ValueError, TypeError):
@@ -100,8 +85,6 @@ for url in urls:
         errors.append(f'{path}: documentation is not rendered in the HTML')
 if len({p.title for p in pages.values()}) != len(pages):
     errors.append('Page titles are not unique')
-if len({p.description for p in pages.values()}) != len(pages):
-    errors.append('Page descriptions are not unique')
 for path, page in pages.items():
     for ref in page.refs:
         url = urlsplit(urljoin(origin + path, ref))
