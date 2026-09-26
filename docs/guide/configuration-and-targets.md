@@ -142,6 +142,7 @@ explains worker route selection.
 | `context.toolResultMaxBytes` | `65536` | next turn; a live session change applies to the next tool result |
 | `context.workingSet.enabled` | `true` | next turn |
 | `context.workingSet.policy` | `structural-v1` | next turn |
+| `context.workingSet.profile` | `default` | next turn |
 | `context.workingSet.target` | `0.6` | next turn |
 | `context.workingSet.protectLastTurns` | `6` | next turn |
 | `context.workingSet.protectLastSteps` | `8` | next turn |

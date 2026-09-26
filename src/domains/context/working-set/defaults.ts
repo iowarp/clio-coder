@@ -9,16 +9,22 @@
  * it meets the recorded default rule at 32k, 64k, and 128k: retention is no
  * lower than `age-horizon`, precision is higher than random, and the target
  * stop remains active above 32k. `age-horizon` stays available as the exact
- * pre-layer selection recorded through the ledger.
+ * pre-layer selection recorded through the ledger. `structural-v2` is the
+ * rung composition under measurement; it becomes the default only once its
+ * ablation and ordering tables are recorded.
  */
 
 import type { WorkingSetSettings } from "../../../core/defaults.js";
 
-export type { WorkingSetPolicyId, WorkingSetSettings } from "../../../core/defaults.js";
+export type { WorkingSetPolicyId, WorkingSetProfileId, WorkingSetSettings } from "../../../core/defaults.js";
 
 export const DEFAULT_WORKING_SET_SETTINGS: WorkingSetSettings = {
 	enabled: true,
 	policy: "structural-v1",
+	// The protection profile: `default` adds nothing to the absolute predicates.
+	// `data-analysis` and `web-design` pin what those kinds of work come back
+	// to; see policies/profiles.ts.
+	profile: "default",
 	target: 0.6,
 	protectLastTurns: 6,
 	// Real ledgers put most of a session inside one to four user turns, with up

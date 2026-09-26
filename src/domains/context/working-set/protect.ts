@@ -23,6 +23,23 @@ export interface ProtectionContext {
 	cutoffIndex: number;
 	input: PolicyInput;
 	index: PathIndex;
+	/** Units a protection profile pins (`profilePins` in policies/profiles.ts); absent means none. */
+	pins?: ReadonlySet<string>;
+	/**
+	 * The churn pin: a body the model recalled more than once stays where the
+	 * recall put it. The recalled body lives in the recall tool result, so the
+	 * pin protects that result, keyed by the ref it readmitted.
+	 */
+	pinRecalledTwice?: boolean;
+}
+
+/** The ref a recall-shaped tool result readmitted: `details.recall.ref`, written by context(scope=recall) and by a reread. */
+function recalledRef(payload: unknown): string | null {
+	if (!isRecord(payload)) return null;
+	const result = payload.result;
+	const details = isRecord(result) && isRecord(result.details) ? result.details : null;
+	const recall = details !== null && isRecord(details.recall) ? details.recall : null;
+	return recall !== null && typeof recall.ref === "string" && recall.ref.length > 0 ? recall.ref : null;
 }
 
 /** Ops whose identity is the file they touched, so a retry on the same path counts as the same call. */
@@ -104,6 +121,14 @@ export function isProtected(entry: SessionEntry, ctx: ProtectionContext): boolea
 	// The recent window is untouchable for both kinds.
 	if (ctx.entryIndex >= ctx.cutoffIndex) return true;
 	if (entry.role === "assistant") return false;
+
+	// Profile pins and the churn pin come before the floor: a pinned unit stays
+	// whatever its size.
+	if (ctx.pins?.has(entry.turnId)) return true;
+	if (ctx.pinRecalledTwice === true) {
+		const ref = recalledRef(entry.payload);
+		if (ref !== null && (ctx.input.view.recallsByRef.get(ref) ?? 0) >= 2) return true;
+	}
 
 	// The floor protects low-yield bodies from churn. The engine separately
 	// rejects any candidate whose marker would free zero or negative tokens, so

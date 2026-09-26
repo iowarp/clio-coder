@@ -84,6 +84,19 @@ function firstLine(text: string): string {
 	return line.trim().slice(0, PREVIEW_LIMIT).replace(/"/g, '\\"');
 }
 
+/**
+ * Reasons whose body tail is the first line rather than a preview. A resolved
+ * failure's first line says what failed; a settled receipt's first line says
+ * how the run ended (`dispatch (parallel) total=3 failed=0`). Every other
+ * reason, the new `search_narrowed`, `diff_applied` and `offloaded_body`
+ * included, previews: a search or a diff echo has no single headline, and an
+ * offloaded body renders no tail at all.
+ */
+const FIRST_LINE_REASONS: ReadonlySet<EvictionReason> = new Set<EvictionReason>([
+	"failure_resolved",
+	"dispatch_receipt_settled",
+]);
+
 export function renderMarker(input: MarkerInput): string {
 	const ref = input.alias ?? input.ref.entry;
 	const fields: string[] = [`ref=${ref}`, `reason=${input.reason}`];
@@ -96,9 +109,9 @@ export function renderMarker(input: MarkerInput): string {
 	// An offloaded body is one `read` away at a stable path; a preview of it
 	// would spend tokens repeating what the pointer already promises.
 	if (input.offloadPath === undefined) {
-		const failed = input.reason === "failure_resolved";
-		const tail = failed ? firstLine(input.text) : preview(input.text);
-		if (tail.length > 0) fields.push(`${failed ? "first_line" : "preview"}="${tail}"`);
+		const headline = FIRST_LINE_REASONS.has(input.reason);
+		const tail = headline ? firstLine(input.text) : preview(input.text);
+		if (tail.length > 0) fields.push(`${headline ? "first_line" : "preview"}="${tail}"`);
 	}
 	return `[evicted ${fields.join(" ")}]`;
 }

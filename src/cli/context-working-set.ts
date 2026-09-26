@@ -1,12 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { WORKING_SET_PROFILE_IDS, type WorkingSetProfileId } from "../core/defaults.js";
 import { assertSafeId } from "../core/safe-id.js";
 import { clioStatePath } from "../core/xdg.js";
 import { DEFAULT_WORKING_SET_SETTINGS } from "../domains/context/working-set/defaults.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { buildPathIndex } from "../domains/context/working-set/path-index.js";
-import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
+import { resolveReplayPolicy } from "../domains/context/working-set/policies/index.js";
 import { makeOraclePolicy, makeRandomPolicy, nonePolicy } from "../domains/context/working-set/replay/controls.js";
 import { loadClioTraces, type ReplayLoadCascade } from "../domains/context/working-set/replay/load-clio.js";
 import { aggregateReplayMetrics, type ReplayMeasurement } from "../domains/context/working-set/replay/metrics.js";
@@ -30,7 +31,9 @@ const REPLAY_HELP = `Usage:
 Options:
   --sessions <path>... Clio session directories, sessions roots, or ledger JSONL files
   --synthetic <ids>   comma-separated procedural corpora: ${SYNTHETIC_CORPORA.map((spec) => spec.id).join(",")}
-  --policies <ids>    comma-separated none,random,age-horizon,structural-v1,oracle
+  --policies <ids>    comma-separated none,random,age-horizon,structural-v1,structural-v2,oracle, or a
+                      composition: <id>+<rung>, <id>-<rung>, rungs:<a>/<b>/<c>
+  --profile <id>      protection profile: ${WORKING_SET_PROFILE_IDS.join(", ")} (default: ${DEFAULT_WORKING_SET_SETTINGS.profile})
   --budgets <tokens>  comma-separated budgets (default: 16000,32000,64000)
   --threshold <ratio> pressure threshold (default: 0.8)
   --target <ratio>    post-eviction pressure target (default: 0.6)
@@ -63,14 +66,17 @@ Print the durable working-set fold and path-index summary for one Clio session.
  */
 const REPLAY_SUMMARY_TOKENS = 1_500;
 
-const POLICY_IDS = ["none", "random", "age-horizon", "structural-v1", "oracle"] as const;
-type ReplayPolicyId = (typeof POLICY_IDS)[number];
+/** Replay-only controls; every other id resolves through the policy registry, compositions included. */
+const CONTROL_POLICY_IDS = ["none", "random", "oracle"] as const;
+const DEFAULT_POLICY_IDS = ["none", "random", "age-horizon", "structural-v1", "structural-v2", "oracle"] as const;
+type ReplayPolicyId = string;
 
 class CliUsageError extends Error {}
 
 interface ReplayArgs {
 	sessions: string[];
 	policies: ReplayPolicyId[];
+	profile: WorkingSetProfileId;
 	budgets: number[];
 	threshold: number;
 	target: number;
@@ -107,24 +113,23 @@ function requiredValue(args: ReadonlyArray<string>, index: number, flag: string)
 	return value;
 }
 
+function isControlPolicy(id: string): boolean {
+	return (CONTROL_POLICY_IDS as ReadonlyArray<string>).includes(id);
+}
+
 function policyResolves(id: ReplayPolicyId): boolean {
-	if (id === "none" || id === "random" || id === "oracle") return true;
-	try {
-		resolveWorkingSetPolicy(id);
-		return true;
-	} catch {
-		return false;
-	}
+	return isControlPolicy(id) || resolveReplayPolicy(id) !== null;
 }
 
 function defaultPolicies(): ReplayPolicyId[] {
-	return POLICY_IDS.filter(policyResolves);
+	return DEFAULT_POLICY_IDS.filter(policyResolves);
 }
 
 function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 	const parsed: ReplayArgs = {
 		sessions: [],
 		policies: defaultPolicies(),
+		profile: DEFAULT_WORKING_SET_SETTINGS.profile,
 		budgets: [16_000, 32_000, 64_000],
 		threshold: 0.8,
 		target: 0.6,
@@ -156,6 +161,7 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 		}
 		if (
 			arg === "--policies" ||
+			arg === "--profile" ||
 			arg === "--budgets" ||
 			arg === "--synthetic" ||
 			arg === "--threshold" ||
@@ -171,10 +177,15 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 			index += 1;
 			if (arg === "--policies") {
 				const values = commaValues(value, arg);
-				const unknown = values.filter((entry) => !(POLICY_IDS as ReadonlyArray<string>).includes(entry));
+				const unknown = values.filter((entry) => !policyResolves(entry));
 				if (unknown.length > 0) throw new CliUsageError(`unknown replay policy: ${unknown.join(", ")}`);
-				parsed.policies = values as ReplayPolicyId[];
+				parsed.policies = values;
 				policiesExplicit = true;
+			} else if (arg === "--profile") {
+				if (!(WORKING_SET_PROFILE_IDS as ReadonlyArray<string>).includes(value)) {
+					throw new CliUsageError(`unknown working-set profile: ${value}`);
+				}
+				parsed.profile = value as WorkingSetProfileId;
 			} else if (arg === "--budgets") {
 				parsed.budgets = commaValues(value, arg).map((entry) => {
 					const budget = numberValue(entry, arg);
@@ -256,7 +267,9 @@ function policyForTrace(id: ReplayPolicyId, graph: ReferenceGraph, seed: number)
 	if (id === "none") return nonePolicy;
 	if (id === "random") return makeRandomPolicy(seed);
 	if (id === "oracle") return makeOraclePolicy(graph);
-	return resolveWorkingSetPolicy(id);
+	const policy = resolveReplayPolicy(id);
+	if (policy === null) throw new CliUsageError(`unknown replay policy: ${id}`);
+	return policy;
 }
 
 function gitSha(): string | null {
@@ -325,6 +338,7 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 		});
 		const settings = {
 			...DEFAULT_WORKING_SET_SETTINGS,
+			profile: parsed.profile,
 			target: parsed.target,
 			protectLastTurns: parsed.protectLastTurns,
 			protectLastSteps: parsed.protectLastSteps,

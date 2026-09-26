@@ -1468,7 +1468,10 @@ export function buildSettingItems(
 			values: ["true", "false"],
 		}),
 		settingItem("context.workingSet.policy", workingSet.policy, {
-			values: ["structural-v1", "age-horizon"],
+			values: ["structural-v1", "structural-v2", "age-horizon"],
+		}),
+		settingItem("context.workingSet.profile", workingSet.profile, {
+			values: ["default", "data-analysis", "web-design"],
 		}),
 		settingItem("context.workingSet.target", formatThreshold(workingSet.target, "0.6"), {
 			values: ["0.4", "0.5", "0.6", "0.7"],
@@ -2401,7 +2404,12 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 			if (value === "true" || value === "false") settings.context.workingSet.enabled = value === "true";
 			return;
 		case "context.workingSet.policy":
-			if (value === "structural-v1" || value === "age-horizon") settings.context.workingSet.policy = value;
+			if (value === "structural-v1" || value === "structural-v2" || value === "age-horizon")
+				settings.context.workingSet.policy = value;
+			return;
+		case "context.workingSet.profile":
+			if (value === "default" || value === "data-analysis" || value === "web-design")
+				settings.context.workingSet.profile = value;
 			return;
 		case "context.workingSet.target": {
 			// The validator's bound is exclusive at both ends, so an eviction target

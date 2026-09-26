@@ -70,6 +70,7 @@ export function renderReplayJson(input: ReplayReportInput): string {
 			settings: {
 				enabled: input.config.settings.enabled,
 				policy: input.config.settings.policy,
+				profile: input.config.settings.profile,
 				target: input.config.settings.target,
 				protectLastTurns: input.config.settings.protectLastTurns,
 				protectLastSteps: input.config.settings.protectLastSteps,

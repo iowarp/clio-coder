@@ -195,12 +195,19 @@ export type DurableCompactionSettings = Omit<CompactionSettings, "excludeLastTur
  *     of the context window; every event cold-starts the prefix cache, and a
  *     checkpoint runs before every model request. Zero disables the band.
  *     Overflow recovery ignores it.
+ *   - profile: the protection profile, what a kind of work never gives up on
+ *     top of the absolute predicates (`default`, `data-analysis`,
+ *     `web-design`; src/domains/context/working-set/policies/profiles.ts).
+ *     Main agent only: workers run their own in-memory guard.
  */
-export type WorkingSetPolicyId = "age-horizon" | "structural-v1";
+export type WorkingSetPolicyId = "age-horizon" | "structural-v1" | "structural-v2";
+export const WORKING_SET_PROFILE_IDS = ["default", "data-analysis", "web-design"] as const;
+export type WorkingSetProfileId = (typeof WORKING_SET_PROFILE_IDS)[number];
 
 export interface WorkingSetSettings {
 	enabled: boolean;
 	policy: WorkingSetPolicyId;
+	profile: WorkingSetProfileId;
 	target: number;
 	protectLastTurns: number;
 	protectLastSteps: number;
@@ -735,6 +742,7 @@ context:
   workingSet:
     enabled: true
     policy: structural-v1
+    profile: default
     target: 0.6
     protectLastTurns: 6
     protectLastSteps: 8
