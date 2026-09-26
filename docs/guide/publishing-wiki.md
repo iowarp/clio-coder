@@ -20,12 +20,12 @@ Clone it beside the source checkout:
 git clone https://github.com/iowarp/clio-coder.wiki.git ../clio-coder-public-wiki
 ```
 
-For each publication, commit the reviewed pages to the source branch. After the
-Clio Coder v0.5.7 tag is public, export them from the source checkout:
+For each publication, commit and push the reviewed pages to the source branch,
+then export them from that checkout:
 
 ```bash
 git -C ../clio-coder-public-wiki pull --ff-only
-node scripts/export-github-wiki.mjs ../clio-coder-public-wiki v0.5.7
+node scripts/export-github-wiki.mjs ../clio-coder-public-wiki v057
 git -C ../clio-coder-public-wiki diff --stat
 git -C ../clio-coder-public-wiki status --short
 ```
@@ -58,5 +58,5 @@ previous exported counterparts explicitly.
 
 The source commit and the wiki commit are each atomic. Because they belong to
 separate repositories, Git cannot make both commits or pushes one transaction.
-Preserve the generation metadata honestly: present Markdown pages do not imply
-that every planned page passed the generator's evidence checks.
+Generation metadata records the generator's checkpoint. Manual page corrections
+retain that checkpoint independently of the wiki's v0.1 reference version.

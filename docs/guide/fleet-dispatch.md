@@ -1012,9 +1012,9 @@ gate decisions project onto independent review; briefing and project context
 project onto context provenance. A receipt does not contain independent-review or
 completion-evidence outcomes merely because it is sealed. Those axes remain
 `absent` until an authenticated gate artifact or finish assessment is composed.
-In particular, verified integrity cannot validate claims, known provenance
-cannot establish correctness, and a review verdict cannot establish
-authorship.
+Integrity authenticates the recorded artifact; provenance identifies its
+sources. Validation, review, and authorship are represented by their respective
+observations and authenticated identities.
 
 Gate references point backward: a reviewer references the builder it reviewed, a
 revise builder references the reviewer whose findings it received, and a judge

@@ -859,11 +859,11 @@ function installerExportLine(): string {
 
 function readmeBashBlockAfter(marker: string): string[] {
 	const readme = readRoot("README.md").split(/\r?\n/);
-	const heading = readme.indexOf("## Install");
-	if (heading < 0) throw new Error("README.md has no ## Install section");
+	const heading = readme.indexOf("## Get started");
+	if (heading < 0) throw new Error("README.md has no ## Get started section");
 	const anchor = readme.findIndex((line, index) => index > heading && line.startsWith(marker));
 	if (anchor <= heading) {
-		throw new Error(`the Install section no longer introduces its steps with ${JSON.stringify(marker)}`);
+		throw new Error(`the Get started section no longer introduces its steps with ${JSON.stringify(marker)}`);
 	}
 	const open = readme.indexOf("```bash", anchor);
 	if (open <= anchor) {
@@ -973,7 +973,7 @@ async function checkReadmeInstallBlock(): Promise<void> {
 	// version output, which passes even when a stale clio-coder shadows the one
 	// just installed.
 	const readme = readRoot("README.md");
-	const section = readme.split(/^## /m).find((part) => part.startsWith("Install\n")) ?? "";
+	const section = readme.split(/^## /m).find((part) => part.startsWith("Get started\n")) ?? "";
 	if (!section.includes("command -v clio-coder")) {
 		fail("readme-install-block", "the README no longer asks which file the bare name reaches");
 	}
@@ -1214,24 +1214,23 @@ function gitIgnored(paths: ReadonlyArray<string>): Set<string> {
 }
 
 // ---------------------------------------------------------------------------
-// readme-shape: the README's structure is a contract (CONTRIBUTING.md,
-// "README contract"). Between April and September 2026 it was rewritten five
-// times and re-inflated by release and feature passes within weeks each time,
-// because nothing but the Install block was checked. Length is deliberately
-// not limited; sections, their order and the required elements are.
+// readme-shape: the README layout and media contract is documented in CONTRIBUTING.md.
 // ---------------------------------------------------------------------------
 const README_SECTIONS = [
 	"Get started",
-	"Why Clio",
+	"Interfaces",
+	"Capabilities",
 	"Models",
-	"Everyday use",
-	"Safety",
-	"Install",
+	"Execution policy",
 	"Documentation",
 	"Contribute",
 	"Acknowledgements",
 ] as const;
-const README_SCREENSHOT = "assets/readme/clio-session.png";
+const README_SCREENSHOTS = [
+	"assets/screenshots/tui-boot.webp",
+	"assets/screenshots/gui-overview.webp",
+	"assets/screenshots/gui-conversation.webp",
+] as const;
 const README_CONTRACT = "change CONTRIBUTING.md#readme-contract and README_SECTIONS in the same commit";
 
 function checkReadmeShape(): void {
@@ -1286,10 +1285,12 @@ function checkReadmeShape(): void {
 			);
 		}
 	}
-	if (!text.includes(`https://raw.githubusercontent.com/iowarp/clio-coder/main/${README_SCREENSHOT}`)) {
-		fail("readme-shape", `README.md must show the product screenshot ${README_SCREENSHOT} from main`);
-	} else if (!existsSync(join(root, README_SCREENSHOT))) {
-		fail("readme-shape", `${README_SCREENSHOT} is referenced by README.md but missing from the tree`);
+	for (const screenshot of README_SCREENSHOTS) {
+		if (!text.includes(`https://raw.githubusercontent.com/iowarp/clio-coder/main/${screenshot}`)) {
+			fail("readme-shape", `README.md must show the product screenshot ${screenshot} from main`);
+		} else if (!existsSync(join(root, screenshot))) {
+			fail("readme-shape", `${screenshot} is referenced by README.md but missing from the tree`);
+		}
 	}
 
 	const sectionText = (name: string) => text.split(/^## /m).find((part) => part.startsWith(`${name}\n`)) ?? "";
@@ -1299,11 +1300,14 @@ function checkReadmeShape(): void {
 			"the agent orientation must stay a collapsed <details> block titled For agents under ## Documentation",
 		);
 	}
-	// Version numbers outside Install are release chronology that goes stale the
-	// day after a release; the Install pin is the one versioned line.
-	for (const name of README_SECTIONS.filter((section) => section !== "Install")) {
+	// Version numbers outside Get started are release chronology that goes stale the
+	// day after a release; the source-install pin is the versioned line.
+	for (const name of README_SECTIONS.filter((section) => section !== "Get started")) {
 		for (const version of sectionText(name).match(/\bv?\d+\.\d+\.\d+\b/g) ?? []) {
-			fail("readme-shape", `## ${name} names version ${version}; only the ## Install pin carries a release number`);
+			fail(
+				"readme-shape",
+				`## ${name} names version ${version}; only the ## Get started source-install pin carries a release number`,
+			);
 		}
 	}
 }

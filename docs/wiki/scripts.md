@@ -229,8 +229,7 @@ Two scripts are explicitly operator-run and are never part of CI:
 isolated home and a local stub HTTP target, starts typing the moment the
 Stage 0 editor paints, and times each keystroke's echo. It reports Stage 0
 commit, Stage 1 hydration, the longest input block, and first/max echo
-latency. The doc block states timings are "observations for a measurement
-campaign, never CI thresholds." `prepareHome` writes a scratch settings.yaml
+latency. `prepareHome` writes a scratch settings.yaml
 with an `lmstudio` runtime target and runs the CLI's `upgrade` command once to
 migrate settings and fill the compile cache; that first boot is not reported.
 

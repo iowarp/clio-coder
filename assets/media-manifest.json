@@ -6,7 +6,7 @@
 			"id": "brand-banner-png",
 			"source": "assets/banner.png",
 			"sha256": "b47abd537fdcf61809bd3b1b673a680346ef7d1c46fa5b5e350af384d757ed72",
-			"provenance": "Project-owned Clio Coder banner master retained in the repository; earlier design provenance is not separately recorded.",
+			"provenance": "Project-owned Clio Coder banner master retained in the repository",
 			"dimensions": {
 				"width": 2400,
 				"height": 750
@@ -15,9 +15,6 @@
 			"channels": ["repository", "press"],
 			"altTextSeed": "Clio Coder, IOWarp's terminal coding agent for scientific software.",
 			"representation": "brand-artwork",
-			"approval": "approved",
-			"approvalNotes": "Approved existing repository banner; retain as the lossless master.",
-			"supersessionNotes": "Not superseded.",
 			"copies": []
 		},
 		{
@@ -33,9 +30,6 @@
 			"channels": ["repository", "website"],
 			"altTextSeed": "Clio Coder, IOWarp's terminal coding agent for scientific software.",
 			"representation": "brand-artwork",
-			"approval": "approved",
-			"approvalNotes": "Approved for repository and website delivery.",
-			"supersessionNotes": "Not superseded.",
 			"copies": ["site/assets/banner.webp"]
 		},
 		{
@@ -51,9 +45,6 @@
 			"channels": ["social-profile", "press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"approval": "approved",
-			"approvalNotes": "Approved existing profile avatar.",
-			"supersessionNotes": "Not superseded.",
 			"copies": []
 		},
 		{
@@ -69,9 +60,6 @@
 			"channels": ["application"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"approval": "approved",
-			"approvalNotes": "Approved existing logo family.",
-			"supersessionNotes": "Not superseded.",
 			"copies": []
 		},
 		{
@@ -87,9 +75,6 @@
 			"channels": ["application"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"approval": "approved",
-			"approvalNotes": "Approved existing logo family.",
-			"supersessionNotes": "Not superseded.",
 			"copies": []
 		},
 		{
@@ -105,9 +90,6 @@
 			"channels": ["application", "website", "social-card"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"approval": "approved",
-			"approvalNotes": "Approved source for byte-identical website and GUI delivery copies.",
-			"supersessionNotes": "Not superseded.",
 			"copies": ["site/assets/logo.webp", "apps/clio-coder-gui/client/public/clio-coder-logo.webp"]
 		},
 		{
@@ -123,9 +105,6 @@
 			"channels": ["application", "press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"approval": "approved",
-			"approvalNotes": "Approved existing logo family.",
-			"supersessionNotes": "Not superseded.",
 			"copies": []
 		},
 		{
@@ -141,9 +120,6 @@
 			"channels": ["website", "press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"approval": "approved",
-			"approvalNotes": "Approved source for the byte-identical website delivery copy.",
-			"supersessionNotes": "Not superseded.",
 			"copies": ["site/assets/logo-512.webp"]
 		},
 		{
@@ -159,9 +135,6 @@
 			"channels": ["press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"approval": "approved",
-			"approvalNotes": "Approved existing logo family.",
-			"supersessionNotes": "Not superseded.",
 			"copies": []
 		},
 		{
@@ -177,9 +150,6 @@
 			"channels": ["press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"approval": "approved",
-			"approvalNotes": "Approved existing logo family.",
-			"supersessionNotes": "Not superseded.",
 			"copies": []
 		},
 		{
@@ -195,9 +165,6 @@
 			"channels": ["gui"],
 			"altTextSeed": "Clio Coder application icon.",
 			"representation": "brand-artwork",
-			"approval": "approved",
-			"approvalNotes": "Promoted from the existing GUI delivery asset to establish a canonical master.",
-			"supersessionNotes": "Not superseded.",
 			"copies": ["apps/clio-coder-gui/client/public/icon-192.png"]
 		},
 		{
@@ -213,16 +180,13 @@
 			"channels": ["gui"],
 			"altTextSeed": "Clio Coder application icon.",
 			"representation": "brand-artwork",
-			"approval": "approved",
-			"approvalNotes": "Promoted from the existing GUI delivery asset to establish a canonical master.",
-			"supersessionNotes": "Not superseded.",
 			"copies": ["apps/clio-coder-gui/client/public/icon-512.png"]
 		},
 		{
 			"id": "terminal-session-png",
 			"source": "assets/readme/clio-session.png",
 			"sha256": "cdcf75cacaabad836220bc447a2d99dff31727a2cf49ee43655d011e43e14f1c",
-			"provenance": "Actual Clio terminal session already approved for the project README; the README caption describes the local 27B scenario. Original capture command and date are not recorded.",
+			"provenance": "Terminal session capture retained from the project README.",
 			"dimensions": {
 				"width": 2012,
 				"height": 2104
@@ -231,16 +195,13 @@
 			"channels": ["repository", "website"],
 			"altTextSeed": "A Clio Coder terminal session showing a failing numerical test, diagnosis, a two-line solver edit, and the passing test run.",
 			"representation": "real-product-capture",
-			"approval": "approved",
-			"approvalNotes": "Approved existing README capture; no general correctness or performance claim.",
-			"supersessionNotes": "Not superseded.",
 			"copies": ["site/assets/session.png"]
 		},
 		{
 			"id": "terminal-session-webp",
 			"source": "assets/readme/clio-session.webp",
 			"sha256": "60b5985f63dcc4e6394a0927a50672e4b7f3153b134c5d1b0f95bdef73410fc7",
-			"provenance": "Optimized half-size WebP derivative of the approved terminal session capture.",
+			"provenance": "Optimized derivative of terminal-session-png.",
 			"dimensions": {
 				"width": 1006,
 				"height": 1052
@@ -249,10 +210,99 @@
 			"channels": ["website"],
 			"altTextSeed": "A Clio Coder terminal session showing a failing numerical test, diagnosis, a two-line solver edit, and the passing test run.",
 			"representation": "real-product-capture",
-			"approval": "approved",
-			"approvalNotes": "Approved optimized derivative of terminal-session-png.",
-			"supersessionNotes": "Not superseded.",
 			"copies": ["site/assets/session.webp"]
+		},
+		{
+			"id": "tui-boot-png",
+			"source": "assets/screenshots/tui-boot.png",
+			"sha256": "6b68401004b45ed85cac8fe089f76d8ffa91e06266f86821957132a6e3bbe0ea",
+			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"dimensions": {
+				"width": 3766,
+				"height": 2003
+			},
+			"role": "Terminal boot screen",
+			"channels": ["repository", "website"],
+			"altTextSeed": "Clio Coder terminal boot screen with the model, workspace, fleet, shortcuts, composer and context footer.",
+			"representation": "real-product-capture",
+			"copies": ["site/assets/tui-boot.png"],
+			"capturedVersion": "0.5.6"
+		},
+		{
+			"id": "tui-boot-webp",
+			"source": "assets/screenshots/tui-boot.webp",
+			"sha256": "f8ffd53ad1ea14eb6d62fa874eab66aeb6e06c3de03b81e931230a92bf6ac976",
+			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"dimensions": {
+				"width": 1920,
+				"height": 1021
+			},
+			"role": "Terminal boot screen",
+			"channels": ["repository", "website"],
+			"altTextSeed": "Clio Coder terminal boot screen with the model, workspace, fleet, shortcuts, composer and context footer.",
+			"representation": "real-product-capture",
+			"copies": ["site/assets/tui-boot.webp"],
+			"capturedVersion": "0.5.6"
+		},
+		{
+			"id": "gui-conversation-png",
+			"source": "assets/screenshots/gui-conversation.png",
+			"sha256": "684e598e04c075ec5f7005bc2559e759d21650a025acfb72bddc78b306dd9827",
+			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"dimensions": {
+				"width": 1513,
+				"height": 1489
+			},
+			"role": "Browser conversation view",
+			"channels": ["repository", "website"],
+			"altTextSeed": "Clio Coder browser conversation with project prompts, session tools, file attachments and model selection.",
+			"representation": "real-product-capture",
+			"copies": ["site/assets/gui-conversation.png"]
+		},
+		{
+			"id": "gui-conversation-webp",
+			"source": "assets/screenshots/gui-conversation.webp",
+			"sha256": "300b1b010491ec3a130103fb15d406c00492a74b25879327547570eccf376451",
+			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"dimensions": {
+				"width": 1513,
+				"height": 1489
+			},
+			"role": "Browser conversation view",
+			"channels": ["repository", "website"],
+			"altTextSeed": "Clio Coder browser conversation with project prompts, session tools, file attachments and model selection.",
+			"representation": "real-product-capture",
+			"copies": ["site/assets/gui-conversation.webp"]
+		},
+		{
+			"id": "gui-overview-png",
+			"source": "assets/screenshots/gui-overview.png",
+			"sha256": "559811a320c674dd05b31780c856547475c3cd08ecb8f673cea4403863c467f8",
+			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"dimensions": {
+				"width": 2072,
+				"height": 1282
+			},
+			"role": "Browser overview view",
+			"channels": ["repository", "website"],
+			"altTextSeed": "Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings.",
+			"representation": "real-product-capture",
+			"copies": ["site/assets/gui-overview.png"]
+		},
+		{
+			"id": "gui-overview-webp",
+			"source": "assets/screenshots/gui-overview.webp",
+			"sha256": "938bb8feef5e3d6498e932180f6ec1fb5bb1a7d1ac94944f33ad35d50b52581a",
+			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"dimensions": {
+				"width": 1920,
+				"height": 1188
+			},
+			"role": "Browser overview view",
+			"channels": ["repository", "website"],
+			"altTextSeed": "Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings.",
+			"representation": "real-product-capture",
+			"copies": ["site/assets/gui-overview.webp"]
 		}
 	],
 	"socialExports": [
@@ -278,10 +328,7 @@
 			"role": "Dark landscape social preview",
 			"channels": ["open-graph", "x", "linkedin", "release"],
 			"altTextSeed": "Clio Coder social preview: AI coding for the code science runs on, with an illustrative request-to-review workflow.",
-			"representation": "illustrative",
-			"approval": "approved",
-			"approvalNotes": "Approved evergreen product card; workflow is illustrative, not a captured run.",
-			"supersessionNotes": "Not superseded."
+			"representation": "illustrative"
 		},
 		{
 			"id": "social-link-light",
@@ -305,10 +352,7 @@
 			"role": "Light landscape social preview",
 			"channels": ["open-graph", "x", "linkedin", "release"],
 			"altTextSeed": "Light Clio Coder social preview: AI coding for the code science runs on, with an illustrative request-to-review workflow.",
-			"representation": "illustrative",
-			"approval": "approved",
-			"approvalNotes": "Approved evergreen product card; workflow is illustrative, not a captured run.",
-			"supersessionNotes": "Not superseded."
+			"representation": "illustrative"
 		},
 		{
 			"id": "social-square-dark",
@@ -332,10 +376,7 @@
 			"role": "Dark square social preview",
 			"channels": ["mastodon", "bluesky", "instagram", "release"],
 			"altTextSeed": "Square Clio Coder social preview: AI coding for the code science runs on, with an illustrative request-to-review workflow.",
-			"representation": "illustrative",
-			"approval": "approved",
-			"approvalNotes": "Approved evergreen product card; workflow is illustrative, not a captured run.",
-			"supersessionNotes": "Not superseded."
+			"representation": "illustrative"
 		},
 		{
 			"id": "social-square-light",
@@ -359,10 +400,7 @@
 			"role": "Light square social preview",
 			"channels": ["mastodon", "bluesky", "instagram", "release"],
 			"altTextSeed": "Light square Clio Coder social preview: AI coding for the code science runs on, with an illustrative request-to-review workflow.",
-			"representation": "illustrative",
-			"approval": "approved",
-			"approvalNotes": "Approved evergreen product card; workflow is illustrative, not a captured run.",
-			"supersessionNotes": "Not superseded."
+			"representation": "illustrative"
 		}
 	]
 }

@@ -199,7 +199,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `TrustVerdict` and `trustVerdict` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts).
 
 ### 49. Trust Vocabulary
-- **Definition**: The standardized word for each canonical state, so the same fact is never spelled two ways. `sealed` means the receipt authenticated against the ledger row; it says nothing about correctness. `grounded` means validation was observed to run and pass, named by its claimant (`host-verification`, `validation-tool`, `receipt-quality`, `evidence-grounding`). `independently reviewed` means an authenticated reviewer that was not the run itself recorded a verdict. `inferred` means the worker claimed validation and nothing was observed to have run. `unknown` means a named source could not answer; `not applicable` means a named authority decided the axis does not apply.
+- **Definition**: The standardized word for each canonical state, so the same fact is never spelled two ways. `sealed` means the receipt authenticated against the ledger row. `grounded` means validation was observed to run and pass, named by its claimant (`host-verification`, `validation-tool`, `receipt-quality`, `evidence-grounding`). `independently reviewed` means an authenticated reviewer that was not the run itself recorded a verdict. `inferred` means the worker claimed validation and nothing was observed to have run. `unknown` means a named source could not answer; `not applicable` means a named authority decided the axis does not apply.
 - **Owning Type**: `TRUST_STATE_WORDS` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts).
 
 ### 50. Commonly Confused Trust States

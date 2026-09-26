@@ -4,44 +4,22 @@
 
 # Clio Coder documentation
 
-This is the documentation map for Clio Coder. Start with the path closest to
-what you are trying to do; the deeper references are here when you need exact
-schemas, wire contracts, or architectural invariants.
-
-The authored Markdown is authoritative for product documentation. The guides
-track the current source tree. Released behavior is fixed by the corresponding
-Git tag and [changelog](../CHANGELOG.md). If prose and the checked source
-disagree, treat source, schema validation, and contract tests as authoritative,
-and please fix or report the documentation drift.
-
-[`corpus.json`](corpus.json) defines two deliberately separate corpora:
+Guides and architecture references for **Clio Coder**. Start with the
+workflow you need, then use the architecture pages for schemas, runtime flow,
+and implementation boundaries.
 
 ```text
 docs/
-├── README.md        Product documentation map
-├── guide/           Authored operator and user workflows
-├── architecture/    Authored current runtime contracts and design
-└── wiki/            Generated development reference, not product guidance
+├── README.md        Documentation map
+├── guide/           Configuration and operator workflows
+├── architecture/    Runtime architecture and contracts
+└── wiki/            Generated development reference, v0.1
 ```
 
-The installed GUI is a direct renderer of the product Markdown. The public
-website is a generated, release-pinned snapshot with source ref and content-hash
-provenance. The [GitHub Wiki](https://github.com/iowarp/clio-coder/wiki) is the
-published mirror of `docs/wiki/`, a generated source, symbol, and test map for
-contributors. See [Publishing the wiki](guide/publishing-wiki.md) for its
-separate review and publication workflow. Generated Wiki pages do not compete
-with current product guidance in application navigation, search, agent
-retrieval, or the product website.
-
-Clio Coder is first and foremost a terminal coding agent. An opt-in alpha
-graphical application (`clio-coder gui`, and `clio-coder docs` for reading these
-pages in a browser) is available for power users; nothing starts it unless you
-run it, and it claims no parity with the terminal. Start with the [release
-notes](../CHANGELOG.md), [configuration and target
-guide](guide/configuration-and-targets.md), and [pre-release
-checks](../CONTRIBUTING.md#validation-reference). The current guides describe
-the working implementation, not a promise that an unreleased candidate has been
-published or that every server capability has been tested.
+The installed application reads the authored Markdown directly; the website
+serves a release-linked snapshot. The [GitHub Wiki](https://github.com/iowarp/clio-coder/wiki)
+is a developing source reference with independent v0.1 versioning. Use the
+architecture guides and current source for implementation decisions.
 
 ## Start here
 
@@ -105,8 +83,8 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Where generated files live and who should read them | [Artifact Placement](architecture/artifact-placement.md) |
 | Versioned artifact schemas and migration policy | [Artifact Versions](architecture/artifact-versions.md) |
 
-Receipts establish what Clio observed and did. They do not replace domain
-validation, reference data, or human scientific judgment.
+Receipts link execution observations to tool activity and results. Project checks,
+reference data, and review define the acceptance criteria for a change.
 
 ## Delegation and fleets
 
@@ -141,7 +119,7 @@ validation, reference data, or human scientific judgment.
 | Package kinds, catalog resolution, integrity, and trust | [Library Architecture](architecture/library.md) |
 | Pi framework boundary and Clio-owned policy | [Pi Boundary](architecture/pi-boundary.md) |
 | Clock, duration, timestamp, and ordering conventions | [Time Conventions](architecture/time-conventions.md) |
-| Package, npm, GitHub, website, docs, Wiki, and communications checkpoints | [Release Readiness](guide/release-readiness.md) |
+| Package qualification, release tags, website documentation, and Wiki updates | [Release Readiness](guide/release-readiness.md) |
 | Core terms mapped to source concepts | [Glossary](guide/glossary.md) |
 
 ## Developer quick start
@@ -168,14 +146,6 @@ Use `pnpm run dev` for a watch build. Before handing back a change, run the
 focused test while iterating and `pnpm run ci` for the deterministic repository
 gate. Maintainers use `pnpm run ci:release` to add the distribution and package
 audit.
-
-## Project context in a source checkout
-
-Projects can keep human-owned guidance in `CLIO-CODER.md`, generated with
-`clio-coder context init`. This repository gitignores its own generated copy so
-local dogfooding instructions do not collide with public documentation. If the
-file exists in your checkout, read it before making changes; if it does not,
-the architecture guide and `CONTRIBUTING.md` are the public starting points.
 
 ## Where Clio finds these docs when it is running in someone else's project
 
@@ -220,10 +190,8 @@ until Ctrl+C. The command never installs a service.
 
 ## Reading in the application
 
-Clio Coder is designed primarily as a terminal coding agent; the bundled web
-application is an early preview for browsing documentation, reviewing sessions,
-and inspecting workspace telemetry, rather than claiming production GUI parity.
-The GUI renders the authoritative product Markdown directly with the
+The browser application provides session controls, project navigation, and
+execution inspection. Its documentation viewer renders product Markdown with the
 application's theme, syntax highlighting, copy controls, tables, and diagrams.
 Navigation groups come from this map, search indexes the same product pages, and
 each page's outline is generated from its headings. Internal product references

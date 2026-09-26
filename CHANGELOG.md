@@ -1,86 +1,58 @@
 # Changelog
 
-All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/).
+Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-### Project context
+### Verification and execution evidence
 
-- The structural index is now called a codemap and uses `.clio-coder/codemap.json`; legacy `codewiki.json` artifacts remain readable and reset clears both names. Compact JSON and the existing index schema remain in place.
-- Indexed projects record bounded deterministic orientation in existing lifecycle state: declared purpose and commands, source/test coverage, areas, entry candidates, provenance and input freshness. Oversized or unreadable manifests remain unknown while facts from other checked inputs retain explicit partial coverage. `code_nav mode=project` retrieves current Git and durable operator-task evidence without treating task status as verified completion.
-- Prompt compilation reports recorded snapshots without synchronously hashing the whole project or checking every wiki source. Bounded workers receive codemap, orientation and wiki discovery even without a handbook; worktree handbook fallback retains the worktree's structural context.
-- Changed-file reconciliation avoids building dependencies twice. Bootstrap completion and session timestamp updates preserve newer index state under the shared lease. Retrieved navigation JSON is compact, and partial wiki checkpoints remain explicitly unvalidated.
-- CMake orientation ignores declarations inside comments and quoted examples, and preset commands preserve literal names with shell quoting. Project status counts and bounds complete Git rename/copy records; a failed codemap rebuild leaves orientation unavailable while retaining readable Git and operator-task evidence.
+- Repository quality policies in `.clio-coder/quality.yaml` select required checks by changed path. A valid policy selects high rigor unless overridden.
+- Verification records source, check-declaration, and policy fingerprints. Completion assessment requires fresh evidence for the covered inputs and reports outstanding requirements in interactive and worker runs.
+- Receipts distinguish executed checks, denied checks, result quality, and completion findings. Denied verification calls preserve their admission outcome without acquiring a validation result.
+- Validation grounding recognizes equivalent npm, pnpm, and Yarn test-script invocations.
 
-### Session context
+### Project and session context
 
-- `structural-v2` is the default reversible working-set policy, with assistant-step protection, repeated-recall protection, and `default`, `data-analysis`, and `web-design` profiles. A rearm band delays another automatic eviction or summary until the projected ledger grows; request-fit recovery still bypasses it.
-- Model recall accepts an evicted read's path while its marker remains visible; historical results behind a summary remain discoverable and recallable by ref. An unchanged reread records recall provenance, repeated reread copies retain the body's recall lineage, and recall-recording failures preserve a successful read.
-- **Compatibility:** Session format 6 adds eviction reasons, reread triggers, and optional content hashes. Supported older ledgers remain readable and are restamped when opened; older readers that support only format 5 refuse format 6. Upgrade clients together before reopening these sessions.
-- `/context` shows the selected non-default profile and rearm percentage. Replay retains recorded recall evidence, uses the same projected-ledger headroom as live eviction, and pairs non-default profile results with default-profile runs over the same corpus in Markdown and JSON reports.
-- A reviewed handoff draft is bound to the active session and branch state. Switching branches or invoking session lifecycle commands directly through ACP invalidates it, so stale draft prose cannot create a successor session.
+- The structural index is now a **codemap**, stored at `.clio-coder/codemap.json`. Existing schema-v5 indexes and legacy `codewiki.json` artifacts remain readable.
+- Bounded project orientation includes declared purpose, commands, entry candidates, areas, counts, workspace scope, observation time, and input identities. `code_nav` project mode retrieves current Git and durable operator-task status.
+- Foreground prompt assembly uses bounded state and root inputs. Incremental reconciliation shares dependency work, and dispatched workers receive orientation independently of handbook availability.
+- CMake orientation handles comments, quoted examples, and literal preset names. Project status handles grouped Git rename/copy records and remains available during codemap rebuild failures.
+- `structural-v2` becomes the default working-set policy, protecting recent assistant steps and repeated recalls. The `default`, `data-analysis`, and `web-design` profiles tailor retained context to the task.
+- Context pressure is checked before each model request, including tool continuations. A rearm band controls repeated automatic eviction and summary; `/context` displays the active profile and rearm percentage.
+- Recall supports visible eviction-marker paths and historical references. Rereads preserve recall lineage, and recall-recording failures preserve successful file reads.
+- Reviewed handoffs are bound to the active session, conversation branch, and decisions. Changes invalidate a draft before it creates the successor session.
+- **Session compatibility:** format 6 records eviction reasons, reread triggers, and optional content hashes. Supported older ledgers are upgraded when opened; format-5 readers cannot reopen format-6 sessions. Upgrade clients sharing sessions together.
 
-### Graphical application and ACP
+### Browser application and ACP
 
-The browser GUI remains opt-in alpha. These items add GUI/ACP access to shared runtime behavior; where a workflow already existed elsewhere, they are not new core capability. Controls are available only when the host advertises the required capability.
-
-- The session board brings operator tasks, the assistant plan, recorded decisions and task-memory status together. Operators can supersede a decision without erasing it and propose selected knowledge or procedural entries for review; a proposal is not accepted memory.
-- Conversation trees can continue from a selected turn or fork to a successor session, and reviewed handoff drafts can start the next session. Conversation branches do not rewind files or Git, and stale handoff drafts are invalidated after session or branch state changes.
-- Fleet controls preview waves, steps, routes, write boundaries, gates and budget before approval, then refuse execution when the approval identity changes. The approval identity and durable DAG hash remain distinct; routes and environment are not promised immutable for an entire multistep run.
-- New requests can carry supported images, workspace `@path` inputs and bounded UTF-8 text files. Model and thinking controls distinguish this conversation's next request from settings saved for every project; image usefulness still depends on model and server vision support.
-- Side questions avoid adding a conversation turn, while labelled alternative drafts can include a model judge's verdict, not independent correctness validation. Session usage and provider-reported quota stay separate, and extension eligibility, reload results and library updates are available to open sessions.
-
-### Safety
-
-- Damage control no longer blocks a destructive command that appears only as quoted text in `echo` or `printf` arguments, a `git commit -m` or `git tag -m` message, or a `grep` or `rg` pattern, including when the bash call names a working directory. The exemption applies only when the whole command has no `eval`, pipe, heredoc, substitution, shell, interpreter or wrapper command, and never to SQL rules. Every other command is still scanned whole.
-- Git commands are normalized before rule matching. Quoted program, subcommand and option words, global options before the subcommand (`-C`, `--git-dir`, `-c`), combined short flags, unique abbreviations of destructive long options and backslash-newline continuations get the same handling as their plain spellings, so commands like these may now ask or hit a hard block where they used to run.
-- Checking out the whole worktree and forced checkout ask for confirmation, and a `+`-prefixed push refspec is blocked like `--force`.
-- `git push --force-with-lease` follows the ordinary git rail instead of being blocked as an unconditional force push.
-- `git clean` previews (`-n`, `--dry-run` and combined forms such as `-nd`) run, while a forced clean is still blocked. Git-accepted unique prefixes of force options in `clean` and `checkout` reach the same rail as their full spellings.
-- `git restore --source=<ref>` for named files follows the ordinary git rail. Whole-worktree restores and `git branch -d` still ask.
-
-### Receipts and evidence
-
-- Project policies in `.clio-coder/quality.yaml` activate required checks by changed path and select high rigor unless overridden. Native verification records fresh source, declaration, and policy fingerprints; interactive and dispatched completion audits retain structured quality findings.
-- A `verify` check whose only calls were blocked seals no typed validation fact, so a check that never ran no longer reads as failed, and read-only runs stop showing `quality validation failed` for denied checks.
-- Worker instructions leave denied checks out of `validations` and cite read sources in the summary. A report that changed nothing may use an empty `validations` array with unmeasured quality, and so may an editing report when every check it attempted was blocked. Receipts sealed by earlier builds still verify unchanged.
-- Validation grounding treats `npm test`, `pnpm test` and `yarn test` and their `run test` forms as one command, including the test command `verify` records and a claim that ends in a colon. Other script names stay distinct.
-- Fleet preview shows appended typed command arguments; bounded previews explicitly mark omitted steps, argument entries and write paths as truncated. Approval identity covers the selected recipes, resolved routes, and registered invocation details including command, working directory, environment, timeout, slots, and budget; it remains distinct from the durable DAG hash. The identity is an approval-boundary check, not a promise that routes or environment stay immutable throughout a multistep run.
-
-### Providers and doctor
-
-- Inception Mercury keeps its required `reasoning_effort: "instant"` in chat turns and tool probes. Before, model discovery could strip it, and Mercury spent the token budget on hidden reasoning.
-- `doctor --deep` reports a target whose runtime has no live probe, such as OpenAI Codex and Anthropic Max subscriptions, as INFO with its credential source. Missing credentials and failed health checks stay WARN.
-- `doctor --fix` regenerates a stale or missing Yazi files-pane profile. A profile that is missing before first use is INFO, a failed generation stays WARN until it succeeds, and an unwritable cache reports a profile error instead of throwing.
-- Doctor no longer reports an installed Slurm client as a working scheduler when the host has no Slurm configuration or controller to reach, and it says so.
-
-### Quota
-
-- **Behavior change:** When any Clio directory is relocated through `CLIO_CODER_HOME` or a `CLIO_CODER_*_DIR` variable, quota no longer reads the Codex, Claude Code or agy CLI credentials from your real home unless that product's own home is set (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `ANTIGRAVITY_HOME`). Default homes keep showing those accounts, and Clio's own Anthropic Max credentials work in either.
-- The Local AI `$0.00` row appears only when a local-runtime target is configured.
-
-### Lifecycle
-
-- Bare `clio-coder gui` opens or reuses this installation's owned background application when present and otherwise starts a private foreground server. An installed Linux background application can refresh its launch paths after an upgrade only while idle; macOS and Windows continue to use the private server path.
+- The alpha browser application exposes session boards, operator tasks, plans, decisions, memory proposals, context inspection and recovery, conversation branches, and reviewed handoffs through ACP host capabilities.
+- Fleet previews show waves, routes, write boundaries, gates, command arguments, and budget. Execution checks the approved recipes, resolved routes, and registered invocation bindings; bounded previews mark omitted details.
+- Requests accept supported images, workspace `@path` references, and bounded UTF-8 text attachments. Model and thinking controls distinguish conversation settings from saved project defaults.
+- Side questions and labelled alternative drafts run beside the main conversation. Draft comparison can use a configured decision model.
+- Session usage, provider quota, extension eligibility and reload, and library updates are available to open browser sessions. ACP hosts also bind sharing, archive operations, advisor and council workflows, and transcript export.
+- Bare `clio-coder gui` reuses the installation's owned background application or starts a private foreground server. Installed Linux background applications refresh launch paths after an upgrade while idle.
 
 ### Terminal interface
 
-- Live Fleet runs sit in a section just above the composer instead of an island painted over the transcript, and the section takes no rows when nothing is running.
-- `/settings targets` adds a target and edits a target's URL, runtime and default model inside the TUI through the configure wizard in the dock, and `/config` opens the same settings surface (#385).
-- With an empty composer, `?` opens a docked key card, `←` opens Fleet Runs and `↓` opens Tasks. With a draft, those keys type and move the cursor as before.
-- Task cards are grouped under section headings with empty states.
-- `/usage` opens on a new Activity tab with a workspace heatmap of session, git and quota activity, and the other tabs move to `2` through `5`. Unknown or not-yet-recorded cost stays unavailable instead of becoming `$0.00`, and a pending or unavailable Git observation does not invent a repository label.
-- The footer, fleet route labels, model picker marks and council detail share one wording and one set of marks, and machine metrics are sampled only while Status is open.
+- Live fleet activity appears above the composer, and tasks use grouped cards with empty states.
+- `/settings targets` supports adding and editing targets inside the docked configuration wizard; `/config` opens settings.
+- With an empty composer, `?` opens quick help, left arrow opens fleets, and down arrow opens tasks.
+- `/usage` opens an Activity workspace heatmap alongside Accounts, Session, Models, and Workers views. Price coverage and Git observation state are displayed from available accounting and status data.
 
-### Fixes
+### Safety, providers, and diagnostics
 
-- Internal dispatches (bootstrap, wiki generation, oracle, watchdog and retries) report their typed-scope diagnostic once per root run instead of repeating the path inventory on every attempt.
-- ACP side-question and draft failures return host-authored failure text while retaining original provider details in diagnostics, rather than exposing raw provider prose to the conversation.
+- Git normalization handles quoted words, global options, combined flags, accepted long-option prefixes, and line continuations before policy matching. Forced checkout, whole-worktree operations, and force-prefixed push refspecs retain their applicable permission or block rules.
+- Dry-run clean, leased pushes, and named-file restores use their respective Git rules. Proven inert quoted command text is excluded from destructive shell matching.
+- Inception Mercury retains its required instant reasoning setting in chat and tool probes.
+- Doctor distinguishes unavailable probes from failed health checks, repairs managed Yazi profiles, and checks Slurm controller configuration.
+- Relocated Clio homes isolate sibling-CLI credential discovery unless the corresponding product home is explicitly configured. Local-runtime accounting appears when a local target is configured.
+- ACP aside failures return host diagnostics summaries while provider response bodies remain in the diagnostic stream.
 
-### Development
+### Documentation and distribution
 
-- The generated development wiki is checked into `docs/wiki/`, with a repeatable exporter for the public GitHub Wiki that preserves diagrams and metadata while adapting page links and navigation.
-- CI runs the installed-package suite on every push as part of the required `ci (22)` check, so a packaging break no longer waits for release qualification to surface.
+- Product documentation describes the current architecture, configuration, context, verification, and delegation interfaces. Generated development wiki pages retain independent **v0.1** versioning.
+- Website documentation is linked to its release source. README and website include terminal and browser captures, and reusable media have checked hashes, dimensions, and delivery copies.
+- The installed package contains authored product documentation and its corpus metadata; generated development wiki pages remain in the repository and GitHub Wiki.
 
 ## 0.5.6 - 2026-09-25
 

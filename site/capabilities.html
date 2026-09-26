@@ -143,8 +143,7 @@
         <div class="detail-heading">
           <h2>Built around your<br />verification workflow.</h2>
           <p>
-            Use your project’s existing tests and scientific acceptance
-            criteria.
+            Run declared checks and map changed paths to repository-owned quality requirements.
           </p>
         </div>
         <div class="detail-body">
@@ -161,7 +160,7 @@
               <dd>
                 The <code>verify</code> tool supports pytest, unittest, Cargo,
                 Go, CMake presets, Make, just, and scripts already used by CI.
-                It can compare numerical results and apply performance budgets.
+                It can compare numerical results and apply performance budgets. Quality policies track required checks against the current covered inputs.
               </dd>
             </div>
             <div>
@@ -395,10 +394,9 @@
               </dd>
             </div>
             <div>
-              <dt>Code index</dt>
+              <dt>Codemap and project view</dt>
               <dd>
-                A Tree-sitter index helps navigate large code trees. Parsing
-                stays outside the interactive input loop.
+                A Tree-sitter codemap supports structural navigation. The project view combines bounded orientation with current Git and recorded operator-task status; indexing runs outside foreground prompt assembly.
               </dd>
             </div>
             <div>
@@ -470,8 +468,7 @@
           <pre><code>clio-coder evidence list
 clio-coder evidence inspect &lt;evidenceId&gt;</code></pre>
           <p>
-            Recorded checks establish observations, not scientific truth.
-            Validate against your own reference data and acceptance criteria.
+            Use repository tests, numerical references and performance budgets as the acceptance criteria for your workflow.
           </p>
           <a
             class="text-link"
@@ -485,8 +482,7 @@ clio-coder evidence inspect &lt;evidenceId&gt;</code></pre>
         <div class="detail-heading">
           <h2>Connect the rest<br />of your toolkit.</h2>
           <p>
-            Reuse procedures and coordinate specialist tools without hiding
-            their limits.
+            Reuse procedures and coordinate specialist tools through declared connectors and extension interfaces.
           </p>
         </div>
         <div class="detail-body">
@@ -542,8 +538,7 @@ clio-coder evidence inspect &lt;evidenceId&gt;</code></pre>
             <div>
               <dt>GUI alpha</dt>
               <dd>
-                The browser application is opt-in and still developing. Terminal
-                and GUI coverage differ.
+                Project and conversation views, attachments, session controls, fleet previews, traces, evidence and configuration are available through the alpha browser application.
               </dd>
             </div>
             <div>
@@ -554,17 +549,9 @@ clio-coder evidence inspect &lt;evidenceId&gt;</code></pre>
               </dd>
             </div>
             <div>
-              <dt>Deferred work</dt>
+              <dt>Execution environment</dt>
               <dd>
-                The high-authority self-edit gate is designed but not enforced.
-                Container and cloud worker transports are deferred.
-              </dd>
-            </div>
-            <div>
-              <dt>Practical boundaries</dt>
-              <dd>
-                Clio does not provide an OS sandbox, promise GUI parity, or
-                establish scientific correctness from a passing command.
+                Tool calls use Clio’s admission policy and the operator’s operating-system permissions. Native workers run locally or on configured SSH nodes.
               </dd>
             </div>
           </dl>

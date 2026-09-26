@@ -8,6 +8,7 @@
 	"developmentWiki": {
 		"label": "Generated development Wiki reference",
 		"root": "wiki/",
-		"generated": true
+		"generated": true,
+		"version": "0.1"
 	}
 }

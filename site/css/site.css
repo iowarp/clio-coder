@@ -429,6 +429,40 @@ pre code {
 	overflow: hidden;
 	box-shadow: 0 24px 60px rgba(0, 0, 0, 0.12);
 }
+.interface-preview img,
+.interface-capture img {
+	display: block;
+	width: 100%;
+}
+.interface-preview figcaption,
+.interface-capture figcaption {
+	display: flex;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 14px 18px;
+	font: 12px / 1.6 var(--font-mono);
+	color: var(--ink-soft);
+}
+.interface-preview figcaption span {
+	color: var(--muted);
+}
+.interface-gallery {
+	display: grid;
+	grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+	gap: 28px;
+	align-items: start;
+}
+.interface-capture {
+	background: var(--paper-raised);
+	border: 1px solid var(--line-control);
+	border-radius: 8px;
+	overflow: hidden;
+}
+@media (max-width: 760px) {
+	.interface-gallery {
+		grid-template-columns: 1fr;
+	}
+}
 .preview-bar {
 	display: flex;
 	justify-content: space-between;

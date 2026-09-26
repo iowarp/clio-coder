@@ -184,9 +184,7 @@
 /delegate codex Review the proposed change and its edge cases.</code></pre>
           <div class="note note-amber">
             <p>
-              A Git worktree separates branches; it does not confine a peer’s
-              shell. Enforcement depends on the connector and the peer runtime.
-              These limits remain visible in the run record.
+              Git worktrees preserve a separate branch for review. Each connector applies the peer runtime’s supported execution restrictions and records the delegation mode.
             </p>
           </div>
           <a class="text-link" href="docs.html?d=guide/interop.md"
@@ -249,8 +247,7 @@
               <dt>Scheduler workflow</dt>
               <dd>
                 With the kit installed and trusted, submit a job, poll its
-                state, and fetch its output. A scheduler result is separate from
-                scientific validation.
+                state, and fetch its output. Use the returned scheduler state and output with your project’s verification procedures.
               </dd>
             </div>
           </dl>

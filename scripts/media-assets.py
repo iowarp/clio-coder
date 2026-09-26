@@ -82,9 +82,6 @@ def metadata_errors(item: dict, label: str) -> list[str]:
         "role",
         "altTextSeed",
         "representation",
-        "approval",
-        "approvalNotes",
-        "supersessionNotes",
     ]
     for key in required_strings:
         if not isinstance(item.get(key), str) or not item[key].strip():

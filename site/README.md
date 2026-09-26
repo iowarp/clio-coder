@@ -1,48 +1,66 @@
 # Clio Coder website
 
-The public product website at **https://coder.iowarp.ai/** is a static Node build served by Nginx. Product pages and all 49 documentation pages contain readable HTML before JavaScript runs. JavaScript enhances theme switching, menus, copying, documentation search, and legacy query links.
+The public website at **https://coder.iowarp.ai/** is a static Node build served
+by Nginx. Product pages and documentation are readable HTML; JavaScript adds
+themes, menus, copy controls, search, and legacy query links.
+
+## Build and preview
 
 ```bash
 python3 site/sync-docs.py --check
-out=$(mktemp -d)
-node site/build.mjs --out "$out/public"
-python3 site/check.py "$out/public"
-python3 -m http.server 4173 --bind 127.0.0.1 --directory "$out/public"
+clio_site_preview=$(mktemp -d)
+node site/build.mjs --out "$clio_site_preview/public"
+python3 site/check.py "$clio_site_preview/public"
+python3 -m http.server 4173 --bind 127.0.0.1 --directory "$clio_site_preview/public"
 ```
 
-Open http://127.0.0.1:4173/. Preview the generated output, not the source directory, and remove the temporary directory afterward. The builder derives shared navigation and footer markup from `index.html`, renders the documentation snapshot through `docs.html`, and generates canonical URLs, structured data, the sitemap, and search metadata. `product.json` supplies the public version, origin, and repository identity.
+Open http://127.0.0.1:4173/. The builder shares navigation and footer markup,
+renders documentation, and generates canonical URLs, structured data, search
+metadata, and the sitemap. Output is generated; use an empty directory or one
+carrying the builder's ownership marker. Remove the preview directory afterward.
 
-`site/public/` is generated and ignored by Git. A custom output directory must be empty or carry this builder’s `.clio-coder-site-build` ownership marker. The builder refuses source replacement and nonempty directories it does not own. Never point it at the repository’s root `dist/`.
+## Content and media
 
-## Design and content
-
-`css/brand.css` defines self-hosted IBM Plex Sans and Mono fonts and the shared semantic color roles: cyan interaction, sage success, amber action/warning, brick failure, warm-paper light surfaces, black dark surfaces, and code wells that remain dark. `css/site.css` owns website layout and components. The website does not edit or implement the GUI.
-
-The homepage workflow is explicitly illustrative. `assets/session.png` is the original terminal capture from the repository; `assets/session.webp` is a smaller derivative for inline display and links to the original. Do not substitute invented run outcomes or performance claims.
-
-Documentation snapshots are under `content/docs/`. Public docs are release-pinned: `content/docs-manifest.json` records the product corpus, release version, source ref, full commit, and every content hash. The product corpus is defined in `docs/corpus.json`; generated development reference under `docs/wiki/**` is never included. `python3 site/sync-docs.py --check` reports missing, extra, changed, index, and provenance drift without writing. At a release cut, refresh only from the matching published tag, for example `python3 site/sync-docs.py --source-ref v0.5.6`. The command refuses an unreleased branch or a ref that differs from `site/product.json`.
-
-The installed package remains the authority for its own version. Website “view source” links use the manifest's declared release ref rather than `main`, and every rendered docs page displays that provenance. The written labs in `learn.html` remain useful without recordings. Add a supplied YouTube ID to `content/recordings.json`; the builder renders only valid, published recordings and omits empty entries.
-
-## Media and social previews
-
-Root `assets/` is the canonical home for brand and product-media masters. `assets/media-manifest.json` records provenance, dimensions, role, channels, alt-text seeds, real or illustrative status, approval, supersession, delivery copies, and social export hashes. Check or synchronize declared website and GUI copies with:
+`product.json` supplies version, origin, and repository identity. Product pages
+use self-hosted IBM Plex Sans and Mono, semantic colors in `css/brand.css`, and
+layout rules in `css/site.css`. Canonical image masters live in root `assets/`;
+`assets/media-manifest.json` maps their website copies. The homepage uses the
+terminal and browser captures; card templates remain in `cards/`.
 
 ```bash
-python3 scripts/media-assets.py --check
 python3 scripts/media-assets.py --sync
+python3 scripts/media-assets.py --check
+node site/render-cards.mjs
 ```
 
-The templates in `cards/` use the same fonts, palette, and hierarchy as the website. Regenerate all four PNGs with `node site/render-cards.mjs`; pass `--chrome <path>` when Chrome is not at `/usr/bin/google-chrome`. The renderer uses the GUI workspace's pinned `playwright-core`, sets link cards to 1200×630 and square cards to 1080×1080, waits for `document.fonts.ready`, and records source/export hashes. Run the media check afterward. `share.html` links to dark and light exports and labels the workflow artwork illustrative. See `assets/README.md` for capture promotion and retention rules.
+## Documentation snapshot
 
-## Production
+`content/docs/` contains the authored product corpus declared in
+`docs/corpus.json`. The snapshot manifest records the release ref, source commit,
+and file hashes. The independent generated development Wiki is published
+separately. After creating the matching release tag:
 
-Read the HLab skill at `/home/akougkas/dotfiles/homelab/skills/hlab/SKILL.md` before infrastructure work. The existing route is Cloudflare → Blade Tunnel → Traefik → the website container. DNS, tunnel routing, and unrelated services are outside this deployment.
+```bash
+python3 site/sync-docs.py --source-ref v<version>
+python3 site/sync-docs.py --check
+pnpm run release:readiness -- --release
+```
+
+Documentation source links resolve to that release. Learning labs are written
+workflows; `content/recordings.json` supplies optional published video IDs.
+
+## Deployment
+
+The existing route is Cloudflare → Blade Tunnel → Traefik → the site container.
+For infrastructure operations, read the local HLab skill at
+`/home/akougkas/dotfiles/homelab/skills/hlab/SKILL.md`.
 
 ```bash
 bash site/deploy-blade.sh
 ```
 
-This builds and checks an isolated output, synchronizes only the website source to Blade, builds and replaces the `site` service in the `clio-coder-site` Compose project, validates Nginx, and checks the origin response. Inspect the HTTPS website afterward, including mobile layouts, both themes, documentation, search, menus, copy controls, a missing URL, and reading without JavaScript. CSP permits the existing Cloudflare analytics injection.
-
-The sitemap and robots file preserve crawlability. Actual search-engine indexing requires checking the relevant Search Console property and is not established by a successful site build or deployment.
+The script builds and checks the site, synchronizes its source to Blade, updates
+only the `clio-coder-site` Compose service, and validates Nginx and the origin
+response. Check the HTTPS pages, mobile layout, themes, documentation, search,
+and install links after deployment. DNS and tunnel configuration are managed
+separately.

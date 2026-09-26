@@ -1,18 +1,23 @@
 # Clio Coder graphical application
 
-An alpha browser front end for Clio Coder, for power users. The terminal is the
-primary interface. This application is opt-in: nothing starts it unless you run one
-of the commands below, and the CLI, the TUI and `clio-coder acp` behave the same
-whether or not it is used. The canonical operator overview is
-[Reading in the application](../../docs/README.md#reading-in-the-application);
-[`DESIGN.md`](DESIGN.md) is the design authority for this folder.
+The alpha browser interface for Clio Coder. It provides project and conversation
+views, attachments, session boards, context controls, fleet previews, traces,
+evidence, library access, and configuration. A local Node service connects these
+views to the shared runtime through ACP.
+
+See [the documentation map](../../docs/README.md) for operator guides and
+[`DESIGN.md`](DESIGN.md) for the application's design and authority boundaries.
 
 ## Running it
 
 ```sh
-clio-coder gui [--open]      # the whole application, served in this terminal until Ctrl+C
+clio-coder gui --open       # reuse the owned background app or start a private server
 clio-coder docs [topic]      # the shipped documentation in your browser
 ```
+
+Bare `gui` reuses this installation's owned background application when present.
+Otherwise it serves privately until Ctrl+C. `gui --foreground` explicitly selects
+the private server.
 
 `clio-coder gui background …` and `clio-coder gui launcher …` add a login service
 and a desktop entry on Linux with a systemd user session. Each is installed only on
@@ -29,9 +34,9 @@ request and removed by its own `uninstall` or by `clio-coder uninstall`.
   256-bit token, carried in the launch link's fragment and then as a bearer token.
   Host and Origin are checked, static files are contained, and a content security
   policy forbids remote scripts, fonts and connections.
-- **Saved settings are the runtime's.** The model picker beside Send and the Settings
-  page write your user settings through the runtime's own safe-settings and
-  settings-control paths, and say "Saved for every project" before they do.
+- **Session and saved settings have distinct scopes.** The model picker can select
+  the next request's model and thinking level for the current conversation. Saving
+  a default uses the runtime settings-control path and applies to every project.
 
 ## Developing
 

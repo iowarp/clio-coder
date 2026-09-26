@@ -61,15 +61,21 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
 
 ## README contract
 
-`README.md` is the front page on GitHub and npm. Its structure is fixed, and the `readme-shape` check in `scripts/check-hygiene.ts` fails on drift. Length is not limited; structure is.
+The README is the GitHub and npm landing page. Keep installation, capabilities,
+interface captures, model choices, and references easy to scan. Details belong
+in the guides; command-heavy material and agent orientation use foldable blocks.
 
-- Sections, in order: Get started, Why Clio, Models, Everyday use, Safety, Install, Documentation, Contribute, Acknowledgements. No new sections, and no sub-headings outside a collapsed `<details>` block.
-- Required elements: the Markdown `# Clio Coder` title, the product screenshot `assets/readme/clio-session.png` referenced from `main`, the source install block that `readme-install-block` pins, and the collapsed **For agents** block under Documentation.
-- Images use absolute `https://` URLs, because npm renders the README without `assets/`.
-- Release numbers appear only in the Install pin. Release notes belong in [CHANGELOG.md](CHANGELOG.md).
-- A release changes the Install pin and, when the terminal interface changed visibly, the screenshot. Coordinate package, GitHub, npm, website/docs, Wiki, and communications through the [release-readiness runbook](docs/guide/release-readiness.md); those surfaces do not add README sections.
-- A feature documents itself in `docs/`. The README gains at most a bullet in Why Clio, a row in an existing table, or a line in an existing collapsed block.
-- Changing the structure changes this section and `README_SECTIONS` in `scripts/check-hygiene.ts` in the same commit, with the maintainer's approval.
+- Sections: Get started, Interfaces, Capabilities, Models, Execution policy,
+  Documentation, Contribute, Acknowledgements.
+- Show the terminal boot, browser overview, and browser conversation captures
+  from `assets/screenshots/`. Image URLs are absolute HTTPS URLs so npm can render them.
+- Keep the release-tag source installation under Get started, including launcher
+  path verification. Release chronology belongs in `CHANGELOG.md`.
+- Keep a collapsed **For agents** block under Documentation with source and
+  installed-documentation lookup guidance.
+- Update this layout contract and `README_SECTIONS` in `scripts/check-hygiene.ts`
+  together when changing the landing page structure.
+
 
 ## Library & Skills
 

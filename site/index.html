@@ -8,7 +8,7 @@
     </title>
     <meta
       name="description"
-      content="An open-source AI coding agent for scientific software. Use local or cloud models, delegate to bounded workers, and inspect the checks behind every result."
+      content="An open-source coding agent for scientific software: chosen models, repository tools, project context, verification and coordinated workers."
     />
     <meta name="theme-color" content="#000000" />
     <meta name="author" content="Gnosis Research Center, Illinois Tech" />
@@ -166,71 +166,12 @@
             Node.js ≥ 22.19 · Linux &amp; macOS · Apache-2.0
           </p>
         </div>
-        <div
-          class="product-preview"
-          aria-label="Illustrative scientific coding workflow"
-        >
-          <div class="preview-bar">
-            <span
-              ><img src="assets/logo.webp" width="22" height="22" alt="" />Clio
-              Coder</span
-            ><span class="preview-label">Illustrative workflow</span>
-          </div>
-          <div class="preview-project">
-            <span class="file-icon" aria-hidden="true">⌘</span> diffusion-solver
-            <span class="branch">main</span>
-          </div>
-          <div class="preview-prompt">
-            <span class="prompt-icon" aria-hidden="true">›</span>
-            <p>
-              Find why the numerical test fails.<br />Make a small fix and run
-              the existing checks.
-            </p>
-          </div>
-          <div class="preview-body">
-            <div class="preview-step">
-              <span class="step-icon" aria-hidden="true">01</span>
-              <div>
-                <strong>Understand the failure</strong>
-                <p>Read the solver and its reference test.</p>
-              </div>
-              <span class="tool-tag">read</span>
-            </div>
-            <div class="code-diff">
-              <div class="code-file">
-                <span>solver.py</span><span>Proposed change</span>
-              </div>
-              <pre><code><span class="diff-context">def stable_dt(dx, alpha):</span>
-<span class="diff-remove">−    return dx**2 / alpha</span>
-<span class="diff-add">+    return dx**2 / (2.0 * alpha)</span></code></pre>
-            </div>
-            <div class="preview-step">
-              <span class="step-icon" aria-hidden="true">02</span>
-              <div>
-                <strong>Check against the repository</strong>
-                <p>Run the declared test, then inspect its output.</p>
-              </div>
-              <span class="tool-tag">verify</span>
-            </div>
-            <div class="preview-check">
-              <code>python3 -m pytest -q</code
-              ><span>Check to run <span aria-hidden="true">↗</span></span>
-            </div>
-            <div class="preview-step">
-              <span class="step-icon" aria-hidden="true">03</span>
-              <div>
-                <strong>Review the evidence</strong>
-                <p>Changes, tool activity, and observed checks.</p>
-              </div>
-              <span class="tool-tag">inspect</span>
-            </div>
-          </div>
-          <div class="preview-bottom">
-            <span
-              ><span class="status-dot"></span>Your model · local or cloud</span
-            ><span>Tools with explicit policy</span>
-          </div>
-        </div>
+        <figure class="product-preview interface-preview">
+          <a href="assets/gui-overview.png" aria-label="Open the browser overview capture">
+            <img src="assets/gui-overview.webp" width="1920" height="1188" alt="Clio Coder browser overview: project selection, recent conversations, traces, fleet, evidence, library and settings" fetchpriority="high" decoding="async" />
+          </a>
+          <figcaption>Browser overview <span>Clio Coder GUI</span></figcaption>
+        </figure>
       </section>
       <div class="platform-strip">
         <p>One agent. Your computing environment.</p>
@@ -239,78 +180,19 @@
           ><span>Cloud APIs</span><span>HPC workflows</span>
         </div>
       </div>
-      <section class="section scientific-section">
+      <section class="section interface-section" id="interfaces">
         <div class="section-head">
-          <div>
-            <p class="eyebrow">Built for research software</p>
-            <h2>From a failing test<br />to a change you can check.</h2>
-          </div>
-          <p>
-            Simulation kernels, numerical libraries, data pipelines, and
-            mixed-language builds. Bring the tests and reference data that
-            define correctness in your project.
-          </p>
+          <div><p class="eyebrow">One runtime, two workspaces</p><h2>Work in the terminal.<br />Continue in the browser.</h2></div>
+          <p>The terminal combines conversation, tool calls, permissions and live fleet activity. The alpha browser application adds project views, session controls, attachments, fleet previews and execution inspection.</p>
         </div>
-        <div class="session-story">
-          <div class="session-explanation">
-            <h3>A real session. A local model.</h3>
-            <p>
-              This terminal capture shows a local 27B model tracing an unstable
-              finite-difference time step, editing the solver, and rerunning its
-              numerical test.
-            </p>
-            <ol class="story-steps">
-              <li>
-                <span>01</span>
-                <div>
-                  <strong>Read before changing</strong>
-                  <p>Inspect source, build rules, and the test that fails.</p>
-                </div>
-              </li>
-              <li>
-                <span>02</span>
-                <div>
-                  <strong>Keep the task bounded</strong>
-                  <p>
-                    Ask for a specific change with clear acceptance criteria.
-                  </p>
-                </div>
-              </li>
-              <li>
-                <span>03</span>
-                <div>
-                  <strong>Use your existing checks</strong>
-                  <p>
-                    Clio’s verification tool runs declared tests and can compare
-                    numerical results.
-                  </p>
-                </div>
-              </li>
-            </ol>
-            <p class="caption">
-              A passing test establishes what ran. Scientific validity still
-              depends on your reference tests and data.
-            </p>
-            <a class="text-link" href="learn.html#lab-4"
-              >Try the numerical workflow <span aria-hidden="true">→</span></a
-            >
-          </div>
-          <figure class="session-capture">
-            <a
-              href="assets/session.png"
-              aria-label="Open the full terminal session screenshot"
-              ><img
-                src="assets/session.webp"
-                width="1006"
-                height="1052"
-                loading="lazy"
-                decoding="async"
-                alt="Real terminal session with a local 27B model: a failing pytest run, diagnosis of an unstable time step, a solver edit, and a passing test run."
-            /></a>
-            <figcaption>
-              <span class="status-dot"></span>Actual terminal capture · Open
-              full size ↗
-            </figcaption>
+        <div class="interface-gallery">
+          <figure class="interface-capture">
+            <a href="assets/tui-boot.png"><img src="assets/tui-boot.webp" width="1920" height="1021" alt="Clio Coder terminal boot screen with model, workspace, fleet, shortcuts, composer and context footer" loading="lazy" decoding="async" /></a>
+            <figcaption>Terminal workspace <a href="assets/tui-boot.png">Full size ↗</a></figcaption>
+          </figure>
+          <figure class="interface-capture">
+            <a href="assets/gui-conversation.png"><img src="assets/gui-conversation.webp" width="1513" height="1489" alt="Browser conversation with project prompts, session tools, attachments and model selection" loading="lazy" decoding="async" /></a>
+            <figcaption>Browser conversation <a href="assets/gui-conversation.png">Full size ↗</a></figcaption>
           </figure>
         </div>
       </section>

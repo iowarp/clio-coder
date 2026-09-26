@@ -175,7 +175,7 @@ Use this shape when testing a subscription model, homelab GPU target, research-l
 - Recommended Clio runtime:
 - Required catalog quirks:
 - Known failures:
-- Follow-up benchmarks:
+- Additional configurations to evaluate:
 ```
 
 ## Reasoning Controls and Thinking Replay Semantics

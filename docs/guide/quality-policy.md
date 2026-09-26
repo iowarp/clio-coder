@@ -144,11 +144,10 @@ fresh quality evidence. Malformed policy files produce explicit errors and
 an unverified completion assessment. Repositories without a policy retain
 their existing verification and completion behavior.
 
-This is completion evidence, not an operating-system snapshot or a guarantee
-against concurrent modifications during execution. The gate activates from
-the finish contract's observed mutation receipts and uses its bounded recent
-turn window. It does not establish scientific validity, infer undeclared
-dependencies, or certify the semantics of a linter's rules.
+The completion gate activates from observed mutation receipts in a bounded
+recent turn window. Freshness covers the selected source inputs, check
+declarations, and policy. Repository checks and domain-specific acceptance
+criteria define how dependencies, environment, and numerical results are validated.
 
 Implementation: [quality-policy.ts](../../src/tools/verify/quality-policy.ts),
 [verify](../../src/tools/verify/index.ts), and

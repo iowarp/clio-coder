@@ -285,7 +285,7 @@ Target-specific options are typed in [`target-descriptor.ts`](../../src/domains/
 
 ### LM Studio load profile
 
-`lmstudio.load` states how Clio loads a model on an LM Studio server, so the server's GUI defaults stop deciding the context window, slot count or speculative draft. `lmstudio.models.<model id>.load` overrides fields for one model; the key is the model id selected on that target. Every field maps to the key LM Studio's `POST /api/v1/models/load` takes: `contextLength`, `parallel`, `flashAttention`, `speculativeDraftMaxTokens`, `evalBatchSize`, `numExperts` and `offloadKvCacheToGpu`. LM Studio's load reference does not list `parallel` or `speculative_draft_max_tokens`, but the server validates load keys strictly and applies both; this was measured on LM Studio serving Qwen3.8-27B and Qwopus3.8-27B-Flash with MTP heads.
+`lmstudio.load` states how Clio loads a model on an LM Studio server, so the server's GUI defaults stop deciding the context window, slot count or speculative draft. `lmstudio.models.<model id>.load` overrides fields for one model; the key is the model id selected on that target. Every field maps to the key LM Studio's `POST /api/v1/models/load` takes: `contextLength`, `parallel`, `flashAttention`, `speculativeDraftMaxTokens`, `evalBatchSize`, `numExperts` and `offloadKvCacheToGpu`. The adapter sends these fields to the load API; configure them for the installed server and model.
 
     targets:
       - id: blade

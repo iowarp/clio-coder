@@ -133,8 +133,7 @@
       <div class="learning-note">
         <span class="learning-icon" aria-hidden="true">↗</span>
         <p>
-          <strong>Written labs are ready to use.</strong> Video walkthroughs
-          will be added when recordings are available.
+          Follow the written labs from configuration to context, verification and delegation.
         </p>
       </div>
       <nav class="section-nav" aria-label="On this page">
@@ -225,8 +224,8 @@ clio-coder targets --probe --tools</code></pre>
           <div>
             <h2>A bounded change, then the checks you already have</h2>
             <p>
-              Give the acceptance criterion in the request. Ask it to use
-              <code>verify</code>, not a narrated “I ran the tests.”
+              State the acceptance criterion and ask Clio to run the relevant
+              declared check with <code>verify</code>.
             </p>
             <pre><code>The finite-difference step in solver.py is unstable at the current ratio.
 Make the smallest change that the existing numerical test accepts.
@@ -234,9 +233,7 @@ Run that test. Do not reformat unrelated files.</code></pre>
             <p>
               <code>verify</code> knows pytest, unittest, Cargo, Go, CMake
               presets, Make, just, and scripts your CI already calls. It can
-              compare numerical results and hold a performance budget. A passing
-              check records what ran. Scientific validity depends on your tests
-              and reference data.
+              compare numerical results and hold a performance budget. Configure numerical reference data and performance budgets for the project’s acceptance criteria.
             </p>
           </div>
         </article>
@@ -269,11 +266,7 @@ Run that test. Do not reformat unrelated files.</code></pre>
 clio-coder evidence list
 clio-coder evidence inspect &lt;evidenceId&gt;</code></pre>
             <p>
-              Sealed means the bytes match. Grounded means a host check was
-              observed. Not independently reviewed is a fact, not a failure of
-              the printer. Unknown is a state. If a file changed and nothing
-              validated it, the finish contract tells the model to call the
-              change unverified.
+              Receipt integrity checks the recorded bytes. Validation grounding links claims to observed checks. Review, context provenance and completion have separate recorded states; use them to inspect the change and its verification.
             </p>
           </div>
         </article>
@@ -282,16 +275,14 @@ clio-coder evidence inspect &lt;evidenceId&gt;</code></pre>
           <div>
             <h2>Slurm, only if the kit is there</h2>
             <p>
-              This lab stops if you do not have the clio-kit Slurm MCP server.
-              Clio Coder does not invent a scheduler.
+              This workflow requires the configured clio-kit Slurm MCP server and an accessible scheduler.
             </p>
             <pre><code>clio-coder mcp list</code></pre>
             <p>
               When the server is trusted, the <code>slurm-jobs</code> skill
               submits a batch script, polls to a terminal state, fetches output,
               and stamps the scheduler result. The kit’s own docs live at
-              <a href="https://toolkit.iowarp.ai">toolkit.iowarp.ai</a>. A stamp
-              is not a scientific conclusion.
+              <a href="https://toolkit.iowarp.ai">toolkit.iowarp.ai</a>. Inspect job output and run the project’s acceptance checks.
             </p>
           </div>
         </article>
@@ -308,13 +299,11 @@ clio-coder evidence inspect &lt;evidenceId&gt;</code></pre>
 /delegate codex Review the proposed change and its edge cases.
 /run --target opencode-local --worktree coder Fix the parser test and report the checks.</code></pre>
             <p>
-              A worktree keeps the peer’s branch for review. It does not confine
-              the peer’s own shell. Receipts mark that limit. OpenCode refuses a
+              A worktree preserves the peer’s branch for review. The connector and peer runtime supply the configured execution restrictions. OpenCode refuses a
               read-only headless run before launch. Use <code>/share</code> when
               the main session should read a managed result.
-              <a href="compare.html">The comparison</a> is the argument.
-              <a href="docs.html?d=guide/interop.md">The guide</a> is the
-              contract.
+              See the <a href="docs.html?d=guide/interop.md">integration guide</a>
+              for connector configuration and supported execution modes.
             </p>
           </div>
         </article>
@@ -347,10 +336,7 @@ clio-coder library validate ./path/to/package</code></pre>
         </div>
         <div class="detail-body">
           <p>
-            Commands run with your user permissions. A worker’s report is
-            distinct from a host-observed check, and a passing test is distinct
-            from a scientific conclusion. Use the installed docs when your
-            package differs from this website snapshot.
+            The guides explain declared checks, worker result contracts, execution policy and project context. Installed documentation describes the package you are running.
           </p>
           <a class="text-link" href="docs.html">Browse documentation →</a>
         </div>
