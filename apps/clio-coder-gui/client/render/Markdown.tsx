@@ -61,7 +61,49 @@ export function decodeEntities(text: string): string {
 	});
 }
 
-/** True once the element is within `rootMargin` of the viewport; false before mount and on the server. */
+const viewportObservers = new Map<string, { observer: IntersectionObserver; targets: Map<Element, Set<() => void>> }>();
+
+function observeNearViewport(element: Element, rootMargin: string, notify: () => void): () => void {
+	let pool = viewportObservers.get(rootMargin);
+	if (pool === undefined) {
+		const targets = new Map<Element, Set<() => void>>();
+		const observer = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) {
+					if (!entry.isIntersecting) continue;
+					const callbacks = targets.get(entry.target);
+					targets.delete(entry.target);
+					observer.unobserve(entry.target);
+					if (callbacks) for (const callback of callbacks) callback();
+				}
+				if (targets.size === 0) {
+					observer.disconnect();
+					if (viewportObservers.get(rootMargin)?.observer === observer) viewportObservers.delete(rootMargin);
+				}
+			},
+			{ rootMargin },
+		);
+		pool = { observer, targets };
+		viewportObservers.set(rootMargin, pool);
+	}
+	const callbacks = pool.targets.get(element) ?? new Set<() => void>();
+	callbacks.add(notify);
+	pool.targets.set(element, callbacks);
+	pool.observer.observe(element);
+	return () => {
+		callbacks.delete(notify);
+		if (callbacks.size === 0) {
+			pool.targets.delete(element);
+			pool.observer.unobserve(element);
+		}
+		if (pool.targets.size === 0) {
+			pool.observer.disconnect();
+			if (viewportObservers.get(rootMargin) === pool) viewportObservers.delete(rootMargin);
+		}
+	};
+}
+
+/** True once near the viewport. Code and diagrams share one observer per margin. */
 export function useNearViewport(ref: RefObject<HTMLElement | null>, rootMargin = "600px"): boolean {
 	const [near, setNear] = useState(false);
 	useEffect(() => {
@@ -71,17 +113,7 @@ export function useNearViewport(ref: RefObject<HTMLElement | null>, rootMargin =
 			setNear(true);
 			return;
 		}
-		const observer = new IntersectionObserver(
-			(entries) => {
-				if (entries.some((entry) => entry.isIntersecting)) {
-					setNear(true);
-					observer.disconnect();
-				}
-			},
-			{ rootMargin },
-		);
-		observer.observe(element);
-		return () => observer.disconnect();
+		return observeNearViewport(element, rootMargin, () => setNear(true));
 	}, [ref, near, rootMargin]);
 	return near;
 }
@@ -144,10 +176,10 @@ function HighlightedCode({ tokens }: { tokens: readonly HighlightToken[] }) {
 					typeof token.content === "string" ? (
 						token.content
 					) : (
-						<HighlightedCode tokens={token.content} key={tokenKey(token)} />
+						<HighlightedCode tokens={token.content} key={highlightKey(token)} />
 					)
 				) : (
-					<span className={`token ${token.type}`} key={tokenKey(token)}>
+					<span className={`token ${token.type}`} key={highlightKey(token)}>
 						{typeof token.content === "string" ? token.content : <HighlightedCode tokens={token.content} />}
 					</span>
 				),
@@ -173,19 +205,24 @@ export const CodeBlock = memo(function CodeBlock({ code, info, settled }: CodeBl
 	const language = codeLanguage(info);
 	const container = useRef<HTMLDivElement>(null);
 	const near = useNearViewport(container);
-	const [tokens, setTokens] = useState<readonly HighlightToken[] | null>(null);
+	const [highlight, setHighlight] = useState<{
+		code: string;
+		grammar: string;
+		tokens: readonly HighlightToken[] | null;
+	} | null>(null);
 	const grammar = language.grammar;
 	const wantsHighlight = settled && near && grammar !== null && code.length <= HIGHLIGHT_MAX_CHARS;
 	useEffect(() => {
 		if (!wantsHighlight || grammar === null) return;
 		let cancelled = false;
 		void highlightCode(code, grammar).then((result) => {
-			if (!cancelled) setTokens(result);
+			if (!cancelled) setHighlight({ code, grammar, tokens: result });
 		});
 		return () => {
 			cancelled = true;
 		};
 	}, [wantsHighlight, code, grammar]);
+	const tokens = highlight?.code === code && highlight.grammar === grammar ? highlight.tokens : null;
 	const lineCount = code.length === 0 ? 0 : code.split("\n").length;
 	return (
 		<div
@@ -225,16 +262,16 @@ export const MermaidBlock = memo(function MermaidBlock({ source, settled }: Merm
 	const container = useRef<HTMLElement>(null);
 	const near = useNearViewport(container);
 	const streaming = useContext(StreamingContext);
-	const [result, setResult] = useState<MermaidResult | null>(null);
+	const [rendered, setRendered] = useState<{ source: string; result: MermaidResult } | null>(null);
+	const result = rendered?.source === source ? rendered.result : null;
 	const [showSource, setShowSource] = useState(false);
 	const problem = mermaidSourceProblem(source);
 	const wantsRender = settled && !streaming && near && problem === null;
 	useEffect(() => {
 		if (!wantsRender) return;
 		let cancelled = false;
-		setResult(null);
 		void renderMermaid(source).then((rendered) => {
-			if (!cancelled) setResult(rendered);
+			if (!cancelled) setRendered({ source, result: rendered });
 		});
 		return () => {
 			cancelled = true;
@@ -304,8 +341,8 @@ function headingTag(depth: number): "h2" | "h3" | "h4" | "h5" | "h6" {
 function Inline({ tokens }: { tokens: readonly MarkdownToken[] }) {
 	return (
 		<>
-			{tokens.map((token) => (
-				<InlineToken token={token} key={tokenKey(token)} />
+			{tokens.map((token, index) => (
+				<InlineToken token={token} key={tokenKey(index, token.type)} />
 			))}
 		</>
 	);
@@ -392,8 +429,8 @@ function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
 function ListItems({ items, settled }: { items: readonly Tokens.ListItem[]; settled: boolean }) {
 	return (
 		<>
-			{items.map((item) => (
-				<li className={item.task ? "md-task-item" : undefined} key={tokenKey(item)}>
+			{items.map((item, index) => (
+				<li className={item.task ? "md-task-item" : undefined} key={tokenKey(index, item.type)}>
 					<Blocks tokens={item.tokens} settled={settled} />
 				</li>
 			))}
@@ -401,7 +438,7 @@ function ListItems({ items, settled }: { items: readonly Tokens.ListItem[]; sett
 	);
 }
 
-function Block({ token, settled }: { token: MarkdownToken; settled: boolean }): ReactNode {
+const Block = memo(function Block({ token, settled }: { token: MarkdownToken; settled: boolean }): ReactNode {
 	switch (token.type) {
 		case "space":
 		case "def":
@@ -463,18 +500,18 @@ function Block({ token, settled }: { token: MarkdownToken; settled: boolean }): 
 					<table>
 						<thead>
 							<tr>
-								{table.header.map((cell) => (
-									<th scope="col" style={cell.align ? { textAlign: cell.align } : undefined} key={tokenKey(cell)}>
+								{table.header.map((cell, index) => (
+									<th scope="col" style={cell.align ? { textAlign: cell.align } : undefined} key={tokenKey(index)}>
 										<Inline tokens={cell.tokens} />
 									</th>
 								))}
 							</tr>
 						</thead>
 						<tbody>
-							{table.rows.map((row) => (
-								<tr key={tokenKey(row)}>
-									{row.map((cell) => (
-										<td style={cell.align ? { textAlign: cell.align } : undefined} key={tokenKey(cell)}>
+							{table.rows.map((row, index) => (
+								<tr key={tokenKey(index)}>
+									{row.map((cell, cellIndex) => (
+										<td style={cell.align ? { textAlign: cell.align } : undefined} key={tokenKey(cellIndex)}>
 											<Inline tokens={cell.tokens} />
 										</td>
 									))}
@@ -506,19 +543,21 @@ function Block({ token, settled }: { token: MarkdownToken; settled: boolean }): 
 			return <p>{typeof generic.text === "string" ? generic.text : generic.raw}</p>;
 		}
 	}
-}
+});
 
 export const Blocks = memo(function Blocks({
 	tokens,
 	settled,
+	settledCount = 0,
 }: {
 	tokens: readonly MarkdownToken[];
 	settled: boolean;
+	settledCount?: number;
 }) {
 	return (
 		<>
-			{tokens.map((token) => (
-				<Block token={token} settled={settled} key={tokenKey(token)} />
+			{tokens.map((token, index) => (
+				<Block token={token} settled={settled || index < settledCount} key={tokenKey(index, token.type)} />
 			))}
 		</>
 	);
@@ -551,15 +590,23 @@ export const MarkdownContent = memo(function MarkdownContent({
 		incremental.current ??= new IncrementalMarkdown();
 		return incremental.current.update(source);
 	}, [source, complete]);
-	const finalTokens = useMemo(() => (complete ? lexMarkdown(source) : null), [source, complete]);
-	// Complete messages are lexed once; streaming messages retain their settled prefix.
-	const settledTokens = finalTokens ?? split?.settled ?? NO_TOKENS;
-	const tailTokens = finalTokens === null ? (split?.tail ?? NO_TOKENS) : NO_TOKENS;
+	const finalTokens = useMemo(() => {
+		if (!complete) return null;
+		const tokens = lexMarkdown(source);
+		// The canonical parse replaces the streaming lexer; settled messages need
+		// neither its second token tree nor its retained source and tail strings.
+		incremental.current = null;
+		return tokens;
+	}, [source, complete]);
+	const tokens = useMemo(
+		() => finalTokens ?? [...(split?.settled ?? NO_TOKENS), ...(split?.tail ?? NO_TOKENS)],
+		[finalTokens, split],
+	);
 	return (
 		<StreamingContext.Provider value={finalTokens === null || deferDiagrams}>
 			<div className={`markdown ${finalTokens === null ? "is-streaming" : "is-complete"}`}>
-				<Blocks tokens={settledTokens} settled />
-				<Blocks tokens={tailTokens} settled={false} />
+				{/* One child list keeps a growing block mounted when it joins the settled prefix. */}
+				<Blocks tokens={tokens} settled={complete} settledCount={split?.settled.length ?? 0} />
 			</div>
 		</StreamingContext.Provider>
 	);
@@ -606,13 +653,24 @@ function CodeViewport({ children }: { children: ReactNode }) {
 	);
 }
 
-const tokenKeys = new WeakMap<object, number>();
-let nextTokenKey = 0;
-function tokenKey(token: object) {
-	let key = tokenKeys.get(token);
+/**
+ * The lexer recreates the growing tail on every update. Its ordered syntax slots,
+ * rather than token object identities, keep text, code and table DOM mounted as
+ * that tail grows. A change of syntax kind still replaces the affected subtree.
+ * Settled tokens also retain their object identity, so Block can skip their work.
+ */
+function tokenKey(index: number, type = "item"): string {
+	return `${type}:${index}`;
+}
+
+// Highlight tokens are immutable and only replaced after a new highlighting result.
+const highlightKeys = new WeakMap<object, number>();
+let nextHighlightKey = 0;
+function highlightKey(token: object) {
+	let key = highlightKeys.get(token);
 	if (key === undefined) {
-		key = ++nextTokenKey;
-		tokenKeys.set(token, key);
+		key = ++nextHighlightKey;
+		highlightKeys.set(token, key);
 	}
 	return key;
 }

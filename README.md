@@ -120,6 +120,8 @@ During a conversation, the left sidebar switches between project sessions,
 recorded runs, and configuration tools while your chat stays open. The collapsible
 Artifacts panel holds recorded file activity, results, and linked evidence.
 Open a dedicated trace or evidence viewer when you need more inspection space.
+Scroll up to read earlier messages; **Jump to latest** returns immediately to the
+newest output and resumes following the stream.
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/tui-boot.webp" alt="Clio Coder terminal boot screen with model and workspace information, fleet, shortcuts, composer and context footer" width="1000" /></a>

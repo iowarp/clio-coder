@@ -1,5 +1,5 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { memo, useCallback, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
@@ -20,13 +20,27 @@ import { basename, presentable } from "./tool-presentation.js";
 import "./ArtifactInspector.css";
 
 const RECORD_BATCH = 20;
+export type ArtifactSession = Pick<SessionSnapshot, "id" | "fleet" | "timelineTruncated"> & {
+	readonly tools: readonly TimelineItem[];
+};
+
+/** Text deltas leave the inspector's recorded tools and evidence projection unchanged. */
+export function selectArtifactSession(session: SessionSnapshot): ArtifactSession {
+	return {
+		id: session.id,
+		fleet: session.fleet,
+		timelineTruncated: session.timelineTruncated,
+		tools: session.timeline.filter((item) => item.kind === "tool").reverse(),
+	};
+}
+
 export type InspectorSelection = {
 	view: "files" | "results" | "evidence";
 	selectedFile: string | null;
 	filter: string;
 };
 
-function RecordedTools({
+const RecordedTools = memo(function RecordedTools({
 	items,
 	workspaceRoot,
 }: {
@@ -34,15 +48,11 @@ function RecordedTools({
 	workspaceRoot: string | undefined;
 }) {
 	const [visible, setVisible] = useState(RECORD_BATCH);
+	const options = useMemo(() => (workspaceRoot === undefined ? {} : { workspaceRoot }), [workspaceRoot]);
 	return (
 		<>
 			{items.slice(0, visible).map((item) => (
-				<ToolCard
-					key={item.id}
-					item={item}
-					options={workspaceRoot === undefined ? {} : { workspaceRoot }}
-					agent={workerLabel(item.provenance)}
-				/>
+				<ToolCard key={item.id} item={item} options={options} agent={workerLabel(item.provenance)} />
 			))}
 			{items.length > visible && (
 				<button
@@ -55,9 +65,50 @@ function RecordedTools({
 			)}
 		</>
 	);
+});
+
+function LatestResponse({ client, sessionId }: { client: Client; sessionId: string }) {
+	const [expanded, setExpanded] = useState(false);
+	const select = useCallback(
+		(session: SessionSnapshot) => {
+			const turn = session.turns.at(-1);
+			const source =
+				expanded && turn
+					? session.timeline
+							.filter((item) => item.turnId === turn.id && item.kind === "text")
+							.map((item) => item.text)
+							.join("\n\n")
+					: "";
+			return {
+				present:
+					turn !== undefined &&
+					session.timeline.some((item) => item.turnId === turn.id && item.kind === "text" && item.text.length > 0),
+				running: turn?.status === "running",
+				source,
+			};
+		},
+		[expanded],
+	);
+	const response = useQuery({
+		queryKey: ["session", sessionId],
+		queryFn: () => client.call(routes.session, { params: { id: sessionId }, query: {}, body: {} }),
+		enabled: false,
+		select,
+	}).data;
+	if (!response?.present) return null;
+	return (
+		<details
+			className="artifact-inspector__response"
+			open={expanded}
+			onToggle={(event) => setExpanded(event.currentTarget.open)}
+		>
+			<summary>Latest recorded response{response.running ? " · streaming" : ""}</summary>
+			{expanded ? <MarkdownContent source={response.source} complete={!response.running} deferDiagrams /> : null}
+		</details>
+	);
 }
 
-function RelatedEvidence({ client, session }: { client: Client; session: SessionSnapshot }) {
+function RelatedEvidence({ client, session }: { client: Client; session: ArtifactSession }) {
 	const runIds = new Set(
 		session.fleet.flatMap((item) =>
 			"runId" in item.fact.payload && item.fact.payload.runId.trim() ? [item.fact.payload.runId] : [],
@@ -170,7 +221,7 @@ function RelatedEvidence({ client, session }: { client: Client; session: Session
 	);
 }
 
-export function ArtifactInspector({
+export const ArtifactInspector = memo(function ArtifactInspector({
 	client,
 	session,
 	workspaceRoot,
@@ -179,7 +230,7 @@ export function ArtifactInspector({
 	onSelectionChange,
 }: {
 	client: Client;
-	session: SessionSnapshot;
+	session: ArtifactSession;
 	workspaceRoot?: string | undefined;
 	onClose: () => void;
 	selection?: InspectorSelection | undefined;
@@ -197,14 +248,7 @@ export function ArtifactInspector({
 		setLocalSelection(nextSelection);
 		onSelectionChange?.(nextSelection);
 	}
-	const tools = useMemo(
-		() =>
-			session.timeline
-				.filter((item) => item.kind === "tool")
-				.slice()
-				.reverse(),
-		[session.timeline],
-	);
+	const tools = session.tools;
 	const files = useMemo(() => {
 		const byPath = new Map<string, TimelineItem[]>();
 		for (const tool of tools)
@@ -219,13 +263,6 @@ export function ArtifactInspector({
 	const needle = filter.trim().toLocaleLowerCase();
 	const matchingFiles = [...files.entries()].filter(([path]) => path.toLocaleLowerCase().includes(needle));
 	const selected = selectedFile === null ? undefined : files.get(selectedFile);
-	const lastTurn = session.turns.at(-1);
-	const latestResponse = lastTurn
-		? session.timeline
-				.filter((item) => item.turnId === lastTurn.id && item.kind === "text")
-				.map((item) => item.text)
-				.join("\n\n")
-		: "";
 	return (
 		<aside className="artifact-inspector" aria-label="Conversation artifacts">
 			<header className="artifact-inspector__header">
@@ -306,12 +343,7 @@ export function ArtifactInspector({
 				)}
 				{view === "results" && (
 					<>
-						{latestResponse && (
-							<details className="artifact-inspector__response">
-								<summary>Latest recorded response{lastTurn?.status === "running" ? " · streaming" : ""}</summary>
-								<MarkdownContent source={latestResponse} complete={lastTurn?.status !== "running"} deferDiagrams />
-							</details>
-						)}
+						<LatestResponse client={client} sessionId={session.id} />
 						<h3>
 							Recorded tool activity <span className="artifact-inspector__count">{tools.length}</span>
 						</h3>
@@ -326,4 +358,4 @@ export function ArtifactInspector({
 			</section>
 		</aside>
 	);
-}
+});

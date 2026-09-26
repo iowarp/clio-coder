@@ -1,28 +1,35 @@
-import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { SessionSnapshot } from "../../contracts/sessions.js";
+import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { useShortcutLayer } from "../interaction/use-shortcut.js";
-import { ArtifactInspector, type InspectorSelection } from "./ArtifactInspector.js";
+import { ArtifactInspector, type InspectorSelection, selectArtifactSession } from "./ArtifactInspector.js";
 import "./inspector-dock.css";
 
-export function InspectorDock({
+export const InspectorDock = memo(function InspectorDock({
 	open,
 	onClose,
 	client,
-	session,
+	sessionId,
 	workspaceRoot,
 }: {
 	open: boolean;
 	onClose: () => void;
 	client: Client;
-	session: SessionSnapshot;
+	sessionId: string;
 	workspaceRoot?: string | undefined;
 }) {
 	const [wide, setWide] = useState(() => typeof window === "undefined" || matchMedia("(min-width: 1200px)").matches);
 	const [selection, setSelection] = useState<InspectorSelection>({ view: "files", selectedFile: null, filter: "" });
 	const dialog = useRef<HTMLDialogElement>(null);
 	const dock = useRef<HTMLDivElement>(null);
+	const session = useQuery({
+		queryKey: ["session", sessionId],
+		queryFn: () => client.call(routes.session, { params: { id: sessionId }, query: {}, body: {} }),
+		enabled: false,
+		select: selectArtifactSession,
+	}).data;
 	useEffect(() => {
 		const query = matchMedia("(min-width: 1200px)");
 		const change = () => setWide(query.matches);
@@ -49,7 +56,7 @@ export function InspectorDock({
 		node.showModal();
 		return () => node.close();
 	}, [open, wide]);
-	if (!open) return null;
+	if (!open || !session) return null;
 	const content = (
 		<ArtifactInspector
 			client={client}
@@ -80,4 +87,4 @@ export function InspectorDock({
 		</dialog>,
 		document.body,
 	);
-}
+});

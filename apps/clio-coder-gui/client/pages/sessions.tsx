@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams } from "react-router";
 import { type AgentCapabilities, EMPTY_CAPABILITIES } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
@@ -528,10 +528,10 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			/* Preference holds in this tab. */
 		}
 	}, [inspectorOpen]);
-	const closeInspector = () => {
+	const closeInspector = useCallback(() => {
 		setInspectorOpen(false);
 		requestAnimationFrame(() => document.getElementById(inspectorButton)?.focus());
-	};
+	}, [inspectorButton]);
 	const connection = useOutletContext<ConnectionState>();
 	const queries = useQueryClient();
 	const input = { params: { id }, query: {}, body: {} };
@@ -595,7 +595,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const now = useSecond(running || (snapshot?.permissions.some((item) => item.status === "pending") ?? false));
 	// A deep link starts without a cached snapshot. Attach the observer only once
 	// the transcript element exists; a ref becoming non-null does not rerun an effect.
-	const follow = useFollowLatest(scroll, snapshot !== undefined, snapshot?.timeline);
+	const follow = useFollowLatest(scroll, snapshot !== undefined, snapshot?.timeline, running);
 	// One object per change of reported settings or health, so a streamed delta leaves the composer alone.
 	const settings = snapshot?.state === "open" ? sessionSettings.data?.settings.chat : undefined;
 	const config = snapshot?.state === "open" ? snapshot.config : undefined;
@@ -788,7 +788,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 				open={inspectorOpen}
 				onClose={closeInspector}
 				client={client}
-				session={snapshot}
+				sessionId={snapshot.id}
 				workspaceRoot={workspaceRoot}
 			/>
 		</section>
