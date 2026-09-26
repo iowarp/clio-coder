@@ -81,3 +81,21 @@ it("BT-014: eval anywhere in the full command prevents a quoted exemption", () =
 	const engine = createSafetyPolicyEngine({ cwd: process.cwd() });
 	strictEqual(engine.evaluate({ tool: "bash", args: { command: 'echo "eval git clean -fd"' } }, "yolo").kind, "block");
 });
+
+it("quoted inert targets keep their policy with an explicit bash cwd", () => {
+	const engine = createSafetyPolicyEngine({ cwd: process.cwd() });
+	for (const command of [
+		"echo \"note: 'git clean -fd'\"",
+		'git commit -m "Explain git clean -fd"',
+		'echo "use sudo carefully"',
+	]) {
+		for (const cwd of [undefined, ".", "src"])
+			for (const level of ["default", "yolo"] as const) {
+				strictEqual(
+					engine.evaluate({ tool: "bash", args: { command, ...(cwd !== undefined ? { cwd } : {}) } }, level).kind,
+					"allow",
+					`${level} ${cwd}: ${command}`,
+				);
+			}
+	}
+});

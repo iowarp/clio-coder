@@ -102,3 +102,5 @@ Each scan candidate must independently prove its matches inert before an exempti
 For git clean, push and checkout, combined short flags are expanded for damage-control matching. Unique destructive long-option prefixes for reset and push are expanded; ambiguous prefixes and `--force-with-lease` are preserved (review round 2 G).
 
 Whole-worktree `git checkout .` and forced checkout ask for confirmation at both autonomy levels. Plus-prefixed push refspecs such as `git push origin +main` hard-block as force updates (review round 2 G).
+
+Inert quoted-argument exemptions inspect the shell command alone. A bash call’s `cwd` is path metadata and cannot turn quoted documentation into shell execution.

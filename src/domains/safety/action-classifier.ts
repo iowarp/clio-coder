@@ -196,9 +196,9 @@ function scanStringOf(args: Record<string, unknown> | undefined): string {
 	return parts.join(" ");
 }
 
-function matchFirst(patterns: ReadonlyArray<NamedPattern>, haystack: string): NamedPattern | null {
+function matchFirst(patterns: ReadonlyArray<NamedPattern>, haystack: string, command = haystack): NamedPattern | null {
 	for (const p of patterns) {
-		if (p.re.test(haystack) && !inertQuotedMatch(haystack, p.re)) return p;
+		if (p.re.test(haystack) && !inertQuotedMatch(command, p.re)) return p;
 	}
 	return null;
 }
@@ -546,15 +546,16 @@ export function classify(rawCall: ClassifierCall): Classification {
 
 	if (call.tool === ToolNames.Bash) {
 		const scan = scanStringOf(call.args);
+		const commandText = typeof call.args?.command === "string" ? call.args.command : "";
 		const gitHit =
-			matchFirst(GIT_DESTRUCTIVE_PATTERNS, scan) ??
+			matchFirst(GIT_DESTRUCTIVE_PATTERNS, scan, commandText) ??
 			normalizedGitCommands(typeof call.args?.command === "string" ? call.args.command : "")
 				.map((candidate) => matchFirst(GIT_DESTRUCTIVE_PATTERNS, candidate))
 				.find((hit) => hit !== null);
 		if (gitHit) {
 			return { actionClass: "git_destructive", reasons: [`pattern:${gitHit.name}`] };
 		}
-		const sysHit = matchFirst(SYSTEM_MODIFY_PATTERNS, scan);
+		const sysHit = matchFirst(SYSTEM_MODIFY_PATTERNS, scan, commandText);
 		if (sysHit) {
 			return { actionClass: "system_modify", reasons: [`pattern:${sysHit.name}`] };
 		}
