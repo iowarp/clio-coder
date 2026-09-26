@@ -136,6 +136,8 @@ export interface ToolSpec {
 	 * to the model, not an enforcement boundary.
 	 */
 	parameters: TSchema;
+	/** Smaller attached schema; canonical validation and gateway describe retain parameters. */
+	modelParameters?: TSchema;
 	/** Base action class for this tool when arguments are trivial. */
 	baseActionClass: ActionClass;
 	/** Harness-owned projection of executable effects for the safety engine. Never package-supplied code. */

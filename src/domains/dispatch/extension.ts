@@ -49,7 +49,7 @@ import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
 import { changedCheckoutPaths, snapshotCheckout } from "../../tools/checkout-changes.js";
 import { networkToolsDisabled } from "../../tools/network-policy.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
-import { withGatewayForCapabilities } from "../../tools/surface.js";
+import { effectiveToolCall, gatewayChainReceipts, withGatewayForCapabilities } from "../../tools/surface.js";
 import {
 	applyTaskWorktree,
 	cleanupTaskWorktree,
@@ -738,10 +738,19 @@ function recordWorkerRunEffect(recorder: RunEffectsRecorder, event: Record<strin
 	if (event.type === "tool_execution_start") {
 		const toolName = readStringOrNull(event.toolName) ?? readStringOrNull(event.tool);
 		if (toolName === null) return;
-		recorder.start(toolCallId, toolName, isRecord(event.args) ? event.args : undefined);
+		const call = effectiveToolCall(toolName, event.args);
+		recorder.start(toolCallId, call.toolName, call.args);
 		return;
 	}
-	if (event.type === "tool_execution_end") recorder.finish(toolCallId, event.isError === true);
+	if (event.type === "tool_execution_end") {
+		for (const child of gatewayChainReceipts(String(event.toolName), event.result)) {
+			const id = `${toolCallId}:${child.id}`;
+			recorder.start(id, child.capability, child.args);
+			recorder.checkOutcome(id, child.admission.outcome);
+			recorder.finish(id, child.admission.outcome !== "ok");
+		}
+		recorder.finish(toolCallId, event.isError === true);
+	}
 }
 
 interface VerifyCallLog {
@@ -760,13 +769,25 @@ interface VerifyCallLog {
 function recordWorkerVerifyCall(log: VerifyCallLog, event: Record<string, unknown>): void {
 	if (event.type === "tool_execution_start") {
 		const toolCallId = readStringOrNull(event.toolCallId);
-		if (toolCallId === null || readStringOrNull(event.toolName) !== ToolNames.Verify) return;
-		log.pending.set(toolCallId, verifyCheckIdentity(event.args));
+		const call = effectiveToolCall(String(event.toolName), event.args);
+		if (toolCallId === null || call.toolName !== ToolNames.Verify) return;
+		log.pending.set(toolCallId, verifyCheckIdentity(call.args));
+		return;
+	}
+	if (event.type === "tool_execution_end") {
+		for (const child of gatewayChainReceipts(String(event.toolName), event.result)) {
+			if (child.capability === ToolNames.Verify)
+				log.calls.push({ check: verifyCheckIdentity(child.args), outcome: child.admission.outcome });
+		}
 		return;
 	}
 	if (event.type !== "clio_coder_tool_finish" || !isRecord(event.payload)) return;
-	if (event.payload.tool !== ToolNames.Verify) return;
 	const toolCallId = readStringOrNull(event.payload.toolCallId);
+	if (
+		event.payload.tool !== ToolNames.Verify &&
+		!(event.payload.tool === ToolNames.Gateway && toolCallId !== null && log.pending.has(toolCallId))
+	)
+		return;
 	const check = toolCallId === null ? null : (log.pending.get(toolCallId) ?? null);
 	if (toolCallId !== null) log.pending.delete(toolCallId);
 	const outcome = event.payload.outcome;
@@ -5499,6 +5520,7 @@ export function createDispatchBundle(
 		const skillActivations: SkillActivation[] = [];
 		const finishContractEntries: unknown[] = [];
 		const verifyCalls: VerifyCallLog = { pending: new Map(), calls: [] };
+		const pendingCapabilities = new Map<string, string>();
 		let runIdForPermissionAudit: string | null = null;
 		// The worker's own tool calls, folded into what this run changed and what
 		// it validated. The sealed mutation-report contract is measured against
@@ -5571,6 +5593,7 @@ export function createDispatchBundle(
 				};
 				payload?: {
 					tool?: string;
+					toolCallId?: string;
 					sequence?: number;
 					outcomeCode?: unknown;
 					detail?: unknown;
@@ -5593,9 +5616,16 @@ export function createDispatchBundle(
 					timeoutMs?: number;
 					source?: "operator" | "timeout" | "policy" | "remembered";
 				};
+				toolName?: string;
+				toolCallId?: string;
+				args?: unknown;
+				result?: unknown;
 			};
 			if (event.type === "clio_coder_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
+			}
+			if (event.type === "tool_execution_start" && event.toolCallId && event.toolName) {
+				pendingCapabilities.set(event.toolCallId, effectiveToolCall(event.toolName, event.args).toolName);
 			}
 			if (event.type === "clio_coder_steer_received") acknowledgeSteer(event.payload?.sequence);
 			if (
@@ -5632,6 +5662,26 @@ export function createDispatchBundle(
 				}
 				recordWorkerRunEffect(runEffects, event);
 				recordWorkerVerifyCall(verifyCalls, event);
+				if (event.type === "tool_execution_end") {
+					for (const child of gatewayChainReceipts(String(event.toolName), event.result)) {
+						recordToolFinish(toolStats, {
+							tool: child.capability,
+							outcome: child.admission.outcome,
+						});
+						if (child.admission.decision === "allowed") safetyDecisionCounts.allowed += 1;
+						else if (child.admission.decision === "blocked") safetyDecisionCounts.blocked += 1;
+						else safetyDecisionCounts.permissionRequested += 1;
+						if (child.admission.outcome === "blocked") {
+							blockedAttempts.push({
+								tool: child.capability,
+								actionClass: child.admission.actionClass,
+								...(child.admission.ruleId ? { ruleId: child.admission.ruleId } : {}),
+								...(child.admission.reasonCode ? { reasonCode: child.admission.reasonCode } : {}),
+								...(child.admission.blockReason ? { reason: child.admission.blockReason } : {}),
+							});
+						}
+					}
+				}
 			}
 			if (
 				event.type === "clio_coder_permission_escalated" &&
@@ -5768,7 +5818,9 @@ export function createDispatchBundle(
 			}
 			if (event.type === "clio_coder_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 				recordToolCompletion(inFlightTools, event.payload);
-				recordToolFinish(toolStats, event.payload);
+				const tool = pendingCapabilities.get(event.payload.toolCallId ?? "") ?? event.payload.tool;
+				pendingCapabilities.delete(event.payload.toolCallId ?? "");
+				recordToolFinish(toolStats, { ...event.payload, tool });
 				if (isSkillActivation(event.payload.skillActivation)) {
 					skillActivations.push(event.payload.skillActivation);
 				}
@@ -5776,7 +5828,7 @@ export function createDispatchBundle(
 				else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
 				else if (event.payload.decision === "permission_requested") safetyDecisionCounts.permissionRequested += 1;
 				if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
-					const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
+					const attempt: SafetyBlockedAttempt = { tool };
 					if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
 					if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
 					if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;

@@ -402,12 +402,20 @@ function selfDevelopmentSkillFragments(
 ): RenderedPromptFragment[] {
 	if (!selfRepo || !sessionCanUseSkills(inputs) || inputs.turnConstraints?.mode === "proposal") return [];
 	const activation = isAutonomyLevel(autonomy);
+	const listCall =
+		inputs.coordinatorCapabilities !== undefined
+			? 'gateway(op="call", capability="context", args={scope:"skills"})'
+			: 'context(scope="skills")';
+	const loadCall = (name: string) =>
+		inputs.coordinatorCapabilities !== undefined
+			? `gateway(op="call", capability="context", args={scope:"skills",name:"${name}"})`
+			: `context(scope="skills", name="${name}")`;
 	const body = [
 		"# Self-development skills",
 		"For a task that changes Clio's source, harness, prompts, or library, use clio-coder-dev before editing and clio-coder-test when choosing validation. Skip this workflow for unrelated or self-contained questions.",
-		'These two skills are discoverable from this checkout\'s library/skills/meta when no installed package owns their names. Check context(scope="skills") for current readiness; disabled, damaged, or hidden skills stay unavailable.',
+		`These two skills are discoverable from this checkout's library/skills/meta when no installed package owns their names. Check ${listCall} for current readiness; disabled, damaged, or hidden skills stay unavailable.`,
 		activation
-			? 'Load each relevant ready skill with context(scope="skills", name="clio-coder-dev") or context(scope="skills", name="clio-coder-test") as needed, without waiting for a separate skill request. Reuse already loaded guidance; do not load every reference or the whole catalog.'
+			? `Load each relevant ready skill with ${loadCall("clio-coder-dev")} or ${loadCall("clio-coder-test")} as needed, without waiting for a separate skill request. Reuse already loaded guidance; do not load every reference or the whole catalog.`
 			: "Only the operator activates skills at this autonomy level. Suggest /skill clio-coder-dev or /skill clio-coder-test when relevant, then continue permitted work without waiting or bypassing the activation gate.",
 		"Read CONTRIBUTING.md and the assigned sprint packet from the detected repository root. A plan or skill does not launch an unapproved implementation sprint or authorize publication.",
 	].join("\n");

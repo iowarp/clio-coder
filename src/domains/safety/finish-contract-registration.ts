@@ -104,10 +104,10 @@ export function createFinishContractRegistration(
 			if (assessment.kind !== "engage") return [];
 			if (rigor === "high") {
 				const constraints = options.getTurnConstraints?.();
-				const attached =
-					typeof input.metadata?.activeToolNames === "string" ? input.metadata.activeToolNames.split(",") : undefined;
+				const names = input.metadata?.activeCapabilityNames ?? input.metadata?.activeToolNames;
+				const reachable = typeof names === "string" ? names.split(",") : undefined;
 				const available = (name: string) =>
-					turnAllowsTool(constraints, name) && (attached === undefined || attached.includes(name));
+					turnAllowsTool(constraints, name) && (reachable === undefined || reachable.includes(name));
 				const verificationTools = (assessment.quality?.length ? ["verify"] : ["verify", "bash", "run_script"]).filter(
 					available,
 				);

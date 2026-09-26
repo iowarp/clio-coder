@@ -9,7 +9,8 @@
  * executable surface and the attested tool signature are computed by the same
  * `effectiveToolNames` narrowing in this file.
  *
- * Validation runs exactly once per tool call. Inside the agent loop pi-ai's
+ * The engine validates attached schemas. A projected schema is then checked
+ * against the canonical schema before admission. Inside the agent loop pi-ai's
  * `validateToolArguments` (called by pi-agent-core's `prepareToolCall`)
  * coerces and schema-checks args before they reach `AgentTool.execute`. For
  * direct callers (tests, scripts, future RPC paths) `invokeRegisteredTool`
@@ -228,7 +229,9 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		});
 		if (
 			input.returnDispositionedErrors === true &&
-			(isDispositionedToolResultError(verdict.result) || isRefusalToolResultError(verdict.result))
+			(isDispositionedToolResultError(verdict.result) ||
+				isRefusalToolResultError(verdict.result) ||
+				(spec.name === ToolNames.Gateway && verdict.result.details?.op === "chain"))
 		) {
 			return projectToolResult(verdict.result);
 		}
@@ -236,7 +239,9 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	}
 	const toolDetails = isRecord(verdict.result.details) ? verdict.result.details : {};
 	const skillActivation =
-		spec.name === ToolNames.Context ? skillActivationFromToolDetails(toolDetails, input.invokeOptions?.turnId) : null;
+		spec.name === ToolNames.Context || toolDetails.capability === ToolNames.Context
+			? skillActivationFromToolDetails(toolDetails, input.invokeOptions?.turnId)
+			: null;
 	const result: AgentToolResult<WorkerToolOkDetails> = {
 		content: [{ type: "text", text: toolResultContextText(verdict.result) }, ...(verdict.result.images ?? [])],
 		details: { ...toolDetails, kind: "ok" },
@@ -355,7 +360,7 @@ function toAgentTool(
 	const tool: AgentTool<TSchema> = {
 		name: spec.name,
 		description: spec.description,
-		parameters: wireParameterSchema(spec.parameters),
+		parameters: wireParameterSchema(spec.modelParameters ?? spec.parameters),
 		label: spec.metadata?.uiLabel ?? spec.name,
 		async execute(
 			toolCallId: string,
@@ -370,7 +375,12 @@ function toAgentTool(
 			}
 			const callInput: RunValidatedToolCallInput = {
 				spec,
-				args: params as Record<string, unknown>,
+				args: spec.modelParameters
+					? (validateEngineToolArguments(
+							{ name: spec.name, description: spec.description, parameters: spec.parameters },
+							{ type: "toolCall", id: toolCallId, name: spec.name, arguments: params as Record<string, unknown> },
+						) as Record<string, unknown>)
+					: (params as Record<string, unknown>),
 				registry,
 				returnDispositionedErrors: true,
 			};
@@ -449,7 +459,11 @@ export function effectiveToolNames(input: Omit<ResolveAgentToolsInput, "telemetr
 		names.push(name);
 	}
 	if (input.registry.get(ToolNames.Gateway) === undefined) return names;
-	return withGatewayForCapabilities(names);
+	return withGatewayForCapabilities(
+		names.some((name) => gatewayNames.includes(name)) && !names.includes(ToolNames.Gateway)
+			? [...names, ToolNames.Gateway]
+			: names,
+	);
 }
 
 /**

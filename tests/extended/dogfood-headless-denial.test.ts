@@ -224,7 +224,11 @@ describe("headless no-op contract through the built binary", () => {
 		name: "write",
 		arguments: { path: "c2-proof.txt", content: PROOF },
 	};
-	const deniedInline: OpenAICompatToolCallScript = { id: "call-inline", name: "bash", arguments: { command: inline } };
+	const deniedInline: OpenAICompatToolCallScript = {
+		id: "call-inline",
+		name: "gateway",
+		arguments: { op: "call", capability: "bash", args: { command: inline } },
+	};
 
 	/** Tool results already in the conversation, which is how far the script has got. */
 	function toolResults(request: Record<string, unknown>): number {
@@ -237,6 +241,7 @@ describe("headless no-op contract through the built binary", () => {
 		steps: ReadonlyArray<OpenAICompatToolCallScript>;
 		failOnNoop: boolean;
 		reply?: string;
+		packageScripts?: Record<string, string>;
 	}) {
 		const scratch = headlessScratch("clio-coder-noop-");
 		scratches.push(scratch);
@@ -248,6 +253,8 @@ describe("headless no-op contract through the built binary", () => {
 		const project = join(scratch.root, "project");
 		mkdirSync(project);
 		writeFileSync(join(project, "sentinel.txt"), "blocked is harmless fixture text\n");
+		if (input.packageScripts)
+			writeFileSync(join(project, "package.json"), JSON.stringify({ scripts: input.packageScripts }));
 		const turn = await runCli(
 			[
 				"--no-context-files",
@@ -358,20 +365,64 @@ describe("headless no-op contract through the built binary", () => {
 			receipt.safety?.blockedAttempts.map((attempt) => [attempt.tool, attempt.actionClass]),
 			[["edit", "write"]],
 		);
-		strictEqual(receipt.toolStats.find((stat) => stat.tool === "gateway")?.ok, 1);
+		strictEqual(receipt.toolStats.find((stat) => stat.tool === "artifact")?.ok, 1);
 	});
 
-	test("three identical denied shell writes all count as permission requests", async () => {
-		// The loop guard rewrites the third denial's reason with its own
-		// guidance, so a reason-prefix check would count that one as a hard block.
+	test("repeated denied gateway shell writes preserve permission requests and the guard's hard block", async () => {
+		// The gateway guard sees retries before the nested command can park;
+		// the third attempt is a real guard block, not another unanswered ask.
 		const { receipt } = await headlessTurn({
 			autonomy: "default",
 			steps: [deniedInline, { ...deniedInline, id: "call-inline-2" }, { ...deniedInline, id: "call-inline-3" }],
 			failOnNoop: false,
 		});
 		strictEqual(receipt.safety?.blockedAttempts.length, 3);
-		deepStrictEqual(receipt.safety?.decisions, { allowed: 0, blocked: 0, permissionRequested: 3 });
+		deepStrictEqual(receipt.safety?.decisions, { allowed: 0, blocked: 1, permissionRequested: 2 });
 		strictEqual(receipt.noop, true);
+	});
+
+	test("a partial chain receipt retains its successful write and actual denied operation", async () => {
+		const { receipt, project } = await headlessTurn({
+			autonomy: "default",
+			steps: [
+				{
+					id: "call-chain",
+					name: "gateway",
+					arguments: {
+						op: "chain",
+						steps: [
+							{ id: "write", capability: "write", args: writeProof.arguments },
+							{ id: "denied", capability: "bash", args: { command: inline }, after: ["write"] },
+						],
+					},
+				},
+			],
+			failOnNoop: true,
+		});
+		strictEqual(readFileSync(join(project, "c2-proof.txt"), "utf8"), PROOF);
+		strictEqual(receipt.toolStats.find((stat) => stat.tool === "write")?.ok, 1);
+		strictEqual(receipt.toolStats.find((stat) => stat.tool === "bash")?.blocked, 1);
+		deepStrictEqual(
+			receipt.safety?.blockedAttempts.map((attempt) => attempt.tool),
+			["bash"],
+		);
+		strictEqual(receipt.noop, false);
+	});
+
+	test("verification through the gateway keeps distinct check identities", async () => {
+		const { receipt } = await headlessTurn({
+			autonomy: "yolo",
+			packageScripts: { "test:fixture": 'node -e "process.exit(0)"', "test:other": 'node -e "process.exit(0)"' },
+			steps: ["test:fixture", "test:other"].map((check, index) => ({
+				id: `call-check-${index}`,
+				name: "gateway",
+				arguments: { op: "call", capability: "verify", args: { check } },
+			})),
+			failOnNoop: false,
+		});
+		strictEqual(receipt.toolStats.find((stat) => stat.tool === "verify")?.ok, 2);
+		strictEqual(receipt.quality.typedValidations.length, 2);
+		ok(receipt.quality.typedValidations.every((fact) => fact.passed));
 	});
 
 	test("the sealed noop bit is covered by the receipt integrity digest", async () => {

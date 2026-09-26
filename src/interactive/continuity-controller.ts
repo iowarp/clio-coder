@@ -22,6 +22,7 @@ import {
 import { persistContinuityGroup } from "../domains/session/continuity/persistence.js";
 import { resolveContinuityProjection } from "../domains/session/continuity/projection.js";
 import type { SessionEntry } from "../domains/session/entries.js";
+import { effectiveToolCall } from "../tools/surface.js";
 
 export interface ContinuityReductionHooks {
 	beforeSummaryCall(): void;
@@ -275,11 +276,16 @@ export class ContinuityController {
 					preparedIndex >= 0 &&
 					entries.slice(preparedIndex + 1).some((entry) => {
 						if (entry.kind !== "message" || entry.role !== "tool_result") return false;
-						const payload = entry.payload as { toolCallId?: string; toolName?: string; isError?: boolean };
+						const payload = entry.payload as {
+							toolCallId?: string;
+							toolName?: string;
+							isError?: boolean;
+							result?: { details?: unknown };
+						};
 						return (
 							entry.parentTurnId === live.origin.leafTurnId &&
 							payload.toolCallId === live.identity.toolCallId &&
-							payload.toolName === "self_compact" &&
+							effectiveToolCall(payload.toolName ?? "", undefined, payload.result?.details).toolName === "self_compact" &&
 							payload.isError === false
 						);
 					});

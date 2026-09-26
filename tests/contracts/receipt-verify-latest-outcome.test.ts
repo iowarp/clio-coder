@@ -25,6 +25,7 @@ interface VerifyCall {
 	outcome: "ok" | "error" | "blocked";
 	/** Omit the call id, the way a runtime without engine call ids reports a finish. */
 	anonymous?: boolean;
+	viaGateway?: "call" | "chain";
 }
 
 let callCounter = 0;
@@ -33,19 +34,51 @@ function verifyCallEvents(call: VerifyCall): unknown[] {
 	callCounter += 1;
 	const toolCallId = `verify-call-${callCounter}`;
 	const id = call.anonymous === true ? {} : { toolCallId };
+	const toolName = call.viaGateway ? "gateway" : "verify";
+	const args =
+		call.viaGateway === "call"
+			? { op: "call", capability: "verify", args: call.args }
+			: call.viaGateway === "chain"
+				? { op: "chain", steps: [{ id: "check", capability: "verify", args: call.args }] }
+				: call.args;
+	const details =
+		call.viaGateway === "chain"
+			? {
+					op: "chain",
+					chainResults: [
+						{
+							id: "check",
+							capability: "verify",
+							args: call.args,
+							isError: call.outcome !== "ok",
+							result: {
+								content: [],
+								details: {
+									kind: call.outcome === "ok" ? "ok" : "error",
+									chainAdmission: {
+										outcome: call.outcome,
+										decision: call.outcome === "blocked" ? "blocked" : "allowed",
+										actionClass: "execute",
+									},
+								},
+							},
+						},
+					],
+				}
+			: {};
 	return [
-		{ type: "tool_execution_start", toolCallId, toolName: "verify", args: call.args },
-		{ type: "clio_coder_tool_start", payload: { tool: "verify", ...id, posture: "operating", startedAt: Date.now() } },
+		{ type: "tool_execution_start", toolCallId, toolName, args },
+		{ type: "clio_coder_tool_start", payload: { tool: toolName, ...id, posture: "operating", startedAt: Date.now() } },
 		{
 			type: "clio_coder_tool_finish",
-			payload: { tool: "verify", ...id, posture: "operating", durationMs: 5, outcome: call.outcome },
+			payload: { tool: toolName, ...id, posture: "operating", durationMs: 5, outcome: call.outcome },
 		},
 		{
 			type: "tool_execution_end",
 			toolCallId,
-			toolName: "verify",
+			toolName,
 			isError: call.outcome !== "ok",
-			result: { content: [{ type: "text", text: call.outcome }], details: {} },
+			result: { content: [{ type: "text", text: call.outcome }], details },
 		},
 	];
 }
@@ -98,6 +131,18 @@ function verdicts(receipt: RunReceipt): boolean[] {
 describe("typed validation follows each check's latest run (BT-017)", () => {
 	beforeEach(() => isolateDispatchState());
 	afterEach(() => restoreDispatchState());
+	for (const viaGateway of ["call", "chain"] as const) {
+		it(`preserves each check's latest evidence through gateway ${viaGateway}`, async () => {
+			const receipt = await sealedReceipt([
+				{ args: { check: "test" }, outcome: "error", viaGateway },
+				{ args: { check: "test" }, outcome: "ok", viaGateway },
+				{ args: { check: "lint" }, outcome: "ok", viaGateway },
+			]);
+			deepStrictEqual(verdicts(receipt), [true, true]);
+			deepStrictEqual(receipt.verification, { state: "verified", basis: "validation-tool" });
+			if (viaGateway === "chain") equal(receipt.toolStats.find((stat) => stat.tool === "verify")?.count, 3);
+		});
+	}
 
 	it("a failed check that later passes seals as passed and verified", async () => {
 		const receipt = await sealedReceipt([

@@ -104,6 +104,11 @@ describe("clio_library tool", () => {
 		deepStrictEqual([missing.total, missing.shown, missing.rows], [0, 0, []]);
 	});
 
+	it("finds a ready workflow from task vocabulary without loading its body", async () => {
+		const listed = await page({ kind: "skill", query: "compare numeric grid with reference" });
+		ok(listed.rows.some((row) => row.row === "resource" && row.name === "grid-check"));
+	});
+
 	it("pages a stable order without overlap, clamps the page size, and filters by kind", async () => {
 		const first = await page({ limit: 2 });
 		strictEqual(first.shown, 2);

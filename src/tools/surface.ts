@@ -1,9 +1,9 @@
 /**
  * Tool placement: which registered tools carry an attached schema on every
  * turn (direct) and which are reached through the gateway's find/describe/call
- * results (gateway). One table for the builtins, one prefix rule for each
- * dynamic namespace, and the helpers every consumer of a placement decision
- * shares, so moving a tool between the two surfaces is a one-row edit here.
+ * results (gateway). The coordinator uses a five-tool projection; the builtin
+ * table and namespace rules preserve the worker and legacy surfaces. Registry
+ * declarations take precedence over those defaults.
  *
  * Placement changes what the model sees, never what a call is allowed to do:
  * a capability behind the gateway runs through the same admission as a direct
@@ -24,6 +24,19 @@ import {
 } from "../core/tool-names.js";
 
 export type ToolPlacement = "direct" | "gateway";
+
+/** The coordinator learns execution capabilities on demand; workers retain their recipe surface. */
+export const COORDINATOR_DIRECT_TOOLS: ReadonlySet<string> = new Set([
+	ToolNames.Read,
+	ToolNames.Write,
+	ToolNames.Edit,
+	ToolNames.Gateway,
+	ToolNames.Dispatch,
+]);
+
+export function coordinatorToolPlacement(name: string): ToolPlacement {
+	return COORDINATOR_DIRECT_TOOLS.has(name) ? "direct" : "gateway";
+}
 
 /**
  * Builtin placement. Direct: the fundamental coding operations, context and
@@ -144,6 +157,73 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export interface GatewayChainReceipt {
+	id: string;
+	capability: string;
+	args: Record<string, unknown>;
+	result: Record<string, unknown>;
+	admission: {
+		outcome: "ok" | "error" | "blocked";
+		decision: "allowed" | "blocked" | "permission_requested";
+		actionClass: string;
+		terminate?: boolean;
+		ruleId?: string;
+		reasonCode?: string;
+		blockReason?: string;
+	};
+}
+
+/** Settled, admitted children of a real gateway aggregate, for receipt accounting. */
+export function gatewayChainReceipts(toolName: string, result: unknown): GatewayChainReceipt[] {
+	const details = isRecord(result) && isRecord(result.details) ? result.details : undefined;
+	if (
+		toolName !== ToolNames.Gateway ||
+		details?.op !== "chain" ||
+		(details.capability !== undefined && details.capability !== ToolNames.Context) ||
+		!Array.isArray(details.chainResults)
+	)
+		return [];
+	return details.chainResults.slice(0, 16).flatMap((child) => {
+		if (
+			!isRecord(child) ||
+			typeof child.id !== "string" ||
+			typeof child.capability !== "string" ||
+			child.capability === ToolNames.Gateway ||
+			!isRecord(child.args) ||
+			!isRecord(child.result) ||
+			!isRecord(child.result.details)
+		)
+			return [];
+		const admission = child.result.details.chainAdmission;
+		if (
+			!isRecord(admission) ||
+			(admission.outcome !== "ok" && admission.outcome !== "error" && admission.outcome !== "blocked") ||
+			(admission.decision !== "allowed" &&
+				admission.decision !== "blocked" &&
+				admission.decision !== "permission_requested") ||
+			typeof admission.actionClass !== "string"
+		)
+			return [];
+		return [
+			{
+				id: child.id,
+				capability: child.capability,
+				args: child.args,
+				result: child.result,
+				admission: {
+					outcome: admission.outcome,
+					decision: admission.decision,
+					actionClass: admission.actionClass,
+					...(admission.terminate === true ? { terminate: true } : {}),
+					...(typeof admission.ruleId === "string" ? { ruleId: admission.ruleId } : {}),
+					...(typeof admission.reasonCode === "string" ? { reasonCode: admission.reasonCode } : {}),
+					...(typeof admission.blockReason === "string" ? { blockReason: admission.blockReason } : {}),
+				},
+			},
+		];
+	});
+}
+
 /**
  * Unwrap a ledger tool record to the capability it stands for. Every consumer
  * keyed on tool names (artifact folding, the read ledger, the path index,
@@ -164,4 +244,49 @@ export function effectiveToolCall(toolName: string, args: unknown, details?: unk
 	const capability = (fromDetails ?? fromArgs)?.trim() ?? "";
 	if (capability.length === 0 || capability === ToolNames.Gateway) return { toolName, args: record, viaGateway: false };
 	return { toolName: capability, args: isRecord(record?.args) ? record.args : undefined, viaGateway: true };
+}
+
+/**
+ * Virtual child records for ledger consumers, never additional transcript
+ * messages. They reference the persisted aggregate result, so recall remains
+ * possible without inventing ledger ids. A failed chain can still have
+ * successful writes or reads; only settled child results count, never planned
+ * or pending steps. Provider history keeps its single gateway call/result.
+ */
+export function expandChainMessages<T>(entries: ReadonlyArray<T>): ReadonlyArray<T> {
+	return entries.flatMap((entry) => {
+		if (!isRecord(entry) || entry.kind !== "message" || entry.role !== "tool_result" || !isRecord(entry.payload))
+			return [entry];
+		const payload = entry.payload;
+		const result = isRecord(payload.result) ? payload.result : undefined;
+		const details = result && isRecord(result.details) ? result.details : undefined;
+		if (
+			payload.toolName !== ToolNames.Gateway ||
+			details?.op !== "chain" ||
+			(details.capability !== undefined && details.capability !== ToolNames.Context) ||
+			!Array.isArray(details.chainResults)
+		)
+			return [entry];
+		const children = details.chainResults.slice(0, 16).flatMap((child): T[] => {
+			if (
+				!isRecord(child) ||
+				typeof child.id !== "string" ||
+				typeof child.capability !== "string" ||
+				!isRecord(child.args) ||
+				!isRecord(child.result) ||
+				typeof child.isError !== "boolean"
+			)
+				return [];
+			const toolCallId = `${String(payload.toolCallId ?? entry.turnId)}:${child.id}`;
+			return [
+				{ ...entry, role: "tool_call", payload: { toolCallId, name: child.capability, args: child.args } } as T,
+				{
+					...entry,
+					role: "tool_result",
+					payload: { toolCallId, toolName: child.capability, result: child.result, isError: child.isError },
+				} as T,
+			];
+		});
+		return [entry, ...children];
+	});
 }

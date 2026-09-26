@@ -496,6 +496,53 @@ describe("mandatory request-fit compaction", () => {
 });
 
 describe("typed historical skill checkpoints (pure source)", () => {
+	for (const chained of [false, true]) {
+		it(`preserves exact skill instructions from a ${chained ? "chain" : "gateway call"} receipt and rejects altered projection`, () => {
+			const f = history("Historical scientific workflow instructions.");
+			const innerArgs = { scope: "skills", name: "diagram" };
+			const args = chained
+				? { op: "chain", steps: [{ id: "load", capability: "context", args: innerArgs }] }
+				: { op: "call", capability: "context", args: innerArgs };
+			const assistant = f.entries.find((entry) => entry.turnId === "assistant");
+			const call = f.entries.find((entry) => entry.turnId === "call");
+			const result = f.entries.find((entry) => entry.turnId === "result");
+			ok(assistant?.kind === "message" && call?.kind === "message" && result?.kind === "message");
+			assistant.payload = { content: [{ type: "toolCall", id: "load", name: "gateway", arguments: args }] };
+			call.payload = { toolCallId: "load", name: "gateway", args };
+			const payload = result.payload as {
+				toolName: string;
+				resultSummary: { bytes: number; truncated: boolean };
+				result: { content: Array<{ type: string; text: string }>; details: Record<string, unknown> };
+			};
+			payload.toolName = "gateway";
+			if (chained) {
+				const child = structuredClone(payload.result);
+				const aggregate = JSON.stringify({
+					status: "paused",
+					results: [{ id: "load", capability: "context", kind: "ok", output: f.body, truncated: false }],
+					pending: [],
+				});
+				payload.result = {
+					content: [{ type: "text", text: aggregate }],
+					details: {
+						...child.details,
+						capability: "context",
+						op: "chain",
+						chainResults: [{ id: "load", capability: "context", args: innerArgs, isError: false, result: child }],
+					},
+				};
+				payload.resultSummary.bytes = Buffer.byteLength(aggregate);
+			} else payload.result.details.capability = "context";
+			const captured = captureSkillContext(f.entries, selection);
+			ok(captured);
+			deepStrictEqual(captured.skills[0]?.content, [{ type: "text", text: f.body }]);
+			strictEqual(captured.skills[0]?.callRef, "call");
+			strictEqual(captured.skills[0]?.resultRef, "result");
+			payload.result.content = [{ type: "text", text: "Altered or truncated projection" }];
+			strictEqual(captureSkillContext(f.entries, selection), undefined);
+		});
+	}
+
 	it("keeps canonical state through repeated small-window batches and failed, canceled, empty, then successful summaries", async () => {
 		const f = history("Verified skill body: inspect both ranks before changing MPI exchange.");
 		const work = f.entries.find((entry) => entry.turnId === "work");

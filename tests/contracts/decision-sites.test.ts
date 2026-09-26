@@ -64,7 +64,17 @@ describe("fleet.decisionProfiles validation", () => {
 	it("names every site the harness knows", () => {
 		deepStrictEqual(
 			[...DECISION_SITES],
-			["skills", "memory", "toolRisk", "drafts", "turnScope", "dispatchForecast", "capabilities", "consult"],
+			[
+				"skills",
+				"memory",
+				"toolRisk",
+				"drafts",
+				"turnScope",
+				"harnessRouting",
+				"dispatchForecast",
+				"capabilities",
+				"consult",
+			],
 		);
 	});
 });

@@ -1,5 +1,5 @@
 import { isAbsolute, relative, resolve } from "node:path";
-import { effectiveToolCall } from "../../tools/surface.js";
+import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
 
 export type SessionArtifactTool = "artifact" | "write" | "edit";
 export type SessionArtifactKind = "plan" | "review" | "report";
@@ -58,7 +58,7 @@ export function foldSessionArtifacts(
 	const writeCounts = new Map<string, number>();
 	let writeIndex = 0;
 
-	for (const raw of entries) {
+	for (const raw of expandChainMessages(entries)) {
 		if (!isRecord(raw) || raw.kind !== "message" || raw.role !== "tool_result") continue;
 		if (typeof raw.turnId !== "string" || typeof raw.timestamp !== "string") continue;
 		const payload = raw.payload;

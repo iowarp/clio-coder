@@ -30,7 +30,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
-import { type ToolName, ToolNames } from "../core/tool-names.js";
+import { isBuiltinToolName, type ToolName, ToolNames } from "../core/tool-names.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import {
 	createLiveBudgetProducer,
@@ -1906,6 +1906,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				contextWindow,
 				providerSupportsTools: runtimeSupportsTools(agentRuntime),
 				toolNames,
+				// Builtin presence gates prompt guidance. Learning an MCP schema
+				// mid-turn changes discovery results, not the immutable prefix.
+				coordinatorCapabilities:
+					deps.toolRegistry
+						?.listAll()
+						.map((spec) => spec.name)
+						.filter(isBuiltinToolName)
+						.sort() ?? [],
 				...(guidance ? { thinkingGuidance: guidance } : {}),
 				...(toolPromptHints.length > 0 ? { toolPromptHints } : {}),
 				...(deps.toolRegistry?.get(ToolNames.ConfigureClio) ? { canConfigureClio: true } : {}),

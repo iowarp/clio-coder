@@ -5,7 +5,8 @@
  * nudge. Owns every `deps.middleware` interaction of the loop.
  */
 
-import { turnAllowsContinuation } from "../core/turn-constraints.js";
+import { ToolNames } from "../core/tool-names.js";
+import { turnAllowsContinuation, turnAllowsTool } from "../core/turn-constraints.js";
 import {
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
 	type MiddlewareContract,
@@ -20,6 +21,7 @@ import { FINISH_CONTRACT_ADVISORY_MESSAGE } from "../domains/safety/finish-contr
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, EvictionTrigger, RecallTrigger } from "../domains/session/entries.js";
 import type { AgentMessage } from "../engine/types.js";
+import type { ToolRegistry } from "../tools/registry.js";
 import { extractText, hasStructuredToolCall, toolNamesFromAgentState } from "./chat-loop-messages.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
@@ -27,6 +29,7 @@ export interface TurnMiddlewareDeps {
 	memoryContentGuard?: (() => () => boolean) | undefined;
 	state: ChatTurnState;
 	middleware?: MiddlewareContract | undefined;
+	toolRegistry?: ToolRegistry | undefined;
 	session?: SessionContract | undefined;
 	middlewareToolChoice: MiddlewareToolChoiceControl;
 	emitNotice: (text: string, level?: "info" | "warning" | "error") => void;
@@ -85,6 +88,17 @@ function reminderNoticeLevel(severity: MiddlewareReminderSeverity): "info" | "wa
 
 export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 	const { state, middlewareToolChoice } = deps;
+	// Internal availability includes admitted gateway capabilities. Keep the
+	// attached names separate: prose detection needs the actual model surface.
+	const activeCapabilityNames = (runtime: AgentRuntime): string => {
+		const attached = toolNamesFromAgentState(runtime.agent.state.tools);
+		const hidden = attached.includes(ToolNames.Gateway)
+			? (deps.toolRegistry?.listGateway() ?? []).map((spec) => spec.name)
+			: [];
+		return [...new Set([...attached, ...hidden])]
+			.filter((name) => turnAllowsTool(state.currentTurnConstraints, name))
+			.join(",");
+	};
 
 	// Reminders accumulated from middleware `inject_reminder` effects
 	// (turn_end advisories, hard-block recovery guidance, turn_start
@@ -268,6 +282,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					requestContinuation,
 					turnMode: state.currentTurnConstraints?.mode ?? "",
 					activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
+					activeCapabilityNames: activeCapabilityNames(agentRuntime),
 					// First-substantive-turn signal for once-per-session reminders:
 					// a fresh session's opening turn has an empty conversation.
 					conversationMessages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system").length,
@@ -302,6 +317,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				runtimeId: agentRuntime.runtimeId,
 				runtimeTier: agentRuntime.runtimeResolution.runtimeTier ?? "",
 				activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
+				activeCapabilityNames: activeCapabilityNames(agentRuntime),
 				turnToolCalls: state.turnToolCalls,
 				turnToolNames: state.turnToolNames.join(","),
 				sharedWorkerNote: state.turnSharedWorkerNote,

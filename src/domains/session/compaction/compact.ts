@@ -13,6 +13,7 @@ import type { ContinuityCheckpointPayload } from "../continuity/contract.js";
 
 import { streamSimple } from "../../../engine/ai.js";
 import type { EngineModel, Usage } from "../../../engine/types.js";
+import { effectiveToolCall } from "../../../tools/surface.js";
 import type { WorkingSetView } from "../../context/working-set/contract.js";
 import { foldWorkingSet } from "../../context/working-set/fold.js";
 import { projectWorkingSet } from "../../context/working-set/project.js";
@@ -291,6 +292,79 @@ function resultFollowsCallInBatch(
 	return false;
 }
 
+interface HistoricalSkillCall {
+	args: Record<string, unknown>;
+	stepId?: string;
+}
+
+function historicalSkillCall(payload: Record<string, unknown> | null, name: string): HistoricalSkillCall | null {
+	if (!payload || typeof payload.name !== "string") return null;
+	const effective = effectiveToolCall(payload.name, payload.args);
+	if (effective.toolName === "context" && effective.args?.scope === "skills" && effective.args.name === name)
+		return { args: effective.args };
+	const args = payloadObject(payload.args);
+	if (payload.name !== "gateway" || args?.op !== "chain" || !Array.isArray(args.steps)) return null;
+	const steps = args.steps
+		.map(payloadObject)
+		.filter(
+			(step) =>
+				step?.capability === "context" &&
+				payloadObject(step.args)?.scope === "skills" &&
+				payloadObject(step.args)?.name === name,
+		);
+	const step = steps[0];
+	const stepArgs = payloadObject(step?.args);
+	return steps.length === 1 && typeof step?.id === "string" && stepArgs ? { args: stepArgs, stepId: step.id } : null;
+}
+
+/** Prove the child instructions were actually visible in the complete aggregate. */
+function historicalSkillReceipt(
+	call: HistoricalSkillCall,
+	result: Record<string, unknown> | null,
+	summary: Record<string, unknown> | null,
+): { result: Record<string, unknown> | null; summary: Record<string, unknown> | null } | null {
+	if (call.stepId === undefined) return { result, summary };
+	const details = payloadObject(result?.details);
+	if (
+		details?.op !== "chain" ||
+		details.capability !== "context" ||
+		summary?.truncated !== false ||
+		!Array.isArray(details.chainResults) ||
+		!Array.isArray(result?.content)
+	)
+		return null;
+	const children = details.chainResults.map(payloadObject).filter((child) => child?.id === call.stepId);
+	const child = children[0];
+	const receipt = payloadObject(child?.result);
+	if (
+		children.length !== 1 ||
+		child?.capability !== "context" ||
+		child.isError !== false ||
+		JSON.stringify(child.args) !== JSON.stringify(call.args) ||
+		!Array.isArray(receipt?.content)
+	)
+		return null;
+	try {
+		const text = (content: unknown[]) => content.map((block) => payloadObject(block)?.text).join("\n");
+		const aggregate = JSON.parse(text(result.content)) as Record<string, unknown>;
+		if (!Array.isArray(aggregate.results)) return null;
+		const rows = aggregate.results.map(payloadObject).filter((row) => row?.id === call.stepId);
+		const row = rows[0];
+		const body = text(receipt.content);
+		if (
+			rows.length !== 1 ||
+			row?.capability !== "context" ||
+			row.kind !== "ok" ||
+			row.truncated !== false ||
+			row.output !== body
+		)
+			return null;
+		return { result: receipt, summary: { bytes: Buffer.byteLength(body, "utf8"), truncated: false } };
+	} catch {
+		return null;
+	}
+}
+
 /** Recover only complete, uniquely paired historical main-agent loads. Never consult current disk. */
 export function captureSkillContext(
 	entries: ReadonlyArray<SessionEntry>,
@@ -344,12 +418,13 @@ export function captureSkillContext(
 		const calls = turn.filter((candidate) => {
 			if (candidate.kind !== "message" || candidate.role !== "tool_call") return false;
 			const payload = payloadObject(candidate.payload);
-			const args = payloadObject(payload?.args);
-			return payload?.name === "context" && args?.scope === "skills" && args.name === activation.name;
+			return historicalSkillCall(payload, activation.name) !== null;
 		});
 		if (calls.length !== 1) return undefined;
 		const call = calls[0];
 		if (call?.kind !== "message") return undefined;
+		const selectedCall = historicalSkillCall(payloadObject(call.payload), activation.name);
+		if (!selectedCall) return undefined;
 		const callId = payloadObject(call.payload)?.toolCallId;
 		if (typeof callId !== "string" || !callId) return undefined;
 		const assistant = turn.find((candidate) => candidate.turnId === call.parentTurnId);
@@ -360,7 +435,7 @@ export function captureSkillContext(
 				(block) =>
 					block.type === "toolCall" &&
 					block.id === callId &&
-					block.name === "context" &&
+					block.name === payloadObject(call.payload)?.name &&
 					JSON.stringify(block.arguments) === JSON.stringify(payloadObject(call.payload)?.args),
 			)
 		)
@@ -381,14 +456,21 @@ export function captureSkillContext(
 		)
 			return undefined;
 		const payload = payloadObject(resultEntry.payload);
-		const result = payloadObject(payload?.result);
+		const selectedReceipt = historicalSkillReceipt(
+			selectedCall,
+			payloadObject(payload?.result),
+			payloadObject(payload?.resultSummary),
+		);
+		if (!selectedReceipt) return undefined;
+		const result = selectedReceipt.result;
 		const details = payloadObject(result?.details);
 		const observation = payloadObject(details?.observation);
-		const resultSummary = payloadObject(payload?.resultSummary);
+		const resultSummary = selectedReceipt.summary;
 		const summaryObservation = payloadObject(resultSummary?.observation);
 		const sourceInfo = payloadObject(details?.sourceInfo);
 		if (
-			payload?.toolName !== "context" ||
+			payload === null ||
+			payload.toolName !== payloadObject(call.payload)?.name ||
 			payload.isError !== false ||
 			payload.outcome !== "ok" ||
 			details?.kind !== "ok" ||

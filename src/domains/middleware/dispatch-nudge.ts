@@ -131,7 +131,7 @@ function isReadOnlyExplorationCall(input: MiddlewareHookInput): boolean {
 }
 
 function hasActiveTool(input: MiddlewareHookInput, toolName: string): boolean {
-	const activeToolNames = input.metadata?.activeToolNames;
+	const activeToolNames = input.metadata?.activeCapabilityNames ?? input.metadata?.activeToolNames;
 	return (
 		typeof activeToolNames === "string" &&
 		activeToolNames
@@ -454,9 +454,9 @@ export function createDetachedDispatchNudgeRegistration(
 			// mirroring the finish contract.
 			const stopReason = input.metadata?.stopReason;
 			if (stopReason !== undefined && stopReason !== "stop") return [];
-			// A surface without the monitor tool can never collect a batch, so
+			// A surface without access to monitor can never collect a batch, so
 			// nudging it would loop against a wall.
-			const activeToolNames = input.metadata?.activeToolNames;
+			const activeToolNames = input.metadata?.activeCapabilityNames ?? input.metadata?.activeToolNames;
 			if (typeof activeToolNames === "string" && !activeToolNames.split(",").includes(ToolNames.Monitor)) return [];
 			let views: ReadonlyArray<DetachedBatchNudgeView>;
 			try {

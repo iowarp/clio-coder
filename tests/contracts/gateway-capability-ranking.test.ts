@@ -53,7 +53,7 @@ function registryWith(count: number, ranker?: GatewayCapabilityRanker): ToolRegi
 async function find(registry: ToolRegistry, query?: string): Promise<string> {
 	const verdict = await registry.invoke({
 		tool: ToolNames.Gateway,
-		args: { op: "find", ...(query === undefined ? {} : { query }) },
+		args: { op: "find", limit: 300, ...(query === undefined ? {} : { query }) },
 	});
 	if (verdict.kind !== "ok" || verdict.result.kind !== "ok") throw new Error(JSON.stringify(verdict));
 	return verdict.result.output;
@@ -124,13 +124,13 @@ describe("gateway find with a capability ranker", () => {
 			[capabilityName(3)]: 0.4,
 		});
 		const registry = registryWith(10, ranker);
-		const missed = await find(registry, "create pull request");
+		const missed = await find(registry, "publish merge proposal");
 		deepStrictEqual(names(missed), []);
 		deepStrictEqual(names(missed, "related"), [capabilityName(7), capabilityName(2)]);
 		ok((JSON.parse(missed) as { relatedNote?: string }).relatedNote?.includes("jev/jev-latest"));
-		strictEqual(calls[0]?.query, "create pull request");
+		strictEqual(calls[0]?.query, "publish merge proposal");
 
-		const oneHit = await find(registry, "kind 3");
+		const oneHit = await find(registry, capabilityName(3));
 		deepStrictEqual(names(oneHit), [capabilityName(3)]);
 		ok(!names(oneHit, "related").includes(capabilityName(3)), "a hit is never repeated as related");
 		ok(!calls.at(-1)?.names.includes(capabilityName(3)), "hits are not sent to the ranker");

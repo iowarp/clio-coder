@@ -30,6 +30,7 @@ import {
 	type ToolRowPair,
 } from "../../tools/presentation.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
+import { effectiveToolCall } from "../../tools/surface.js";
 import { mutationFactsLine } from "../mutation-preview.js";
 import type { ApprovalRequestView } from "../permission-overlay.js";
 import { clioTheme, formatCompactMs, GLYPH, holdFact, joinFacts, releaseSpaces } from "../theme/index.js";
@@ -375,9 +376,10 @@ interface SkillLoadFacts {
 }
 
 function skillLoadFacts(finished: ToolExecutionFinished): SkillLoadFacts | null {
-	if (finished.toolName !== "context" || finished.isError || finished.outcome !== undefined) return null;
-	if (!isPlainObject(finished.args) || finished.args.scope !== "skills") return null;
 	const details = detailsOf(finished.result);
+	const call = effectiveToolCall(finished.toolName, finished.args, details);
+	if (call.toolName !== "context" || finished.isError || finished.outcome !== undefined) return null;
+	if (call.args?.scope !== "skills" && details?.op !== "chain") return null;
 	const name = stringField(details, "name");
 	if (name === null) return null;
 	const declared = (key: string): string[] =>

@@ -1613,6 +1613,18 @@ describe("transcript block grammar", () => {
 		const render = (style: OutputStyle) =>
 			stripTerminalSequences(renderToolPreview(load, 90, transcriptDetail(style)).join("\n"));
 		match(render("compact"), /loaded skill test-hygiene · by model · drifted ✓/u);
+		const gatewayLoad = {
+			...load,
+			toolName: "gateway",
+			args: { op: "call", capability: "context", args: load.args },
+			result: { ...load.result, details: { ...load.result.details, capability: "context" } },
+		};
+		const viaGateway = stripTerminalSequences(
+			renderToolPreview(gatewayLoad, 110, transcriptDetail("standard")).join("\n"),
+		);
+		match(viaGateway, /loaded skill test-hygiene · by model · via gateway · drifted/u);
+		match(viaGateway, /narrows tools to read/u);
+		match(viaGateway, /via gateway/u);
 		doesNotMatch(render("compact"), /narrows|Keep tests deterministic|1 section/u);
 		// Standard nests the surface the skill declares, then what it is for.
 		for (const style of ["standard", "detailed"] as const) {

@@ -266,6 +266,27 @@ it("keeps normal-rigor advisories, requests scoped high-rigor recovery and audit
 			true,
 		);
 		match(JSON.stringify(recovery), /solver\/test:solver: missing/u);
+		const gatewayRecovery = await high.evaluate({
+			hook: "turn_end",
+			text: "Fixed solver.",
+			metadata: {
+				activeToolNames: "read,write,edit,gateway,dispatch",
+				activeCapabilityNames: "read,write,edit,gateway,dispatch,verify",
+			},
+		});
+		strictEqual(
+			gatewayRecovery.some((effect) => effect.kind === "request_continuation"),
+			true,
+		);
+		const scopedGateway = await high.evaluate({
+			hook: "turn_end",
+			text: "Fixed solver.",
+			metadata: { activeToolNames: "gateway", activeCapabilityNames: "gateway" },
+		});
+		strictEqual(
+			scopedGateway.some((effect) => effect.kind === "request_continuation"),
+			false,
+		);
 		const restricted = await high.evaluate({
 			hook: "turn_end",
 			text: "Fixed solver.",

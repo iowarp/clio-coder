@@ -41,6 +41,7 @@ import {
 } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
+import { effectiveToolCall } from "../tools/surface.js";
 import { createAssistantGenerationTiming, hasAssistantGenerationDelta } from "./assistant-generation-timing.js";
 import {
 	type AssistantCallTiming,
@@ -544,7 +545,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			...(gatewaySessionId ? { sessionId: gatewaySessionId } : {}),
 			beforeToolBatch: ({ assistantMessage }) => {
 				const calls = assistantMessage.content.filter((block) => block.type === "toolCall");
-				if (calls.some((call) => call.name === "self_compact") && calls.length !== 1) {
+				if (
+					calls.some((call) => effectiveToolCall(call.name, call.arguments).toolName === "self_compact") &&
+					calls.length !== 1
+				) {
 					return { reason: "self_compact must be the only call in its batch; no sibling was executed." };
 				}
 				return undefined;

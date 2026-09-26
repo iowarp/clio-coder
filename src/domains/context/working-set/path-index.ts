@@ -25,7 +25,7 @@
  */
 
 import { basename, isAbsolute, join, normalize, resolve } from "node:path";
-import { effectiveToolCall } from "../../../tools/surface.js";
+import { effectiveToolCall, expandChainMessages } from "../../../tools/surface.js";
 import type { MessageEntry, SessionEntry } from "../../session/entries.js";
 import type { WorkingSetRef } from "./contract.js";
 import { isTurnStart } from "./horizon.js";
@@ -398,7 +398,7 @@ function toolResultObservation(
 
 export function buildPathIndex(entries: ReadonlyArray<SessionEntry>, options?: PathIndexOptions): PathIndex {
 	const cwd = usableCwd(options);
-	const calls = collectToolCalls(entries);
+	const calls = collectToolCalls(expandChainMessages(entries));
 	const observations: PathObservation[] = [];
 	const byRef = new Map<string, PathObservation>();
 	const byPath = new Map<string, PathObservation[]>();
@@ -409,9 +409,9 @@ export function buildPathIndex(entries: ReadonlyArray<SessionEntry>, options?: P
 		const entry = entries[entryIndex];
 		if (entry === undefined) continue;
 		turnIndexOf.set(entry.turnId, turnIndex);
-		let observation: PathObservation | null = null;
+		const entryObservations: PathObservation[] = [];
 		if (entry.kind === "fileEntry") {
-			observation = {
+			entryObservations.push({
 				ref: { entry: entry.turnId },
 				toolCallId: null,
 				toolName: "fileEntry",
@@ -424,13 +424,19 @@ export function buildPathIndex(entries: ReadonlyArray<SessionEntry>, options?: P
 				turnIndex,
 				entryIndex,
 				argsKey: "",
-			};
+			});
 		} else if (entry.kind === "message" && entry.role === "tool_result") {
-			observation = toolResultObservation(entry, { entryIndex, turnIndex, cwd, calls });
+			for (const child of expandChainMessages([entry])) {
+				if (child.role !== "tool_result") continue;
+				const observation = toolResultObservation(child, { entryIndex, turnIndex, cwd, calls });
+				if (observation) entryObservations.push(observation);
+			}
 		}
-		if (observation !== null) {
+		for (const observation of entryObservations) {
 			observations.push(observation);
-			byRef.set(observation.ref.entry, observation);
+			// A compound receipt has multiple facts under one recallable body.
+			// Never identify that entire body with its last child operation.
+			if (entryObservations.length === 1) byRef.set(observation.ref.entry, observation);
 			if (observation.path.length > 0) {
 				const bucket = byPath.get(observation.path);
 				if (bucket === undefined) byPath.set(observation.path, [observation]);

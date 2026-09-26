@@ -88,6 +88,7 @@ import type { AgentEvent, AgentMessage, ImageContent, Usage } from "../engine/ty
 import { resolveSessionTools } from "../tools/agent-tools.js";
 import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
+import { effectiveToolCall } from "../tools/surface.js";
 import {
 	createAskUserToolPolicy,
 	createPendingSkillToolPolicy,
@@ -964,6 +965,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		memoryContentGuard: deps.memoryCommitBridge?.isContentCurrent,
 		state,
 		middleware: deps.middleware,
+		toolRegistry: deps.toolRegistry,
 		session: deps.session,
 		middlewareToolChoice,
 		emitNotice,
@@ -1085,7 +1087,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// Include the complete skill messages and tool receipts already in the
 			// protected suffix. The final guard still prices the actual replay.
 			const protectedSkills = messages
-				.filter((message) => message.role === "toolResult" && message.toolName === "context")
+				.filter(
+					(message) =>
+						message.role === "toolResult" &&
+						effectiveToolCall(message.toolName, undefined, message.details).toolName === "context",
+				)
 				.reduce((sum, message) => sum + estimateAgentMessageTokens(message), 0);
 			const floor =
 				view.breakdown.systemPromptTokens +

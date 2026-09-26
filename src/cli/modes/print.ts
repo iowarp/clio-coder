@@ -37,6 +37,7 @@ import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { type RunUsageSummary, sumRunUsage } from "../../interactive/chat-loop-messages.js";
 import { TOOL_PLANES } from "../../tools/policy.js";
+import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { setupSteerChannel } from "../steer-channel.js";
 import { projectHeadlessJsonEvent } from "./json-stream.js";
@@ -123,6 +124,7 @@ interface HeadlessMainAgentResult {
 
 interface HeadlessMainAgentReceiptStats {
 	toolStats: Map<string, ToolCallStat>;
+	pendingCapabilities: Map<string, string>;
 	pendingVerifyCalls: Map<string, string | null>;
 	verifyCalls: VerifyCallOutcome[];
 	skillActivations: SkillActivation[];
@@ -264,12 +266,30 @@ function durationMsFromEvent(event: ChatLoopEvent): number | undefined {
 }
 
 function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEvent): void {
-	if (event.type === "tool_execution_start" && event.toolName === ToolNames.Verify) {
-		stats.pendingVerifyCalls.set(event.toolCallId, verifyCheckIdentity(event.args));
+	if (event.type === "tool_execution_start") {
+		const call = effectiveToolCall(event.toolName, event.args);
+		stats.pendingCapabilities.set(event.toolCallId, call.toolName);
+		if (call.toolName === ToolNames.Verify)
+			stats.pendingVerifyCalls.set(event.toolCallId, verifyCheckIdentity(call.args));
 		return;
 	}
 	if (event.type !== "tool_execution_end") return;
-	const tool = typeof event.toolName === "string" && event.toolName.length > 0 ? event.toolName : "tool";
+	const tool = stats.pendingCapabilities.get(event.toolCallId) ?? event.toolName ?? "tool";
+	stats.pendingCapabilities.delete(event.toolCallId);
+	// Fold completed child operations into accounting only. The provider and
+	// session history retain the real aggregate call/result pair.
+	for (const child of gatewayChainReceipts(event.toolName, event.result)) {
+		const toolCallId = `${event.toolCallId}:${child.id}`;
+		if (child.capability === ToolNames.Verify) stats.pendingVerifyCalls.set(toolCallId, verifyCheckIdentity(child.args));
+		recordToolEnd(stats, {
+			type: "tool_execution_end",
+			toolCallId,
+			toolName: child.capability,
+			isError: child.admission.outcome !== "ok",
+			result: { ...child.result, terminate: child.admission.terminate === true },
+			...child.admission,
+		} as ChatLoopEvent);
+	}
 	const stat = stats.toolStats.get(tool) ?? blankToolStat(tool);
 	stat.count += 1;
 	const durationMs = durationMsFromEvent(event);
@@ -639,6 +659,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	};
 	const receiptStats: HeadlessMainAgentReceiptStats = {
 		toolStats: new Map<string, ToolCallStat>(),
+		pendingCapabilities: new Map(),
 		pendingVerifyCalls: new Map(),
 		verifyCalls: [],
 		skillActivations: [],

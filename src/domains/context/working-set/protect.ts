@@ -12,6 +12,7 @@
  * Pure over the entry, the index, and the policy input.
  */
 
+import { expandChainMessages } from "../../../tools/surface.js";
 import type { SessionEntry } from "../../session/entries.js";
 import type { PolicyInput } from "./contract.js";
 import type { PathIndex, PathObservation } from "./path-index.js";
@@ -112,6 +113,10 @@ export function isProtected(entry: SessionEntry, ctx: ProtectionContext): boolea
 	// The recent window is untouchable for both kinds.
 	if (ctx.entryIndex >= ctx.cutoffIndex) return true;
 	if (entry.role === "assistant") return false;
+	// Eviction addresses whole persisted results. A child becoming stale must
+	// not erase sibling evidence; retain compound receipts until eviction can
+	// assess every member together.
+	if (expandChainMessages([entry]).length > 1) return true;
 
 	// Profile pins and the churn pin come before the floor: a pinned unit stays
 	// whatever its size.

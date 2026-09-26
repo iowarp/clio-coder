@@ -123,7 +123,12 @@ function contextToolResult(events: Array<Record<string, unknown>>): string {
 }
 
 function contextToolEnd(events: Array<Record<string, unknown>>): Record<string, unknown> | undefined {
-	return events.find((event) => event.type === "tool_execution_end" && event.toolName === "context");
+	return events.find(
+		(event) =>
+			event.type === "tool_execution_end" &&
+			event.toolName === "gateway" &&
+			(event.result as { details?: { capability?: string } } | undefined)?.details?.capability === "context",
+	);
 }
 
 /** Every entry of the one session the run wrote. */
@@ -148,7 +153,7 @@ function assertRefusal(turn: { stdout: string; root: string }, refusal: Record<s
 	strictEqual(end?.isError, true, turn.stdout);
 	deepStrictEqual((end?.result as { details?: { refusal?: unknown } } | undefined)?.details?.refusal, refusal);
 	const persisted = sessionEntries(turn.root).find(
-		(entry) => entry.role === "tool_result" && (entry.payload as { toolName?: string }).toolName === "context",
+		(entry) => entry.role === "tool_result" && (entry.payload as { toolName?: string }).toolName === "gateway",
 	)?.payload as { isError?: boolean; result?: { details?: { refusal?: unknown } } } | undefined;
 	strictEqual(persisted?.isError, true);
 	deepStrictEqual(persisted?.result?.details?.refusal, refusal);
@@ -171,7 +176,10 @@ async function headlessSkillTurn(
 	// One scripted tool call per turn: the model asks to load the skill by name,
 	// which is the call that is operator-gated today at every level.
 	const fixture = await startOpenAICompatFixture("done", {
-		toolCall: { name: "context", arguments: { scope: "skills", name: skillName } },
+		toolCall: {
+			name: "gateway",
+			arguments: { op: "call", capability: "context", args: { scope: "skills", name: skillName } },
+		},
 	});
 	fixtures.push(fixture);
 	seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, autonomy);
@@ -209,7 +217,10 @@ describe("headless skill activation by autonomy level", () => {
 		const installed = await runCli(["library", "install", "skill:herdr", "--user", "--json"], { env, cwd });
 		strictEqual(installed.code, 0, installed.stderr);
 		const fixture = await startOpenAICompatFixture("done", {
-			toolCall: { name: "context", arguments: { scope: "skills", name: "herdr" } },
+			toolCall: {
+				name: "gateway",
+				arguments: { op: "call", capability: "context", args: { scope: "skills", name: "herdr" } },
+			},
 		});
 		fixtures.push(fixture);
 		seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, "yolo");

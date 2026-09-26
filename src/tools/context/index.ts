@@ -159,6 +159,7 @@ function skillExecutionFrame(skill: Skill, workspaceRoot: string): string[] {
 		"How to read this skill:",
 		`- Workspace root: ${workspaceRoot}. Run every command and resolve every repository path there. ${skill.baseDir} holds only this skill's own resource files; it is never the working directory.`,
 		"- This skill may name tools, subagents, or commands from another harness. Use Clio's equivalent from your own tool list; if there is no equivalent, say so and continue without that step. Never invent one, and never substitute repeated calls to a different agent for an agent the skill named.",
+		"- If gateway is attached, discover any equivalent without an attached schema before calling it through gateway. A tool name in this document does not attach that tool. Discover worker recipes before delegating.",
 		"- The skill describes a workflow. Your safety policy, permissions, and tool surface still bind it.",
 		"",
 	];

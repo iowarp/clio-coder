@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
-import { effectiveToolCall } from "../../tools/surface.js";
+import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
 import { type DeclaredCheckSourceRef, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../../tools/verify/catalog.js";
 import { assessQualityPolicy, loadQualityPolicy, type QualityFinding } from "../../tools/verify/quality-policy.js";
 import { validateTrustStatus } from "../evidence/trust-status.js";
@@ -229,7 +229,7 @@ function collectLimitationEvidence(recent: ReadonlyArray<unknown>): FinishContra
 	const calls = new Map<string, ToolCallEvidenceCandidate>();
 	const seen = new Set<string>();
 
-	for (const entry of recent) {
+	for (const entry of expandChainMessages(recent)) {
 		const call = limitationToolCall(entry);
 		if (call !== null) {
 			calls.set(call.toolCallId, call);
@@ -291,7 +291,7 @@ function mutatingReceipts(recent: ReadonlyArray<unknown>): string[] {
 	const paths: string[] = [];
 	const seen = new Set<string>();
 
-	for (const entry of recent) {
+	for (const entry of expandChainMessages(recent)) {
 		// A user-run `!` bash execution is self-contained: it carries its own
 		// success signal, so any mutation targets count without a paired result.
 		const bashMutation = bashExecutionMutationPaths(entry);
@@ -386,7 +386,7 @@ function collectValidationEvidence(
 	const dispatchCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const seen = new Set<string>();
 
-	for (const entry of recent) {
+	for (const entry of expandChainMessages(recent)) {
 		const protectedArtifact = protectedArtifactEvidence(entry);
 		if (protectedArtifact !== null) {
 			pushEvidence(evidence, seen, protectedArtifact);
