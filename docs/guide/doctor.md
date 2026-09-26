@@ -95,7 +95,8 @@ through the path a real turn uses.
 | The model streamed a valid tool call | `OK`, with the model and latency |
 | The probe ran and the call was missing or malformed | `WARN`, with the reason |
 | The probe could not run: no model is set, or the runtime does not stream through the engine | `INFO` |
-| The target did not answer its health probe | `WARN` |
+| An available runtime has no live probe | `INFO`, with the credential source |
+| Credentials are missing or the target did not answer its health probe | `WARN`, with the actual error |
 
 The probe generates tokens and can load a cold model on a local server. It
 unloads afterwards only the model it loaded itself, on the server it probed.
@@ -138,3 +139,5 @@ With no contract, or a contract with no validators, the dry run adds no rows.
 by a tally, for example `doctor: 58 checks, 0 error(s), 3 warning(s)`. The
 notice takes the level of the worst row. `/doctor` never repairs anything;
 run `clio-coder doctor --fix` from a shell for that.
+
+Deep tool-probe rows report INFO when an available runtime has no live probe, naming the credential source. A failed health probe remains WARN and reports its last error.

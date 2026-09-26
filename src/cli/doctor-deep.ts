@@ -17,8 +17,15 @@ function toolProbeFinding(status: TargetStatus): DoctorFinding {
 	const name = `tools ${status.target.id}`;
 	const probe = status.toolProbe;
 	if (!probe) {
-		// The tool probe runs only once the target answered its health probe.
-		const reason = status.reason || status.health.lastError || "the target did not answer";
+		if (status.available && !status.health.lastError && status.runtime && !status.runtime.probe) {
+			return {
+				ok: true,
+				name,
+				level: "info",
+				detail: `runtime has no live probe; credential source: ${status.reason || "unknown"}`,
+			};
+		}
+		const reason = status.health.lastError || status.reason || "the target did not answer";
 		return { ok: true, name, level: "warn", detail: `not probed: ${reason}` };
 	}
 	const model = probe.modelId ?? "no model";
