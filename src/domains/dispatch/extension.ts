@@ -4831,11 +4831,13 @@ export function createDispatchBundle(
 
 		const assessDispatchFinishContract = (): DispatchFinishContractSnapshot | null => {
 			if (finishContractAssistantText.trim().length === 0) return null;
+			const rigor = resolveRigor({ cwd: lifecycle.cwd, override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) });
 			const assessment = assessFinishContract({
 				sessionEntries: finishContractEntries,
 				assistantTurnId: finishContractAssistantTurnId,
+				workspaceRoot: lifecycle.cwd,
+				rigor,
 			});
-			const rigor = resolveRigor({ cwd: lifecycle.cwd, override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) });
 			try {
 				safety.audit.recordCompletionContract?.({
 					runId: envelope.id,
@@ -4845,6 +4847,7 @@ export function createDispatchBundle(
 					rigor,
 					mutatedPaths: assessment.mutatedPaths,
 					evidenceKinds: Array.from(new Set(assessment.evidence.map((item) => item.kind))),
+					...(assessment.quality ? { quality: assessment.quality } : {}),
 				});
 			} catch {
 				// Audit must not destabilize dispatch finalization.
@@ -6188,11 +6191,13 @@ export function createDispatchBundle(
 
 		const assessDispatchFinishContract = (): DispatchFinishContractSnapshot | null => {
 			if (finishContractAssistantText.trim().length === 0) return null;
+			const rigor = resolveRigor({ cwd: lifecycle.cwd, override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) });
 			const assessment = assessFinishContract({
 				sessionEntries: finishContractEntries,
 				assistantTurnId: finishContractAssistantTurnId,
+				workspaceRoot: lifecycle.cwd,
+				rigor,
 			});
-			const rigor = resolveRigor({ cwd: lifecycle.cwd, override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) });
 			try {
 				safety.audit.recordCompletionContract?.({
 					runId: envelope.id,
@@ -6202,6 +6207,7 @@ export function createDispatchBundle(
 					rigor,
 					mutatedPaths: assessment.mutatedPaths,
 					evidenceKinds: Array.from(new Set(assessment.evidence.map((item) => item.kind))),
+					...(assessment.quality ? { quality: assessment.quality } : {}),
 				});
 			} catch {
 				// Audit must not destabilize dispatch finalization.

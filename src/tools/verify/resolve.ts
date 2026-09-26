@@ -2,7 +2,7 @@ import path from "node:path";
 import { resolveSafeCwd } from "../../core/safe-exec.js";
 import { isVerificationScriptName, VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
 import { type DeclaredCheck, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "./catalog.js";
-import { discoverDeclaredChecksAtRoot } from "./discovery.js";
+import { type DeclaredCheckDiscoveryResult, discoverDeclaredChecksAtRoot } from "./discovery.js";
 import { prepareVerifyArguments } from "./surface.js";
 import {
 	discoverToolchainChecks,
@@ -47,13 +47,37 @@ function nothingDeclared(root: string): string {
 	);
 }
 
+interface VerifyDiscoveryCache {
+	discovery: DeclaredCheckDiscoveryResult;
+	derived: (declared: ReadonlyArray<DeclaredCheck>) => ToolchainCheck[];
+}
+
+/** One fresh root discovery per assessment; normal admission/execution still resolves each call independently. */
+export function createRootVerifyResolver(workspaceRoot: string): (check: string) => VerifyResolution {
+	const discovery = discoverDeclaredChecksAtRoot(workspaceRoot, undefined);
+	let derived: ToolchainCheck[] | undefined;
+	const cache: VerifyDiscoveryCache = {
+		discovery,
+		derived: (declared) => (derived ??= availableToolchainChecks(workspaceRoot, declared)),
+	};
+	return (check) => resolveWithDiscovery(workspaceRoot, { check }, cache);
+}
+
 export function resolveVerifyCall(workspaceRoot: string, args: Record<string, unknown>): VerifyResolution {
+	return resolveWithDiscovery(workspaceRoot, args);
+}
+
+function resolveWithDiscovery(
+	workspaceRoot: string,
+	args: Record<string, unknown>,
+	cache?: VerifyDiscoveryCache,
+): VerifyResolution {
 	args = prepareVerifyArguments(args);
 	const check = typeof args.check === "string" ? args.check.trim() : "";
 	if (check.length === 0) return { kind: "list" };
 	if (check === "frontend") return { kind: "frontend" };
 	const cwdArg = typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined;
-	const discovery = discoverDeclaredChecksAtRoot(workspaceRoot, cwdArg);
+	const discovery = cache?.discovery ?? discoverDeclaredChecksAtRoot(workspaceRoot, cwdArg);
 	if (!discovery.ok) return { kind: "unresolved", message: discovery.reason };
 	const declared = discovery.sources.flatMap((source) => source.checks);
 	const hit = declared.find((candidate) => candidate.id === check);
@@ -62,7 +86,7 @@ export function resolveVerifyCall(workspaceRoot: string, args: Record<string, un
 		return { kind: "package", check: hit, packageRoot: path.dirname(hit.source.path) };
 	}
 
-	const derived = availableToolchainChecks(workspaceRoot, declared);
+	const derived = cache?.derived(declared) ?? availableToolchainChecks(workspaceRoot, declared);
 	const exact = derived.find((candidate) => candidate.id === check);
 	const owners = FAMILY_WORDS.has(check) ? derived.filter((candidate) => candidate.tags.includes(check)) : [];
 	const chosen = exact ?? (owners.length === 1 ? owners[0] : undefined);

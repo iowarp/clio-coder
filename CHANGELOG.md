@@ -15,6 +15,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### Receipts and evidence
 
+- Project policies in `.clio-coder/quality.yaml` activate required checks by changed path and select high rigor unless overridden. Native verification records fresh source, declaration, and policy fingerprints; interactive and dispatched completion audits retain structured quality findings.
 - A `verify` check whose only calls were blocked seals no typed validation fact, so a check that never ran no longer reads as failed, and read-only runs stop showing `quality validation failed` for denied checks.
 - Worker instructions leave denied checks out of `validations` and cite read sources in the summary. A report that changed nothing may use an empty `validations` array with unmeasured quality, and so may an editing report when every check it attempted was blocked. Receipts sealed by earlier builds still verify unchanged.
 - Validation grounding treats `npm test`, `pnpm test` and `yarn test` and their `run test` forms as one command, including the test command `verify` records and a claim that ends in a colon. Other script names stay distinct.

@@ -3,12 +3,14 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { parseDocument } from "yaml";
-import { resolveVerifyCall } from "./resolve.js";
+import { createRootVerifyResolver, type VerifyResolution } from "./resolve.js";
 
 export const QUALITY_POLICY_PATH = ".clio-coder/quality.yaml";
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_INPUT_BYTES = 64 * 1024 * 1024;
 const MAX_FILES = 10_000;
+const MAX_PATH_COMPONENTS = 50_000;
+const MAX_GLOB_COMPARISONS = 1_000_000;
 
 export interface QualityRule {
 	id: string;
@@ -80,28 +82,46 @@ function patterns(value: unknown, label: string): string[] {
 }
 
 /** Check components even for dangling links: absence must not hide a symbolic link. */
-function qualityFileExists(root: string, relative: string): boolean {
+function qualityFileExists(root: string, relative: string, components?: Map<string, boolean | Error>): boolean {
 	const parts = relative.split("/");
 	let current = root;
 	for (const part of parts) {
 		current = path.join(current, part);
+		const cached = components?.get(current);
+		if (cached instanceof Error) throw cached;
+		if (cached === false) return false;
+		if (cached === true) continue;
+		if (components && components.size >= MAX_PATH_COMPONENTS)
+			throw new Error(`quality assessment exceeds ${MAX_PATH_COMPONENTS} path components`);
 		try {
 			if (lstatSync(current).isSymbolicLink()) throw new Error(`symbolic link in quality input '${relative}'`);
+			components?.set(current, true);
 		} catch (error) {
-			if (record(error)?.code === "ENOENT") return false;
-			throw error;
+			if (record(error)?.code === "ENOENT") {
+				components?.set(current, false);
+				return false;
+			}
+			const failure = error instanceof Error ? error : new Error(String(error));
+			components?.set(current, failure);
+			throw failure;
 		}
 	}
 	return true;
 }
 
 /** Reject links at any component: quality evidence never reads outside the workspace. */
-function boundedFile(root: string, relative: string): Buffer {
-	if (!qualityFileExists(root, relative)) throw new Error(`quality input '${relative}' is missing`);
+function boundedFile(
+	root: string,
+	relative: string,
+	remainingBytes = MAX_INPUT_BYTES,
+	components?: Map<string, boolean | Error>,
+): Buffer {
+	if (!qualityFileExists(root, relative, components)) throw new Error(`quality input '${relative}' is missing`);
 	const current = path.join(root, relative);
 	const stat = lstatSync(current);
 	if (!stat.isFile() || stat.size > MAX_FILE_BYTES)
 		throw new Error(`quality input '${relative}' must be a regular file of at most ${MAX_FILE_BYTES} bytes`);
+	if (stat.size > remainingBytes) throw new Error(`quality assessment exceeds ${MAX_INPUT_BYTES} input bytes`);
 	return readFileSync(current);
 }
 
@@ -182,53 +202,128 @@ function qualityFiles(root: string): string[] {
 	return [...new Set(files)].sort();
 }
 
-interface SnapshotInputs {
+interface SnapshotContext {
+	root: string;
 	files: string[];
+	enumerated: Set<string>;
 	digests: Map<string, string>;
+	components: Map<string, boolean | Error>;
+	ruleDigests: Map<string, string | Error>;
 	bytes: number;
+	globComparisons: number;
+	resolve: (check: string) => VerifyResolution;
 }
 
-function inputDigest(root: string, rule: QualityRule, inputs: SnapshotInputs): string {
-	const unique = inputs.files.filter((file) => qualityPathMatches(root, file, [...rule.paths, ...rule.inputs]));
-	if (unique.length > MAX_FILES) throw new Error(`quality rule '${rule.id}' exceeds ${MAX_FILES} input files`);
-	const digest = createHash("sha256");
-	for (const file of unique) {
-		digest.update(JSON.stringify(file));
-		let fingerprint = inputs.digests.get(file);
-		if (fingerprint === undefined) {
-			if (inputs.digests.size >= MAX_FILES) throw new Error(`quality snapshot exceeds ${MAX_FILES} input files`);
-			if (!qualityFileExists(root, file)) fingerprint = "deleted";
-			else {
-				const bytes = boundedFile(root, file);
-				inputs.bytes += bytes.length;
-				if (inputs.bytes > MAX_INPUT_BYTES) throw new Error(`quality snapshot exceeds ${MAX_INPUT_BYTES} input bytes`);
-				fingerprint = hash(bytes);
-			}
-			inputs.digests.set(file, fingerprint);
-		}
-		digest.update(fingerprint);
+function snapshotContext(root: string): SnapshotContext {
+	const files = qualityFiles(root);
+	return {
+		root,
+		files,
+		enumerated: new Set(files),
+		digests: new Map(),
+		components: new Map(),
+		ruleDigests: new Map(),
+		bytes: 0,
+		globComparisons: 0,
+		resolve: createRootVerifyResolver(root),
+	};
+}
+
+function fileDigest(context: SnapshotContext, file: string): string {
+	const cached = context.digests.get(file);
+	if (cached !== undefined) return cached;
+	if (context.digests.size >= MAX_FILES) throw new Error(`quality assessment exceeds ${MAX_FILES} input files`);
+	let fingerprint = "deleted";
+	if (qualityFileExists(context.root, file, context.components)) {
+		const bytes = boundedFile(context.root, file, MAX_INPUT_BYTES - context.bytes, context.components);
+		context.bytes += bytes.length;
+		fingerprint = hash(bytes);
 	}
-	return digest.digest("hex");
+	context.digests.set(file, fingerprint);
+	return fingerprint;
+}
+
+function scopeRoot(pattern: string): string {
+	const parts = pattern.split("/");
+	const firstGlob = parts.findIndex((part) => [...part].some((character) => "*?[]{}()!+@".includes(character)));
+	return (firstGlob < 0 ? parts : parts.slice(0, firstGlob)).join("/");
+}
+
+function globMatches(context: SnapshotContext, file: string, pattern: string): boolean {
+	if (++context.globComparisons > MAX_GLOB_COMPARISONS)
+		throw new Error(`quality assessment exceeds ${MAX_GLOB_COMPARISONS} glob comparisons`);
+	return path.posix.matchesGlob(file, pattern);
+}
+
+/** Validate literal roots even when Git lists no descendants; also inspect possible wildcard ancestors. */
+function inputDigest(rule: QualityRule, context: SnapshotContext): string {
+	const cached = context.ruleDigests.get(rule.id);
+	if (cached instanceof Error) throw cached;
+	if (cached !== undefined) return cached;
+	try {
+		const patterns = [...new Set([...rule.paths, ...rule.inputs])];
+		const scopes = patterns.map((pattern) => ({
+			pattern,
+			root: scopeRoot(pattern),
+			prefixes: pattern
+				.split("/")
+				.slice(0, -1)
+				.map((_, index) =>
+					pattern
+						.split("/")
+						.slice(0, index + 1)
+						.join("/"),
+				),
+			complex: pattern.includes("{") || pattern.includes("("),
+		}));
+		for (const scope of scopes) qualityFileExists(context.root, scope.root, context.components);
+		const digest = createHash("sha256");
+		for (const file of context.files) {
+			const included = scopes.some((scope) => globMatches(context, file, scope.pattern));
+			const ancestor =
+				!included &&
+				scopes.some((scope) =>
+					scope.complex
+						? scope.root.length === 0 || file === scope.root || file.startsWith(`${scope.root}/`)
+						: scope.prefixes.some((prefix) => globMatches(context, file, prefix)),
+				);
+			if (included || ancestor) qualityFileExists(context.root, file, context.components);
+			if (!included) continue;
+			digest.update(JSON.stringify(file));
+			digest.update(fileDigest(context, file));
+		}
+		const fingerprint = digest.digest("hex");
+		context.ruleDigests.set(rule.id, fingerprint);
+		return fingerprint;
+	} catch (error) {
+		const failure = error instanceof Error ? error : new Error(String(error));
+		context.ruleDigests.set(rule.id, failure);
+		throw failure;
+	}
 }
 
 /** Capture policy, check declaration and all scoped source inputs before and after execution. */
 export function captureQualitySnapshot(root: string, policy: QualityPolicy, check: string): QualitySnapshot {
-	const resolution = resolveVerifyCall(root, { check });
+	return captureSnapshot(snapshotContext(root), policy, check);
+}
+
+function captureSnapshot(context: SnapshotContext, policy: QualityPolicy, check: string): QualitySnapshot {
+	const { root } = context;
+	const resolution = context.resolve(check);
 	if (resolution.kind !== "catalog" && resolution.kind !== "package" && resolution.kind !== "toolchain")
 		throw new Error(
 			`quality check '${check}' is not declared: ${resolution.kind === "unresolved" ? resolution.message : resolution.kind}`,
 		);
 	const source = path.relative(root, path.resolve(root, resolution.check.source.path)).split(path.sep).join("/");
 	if (source.startsWith("../") || path.isAbsolute(source)) throw new Error("quality check source escapes workspace");
-	const inputs: SnapshotInputs = { files: qualityFiles(root), digests: new Map(), bytes: 0 };
 	return {
 		version: 1,
 		policyDigest: policy.digest,
 		check,
-		definitionDigest: hash(JSON.stringify(resolution) + hash(boundedFile(root, source))),
+		definitionDigest: hash(JSON.stringify(resolution) + fileDigest(context, source)),
 		inputs: policy.rules
 			.filter((rule) => rule.checks.includes(check))
-			.map((rule) => ({ rule: rule.id, digest: inputDigest(root, rule, inputs) })),
+			.map((rule) => ({ rule: rule.id, digest: inputDigest(rule, context) })),
 	};
 }
 
@@ -276,6 +371,7 @@ export function assessQualityPolicy(
 		}
 	}
 	const snapshots = new Map<string, QualitySnapshot | Error>();
+	let context: SnapshotContext | Error | undefined;
 	return rules.flatMap((rule) =>
 		rule.checks.map((check): QualityFinding => {
 			const finding = (state: QualityFinding["state"], message: string): QualityFinding => ({
@@ -319,7 +415,15 @@ export function assessQualityPolicy(
 			let current = snapshots.get(check);
 			if (!current) {
 				try {
-					current = captureQualitySnapshot(root, policy, check);
+					if (!context) {
+						try {
+							context = snapshotContext(root);
+						} catch (error) {
+							context = error instanceof Error ? error : new Error(String(error));
+						}
+					}
+					if (context instanceof Error) throw context;
+					current = captureSnapshot(context, policy, check);
 				} catch (error) {
 					current = error instanceof Error ? error : new Error(String(error));
 				}
@@ -329,6 +433,21 @@ export function assessQualityPolicy(
 				return rule.allowLimitations && limited.has(check)
 					? finding("limited", "Explicit limitation recorded; snapshot unavailable.")
 					: finding("unavailable", current.message);
+			if (context && !(context instanceof Error)) {
+				const activeContext = context;
+				const uncovered = paths.find(
+					(filename) =>
+						qualityPathMatches(root, filename, rule.paths) &&
+						!activeContext.enumerated.has(path.relative(root, path.resolve(root, filename)).split(path.sep).join("/")),
+				);
+				if (uncovered !== undefined)
+					return rule.allowLimitations && limited.has(check)
+						? finding("limited", "Explicit limitation recorded; changed input coverage is unavailable.")
+						: finding(
+								"unavailable",
+								`Changed source '${uncovered}' is outside the Git-enumerated snapshot; freshness cannot be established.`,
+							);
+			}
 			if (JSON.stringify(provenance.snapshot) !== JSON.stringify(current))
 				return rule.allowLimitations && limited.has(check)
 					? finding("limited", "Explicit limitation recorded; snapshot is stale.")

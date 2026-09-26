@@ -42,8 +42,10 @@ rejected. Every matching rule applies; a change to the policy itself activates
 every rule in the current policy.
 
 `inputs` adds files whose contents affect the result. It defaults to `paths`.
-Clio always fingerprints both `paths` and `inputs`, so an explicit `inputs`
-list cannot exclude the changed source. Include tests, compiler configuration,
+Clio fingerprints Git-enumerated files matching both `paths` and `inputs`, so
+an explicit `inputs` list cannot exclude covered, enumerated source. A covered
+mutation absent from that inventory is unavailable, never certified as fresh.
+Include tests, compiler configuration,
 lockfiles, fixtures, and helper scripts on which a check depends. The policy
 file and the check's declaration source are fingerprinted separately.
 
@@ -95,6 +97,11 @@ the current turn permits recovery. No reminder grants additional tool or
 execution authority. Stop or steer a blocked run when the authorized checks
 cannot be completed.
 
+Native and ACP dispatched workers are assessed against their actual workspace
+before completion. Outstanding requirements fail an otherwise successful
+high-rigor dispatch; explicit normal rigor keeps them advisory. Completion
+assessment does not issue commands or expand worker authority.
+
 `allowLimitations` defaults to `false`. When set to `true`, a successful
 `limitation` receipt whose `paths` includes the exact check ID can settle the
 requirement as `limited`, never as `passed`. A generic limitation or source
@@ -105,15 +112,29 @@ continue to apply alongside the project policy.
 
 Snapshots currently require Git and a workspace that is the repository root.
 They include Git-tracked and nonignored untracked files; ignored untracked
-files are not fingerprinted. External datasets, installed dependencies,
+files are not fingerprinted. A covered mutation to such a file makes its
+requirement unavailable even when a recorded snapshot otherwise matches.
+Clio does not scan ignored dependency or build trees to establish coverage.
+External datasets, installed dependencies,
 environment variables, tool binaries, and services are not captured. A
 lockfile fingerprint records dependency intent, not the installed environment.
 Declare relevant source inputs explicitly and use separate checks for other
 evidence you need.
 
-Each check snapshot is bounded to 10,000 distinct inputs, 64 MiB total, and 4 MiB per
-regular file. Git enumeration has a five-second timeout and a 4 MiB output
-cap. Git filesystem-monitor hooks are disabled for enumeration. Scoped symlinks are refused, including links at parent components.
+Each completion assessment shares Git enumeration, declaration discovery,
+file fingerprints, and rule input digests across checks. Before execution,
+after execution, and later completion assessments each use a fresh context.
+The fingerprint budget is 10,000 distinct files and 64 MiB total across the
+assessment, including declaration fingerprints, with 4 MiB per regular file.
+The remaining byte budget is checked before each file read. Scope validation
+is also bounded to 50,000 path components and one million glob comparisons;
+exceeding a bound makes affected evidence unavailable.
+Git enumeration has a five-second timeout and a 4 MiB output cap. Git
+filesystem-monitor hooks are disabled for enumeration. Scoped symlinks are
+refused before filtering, including dangling directory roots and ancestors of
+both `paths` and `inputs` globs. Wildcard ancestors in the Git inventory are
+checked too; complex brace or parenthesized scopes conservatively validate
+candidates under their literal root. Links are never followed.
 Snapshotting reads file contents locally and persists hashes rather than
 those contents. It uses the repository's ignored-file semantics; a broad
 pattern over tracked files includes everything that matches it.
