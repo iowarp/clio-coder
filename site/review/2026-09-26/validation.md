@@ -18,7 +18,7 @@ The GUI is described as an opt-in alpha with different coverage from the termina
 - `python3 site/check.py`: passed; readable rendered documentation, unique titles and descriptions, canonical URLs, structured data, matching Open Graph/Twitter metadata, correct document source links, assets, anchors, and internal links.
 - `pnpm exec biome check site/css site/js site/build.mjs`: passed without warnings.
 - Builder output protection: an unowned nonempty output directory was refused and its sentinel file preserved; the source directory was refused. The existing `.clio-coder-site-build` marker remains in use.
-- `pnpm run lint`: an earlier run passed. The final run failed outside website scope on formatting in concurrently generated, untracked `docs/wiki/meta.json`. Source warnings were also reported outside `site/`. A separate hygiene run found 59 documentation-link drift conditions under that same generated `docs/wiki/` tree. Those files were left to their owner. The full shared-repository check is therefore not reported as passing at completion.
+- `pnpm run lint`: passed at completion, including all 20 hygiene checks. Six non-blocking source/test warnings remain outside `site/`. An intermediate run encountered formatting and link drift in the concurrent wiki generation; its owner completed that work in `4aed64824`, and the final check passed. This task did not modify repository `docs/`.
 
 ## Browser review
 
@@ -34,7 +34,7 @@ Interactive checks verified documentation search, no-result text, index-unavaila
 
 ## Deployment and crawlability
 
-Read the [HLab skill](https://github.com/akougkas/dotfiles) at `/home/akougkas/dotfiles/homelab/skills/hlab/SKILL.md` before infrastructure operations. Deployment used the existing `bash site/deploy-blade.sh` workflow, scoped to the `site` service in the `clio-coder-site` Compose project. The previous website image was retained locally on Blade as `clio-coder-site:before-v057-redesign`.
+Read the [HLab skill](/home/akougkas/dotfiles/homelab/skills/hlab/SKILL.md) before infrastructure operations. Deployment used the existing `bash site/deploy-blade.sh` workflow, scoped to the `site` service in the `clio-coder-site` Compose project. The previous website image was retained locally on Blade as `clio-coder-site:before-v057-redesign`.
 
 The container is healthy. Nginx configuration validation passed. The origin and public HTTPS homepage return 200, TLS verification succeeds, and HTTP redirects with 308 to HTTPS. A nonexistent public URL returns the new 404 page with `noindex`. The existing CSP remains unchanged and allows Cloudflare analytics.
 
