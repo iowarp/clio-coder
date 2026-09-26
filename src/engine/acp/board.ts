@@ -43,6 +43,8 @@ export interface AcpSessionBoard {
 	} | null;
 	decisions: Array<{
 		ref: string;
+		/** With {@link key}, what `_clio-coder/decisions/supersede` names. */
+		interviewId: string;
 		key: string;
 		label: string | null;
 		value: string;
@@ -52,7 +54,14 @@ export interface AcpSessionBoard {
 		rationale: string | null;
 		correction: string | null;
 	}>;
-	memory: { enabled: boolean; tier: "llm" | "rules"; entries: number; stepInFlight: boolean } | null;
+	memory: {
+		enabled: boolean;
+		tier: "llm" | "rules";
+		entries: number;
+		stepInFlight: boolean;
+		/** Knowledge and procedural entries a person may propose as durable memory; status stays private. */
+		bank: Array<{ id: string; kind: "knowledge" | "procedural"; content: string }>;
+	} | null;
 	/** True when any list was cut at {@link ACP_BOARD_MAX_ITEMS}. */
 	truncated: boolean;
 }
@@ -76,6 +85,7 @@ export function projectSessionBoard(source: AcpBoardSource): AcpSessionBoard {
 	const decisions = source.decisions.flatMap((entry) =>
 		entry.decisions.map((decision) => ({
 			ref: `${entry.interviewId}/${decision.key}`,
+			interviewId: entry.interviewId,
 			key: bounded(decision.key),
 			label: optional(decision.label),
 			value: bounded(decision.value),
@@ -120,6 +130,14 @@ export function projectSessionBoard(source: AcpBoardSource): AcpSessionBoard {
 							source.memory.bank.knowledge.length +
 							source.memory.bank.procedural.length,
 						stepInFlight: source.memory.stepInFlight,
+						bank: [...source.memory.bank.knowledge, ...source.memory.bank.procedural]
+							.filter((entry) => typeof entry?.id === "string" && typeof entry.content === "string")
+							.slice(0, ACP_BOARD_MAX_ITEMS)
+							.map((entry) => ({
+								id: entry.id,
+								kind: entry.kind === "procedural" ? ("procedural" as const) : ("knowledge" as const),
+								content: bounded(entry.content),
+							})),
 					},
 		truncated,
 	};

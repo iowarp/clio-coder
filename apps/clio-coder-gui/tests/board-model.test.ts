@@ -74,10 +74,17 @@ test("the plan reads as Clio Coder's report and an unknown state stays unverifie
 test("decisions split into active and earlier, with who decided and why", () => {
 	const view = boardView(board);
 	assert.deepEqual(view.activeDecisions, [
-		{ ref: "i1/db", name: "Database", value: "sqlite", who: "Your answer", note: null },
+		{ ref: "i1/db", name: "Database", value: "sqlite", who: "Your answer", note: null, target: null },
 	]);
 	assert.deepEqual(view.earlierDecisions, [
-		{ ref: "agent:1/cache", name: "cache", value: "none", who: "Decided by Clio Coder", note: "use redis" },
+		{
+			ref: "agent:1/cache",
+			name: "cache",
+			value: "none",
+			who: "Decided by Clio Coder",
+			note: "use redis",
+			target: null,
+		},
 	]);
 });
 
@@ -85,4 +92,34 @@ test("memory reads as a sentence and a missing report says so", () => {
 	assert.equal(memoryLine(board.memory), "Task memory is on, model tier, 1 entry, updating now.");
 	assert.equal(memoryLine({ enabled: false, tier: "rules", entries: 0, stepInFlight: false }), "Task memory is off.");
 	assert.equal(memoryLine(null), "Task memory is not reported by this session.");
+});
+
+test("board writes are worded as what happened, and a proposal always names its review step", async () => {
+	const { memoryOutcome, supersedeOutcome } = await import("../client/chat/board-model.js");
+	assert.equal(
+		memoryOutcome({ status: "proposed", recordId: "memory-1" }).text,
+		"Proposed memory-1. Review it, then run clio-coder memory approve memory-1.",
+	);
+	assert.match(memoryOutcome({ status: "existing", recordId: "memory-1" }).text, /^Already proposed as memory-1\./);
+	assert.equal(memoryOutcome({ status: "needs_acknowledgement", reason: "x" }).tone, "warning");
+	assert.equal(memoryOutcome({ status: "refused", reason: "no session" }).text, "Not proposed: no session.");
+	assert.match(supersedeOutcome({ status: "superseded" }, false).text, /stays in the record/);
+	assert.match(
+		supersedeOutcome({ status: "superseded", correctionTurn: "x" }, true).text,
+		/sent to Clio Coder as a request/,
+	);
+	assert.match(supersedeOutcome({ status: "already_superseded" }, false).text, /nothing was written/);
+});
+
+test("with only superseded decisions the board says none is active, not that none was recorded", async () => {
+	const { decisionsEmptyLine } = await import("../client/chat/board-model.js");
+	assert.equal(
+		decisionsEmptyLine({ activeDecisions: [], earlierDecisions: [] }),
+		"No decision has been recorded in this session.",
+	);
+	assert.equal(
+		decisionsEmptyLine({ activeDecisions: [], earlierDecisions: [{} as never] }),
+		"No decision is active. The earlier one is below.",
+	);
+	assert.equal(decisionsEmptyLine({ activeDecisions: [{} as never], earlierDecisions: [] }), null);
 });

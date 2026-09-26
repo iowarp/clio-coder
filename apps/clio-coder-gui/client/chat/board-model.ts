@@ -2,7 +2,7 @@
 // the `tasks` command family accepts for their state; the plan and the decisions are Clio Coder's
 // report and carry none. Pure, so the wording and the permitted actions are testable without a DOM.
 
-import type { SessionBoard } from "../../contracts/board.js";
+import type { DecisionSuperseded, MemoryProposed, SessionBoard } from "../../contracts/board.js";
 import type { StatusTone } from "../design/status.js";
 
 export type OperatorTaskAction = "hand" | "done" | "drop";
@@ -32,6 +32,14 @@ export interface DecisionRow {
 	who: string;
 	/** Rationale for an agent decision, or the correction that replaced a superseded one. */
 	note: string | null;
+	/** What a supersede names; null when the agent did not report the interview. */
+	target: { interviewId: string; key: string } | null;
+}
+
+export interface BankRow {
+	id: string;
+	word: string;
+	content: string;
 }
 
 export interface BoardView {
@@ -40,6 +48,8 @@ export interface BoardView {
 	activeDecisions: DecisionRow[];
 	earlierDecisions: DecisionRow[];
 	memory: string;
+	/** Task-bank entries a person may propose as durable memory. */
+	bank: BankRow[];
 	truncated: boolean;
 }
 
@@ -86,6 +96,7 @@ function decision(row: SessionBoard["decisions"][number]): DecisionRow {
 		value: row.value,
 		who: row.source === "agent" ? "Decided by Clio Coder" : row.source === "operator" ? "Your answer" : "Recorded",
 		note: row.status === "superseded" ? row.correction : row.rationale,
+		target: row.interviewId === undefined ? null : { interviewId: row.interviewId, key: row.key },
 	};
 }
 
@@ -128,6 +139,56 @@ export function boardView(board: SessionBoard): BoardView {
 		activeDecisions: board.decisions.filter((row) => row.status === "active").map(decision),
 		earlierDecisions: board.decisions.filter((row) => row.status === "superseded").map(decision),
 		memory: memoryLine(board.memory),
+		bank: (board.memory?.bank ?? []).map((entry) => ({
+			id: entry.id,
+			word: entry.kind === "procedural" ? "How to" : "Fact",
+			content: entry.content,
+		})),
 		truncated: board.truncated,
 	};
+}
+
+/** What a proposal did, in words; the review step is always named because a proposal is not an approval. */
+export function memoryOutcome(result: MemoryProposed): { tone: "success" | "warning" | "error"; text: string } {
+	if ("recordId" in result) {
+		const review = `Review it, then run clio-coder memory approve ${result.recordId}.`;
+		return {
+			tone: "success",
+			text:
+				result.status === "proposed"
+					? `Proposed ${result.recordId}. ${review}`
+					: `Already proposed as ${result.recordId}. ${review}`,
+		};
+	}
+	if (result.status === "needs_acknowledgement")
+		return {
+			tone: "warning",
+			text: "Every project broadens where this lesson applies. Press again to propose it everywhere.",
+		};
+	return { tone: "error", text: `Not proposed: ${result.reason}.` };
+}
+
+/** What a supersede did; a correction's request is sent separately and named here. */
+export function supersedeOutcome(
+	result: DecisionSuperseded,
+	corrected: boolean,
+): { tone: "success" | "error"; text: string } {
+	if (result.status === "refused") return { tone: "error", text: `Not superseded: ${result.reason}.` };
+	if (result.status === "already_superseded")
+		return { tone: "success", text: "This decision was already superseded; nothing was written." };
+	return {
+		tone: "success",
+		text: corrected
+			? "Superseded. The new direction was sent to Clio Coder as a request."
+			: "Superseded. It stays in the record under earlier decisions.",
+	};
+}
+
+/** The Decisions section's empty line: none recorded, or none still active while earlier ones remain. */
+export function decisionsEmptyLine(view: Pick<BoardView, "activeDecisions" | "earlierDecisions">): string | null {
+	if (view.activeDecisions.length > 0) return null;
+	if (view.earlierDecisions.length === 0) return "No decision has been recorded in this session.";
+	return view.earlierDecisions.length === 1
+		? "No decision is active. The earlier one is below."
+		: `No decision is active. The ${view.earlierDecisions.length} earlier ones are below.`;
 }

@@ -44,6 +44,18 @@ export function sessionRoutes(
 		),
 	);
 	register(app, hub, routes.sessionBoard, ({ params }) => supervisor.board(params.id));
+	// A retried supersede or proposal answers from the ledger; the agent also finds an already
+	// superseded decision or an existing candidate rather than writing a second.
+	register(app, hub, routes.supersedeDecision, ({ params, body }, context) =>
+		commands.run(`decision.supersede:${params.id}`, idempotencyKey(context), body, () =>
+			supervisor.supersedeDecision(params.id, body),
+		),
+	);
+	register(app, hub, routes.proposeMemory, ({ params, body }, context) =>
+		commands.run(`memory.propose:${params.id}`, idempotencyKey(context), body, () =>
+			supervisor.proposeMemory(params.id, body),
+		),
+	);
 	register(app, hub, routes.sessionTree, ({ params }) => supervisor.tree(params.id));
 	// A branch change resets the conversation, so a retried request answers from
 	// the command ledger instead of switching or forking a second time.

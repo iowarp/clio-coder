@@ -281,6 +281,7 @@ const BOARD = {
 	decisions: [
 		{
 			ref: "interview-1/format",
+			interviewId: "interview-1",
 			key: "format",
 			label: "Report format",
 			value: "Markdown with one table",
@@ -291,7 +292,16 @@ const BOARD = {
 			correction: null,
 		},
 	],
-	memory: { enabled: true, tier: "rules", entries: 2, stepInFlight: false },
+	memory: {
+		enabled: true,
+		tier: "rules",
+		entries: 2,
+		stepInFlight: false,
+		bank: [
+			{ id: "k1", kind: "knowledge", content: "Sample B reads 4.2 on the field instrument." },
+			{ id: "p1", kind: "procedural", content: "Read README.md before measuring." },
+		],
+	},
 	truncated: false,
 };
 const invokeTask = (argv) => {
@@ -413,6 +423,7 @@ const fleetPreview = (name, vars) =>
 // The /handoff lifecycle a real agent runs through its shared service: a draft is
 // held under an id until it is committed, discarded, or a request moves the session.
 let pendingHandoff = null;
+const proposedMemory = new Set();
 // Visual review can ask the smoke scenario to advertise safe settings and targets, so the composer's
 // route chip shows a reported model. The smoke itself leaves it off and asserts the missing controls.
 const ROUTE = process.env.CLIO_CODER_WEB_FIXTURE_ROUTE === "1";
@@ -567,7 +578,12 @@ async function handle(frame) {
 														count: COMMANDS.commands.length,
 														...(process.env.CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS !== "0" ? { promptTurns: true } : {}),
 													},
-													"clio-coder/board": { version: 1, method: "_clio-coder/session/board" },
+													"clio-coder/board": {
+														version: 1,
+														method: "_clio-coder/session/board",
+														supersede: "_clio-coder/decisions/supersede",
+														proposeMemory: "_clio-coder/memory/propose",
+													},
 													"clio-coder/context": { version: 1, ledger: "_clio-coder/context/ledger" },
 													"clio-coder/fleet": {
 														version: 1,
@@ -804,6 +820,47 @@ async function handle(frame) {
 				if (!COMMANDS) throw Error("method_not_found");
 				result = BOARD;
 				break;
+			case "_clio-coder/decisions/supersede": {
+				const decision = BOARD.decisions.find(
+					(row) => row.interviewId === frame.params.interviewId && row.key === frame.params.key,
+				);
+				if (!decision) {
+					result = { status: "refused", reason: `decision ${frame.params.key} is not on the board` };
+					break;
+				}
+				if (decision.status !== "active") {
+					result = { status: "already_superseded" };
+					break;
+				}
+				decision.status = "superseded";
+				log({ superseded: decision.key, correction: frame.params.correction ?? null });
+				if (frame.params.correction) decision.correction = frame.params.correction;
+				result = {
+					status: "superseded",
+					...(frame.params.correction
+						? {
+								correctionTurn: `Decision "${decision.label}" (previously: ${decision.value}) is superseded by the operator. New direction: ${frame.params.correction}. Acknowledge and adjust the plan.`,
+							}
+						: {}),
+				};
+				break;
+			}
+			case "_clio-coder/memory/propose": {
+				const entry = BOARD.memory.bank.find((row) => row.id === frame.params.entryId);
+				if (!entry) {
+					result = { status: "refused", reason: `task-bank entry ${frame.params.entryId} is not in this session` };
+					break;
+				}
+				if (frame.params.scope === "global" && frame.params.acknowledgeGlobal !== true) {
+					result = { status: "needs_acknowledgement", reason: "global scope broadens where this lesson applies" };
+					break;
+				}
+				const recordId = `memory-${entry.id}-${frame.params.scope}`;
+				proposedMemory.has(recordId) ? null : log({ proposed: recordId });
+				result = { status: proposedMemory.has(recordId) ? "existing" : "proposed", recordId };
+				proposedMemory.add(recordId);
+				break;
+			}
 			case "_clio-coder/session/tree":
 				if (!COMMANDS) throw Error("method_not_found");
 				result = sessionTree();

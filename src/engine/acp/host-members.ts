@@ -18,8 +18,12 @@
 
 import { randomUUID } from "node:crypto";
 import { ToolNames } from "../../core/tool-names.js";
+import { proposeTaskBankPromotion, type TaskMemorySnapshot } from "../../domains/memory/index.js";
+import type { DecisionBoardStore } from "../../domains/session/decision-board.js";
+import { formatDecisionCorrectionTurn } from "../../interactive/overlays/decisions.js";
 import type { CouncilDispatchOutcome } from "../../interactive/slash-commands.js";
 import type { ToolRegistry } from "../../tools/registry.js";
+import type { AcpBoardActions } from "./server.js";
 
 export { oracleBriefingFromEntries } from "../../interactive/oracle.js";
 export { followWorkerRuns } from "../../interactive/worker-run-ledger.js";
@@ -75,4 +79,52 @@ export async function runHostDispatch(
 		isError: outcome.status !== "ok",
 	});
 	return outcome;
+}
+
+/**
+ * The board panel's writes with the terminal overlays' semantics. Superseding
+ * a decision keeps it in the record, marked superseded; a correction also
+ * yields the exact turn the terminal submits, for the client to send as a
+ * visible prompt. A decision already superseded is left alone, so a retried
+ * press writes nothing. A proposal goes through the same memory-domain
+ * function the /memory overlay uses, whose derived ids make a retry find the
+ * existing candidate.
+ */
+export function bindBoardActions(deps: {
+	decisionBoard: Pick<DecisionBoardStore, "snapshot" | "supersede">;
+	taskBank: () => TaskMemorySnapshot;
+	currentSession: () => { id: string; cwd: string } | null | undefined;
+	dataDir: string;
+}): AcpBoardActions {
+	return {
+		supersedeDecision: (interviewId, key, correction) => {
+			const decision = deps.decisionBoard
+				.snapshot()
+				.find((entry) => entry.interviewId === interviewId)
+				?.decisions.find((row) => row.key === key);
+			if (decision === undefined) throw new Error(`decision ${key} is not on the board`);
+			if (decision.status !== "active") return { status: "already_superseded" };
+			deps.decisionBoard.supersede(interviewId, key, correction);
+			return {
+				status: "superseded",
+				...(correction === undefined
+					? {}
+					: {
+							correctionTurn: formatDecisionCorrectionTurn(
+								{ interviewId, key, label: decision.label ?? decision.key, value: decision.value },
+								correction,
+							),
+						}),
+			};
+		},
+		proposeMemory: async (entryId, scope) => {
+			const session = deps.currentSession();
+			if (!session) throw new Error("memory promotion requires an active session");
+			const bank = deps.taskBank();
+			const entry = [...bank.knowledge, ...bank.procedural].find((row) => row.id === entryId);
+			if (entry === undefined) throw new Error(`task-bank entry ${entryId} is not in this session`);
+			const result = await proposeTaskBankPromotion(deps.dataDir, { id: session.id, cwd: session.cwd }, entry, scope);
+			return { created: result.created, recordId: result.record.id };
+		},
+	};
 }

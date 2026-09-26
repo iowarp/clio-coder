@@ -137,6 +137,46 @@ test("the context window is read from the agent, and recovery runs as a visible 
 	assert.equal(h.supervisor.get(session.id).turns.length, 1, "a reset is a control reply, not a turn");
 });
 
+test("a decision is superseded once and its correction becomes a visible request; proposals need review", async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const base = `/api/sessions/${session.id}`;
+	const board = await json(await h.request(`${base}/board`), routes.sessionBoard.response);
+	assert.equal(board.decisions[0]?.interviewId, "interview-1");
+	assert.equal(board.memory?.bank?.length, 2);
+	const body = { interviewId: "interview-1", key: "format", correction: "HTML with one table" };
+	const superseded = await json(await h.post(`${base}/decisions/supersede`, body), routes.supersedeDecision.response);
+	assert.equal(superseded.status, "superseded");
+	assert.match(
+		superseded.status === "superseded" ? (superseded.correctionTurn ?? "") : "",
+		/New direction: HTML with one table/,
+	);
+	const again = await json(await h.post(`${base}/decisions/supersede`, body), routes.supersedeDecision.response);
+	assert.equal(again.status, "already_superseded");
+	assert.equal((await readFile(join(h.home.path, "acp.jsonl"), "utf8")).match(/"superseded":"format"/g)?.length, 1);
+	const global = { entryId: "k1", scope: "global" as const };
+	const unacknowledged = await json(await h.post(`${base}/memory/propose`, global), routes.proposeMemory.response);
+	assert.equal(unacknowledged.status, "needs_acknowledgement");
+	const proposed = await json(
+		await h.post(`${base}/memory/propose`, { ...global, acknowledgeGlobal: true }),
+		routes.proposeMemory.response,
+	);
+	assert.deepEqual(proposed, { status: "proposed", recordId: "memory-k1-global" });
+	const existing = await json(
+		await h.post(`${base}/memory/propose`, { ...global, acknowledgeGlobal: true }),
+		routes.proposeMemory.response,
+	);
+	assert.equal(existing.status, "existing");
+	assert.equal((await h.post(`${base}/turns`, { text: "[stream]" })).status, 202);
+	assert.equal(
+		(await h.post(`${base}/decisions/supersede`, { interviewId: "interview-1", key: "format" })).status,
+		409,
+		"a running turn owns the board",
+	);
+});
+
 test("an older command peer refuses injected turns without submitting unrecognised slash text", async (t) => {
 	const h = await harness({}, { scenario: "markdown", env: { CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS: "0" } });
 	t.after(h.close);

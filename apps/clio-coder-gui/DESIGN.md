@@ -493,6 +493,17 @@ than dots, so a narrow row that wraps them never starts a line with a separator.
 inspector eyebrow. Deleting a saved conversation takes two presses in place, and the second question
 puts focus on Keep.
 
+Tasks and decisions also carries the two writes the terminal's /decisions and /memory overlays make.
+An active decision offers Supersede and Correct. Supersede asks in the row, with focus on Keep, and
+says the decision stays in the record, marked superseded. Correct takes the new direction and sends
+it to Clio Coder as the operator's own request, in the words the terminal uses, so the correction is a
+visible turn. A retried press finds the decision already superseded and writes nothing. When only
+superseded decisions remain, the section says none is active rather than that none was recorded.
+What Clio Coder learned this session lists the task bank's facts and how-tos with Propose for this
+repository and Propose for every project; every project needs a second press, because it broadens
+where a lesson applies. A proposal is a candidate, and the outcome always names the review step
+(`clio-coder memory approve`); a retry finds the existing candidate.
+
 Tasks and decisions in Session tools offers Hand only for an open operator task. It is disabled
 while a turn runs or when the peer cannot record command turns. Hand submits a visible conversation
 request and keeps its output, tools, approvals, cancellation and final outcome in that turn. When

@@ -4,7 +4,14 @@ import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { StatusMark } from "../design/status.js";
-import { boardView, type OperatorTaskAction } from "./board-model.js";
+import {
+	boardView,
+	type DecisionRow,
+	decisionsEmptyLine,
+	memoryOutcome,
+	type OperatorTaskAction,
+	supersedeOutcome,
+} from "./board-model.js";
 import "./session-board.css";
 
 /**
@@ -57,6 +64,54 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 					if (panel.current?.open) (next ?? panel.current.querySelector("summary"))?.focus();
 				});
 		},
+	});
+	const [confirming, setConfirming] = useState<string | null>(null);
+	const [correcting, setCorrecting] = useState<string | null>(null);
+	const [correction, setCorrection] = useState("");
+	const [decisionNote, setDecisionNote] = useState<{ tone: string; text: string } | null>(null);
+	const [pendingGlobal, setPendingGlobal] = useState<string | null>(null);
+	const [memoryNote, setMemoryNote] = useState<{ tone: string; text: string } | null>(null);
+	const canSupersede = !!capabilities?.board?.supersede;
+	const canPropose = !!capabilities?.board?.proposeMemory;
+	const supersede = useMutation({
+		mutationFn: async ({ row, text }: { row: DecisionRow; text?: string }) => {
+			if (row.target === null) throw new Error("This decision cannot be named to Clio Coder.");
+			const result = await client.call(
+				routes.supersedeDecision,
+				{ ...params, body: { ...row.target, ...(text === undefined ? {} : { correction: text }) } },
+				crypto.randomUUID(),
+			);
+			// The correction reaches Clio Coder as the operator's own request, as the terminal sends it.
+			if (result.status === "superseded" && result.correctionTurn !== undefined)
+				await client.call(routes.turn, { ...params, body: { text: result.correctionTurn } }, crypto.randomUUID());
+			return { result, corrected: text !== undefined };
+		},
+		onSuccess: async ({ result, corrected }) => {
+			setConfirming(null);
+			setCorrecting(null);
+			setCorrection("");
+			setDecisionNote(supersedeOutcome(result, corrected));
+			await queries.invalidateQueries({ queryKey: ["session-board", sessionId] });
+			// The row that held focus may have moved to earlier decisions; the section heading is where it lands.
+			requestAnimationFrame(() => document.getElementById(`${titleId}-decisions`)?.focus());
+		},
+		onError: (error) => setDecisionNote({ tone: "error", text: error.message }),
+	});
+	const propose = useMutation({
+		mutationFn: ({ entryId, scope }: { entryId: string; scope: "repo" | "global" }) =>
+			client.call(
+				routes.proposeMemory,
+				{
+					...params,
+					body: { entryId, scope, ...(scope === "global" && pendingGlobal === entryId ? { acknowledgeGlobal: true } : {}) },
+				},
+				crypto.randomUUID(),
+			),
+		onSuccess: (result, input) => {
+			setPendingGlobal(result.status === "needs_acknowledgement" ? input.entryId : null);
+			setMemoryNote(memoryOutcome(result));
+		},
+		onError: (error) => setMemoryNote({ tone: "error", text: error.message }),
 	});
 	const view = board.data ? boardView(board.data) : null;
 	const act = (id: string, action: OperatorTaskAction) => change.mutate([action, id]);
@@ -157,10 +212,10 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 						)}
 					</section>
 					<section aria-labelledby={`${titleId}-decisions`}>
-						<h3 id={`${titleId}-decisions`}>Decisions</h3>
-						{view.activeDecisions.length === 0 ? (
-							<p className="session-board__empty">No decision has been recorded in this session.</p>
-						) : null}
+						<h3 id={`${titleId}-decisions`} tabIndex={-1}>
+							Decisions
+						</h3>
+						{decisionsEmptyLine(view) ? <p className="session-board__empty">{decisionsEmptyLine(view)}</p> : null}
 						<dl className="session-board__decisions">
 							{view.activeDecisions.map((row) => (
 								<div key={row.ref}>
@@ -171,6 +226,78 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 											{row.who}
 											{row.note ? ` · ${row.note}` : ""}
 										</small>
+										{canSupersede && row.target !== null ? (
+											confirming === row.ref ? (
+												<fieldset className="session-board__actions session-board__confirm">
+													<legend>Supersede {row.name}? It stays in the record, marked superseded.</legend>
+
+													<button type="button" disabled={supersede.isPending || running} onClick={() => supersede.mutate({ row })}>
+														Supersede
+													</button>
+													<button
+														type="button"
+														// Keep is the safe answer, so the question puts focus on it.
+														ref={(button) => button?.focus()}
+														onClick={() => setConfirming(null)}
+													>
+														Keep
+													</button>
+												</fieldset>
+											) : correcting === row.ref ? (
+												<form
+													className="session-board__add"
+													onSubmit={(event) => {
+														event.preventDefault();
+														const text = correction.trim();
+														if (text) supersede.mutate({ row, text });
+													}}
+												>
+													<label htmlFor={`${titleId}-correct-${row.ref}`}>New direction</label>
+													<input
+														id={`${titleId}-correct-${row.ref}`}
+														value={correction}
+														maxLength={2000}
+														// biome-ignore lint/a11y/noAutofocus: the operator just asked to write the correction.
+														autoFocus
+														onChange={(event) => setCorrection(event.target.value.replace(/[\r\n]+/g, " "))}
+													/>
+													<button type="submit" disabled={supersede.isPending || running || !correction.trim()}>
+														Supersede and tell Clio Coder
+													</button>
+													<button type="button" onClick={() => setCorrecting(null)}>
+														Cancel
+													</button>
+												</form>
+											) : (
+												<span className="session-board__actions">
+													<button
+														type="button"
+														disabled={supersede.isPending || running}
+														onClick={() => {
+															setDecisionNote(null);
+															setCorrecting(null);
+															setConfirming(row.ref);
+														}}
+														aria-label={`Supersede: ${row.name}`}
+													>
+														Supersede
+													</button>
+													<button
+														type="button"
+														disabled={supersede.isPending || running}
+														onClick={() => {
+															setDecisionNote(null);
+															setConfirming(null);
+															setCorrection("");
+															setCorrecting(row.ref);
+														}}
+														aria-label={`Correct: ${row.name}`}
+													>
+														Correct
+													</button>
+												</span>
+											)
+										) : null}
 									</dd>
 								</div>
 							))}
@@ -197,7 +324,53 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 							</details>
 						) : null}
 					</section>
+					{decisionNote ? (
+						<p role={decisionNote.tone === "error" ? "alert" : "status"} className="session-board__note">
+							{decisionNote.text}
+						</p>
+					) : null}
 					<p className="session-board__note">{view.memory}</p>
+					{view.bank.length > 0 ? (
+						<section aria-labelledby={`${titleId}-bank`}>
+							<h3 id={`${titleId}-bank`}>What Clio Coder learned this session</h3>
+							<p className="session-board__note">
+								Proposing makes a candidate for durable memory. Nothing is remembered until you approve it.
+							</p>
+							<ul className="session-board__rows">
+								{view.bank.map((entry) => (
+									<li key={entry.id}>
+										<span className="session-board__id">{entry.word}</span>
+										<span className="session-board__title">{entry.content}</span>
+										{canPropose ? (
+											<span className="session-board__actions">
+												<button
+													type="button"
+													disabled={propose.isPending}
+													onClick={() => propose.mutate({ entryId: entry.id, scope: "repo" })}
+													aria-label={`Propose for this repository: ${entry.content}`}
+												>
+													Propose for this repository
+												</button>
+												<button
+													type="button"
+													disabled={propose.isPending}
+													onClick={() => propose.mutate({ entryId: entry.id, scope: "global" })}
+													aria-label={`Propose for every project: ${entry.content}`}
+												>
+													{pendingGlobal === entry.id ? "Propose everywhere" : "Propose for every project"}
+												</button>
+											</span>
+										) : null}
+									</li>
+								))}
+							</ul>
+							{memoryNote ? (
+								<p role={memoryNote.tone === "error" ? "alert" : "status"} className="session-board__note">
+									{memoryNote.text}
+								</p>
+							) : null}
+						</section>
+					) : null}
 					{view.truncated ? (
 						<p className="session-board__note">Only the first 100 of a list are shown; the terminal shows the rest.</p>
 					) : null}

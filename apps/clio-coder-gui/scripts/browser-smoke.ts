@@ -732,6 +732,31 @@ try {
 			() => document.activeElement?.getAttribute("aria-label") === "Mark done: Survey the project",
 		);
 		await page.getByRole("button", { name: "Send", exact: true }).waitFor({ state: "visible" });
+		// A decision is corrected in place: it is superseded and the new direction is sent as a request.
+		await board.getByRole("button", { name: "Correct: Report format", exact: true }).click();
+		await board.getByLabel("New direction", { exact: true }).fill("HTML with one table");
+		await board.getByRole("button", { name: "Supersede and tell Clio Coder", exact: true }).click();
+		await board
+			.getByText("Superseded. The new direction was sent to Clio Coder as a request.", { exact: true })
+			.waitFor();
+		await page.locator(".chat-request", { hasText: "is superseded by the operator" }).waitFor();
+		await board
+			.getByRole("button", { name: "Propose for every project: Sample B reads 4.2 on the field instrument.", exact: true })
+			.click();
+		await board
+			.getByText("Every project broadens where this lesson applies. Press again to propose it everywhere.", {
+				exact: true,
+			})
+			.waitFor();
+		await board
+			.getByRole("button", { name: "Propose for every project: Sample B reads 4.2 on the field instrument.", exact: true })
+			.click();
+		await board.getByText(/^Proposed memory-k1-global\. Review it/).waitFor();
+		await check("session-board-writes");
+		if (width === 1600 || width === 390) {
+			await board.locator("h3", { hasText: "What Clio Coder learned this session" }).scrollIntoViewIfNeeded();
+			await page.screenshot({ path: join(output, `session-board-writes-${width}.png`) });
+		}
 		await check("session-board-hand");
 		await check("session-board");
 		if (width === 1600) await page.screenshot({ path: join(output, "session-board.png"), fullPage: true });

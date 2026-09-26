@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { TURN_IMAGES_MAX_BASE64, type TurnImage } from "../../contracts/attachments.js";
-import { SessionBoard } from "../../contracts/board.js";
+import {
+	DecisionSuperseded,
+	type DecisionSupersedeRequest,
+	MemoryProposed,
+	type MemoryProposeRequest,
+	SessionBoard,
+} from "../../contracts/board.js";
 import { SessionTree } from "../../contracts/branches.js";
 import { Id } from "../../contracts/common.js";
 import { ContextLedger } from "../../contracts/context-ledger.js";
@@ -816,6 +822,22 @@ export class Supervisor {
 	cancelHandoff(id: string, handoffId: string) {
 		this.handing(id);
 		return this.projected(id, "_clio-coder/session/handoff/cancel", { sessionId: id, handoffId }, HandoffCancelled);
+	}
+	private boardWrites(id: string, method: "supersede" | "proposeMemory") {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.board?.[method])
+			throw new AppProblem("conflict", "This Clio Coder build cannot change decisions or memory from here.");
+		return entry;
+	}
+	supersedeDecision(id: string, body: Static<typeof DecisionSupersedeRequest>) {
+		const entry = this.boardWrites(id, "supersede");
+		if (entry.turnId || entry.rebase || entry.drafting)
+			throw new AppProblem("conflict", "Wait for the current turn to finish before revising a decision.");
+		return this.projected(id, "_clio-coder/decisions/supersede", { sessionId: id, ...body }, DecisionSuperseded);
+	}
+	proposeMemory(id: string, body: Static<typeof MemoryProposeRequest>) {
+		this.boardWrites(id, "proposeMemory");
+		return this.projected(id, "_clio-coder/memory/propose", { sessionId: id, ...body }, MemoryProposed);
 	}
 	commands(id: string) {
 		const entry = this.active(id);

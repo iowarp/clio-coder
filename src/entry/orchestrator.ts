@@ -212,6 +212,7 @@ import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptanc
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
 import { type AcpHostReport, acpCommandControl } from "../engine/acp/commands.js";
 import {
+	bindBoardActions,
 	createHostToolEvents,
 	followWorkerRuns,
 	oracleBriefingFromEntries,
@@ -3248,6 +3249,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					: {}),
 				toolRegistry,
 				hostToolEvents: acpHostToolEvents,
+				...(session
+					? {
+							boardActions: bindBoardActions({
+								decisionBoard,
+								taskBank: () => taskMemoryBank.snapshot(),
+								currentSession: () => session.current(),
+								dataDir: clioDataDir(),
+							}),
+						}
+					: {}),
 				contextLedger: () => chat.contextLedger(),
 				...(toolBootstrap.mcpCapabilities ? { mcpCapabilities: toolBootstrap.mcpCapabilities } : {}),
 				bus,

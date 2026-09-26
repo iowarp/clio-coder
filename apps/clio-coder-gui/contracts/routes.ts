@@ -1,6 +1,12 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { TURN_IMAGE_MAX, TurnImage } from "./attachments.js";
-import { SessionBoard } from "./board.js";
+import {
+	DecisionSuperseded,
+	DecisionSupersedeRequest,
+	MemoryProposed,
+	MemoryProposeRequest,
+	SessionBoard,
+} from "./board.js";
 import { BranchRequest, BranchSwitched, Forked, SessionTree } from "./branches.js";
 import { AgentCapabilities } from "./capabilities.js";
 import { Empty, Id } from "./common.js";
@@ -438,6 +444,24 @@ export const routes = {
 		params: operationParams,
 		response: SessionBoard,
 		summary: "The operator's tasks, the session plan, its decisions and the memory tier",
+	}),
+	supersedeDecision: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/decisions/supersede",
+		params: operationParams,
+		body: DecisionSupersedeRequest,
+		response: DecisionSuperseded,
+		summary: "Mark a decision superseded; a correction also returns the request that tells Clio Coder",
+	}),
+	proposeMemory: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/memory/propose",
+		params: operationParams,
+		body: MemoryProposeRequest,
+		response: MemoryProposed,
+		summary: "Propose a task-bank entry as a durable memory candidate for review",
 	}),
 	sessionTree: defineRoute({
 		...get,

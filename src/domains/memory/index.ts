@@ -17,6 +17,7 @@ export {
 	memoryRuntimeIdentity,
 	memoryScopeIdentityKey,
 	proposeMemoryPromotion,
+	proposeTaskBankPromotion,
 	validateMemoryScopeSelection,
 } from "./promotion.js";
 export {

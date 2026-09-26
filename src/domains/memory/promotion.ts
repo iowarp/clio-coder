@@ -279,3 +279,31 @@ function redactPromotionText(text: string, tally: ReturnType<typeof createRedact
 function compareStrings(left: string, right: string): number {
 	return left < right ? -1 : left > right ? 1 : 0;
 }
+
+/**
+ * Propose one task-bank entry from a session as a durable memory candidate, the
+ * way the terminal's memory overlay does. Repository scope needs the session's
+ * canonical repository identity; global scope is the caller's to confirm first.
+ * The record id is derived from the entry, the session and the scope, so a
+ * retried proposal finds the existing candidate instead of writing a second.
+ */
+export async function proposeTaskBankPromotion(
+	dataDir: string,
+	session: { id: string; cwd: string },
+	entry: TaskMemoryEntry,
+	scope: "repo" | "global",
+): Promise<MemoryProposalResult> {
+	const selection: MemoryScopeSelection =
+		scope === "global"
+			? { scope: "global", acknowledgeGlobal: true }
+			: (() => {
+					const repository = canonicalMemoryRepositoryIdentity(session.cwd);
+					if (repository === null) throw new Error("repo promotion requires a canonical active repository identity");
+					return { scope: "repo", repository } as const;
+				})();
+	return proposeMemoryPromotion(
+		dataDir,
+		{ kind: "task-bank-entry", sessionId: session.id, evidenceRefs: [`session-${session.id}`], entry },
+		selection,
+	);
+}

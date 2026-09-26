@@ -77,7 +77,15 @@ test("the board projects what the terminal views show and nothing the ledger kee
 			["interview-1/cache", "superseded", "agent", "use redis"],
 		],
 	);
-	assert.deepEqual(board.memory, { enabled: true, tier: "rules", entries: 3, stepInFlight: false });
+	// Entries without an id and text are not offered for promotion; the count still reports them.
+	assert.deepEqual(board.memory, { enabled: true, tier: "rules", entries: 3, stepInFlight: false, bank: [] });
+	assert.deepEqual(
+		board.decisions.map((row) => [row.interviewId, row.key]),
+		[
+			["interview-1", "db"],
+			["interview-1", "cache"],
+		],
+	);
 	assert.equal(board.truncated, false);
 	const wire = JSON.stringify(board);
 	for (const secret of ["/private/transcript.json", "run-private", "b1"]) assert.ok(!wire.includes(secret), secret);

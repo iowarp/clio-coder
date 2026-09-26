@@ -201,3 +201,18 @@
 	font-variant-numeric: tabular-nums;
 	text-align: end;
 }
+
+/* The supersede question sits in the row it asks about: a legend and two buttons, no frame of its own. */
+.session-board__confirm {
+	flex-wrap: wrap;
+	align-items: center;
+	margin: var(--space-2) 0 0;
+	padding: 0;
+	border: 0;
+}
+.session-board__confirm legend {
+	padding: 0;
+	margin-block-end: var(--space-1);
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}

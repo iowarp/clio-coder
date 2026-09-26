@@ -125,6 +125,7 @@ export async function runAcpCommand(
 					toolRegistry: true,
 					bus: true,
 					board: true,
+					boardActions: true,
 					branches: true,
 					handoff: true,
 					fleet: true,

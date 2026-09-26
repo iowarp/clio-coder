@@ -11,11 +11,7 @@ import {
 	fleetRouteResolver,
 } from "../domains/dispatch/index.js";
 import type { MemoryRecord } from "../domains/memory/index.js";
-import {
-	canonicalMemoryRepositoryIdentity,
-	loadMemoryRecordsSync,
-	proposeMemoryPromotion,
-} from "../domains/memory/index.js";
+import { loadMemoryRecordsSync, proposeTaskBankPromotion } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { renderCostAggregate } from "../domains/observability/index.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
@@ -323,26 +319,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			onPromote: async (entry, scope) => {
 				const meta = deps.getSessionMeta();
 				if (!meta) throw new Error("memory promotion requires an active session");
-				const selection =
-					scope === "global"
-						? ({ scope: "global", acknowledgeGlobal: true } as const)
-						: (() => {
-								const repository = canonicalMemoryRepositoryIdentity(meta.cwd);
-								if (repository === null) {
-									throw new Error("repo promotion requires a canonical active repository identity");
-								}
-								return { scope: "repo", repository } as const;
-							})();
-				const result = await proposeMemoryPromotion(
-					deps.dataDir,
-					{
-						kind: "task-bank-entry",
-						sessionId: meta.id,
-						evidenceRefs: [`session-${meta.id}`],
-						entry,
-					},
-					selection,
-				);
+				const result = await proposeTaskBankPromotion(deps.dataDir, { id: meta.id, cwd: meta.cwd }, entry, scope);
 				records = loadMemoryRecordsSync(deps.dataDir);
 				return result;
 			},

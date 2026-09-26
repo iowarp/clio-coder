@@ -127,6 +127,18 @@ export interface AcpHandoffControl {
 	): { ok: true; toSessionId: string; warnings: ReadonlyArray<string> } | AcpHandoffRefusal;
 }
 
+/** The board's writes, bound by the composition root. */
+export interface AcpBoardActions {
+	/** Throws when the decision is not on the board. */
+	supersedeDecision(
+		interviewId: string,
+		key: string,
+		correction?: string,
+	): { status: "superseded" | "already_superseded"; correctionTurn?: string };
+	/** Throws when the entry is not in the task bank or the scope cannot be resolved. */
+	proposeMemory(entryId: string, scope: "repo" | "global"): Promise<{ created: boolean; recordId: string }>;
+}
+
 export interface AcpServerChat {
 	submit(text: string, options?: unknown): Promise<void>;
 	/** Wait for a command's host-injected turn while the ACP prompt owns its subscription. */
@@ -228,6 +240,13 @@ export interface ClioAcpServerOptions {
 	 * the two fleet methods are not announced and refuse.
 	 */
 	fleet?: AcpFleetControl;
+	/**
+	 * The board panel's two writes, with the terminal overlays' semantics:
+	 * superseding a decision (a correction also yields the turn the terminal
+	 * submits) and proposing a task-bank entry as durable memory. Absent means
+	 * both methods refuse.
+	 */
+	boardActions?: AcpBoardActions;
 	/**
 	 * The chat's context accounting, read for `_clio-coder/context/ledger`.
 	 * Absent means the method is not announced and refuses.
@@ -1362,6 +1381,9 @@ const ACP_MAX_MODEL_ID_BYTES = 256;
 const ACP_MAX_LABEL_BYTES = 256;
 const ACP_REPLAY_META_KEY = "clio-coder/replay";
 const ACP_BRANCHES_META_KEY = "clio-coder/branches";
+const ACP_DECISION_SUPERSEDE_METHOD = "_clio-coder/decisions/supersede";
+const ACP_MEMORY_PROPOSE_METHOD = "_clio-coder/memory/propose";
+const ACP_MAX_CORRECTION_BYTES = 2048;
 const ACP_HANDOFF_META_KEY = "clio-coder/handoff";
 const ACP_HANDOFF_PREPARE_METHOD = "_clio-coder/session/handoff/prepare";
 const ACP_HANDOFF_COMMIT_METHOD = "_clio-coder/session/handoff/commit";
@@ -2153,6 +2175,8 @@ export interface AcpHandshakeFeatures {
 	bus: boolean;
 	/** Whether `_clio-coder/session/board` answers; absent reads as false. */
 	board?: boolean;
+	/** Whether the board's supersede and memory-propose methods answer; absent reads as false. */
+	boardActions?: boolean;
 	/** Whether the session tree, branch switch and fork methods answer; absent reads as false. */
 	branches?: boolean;
 	/** Whether the handoff prepare, commit and cancel methods answer; absent reads as false. */
@@ -2384,7 +2408,17 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 								}
 							: {}),
 						...(features.toolRegistry ? { "clio-coder/tools": "mediated" } : {}),
-						...(features.board ? { [ACP_BOARD_META_KEY]: { version: 1, method: ACP_BOARD_METHOD } } : {}),
+						...(features.board
+							? {
+									[ACP_BOARD_META_KEY]: {
+										version: 1,
+										method: ACP_BOARD_METHOD,
+										...(features.boardActions
+											? { supersede: ACP_DECISION_SUPERSEDE_METHOD, proposeMemory: ACP_MEMORY_PROPOSE_METHOD }
+											: {}),
+									},
+								}
+							: {}),
 						...(features.branches
 							? {
 									[ACP_BRANCHES_META_KEY]: {
@@ -2476,6 +2510,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			toolRegistry: options.toolRegistry !== undefined,
 			bus: options.bus !== undefined,
 			board: options.board !== undefined,
+			boardActions: options.board !== undefined && options.boardActions !== undefined,
 			branches: branchesWired(options),
 			handoff: handoffWired(options),
 			fleet: options.fleet !== undefined,
@@ -3713,6 +3748,70 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			fleetRootId,
 			stepCount: result.preview.plan.steps.length,
 		};
+	});
+
+	const requireBoardActions = (): AcpBoardActions => {
+		if (options.boardActions === undefined || options.board === undefined) {
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		}
+		return options.boardActions;
+	};
+
+	// The /decisions overlay's `s` and `c`. The record keeps the decision,
+	// marked superseded; a correction's turn is returned for the client to send,
+	// so it lands in the conversation as the terminal's does.
+	options.transport.onRequest(ACP_DECISION_SUPERSEDE_METHOD, (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "interviewId", "key", "correction"]));
+		const actions = requireBoardActions();
+		const bound = getSession(request);
+		requireIdle(bound, "revise a decision");
+		const interviewId = requireBoundedClientString(request.interviewId, "interviewId", 256);
+		const key = requireBoundedClientString(request.key, "key", 1024);
+		const correction =
+			request.correction === undefined
+				? undefined
+				: requireBoundedClientString(request.correction, "correction", ACP_MAX_CORRECTION_BYTES).trim();
+		if (correction !== undefined && correction.length === 0) {
+			throw new AcpRequestError(-32602, "a correction needs the new direction", { code: "invalid_params" });
+		}
+		try {
+			const outcome = actions.supersedeDecision(interviewId, key, correction);
+			return {
+				status: outcome.status,
+				...(outcome.correctionTurn !== undefined ? { correctionTurn: boundString(outcome.correctionTurn, 4096) } : {}),
+			};
+		} catch (error) {
+			return { status: "refused" as const, reason: boundString(acpErrorMessage(error), 1024) };
+		}
+	});
+
+	// The /memory overlay's `p` and `g`. A proposal is a candidate for review,
+	// never an approval; global scope broadens where a lesson applies, so it is
+	// refused until the client says the operator acknowledged that.
+	options.transport.onRequest(ACP_MEMORY_PROPOSE_METHOD, async (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "entryId", "scope", "acknowledgeGlobal"]));
+		const actions = requireBoardActions();
+		getSession(request);
+		const entryId = requireBoundedClientString(request.entryId, "entryId", 256);
+		if (request.scope !== "repo" && request.scope !== "global") {
+			throw new AcpRequestError(-32602, "scope must be repo or global", { code: "invalid_params" });
+		}
+		if (request.scope === "global" && request.acknowledgeGlobal !== true) {
+			return {
+				status: "needs_acknowledgement" as const,
+				reason: "global scope broadens where this lesson applies; acknowledge it to propose",
+			};
+		}
+		try {
+			const outcome = await actions.proposeMemory(entryId, request.scope);
+			return { status: outcome.created ? ("proposed" as const) : ("existing" as const), recordId: outcome.recordId };
+		} catch (error) {
+			return { status: "refused" as const, reason: boundString(acpErrorMessage(error), 1024) };
+		}
 	});
 
 	options.transport.onRequest("_clio-coder/session/label", (params) => {
