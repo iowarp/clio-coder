@@ -3,9 +3,10 @@ import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
+import { shellQuote } from "../../core/shell-quote.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import type { Fingerprint } from "./fingerprint.js";
-import { readmeSummary, readmeTitle } from "./project-metadata.js";
+import { cmakeProjectDeclaration, readmeSummary, readmeTitle } from "./project-metadata.js";
 
 const INPUT_LIMIT = 64 * 1024;
 const MAX_ORIENTATION_BYTES = 12 * 1024;
@@ -85,11 +86,11 @@ export function buildProjectOrientation(cwd: string, codewiki: Codewiki, fingerp
 		/* Malformed inputs remain unknown. */
 	}
 	if (!identity && captured["CMakeLists.txt"]) {
-		const project = /\bproject\s*\(\s*([\w.+-]+)([^)]*)\)/i.exec(captured["CMakeLists.txt"]);
-		if (project)
+		const project = cmakeProjectDeclaration(captured["CMakeLists.txt"]);
+		if (project.name)
 			identity = {
-				name: project[1] ?? "unknown",
-				purpose: text(/\bDESCRIPTION\s+"([^"]+)"/i.exec(project[2] ?? "")?.[1]),
+				name: project.name,
+				purpose: text(project.description),
 				source: "CMakeLists.txt#project",
 			};
 	}
@@ -117,7 +118,7 @@ export function buildProjectOrientation(cwd: string, codewiki: Codewiki, fingerp
 			if (!Array.isArray(values)) continue;
 			const selected = values
 				.map(record)
-				.filter((preset) => preset && preset.hidden !== true && text(preset.name, 80))
+				.filter((preset) => preset && preset.hidden !== true && presetName(preset.name))
 				.sort((a, b) => {
 					const rank = (preset: Record<string, unknown> | null) =>
 						preset?.name === "release" ? 0 : preset?.name === "debug" ? 1 : 2;
@@ -125,12 +126,11 @@ export function buildProjectOrientation(cwd: string, codewiki: Codewiki, fingerp
 				})
 				.slice(0, 2);
 			for (const preset of selected) {
-				const name = text(preset?.name, 80);
+				const name = presetName(preset?.name);
 				if (!name || preset?.hidden === true || commands.length >= 7) continue;
 				commands.push({
 					name: `${key}:${name}`,
-					command:
-						flag === "ctest" ? `ctest --preset ${JSON.stringify(name)}` : `cmake ${flag}--preset ${JSON.stringify(name)}`,
+					command: flag === "ctest" ? `ctest --preset ${shellQuote(name)}` : `cmake ${flag}--preset ${shellQuote(name)}`,
 					source: `CMakePresets.json#${key}`,
 				});
 			}
@@ -172,6 +172,17 @@ export function buildProjectOrientation(cwd: string, codewiki: Codewiki, fingerp
 		sourceFiles: sources.length,
 		testFiles: sources.filter((file) => file.role === "test").length,
 	};
+}
+
+function presetName(value: unknown): string | undefined {
+	// Executable hints must keep the declared argument intact. Unsupported names
+	// are omitted rather than normalized into a different preset.
+	return typeof value === "string" &&
+		value.trim() &&
+		value.length <= 80 &&
+		[...value].every((character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127)
+		? value
+		: undefined;
 }
 
 /** Optional additive state field: a damaged orientation must not discard valid lifecycle evidence. */

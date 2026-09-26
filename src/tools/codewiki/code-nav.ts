@@ -607,20 +607,21 @@ export const codeNavTool: ToolSpec = {
 			};
 		if (mode === "wiki") return close(runWiki(process.cwd(), query));
 		const loaded = await loadNavSource(source);
-		if (!loaded.ok) return { kind: "error", message: loaded.message };
 		if (mode === "project") {
 			const { readProjectStatus } = await import("../../domains/context/project-status.js");
 			return close({
 				payload: await readProjectStatus(
 					process.cwd(),
-					loaded.loaded.fingerprint
+					loaded.ok && loaded.loaded.fingerprint
 						? { codewiki: loaded.loaded.codewiki, fingerprint: loaded.loaded.fingerprint }
 						: undefined,
+					loaded.ok ? undefined : loaded.message,
 				),
 				shownCount: 1,
 				totalCount: 1,
 			});
 		}
+		if (!loaded.ok) return { kind: "error", message: loaded.message };
 		const index = navIndexFor(loaded.loaded.codewiki);
 		if (mode === "symbol") {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=symbol requires query" };

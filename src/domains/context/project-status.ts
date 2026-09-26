@@ -11,13 +11,33 @@ import { readClioState } from "./state.js";
 
 const exec = promisify(execFile);
 
+function gitStatusRecords(output: string): string[] {
+	const fields = output.split("\0");
+	const records: string[] = [];
+	for (let i = 0; i < fields.length; i++) {
+		const entry = fields[i];
+		if (!entry) continue;
+		if (/[RC]/.test(entry.slice(0, 2))) {
+			const source = fields[++i];
+			if (!source) throw new Error("incomplete Git rename/copy observation");
+			records.push(`${entry}\0${source}`);
+		} else records.push(entry);
+	}
+	return records;
+}
+
 export async function readProjectStatus(
 	cwd: string,
 	current?: { codewiki: Codewiki; fingerprint: Fingerprint },
+	codemapError?: string,
 ): Promise<Record<string, unknown>> {
 	const observedAt = new Date().toISOString();
 	const state = readClioState(cwd);
-	const orientation = current ? buildProjectOrientation(cwd, current.codewiki, current.fingerprint) : state?.orientation;
+	const orientation = codemapError
+		? undefined
+		: current
+			? buildProjectOrientation(cwd, current.codewiki, current.fingerprint)
+			: state?.orientation;
 	let git: Record<string, unknown> = { state: "unknown" };
 	try {
 		const [head, branch, status] = await Promise.all([
@@ -29,14 +49,15 @@ export async function readProjectStatus(
 				maxBuffer: 64 * 1024,
 			}),
 		]);
+		const records = gitStatusRecords(status.stdout);
 		git = {
 			state: "observed",
 			source: "git HEAD / symbolic-ref / status --porcelain=v1 -z",
 			head: head.stdout.trim(),
 			branch: branch?.stdout.trim() ?? null,
-			porcelain: status.stdout.split("\0").filter(Boolean).slice(0, 24),
-			statusRecords: status.stdout.split("\0").filter(Boolean).length,
-			statusTruncated: status.stdout.split("\0").filter(Boolean).length > 24,
+			porcelain: records.slice(0, 24),
+			statusRecords: records.length,
+			statusTruncated: records.length > 24,
 		};
 	} catch {
 		/* An unavailable or oversized Git observation remains unknown. */
@@ -76,6 +97,7 @@ export async function readProjectStatus(
 	}
 	return {
 		observedAt,
+		...(codemapError ? { codemap: { state: "unknown", reason: codemapError } } : {}),
 		orientation: orientation
 			? {
 					...orientation,

@@ -1,6 +1,15 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fallbackBootstrapOutput, runBootstrap } from "../../src/domains/context/bootstrap.js";
@@ -31,6 +40,115 @@ async function index(cwd: string) {
 	ok(result);
 	return result;
 }
+
+test("preset commands preserve literal shell arguments and omit overlong names", {
+	skip: process.platform === "win32",
+}, async () => {
+	const env = await isolateClioEnv("clio-preset-literals-");
+	try {
+		const names = ["release  local $CLIO_PRESET `printf expanded` $(printf substituted) 'quote'", "x".repeat(81)];
+		writeFileSync(
+			join(env.dir, "CMakePresets.json"),
+			JSON.stringify({ configurePresets: names.map((name) => ({ name })) }),
+		);
+		const result = await index(env.dir);
+		const orientation = buildProjectOrientation(env.dir, result.codewiki, result.worker.fingerprint);
+		strictEqual(orientation.commands.length, 1);
+		const command = orientation.commands[0]?.command;
+		ok(command);
+		const args = execFileSync("sh", ["-c", `cmake() { printf '%s\\n' "$@"; }; ${command}`], { encoding: "utf8" });
+		strictEqual(args, `--preset\n${names[0]}\n`);
+	} finally {
+		env.restore();
+	}
+});
+
+test("CMake orientation ignores commented and quoted example declarations", async () => {
+	const env = await isolateClioEnv("clio-cmake-declaration-");
+	try {
+		writeFileSync(
+			join(env.dir, "CMakeLists.txt"),
+			[
+				'# project(line_example DESCRIPTION "Example only")',
+				'#[=[\nproject(bracket_example DESCRIPTION "Example only")\n]=]',
+				'set(EXAMPLE "\nproject(quoted_example DESCRIPTION \\"Example only\\")\n")',
+				'project(actual DESCRIPTION "Real solver")',
+			].join("\n"),
+		);
+		await index(env.dir);
+		strictEqual(readClioState(env.dir)?.orientation?.identity?.name, "actual");
+		strictEqual(readClioState(env.dir)?.orientation?.identity?.purpose, "Real solver");
+	} finally {
+		env.restore();
+	}
+});
+
+test("project status counts and bounds whole Git rename records", async () => {
+	const env = await isolateClioEnv("clio-status-renames-");
+	try {
+		const git = (...args: string[]) => execFileSync("git", args, { cwd: env.dir, encoding: "utf8" });
+		git("init", "-q");
+		for (let i = 0; i < 25; i++) writeFileSync(join(env.dir, `before-${i}.txt`), `unique ${i}\n`);
+		git("add", ".");
+		git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture");
+		for (let i = 0; i < 25; i++) git("mv", `before-${i}.txt`, `after-${i}.txt`);
+		const status = (await readProjectStatus(env.dir)).git as {
+			statusRecords: number;
+			statusTruncated: boolean;
+			porcelain: string[];
+		};
+		strictEqual(status.statusRecords, 25);
+		strictEqual(status.statusTruncated, true);
+		strictEqual(status.porcelain.length, 24);
+		ok(
+			status.porcelain.every(
+				(entry) => entry.startsWith("R  after-") && /^before-\d+\.txt$/.test(entry.split("\0")[1] ?? ""),
+			),
+		);
+	} finally {
+		env.restore();
+	}
+});
+
+test("project retrieval retains independent evidence when source indexing fails", {
+	skip: process.platform === "win32",
+}, async () => {
+	const env = await isolateClioEnv("clio-status-index-failure-");
+	const previous = process.cwd();
+	const source = join(env.dir, "a.ts");
+	try {
+		execFileSync("git", ["init", "-q"], { cwd: env.dir });
+		writeFileSync(source, "export const value = 1;\n");
+		execFileSync("git", ["add", "a.ts"], { cwd: env.dir });
+		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"], {
+			cwd: env.dir,
+		});
+		await index(env.dir);
+		mkdirSync(join(env.dir, ".clio-coder"), { recursive: true });
+		writeFileSync(
+			join(env.dir, ".clio-coder/user-tasks.json"),
+			JSON.stringify({
+				version: 1,
+				nextId: 2,
+				tasks: [{ id: "u1", title: "Inspect source", status: "open", createdAt: "2026-09-26", updatedAt: "2026-09-26" }],
+			}),
+		);
+		chmodSync(source, 0);
+		process.chdir(env.dir);
+		const result = await codeNavTool.run({ mode: "project" });
+		ok(result.kind === "ok");
+		const status = JSON.parse(result.output);
+		strictEqual(status.git.state, "observed");
+		strictEqual(status.operatorTasks.state, "observed");
+		strictEqual(status.operatorTasks.shown[0].id, "u1");
+		strictEqual(status.orientation, null);
+		strictEqual(status.codemap.state, "unknown");
+	} finally {
+		chmodSync(source, 0o644);
+		process.chdir(previous);
+		env.restore();
+	}
+});
 
 test("orientation uses declared facts, invalidates changed/added manifests and survives lifecycle writes", async () => {
 	const env = await isolateClioEnv("clio-orientation-");
