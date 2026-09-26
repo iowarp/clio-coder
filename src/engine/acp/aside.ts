@@ -63,26 +63,50 @@ function clean(text: string, maxBytes: number): { text: string; truncated: boole
 
 const reasonText = (reason: string) => clean(reason, MAX_REASON_BYTES).text;
 const finite = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+const ROUND_FAILED = "the model round failed; the agent's diagnostics carry the provider's answer";
+const JUDGMENT_UNAVAILABLE = "not judged: the model round did not produce a judgment; inspect the agent's diagnostics";
+/** Exact process-authored outcomes; any other judgment reason can contain provider prose. */
+const SAFE_JUDGMENT_REASONS = new Set([
+	"not judged: settings are not loaded",
+	"not judged: bind fleet.decisionProfiles.drafts to a System One profile",
+	"not judged: cancelled",
+	"not judged: a draft failed or came back empty",
+	"not judged: fewer than 2 drafts to compare",
+]);
 
-export function projectAsideAnswer(answer: AcpAsideAnswer) {
-	if (answer.status === "refused" || answer.status === "failed")
-		return { status: answer.status, reason: reasonText(answer.reason) };
+export function projectAsideAnswer(answer: AcpAsideAnswer, diagnostics?: (line: string) => void) {
+	if (answer.status === "refused") return { status: answer.status, reason: reasonText(answer.reason) };
+	if (answer.status === "failed") {
+		diagnostics?.(`side question failed: ${reasonText(answer.reason)}`);
+		return { status: answer.status, reason: ROUND_FAILED };
+	}
 	const bounded = clean(answer.text, MAX_ANSWER_BYTES);
 	return { status: answer.status, text: bounded.text, truncated: bounded.truncated };
 }
 
-export function projectDraftOutcome(outcome: AcpDraftOutcome) {
+export function projectDraftOutcome(outcome: AcpDraftOutcome, diagnostics?: (line: string) => void) {
 	if (outcome.status === "refused") return { status: "refused" as const, reason: reasonText(outcome.reason) };
 	const labels = LABELS.slice(0, outcome.candidates.length);
 	const pick = <T>(record: Partial<Record<string, T>>, read: (value: T | undefined) => T) =>
 		Object.fromEntries(labels.map((label) => [label, read(record[label])]));
 	const judgment = outcome.judgment;
+	let judgmentReason: string | undefined;
+	if (judgment !== undefined && "reason" in judgment) {
+		if (SAFE_JUDGMENT_REASONS.has(judgment.reason)) judgmentReason = judgment.reason;
+		else {
+			diagnostics?.(`draft judgment unavailable: ${reasonText(judgment.reason)}`);
+			judgmentReason = JUDGMENT_UNAVAILABLE;
+		}
+	}
 	return {
 		status: "drafted" as const,
 		aborted: outcome.aborted,
 		candidates: outcome.candidates.slice(0, LABELS.length).map((candidate, index) => {
 			const label = LABELS[index] ?? "A";
-			if (candidate.status === "failed") return { label, status: "failed" as const, reason: reasonText(candidate.reason) };
+			if (candidate.status === "failed") {
+				diagnostics?.(`draft ${label} failed: ${reasonText(candidate.reason)}`);
+				return { label, status: "failed" as const, reason: ROUND_FAILED };
+			}
 			const bounded = clean(candidate.text, MAX_ANSWER_BYTES);
 			return { label, status: "drafted" as const, text: bounded.text, truncated: bounded.truncated };
 		}),
@@ -99,7 +123,7 @@ export function projectDraftOutcome(outcome: AcpDraftOutcome) {
 									source: reasonText(judgment.verdict.source),
 									elapsedMs: Math.max(0, Math.round(finite(judgment.verdict.elapsedMs))),
 								}
-							: { status: "unjudged" as const, reason: reasonText(judgment.reason) },
+							: { status: "unjudged" as const, reason: judgmentReason ?? JUDGMENT_UNAVAILABLE },
 				}),
 	};
 }

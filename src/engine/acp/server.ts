@@ -135,6 +135,8 @@ export interface AcpPromptExpansion {
 export interface AcpHandoffDraft {
 	goal: string;
 	fromSessionId: string;
+	/** Host-only snapshot identity, never projected into the review response. */
+	sourceIdentity: string;
 	document: string;
 }
 export interface AcpHandoffRefusal {
@@ -3842,7 +3844,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const aside = requireAside();
 		getSession(request);
 		const question = asideText(request.question, "question");
-		return projectAsideAnswer(await runAside((signal) => aside.ask(question, signal)));
+		return projectAsideAnswer(await runAside((signal) => aside.ask(question, signal)), options.diagnostics);
 	});
 	options.transport.onRequest(ACP_ASIDE_DRAFT_METHOD, async (params) => {
 		requireInitialized();
@@ -3861,7 +3863,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32602, `count must be ${ACP_ASIDE_DRAFT_COUNTS.min} to ${ACP_ASIDE_DRAFT_COUNTS.max}`, {
 				code: "invalid_params",
 			});
-		return projectDraftOutcome(await runAside((signal) => aside.draft(text, count, signal)));
+		return projectDraftOutcome(await runAside((signal) => aside.draft(text, count, signal)), options.diagnostics);
 	});
 	options.transport.onRequest(ACP_ASIDE_CANCEL_METHOD, (params) => {
 		requireInitialized();

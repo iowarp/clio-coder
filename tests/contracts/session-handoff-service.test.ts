@@ -200,10 +200,12 @@ test("handoff extraction reports both rounds when the repair also fails, and a c
 		deepStrictEqual([failed.level, failed.code, failed.reason], ["error", "provider", "401 from provider"]);
 });
 
-test("handoff commit seeds the successor, notes the source, replays skills and lands on the successor", () => {
+test("handoff commit seeds the successor, notes the source, replays skills and lands on the successor", async () => {
 	const fake = fakeSession();
-	const { deps: service } = deps(fake, []);
-	const draft = { goal: GOAL, fromSessionId: "from", document: "# draft" };
+	const { deps: service } = deps(fake, [{ status: "answered", text: EXTRACTION }]);
+	const prepared = await prepareHandoff(service, GOAL);
+	ok(prepared.ok);
+	const { draft } = prepared;
 	const committed = commitHandoff(service, draft, "  # reviewed by a person  ");
 	ok(committed.ok);
 	deepStrictEqual(committed, { ok: true, fromSessionId: "from", toSessionId: "to-1", warnings: [] });
@@ -217,10 +219,12 @@ test("handoff commit seeds the successor, notes the source, replays skills and l
 	deepStrictEqual(note?.data, { toSessionId: "to-1", goal: GOAL });
 });
 
-test("handoff commit writes nothing for an empty or stale review, and keeps the seed when only the note fails", () => {
+test("handoff commit writes nothing for an empty or stale review, and keeps the seed when only the note fails", async () => {
 	const fake = fakeSession();
-	const { deps: service } = deps(fake, []);
-	const draft = { goal: GOAL, fromSessionId: "from", document: "# draft" };
+	const { deps: service } = deps(fake, [{ status: "answered", text: EXTRACTION }]);
+	const prepared = await prepareHandoff(service, GOAL);
+	ok(prepared.ok);
+	const { draft } = prepared;
 	const empty = commitHandoff(service, draft, "   \n");
 	strictEqual(empty.ok, false);
 	if (!empty.ok) strictEqual(empty.code, "empty");

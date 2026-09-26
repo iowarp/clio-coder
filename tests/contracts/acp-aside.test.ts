@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { AcpAsideControl } from "../../src/engine/acp/aside.js";
+import { type AcpAsideControl, projectAsideAnswer, projectDraftOutcome } from "../../src/engine/acp/aside.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
@@ -175,7 +175,11 @@ test("drafts come back labelled with the judge's verdict, or the reason there is
 			aborted: false,
 			candidates: [
 				{ label: "A", status: "drafted", text: "Use a table.", truncated: false },
-				{ label: "B", status: "failed", reason: "endpoint reset" },
+				{
+					label: "B",
+					status: "failed",
+					reason: "the model round failed; the agent's diagnostics carry the provider's answer",
+				},
 				{ label: "C", status: "drafted", text: "Use a list.", truncated: false },
 			],
 			judgment: {
@@ -216,6 +220,55 @@ test("a refusal from the chat loop is reported, not thrown", async () => {
 			await agent.call("_clio-coder/aside/draft", { sessionId: agent.sessionId, request: "r", count: 2 }),
 			{ status: "refused", reason: "a turn is in flight; /draft runs beside the session, not in its queue" },
 		);
+	} finally {
+		await agent.stop();
+	}
+});
+
+test("failed side rounds and judgments keep provider bodies off ACP while preserving diagnostics", async () => {
+	const providerBody = "provider rejected credential secret-example at https://private.example/infer";
+	const agent = await peer({
+		ask: async () => ({ status: "failed", reason: providerBody }),
+		draft: async () => ({
+			status: "drafted",
+			aborted: false,
+			candidates: [{ status: "failed", reason: providerBody }],
+			judgment: { reason: `not judged: provider failed: ${providerBody}` },
+		}),
+	});
+	try {
+		const answer = await agent.call("_clio-coder/aside/ask", { sessionId: agent.sessionId, question: "why?" });
+		const drafts = await agent.call("_clio-coder/aside/draft", {
+			sessionId: agent.sessionId,
+			request: "write candidates",
+			count: 2,
+		});
+		assert.equal(answer.status, "failed");
+		assert.equal(drafts.status, "drafted");
+		assert.doesNotMatch(JSON.stringify({ answer, drafts }), /secret-example|private\.example|provider rejected/);
+		const diagnostics: string[] = [];
+		projectAsideAnswer({ status: "failed", reason: providerBody }, (line) => diagnostics.push(line));
+		projectDraftOutcome(
+			{
+				status: "drafted",
+				aborted: false,
+				candidates: [{ status: "failed", reason: providerBody }],
+				judgment: { reason: providerBody },
+			},
+			(line) => diagnostics.push(line),
+		);
+		assert.equal(diagnostics.length, 3);
+		assert.ok(diagnostics.every((line) => line.includes(providerBody)));
+		const unbound = "not judged: bind fleet.decisionProfiles.drafts to a System One profile";
+		const known = projectDraftOutcome({
+			status: "drafted",
+			aborted: false,
+			candidates: [],
+			judgment: { reason: unbound },
+		});
+		assert.equal(known.status, "drafted");
+		if (known.status !== "drafted") return;
+		assert.deepEqual(known.judgment, { status: "unjudged", reason: unbound });
 	} finally {
 		await agent.stop();
 	}

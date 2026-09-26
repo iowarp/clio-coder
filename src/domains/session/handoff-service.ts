@@ -14,6 +14,7 @@
  * {@link commitHandoff} receives the reviewed document.
  */
 
+import { createHash } from "node:crypto";
 import type { SessionContract } from "./contract.js";
 import type { DecisionLedgerEntry, SessionEntry } from "./entries.js";
 import {
@@ -78,6 +79,8 @@ export interface HandoffRefusal {
 export interface HandoffDraft {
 	goal: string;
 	fromSessionId: string;
+	/** Host-only identity of the conversation and decisions the document describes. */
+	sourceIdentity: string;
 	document: string;
 }
 
@@ -98,6 +101,27 @@ function refuse(level: HandoffRefusal["level"], code: HandoffRefusal["code"], re
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+function handoffSnapshot(deps: HandoffServiceDeps) {
+	const meta = deps.session?.current();
+	if (!meta) return null;
+	deps.session?.flushAppends?.();
+	const entries = deps.readEntries(meta.id);
+	const decisions = deps.getDecisionBoard?.() ?? [];
+	const identity = createHash("sha256")
+		.update(
+			JSON.stringify({
+				sessionId: meta.id,
+				cwd: meta.cwd,
+				leaf: meta.pinnedLeafTurnId ?? null,
+				skills: meta.skillActivations ?? [],
+				entries,
+				decisions,
+			}),
+		)
+		.digest("hex");
+	return { meta, entries, decisions, identity };
+}
 
 /**
  * The gate, in the order the terminal has always applied it: the goal first,
@@ -197,18 +221,33 @@ export async function prepareHandoff(
 ): Promise<{ ok: true; draft: HandoffDraft } | HandoffRefusal> {
 	const admitted = admitHandoff(deps, rawGoal);
 	if (!admitted.ok) return admitted;
-	const { goal, fromSessionId, session } = admitted;
+	const { goal, fromSessionId } = admitted;
+	let sourceIdentity: string;
+	try {
+		const snapshot = handoffSnapshot(deps);
+		if (!snapshot) return refuse("warn", "stale", "the conversation changed before extraction; nothing was written");
+		sourceIdentity = snapshot.identity;
+	} catch {
+		return refuse("error", "unavailable", "the conversation snapshot could not be read; nothing was written");
+	}
 	const extraction = await extractHandoffWithRepair(deps, goal);
 	if (!extraction.ok) return extraction;
 	const parsed = extraction.parsed;
-	const meta = session.current();
+	let snapshot: ReturnType<typeof handoffSnapshot>;
+	try {
+		snapshot = handoffSnapshot(deps);
+	} catch {
+		return refuse("error", "unavailable", "the conversation snapshot could not be read; nothing was written");
+	}
+	if (!snapshot || snapshot.identity !== sourceIdentity || deps.isTurnInFlight())
+		return refuse("warn", "stale", "the conversation moved while the document was drawn; nothing was written");
+	const { meta, entries, decisions: decisionBoard } = snapshot;
 	const cwd = typeof meta?.cwd === "string" && meta.cwd.length > 0 ? meta.cwd : null;
-	const entries = deps.readEntries(fromSessionId);
 	// The ledger is what this session's own tool calls touched, folded through
 	// the active path so an abandoned `/tree` branch is not evidence.
 	const ledger = buildHandoffReadLedger(entries, { cwd, leafTurnId: meta?.pinnedLeafTurnId ?? null });
 	const files = validateHandoffFiles(parsed.extraction.files, ledger, cwd);
-	const decisions = mergeHandoffDecisions(parsed.extraction.decisions, deps.getDecisionBoard?.() ?? []);
+	const decisions = mergeHandoffDecisions(parsed.extraction.decisions, decisionBoard);
 	const document = renderHandoffDocument({
 		goal,
 		fromSessionId,
@@ -220,7 +259,7 @@ export async function prepareHandoff(
 		openQuestions: parsed.extraction.openQuestions,
 		truncations: parsed.truncations,
 	});
-	return { ok: true, draft: { goal, fromSessionId, document } };
+	return { ok: true, draft: { goal, fromSessionId, sourceIdentity, document } };
 }
 
 /**
@@ -250,6 +289,12 @@ export function commitHandoff(
 	}
 	if (session.current()?.id !== draft.fromSessionId) {
 		return refuse("warn", "stale", "the conversation changed since this document was drawn; nothing was written");
+	}
+	try {
+		if (handoffSnapshot(deps)?.identity !== draft.sourceIdentity)
+			return refuse("warn", "stale", "the conversation changed since this document was drawn; nothing was written");
+	} catch {
+		return refuse("error", "unavailable", "the conversation snapshot could not be read; nothing was written");
 	}
 	const { fromSessionId, goal } = draft;
 	const activations = session.current()?.skillActivations ?? [];
