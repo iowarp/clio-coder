@@ -24,3 +24,13 @@ export function toolCandidateNote(tool: Pick<Tool, "resolution">): string | null
 	if (candidate.satisfiesMinimum) return null;
 	return `A copy at ${candidate.path} reports ${candidate.version ?? "no version"}, which is below the pinned minimum, so Clio does not use it.`;
 }
+
+/** Explain the effect beside the action rather than making an operator infer it from the resolution. */
+export function toolActionEffect(tool: Pick<Tool, "supported" | "installed" | "resolution">): string {
+	if (!tool.supported)
+		return "No pinned download is available for this platform. A compatible tool on PATH can still be inspected above.";
+	if (tool.installed) return "Check confirms the pinned binaries are present. Remove deletes only the vendored copy.";
+	return tool.resolution.source === "path"
+		? "Install adds a pinned fallback. The compatible PATH copy may remain the executable Clio uses."
+		: "Install downloads and verifies the pinned version into Clio’s toolchain folder.";
+}

@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+	type ReactNode,
+	type Ref,
+	useCallback,
+	useEffect,
+	useImperativeHandle,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { NavLink, useLocation } from "react-router";
 import { announce, composeTitle, useLiveState } from "../interaction/announcer.js";
 import { formatKeybinding, KEYBINDINGS } from "../interaction/keybindings.js";
+import { useLayersActive } from "../interaction/use-shortcut.js";
 import { Icon } from "./icons.js";
 
 /** `--paper` from client/design/tokens.css, light and dark. Keep these two in step with it. */
@@ -24,7 +34,6 @@ export const navigation = [
 	{ label: "Toolchain", path: "/toolchain", icon: "toolchain", group: "more" },
 	{ label: "Settings", path: "/settings", icon: "settings", group: "more" },
 	{ label: "System", path: "/system", icon: "system", group: "more" },
-	{ label: "Docs", path: "/docs", icon: "docs", group: "more" },
 ] as const;
 const SIDEBAR_KEY = "clio-coder-gui-sidebar";
 
@@ -82,14 +91,31 @@ export function SidebarToggle({ collapsed, toggle }: { collapsed: boolean; toggl
  * Collapsed, the labels stay in the document for assistive technology and the icon carries the
  * link visually; `data-tip` shows the name on hover and on keyboard focus.
  */
-export function Navigation({ close, collapsed = false }: { close?: () => void; collapsed?: boolean }) {
+export function Navigation({
+	close,
+	collapsed = false,
+	onHelp,
+	onSelect,
+}: {
+	close?: (() => void) | undefined;
+	collapsed?: boolean;
+	onHelp: () => void;
+	onSelect?: (path: string) => boolean;
+}) {
 	const location = useLocation();
 	const link = (item: (typeof navigation)[number]) => (
 		<NavLink
 			key={item.path}
 			to={item.path}
 			end={item.path === "/"}
-			onClick={close}
+			onClick={(event) => {
+				if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+				if (onSelect?.(item.path)) {
+					event.preventDefault();
+					return;
+				}
+				close?.();
+			}}
 			data-tip={collapsed ? item.label : undefined}
 			data-group={item.group}
 			className={({ isActive }) =>
@@ -101,25 +127,63 @@ export function Navigation({ close, collapsed = false }: { close?: () => void; c
 		</NavLink>
 	);
 	return (
-		<nav aria-label="Main navigation">
-			{navigation.filter((item) => item.group === "work").map(link)}
-			<p className="nav-group" aria-hidden="true">
-				<span className="nav-label">Inspect &amp; configure</span>
-			</p>
-			{navigation.filter((item) => item.group === "more").map(link)}
-		</nav>
+		<>
+			<nav aria-label="Main navigation">
+				{navigation.filter((item) => item.group === "work").map(link)}
+				<p className="nav-group" aria-hidden="true">
+					<span className="nav-label">Inspect &amp; configure</span>
+				</p>
+				{navigation.filter((item) => item.group === "more").map(link)}
+			</nav>
+			<button
+				type="button"
+				className="nav-help"
+				aria-label="Help"
+				data-tip={collapsed ? "Help (Ctrl /)" : undefined}
+				onClick={() => {
+					close?.();
+					onHelp();
+				}}
+			>
+				<Icon name="docs" />
+				<span className="nav-label">Help</span>
+			</button>
+		</>
 	);
 }
-export function MobileNavigation() {
+export interface MobileNavigationHandle {
+	open: () => void;
+}
+export function MobileNavigation({
+	onHelp,
+	content,
+	ref,
+}: {
+	onHelp: () => void;
+	content?: ((close: () => void) => ReactNode) | undefined;
+	ref?: Ref<MobileNavigationHandle> | undefined;
+}) {
 	const dialog = useRef<HTMLDialogElement>(null);
+	const [mounted, setMounted] = useState(false);
+	const layered = useLayersActive();
+	const open = useCallback(() => {
+		setMounted(true);
+		if (!dialog.current?.open) dialog.current?.showModal();
+		requestAnimationFrame(() => dialog.current?.querySelector<HTMLElement>(".sidebar-back")?.focus());
+	}, []);
+	useImperativeHandle(ref, () => ({ open }), [open]);
+	useEffect(() => {
+		if (layered) dialog.current?.close();
+	}, [layered]);
+	const location = useLocation();
+	const previousPath = useRef(location.pathname);
+	useEffect(() => {
+		if (previousPath.current !== location.pathname) dialog.current?.close();
+		previousPath.current = location.pathname;
+	}, [location.pathname]);
 	return (
 		<>
-			<button
-				className="icon-button menu-toggle"
-				type="button"
-				onClick={() => dialog.current?.showModal()}
-				aria-label="Open navigation"
-			>
+			<button className="icon-button menu-toggle" type="button" onClick={open} aria-label="Open navigation">
 				<Icon name="menu" />
 			</button>
 			<dialog ref={dialog} className="navigation-dialog" aria-label="Navigation">
@@ -137,7 +201,11 @@ export function MobileNavigation() {
 						<Icon name="close" />
 					</button>
 				</div>
-				<Navigation close={() => dialog.current?.close()} />
+				{!mounted ? null : content ? (
+					content(() => dialog.current?.close())
+				) : (
+					<Navigation close={() => dialog.current?.close()} onHelp={onHelp} />
+				)}
 			</dialog>
 		</>
 	);
@@ -213,8 +281,12 @@ export function RouteFocus() {
 		previous = useRef(location.pathname);
 	const { approvalPending } = useLiveState();
 	useEffect(() => {
-		if (previous.current !== location.pathname) document.getElementById("main")?.focus();
+		const changed = previous.current !== location.pathname;
 		previous.current = location.pathname;
+		if (!changed) return;
+		// Let an outgoing modal release the workspace before focusing the destination.
+		const frame = requestAnimationFrame(() => document.getElementById("main")?.focus());
+		return () => cancelAnimationFrame(frame);
 	}, [location.pathname]);
 	useEffect(() => {
 		const section = navigation.find((item) => item.path !== "/" && location.pathname.startsWith(item.path));

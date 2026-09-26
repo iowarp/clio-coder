@@ -132,3 +132,86 @@ test("keyset scan retains TraceReader's source derivation for its additive sourc
 	assert.ok(page.runs.length);
 	assert.ok(page.runs.every((row) => row.assignment_id === "session" && row.source === "session"));
 });
+
+test("canonical session turn trace namespaces read and paginate without authorizing receipt files", async (t) => {
+	const h = await harness();
+	const state = join(h.home.path, "state");
+	const fixture = traceFixture(state, 1);
+	t.after(async () => {
+		fixture.close();
+		await h.close();
+	});
+	const runId = "session:01a0dee8-0371-746d-a6f7-e9cb21b9634f";
+	fixture.store.recordSessionTurn({
+		kind: "start",
+		runId,
+		agent: "clio-coder",
+		target: "local",
+		model: "fixture",
+		runtime: "native",
+		prompt: "Inspect canonical session trace",
+		at: "2026-09-26T10:00:00Z",
+	});
+	fixture.store.recordSessionTurn({
+		kind: "event",
+		runId,
+		eventId: "call-1",
+		type: "tool_call",
+		name: "read",
+		payload: { ok: true },
+		startedAt: "2026-09-26T10:00:01Z",
+		endedAt: "2026-09-26T10:00:02Z",
+	});
+	fixture.store.recordSessionTurn({
+		kind: "finish",
+		runId,
+		status: "success",
+		error: null,
+		usage: null,
+		at: "2026-09-26T10:00:03Z",
+	});
+	// A colon-named file must never become a dispatch receipt through the database ID seam.
+	writeFileSync(join(state, "receipts", `${runId}.json`), '{"private":"must-not-read"}');
+	for (const [suffix, route] of [
+		["", routes.traceRun],
+		["/phases", routes.tracePhases],
+		["/gates", routes.traceGates],
+		["/processes", routes.traceProcesses],
+		["/events", routes.traceEvents],
+	] as const) {
+		const response = await h.request(`/api/traces/runs/${encodeURIComponent(runId)}${suffix}`);
+		assert.equal(response.status, 200, suffix);
+		await json(response, route.response);
+	}
+	const run = await json(await h.request(`/api/traces/runs/${encodeURIComponent(runId)}`), routes.traceRun.response);
+	assert.equal(run.source, "session");
+	assert.equal(run.run_id, runId);
+	assert.equal(run.total_cost_usd, null);
+	const phases = await json(
+		await h.request(`/api/traces/runs/${encodeURIComponent(runId)}/phases`),
+		routes.tracePhases.response,
+	);
+	assert.equal(phases[0]?.phase_id, runId);
+	for (const full of ["", "?include=full"]) {
+		assert.deepEqual(
+			await json(
+				await h.request(`/api/traces/runs/${encodeURIComponent(runId)}/receipt${full}`),
+				routes.traceReceipt.response,
+			),
+			{ receipt: null, evidence: null },
+		);
+	}
+	const first = await json(await h.request("/api/traces/runs?limit=1"), routes.traceRuns.response);
+	assert.equal(first.runs[0]?.run_id, runId);
+	assert.ok(first.nextCursor);
+	const next = await h.request(`/api/traces/runs?limit=1&cursor=${first.nextCursor}`);
+	assert.equal(next.status, 200, "Namespaced trace IDs remain valid inside an opaque keyset cursor");
+	for (const unsafe of ["session:a/b", "session:a\\b", "session:..escape", "s".repeat(257)]) {
+		assert.equal((await h.request(`/api/traces/runs/${encodeURIComponent(unsafe)}/events`)).status, 422);
+	}
+	assert.equal(
+		(await h.request(`/api/fleet/receipts/${encodeURIComponent(runId)}`)).status,
+		422,
+		"Generic filesystem artifact identifiers stay restricted",
+	);
+});

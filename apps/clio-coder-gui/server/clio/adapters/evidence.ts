@@ -46,7 +46,7 @@ async function inventory(data: string) {
 	try {
 		entries = readdirSync(join(data, "evidence"));
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { rows: [], present: false };
 		throw error;
 	}
 	if (entries.length > 10_000) throw new AppProblem("unavailable", "Evidence inventory exceeds 10,000 directories.");
@@ -56,11 +56,14 @@ async function inventory(data: string) {
 		bytes += guard(data, id, ["overview.json"]);
 		if (bytes > 64 * 1024 * 1024) throw new AppProblem("unavailable", "Evidence overview inventory exceeds 64 MiB.");
 	}
-	return (await listEvidenceOverviews(data)).filter(
-		(row) => Value.Check(EvidenceOverview, row) && Number.isFinite(Date.parse(row.generatedAt)),
-	);
+	return {
+		present: true,
+		rows: (await listEvidenceOverviews(data)).filter(
+			(row) => Value.Check(EvidenceOverview, row) && Number.isFinite(Date.parse(row.generatedAt)),
+		),
+	};
 }
-async function item(data: string, overview: Awaited<ReturnType<typeof inventory>>[number]) {
+async function item(data: string, overview: Awaited<ReturnType<typeof inventory>>["rows"][number]) {
 	guard(data, overview.evidenceId, ["trust-status.json"]);
 	try {
 		return { overview, verdict: verdict(await loadEvidenceTrustStatus(data, overview.evidenceId)) };
@@ -100,7 +103,7 @@ function attributionCounts(data: string, id: string) {
 export async function readEvidence(input: EvidenceRequest): Promise<unknown> {
 	const data = clioDataDir();
 	if (input.kind === "list" || input.kind === "built") {
-		const rows = await inventory(data);
+		const { rows, present } = await inventory(data);
 		if (input.kind === "built") {
 			const row = rows
 				.filter((row) => row.source.kind === "run" && row.source.runId === input.runId)
@@ -113,7 +116,11 @@ export async function readEvidence(input: EvidenceRequest): Promise<unknown> {
 			input.limit,
 			input.cursor,
 		);
-		return { items: await Promise.all(page.items.map((row) => item(data, row.overview))), nextCursor: page.nextCursor };
+		return {
+			items: await Promise.all(page.items.map((row) => item(data, row.overview))),
+			nextCursor: page.nextCursor,
+			present,
+		};
 	}
 	if (!Value.Check(Id, input.id)) throw new AppProblem("validation", "Invalid evidence identifier.");
 	guard(data, input.id, [

@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { type KeyboardEvent, useRef, useState } from "react";
+import { type KeyboardEvent, useId, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { Facts } from "../design/facts.js";
-import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
+import { PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark } from "../design/status.js";
 import { LibraryCatalog } from "./library-catalog.js";
@@ -103,12 +104,51 @@ const purpose: Record<Collection, string> = {
 	Extensions: "Installed packages that add executable capabilities. Admission state shows whether Clio can load them.",
 	Verifiers: "Checks Clio discovered for this workspace. Viewing this list does not run them.",
 };
-export function LibraryPage({ client }: { client: Client }) {
-	const selection = useWorkspaceSelection(client),
-		{ id } = selection;
-	const [active, setActive] = useState<Collection>("Catalog"),
-		[filter, setFilter] = useState(""),
-		[limit, setLimit] = useState(40);
+export function LibraryPage({
+	client,
+	compact = false,
+	workspaceId,
+	onReview,
+}: {
+	client: Client;
+	compact?: boolean;
+	workspaceId?: string | undefined;
+	onReview?: (() => void) | undefined;
+}) {
+	const selection = useWorkspaceSelection(client);
+	const id = workspaceId ?? selection.id;
+	const [search, setSearch] = useSearchParams();
+	const [localDiscovery, setLocalDiscovery] = useState<{ collection: Collection; q: string }>({
+		collection: "Catalog",
+		q: "",
+	});
+	const active = compact
+		? localDiscovery.collection
+		: (collections.find((name) => name.toLowerCase() === search.get("collection")) ?? "Catalog");
+	const filter = compact ? localDiscovery.q : (search.get("q") ?? "");
+	const tabId = useId();
+	const [limit, setLimit] = useState(40);
+	const discover = (collection: Collection, query: string, replace = false) => {
+		if (compact) {
+			setLocalDiscovery({ collection, q: query });
+			return;
+		}
+		setSearch(
+			(current) => {
+				const next = new URLSearchParams(current);
+				next.set("collection", collection.toLowerCase());
+				if (query) next.set("q", query);
+				else next.delete("q");
+				if (collection !== active) {
+					next.delete("package");
+					next.delete("kind");
+					next.delete("installed");
+				}
+				return next;
+			},
+			{ replace },
+		);
+	};
 	const inventory = useQuery({
 		queryKey: ["library", id],
 		enabled: !!id,
@@ -183,8 +223,7 @@ export function LibraryPage({ client }: { client: Client }) {
 	const visible = (active === "Catalog" ? [] : entries[active]).filter((row) => matchesQuery(row.detail, filter));
 	const tabs = useRef(new Map<Collection, HTMLButtonElement>());
 	const activate = (name: Collection) => {
-		setActive(name);
-		setFilter("");
+		discover(name, "");
 		setLimit(40);
 	};
 	const onTabKey = (event: KeyboardEvent) => {
@@ -198,9 +237,9 @@ export function LibraryPage({ client }: { client: Client }) {
 		name === "Catalog" ? (inventory.data?.packages.length ?? 0) : entries[name].length;
 	return (
 		<section>
-			<PanelHeading panel={PANELS.library} level={1} />
-			<WorkspacePicker selection={selection} />
-			<p>Explore the capabilities available to Clio in this workspace, and see where they come from.</p>
+			{!compact && <PanelHeading panel={PANELS.library} level={1} />}
+			{!workspaceId && <WorkspacePicker selection={selection} />}
+			{!compact && <p>Explore the capabilities available to Clio in this workspace, and see where they come from.</p>}
 			{!id && !selection.workspaces.isPending && <PanelEmpty>{emptyState.unread("library of a workspace")}</PanelEmpty>}
 			<div className="settings-tabs" role="tablist" aria-label="Library collections" onKeyDown={onTabKey}>
 				{collections.map((name) => (
@@ -208,9 +247,9 @@ export function LibraryPage({ client }: { client: Client }) {
 						type="button"
 						role="tab"
 						key={name}
-						id={`library-tab-${name}`}
+						id={`${tabId}-library-tab-${name}`}
 						aria-selected={active === name}
-						aria-controls="library-panel"
+						aria-controls={`${tabId}-library-panel`}
 						// One tab stop for the whole list; the arrow keys move inside it.
 						tabIndex={active === name ? 0 : -1}
 						ref={(node) => {
@@ -223,15 +262,15 @@ export function LibraryPage({ client }: { client: Client }) {
 					</button>
 				))}
 			</div>
-			<div role="tabpanel" id="library-panel" aria-labelledby={`library-tab-${active}`}>
-				<h2>{active}</h2>
-				<p>{purpose[active]}</p>
+			<div role="tabpanel" id={`${tabId}-library-panel`} aria-labelledby={`${tabId}-library-tab-${active}`}>
+				{!compact && <h2>{active}</h2>}
+				{!compact && <p>{purpose[active]}</p>}
 				<label className="settings-filter">
 					Search {active.toLowerCase()}
 					<input
 						value={filter}
 						onChange={(event) => {
-							setFilter(event.target.value);
+							discover(active, event.target.value, true);
 							setLimit(40);
 						}}
 					/>
@@ -260,7 +299,15 @@ export function LibraryPage({ client }: { client: Client }) {
 					</>
 				)}
 				{active === "Catalog" && inventory.data && (
-					<LibraryCatalog client={client} workspaceId={id} packages={inventory.data.packages} filter={filter} />
+					<LibraryCatalog
+						key={id}
+						client={client}
+						workspaceId={id}
+						packages={inventory.data.packages}
+						filter={filter}
+						compact={compact}
+						onReview={onReview}
+					/>
 				)}
 				{active !== "Catalog" && source.data && !visible.length && (
 					<PanelEmpty>
@@ -269,28 +316,39 @@ export function LibraryPage({ client }: { client: Client }) {
 							: emptyState.emptyStore(active.toLowerCase().replace(/s$/u, ""), "for this workspace")}
 					</PanelEmpty>
 				)}
-				<div className="config-entries">
+				{active !== "Catalog" && source.data && (
+					<p className="library-result-count" role="status">
+						{visible.length} of {entries[active].length} {active.toLowerCase()} · workspace inventory
+					</p>
+				)}
+				<div className="library-resources">
 					{visible.slice(0, limit).map((row) => (
-						<article className="trace-panel" key={row.id}>
-							<h3>{row.name}</h3>
-							<p>{row.description}</p>
-							{row.agent ? (
-								<AgentBody agent={row.agent} />
-							) : row.skill ? (
-								<SkillBody skill={row.skill} />
-							) : (
-								<>
-									<p>{row.state}</p>
-									<details>
-										<summary>Source and configuration</summary>
-										<Facts
-											value={row.detail}
-											order={["availability", "reason", "source", "owner", "origin", "path"]}
-											hide={["key", "name", "description"]}
-										/>
-									</details>
-								</>
-							)}
+						<article className="library-resource" key={row.id}>
+							<div className="library-resource__identity">
+								<h3>{row.name}</h3>
+								<p>{row.description}</p>
+								<small>{row.state}</small>
+							</div>
+							<details className="library-resource__details">
+								<summary>Inspect {row.name}</summary>
+								{row.agent ? (
+									<AgentBody agent={row.agent} />
+								) : row.skill ? (
+									<SkillBody skill={row.skill} />
+								) : (
+									<>
+										<p>{row.state}</p>
+										<details>
+											<summary>Source and configuration</summary>
+											<Facts
+												value={row.detail}
+												order={["availability", "reason", "source", "owner", "origin", "path"]}
+												hide={["key", "name", "description"]}
+											/>
+										</details>
+									</>
+								)}
+							</details>
 						</article>
 					))}
 				</div>
@@ -310,7 +368,6 @@ export function LibraryPage({ client }: { client: Client }) {
 					</details>
 				)}
 			</div>
-			<Boundary panel={PANELS.library} />
 		</section>
 	);
 }

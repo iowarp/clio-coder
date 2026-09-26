@@ -58,7 +58,7 @@ truth; the test file imports only the symbols under test.
 | `apps/clio-coder-gui/tests/chat-tools.test.ts` | `apps/clio-coder-gui/client/chat/diff-model.ts`, `apps/clio-coder-gui/client/chat/tool-presentation.ts` | Diff parsing and the diff panel provenance, tool card presentation |
 | `apps/clio-coder-gui/tests/chat-approval.test.ts` | `apps/clio-coder-gui/client/chat/approval-model.ts`, `apps/clio-coder-gui/client/chat/fleet-facts.ts` | Approval timing, decision classification, gated preview, fleet-run folding |
 | `apps/clio-coder-gui/tests/chat-shell.test.ts` | `apps/clio-coder-gui/client/chat/chat-turn.ts`, `apps/clio-coder-gui/client/chat/turns.ts`, `apps/clio-coder-gui/client/interaction/commands.ts` | Conversation view helpers and the command palette catalog |
-| `apps/clio-coder-gui/tests/markdown.test.tsx` | `apps/clio-coder-gui/client/render/Markdown.tsx`, `apps/clio-coder-gui/client/render/markdown-model.ts`, `apps/clio-coder-gui/client/render/details.ts` | Markdown sanitization, incremental lexing, code blocks, `<details>` sections |
+| `apps/clio-coder-gui/tests/markdown.test.tsx` | `apps/clio-coder-gui/client/render/Markdown.tsx`, `apps/clio-coder-gui/client/render/markdown-model.ts` | Markdown sanitization, incremental lexing, code blocks, tables and diagrams |
 
 The model files themselves are the implementation. For example, `apps/clio-coder-gui/client/chat/composer-model.ts`
 exports `DraftStore`, `submitIntent`, `composerKeyAction`, `projectQueue`, and `turnOutcome`, and its

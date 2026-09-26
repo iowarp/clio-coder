@@ -4,8 +4,17 @@ import { once } from "node:events";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { legacyDocsBirthVerified } from "../../src/cli/legacy-docs-cleanup.js";
 import { processAlive, processBirthToken } from "../../src/core/process-identity.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
+
+test("legacy documentation cleanup refuses PID ownership without verified OS birth tokens", () => {
+	const currentBirth = processBirthToken(process.pid);
+	assert.equal(legacyDocsBirthVerified(process.pid, currentBirth, false), false);
+	assert.equal(legacyDocsBirthVerified(process.pid, `pid-${process.pid}`, false), false);
+	assert.equal(legacyDocsBirthVerified(process.pid, "stale-birth", true), false);
+	assert.equal(legacyDocsBirthVerified(process.pid, null, true), false);
+});
 
 function fixture() {
 	const home = makeScratchHome("clio-lifecycle-cleanup-");
@@ -51,7 +60,7 @@ function fixture() {
 }
 
 for (const command of ["reset", "uninstall"] as const) {
-	test(`${command} leaves a docs server alive on preview and stops it before removing state`, {
+	test(`${command} leaves a legacy docs process alive on preview and stops it before removing state`, {
 		skip: process.platform !== "linux",
 	}, async (t) => {
 		const f = fixture();
@@ -78,7 +87,7 @@ for (const command of ["reset", "uninstall"] as const) {
 		assert.equal(existsSync(f.registry), false);
 	});
 
-	test(`${command} preserves every root and the record when docs process ownership is unverified`, async (t) => {
+	test(`${command} preserves every root and the record when legacy docs process ownership is unverified`, async (t) => {
 		const f = fixture();
 		t.after(f.home.cleanup);
 		const server = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });

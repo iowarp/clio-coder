@@ -1,7 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { ApiProblem, type Client } from "../api/client.js";
+import { reportProblem } from "../design/notifications.js";
 import { StatusMark } from "../design/status.js";
 import { Dialog } from "../interaction/Dialog.js";
 import {
@@ -99,10 +101,24 @@ function PlanReview({ plan }: { plan: Plan }) {
 								</dd>
 							</div>
 						)}
+						{!!step.dependents.preexisting.length && (
+							<div>
+								<dt>Already affected</dt>
+								<dd>
+									{step.dependents.preexisting
+										.map((item) => `${item.ref} (${item.scope}): ${item.missing.join(", ")}`)
+										.join("; ")}
+								</dd>
+							</div>
+						)}
 						{!!step.dependents.newlyBroken.length && (
 							<div>
 								<dt>Would break</dt>
-								<dd>{step.dependents.newlyBroken.map((item) => `${item.ref} (${item.scope})`).join(", ")}</dd>
+								<dd>
+									{step.dependents.newlyBroken
+										.map((item) => `${item.ref} (${item.scope}): ${item.missing.join(", ")}`)
+										.join("; ")}
+								</dd>
 							</div>
 						)}
 						<div>
@@ -214,15 +230,51 @@ function PlanDialog({
 	const queries = useQueryClient();
 	const cancel = useRef<HTMLButtonElement>(null);
 	const [plan, setPlan] = useState<Plan | null>(null);
-	const started = useRef(false);
+	const started = useRef(false),
+		mounted = useRef(true),
+		heldPlan = useRef<Plan | null>(null),
+		writing = useRef(false);
+	const release = useCallback(
+		(planId: string) =>
+			client.call(routes.libraryPlanRelease, { params: { id: workspaceId, planId }, query: {}, body: {} }),
+		[client, workspaceId],
+	);
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+			// A browser navigation can remove the dialog even while its source is staging.
+			// Defer one microtask so StrictMode's temporary cleanup can remount first.
+			queueMicrotask(() => {
+				if (!mounted.current && heldPlan.current && !writing.current)
+					void release(heldPlan.current.id).catch(reportProblem);
+			});
+		};
+	}, [release]);
 	const planning = useMutation({
 		mutationFn: (input: Request) =>
 			client.call(routes.libraryPlan, { params: { id: workspaceId }, query: {}, body: input }),
-		onSuccess: setPlan,
+		onSuccess: (value) => {
+			heldPlan.current = value;
+			if (mounted.current) setPlan(value);
+			else void release(value.id).catch(reportProblem);
+		},
 	});
 	const applying = useMutation({
-		mutationFn: (planId: string) =>
-			client.call(routes.libraryPlanApply, { params: { id: workspaceId, planId }, query: {}, body: {} }),
+		mutationFn: async (planId: string) => {
+			writing.current = true;
+			try {
+				const result = await client.call(routes.libraryPlanApply, {
+					params: { id: workspaceId, planId },
+					query: {},
+					body: {},
+				});
+				heldPlan.current = null;
+				return result;
+			} finally {
+				writing.current = false;
+			}
+		},
 		onSettled: () => {
 			for (const key of ["library", "library-agents", "library-extensions"])
 				void queries.invalidateQueries({ queryKey: [key] });
@@ -235,13 +287,29 @@ function PlanDialog({
 		started.current = true;
 		plan0(request);
 	}, [plan0, request]);
+	const releasing = useMutation({
+		mutationFn: async (planId: string) => {
+			const result = await release(planId);
+			heldPlan.current = null;
+			return result;
+		},
+	});
+	const busy = planning.isPending || applying.isPending || releasing.isPending;
+	useEffect(() => {
+		const button = cancel.current;
+		const dialog = button?.closest<HTMLElement>(".dialog");
+		if (!button || !dialog) return;
+		// Staging disables Cancel after it received initial focus. Keep keyboard focus in the review.
+		if (!dialog.contains(document.activeElement)) {
+			if (busy) dialog.focus();
+			else button.focus();
+		} else if (!busy && document.activeElement === dialog) button.focus();
+	}, [busy]);
 	const close = () => {
-		// A plan that was reviewed and abandoned still holds staged sources on the server.
-		if (plan && !applying.data && !applying.isPending)
-			void client
-				.call(routes.libraryPlanRelease, { params: { id: workspaceId, planId: plan.id }, query: {}, body: {} })
-				.catch(() => undefined);
-		onClose();
+		// Keep the review open until staging or writes settle, and report failed release so it can be retried.
+		if (busy) return;
+		if (plan && !applying.data) releasing.mutate(plan.id, { onSuccess: onClose });
+		else onClose();
 	};
 	const title = `${verb(request.operation)} ${request.ref}`;
 	return (
@@ -258,6 +326,16 @@ function PlanDialog({
 			{planning.error && <Failure error={planning.error} />}
 			{plan && !applying.data && (
 				<>
+					<div className="library-plan-summary">
+						<StatusMark
+							tone={plan.applicable ? "neutral" : "fail"}
+							label={plan.applicable ? "Ready for review" : "Plan refused"}
+						/>
+						<span>
+							{plan.steps.length} {plan.steps.length === 1 ? "step" : "steps"} · expires{" "}
+							{new Date(plan.expiresAt).toLocaleTimeString()}
+						</span>
+					</div>
 					<p>
 						{plan.applicable
 							? "This is exactly what will be applied. Nothing has been written yet."
@@ -276,11 +354,14 @@ function PlanDialog({
 					)}
 				</>
 			)}
+			{applying.isPending && <p role="status">Applying the reviewed plan. Keep this review open for the result.</p>}
+			{releasing.isPending && <p role="status">Releasing staged sources…</p>}
+			{releasing.error && <Failure error={releasing.error} />}
 			{applying.error && <Failure error={applying.error} />}
 			{applying.data && <Outcomes applied={applying.data} />}
 			<div className="actions">
 				{plan && !applying.data && plan.applicable && (
-					<button type="button" className="primary" disabled={applying.isPending} onClick={() => applying.mutate(plan.id)}>
+					<button type="button" className="primary" disabled={busy} onClick={() => applying.mutate(plan.id)}>
 						{applying.isPending
 							? "Applying…"
 							: `Apply ${plan.steps.length === 1 ? "this change" : `${plan.steps.length} changes`}`}
@@ -290,19 +371,20 @@ function PlanDialog({
 					<button
 						type="button"
 						className="primary"
-						disabled={planning.isPending}
-						onClick={() => {
-							void client
-								.call(routes.libraryPlanRelease, { params: { id: workspaceId, planId: plan.id }, query: {}, body: {} })
-								.catch(() => undefined);
-							setPlan(null);
-							planning.mutate({ ...request, withRequirements: true });
-						}}
+						disabled={busy}
+						onClick={() =>
+							releasing.mutate(plan.id, {
+								onSuccess: () => {
+									setPlan(null);
+									planning.mutate({ ...request, withRequirements: true });
+								},
+							})
+						}
 					>
 						Plan again with its requirements
 					</button>
 				)}
-				<button type="button" ref={cancel} onClick={close}>
+				<button type="button" ref={cancel} disabled={busy} onClick={close}>
 					{applying.data ? "Done" : "Cancel"}
 				</button>
 			</div>
@@ -315,21 +397,54 @@ export function LibraryCatalog({
 	workspaceId,
 	packages,
 	filter,
+	compact = false,
+	onReview,
 }: {
 	client: Client;
 	workspaceId: string;
 	packages: Package[];
 	filter: string;
+	compact?: boolean;
+	onReview?: (() => void) | undefined;
 }) {
-	const [kind, setKind] = useState<(typeof PACKAGE_KINDS)[number] | "all">("all"),
-		[installedOnly, setInstalledOnly] = useState(false),
-		[limit, setLimit] = useState(40),
+	const [search, setSearch] = useSearchParams();
+	const [localDiscovery, setLocalDiscovery] = useState<Record<string, string>>({});
+	const valueFor = (key: string) => (compact ? localDiscovery[key] : search.get(key));
+	const kind = PACKAGE_KINDS.find((candidate) => candidate === valueFor("kind")) ?? "all";
+	const installedOnly = valueFor("installed") === "true",
+		selected = valueFor("package");
+	const discover = (key: string, value: string | null) => {
+		if (compact) {
+			setLocalDiscovery((current) => {
+				const next = { ...current };
+				if (value) next[key] = value;
+				else delete next[key];
+				return next;
+			});
+			return;
+		}
+		setSearch((current) => {
+			const next = new URLSearchParams(current);
+			if (value) next.set(key, value);
+			else next.delete(key);
+			return next;
+		});
+	};
+	const [limit, setLimit] = useState(40),
 		[request, setRequest] = useState<Request | null>(null);
+	const review = (input: Request) => {
+		// Release a native navigation dialog's top layer before the review claims focus.
+		onReview?.();
+		setRequest(input);
+	};
 	const visible = packages.filter(
 		(pkg) =>
 			(kind === "all" || pkg.kind === kind) && (!installedOnly || pkg.copies.length > 0) && matchesPackage(pkg, filter),
 	);
 	const installed = packages.filter((pkg) => pkg.copies.length > 0).length;
+	const displayed = visible.slice(0, limit),
+		selectedPackage = visible.find((pkg) => pkg.ref === selected);
+	if (selectedPackage && !displayed.includes(selectedPackage)) displayed.unshift(selectedPackage);
 	return (
 		<>
 			<fieldset className="library-facets">
@@ -342,7 +457,7 @@ export function LibraryCatalog({
 							key={name}
 							aria-pressed={kind === name}
 							onClick={() => {
-								setKind(name);
+								discover("kind", name === "all" ? null : name);
 								setLimit(40);
 							}}
 						>
@@ -350,16 +465,34 @@ export function LibraryCatalog({
 							{name === "all" ? packages.length : packages.filter((pkg) => pkg.kind === name).length}
 						</button>
 					))}
-				<button type="button" aria-pressed={installedOnly} onClick={() => setInstalledOnly(!installedOnly)}>
+				<button
+					type="button"
+					aria-pressed={installedOnly}
+					onClick={() => {
+						discover("installed", installedOnly ? null : "true");
+						setLimit(40);
+					}}
+				>
 					Installed only · {installed}
 				</button>
 			</fieldset>
 			{!visible.length && (
 				<p>{packages.length ? "No packages match." : "No catalog is configured and nothing is installed."}</p>
 			)}
+			<p className="library-result-count" role="status">
+				{visible.length} of {packages.length} packages · {installed} installed
+			</p>
+			{selected && !visible.some((pkg) => pkg.ref === selected) && (
+				<p className="panel-note">
+					The selected package is outside these filters or is no longer available.{" "}
+					<button type="button" onClick={() => discover("package", null)}>
+						Clear selection
+					</button>
+				</p>
+			)}
 			<ul className="library-packages">
-				{visible.slice(0, limit).map((pkg) => (
-					<li key={pkg.ref} aria-label={pkg.ref}>
+				{displayed.map((pkg) => (
+					<li key={pkg.ref} aria-label={pkg.ref} data-selected={selected === pkg.ref}>
 						<div className="library-package__identity">
 							<h3>
 								{pkg.name}
@@ -371,48 +504,104 @@ export function LibraryCatalog({
 								{pkg.requires?.length ? ` · requires ${pkg.requires.join(", ")}` : ""}
 							</small>
 							{pkg.refusal && <p className="library-refusal">{pkg.refusal}</p>}
+							<button
+								type="button"
+								className="library-inspect"
+								aria-expanded={selected === pkg.ref}
+								onClick={() => discover("package", selected === pkg.ref ? null : pkg.ref)}
+							>
+								{compact ? `Inspect ${pkg.name}` : "Inspect package"}
+							</button>
 						</div>
-						<div className="library-package__copies">
-							{!pkg.copies.length && <StatusMark tone="neutral" label="Not installed" />}
-							{pkg.copies.map((copy) => {
-								const state = copyState(String(copy.state));
-								const scope = copy.scope as Scope;
-								return (
-									<div className="library-copy" key={scope}>
-										<span>
-											{scopeCopy(scope)} <StatusMark tone={state.tone} label={state.label} />
-										</span>
-										<span className="library-copy__actions">
-											{copyOperations(String(copy.state)).map((operation) => (
-												<button
-													type="button"
-													key={operation}
-													aria-label={`${verb(operation)} the ${scope} copy of ${pkg.ref}`}
-													onClick={() => setRequest({ operation, ref: pkg.ref, scope })}
-												>
-													{verb(operation)}
-												</button>
-											))}
-										</span>
+						{(!compact || selected === pkg.ref) && (
+							<div className="library-package__copies">
+								{!pkg.copies.length && <StatusMark tone="neutral" label="Not installed" />}
+								{pkg.copies.map((copy) => {
+									const state = copyState(String(copy.state));
+									const scope = copy.scope as Scope;
+									return (
+										<div className="library-copy" key={scope}>
+											<span>
+												{scopeCopy(scope)} <StatusMark tone={state.tone} label={state.label} />
+											</span>
+											<span className="library-copy__actions">
+												{copyOperations(String(copy.state)).map((operation) => (
+													<button
+														type="button"
+														key={operation}
+														aria-label={`${verb(operation)} the ${scope} copy of ${pkg.ref}`}
+														onClick={() => review({ operation, ref: pkg.ref, scope })}
+													>
+														{verb(operation)}
+													</button>
+												))}
+											</span>
+										</div>
+									);
+								})}
+								{pkg.catalogOrigin !== "installed" && (
+									<span className="library-copy__actions">
+										{missingScopes(pkg).map((scope) => (
+											<button
+												type="button"
+												key={scope}
+												className={pkg.copies.length ? undefined : scope === "user" ? "primary" : undefined}
+												aria-label={`Install ${pkg.ref} ${scope === "user" ? "for me" : "in this project"}`}
+												onClick={() => review({ operation: "install", ref: pkg.ref, scope })}
+											>
+												{scope === "user" ? "Install for me" : "Install in this project"}
+											</button>
+										))}
+									</span>
+								)}
+							</div>
+						)}
+						{selected === pkg.ref && (
+							<div className="library-package__detail">
+								<h4>Package source & requirements</h4>
+								<dl className="library-facts">
+									<div>
+										<dt>Reference</dt>
+										<dd>
+											<code>{pkg.ref}</code>
+										</dd>
 									</div>
-								);
-							})}
-							{pkg.catalogOrigin !== "installed" && (
-								<span className="library-copy__actions">
-									{missingScopes(pkg).map((scope) => (
-										<button
-											type="button"
-											key={scope}
-											className={pkg.copies.length ? undefined : scope === "user" ? "primary" : undefined}
-											aria-label={`Install ${pkg.ref} ${scope === "user" ? "for me" : "in this project"}`}
-											onClick={() => setRequest({ operation: "install", ref: pkg.ref, scope })}
-										>
-											{scope === "user" ? "Install for me" : "Install in this project"}
-										</button>
-									))}
-								</span>
-							)}
-						</div>
+									<div>
+										<dt>Source</dt>
+										<dd>
+											<code>{pkg.sourceUrl}</code>
+										</dd>
+									</div>
+									<div>
+										<dt>Origin</dt>
+										<dd>{originSentence(pkg)}</dd>
+									</div>
+									<div>
+										<dt>Requires</dt>
+										<dd>{pkg.requires?.length ? pkg.requires.join(", ") : "No declared requirements"}</dd>
+									</div>
+									<div>
+										<dt>Provides</dt>
+										<dd>
+											{pkg.provides?.length
+												? pkg.provides.map((item) => `${String(item.kind)} ${String(item.name)}`).join(", ")
+												: "No recipes declared in the catalog"}
+										</dd>
+									</div>
+									{pkg.sha256 && (
+										<div>
+											<dt>Fingerprint</dt>
+											<dd>
+												<code>{pkg.sha256}</code>
+											</dd>
+										</div>
+									)}
+								</dl>
+								<p className="panel-note">
+									Choose a destination to review the exact files, dependencies and effects before applying a change.
+								</p>
+							</div>
+						)}
 					</li>
 				))}
 			</ul>

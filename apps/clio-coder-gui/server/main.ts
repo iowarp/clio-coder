@@ -13,7 +13,6 @@ import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
 import { autoOpenBrowser, openBrowser } from "./process-policy.js";
 import { CliRunner } from "./services/cli-runner.js";
-import { DocsService } from "./services/docs.js";
 import { EventHub } from "./services/event-hub.js";
 import { EvidenceService } from "./services/evidence.js";
 import { FleetService } from "./services/fleet.js";
@@ -33,7 +32,6 @@ import { AppFiles } from "./state/files.js";
 import { WorkerHost } from "./worker/host.js";
 
 export { prepareGuiUninstall } from "./launcher/uninstall.js";
-// The docs command opens its page through the same opener, so there is one policy for what may be launched.
 export { openBrowser } from "./process-policy.js";
 
 declare const __CLIO_GUI_BUNDLED__: boolean;
@@ -157,7 +155,6 @@ export async function main(args = process.argv.slice(2)) {
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
-		docs: new DocsService(reads),
 		settings: settingsService,
 		fleet: new FleetService(reads),
 		system: new SystemService(reads, workspaces, ops),

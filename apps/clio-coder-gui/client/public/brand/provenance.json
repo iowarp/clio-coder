@@ -1,0 +1,22 @@
+{
+	"references": ["https://iowarp.ai", "https://iowarp.ai/images/brand/clio-lockup-cyan.png"],
+	"assets": [
+		{
+			"name": "clio-mark",
+			"source": "/home/akougkas/iowarp/gact-tui/apps/design/assets/brand/clio-icon-lg.png",
+			"sha256": "b26bf6396d87a6f821add201f19bfb0fbfcf77a2b82278c942453aac19e8b75a",
+			"dimensions": [584, 641]
+		}
+	],
+	"projection": {
+		"source": "site/export-brand.mjs",
+		"designSha256": "3ac20c87fad09db521621c5ac57fe6c5184b120897ede3d347e991ab8624f5d9",
+		"padding": "Square icons center the unchanged mark within an 80% safe area.",
+		"sha256": {
+			"clio-coder-logo.webp": "0a9ad4f1015c4c0bb17dbe952841c915a39ca0cf5fc9ec06f403d1673357bd23",
+			"favicon.png": "ad27cbf1df85b46eeff96cb8794e2fe31c461c8815ec84b80cdcad25c8aa682c",
+			"icon-192.png": "2e2544d15cd9149fa0bb2bad04a561caf97e07a4db1127354e2e77deacc6e8e6",
+			"icon-512.png": "fa5fadff9b50f8f6380032919be2e0d6be973696729304fa4e2f803c472815c3"
+		}
+	}
+}

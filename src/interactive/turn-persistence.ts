@@ -10,6 +10,7 @@ import type { ClioSettings } from "../core/config.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { SessionTurnUsage } from "../domains/observability/trace-store.js";
+import { normalizeCostProvenance } from "../domains/providers/types/cost-provenance.js";
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { replaceEngineMessages } from "../engine/agent.js";
@@ -222,6 +223,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			totalTokens: 0,
 			costUsd: 0,
 		};
+		const pricing = normalizeCostProvenance(state.runtime?.runtimeResolution.costProvenance);
 		traceUsage = {
 			inputTokens: total.inputTokens + summary.input,
 			outputTokens: total.outputTokens + summary.output,
@@ -232,7 +234,9 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				: { cacheWrite1hTokens: (total.cacheWrite1hTokens ?? 0) + (summary.cacheWrite1h ?? 0) }),
 			reasoningTokens: total.reasoningTokens + summary.reasoning,
 			totalTokens: total.totalTokens + summary.tokens,
-			costUsd: (total.costUsd ?? 0) + summary.costUsd,
+			// Engine usage uses zero when pricing is absent. A single unpriced
+			// call makes this turn's total unavailable, even after priced calls.
+			costUsd: total.costUsd === null || pricing === "unknown" ? null : (total.costUsd ?? 0) + summary.costUsd,
 		};
 	};
 

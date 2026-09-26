@@ -85,7 +85,7 @@ test("a run's four totals are tokens, cost, wall time and the runtime that produ
 	]);
 	// A live run measures against now, not against a missing end.
 	const live = runTotals(
-		run({ ended_at: null, total_tokens: null, total_cost_usd: null }),
+		run({ status: "running", ended_at: null, total_tokens: null, total_cost_usd: null }),
 		Date.parse("2026-09-20T10:01:00.000Z"),
 	);
 	assert.deepEqual(live.slice(0, 3), [

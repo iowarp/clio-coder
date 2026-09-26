@@ -8,7 +8,7 @@
 		"dev:server": "node --watch --import tsx server/main.ts --port 4317",
 		"dev:client": "vite --host 127.0.0.1",
 		"build": "vite build",
-		"typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
+		"typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json && pnpm run check:brand",
 		"lint": "biome check .",
 		"test": "node --import tsx --import ./tests/harness/no-network.ts --test --test-concurrency=2 tests/http-meta.test.ts tests/session-controls.test.ts tests/sessions-http.test.ts tests/worker-rpc.test.ts tests/egress-policy.test.ts tests/process-policy.test.ts tests/boundaries.test.ts tests/kill-parent.test.ts tests/artifact-window.test.ts tests/frame-buffer.test.ts tests/interaction.test.ts tests/chat-turns.test.ts tests/chat-tools.test.ts tests/chat-composer.test.ts tests/chat-approval.test.ts tests/chat-shell.test.ts tests/acp-tolerance.test.ts tests/trace-provenance.test.ts tests/receipt-checks-model.test.ts tests/board-model.test.ts tests/branch-model.test.ts tests/handoff-model.test.ts tests/clock-duration.test.ts tests/fleet-run-model.test.ts tests/context-model.test.ts tests/extensions-model.test.ts tests/aside-model.test.ts tests/session-usage-model.test.ts tests/attachments-model.test.ts tests/background.test.ts tests/open-browser.test.ts tests/pwa.test.ts tests/launcher-linux.test.ts tests/system-http.test.ts tests/interop-model.test.ts",
 		"openapi": "node --import tsx scripts/openapi.ts && biome format --write contracts/openapi.json",
@@ -18,11 +18,10 @@
 		"visual": "node --import tsx scripts/visual-review.ts",
 		"perf": "node --import tsx scripts/perf-workload.ts",
 		"test:pwa": "node --import tsx --test tests/real/background-pwa.test.ts",
-		"test:full": "node --import tsx --import ./tests/harness/no-network.ts --test tests/*.test.ts tests/*.test.tsx"
+		"test:full": "node --import tsx --import ./tests/harness/no-network.ts --test tests/*.test.ts tests/*.test.tsx",
+		"check:brand": "node scripts/sync-brand.mjs --check && node scripts/check-contrast.mjs"
 	},
 	"dependencies": {
-		"@fontsource-variable/atkinson-hyperlegible-next": "5.3.0",
-		"@fontsource-variable/newsreader": "5.3.0",
 		"@hono/node-server": "2.1.1",
 		"@tanstack/react-query": "5.102.8",
 		"dompurify": "3.4.14",

@@ -8,7 +8,6 @@ import { Supervisor } from "../../server/acp/supervisor.js";
 import { createApp } from "../../server/app.js";
 import { parse } from "../../server/http/validate.js";
 import { CliRunner } from "../../server/services/cli-runner.js";
-import { DocsService } from "../../server/services/docs.js";
 import { EventHub } from "../../server/services/event-hub.js";
 import { EvidenceService } from "../../server/services/evidence.js";
 import { FleetService } from "../../server/services/fleet.js";
@@ -71,7 +70,6 @@ export async function harness(
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
-		docs: new DocsService(reads),
 		settings: settingsService,
 		fleet: new FleetService(reads),
 		system: new SystemService(reads, workspaces, ops),

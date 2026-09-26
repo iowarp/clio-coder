@@ -42,7 +42,7 @@
 			"!**/dist",
 			"!**/node_modules",
 			"!**/*.log",
-			"!**/.superpowers",
+			"!.superpowers",
 			"!benchmarks/community/*/runs",
 			"!benchmarks/internal/runs",
 			"!**/*.html",

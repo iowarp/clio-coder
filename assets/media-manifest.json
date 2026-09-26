@@ -12,10 +12,7 @@
 				"height": 750
 			},
 			"role": "Lossless brand banner master",
-			"channels": [
-				"repository",
-				"press"
-			],
+			"channels": ["repository", "press"],
 			"altTextSeed": "Clio Coder, IOWarp's terminal coding agent for scientific software.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -30,15 +27,10 @@
 				"height": 750
 			},
 			"role": "Web brand banner",
-			"channels": [
-				"repository",
-				"website"
-			],
+			"channels": ["repository", "website"],
 			"altTextSeed": "Clio Coder, IOWarp's terminal coding agent for scientific software.",
 			"representation": "brand-artwork",
-			"copies": [
-				"site/assets/banner.webp"
-			]
+			"copies": ["site/assets/banner.webp"]
 		},
 		{
 			"id": "brand-avatar-512",
@@ -50,10 +42,7 @@
 				"height": 512
 			},
 			"role": "Profile avatar master",
-			"channels": [
-				"social-profile",
-				"press"
-			],
+			"channels": ["social-profile", "press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -68,9 +57,7 @@
 				"height": 32
 			},
 			"role": "Small logo master",
-			"channels": [
-				"application"
-			],
+			"channels": ["application"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -85,9 +72,7 @@
 				"height": 64
 			},
 			"role": "Compact logo master",
-			"channels": [
-				"application"
-			],
+			"channels": ["application"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -102,17 +87,10 @@
 				"height": 128
 			},
 			"role": "Primary application and website logo master",
-			"channels": [
-				"application",
-				"website",
-				"social-card"
-			],
+			"channels": ["application", "website", "social-card"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"copies": [
-				"site/assets/logo.webp",
-				"apps/clio-coder-gui/client/public/clio-coder-logo.webp"
-			]
+			"copies": ["site/assets/logo.webp"]
 		},
 		{
 			"id": "brand-logo-256",
@@ -124,10 +102,7 @@
 				"height": 256
 			},
 			"role": "Medium logo master",
-			"channels": [
-				"application",
-				"press"
-			],
+			"channels": ["application", "press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -142,15 +117,10 @@
 				"height": 512
 			},
 			"role": "Large website logo master",
-			"channels": [
-				"website",
-				"press"
-			],
+			"channels": ["website", "press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"copies": [
-				"site/assets/logo-512.webp"
-			]
+			"copies": ["site/assets/logo-512.webp"]
 		},
 		{
 			"id": "brand-logo-1024",
@@ -162,9 +132,7 @@
 				"height": 1024
 			},
 			"role": "High-resolution logo master",
-			"channels": [
-				"press"
-			],
+			"channels": ["press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -179,9 +147,7 @@
 				"height": 2048
 			},
 			"role": "Maximum-resolution logo master",
-			"channels": [
-				"press"
-			],
+			"channels": ["press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -189,40 +155,32 @@
 		{
 			"id": "gui-icon-192",
 			"source": "assets/clio-coder-app-icon-192.png",
-			"sha256": "9d5fc6ac72ef58c65d27c08fac56a435367270bc469f3723dc7eea60c5fea609",
-			"provenance": "Canonical tracked copy of the existing GUI PWA 192-pixel application icon.",
+			"sha256": "2e2544d15cd9149fa0bb2bad04a561caf97e07a4db1127354e2e77deacc6e8e6",
+			"provenance": "Canonical cyan Clio ring with copper C; square safe-area projection from site/export-brand.mjs, unchanged geometry and colors.",
 			"dimensions": {
 				"width": 192,
 				"height": 192
 			},
 			"role": "GUI PWA application icon",
-			"channels": [
-				"gui"
-			],
+			"channels": ["gui"],
 			"altTextSeed": "Clio Coder application icon.",
 			"representation": "brand-artwork",
-			"copies": [
-				"apps/clio-coder-gui/client/public/icon-192.png"
-			]
+			"copies": ["apps/clio-coder-gui/client/public/icon-192.png"]
 		},
 		{
 			"id": "gui-icon-512",
 			"source": "assets/clio-coder-app-icon-512.png",
-			"sha256": "1ecb31fe7b5bb782257a7f6beb5baec51e143af5ca3c913fcb472a26550e6250",
-			"provenance": "Canonical tracked copy of the existing GUI PWA 512-pixel application icon.",
+			"sha256": "fa5fadff9b50f8f6380032919be2e0d6be973696729304fa4e2f803c472815c3",
+			"provenance": "Canonical cyan Clio ring with copper C; square safe-area projection from site/export-brand.mjs, unchanged geometry and colors.",
 			"dimensions": {
 				"width": 512,
 				"height": 512
 			},
 			"role": "GUI PWA application icon",
-			"channels": [
-				"gui"
-			],
+			"channels": ["gui"],
 			"altTextSeed": "Clio Coder application icon.",
 			"representation": "brand-artwork",
-			"copies": [
-				"apps/clio-coder-gui/client/public/icon-512.png"
-			]
+			"copies": ["apps/clio-coder-gui/client/public/icon-512.png"]
 		},
 		{
 			"id": "terminal-session-png",
@@ -234,15 +192,10 @@
 				"height": 2104
 			},
 			"role": "Full-resolution terminal product capture",
-			"channels": [
-				"repository",
-				"website"
-			],
+			"channels": ["repository", "website"],
 			"altTextSeed": "A Clio Coder terminal session showing a failing numerical test, diagnosis, a two-line solver edit, and the passing test run.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/session.png"
-			]
+			"copies": ["site/assets/session.png"]
 		},
 		{
 			"id": "terminal-session-webp",
@@ -254,14 +207,10 @@
 				"height": 1052
 			},
 			"role": "Inline website terminal capture",
-			"channels": [
-				"website"
-			],
+			"channels": ["website"],
 			"altTextSeed": "A Clio Coder terminal session showing a failing numerical test, diagnosis, a two-line solver edit, and the passing test run.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/session.webp"
-			]
+			"copies": ["site/assets/session.webp"]
 		},
 		{
 			"id": "tui-boot-png",
@@ -273,15 +222,10 @@
 				"height": 2003
 			},
 			"role": "Terminal boot screen",
-			"channels": [
-				"repository",
-				"website"
-			],
+			"channels": ["repository", "website"],
 			"altTextSeed": "Clio Coder terminal boot screen with the model, workspace, fleet, shortcuts, composer and context footer.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/tui-boot.png"
-			],
+			"copies": ["site/assets/tui-boot.png"],
 			"capturedVersion": "0.5.6"
 		},
 		{
@@ -294,96 +238,211 @@
 				"height": 1021
 			},
 			"role": "Terminal boot screen",
-			"channels": [
-				"repository",
-				"website"
-			],
+			"channels": ["repository", "website"],
 			"altTextSeed": "Clio Coder terminal boot screen with the model, workspace, fleet, shortcuts, composer and context footer.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/tui-boot.webp"
-			],
+			"copies": ["site/assets/tui-boot.webp"],
 			"capturedVersion": "0.5.6"
 		},
 		{
 			"id": "gui-conversation-png",
 			"source": "assets/screenshots/gui-conversation.png",
-			"sha256": "684e598e04c075ec5f7005bc2559e759d21650a025acfb72bddc78b306dd9827",
-			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"sha256": "0ce1d9a80c00f17e0f07c3a3ba9e3ed9580c3a68e2d197ce83d89479a50be822",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
 			"dimensions": {
-				"width": 1513,
-				"height": 1489
+				"width": 1600,
+				"height": 1000
 			},
-			"role": "Browser conversation view",
-			"channels": [
-				"repository",
-				"website"
-			],
-			"altTextSeed": "Clio Coder browser conversation with project prompts, session tools, file attachments and model selection.",
+			"role": "Browser conversation reporting eight passing calibration tests from a real verification call.",
+			"channels": ["repository", "website"],
+			"altTextSeed": "Browser conversation reporting eight passing calibration tests from a real verification call.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/gui-conversation.png"
-			]
+			"copies": ["site/assets/gui-conversation.png"],
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "6d8fbaea2"
 		},
 		{
 			"id": "gui-conversation-webp",
 			"source": "assets/screenshots/gui-conversation.webp",
-			"sha256": "300b1b010491ec3a130103fb15d406c00492a74b25879327547570eccf376451",
-			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"sha256": "445e64e784e2de085e3cfabeb2f3dac85f81964d4da3ed406f0fd849dbf9060f",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
 			"dimensions": {
-				"width": 1513,
-				"height": 1489
+				"width": 1600,
+				"height": 1000
 			},
-			"role": "Browser conversation view",
-			"channels": [
-				"repository",
-				"website"
-			],
-			"altTextSeed": "Clio Coder browser conversation with project prompts, session tools, file attachments and model selection.",
+			"role": "Browser conversation reporting eight passing calibration tests from a real verification call.",
+			"channels": ["repository", "website"],
+			"altTextSeed": "Browser conversation reporting eight passing calibration tests from a real verification call.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/gui-conversation.webp"
-			]
+			"copies": ["site/assets/gui-conversation.webp"],
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "6d8fbaea2"
 		},
 		{
 			"id": "gui-overview-png",
 			"source": "assets/screenshots/gui-overview.png",
-			"sha256": "559811a320c674dd05b31780c856547475c3cd08ecb8f673cea4403863c467f8",
-			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"sha256": "00de849cbd7f4abed0f2031151e2d489456b3a77473c62bab37d874828a936c6",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
 			"dimensions": {
-				"width": 2072,
-				"height": 1282
+				"width": 1600,
+				"height": 1000
 			},
-			"role": "Browser overview view",
-			"channels": [
-				"repository",
-				"website"
-			],
-			"altTextSeed": "Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings.",
+			"role": "Browser overview with project selection and real calibration conversations.",
+			"channels": ["repository", "website"],
+			"altTextSeed": "Browser overview with project selection and real calibration conversations.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/gui-overview.png"
-			]
+			"copies": ["site/assets/gui-overview.png"],
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "6d8fbaea2"
 		},
 		{
 			"id": "gui-overview-webp",
 			"source": "assets/screenshots/gui-overview.webp",
-			"sha256": "938bb8feef5e3d6498e932180f6ec1fb5bb1a7d1ac94944f33ad35d50b52581a",
-			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"sha256": "e1c65f9582f6c16e65754d56983d5dd29063b86a66bca6bf607dad4d03287a88",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
 			"dimensions": {
-				"width": 1920,
-				"height": 1188
+				"width": 1600,
+				"height": 1000
 			},
-			"role": "Browser overview view",
-			"channels": [
-				"repository",
-				"website"
-			],
-			"altTextSeed": "Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings.",
+			"role": "Browser overview with project selection and real calibration conversations.",
+			"channels": ["repository", "website"],
+			"altTextSeed": "Browser overview with project selection and real calibration conversations.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/gui-overview.webp"
-			]
+			"copies": ["site/assets/gui-overview.webp"],
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "6d8fbaea2"
+		},
+		{
+			"id": "gui-clio-mark",
+			"source": "assets/clio-mark-gui.webp",
+			"sha256": "0a9ad4f1015c4c0bb17dbe952841c915a39ca0cf5fc9ec06f403d1673357bd23",
+			"provenance": "Canonical Clio mark exported from site/export-brand.mjs; original provenance and derived hashes in the GUI brand/provenance.json.",
+			"dimensions": {
+				"width": 117,
+				"height": 128
+			},
+			"role": "GUI canonical Clio mark",
+			"channels": ["gui"],
+			"altTextSeed": "Cyan Clio ring with a copper C.",
+			"representation": "brand-artwork",
+			"copies": ["apps/clio-coder-gui/client/public/clio-coder-logo.webp"]
+		},
+		{
+			"id": "gui-favicon",
+			"source": "assets/clio-coder-app-favicon.png",
+			"sha256": "ad27cbf1df85b46eeff96cb8794e2fe31c461c8815ec84b80cdcad25c8aa682c",
+			"provenance": "Canonical Clio mark exported from site/export-brand.mjs; original provenance and derived hashes in the GUI brand/provenance.json.",
+			"dimensions": {
+				"width": 32,
+				"height": 32
+			},
+			"role": "GUI favicon",
+			"channels": ["gui"],
+			"altTextSeed": "Cyan Clio ring with a copper C.",
+			"representation": "brand-artwork",
+			"copies": ["apps/clio-coder-gui/client/public/favicon.png"]
+		},
+		{
+			"id": "gui-trace-png",
+			"source": "assets/screenshots/gui-trace.png",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
+			"channels": ["repository"],
+			"altTextSeed": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
+			"representation": "real-product-capture",
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "6d8fbaea2",
+			"copies": [],
+			"sha256": "06ea91a4be0a2d079efbd9c36ca919b4e57fb852318aaaab702018d15b3ae4b6"
+		},
+		{
+			"id": "gui-trace-webp",
+			"source": "assets/screenshots/gui-trace.webp",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
+			"channels": ["repository"],
+			"altTextSeed": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
+			"representation": "real-product-capture",
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "6d8fbaea2",
+			"copies": [],
+			"sha256": "5d71e8012cfffbb33d28a7826b22342283187f76a192fa76e0dd662c35fa0bda"
+		},
+		{
+			"id": "gui-library-png",
+			"source": "assets/screenshots/gui-library.png",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Library catalog search in the sidebar beside a completed real verification conversation.",
+			"channels": ["repository"],
+			"altTextSeed": "Library catalog search in the sidebar beside a completed real verification conversation.",
+			"representation": "real-product-capture",
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "6d8fbaea2",
+			"copies": [],
+			"sha256": "7937517adb8d699fe705559701f9b038b8d2c776559f5e662503fdfb3cdf54a1"
+		},
+		{
+			"id": "gui-library-webp",
+			"source": "assets/screenshots/gui-library.webp",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Library catalog search in the sidebar beside a completed real verification conversation.",
+			"channels": ["repository"],
+			"altTextSeed": "Library catalog search in the sidebar beside a completed real verification conversation.",
+			"representation": "real-product-capture",
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "6d8fbaea2",
+			"copies": [],
+			"sha256": "234d6b0f829bce07998e36175efab8ec14cfaf0701bb36980ca9c4c84be1a98e"
+		},
+		{
+			"id": "gui-artifacts-png",
+			"source": "assets/screenshots/gui-artifacts.png",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Conversation with project-grouped sessions, modern composer and recorded results in the collapsible artifact inspector.",
+			"channels": ["repository"],
+			"altTextSeed": "Clio conversation with eight passing tests, project sessions and recorded verification results in the right sidebar.",
+			"representation": "real-product-capture",
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "6d8fbaea2",
+			"copies": [],
+			"sha256": "60aa9d0674aafb59fa87772942206beaa5c4ff42759872df1f87b0a23edf70fc"
+		},
+		{
+			"id": "gui-artifacts-webp",
+			"source": "assets/screenshots/gui-artifacts.webp",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Conversation with project-grouped sessions, modern composer and recorded results in the collapsible artifact inspector.",
+			"channels": ["repository"],
+			"altTextSeed": "Clio conversation with eight passing tests, project sessions and recorded verification results in the right sidebar.",
+			"representation": "real-product-capture",
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "6d8fbaea2",
+			"copies": [],
+			"sha256": "ddf4848184a83866e2041673a4bf4c636baf742aab209c5c40d6fb1828f50883"
 		}
 	],
 	"socialExports": [
@@ -409,12 +468,7 @@
 				"height": 630
 			},
 			"role": "Dark landscape social preview",
-			"channels": [
-				"open-graph",
-				"x",
-				"linkedin",
-				"release"
-			],
+			"channels": ["open-graph", "x", "linkedin", "release"],
 			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		},
@@ -440,12 +494,7 @@
 				"height": 630
 			},
 			"role": "Light landscape social preview",
-			"channels": [
-				"open-graph",
-				"x",
-				"linkedin",
-				"release"
-			],
+			"channels": ["open-graph", "x", "linkedin", "release"],
 			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		},
@@ -471,12 +520,7 @@
 				"height": 1080
 			},
 			"role": "Dark square social preview",
-			"channels": [
-				"mastodon",
-				"bluesky",
-				"instagram",
-				"release"
-			],
+			"channels": ["mastodon", "bluesky", "instagram", "release"],
 			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		},
@@ -502,12 +546,7 @@
 				"height": 1080
 			},
 			"role": "Light square social preview",
-			"channels": [
-				"mastodon",
-				"bluesky",
-				"instagram",
-				"release"
-			],
+			"channels": ["mastodon", "bluesky", "instagram", "release"],
 			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		}

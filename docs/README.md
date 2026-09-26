@@ -181,40 +181,22 @@ root**, which is that directory's parent. So when the prompt names `/pkg/docs`:
 Do not duplicate the `docs/` segment, and do not resolve a citation against the
 workspace. Omitting `query` lists the corpus instead of searching it.
 
-**The web documentation.** `clio-coder docs` opens the documentation map in your
-browser, and `clio-coder docs safety` opens the safety guide. It resolves content
-from the installed package, independent of your current project. If you installed
-the background app, it uses that. Otherwise it starts a loopback server that keeps
-running after the command returns, so the terminal is free, and reuses that server
-on the next call. The server stops on `clio-coder docs --stop`, or by itself 15
-minutes after the last page closes. `--no-open` prints the private launch link
-without opening a browser, and `--foreground` serves privately in the terminal
-until Ctrl+C. The command never installs a service.
+**The public documentation.** Read the user guides at
+<https://coder.iowarp.ai/docs.html>. The browser application's Help entry links to
+that site and identifies the installed `docs/` directory. Use an editor to read
+those Markdown files offline, or ask Clio to retrieve them with `clio_docs`.
+There is no documentation command or separate documentation server.
 
-## Reading in the application
+## Reading the bundled reference
 
-The browser application provides session controls, project navigation, and
-execution inspection. Its documentation viewer renders product Markdown with the
-application's theme, syntax highlighting, copy controls, tables, and diagrams.
-Navigation groups come from this map, search indexes the same product pages, and
-each page's outline is generated from its headings. Internal product references
-stay in the application. The loopback document server is a renderer, not an
-independent manual.
+The package ships the canonical Markdown and `docs/corpus.json`, independent of
+your current project. The offline `clio_docs` capability indexes that corpus for
+agents without a model connection or network request for retrieval.
 
-Edit the authoritative Markdown once to update the installed human and agent
-documentation. The static product website has a separate generated snapshot
-because it deploys independently from npm; its manifest pins that copy to a
-released source ref. The generated development Wiki has separate generation and
-publication ownership.
-
-```bash
-clio-coder docs
-clio-coder docs safety
-clio-coder docs guide/configuration-reference.md --no-open
-```
-
-The Markdown files remain the portable reference for the CLI, agents, editors,
-and repository readers. Opening documentation does not require a model connection.
+Edit the authoritative Markdown once to update the installed reference. The
+static product website has a generated public guide snapshot because it deploys
+independently from npm; its manifest records the source revision. The generated
+development Wiki has separate generation and publication ownership.
 
 ## Writing documentation
 

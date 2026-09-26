@@ -67,6 +67,10 @@
 															},
 															{
 																"type": "string",
+																"const": "info"
+															},
+															{
+																"type": "string",
 																"const": "warn"
 															},
 															{
@@ -3100,7 +3104,7 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["items", "nextCursor"],
+									"required": ["items", "nextCursor", "present"],
 									"properties": {
 										"items": {
 											"type": "array",
@@ -3394,6 +3398,9 @@
 													"type": "null"
 												}
 											]
+										},
+										"present": {
+											"type": "boolean"
 										}
 									},
 									"additionalProperties": false
@@ -4443,7 +4450,7 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["items", "nextCursor"],
+									"required": ["items", "nextCursor", "present"],
 									"properties": {
 										"items": {
 											"type": "array",
@@ -4516,6 +4523,9 @@
 													"type": "null"
 												}
 											]
+										},
+										"present": {
+											"type": "boolean"
 										}
 									},
 									"additionalProperties": false
@@ -5279,7 +5289,7 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["items", "nextCursor"],
+									"required": ["items", "nextCursor", "present"],
 									"properties": {
 										"items": {
 											"type": "array",
@@ -5418,6 +5428,9 @@
 													"type": "null"
 												}
 											]
+										},
+										"present": {
+											"type": "boolean"
 										}
 									},
 									"additionalProperties": false
@@ -8989,468 +9002,6 @@
 										}
 									},
 									"additionalProperties": false
-								}
-							}
-						},
-						"headers": {
-							"X-Clio-Epoch": {
-								"schema": {
-									"type": "string"
-								},
-								"description": "Server epoch"
-							},
-							"X-Clio-Seq": {
-								"schema": {
-									"type": "integer"
-								},
-								"description": "Sequence before assembling the snapshot"
-							}
-						}
-					},
-					"default": {
-						"description": "Problem",
-						"content": {
-							"application/problem+json": {
-								"schema": {
-									"type": "object",
-									"required": ["type", "title", "status", "detail", "code", "instance"],
-									"properties": {
-										"type": {
-											"type": "string"
-										},
-										"title": {
-											"type": "string"
-										},
-										"status": {
-											"type": "integer"
-										},
-										"detail": {
-											"type": "string"
-										},
-										"code": {
-											"anyOf": [
-												{
-													"type": "string",
-													"const": "validation"
-												},
-												{
-													"type": "string",
-													"const": "unauthorized"
-												},
-												{
-													"type": "string",
-													"const": "not_found"
-												},
-												{
-													"type": "string",
-													"const": "conflict"
-												},
-												{
-													"type": "string",
-													"const": "unsupported"
-												},
-												{
-													"type": "string",
-													"const": "unavailable"
-												},
-												{
-													"type": "string",
-													"const": "upstream_acp"
-												},
-												{
-													"type": "string",
-													"const": "operation_failed"
-												},
-												{
-													"type": "string",
-													"const": "internal"
-												}
-											]
-										},
-										"instance": {
-											"type": "string"
-										}
-									},
-									"additionalProperties": false
-								}
-							}
-						}
-					}
-				}
-			}
-		},
-		"/api/docs/tree": {
-			"get": {
-				"operationId": "docsTree",
-				"summary": "Documentation navigation and Markdown inventory",
-				"security": [
-					{
-						"bearer": []
-					}
-				],
-				"parameters": [],
-				"responses": {
-					"200": {
-						"description": "Success",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"required": ["pages", "groups"],
-									"properties": {
-										"pages": {
-											"type": "array",
-											"items": {
-												"type": "object",
-												"required": ["path", "title"],
-												"properties": {
-													"path": {
-														"type": "string"
-													},
-													"title": {
-														"type": "string"
-													}
-												},
-												"additionalProperties": false
-											}
-										},
-										"groups": {
-											"type": "array",
-											"items": {
-												"type": "object",
-												"required": ["title", "pages"],
-												"properties": {
-													"title": {
-														"type": "string"
-													},
-													"pages": {
-														"type": "array",
-														"items": {
-															"type": "object",
-															"required": ["path", "title"],
-															"properties": {
-																"path": {
-																	"type": "string"
-																},
-																"title": {
-																	"type": "string"
-																}
-															},
-															"additionalProperties": false
-														}
-													}
-												},
-												"additionalProperties": false
-											}
-										}
-									},
-									"additionalProperties": false
-								}
-							}
-						},
-						"headers": {
-							"X-Clio-Epoch": {
-								"schema": {
-									"type": "string"
-								},
-								"description": "Server epoch"
-							},
-							"X-Clio-Seq": {
-								"schema": {
-									"type": "integer"
-								},
-								"description": "Sequence before assembling the snapshot"
-							}
-						}
-					},
-					"default": {
-						"description": "Problem",
-						"content": {
-							"application/problem+json": {
-								"schema": {
-									"type": "object",
-									"required": ["type", "title", "status", "detail", "code", "instance"],
-									"properties": {
-										"type": {
-											"type": "string"
-										},
-										"title": {
-											"type": "string"
-										},
-										"status": {
-											"type": "integer"
-										},
-										"detail": {
-											"type": "string"
-										},
-										"code": {
-											"anyOf": [
-												{
-													"type": "string",
-													"const": "validation"
-												},
-												{
-													"type": "string",
-													"const": "unauthorized"
-												},
-												{
-													"type": "string",
-													"const": "not_found"
-												},
-												{
-													"type": "string",
-													"const": "conflict"
-												},
-												{
-													"type": "string",
-													"const": "unsupported"
-												},
-												{
-													"type": "string",
-													"const": "unavailable"
-												},
-												{
-													"type": "string",
-													"const": "upstream_acp"
-												},
-												{
-													"type": "string",
-													"const": "operation_failed"
-												},
-												{
-													"type": "string",
-													"const": "internal"
-												}
-											]
-										},
-										"instance": {
-											"type": "string"
-										}
-									},
-									"additionalProperties": false
-								}
-							}
-						}
-					}
-				}
-			}
-		},
-		"/api/docs/page": {
-			"get": {
-				"operationId": "docsPage",
-				"summary": "Read a contained Markdown page and resolve its links",
-				"security": [
-					{
-						"bearer": []
-					}
-				],
-				"parameters": [
-					{
-						"name": "path",
-						"in": "query",
-						"required": true,
-						"schema": {
-							"type": "string",
-							"minLength": 1,
-							"maxLength": 1024
-						}
-					}
-				],
-				"responses": {
-					"200": {
-						"description": "Success",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"required": ["path", "title", "markdown", "headings", "links", "unavailableLinks"],
-									"properties": {
-										"path": {
-											"type": "string"
-										},
-										"title": {
-											"type": "string"
-										},
-										"markdown": {
-											"type": "string"
-										},
-										"headings": {
-											"type": "array",
-											"items": {
-												"type": "object",
-												"required": ["id", "title", "depth"],
-												"properties": {
-													"id": {
-														"type": "string"
-													},
-													"title": {
-														"type": "string"
-													},
-													"depth": {
-														"type": "integer",
-														"minimum": 1,
-														"maximum": 6
-													}
-												},
-												"additionalProperties": false
-											}
-										},
-										"links": {
-											"type": "object",
-											"patternProperties": {
-												"^.*$": {
-													"anyOf": [
-														{
-															"type": "string"
-														},
-														{
-															"type": "null"
-														}
-													]
-												}
-											}
-										},
-										"unavailableLinks": {
-											"type": "array",
-											"items": {
-												"type": "string"
-											}
-										}
-									},
-									"additionalProperties": false
-								}
-							}
-						},
-						"headers": {
-							"X-Clio-Epoch": {
-								"schema": {
-									"type": "string"
-								},
-								"description": "Server epoch"
-							},
-							"X-Clio-Seq": {
-								"schema": {
-									"type": "integer"
-								},
-								"description": "Sequence before assembling the snapshot"
-							}
-						}
-					},
-					"default": {
-						"description": "Problem",
-						"content": {
-							"application/problem+json": {
-								"schema": {
-									"type": "object",
-									"required": ["type", "title", "status", "detail", "code", "instance"],
-									"properties": {
-										"type": {
-											"type": "string"
-										},
-										"title": {
-											"type": "string"
-										},
-										"status": {
-											"type": "integer"
-										},
-										"detail": {
-											"type": "string"
-										},
-										"code": {
-											"anyOf": [
-												{
-													"type": "string",
-													"const": "validation"
-												},
-												{
-													"type": "string",
-													"const": "unauthorized"
-												},
-												{
-													"type": "string",
-													"const": "not_found"
-												},
-												{
-													"type": "string",
-													"const": "conflict"
-												},
-												{
-													"type": "string",
-													"const": "unsupported"
-												},
-												{
-													"type": "string",
-													"const": "unavailable"
-												},
-												{
-													"type": "string",
-													"const": "upstream_acp"
-												},
-												{
-													"type": "string",
-													"const": "operation_failed"
-												},
-												{
-													"type": "string",
-													"const": "internal"
-												}
-											]
-										},
-										"instance": {
-											"type": "string"
-										}
-									},
-									"additionalProperties": false
-								}
-							}
-						}
-					}
-				}
-			}
-		},
-		"/api/docs/search": {
-			"get": {
-				"operationId": "docsSearch",
-				"summary": "Search the package documentation",
-				"security": [
-					{
-						"bearer": []
-					}
-				],
-				"parameters": [
-					{
-						"name": "q",
-						"in": "query",
-						"required": true,
-						"schema": {
-							"type": "string",
-							"maxLength": 200
-						}
-					}
-				],
-				"responses": {
-					"200": {
-						"description": "Success",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "array",
-									"items": {
-										"type": "object",
-										"required": ["path", "title", "excerpt"],
-										"properties": {
-											"path": {
-												"type": "string"
-											},
-											"title": {
-												"type": "string"
-											},
-											"excerpt": {
-												"type": "string"
-											}
-										},
-										"additionalProperties": false
-									}
 								}
 							}
 						},
@@ -27218,7 +26769,10 @@
 												],
 												"properties": {
 													"run_id": {
-														"type": "string"
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256,
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 													},
 													"assignment_id": {
 														"type": "string"
@@ -27427,7 +26981,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					}
 				],
@@ -27456,7 +27012,10 @@
 									],
 									"properties": {
 										"run_id": {
-											"type": "string"
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256,
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 										},
 										"assignment_id": {
 											"type": "string"
@@ -27649,7 +27208,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					}
 				],
@@ -27688,10 +27249,16 @@
 										],
 										"properties": {
 											"phase_id": {
-												"type": "string"
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256,
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 											},
 											"run_id": {
-												"type": "string"
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256,
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 											},
 											"seq": {
 												"type": "integer"
@@ -27963,7 +27530,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					}
 				],
@@ -27992,10 +27561,16 @@
 												"type": "integer"
 											},
 											"run_id": {
-												"type": "string"
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256,
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 											},
 											"phase_id": {
-												"type": "string"
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256,
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 											},
 											"attempt": {
 												"type": "integer"
@@ -28133,7 +27708,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					}
 				],
@@ -28152,7 +27729,10 @@
 												"type": "integer"
 											},
 											"run_id": {
-												"type": "string"
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256,
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 											},
 											"kind": {
 												"type": "string"
@@ -28311,7 +27891,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					},
 					{
@@ -28370,10 +27952,16 @@
 														"type": "string"
 													},
 													"run_id": {
-														"type": "string"
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256,
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 													},
 													"phase_id": {
-														"type": "string"
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256,
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 													},
 													"parent_id": {
 														"anyOf": [
@@ -28544,7 +28132,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					},
 					{
@@ -28703,7 +28293,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					},
 					{
@@ -28860,7 +28452,8 @@
 										"apiVersion",
 										"epoch",
 										"pwa",
-										"idle"
+										"idle",
+										"bundledDocsPath"
 									],
 									"properties": {
 										"clio": {
@@ -28917,6 +28510,9 @@
 										},
 										"idle": {
 											"type": "boolean"
+										},
+										"bundledDocsPath": {
+											"type": "string"
 										}
 									},
 									"additionalProperties": false

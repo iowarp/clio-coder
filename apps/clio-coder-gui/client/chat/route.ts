@@ -18,6 +18,9 @@ export interface RouteFacts {
 	readonly tone: StatusTone;
 	/** What the chip prints: `target · model`, or the one fact that is known. */
 	readonly text: string;
+	/** The compact face names the model; the full route remains in text and title. */
+	readonly model?: string;
+	readonly thinking?: string;
 	/** The pointer tooltip, with every fact spelled out. */
 	readonly title: string;
 	/** What assistive technology hears after the text. */
@@ -58,6 +61,11 @@ export function routeFacts(
 		...(config ? { config } : {}),
 		tone,
 		text: `${settings.target ?? "automatic routing"} · ${settings.model ?? "default model"}`,
+		model:
+			config?.options.find((row) => row.id === "model")?.options.find((row) => row.value === settings.model)?.name ??
+			settings.model ??
+			"Default model",
+		...(settings.thinking === "not reported" ? {} : { thinking: settings.thinking }),
 		title: `Target: ${settings.target ?? "automatic"}. Model: ${settings.model ?? "configured default"}. Thinking: ${settings.thinking}. ${healthText}`,
 		spoken: `Thinking ${settings.thinking}. ${healthText}`,
 	};

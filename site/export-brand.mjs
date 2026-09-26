@@ -10,7 +10,7 @@ const { values } = parseArgs({ options: { out: { type: "string", default: "/tmp/
 const out = resolve(values.out);
 if (out === "/" || out === site || site.startsWith(`${out}/`))
 	throw new Error("The export must not replace source files.");
-const marker = ".clio-brand-kit";
+const marker = ".clio-coder-brand-kit";
 const existing = await readdir(out).catch((error) => {
 	if (error.code === "ENOENT") return [];
 	throw error;

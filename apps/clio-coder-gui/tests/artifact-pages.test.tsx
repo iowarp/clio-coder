@@ -21,10 +21,10 @@ const { FleetPage } = await import("../client/pages/fleet.js");
 
 const client = { token: "t", call: () => new Promise(() => {}) } as unknown as Client;
 
-function render(queries: QueryClient, node: ReactNode) {
+function render(queries: QueryClient, node: ReactNode, entry = "/") {
 	return renderToStaticMarkup(
 		<QueryClientProvider client={queries}>
-			<MemoryRouter>{node}</MemoryRouter>
+			<MemoryRouter initialEntries={[entry]}>{node}</MemoryRouter>
 		</QueryClientProvider>,
 	);
 }
@@ -123,4 +123,100 @@ test("both fleet lists offer links only while settled, and render nothing after 
 	const broken = render(failed, <FleetPage client={client} />);
 	assert.doesNotMatch(broken, /nightly|run-1|Load more/);
 	assert.match(broken, /refresh failed/);
+});
+
+test("evidence discovery restores URL filters and detail navigation excludes launch credentials", () => {
+	const queries = listed(Number.POSITIVE_INFINITY);
+	const filtered = render(
+		queries,
+		<EvidencePage client={client} />,
+		"/evidence?q=evidence-007&verdict=grounded&token=private",
+	);
+	assert.match(filtered, /href="\/evidence\/evidence-007\?q=evidence-007&amp;verdict=grounded"/);
+	assert.doesNotMatch(filtered, /href="[^"]*token=/);
+	assert.match(filtered, /name="q" value="evidence-007"/);
+	const noMatch = render(queries, <EvidencePage client={client} />, "/evidence?q=missing");
+	assert.match(noMatch, /No loaded bundle matches these filters/);
+	assert.doesNotMatch(noMatch, /href="\/evidence\/evidence-007/);
+});
+
+test("Fleet filters search only loaded records and preserve their destination", () => {
+	const queries = new QueryClient({
+		defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
+	});
+	queries.setQueryData(["fleet-roots"], {
+		pageParams: [undefined],
+		pages: [
+			{
+				nextCursor: null,
+				items: [
+					{
+						id: "root-1",
+						fleet: "nightly",
+						endedAt: null,
+						completedCount: 0,
+						stepCount: 1,
+						startedAt: "2026-09-24T00:00:00Z",
+					},
+				],
+			},
+		],
+	});
+	queries.setQueryData(["fleet-dispatches"], {
+		pageParams: [undefined],
+		pages: [
+			{
+				nextCursor: null,
+				items: [
+					{
+						id: "dispatch-1",
+						agentId: "worker",
+						task: "Inspect models",
+						outcome: null,
+						status: "running",
+						endedAt: null,
+						targetId: "local",
+						wireModelId: "model-a",
+						tokenCount: 0,
+						parentRunId: "parent-1",
+						rootRunId: "root-dispatch",
+					},
+				],
+			},
+		],
+	});
+	const filtered = render(queries, <FleetPage client={client} />, "/fleet?q=worker&status=active");
+	assert.doesNotMatch(filtered, /href="\/fleet\/root-1/);
+	assert.match(filtered, /No loaded fleet execution matches these filters/);
+	assert.match(filtered, /href="\/fleet\/dispatches\/dispatch-1\?q=worker&amp;status=active"/);
+	assert.match(filtered, /Root dispatch: root-dispatch/);
+	assert.match(filtered, /Parent: parent-1/);
+	const finished = render(queries, <FleetPage client={client} />, "/fleet?status=finished");
+	assert.match(finished, /No loaded worker dispatch matches these filters/);
+	assert.doesNotMatch(finished, /href="\/fleet\/dispatches/);
+});
+
+test("artifact pages distinguish missing stores from present empty history", () => {
+	for (const present of [false, true]) {
+		const queries = new QueryClient({
+			defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
+		});
+		const page = { pageParams: [undefined], pages: [{ present, items: [], nextCursor: null }] };
+		queries.setQueryData(["fleet-roots"], page);
+		queries.setQueryData(["fleet-dispatches"], page);
+		queries.setQueryData(["evidence"], page);
+		const fleet = render(queries, <FleetPage client={client} />);
+		const evidence = render(queries, <EvidencePage client={client} />);
+		if (present) {
+			assert.match(fleet, /recorded no fleet run/);
+			assert.match(fleet, /recorded no dispatch run/);
+			assert.match(evidence, /recorded no evidence bundle/);
+			assert.doesNotMatch(fleet + evidence, /missing store/);
+		} else {
+			assert.match(fleet, /no fleet history store/);
+			assert.match(fleet, /no dispatch ledger store/);
+			assert.match(evidence, /no evidence inventory store/);
+			assert.doesNotMatch(fleet + evidence, /recorded no (fleet run|dispatch run|evidence bundle)/);
+		}
+	}
 });

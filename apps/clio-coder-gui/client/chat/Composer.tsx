@@ -17,7 +17,9 @@ import { memo, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExter
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
+import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
+import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
 import { readAttachment } from "./attachment-image.js";
@@ -112,6 +114,9 @@ export const Composer = memo(function Composer({
 	const fieldId = useId();
 	const hintId = useId();
 	const [enterSends, setEnterSends] = useState(initialEnterSends);
+	const options = useRef<HTMLDetailsElement | null>(null);
+	const [optionsOpen, setOptionsOpen] = useState(false);
+	useDetailsDismiss(options, optionsOpen);
 	const [attachments, setAttachments] = useState<Attachment[]>([]);
 	const [attachProblem, setAttachProblem] = useState<string | null>(null);
 	const attached = useRef<Attachment[]>([]);
@@ -321,6 +326,12 @@ export const Composer = memo(function Composer({
 		}
 	};
 
+	const closeOptions = () => {
+		if (!options.current) return;
+		options.current.open = false;
+		options.current.querySelector("summary")?.focus();
+	};
+
 	const notice =
 		noticeForError(send.error ?? interrupt.error ?? stop.error ?? drain.error) ??
 		noticeForRefusal(send.data) ??
@@ -360,7 +371,7 @@ export const Composer = memo(function Composer({
 							? steering.steer || steering.queue
 								? "Add direction for Clio Coder while it works"
 								: "Draft your next message while Clio Coder works"
-							: "Ask Clio Coder to do something in this project"
+							: "Describe a task or ask a question"
 				}
 				onChange={(event) => {
 					store.write(event.target.value);
@@ -397,29 +408,6 @@ export const Composer = memo(function Composer({
 					</button>
 				</p>
 			)}
-			{/* Delivery only matters once there is something to deliver mid-turn, so the choice appears with the draft. */}
-			{running && modes.length > 1 && draft.text.trim() !== "" ? (
-				<fieldset className="composer__modes">
-					<legend>Deliver this</legend>
-					{modes.map((offer) => (
-						<label key={offer.mode} className="composer__mode" title={offer.lands}>
-							<input
-								type="radio"
-								name={`${fieldId}-mode`}
-								checked={draft.mode === offer.mode}
-								onChange={() => {
-									store.chooseMode(offer.mode);
-									if (!send.isPending) send.reset();
-								}}
-							/>
-							{offer.label}
-						</label>
-					))}
-					<span className="composer__mode-lands">
-						{modes.find((offer) => offer.mode === draft.mode)?.lands ?? modes[0]?.lands}
-					</span>
-				</fieldset>
-			) : null}
 			{attachments.length > 0 ? (
 				<ul className="composer__attachments" aria-label="Attachments to send with this request">
 					{attachments.map((item) => (
@@ -452,83 +440,132 @@ export const Composer = memo(function Composer({
 					{attachProblem}
 				</p>
 			) : null}
+			<p className="composer__hint sr-only" id={hintId}>
+				{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @path adds a project file
+				{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
+			</p>
 			<div className="composer__actions">
-				<label className="composer__enter-mode">
-					<input type="checkbox" checked={enterSends} onChange={(event) => setEnterSends(event.target.checked)} />
-					Enter sends
-				</label>
-				<p className="composer__hint" id={hintId}>
-					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @path adds a project file
-					{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
-				</p>
-				{canAttach ? (
-					<>
-						<input
-							ref={picker}
-							id={pickerId}
-							hidden
-							type="file"
-							{...(canAttachFiles ? {} : { accept: "image/png,image/jpeg,image/gif,image/webp" })}
-							multiple
-							onChange={(event) => {
-								const files = [...(event.target.files ?? [])];
-								event.target.value = "";
-								void attach(files);
-							}}
-						/>
-						<button
-							type="button"
-							className="composer__secondary composer__attach"
-							onClick={() => picker.current?.click()}
-							aria-label={attachLabel}
-							title={`${attachLabel} to this request. You can also ${canAttachImages ? "paste or " : ""}drop them here.`}
-						>
-							<span aria-hidden="true">+</span>
-							<span className="composer__attach-label" aria-hidden="true">
-								{attachLabel}
-							</span>
-						</button>
-					</>
-				) : null}
-				<RoutePicker
-					client={client}
-					sessionId={sessionId}
-					route={route}
-					running={running}
-					capabilities={capabilities.data}
-				/>
-				{running ? (
-					<>
-						{steering.interrupt ? (
+				<div className="composer__tools">
+					{canAttach ? (
+						<>
+							<input
+								ref={picker}
+								id={pickerId}
+								hidden
+								type="file"
+								{...(canAttachFiles ? {} : { accept: "image/png,image/jpeg,image/gif,image/webp" })}
+								multiple
+								onChange={(event) => {
+									const files = [...(event.target.files ?? [])];
+									event.target.value = "";
+									void attach(files);
+								}}
+							/>
 							<button
-								className="composer__secondary"
 								type="button"
-								disabled={interrupt.isPending}
-								onClick={() => interrupt.mutate()}
-								title="Ask Clio Coder to put down what it is doing and take new direction. The turn stays open."
+								className="composer__icon-button composer__attach"
+								onClick={() => picker.current?.click()}
+								aria-label={attachLabel}
+								title={`${attachLabel} to this request. You can also ${canAttachImages ? "paste or " : ""}drop them here.`}
 							>
-								{interrupt.isPending ? "Interrupting…" : "Interrupt"}
+								<Icon name="plus" />
 							</button>
-						) : null}
+						</>
+					) : null}
+					<details
+						className="composer__options"
+						ref={options}
+						onToggle={(event) => setOptionsOpen(event.currentTarget.open)}
+						onKeyDown={(event) => {
+							if (event.key !== "Escape") return;
+							event.preventDefault();
+							closeOptions();
+						}}
+					>
+						<summary aria-label="Message options" title="Keyboard and message delivery options">
+							<Icon name="keyboard" />
+							{running && modes.length > 1 ? (
+								<span className="composer__delivery-label">
+									{modes.find((offer) => offer.mode === draft.mode)?.label ?? modes[0]?.label}
+								</span>
+							) : null}
+						</summary>
+						<div className="composer__options-panel">
+							<p className="composer__options-title">Message options</p>
+							<label className="composer__enter-mode">
+								<input type="checkbox" checked={enterSends} onChange={(event) => setEnterSends(event.target.checked)} />
+								Enter sends
+							</label>
+							<p>{enterSends ? "Shift+Enter adds a new line." : "Enter adds a line. Ctrl/⌘+Enter sends."}</p>
+							<p>Use @path to add a project file to your message.</p>
+							{running && modes.length > 1 ? (
+								<fieldset className="composer__modes">
+									<legend>Deliver this</legend>
+									{modes.map((offer) => (
+										<label key={offer.mode} className="composer__mode" title={offer.lands}>
+											<input
+												type="radio"
+												name={`${fieldId}-mode`}
+												checked={draft.mode === offer.mode}
+												onChange={() => {
+													store.chooseMode(offer.mode);
+													if (!send.isPending) send.reset();
+												}}
+											/>
+											{offer.label}
+										</label>
+									))}
+									<span className="composer__mode-lands">
+										{modes.find((offer) => offer.mode === draft.mode)?.lands ?? modes[0]?.lands}
+									</span>
+								</fieldset>
+							) : null}
+							{running && steering.interrupt ? (
+								<button
+									className="composer__secondary"
+									type="button"
+									disabled={interrupt.isPending}
+									onClick={() => interrupt.mutate()}
+									title="Ask Clio Coder to put down what it is doing and take new direction. The turn stays open."
+								>
+									{interrupt.isPending ? "Interrupting…" : "Interrupt"}
+								</button>
+							) : null}
+						</div>
+					</details>
+				</div>
+				<div className="composer__route-actions">
+					<RoutePicker
+						client={client}
+						sessionId={sessionId}
+						route={route}
+						running={running}
+						capabilities={capabilities.data}
+					/>
+					{running ? (
 						<button
-							className="composer__secondary composer__stop"
+							className="composer__icon-button composer__stop"
 							type="button"
 							disabled={stop.isPending}
 							onClick={() => stop.mutate()}
+							aria-label={stop.isPending ? "Stopping…" : "Stop turn"}
 							title="End this turn now. Nothing further is run."
 						>
-							<span aria-hidden="true">■</span> {stop.isPending ? "Stopping…" : "Stop turn"}
+							<Icon name="stop" />
 						</button>
-					</>
-				) : null}
-				<button
-					className="composer__submit primary"
-					type="submit"
-					disabled={intent.kind === "blocked" || attachBlock !== null}
-					title={intent.kind === "blocked" ? intent.reason : (attachBlock ?? undefined)}
-				>
-					{send.isPending ? "Sending…" : submitLabel(intent, situation, draft.mode)}
-				</button>
+					) : null}
+					{!running || draft.text.trim() !== "" ? (
+						<button
+							className="composer__submit primary"
+							type="submit"
+							disabled={intent.kind === "blocked" || attachBlock !== null}
+							aria-label={send.isPending ? "Sending…" : submitLabel(intent, situation, draft.mode)}
+							title={intent.kind === "blocked" ? intent.reason : (attachBlock ?? submitLabel(intent, situation, draft.mode))}
+						>
+							<Icon name="arrowUp" />
+						</button>
+					) : null}
+				</div>
 			</div>
 			{attachBlock !== null && intent.kind !== "blocked" ? (
 				<p className="composer__blocked" role="status">

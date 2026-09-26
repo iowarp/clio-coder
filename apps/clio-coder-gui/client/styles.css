@@ -151,7 +151,7 @@ h1 {
 	font-family: var(--font-editorial);
 }
 h1 {
-	font-weight: 450;
+	font-weight: 500;
 	font-size: clamp(42px, 4.2vw, 68px);
 	letter-spacing: -1.5px;
 	line-height: 1.06;
@@ -368,7 +368,7 @@ nav {
 	clip-path: inset(50%);
 	white-space: nowrap;
 }
-.workspace[data-sidebar="collapsed"] .sidebar :is(nav a, .sidebar-toggle) {
+.workspace[data-sidebar="collapsed"] .sidebar :is(nav a, .sidebar-toggle, .nav-help) {
 	position: relative;
 	justify-content: center;
 	padding-inline: 0;
@@ -376,7 +376,7 @@ nav {
 .workspace[data-sidebar="collapsed"] .desktop-navigation {
 	padding-inline: var(--space-2);
 }
-.workspace[data-sidebar="collapsed"] .sidebar :is(nav a, .sidebar-toggle):is(:hover, :focus-visible)::after {
+.workspace[data-sidebar="collapsed"] .sidebar :is(nav a, .sidebar-toggle, .nav-help):is(:hover, :focus-visible)::after {
 	content: attr(data-tip);
 	position: absolute;
 	left: calc(100% + 10px);
@@ -984,7 +984,7 @@ nav a[data-group="more"] .icon {
 .trace-filters button {
 	border: 1px solid var(--line-strong);
 	padding: 11px var(--space-4);
-	background: var(--surface-sunken);
+	background: var(--surface);
 	border-radius: var(--radius-sm);
 	color: var(--accent);
 }
@@ -1313,6 +1313,7 @@ main:has(> .conversation) {
 /* One line: where you are, what this conversation is, whether Clio Coder is working, and one
    control for everything else. The model sits in the composer, where the next request leaves. */
 .conversation__bar {
+	position: relative;
 	display: flex;
 	align-items: center;
 	gap: var(--space-2) var(--space-3);
@@ -1392,7 +1393,7 @@ main:has(> .conversation) {
 	font-size: var(--text-meta);
 }
 .conversation__tools {
-	position: relative;
+	position: static;
 	flex: none;
 }
 /* A labelled control in the header's own voice; its words identify it, so it needs no frame until
@@ -1430,7 +1431,7 @@ main:has(> .conversation) {
 	z-index: 6;
 	right: 0;
 	top: calc(100% + var(--space-2));
-	width: min(40rem, calc(100vw - 2 * var(--space-4)));
+	width: min(40rem, 100%);
 	max-height: min(75dvh, 44rem);
 	overflow: auto;
 	padding: var(--space-2) var(--space-5) var(--space-4);
@@ -1573,9 +1574,9 @@ main:has(> .conversation) {
 	.conversation__tools > summary {
 		padding-inline: var(--space-2);
 	}
-	/* The menu still hangs below its own summary, which sits at the right gutter, so the control that
-	   opened it stays visible and closes it. A fixed panel at a guessed offset covered it. */
+	/* Keep the menu inside the conversation gutters even when header controls wrap. */
 	.conversation__tools-body {
+		width: 100%;
 		max-height: min(70dvh, 44rem);
 		padding-inline: var(--space-4);
 	}
@@ -1812,4 +1813,73 @@ main:has(> .conversation) {
 .reconnect__problem {
 	color: var(--status-fail-fg);
 	font-size: 14px;
+}
+
+/* Dense inspection pages share a compact title; expressive type remains on the overview. */
+main :is(.panel-heading, .page-heading) h1 {
+	font-family: var(--font-ui);
+	font-size: clamp(28px, 3vw, 38px);
+	font-weight: 600;
+	letter-spacing: -0.8px;
+	line-height: 1.2;
+}
+main > .panel-heading {
+	margin-bottom: var(--space-6);
+}
+main :is(section, article, .panel-heading, .page-heading) {
+	min-width: 0;
+}
+main :is(h1, h2, h3, p, li, dd, dt, a) {
+	overflow-wrap: anywhere;
+}
+main :is(pre, .table-scroll) {
+	max-width: 100%;
+	overflow-x: auto;
+}
+@media (pointer: coarse) {
+	button,
+	summary,
+	nav a {
+		min-height: 44px;
+	}
+}
+@media (max-width: 360px) {
+	.brand {
+		font-size: 16px;
+		gap: var(--space-1);
+	}
+	.brand img {
+		width: 30px;
+	}
+	.connection {
+		padding-inline: var(--space-1);
+	}
+	main {
+		padding-inline: var(--space-4);
+	}
+}
+
+.nav-help {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: 11px 14px;
+	min-height: 44px;
+	border: 0;
+	border-top: 1px solid var(--line);
+	border-radius: 0;
+	background: transparent;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+	text-align: left;
+}
+.nav-help:hover {
+	background: var(--surface-sunken);
+	color: var(--ink);
+}
+
+.trace-filters .primary {
+	background: var(--primary-fill);
+	color: var(--on-primary);
+	border-color: var(--primary-fill);
 }

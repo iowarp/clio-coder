@@ -37,7 +37,7 @@ export interface Destination {
 }
 
 /**
- * The navigable views. The first eleven mirror `client/design/navigation.tsx` exactly; the rest are
+ * The navigable views. Primary destinations mirror `client/design/navigation.tsx`; the rest are
  * routed views with no navigation entry, which is precisely the set a launcher earns its place on.
  */
 export const DESTINATIONS: readonly Destination[] = [
@@ -45,7 +45,6 @@ export const DESTINATIONS: readonly Destination[] = [
 	{ label: "Sessions", path: "/sessions", keywords: ["chat", "conversation", "workspace"] },
 	{ label: "Traces", path: "/traces", keywords: ["runs", "forensics"] },
 	{ label: "Toolchain", path: "/toolchain", keywords: ["tools", "install"] },
-	{ label: "Docs", path: "/docs", keywords: ["documentation", "reference"] },
 	{ label: "Settings", path: "/settings", keywords: ["configuration", "preferences"] },
 	{ label: "Fleet", path: "/fleet", keywords: ["dispatch", "workers", "runs"] },
 	{ label: "Evidence", path: "/evidence", keywords: ["receipts", "trust"] },
@@ -128,7 +127,7 @@ export function appCommands(situation: CommandSituation, handlers: CommandHandle
 		id: "app.help",
 		title: "Keyboard and vocabulary reference",
 		group: "App",
-		keywords: ["help", "shortcuts", "keys", "glossary"],
+		keywords: ["help", "documentation", "docs", "shortcuts", "keys", "glossary"],
 		binding: "help",
 		available: true,
 		run: handlers.openHelp,

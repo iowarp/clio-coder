@@ -7,15 +7,14 @@
 	display: grid;
 	gap: var(--space-1);
 	margin-top: 0;
-	padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+	padding: var(--space-4) var(--space-3) var(--space-2) var(--space-4);
 	background: var(--surface);
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-lg);
-	box-shadow: var(--shadow-raised);
+	border: 1px solid var(--line);
+	border-radius: var(--space-6);
+	box-shadow: var(--shadow-none);
 }
 .composer:focus-within {
-	border-color: var(--accent-strong);
-	box-shadow: 0 0 0 1px var(--accent-strong);
+	border-color: var(--line-strong);
 }
 .composer__label {
 	font-size: var(--text-meta);
@@ -24,7 +23,7 @@
 .composer__field {
 	width: 100%;
 	resize: none;
-	min-height: calc(2 * var(--leading-body) * 1em + 2 * var(--space-2));
+	min-height: 64px;
 	max-height: min(14rem, 28dvh);
 	overflow-y: hidden;
 	border: 0;
@@ -36,8 +35,8 @@
 	color: var(--ink);
 	background: transparent;
 }
-/* The tray draws a 2px accent boundary around the field while it has focus, so the field needs no
-   second ring. Forced colours drop that shadow, so there the field keeps the system ring. */
+/* Focus changes the boundary of the unified input; the field has no second inset frame.
+   Forced colours retain the browser's own field outline. */
 @media (forced-colors: none) {
 	.composer__field:focus-visible {
 		outline: none;
@@ -92,32 +91,100 @@
 
 .composer__actions {
 	display: flex;
-	flex-wrap: wrap;
 	align-items: center;
-	justify-content: flex-end;
+	justify-content: space-between;
 	gap: var(--space-2);
+	min-width: 0;
 }
-.composer__enter-mode {
+.composer__tools,
+.composer__route-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--space-1);
+	min-width: 0;
+}
+.composer__tools {
+	flex: none;
+}
+.composer__route-actions {
+	flex: 1;
+	justify-content: flex-end;
+}
+.composer__icon-button,
+.composer__options > summary {
 	display: inline-flex;
 	flex: none;
 	align-items: center;
-	gap: var(--space-2);
-	font-size: var(--text-exact);
+	justify-content: center;
+	min-width: 44px;
+	min-height: 44px;
+	padding: var(--space-2);
+	border: 0;
+	border-radius: var(--radius-pill);
+	background: transparent;
 	color: var(--ink-muted);
 	cursor: pointer;
 }
-/* The global field rule stretches every input; a checkbox must stay its own size. */
+.composer__icon-button:hover:not(:disabled),
+.composer__options > summary:hover,
+.composer__options[open] > summary {
+	background: var(--paper);
+	color: var(--ink);
+}
+.composer__icon-button .icon {
+	width: 20px;
+	height: 20px;
+}
+.composer__options > summary {
+	gap: var(--space-2);
+	list-style: none;
+}
+.composer__options > summary::-webkit-details-marker {
+	display: none;
+}
+.composer__delivery-label {
+	font-size: var(--text-meta);
+	white-space: nowrap;
+}
+.composer__options-panel {
+	position: absolute;
+	left: 0;
+	bottom: calc(100% + var(--space-2));
+	z-index: 6;
+	display: grid;
+	gap: var(--space-3);
+	width: min(24rem, 100%);
+	max-height: 70dvh;
+	overflow: auto;
+	padding: var(--space-4);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-lg);
+	background: var(--overlay);
+	box-shadow: var(--shadow-panel);
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.composer__options-panel p {
+	margin: 0;
+}
+.composer__options-title {
+	font-weight: 600;
+	color: var(--ink);
+}
+.composer__enter-mode {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-height: 44px;
+	color: var(--ink);
+	cursor: pointer;
+}
+/* The global field rule stretches inputs; the preference checkbox keeps its own size. */
 .composer__enter-mode input {
 	flex: none;
 	inline-size: auto;
 	margin: 0;
 	accent-color: var(--accent);
-}
-.composer__hint {
-	flex: 1 1 16ch;
-	margin: 0;
-	font-size: var(--text-exact);
-	color: var(--ink-muted);
 }
 /* The route beside Send: which target and model the next request goes to, with the target's
    reported health as the glyph; the words carry it in greyscale. When the agent lets the GUI edit
@@ -125,13 +192,13 @@
    row until it is pointed at, focused or open. */
 .route-chip {
 	display: inline-flex;
-	align-items: baseline;
+	align-items: center;
 	gap: var(--space-2);
 	flex: 0 1 auto;
-	max-width: 18rem;
+	max-width: 24rem;
 	min-width: 0;
 	color: var(--ink-muted);
-	font-size: var(--text-exact);
+	font-size: var(--text-meta);
 	white-space: nowrap;
 }
 .route-chip__glyph {
@@ -148,8 +215,15 @@
 	color: var(--status-fail-fg);
 }
 .route-chip__text {
+	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	color: var(--ink);
+}
+.route-chip__thinking {
+	flex: none;
+	color: var(--ink-muted);
+	text-transform: capitalize;
 }
 .route-picker {
 	display: flex;
@@ -158,11 +232,11 @@
 }
 .route-picker > summary {
 	align-items: center;
-	min-height: 36px;
-	max-width: 20rem;
-	padding: var(--space-1) var(--space-2);
-	border: 1px solid transparent;
-	border-radius: var(--radius-sm);
+	min-height: 44px;
+	max-width: 24rem;
+	padding: var(--space-2);
+	border: 0;
+	border-radius: var(--radius-pill);
 	cursor: pointer;
 	list-style: none;
 	transition:
@@ -175,8 +249,7 @@
 .route-picker > summary:hover,
 .route-picker[open] > summary {
 	color: var(--ink);
-	background: var(--surface-sunken);
-	border-color: var(--line-strong);
+	background: var(--paper);
 }
 .route-chip__caret {
 	flex: none;
@@ -242,42 +315,48 @@
 	min-height: 36px;
 	padding: var(--space-1) var(--space-4);
 }
-.composer__submit,
 .composer__secondary {
-	min-height: 36px;
+	min-height: 44px;
+	border: 1px solid var(--line);
 	border-radius: var(--radius-sm);
-	padding: var(--space-1) var(--space-4);
+	padding: var(--space-1) var(--space-3);
+	background: transparent;
 	font: inherit;
 	font-size: var(--text-meta);
+	color: var(--ink);
 	cursor: pointer;
 }
-.composer__secondary {
-	border: 1px solid var(--line-strong);
-	background: var(--surface);
-	color: var(--ink);
-}
 .composer__secondary:hover:not(:disabled) {
-	background: var(--surface-sunken);
+	background: var(--paper);
 }
+.composer__submit.primary,
 .composer__stop {
-	border-color: var(--status-fail-line);
-	color: var(--status-fail-fg);
+	display: grid;
+	place-items: center;
+	flex: none;
+	width: 44px;
+	min-height: 44px;
+	padding: 0;
+	border: 0;
+	border-radius: var(--radius-pill);
+	background: var(--ink);
+	color: var(--paper);
+	cursor: pointer;
 }
-.composer__submit {
-	border: 1px solid var(--primary-fill);
-	background: var(--primary-fill);
-	color: var(--on-primary);
-	font-weight: 600;
+.composer__submit.primary:hover:not(:disabled),
+.composer__stop:hover:not(:disabled) {
+	background: var(--ink-muted);
+	color: var(--paper);
 }
-.composer__submit:hover:not(:disabled) {
-	border-color: var(--accent);
-	background: var(--accent);
-	color: var(--on-accent);
+.composer__submit .icon {
+	width: 22px;
+	height: 22px;
 }
 .composer__submit:disabled,
-.composer__secondary:disabled {
+.composer__secondary:disabled,
+.composer__icon-button:disabled {
 	cursor: not-allowed;
-	opacity: 0.55;
+	opacity: 0.45;
 }
 
 .composer__blocked,
@@ -440,35 +519,25 @@
 	}
 }
 
-/* A touch keyboard adds lines with Enter by default, and the checkbox beside the field already says
-   which key sends; the longer hint stays for assistive technology. */
 @media (max-width: 650px) {
-	.composer__hint {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		margin: -1px;
-		overflow: hidden;
-		clip-path: inset(50%);
-		white-space: nowrap;
+	.composer {
+		padding-inline: var(--space-3);
 	}
-	.composer__enter-mode {
-		margin-right: auto;
-	}
-	/* The attach control keeps its glyph and accessible name; its words would push Send to a new row. */
-	.composer__attach-label {
-		display: none;
-	}
-	.composer__attach {
-		padding-inline: var(--space-2);
-	}
+	.composer__actions,
 	.route-chip {
-		max-width: 11rem;
+		gap: var(--space-1);
 	}
-	/* Padding and the caret take the difference, so Send keeps its place on the row beside the
-	   attach control; the full route is in the picker. */
+	.composer__route-actions .route-picker {
+		flex: 1 1 0;
+		justify-content: flex-end;
+	}
 	.route-picker > summary {
-		max-width: 7rem;
+		max-width: 100%;
+		min-width: 0;
+		padding-inline: var(--space-1);
+	}
+	.route-chip__text {
+		max-width: 12rem;
 	}
 	.route-picker__panel {
 		padding-inline: var(--space-4);
@@ -482,11 +551,21 @@
 	}
 }
 
+@media (max-width: 420px) {
+	.composer__delivery-label,
+	.route-chip__glyph {
+		display: none;
+	}
+	.route-chip__thinking {
+		font-size: var(--text-exact);
+	}
+}
+
 /* Images and text files waiting to go with the next request: a quiet row above the actions, each removable. */
 .composer__attachments {
 	list-style: none;
 	margin: 0;
-	padding: 0 var(--space-4);
+	padding: 0;
 	display: flex;
 	flex-wrap: wrap;
 	gap: var(--space-2) var(--space-4);

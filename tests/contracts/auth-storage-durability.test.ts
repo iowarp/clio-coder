@@ -180,6 +180,31 @@ describe("contracts/auth storage durability", () => {
 			storage.damageReason()?.includes("read-only file system"),
 			`the refused write is reported, got: ${storage.damageReason()}`,
 		);
+		strictEqual(storage.hasStored("mistral"), false, "a failed commit cannot publish a credential in memory");
+		strictEqual(storage.status("mistral").available, false);
+	});
+
+	it("keeps the last committed credentials after a failed replacement or removal", async () => {
+		const committed = storeTwoKeys();
+		const backend: AuthStorageBackend = {
+			read: () => committed,
+			withLock(fn) {
+				const { result, next } = fn(committed);
+				if (next !== undefined) throw new Error("ENOSPC: no space left on device");
+				return result;
+			},
+			withLockAsync: async (fn) => (await fn(committed)).result,
+		};
+		const storage = new AuthStorage(backend);
+		const before = storage.get("mistral");
+		storage.setApiKey("mistral", "sk-not-a-real-key-replacement");
+		strictEqual(storage.get("mistral"), before, "a failed replacement retains the committed key");
+		storage.remove("mistral");
+		strictEqual(storage.get("mistral"), before, "a failed removal retains the committed key");
+		strictEqual(storage.listStored().length, 2);
+		strictEqual((await storage.resolveApiKey("mistral")).apiKey, "sk-not-a-real-key-mistral");
+		ok(storage.damageReason()?.includes("no space left on device"));
+		strictEqual(readFileSync(path, "utf8"), committed);
 	});
 
 	it("does not report a stored credential the disk write refused", () => {

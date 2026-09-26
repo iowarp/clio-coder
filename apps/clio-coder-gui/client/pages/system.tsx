@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef } from "react";
-import { Link } from "react-router";
+import { useRef, useState } from "react";
+import { Link, NavLink, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { humanizeKey } from "../design/facts-model.js";
-import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
+import { PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark } from "../design/status.js";
 import {
@@ -21,90 +21,199 @@ import {
 	wiringSentence,
 } from "./interop-model.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
+import { findingAction, healthGroups } from "./system-model.js";
 import "../design/facts.css";
+import "./system.css";
 
 function SystemTabs() {
 	return (
 		<nav className="settings-tabs" aria-label="System views">
-			<Link to="/system">System health</Link>
-			<Link to="/system/interop">Other coding agents</Link>
+			<NavLink end to="/system">
+				System health
+			</NavLink>
+			<NavLink to="/system/interop">Other coding agents</NavLink>
 		</nav>
 	);
 }
-export function SystemPage({ client }: { client: Client }) {
+export function SystemPage({
+	client,
+	compact = false,
+	filter: sidebarFilter = "",
+}: {
+	client: Client;
+	compact?: boolean;
+	filter?: string;
+}) {
 	const report = useQuery({ queryKey: ["system"], queryFn: () => client.call(routes.system, emptyInput) });
 	const meta = useQuery({ queryKey: ["meta"], queryFn: () => client.call(routes.meta, emptyInput) });
+	const [search, setSearch] = useSearchParams();
+	const [sidebarAttention, setSidebarAttention] = useState(false);
+	const filter = compact ? sidebarFilter : (search.get("q") ?? ""),
+		attentionOnly = compact ? sidebarAttention : search.get("attention") === "true";
+	const discover = (key: string, value: string | null, replace = false) =>
+		setSearch(
+			(current) => {
+				const next = new URLSearchParams(current);
+				if (value) next.set(key, value);
+				else next.delete(key);
+				return next;
+			},
+			{ replace },
+		);
+	const groups = healthGroups(report.data?.findings ?? [], filter, attentionOnly);
+	const attention = report.data?.findings.filter((row) => row.level === "error" || row.level === "warn").length ?? 0;
 	return (
 		<section>
-			<PanelHeading
-				panel={PANELS.system}
-				level={1}
-				action={report.data ? <span className="count">Checked {formatTime(report.data.checkedAt)}</span> : null}
-			/>
-			<SystemTabs />
-			<p>
-				Check this installation and find the folders Clio uses. These checks inspect existing state without repairing or
-				changing it.
-			</p>
-			<button type="button" disabled={report.isFetching} onClick={() => void report.refetch()}>
-				Check again
-			</button>
-			{report.isPending && <p>Checking installation…</p>}
-			{report.error && <p role="alert">{report.error.message}</p>}
-			{meta.error && <p role="alert">{meta.error.message}</p>}
-			{meta.data && (
+			{!compact && (
 				<>
-					<h2>Versions</h2>
-					<dl className="settings-list">
-						{Object.entries({
-							"Clio Coder": meta.data.clio,
-							"Web application": meta.data.app,
-							Node: meta.data.node,
-							Platform: meta.data.platform,
-							"Pi agent core": meta.data.piAgentCore,
-							"Pi AI": meta.data.piAi,
-							"Pi TUI": meta.data.piTui,
-						}).map(([name, value]) => (
-							<div key={name}>
-								<dt>{name}</dt>
-								<dd>{value ?? "Not installed"}</dd>
-								<dd />
-							</div>
-						))}
-					</dl>
+					<PanelHeading
+						panel={PANELS.system}
+						level={1}
+						action={report.data ? <span className="count">Checked {formatTime(report.data.checkedAt)}</span> : null}
+					/>
+					<SystemTabs />
+					<p>Installation diagnostics and local folders. Check again refreshes these observations without changing files.</p>
 				</>
 			)}
+			<button type="button" disabled={report.isFetching} onClick={() => void report.refetch()}>
+				{compact ? "Refresh diagnostics" : "Check again"}
+			</button>
+			{report.isPending && <p>Checking installation…</p>}
+			{report.error && (
+				<p role="alert">
+					{report.error.message}
+					{report.data && " Showing the last received observations."}
+				</p>
+			)}
+			{meta.error && <p role="alert">{meta.error.message}</p>}
+
 			{report.data && (
 				<>
-					<h2>Health checks · {report.data.findings.length}</h2>
-					{!report.data.findings.length && <PanelEmpty>{emptyState.emptyStore("health finding")}</PanelEmpty>}
-					<div className="config-entries">
-						{report.data.findings.map((row) => (
-							<article className="trace-panel" key={row.name}>
-								<h3>{row.name}</h3>
-								<StatusMark
-									tone={row.level === "ok" ? "success" : row.level === "warn" ? "warn" : "fail"}
-									label={row.level === "ok" ? "Ready" : row.level === "warn" ? "Note" : "Needs attention"}
-								/>
-								<p>{row.detail}</p>
-								{row.detailRedacted && <small>Parser details withheld</small>}
-								{row.name === "settings.yaml" && !row.ok && <Link to="/settings">Inspect settings</Link>}
-							</article>
-						))}
+					<div className="system-health-heading">
+						<h2>
+							Health checks <span className="count">{report.data.findings.length}</span>
+						</h2>
+						<StatusMark
+							tone={attention ? "warn" : report.data.findings.length ? "success" : "unverified"}
+							label={
+								attention
+									? `${attention} to review`
+									: report.data.findings.length
+										? "No findings need attention"
+										: "No findings reported"
+							}
+						/>
 					</div>
-					<h2>Clio folders</h2>
-					<dl className="settings-list">
-						{Object.entries(report.data.paths).map(([role, path]) => (
-							<div key={role}>
-								<dt>{humanizeKey(role)}</dt>
-								<dd>
-									<code>{path}</code>
-								</dd>
-								<dd />
-							</div>
-						))}
-					</dl>
-					<Boundary panel={PANELS.system} />
+					<div className="system-discovery">
+						{!compact && (
+							<label className="settings-filter">
+								Find a diagnostic
+								<input type="search" value={filter} onChange={(event) => discover("q", event.target.value, true)} />
+							</label>
+						)}
+						<button
+							type="button"
+							aria-pressed={attentionOnly}
+							onClick={() =>
+								compact ? setSidebarAttention(!attentionOnly) : discover("attention", attentionOnly ? null : "true")
+							}
+						>
+							Needs review only · {attention}
+						</button>
+					</div>
+					{!report.data.findings.length && <PanelEmpty>{emptyState.emptyStore("health finding")}</PanelEmpty>}
+					{!!report.data.findings.length && !groups.length && (
+						<PanelEmpty>
+							{attentionOnly && !filter ? "No findings need review." : "No diagnostics match these filters."}
+						</PanelEmpty>
+					)}
+					{groups.map((group) => (
+						<section className="system-health-group" key={group.level} aria-label={group.label}>
+							<h3>
+								{group.label} · {group.findings.length}
+							</h3>
+							{group.findings.map((row) => {
+								const action = findingAction(row);
+								const FindingContainer = compact ? "details" : "article";
+								return (
+									<FindingContainer className="system-finding" key={row.name}>
+										{compact && <summary>{row.name}</summary>}
+										{!compact && (
+											<div>
+												<h4>{row.name}</h4>
+												<StatusMark tone={group.tone} label={group.label} />
+											</div>
+										)}
+										<div>
+											<p>{row.detail}</p>
+											{row.detailRedacted && (
+												<small>
+													Parser details withheld · inspect locally with <code>clio-coder doctor</code>
+												</small>
+											)}
+											{action && <Link to={action.path}>{action.label}</Link>}
+										</div>
+									</FindingContainer>
+								);
+							})}
+						</section>
+					))}
+					{attention > 0 && (
+						<p className="panel-note">
+							For local diagnostic details, run <code>clio-coder doctor</code>. Review the reported remedy before making
+							changes.
+						</p>
+					)}
+					{meta.data && (
+						<details className="system-versions">
+							<summary>Runtime versions · {meta.data.clio}</summary>
+							<dl className="settings-list">
+								{Object.entries({
+									"Clio Coder": meta.data.clio,
+									"Web application": meta.data.app,
+									Node: meta.data.node,
+									Platform: meta.data.platform,
+									"Pi agent core": meta.data.piAgentCore,
+									"Pi AI": meta.data.piAi,
+									"Pi TUI": meta.data.piTui,
+								}).map(([name, value]) => (
+									<div key={name}>
+										<dt>{name}</dt>
+										<dd>{value ?? "Not installed"}</dd>
+										<dd />
+									</div>
+								))}
+							</dl>
+						</details>
+					)}
+					{!compact && <h2>Clio folders</h2>}
+					{compact ? (
+						<details className="system-compact-paths">
+							<summary>Clio folders</summary>
+							<dl className="settings-list">
+								{Object.entries(report.data.paths).map(([role, path]) => (
+									<div key={role}>
+										<dt>{humanizeKey(role)}</dt>
+										<dd>
+											<code>{path}</code>
+										</dd>
+									</div>
+								))}
+							</dl>
+						</details>
+					) : (
+						<dl className="settings-list">
+							{Object.entries(report.data.paths).map(([role, path]) => (
+								<div key={role}>
+									<dt>{humanizeKey(role)}</dt>
+									<dd>
+										<code>{path}</code>
+									</dd>
+									<dd />
+								</div>
+							))}
+						</dl>
+					)}
 				</>
 			)}
 		</section>
@@ -189,7 +298,12 @@ export function InteropPage({ client }: { client: Client }) {
 				<PanelEmpty>{emptyState.unread("external agent inventory")}</PanelEmpty>
 			)}
 			{selection.id && report.isPending && <p>Reading installed agents…</p>}
-			{report.error && <p role="alert">{report.error.message}</p>}
+			{report.error && (
+				<p role="alert">
+					{report.error.message}
+					{report.data && " Showing the last received observations."}
+				</p>
+			)}
 			{report.data && (
 				<>
 					<dl className="facts panel-summary" aria-label="Detected agent summary">
@@ -200,13 +314,20 @@ export function InteropPage({ client }: { client: Client }) {
 							</div>
 						))}
 					</dl>
-					<div className="config-entries">
+					<p className="panel-note">
+						Versions are recorded observations until you explicitly probe them. Probing runs each installed executable’s
+						bounded <code>--version</code> command.
+					</p>
+					<div className="interop-agents">
 						{orderedAgents(report.data).map((agent) => {
 							const presence = presenceMark(agent);
 							const wiring = wiringMark(agent);
 							return (
-								<article className="trace-panel" key={agent.kind}>
-									<h2>{agent.label}</h2>
+								<article className="interop-agent" key={agent.kind}>
+									<div className="interop-agent__heading">
+										<h2>{agent.label}</h2>
+										{agent.decisionStale && <StatusMark tone="warn" label="Previous answer is stale" />}
+									</div>
 									<p className="panel-marks">
 										<StatusMark tone={presence.tone} label={presence.label} />
 										<StatusMark tone={wiring.tone} label={wiring.label} />
@@ -277,7 +398,6 @@ export function InteropPage({ client }: { client: Client }) {
 							);
 						})}
 					</div>
-					<Boundary panel={PANELS.interop} />
 				</>
 			)}
 		</section>

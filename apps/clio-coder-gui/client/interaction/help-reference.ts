@@ -46,10 +46,6 @@ export const VIEW_GUIDE: Readonly<Record<NavPath, { title: string; meaning: stri
 		title: "Toolchain",
 		meaning: "The tools Clio Coder can reach on this machine, their versions, and the trust each one carries.",
 	},
-	"/docs": {
-		title: "Docs",
-		meaning: "The project's own documentation, read from the repository and searchable without leaving the app.",
-	},
 	"/settings": {
 		title: "Settings",
 		meaning:

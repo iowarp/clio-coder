@@ -1,12 +1,12 @@
+import { join } from "node:path";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { API_VERSION, APP_VERSION } from "../contracts/meta.js";
 import { openapi } from "../contracts/openapi.js";
 import { routes } from "../contracts/routes.js";
-import { getVersionInfo } from "./clio/http-shims.js";
+import { getVersionInfo, resolvePackageRoot } from "./clio/http-shims.js";
 import { auth } from "./http/auth.js";
 import { problemResponse } from "./http/problem.js";
-import { docsRoutes } from "./http/routes-docs.js";
 import { evidenceRoutes } from "./http/routes-evidence.js";
 import { fleetRoutes } from "./http/routes-fleet.js";
 import { libraryRoutes } from "./http/routes-library.js";
@@ -21,7 +21,6 @@ import { staticClient } from "./http/static.js";
 import { idempotencyKey, register } from "./http/validate.js";
 import { ArtifactWindow } from "./services/artifact-window.js";
 import { Commands } from "./services/commands.js";
-import type { DocsService } from "./services/docs.js";
 import type { EventHub } from "./services/event-hub.js";
 import type { EvidenceService } from "./services/evidence.js";
 import type { FleetService } from "./services/fleet.js";
@@ -44,7 +43,6 @@ export function createApp(options: {
 	operations: OperationRegistry;
 	toolchain: ToolchainService;
 	traces: TraceService;
-	docs: DocsService;
 	settings: SettingsService;
 	targets: TargetsService;
 	fleet: FleetService;
@@ -91,6 +89,7 @@ export function createApp(options: {
 		epoch: hub.epoch,
 		pwa: options.pwa ?? false,
 		idle: options.idle(),
+		bundledDocsPath: join(resolvePackageRoot(), "docs"),
 	}));
 	register(app, hub, routes.openapi, () => openapi());
 	register(app, hub, routes.events, ({ query }, context) => events(context, hub, query.after));
@@ -112,7 +111,6 @@ export function createApp(options: {
 	});
 	register(app, hub, routes.cancel, ({ params }) => operations.cancel(params.id));
 	traceRoutes(app, hub, options.traces);
-	docsRoutes(app, hub, options.docs);
 	settingsRoutes(app, hub, options.settings);
 	targetsRoutes(app, hub, options.targets);
 	fleetRoutes(app, hub, options.fleet, artifacts);

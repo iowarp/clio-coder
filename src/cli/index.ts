@@ -76,7 +76,6 @@ Usage:
   clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
   clio-coder interop inspect --json  detected external coding agents and how far each one is wired
   clio-coder panes install|theme  install the pane multiplexer (alias for 'tools install herdr'), or print Clio's theme as a herdr block
-  clio-coder docs [topic]         open the documentation in your browser (--no-open to print the launch link)
   clio-coder dev <command>        harness instruments and power-user surfaces; run 'clio-coder dev' for the list
   clio-coder --demo|--no-demo      enable or disable interactive guidance for this session
   clio-coder --help, -h           this message
@@ -313,7 +312,6 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["mcp", async (subArgs) => (await import("./mcp.js")).runMcpCommand(subArgs)],
 	["verifiers", async (subArgs) => (await import("./verifiers.js")).runVerifiersCommand(subArgs)],
 	["gui", async (subArgs) => (await import("./gui.js")).runGuiCommand(subArgs)],
-	["docs", async (subArgs) => (await import("./docs.js")).runDocsCommand(subArgs)],
 	["share", async (subArgs) => (await import("./share.js")).runShareCommand(subArgs)],
 	["export", async (subArgs) => (await import("./share.js")).runExportCommand(subArgs)],
 	["import", async (subArgs) => (await import("./share.js")).runImportCommand(subArgs)],

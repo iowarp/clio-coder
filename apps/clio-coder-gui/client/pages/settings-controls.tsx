@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SettingControl, SettingsControls, SettingWritten } from "../../contracts/settings-controls.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
@@ -20,6 +21,7 @@ import {
 	TIMING_SENTENCE,
 	writtenSentences,
 } from "./settings-control-model.js";
+import { useSettingsDrafts } from "./settings-drafts.js";
 import "./settings-controls.css";
 
 /** A model setting's catalog: the paired target's models as Clio Coder last read them, and where from. */
@@ -106,13 +108,15 @@ function ControlRow({
 	draft,
 	onDraft,
 	catalog,
+	compact = false,
 }: {
 	control: SettingControl;
 	save: (write: { path: string; value: string; confirmed?: boolean }) => Promise<SettingWritten>;
 	workspaceId: string;
 	draft: string | null;
-	onDraft: (value: string | null) => void;
+	onDraft: (value: string | null, submittedValue?: string) => void;
 	catalog?: ModelCatalog | undefined;
+	compact?: boolean;
 }) {
 	const fieldId = useId(),
 		helpId = useId();
@@ -122,12 +126,12 @@ function ControlRow({
 	const write = useMutation({
 		scope: { id: `settings-write:${workspaceId}` },
 		mutationFn: save,
-		onSuccess: (result) => {
+		onSuccess: (result, variables) => {
 			setSaved({
 				sentences: writtenSentences(result.changed, result.controls.controls, control.path),
 				timing: result.timing,
 			});
-			onDraft(null);
+			onDraft(null, variables.value);
 			setConfirmed(false);
 		},
 		onSettled: () => {
@@ -140,6 +144,7 @@ function ControlRow({
 	const edit = (next: string) => {
 		onDraft(next === control.value ? null : next);
 		setSaved(null);
+		setConfirmed(false);
 		write.reset();
 	};
 	const writable = control.access === "writable";
@@ -150,8 +155,12 @@ function ControlRow({
 				<p id={helpId}>{control.description}</p>
 				{control.help && <p className="setting-control__help">{control.help}</p>}
 				{control.note && <p className="setting-control__note">{control.note}</p>}
-				<small>
-					<code>{control.path}</code> · {sourceLabel(control.source)} · {TIMING_LABEL[control.timing]}
+				<small className="setting-control__source">
+					<code>{control.path}</code>
+					<Link to={`/settings/effective?${new URLSearchParams({ workspace: workspaceId, q: control.path })}`}>
+						{sourceLabel(control.source)} · {compact ? "open effective value page" : "inspect effective value"}
+					</Link>
+					<span title={TIMING_SENTENCE[control.timing]}>{TIMING_LABEL[control.timing]}</span>
 				</small>
 			</div>
 			<div className="setting-control__edit">
@@ -267,12 +276,41 @@ function ControlRow({
 	);
 }
 
-export function SettingsControlsView({ client, workspaceId }: { client: Client; workspaceId: string }) {
+export function SettingsControlsView({
+	client,
+	workspaceId,
+	compact = false,
+}: {
+	client: Client;
+	workspaceId: string;
+	compact?: boolean;
+}) {
 	const queries = useQueryClient();
-	const [section, setSection] = useState<string | null>(null),
-		[filter, setFilter] = useState(""),
-		[showDrafts, setShowDrafts] = useState(false),
-		[drafts, setDrafts] = useState<Record<string, string>>({});
+	const [search, setSearch] = useSearchParams();
+	const [localDiscovery, setLocalDiscovery] = useState<{ section: string | null; q: string }>({ section: null, q: "" });
+	const [selectedControl, setSelectedControl] = useState<string | null>(null);
+	const section = compact ? localDiscovery.section : search.get("section"),
+		filter = compact ? localDiscovery.q : (search.get("q") ?? "");
+	const discover = (sectionId: string | null, query: string, replace = false) => {
+		if (compact) {
+			setLocalDiscovery({ section: sectionId, q: query });
+			setSelectedControl(null);
+			return;
+		}
+		setSearch(
+			(current) => {
+				const next = new URLSearchParams(current);
+				if (sectionId) next.set("section", sectionId);
+				else next.delete("section");
+				if (query) next.set("q", query);
+				else next.delete("q");
+				return next;
+			},
+			{ replace },
+		);
+	};
+	const [showDrafts, setShowDrafts] = useState(false);
+	const [drafts, setDrafts, updateDraft] = useSettingsDrafts(client, workspaceId);
 	const key = ["settings-controls", workspaceId];
 	const report = useQuery({
 		queryKey: key,
@@ -290,7 +328,7 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 			}
 			return changed ? next : current;
 		});
-	}, [report.data]);
+	}, [report.data, setDrafts]);
 	// Model settings pick from their target's catalog. The inventory is read only when one is on
 	// screen, and "Check again" asks that target's endpoint for its current list.
 	const modelsVisible = (report.data?.controls ?? []).some((control) => MODEL_TARGET_PATHS[control.path]);
@@ -360,14 +398,6 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 			),
 		};
 	};
-	const updateDraft = (path: string, value: string | null) => {
-		setDrafts((current) => {
-			const next = { ...current };
-			if (value === null) delete next[path];
-			else next[path] = value;
-			return next;
-		});
-	};
 	if (report.isPending) return <p>Reading settings…</p>;
 	if (!report.data)
 		return (
@@ -389,11 +419,16 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 	const unsaved = controls.filter(
 		(control) => drafts[control.path] !== undefined && drafts[control.path] !== control.value,
 	);
-	const active = showDrafts || filter.trim() ? null : (section ?? sections[0]?.id ?? null);
+	const active =
+		showDrafts || filter.trim() || (compact && section === "all")
+			? null
+			: (sections.find((candidate) => candidate.id === section)?.id ?? sections[0]?.id ?? null);
 	const visible = showDrafts
 		? unsaved
 		: controls.filter((control) => (active ? control.section === active : matchesControl(control, filter)));
 	const current = sections.find((candidate) => candidate.id === active);
+	const chosen = visible.find((control) => control.path === selectedControl) ?? visible[0];
+	const editorControls = compact && chosen ? [chosen] : visible;
 	return (
 		<>
 			{report.error ? (
@@ -404,62 +439,117 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 					</button>
 				</div>
 			) : null}
-			<p>
-				These user settings can affect other projects. The selected project determines which effective values and sources
-				are shown. Changes are checked against the whole configuration and saved to your user settings
+			<div className="settings-write-scope">
+				<strong>Save to your user settings</strong>
+				<p>Applies across projects. Project and command-line overrides take precedence.</p>
 				{userFile && (
-					<>
-						{" "}
-						at <code className="inline-path">{userFile}</code>
-					</>
+					<details>
+						<summary>Saved settings file</summary>
+						<code>{userFile}</code>
+					</details>
 				)}
-				. Project files are never written from here.
-			</p>
+			</div>
 			<label className="settings-filter">
 				Find a setting
 				<input
 					type="search"
 					value={filter}
 					onChange={(event) => {
-						setFilter(event.target.value);
+						discover(section, event.target.value, true);
 						setShowDrafts(false);
 					}}
 				/>
 			</label>
-			<nav className="settings-tabs" aria-label="Settings sections">
-				{sections.map((candidate) => (
-					<button
-						type="button"
-						key={candidate.id}
-						aria-pressed={active === candidate.id}
-						onClick={() => {
-							setSection(candidate.id);
-							setFilter("");
-							setShowDrafts(false);
-						}}
-					>
-						{candidate.label} · {controls.filter((control) => control.section === candidate.id).length}
-					</button>
-				))}
-				{unsaved.length > 0 || showDrafts ? (
-					<button
-						type="button"
-						aria-pressed={showDrafts}
-						onClick={() => {
-							setFilter("");
-							setShowDrafts(true);
-						}}
-					>
-						Unsaved · {unsaved.length}
-					</button>
-				) : null}
-			</nav>
-			<h2>
-				{showDrafts ? `Unsaved changes · ${visible.length}` : current ? current.label : `Matches · ${visible.length}`}
-			</h2>
-			{current && <p>{current.description}</p>}
+			{compact ? (
+				<div className="sidebar-settings__selection">
+					<label>
+						Section
+						<select
+							value={active ?? "all"}
+							onChange={(event) => {
+								discover(event.target.value, "");
+								setShowDrafts(false);
+							}}
+						>
+							<option value="all">All sections</option>
+							{sections.map((candidate) => (
+								<option key={candidate.id} value={candidate.id}>
+									{candidate.label}
+								</option>
+							))}
+						</select>
+					</label>
+					<label>
+						Setting · {visible.length}
+						<select
+							value={chosen?.path ?? ""}
+							disabled={!visible.length}
+							onChange={(event) => setSelectedControl(event.target.value)}
+						>
+							{!visible.length && <option value="">No settings match</option>}
+							{groupControls(visible).map(({ group, controls: rows }) => (
+								<optgroup key={group} label={group}>
+									{rows.map((control) => (
+										<option key={control.path} value={control.path}>
+											{control.label}
+											{drafts[control.path] !== undefined ? " · unsaved" : ""}
+										</option>
+									))}
+								</optgroup>
+							))}
+						</select>
+					</label>
+					{unsaved.length > 0 || showDrafts ? (
+						<button type="button" aria-pressed={showDrafts} onClick={() => setShowDrafts(!showDrafts)}>
+							Unsaved · {unsaved.length}
+						</button>
+					) : null}
+				</div>
+			) : (
+				<nav className="settings-tabs" aria-label="Settings sections">
+					{sections.map((candidate) => (
+						<button
+							type="button"
+							key={candidate.id}
+							aria-pressed={active === candidate.id}
+							onClick={() => {
+								discover(candidate.id, "");
+								setShowDrafts(false);
+							}}
+						>
+							{candidate.label} · {controls.filter((control) => control.section === candidate.id).length}
+						</button>
+					))}
+					{unsaved.length > 0 || showDrafts ? (
+						<button
+							type="button"
+							aria-pressed={showDrafts}
+							onClick={() => {
+								discover(section, "");
+								setShowDrafts(true);
+							}}
+						>
+							Unsaved · {unsaved.length}
+						</button>
+					) : null}
+				</nav>
+			)}
+			{!compact && (
+				<h2>
+					{showDrafts ? `Unsaved changes · ${visible.length}` : current ? current.label : `Matches · ${visible.length}`}
+				</h2>
+			)}
+			{current && !compact && <p>{current.description}</p>}
+			{unsaved.length > 0 && (
+				<p className="settings-draft-note" role="status">
+					{unsaved.length} unsaved {unsaved.length === 1 ? "change" : "changes"}. Save each control to apply it; filtering
+					preserves drafts in this workspace.
+				</p>
+			)}
+			{startCheck.error && <p role="alert">Could not start the model check: {startCheck.error.message}</p>}
+			{checkOperation.error && <p role="alert">Model check progress is unavailable: {checkOperation.error.message}</p>}
 			{!visible.length && <p>{showDrafts ? "No unsaved changes." : "No settings match."}</p>}
-			{groupControls(visible).map(({ group, controls: rows }) => (
+			{groupControls(editorControls).map(({ group, controls: rows }) => (
 				<section key={group} className="setting-group" aria-label={group}>
 					<h3>{group}</h3>
 					{rows.map((control) => (
@@ -469,8 +559,9 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 							save={save}
 							workspaceId={workspaceId}
 							draft={drafts[control.path] ?? null}
-							onDraft={(value) => updateDraft(control.path, value)}
+							onDraft={(value, submittedValue) => updateDraft(control.path, value, submittedValue)}
 							catalog={catalogFor(control)}
+							compact={compact}
 						/>
 					))}
 				</section>

@@ -37,11 +37,17 @@ export function runTone(status: string): StatusTone {
 
 /** Tokens, cost, wall time and the runtime that produced them. A live run measures wall time to now. */
 export function runTotals(run: TraceRun, now: number): RunTotal[] {
-	const ended = run.ended_at ? Date.parse(run.ended_at) : now;
+	const ended = run.ended_at ? Date.parse(run.ended_at) : run.status === "running" ? now : Number.NaN;
 	return [
 		{ label: "Tokens", value: formatTokens(run.total_tokens) },
 		{ label: "Cost", value: formatCost(run.total_cost_usd) },
-		{ label: "Wall time", value: formatDuration(ended - Date.parse(run.started_at)) },
+		{
+			label: "Wall time",
+			value:
+				Number.isFinite(ended - Date.parse(run.started_at)) && ended >= Date.parse(run.started_at)
+					? formatDuration(ended - Date.parse(run.started_at))
+					: "not recorded",
+		},
 		{ label: "Runtime", value: run.runtime || "not recorded" },
 	];
 }
@@ -91,4 +97,27 @@ export function provenanceFacts(receipt: Record<string, unknown>): Array<[string
 		["clioCoderVersion", receipt.clioCoderVersion ?? receipt.clioVersion],
 		...PROVENANCE_KEYS.map((key): [string, unknown] => [key, receipt[key]]),
 	];
+}
+
+/** Missing phase timestamps stay missing; no bar is inferred from the parent run. */
+export function phasePosition(
+	phase: TracePhase,
+	run: TraceRun,
+	now: number,
+): { left: number; width: number; duration: number } | null {
+	const start = Date.parse(run.started_at);
+	const end = run.ended_at ? Date.parse(run.ended_at) : run.status === "running" ? now : Number.NaN;
+	const phaseStart = phase.started_at ? Date.parse(phase.started_at) : Number.NaN;
+	const phaseEnd = phase.ended_at
+		? Date.parse(phase.ended_at)
+		: phase.status === "running" && run.status === "running"
+			? now
+			: Number.NaN;
+	if (![start, end, phaseStart, phaseEnd].every(Number.isFinite) || end <= start || phaseEnd < phaseStart) return null;
+	const left = Math.max(0, Math.min(100, ((phaseStart - start) / (end - start)) * 100));
+	return {
+		left,
+		width: Math.max(0, Math.min(100 - left, ((phaseEnd - phaseStart) / (end - start)) * 100)),
+		duration: phaseEnd - phaseStart,
+	};
 }

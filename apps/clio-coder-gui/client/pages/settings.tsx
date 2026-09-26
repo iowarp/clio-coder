@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
@@ -23,7 +22,16 @@ export function useWorkspaceSelection(client: Client) {
 	const [search, setSearch] = useSearchParams();
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	const id = search.get("workspace") || workspaces.data?.[0]?.id || "";
-	return { workspaces, id, select: (workspace: string) => setSearch({ workspace }) };
+	return {
+		workspaces,
+		id,
+		select: (workspace: string) =>
+			setSearch((current) => {
+				const next = new URLSearchParams(current);
+				next.set("workspace", workspace);
+				return next;
+			}),
+	};
 }
 export function WorkspacePicker({ selection }: { selection: ReturnType<typeof useWorkspaceSelection> }) {
 	const { workspaces, id, select } = selection;
@@ -52,7 +60,18 @@ export function WorkspacePicker({ selection }: { selection: ReturnType<typeof us
 export function SettingsPage({ client, view }: { client: Client; view: "settings" | "effective" | "why" }) {
 	const selection = useWorkspaceSelection(client);
 	const { id } = selection;
-	const [filter, setFilter] = useState("");
+	const [search, setSearch] = useSearchParams();
+	const filter = search.get("q") ?? "";
+	const setFilter = (query: string) =>
+		setSearch(
+			(current) => {
+				const next = new URLSearchParams(current);
+				if (query) next.set("q", query);
+				else next.delete("q");
+				return next;
+			},
+			{ replace: true },
+		);
 	const settings = useQuery({
 		queryKey: ["workspace-settings", id],
 		queryFn: () => client.call(routes.workspaceSettings, { ...emptyInput, params: { id } }),
@@ -85,10 +104,13 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 					<p role="alert">{settings.error.message}</p>
 				) : (
 					<>
-						<p>
-							Each value is the one Clio Coder would use in this workspace, with the layer that set it. Exact values appear for
-							the non-sensitive set; everything else reads as hidden without copying the raw value.
-						</p>
+						<p>Effective values for this workspace. Sensitive values stay hidden.</p>
+						<ol className="settings-precedence" aria-label="Setting precedence, lowest to highest">
+							{Object.values(SETTING_SOURCE_LABELS).map((label) => (
+								<li key={label}>{label}</li>
+							))}
+						</ol>
+						<p className="panel-note">Later layers override earlier ones. GUI edits save to the user layer.</p>
 						<details className="trace-panel">
 							<summary>Configuration layers · {settings.data.layers.length}</summary>
 							<ul className="config-layers">
@@ -145,7 +167,10 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 												{settingValue(row)}
 												{row.redacted && <small>Sensitive content hidden</small>}
 											</dd>
-											<dd className="setting-source">{SETTING_SOURCE_LABELS[row.source]}</dd>
+											<dd className="setting-source">
+												{SETTING_SOURCE_LABELS[row.source]}
+												<Link to={`/settings?${new URLSearchParams({ workspace: id, q: row.key })}`}>Find control</Link>
+											</dd>
 										</div>
 									))}
 								</dl>
@@ -303,7 +328,7 @@ export function ConfigurationTabs({
 			{[
 				{ key: "settings", label: "Settings", path: "/settings" },
 				{ key: "effective", label: "Effective values", path: "/settings/effective" },
-				{ key: "why", label: "Why", path: "/settings/why" },
+				{ key: "why", label: "Sources & timing", path: "/settings/why" },
 				{ key: "targets", label: "Targets", path: "/settings/targets" },
 				{ key: "routing", label: "Routing", path: "/settings/routing" },
 			].map((tab) => (

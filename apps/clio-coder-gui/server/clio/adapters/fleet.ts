@@ -48,20 +48,23 @@ function dispatchRows() {
 	try {
 		statSync(join(clioStateDir(), "runs.json"));
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { rows: [], present: false };
 		throw new AppProblem("unavailable", "The dispatch ledger cannot be read.");
 	}
 	if (!containedFile(clioStateDir(), "runs.json"))
 		throw new AppProblem("unavailable", "The dispatch ledger is outside its storage boundary or exceeds 8 MiB.");
 	try {
-		return [...openLedger().list()].filter((row) => {
-			try {
-				dispatchSummary(row);
-				return Number.isFinite(Date.parse(row.startedAt));
-			} catch {
-				return false;
-			}
-		});
+		return {
+			present: true,
+			rows: [...openLedger().list()].filter((row) => {
+				try {
+					dispatchSummary(row);
+					return Number.isFinite(Date.parse(row.startedAt));
+				} catch {
+					return false;
+				}
+			}),
+		};
 	} catch {
 		throw new AppProblem("unavailable", "The dispatch ledger is unreadable.");
 	}
@@ -72,7 +75,8 @@ export function readFleet(input: FleetRequest): unknown {
 		try {
 			entries = readdirSync(join(clioStateDir(), "fleet-runs"));
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") return artifactPage([], input.limit, input.cursor);
+			if ((error as NodeJS.ErrnoException).code === "ENOENT")
+				return { ...artifactPage([], input.limit, input.cursor), present: false };
 			throw new AppProblem("unavailable", "The fleet directory cannot be read.");
 		}
 		if (entries.length > 100_000) throw new AppProblem("unavailable", "Fleet directory exceeds the supported scan size.");
@@ -89,14 +93,14 @@ export function readFleet(input: FleetRequest): unknown {
 				/* A malformed record costs one row, never the page. */
 			}
 		}
-		return artifactPage(rows, input.limit, input.cursor);
+		return { ...artifactPage(rows, input.limit, input.cursor), present: true };
 	}
 	if (input.kind === "receipt") return { receipt: receipt(input.id) };
 	if (input.kind === "gates") return checked(FleetGates, gateTopology());
-	const rows = dispatchRows().sort(
-		(a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt) || b.id.localeCompare(a.id),
-	);
-	if (input.kind === "dispatches") return artifactPage(rows.map(dispatchSummary), input.limit, input.cursor);
+	const ledger = dispatchRows();
+	const rows = ledger.rows.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt) || b.id.localeCompare(a.id));
+	if (input.kind === "dispatches")
+		return { ...artifactPage(rows.map(dispatchSummary), input.limit, input.cursor), present: ledger.present };
 	if (input.kind === "councils") return checked(Councils, councilTopologies(rows));
 	if (input.kind === "dispatch") {
 		const row = rows.find((row) => row.id === input.id);

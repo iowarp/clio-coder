@@ -12,7 +12,6 @@ See [the documentation map](../../docs/README.md) for operator guides and
 
 ```sh
 clio-coder gui --open       # reuse the owned background app or start a private server
-clio-coder docs [topic]      # the shipped documentation in your browser
 ```
 
 Bare `gui` reuses this installation's owned background application when present.
@@ -23,10 +22,59 @@ the private server.
 and a desktop entry on Linux with a systemd user session. Each is installed only on
 request and removed by its own `uninstall` or by `clio-coder uninstall`.
 
+Select **Sessions** to browse conversations grouped by project in the sidebar.
+Expand a project to open or resume a conversation; **Show more** reveals earlier
+conversations. **Navigation** returns to the application sections.
+
+During a conversation, selecting another area opens its controls in the sidebar
+and keeps the chat and its draft in place. Settings edits supported controls
+inline; Library keeps package inspection and plan review beside the chat. Traces,
+Fleet, Evidence, Toolchain, and System have their own lists and controls.
+Explicit viewer links open larger inspection pages, with a return to the conversation.
+
+The conversation input keeps attachments and message options on the left, with
+model, thinking, and send/stop controls on the right. Message options includes
+the Enter preference and delivery controls for steering or queuing a message
+while Clio is working.
+
+The conversation header provides **Configure harness**, a compact dashboard of
+reported session activity, and **Show artifacts**. The artifacts inspector shows
+recorded file activity, tool results, and linked evidence. It docks on the right
+on wide screens and opens as a dismissible drawer on smaller screens.
+
+## Inspecting work and configuration
+
+Traces keeps search and source/status filters in the URL. Open a recorded run,
+select a phase in its waterfall, and inspect its events, checks, and accounting.
+Unknown prices remain unavailable. A session trace has no worker receipt unless
+work was actually dispatched.
+
+Fleet shows installation-wide execution and dispatch history. Open a worker to
+inspect its recorded output, then follow its associated Evidence or trace link
+when available. Evidence can select a recent dispatch, collect its bundle for a
+chosen workspace, and show receipt integrity, observed validation, and review as
+separate checks.
+
+Library supports searching available and installed resources and inspecting a
+package before staging a lifecycle plan. Review its destinations, dependencies,
+refused steps, and effects on dependents before applying the exact plan. Canceling
+releases the staged source. Browsing does not install packages or run verifiers.
+
+Settings search links each supported control to its effective value and sources.
+Drafts are applied explicitly to the user layer; workspace and command-line
+overrides remain visible. Toolchain distinguishes PATH resolution from Clio's
+vendored copy, and removing that copy leaves a PATH installation intact. System
+groups health findings and offers an explicit fresh version probe.
+
+Help opens [the public documentation](https://coder.iowarp.ai/docs.html) and shows
+the installed Markdown reference path. `Control+/` opens Help. The documentation
+command and native reader have been removed; the bundled reference and offline
+`clio_docs` retrieval remain available.
+
 ## How it stays separate
 
-- **Its own process.** The CLI loads the application only inside the `gui` and
-  `docs` commands, and inside `uninstall` when a GUI service or launcher is
+- **Its own process.** The CLI loads the application only inside the `gui` command
+  and inside `uninstall` when a GUI service or launcher is
   installed, so ordinary commands, the TUI and help/version load none of it.
   The application drives Clio Coder through ACP children and fixed CLI commands; it
   is not a second implementation of the runtime.
@@ -59,7 +107,7 @@ because the root test lane rebuilds `dist/client`.
 pnpm run typecheck && npx biome check . && pnpm run test:full && pnpm run build
 node scripts/check-contrast.mjs
 npx vite build --outDir <scratch>/client --emptyOutDir
-pnpm run smoke:browser --client <scratch>/client/   # 1600, 1050 and 390 px with Axe
+pnpm run smoke:browser --client <scratch>/client/   # 1600, 1050, 390 and 320 px with Axe
 pnpm run visual --client <scratch>/client/ --out <scratch>/shots --route   # review screenshots
 pnpm run perf --client <scratch>/client/ --out <scratch>/perf             # streaming measurements
 ```

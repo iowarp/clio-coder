@@ -1,6 +1,5 @@
 import type { Static } from "typebox";
 import type { Problem } from "../../contracts/common.js";
-import type { DocsRequest } from "../../contracts/docs.js";
 import type { EvidenceRequest } from "../../contracts/evidence.js";
 import type { FleetRequest } from "../../contracts/fleet.js";
 import type { LibraryPlanRequest } from "../../contracts/library.js";
@@ -11,7 +10,6 @@ import type { TraceRequest } from "../../contracts/traces.js";
 export type WorkerKind = "reads" | "ops";
 export type WorkerSettings = {
 	fixture?: boolean;
-	fixtureDocsPackageRoot?: string;
 	fixtureGraphDelayMs?: number;
 	readDelayMs?: number;
 	readDeadlineMs?: number;
@@ -35,7 +33,6 @@ export interface Methods {
 	"settings.controls": { params: { cwd: string }; result: unknown };
 	"settings.write": { params: { cwd: string; write: SettingWrite }; result: unknown };
 	"config.graph": { params: { cwd: string }; result: unknown };
-	"docs.read": { params: DocsRequest; result: unknown };
 	"sessions.list": { params: { cwd: string }; result: unknown };
 	"traces.read": { params: TraceRequest; result: unknown };
 	"tools.list": { params: Record<string, never>; result: { rows: RawTool[]; threadId: number } };

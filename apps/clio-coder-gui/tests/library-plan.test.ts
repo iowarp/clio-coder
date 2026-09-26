@@ -51,6 +51,12 @@ test("a catalog search finds the package that provides a recipe, and scopes are 
 	assert.equal(matchesPackage(bundle, "  PAPER-cards "), true);
 	assert.equal(matchesPackage(bundle, "plugin:bundle"), true);
 	assert.equal(matchesPackage(bundle, "absent"), false);
+	assert.equal(
+		matchesPackage(pkg({ requires: ["skill:base"], sourceUrl: "registry/source/package" }), "skill:base"),
+		true,
+	);
+	assert.equal(matchesPackage(pkg({ sourceUrl: "registry/source/package" }), "source/package"), true);
+	assert.equal(matchesPackage(pkg({ copies: [{ scope: "project", state: "disabled" }] }), "disabled"), true);
 	assert.deepEqual(missingScopes(bundle), ["user", "project"]);
 	assert.deepEqual(missingScopes(pkg({ copies: [{ scope: "user", state: "loadable" }] })), ["project"]);
 });

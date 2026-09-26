@@ -11,10 +11,13 @@ import {
 	traceDatabasePath,
 } from "../../../../../src/domains/observability/trace-store.js";
 import { Id } from "../../../contracts/common.js";
-import type { TraceRequest } from "../../../contracts/traces.js";
+import { TraceId, type TraceRequest } from "../../../contracts/traces.js";
 import { AppProblem } from "../../services/problem.js";
 
-const Cursor = Type.Object({ startedAt: Type.String({ maxLength: 64 }), runId: Id }, { additionalProperties: false });
+const Cursor = Type.Object(
+	{ startedAt: Type.String({ maxLength: 64 }), runId: TraceId },
+	{ additionalProperties: false },
+);
 function cursorOf(encoded: string | undefined) {
 	if (encoded === undefined) return null;
 	try {
@@ -65,7 +68,7 @@ export class TraceAdapter {
 	read(input: TraceRequest): unknown {
 		// Parse caller-controlled cursors before opening storage, including on an empty installation.
 		const cursor = input.kind === "runs" ? cursorOf(input.query.cursor) : null;
-		if ("runId" in input && (!Value.Check(Id, input.runId) || input.runId.includes("..")))
+		if ("runId" in input && (!Value.Check(TraceId, input.runId) || input.runId.includes("..")))
 			throw new AppProblem("validation", "Invalid trace run identifier.");
 		if (input.kind === "receipt") return this.receipt(input.runId, input.full ?? false);
 		try {
@@ -115,6 +118,8 @@ export class TraceAdapter {
 		}
 	}
 	private receipt(runId: string, full: boolean) {
+		// Session namespaces identify database rows, not files in the dispatch receipt store.
+		if (!Value.Check(Id, runId)) return { receipt: null, evidence: null };
 		const state = clioStateDir();
 		let receipt: Record<string, unknown> | null = null;
 		let evidence: unknown = null;

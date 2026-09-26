@@ -422,10 +422,10 @@ const nginxRedirects = Object.entries(redirects)
 		return `location = ${path} { return 308 "${url.pathname}$is_args$args${url.hash}"; }`;
 	})
 	.join("\n");
-await writeFile(join(out, ".clio-redirects.conf"), `${nginxRedirects}\n`);
+await writeFile(join(out, ".clio-coder-redirects.conf"), `${nginxRedirects}\n`);
 
 await writeFile(
-	join(out, ".clio-revision.conf"),
+	join(out, ".clio-coder-revision.conf"),
 	values.revision
 		? `add_header X-Clio-Site-Revision "${values.revision}" always;\n`
 		: "# Local preview has no deployed revision.\n",

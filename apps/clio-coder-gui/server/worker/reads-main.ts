@@ -1,5 +1,4 @@
 import { workerData } from "node:worker_threads";
-import { DocsAdapter } from "../clio/adapters/docs.js";
 import { runtimeInfo } from "../clio/adapters/runtime.js";
 import { sessionHistory } from "../clio/adapters/sessions.js";
 import { toolchainAdapter } from "../clio/adapters/toolchain.js";
@@ -18,7 +17,6 @@ const fixture =
 		: undefined;
 const adapter = toolchainAdapter(fixture?.fixtureOptions(settings));
 const traces = new TraceAdapter();
-const docs = new DocsAdapter(settings.fixture ? settings.fixtureDocsPackageRoot : undefined);
 serveWorker(async (call) => {
 	if (call.method === "runtime.info" && process.env.NODE_ENV === "test") return runtimeInfo(import.meta.url);
 	if (call.method === "system.read" || call.method === "interop.read") {
@@ -57,7 +55,6 @@ serveWorker(async (call) => {
 		const { inspectConfigGraph } = await import("../clio/adapters/config-graph.js");
 		return inspectConfigGraph(call.params.cwd);
 	}
-	if (call.method === "docs.read") return docs.read(call.params);
 	if (call.method === "sessions.list") return sessionHistory(call.params.cwd);
 	if (call.method === "traces.read") return traces.read(call.params);
 	if (call.method !== "tools.list") throw new AppProblem("unsupported", "Method is not available in the reads worker.");

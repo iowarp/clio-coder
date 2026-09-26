@@ -1,14 +1,16 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
 import { useTokenRejected } from "./api/auth-state.js";
 import { type Client, emptyInput } from "./api/client.js";
 import { type ConnectionState, subscribe } from "./api/events.js";
 import { lastTokenWasRefused } from "./api/token.js";
+import { Icon } from "./design/icons.js";
 import {
 	MobileNavigation,
+	type MobileNavigationHandle,
 	Navigation,
 	RouteFocus,
 	SIDEBAR_ID,
@@ -16,13 +18,35 @@ import {
 	ThemeToggle,
 	useSidebarCollapsed,
 } from "./design/navigation.js";
+import { AREA_LABELS, type NavigationArea, navigationArea } from "./design/navigation-area.js";
 import { dismissAll, LiveRegions, NoticeToasts, reportProblem, useNotices } from "./design/notifications.js";
+import { ProjectNavigation } from "./design/project-navigation.js";
 import { AppPreferences } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
+import { WorkspaceChrome } from "./design/workspace-chrome.js";
 import { CommandPalette } from "./interaction/CommandPalette.js";
 import { appCommands } from "./interaction/commands.js";
 import { HelpDialog } from "./interaction/HelpDialog.js";
 import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
+import "./design/context-navigation.css";
+
+const areaViews = {
+	traces: lazy(() => import("./design/trace-navigation.js").then((module) => ({ default: module.TraceNavigation }))),
+	fleet: lazy(() => import("./design/fleet-navigation.js").then((module) => ({ default: module.FleetNavigation }))),
+	evidence: lazy(() =>
+		import("./design/evidence-navigation.js").then((module) => ({ default: module.EvidenceNavigation })),
+	),
+	library: lazy(() =>
+		import("./design/library-navigation.js").then((module) => ({ default: module.LibraryNavigation })),
+	),
+	toolchain: lazy(() =>
+		import("./design/toolchain-navigation.js").then((module) => ({ default: module.ToolchainNavigation })),
+	),
+	settings: lazy(() =>
+		import("./design/settings-navigation.js").then((module) => ({ default: module.SettingsNavigation })),
+	),
+	system: lazy(() => import("./design/system-navigation.js").then((module) => ({ default: module.SystemNavigation }))),
+};
 
 /** `/sessions/:id` and nothing else. The palette's session rows exist only on a conversation. */
 function sessionIdFrom(pathname: string): string | null {
@@ -34,6 +58,19 @@ export function App({ client }: { client: Client }) {
 	const queries = useQueryClient();
 	const navigate = useNavigate();
 	const location = useLocation();
+	const [navigationAt, setNavigationAt] = useState<string | null>(null);
+	const mobileNavigation = useRef<MobileNavigationHandle>(null);
+	const [selectedArea, setSelectedArea] = useState<{ path: string; area: NavigationArea } | null>(null);
+	const [conversationPath, setConversationPath] = useState<string | null>(null);
+	const previousPath = useRef(location.pathname);
+	useEffect(() => {
+		if (previousPath.current !== location.pathname) {
+			setNavigationAt(null);
+			setSelectedArea(null);
+		}
+		if (sessionIdFrom(location.pathname)) setConversationPath(location.pathname);
+		previousPath.current = location.pathname;
+	}, [location.pathname]);
 	const [connection, setConnection] = useState<ConnectionState>(client.token ? "Connecting…" : "Not connected");
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [helpOpen, setHelpOpen] = useState(false);
@@ -43,6 +80,8 @@ export function App({ client }: { client: Client }) {
 	// not be reachable by Tab either, or the focus order silently leaves the thing that has focus.
 	const layered = useLayersActive();
 	const refused = useTokenRejected() || (!client.token && lastTokenWasRefused());
+	const area = selectedArea?.path === location.pathname ? selectedArea.area : navigationArea(location.pathname);
+	const showArea = !!client.token && !refused && area !== null && navigationAt !== location.pathname;
 	const meta = useQuery({
 		queryKey: ["meta"],
 		queryFn: () => client.call(routes.meta, emptyInput),
@@ -58,15 +97,39 @@ export function App({ client }: { client: Client }) {
 	const session = useQuery({
 		queryKey: ["session", sessionId ?? ""],
 		queryFn: () => client.call(routes.session, { params: { id: sessionId ?? "" }, query: {}, body: {} }),
+		select: (value) => ({
+			workspaceId: value.workspaceId,
+			state: value.state,
+			runningTurnId: value.turns.at(-1)?.status === "running" ? (value.turns.at(-1)?.id ?? null) : null,
+		}),
 		enabled: false,
 	});
 	const snapshot = sessionId === null ? undefined : session.data;
-	const lastTurn = snapshot?.turns.at(-1);
-	const runningTurnId = lastTurn?.status === "running" ? lastTurn.id : null;
+	const runningTurnId = snapshot?.runningTurnId ?? null;
 
 	useShortcut("palette", () => setPaletteOpen(true));
 	useShortcut("help", () => setHelpOpen(true));
 	useShortcut("sidebar", toggleSidebar);
+
+	const selectArea = useCallback(
+		(path: string) => {
+			const nextArea = navigationArea(path);
+			if (nextArea) {
+				setNavigationAt(null);
+				if (sidebarCollapsed && !matchMedia("(max-width: 750px)").matches) toggleSidebar();
+				if (sessionIdFrom(location.pathname)) {
+					setSelectedArea({ path: location.pathname, area: nextArea });
+					requestAnimationFrame(() => {
+						if (matchMedia("(max-width: 750px)").matches) mobileNavigation.current?.open();
+						else document.querySelector<HTMLElement>(".desktop-navigation .sidebar-back")?.focus();
+					});
+					return true;
+				}
+			}
+			return false;
+		},
+		[location.pathname, sidebarCollapsed, toggleSidebar],
+	);
 
 	const commands = useMemo(
 		() =>
@@ -78,7 +141,9 @@ export function App({ client }: { client: Client }) {
 					hasNotices: notices.length > 0,
 				},
 				{
-					navigate: (path) => void navigate(path),
+					navigate: (path) => {
+						if (!selectArea(path)) void navigate(path);
+					},
 					openHelp: () => setHelpOpen(true),
 					toggleSidebar,
 					dismissNotices: dismissAll,
@@ -101,8 +166,90 @@ export function App({ client }: { client: Client }) {
 					},
 				},
 			),
-		[client, navigate, notices.length, queries, runningTurnId, sessionId, snapshot?.state, toggleSidebar],
+		[client, navigate, notices.length, queries, runningTurnId, sessionId, snapshot?.state, toggleSidebar, selectArea],
 	);
+	const workspaceChrome = useMemo(
+		() => ({
+			openArea: (next: NavigationArea) => {
+				if (!selectArea(`/${next}`)) void navigate(`/${next}`);
+			},
+		}),
+		[navigate, selectArea],
+	);
+
+	const navigationContent = (close?: () => void, collapsed = false) =>
+		showArea && area && !collapsed ? (
+			<>
+				<div className="sidebar-area-actions">
+					<button
+						type="button"
+						className="sidebar-back"
+						onClick={(event) => {
+							const container = event.currentTarget.closest(".sidebar, .navigation-dialog");
+							setNavigationAt(location.pathname);
+							requestAnimationFrame(() =>
+								container?.querySelector<HTMLElement>('nav[aria-label="Main navigation"] a')?.focus(),
+							);
+						}}
+					>
+						<span aria-hidden="true">←</span> Navigation
+					</button>
+					<button
+						type="button"
+						className="sidebar-search"
+						aria-label="Search commands"
+						title="Search commands (Ctrl K)"
+						onClick={() => {
+							close?.();
+							setPaletteOpen(true);
+						}}
+					>
+						<Icon name="search" />
+					</button>
+					{!close ? <SidebarToggle collapsed={sidebarCollapsed} toggle={toggleSidebar} /> : null}
+				</div>
+				<h2 className="sidebar-area-title">{AREA_LABELS[area]}</h2>
+				{conversationPath && conversationPath !== location.pathname ? (
+					<Link className="sidebar-return" to={conversationPath} onClick={close}>
+						Return to conversation <span aria-hidden="true">→</span>
+					</Link>
+				) : null}
+				<Suspense
+					fallback={
+						<p className="sidebar-note" role="status">
+							Loading {AREA_LABELS[area].toLocaleLowerCase()}…
+						</p>
+					}
+				>
+					{sessionId && !snapshot?.workspaceId && ["settings", "library"].includes(area) ? (
+						<p className="sidebar-note" role={session.error ? "alert" : "status"}>
+							{session.error
+								? `Conversation project unavailable: ${session.error.message}`
+								: "Reading the conversation's project…"}
+						</p>
+					) : area === "sessions" ? (
+						<ProjectNavigation client={client} activeWorkspace={snapshot?.workspaceId} close={close} />
+					) : (
+						(() => {
+							const AreaView = areaViews[area];
+							return (
+								<AreaView
+									client={client}
+									close={close}
+									workspaceId={snapshot?.workspaceId}
+									conversationPath={sessionId ? location.pathname : undefined}
+								/>
+							);
+						})()
+					)}
+				</Suspense>
+			</>
+		) : (
+			<>
+				{!close ? <SidebarToggle collapsed={sidebarCollapsed} toggle={toggleSidebar} /> : null}
+				<Navigation collapsed={collapsed} close={close} onHelp={() => setHelpOpen(true)} onSelect={selectArea} />
+			</>
+		);
 
 	return (
 		<div className="shell">
@@ -127,15 +274,21 @@ export function App({ client }: { client: Client }) {
 						version={meta.data?.clio}
 						platform={meta.data?.platform}
 					/>
-					<MobileNavigation />
+					<MobileNavigation
+						ref={mobileNavigation}
+						onHelp={() => setHelpOpen(true)}
+						content={(close) => navigationContent(close)}
+					/>
 				</div>
 			</header>
-			<div className="workspace" data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"} inert={layered}>
+			<div
+				className="workspace"
+				data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"}
+				data-area={showArea && area ? area : "navigation"}
+				inert={layered}
+			>
 				<aside className="desktop-navigation" id={SIDEBAR_ID}>
-					<div className="sidebar">
-						<SidebarToggle collapsed={sidebarCollapsed} toggle={toggleSidebar} />
-						<Navigation collapsed={sidebarCollapsed} />
-					</div>
+					<div className="sidebar">{navigationContent(undefined, sidebarCollapsed)}</div>
 				</aside>
 				<main id="main" tabIndex={-1}>
 					{!client.token || refused ? (
@@ -153,13 +306,15 @@ export function App({ client }: { client: Client }) {
 					) : meta.data.apiVersion !== API_VERSION ? (
 						<div role="alert">The app and server versions differ. Rebuild the client and reload.</div>
 					) : (
-						<Outlet context={connection} />
+						<WorkspaceChrome.Provider value={workspaceChrome}>
+							<Outlet context={connection} />
+						</WorkspaceChrome.Provider>
 					)}
 				</main>
 			</div>
 
 			<CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
-			<HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+			<HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} bundledDocsPath={meta.data?.bundledDocsPath} />
 			<LiveRegions />
 			<NoticeToasts />
 		</div>

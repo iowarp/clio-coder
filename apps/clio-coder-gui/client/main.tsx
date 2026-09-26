@@ -7,8 +7,6 @@ import { App } from "./app.js";
 import { reportProblem } from "./design/notifications.js";
 import { Home } from "./pages/home.js";
 import "./styles.css";
-import "@fontsource-variable/atkinson-hyperlegible-next/index.css";
-import "@fontsource-variable/newsreader/index.css";
 import "./design/tokens.css";
 import "./render/markdown.css";
 
@@ -136,8 +134,8 @@ const router = createBrowserRouter([
 			{
 				path: "/docs/*",
 				lazy: async () => {
-					const { Docs } = await import("./pages/docs.js");
-					return { element: <Docs client={client} /> };
+					const { LegacyHelp } = await import("./interaction/LegacyHelp.js");
+					return { element: <LegacyHelp /> };
 				},
 			},
 			{

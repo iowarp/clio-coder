@@ -55,6 +55,7 @@ const CHECKS = [
 	["--focus", "--surface-sunken", NON_TEXT],
 	...TONES.flatMap((t) => [
 		[`--status-${t}-fg`, "--paper", TEXT],
+		[`--status-${t}-fg`, "--surface-sunken", TEXT],
 		[`--status-${t}-fg`, `--status-${t}-tint`, TEXT],
 		[`--status-${t}-line`, "--paper", NON_TEXT],
 	]),
@@ -78,15 +79,16 @@ const CHECKS = [
 
 const tokensUrl = new URL("../client/design/tokens.css", import.meta.url);
 const css = await readFile(tokensUrl, "utf8");
-const block = (selector) => {
-	const start = css.indexOf(selector);
+const brand = await readFile(new URL("../client/design/brand.css", import.meta.url), "utf8");
+const block = (selector, source = css) => {
+	const start = source.indexOf(selector);
 	if (start < 0) throw new Error(`Missing ${selector} in tokens.css`);
-	const body = css.slice(css.indexOf("{", start) + 1, css.indexOf("}", start));
+	const body = source.slice(source.indexOf("{", start) + 1, source.indexOf("}", start));
 	return Object.fromEntries([...body.matchAll(/(--[a-z0-9-]+)\s*:\s*(#[0-9a-f]{3,8})\s*;/gi)].map((m) => [m[1], m[2]]));
 };
 
-const light = block(":root {");
-const dark = { ...light, ...block(':root[data-theme="dark"] {') };
+const light = { ...block(":root {", brand), ...block(":root {") };
+const dark = { ...light, ...block(':root[data-theme="dark"] {', brand), ...block(':root[data-theme="dark"] {') };
 // The dark palette is written twice, once for an explicit choice and once for the system preference,
 // because CSS cannot share one declaration block between a selector and a media query. The copies
 // must agree, or a reader's theme would depend on how they chose it.
@@ -100,6 +102,9 @@ const systemDark = (() => {
 	return Object.fromEntries([...body.matchAll(/(--[a-z0-9-]+)\s*:\s*(#[0-9a-f]{3,8})\s*;/gi)].map((m) => [m[1], m[2]]));
 })();
 const explicitDark = block(':root[data-theme="dark"] {');
+const brandSystemDark = block(':root:not([data-theme="light"]) {', brand);
+for (const [key, value] of Object.entries(block(':root[data-theme="dark"] {', brand)))
+	if (brandSystemDark[key] !== value) throw new Error(`Canonical dark role disagrees: ${key}`);
 for (const key of new Set([...Object.keys(explicitDark), ...Object.keys(systemDark)]))
 	if (explicitDark[key] !== systemDark[key]) {
 		console.error(`dark: ${key} is ${explicitDark[key]} when chosen and ${systemDark[key]} from the system preference`);

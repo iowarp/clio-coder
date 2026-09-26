@@ -1,5 +1,5 @@
 // Visual review against the ACP fixture: photographs the conversation, the project pages, an
-// approval, a held worker and Docs at the three review viewports, or keeps a fixture API up on 4317
+// approval, a held worker and seven inspection areas at the three review viewports, or keeps a fixture API up on 4317
 // for `pnpm dev:client`. Evidence for a visual change comes from these images, looked at before and
 // after; the smoke remains the gate.
 //
@@ -13,11 +13,17 @@
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
 import { chromium } from "playwright-core";
 import { harness } from "../tests/harness/app.js";
+import { seedEvidence } from "../tests/harness/evidence-fixture.js";
+import { seedFleet } from "../tests/harness/fleet-fixture.js";
 import { seedHistory } from "../tests/harness/history-fixture.js";
+import { seedLibrary } from "../tests/harness/library-fixture.js";
+import { seedSettings } from "../tests/harness/settings-fixture.js";
+import { traceFixture } from "../tests/harness/trace-fixture.js";
 
 const SHOTS = [
 	"home",
@@ -27,7 +33,15 @@ const SHOTS = [
 	"empty",
 	"picker",
 	"conv",
-	"docs",
+	"help",
+	"traces",
+	"trace-detail",
+	"fleet-history",
+	"evidence",
+	"library",
+	"toolchain",
+	"settings",
+	"system",
 	"approval",
 	"fleet",
 	"steer",
@@ -36,10 +50,13 @@ const SHOTS = [
 const { values } = parseArgs({
 	options: {
 		client: { type: "string" },
-		out: { type: "string", default: "visual-review" },
+		out: {
+			type: "string",
+			default: fileURLToPath(new URL("../../../.superpowers/gui-validation/visual", import.meta.url)),
+		},
 		only: { type: "string", default: "" },
 		views: { type: "string", default: "2000x1040:dark,1440x900:light,390x844:light" },
-		doc: { type: "string", default: "guide/troubleshooting.md" },
+		state: { type: "string", default: "populated" },
 		route: { type: "boolean", default: false },
 		serve: { type: "boolean", default: false },
 		// Vite's dev proxy expects the API on 4317; another port only helps a direct check.
@@ -54,6 +71,10 @@ const want = (name: string) => only.size === 0 || only.has(name);
 
 // The workspace is opened through the app before the listening origin is known, so the origin starts
 // as the one its in-process requests carry.
+if (!["populated", "empty", "error"].includes(values.state)) throw new Error("state: populated, empty, error");
+const scratch = fileURLToPath(new URL("../../../.superpowers/gui-validation/", import.meta.url));
+await mkdir(scratch, { recursive: true });
+process.env.TMPDIR ??= scratch;
 let origin = `http://127.0.0.1:${values.serve ? values.port : "4317"}`;
 const h = await harness(
 	{},
@@ -64,6 +85,15 @@ const h = await harness(
 		...(values.route || values.serve ? { env: { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" } } : {}),
 	},
 );
+let trace: ReturnType<typeof traceFixture> | undefined;
+if (values.state !== "empty") {
+	await seedSettings(h.home.path, h.home.env);
+	await seedFleet(h.home.path, h.home.env);
+	await seedEvidence(h.home.path, h.home.env);
+	await seedLibrary(h.home.path, h.home.env);
+	trace = traceFixture(join(h.home.path, "state"));
+	trace.finish();
+}
 const project = join(h.home.path, "field-notes");
 await mkdir(project, { recursive: true });
 await seedHistory(h.home.path, project);
@@ -77,6 +107,7 @@ if (!address || typeof address === "string") throw new Error("The review server 
 const stop = async () => {
 	if ("closeAllConnections" in server) server.closeAllConnections();
 	await new Promise<void>((resolve) => server.close(() => resolve()));
+	trace?.close();
 	await h.close();
 };
 
@@ -140,13 +171,51 @@ if (values.serve) {
 					await page.getByRole("button", { name: "Keep", exact: true }).click();
 				}
 			}
-			if (want("docs")) {
-				await page.goto(`${origin}/docs/${values.doc}`);
-				await page.locator(".docs-page .markdown").waitFor();
-				const block = page.locator(".docs-page :is(.code-block, .diagram)").first();
-				if (await block.count()) await block.evaluate((element) => element.scrollIntoView({ block: "start" }));
-				await shot("docs");
+			if (want("help")) {
+				await page.keyboard.press("Control+/");
+				await page.getByRole("heading", { name: "How this app works", exact: true }).waitFor();
+				await shot("help");
+				await page.keyboard.press("Escape");
 			}
+			if (values.state === "error")
+				await page.route("**/api/**", async (route) => {
+					const path = new URL(route.request().url()).pathname;
+					if (path === "/api/meta" || path === "/api/events") return route.continue();
+					return route.fulfill({
+						status: 503,
+						contentType: "application/json",
+						body: JSON.stringify({
+							type: "urn:clio-coder:problem:unavailable",
+							title: "Local store unavailable",
+							status: 503,
+							code: "unavailable",
+							detail: "The local store is unavailable. Try again after reconnecting.",
+							instance: path,
+						}),
+					});
+				});
+			for (const [name, path] of [
+				["traces", "/traces"],
+				["trace-detail", "/traces/run-0000"],
+				["fleet-history", "/fleet"],
+				["evidence", "/evidence"],
+				["library", "/library"],
+				["toolchain", "/toolchain"],
+				["settings", "/settings"],
+				["system", "/system"],
+			] as const)
+				if (want(name)) {
+					await page.goto(`${origin}${path}`);
+					await page.getByRole("heading", { level: 1 }).waitFor();
+					await page.waitForFunction(
+						() =>
+							!/(?:Reading|Loading|Checking|Resolving|Connecting)[^.!?]{0,90}…/.test(
+								document.querySelector("main")?.textContent ?? "",
+							),
+					);
+					await shot(`${name}-${values.state}`, true);
+				}
+			if (values.state === "error") await page.unroute("**/api/**");
 			if (["empty", "picker", "conv", "approval", "fleet", "steer", "tools"].some(want)) {
 				await page.goto(`${origin}/workspaces/${workspace.id}/sessions`);
 				await page.getByRole("button", { name: "New conversation", exact: true }).click();

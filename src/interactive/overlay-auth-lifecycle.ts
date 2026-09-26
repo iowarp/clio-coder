@@ -39,7 +39,7 @@ export interface OverlayAuthLifecycle {
 
 /**
  * Provider runtimes supply OAuth authorize, device-code, and management-console
- * links, so the string is not ours to trust. `src/cli/docs.ts` already opens
+ * links, so the string is not ours to trust. the graphical app browser opener opens
  * a browser the right way; this is the same shape.
  */
 const maybeOpenExternalUrl = (url: string): void => {

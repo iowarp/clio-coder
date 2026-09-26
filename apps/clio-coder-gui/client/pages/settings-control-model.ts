@@ -26,7 +26,17 @@ export function matchesControl(control: SettingControl, query: string): boolean 
 	const needle = query.trim().toLocaleLowerCase("en-US");
 	return (
 		!needle ||
-		[control.path, control.label, control.description, control.group]
+		[
+			control.path,
+			control.label,
+			control.description,
+			control.group,
+			control.section,
+			sourceLabel(control.source),
+			TIMING_LABEL[control.timing],
+			control.access,
+			control.help ?? "",
+		]
 			.join(" ")
 			.toLocaleLowerCase("en-US")
 			.includes(needle)

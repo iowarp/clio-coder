@@ -58,7 +58,7 @@ test("Linux launcher installs absolute checkout paths, verifies ownership, and l
 test("desktop quoting survives GLib parsing of spaces, quotes, backslashes, dollar and percent field codes", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "clio-web-launcher-quoting-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
-	const entry = join(dir, 'entry "quote" $literal `tick` %f \\ file.js');
+	const entry = join(dir, 'entry "quote" $literal `tick` %f \\ file.cjs');
 	await writeFile(
 		entry,
 		'require("node:fs").writeFileSync(process.env.QUOTING_LOG, JSON.stringify(process.argv.slice(2)))',

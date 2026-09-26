@@ -8,7 +8,9 @@ test("every panel eyebrow names a scope and a mutability", () => {
 		"EVIDENCE BUNDLES · INSTALLATION-WIDE · READ ONLY",
 	);
 	const panels = Object.entries(PANELS);
-	assert.ok(panels.length >= 19, `expected the inspector panels to be registered, saw ${panels.length}`);
+	for (const id of ["traceRun", "fleet", "evidenceInventory", "library", "toolchain", "settings", "system"])
+		assert.ok(Object.hasOwn(PANELS, id), `${id} has no inspection scope`);
+	assert.equal(Object.hasOwn(PANELS, "docs"), false, "Help must not retain a native documentation panel");
 	const mutabilities = new Set(MUTABILITIES.map((word) => word.toUpperCase()));
 	for (const [id, panel] of panels) {
 		const segments = panel.eyebrow.split(" · ");

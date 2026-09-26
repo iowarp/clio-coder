@@ -7,7 +7,7 @@ import { Facts as RecordFacts } from "../../design/facts.js";
 import { humanizeKey } from "../../design/facts-model.js";
 import { StatusMark } from "../../design/status.js";
 import { ReceiptChecks } from "./receipt-checks.js";
-import { provenanceFacts } from "./trace-model.js";
+import { phasePosition, provenanceFacts } from "./trace-model.js";
 export function object(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
@@ -50,53 +50,60 @@ export function Waterfall({
 	select: (id: string) => void;
 }) {
 	const start = Date.parse(run.started_at),
-		end = run.ended_at ? Date.parse(run.ended_at) : clock.now(),
-		duration = Math.max(1, end - start);
+		end = run.ended_at ? Date.parse(run.ended_at) : run.status === "running" ? clock.now() : Number.NaN,
+		knownDuration = Number.isFinite(end - start) && end >= start,
+		duration = knownDuration ? Math.max(1, end - start) : 1;
 	return (
 		<section className="trace-panel">
 			<div className="page-heading">
 				<h2>Phase waterfall</h2>
-				<small>{formatDuration(duration)}</small>
+				<small>{knownDuration ? formatDuration(end - start) : "Run timing not recorded"}</small>
 			</div>
+			<p className="panel-note">
+				Select a phase to inspect its events, checks and accounting. Bars use recorded timestamps; they do not imply
+				causality.
+			</p>
 			<div className="trace-waterfall">
 				{phases.map((phase) => {
-					const left = Math.max(0, ((Date.parse(phase.started_at ?? run.started_at) - start) / duration) * 100),
-						width = Math.min(
-							100 - left,
-							Math.max(
-								0.5,
-								(((phase.ended_at ? Date.parse(phase.ended_at) : end) - Date.parse(phase.started_at ?? run.started_at)) /
-									duration) *
-									100,
-							),
-						);
+					const position = phasePosition(phase, run, clock.now());
 					return (
 						<div className="trace-lane" key={phase.phase_id}>
 							<button type="button" aria-pressed={selected === phase.phase_id} onClick={() => select(phase.phase_id)}>
 								{phase.name}
 								<small>
-									{phase.kind} · {phase.owner}
+									{phase.status} · {position ? formatDuration(position.duration) : "Timing not recorded"}
 								</small>
 							</button>
 							<div className="trace-track">
-								<button
-									className={`trace-bar ${phase.status}`}
-									type="button"
-									aria-label={`Select phase ${phase.name}`}
-									title={`${phase.name}: ${phase.status}`}
-									style={{ left: `${left}%`, width: `${width}%` }}
-									onClick={() => select(phase.phase_id)}
-								/>
+								{position ? (
+									<button
+										className={`trace-bar ${phase.status}`}
+										type="button"
+										aria-label={`Select phase ${phase.name}`}
+										title={`${phase.name}: ${phase.status}`}
+										aria-pressed={selected === phase.phase_id}
+										style={{ left: `${position.left}%`, width: `${Math.max(0.5, position.width)}%` }}
+										onClick={() => select(phase.phase_id)}
+									/>
+								) : (
+									<span className="trace-timing-missing">No recorded timing</span>
+								)}
 								{events
-									.filter((event) => event.phase_id === phase.phase_id && event.type === "tool_call")
+									.filter(
+										(event) =>
+											knownDuration &&
+											event.phase_id === phase.phase_id &&
+											event.type === "tool_call" &&
+											Number.isFinite(Date.parse(event.started_at)),
+									)
 									.map((event) => (
 										<i
 											key={event.rowid}
 											className="trace-tool-span"
-											title={`${event.name} · ${event.ended_at ? formatDuration(Date.parse(event.ended_at) - Date.parse(event.started_at)) : "live"}`}
+											title={`${event.name} · ${event.ended_at ? formatDuration(Date.parse(event.ended_at) - Date.parse(event.started_at)) : "end not recorded"}`}
 											style={{
 												left: `${Math.max(0, Math.min(99, ((Date.parse(event.started_at) - start) / duration) * 100))}%`,
-												width: `${Math.max(0.4, Math.min(100, (((event.ended_at ? Date.parse(event.ended_at) : end) - Date.parse(event.started_at)) / duration) * 100))}%`,
+												width: `${Math.max(0.4, Math.min(100, ((event.ended_at ? Math.max(0, Date.parse(event.ended_at) - Date.parse(event.started_at)) : 0) / duration) * 100))}%`,
 											}}
 										/>
 									))}
@@ -155,21 +162,27 @@ export function EventRow({ event, start }: { event: TraceEvent; start: string })
 	return (
 		<article className="trace-event">
 			<div className="trace-event-head">
-				<span className={`trace-badge ${record.ok === false || event.type === "error" ? "fail" : ""}`}>{event.type}</span>
+				<StatusMark
+					tone={record.ok === false || event.type === "error" ? "fail" : "neutral"}
+					label={record.ok === false ? `${event.type} · failed` : event.type}
+				/>
 				<strong>{event.name}</strong>
 				<small>
 					+{formatDuration(Date.parse(event.started_at) - Date.parse(start))}
-					{event.ended_at ? ` · ${formatDuration(Date.parse(event.ended_at) - Date.parse(event.started_at))}` : " · live"}
+					{event.ended_at
+						? ` · ${formatDuration(Date.parse(event.ended_at) - Date.parse(event.started_at))}`
+						: " · end not recorded"}
 					{event.tokens == null ? "" : ` · ${formatTokens(event.tokens)} tokens`}
 				</small>
 			</div>
 			{record.truncated === true ? <p className="trace-warning">Payload exceeded the trace limit; snippet only.</p> : null}
-			<Facts
-				entries={Object.entries(record).map(([key, value]) => [
-					key,
-					typeof value === "string" && value.length > 400 ? `${value.slice(0, 400)}… (see payload)` : value,
-				])}
-			/>
+			{typeof record.message === "string" && (
+				<p>
+					{record.message.slice(0, 400)}
+					{record.message.length > 400 ? "…" : ""}
+				</p>
+			)}
+
 			<details>
 				<summary>Event payload</summary>
 				<Json value={payload} />
