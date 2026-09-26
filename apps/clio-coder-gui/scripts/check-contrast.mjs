@@ -55,6 +55,7 @@ const CHECKS = [
 	["--focus", "--surface-sunken", NON_TEXT],
 	...TONES.flatMap((t) => [
 		[`--status-${t}-fg`, "--paper", TEXT],
+		[`--status-${t}-fg`, "--surface-sunken", TEXT],
 		[`--status-${t}-fg`, `--status-${t}-tint`, TEXT],
 		[`--status-${t}-line`, "--paper", NON_TEXT],
 	]),

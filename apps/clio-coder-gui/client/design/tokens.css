@@ -21,7 +21,7 @@
 	--status-neutral-tint: #ebe4d7;
 	--status-neutral-line: #857a6c;
 
-	--status-running-fg: #2d5a86;
+	--status-running-fg: #2c5883;
 	--status-running-tint: #e4ebf2;
 	--status-running-line: #4a7cae;
 
@@ -29,7 +29,7 @@
 	--status-success-tint: #e3efe6;
 	--status-success-line: #3b8a5d;
 
-	--status-warn-fg: #8a4b12;
+	--status-warn-fg: #79410f;
 	--status-warn-tint: #f6ead6;
 	--status-warn-line: #b06e24;
 

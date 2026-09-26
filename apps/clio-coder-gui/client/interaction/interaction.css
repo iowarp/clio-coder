@@ -334,7 +334,7 @@
 	padding: 6px 10px;
 	background: var(--surface);
 	border: 1px solid var(--line);
-	font-size: var(--text-sm);
+	font-size: var(--text-meta);
 	z-index: 1;
 }
 .notice-region__controls button {
