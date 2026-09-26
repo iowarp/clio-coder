@@ -22,6 +22,15 @@ the private server.
 and a desktop entry on Linux with a systemd user session. Each is installed only on
 request and removed by its own `uninstall` or by `clio-coder uninstall`.
 
+Select **Sessions** to browse conversations grouped by project in the sidebar.
+Expand a project to open or resume a conversation; **Show more** reveals earlier
+conversations. **Navigation** returns to the application sections.
+
+The conversation input keeps attachments and message options on the left, with
+model, thinking, and send/stop controls on the right. Message options includes
+the Enter preference and delivery controls for steering or queuing a message
+while Clio is working.
+
 ## Inspecting work and configuration
 
 Traces keeps search and source/status filters in the URL. Open a recorded run,

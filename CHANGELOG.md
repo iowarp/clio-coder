@@ -26,6 +26,7 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 ### Browser application and ACP
 
 - The browser application adopts the canonical cyan Clio mark, warm dark/light palette, and locally bundled IBM Plex and Newsreader fonts across navigation, installation icons, and offline recovery.
+- Conversations use a compact input with attachment, message-options, model, thinking, and send/stop controls. Sessions switches the sidebar to conversations grouped by project, with expandable history and a return to application navigation.
 - Traces, Fleet, Evidence, Library, Toolchain, Settings, and System gain focused inspection, URL-backed discovery, reviewed operations, and clearer storage/error states. Recorded session traces open correctly, and unpriced model usage remains unavailable rather than displaying zero spend.
 
 - The alpha browser application exposes session boards, operator tasks, plans, decisions, memory proposals, context inspection and recovery, conversation branches, and reviewed handoffs through ACP host capabilities.
