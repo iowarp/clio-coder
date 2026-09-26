@@ -1157,6 +1157,7 @@ export function formatTaskIslandLines(
 	rows: ReadonlyArray<DispatchBoardRow>,
 	maxRows = 4,
 	quota: ReadonlyArray<UsageSnapshot> = [],
+	contentWidth = TASK_ISLAND_WIDTH,
 ): string[] {
 	// Councils are folded before the row cap, so a five-member council costs the
 	// island one card and never crowds out the runs beside it.
@@ -1173,17 +1174,17 @@ export function formatTaskIslandLines(
 			const item = visibleItems[i];
 			if (!item) continue;
 			if (i > 0) {
-				body.push(innerDivider(clioTheme(), TASK_ISLAND_WIDTH));
+				body.push(innerDivider(clioTheme(), contentWidth));
 			}
 			body.push(
 				...(item.kind === "council"
-					? councilIslandLines(clioTheme(), item.group, TASK_ISLAND_WIDTH)
-					: renderTaskIslandRow(item.row, TASK_ISLAND_WIDTH, quota)),
+					? councilIslandLines(clioTheme(), item.group, contentWidth)
+					: renderTaskIslandRow(item.row, contentWidth, quota)),
 			);
 		}
 		const hidden = items.length - visibleItems.length;
 		if (hidden > 0) {
-			body.push(innerDivider(clioTheme(), TASK_ISLAND_WIDTH));
+			body.push(innerDivider(clioTheme(), contentWidth));
 			body.push(clioTheme().fg("dim", `+ ${hidden} more`));
 		}
 	}
@@ -1191,7 +1192,7 @@ export function formatTaskIslandLines(
 	// Body rows are already ANSI-padded to TASK_ISLAND_WIDTH by the row renderer
 	// (or are fixed-width dividers/empty-state lines). The canonical frame re-pads
 	// each row ANSI-aware, so passing the styled lines through is safe.
-	return frame(clioTheme(), "Fleet runs", body, TASK_ISLAND_WIDTH + 4);
+	return frame(clioTheme(), "Fleet runs", body, contentWidth + 4);
 }
 
 function parseOptionalDetail(value: unknown): string | null {

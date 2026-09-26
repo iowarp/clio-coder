@@ -27,6 +27,7 @@ import { createContextActivityStore } from "./context-activity.js";
 import { createDispatchBoardStore, createDispatchBoardView, type DispatchBoardView } from "./dispatch-board.js";
 import { parseEditorBashCommand } from "./editor-bash.js";
 import { parseEditorSteerMention, resolveSteerTarget } from "./editor-steer.js";
+import { createFleetDock } from "./fleet-dock.js";
 import { createFollowUpQueuePanel, type FollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { buildFooterDashboard, type FooterDashboardDeps, type FooterDashboardPanel } from "./footer/dashboard.js";
 import { createNotificationCenter, type NotificationCenter } from "./footer/notifications.js";
@@ -591,6 +592,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			banner,
 			chat: chatPanel,
 			pending,
+			fleet: createFleetDock({
+				getRows: () => dispatchBoardStore.activeRows(),
+				getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
+			}),
 			editor,
 			footer: footer.view,
 		},

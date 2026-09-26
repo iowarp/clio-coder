@@ -123,6 +123,7 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 			deps.getOverlayState() !== "closed" ||
 			deps.isFooterExpanded() ||
 			contextActive ||
+			rows.length > 0 ||
 			(rows.length === 0 && !boardHasOpenTasks);
 		const visibilityChanged = taskIslandHidden !== hidden;
 		taskIslandHandle.setHidden(hidden);
@@ -132,15 +133,7 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 		// leaves the last text in place, which is unreachable while hidden.
 		if (hidden && taskIslandHidden && rows.length === 0 && !boardHasOpenTasks) return visibilityChanged;
 		taskIslandHidden = hidden;
-		if (rows.length > 0)
-			taskIsland.setText(
-				formatTaskIslandLines(
-					rows,
-					Math.max(1, Math.min(4, Math.floor((deps.tui.terminal.rows - 8) / 10))),
-					deps.getQuotaSnapshots?.() ?? [],
-				).join("\n"),
-			);
-		else if (board) taskIsland.setText(formatTaskBoardIslandLines(board).join("\n"));
+		if (!hidden && board) taskIsland.setText(formatTaskBoardIslandLines(board).join("\n"));
 		taskIsland.invalidate();
 		return visibilityChanged || !hidden;
 	};

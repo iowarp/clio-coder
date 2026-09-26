@@ -149,13 +149,14 @@ Compact inline lifecycle indicators:
 
 ### 3.4 Width Degradation
 
-No row exceeds the terminal width in visible cells at any width. The contracts in `tests/contracts/tui-island-frames.test.ts`, `tests/contracts/transcript-retry-prefix.test.ts` and `tests/contracts/footer-notice-priority.test.ts` render at 60, 80, 120 and 200 columns.
+No row exceeds the terminal width in visible cells at any width. The contracts in `tests/contracts/tui-island-frames.test.ts`, `tests/contracts/transcript-retry-prefix.test.ts` and `tests/contracts/footer-notice-priority.test.ts` render at 40, 60, 80, 120 and 200 columns.
 
 | Surface | 60 | 80 | 120 | 200 |
 | :--- | :--- | :--- | :--- | :--- |
 | Launchpad | Stacked details, no wordmark | Wordmark beside details (from 76) | Wide wordmark (from 100) | Hint column added (from 160) |
 | Session header | One row | One row | One row | One row |
-| Fleet or task island | Hidden | Shown at 48 cells when the screen has 18 rows | Same | Same |
+| Fleet runs | Docked above the composer while live | Same | Same | Same |
+| Task island | Hidden | Shown at 48 cells when the screen has 18 rows and no run is live | Same | Same |
 | Context island | Hidden | Hidden | Shown at 52 cells when the screen has 20 rows (from 92) | Same |
 | Council card | Stacked members | Stacked until each column holds 34 cells | Grid | Grid |
 | Compact footer | Two rows, 8-cell context meter | Two rows, 8-cell meter | Two rows, 14-cell meter, full hints | Two rows, wider identity |
@@ -168,7 +169,7 @@ The minimum supported width is 40 columns. Gutters stay 2 columns with hanging i
 
 The viewport has two kinds of content.
 
-- **Pinned**: the composer and the footer dock below the transcript in [layout.ts](../../src/interactive/layout.ts). Two islands float at the top right as non-capturing overlays owned by `interactive-tickers.ts`: the fleet island (live dispatch rows and councils, one card per council) or, when no run is live, the task island, and the context island while a context operation runs. Only one island shows at a time, the context island taking precedence, and every island hides while an overlay is open or the footer is expanded. An island never takes the keyboard. Known gap: from 80 to 91 columns, context activity hides the fleet or task island while the context island still needs 92, so neither shows.
+- **Pinned**: the composer and footer dock below the transcript in [layout.ts](../../src/interactive/layout.ts). While runs are live, Fleet renders in normal flow just above the composer, reserving its own rows in both regular and fullscreen modes. It uses the same phase wording, counts and council projection as the run cards. It shows one card and a count of additional cards, which remain inspectable through Fleet Runs. With no live run, Fleet takes no rows. The task island and context island remain non-capturing top-right summaries owned by `interactive-tickers.ts`; the task island shows only when no run is live and yields to context only when context fits. These floating summaries hide while an overlay is open or the footer is expanded. Fleet never paints over a transcript row and never takes the keyboard. The decision board stays a capturing docked surface (`/decisions`).
 - **Dynamic**: everything in the transcript. Dispatch, council and worker state render as transcript blocks that update in place; the islands summarize them and never become a second history. The decision board stays a capturing overlay (`/decisions`), because a decision needs the keyboard and an island may not hold it.
 
 **Hydration.** The instant shell paints `createBootWelcome` with the settings already read, at the same geometry as the hydrated launchpad. A resumed session replays its turns through the same panel operations a live turn uses (`rehydrateChatPanelFromTurns` in `chat-renderer.ts`), and the settled entries are pre-rendered in the other output styles while idle.

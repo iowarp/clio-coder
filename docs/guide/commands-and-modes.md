@@ -693,3 +693,5 @@ Use `/library`, `/skills`, `/agents`, and `/prompts` to browse resources. `/skil
 With an empty composer, press `?` for the docked key card, `←` for Fleet Runs, or `↓` for Tasks. The next key closes the key card without taking another action. With a draft, `?` inserts text and the arrows move the cursor.
 
 `/usage` opens the docked Activity tab with workspace session history and current consumption. Its five tabs are Activity (`1`), Accounts (`2`), Session (`3`), Models (`4`) and Workers (`5`). Use Tab to switch tabs and PgUp/PgDn, Home or End to read a long tab.
+
+Live Fleet runs reserve a section just above the composer. This summary never covers transcript text and disappears when no run is live. Open Fleet Runs with the configured shortcut or `←` on an empty composer to inspect additional runs.

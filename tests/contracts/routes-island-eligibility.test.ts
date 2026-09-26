@@ -30,7 +30,13 @@ test("task island yields only to context that fits, including resize and short t
 	let expanded = false;
 	const controller = createInteractiveTickers({
 		tui,
-		dispatchBoardStore: { activeRows: () => [{ ...row, agentAudience: "base" }], reconcile() {} },
+		dispatchBoardStore: { activeRows: () => [], reconcile() {} },
+		getTaskBoard: () => ({
+			boardId: "b1",
+			title: "Board",
+			activeRunIds: [],
+			tasks: [{ id: "t1", title: "Task", status: "active" }],
+		}),
 		contextActivityStore: {
 			active: () => true,
 			current: () => ({
