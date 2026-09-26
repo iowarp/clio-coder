@@ -281,8 +281,12 @@ export function RouteFocus() {
 		previous = useRef(location.pathname);
 	const { approvalPending } = useLiveState();
 	useEffect(() => {
-		if (previous.current !== location.pathname) document.getElementById("main")?.focus();
+		const changed = previous.current !== location.pathname;
 		previous.current = location.pathname;
+		if (!changed) return;
+		// Let an outgoing modal release the workspace before focusing the destination.
+		const frame = requestAnimationFrame(() => document.getElementById("main")?.focus());
+		return () => cancelAnimationFrame(frame);
 	}, [location.pathname]);
 	useEffect(() => {
 		const section = navigation.find((item) => item.path !== "/" && location.pathname.startsWith(item.path));
