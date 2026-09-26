@@ -285,16 +285,16 @@ function renderActivity(
 	];
 	const changesValue =
 		changes === null
-			? theme.fg("dim", "no repository")
+			? theme.fg("dim", "not observed")
 			: `${theme.fg("success", `+${changes.insertions}`)} ${theme.fg("error", `-${changes.deletions}`)} ${theme.fg("dim", `· ${changes.files} file${changes.files === 1 ? "" : "s"}`)}`;
 	lines.push(`${label("Changes")}${changesValue}`);
-	const cost = formatCostAggregate(snapshot.totalCost) ?? "$0.00";
+	const cost = formatCostAggregate(snapshot.totalCost);
 	const started = startedAt ? Date.parse(startedAt) : Number.NaN;
 	const elapsed = Number.isFinite(started)
 		? ` ${theme.fg("dim", `(${formatCompactMs(Math.max(0, now - started))})`)}`
 		: "";
 	lines.push(
-		`${label("Session")}${cost} ${theme.fg("dim", `· ${formatTokens(snapshot.totalTokens)} tokens`)}${elapsed}`,
+		`${label("Session")}${cost ? `${cost} · ` : ""}${theme.fg("dim", `${formatTokens(snapshot.totalTokens)} tokens`)}${elapsed}`,
 	);
 	const window = quota.flatMap((entry) => entry.windows.map((item) => ({ entry, item })))[0];
 	if (window) {
