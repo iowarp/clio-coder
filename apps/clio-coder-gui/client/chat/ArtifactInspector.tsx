@@ -55,7 +55,9 @@ function RecordedTools({
 
 function RelatedEvidence({ client, session }: { client: Client; session: SessionSnapshot }) {
 	const runIds = new Set(
-		session.fleet.flatMap((item) => ("runId" in item.fact.payload ? [item.fact.payload.runId] : [])),
+		session.fleet.flatMap((item) =>
+			"runId" in item.fact.payload && item.fact.payload.runId.trim() ? [item.fact.payload.runId] : [],
+		),
 	);
 	const announced = session.fleet.filter((item) => item.fact.type === "evidence.ready").length;
 	const inventory = useInfiniteQuery({
