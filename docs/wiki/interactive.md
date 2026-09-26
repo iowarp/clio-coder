@@ -95,7 +95,7 @@ without mutating it.
 ### Turn context (`turn-context.ts`)
 
 `createTurnContext` owns the session-prompt compile cache, context-snapshot accounting,
-prompt-cache honesty, and compaction. Its doc block states `runAutoCompact` is the one
+prompt-cache accounting, and compaction. Its doc block states `runAutoCompact` is the one
 compaction entry point; the pre-submit trigger, the preflight overflow guard, overflow
 recovery, `/context compact`, and the post-tool continuation guard all flow through it. It
 publishes the live budget view through `refreshLiveBudget` and `liveBudget` (delegating to the [context budget producer](domains/context.md) in `domains/context/budget/live-view.ts`), tracks a

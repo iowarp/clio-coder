@@ -81,13 +81,13 @@ for (const file of files) {
 		)
 		.join("");
 	if (frontmatter) {
-		body += `\n\n<details>\n<summary>Source and validation metadata</summary>\n\n\`\`\`yaml\n${frontmatter[1]}\n\`\`\`\n\n</details>\n`;
+		body += `\n\n<details>\n<summary>Source and generation metadata</summary>\n\n\`\`\`yaml\n${frontmatter[1]}\n\`\`\`\n\n</details>\n`;
 	}
 	if (file === "index.md") {
 		body = body.replace(/^# Wiki\s*/m, "# Clio Coder Wiki\n\n");
 		body = body.replace(
 			"# Clio Coder Wiki\n\n",
-			`# Clio Coder Wiki\n\nExplore Clio Coder's architecture, runtime, domains, tools, graphical interface, and tests. These pages document the development checkout; released behavior is described in the [project documentation](${repository}/tree/${encodePath(reference)}/docs).\n\nStart with the [overview](${wiki}/Quickstart), [architecture](${wiki}/Architecture), or [command-line surfaces](${wiki}/Cli).\n\n`,
+			`# Clio Coder Wiki\n\nStart with the [overview](${wiki}/Quickstart), [architecture](${wiki}/Architecture), or [command-line surfaces](${wiki}/Cli).\n\n`,
 		);
 	}
 	pages.set(`${slugs.get(file)}.md`, `${body.trimEnd()}\n`);
@@ -99,7 +99,7 @@ const sidebar = [
 	"",
 ].join("\n");
 const snapshot = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
-const footer = `Clio Coder · [Repository](${repository}) · [Website](https://coder.iowarp.ai) · [Documentation](${repository}/tree/${encodePath(reference)}/docs)\n\nDocumentation snapshot: \`${snapshot.slice(0, 9)}\`. Source references in these development pages may precede publication of the corresponding code.\n`;
+const footer = `Clio Coder · [Repository](${repository}) · [Website](https://coder.iowarp.ai) · [Documentation](${repository}/tree/${encodePath(reference)}/docs)\n\nWiki v0.1 · Developing implementation reference · Source snapshot: \`${snapshot.slice(0, 9)}\`. Authored architecture documents define the product contracts.\n`;
 pages.set("_Sidebar.md", sidebar);
 pages.set("_Footer.md", footer);
 // Resolve everything before writing: a broken link must not produce a partial export.

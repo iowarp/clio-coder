@@ -1,6 +1,6 @@
 ---
 title: "Tools data"
-summary: "Streaming inspection, selection, and validation of CSV/TSV, JSON, and JSON Lines files, exposed through the `data` tool; every result carries honest view flags and typed refusals instead of guesses."
+summary: "Streaming inspection, selection, and validation of CSV/TSV, JSON, and JSON Lines files, exposed through the `data` tool; results carry explicit view flags and typed refusals."
 sources:
   - "src/tools/data/index.ts"
   - "src/tools/data/shared.ts"
@@ -30,7 +30,7 @@ tests:
   - "tests/contracts/data-tool.test.ts"
 invariants:
   - "Nothing in the directory reads a data file whole; every result carries DataViewFlags {exact, sampled, converted} so a sampled scan cannot pass for the complete dataset."
-  - "Readers refuse bytes they cannot honestly read: invalid UTF-8 names its byte offset, a NUL byte within the first 8 KiB is binary, an unrecognized format names the supported ones."
+  - "Readers validate input bytes: invalid UTF-8 names its byte offset, a NUL byte within the first 8 KiB is binary, an unrecognized format names the supported ones."
   - "Cells and numbers stay source text: inspection classifies them, selection returns them verbatim, and numbers a double would misstate are reported with a $literal placeholder and a precision kind."
 validate:
   - "pnpm run test:file -- tests/contracts/data-csv.test.ts"
@@ -345,7 +345,7 @@ If the reservation is exhausted it returns `observationBudgetExhausted`. It
 then commits the reservation up front (`commitObservationReservation`) because
 the readers stream and await between reserve and finalize, so the cap is
 charged up front and reconciled when the result settles. The result is
-finalized through `finalizeObservation` with `format: "json"`, an honest unit
+finalized through `finalizeObservation` with `format: "json"`, an explicit unit
 and counts from `countResult` (which reads `returned`, `offset`, `limit`, and
 `hasMore` off the reader's own result), and a `details` object carrying `op`,
 `path`, `format`, `view`, and `viewLabel` from `describeDataView`. A refusal is
@@ -406,7 +406,7 @@ The change points this area invites:
   early (a sink returning `false`, or a `maxRows` bound) relies on this to not
   read the rest of the file; the JSONL line-splitting performance test exists
   because rescanning a chunk prefix for every line broke the bound.
-- **View flags are an honest envelope.** `exactView`, `sampledView`, and
+- **View flags describe the returned data.** `exactView`, `sampledView`, and
   `cutView` encode whether counts are lower bounds and whether a value was cut
   to a budget. A change to a reader's stop condition must update its `view` so
   a sampled scan cannot pass for the complete dataset; the `describeDataView`

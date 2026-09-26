@@ -103,7 +103,7 @@ The gateway's `safetyCall` projection is absent: the gateway itself is a read-cl
 
 ## The code_nav tool
 
-`codeNavTool` in `src/tools/codewiki/code-nav.ts` navigates an indexed codewiki. It accepts `source` (workspace or clio), `mode`, `query`, and `limit`.
+`codeNavTool` in `src/tools/codewiki/code-nav.ts` navigates the structural codemap. It accepts `source` (workspace or clio), `mode`, `query`, and `limit`.
 
 **Modes:**
 - **symbol**: finds files by symbol name, returning the symbol records with path, line, kind, and signature.
@@ -113,10 +113,11 @@ The gateway's `safetyCall` projection is absent: the gateway itself is a read-cl
 - **deps**: lists a file's internal imports (resolved to paths) and external modules.
 - **dependents**: lists files that import the queried file.
 - **wiki**: lists or resolves generated Markdown wiki pages under `.clio-coder/wiki/`.
+- **project**: returns bounded orientation, current Git observations, and validated durable operator tasks, with provenance and explicit unknown values. A recorded task status does not establish verification.
 
 **Sources:**
 - **workspace**: builds a read-only index on demand through `loadCodewikiForTool` in `src/tools/codewiki/shared.ts`. The codewiki artifact is cached by file identity (dev, ino, mtimeNs, size) in a bounded LRU. The index is built once per codewiki and cached in a WeakMap.
-- **clio**: reads the bundled code map at `dist/assets/codewiki.json` from the package root, resolving all paths against it. Cached per package root.
+- **clio**: reads the bundled codemap at `dist/assets/codemap.json` from the package root, resolving all paths against it. Cached per package root. Legacy `codewiki.json` is accepted when the canonical artifact is absent. The workspace-only `project` and `wiki` modes are unavailable with this source.
 
 The `regexFromPattern` function strips `g` and `y` flags from user-supplied regexes because the regex is reused across `.test()` calls in a `.filter`, and a sticky/global flag would advance `lastIndex` between calls, silently skipping matching paths.
 

@@ -69,7 +69,11 @@ Key lifecycle rules:
 
 ### `src/domains/session/migrations/index.ts`
 
-`runMigrations(meta, sessionPath)` enforces format version gates. Versions below 3 are refused as disposable pre-1.0 state. Versions above the current build are refused as sessions from a newer Clio. Versions 3, 4, and 5 are one additive chain: 4 added the working-set kinds (`contextEviction`, `contextRecall`); 5 added the continuity kinds (`handoffTransaction`, `continuityCommit`) and the optional continuity payload on a compaction summary. Each step only makes new records legal, so a version-3 or version-4 ledger is read exactly as it stands.
+`runMigrations(meta, sessionPath)` reads formats 3 through 6. Older formats and formats newer than this build are refused. Format 4 added `contextEviction` and `contextRecall`; format 5 added continuity transactions and checkpoint payloads; format 6 added structural eviction reasons, the `reread` recall trigger, and optional evicted-item content hashes. Resuming formats 3–5 updates the metadata version without transforming ledger records. Older binaries cannot resume a session restamped to format 6.
+
+### `src/domains/session/handoff-service.ts`
+
+The terminal and ACP host share the prepare/commit service. Prepare extracts a goal-directed document, validates file references against the active read ledger, and incorporates durable decisions. It records a host-only identity of the source session, workspace, pinned branch, entries, skill activations, and decision board. A changed identity after extraction or before commit refuses the draft before writing. Commit accepts the reviewed document, creates and seeds a successor, restores activations, and links the original session; cancellation leaves the source conversation in place.
 
 ### `src/domains/session/context-accounting.ts`
 

@@ -34,11 +34,11 @@ validate:
 
 ## What this repository is
 
-Clio Coder is a terminal coding agent for HPC and scientific software, built by IOWarp and the Gnosis Research Center at Illinois Tech. The package (`@iowarp/clio-coder` version 0.5.6) provides an interactive TUI for repository chat, a headless single-turn runner, an ACP v1 agent over stdio, and a GUI server. It orchestrates one or more LLM targets and dispatches bounded workers as subprocesses.
+Clio Coder is a coding agent for HPC and scientific software, built by IOWarp and the Gnosis Research Center at Illinois Tech. The package (`@iowarp/clio-coder`) provides an interactive terminal interface for repository work, a headless single-turn runner, an ACP v1 agent over stdio, and a local graphical interface. It orchestrates configured model targets and dispatches bounded workers as subprocesses. The [authored architecture](../architecture/architecture.md) defines the maintained contracts for these layers.
 
 ## Top-level composition
 
-The source tree is organized into seven functional layers under `src/` plus an application under `apps/`:
+The source tree is organized into eight functional layers under `src/` plus an application under `apps/`:
 
 | Layer | Path | Role |
 |-------|------|------|

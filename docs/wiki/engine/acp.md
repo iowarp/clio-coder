@@ -96,6 +96,22 @@ sequenceDiagram
   Client-->>Server: allow-once, reject-once, or reject-and-stop
 ```
 
+## Session and operator controls
+
+Beyond the standard protocol, `_clio-coder/` methods expose controls supplied by the host. `initialize` advertises only the capabilities bound by the composition root; clients use that advertisement to enable controls.
+
+| Control | Behavior |
+| --- | --- |
+| Session history and branches | Standard `session/list` and `session/load` discover and restore stored conversations. Extension methods expose the active tree, switch its turn, and fork a successor through the shared replay path. |
+| Handoff | Prepare extracts a document for review without creating a successor. Commit seeds the reviewed document once. Conversation, branch, skills, or decisions changing during extraction or before commit invalidate the draft. Cancel discards it. |
+| Fleet contracts | Preview compiles a named contract and presents its steps, resolved routes, command invocations, and budget. Run recompiles and requires the approved identity; a changed recipe, model route, command binding, plan, or budget requires another approval before dispatch. |
+| Task and decision boards | Session board reads and explicit task/decision mutations use the domain stores. Completion notes remain distinct from verification evidence. |
+| Context | The ledger method exposes chat context accounting. Allowlisted context commands provide recall, reset, and recovery through the shared host services. |
+| Side questions and drafts | Out-of-turn questions and candidate drafts run beside the conversation. Failed provider answers stay in diagnostics; responses carry bounded host explanations. |
+| Configuration and resources | Model and thinking selections, usage/quota, extensions, and library operations use the corresponding host controls. |
+
+Prompt submission accepts text, bounded embedded text resources, and images when the host advertises image support. These inputs pass through the same prompt expansion used by the main chat loop.
+
 ## Permission mediation on the server
 
 `installPermissionBridge` subscribes to `options.toolRegistry.onPermissionRequired`. When a parked tool call needs approval, the bridge finds the wire id that the client has already rendered, reads that call's `toolCallSnapshot`, and sends `session/request_permission`. It offers exactly three option ids: `allow-once`, `reject-once`, and `reject-and-stop`.

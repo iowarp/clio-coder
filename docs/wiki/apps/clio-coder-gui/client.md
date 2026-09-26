@@ -46,14 +46,14 @@ The architectural rule that shapes every module is this: **the app has no DOM te
 
 The entry point is `apps/clio-coder-gui/client/main.tsx`. It creates a `QueryClient` with `retry: false` and error reporting through `reportProblem`, then builds a `createBrowserRouter` with lazy-loaded route modules. The app shell (`App` in `apps/clio-coder-gui/client/app.tsx`) manages connection state, sidebar collapse, the command palette, and the help dialog. It subscribes to the server's event stream via `subscribe(client, queries, setConnection)` from `apps/clio-coder-gui/client/api/events.ts`.
 
-The router defines these top-level routes, all lazy-loaded:
+The router defines these top-level routes. Pages are lazy-loaded except for `Home`:
 
 - `/` — `Home`
 - `/sessions` — `Workspaces` (list of recent project folders)
 - `/workspaces/:workspaceId/sessions` — `Sessions` (conversations in a workspace)
 - `/sessions/:id` — `Session` (the chat transcript)
 - `/evidence`, `/evidence/:id` — `EvidencePage`, `EvidenceDetail`
-- `/usage`, `/library`, `/system`, `/system/interop`, `/fleet`, `/fleet/:id`
+- `/usage`, `/library`, `/system`, `/system/interop`, `/fleet`, `/fleet/:id`, `/fleet/dispatches/:id`
 - `/settings`, `/settings/targets`, `/settings/routing`, `/settings/effective`, `/settings/why`
 - `/traces`, `/traces/:runId`, `/toolchain`, `/docs/*`
 
@@ -98,9 +98,17 @@ An unknown tool falls back to `KIND_HINT` (the ACP kind hint) and then to a gene
 
 `submitLabel` names what the send will actually do: "Send", "Send now", or "Queue for after".
 
-**Steering affordances.** `steeringAffordances` projects `AgentCapabilities` onto the four controls this track offers: `steer`, `interrupt`, `queue`, and `dispatch`. An engine that announced nothing yields `NO_STEERING`, and the composer hides the steering control rather than letting the operator press something that would return 409.
+**Steering affordances.** `steeringAffordances` projects `AgentCapabilities` onto four controls: `steer`, `interrupt`, `queue`, and `dispatch`. An engine that announced nothing yields `NO_STEERING`, and the composer hides the steering control rather than letting the operator press something that would return 409.
 
 **Queue projection.** `projectQueue` reads `GET /queue`'s two flat arrays (`steer` and `followUp`) and gives each entry a stable key, position, and the sentence that says when it will be read. `restoredDraft` puts drained queue texts back into the draft, deduplicated and capped at `PROMPT_TEXT_MAX_CHARACTERS`.
+
+## Session controls
+
+`RoutePicker.tsx` uses `route-picker-model.ts` to distinguish conversation routing from saved defaults. A conversation selection calls the engine's session configuration methods; changing saved defaults patches settings. The route chip displays the target, model, and thinking level reported by Clio.
+
+The composer accepts images and text-file attachments when the engine advertises the corresponding prompt capabilities. `attachments-model.ts` checks count, size, format, and text encoding before submission; image processing fits the browser payload, and the agent validates images again. Attachments submit with an idle prompt, rather than a steering message.
+
+`HandoffPanel.tsx` presents the extracted document for editing and explicit commit. `FleetRunPanel.tsx` presents a named contract's preview and requires approval before run. `AsidePanel.tsx` offers side questions and candidate drafts. Session controls also expose branch navigation, task and decision boards, context accounting and recovery, and usage through the advertised ACP methods. The GUI displays domain outcomes and enables actions according to reported capabilities.
 
 ## Approval model
 
@@ -113,7 +121,7 @@ An unknown tool falls back to `KIND_HINT` (the ACP kind hint) and then to a gene
 - `reject-and-stop` (only when `canStopTurn` is true) — denies this request and every other parked request from this turn, and cancels the turn.
 - `allow-once` (always, drawn last as `primary`) — allows this one call.
 
-The `CARD_EYEBROW` reads "APPROVAL NEEDED · ONE USE" because there is deliberately no allow-always on the wire. `SAFETY_POSTURE` states the product's whole promise: "Nothing runs until you answer. The GUI never answers for you."
+The `CARD_EYEBROW` reads "APPROVAL NEEDED · ONE USE" because there is deliberately no allow-always on the wire. `SAFETY_POSTURE` describes a parked permission request: "Nothing runs until you answer. The GUI never answers for you."
 
 **Agent classification.** The agent classified the call before it asked. `decisionChips` labels the tier, action class, and affected scope from the agent's own `PermissionDecisionFacts`. Without these facts a client would re-derive a tier from a tool name, which would be a second and worse classifier. `decisionTone` maps the agent's three semantic tokens (`accent`, `action`, `warning`) to status tones.
 

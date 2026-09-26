@@ -278,7 +278,7 @@ Tests that the prompt points to Clio's self-knowledge sources (live settings, bu
 
 - `points settings questions at the live snapshot whenever context is on the surface` — verifies that `context(scope="settings")` appears when `context` is on the tool surface, regardless of skill discovery or turn constraints.
 - `teaches the configure_clio preview only where the tool is registered and autonomy lets it run` — verifies that the `configure_clio` preview sentence appears only when `canConfigureClio` is true and autonomy is `default` or `yolo`, and that the sentence text differs between autonomy levels.
-- `names the shipped code map and never routes to the removed docs scope` — verifies that the compiled prompt references `dist/assets/codewiki.json` and does not contain unsubstituted `{CLIO_*}` placeholders.
+- `names the shipped code map and never routes to the removed docs scope` — verifies that the compiled prompt references `dist/assets/codemap.json` and does not contain unsubstituted `{CLIO_*}` placeholders.
 
 ### `tests/contracts/headless-approval-prompt.test.ts`
 
