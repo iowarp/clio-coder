@@ -22,8 +22,15 @@ test("Linux launcher installs absolute checkout paths, verifies ownership, and l
 	assert.equal(text, desktopEntry(paths));
 	assert.match(text, /"--open" "--idle-exit" "60000"/);
 	assert.match(text, /Terminal=false/);
-	const validation = spawnSync("desktop-file-validate", [installed.entry], { encoding: "utf8" });
-	if (!validation.error) assert.equal(validation.status, 0, validation.stderr);
+	await t.test("the desktop file passes the platform validator when it is installed", (t) => {
+		const validation = spawnSync("desktop-file-validate", [installed.entry], { encoding: "utf8" });
+		if ((validation.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+			t.skip("desktop-file-validate is not installed");
+			return;
+		}
+		if (validation.error) throw validation.error;
+		assert.equal(validation.status, 0, validation.stderr);
+	});
 	assert.equal((await installLauncher(prefix, paths)).status, "installed");
 	assert.equal((await launcherStatus(prefix)).status, "installed");
 	await writeFile(join(installed.directory, "unrelated.desktop"), "keep");
@@ -66,10 +73,11 @@ test("desktop quoting survives GLib parsing of spaces, quotes, backslashes, doll
 		env: { ...process.env, QUOTING_LOG: log },
 		encoding: "utf8",
 	});
-	if (launch.error) {
+	if ((launch.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
 		t.skip("GLib gio is not installed");
 		return;
 	}
+	if (launch.error) throw launch.error;
 	assert.equal(launch.status, 0, launch.stderr);
 	for (let i = 0; i < 100; i++) {
 		try {

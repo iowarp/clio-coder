@@ -4,6 +4,7 @@ import { setTimeout } from "node:timers/promises";
 /** What a ready background app reports about itself; `clio` is the version its process loaded. */
 export interface LocalServerMeta {
 	clio: string;
+	idle?: boolean;
 }
 
 /** Readiness checks are the sole app-owned socket client: fixed loopback, fixed path, no redirects. */
@@ -30,7 +31,10 @@ export async function localServerMeta(port: number, token: string) {
 						const value = JSON.parse(body);
 						resolve(
 							response.statusCode === 200 && value.apiVersion === 1 && value.pwa === true
-								? { clio: typeof value.clio === "string" ? value.clio.slice(0, 64) : "unknown" }
+								? {
+										clio: typeof value.clio === "string" ? value.clio.slice(0, 64) : "unknown",
+										...(typeof value.idle === "boolean" ? { idle: value.idle } : {}),
+									}
 								: null,
 						);
 					} catch {

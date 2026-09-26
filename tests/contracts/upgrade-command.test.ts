@@ -136,6 +136,33 @@ test("upgrade updates the same prefix and runs checks with the exact installed e
 	]);
 });
 
+test("a successful upgrade asks the installed CLI to restart an idle background app", (t) => {
+	const f = installedFixture();
+	t.after(f.home.cleanup);
+	const background = join(f.home.dir, "state/gui/background");
+	mkdirSync(background, { recursive: true });
+	writeFileSync(join(background, "owner.json"), "{}\n");
+	const result = f.run(
+		["--json"],
+		`runBackgroundRestart: async (installation) => {
+			const { appendFileSync } = await import("node:fs");
+			appendFileSync(process.env.CALL_LOG, JSON.stringify({ backgroundEntry: installation.entry }) + "\\n");
+			return "Clio Coder background app was left running because it is busy.";
+		},`,
+	);
+	assert.equal(result.status, 0, result.stderr + result.stdout);
+	assert.deepEqual(f.calls().at(-1), { backgroundEntry: f.entry });
+	assert.match(result.stdout, /background app was left running because it is busy/);
+
+	const manual = f.run(
+		["--post-install", "--skip-migrations", "--json"],
+		`runBackgroundRestart: async () => { throw new Error("must not run automatically"); },`,
+	);
+	assert.equal(manual.status, 0, manual.stderr + manual.stdout);
+	assert.doesNotMatch(manual.stdout, /must not run automatically/);
+	assert.match(manual.stdout, /clio-coder gui background restart/);
+});
+
 test("restart follows successful checks, relaunches with argv the real parser accepts, and propagates the new CLI's exit status", (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);

@@ -9,6 +9,7 @@ import {
 	installBackground,
 	preferBackground,
 	restartBackground,
+	restartBackgroundIfIdle,
 	startBackground,
 	stopBackground,
 	tryStartBackground,
@@ -201,7 +202,11 @@ test("installed background configuration launches plain Node and preserves a bra
 	const config = await newBackgroundConfig(4317, { node: process.execPath, entry, icon }, join(root, "desktop"));
 	assert.equal(config.launch.loader, undefined);
 	assert.ok(!backgroundUnit(config, directory).includes("--import"));
-	const control = async () => "";
+	const calls: string[] = [];
+	const control: typeof controlService = async (action) => {
+		calls.push(action);
+		return "";
+	};
 	await installBackground(directory, config, control, async () => {});
 	assert.deepEqual(await readBackgroundConfig(backgroundPaths(directory).config), config);
 	const desktop = await launcherStatus(config.desktopPrefix);
@@ -210,12 +215,70 @@ test("installed background configuration launches plain Node and preserves a bra
 	assert.equal(text, desktopEntry({ ...config.launch, background: directory }));
 	assert.ok(text.includes(`Icon=${icon}`));
 	assert.ok(!text.includes("--import"));
+	const movedEntry = join(root, "moved-server.js"),
+		packageAlias = join(root, "same-package-root");
+	await writeFile(movedEntry, "export {};\n");
+	await symlink(config.packageRoot, packageAlias);
+	const current = await newBackgroundConfig(
+		4317,
+		{ node: process.execPath, entry: movedEntry, icon },
+		config.desktopPrefix,
+	);
+	const moved = { ...current, packageRoot: packageAlias };
+	await installBackground(directory, moved, control, async () => {});
+	const repinned = await readBackgroundConfig(backgroundPaths(directory).config);
+	assert.equal(repinned.token, config.token);
+	assert.equal(repinned.launch.entry, movedEntry);
+	assert.deepEqual(calls.slice(-2), ["reload", "enable"]);
+	const movedDesktop = await launcherStatus(config.desktopPrefix);
+	assert.equal(movedDesktop.status, "installed");
+	assert.equal(
+		await readFile(movedDesktop.entry, "utf8"),
+		desktopEntry({ ...repinned.launch, background: directory }),
+	);
 	await assert.rejects(
-		installBackground(directory, { ...config, packageRoot: root }, control, async () => {}),
+		installBackground(directory, { ...moved, packageRoot: root }, control, async () => {}),
 		/another installation/,
 	);
 	assert.equal((await uninstallBackground(directory, control)).status, "absent");
 	assert.equal(serverOptions(["--open", "--no-open"]).open, "never");
+});
+
+test("restart repins moved launch paths for the same installation before starting", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-web-background-repin-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const directory = join(root, "background"),
+		prefix = join(root, "desktop"),
+		oldEntry = join(root, "old-server.js"),
+		currentEntry = join(root, "current-server.js");
+	await writeFile(oldEntry, "export {};\n");
+	await writeFile(currentEntry, "export {};\n");
+	const config = await newBackgroundConfig(4317, { node: process.execPath, entry: oldEntry }, prefix);
+	const files = backgroundPaths(directory);
+	const calls: string[] = [];
+	const control: typeof controlService = async (action) => {
+		calls.push(action);
+		return `FragmentPath=${calls.includes("enable") ? files.unitFile : ""}\nActiveState=active\n`;
+	};
+	const ready = async () => ({ clio: "0.5.7", idle: true });
+	await installBackground(directory, config, control, ready);
+	const result = await restartBackgroundIfIdle(directory, control, ready, ready, {
+		node: process.execPath,
+		entry: currentEntry,
+	});
+	assert.deepEqual(result, { status: "restarted", running: "0.5.7" });
+	assert.deepEqual(calls.slice(-3), ["reload", "show", "restart"]);
+	const repinned = await readBackgroundConfig(files.config);
+	assert.equal(repinned.token, config.token);
+	assert.equal(repinned.launch.entry, currentEntry);
+	assert.ok((await readFile(files.unitFile, "utf8")).includes(currentEntry));
+	const desktop = await launcherStatus(prefix);
+	assert.equal(desktop.status, "installed");
+	assert.equal(
+		await readFile(desktop.entry, "utf8"),
+		desktopEntry({ ...repinned.launch, background: directory }),
+	);
+	assert.equal((await uninstallBackground(directory, control)).status, "absent");
 });
 
 test("a bare launch reuses only this installation's verified background app and otherwise explains", async (t) => {
@@ -297,4 +360,95 @@ test("launch options: bare reuses and opens on a desktop; any listener flag keep
 	);
 	assert.equal(autoOpenBrowser({}, "darwin", true), true);
 	assert.equal(autoOpenBrowser({}, "win32", true), false, "Windows prints the link until its opener is verified");
+});
+
+test("a bare launch restarts this installation's idle background app when it runs an older version, and only then", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-web-background-version-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const directory = join(root, "background"),
+		files = backgroundPaths(directory);
+	const config = await newBackgroundConfig(4318, launch, join(root, "desktop"), { PATH: "/usr/bin" });
+	const calls: string[] = [];
+	const control: typeof controlService = async (action) => {
+		calls.push(action);
+		return `FragmentPath=${calls.includes("enable") ? files.unitFile : ""}\nActiveState=active\n`;
+	};
+	// The running app answers with its version and whether anything is open in it; a restart loads the new one.
+	let running = "0.5.6";
+	let idle: boolean | undefined = true;
+	const ready = async () => ({ clio: running, ...(idle === undefined ? {} : { idle }) });
+	await installBackground(directory, config, control, ready);
+	const restartTo = (version: string): typeof controlService => async (action, unit, unitFile) => {
+		if (action === "restart") running = version;
+		return control(action, unit, unitFile);
+	};
+	const upgraded = await preferBackground(directory, config.packageRoot, restartTo("0.5.7"), ready, "linux", "0.5.7");
+	assert.deepEqual(upgraded, {
+		kind: "open",
+		url: `http://127.0.0.1:4318/#token=${config.token}`,
+		running: "0.5.7",
+		restartedFrom: "0.5.6",
+	});
+	assert.deepEqual(calls.slice(-2), ["show", "restart"]);
+	// Something is open in it: the operator's work outlives the version check, and the caller says so.
+	running = "0.5.6";
+	idle = false;
+	const busy = await preferBackground(directory, config.packageRoot, restartTo("0.5.7"), ready, "linux", "0.5.7");
+	assert.deepEqual(busy, { kind: "open", url: `http://127.0.0.1:4318/#token=${config.token}`, running: "0.5.6" });
+	assert.notEqual(calls.at(-1), "restart");
+	// An older app that does not report idleness is treated as in use.
+	idle = undefined;
+	const unknown = await preferBackground(directory, config.packageRoot, restartTo("0.5.7"), ready, "linux", "0.5.7");
+	assert.equal((unknown as { running: string }).running, "0.5.6");
+	assert.notEqual(calls.at(-1), "restart");
+	// The same version is never restarted.
+	idle = true;
+	running = "0.5.7";
+	const same = await preferBackground(directory, config.packageRoot, restartTo("0.5.8"), ready, "linux", "0.5.7");
+	assert.deepEqual(same, { kind: "open", url: `http://127.0.0.1:4318/#token=${config.token}`, running: "0.5.7" });
+	assert.notEqual(calls.at(-1), "restart");
+	assert.equal((await uninstallBackground(directory, control)).status, "absent");
+});
+
+test("restart --if-idle restarts only an idle background app and says why it left a busy one", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-web-background-if-idle-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const directory = join(root, "background"),
+		files = backgroundPaths(directory);
+	const config = await newBackgroundConfig(4319, launch, join(root, "desktop"), { PATH: "/usr/bin" });
+	const calls: string[] = [];
+	const control: typeof controlService = async (action) => {
+		calls.push(action);
+		return `FragmentPath=${calls.includes("enable") ? files.unitFile : ""}\nActiveState=active\n`;
+	};
+	let idle: boolean | undefined = false;
+	const ready = async () => ({ clio: "0.5.6", ...(idle === undefined ? {} : { idle }) });
+	const probe = async () => ({ clio: "0.5.6", ...(idle === undefined ? {} : { idle }) });
+	assert.deepEqual(await restartBackgroundIfIdle(directory, control, ready, probe), { status: "absent" });
+	await installBackground(directory, config, control, ready);
+	assert.deepEqual(await restartBackgroundIfIdle(directory, control, ready, probe), {
+		status: "left",
+		reason: "busy",
+		running: "0.5.6",
+	});
+	assert.notEqual(calls.at(-1), "restart");
+	idle = undefined;
+	assert.deepEqual(await restartBackgroundIfIdle(directory, control, ready, probe), {
+		status: "left",
+		reason: "unknown",
+		running: "0.5.6",
+	});
+	idle = true;
+	assert.deepEqual(await restartBackgroundIfIdle(directory, control, ready, probe), {
+		status: "restarted",
+		running: "0.5.6",
+	});
+	assert.equal(calls.at(-1), "restart");
+	// A stopped app has nothing open in it; restarting would start it, so it is left stopped.
+	assert.deepEqual(await restartBackgroundIfIdle(directory, control, ready, async () => null), {
+		status: "left",
+		reason: "stopped",
+		running: null,
+	});
+	assert.equal((await uninstallBackground(directory, control)).status, "absent");
 });
