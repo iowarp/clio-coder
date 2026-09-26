@@ -52,6 +52,9 @@ export const GLYPH = {
 	warnInline: "!",
 	phaseWaiting: "◔",
 	phaseThinking: "◐",
+	// Nerd Font nf-md-brain: a monochrome font glyph, not a color emoji.
+	// The composer keeps its textual effort fallback for accessible/narrow layouts.
+	brain: "\u{F09D1}",
 	phaseWriting: "◑",
 	phaseTool: "⚙",
 	phaseBlocked: "⏸",

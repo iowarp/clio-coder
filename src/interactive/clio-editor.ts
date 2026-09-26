@@ -111,11 +111,11 @@ function thinkingRailHint(
 		levels.length === 0 ||
 		(level !== "off" && count === 0) ||
 		process.env.CLIO_CODER_SCREEN_READER === "1" ||
-		width < levels.length + 1 + visibleWidth(level)
+		width < visibleWidth(GLYPH.brain) + levels.length + 2 + visibleWidth(level)
 	)
 		return theme.fg("thinkingLevel", `think ${level}`);
 	const cells = `${theme.fg("meterFill", "▰".repeat(count))}${theme.fg("meterFree", "▱".repeat(levels.length - count))}`;
-	return `${cells} ${theme.fg("thinkingLevel", level)}`;
+	return `${theme.fg("thinkingLevel", GLYPH.brain)} ${cells} ${theme.fg("thinkingLevel", level)}`;
 }
 
 /** The line the empty composer shows for the mode it is in. */
