@@ -131,6 +131,14 @@ try {
 		const page = await context.newPage();
 		failedPage = page;
 		page.setDefaultTimeout(15000);
+		let evidenceReads = 0;
+		const apiWrites: string[] = [];
+		page.on("request", (request) => {
+			const path = new URL(request.url()).pathname;
+			if (path === "/api/evidence" && request.method() === "GET") evidenceReads++;
+			if (path.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(request.method()))
+				apiWrites.push(`${request.method()} ${path}`);
+		});
 		page.on("pageerror", (error) => errors.push(error.message));
 		page.on("requestfailed", (request) => {
 			const path = new URL(request.url()).pathname;
@@ -188,14 +196,27 @@ try {
 			);
 			assert.equal(overflow, false, `${name} overflows at ${width}px`);
 		}
-		async function navigate(label: string) {
+		async function selectArea(label: string) {
 			const menu = page.getByRole("button", { name: "Open navigation", exact: true });
-			if (await menu.isVisible()) await menu.click();
+			if ((await menu.isVisible()) && !(await page.locator(".navigation-dialog:open").count())) await menu.click();
+			const back = page.getByRole("button", { name: "Navigation", exact: true });
+			if (await back.isVisible()) await back.click();
 			await page
-				.getByRole("navigation", { name: /^(Main navigation|Inspection and settings)$/ })
+				.getByRole("navigation", { name: "Main navigation", exact: true })
 				.filter({ visible: true })
 				.getByRole("link", { name: label, exact: true })
 				.click();
+		}
+		async function navigate(label: string) {
+			const previous = new URL(page.url()).pathname;
+			await selectArea(label);
+			// Area selection keeps an active conversation mounted. Leaving it is a separate,
+			// explicit viewer action; legacy full-page checks still exercise those pages.
+			if (/^\/sessions\/[^/]+$/.test(previous) && new URL(page.url()).pathname === previous) {
+				const viewer = label === "Sessions" ? "Manage projects" : `Open ${label} page`;
+				await page.getByRole("link", { name: viewer, exact: true }).filter({ visible: true }).click();
+				await page.waitForURL((url) => url.pathname !== previous);
+			}
 		}
 		await page.goto(`${origin}/#token=test-token`);
 		await page.getByRole("heading", { level: 1 }).waitFor();
@@ -267,6 +288,7 @@ try {
 		await check("home-live-preferences");
 		await check("home");
 		if (width === 1600) await page.screenshot({ path: join(output, "home.png"), fullPage: true });
+		if (width === 320) await page.screenshot({ path: join(output, "320-home-light.png"), fullPage: true });
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await page.locator(':root[data-theme="dark"]').waitFor();
 		await check("home-dark");
@@ -289,10 +311,10 @@ try {
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `toolchain-${width}.png`), fullPage: true });
 		await navigate("Traces");
-		await page.locator('a[href^="/traces/run-0000"]').waitFor();
+		await page.locator('main a[href^="/traces/run-0000"]').waitFor();
 		await check("traces");
-		await page.locator('a[href^="/traces/run-0000"]').click();
-		await page.getByRole("heading", { name: "Inspect fixture 0", exact: true }).waitFor();
+		await page.locator('main a[href^="/traces/run-0000"]').click();
+		await page.locator("main").getByRole("heading", { name: "Inspect fixture 0", exact: true }).waitFor();
 		await page.getByText("Fixture workspace", { exact: false }).first().waitFor({ state: "attached" });
 		// Format conformance and contract quality are separate facts; an unmeasured quality never reads as a pass.
 		const checkRow = (label: string) => page.locator(".receipt-check", { has: page.getByText(label, { exact: true }) });
@@ -305,23 +327,26 @@ try {
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `trace-run-${width}.png`), fullPage: true });
 		await navigate("Fleet");
-		await page.getByRole("heading", { name: "Fleet executions", exact: true }).waitFor();
+		await page.locator("main").getByRole("heading", { name: "Fleet executions", exact: true }).waitFor();
 		await page.getByText("not a live event stream", { exact: false }).waitFor();
 		await check("fleet");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `fleet-${width}.png`), fullPage: true });
-		await page.locator('a[href^="/fleet/fleet-149"]').click();
+		await page.locator('main a[href^="/fleet/fleet-149"]').click();
 		await page.getByText("Inspect worker output", { exact: true }).click();
 		await page.getByText("Fixture step passed.", { exact: true }).waitFor();
-		await page.getByRole("heading", { name: "review · pass", exact: true }).waitFor({ state: "attached" });
+		await page
+			.locator("main")
+			.getByRole("heading", { name: "review · pass", exact: true })
+			.waitFor({ state: "attached" });
 		await check("fleet-run");
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("fleet-run-dark");
 		await page.goto(`${origin}/evidence`);
-		await page.locator('a[href^="/evidence/evidence-039"]').waitFor();
+		await page.locator('main a[href^="/evidence/evidence-039"]').waitFor();
 		await check("evidence");
-		await page.locator('a[href^="/evidence/evidence-039"]').click();
-		await page.getByRole("heading", { name: "Trust by run", exact: true }).waitFor();
+		await page.locator('main a[href^="/evidence/evidence-039"]').click();
+		await page.locator("main").getByRole("heading", { name: "Trust by run", exact: true }).waitFor();
 		await check("evidence-detail-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await check("evidence-detail");
@@ -349,7 +374,10 @@ try {
 		await page.keyboard.press("Escape");
 		assert.equal(await page.getByRole("link", { name: "Docs", exact: true }).count(), 0);
 		await page.goto(`${origin}/docs/architecture/trace-store.md`);
-		await page.getByRole("heading", { name: "Documentation is on the public site.", exact: true }).waitFor();
+		await page
+			.locator("main")
+			.getByRole("heading", { name: "Documentation is on the public site.", exact: true })
+			.waitFor();
 		assert.equal(await page.locator(".docs-page, iframe").count(), 0);
 		assert.equal(
 			await page.getByRole("link", { name: "Open documentation ↗", exact: true }).getAttribute("href"),
@@ -367,11 +395,9 @@ try {
 				expanded,
 			);
 			await check("help-rail-collapsed");
+			if (width === 1600) await page.screenshot({ path: join(output, "navigation-collapsed-1600.png"), fullPage: true });
 			assert.equal(
-				await page
-					.getByRole("navigation", { name: /^(Main navigation|Inspection and settings)$/ })
-					.getByRole("link")
-					.count(),
+				await page.getByRole("navigation", { name: "Main navigation", exact: true }).getByRole("link").count(),
 				9,
 			);
 			assert.equal(await page.getByRole("link", { name: "Settings", exact: true }).getAttribute("data-tip"), "Settings");
@@ -394,8 +420,9 @@ try {
 		await navigate("Settings");
 		// The write surface: a select saves through the engine, a project-set value refuses, a destructive
 		// change needs its named confirmation.
-		const setting = (path: string) => page.locator(".setting-control", { has: page.getByText(path, { exact: true }) });
-		await page.getByRole("heading", { name: "Chat", exact: true }).waitFor();
+		const setting = (path: string) =>
+			page.locator("main .setting-control", { has: page.getByText(path, { exact: true }) });
+		await page.locator("main").getByRole("heading", { name: "Chat", exact: true }).waitFor();
 		const thinking = setting("chat.thinkingLevel");
 		const level = (await thinking.getByRole("combobox").inputValue()) === "low" ? "high" : "low";
 		await thinking.getByRole("combobox").selectOption(level);
@@ -404,7 +431,10 @@ try {
 		await check("settings-saved");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `settings-controls-${width}.png`), fullPage: true });
-		await page.getByRole("button", { name: /^Fleet · / }).click();
+		await page
+			.locator("main")
+			.getByRole("button", { name: /^Fleet · / })
+			.click();
 		await setting("fleet.concurrency").getByText("Set by the project layer").waitFor();
 		if (await setting("fleet.concurrency").getByRole("combobox").count())
 			throw new Error("A project-set value still offers an editor.");
@@ -417,10 +447,10 @@ try {
 		if (width === 1600) await page.screenshot({ path: join(output, "settings-confirm.png"), fullPage: true });
 		await history.getByRole("button", { name: "Save", exact: true }).click();
 		await history.getByRole("status").waitFor();
-		await page.getByLabel("Find a setting", { exact: true }).fill("no-such-setting-anywhere");
+		await page.locator("main").getByLabel("Find a setting", { exact: true }).fill("no-such-setting-anywhere");
 		await page.getByText("No settings match.", { exact: true }).waitFor();
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
-		await page.getByLabel("Find a setting", { exact: true }).fill("retry");
+		await page.locator("main").getByLabel("Find a setting", { exact: true }).fill("retry");
 		await check("settings-controls-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await page.getByRole("link", { name: "Effective values", exact: true }).click();
@@ -432,8 +462,8 @@ try {
 		await check("settings-inspection-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await page.getByRole("link", { name: "Sources & timing", exact: true }).click();
-		await page.getByRole("heading", { name: "fixture-hook", exact: true }).waitFor();
-		await page.getByRole("heading", { name: "From source to behavior", exact: true }).waitFor();
+		await page.locator("main").getByRole("heading", { name: "fixture-hook", exact: true }).waitFor();
+		await page.locator("main").getByRole("heading", { name: "From source to behavior", exact: true }).waitFor();
 		await check("config-graph");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `config-graph-${width}.png`), fullPage: true });
@@ -467,19 +497,22 @@ try {
 			.getByRole("article", { name: "fixture-target", exact: true })
 			.getByRole("button", { name: "Use for chat & fleet", exact: true })
 			.click();
-		await page.getByRole("heading", { name: "Target use · succeeded", exact: true }).waitFor();
+		await page.locator("main").getByRole("heading", { name: "Target use · succeeded", exact: true }).waitFor();
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("targets-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await page.getByRole("link", { name: "Routing", exact: true }).click();
-		await page.getByRole("heading", { name: /^Agent bindings ·/ }).waitFor();
+		await page
+			.locator("main")
+			.getByRole("heading", { name: /^Agent bindings ·/ })
+			.waitFor();
 		await check("routing");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `routing-${width}.png`), fullPage: true });
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("routing-dark");
 		await page.goto(`${origin}/usage`);
-		await page.getByRole("heading", { name: "Token composition", exact: true }).waitFor();
+		await page.locator("main").getByRole("heading", { name: "Token composition", exact: true }).waitFor();
 		// The five bars compare fields with one another, which is the one thing a reader can get
 		// wrong by looking; the caveat is part of the panel, not a footnote that can drift away.
 		await page.getByText("they are not additive percentages", { exact: false }).waitFor();
@@ -490,7 +523,7 @@ try {
 			await page.screenshot({ path: join(output, `usage-${width}.png`), fullPage: true });
 		await navigate("Library");
 		// The catalog is the landing collection: plan, review, apply, then remove, all against the bundled index.
-		const offer = page.getByRole("listitem", { name: "skill:archify", exact: true });
+		const offer = page.locator("main").getByRole("listitem", { name: "skill:archify", exact: true });
 		await offer.waitFor();
 		await check("library-catalog");
 		await offer.getByRole("button", { name: "Install skill:archify for me", exact: true }).click();
@@ -512,7 +545,10 @@ try {
 		if (await offer.getByRole("button", { name: "Install skill:archify for me", exact: true }).count())
 			throw new Error("An installed user copy still offers a user install.");
 		await offer.getByRole("button", { name: "Install skill:archify in this project", exact: true }).waitFor();
-		await page.getByRole("button", { name: /^Installed only · [1-9]/ }).click();
+		await page
+			.locator("main")
+			.getByRole("button", { name: /^Installed only · [1-9]/ })
+			.click();
 		await check("library-installed");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `library-installed-${width}.png`), fullPage: true });
@@ -525,32 +561,39 @@ try {
 		await removal.getByRole("button", { name: "Apply this change", exact: true }).click();
 		await removal.getByText("The files and the install record are gone.").waitFor();
 		await removal.getByRole("button", { name: "Done", exact: true }).click();
-		await page.getByText("No packages match.").waitFor();
+		await page.locator("main").getByText("No packages match.").waitFor();
 		await page
+			.locator("main")
 			.getByRole("tablist", { name: "Library collections" })
 			.getByRole("tab", { name: /^Skills · [1-9]/ })
 			.click();
-		await page.getByRole("heading", { name: "fixture-skill", exact: true }).waitFor();
+		await page.locator("main").getByRole("heading", { name: "fixture-skill", exact: true }).waitFor();
 		await check("library-skills");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `library-skills-${width}.png`), fullPage: true });
 		// The collections are one tab stop: an arrow key moves the selection and the focus together.
-		await page.getByRole("tab", { name: /^Skills · / }).press("ArrowLeft");
-		const agentsTab = page.getByRole("tab", { name: /^Agents · / });
+		await page
+			.locator("main")
+			.getByRole("tab", { name: /^Skills · / })
+			.press("ArrowLeft");
+		const agentsTab = page.locator("main").getByRole("tab", { name: /^Agents · / });
 		await agentsTab.and(page.locator('[aria-selected="true"]')).waitFor();
 		if ((await agentsTab.getAttribute("aria-selected")) !== "true")
 			throw new Error("ArrowLeft from Skills did not select the Agents tab.");
 		if (!(await agentsTab.evaluate((node) => node === document.activeElement)))
 			throw new Error("ArrowLeft moved the selection without moving focus.");
-		const agentDetails = page.locator(".library-resource__details").first();
+		const agentDetails = page.locator("main .library-resource__details").first();
 		await agentDetails.locator(":scope > summary").click();
 		await agentDetails.getByText("Tool-call budget", { exact: true }).waitFor();
 		await check("library-agent-details");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `library-agents-${width}.png`), fullPage: true });
 		for (const collection of ["Agents", "Prompts", "Fleets", "Extensions", "Verifiers"]) {
-			await page.getByRole("tab", { name: new RegExp(`^${collection} · [1-9]`) }).click();
-			const resource = page.locator(".library-resource").first();
+			await page
+				.locator("main")
+				.getByRole("tab", { name: new RegExp(`^${collection} · [1-9]`) })
+				.click();
+			const resource = page.locator("main .library-resource").first();
 			await resource.waitFor();
 			const details = resource.locator(".library-resource__details");
 			if (!(await details.evaluate((node) => (node as HTMLDetailsElement).open)))
@@ -560,10 +603,10 @@ try {
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("library-dark");
 		await navigate("System");
-		await page.getByRole("heading", { name: "Clio folders", exact: true }).waitFor();
+		await page.locator("main").getByRole("heading", { name: "Clio folders", exact: true }).waitFor();
 		await check("system-dark");
-		await page.getByRole("link", { name: "Other coding agents", exact: true }).click();
-		await page.getByRole("heading", { name: "Codex", exact: true }).waitFor();
+		await page.locator("main").getByRole("link", { name: "Other coding agents", exact: true }).click();
+		await page.locator("main").getByRole("heading", { name: "Codex", exact: true }).waitFor();
 		await check("interop-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await page.getByText("Would be offered", { exact: true }).waitFor();
@@ -582,8 +625,11 @@ try {
 			.getByLabel("Message Clio Coder", { exact: true })
 			.fill("Show the fixture findings with code and a diagram.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
+		// The fixture first streams and then settles. Inspect its final Markdown subtree,
+		// which replaces the streaming subtree before deferred diagrams are rendered.
+		await page.locator(".chat-turn.is-settled .diagram").waitFor();
 		// Diagrams, like highlighted code, render when they approach the transcript viewport.
-		await page.locator(".diagram").scrollIntoViewIfNeeded();
+		await page.locator(".chat-turn.is-settled .diagram").scrollIntoViewIfNeeded();
 		await page.locator(".diagram.is-rendered svg").waitFor();
 		// Highlighting waits until code nears the visible transcript; the composer is no longer
 		// displaced by page scrolling, so bring that block into the one reading viewport.
@@ -734,7 +780,156 @@ try {
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("conversation-dark");
 		if (width === 1600) await page.screenshot({ path: join(output, "conversation-dark.png"), fullPage: true });
+		if (width === 320) await page.screenshot({ path: join(output, "conversation-320-dark.png"), fullPage: true });
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
+		// Every workspace area is an interactive sidebar during a conversation. Inspecting
+		// records or drafting a setting must preserve the route, unsent text and actual
+		// textarea node: a remount can silently lose selection, attachments or editor state.
+		const writesBeforeInspection = apiWrites.length;
+		const contextPath = new URL(page.url()).pathname;
+		const contextSessionId = contextPath.split("/").at(-1);
+		assert.ok(contextSessionId);
+		const draft = "Keep this unsent draft while inspecting the workspace.";
+		await composerField.fill(draft);
+		const originalField = await composerField.elementHandle();
+		assert.ok(originalField);
+		async function assertConversationPreserved() {
+			assert.equal(new URL(page.url()).pathname, contextPath);
+			assert.equal(new URL(page.url()).pathname.split("/").at(-1), contextSessionId);
+			assert.equal(await composerField.inputValue(), draft);
+			assert.equal(
+				await originalField.evaluate((node) => node === document.querySelector(".composer__field")),
+				true,
+				"Sidebar inspection remounted the conversation composer",
+			);
+		}
+		let settingDraft = "";
+		for (const area of ["Traces", "Fleet", "Evidence", "Toolchain", "Settings", "Library", "System"]) {
+			await selectArea(area);
+			await page.getByRole("heading", { name: area, exact: true }).filter({ visible: true }).waitFor();
+			if (area === "Traces" || area === "Fleet" || area === "Evidence") {
+				const input = page
+					.getByLabel(
+						area === "Traces" ? "Search runs" : area === "Fleet" ? "Search loaded history" : "Search loaded bundles",
+						{ exact: true },
+					)
+					.filter({ visible: true });
+				await input.fill("smoke-no-record-matches");
+				await page
+					.getByRole("button", {
+						name: area === "Traces" ? "Filter runs" : area === "Fleet" ? "Filter history" : "Filter bundles",
+						exact: true,
+					})
+					.filter({ visible: true })
+					.click();
+				await page.getByText("No loaded records match.", { exact: true }).filter({ visible: true }).first().waitFor();
+				await input.fill("");
+				await page
+					.getByRole("button", {
+						name: area === "Traces" ? "Filter runs" : area === "Fleet" ? "Filter history" : "Filter bundles",
+						exact: true,
+					})
+					.filter({ visible: true })
+					.click();
+				const record = page.locator(".inspection-navigation__record[data-record-id]").filter({ visible: true }).first();
+				await record.waitFor();
+				await record.click();
+				await page
+					.getByRole("link", {
+						name: area === "Traces" ? "Open trace viewer" : area === "Fleet" ? "Open Fleet viewer" : "Open evidence viewer",
+						exact: true,
+					})
+					.filter({ visible: true })
+					.waitFor();
+			} else if (area === "Toolchain" || area === "System") {
+				const filter = page
+					.getByLabel(area === "Toolchain" ? "Filter pinned tools" : "Filter system diagnostics", {
+						exact: true,
+					})
+					.filter({ visible: true });
+				await filter.fill("smoke-no-match");
+				await filter.fill("");
+				const disclosure = page
+					.locator(area === "Toolchain" ? ".tool-navigation details > summary" : ".system-navigation details > summary")
+					.filter({ visible: true })
+					.first();
+				await disclosure.waitFor();
+				await disclosure.click();
+			} else if (area === "Settings") {
+				const editor = page.getByRole("region", { name: "Settings editor", exact: true });
+				await editor.getByLabel(/^Setting · /).selectOption("chat.thinkingLevel");
+				const value = editor.locator(".setting-control").getByRole("combobox");
+				settingDraft = (await value.inputValue()) === "low" ? "high" : "low";
+				await value.selectOption(settingDraft);
+				await editor.getByRole("button", { name: "Unsaved · 1", exact: true }).waitFor();
+				assert.equal(await editor.getByRole("button", { name: "Save", exact: true }).isEnabled(), true);
+			} else {
+				const library = page.getByRole("region", { name: "Library collections and packages", exact: true });
+				const packageRow = library.locator(".library-packages > li").first();
+				await packageRow.waitFor();
+				await packageRow.getByRole("button", { name: /^Inspect / }).click();
+				await packageRow.getByRole("heading", { name: "Package source & requirements", exact: true }).waitFor();
+			}
+			await assertConversationPreserved();
+			await check(`context-${area.toLowerCase()}`);
+			await page.screenshot({ path: join(output, `context-${area.toLowerCase()}-${width}.png`), fullPage: true });
+		}
+		// Close the mobile native panel before using conversation controls. Configure harness
+		// deliberately opens the same settings editor without changing the session route.
+		if (await page.locator(".navigation-dialog:open").count()) await page.keyboard.press("Escape");
+		await page.getByRole("button", { name: "Configure harness", exact: true }).click();
+		await page.getByRole("region", { name: "Settings editor", exact: true }).filter({ visible: true }).waitFor();
+		const returnedEditor = page.getByRole("region", { name: "Settings editor", exact: true }).filter({ visible: true });
+		await returnedEditor.getByLabel(/^Setting · /).selectOption("chat.thinkingLevel");
+		assert.equal(
+			await returnedEditor.locator(".setting-control").getByRole("combobox").inputValue(),
+			settingDraft,
+			"An unsaved setting draft disappeared while inspecting other sidebars",
+		);
+		await returnedEditor.getByRole("button", { name: "Revert", exact: true }).click();
+		await returnedEditor.getByRole("button", { name: "Revert", exact: true }).waitFor({ state: "detached" });
+		await assertConversationPreserved();
+		await check("context-configure-harness");
+		if (await page.locator(".navigation-dialog:open").count()) await page.keyboard.press("Escape");
+		const readsBeforeArtifacts = evidenceReads;
+		const artifactsToggle = page.getByRole("button", { name: "Show artifacts", exact: true });
+		await artifactsToggle.click();
+		const inspector = page.getByRole("complementary", { name: "Conversation artifacts", exact: true });
+		await inspector.waitFor();
+		await inspector.getByLabel("Find a recorded path", { exact: true }).fill("smoke-no-recorded-path");
+		await inspector.getByLabel("Find a recorded path", { exact: true }).fill("");
+		const file = inspector.locator(".artifact-inspector__files button").first();
+		if (await file.count()) {
+			await file.click();
+			await inspector.getByRole("region", { name: "Selected file records", exact: true }).waitFor();
+		}
+		await check("artifacts-files");
+		await inspector.getByRole("button", { name: "Results", exact: true }).click();
+		await inspector.locator(".artifact-inspector__response > summary").click();
+		await inspector.getByRole("heading", { name: /^Recorded tool activity/ }).waitFor();
+		await check("artifacts-results");
+		assert.equal(evidenceReads, readsBeforeArtifacts, "Files and Results triggered an evidence inventory read");
+		await inspector.getByRole("button", { name: "Evidence", exact: true }).click();
+		await inspector.getByText(/No linked evidence bundles are in the loaded inventory window/).waitFor();
+		assert.equal(
+			await inspector.getByRole("link", { name: "Open evidence viewer", exact: true }).count(),
+			0,
+			"Unrelated installation bundles were presented as conversation artifacts",
+		);
+		await check("artifacts-evidence");
+		assert.ok(evidenceReads > readsBeforeArtifacts, "Opening Evidence did not read its admitted inventory");
+		await assertConversationPreserved();
+		await inspector.getByRole("button", { name: "Close artifacts", exact: true }).click();
+		await inspector.waitFor({ state: "hidden" });
+		assert.equal(await artifactsToggle.evaluate((node) => document.activeElement === node), true);
+		// Return to the default rail before the existing conversation controls and send flows.
+		await selectArea("Settings");
+		await page.getByRole("button", { name: "Navigation", exact: true }).filter({ visible: true }).click();
+		if (await page.locator(".navigation-dialog:open").count()) await page.keyboard.press("Escape");
+		await assertConversationPreserved();
+		assert.deepEqual(apiWrites.slice(writesBeforeInspection), [], "Read-only sidebar inspection performed a write");
+		await composerField.fill("");
+		await originalField.dispose();
 		// Conversation controls use ACP config options, and saved scope alone can switch targets.
 		const route = page.locator(".route-picker");
 		await route.locator("summary").click();
@@ -782,6 +977,15 @@ try {
 		await page.getByText(/^Choose the target and model beside Send, under the message field\./).waitFor();
 		await page.getByRole("combobox", { name: /^Working freedom for new conversations/ }).waitFor();
 		await check("session-controls");
+		const toolsBounds = await page.locator(".conversation__tools-body").boundingBox();
+		const mainBounds = await page.locator("main").boundingBox();
+		assert.ok(
+			toolsBounds &&
+				mainBounds &&
+				toolsBounds.x >= mainBounds.x &&
+				toolsBounds.x + toolsBounds.width <= mainBounds.x + mainBounds.width,
+			`Session tools are outside the conversation at ${width}px: ${JSON.stringify({ toolsBounds, mainBounds })}`,
+		);
 		await page.keyboard.press("Escape");
 		assert.equal(
 			await page.locator(".conversation__tools").evaluate((element) => (element as HTMLDetailsElement).open),
@@ -930,6 +1134,35 @@ try {
 		assert.match(await refused.innerText(), /approved/, "The refused content stays readable.");
 		await check("permission-rejected");
 		if (width === 1600) await page.screenshot({ path: join(output, "permission-rejected.png"), fullPage: true });
+		// The real recorded tool locations now back Files. Inspect the same path's accepted
+		// and refused calls through the canonical read-only cards, rather than reading disk
+		// or inferring that a reported path is a live file.
+		await page.getByRole("button", { name: "Show artifacts", exact: true }).click();
+		const recordedInspector = page.getByRole("complementary", { name: "Conversation artifacts", exact: true });
+		await recordedInspector.getByRole("button", { name: "Files", exact: true }).click();
+		await recordedInspector.locator(".artifact-inspector__files button", { hasText: "fixture.txt" }).click();
+		const recordedFile = recordedInspector.getByRole("region", { name: "Selected file records", exact: true });
+		await recordedFile.waitFor();
+		assert.equal(await recordedFile.locator(".tool-card").count(), 2);
+		for (const card of await recordedFile.locator(".tool-card").all()) {
+			if (!(await card.evaluate((node) => (node as HTMLDetailsElement).open)))
+				await card.locator(":scope > summary").click();
+		}
+		await recordedFile.locator(".diff.is-applied").waitFor();
+		await recordedFile.locator(".diff.is-rejected").waitFor();
+		assert.match(await recordedFile.locator(".diff.is-applied").innerText(), /applied/i);
+		assert.match(await recordedFile.locator(".diff.is-rejected").innerText(), /not applied · not approved/i);
+		await check("artifacts-recorded-file");
+		if (width === 320 || width === 1600)
+			await page.screenshot({ path: join(output, `artifacts-recorded-file-${width}.png`), fullPage: true });
+		await recordedInspector.getByRole("button", { name: "Close artifacts", exact: true }).click();
+		await recordedInspector.waitFor({ state: "hidden" });
+		assert.equal(
+			await page
+				.getByRole("button", { name: "Show artifacts", exact: true })
+				.evaluate((node) => document.activeElement === node),
+			true,
+		);
 		// A plan-scale dispatch: the card names every run and the hash the runs will seal.
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[plan] Survey the samples and draft a report.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
