@@ -1,0 +1,329 @@
+{
+	"reports": [
+		{
+			"path": "/",
+			"width": 1440,
+			"theme": "dark",
+			"status": 200,
+			"scroll": 1440,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/docs/guide/configuration-reference.html",
+			"width": 1440,
+			"theme": "dark",
+			"status": 200,
+			"scroll": 1440,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/start.html",
+			"width": 1440,
+			"theme": "dark",
+			"status": 200,
+			"scroll": 1440,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/learn.html",
+			"width": 1440,
+			"theme": "dark",
+			"status": 200,
+			"scroll": 1440,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/this-page-does-not-exist",
+			"width": 1440,
+			"theme": "dark",
+			"status": 404,
+			"scroll": 1440,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"width": 1440,
+			"theme": "dark",
+			"search": "Slurm through the clio-kit MCP server\nguide/slurm.md\nDoctor\nguide/doctor.md"
+		},
+		{
+			"width": 1440,
+			"theme": "dark",
+			"empty": "No page in this snapshot matches."
+		},
+		{
+			"width": 1440,
+			"theme": "dark",
+			"copied": "npm install -g @iowarp/clio-coder"
+		},
+		{
+			"path": "/",
+			"width": 820,
+			"theme": "dark",
+			"status": 200,
+			"scroll": 820,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/docs/guide/configuration-reference.html",
+			"width": 820,
+			"theme": "dark",
+			"status": 200,
+			"scroll": 820,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/start.html",
+			"width": 820,
+			"theme": "dark",
+			"status": 200,
+			"scroll": 820,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/learn.html",
+			"width": 820,
+			"theme": "dark",
+			"status": 200,
+			"scroll": 820,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/this-page-does-not-exist",
+			"width": 820,
+			"theme": "dark",
+			"status": 404,
+			"scroll": 820,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"width": 820,
+			"theme": "dark",
+			"search": "Slurm through the clio-kit MCP server\nguide/slurm.md\nDoctor\nguide/doctor.md"
+		},
+		{
+			"width": 820,
+			"theme": "dark",
+			"empty": "No page in this snapshot matches."
+		},
+		{
+			"width": 820,
+			"theme": "dark",
+			"copied": "npm install -g @iowarp/clio-coder"
+		},
+		{
+			"width": 820,
+			"theme": "dark",
+			"menuClosed": true
+		},
+		{
+			"path": "/",
+			"width": 390,
+			"theme": "dark",
+			"status": 200,
+			"scroll": 390,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/docs/guide/configuration-reference.html",
+			"width": 390,
+			"theme": "dark",
+			"status": 200,
+			"scroll": 390,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/start.html",
+			"width": 390,
+			"theme": "dark",
+			"status": 200,
+			"scroll": 390,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/learn.html",
+			"width": 390,
+			"theme": "dark",
+			"status": 200,
+			"scroll": 390,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/this-page-does-not-exist",
+			"width": 390,
+			"theme": "dark",
+			"status": 404,
+			"scroll": 390,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"width": 390,
+			"theme": "dark",
+			"search": "Slurm through the clio-kit MCP server\nguide/slurm.md\nDoctor\nguide/doctor.md"
+		},
+		{
+			"width": 390,
+			"theme": "dark",
+			"empty": "No page in this snapshot matches."
+		},
+		{
+			"width": 390,
+			"theme": "dark",
+			"copied": "npm install -g @iowarp/clio-coder"
+		},
+		{
+			"width": 390,
+			"theme": "dark",
+			"menuClosed": true
+		},
+		{
+			"path": "/",
+			"width": 1440,
+			"theme": "light",
+			"status": 200,
+			"scroll": 1440,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/docs/guide/configuration-reference.html",
+			"width": 1440,
+			"theme": "light",
+			"status": 200,
+			"scroll": 1440,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/start.html",
+			"width": 1440,
+			"theme": "light",
+			"status": 200,
+			"scroll": 1440,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/learn.html",
+			"width": 1440,
+			"theme": "light",
+			"status": 200,
+			"scroll": 1440,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/this-page-does-not-exist",
+			"width": 1440,
+			"theme": "light",
+			"status": 404,
+			"scroll": 1440,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"width": 1440,
+			"theme": "light",
+			"search": "Slurm through the clio-kit MCP server\nguide/slurm.md\nDoctor\nguide/doctor.md"
+		},
+		{
+			"width": 1440,
+			"theme": "light",
+			"empty": "No page in this snapshot matches."
+		},
+		{
+			"width": 1440,
+			"theme": "light",
+			"copied": "npm install -g @iowarp/clio-coder"
+		},
+		{
+			"path": "/",
+			"width": 390,
+			"theme": "light",
+			"status": 200,
+			"scroll": 390,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/docs/guide/configuration-reference.html",
+			"width": 390,
+			"theme": "light",
+			"status": 200,
+			"scroll": 390,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/start.html",
+			"width": 390,
+			"theme": "light",
+			"status": 200,
+			"scroll": 390,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/learn.html",
+			"width": 390,
+			"theme": "light",
+			"status": 200,
+			"scroll": 390,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"path": "/this-page-does-not-exist",
+			"width": 390,
+			"theme": "light",
+			"status": 404,
+			"scroll": 390,
+			"errors": [],
+			"violations": []
+		},
+		{
+			"width": 390,
+			"theme": "light",
+			"search": "Slurm through the clio-kit MCP server\nguide/slurm.md\nDoctor\nguide/doctor.md"
+		},
+		{
+			"width": 390,
+			"theme": "light",
+			"empty": "No page in this snapshot matches."
+		},
+		{
+			"width": 390,
+			"theme": "light",
+			"copied": "npm install -g @iowarp/clio-coder"
+		},
+		{
+			"width": 390,
+			"theme": "light",
+			"menuClosed": true
+		},
+		{
+			"noJavaScript": {
+				"heading": "Configuration reference",
+				"text": 12503,
+				"links": 49
+			}
+		},
+		{
+			"legacy": "https://coder.iowarp.ai/docs/guide/slurm.html"
+		}
+	]
+}

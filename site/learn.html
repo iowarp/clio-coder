@@ -1,203 +1,417 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Learn Clio Coder — ten hands-on coding agent workflows</title>
-<meta name="description" content="Written labs for Clio Coder, and a place for the recordings when they exist. The text is the session until a film is published.">
-<meta name="theme-color" content="#000000">
-<link rel="canonical" href="https://coder.iowarp.ai/learn.html">
-<link rel="icon" href="assets/logo.webp" type="image/webp">
-<link rel="apple-touch-icon" href="assets/logo-512.webp">
-<link rel="preload" href="assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="css/site.css">
-<script src="js/theme.js"></script>
-<meta property="og:site_name" content="Clio Coder">
-<meta property="og:type" content="website">
-<meta property="og:title" content="Laboratory — Clio Coder">
-<meta property="og:description" content="Ten labs. The recordings are not published yet. The written session is.">
-<meta property="og:url" content="https://coder.iowarp.ai/learn.html">
-<meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Clio Coder. Your models. Your science. Local or cloud models, bounded workers, and work you can inspect.">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Laboratory — Clio Coder">
-<meta name="twitter:description" content="Ten labs. The recordings are not published yet. The written session is.">
-<meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png">
-<meta name="twitter:image:alt" content="Clio Coder. Your models. Your science. Local or cloud models, bounded workers, and work you can inspect.">
-</head>
-<body>
-<a class="skip" href="#content">Skip to content</a>
-<p class="spine">IOWarp · Clio Coder · field instrument</p>
-<header class="mast">
-  <div class="mast-row">
-    <a class="brand" href="index.html">
-      <img src="assets/logo.webp" width="36" height="36" alt="">
-      <span class="brand-name">Clio Coder</span>
-    </a>
-    <nav class="nav" aria-label="Primary">
-      <a href="capabilities.html">Capabilities</a>
-      <a href="harness.html">Harness</a>
-      <a href="library.html">Library</a>
-      <a href="docs.html">Docs</a>
-      <a href="learn.html" aria-current="page">Learn</a>
-      <a href="compare.html">Compare</a>
-      <a href="vision.html">Vision</a>
-    </nav>
-    <div class="mast-actions">
-      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to paper theme">
-        <span class="theme-icon" aria-hidden="true">□</span> <span>Paper</span>
-      </button>
-      <a class="btn" href="start.html">Install</a>
-      <details class="nav-more">
-        <summary>Menu</summary>
-        <div class="nav-more-menu">
-          <a href="capabilities.html">Capabilities</a>
-          <a href="harness.html">Harness</a>
-          <a href="library.html">Library</a>
-          <a href="docs.html">Docs</a>
-          <a href="learn.html">Learn</a>
-          <a href="compare.html">Compare</a>
-          <a href="vision.html">Vision</a>
-          <a href="start.html">Install</a>
-          <a href="share.html">Post on X</a>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Learning labs — Clio Coder</title>
+    <meta
+      name="description"
+      content="Ten written labs for Clio Coder: installation, local models, project context, scientific verification, workers, evidence, Slurm, and reusable skills."
+    />
+    <meta name="theme-color" content="#000000" />
+    <link rel="canonical" href="https://coder.iowarp.ai/learn.html" />
+    <link rel="icon" href="assets/logo.webp" type="image/webp" />
+    <link rel="apple-touch-icon" href="assets/logo-512.webp" />
+    <link
+      rel="preload"
+      href="assets/fonts/plex-sans.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="css/brand.css" />
+    <link rel="stylesheet" href="css/site.css" />
+    <script src="js/theme.js"></script>
+    <meta property="og:site_name" content="Clio Coder" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Laboratory — Clio Coder" />
+    <meta
+      property="og:description"
+      content="Ten labs. The recordings are not published yet. The written session is."
+    />
+    <meta property="og:url" content="https://coder.iowarp.ai/learn.html" />
+    <meta
+      property="og:image"
+      content="https://coder.iowarp.ai/assets/social-card.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Clio Coder. AI coding for the code science runs on. Local and cloud models, bounded workers, and inspectable checks."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Laboratory — Clio Coder" />
+    <meta
+      name="twitter:description"
+      content="Ten labs. The recordings are not published yet. The written session is."
+    />
+    <meta
+      name="twitter:image"
+      content="https://coder.iowarp.ai/assets/social-card.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="Clio Coder. AI coding for the code science runs on. Local and cloud models, bounded workers, and inspectable checks."
+    />
+  </head>
+  <body>
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="mast">
+      <div class="mast-row">
+        <a class="brand" href="index.html"
+          ><img src="assets/logo.webp" width="36" height="36" alt="" /><span
+            class="brand-name"
+            >Clio Coder</span
+          ></a
+        >
+        <nav class="nav" aria-label="Primary">
+          <details class="nav-product">
+            <summary>Product</summary>
+            <div class="nav-product-menu">
+              <a href="capabilities.html"
+                ><strong>Capabilities</strong
+                ><span>Models, tools, workers, and context</span></a
+              ><a href="harness.html"
+                ><strong>How it works</strong
+                ><span>Inside the open runtime</span></a
+              ><a href="compare.html"
+                ><strong>Integrations</strong
+                ><span>Work with other coding agents</span></a
+              ><a href="vision.html"
+                ><strong>About Clio</strong
+                ><span>Project, people, and status</span></a
+              >
+            </div>
+          </details>
+          <a href="docs.html">Docs</a><a href="learn.html">Learn</a
+          ><a href="library.html">Library</a>
+        </nav>
+        <div class="mast-actions">
+          <a
+            class="source-link"
+            href="https://github.com/iowarp/clio-coder"
+            aria-label="Clio Coder on GitHub"
+            >GitHub ↗</a
+          ><button
+            class="theme-toggle"
+            type="button"
+            data-theme-toggle
+            aria-label="Switch to light theme"
+          >
+            <span aria-hidden="true">◐</span></button
+          ><a class="btn btn-small" href="start.html"
+            >Get started <span aria-hidden="true">↗</span></a
+          >
+          <details class="nav-more">
+            <summary>Menu</summary>
+            <div class="nav-more-menu">
+              <a href="capabilities.html">Capabilities</a
+              ><a href="harness.html">How it works</a
+              ><a href="docs.html">Documentation</a
+              ><a href="learn.html">Learning labs</a
+              ><a href="library.html">Library</a
+              ><a href="compare.html">Integrations</a
+              ><a href="vision.html">About Clio</a
+              ><a href="start.html">Get started</a
+              ><a href="https://github.com/iowarp/clio-coder">GitHub ↗</a>
+            </div>
+          </details>
         </div>
-      </details>
-    </div>
-  </div>
-  <p class="issue"><b>Issue 0.5.6</b><span>Labs</span><span>Films unpublished</span><span>Text is the authoritative record</span></p>
-</header>
-<main class="page" id="content">
-  <p class="kicker">A field manual</p>
-  <h1 class="display">Do the work<br><em>in the open.</em></h1>
-  <p class="lede">Ten practical workflows, from your first local model to an independently checked numerical result. Follow the written labs now; recordings will appear here as they are published.</p>
-
-  <div class="film-grid" id="films" aria-label="Recordings">
-    <figure class="film"><div class="film-frame"><p class="film-empty">Loading recordings…</p></div></figure>
-  </div>
-
-  <div class="labs">
-    <article class="lab" id="lab-0">
-      <div class="lab-num">00</div>
-      <div>
-        <h2>Prove the install</h2>
-        <p>Before a model is involved, the binary should answer, and doctor should be able to look without writing.</p>
-        <pre><code>clio-coder --version
+      </div>
+    </header>
+    <main class="page" id="content">
+      <section class="page-intro">
+        <p class="eyebrow">Learn by doing</p>
+        <h1>A useful first session.<br />Then a deeper workflow.</h1>
+        <p class="lede">
+          Ten written labs take you from installation to independent review and
+          scientific infrastructure. Start with a repository you know and a
+          result you can check.
+        </p>
+      </section>
+      <div class="learning-note">
+        <span class="learning-icon" aria-hidden="true">↗</span>
+        <p>
+          <strong>Written labs are ready to use.</strong> Video walkthroughs
+          will be added when recordings are available.
+        </p>
+      </div>
+      <nav class="section-nav" aria-label="On this page">
+        <a href="#lab-0">Install</a><a href="#lab-1">First request</a
+        ><a href="#lab-2">Local model</a><a href="#lab-3">Context</a
+        ><a href="#lab-4">Verification</a><a href="#lab-5">Workers</a
+        ><a href="#lab-6">Evidence</a><a href="#lab-7">Slurm</a
+        ><a href="#lab-8">Peers</a><a href="#lab-9">Authoring</a>
+      </nav>
+      <!-- clio-coder-recordings -->
+      <div class="labs">
+        <article class="lab" id="lab-0">
+          <div class="lab-num">00</div>
+          <div>
+            <h2>Prove the install</h2>
+            <p>
+              Before a model is involved, the binary should answer, and doctor
+              should be able to look without writing.
+            </p>
+            <pre><code>clio-coder --version
 clio-coder doctor
 clio-coder paths</code></pre>
-        <p>Plain <code>doctor</code> is read-only. If you are upgrading and Clio Coder refuses to start, your user <code>settings.yaml</code> still has a retired autonomy name. See <a href="start.html">Install</a>.</p>
-      </div>
-    </article>
-    <article class="lab" id="lab-1">
-      <div class="lab-num">01</div>
-      <div>
-        <h2>A question that cannot edit</h2>
-        <p>Open a repository you know. Ask for a map, and say the boundary out loud.</p>
-        <pre><code>Explain how this repository builds and runs its tests. Find the main entry
+            <p>
+              Plain <code>doctor</code> is read-only. If you are upgrading and
+              Clio Coder refuses to start, your user
+              <code>settings.yaml</code> still has a retired autonomy name. See
+              <a href="start.html">Install</a>.
+            </p>
+          </div>
+        </article>
+        <article class="lab" id="lab-1">
+          <div class="lab-num">01</div>
+          <div>
+            <h2>A question that cannot edit</h2>
+            <p>
+              Open a repository you know. Ask for a map, and say the boundary
+              out loud.
+            </p>
+            <pre><code>Explain how this repository builds and runs its tests. Find the main entry
 points and suggest one useful verification task. Do not change files yet.</code></pre>
-        <p>Watch the tool calls. If a command is unfamiliar, an approval card shows the exact invocation. Deny skips that call. Stop ends the turn.</p>
-      </div>
-    </article>
-    <article class="lab" id="lab-2">
-      <div class="lab-num">02</div>
-      <div>
-        <h2>A model you already host</h2>
-        <p>Quick Connect wants an endpoint, a key only if the server needs one, and a model with tool calling. Ollama is <code>http://localhost:11434</code>. LM Studio is often <code>http://localhost:1234</code>.</p>
-        <pre><code>clio-coder configure
+            <p>
+              Watch the tool calls. If a command is unfamiliar, an approval card
+              shows the exact invocation. Deny skips that call. Stop ends the
+              turn.
+            </p>
+          </div>
+        </article>
+        <article class="lab" id="lab-2">
+          <div class="lab-num">02</div>
+          <div>
+            <h2>A model you already host</h2>
+            <p>
+              Quick Connect wants an endpoint, a key only if the server needs
+              one, and a model with tool calling. Ollama is
+              <code>http://localhost:11434</code>. LM Studio is often
+              <code>http://localhost:1234</code>.
+            </p>
+            <pre><code>clio-coder configure
 clio-coder targets --probe --tools</code></pre>
-        <p>Chat and workers can use different targets. A local model for the edit and another model for the review is a normal arrangement, not an advanced mode. <code>/model</code> changes the session. Settings → Fleet changes the worker default.</p>
-      </div>
-    </article>
-    <article class="lab" id="lab-3">
-      <div class="lab-num">03</div>
-      <div>
-        <h2>Teach the project</h2>
-        <p>The handbook is yours. The index is generated. Do not mix them.</p>
-        <pre><code>clio-coder context init</code></pre>
-        <p>Read the drafted <code>CLIO-CODER.md</code>. Keep build commands, conventions, and validation rules. Commit it. Runtime state belongs under <code>.clio-coder/</code> and should stay out of the handbook. <code>/context</code> shows the window, the occupancy, and whether the prefix cache was reused.</p>
-      </div>
-    </article>
-    <article class="lab" id="lab-4">
-      <div class="lab-num">04</div>
-      <div>
-        <h2>A bounded change, then the checks you already have</h2>
-        <p>Give the acceptance criterion in the request. Ask it to use <code>verify</code>, not a narrated “I ran the tests.”</p>
-        <pre><code>The finite-difference step in solver.py is unstable at the current ratio.
+            <p>
+              Chat and workers can use different targets. A local model for the
+              edit and another model for the review is a normal arrangement,
+              supported by the configuration. <code>/model</code> changes the
+              session. Settings → Fleet changes the worker default.
+            </p>
+          </div>
+        </article>
+        <article class="lab" id="lab-3">
+          <div class="lab-num">03</div>
+          <div>
+            <h2>Teach the project</h2>
+            <p>
+              Keep your project guidance in a versioned handbook and runtime
+              state in its own directory.
+            </p>
+            <pre><code>clio-coder context init</code></pre>
+            <p>
+              Read the drafted <code>CLIO-CODER.md</code>. Keep build commands,
+              conventions, and validation rules. Commit it. Runtime state
+              belongs under <code>.clio-coder/</code> and should stay out of the
+              handbook. <code>/context</code> shows the window, the occupancy,
+              and whether the prefix cache was reused.
+            </p>
+          </div>
+        </article>
+        <article class="lab" id="lab-4">
+          <div class="lab-num">04</div>
+          <div>
+            <h2>A bounded change, then the checks you already have</h2>
+            <p>
+              Give the acceptance criterion in the request. Ask it to use
+              <code>verify</code>, not a narrated “I ran the tests.”
+            </p>
+            <pre><code>The finite-difference step in solver.py is unstable at the current ratio.
 Make the smallest change that the existing numerical test accepts.
 Run that test. Do not reformat unrelated files.</code></pre>
-        <p><code>verify</code> knows pytest, unittest, Cargo, Go, CMake presets, Make, just, and scripts your CI already calls. It can compare numerical results and hold a performance budget. A green line is what ran. It is not a claim that the science is right.</p>
-      </div>
-    </article>
-    <article class="lab" id="lab-5">
-      <div class="lab-num">05</div>
-      <div>
-        <h2>A worker that is not allowed to write</h2>
-        <p>The verifier recipe is the independent pass. Its ceiling is the lesson.</p>
-        <pre><code>/run verifier Review the current diff and run the relevant existing checks. Do not edit files.</code></pre>
-        <p>Workers run at default even if your session is yolo. A read-only dispatch is a restriction on top of that. Alt+W shows the board. ◇ means you asked. ◆ means the model asked.</p>
-      </div>
-    </article>
-    <article class="lab" id="lab-6">
-      <div class="lab-num">06</div>
-      <div>
-        <h2>Read the trust line</h2>
-        <p>After the run, read the receipt instead of the last paragraph. You want five clauses, not a grade.</p>
-        <pre><code>clio-coder fleet view &lt;runId&gt;
+            <p>
+              <code>verify</code> knows pytest, unittest, Cargo, Go, CMake
+              presets, Make, just, and scripts your CI already calls. It can
+              compare numerical results and hold a performance budget. A passing
+              check records what ran. Scientific validity depends on your tests
+              and reference data.
+            </p>
+          </div>
+        </article>
+        <article class="lab" id="lab-5">
+          <div class="lab-num">05</div>
+          <div>
+            <h2>A worker that is not allowed to write</h2>
+            <p>
+              The verifier recipe is the independent pass. Its ceiling is the
+              lesson.
+            </p>
+            <pre><code>/run verifier Review the current diff and run the relevant existing checks. Do not edit files.</code></pre>
+            <p>
+              Workers run at default even if your session is yolo. A read-only
+              dispatch is a restriction on top of that. Alt+W shows the board. ◇
+              means you asked. ◆ means the model asked.
+            </p>
+          </div>
+        </article>
+        <article class="lab" id="lab-6">
+          <div class="lab-num">06</div>
+          <div>
+            <h2>Read the trust line</h2>
+            <p>
+              After the run, inspect the record of changes and checks. Its trust
+              states distinguish integrity, observed validation, review,
+              context, and completion.
+            </p>
+            <pre><code>clio-coder fleet view &lt;runId&gt;
 clio-coder evidence list
 clio-coder evidence inspect &lt;evidenceId&gt;</code></pre>
-        <p>Sealed means the bytes match. Grounded means a host check was observed. Not independently reviewed is a fact, not a failure of the printer. Unknown is a state. If a file changed and nothing validated it, the finish contract tells the model to call the change unverified.</p>
-      </div>
-    </article>
-    <article class="lab" id="lab-7">
-      <div class="lab-num">07</div>
-      <div>
-        <h2>Slurm, only if the kit is there</h2>
-        <p>This lab stops if you do not have the clio-kit Slurm MCP server. Clio Coder does not invent a scheduler.</p>
-        <pre><code>clio-coder mcp list</code></pre>
-        <p>When the server is trusted, the <code>slurm-jobs</code> skill submits a batch script, polls to a terminal state, fetches output, and stamps the scheduler result. The kit’s own docs live at <a href="https://toolkit.iowarp.ai">toolkit.iowarp.ai</a>. A stamp is not a scientific conclusion.</p>
-      </div>
-    </article>
-    <article class="lab" id="lab-8">
-      <div class="lab-num">08</div>
-      <div>
-        <h2>Hand a task to an agent you already installed</h2>
-        <p>Authenticate that agent first, with its own CLI. Then let Clio Coder see it.</p>
-        <pre><code>clio-coder interop inspect --json
+            <p>
+              Sealed means the bytes match. Grounded means a host check was
+              observed. Not independently reviewed is a fact, not a failure of
+              the printer. Unknown is a state. If a file changed and nothing
+              validated it, the finish contract tells the model to call the
+              change unverified.
+            </p>
+          </div>
+        </article>
+        <article class="lab" id="lab-7">
+          <div class="lab-num">07</div>
+          <div>
+            <h2>Slurm, only if the kit is there</h2>
+            <p>
+              This lab stops if you do not have the clio-kit Slurm MCP server.
+              Clio Coder does not invent a scheduler.
+            </p>
+            <pre><code>clio-coder mcp list</code></pre>
+            <p>
+              When the server is trusted, the <code>slurm-jobs</code> skill
+              submits a batch script, polls to a terminal state, fetches output,
+              and stamps the scheduler result. The kit’s own docs live at
+              <a href="https://toolkit.iowarp.ai">toolkit.iowarp.ai</a>. A stamp
+              is not a scientific conclusion.
+            </p>
+          </div>
+        </article>
+        <article class="lab" id="lab-8">
+          <div class="lab-num">08</div>
+          <div>
+            <h2>Hand a task to an agent you already installed</h2>
+            <p>
+              Authenticate that agent first, with its own CLI. Then let Clio
+              Coder see it.
+            </p>
+            <pre><code>clio-coder interop inspect --json
 /interop
 /delegate codex Review the proposed change and its edge cases.
 /run --target opencode-local --worktree coder Fix the parser test and report the checks.</code></pre>
-        <p>A worktree keeps the peer’s branch for review. It does not confine the peer’s own shell. Receipts mark that limit. OpenCode refuses a read-only headless run before launch. Use <code>/share</code> when the main session should read a managed result. <a href="compare.html">The comparison</a> is the argument. <a href="docs.html?d=guide/interop.md">The guide</a> is the contract.</p>
-      </div>
-    </article>
-    <article class="lab" id="lab-9">
-      <div class="lab-num">09</div>
-      <div>
-        <h2>Publish a procedure</h2>
-        <p>When a workflow just worked, do not leave it in the transcript.</p>
-        <pre><code>/skill workflow-distiller
+            <p>
+              A worktree keeps the peer’s branch for review. It does not confine
+              the peer’s own shell. Receipts mark that limit. OpenCode refuses a
+              read-only headless run before launch. Use <code>/share</code> when
+              the main session should read a managed result.
+              <a href="compare.html">The comparison</a> is the argument.
+              <a href="docs.html?d=guide/interop.md">The guide</a> is the
+              contract.
+            </p>
+          </div>
+        </article>
+        <article class="lab" id="lab-9">
+          <div class="lab-num">09</div>
+          <div>
+            <h2>Publish a procedure</h2>
+            <p>
+              When a workflow just worked, do not leave it in the transcript.
+            </p>
+            <pre><code>/skill workflow-distiller
 clio-coder library validate ./path/to/package</code></pre>
-        <p>Skills, agents, prompts, fleets, and plugins are different kinds. A command tool is an extension, not a skill. The authoring templates are in <code>library/_authoring/templates/</code>. <a href="library.html">The library page</a> is the map.</p>
+            <p>
+              Skills, agents, prompts, fleets, and plugins are different kinds.
+              A command tool is an extension, not a skill. The authoring
+              templates are in <code>library/_authoring/templates/</code>.
+              <a href="library.html">The library page</a> is the map.
+            </p>
+          </div>
+        </article>
       </div>
-    </article>
-  </div>
 
-  <section class="section">
-    <h2 class="section-title">What not to believe</h2>
-    <div class="note note-dash">
-      <p>Yolo is not an OS sandbox. A passing <code>verify</code> is not a paper. A worker’s summary is not a host check. A pane handoff has no receipt. The GUI is not the product. A film on this page, when one appears, is a demonstration, not a result.</p>
-    </div>
-    <p class="actions"><a class="btn" href="docs.html">Read the guides</a> <a class="btn btn-ghost" href="share.html">Post a lab, not a slogan</a></p>
-  </section>
-
-  <footer class="colophon">
-    <div><span class="brand-name">Clio Coder</span><p>Labs track issue 0.5.6.</p></div>
-    <div><p>Add a recording by setting <code>id</code> in <code>content/recordings.json</code> to a YouTube video id. Leave it empty to keep the honest frame.</p></div>
-    <div class="colo-links"><a href="start.html">Install</a><a href="docs.html">Docs</a><a href="compare.html">Compare</a></div>
-    <p class="colo-fine">Embedded players use youtube-nocookie.com. No recording is loaded until an id is set. If this site and the installed package disagree, the package, schemas, and contract tests win.</p>
-  </footer>
-</main>
-<script src="js/site.js"></script>
-<script src="js/learn.js"></script>
-</body>
+      <section class="detail-section">
+        <div class="detail-heading">
+          <h2>Read the behavior<br />behind the examples.</h2>
+          <p>
+            The labs describe workflows; the guides explain configuration and
+            limits.
+          </p>
+        </div>
+        <div class="detail-body">
+          <p>
+            Commands run with your user permissions. A worker’s report is
+            distinct from a host-observed check, and a passing test is distinct
+            from a scientific conclusion. Use the installed docs when your
+            package differs from this website snapshot.
+          </p>
+          <a class="text-link" href="docs.html">Browse documentation →</a>
+        </div>
+      </section>
+      <footer class="colophon">
+        <div class="footer-top">
+          <div class="footer-brand">
+            <a class="brand" href="index.html"
+              ><img src="assets/logo.webp" width="32" height="32" alt="" /><span
+                class="brand-name"
+                >Clio Coder</span
+              ></a
+            >
+            <p>
+              AI coding for the code science runs on.<br />Open source. Part of
+              <a href="https://iowarp.ai">IOWarp</a>.
+            </p>
+            <span class="status-label"
+              ><span class="status-dot"></span>Experimental · Terminal-first ·
+              GUI alpha</span
+            >
+          </div>
+          <div class="footer-links">
+            <div>
+              <h2>Product</h2>
+              <a href="capabilities.html">Capabilities</a
+              ><a href="harness.html">How it works</a
+              ><a href="compare.html">Integrations</a
+              ><a href="start.html">Install</a>
+            </div>
+            <div>
+              <h2>Resources</h2>
+              <a href="docs.html">Documentation</a
+              ><a href="learn.html">Learning labs</a
+              ><a href="library.html">Skills &amp; plugins</a
+              ><a href="share.html">Share Clio</a>
+            </div>
+            <div>
+              <h2>Project</h2>
+              <a href="vision.html">About &amp; status</a
+              ><a href="https://github.com/iowarp/clio-coder">Source code ↗</a
+              ><a href="https://github.com/iowarp/clio-coder/issues"
+                >Report an issue ↗</a
+              ><a
+                href="https://github.com/iowarp/clio-coder/blob/main/CONTRIBUTING.md"
+                >Contribute ↗</a
+              >
+            </div>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <p>Gnosis Research Center, Illinois Tech · University of Utah</p>
+          <p>
+            Apache-2.0 · NSF
+            <a href="https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318"
+              >2411318</a
+            >
+          </p>
+        </div>
+      </footer>
+    </main>
+    <script src="js/site.js"></script>
+  </body>
 </html>

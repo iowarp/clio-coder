@@ -1,4 +1,4 @@
-@import url("/css/brand.css");
+@import url("brand.css");
 * {
 	box-sizing: border-box;
 }
@@ -10,127 +10,129 @@ body {
 body {
 	width: 1200px;
 	height: 630px;
-	display: grid;
-	grid-template-columns: 1fr 360px;
 	background: var(--paper);
 	color: var(--ink);
 	font-family: var(--font-ui);
-	border-left: 10px solid var(--cyan);
+	display: grid;
+	grid-template-columns: 1.5fr 1fr;
+	gap: 50px;
+	padding: 52px 60px;
 }
 main {
-	padding: 44px 42px 36px;
 	display: flex;
 	flex-direction: column;
 }
 .brand {
 	display: flex;
-	align-items: center;
 	gap: 14px;
+	align-items: center;
 }
-.brand span {
-	font: italic 36px var(--font-display);
+:where(.brand) span {
+	font-size: 30px;
+	font-weight: 600;
 	letter-spacing: -0.03em;
 }
+.brand img {
+	width: 46px;
+	height: 46px;
+}
 :where(.brand) small {
-	margin-left: auto;
-	font: 14px var(--font-mono);
-	letter-spacing: 0.12em;
+	font: 12px var(--font-mono);
 	color: var(--muted);
+	margin-left: auto;
 }
 .kicker {
-	margin: 34px 0 18px;
-	font: 13px var(--font-mono);
-	text-transform: uppercase;
-	letter-spacing: 0.1em;
 	color: var(--cyan);
+	font: 12px var(--font-mono);
+	margin: 58px 0 20px;
 }
 h1 {
-	margin: 0;
-	font: 500 92px / 0.95 var(--font-display);
+	font-size: 66px;
+	line-height: 1.08;
+	font-weight: 600;
 	letter-spacing: -0.045em;
+	margin: 0;
 }
-h1 em {
-	font-weight: 480;
+h1 span {
+	color: var(--cyan);
 }
 .promise {
-	margin: 28px 0 0;
-	font-size: 28px;
-	line-height: 1.5;
 	color: var(--ink-soft);
+	font-size: 22px;
+	line-height: 1.6;
+	margin: 24px 0 0;
 }
 footer {
 	margin-top: auto;
+	color: var(--muted);
 	display: flex;
 	justify-content: space-between;
 	gap: 20px;
-	font: 12px var(--font-mono);
-	color: var(--muted);
+	font: 11px var(--font-mono);
 }
 aside {
+	border: 1px solid var(--line-control);
+	border-radius: 10px;
 	background: var(--paper-raised);
-	border-left: 1px solid var(--line);
-	padding: 50px 30px 36px;
+	padding: 30px;
 	display: flex;
 	flex-direction: column;
+	margin-top: 20px;
 }
 aside header {
-	color: var(--cyan);
-	font: 13px var(--font-mono);
-	text-transform: uppercase;
-	letter-spacing: 0.1em;
-	padding-bottom: 26px;
+	font-size: 17px;
+	font-weight: 500;
 	border-bottom: 1px solid var(--line);
+	padding-bottom: 24px;
 }
 ol {
-	list-style: none;
 	padding: 0;
 	margin: 0;
+	list-style: none;
 }
 li {
-	border-bottom: 1px solid var(--line);
 	padding: 25px 0;
-	font-size: 22px;
+	font-size: 21px;
+	border-bottom: 1px solid var(--line);
 }
 li small {
 	display: block;
-	font: 12px var(--font-mono);
-	text-transform: uppercase;
-	color: var(--sage);
-	margin-bottom: 10px;
+	font: 10px var(--font-mono);
+	margin-bottom: 12px;
+	color: var(--cyan);
 }
 aside p {
-	margin-top: auto;
-	font: 12px var(--font-mono);
+	margin: auto 0 0;
+	padding-top: 24px;
 	color: var(--muted);
+	font: 11px var(--font-mono);
 }
 body.square {
 	width: 1080px;
 	height: 1080px;
 	grid-template-columns: 1fr;
-	grid-template-rows: 660px 1fr;
-}
-.square main {
-	padding: 58px;
+	grid-template-rows: 580px 1fr;
+	gap: 30px;
+	padding: 60px;
 }
 .square h1 {
-	font-size: 124px;
+	font-size: 84px;
+	max-width: 900px;
+}
+.square .kicker {
+	margin-top: 48px;
 }
 .square .promise {
-	font-size: 34px;
+	font-size: 26px;
 }
 .square aside {
-	border-left: 0;
-	border-top: 1px solid var(--line);
-	padding: 32px 58px;
+	margin-top: 0;
 }
 .square ol {
 	display: grid;
 	grid-template-columns: 1fr 1fr;
-	column-gap: 36px;
+	column-gap: 32px;
 }
-.square aside header {
-	padding-bottom: 12px;
-}
-.square li {
-	padding-block: 18px;
+.square aside p {
+	padding-top: 16px;
 }

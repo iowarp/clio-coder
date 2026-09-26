@@ -1,0 +1,425 @@
+[
+	{
+		"mode": "desktop",
+		"sample": 1,
+		"rules": [],
+		"applied": 0,
+		"lcp": 248,
+		"cls": 0.0002877777777777778,
+		"ttfb": 95.59999999403954,
+		"dcl": 156.19999998807907,
+		"requests": 12,
+		"encodedBytes": 168223,
+		"connection": {
+			"rtt": 100,
+			"downlink": 1.4
+		},
+		"resources": [
+			{
+				"url": "https://coder.iowarp.ai/assets/fonts/plex-sans.woff2",
+				"duration": 43.29999998211861,
+				"transfer": 45712
+			},
+			{
+				"url": "https://coder.iowarp.ai/css/brand.css",
+				"duration": 38.099999994039536,
+				"transfer": 1284
+			},
+			{
+				"url": "https://coder.iowarp.ai/css/site.css",
+				"duration": 40.5,
+				"transfer": 8936
+			},
+			{
+				"url": "https://coder.iowarp.ai/js/theme.js",
+				"duration": 41,
+				"transfer": 405
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/logo.webp",
+				"duration": 69,
+				"transfer": 10544
+			},
+			{
+				"url": "https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495",
+				"duration": 37.099999994039536,
+				"transfer": 0
+			},
+			{
+				"url": "https://coder.iowarp.ai/js/site.js",
+				"duration": 41.80000001192093,
+				"transfer": 1134
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/fonts/plex-400.woff2",
+				"duration": 31.400000005960464,
+				"transfer": 14708
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/session.webp",
+				"duration": 28.900000005960464,
+				"transfer": 68312
+			},
+			{
+				"url": "https://coder.iowarp.ai/cdn-cgi/rum?",
+				"duration": 10.299999982118607,
+				"transfer": 0
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/logo.webp",
+				"duration": 18.19999998807907,
+				"transfer": 10544
+			}
+		]
+	},
+	{
+		"mode": "desktop",
+		"sample": 2,
+		"rules": [],
+		"applied": 0,
+		"lcp": 180,
+		"cls": 0.0002877777777777778,
+		"ttfb": 54.30000001192093,
+		"dcl": 163.30000001192093,
+		"requests": 12,
+		"encodedBytes": 168223,
+		"connection": {
+			"rtt": 100,
+			"downlink": 1.45
+		},
+		"resources": [
+			{
+				"url": "https://coder.iowarp.ai/assets/fonts/plex-sans.woff2",
+				"duration": 35,
+				"transfer": 45712
+			},
+			{
+				"url": "https://coder.iowarp.ai/css/brand.css",
+				"duration": 18.80000001192093,
+				"transfer": 1284
+			},
+			{
+				"url": "https://coder.iowarp.ai/css/site.css",
+				"duration": 32.099999994039536,
+				"transfer": 8936
+			},
+			{
+				"url": "https://coder.iowarp.ai/js/theme.js",
+				"duration": 33,
+				"transfer": 405
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/logo.webp",
+				"duration": 54.30000001192093,
+				"transfer": 10544
+			},
+			{
+				"url": "https://coder.iowarp.ai/js/site.js",
+				"duration": 34.20000001788139,
+				"transfer": 1134
+			},
+			{
+				"url": "https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495",
+				"duration": 45.29999998211861,
+				"transfer": 0
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/fonts/plex-400.woff2",
+				"duration": 18.19999998807907,
+				"transfer": 14708
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/session.webp",
+				"duration": 22,
+				"transfer": 68312
+			},
+			{
+				"url": "https://coder.iowarp.ai/cdn-cgi/rum?",
+				"duration": 7,
+				"transfer": 0
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/logo.webp",
+				"duration": 19.400000005960464,
+				"transfer": 10544
+			}
+		]
+	},
+	{
+		"mode": "desktop",
+		"sample": 3,
+		"rules": [],
+		"applied": 0,
+		"lcp": 180,
+		"cls": 0.0002877777777777778,
+		"ttfb": 57.30000001192093,
+		"dcl": 169.90000000596046,
+		"requests": 12,
+		"encodedBytes": 168223,
+		"connection": {
+			"rtt": 100,
+			"downlink": 1.4
+		},
+		"resources": [
+			{
+				"url": "https://coder.iowarp.ai/assets/fonts/plex-sans.woff2",
+				"duration": 35.099999994039536,
+				"transfer": 45712
+			},
+			{
+				"url": "https://coder.iowarp.ai/css/brand.css",
+				"duration": 19.799999982118607,
+				"transfer": 1284
+			},
+			{
+				"url": "https://coder.iowarp.ai/css/site.css",
+				"duration": 34.29999998211861,
+				"transfer": 8936
+			},
+			{
+				"url": "https://coder.iowarp.ai/js/theme.js",
+				"duration": 33,
+				"transfer": 405
+			},
+			{
+				"url": "https://coder.iowarp.ai/js/site.js",
+				"duration": 34.70000001788139,
+				"transfer": 1134
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/logo.webp",
+				"duration": 57.599999994039536,
+				"transfer": 10544
+			},
+			{
+				"url": "https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495",
+				"duration": 47.70000001788139,
+				"transfer": 0
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/fonts/plex-400.woff2",
+				"duration": 22.299999982118607,
+				"transfer": 14708
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/session.webp",
+				"duration": 24.299999982118607,
+				"transfer": 68312
+			},
+			{
+				"url": "https://coder.iowarp.ai/cdn-cgi/rum?",
+				"duration": 9.399999976158142,
+				"transfer": 0
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/logo.webp",
+				"duration": 17.299999982118607,
+				"transfer": 10544
+			}
+		]
+	},
+	{
+		"mode": "mobile",
+		"sample": 1,
+		"rules": ["D892D6B78CAEFA01AA65AE12922ADB72"],
+		"applied": 11,
+		"lcp": 672,
+		"cls": 0,
+		"ttfb": 63.80000001192093,
+		"dcl": 482.80000001192093,
+		"requests": 11,
+		"encodedBytes": 99911,
+		"connection": {
+			"rtt": 150,
+			"downlink": 3.55
+		},
+		"resources": [
+			{
+				"url": "https://coder.iowarp.ai/assets/fonts/plex-sans.woff2",
+				"duration": 303.5,
+				"transfer": 45712
+			},
+			{
+				"url": "https://coder.iowarp.ai/css/brand.css",
+				"duration": 167.19999998807907,
+				"transfer": 1284
+			},
+			{
+				"url": "https://coder.iowarp.ai/css/site.css",
+				"duration": 217.7999999821186,
+				"transfer": 8936
+			},
+			{
+				"url": "https://coder.iowarp.ai/js/theme.js",
+				"duration": 157.40000000596046,
+				"transfer": 405
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/logo.webp",
+				"duration": 409.2999999821186,
+				"transfer": 10544
+			},
+			{
+				"url": "https://coder.iowarp.ai/js/site.js",
+				"duration": 177.80000001192093,
+				"transfer": 1134
+			},
+			{
+				"url": "https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495",
+				"duration": 232.2000000178814,
+				"transfer": 0
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/fonts/plex-400.woff2",
+				"duration": 188.5,
+				"transfer": 14708
+			},
+			{
+				"url": "https://coder.iowarp.ai/cdn-cgi/rum?",
+				"duration": 162.10000002384186,
+				"transfer": 0
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/logo.webp",
+				"duration": 178.5,
+				"transfer": 10544
+			}
+		]
+	},
+	{
+		"mode": "mobile",
+		"sample": 2,
+		"rules": ["A897C18F5EC96684463B18344096C670"],
+		"applied": 11,
+		"lcp": 668,
+		"cls": 0,
+		"ttfb": 52.69999998807907,
+		"dcl": 487.40000000596046,
+		"requests": 11,
+		"encodedBytes": 99911,
+		"connection": {
+			"rtt": 150,
+			"downlink": 3.85
+		},
+		"resources": [
+			{
+				"url": "https://coder.iowarp.ai/assets/fonts/plex-sans.woff2",
+				"duration": 304.90000000596046,
+				"transfer": 45712
+			},
+			{
+				"url": "https://coder.iowarp.ai/css/brand.css",
+				"duration": 165.7000000178814,
+				"transfer": 1284
+			},
+			{
+				"url": "https://coder.iowarp.ai/css/site.css",
+				"duration": 217,
+				"transfer": 8936
+			},
+			{
+				"url": "https://coder.iowarp.ai/js/theme.js",
+				"duration": 159.5,
+				"transfer": 405
+			},
+			{
+				"url": "https://coder.iowarp.ai/js/site.js",
+				"duration": 182.40000000596046,
+				"transfer": 1134
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/logo.webp",
+				"duration": 407.7000000178814,
+				"transfer": 10544
+			},
+			{
+				"url": "https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495",
+				"duration": 235.59999999403954,
+				"transfer": 0
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/fonts/plex-400.woff2",
+				"duration": 189,
+				"transfer": 14708
+			},
+			{
+				"url": "https://coder.iowarp.ai/cdn-cgi/rum?",
+				"duration": 162.40000000596046,
+				"transfer": 0
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/logo.webp",
+				"duration": 178,
+				"transfer": 10544
+			}
+		]
+	},
+	{
+		"mode": "mobile",
+		"sample": 3,
+		"rules": ["D218CA752E30EAA02AE5D6943E7217DC"],
+		"applied": 11,
+		"lcp": 660,
+		"cls": 0,
+		"ttfb": 57.79999998211861,
+		"dcl": 481.89999997615814,
+		"requests": 11,
+		"encodedBytes": 99911,
+		"connection": {
+			"rtt": 150,
+			"downlink": 3.95
+		},
+		"resources": [
+			{
+				"url": "https://coder.iowarp.ai/assets/fonts/plex-sans.woff2",
+				"duration": 304.59999999403954,
+				"transfer": 45712
+			},
+			{
+				"url": "https://coder.iowarp.ai/css/brand.css",
+				"duration": 167.30000001192093,
+				"transfer": 1284
+			},
+			{
+				"url": "https://coder.iowarp.ai/js/theme.js",
+				"duration": 157.80000001192093,
+				"transfer": 405
+			},
+			{
+				"url": "https://coder.iowarp.ai/css/site.css",
+				"duration": 218,
+				"transfer": 8936
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/logo.webp",
+				"duration": 409.69999998807907,
+				"transfer": 10544
+			},
+			{
+				"url": "https://coder.iowarp.ai/js/site.js",
+				"duration": 174.30000001192093,
+				"transfer": 1134
+			},
+			{
+				"url": "https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495",
+				"duration": 230.30000001192093,
+				"transfer": 0
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/fonts/plex-400.woff2",
+				"duration": 190,
+				"transfer": 14708
+			},
+			{
+				"url": "https://coder.iowarp.ai/cdn-cgi/rum?",
+				"duration": 157.59999999403954,
+				"transfer": 0
+			},
+			{
+				"url": "https://coder.iowarp.ai/assets/logo.webp",
+				"duration": 176.59999999403954,
+				"transfer": 10544
+			}
+		]
+	}
+]
