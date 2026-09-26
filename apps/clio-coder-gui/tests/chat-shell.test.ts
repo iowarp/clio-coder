@@ -299,9 +299,16 @@ test("every navigation entry is reachable from the palette", () => {
 	const source = readFileSync(fileURLToPath(new URL("../client/design/navigation.tsx", import.meta.url)), "utf8");
 	const table = source.slice(source.indexOf("export const navigation"), source.indexOf("] as const"));
 	const paths = [...table.matchAll(/path:\s*"([^"]+)"/g)].flatMap((match) => (match[1] ? [match[1]] : []));
-	assert.equal(paths.length, 10, "the navigation table changed; the palette destinations must follow");
+	assert.ok(paths.length > 0, "expected the navigation table to be readable");
+	assert.equal(paths.includes("/docs"), false, "native Docs is no longer a navigation destination");
 	const offered = new Set(DESTINATIONS.map((destination) => destination.path));
+	assert.equal(offered.has("/docs"), false, "the palette must not retain native Docs navigation");
 	for (const path of paths) assert.ok(offered.has(path), `${path} is in the navigation but not in the palette`);
+	const { calls, handlers: on } = handlers();
+	const help = appCommands(NO_SITUATION, on).find((command) => command.id === "app.help");
+	assert.ok(help?.available, "Help remains reachable without an open session");
+	help.run();
+	assert.deepEqual(calls, ["help"], "Help opens its reference action instead of navigating to a reader");
 });
 
 test("the palette never sources a row from the session command catalog", () => {
