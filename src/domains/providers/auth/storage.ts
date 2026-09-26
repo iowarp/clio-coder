@@ -330,7 +330,7 @@ export class AuthStorage {
 
 	private persist(providerId: string, credential: AuthCredential | undefined): void {
 		try {
-			this.backend.withLock((current) => {
+			const committed = this.backend.withLock((current) => {
 				const read = readStorageData(current);
 				if (read.damage !== null) {
 					this.damage = read.damage;
@@ -339,10 +339,12 @@ export class AuthStorage {
 				const merged = read.data;
 				if (credential) merged[providerId] = credential;
 				else delete merged[providerId];
-				this.data = merged;
-				this.damage = null;
-				return { result: undefined, next: serializeStorageData(merged) };
+				return { result: merged, next: serializeStorageData(merged) };
 			});
+			// The backend writes after the callback returns. Publish the merged
+			// snapshot only once that write has committed, as OAuth refresh does.
+			this.data = committed;
+			this.damage = null;
 		} catch (error) {
 			// A write that failed for a reason the damage refusal does not cover: a
 			// lock that could not be taken, a read-only config dir, a full disk.
@@ -363,7 +365,6 @@ export class AuthStorage {
 	// while the disk write was refused.
 	set(providerId: string, credential: AuthCredential): void {
 		this.persist(providerId, credential);
-		this.data[providerId] = credential;
 	}
 
 	setApiKey(providerId: string, key: string): void {
@@ -374,7 +375,6 @@ export class AuthStorage {
 
 	remove(providerId: string): void {
 		this.persist(providerId, undefined);
-		delete this.data[providerId];
 	}
 
 	listStored(): ReadonlyArray<{ providerId: string; type: AuthCredential["type"]; updatedAt: string }> {
