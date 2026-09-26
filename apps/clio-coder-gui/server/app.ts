@@ -30,6 +30,7 @@ import { AppProblem } from "./services/problem.js";
 import type { ReportsService } from "./services/reports.js";
 import type { SessionService } from "./services/sessions.js";
 import type { SettingsService } from "./services/settings.js";
+import type { SetupService } from "./services/setup.js";
 import type { SystemService } from "./services/system.js";
 import type { TargetsService } from "./services/targets-cli.js";
 import type { ToolchainService } from "./services/toolchain.js";
@@ -44,6 +45,7 @@ export function createApp(options: {
 	toolchain: ToolchainService;
 	traces: TraceService;
 	settings: SettingsService;
+	setup: SetupService;
 	targets: TargetsService;
 	fleet: FleetService;
 	system: SystemService;
@@ -112,7 +114,7 @@ export function createApp(options: {
 	register(app, hub, routes.cancel, ({ params }) => operations.cancel(params.id));
 	traceRoutes(app, hub, options.traces);
 	settingsRoutes(app, hub, options.settings);
-	targetsRoutes(app, hub, options.targets);
+	targetsRoutes(app, hub, options.targets, options.setup);
 	fleetRoutes(app, hub, options.fleet, artifacts);
 	systemRoutes(app, hub, options.system);
 	libraryRoutes(app, hub, options.library, options.sessions.supervisor);

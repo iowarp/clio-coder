@@ -21,7 +21,7 @@ User settings are stored at `<configDir>/settings.yaml`. Project layers are `.cl
 
 ## First-run flow
 
-Run `clio-coder configure` or start `clio-coder` without a chat target. Choose **Guided setup** and then the source you recognize: an app on this computer, a model server, an AI subscription, or a provider account/API. Clio chooses a unique internal connection id, fills known local addresses, and lists the relevant providers. An installed coding agent is a separate worker-only choice when adding another connection.
+For terminal setup, run `clio-coder configure` or start `clio-coder` without a chat target. For browser setup, run `clio-coder gui --open` and use **Guided setup** on the home page; a prior configure run is optional. Both presentations run the same connection wizard. Choose **Guided setup** and then the source you recognize: an app on this computer, a model server, an AI subscription, or a provider account/API. Clio chooses a unique internal connection id, fills known local addresses, and lists the relevant providers. An installed coding agent is a separate worker-only choice when adding another connection.
 
 1. Choose the provider or app. Provide a key or complete browser sign-in only when required.
 2. Confirm the server address when that provider has one. Clio performs a passive reachability and model-catalog probe when the runtime supports it; this sends no generation request.
@@ -35,7 +35,7 @@ For saved defaults use `clio-coder configure --settings`. Each area shows its co
 
 ## Advanced settings
 
-Configure and TUI `/settings` share the section names, section order, control labels, descriptions, and grouped control order. The menu reads:
+Configure, TUI `/settings`, and GUI Settings share the section names, section order, control labels, descriptions, and grouped control order. The GUI hides or identifies controls specific to terminal presentation. The menu reads:
 
 | Section | Owns |
 | --- | --- |
@@ -64,15 +64,29 @@ Other settings apply at the boundary shown in the inventory. The routing classif
 
 ## Settings Center
 
-Open `/settings` in the TUI or `clio-coder configure --settings`. Both start with **Connections**, **Chat**, **Fleet**, **Context & Memory**, **Permissions & Limits**, **Appearance**, **Integrations**, and **Advanced**, in that order. A connection is the provider/app/server entry stored as a `target`; the CLI's `targets` commands and the YAML keys keep that technical name. You do not need to learn a second settings hierarchy after onboarding.
+Open `/settings` in the TUI, `clio-coder configure --settings`, or Settings in the GUI. All three start with **Connections**, **Chat**, **Fleet**, **Context & Memory**, **Permissions & Limits**, **Appearance**, **Integrations**, and **Advanced**, in that order. A connection is the provider/app/server entry stored as a `target`; the CLI's `targets` commands and the YAML keys keep that technical name. You do not need to learn a second settings hierarchy after onboarding.
 
 Use **Connections → Add a target** to reopen Guided setup inside the TUI. It runs the same setup flow as configure, including model inventories, passive checks, and review before Save. **Chat** selects the connection and model that answer you. **Fleet → Default model** selects the connection, model, and thinking level for delegated work; profiles and agent routes stay in Fleet. Worker approvals and external-agent tool permissions live in **Permissions & Limits**, alongside autonomy and spending/tool limits.
 
-Each section keeps related controls together. Configure combines a route's connection and model into one guided action; the TUI offers separate connection and model pickers in the same group. Select **Use connection default** in a TUI model picker to clear that route's model override. A blank override in the text fallback has the same meaning; a typed model id is unverified. **Context & Memory → Proactive memory → Memory connection → Rules only** clears the background model route while leaving rules-based memory available when proactive memory is enabled.
+Each section keeps related controls together. Configure combines a route's connection and model into one guided action; the TUI offers separate connection and model pickers in the same group. Select **Use connection default** in a TUI or GUI model picker to clear that route's model override. A blank override in the text fallback has the same meaning; a typed model id is unverified. **Context & Memory → Proactive memory → Memory connection → Rules only** clears the background model route while leaving rules-based memory available when proactive memory is enabled.
 
 In the TUI, use arrows to move, Enter to open, and `/` to filter by name or canonical key. On wide terminals, Tab switches between sections and their controls; narrow terminals show one level at a time. Esc goes back. Previewing a value does not save it. Edits offer this session, this project, global, or cancel when the control supports that scope. Project saves require trusted project settings. Restart-required controls explain that timing before saving; target and profile removal shows affected routes before confirmation.
 
 Configure edits saved global defaults. It does not offer the TUI's session/project scope menu or redirect an already-running chat session. In **Advanced**, the TUI's **Check setup** and **Edit all settings** rows show the terminal commands for diagnostics and the validated file editor.
+
+In the GUI, **Connections → Guided setup** runs the same connection wizard before
+or after opening a project. A configured home page goes straight to project
+selection; an incomplete saved chat route offers repair. Setup does not send a
+generation request. Live, catalog, and cached model evidence retain the wizard's
+labels and limitations. Keys are entered in a masked field or supplied through
+an existing credential or environment variable; supported subscriptions offer an
+explicit browser sign-in link. Setup replies are not stored as conversations or
+operation history. OAuth credentials are saved when sign-in succeeds, while
+connection settings wait for **Save target**. Adding or editing another connection
+preserves explicit chat, fleet, and memory routes. Saved settings in the GUI apply
+to new conversations; active conversation model controls have their own scope.
+See [the graphical application guide](commands-and-modes.md#graphical-application)
+for launch, cancellation, credential storage, and project override behavior.
 
 ## Settings inventory
 

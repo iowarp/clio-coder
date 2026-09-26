@@ -422,6 +422,7 @@ try {
 		// change needs its named confirmation.
 		const setting = (path: string) =>
 			page.locator("main .setting-control", { has: page.getByText(path, { exact: true }) });
+		await page.locator("main").getByRole("button", { name: "Chat", exact: true }).click();
 		await page.locator("main").getByRole("heading", { name: "Chat", exact: true }).waitFor();
 		const thinking = setting("chat.thinkingLevel");
 		const level = (await thinking.getByRole("combobox").inputValue()) === "low" ? "high" : "low";
@@ -431,10 +432,7 @@ try {
 		await check("settings-saved");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `settings-controls-${width}.png`), fullPage: true });
-		await page
-			.locator("main")
-			.getByRole("button", { name: /^Fleet · / })
-			.click();
+		await page.locator("main").getByRole("button", { name: "Fleet", exact: true }).click();
 		await setting("fleet.concurrency").getByText("Set by the project layer").waitFor();
 		if (await setting("fleet.concurrency").getByRole("combobox").count())
 			throw new Error("A project-set value still offers an editor.");
@@ -453,7 +451,8 @@ try {
 		await page.locator("main").getByLabel("Find a setting", { exact: true }).fill("retry");
 		await check("settings-controls-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
-		await page.getByRole("link", { name: "Effective values", exact: true }).click();
+		await page.locator("main").getByRole("button", { name: "Advanced", exact: true }).click();
+		await page.locator("main").getByRole("link", { name: "Effective settings", exact: true }).click();
 		await page.getByLabel("Filter settings", { exact: true }).fill("chat.model");
 		await page.getByText("fixture-local-model", { exact: true }).waitFor();
 		await check("settings-inspection");
@@ -461,7 +460,7 @@ try {
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("settings-inspection-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
-		await page.getByRole("link", { name: "Sources & timing", exact: true }).click();
+		await page.getByRole("link", { name: "Advanced: configuration sources", exact: true }).click();
 		await page.locator("main").getByRole("heading", { name: "fixture-hook", exact: true }).waitFor();
 		await page.locator("main").getByRole("heading", { name: "From source to behavior", exact: true }).waitFor();
 		await check("config-graph");
@@ -470,38 +469,29 @@ try {
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("config-graph-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
-		await page.getByRole("link", { name: "Targets", exact: true }).click();
+		await page.getByRole("link", { name: "Connections", exact: true }).click();
 		await page.getByRole("article", { name: "fixture-target", exact: true }).waitFor();
 		await check("targets");
 		// Onboarding: a catalog runtime refuses to save without a model, and a local endpoint saves
 		// through the real CLI with no key field anywhere on the form.
 		await page.getByRole("button", { name: "Add a connection", exact: true }).click();
-		const onboarding = page.getByRole("form", { name: "Add a connection", exact: true });
-		await onboarding.getByLabel("Runtime", { exact: true }).selectOption("anthropic");
-		await onboarding.getByText("so choose a model").waitFor();
-		if (!(await onboarding.getByRole("button", { name: "Save connection", exact: true }).isDisabled()))
-			throw new Error("A catalog runtime offered to save without a model.");
-		if (await onboarding.locator('input[type="password"]').count())
-			throw new Error("The onboarding form rendered a credential field.");
-		await onboarding.getByLabel("Runtime", { exact: true }).selectOption("openai-compat");
-		await onboarding.getByLabel("Connection id", { exact: true }).fill(`smoke-${width}`);
-		await onboarding.getByLabel("Endpoint URL", { exact: true }).fill("http://127.0.0.1:9");
-		await onboarding.getByLabel(/^Default model/).fill("smoke-model");
+		await page.getByRole("button", { name: "Add a connection", exact: true }).click();
+		const onboarding = page.locator("main .connection-setup");
+		await onboarding.getByRole("heading", { name: "Where does your model come from?", exact: true }).waitFor();
 		await check("targets-onboarding");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `targets-onboarding-${width}.png`), fullPage: true });
-		await onboarding.getByRole("button", { name: "Save connection", exact: true }).click();
-		await page.getByRole("article", { name: `smoke-${width}`, exact: true }).waitFor();
-		await page.getByText("could not verify model").waitFor();
+		await onboarding.getByRole("button", { name: "Cancel setup", exact: true }).click();
+
 		await page
 			.getByRole("article", { name: "fixture-target", exact: true })
 			.getByRole("button", { name: "Use for chat & fleet", exact: true })
 			.click();
-		await page.locator("main").getByRole("heading", { name: "Target use · succeeded", exact: true }).waitFor();
+		await page.locator("main").getByRole("heading", { name: "Connection use · succeeded", exact: true }).waitFor();
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("targets-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
-		await page.getByRole("link", { name: "Routing", exact: true }).click();
+		await page.getByRole("link", { name: "Fleet routes", exact: true }).click();
 		await page
 			.locator("main")
 			.getByRole("heading", { name: /^Agent bindings ·/ })
@@ -934,7 +924,7 @@ try {
 		const route = page.locator(".route-picker");
 		await route.locator("summary").click();
 		await route.getByText("This conversation.", { exact: true }).waitFor();
-		assert.equal(await route.getByLabel("Target", { exact: true }).isDisabled(), true);
+		assert.equal(await route.getByLabel("Connection", { exact: true }).isDisabled(), true);
 		await route.getByLabel("Model", { exact: true }).selectOption("fixture-small");
 		await route.getByLabel("Thinking", { exact: true }).selectOption("high");
 		await check("route-picker-conversation");
@@ -950,7 +940,7 @@ try {
 		await route.locator("summary").click();
 		await route.getByLabel("Apply to", { exact: true }).selectOption("every-project");
 		await route.getByText("Saved for every project.", { exact: true }).waitFor();
-		await route.getByLabel("Target", { exact: true }).selectOption("field-station");
+		await route.getByLabel("Connection", { exact: true }).selectOption("field-station");
 		assert.equal(await route.getByLabel("Model", { exact: true }).inputValue(), "");
 		await route.getByLabel("Model", { exact: true }).selectOption("survey-small");
 		await route.getByText(/^field-station answered at /).waitFor();

@@ -197,7 +197,7 @@ function RouteForm({
 	};
 	const cut =
 		models !== null && catalogMayBeCut(models)
-			? ` Clio Coder lists at most ${ACP_TARGET_MODEL_LIMIT} per target; choose Another model id for one not shown.`
+			? ` Clio Coder lists at most ${ACP_TARGET_MODEL_LIMIT} per connection; choose Advanced: unverified model id for one not shown.`
 			: "";
 	const count = models === null ? "" : ` ${models.length} ${models.length === 1 ? "model" : "models"}.`;
 	const note =
@@ -231,7 +231,7 @@ function RouteForm({
 					{config?.options.length ? <option value="conversation">This conversation</option> : null}
 					{global ? <option value="every-project">Every project</option> : null}
 				</select>
-				<label htmlFor={targetId}>Target</label>
+				<label htmlFor={targetId}>Connection</label>
 				<select
 					id={targetId}
 					value={draft.target}
@@ -293,12 +293,12 @@ function RouteForm({
 					))}
 				</select>
 			</div>
-			{modelNeedsTarget ? <p role="alert">Choose a target before naming a model.</p> : null}
+			{modelNeedsTarget ? <p role="alert">Choose a connection before naming a model.</p> : null}
 			<p className="route-picker__scope" id={scopeId}>
 				{scope === "conversation" ? (
 					<>
 						<strong>This conversation.</strong> Model and thinking apply from its next request. Saved defaults stay as they
-						are. ACP cannot switch targets for one conversation; choose Every project to change the target.
+						are. This conversation keeps its connection; choose Every project to change the saved connection.
 					</>
 				) : (
 					<>

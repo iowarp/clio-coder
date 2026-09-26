@@ -4,7 +4,7 @@ import "./model-select.css";
 
 /**
  * A model field that offers the target's catalog as a select. Without a catalog, or after the
- * operator picks "Another model id…", it is a text field for an exact id, with a way back to the
+ * operator picks "Advanced: unverified model id…", it is a text field for an exact id, with a way back to the
  * list. The label is the caller's, pointed at `id` with `htmlFor`, because the field is one of two
  * elements.
  */
@@ -24,7 +24,7 @@ export function ModelSelect({
 	/** The target's catalog, or null when there is no target or it has not been read. */
 	models: readonly string[] | null;
 	defaultModel?: string | null;
-	/** Replaces "Target default" as the empty choice's words. */
+	/** Replaces "Use connection default" as the empty choice's words. */
 	emptyLabel?: string;
 	disabled?: boolean;
 	describedBy?: string;
@@ -63,7 +63,7 @@ export function ModelSelect({
 						disabled={disabled}
 						spellCheck={false}
 						autoComplete="off"
-						placeholder={emptyLabel ?? "Target default"}
+						placeholder={emptyLabel ?? "Use connection default"}
 						aria-describedby={describedBy}
 						onChange={(event) => onChange(event.target.value)}
 						// biome-ignore lint/a11y/noAutofocus: the operator just asked to type an id; the field is where they type it.

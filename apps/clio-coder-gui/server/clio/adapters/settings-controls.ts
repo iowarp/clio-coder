@@ -1,8 +1,8 @@
 import { SettingsValidationError } from "../../../../../src/core/config.js";
 import {
 	applyControlValue,
+	orderedSectionControls,
 	type SettingControl as RootControl,
-	SETTING_CONTROLS,
 	SETTINGS_LABELS_BY_ID,
 	SETTINGS_VALUE_HELP_BY_ID,
 	settingsV2PathForRow,
@@ -120,45 +120,47 @@ function runtimes() {
 export function readSettingsControls(cwd: string): SettingsControls {
 	const layered = readLayeredSettings(cwd);
 	const targets = layered.settings.targets.map((target) => target.id);
-	const controls = SETTING_CONTROLS.filter((control) => !hidden(control.path)).map((control): SettingControl => {
-		// Exact leaf only: a parent object is also recorded as a source, and it does not set absent children.
-		const source = layered.sources[control.path] ?? "built-in";
-		// The write lands in the user layer, which a project or command-line value would silently override.
-		const overridden =
-			source === "project" || source === "project.local" || source === "cli"
-				? `Set by the ${source} layer, which outranks your user settings. Change it there.`
-				: undefined;
-		const reason = readOnlyReason(control) ?? overridden;
-		const suggestions = control.path.endsWith(".target")
-			? targets
-			: control.path === "fleet.default.node"
-				? ["local", ...layered.settings.fleet.nodes.map((node) => node.id)]
-				: undefined;
-		return {
-			path: control.path,
-			section: settingsSectionForPath(control.path),
-			group: settingsGroupForPath(control.path),
-			label: control.label,
-			description: control.description,
-			...(control.help ? { help: control.help } : {}),
-			valueHelp: VALUE_HELP.get(control.path) ?? {},
-			kind: control.kind,
-			...(control.choices ? { choices: [...control.choices] } : {}),
-			...(suggestions ? { suggestions } : {}),
-			optional: control.optional,
-			timing: settingsChangeKind(control.path),
-			value: text(control, at(layered.settings, control.path)),
-			source,
-			access: reason ? "read-only" : "writable",
-			...(reason ? { reason } : {}),
-			...(NOTES[control.path] ? { note: NOTES[control.path] } : {}),
-			...(CONFIRM[control.path] && !reason ? { confirm: CONFIRM[control.path] } : {}),
-		};
-	});
+	const controls = SETTINGS_SECTIONS.flatMap((section) =>
+		orderedSectionControls(section.id).map((entry) => entry.control),
+	)
+		.filter((control) => !hidden(control.path))
+		.map((control): SettingControl => {
+			// Exact leaf only: a parent object is also recorded as a source, and it does not set absent children.
+			const source = layered.sources[control.path] ?? "built-in";
+			// The write lands in the user layer, which a project or command-line value would silently override.
+			const overridden =
+				source === "project" || source === "project.local" || source === "cli"
+					? `Set by the ${source} layer, which outranks your user settings. Change it there.`
+					: undefined;
+			const reason = readOnlyReason(control) ?? overridden;
+			const suggestions = control.path.endsWith(".target")
+				? targets
+				: control.path === "fleet.default.node"
+					? ["local", ...layered.settings.fleet.nodes.map((node) => node.id)]
+					: undefined;
+			return {
+				path: control.path,
+				section: settingsSectionForPath(control.path),
+				group: settingsGroupForPath(control.path),
+				label: control.label,
+				description: control.description,
+				...(control.help ? { help: control.help } : {}),
+				valueHelp: VALUE_HELP.get(control.path) ?? {},
+				kind: control.kind,
+				...(control.choices ? { choices: [...control.choices] } : {}),
+				...(suggestions ? { suggestions } : {}),
+				optional: control.optional,
+				timing: settingsChangeKind(control.path),
+				value: text(control, at(layered.settings, control.path)),
+				source,
+				access: reason ? "read-only" : "writable",
+				...(reason ? { reason } : {}),
+				...(NOTES[control.path] ? { note: NOTES[control.path] } : {}),
+				...(CONFIRM[control.path] && !reason ? { confirm: CONFIRM[control.path] } : {}),
+			};
+		});
 	return {
-		sections: SETTINGS_SECTIONS.filter((section) => controls.some((control) => control.section === section.id)).map(
-			({ id, label, description }) => ({ id, label, description }),
-		),
+		sections: SETTINGS_SECTIONS.map(({ id, label, description }) => ({ id, label, description })),
 		controls,
 		userFile: layered.layers.find((layer) => layer.origin === "user")?.path ?? "",
 	};

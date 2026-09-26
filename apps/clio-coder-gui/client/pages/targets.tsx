@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { routes } from "../../contracts/routes.js";
-import type { TargetAdd } from "../../contracts/targets-cli.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { useOperation } from "../api/queries.js";
 import { humanizeKey, reportedCount } from "../design/facts-model.js";
@@ -9,7 +8,7 @@ import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark } from "../design/status.js";
 import { ConfigurationTabs, useWorkspaceSelection, WorkspacePicker } from "./settings.js";
-import { AddConnection } from "./target-onboarding.js";
+import { ConnectionSetup } from "./target-onboarding.js";
 
 export function TargetsPage({ client, view }: { client: Client; view: "targets" | "routing" }) {
 	const queries = useQueryClient();
@@ -44,15 +43,9 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 			}),
 		onSuccess: (value, variables) => setOperationScope({ id: value.operationId, workspaceId: variables.workspaceId }),
 	});
-	const add = useMutation({
-		mutationFn: ({ workspaceId, body }: { workspaceId: string; body: TargetAdd }) =>
-			client.call(routes.targetsAdd, { params: { id: workspaceId }, query: {}, body }),
-		onSuccess: (value, variables) => setOperationScope({ id: value.operationId, workspaceId: variables.workspaceId }),
-	});
 	const cancel = useMutation({
 		mutationFn: () => client.call(routes.cancel, { ...emptyInput, params: { id: operationId ?? "" } }),
 	});
-	const completedId = operation.data?.status === "succeeded" ? operation.data.id : undefined;
 	useEffect(() => {
 		const result = operation.data?.status === "succeeded" ? operation.data.result : null;
 		if (!result || !("targets" in result) || !operationScope) return;
@@ -62,7 +55,6 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 	}, [operation.data, operationScope, queries]);
 	const busy =
 		mutate.isPending ||
-		add.isPending ||
 		(!!operationId && operation.isPending) ||
 		operation.data?.status === "queued" ||
 		operation.data?.status === "running";
@@ -73,36 +65,25 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 			<ConfigurationTabs id={id} active={view} />
 			{view === "targets" ? (
 				<>
-					<p>Use a target for chat and fleet, inspect its current health, or add a new connection.</p>
-					<p>Clio’s probe checks all configured endpoints before returning the selected target’s result.</p>
-					{targets.isPending && id && <p>Reading targets…</p>}
+					<p>Use a connection for chat and fleet, inspect its current health, or add a new connection.</p>
+					<p>Clio’s probe checks all configured endpoints before returning the selected connection’s result.</p>
+					{targets.isPending && id && <p>Reading connections…</p>}
 					{targets.error && <p role="alert">{targets.error.message}</p>}
-					{targets.data?.truncated && <PanelEmpty>{emptyState.bounded("targets", "Later")}</PanelEmpty>}
+					{targets.data?.truncated && <PanelEmpty>{emptyState.bounded("connections", "Later")}</PanelEmpty>}
 					{targets.data && !targets.data.targets.length && (
-						<PanelEmpty>No model target is configured yet. Add a connection to start a conversation.</PanelEmpty>
+						<PanelEmpty>No model connection is configured yet. Add a connection to start a conversation.</PanelEmpty>
 					)}
-					{targets.data && (
-						<AddConnection
-							client={client}
-							taken={targets.data.targets.map((target) => target.id)}
-							busy={busy || add.isPending}
-							completedId={add.data?.operationId === completedId ? completedId : undefined}
-							onSubmit={(body) => add.mutate({ workspaceId: id, body })}
-						/>
+					<ConnectionSetup client={client} />
+					{mutate.isPending && <p role="status">Sending connection request…</p>}
+					{operationId && operation.isPending && !mutate.isPending && <p role="status">Checking connection operation…</p>}
+					{operation.error && !mutate.isPending && (
+						<p role="alert">Could not read the connection operation: {operation.error.message}</p>
 					)}
-					{add.error && <p role="alert">{add.error.message}</p>}
-					{(add.isPending || mutate.isPending) && <p role="status">Sending target request…</p>}
-					{operationId && operation.isPending && !add.isPending && !mutate.isPending && (
-						<p role="status">Checking target operation…</p>
-					)}
-					{operation.error && !add.isPending && !mutate.isPending && (
-						<p role="alert">Could not read the target operation: {operation.error.message}</p>
-					)}
-					{operation.data && !add.isPending && !mutate.isPending && (
-						<section className="trace-panel" aria-label="Target operation">
+					{operation.data && !mutate.isPending && (
+						<section className="trace-panel" aria-label="Connection operation">
 							{/* aria-live, not role="status": a role on the h2 would replace its heading role. */}
 							<h2 aria-live="polite">
-								{operation.data.kind.replace("targets.", "Target ")} · {operation.data.status}
+								{operation.data.kind.replace("targets.", "Connection ")} · {operation.data.status}
 							</h2>
 							{operation.data.progress.length > 0 && (
 								<ul>
@@ -155,9 +136,10 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 											))}
 										</ul>
 									) : (
-										<PanelEmpty>{emptyState.emptyStore("model", "for this target")}</PanelEmpty>
+										<PanelEmpty>{emptyState.emptyStore("model", "for this connection")}</PanelEmpty>
 									)}
 								</details>
+								<ConnectionSetup client={client} targetId={target.id} />
 								<div className="actions">
 									<button
 										type="button"
@@ -177,11 +159,11 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 										type="button"
 										disabled={busy}
 										onClick={() => {
-											if (window.confirm(`Remove target ${target.id} and its routing references from user settings?`))
+											if (window.confirm(`Remove connection ${target.id} and its routing references from user settings?`))
 												mutate.mutate({ workspaceId: id, targetId: target.id, action: "remove" });
 										}}
 									>
-										Remove target
+										Remove connection
 									</button>
 								</div>
 							</article>
@@ -225,7 +207,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 									<div key={row.name}>
 										<dt>{row.name}</dt>
 										<dd>
-											{row.target ?? "No target"} · {row.model ?? "No model"}
+											{row.target ?? "No connection"} · {row.model ?? "No model"}
 										</dd>
 										<dd>{row.thinkingLevel}</dd>
 									</div>
@@ -238,7 +220,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 									<div key={row.agentId}>
 										<dt>{row.agentId}</dt>
 										<dd>
-											{row.profile} · {row.target ?? "No target"}
+											{row.profile} · {row.target ?? "No connection"}
 										</dd>
 										<dd>{row.resolved ? "Resolved" : "Missing profile"}</dd>
 									</div>

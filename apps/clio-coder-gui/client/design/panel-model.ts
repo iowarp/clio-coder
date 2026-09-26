@@ -81,7 +81,7 @@ export const PANELS = {
 	},
 	routing: {
 		eyebrow: eyebrow("Models", "worker routing", "read offline"),
-		title: "Models and routing",
+		title: "Fleet routes",
 		boundary:
 			"This inventory is read from cached configuration on this machine. No endpoint is contacted, so a listed model is a recorded capability and not a live reachability claim.",
 	},
@@ -105,7 +105,7 @@ export const PANELS = {
 	},
 	targets: {
 		eyebrow: eyebrow("Model endpoints", "your user settings", "add, probe and remove"),
-		title: "Targets",
+		title: "Connections",
 		boundary:
 			"Targets are written to your user settings on this machine, and credentials are never entered or shown here. A probe contacts the endpoints you configured and no other host.",
 	},

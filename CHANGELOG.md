@@ -25,6 +25,9 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ### Browser application and ACP
 
+- First-time browser users can connect a model through the shared configure wizard before opening a project, including masked key entry, supported browser sign-in, model inventories, passive checks, and review before Save. Existing configured users go directly to project selection.
+- GUI Settings follows configure and the TUI's eight sections, control groups, and order. Connections replaces the old flat form; model defaults use **Use connection default**, and proactive memory offers **Rules only**. Terminal launch behavior stays the same.
+
 - The browser application adopts the canonical cyan Clio mark, warm dark/light palette, and locally bundled IBM Plex and Newsreader fonts across navigation, installation icons, and offline recovery.
 - Conversations use a compact input with attachment, message-options, model, thinking, and send/stop controls. Sessions switches the sidebar to conversations grouped by project, with expandable history and a return to application navigation.
 - Sidebar controls for Settings, Library, Traces, Fleet, Evidence, Toolchain, and System keep the active conversation in view. Explicit viewer links open larger inspection pages. A collapsible right inspector presents recorded file activity, tool results, and linked evidence beside a compact conversation dashboard.

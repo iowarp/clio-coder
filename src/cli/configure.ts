@@ -2105,6 +2105,11 @@ export async function runConfigureCommand(
 	inStream: NodeJS.ReadableStream = input,
 	outStream: NodeJS.WritableStream = output,
 ): Promise<number> {
+	// The GUI owns presentation; this fixed child transport keeps provider I/O in the CLI.
+	if (argv.length === 1 && argv[0] === "--gui-host") {
+		ensureRegistryPopulated();
+		return (await import("./configure-browser.js")).runBrowserConfigure(inStream, outStream);
+	}
 	let args: ParsedArgs;
 	try {
 		args = parseSetupArgs(argv);

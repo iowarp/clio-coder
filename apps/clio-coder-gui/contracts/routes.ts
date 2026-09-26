@@ -54,6 +54,7 @@ import { SessionSnapshot, SessionSummary, Workspace, WorkspaceFolders } from "./
 import { ConfigGraph, SettingsReport } from "./settings.js";
 import { SettingsControls, SettingWrite, SettingWritten } from "./settings-controls.js";
 import { Autonomy, AutonomyLevel, SafeSettings, SafeSettingsPatch } from "./settings-safe.js";
+import { SetupAnswer, SetupStart, SetupState, SetupStatus } from "./setup.js";
 import {
 	CommandCatalog,
 	CommandRequest,
@@ -119,6 +120,47 @@ const operationParams = Type.Object({ id: Id }, { additionalProperties: false })
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
+	setupStatus: defineRoute({
+		...get,
+		path: "/api/setup",
+		response: SetupStatus,
+		summary: "Read saved chat setup without contacting providers.",
+	}),
+	setupStart: defineRoute({
+		...post,
+		params: Empty,
+		path: "/api/setup",
+		body: SetupStart,
+		response: SetupState,
+		status: 200,
+		summary: "Host Guided setup from the shared configure wizard.",
+	}),
+	setupState: defineRoute({
+		...get,
+		params: operationParams,
+		path: "/api/setup/:id",
+		response: SetupState,
+		summary: "Read the current setup prompt.",
+	}),
+	setupAnswer: defineRoute({
+		...post,
+		params: operationParams,
+		path: "/api/setup/:id",
+		body: SetupAnswer,
+		response: SetupState,
+		status: 200,
+		summary: "Answer the current setup prompt.",
+	}),
+	setupCancel: defineRoute({
+		...post,
+		method: "DELETE",
+		params: operationParams,
+		path: "/api/setup/:id",
+		response: SetupState,
+		status: 200,
+		summary: "Cancel setup before saving.",
+	}),
+
 	system: defineRoute({
 		...get,
 		path: "/api/system",

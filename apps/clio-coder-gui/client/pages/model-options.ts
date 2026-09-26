@@ -26,11 +26,15 @@ export function modelOptions(
 ): ModelOption[] {
 	const catalog = [...new Set(models)].sort((left, right) => left.localeCompare(right, "en-US"));
 	const options: ModelOption[] = [
-		{ value: "", label: emptyLabel ?? (defaultModel ? `Target default · ${defaultModel}` : "Target default") },
+		{
+			value: "",
+			label: emptyLabel ?? (defaultModel ? `Use connection default · ${defaultModel}` : "Use connection default"),
+		},
 	];
-	if (value !== "" && !catalog.includes(value)) options.push({ value, label: `${value} · not in this target's list` });
+	if (value !== "" && !catalog.includes(value))
+		options.push({ value, label: `${value} · not in this connection's list` });
 	for (const model of catalog) options.push({ value: model, label: model });
-	options.push({ value: OTHER_MODEL, label: "Another model id…" });
+	options.push({ value: OTHER_MODEL, label: "Advanced: unverified model id…" });
 	return options;
 }
 

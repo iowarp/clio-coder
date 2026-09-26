@@ -23,6 +23,7 @@ import { OperationRegistry } from "./services/operations.js";
 import { ReportsService } from "./services/reports.js";
 import { SessionService } from "./services/sessions.js";
 import { SettingsService } from "./services/settings.js";
+import { SetupService } from "./services/setup.js";
 import { SystemService } from "./services/system.js";
 import { TargetsService } from "./services/targets-cli.js";
 import { ToolchainService } from "./services/toolchain.js";
@@ -37,11 +38,14 @@ export { openBrowser } from "./process-policy.js";
 declare const __CLIO_GUI_BUNDLED__: boolean;
 const bundled = typeof __CLIO_GUI_BUNDLED__ !== "undefined" && __CLIO_GUI_BUNDLED__;
 export async function main(args = process.argv.slice(2)) {
+	const appClient = fileURLToPath(new URL(bundled ? "./client/" : "../dist/client/", import.meta.url));
+	const clientDir =
+		bundled || existsSync(join(appClient, "index.html")) ? appClient : join(resolvePackageRoot(), "dist/gui/client");
 	const launch = () => ({
 		node: process.execPath,
 		...(!bundled ? { loader: fileURLToPath(import.meta.resolve("tsx")) } : {}),
 		entry: fileURLToPath(import.meta.url),
-		icon: fileURLToPath(new URL(bundled ? "./client/icon-192.png" : "../dist/client/icon-192.png", import.meta.url)),
+		icon: join(clientDir, "icon-192.png"),
 	});
 	if (args[0] === "background") {
 		const { background } = await import("./launcher/background.js");
@@ -105,7 +109,6 @@ export async function main(args = process.argv.slice(2)) {
 	if (persistent) Object.assign(process.env, backgroundEnvironment(persistent));
 	const port = persistent?.port ?? values.port;
 	restrictNetwork();
-	const clientDir = fileURLToPath(new URL(bundled ? "./client/" : "../dist/client/", import.meta.url));
 	if (!existsSync(join(clientDir, "index.html")))
 		throw new Error("Client build is missing. Run pnpm --filter @iowarp/clio-coder-gui build before start.");
 	const scratch = values.fixture ? await mkdtemp(join(tmpdir(), "clio-coder-gui-fixture-")) : undefined;
@@ -138,6 +141,7 @@ export async function main(args = process.argv.slice(2)) {
 	const sessions = new SessionService(supervisor, workspaces, reads);
 	const cli = new CliRunner(env);
 	const settingsService = new SettingsService(reads, workspaces, ops);
+	const setup = new SetupService(reads, env);
 	const token = persistent?.token ?? values.token ?? randomBytes(32).toString("base64url");
 	let log: Awaited<ReturnType<typeof lifecycleLog>>;
 	try {
@@ -156,6 +160,7 @@ export async function main(args = process.argv.slice(2)) {
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
 		settings: settingsService,
+		setup,
 		fleet: new FleetService(reads),
 		system: new SystemService(reads, workspaces, ops),
 		library: new LibraryService(reads, cli, workspaces, ops),
@@ -163,7 +168,8 @@ export async function main(args = process.argv.slice(2)) {
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations, reads),
 		sessions,
-		idle: () => !(operations.activeCount || cli.activeCount || supervisor.busy || supervisor.hasOpenSessions),
+		idle: () =>
+			!(operations.activeCount || cli.activeCount || setup.busy || supervisor.busy || supervisor.hasOpenSessions),
 		clientDir,
 		pwa: !!persistent,
 		...(process.env.NODE_ENV === "test"
@@ -204,7 +210,15 @@ export async function main(args = process.argv.slice(2)) {
 			? undefined
 			: new IdleExit(
 					values.idleMs,
-					() => !!(operations.activeCount || cli.activeCount || reads.pendingCount || ops.pendingCount || supervisor.busy),
+					() =>
+						!!(
+							operations.activeCount ||
+							cli.activeCount ||
+							setup.busy ||
+							reads.pendingCount ||
+							ops.pendingCount ||
+							supervisor.busy
+						),
 					() => {
 						void close().catch(fail);
 					},
@@ -222,7 +236,7 @@ export async function main(args = process.argv.slice(2)) {
 		process.removeListener("SIGTERM", stop);
 		server.close();
 		if ("closeAllConnections" in server) server.closeAllConnections();
-		await Promise.all([supervisor.shutdown(), cli.close()]);
+		await Promise.all([supervisor.shutdown(), cli.close(), setup.close()]);
 		await Promise.all([reads.close(), ops.close()]);
 		if (scratch) await rm(scratch, { recursive: true, force: true });
 		try {

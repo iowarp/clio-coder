@@ -41,6 +41,10 @@ serveWorker(async (call) => {
 		const { inspectSettings } = await import("../clio/adapters/settings.js");
 		return inspectSettings(call.params.cwd);
 	}
+	if (call.method === "setup.status") {
+		const { readSetupStatus } = await import("../clio/adapters/target-runtimes.js");
+		return readSetupStatus();
+	}
 	if (call.method === "targets.runtimes") {
 		const { readTargetRuntimes } = await import("../clio/adapters/target-runtimes.js");
 		return readTargetRuntimes();

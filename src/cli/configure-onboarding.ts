@@ -1253,6 +1253,7 @@ function finish(wizard: Wizard, answers: Answers): number {
 		}
 
 		updateSettings((settings) => applyAnswers(settings, answers, descriptor, chatEligible));
+		wizard.host?.onTargetSaved?.();
 	} catch (error) {
 		presenter.fail("settings were not written", error instanceof Error ? error.message : String(error));
 		presenter.done("Target settings not saved");

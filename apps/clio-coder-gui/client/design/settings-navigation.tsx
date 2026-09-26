@@ -37,7 +37,13 @@ export function SettingsNavigation({ client, close, workspaceId }: AreaNavigatio
 				{id ? (
 					<SettingsControlsView key={id} client={client} workspaceId={id} compact />
 				) : (
-					<p className="sidebar-note">Open a project to inspect and edit its settings.</p>
+					<p className="sidebar-note">
+						<Link to="/settings/targets" onClick={close}>
+							Connections · Guided setup
+						</Link>
+						<br />
+						Open a project to inspect effective settings.
+					</p>
 				)}
 				{id && (
 					<details className="sidebar-settings__sources" onToggle={(event) => setInspectSources(event.currentTarget.open)}>

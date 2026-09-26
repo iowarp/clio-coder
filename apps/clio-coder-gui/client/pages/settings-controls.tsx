@@ -22,6 +22,7 @@ import {
 	writtenSentences,
 } from "./settings-control-model.js";
 import { useSettingsDrafts } from "./settings-drafts.js";
+import { ConnectionSetup } from "./target-onboarding.js";
 import "./settings-controls.css";
 
 /** A model setting's catalog: the paired target's models as Clio Coder last read them, and where from. */
@@ -367,7 +368,7 @@ export function SettingsControlsView({
 				note: `The target list could not be read${inventory.error ? `: ${inventory.error.message}` : "."}`,
 			};
 		const target = inventory.data.targets.find((row) => row.id === targetId);
-		if (!target) return { models: null, defaultModel: null, note: `${targetId} is not a configured target.` };
+		if (!target) return { models: null, defaultModel: null, note: `${targetId} is not a configured connection.` };
 		const checking =
 			check?.targetId === targetId &&
 			(startCheck.isPending || checkOperation.data?.status === "queued" || checkOperation.data?.status === "running");
@@ -385,7 +386,9 @@ export function SettingsControlsView({
 			note: (
 				<>
 					{source}
-					{target.modelsTruncated ? " The list shows the first 200; choose Another model id for one not shown." : ""}{" "}
+					{target.modelsTruncated
+						? " The list shows the first 200; choose Advanced: unverified model id for one not shown."
+						: ""}{" "}
 					<button
 						type="button"
 						className="setting-control__check"
@@ -479,26 +482,28 @@ export function SettingsControlsView({
 							))}
 						</select>
 					</label>
-					<label>
-						Setting · {visible.length}
-						<select
-							value={chosen?.path ?? ""}
-							disabled={!visible.length}
-							onChange={(event) => setSelectedControl(event.target.value)}
-						>
-							{!visible.length && <option value="">No settings match</option>}
-							{groupControls(visible).map(({ group, controls: rows }) => (
-								<optgroup key={group} label={group}>
-									{rows.map((control) => (
-										<option key={control.path} value={control.path}>
-											{control.label}
-											{drafts[control.path] !== undefined ? " · unsaved" : ""}
-										</option>
-									))}
-								</optgroup>
-							))}
-						</select>
-					</label>
+					{active !== "targets" && active !== "advanced" && (
+						<label>
+							Setting · {visible.length}
+							<select
+								value={chosen?.path ?? ""}
+								disabled={!visible.length}
+								onChange={(event) => setSelectedControl(event.target.value)}
+							>
+								{!visible.length && <option value="">No settings match</option>}
+								{groupControls(visible).map(({ group, controls: rows }) => (
+									<optgroup key={group} label={group}>
+										{rows.map((control) => (
+											<option key={control.path} value={control.path}>
+												{control.label}
+												{drafts[control.path] !== undefined ? " · unsaved" : ""}
+											</option>
+										))}
+									</optgroup>
+								))}
+							</select>
+						</label>
+					)}
 					{unsaved.length > 0 || showDrafts ? (
 						<button type="button" aria-pressed={showDrafts} onClick={() => setShowDrafts(!showDrafts)}>
 							Unsaved · {unsaved.length}
@@ -517,7 +522,7 @@ export function SettingsControlsView({
 								setShowDrafts(false);
 							}}
 						>
-							{candidate.label} · {controls.filter((control) => control.section === candidate.id).length}
+							{candidate.label}
 						</button>
 					))}
 					{unsaved.length > 0 || showDrafts ? (
@@ -548,7 +553,29 @@ export function SettingsControlsView({
 			)}
 			{startCheck.error && <p role="alert">Could not start the model check: {startCheck.error.message}</p>}
 			{checkOperation.error && <p role="alert">Model check progress is unavailable: {checkOperation.error.message}</p>}
-			{!visible.length && <p>{showDrafts ? "No unsaved changes." : "No settings match."}</p>}
+			{active === "targets" && (
+				<>
+					<ConnectionSetup client={client} compact={compact} />
+					<Link to={`/settings/targets?workspace=${workspaceId}`}>Manage connections</Link>
+				</>
+			)}
+			{active === "advanced" && (
+				<div className="setting-group">
+					<p>Inspect saved defaults, effective values, and the sources that set them.</p>
+					<p>
+						<Link to={`/settings/effective?workspace=${workspaceId}`}>Effective settings</Link>
+					</p>
+					<p>
+						<Link to={`/settings/why?workspace=${workspaceId}`}>Configuration sources and timing</Link>
+					</p>
+					<p>
+						<Link to="/system">Check setup</Link>
+					</p>
+				</div>
+			)}
+			{!visible.length && active !== "targets" && active !== "advanced" && (
+				<p>{showDrafts ? "No unsaved changes." : "No settings match."}</p>
+			)}
 			{groupControls(editorControls).map(({ group, controls: rows }) => (
 				<section key={group} className="setting-group" aria-label={group}>
 					<h3>{group}</h3>

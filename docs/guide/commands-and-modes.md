@@ -113,12 +113,46 @@ On Linux with a systemd user session, `clio-coder gui background install --open`
 installs the optional login service. `clio-coder gui launcher install` adds a
 desktop entry; each has an `uninstall` command.
 
-Select a project and start or resume a conversation. Selecting another area during
-a conversation opens its controls in the sidebar and preserves the chat and draft.
-Explicit viewer links open larger inspection pages. Model controls distinguish
-current-conversation choices from saved defaults; save actions state their scope.
-Help opens the public documentation and identifies the installed Markdown reference.
-Offline `clio_docs` retrieval remains available.
+On a fresh installation, the home page offers **Guided setup** before you open a
+project. It presents the same source choices, authentication steps, model
+inventories, passive checks, and review-before-save flow as `clio-coder configure`.
+Enter a provider key in its masked field, use an existing credential or named
+environment variable, or follow the sign-in link and instructions when your
+provider supports browser authentication. You do not need to return to a terminal
+to run configure. NPM installation and the initial `gui --open` command still use
+a terminal; the optional desktop launcher avoids repeating the launch command.
+
+A saved chat connection, model, and required credential skip onboarding. This
+checks saved configuration and credential presence, not live reachability or
+model quality. An incomplete saved connection offers repair. **Connections →
+Guided setup** adds another connection; **Repair or edit connection** reopens its
+wizard. Connection settings remain a draft until **Save target**. Completed
+browser sign-in stores credentials immediately, even if you later cancel setup.
+Closing the setup view cancels its active wizard; abandoned setup expires after
+15 minutes. If saving and cancellation race, inspect the saved connection before
+retrying. Setup replies are temporary and are not conversation or operation
+history. Stored keys use Clio's credential file, with mode 0600; they are not
+encrypted at rest.
+
+Once connected, select a project and start or resume a conversation. Selecting
+another area during a conversation opens its controls in the sidebar and
+preserves the chat and draft. Explicit viewer links open larger inspection pages.
+**Settings** uses configure and the TUI's section names and order: **Connections**,
+**Chat**, **Fleet**, **Context & Memory**, **Permissions & Limits**, **Appearance**,
+**Integrations**, **Advanced**. Controls follow the same groups and ordering;
+terminal-only controls are hidden or identified as such. **Advanced** links to
+effective settings and configuration sources. Model controls distinguish current
+conversation choices from saved defaults; save actions state their scope.
+**Use connection default** clears a saved route's model override; **Rules only**
+clears the proactive-memory connection. Typed model ids are an advanced,
+unverified fallback. See the [settings walkthrough](configuration-and-targets.md#settings-center).
+
+GUI saved-setting edits write the user layer and seed new conversations. They do
+not redirect an open conversation, and trusted project overrides still take
+precedence. The no-project setup flow writes global connections without creating
+a project. Open a project to inspect its effective values and manage the full
+connection inventory. Help opens the public documentation and identifies the
+installed Markdown reference. Offline `clio_docs` retrieval remains available.
 
 ### Project trust
 

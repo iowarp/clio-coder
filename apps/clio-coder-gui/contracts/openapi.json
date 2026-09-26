@@ -6,6 +6,1336 @@
 		"version": "0.0.0"
 	},
 	"paths": {
+		"/api/setup": {
+			"get": {
+				"operationId": "setupStatus",
+				"summary": "Read saved chat setup without contacting providers.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["state", "targetId", "model", "message"],
+									"properties": {
+										"state": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "ready"
+												},
+												{
+													"type": "string",
+													"const": "unconfigured"
+												},
+												{
+													"type": "string",
+													"const": "needs-model"
+												},
+												{
+													"type": "string",
+													"const": "needs-credentials"
+												}
+											]
+										},
+										"targetId": {
+											"anyOf": [
+												{
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"model": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 4096
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"message": {
+											"type": "string",
+											"maxLength": 4096
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"operationId": "setupStart",
+				"summary": "Host Guided setup from the shared configure wizard.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"targetId": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["id", "status", "prompt", "messages", "problem"],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"status": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "working"
+												},
+												{
+													"type": "string",
+													"const": "prompt"
+												},
+												{
+													"type": "string",
+													"const": "saved"
+												},
+												{
+													"type": "string",
+													"const": "cancelled"
+												},
+												{
+													"type": "string",
+													"const": "failed"
+												}
+											]
+										},
+										"prompt": {
+											"anyOf": [
+												{
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["id", "kind", "heading", "choices", "initial", "searchable"],
+															"properties": {
+																"id": {
+																	"type": "integer",
+																	"minimum": 1
+																},
+																"kind": {
+																	"type": "string",
+																	"const": "select"
+																},
+																"heading": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 4096
+																	},
+																	"maxItems": 40
+																},
+																"choices": {
+																	"type": "array",
+																	"items": {
+																		"type": "object",
+																		"required": ["id", "label", "hint"],
+																		"properties": {
+																			"id": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"label": {
+																				"type": "string",
+																				"maxLength": 4096
+																			},
+																			"hint": {
+																				"type": "string",
+																				"maxLength": 4096
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	"maxItems": 2000
+																},
+																"initial": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"searchable": {
+																	"type": "boolean"
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "object",
+															"required": ["id", "kind", "heading", "initial", "hint", "mask"],
+															"properties": {
+																"id": {
+																	"type": "integer",
+																	"minimum": 1
+																},
+																"kind": {
+																	"type": "string",
+																	"const": "text"
+																},
+																"heading": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 4096
+																	},
+																	"maxItems": 40
+																},
+																"initial": {
+																	"type": "string",
+																	"maxLength": 4096
+																},
+																"hint": {
+																	"type": "string",
+																	"maxLength": 4096
+																},
+																"mask": {
+																	"type": "boolean"
+																}
+															},
+															"additionalProperties": false
+														}
+													]
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"messages": {
+											"type": "array",
+											"items": {
+												"type": "string",
+												"maxLength": 4096
+											},
+											"maxItems": 80
+										},
+										"problem": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 4096
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/setup/{id}": {
+			"get": {
+				"operationId": "setupState",
+				"summary": "Read the current setup prompt.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["id", "status", "prompt", "messages", "problem"],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"status": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "working"
+												},
+												{
+													"type": "string",
+													"const": "prompt"
+												},
+												{
+													"type": "string",
+													"const": "saved"
+												},
+												{
+													"type": "string",
+													"const": "cancelled"
+												},
+												{
+													"type": "string",
+													"const": "failed"
+												}
+											]
+										},
+										"prompt": {
+											"anyOf": [
+												{
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["id", "kind", "heading", "choices", "initial", "searchable"],
+															"properties": {
+																"id": {
+																	"type": "integer",
+																	"minimum": 1
+																},
+																"kind": {
+																	"type": "string",
+																	"const": "select"
+																},
+																"heading": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 4096
+																	},
+																	"maxItems": 40
+																},
+																"choices": {
+																	"type": "array",
+																	"items": {
+																		"type": "object",
+																		"required": ["id", "label", "hint"],
+																		"properties": {
+																			"id": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"label": {
+																				"type": "string",
+																				"maxLength": 4096
+																			},
+																			"hint": {
+																				"type": "string",
+																				"maxLength": 4096
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	"maxItems": 2000
+																},
+																"initial": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"searchable": {
+																	"type": "boolean"
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "object",
+															"required": ["id", "kind", "heading", "initial", "hint", "mask"],
+															"properties": {
+																"id": {
+																	"type": "integer",
+																	"minimum": 1
+																},
+																"kind": {
+																	"type": "string",
+																	"const": "text"
+																},
+																"heading": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 4096
+																	},
+																	"maxItems": 40
+																},
+																"initial": {
+																	"type": "string",
+																	"maxLength": 4096
+																},
+																"hint": {
+																	"type": "string",
+																	"maxLength": 4096
+																},
+																"mask": {
+																	"type": "boolean"
+																}
+															},
+															"additionalProperties": false
+														}
+													]
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"messages": {
+											"type": "array",
+											"items": {
+												"type": "string",
+												"maxLength": 4096
+											},
+											"maxItems": 80
+										},
+										"problem": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 4096
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"operationId": "setupAnswer",
+				"summary": "Answer the current setup prompt.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"anyOf": [
+									{
+										"type": "object",
+										"required": ["promptId", "action", "choice"],
+										"properties": {
+											"promptId": {
+												"type": "integer",
+												"minimum": 1
+											},
+											"action": {
+												"type": "string",
+												"const": "select"
+											},
+											"choice": {
+												"type": "integer",
+												"minimum": 0,
+												"maximum": 1999
+											}
+										},
+										"additionalProperties": false
+									},
+									{
+										"type": "object",
+										"required": ["promptId", "action", "value"],
+										"properties": {
+											"promptId": {
+												"type": "integer",
+												"minimum": 1
+											},
+											"action": {
+												"type": "string",
+												"const": "text"
+											},
+											"value": {
+												"type": "string",
+												"maxLength": 4096
+											}
+										},
+										"additionalProperties": false
+									},
+									{
+										"type": "object",
+										"required": ["promptId", "action"],
+										"properties": {
+											"promptId": {
+												"type": "integer",
+												"minimum": 1
+											},
+											"action": {
+												"type": "string",
+												"const": "back"
+											}
+										},
+										"additionalProperties": false
+									}
+								]
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["id", "status", "prompt", "messages", "problem"],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"status": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "working"
+												},
+												{
+													"type": "string",
+													"const": "prompt"
+												},
+												{
+													"type": "string",
+													"const": "saved"
+												},
+												{
+													"type": "string",
+													"const": "cancelled"
+												},
+												{
+													"type": "string",
+													"const": "failed"
+												}
+											]
+										},
+										"prompt": {
+											"anyOf": [
+												{
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["id", "kind", "heading", "choices", "initial", "searchable"],
+															"properties": {
+																"id": {
+																	"type": "integer",
+																	"minimum": 1
+																},
+																"kind": {
+																	"type": "string",
+																	"const": "select"
+																},
+																"heading": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 4096
+																	},
+																	"maxItems": 40
+																},
+																"choices": {
+																	"type": "array",
+																	"items": {
+																		"type": "object",
+																		"required": ["id", "label", "hint"],
+																		"properties": {
+																			"id": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"label": {
+																				"type": "string",
+																				"maxLength": 4096
+																			},
+																			"hint": {
+																				"type": "string",
+																				"maxLength": 4096
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	"maxItems": 2000
+																},
+																"initial": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"searchable": {
+																	"type": "boolean"
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "object",
+															"required": ["id", "kind", "heading", "initial", "hint", "mask"],
+															"properties": {
+																"id": {
+																	"type": "integer",
+																	"minimum": 1
+																},
+																"kind": {
+																	"type": "string",
+																	"const": "text"
+																},
+																"heading": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 4096
+																	},
+																	"maxItems": 40
+																},
+																"initial": {
+																	"type": "string",
+																	"maxLength": 4096
+																},
+																"hint": {
+																	"type": "string",
+																	"maxLength": 4096
+																},
+																"mask": {
+																	"type": "boolean"
+																}
+															},
+															"additionalProperties": false
+														}
+													]
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"messages": {
+											"type": "array",
+											"items": {
+												"type": "string",
+												"maxLength": 4096
+											},
+											"maxItems": 80
+										},
+										"problem": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 4096
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			},
+			"delete": {
+				"operationId": "setupCancel",
+				"summary": "Cancel setup before saving.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["id", "status", "prompt", "messages", "problem"],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"status": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "working"
+												},
+												{
+													"type": "string",
+													"const": "prompt"
+												},
+												{
+													"type": "string",
+													"const": "saved"
+												},
+												{
+													"type": "string",
+													"const": "cancelled"
+												},
+												{
+													"type": "string",
+													"const": "failed"
+												}
+											]
+										},
+										"prompt": {
+											"anyOf": [
+												{
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["id", "kind", "heading", "choices", "initial", "searchable"],
+															"properties": {
+																"id": {
+																	"type": "integer",
+																	"minimum": 1
+																},
+																"kind": {
+																	"type": "string",
+																	"const": "select"
+																},
+																"heading": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 4096
+																	},
+																	"maxItems": 40
+																},
+																"choices": {
+																	"type": "array",
+																	"items": {
+																		"type": "object",
+																		"required": ["id", "label", "hint"],
+																		"properties": {
+																			"id": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"label": {
+																				"type": "string",
+																				"maxLength": 4096
+																			},
+																			"hint": {
+																				"type": "string",
+																				"maxLength": 4096
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	"maxItems": 2000
+																},
+																"initial": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"searchable": {
+																	"type": "boolean"
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "object",
+															"required": ["id", "kind", "heading", "initial", "hint", "mask"],
+															"properties": {
+																"id": {
+																	"type": "integer",
+																	"minimum": 1
+																},
+																"kind": {
+																	"type": "string",
+																	"const": "text"
+																},
+																"heading": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 4096
+																	},
+																	"maxItems": 40
+																},
+																"initial": {
+																	"type": "string",
+																	"maxLength": 4096
+																},
+																"hint": {
+																	"type": "string",
+																	"maxLength": 4096
+																},
+																"mask": {
+																	"type": "boolean"
+																}
+															},
+															"additionalProperties": false
+														}
+													]
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"messages": {
+											"type": "array",
+											"items": {
+												"type": "string",
+												"maxLength": 4096
+											},
+											"maxItems": 80
+										},
+										"problem": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 4096
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/system": {
 			"get": {
 				"operationId": "system",

@@ -47,6 +47,14 @@ pnpm run check:gui
 pnpm --filter @iowarp/clio-coder-gui test:full
 ```
 
+The root build supplies both the CLI and `dist/gui/client`; the source server can
+use that client build. Rebuild after changing the shared configure wizard: GUI
+setup hosts a fixed `configure --gui-host` child through `server/process-policy.ts`.
+The browser presents typed prompts; the CLI retains provider I/O, credential
+storage, model checks, and settings writes. Keep setup replies out of operation,
+conversation, and lifecycle logs. Validate first-run changes with isolated
+`CLIO_CODER_HOME` and a local model fixture.
+
 ## Architecture Boundaries
 
 The lint suite enforces 6 boundary invariants:

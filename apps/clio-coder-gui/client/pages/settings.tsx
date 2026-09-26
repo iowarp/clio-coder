@@ -15,6 +15,7 @@ import {
 	settingValue,
 } from "./config-map-model.js";
 import { SettingsControlsView } from "./settings-controls.js";
+import { ConnectionSetup } from "./target-onboarding.js";
 import "../design/facts.css";
 import "./settings.css";
 
@@ -91,8 +92,9 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 		<section>
 			<PanelHeading panel={panel} level={1} />
 			<WorkspacePicker selection={selection} />
-			<ConfigurationTabs id={id} active={view} />
-			{!id && !selection.workspaces.isPending && (
+			{view !== "settings" && <ConfigurationTabs id={id} active={view} />}
+			{!id && view === "settings" && <ConnectionSetup client={client} />}
+			{!id && view !== "settings" && !selection.workspaces.isPending && (
 				<PanelEmpty>{emptyState.unread("configuration of a workspace")}</PanelEmpty>
 			)}
 			{view === "settings" && id && <SettingsControlsView key={id} client={client} workspaceId={id} />}
@@ -327,10 +329,10 @@ export function ConfigurationTabs({
 		<nav className="settings-tabs" aria-label="Configuration views">
 			{[
 				{ key: "settings", label: "Settings", path: "/settings" },
-				{ key: "effective", label: "Effective values", path: "/settings/effective" },
-				{ key: "why", label: "Sources & timing", path: "/settings/why" },
-				{ key: "targets", label: "Targets", path: "/settings/targets" },
-				{ key: "routing", label: "Routing", path: "/settings/routing" },
+				{ key: "targets", label: "Connections", path: "/settings/targets" },
+				{ key: "routing", label: "Fleet routes", path: "/settings/routing" },
+				{ key: "effective", label: "Advanced: effective settings", path: "/settings/effective" },
+				{ key: "why", label: "Advanced: configuration sources", path: "/settings/why" },
 			].map((tab) => (
 				<Link key={tab.key} aria-current={active === tab.key ? "page" : undefined} to={`${tab.path}?workspace=${id}`}>
 					{tab.label}

@@ -28,7 +28,7 @@ export async function loginOAuthRuntime(
 	if (host)
 		rl = {
 			question: async (message: string) => {
-				const result = await host.text({ heading: message });
+				const result = await host.text({ heading: message, mask: true });
 				if (result.kind !== "value") throw new Error("Sign-in cancelled");
 				return result.value;
 			},

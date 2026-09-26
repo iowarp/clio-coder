@@ -16,6 +16,7 @@ import { OperationRegistry } from "../../server/services/operations.js";
 import { ReportsService } from "../../server/services/reports.js";
 import { SessionService } from "../../server/services/sessions.js";
 import { SettingsService } from "../../server/services/settings.js";
+import { SetupService } from "../../server/services/setup.js";
 import { SystemService } from "../../server/services/system.js";
 import { TargetsService } from "../../server/services/targets-cli.js";
 import { ToolchainService } from "../../server/services/toolchain.js";
@@ -63,6 +64,7 @@ export async function harness(
 	const sessions = new SessionService(supervisor, workspaces, reads);
 	const cli = new CliRunner(env);
 	const settingsService = new SettingsService(reads, workspaces, ops);
+	const setup = new SetupService(reads, env);
 	const app = createApp({
 		token: "test-token",
 		origin: options.origin ?? (() => "http://127.0.0.1:4317"),
@@ -71,6 +73,7 @@ export async function harness(
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
 		settings: settingsService,
+		setup,
 		fleet: new FleetService(reads),
 		system: new SystemService(reads, workspaces, ops),
 		library: new LibraryService(reads, cli, workspaces, ops),
@@ -78,7 +81,8 @@ export async function harness(
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations, reads),
 		sessions,
-		idle: () => !(operations.activeCount || cli.activeCount || supervisor.busy || supervisor.hasOpenSessions),
+		idle: () =>
+			!(operations.activeCount || cli.activeCount || setup.busy || supervisor.busy || supervisor.hasOpenSessions),
 		...(options.snapshotHold ? { snapshotHold: options.snapshotHold } : {}),
 		diagnostics: true,
 		pwa: options.pwa ?? false,
@@ -110,7 +114,7 @@ export async function harness(
 		request,
 		post,
 		close: async () => {
-			await Promise.all([supervisor.shutdown(), cli.close()]);
+			await Promise.all([supervisor.shutdown(), cli.close(), setup.close()]);
 			await Promise.all([reads.close(), ops.close()]);
 			await home.close();
 		},

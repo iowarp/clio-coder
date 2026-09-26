@@ -15,12 +15,12 @@ test("modelOptions offers the target's catalog, keeps a saved id it lacks, and e
 		options.map((option) => option.value),
 		["", "mercury-2", "mercury-2.5", OTHER_MODEL],
 	);
-	assert.equal(options[0]?.label, "Target default · mercury-2.5");
-	assert.equal(options.at(-1)?.label, "Another model id…");
+	assert.equal(options[0]?.label, "Use connection default · mercury-2.5");
+	assert.equal(options.at(-1)?.label, "Advanced: unverified model id…");
 
 	const stale = modelOptions(["a", "b"], "retired-model", null);
-	assert.deepEqual(stale[1], { value: "retired-model", label: "retired-model · not in this target's list" });
-	assert.equal(stale[0]?.label, "Target default", "an unknown default is not guessed");
+	assert.deepEqual(stale[1], { value: "retired-model", label: "retired-model · not in this connection's list" });
+	assert.equal(stale[0]?.label, "Use connection default", "an unknown default is not guessed");
 });
 
 test("a catalog as long as the wire allows may be cut, and says so", () => {

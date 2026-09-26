@@ -12,9 +12,11 @@ export interface ConfigureWizardHost {
 	cancelled(): boolean;
 	readonly signal: AbortSignal;
 	dismissPrompt(): void;
+	/** Called only after the shared wizard commits the target settings. */
+	onTargetSaved?(): void;
 }
 
-export type HostedTargetOptions = { mode: "add" } | { mode: "edit"; target: TargetDescriptor };
+export type HostedTargetOptions = { mode: "first" | "add" } | { mode: "edit"; target: TargetDescriptor };
 
 /** Loaded on target setup so the instant shell never evaluates wizard code. */
 export async function runHostedTargetWizard(host: ConfigureWizardHost, options: HostedTargetOptions): Promise<number> {

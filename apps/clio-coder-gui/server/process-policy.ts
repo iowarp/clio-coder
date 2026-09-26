@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access, readFile, realpath, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join, win32 } from "node:path";
@@ -98,11 +98,19 @@ export async function runClioCommand(command: CliCommand, cwd: string, env: Node
 	return { child, birthToken };
 }
 
-export function stopClioCommand(
-	child: Awaited<ReturnType<typeof runClioCommand>>["child"],
-	birthToken: string | null,
-	signal: "SIGTERM" | "SIGKILL",
-) {
+/** One fixed interactive configure child; prompt replies travel on stdin, never argv. */
+export async function startConfigureChild(env: NodeJS.ProcessEnv = process.env) {
+	const executable = await resolveClioCommand(env);
+	const child = spawn(executable.file, [...executable.prefix, "configure", "--gui-host"], {
+		env,
+		shell: false,
+		detached: process.platform !== "win32",
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+	return { child, birthToken: child.pid ? processBirthToken(child.pid) : "" };
+}
+
+export function stopClioCommand(child: ChildProcess, birthToken: string | null, signal: "SIGTERM" | "SIGKILL") {
 	if (!child.pid || child.exitCode !== null || child.signalCode !== null) return false;
 	if (birthToken && !birthToken.startsWith("pid-") && process.platform !== "win32")
 		return signalRecordedChild(child.pid, birthToken, signal);

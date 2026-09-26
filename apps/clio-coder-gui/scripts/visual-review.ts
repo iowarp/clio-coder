@@ -223,7 +223,7 @@ if (values.serve) {
 				if (want("picker") && values.route) {
 					const picker = page.locator(".route-picker");
 					await picker.locator("summary").click();
-					await picker.getByLabel("Target", { exact: true }).selectOption("field-station");
+					await picker.getByLabel("Connection", { exact: true }).selectOption("field-station");
 					await picker.getByText(/^field-station answered at /).waitFor();
 					await shot("picker");
 					await page.keyboard.press("Escape");

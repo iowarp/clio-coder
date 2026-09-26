@@ -7,6 +7,7 @@ import { formatTime } from "../api/clock.js";
 import { isAwaitingAnswer } from "../chat/approval-model.js";
 import { StatusMark, type StatusTone } from "../design/status.js";
 import { ProjectOpenForm, useProjectLaunch } from "./project-open.js";
+import { ConnectionSetup, useSetupStatus } from "./target-onboarding.js";
 import "./projects.css";
 
 const RECENT_PROJECTS = 5;
@@ -21,14 +22,10 @@ function sessionState(session: SessionSnapshot): { tone: StatusTone; label: stri
 	return { tone: "success", label: "Ready" };
 }
 
-/**
- * The front door. Someone arriving here wants to get to work, so the page leads with the project
- * folder field (a first visit reaches a conversation in two actions), then the open conversations and
- * the recent projects, each one action away from a conversation. Inspection and configuration live in
- * the rail and are not repeated here.
- */
+/** Saved setup goes straight to projects; first-time visitors connect a model here. */
 export function Home({ client }: { client: Client }) {
 	const launch = useProjectLaunch(client);
+	const setup = useSetupStatus(client);
 	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	const open = sessions.data?.filter((session) => session.state === "open" || session.state === "starting") ?? [];
@@ -50,7 +47,34 @@ export function Home({ client }: { client: Client }) {
 						Work with Clio Coder in your own projects. Follow the conversation, review each consequential action, and inspect
 						the evidence behind the result.
 					</p>
-					<ProjectOpenForm client={client} launch={launch} />
+					{setup.isPending ? (
+						<p role="status">Reading your saved model setup…</p>
+					) : setup.error ? (
+						<div role="alert">
+							<p>{setup.error.message}</p>
+							<button type="button" onClick={() => void setup.refetch()}>
+								Check setup again
+							</button>
+						</div>
+					) : setup.data.state !== "ready" ? (
+						<>
+							{setup.data.targetId && (
+								<p>
+									{setup.data.targetId}: {setup.data.message}
+								</p>
+							)}
+							<ConnectionSetup client={client} {...(setup.data.targetId ? { targetId: setup.data.targetId } : {})} />
+						</>
+					) : (
+						<p className="home-setup">
+							{setup.data.targetId} · {setup.data.model}. <Link to="/settings/targets">Connections</Link>
+						</p>
+					)}
+					{setup.data?.state === "ready" ? (
+						<ProjectOpenForm client={client} launch={launch} />
+					) : (
+						<p>Connect a model before starting a conversation. You can still browse your projects and settings.</p>
+					)}
 				</div>
 				<section className="home-resume" aria-labelledby="home-resume-title">
 					<div className="home-resume__heading">
@@ -98,7 +122,7 @@ export function Home({ client }: { client: Client }) {
 									</div>
 									<button
 										type="button"
-										disabled={launch.busy}
+										disabled={launch.busy || setup.data?.state !== "ready"}
 										onClick={() => launch.start(workspace.id)}
 										aria-label={`New conversation in ${workspace.name}`}
 									>

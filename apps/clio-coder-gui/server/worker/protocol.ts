@@ -21,6 +21,7 @@ export type WorkerSettings = {
 export type RawTool = Tool;
 export type RuntimeInfo = { entry: string; packageRoot: string; execArgv: string[]; threadId: number };
 export interface Methods {
+	"setup.status": { params: Record<string, never>; result: unknown };
 	"runtime.info": { params: Record<string, never>; result: RuntimeInfo };
 	"system.read": { params: Record<string, never>; result: unknown };
 	"interop.read": { params: { cwd: string; probe: boolean }; result: unknown };

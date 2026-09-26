@@ -64,6 +64,19 @@ clio-coder
    for model inheritance and session, project, and global saves.
    `clio-coder doctor` checks installation and connections.
 
+Prefer a browser workspace? After installing the same package, run:
+
+```bash
+clio-coder gui --open
+```
+
+If you have already configured Clio, open a project and start a conversation.
+Otherwise, **Guided setup** in the browser connects your app, server, subscription,
+or provider account, selects a model, and reviews the connection before saving.
+You can enter a key or follow the browser sign-in instructions there; running
+`clio-coder configure` first is optional. The terminal and GUI share your saved
+connections and settings. Bare `clio-coder` still opens the terminal workspace.
+
 <details>
 <summary><strong>Package managers and source installation</strong></summary>
 
