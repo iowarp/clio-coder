@@ -20,7 +20,11 @@ import { basename, presentable } from "./tool-presentation.js";
 import "./ArtifactInspector.css";
 
 const RECORD_BATCH = 20;
-type InspectorView = "files" | "results" | "evidence";
+export type InspectorSelection = {
+	view: "files" | "results" | "evidence";
+	selectedFile: string | null;
+	filter: string;
+};
 
 function RecordedTools({
 	items,
@@ -171,15 +175,28 @@ export function ArtifactInspector({
 	session,
 	workspaceRoot,
 	onClose,
+	selection,
+	onSelectionChange,
 }: {
 	client: Client;
 	session: SessionSnapshot;
 	workspaceRoot?: string | undefined;
 	onClose: () => void;
+	selection?: InspectorSelection | undefined;
+	onSelectionChange?: ((selection: InspectorSelection) => void) | undefined;
 }) {
-	const [view, setView] = useState<InspectorView>("files");
-	const [selectedFile, setSelectedFile] = useState<string | null>(null);
-	const [filter, setFilter] = useState("");
+	const [localSelection, setLocalSelection] = useState<InspectorSelection>({
+		view: "files",
+		selectedFile: null,
+		filter: "",
+	});
+	const currentSelection = selection ?? localSelection;
+	const { view, selectedFile, filter } = currentSelection;
+	function updateSelection(patch: Partial<InspectorSelection>) {
+		const nextSelection = { ...currentSelection, ...patch };
+		setLocalSelection(nextSelection);
+		onSelectionChange?.(nextSelection);
+	}
 	const tools = useMemo(
 		() =>
 			session.timeline
@@ -220,7 +237,7 @@ export function ArtifactInspector({
 			<fieldset className="artifact-inspector__views">
 				<legend className="sr-only">Artifact views</legend>
 				{(["files", "results", "evidence"] as const).map((name) => (
-					<button key={name} type="button" aria-pressed={view === name} onClick={() => setView(name)}>
+					<button key={name} type="button" aria-pressed={view === name} onClick={() => updateSelection({ view: name })}>
 						{name === "files" ? "Files" : name === "results" ? "Results" : "Evidence"}
 					</button>
 				))}
@@ -240,7 +257,7 @@ export function ArtifactInspector({
 							<input
 								type="search"
 								value={filter}
-								onChange={(event) => setFilter(event.target.value)}
+								onChange={(event) => updateSelection({ filter: event.target.value })}
 								placeholder="Filename or path"
 							/>
 						</label>
@@ -251,7 +268,7 @@ export function ArtifactInspector({
 										<button
 											type="button"
 											aria-pressed={selectedFile === path}
-											onClick={() => setSelectedFile((current) => (current === path ? null : path))}
+											onClick={() => updateSelection({ selectedFile: selectedFile === path ? null : path })}
 											title={presentable(path, workspaceRoot)}
 										>
 											<Icon name="folder" />
