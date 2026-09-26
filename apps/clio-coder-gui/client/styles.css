@@ -1544,6 +1544,7 @@ main:has(> .conversation) {
 		padding-bottom: var(--space-3);
 	}
 	.conversation__bar {
+		position: relative;
 		flex-wrap: wrap;
 		row-gap: var(--space-1);
 	}
@@ -1573,9 +1574,12 @@ main:has(> .conversation) {
 	.conversation__tools > summary {
 		padding-inline: var(--space-2);
 	}
-	/* The menu still hangs below its own summary, which sits at the right gutter, so the control that
-	   opened it stays visible and closes it. A fixed panel at a guessed offset covered it. */
+	/* The header is the anchor when controls wrap. Keep the entire menu inside its gutters. */
+	.conversation__tools {
+		position: static;
+	}
 	.conversation__tools-body {
+		width: 100%;
 		max-height: min(70dvh, 44rem);
 		padding-inline: var(--space-4);
 	}
