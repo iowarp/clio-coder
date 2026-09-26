@@ -22,7 +22,7 @@ Use Node >=22.19 and the pnpm version pinned in `package.json`.
 | `pnpm smoke:real-home --target <id>` | Manual smoke with an isolated copy of operator settings | **Calls the configured model**, copies credentials to private scratch, cleans up | Explicit operator run only |
 | `bash scripts/verify-portable-hosts.sh [output-directory]` | Exercise installed Claude/Codex host interoperability | Requires host CLIs; isolated homes, local package install and saved evidence; no model calls | Optional integration evidence |
 
-Hosted CI runs the source checks and two shards of the core tests in parallel.
+Hosted CI runs the source checks and three shards of the core tests in parallel.
 The `ci (22)` status combines those results with Windows subprocess tests; the
 separate `ci (24)` status covers the newer Node runtime. A tag release calls that
 same CI workflow, then rebuilds and audits the exact tarball before publishing
