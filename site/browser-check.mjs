@@ -25,6 +25,7 @@ await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ executablePath: values.chrome, headless: true });
 const results = [];
 const failures = [];
+const brand = JSON.parse(await readFile(join(site, "design-system.json"), "utf8"));
 const catalog = JSON.parse(await readFile(join(site, "public-docs.json"), "utf8"));
 const docs = catalog.map((item) =>
 	item.path === "README.md" ? "/docs.html" : `/docs/${item.path.replace(/\.md$/, ".html")}`,
@@ -234,9 +235,51 @@ try {
 	await motionPage.screenshot({ path: join(out, "screenshot-viewer-tablet.png") });
 	await motionPage.locator(".media-close").tap();
 	await motionContext.close();
-	const plain = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 390, height: 844 } });
+	const themeContext = await browser.newContext({ colorScheme: "light", viewport: { width: 390, height: 844 } });
+	const themePage = await themeContext.newPage();
+	await themePage.goto(`${values.url}/?__static=1`);
+	const expectedDefault = brand.defaultTheme === "system" ? "light" : brand.defaultTheme;
+	assert.equal(
+		await themePage.locator("html").getAttribute("data-theme"),
+		expectedDefault,
+		"First visit uses the configured default",
+	);
+	await themePage.emulateMedia({ colorScheme: "dark" });
+	await themePage.emulateMedia({ colorScheme: "light" });
+	await themePage.waitForFunction((expected) => document.documentElement.dataset.theme === expected, expectedDefault);
+	const savedTheme = expectedDefault === "dark" ? "light" : "dark";
+	await themePage.locator("[data-theme-toggle]").click();
+	await themePage.reload();
+	assert.equal(
+		await themePage.locator("html").getAttribute("data-theme"),
+		savedTheme,
+		"Saved visitor preference beats the default",
+	);
+	await themePage.goto(`${values.url}/?theme=dark&__static=1`);
+	assert.equal(
+		await themePage.locator("html").getAttribute("data-theme"),
+		"dark",
+		"Explicit URL theme wins for the visit",
+	);
+	await themePage.goto(`${values.url}/docs.html?__static=1`);
+	assert.equal(
+		await themePage.locator("html").getAttribute("data-theme"),
+		savedTheme,
+		"URL override preserves the saved choice",
+	);
+	await themeContext.close();
+	const plain = await browser.newContext({
+		javaScriptEnabled: false,
+		colorScheme: "light",
+		viewport: { width: 390, height: 844 },
+	});
 	const plainPage = await plain.newPage();
 	await plainPage.goto(`${values.url}/docs.html`);
+	assert.equal(
+		await plainPage.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--paper").trim()),
+		brand.palette[brand.themes[expectedDefault].paper],
+		"No-JavaScript CSS uses the configured default",
+	);
 	assert.ok((await plainPage.locator("#doc").innerText()).includes("npm install"));
 	if ((await plainPage.locator(".docs-menu").getAttribute("open")) === null)
 		await plainPage.locator(".docs-menu > summary").click();

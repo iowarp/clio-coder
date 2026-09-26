@@ -156,7 +156,7 @@ function head(path, title, description, type = "WebPage") {
 			author: { "@type": "Person", name: "Anthony Kougkas" },
 		});
 	return `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><meta name="color-scheme" content="dark light"><meta name="theme-color" content="${escapeHtml(brand.palette.black)}">
+<title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="${escapeHtml(brand.defaultTheme)}"><meta name="theme-color" content="${escapeHtml(brand.palette[brand.themes[brand.defaultTheme === "light" ? "light" : "dark"].paper])}">
 <link rel="canonical" href="${url}"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
 <link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>

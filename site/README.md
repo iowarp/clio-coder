@@ -22,6 +22,8 @@ Open **http://localhost:4173/**. The server builds the site, regenerates the pub
 
 The identity uses IOWarp’s existing cyan Clio ring with a copper center. `assets/brand/` holds its high-quality original and the IOWarp lattice mark. Its provenance file records source artwork and hashes. Legacy terminal-orbit artwork remains in the repository for compatibility but is not published by the new site. Export the selected artwork, tokens, fonts, and licenses for another Clio project with `node site/export-brand.mjs --out /tmp/clio-brand-kit`. The kit contains no site layout code.
 
+The live theme default is controlled by `defaultTheme` in `design-system.json`. Use `dark` (current), `light`, or `system`. Saved visitor preferences still take priority. Regenerate tokens and deploy a committed build after changing it; the initial HTML metadata and no-JavaScript CSS use the same setting.
+
 After an explicitly authorized token change:
 
 ```sh

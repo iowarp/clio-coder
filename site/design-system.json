@@ -1,6 +1,7 @@
 {
 	"schema": 1,
 	"identity": "Clio Coder",
+	"defaultTheme": "dark",
 	"palette": {
 		"black": "#000000",
 		"charcoal": "#0d0d0c",

@@ -65,6 +65,21 @@
   --well-cyan: var(--clio-teal); --well-sage: var(--clio-teal);
   --paper-elevated: var(--paper-raised);
 }
+html[data-theme="dark"] {
+  color-scheme: dark;
+	--paper: var(--clio-black);
+	--paper-raised: var(--clio-charcoal);
+	--paper-sunk: var(--clio-graphite);
+	--ink: var(--clio-ivory);
+	--ink-soft: var(--clio-warmGray);
+	--muted: var(--clio-stone);
+	--line: var(--clio-darkLine);
+	--line-control: var(--clio-darkControl);
+	--accent: var(--clio-teal);
+	--accent-soft: var(--clio-darkTealWash);
+	--on-accent: var(--clio-black);
+	--secondary: var(--clio-copper);
+}
 html[data-theme="light"] {
   color-scheme: light;
 	--paper: var(--clio-paper);
@@ -80,20 +95,4 @@ html[data-theme="light"] {
 	--on-accent: var(--clio-raisedPaper);
 	--secondary: var(--clio-deepCopper);
 }
-@media (prefers-color-scheme: light) {
-  html:not([data-theme]) {
-    color-scheme: light;
-	--paper: var(--clio-paper);
-	--paper-raised: var(--clio-raisedPaper);
-	--paper-sunk: var(--clio-lightLine);
-	--ink: var(--clio-ink);
-	--ink-soft: var(--clio-softInk);
-	--muted: var(--clio-mutedInk);
-	--line: var(--clio-lightLine);
-	--line-control: var(--clio-lightControl);
-	--accent: var(--clio-deepTeal);
-	--accent-soft: var(--clio-lightTealWash);
-	--on-accent: var(--clio-raisedPaper);
-	--secondary: var(--clio-deepCopper);
-  }
-}
+

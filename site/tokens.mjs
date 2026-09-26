@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url";
 
 const file = (path) => fileURLToPath(new URL(path, import.meta.url));
 export async function tokenCSS() {
-	const { palette, themes, motion } = JSON.parse(await readFile(file("design-system.json"), "utf8"));
+	const { palette, themes, motion, defaultTheme } = JSON.parse(await readFile(file("design-system.json"), "utf8"));
+	if (!["dark", "light", "system"].includes(defaultTheme))
+		throw new Error("defaultTheme must be dark, light, or system.");
+	const initial = defaultTheme === "light" ? "light" : "dark";
 	const theme = (name) =>
 		Object.entries(themes[name])
 			.map(([key, color]) => {
@@ -21,8 +24,8 @@ export async function tokenCSS() {
 ${Object.entries(palette)
 	.map(([key, value]) => `\t--clio-${key}: ${value};`)
 	.join("\n")}
-  color-scheme: dark;
-${theme("dark")}
+  color-scheme: ${initial};
+${theme(initial)}
   --font-ui: "IBM Plex Sans", sans-serif;
   --font-display: "Newsreader", Georgia, serif;
   --font-mono: "IBM Plex Mono", monospace;
@@ -45,15 +48,23 @@ ${Object.entries(motion)
   --well-cyan: var(--clio-teal); --well-sage: var(--clio-teal);
   --paper-elevated: var(--paper-raised);
 }
+html[data-theme="dark"] {
+  color-scheme: dark;
+${theme("dark")}
+}
 html[data-theme="light"] {
   color-scheme: light;
 ${theme("light")}
 }
-@media (prefers-color-scheme: light) {
+${
+	defaultTheme === "system"
+		? `@media (prefers-color-scheme: light) {
   html:not([data-theme]) {
     color-scheme: light;
 ${theme("light")}
   }
+}`
+		: ""
 }
 `;
 }

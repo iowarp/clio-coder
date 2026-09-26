@@ -8,7 +8,12 @@
 		} catch {
 			/* Storage is optional. */
 		}
-		if (!saved && !new URLSearchParams(location.search).has("theme"))
+		const requested = new URLSearchParams(location.search).get("theme");
+		if (
+			document.querySelector('meta[name="clio-default-theme"]')?.content === "system" &&
+			!["light", "dark"].includes(saved) &&
+			!["light", "dark"].includes(requested)
+		)
 			applyTheme(system.matches ? "light" : "dark", false);
 	});
 	const announcement = document.createElement("p");

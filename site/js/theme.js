@@ -1,5 +1,6 @@
-// Runs before first paint; use the operating-system preference until explicitly changed.
+// Runs before first paint; explicit choices take priority over the sanctioned default.
 (() => {
+	const defaultTheme = document.querySelector('meta[name="clio-default-theme"]')?.content ?? "dark";
 	const requested = new URLSearchParams(location.search).get("theme");
 	let saved;
 	try {
@@ -11,9 +12,13 @@
 		? requested
 		: ["light", "dark"].includes(saved)
 			? saved
-			: matchMedia("(prefers-color-scheme: light)").matches
-				? "light"
-				: "dark";
+			: defaultTheme === "system"
+				? matchMedia("(prefers-color-scheme: light)").matches
+					? "light"
+					: "dark"
+				: defaultTheme === "light"
+					? "light"
+					: "dark";
 	document.documentElement.dataset.theme = theme;
 	const meta = document.querySelector('meta[name="theme-color"]');
 	if (meta) meta.content = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
