@@ -1341,6 +1341,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						const policy = resolveWorkingSetPolicy(settings.context.workingSet.policy);
 						policyId = policy.id;
 						visibleEntries = selectVisibleEntries(entries, state.lastTurnId ?? undefined);
+						const projectedTokens = projectedWorkingSetTokens(visibleEntries, view, estimateTokens);
 						// The hysteresis band. A checkpoint runs before every request, so
 						// without it a policy with unconditional rungs fires an event per
 						// step and cold-starts the prefix cache each time. Inside the band
@@ -1350,7 +1351,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						if (
 							!requiredFit &&
 							withinRearmBand({
-								projectedTokens: projectedWorkingSetTokens(visibleEntries, view, estimateTokens),
+								projectedTokens,
 								contextWindow: estimate.contextWindow,
 								rearmFraction: settings.context.workingSet.rearmFraction,
 								lastEvictionTokensAfter: view.lastEvictionTokensAfter,
@@ -1363,7 +1364,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							cwd: deps.session.current()?.cwd ?? null,
 							settings: settings.context.workingSet,
 							pressure: {
-								tokens: estimate.tokens,
+								tokens: projectedTokens,
 								contextWindow: estimate.contextWindow,
 								threshold: requiredFit
 									? Math.min(
