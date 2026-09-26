@@ -18,7 +18,7 @@ The core thesis of Clio's context architecture is that **context management must
 | Reversibly prune past observations | `/context compact` or `self_compact()` | Working-set eviction first; LLM summary handoff only if still over budget. |
 | Recover an interrupted compaction | `/context recover <handoffId> <reduce\|deliver>` | Branch-bound transaction recovery with preserved continuity identity. |
 | Inspect an evicted tool observation | `/context recall <ref>` | Shows the original body in the transcript; model recall uses the context tool. |
-| Initialize or refresh structural index | `clio-coder context init` / `refresh` | Model-free indexing of symbols, files, and dependencies into `.clio-coder/codemap.json`. |
+| Initialize or refresh structural index | `clio-coder context index` / `refresh` | Model-free indexing of symbols, files, and dependencies into `.clio-coder/codemap.json`; `context init` also generates a handbook. |
 | Generate architectural Markdown wiki | `clio-coder context wiki` | Dispatched worker generation of persistent documentation under `.clio-coder/wiki/`. |
 | Inspect effective session settings | `context(scope="settings")` | Read-only view of active configuration, targets, and compaction thresholds. |
 

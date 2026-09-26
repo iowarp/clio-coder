@@ -112,8 +112,8 @@ happened afterward.
   cost are recorded. Runs seal receipts and evidence bundles you can inspect
   later. [Observability](docs/architecture/observability.md)
 - **Built for science.** A project handbook, a Tree-sitter codemap with bounded
-  project orientation, MCP servers behind one gateway (including Slurm job workflows through
-  clio-kit), and a library of skills, agents and domain plugins that Claude Code
+  project orientation, MCP servers behind one gateway (including Slurm job
+  workflows through clio-kit), and a library of skills, agents and domain plugins that Claude Code
   and Codex can use too. [Project context](docs/architecture/project-context.md) ·
   [Slurm](docs/guide/slurm.md) · [Library](library/README.md)
 - **Works with the agents you already use.** Claude Code, Codex, OpenCode, Pi and
