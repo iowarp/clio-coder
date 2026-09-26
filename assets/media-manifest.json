@@ -12,10 +12,7 @@
 				"height": 750
 			},
 			"role": "Lossless brand banner master",
-			"channels": [
-				"repository",
-				"press"
-			],
+			"channels": ["repository", "press"],
 			"altTextSeed": "Clio Coder, IOWarp's terminal coding agent for scientific software.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -30,15 +27,10 @@
 				"height": 750
 			},
 			"role": "Web brand banner",
-			"channels": [
-				"repository",
-				"website"
-			],
+			"channels": ["repository", "website"],
 			"altTextSeed": "Clio Coder, IOWarp's terminal coding agent for scientific software.",
 			"representation": "brand-artwork",
-			"copies": [
-				"site/assets/banner.webp"
-			]
+			"copies": ["site/assets/banner.webp"]
 		},
 		{
 			"id": "brand-avatar-512",
@@ -50,10 +42,7 @@
 				"height": 512
 			},
 			"role": "Profile avatar master",
-			"channels": [
-				"social-profile",
-				"press"
-			],
+			"channels": ["social-profile", "press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -68,9 +57,7 @@
 				"height": 32
 			},
 			"role": "Small logo master",
-			"channels": [
-				"application"
-			],
+			"channels": ["application"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -85,9 +72,7 @@
 				"height": 64
 			},
 			"role": "Compact logo master",
-			"channels": [
-				"application"
-			],
+			"channels": ["application"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -102,16 +87,10 @@
 				"height": 128
 			},
 			"role": "Primary application and website logo master",
-			"channels": [
-				"application",
-				"website",
-				"social-card"
-			],
+			"channels": ["application", "website", "social-card"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"copies": [
-				"site/assets/logo.webp"
-			]
+			"copies": ["site/assets/logo.webp"]
 		},
 		{
 			"id": "brand-logo-256",
@@ -123,10 +102,7 @@
 				"height": 256
 			},
 			"role": "Medium logo master",
-			"channels": [
-				"application",
-				"press"
-			],
+			"channels": ["application", "press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -141,15 +117,10 @@
 				"height": 512
 			},
 			"role": "Large website logo master",
-			"channels": [
-				"website",
-				"press"
-			],
+			"channels": ["website", "press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"copies": [
-				"site/assets/logo-512.webp"
-			]
+			"copies": ["site/assets/logo-512.webp"]
 		},
 		{
 			"id": "brand-logo-1024",
@@ -161,9 +132,7 @@
 				"height": 1024
 			},
 			"role": "High-resolution logo master",
-			"channels": [
-				"press"
-			],
+			"channels": ["press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -178,9 +147,7 @@
 				"height": 2048
 			},
 			"role": "Maximum-resolution logo master",
-			"channels": [
-				"press"
-			],
+			"channels": ["press"],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -195,14 +162,10 @@
 				"height": 192
 			},
 			"role": "GUI PWA application icon",
-			"channels": [
-				"gui"
-			],
+			"channels": ["gui"],
 			"altTextSeed": "Clio Coder application icon.",
 			"representation": "brand-artwork",
-			"copies": [
-				"apps/clio-coder-gui/client/public/icon-192.png"
-			]
+			"copies": ["apps/clio-coder-gui/client/public/icon-192.png"]
 		},
 		{
 			"id": "gui-icon-512",
@@ -214,14 +177,10 @@
 				"height": 512
 			},
 			"role": "GUI PWA application icon",
-			"channels": [
-				"gui"
-			],
+			"channels": ["gui"],
 			"altTextSeed": "Clio Coder application icon.",
 			"representation": "brand-artwork",
-			"copies": [
-				"apps/clio-coder-gui/client/public/icon-512.png"
-			]
+			"copies": ["apps/clio-coder-gui/client/public/icon-512.png"]
 		},
 		{
 			"id": "terminal-session-png",
@@ -233,15 +192,10 @@
 				"height": 2104
 			},
 			"role": "Full-resolution terminal product capture",
-			"channels": [
-				"repository",
-				"website"
-			],
+			"channels": ["repository", "website"],
 			"altTextSeed": "A Clio Coder terminal session showing a failing numerical test, diagnosis, a two-line solver edit, and the passing test run.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/session.png"
-			]
+			"copies": ["site/assets/session.png"]
 		},
 		{
 			"id": "terminal-session-webp",
@@ -253,14 +207,10 @@
 				"height": 1052
 			},
 			"role": "Inline website terminal capture",
-			"channels": [
-				"website"
-			],
+			"channels": ["website"],
 			"altTextSeed": "A Clio Coder terminal session showing a failing numerical test, diagnosis, a two-line solver edit, and the passing test run.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/session.webp"
-			]
+			"copies": ["site/assets/session.webp"]
 		},
 		{
 			"id": "tui-boot-png",
@@ -272,15 +222,10 @@
 				"height": 2003
 			},
 			"role": "Terminal boot screen",
-			"channels": [
-				"repository",
-				"website"
-			],
+			"channels": ["repository", "website"],
 			"altTextSeed": "Clio Coder terminal boot screen with the model, workspace, fleet, shortcuts, composer and context footer.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/tui-boot.png"
-			],
+			"copies": ["site/assets/tui-boot.png"],
 			"capturedVersion": "0.5.6"
 		},
 		{
@@ -293,15 +238,10 @@
 				"height": 1021
 			},
 			"role": "Terminal boot screen",
-			"channels": [
-				"repository",
-				"website"
-			],
+			"channels": ["repository", "website"],
 			"altTextSeed": "Clio Coder terminal boot screen with the model, workspace, fleet, shortcuts, composer and context footer.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/tui-boot.webp"
-			],
+			"copies": ["site/assets/tui-boot.webp"],
 			"capturedVersion": "0.5.6"
 		},
 		{
@@ -314,15 +254,10 @@
 				"height": 1489
 			},
 			"role": "Browser conversation view",
-			"channels": [
-				"repository",
-				"website"
-			],
+			"channels": ["repository", "website"],
 			"altTextSeed": "Clio Coder browser conversation with project prompts, session tools, file attachments and model selection.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/gui-conversation.png"
-			]
+			"copies": ["site/assets/gui-conversation.png"]
 		},
 		{
 			"id": "gui-conversation-webp",
@@ -334,15 +269,10 @@
 				"height": 1489
 			},
 			"role": "Browser conversation view",
-			"channels": [
-				"repository",
-				"website"
-			],
+			"channels": ["repository", "website"],
 			"altTextSeed": "Clio Coder browser conversation with project prompts, session tools, file attachments and model selection.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/gui-conversation.webp"
-			]
+			"copies": ["site/assets/gui-conversation.webp"]
 		},
 		{
 			"id": "gui-overview-png",
@@ -354,15 +284,10 @@
 				"height": 1282
 			},
 			"role": "Browser overview view",
-			"channels": [
-				"repository",
-				"website"
-			],
+			"channels": ["repository", "website"],
 			"altTextSeed": "Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/gui-overview.png"
-			]
+			"copies": ["site/assets/gui-overview.png"]
 		},
 		{
 			"id": "gui-overview-webp",
@@ -374,15 +299,10 @@
 				"height": 1188
 			},
 			"role": "Browser overview view",
-			"channels": [
-				"repository",
-				"website"
-			],
+			"channels": ["repository", "website"],
 			"altTextSeed": "Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings.",
 			"representation": "real-product-capture",
-			"copies": [
-				"site/assets/gui-overview.webp"
-			]
+			"copies": ["site/assets/gui-overview.webp"]
 		},
 		{
 			"id": "gui-clio-mark",
@@ -394,14 +314,10 @@
 				"height": 128
 			},
 			"role": "GUI canonical Clio mark",
-			"channels": [
-				"gui"
-			],
+			"channels": ["gui"],
 			"altTextSeed": "Cyan Clio ring with a copper C.",
 			"representation": "brand-artwork",
-			"copies": [
-				"apps/clio-coder-gui/client/public/clio-coder-logo.webp"
-			]
+			"copies": ["apps/clio-coder-gui/client/public/clio-coder-logo.webp"]
 		},
 		{
 			"id": "gui-favicon",
@@ -413,14 +329,10 @@
 				"height": 32
 			},
 			"role": "GUI favicon",
-			"channels": [
-				"gui"
-			],
+			"channels": ["gui"],
 			"altTextSeed": "Cyan Clio ring with a copper C.",
 			"representation": "brand-artwork",
-			"copies": [
-				"apps/clio-coder-gui/client/public/favicon.png"
-			]
+			"copies": ["apps/clio-coder-gui/client/public/favicon.png"]
 		}
 	],
 	"socialExports": [
@@ -446,12 +358,7 @@
 				"height": 630
 			},
 			"role": "Dark landscape social preview",
-			"channels": [
-				"open-graph",
-				"x",
-				"linkedin",
-				"release"
-			],
+			"channels": ["open-graph", "x", "linkedin", "release"],
 			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		},
@@ -477,12 +384,7 @@
 				"height": 630
 			},
 			"role": "Light landscape social preview",
-			"channels": [
-				"open-graph",
-				"x",
-				"linkedin",
-				"release"
-			],
+			"channels": ["open-graph", "x", "linkedin", "release"],
 			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		},
@@ -508,12 +410,7 @@
 				"height": 1080
 			},
 			"role": "Dark square social preview",
-			"channels": [
-				"mastodon",
-				"bluesky",
-				"instagram",
-				"release"
-			],
+			"channels": ["mastodon", "bluesky", "instagram", "release"],
 			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		},
@@ -539,12 +436,7 @@
 				"height": 1080
 			},
 			"role": "Light square social preview",
-			"channels": [
-				"mastodon",
-				"bluesky",
-				"instagram",
-				"release"
-			],
+			"channels": ["mastodon", "bluesky", "instagram", "release"],
 			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		}

@@ -9,5 +9,5 @@ ARG SITE_REVISION
 LABEL org.opencontainers.image.revision=$SITE_REVISION
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /public /usr/share/nginx/html
-COPY --from=build /public/.clio-redirects.conf /etc/nginx/clio-redirects.conf
-COPY --from=build /public/.clio-revision.conf /etc/nginx/clio-revision.conf
+COPY --from=build /public/.clio-coder-redirects.conf /etc/nginx/clio-redirects.conf
+COPY --from=build /public/.clio-coder-revision.conf /etc/nginx/clio-revision.conf
