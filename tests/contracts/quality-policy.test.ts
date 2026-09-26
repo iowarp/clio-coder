@@ -136,6 +136,36 @@ it("invalidates passing checks after out-of-band source changes, additions and d
 		strictEqual(assessFinishContract({ workspaceRoot: root, sessionEntries: entries }).quality?.[0]?.state, "stale");
 	}));
 
+it("invalidates a staged tracked deletion and accepts fresh verification after it", async () =>
+	project(async (root) => {
+		execFileSync("git", ["add", "--", "src/solver.ts"], { cwd: root });
+		execFileSync(
+			"git",
+			[
+				"-c",
+				"core.hooksPath=/dev/null",
+				"-c",
+				"user.name=Quality fixture",
+				"-c",
+				"user.email=quality@example.test",
+				"commit",
+				"--quiet",
+				"-m",
+				"Track solver",
+			],
+			{ cwd: root },
+		);
+		const entries = mutation();
+		await verify(entries);
+		strictEqual(assessFinishContract({ workspaceRoot: root, sessionEntries: entries }).quality?.[0]?.state, "passed");
+		execFileSync("git", ["rm", "--quiet", "--", "src/solver.ts"], { cwd: root });
+		strictEqual(assessFinishContract({ workspaceRoot: root, sessionEntries: entries }).quality?.[0]?.state, "stale");
+		await verify(entries);
+		const assessment = assessFinishContract({ workspaceRoot: root, sessionEntries: entries });
+		strictEqual(assessment.kind, "ok");
+		strictEqual(assessment.quality?.[0]?.state, "passed");
+	}));
+
 it("invalidates policy and check declaration changes but ignores unrelated inputs", async () =>
 	project(async (root) => {
 		const entries = mutation();

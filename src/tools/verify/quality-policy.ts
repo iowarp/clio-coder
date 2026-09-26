@@ -186,20 +186,30 @@ function qualityFiles(root: string): string[] {
 	}).trim();
 	if (realpathSync(gitRoot) !== realpathSync(root))
 		throw new Error("quality snapshots require the workspace to be a Git repository root");
-	const files = execFileSync(
-		"git",
-		["-c", "core.fsmonitor=false", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-		{
+	const enumerate = (args: string[]): string[] =>
+		execFileSync("git", ["-c", "core.fsmonitor=false", ...args], {
 			cwd: root,
 			encoding: "utf8",
 			timeout: 5000,
 			maxBuffer: 4 * 1024 * 1024,
 			stdio: ["ignore", "pipe", "pipe"],
-		},
-	)
-		.split("\0")
-		.filter((file) => file.length > 0);
-	return [...new Set(files)].sort();
+		})
+			.split("\0")
+			.filter((file) => file.length > 0);
+	const files = enumerate(["ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
+	// A staged deletion leaves the index. Retain its path so fresh snapshots
+	// fingerprint absence instead of mistaking a tracked deletion for an ignored input.
+	const deleted = enumerate([
+		"diff",
+		"--cached",
+		"--name-only",
+		"--diff-filter=D",
+		"--no-ext-diff",
+		"--no-textconv",
+		"--no-renames",
+		"-z",
+	]);
+	return [...new Set([...files, ...deleted])].sort();
 }
 
 interface SnapshotContext {
