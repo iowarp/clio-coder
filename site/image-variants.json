@@ -2,50 +2,50 @@
 	"assets/gui-overview.webp": {
 		"width": 1600,
 		"height": 1000,
-		"sha256": "1de5984ffba6a2f3e6bbf8e066104b6f0078a25cbd431794e6a0662c832c28b6",
+		"sha256": "e1c65f9582f6c16e65754d56983d5dd29063b86a66bca6bf607dad4d03287a88",
 		"variants": [
 			{
 				"path": "assets/responsive/gui-overview-640.webp",
 				"width": 640,
 				"height": 400,
-				"sha256": "f8bbb7b1125fa93d4c5e81eada2c2799648f93ea07e0b5003d931025e3f08e60"
+				"sha256": "6ba26979ee9509687eb54f27a7790aa29cd9fb15dd5ec561c4a74d36857d0371"
 			},
 			{
 				"path": "assets/responsive/gui-overview-960.webp",
 				"width": 960,
 				"height": 600,
-				"sha256": "d53002fee48d03cfcb33bb569077846f5d9fcc3696d47d9690523d7b988c5c52"
+				"sha256": "33e7425c6b6644c6e579f148e17736f48eca6ee3ff73a11187a51fab4095aec2"
 			},
 			{
 				"path": "assets/responsive/gui-overview-1280.webp",
 				"width": 1280,
 				"height": 800,
-				"sha256": "ba56a5d9b07d8444e6e181e8988b3b27aee2ba90ad414d0b9284038f8495fcce"
+				"sha256": "fa7a4b5776b467674ad199e8cd074e547b5dee67d4d3de2f5c716880905e4844"
 			}
 		]
 	},
 	"assets/gui-conversation.webp": {
 		"width": 1600,
 		"height": 1000,
-		"sha256": "e711f5873d77c4080eaf07d4ab16af3ad35775675cdccddd1479b282f6a54e4f",
+		"sha256": "445e64e784e2de085e3cfabeb2f3dac85f81964d4da3ed406f0fd849dbf9060f",
 		"variants": [
 			{
 				"path": "assets/responsive/gui-conversation-480.webp",
 				"width": 480,
 				"height": 300,
-				"sha256": "a5f0966da503e1bb342001f57191215a7445630431fe8c75f07c4490e9cc1afc"
+				"sha256": "9ae5bed5e3546743ab5fd068a73e7918edf538e5191cda9c30642498ba02d91a"
 			},
 			{
 				"path": "assets/responsive/gui-conversation-768.webp",
 				"width": 768,
 				"height": 480,
-				"sha256": "9fcc86e8778ef5536f87e340e6e29720dc932ee9bd415688a32c7aae60a10213"
+				"sha256": "07769760a6593edede24d61fd578109b7e45ec0515e9575bd1d3f6d37b6fd3ed"
 			},
 			{
 				"path": "assets/responsive/gui-conversation-1120.webp",
 				"width": 1120,
 				"height": 700,
-				"sha256": "58a414f25ed975f589ac01bdc8998a6234c1adb3a167449d78ec2726e2cb84f1"
+				"sha256": "85e780ee7fb81fa50ea26fecfc924a5f1555b5f690e90f1e459a72d92b310bc3"
 			}
 		]
 	},

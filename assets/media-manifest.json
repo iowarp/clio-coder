@@ -247,8 +247,8 @@
 		{
 			"id": "gui-conversation-png",
 			"source": "assets/screenshots/gui-conversation.png",
-			"sha256": "21a108f30a3aad6e430c540431791ce033790c05e146e7361de2c76caeb64400",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
+			"sha256": "0ce1d9a80c00f17e0f07c3a3ba9e3ed9580c3a68e2d197ce83d89479a50be822",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
@@ -259,13 +259,13 @@
 			"representation": "real-product-capture",
 			"copies": ["site/assets/gui-conversation.png"],
 			"capturedVersion": "0.5.7",
-			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef"
+			"capturedRevision": "6d8fbaea2"
 		},
 		{
 			"id": "gui-conversation-webp",
 			"source": "assets/screenshots/gui-conversation.webp",
-			"sha256": "e711f5873d77c4080eaf07d4ab16af3ad35775675cdccddd1479b282f6a54e4f",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
+			"sha256": "445e64e784e2de085e3cfabeb2f3dac85f81964d4da3ed406f0fd849dbf9060f",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
@@ -276,13 +276,13 @@
 			"representation": "real-product-capture",
 			"copies": ["site/assets/gui-conversation.webp"],
 			"capturedVersion": "0.5.7",
-			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef"
+			"capturedRevision": "6d8fbaea2"
 		},
 		{
 			"id": "gui-overview-png",
 			"source": "assets/screenshots/gui-overview.png",
-			"sha256": "423a83933dc2557b5fb97e582e94f60c3651c09ce16ceba7c7b649904e381d3d",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
+			"sha256": "00de849cbd7f4abed0f2031151e2d489456b3a77473c62bab37d874828a936c6",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
@@ -293,13 +293,13 @@
 			"representation": "real-product-capture",
 			"copies": ["site/assets/gui-overview.png"],
 			"capturedVersion": "0.5.7",
-			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef"
+			"capturedRevision": "6d8fbaea2"
 		},
 		{
 			"id": "gui-overview-webp",
 			"source": "assets/screenshots/gui-overview.webp",
-			"sha256": "1de5984ffba6a2f3e6bbf8e066104b6f0078a25cbd431794e6a0662c832c28b6",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
+			"sha256": "e1c65f9582f6c16e65754d56983d5dd29063b86a66bca6bf607dad4d03287a88",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
@@ -310,7 +310,7 @@
 			"representation": "real-product-capture",
 			"copies": ["site/assets/gui-overview.webp"],
 			"capturedVersion": "0.5.7",
-			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef"
+			"capturedRevision": "6d8fbaea2"
 		},
 		{
 			"id": "gui-clio-mark",
@@ -345,7 +345,7 @@
 		{
 			"id": "gui-trace-png",
 			"source": "assets/screenshots/gui-trace.png",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
@@ -355,14 +355,14 @@
 			"altTextSeed": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
-			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef",
+			"capturedRevision": "6d8fbaea2",
 			"copies": [],
-			"sha256": "c21cc60302edb07282f6a0b0573e45af375feb578350613ce51dde8689d1ffa0"
+			"sha256": "06ea91a4be0a2d079efbd9c36ca919b4e57fb852318aaaab702018d15b3ae4b6"
 		},
 		{
 			"id": "gui-trace-webp",
 			"source": "assets/screenshots/gui-trace.webp",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
@@ -372,43 +372,77 @@
 			"altTextSeed": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
-			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef",
+			"capturedRevision": "6d8fbaea2",
 			"copies": [],
-			"sha256": "7f6b367d4238b90f934b07b11b256272ef2b242f685d84eabd7bda8eb89041f7"
+			"sha256": "5d71e8012cfffbb33d28a7826b22342283187f76a192fa76e0dd662c35fa0bda"
 		},
 		{
 			"id": "gui-library-png",
 			"source": "assets/screenshots/gui-library.png",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
 			},
-			"role": "Library catalog search with available package sources and explicit installation controls.",
+			"role": "Library catalog search in the sidebar beside a completed real verification conversation.",
 			"channels": ["repository"],
-			"altTextSeed": "Library catalog search with available package sources and explicit installation controls.",
+			"altTextSeed": "Library catalog search in the sidebar beside a completed real verification conversation.",
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
-			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef",
+			"capturedRevision": "6d8fbaea2",
 			"copies": [],
-			"sha256": "41697b87f67362fc2c5a061772fc60d2c3f3bd52fed244831af8928ac9a3f3be"
+			"sha256": "7937517adb8d699fe705559701f9b038b8d2c776559f5e662503fdfb3cdf54a1"
 		},
 		{
 			"id": "gui-library-webp",
 			"source": "assets/screenshots/gui-library.webp",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
 			},
-			"role": "Library catalog search with available package sources and explicit installation controls.",
+			"role": "Library catalog search in the sidebar beside a completed real verification conversation.",
 			"channels": ["repository"],
-			"altTextSeed": "Library catalog search with available package sources and explicit installation controls.",
+			"altTextSeed": "Library catalog search in the sidebar beside a completed real verification conversation.",
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
-			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef",
+			"capturedRevision": "6d8fbaea2",
 			"copies": [],
-			"sha256": "8d8c953015e8f819e771bbf41081e08bf2ab6ad128e278e26671b85b717fc8ec"
+			"sha256": "234d6b0f829bce07998e36175efab8ec14cfaf0701bb36980ca9c4c84be1a98e"
+		},
+		{
+			"id": "gui-artifacts-png",
+			"source": "assets/screenshots/gui-artifacts.png",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Conversation with project-grouped sessions, modern composer and recorded results in the collapsible artifact inspector.",
+			"channels": ["repository"],
+			"altTextSeed": "Clio conversation with eight passing tests, project sessions and recorded verification results in the right sidebar.",
+			"representation": "real-product-capture",
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "6d8fbaea2",
+			"copies": [],
+			"sha256": "60aa9d0674aafb59fa87772942206beaa5c4ff42759872df1f87b0a23edf70fc"
+		},
+		{
+			"id": "gui-artifacts-webp",
+			"source": "assets/screenshots/gui-artifacts.webp",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Conversation with project-grouped sessions, modern composer and recorded results in the collapsible artifact inspector.",
+			"channels": ["repository"],
+			"altTextSeed": "Clio conversation with eight passing tests, project sessions and recorded verification results in the right sidebar.",
+			"representation": "real-product-capture",
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "6d8fbaea2",
+			"copies": [],
+			"sha256": "ddf4848184a83866e2041673a4bf4c636baf742aab209c5c40d6fb1828f50883"
 		}
 	],
 	"socialExports": [

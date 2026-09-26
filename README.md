@@ -97,6 +97,11 @@ context accounting into one workspace. The browser application provides project
 and conversation views, session controls, fleet previews, traces, evidence, and
 configuration through the same runtime. The browser interface is in alpha.
 
+During a conversation, the left sidebar switches between project sessions,
+recorded runs, and configuration tools while your chat stays open. The collapsible
+Artifacts panel holds recorded file activity, results, and linked evidence.
+Open a dedicated trace or evidence viewer when you need more inspection space.
+
 <p align="center">
   <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/tui-boot.webp" alt="Clio Coder terminal boot screen with model and workspace information, fleet, shortcuts, composer and context footer" width="1000" /></a>
 </p>
@@ -109,7 +114,10 @@ configuration through the same runtime. The browser interface is in alpha.
 <summary><strong>Browser conversation view</strong></summary>
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-conversation.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-conversation.webp" alt="Browser conversation with project prompts, session tools, file attachments and model selection" width="800" /></a>
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-conversation.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-conversation.webp" alt="Browser conversation with project-grouped sessions, a compact composer, model selection and harness controls" width="800" /></a>
+</p>
+<p align="center">
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-artifacts.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-artifacts.webp" alt="Conversation with eight passing tests and recorded verification results in the collapsible right Artifacts panel" width="800" /></a>
 </p>
 
 [Watch a real calibration verification (33 seconds, MP4)](https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/recordings/gui-calibration.mp4)
