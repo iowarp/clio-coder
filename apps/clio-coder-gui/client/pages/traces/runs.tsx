@@ -4,6 +4,8 @@ import { type Input, routes } from "../../../contracts/routes.js";
 import type { Client } from "../../api/client.js";
 import { formatCost, formatTime, formatTokens } from "../../api/clock.js";
 import { PanelEmpty } from "../../design/panel.js";
+import { listDestination } from "../run-inspection-model.js";
+import "../run-inspection.css";
 import { emptyState } from "../../design/panel-model.js";
 export function TraceRuns({ client }: { client: Client }) {
 	const [search, setSearch] = useSearchParams();
@@ -34,7 +36,7 @@ export function TraceRuns({ client }: { client: Client }) {
 		enabled: availability.data?.available === true,
 	});
 	return (
-		<section>
+		<section className="run-inspection">
 			<p className="eyebrow">Execution history</p>
 			<h1>
 				Traces<span className="period">.</span>
@@ -42,6 +44,7 @@ export function TraceRuns({ client }: { client: Client }) {
 			<p className="intro">Follow a run from its first decision to its final evidence.</p>
 			<form
 				className="trace-filters"
+				key={search.toString()}
 				onSubmit={(event) => {
 					event.preventDefault();
 					const data = new FormData(event.currentTarget);
@@ -52,7 +55,7 @@ export function TraceRuns({ client }: { client: Client }) {
 			>
 				<label>
 					Search runs
-					<input name="q" defaultValue={q} placeholder="Run, agent, model or request" />
+					<input name="q" defaultValue={q} placeholder="Run, agent, model or request" maxLength={256} />
 				</label>
 				<label>
 					Source
@@ -75,7 +78,12 @@ export function TraceRuns({ client }: { client: Client }) {
 					Filter
 				</button>
 			</form>
-			{availability.error || runs.error ? <p role="alert">{availability.error?.message ?? runs.error?.message}</p> : null}
+			{availability.error || runs.error ? (
+				<p role="alert">
+					{availability.error?.message ?? runs.error?.message}
+					{runs.data && " · Showing last loaded history."}
+				</p>
+			) : null}
 			{availability.data?.available === false ? (
 				<div className="trace-panel">
 					<h2>No trace database available</h2>
@@ -87,30 +95,44 @@ export function TraceRuns({ client }: { client: Client }) {
 				</div>
 			) : null}
 			{availability.isPending || (availability.data?.available && runs.isPending) ? <p>Loading trace history…</p> : null}
-			{runs.data?.pages.map((page) =>
-				page.runs.map((run) => (
-					<Link className="trace-run-card" key={run.run_id} to={`/traces/${encodeURIComponent(run.run_id)}`}>
-						<div>
-							<span className={`trace-badge ${run.status}`}>{run.status === "running" ? "● running" : run.status}</span>{" "}
-							<span className="trace-badge">{run.source}</span>
-							<h2>{run.request ?? run.run_id}</h2>
-							<p>
-								{run.agent} · {run.model}
-							</p>
-							<small>
-								{run.run_id} · {formatTime(run.started_at)}
-							</small>
-						</div>
-						<div className="trace-spend">
-							<strong>{formatCost(run.total_cost_usd)}</strong>
-							<small>{formatTokens(run.total_tokens)} tokens</small>
-						</div>
-					</Link>
-				)),
-			)}
-			{runs.data?.pages[0]?.runs.length === 0 ? <PanelEmpty>No run matches these filters.</PanelEmpty> : null}
-			{runs.hasNextPage ? <PanelEmpty>{emptyState.bounded("runs")}</PanelEmpty> : null}
-			{runs.hasNextPage ? (
+			<div className="inspection-heading">
+				<h2>Recorded runs</h2>
+				<span className="panel-note">Installation history · refreshes every 5 seconds</span>
+			</div>
+			{(q || source || status) && <Link to="/traces">Clear filters</Link>}
+			{availability.data?.available === true &&
+				runs.data?.pages.map((page) =>
+					page.runs.map((run) => (
+						<Link
+							className="trace-run-card"
+							key={run.run_id}
+							to={`/traces/${encodeURIComponent(run.run_id)}?${new URLSearchParams({ list: listDestination("/traces", search, ["q", "source", "status"]) })}`}
+						>
+							<div>
+								<span className={`trace-badge ${run.status}`}>{run.status === "running" ? "● running" : run.status}</span>{" "}
+								<span className="trace-badge">{run.source}</span>
+								<h2>{run.request ?? run.run_id}</h2>
+								<p>
+									{run.agent} · {run.model}
+								</p>
+								<small>
+									{run.run_id} · {formatTime(run.started_at)}
+								</small>
+							</div>
+							<div className="trace-spend">
+								<strong>{formatCost(run.total_cost_usd)}</strong>
+								<small>{formatTokens(run.total_tokens)} tokens</small>
+							</div>
+						</Link>
+					)),
+				)}
+			{availability.data?.available === true && runs.data?.pages[0]?.runs.length === 0 ? (
+				<PanelEmpty>No run matches these filters.</PanelEmpty>
+			) : null}
+			{availability.data?.available === true && runs.hasNextPage ? (
+				<PanelEmpty>{emptyState.bounded("runs")}</PanelEmpty>
+			) : null}
+			{availability.data?.available === true && runs.hasNextPage ? (
 				<button type="button" onClick={() => void runs.fetchNextPage()} disabled={runs.isFetchingNextPage}>
 					Load more runs
 				</button>

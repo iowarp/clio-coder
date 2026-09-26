@@ -1,22 +1,36 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { routes } from "../../../contracts/routes.js";
 import type { TraceEvent } from "../../../contracts/traces.js";
 import type { Client } from "../../api/client.js";
 import { clock, formatTime } from "../../api/clock.js";
-import { Boundary, PanelEmpty, PanelHeading } from "../../design/panel.js";
-import { emptyState, PANELS } from "../../design/panel-model.js";
+import { PanelEmpty } from "../../design/panel.js";
+import { emptyState } from "../../design/panel-model.js";
 import { StatusMark } from "../../design/status.js";
+import { listDestination } from "../run-inspection-model.js";
 import { CostPanel, EventRow, Facts, Gates, ReceiptPanel, Waterfall } from "./panels.js";
+import "../run-inspection.css";
 import { histogram, orderedPhases, runTone, runTotals } from "./trace-model.js";
 export function TraceRunPage({ client }: { client: Client }) {
 	const { runId = "" } = useParams();
 	return <Run key={runId} client={client} runId={runId} />;
 }
 function Run({ client, runId }: { client: Client; runId: string }) {
+	const [search, setSearch] = useSearchParams();
+	const selected = search.get("phase");
+	const select = (id: string) => {
+		const next = new URLSearchParams(search);
+		next.set("phase", id);
+		setSearch(next);
+	};
+	const list = search.get("list") ?? "/traces";
+	const back = listDestination("/traces", new URLSearchParams(list.startsWith("/traces?") ? list.slice(8) : ""), [
+		"q",
+		"source",
+		"status",
+	]);
 	const queries = useQueryClient(),
-		[selected, select] = useState<string | null>(null),
 		[full, setFull] = useState(false),
 		[live, setLive] = useState("Connecting to trace…"),
 		[now, setNow] = useState(clock.now());
@@ -51,9 +65,10 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 	});
 	const ready = !!events.data && !!detail.data;
 	useEffect(() => {
+		if (detail.data?.run.status !== "running") return;
 		const interval = setInterval(() => setNow(clock.now()), 500);
 		return () => clearInterval(interval);
-	}, []);
+	}, [detail.data?.run.status]);
 	useEffect(() => {
 		if (!ready) return;
 		const rows = queries.getQueryData<TraceEvent[]>(["trace-events", runId]) ?? [];
@@ -81,24 +96,24 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		source.onerror = () => setLive("Reconnecting to trace…");
 		return () => source.close();
 	}, [client, queries, ready, runId]);
-	if (detail.error || events.error)
+	if ((detail.error && !detail.data) || (events.error && !events.data))
 		return (
 			<div role="alert">
 				<h1>Trace unavailable</h1>
 				<p>{detail.error?.message ?? events.error?.message}</p>
-				<Link to="/traces">Back to traces</Link>
+				<Link to={back}>Back to traces</Link>
 			</div>
 		);
 	if (!detail.data || !events.data) return <p>Loading run…</p>;
 	const { run, gates, processes, receipt } = detail.data,
 		phases = orderedPhases(detail.data.phases),
-		phase = phases.find((item) => item.phase_id === selected) ?? phases[0],
+		phase = selected === "all" ? undefined : (phases.find((item) => item.phase_id === selected) ?? phases[0]),
 		phaseEvents = events.data.filter((event) => !phase || event.phase_id === phase.phase_id),
 		eventKinds = histogram(events.data.map((event) => event.type)),
 		processKinds = histogram(processes.map((process) => process.kind));
 	return (
-		<section className="trace-run-detail">
-			<Link to="/traces">← Trace history</Link>
+		<section className="trace-run-detail run-inspection">
+			<Link to={back}>← Trace history</Link>
 			<p className="eyebrow">
 				{run.source} / {run.run_id}
 			</p>
@@ -107,7 +122,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 				<StatusMark tone={runTone(run.status)} label={run.status} />
 				<span role="status">{live}</span>
 			</div>
-			<PanelHeading panel={PANELS.traceRun} />
+			<p className="panel-note">Durable run record · receipt integrity is a separate check</p>
 			<ul className="trace-totals">
 				{runTotals(run, now).map((total) => (
 					<li key={total.label}>
@@ -125,9 +140,20 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 					["Started", formatTime(run.started_at)],
 				]}
 			/>
+			{(detail.error || events.error) && (
+				<p role="alert">
+					Refresh failed: {detail.error?.message ?? events.error?.message}. Showing the last loaded record.
+				</p>
+			)}
+			<div className="inspection-heading">
+				<h2>Execution sequence</h2>
+				<button type="button" aria-pressed={selected === "all"} onClick={() => select("all")}>
+					All phases
+				</button>
+			</div>
 			<Waterfall run={run} phases={phases} events={events.data} selected={phase?.phase_id ?? null} select={select} />
 			{phase ? (
-				<>
+				<div className="inspection-phase">
 					<section className="trace-panel">
 						<h2>{phase.name}</h2>
 						<Facts
@@ -142,10 +168,10 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 						/>
 					</section>
 					<CostPanel phase={phase} />
-				</>
+				</div>
 			) : null}
 			<section className="trace-panel">
-				<h2>How many of each kind</h2>
+				<h2>Recorded activity</h2>
 				<div className="trace-histograms">
 					{[
 						{ title: "Events", data: eventKinds, subject: "event" },
@@ -172,22 +198,23 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 			</section>
 			<section className="trace-panel">
 				<h2>
-					Event log <small>({phaseEvents.length})</small>
+					{phase ? `${phase.name} · event log` : "Event log"} <small>({phaseEvents.length})</small>
 				</h2>
-				{phaseEvents.map((event) => (
-					<EventRow key={event.rowid} event={event} start={run.started_at} />
-				))}
+				{/* biome-ignore lint/a11y/noNoninteractiveTabindex: The bounded event log is a keyboard-scrollable region. */}
+				<section className="inspection-log" tabIndex={0} aria-label={phase ? `${phase.name} events` : "All run events"}>
+					{phaseEvents.map((event) => (
+						<EventRow key={event.rowid} event={event} start={run.started_at} />
+					))}
+				</section>
 				{!phaseEvents.length ? <PanelEmpty>{emptyState.emptyStore("event", "for this phase")}</PanelEmpty> : null}
 			</section>
 			<Gates gates={gates.filter((gate) => !phase || gate.phase_id === phase.phase_id)} />
-			<section className="trace-panel">
-				<h2>
-					Processes <small>({processes.length})</small>
-				</h2>
+			<details className="trace-panel">
+				<summary>Processes · {processes.length} recorded</summary>
 				{processes.map((process) => (
 					<article className="trace-event" key={process.id}>
 						<h3>
-							{process.name} <span className="trace-badge">{process.ended_at ? "ended" : "live"}</span>
+							{process.name} <span className="trace-badge">{process.ended_at ? "ended" : "no end recorded"}</span>
 						</h3>
 						<Facts
 							entries={[
@@ -202,9 +229,8 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 					</article>
 				))}
 				{!processes.length ? <PanelEmpty>{emptyState.emptyStore("process", "for this run")}</PanelEmpty> : null}
-			</section>
+			</details>
 			<ReceiptPanel data={receipt} full={full} loadFull={() => setFull(true)} />
-			<Boundary panel={PANELS.traceRun} />
 		</section>
 	);
 }
