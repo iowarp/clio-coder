@@ -18,6 +18,7 @@ scripts/orch/
 
 # Dev-time scratch area: planning files, debugging notes, sprint plans, reports. Never shipped.
 .superpowers/
+social-campaigns/
 CLIO-CODER.md
 CLAUDE.md
 AGENTS.md
