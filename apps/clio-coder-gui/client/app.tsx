@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
 import { useTokenRejected } from "./api/auth-state.js";
@@ -17,7 +17,7 @@ import {
 	ThemeToggle,
 	useSidebarCollapsed,
 } from "./design/navigation.js";
-import { AREA_LABELS, navigationArea } from "./design/navigation-area.js";
+import { AREA_LABELS, type NavigationArea, navigationArea } from "./design/navigation-area.js";
 import { dismissAll, LiveRegions, NoticeToasts, reportProblem, useNotices } from "./design/notifications.js";
 import { ProjectNavigation } from "./design/project-navigation.js";
 import { AppPreferences } from "./design/pwa.js";
@@ -57,9 +57,15 @@ export function App({ client }: { client: Client }) {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const [navigationAt, setNavigationAt] = useState<string | null>(null);
+	const [selectedArea, setSelectedArea] = useState<{ path: string; area: NavigationArea } | null>(null);
+	const [conversationPath, setConversationPath] = useState<string | null>(null);
 	const previousPath = useRef(location.pathname);
 	useEffect(() => {
-		if (previousPath.current !== location.pathname) setNavigationAt(null);
+		if (previousPath.current !== location.pathname) {
+			setNavigationAt(null);
+			setSelectedArea(null);
+		}
+		if (sessionIdFrom(location.pathname)) setConversationPath(location.pathname);
 		previousPath.current = location.pathname;
 	}, [location.pathname]);
 	const [connection, setConnection] = useState<ConnectionState>(client.token ? "Connecting…" : "Not connected");
@@ -71,7 +77,7 @@ export function App({ client }: { client: Client }) {
 	// not be reachable by Tab either, or the focus order silently leaves the thing that has focus.
 	const layered = useLayersActive();
 	const refused = useTokenRejected() || (!client.token && lastTokenWasRefused());
-	const area = navigationArea(location.pathname);
+	const area = selectedArea?.path === location.pathname ? selectedArea.area : navigationArea(location.pathname);
 	const showArea = !!client.token && !refused && area !== null && navigationAt !== location.pathname;
 	const meta = useQuery({
 		queryKey: ["meta"],
@@ -134,11 +140,17 @@ export function App({ client }: { client: Client }) {
 		[client, navigate, notices.length, queries, runningTurnId, sessionId, snapshot?.state, toggleSidebar],
 	);
 	const selectArea = (path: string) => {
-		if (navigationArea(path)) {
+		const nextArea = navigationArea(path);
+		if (nextArea) {
 			setNavigationAt(null);
 			if (sidebarCollapsed) toggleSidebar();
 			requestAnimationFrame(() => document.querySelector<HTMLElement>(".desktop-navigation .sidebar-back")?.focus());
+			if (sessionIdFrom(location.pathname)) {
+				setSelectedArea({ path: location.pathname, area: nextArea });
+				return true;
+			}
 		}
+		return false;
 	};
 	const navigationContent = (close?: () => void, collapsed = false) =>
 		showArea && area && !collapsed ? (
@@ -172,6 +184,11 @@ export function App({ client }: { client: Client }) {
 					{!close ? <SidebarToggle collapsed={sidebarCollapsed} toggle={toggleSidebar} /> : null}
 				</div>
 				<h2 className="sidebar-area-title">{AREA_LABELS[area]}</h2>
+				{conversationPath && conversationPath !== location.pathname ? (
+					<Link className="sidebar-return" to={conversationPath} onClick={close}>
+						Return to conversation <span aria-hidden="true">→</span>
+					</Link>
+				) : null}
 				<Suspense
 					fallback={
 						<p className="sidebar-note" role="status">
@@ -184,7 +201,7 @@ export function App({ client }: { client: Client }) {
 					) : (
 						(() => {
 							const AreaView = areaViews[area];
-							return <AreaView client={client} close={close} />;
+							return <AreaView client={client} close={close} workspaceId={snapshot?.workspaceId} />;
 						})()
 					)}
 				</Suspense>

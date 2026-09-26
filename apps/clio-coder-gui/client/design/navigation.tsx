@@ -90,7 +90,7 @@ export function Navigation({
 	close?: (() => void) | undefined;
 	collapsed?: boolean;
 	onHelp: () => void;
-	onSelect?: (path: string) => void;
+	onSelect?: (path: string) => boolean;
 }) {
 	const location = useLocation();
 	const link = (item: (typeof navigation)[number]) => (
@@ -98,8 +98,11 @@ export function Navigation({
 			key={item.path}
 			to={item.path}
 			end={item.path === "/"}
-			onClick={() => {
-				onSelect?.(item.path);
+			onClick={(event) => {
+				if (onSelect?.(item.path)) {
+					event.preventDefault();
+					return;
+				}
 				close?.();
 			}}
 			data-tip={collapsed ? item.label : undefined}

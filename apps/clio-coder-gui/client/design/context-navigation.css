@@ -64,6 +64,20 @@
 	font: 600 20px var(--font-ui);
 	color: var(--ink);
 }
+.sidebar-return {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex: none;
+	min-height: 44px;
+	padding: 8px 10px;
+	color: var(--accent);
+	font-size: var(--text-meta);
+	text-decoration: none;
+}
+.sidebar-return:hover {
+	background: var(--surface-sunken);
+}
 .navigation-dialog:has(.sidebar-area-title)[open] {
 	display: flex;
 	flex-direction: column;
