@@ -14,6 +14,7 @@ import { ContextLedger } from "./context-ledger.js";
 import { DocPage, DocsSearch, DocsTree } from "./docs.js";
 import { EventCursor } from "./events.js";
 import { EvidenceDetail, EvidencePage } from "./evidence.js";
+import { ExtensionReload, SessionExtensions } from "./extensions.js";
 import {
 	Councils,
 	DispatchRun,
@@ -487,6 +488,21 @@ export const routes = {
 		body: BranchRequest,
 		response: Forked,
 		summary: "Start a new conversation from a turn; workspace files are not rewound",
+	}),
+	sessionExtensions: defineRoute({
+		...get,
+		path: "/api/sessions/:id/extensions",
+		params: operationParams,
+		response: SessionExtensions,
+		summary: "The extensions this conversation loaded, in its own words",
+	}),
+	reloadSessionExtensions: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/extensions/reload",
+		params: operationParams,
+		response: ExtensionReload,
+		summary: "Reload this conversation's extensions and hooks together",
 	}),
 	sessionContext: defineRoute({
 		...get,

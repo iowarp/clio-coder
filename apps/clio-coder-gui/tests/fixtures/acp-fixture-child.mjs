@@ -424,6 +424,8 @@ const fleetPreview = (name, vars) =>
 // held under an id until it is committed, discarded, or a request moves the session.
 let pendingHandoff = null;
 const proposedMemory = new Set();
+let extensionGeneration = 1;
+let libraryGeneration = 1;
 // Visual review can ask the smoke scenario to advertise safe settings and targets, so the composer's
 // route chip shows a reported model. The smoke itself leaves it off and asserts the missing controls.
 const ROUTE = process.env.CLIO_CODER_WEB_FIXTURE_ROUTE === "1";
@@ -585,6 +587,12 @@ async function handle(frame) {
 														proposeMemory: "_clio-coder/memory/propose",
 													},
 													"clio-coder/context": { version: 1, ledger: "_clio-coder/context/ledger" },
+													"clio-coder/extensions": {
+														version: 1,
+														list: "_clio-coder/extensions/list",
+														reload: "_clio-coder/extensions/reload",
+													},
+													"clio-coder/library": { version: 1, reload: "_clio-coder/library/reload" },
 													"clio-coder/fleet": {
 														version: 1,
 														preview: "_clio-coder/fleet/preview",
@@ -877,6 +885,64 @@ async function handle(frame) {
 				};
 				break;
 			}
+			case "_clio-coder/extensions/list":
+				result = {
+					version: 1,
+					extensions: [
+						{
+							id: "survey-tools",
+							name: "Survey tools",
+							version: "1.2.0",
+							description: "Field survey helpers",
+							scope: "project",
+							state: "eligible",
+							runtime: false,
+							problems: 0,
+							diagnostics: [],
+						},
+						{
+							id: "old-plotter",
+							name: "Old plotter",
+							version: "0.3.0",
+							description: "Plots survey grids",
+							scope: "user",
+							state: "incompatible",
+							runtime: false,
+							problems: 1,
+							diagnostics: ["requires Clio Coder 0.4 or earlier"],
+						},
+					],
+					truncated: false,
+				};
+				break;
+			case "_clio-coder/extensions/reload":
+				extensionGeneration++;
+				log({ extensionsReloaded: extensionGeneration });
+				result = {
+					status: "committed",
+					generation: extensionGeneration,
+					changed: false,
+					added: 0,
+					removed: 0,
+					modified: 0,
+					hooks: { registered: 2, dropped: 0, issues: 0, overridden: 0 },
+					lines: [],
+				};
+				break;
+			case "_clio-coder/library/reload":
+				if (process.env.CLIO_CODER_WEB_FIXTURE_LIBRARY_RELOAD === "fail") {
+					result = { status: "failed", error: "plugin tree digest mismatch" };
+					break;
+				}
+				libraryGeneration++;
+				log({ libraryReloaded: libraryGeneration });
+				result = {
+					status: "refreshed",
+					generation: libraryGeneration,
+					previousGeneration: libraryGeneration - 1,
+					changed: true,
+				};
+				break;
 			case "_clio-coder/context/ledger":
 				if (!COMMANDS) throw Error("method_not_found");
 				result = {

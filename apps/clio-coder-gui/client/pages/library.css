@@ -163,6 +163,12 @@
 	padding: var(--space-3);
 	font-size: 14px;
 }
+/* A reload that happened, or none that was needed, is a fact rather than a warning. */
+.library-session-note--settled {
+	border-left-color: var(--line-strong);
+	background: var(--surface-sunken);
+	color: var(--ink);
+}
 @media (max-width: 750px) {
 	.library-packages > li {
 		grid-template-columns: minmax(0, 1fr);

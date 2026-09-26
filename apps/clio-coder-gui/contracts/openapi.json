@@ -1719,18 +1719,67 @@
 											}
 										},
 										"refresh": {
-											"type": "object",
-											"required": ["status", "reason"],
-											"properties": {
-												"status": {
-													"type": "string",
-													"const": "not-applicable"
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["status", "reason"],
+													"properties": {
+														"status": {
+															"type": "string",
+															"const": "not-applicable"
+														},
+														"reason": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
 												},
-												"reason": {
-													"type": "string"
+												{
+													"type": "object",
+													"required": ["status", "sessions", "generation", "changed"],
+													"properties": {
+														"status": {
+															"type": "string",
+															"const": "refreshed"
+														},
+														"sessions": {
+															"type": "integer",
+															"minimum": 1
+														},
+														"generation": {
+															"type": "integer",
+															"minimum": 0
+														},
+														"changed": {
+															"type": "boolean"
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"required": ["status", "sessions", "failedSessions", "error"],
+													"properties": {
+														"status": {
+															"type": "string",
+															"const": "failed"
+														},
+														"sessions": {
+															"type": "integer",
+															"minimum": 1
+														},
+														"failedSessions": {
+															"type": "integer",
+															"minimum": 1
+														},
+														"error": {
+															"type": "string",
+															"maxLength": 1100
+														}
+													},
+													"additionalProperties": false
 												}
-											},
-											"additionalProperties": false
+											]
 										}
 									},
 									"additionalProperties": false
@@ -9960,6 +10009,40 @@
 											},
 											"additionalProperties": false
 										},
+										"extensions": {
+											"type": "object",
+											"required": ["version", "list", "reload"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"list": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"reload": {
+													"type": "string",
+													"maxLength": 128
+												}
+											},
+											"additionalProperties": false
+										},
+										"library": {
+											"type": "object",
+											"required": ["version", "reload"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"reload": {
+													"type": "string",
+													"maxLength": 128
+												}
+											},
+											"additionalProperties": false
+										},
 										"images": {
 											"type": "boolean"
 										},
@@ -12164,6 +12247,446 @@
 										}
 									},
 									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/extensions": {
+			"get": {
+				"operationId": "sessionExtensions",
+				"summary": "The extensions this conversation loaded, in its own words",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["version", "extensions", "truncated"],
+									"properties": {
+										"version": {
+											"type": "number",
+											"const": 1
+										},
+										"extensions": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"name",
+													"version",
+													"description",
+													"scope",
+													"state",
+													"runtime",
+													"problems",
+													"diagnostics"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"maxLength": 520
+													},
+													"name": {
+														"type": "string",
+														"maxLength": 520
+													},
+													"version": {
+														"type": "string",
+														"maxLength": 520
+													},
+													"description": {
+														"type": "string",
+														"maxLength": 520
+													},
+													"scope": {
+														"type": "string",
+														"maxLength": 520
+													},
+													"state": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "eligible"
+															},
+															{
+																"type": "string",
+																"const": "disabled"
+															},
+															{
+																"type": "string",
+																"const": "invalid"
+															},
+															{
+																"type": "string",
+																"const": "incompatible"
+															},
+															{
+																"type": "string",
+																"const": "shadowed"
+															}
+														]
+													},
+													"overriddenBy": {
+														"type": "string",
+														"maxLength": 520
+													},
+													"runtime": {
+														"type": "boolean"
+													},
+													"problems": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"diagnostics": {
+														"type": "array",
+														"items": {
+															"type": "string",
+															"maxLength": 520
+														},
+														"maxItems": 3
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 64
+										},
+										"truncated": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/extensions/reload": {
+			"post": {
+				"operationId": "reloadSessionExtensions",
+				"summary": "Reload this conversation's extensions and hooks together",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["status", "generation", "changed", "added", "removed", "modified", "hooks", "lines"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "committed"
+												},
+												"generation": {
+													"type": "integer",
+													"minimum": 0
+												},
+												"changed": {
+													"type": "boolean"
+												},
+												"added": {
+													"type": "integer",
+													"minimum": 0
+												},
+												"removed": {
+													"type": "integer",
+													"minimum": 0
+												},
+												"modified": {
+													"type": "integer",
+													"minimum": 0
+												},
+												"hooks": {
+													"type": "object",
+													"required": ["registered", "dropped", "issues", "overridden"],
+													"properties": {
+														"registered": {
+															"type": "integer",
+															"minimum": 0
+														},
+														"dropped": {
+															"type": "integer",
+															"minimum": 0
+														},
+														"issues": {
+															"type": "integer",
+															"minimum": 0
+														},
+														"overridden": {
+															"type": "integer",
+															"minimum": 0
+														}
+													},
+													"additionalProperties": false
+												},
+												"lines": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 520
+													},
+													"maxItems": 40
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status", "reason", "generation", "lines"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "rejected"
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 520
+												},
+												"generation": {
+													"type": "integer",
+													"minimum": 0
+												},
+												"lines": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 520
+													},
+													"maxItems": 40
+												}
+											},
+											"additionalProperties": false
+										}
+									]
 								}
 							}
 						},

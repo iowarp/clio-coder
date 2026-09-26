@@ -12,6 +12,7 @@ import {
 import { SessionTree } from "../../contracts/branches.js";
 import { Id } from "../../contracts/common.js";
 import { ContextLedger } from "../../contracts/context-ledger.js";
+import { ExtensionReload, LibraryReload, SessionExtensions } from "../../contracts/extensions.js";
 import {
 	FleetPreview,
 	type FleetPreviewRequest,
@@ -751,6 +752,80 @@ export class Supervisor {
 		} finally {
 			delete entry.rebase;
 		}
+	}
+	private extending(id: string) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.extensions)
+			throw new AppProblem("conflict", "This Clio Coder build does not report its extensions.");
+		return entry;
+	}
+	extensions(id: string) {
+		this.extending(id);
+		return this.projected(id, "_clio-coder/extensions/list", { sessionId: id }, SessionExtensions);
+	}
+	reloadExtensions(id: string) {
+		const entry = this.extending(id);
+		if (entry.turnId)
+			throw new AppProblem("conflict", "Wait for the current turn to finish before reloading extensions.");
+		return this.projected(id, "_clio-coder/extensions/reload", { sessionId: id }, ExtensionReload, BRANCH_TIMEOUT_MS);
+	}
+	/**
+	 * Ask every open conversation of a workspace to reload its library after a change was applied.
+	 * Refreshed only when each one did; a conversation that is mid-turn, too old to reload, or whose
+	 * reload failed makes the whole refresh failed, with the count and the first reason.
+	 */
+	async reloadLibrary(workspaceId: string) {
+		const open = [...this.entries.values()].filter(
+			(entry) =>
+				entry.bound &&
+				!entry.closing &&
+				this.snapshots.get(entry.id)?.state === "open" &&
+				this.snapshots.get(entry.id)?.workspaceId === workspaceId,
+		);
+		if (open.length === 0)
+			return {
+				status: "not-applicable" as const,
+				reason: "No conversation is open in this project; new conversations read the change when they start.",
+			};
+		const outcomes = await Promise.all(
+			open.map(
+				async (entry): Promise<{ ok: true; generation: number; changed: boolean } | { ok: false; error: string }> => {
+					if (!entry.client.capabilities.library)
+						return { ok: false, error: "an open conversation cannot reload its library; close and reopen it" };
+					if (entry.turnId)
+						return { ok: false, error: "an open conversation is running a turn; reload it when the turn ends" };
+					try {
+						const result = await this.projected(
+							entry.id,
+							"_clio-coder/library/reload",
+							{ sessionId: entry.id },
+							LibraryReload,
+							BRANCH_TIMEOUT_MS,
+						);
+						return result.status === "refreshed"
+							? { ok: true, generation: result.generation, changed: result.changed }
+							: { ok: false, error: result.error };
+					} catch (error) {
+						return { ok: false, error: error instanceof Error ? error.message : String(error) };
+					}
+				},
+			),
+		);
+		const failures = outcomes.filter((outcome) => !outcome.ok);
+		if (failures.length > 0)
+			return {
+				status: "failed" as const,
+				sessions: open.length,
+				failedSessions: failures.length,
+				error: failures[0] && !failures[0].ok ? failures[0].error.slice(0, 1000) : "reload failed",
+			};
+		const reloaded = outcomes.filter((outcome) => outcome.ok);
+		return {
+			status: "refreshed" as const,
+			sessions: open.length,
+			generation: Math.max(...reloaded.map((outcome) => (outcome.ok ? outcome.generation : 0))),
+			changed: reloaded.some((outcome) => outcome.ok && outcome.changed),
+		};
 	}
 	contextLedger(id: string) {
 		const entry = this.active(id);

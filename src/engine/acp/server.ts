@@ -45,6 +45,17 @@ import { ACP_CONTEXT_LEDGER_METHOD, ACP_CONTEXT_META_KEY, projectContextLedger }
 import { ACP_DISPATCH_PLAN_META_KEY, projectDispatchPlanMeta } from "./dispatch-plan-meta.js";
 import { ACP_TURN_FAILED_MESSAGE, AcpRequestError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
 import {
+	ACP_EXTENSIONS_LIST_METHOD,
+	ACP_EXTENSIONS_META_KEY,
+	ACP_EXTENSIONS_RELOAD_METHOD,
+	ACP_LIBRARY_META_KEY,
+	ACP_LIBRARY_RELOAD_METHOD,
+	type AcpExtensionsControl,
+	type AcpLibraryReload,
+	projectExtensionReload,
+	projectExtensions,
+} from "./extensions.js";
+import {
 	ACP_FLEET_MAX_REASON_BYTES,
 	ACP_FLEET_META_KEY,
 	ACP_FLEET_PREVIEW_METHOD,
@@ -247,6 +258,16 @@ export interface ClioAcpServerOptions {
 	 * both methods refuse.
 	 */
 	boardActions?: AcpBoardActions;
+	/**
+	 * The session's extensions and their reload coordinator, for
+	 * `_clio-coder/extensions/list` and `/reload`. Absent means both refuse.
+	 */
+	extensions?: AcpExtensionsControl;
+	/**
+	 * The plugin-resource reload /library reload runs, so a library change made
+	 * elsewhere reaches this open session. Absent means the method refuses.
+	 */
+	libraryReload?: AcpLibraryReload;
 	/**
 	 * The chat's context accounting, read for `_clio-coder/context/ledger`.
 	 * Absent means the method is not announced and refuses.
@@ -2185,6 +2206,10 @@ export interface AcpHandshakeFeatures {
 	fleet?: boolean;
 	/** Whether `_clio-coder/context/ledger` answers; absent reads as false. */
 	contextLedger?: boolean;
+	/** Whether the extension list and reload methods answer; absent reads as false. */
+	extensions?: boolean;
+	/** Whether `_clio-coder/library/reload` answers; absent reads as false. */
+	libraryReload?: boolean;
 	/** Whether prompts are expanded, which is what admits image blocks; absent reads as false. */
 	images?: boolean;
 }
@@ -2429,6 +2454,16 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 									},
 								}
 							: {}),
+						...(features.extensions
+							? {
+									[ACP_EXTENSIONS_META_KEY]: {
+										version: 1,
+										list: ACP_EXTENSIONS_LIST_METHOD,
+										reload: ACP_EXTENSIONS_RELOAD_METHOD,
+									},
+								}
+							: {}),
+						...(features.libraryReload ? { [ACP_LIBRARY_META_KEY]: { version: 1, reload: ACP_LIBRARY_RELOAD_METHOD } } : {}),
 						...(features.contextLedger ? { [ACP_CONTEXT_META_KEY]: { version: 1, ledger: ACP_CONTEXT_LEDGER_METHOD } } : {}),
 						...(features.fleet
 							? {
@@ -2515,6 +2550,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			handoff: handoffWired(options),
 			fleet: options.fleet !== undefined,
 			contextLedger: options.contextLedger !== undefined,
+			extensions: options.extensions !== undefined,
+			libraryReload: options.libraryReload !== undefined,
 			images: options.expandPrompt !== undefined,
 		});
 	const workspaceInstanceId = handshake.workspaceInstanceId;
@@ -3635,6 +3672,48 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const cancelled = pendingHandoff?.handoffId === handoffId && pendingHandoff.sessionId === bound.id;
 		if (cancelled) pendingHandoff = null;
 		return { cancelled };
+	});
+
+	// The /extensions view: what this session loaded, never paths or provenance.
+	options.transport.onRequest(ACP_EXTENSIONS_LIST_METHOD, (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		if (options.extensions === undefined) {
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		}
+		getSession(request);
+		return projectExtensions(options.extensions.list());
+	});
+
+	// /extensions reload. Hooks and extension resources change together, so a
+	// reload waits for a running turn rather than swapping them under it.
+	options.transport.onRequest(ACP_EXTENSIONS_RELOAD_METHOD, (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		if (options.extensions === undefined) {
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		}
+		requireIdle(getSession(request), "reload extensions");
+		return projectExtensionReload(options.extensions.reload());
+	});
+
+	// /library reload, so a library change made outside this session reaches it.
+	// A failed reload is reported as failed; the previous resources stay live.
+	options.transport.onRequest(ACP_LIBRARY_RELOAD_METHOD, (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		if (options.libraryReload === undefined) {
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		}
+		requireIdle(getSession(request), "reload the library");
+		try {
+			return { status: "refreshed" as const, ...options.libraryReload() };
+		} catch (error) {
+			options.diagnostics?.(`library reload failed: ${acpErrorMessage(error)}`);
+			return { status: "failed" as const, error: boundString(acpErrorMessage(error), 1024) };
+		}
 	});
 
 	// The terminal's /context window view, read and never recomputed.

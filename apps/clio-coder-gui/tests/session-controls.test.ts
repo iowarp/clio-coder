@@ -177,6 +177,26 @@ test("a decision is superseded once and its correction becomes a visible request
 	);
 });
 
+test("a conversation lists the extensions it loaded and reloads them only when idle", async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const base = `/api/sessions/${session.id}/extensions`;
+	const listed = await json(await h.request(base), routes.sessionExtensions.response);
+	assert.deepEqual(
+		listed.extensions.map((row) => [row.id, row.state]),
+		[
+			["survey-tools", "eligible"],
+			["old-plotter", "incompatible"],
+		],
+	);
+	const reloaded = await json(await h.post(`${base}/reload`), routes.reloadSessionExtensions.response);
+	assert.equal(reloaded.status, "committed");
+	assert.equal((await h.post(`/api/sessions/${session.id}/turns`, { text: "[stream]" })).status, 202);
+	assert.equal((await h.post(`${base}/reload`)).status, 409);
+});
+
 test("an older command peer refuses injected turns without submitting unrecognised slash text", async (t) => {
 	const h = await harness({}, { scenario: "markdown", env: { CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS: "0" } });
 	t.after(h.close);
@@ -436,6 +456,7 @@ test("an older ACP peer has no branches and refuses tree, switch and fork before
 	assert.equal((await h.post(`${base}/handoff`, { goal: "Finish the survey report" })).status, 409);
 	assert.equal((await h.post(`${base}/fleet/preview`, { name: "survey" })).status, 409);
 	assert.equal((await h.request(`${base}/context`)).status, 409);
+	assert.equal((await h.request(`${base}/extensions`)).status, 409);
 	assert.doesNotMatch(
 		await readFile(join(h.home.path, "acp.jsonl"), "utf8"),
 		/session\/(tree|switch_turn|fork|handoff)|fleet\//,

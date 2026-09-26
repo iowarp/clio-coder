@@ -67,6 +67,12 @@ export function sessionRoutes(
 	register(app, hub, routes.forkSession, ({ params, body }, context) =>
 		commands.run(`fork:${params.id}`, idempotencyKey(context), body, () => supervisor.fork(params.id, body.turnId)),
 	);
+	register(app, hub, routes.sessionExtensions, ({ params }) => supervisor.extensions(params.id));
+	register(app, hub, routes.reloadSessionExtensions, ({ params }, context) =>
+		commands.run(`extensions.reload:${params.id}`, idempotencyKey(context), {}, () =>
+			supervisor.reloadExtensions(params.id),
+		),
+	);
 	register(app, hub, routes.sessionContext, ({ params }) => supervisor.contextLedger(params.id));
 	register(app, hub, routes.previewFleetRun, ({ params, body }) => supervisor.fleetPreview(params.id, body));
 	// A retried start answers from the ledger rather than starting the plan twice.

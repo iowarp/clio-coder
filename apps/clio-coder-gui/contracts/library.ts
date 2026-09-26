@@ -254,8 +254,31 @@ export const LibraryApplyResult = Type.Object(
 				closed,
 			),
 		),
-		/** The web server holds no agent session, so an open conversation keeps its library until it reloads. */
-		refresh: Type.Object({ status: Type.Literal("not-applicable"), reason: Type.String() }, closed),
+		/**
+		 * Whether the project's open conversations picked the change up. The server asks each to reload its
+		 * library; it is refreshed only when every one did, and failed when any could not.
+		 */
+		refresh: Type.Union([
+			Type.Object({ status: Type.Literal("not-applicable"), reason: Type.String() }, closed),
+			Type.Object(
+				{
+					status: Type.Literal("refreshed"),
+					sessions: Type.Integer({ minimum: 1 }),
+					generation: Type.Integer({ minimum: 0 }),
+					changed: Type.Boolean(),
+				},
+				closed,
+			),
+			Type.Object(
+				{
+					status: Type.Literal("failed"),
+					sessions: Type.Integer({ minimum: 1 }),
+					failedSessions: Type.Integer({ minimum: 1 }),
+					error: Type.String({ maxLength: 1100 }),
+				},
+				closed,
+			),
+		]),
 	},
 	closed,
 );

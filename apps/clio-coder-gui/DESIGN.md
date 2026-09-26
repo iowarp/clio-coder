@@ -559,6 +559,14 @@ reported, never as zero. Resetting project context from the commands panel takes
 and `--all` only widens a confirmed reset; without it Clio Coder answers that nothing was changed.
 `/context recover` is sent as a conversation turn, because it continues the paused turn.
 
+Extensions in Session tools is the terminal's /extensions view for the running conversation: each
+extension with the overlay's state word (Loaded, Disabled, Invalid, Incompatible, Shadowed) as a
+status mark, its id, version, scope, whether it runs code and its problems. Reload extensions waits
+for an idle turn and says which generation is live and how many hooks registered, or that the reload
+was refused and which generation stays. Installing a package on the Library page asks each open
+conversation in that project to reload its library, as /library reload does; the result says the open
+conversations reloaded, or how many did not and why, and never claims a reload that failed.
+
 A model is always picked from its target's catalog, never typed from memory. The route picker, the
 Settings page (`chat.model`, `fleet.default.model`, `context.memory.model` and
 `context.compaction.model`, which runs on the chat target) and the new-connection form share one
@@ -602,8 +610,8 @@ Every UI change must preserve:
 Covered states the smoke must visit: home in both themes, toolchain, traces and run detail,
 workspaces and sessions, a Markdown/code/Mermaid conversation, session controls, the branch view,
 a branch switch and a fork, a handoff review and its successor, a dispatch plan approval, a fleet
-contract preview and run, the context window, permission and cancellation, and a problem
-notification. This design work adds three: the six status tones rendered
+contract preview and run, the context window, extensions and a reload, permission and cancellation, and a
+problem notification. This design work adds three: the six status tones rendered
 side by side, a focus-visible capture of a button, an input and a table cell, and one forced-colors
 pass.
 

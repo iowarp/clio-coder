@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -133,6 +133,65 @@ test("a catalog package installs and removes through one reviewed plan, and a pl
 		for (const ref of ["../extension-source", "https://github.com/a/b/tree/main/x", "archify"])
 			assert.equal((await h.post(`${base}/plans`, { operation: "install", ref })).status, 422);
 		assert.equal((await h.post(`${base}/plans`, { operation: "import", ref: offer.ref })).status, 422);
+	} finally {
+		await h.close();
+	}
+});
+
+test("an applied change reaches the project's open conversations, and a reload that fails is reported as failed", async () => {
+	for (const [env, expected] of [
+		[{}, "refreshed"],
+		[{ CLIO_CODER_WEB_FIXTURE_LIBRARY_RELOAD: "fail" }, "failed"],
+	] as const) {
+		const h = await harness({}, { scenario: "markdown", env });
+		try {
+			await seedLibrary(h.home.path, h.home.env);
+			const workspace = await h.workspaces.open(h.home.path),
+				base = `/api/workspaces/${workspace.id}/library`;
+			const session = await h.supervisor.open(workspace.id);
+			const offer = (await json(await h.request(base), LibraryInventory)).packages.find(
+				(row) => row.kind === "skill" && row.catalogOrigin === "catalog",
+			);
+			assert.ok(offer);
+			const plan = await json(await h.post(`${base}/plans`, { operation: "install", ref: offer.ref }), LibraryPlan);
+			const applied = await json(await h.post(`${base}/plans/${plan.id}/apply`), LibraryApplyResult);
+			assert.ok(applied.committed > 0);
+			assert.equal(applied.refresh.status, expected);
+			const log = await readFile(join(h.home.path, "acp.jsonl"), "utf8");
+			if (expected === "refreshed") {
+				assert.deepEqual(applied.refresh, { status: "refreshed", sessions: 1, generation: 2, changed: true });
+				assert.match(log, /"libraryReloaded":2/, "the open conversation reloaded");
+			} else {
+				assert.deepEqual(applied.refresh, {
+					status: "failed",
+					sessions: 1,
+					failedSessions: 1,
+					error: "plugin tree digest mismatch",
+				});
+				assert.doesNotMatch(log, /"libraryReloaded"/);
+			}
+			await h.supervisor.close(session.id);
+		} finally {
+			await h.close();
+		}
+	}
+});
+
+test("an open conversation from a build that cannot reload makes the refresh failed, not refreshed", async () => {
+	const h = await harness();
+	try {
+		await seedLibrary(h.home.path, h.home.env);
+		const workspace = await h.workspaces.open(h.home.path),
+			base = `/api/workspaces/${workspace.id}/library`;
+		await h.supervisor.open(workspace.id);
+		const offer = (await json(await h.request(base), LibraryInventory)).packages.find(
+			(row) => row.kind === "skill" && row.catalogOrigin === "catalog",
+		);
+		assert.ok(offer);
+		const plan = await json(await h.post(`${base}/plans`, { operation: "install", ref: offer.ref }), LibraryPlan);
+		const applied = await json(await h.post(`${base}/plans/${plan.id}/apply`), LibraryApplyResult);
+		assert.equal(applied.refresh.status, "failed");
+		assert.match(applied.refresh.status === "failed" ? applied.refresh.error : "", /cannot reload its library/);
 	} finally {
 		await h.close();
 	}

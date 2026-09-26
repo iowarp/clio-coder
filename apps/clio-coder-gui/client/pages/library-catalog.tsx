@@ -165,13 +165,38 @@ function Outcomes({ applied }: { applied: Applied }) {
 					);
 				})}
 			</ol>
-			{applied.committed > 0 && (
-				<p className="library-session-note">
-					<strong>Open conversations have not reloaded.</strong> {applied.refresh.reason} Run <code>/library reload</code> in
-					a conversation, or start a new one, to use the change.
-				</p>
-			)}
+			{applied.committed > 0 && <RefreshNote refresh={applied.refresh} />}
 		</>
+	);
+}
+
+/** Whether the project's open conversations picked the change up, said as it happened. */
+function RefreshNote({ refresh }: { refresh: Applied["refresh"] }) {
+	if (refresh.status === "refreshed")
+		return (
+			<p className="library-session-note library-session-note--settled" role="status">
+				<strong>
+					{refresh.sessions === 1 ? "The open conversation reloaded" : `All ${refresh.sessions} open conversations reloaded`}{" "}
+					its library.
+				</strong>{" "}
+				Its next request uses the change.
+			</p>
+		);
+	if (refresh.status === "failed")
+		return (
+			<p className="library-session-note" role="alert">
+				<strong>
+					{refresh.failedSessions} of {refresh.sessions} open {refresh.sessions === 1 ? "conversation" : "conversations"} did
+					not reload.
+				</strong>{" "}
+				{refresh.error}. The change is installed; run <code>/library reload</code> there, or start a new conversation, to
+				use it.
+			</p>
+		);
+	return (
+		<p className="library-session-note library-session-note--settled">
+			<strong>No open conversation needed a reload.</strong> {refresh.reason}
+		</p>
 	);
 }
 

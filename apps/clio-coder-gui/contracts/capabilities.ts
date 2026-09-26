@@ -2,6 +2,7 @@ import { type Static, Type } from "typebox";
 import { BoardCapability } from "./board.js";
 import { BranchesCapability } from "./branches.js";
 import { ContextCapability } from "./context-ledger.js";
+import { ExtensionsCapability, LibraryCapability } from "./extensions.js";
 import { FleetCapability } from "./fleet-run.js";
 import { HandoffCapability } from "./handoff.js";
 
@@ -100,6 +101,10 @@ export const AgentCapabilities = Type.Object(
 		fleet: Type.Optional(FleetCapability),
 		/** The context window accounting, read for the Context view. */
 		context: Type.Optional(ContextCapability),
+		/** The session's extensions and their reload. */
+		extensions: Type.Optional(ExtensionsCapability),
+		/** Plugin reload, so a library change reaches an open session. */
+		library: Type.Optional(LibraryCapability),
 		/** ACP promptCapabilities.image: the agent accepts image blocks with a request. */
 		images: Type.Optional(Type.Boolean()),
 		/** True when the agent mediates every tool through its own safety policy. */

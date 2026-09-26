@@ -130,6 +130,8 @@ export async function runAcpCommand(
 					handoff: true,
 					fleet: true,
 					contextLedger: true,
+					extensions: true,
+					libraryReload: true,
 					images: true,
 				});
 				const serving = serveDeferredAcp({

@@ -421,7 +421,10 @@ try {
 		await check("library-plan");
 		await review.getByRole("button", { name: "Apply this change", exact: true }).click();
 		await review.getByText("The files are on disk and the install record matches.").waitFor();
-		await review.getByText("Open conversations have not reloaded.").waitFor();
+		// The change reaches open conversations by reload; with none open the note says so.
+		const refreshNote = review.locator(".library-session-note");
+		await refreshNote.waitFor();
+		assert.doesNotMatch(await refreshNote.innerText(), /did not reload/);
 		await check("library-applied");
 		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `library-applied-${width}.png`) });
 		await review.getByRole("button", { name: "Done", exact: true }).click();
@@ -931,6 +934,16 @@ try {
 		// Dismissing the notice is a press outside Session tools, which closes the menu.
 		await page.getByRole("button", { name: "Dismiss Fleet survey started", exact: true }).click();
 		await page.waitForFunction(() => !(document.querySelector(".conversation__tools") as HTMLDetailsElement).open);
+		// Extensions: what this conversation loaded, and a reload that says which generation is live.
+		await page.locator(".conversation__tools > summary").click();
+		await page.getByText("Extensions", { exact: true }).click();
+		const extensionsPanel = page.locator(".extensions-panel");
+		await extensionsPanel.getByText("survey-tools 1.2.0 · project scope", { exact: true }).waitFor();
+		await extensionsPanel.getByRole("button", { name: "Reload extensions", exact: true }).click();
+		await extensionsPanel.getByText(/^Generation \d+ is live \(no changes\); 2 hooks registered\.$/).waitFor();
+		await check("extensions");
+		await page.getByText("Extensions", { exact: true }).click();
+		await page.keyboard.press("Escape");
 		// The context window: Clio Coder's own accounting, worded and never recomputed.
 		await page.locator(".conversation__tools > summary").click();
 		await page.getByText("Context window", { exact: true }).click();

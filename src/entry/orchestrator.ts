@@ -5,7 +5,7 @@ import chalk from "chalk";
 import { modelBootstrapGenerate, resolveBootstrapRoute } from "../cli/bootstrap-generate.js";
 import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import { formatBootTrace } from "../core/boot-trace.js";
-import { BusChannels } from "../core/bus-events.js";
+import { BusChannels, type PluginsReloadedPayload } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../core/defaults.js";
@@ -3260,6 +3260,26 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}
 					: {}),
 				contextLedger: () => chat.contextLedger(),
+				...(extensions
+					? {
+							extensions: {
+								list: () => extensions.list(process.cwd(), { all: true }),
+								reload: () => extensionReload.reload(),
+							},
+						}
+					: {}),
+				// The same reload /library reload runs, with the generation change the
+				// PluginsReloaded event reports. A throw is a failed reload.
+				libraryReload: () => {
+					let reloaded: PluginsReloadedPayload | null = null;
+					reloadPluginResourcesAndNotify(process.cwd(), (event) => {
+						reloaded = event;
+						bus.emit(BusChannels.PluginsReloaded, event);
+					});
+					const event = reloaded as PluginsReloadedPayload | null;
+					if (event === null) throw new Error("plugin reload reported no generation");
+					return { generation: event.generation, previousGeneration: event.previousGeneration, changed: event.changed };
+				},
 				...(toolBootstrap.mcpCapabilities ? { mcpCapabilities: toolBootstrap.mcpCapabilities } : {}),
 				bus,
 				autonomy: resolveBaselineAutonomy,

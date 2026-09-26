@@ -115,7 +115,7 @@ export function createApp(options: {
 	targetsRoutes(app, hub, options.targets);
 	fleetRoutes(app, hub, options.fleet, artifacts);
 	systemRoutes(app, hub, options.system);
-	libraryRoutes(app, hub, options.library);
+	libraryRoutes(app, hub, options.library, options.sessions.supervisor);
 	reportRoutes(app, hub, options.reports);
 	evidenceRoutes(app, hub, options.evidence, artifacts);
 	sessionRoutes(app, hub, options.sessions, new Commands(), options.snapshotHold);

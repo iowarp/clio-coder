@@ -14,6 +14,7 @@ import {
 } from "../../contracts/capabilities.js";
 import { Id } from "../../contracts/common.js";
 import { ContextCapability } from "../../contracts/context-ledger.js";
+import { ExtensionsCapability, LibraryCapability } from "../../contracts/extensions.js";
 import { FleetCapability } from "../../contracts/fleet-run.js";
 import { HandoffCapability } from "../../contracts/handoff.js";
 import type { SessionConfig } from "../../contracts/session-config.js";
@@ -70,6 +71,8 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("handoff", optional(HandoffCapability, meta["clio-coder/handoff"])),
 		...maybe("fleet", optional(FleetCapability, meta["clio-coder/fleet"])),
 		...maybe("context", optional(ContextCapability, meta["clio-coder/context"])),
+		...maybe("extensions", optional(ExtensionsCapability, meta["clio-coder/extensions"])),
+		...maybe("library", optional(LibraryCapability, meta["clio-coder/library"])),
 	};
 }
 const closed = { additionalProperties: false };
