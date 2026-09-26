@@ -17,17 +17,12 @@
  * keeps reading back is a policy worth changing.
  */
 
-import type { ContextRecalledPayload } from "../core/bus-events.js";
-import type { EvictedState } from "../domains/context/working-set/contract.js";
-import { foldWorkingSet } from "../domains/context/working-set/fold.js";
-import {
-	buildRecallFields,
-	recallErrorMessage,
-	recallParentTurnId,
-	resolveRecall,
-} from "../domains/context/working-set/recall.js";
-import type { SessionEntryInput } from "../domains/session/contract.js";
-import type { SessionEntry } from "../domains/session/entries.js";
+import type { ContextRecalledPayload } from "../../../core/bus-events.js";
+import type { SessionEntryInput } from "../../session/contract.js";
+import type { SessionEntry } from "../../session/entries.js";
+import type { EvictedState } from "./contract.js";
+import { foldWorkingSet } from "./fold.js";
+import { buildRecallFields, recallErrorMessage, recallParentTurnId, resolveRecall } from "./recall.js";
 
 /** Ledger access the command needs, mirroring the context tool's `ContextSessionDeps`. */
 export interface OperatorRecallDeps {

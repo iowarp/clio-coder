@@ -64,6 +64,9 @@ type Entry = {
 	prompt?: Promise<void>;
 	retired?: Promise<void>;
 };
+/** Longest a command reply may take; see invokeCommand. */
+const COMMAND_TIMEOUT_MS = 10 * 60_000;
+
 export class Supervisor {
 	readonly children: ChildrenFile;
 	private readonly snapshots = new Map<string, SessionSnapshot>();
@@ -462,8 +465,9 @@ export class Supervisor {
 		method: string,
 		params: unknown,
 		schema: S,
+		timeoutMs?: number,
 	): Promise<Static<S>> {
-		const raw = await this.active(id).client.request(method, params),
+		const raw = await this.active(id).client.request(method, params, timeoutMs),
 			value = Value.Clean(schema, raw);
 		if (!Value.Check(schema, value)) throw new AppProblem("upstream_acp", "Clio returned an invalid control response.");
 		return value;
@@ -563,6 +567,8 @@ export class Supervisor {
 			"_clio-coder/commands/invoke",
 			{ sessionId: id, command: body.command, ...(body.argv ? { argv: body.argv } : {}) },
 			CommandResult,
+			// A context command answers when its work ends: compaction or a model-written handbook can take minutes.
+			COMMAND_TIMEOUT_MS,
 		);
 	}
 	async ledgerCommand(workspaceId: string, id: string, action: "label" | "delete", label?: string) {

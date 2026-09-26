@@ -2,9 +2,9 @@
 //
 // The list is built from destinations this app actually routes to and from actions that are already
 // wired end to end. It is deliberately NOT built from `GET /api/sessions/:id/commands`: that catalog
-// wires 9 of about 21 optional members, so a palette composed from it would list `/archive`,
-// `/export`, `/context` and `/council` rows that answer "not wired" when run. A palette whose rows
-// refuse is worse than no palette, because it teaches the operator that the whole surface is a guess.
+// belongs to one session and needs that session's arguments, which the conversation's command panel
+// collects. A palette row has neither, and a row that refuses teaches the operator that the whole
+// surface is a guess.
 //
 // Every row here is therefore either a route this client renders or a mutation this client already
 // sends from a visible button. A row that cannot run right now is marked unavailable and the palette

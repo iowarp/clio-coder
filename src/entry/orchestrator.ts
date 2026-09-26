@@ -54,6 +54,7 @@ import { CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybind
 import type { ContextContract } from "../domains/context/contract.js";
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
+import { runOperatorRecall } from "../domains/context/working-set/operator-recall.js";
 import { endpointCapacityUsage } from "../domains/dispatch/capacity-lease.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
@@ -199,7 +200,7 @@ import { type ShareContract, ShareDomainModule } from "../domains/share/index.js
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
-import { acpCommandControl } from "../engine/acp/commands.js";
+import { type AcpHostReport, acpCommandControl } from "../engine/acp/commands.js";
 import { type AcpSafeSettingsPatch, type AcpSafeSettingsSnapshot, serveClioAcpAgent } from "../engine/acp/server.js";
 import { createStdioServerTransport } from "../engine/acp/transport.js";
 import { completeEngineText, type EngineTextCompletionResult } from "../engine/ai.js";
@@ -2724,6 +2725,78 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 
+	// One context-init runner for the TUI and ACP hosts.
+	const runContextInit = async (
+		options: {
+			preview?: boolean;
+			adopt?: boolean;
+			applyClioMd?: boolean;
+			rewriteClioMd?: boolean;
+			proposeClioMd?: boolean;
+			includeGlobalImports?: boolean;
+			heuristic?: boolean;
+		},
+		runIo?: RunIo,
+	) => {
+		// Context init explores the repo with the configured target by
+		// default, grounded in the freshly built codewiki, and falls back to the
+		// deterministic heuristic when no target is reachable. --heuristic and
+		// --preview skip model generation.
+		const useModel = options.heuristic !== true && options.preview !== true;
+		const bootstrapOptions = bootstrapInputFromInitOptions(options);
+		if (!contextDomain) throw new Error("context domain unavailable");
+		await contextDomain.runBootstrap({
+			cwd: process.cwd(),
+			...(runIo ? { io: runIo } : {}),
+			confirmGitignore: () => true,
+			adopt: options.adopt === true,
+			...bootstrapOptions,
+			...(useModel
+				? {
+						generate: modelBootstrapGenerate({
+							dispatch,
+							resolveRoute: () => {
+								if (!config) throw new Error("context-bootstrap configuration unavailable");
+								return resolveBootstrapRoute(config.get());
+							},
+							// Names the agent that actually ran and reports the throw as
+							// what it is. "Scout unavailable" was wrong twice over: the
+							// agent is context-bootstrap, and the same line was printed
+							// for a worker that failed, a worker whose answer the loop
+							// guard removed, and a worker that succeeded and whose
+							// payload the reader then refused.
+							onFallback: (err, mode) =>
+								runIo?.stderr(
+									`context init: context-bootstrap did not produce a handbook, using ${mode === "existing" ? "the existing CLIO-CODER.md" : "the heuristic writer"} (${err.message})\n`,
+								),
+						}),
+						modelId: "configured-clio-target",
+					}
+				: {}),
+		});
+	};
+
+	// A context operation that writes progress to a RunIo answers an ACP client with what it wrote.
+	const captureRunIo = () => {
+		const written: string[] = [];
+		let warned = false;
+		return {
+			io: {
+				stdout: (text: string) => {
+					written.push(text);
+				},
+				stderr: (text: string) => {
+					warned = true;
+					written.push(text);
+				},
+			} satisfies RunIo,
+			report: (fallback: string): AcpHostReport => ({
+				level: warned ? "warn" : "success",
+				text: written.join("").trim() || fallback,
+			}),
+		};
+	};
+
 	if (options.acp) {
 		// ACP-served sessions get the same routing isolation as interactive
 		// ones, but ACP v1 has no channel for agent-initiated advisory text:
@@ -2834,6 +2907,65 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								getDecisionBoard: () => decisionBoard.snapshot(),
 								isTurnInFlight: () => chat.isStreaming(),
 								seedTaskMemory: seedCurrentTaskMemoryFromHandoff,
+								// The context verbs the TUI reaches through its hub. Each answers the
+								// wire client with how it ended, because nothing else reaches one.
+								...(session
+									? {
+											runCompact: async (instructions: string | undefined): Promise<AcpHostReport> => {
+												// Compaction rewrites the context a running turn is reading.
+												if (chat.isStreaming())
+													return { level: "error", text: "Wait for the current turn to finish before compacting." };
+												// chat.compact says nothing when it compacts. Every notice it raises
+												// is a refusal, a failure, or an empty cut, so none reads as success.
+												const notices: string[] = [];
+												let failed = false;
+												const stop = chat.onEvent((event) => {
+													if (event.type !== "notice") return;
+													notices.push(event.text);
+													if (event.level === "error") failed = true;
+												});
+												try {
+													await chat.compact(instructions);
+												} finally {
+													stop();
+												}
+												if (notices.length === 0)
+													return { level: "success", text: "Context compacted. The next request starts from the summary." };
+												const empty = notices.every((text) => text.includes("nothing to compact"));
+												return { level: failed ? "error" : empty ? "info" : "warn", text: notices.join("\n") };
+											},
+											runContextRecall: async (ref: string): Promise<AcpHostReport> => {
+												const outcome = runOperatorRecall(ref, {
+													hasSession: () => session.current() !== null,
+													readEntries: readCurrentSessionEntries,
+													activeLeafTurnId: () => {
+														const meta = session.current();
+														return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
+													},
+													appendEntry: (entry) => session.appendEntry(entry),
+													onRecalled: (payload) => bus.emit(BusChannels.ContextRecalled, payload),
+												});
+												// The body answers the person; like the TUI's replay block it never becomes model context.
+												return outcome.ok
+													? { level: "success", text: `${outcome.headline}\n${outcome.body}` }
+													: { level: "error", text: outcome.message };
+											},
+										}
+									: {}),
+								...(contextDomain
+									? {
+											runContextRefresh: async (): Promise<AcpHostReport> => {
+												const capture = captureRunIo();
+												await contextDomain.runContextRefresh({ cwd: process.cwd(), io: capture.io });
+												return capture.report("Project context refreshed.");
+											},
+											runInit: async (initOptions: Parameters<typeof runContextInit>[0]): Promise<AcpHostReport> => {
+												const capture = captureRunIo();
+												await runContextInit(initOptions, capture.io);
+												return capture.report("Project context initialized.");
+											},
+										}
+									: {}),
 								...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
 								...(config ? { getWorkerRosters: () => config.get().fleet.rosters } : {}),
 								...(resources
@@ -3100,54 +3232,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(contextDomain
 			? {
 					getContextState: (cwd?: string) => contextDomain.contextState(cwd),
-					onInit: async (
-						options: {
-							preview?: boolean;
-							adopt?: boolean;
-							applyClioMd?: boolean;
-							rewriteClioMd?: boolean;
-							proposeClioMd?: boolean;
-							includeGlobalImports?: boolean;
-							heuristic?: boolean;
-						},
-						runIo?: RunIo,
-					) => {
-						// Interactive context-init explores the repo with the configured target by
-						// default, grounded in the freshly built codewiki, and falls back to the
-						// deterministic heuristic when no target is reachable. --heuristic and
-						// --preview skip model generation.
-						const useModel = options.heuristic !== true && options.preview !== true;
-						const bootstrapOptions = bootstrapInputFromInitOptions(options);
-						await contextDomain.runBootstrap({
-							cwd: process.cwd(),
-							...(runIo ? { io: runIo } : {}),
-							confirmGitignore: () => true,
-							adopt: options.adopt === true,
-							...bootstrapOptions,
-							...(useModel
-								? {
-										generate: modelBootstrapGenerate({
-											dispatch,
-											resolveRoute: () => {
-												if (!config) throw new Error("context-bootstrap configuration unavailable");
-												return resolveBootstrapRoute(config.get());
-											},
-											// Names the agent that actually ran and reports the throw as
-											// what it is. "Scout unavailable" was wrong twice over: the
-											// agent is context-bootstrap, and the same line was printed
-											// for a worker that failed, a worker whose answer the loop
-											// guard removed, and a worker that succeeded and whose
-											// payload the reader then refused.
-											onFallback: (err, mode) =>
-												runIo?.stderr(
-													`context init: context-bootstrap did not produce a handbook, using ${mode === "existing" ? "the existing CLIO-CODER.md" : "the heuristic writer"} (${err.message})\n`,
-												),
-										}),
-										modelId: "configured-clio-target",
-									}
-								: {}),
-						});
-					},
+					onInit: runContextInit,
 					onContextClear: async (options: { all?: boolean; confirmed?: boolean; confirmedAll?: boolean }, runIo?: RunIo) => {
 						await contextDomain.runContextClear({
 							cwd: process.cwd(),

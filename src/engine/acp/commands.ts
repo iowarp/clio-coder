@@ -315,6 +315,23 @@ export function acpCommandCatalog(host?: AcpCommandHost): AcpCommandCatalog {
  * `showDoctor`, `render`) are deliberately never supplied; each has a
  * documented non-TUI fallback in the registry.
  */
+/**
+ * What a host operation that finishes after its command returns says about how
+ * it ended. The TUI prints its own progress; a wire client has only the reply.
+ */
+export interface AcpHostReport {
+	level: NoticeLevel;
+	text: string;
+}
+
+/**
+ * A context operation the reply waits for. The registry calls it as a
+ * fire-and-forget member, as the TUI does, so a host that returns a promise
+ * has it awaited, and an {@link AcpHostReport} it resolves to, or its
+ * failure, becomes the result.
+ */
+type AcpHostOperation<Args extends unknown[]> = (...args: Args) => unknown;
+
 export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "providers"> &
 	Partial<
 		Pick<
@@ -329,19 +346,19 @@ export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "pro
 			| "listWorkerRuns"
 			| "oracleBriefing"
 			| "getWorkerRosters"
-			| "runCompact"
 			| "runContextClear"
-			| "runContextRecall"
-			| "runContextRefresh"
 			| "runCouncilDispatch"
 			| "runDoctor"
-			| "runInit"
 			| "runLocalOperation"
 			| "seedTaskMemory"
 			| "submitOperatorNote"
 			| "userTasks"
 		>
 	> & {
+		runCompact?: AcpHostOperation<Parameters<SlashCommandContext["runCompact"]>>;
+		runContextRecall?: AcpHostOperation<[ref: string]>;
+		runContextRefresh?: AcpHostOperation<[]>;
+		runInit?: AcpHostOperation<Parameters<SlashCommandContext["runInit"]>>;
 		cwd?: string;
 		/**
 		 * Submit a user turn. `pendingSkillRequests` arrives already expanded, so
@@ -491,7 +508,8 @@ export function invokeAcpCommand(
 				},
 			);
 	}
-	const ctx = headlessContext(host, notice, push);
+	const pending: Promise<void>[] = [];
+	const ctx = headlessContext(host, notice, push, pending);
 	const outcome = dispatchSlashCommand(parsed, ctx);
 	if (outcome === "rejected") rank = NOTICE_LEVELS.length - 1;
 	// A dispatch command returns before its worker produces anything, and a
@@ -499,7 +517,14 @@ export function invokeAcpCommand(
 	if (rule.streams === "dispatch" && lines.length === 0 && outcome === "accepted") {
 		push(`${rule.name} started; progress arrives as _clio-coder/event dispatch kinds`);
 	}
-	return Promise.resolve(finish());
+	return pending.length === 0 ? Promise.resolve(finish()) : Promise.all(pending).then(finish);
+}
+
+/** A report is two fields and nothing else the wire could not carry. */
+function isHostReport(value: unknown): value is AcpHostReport {
+	if (typeof value !== "object" || value === null) return false;
+	const report = value as Partial<AcpHostReport>;
+	return typeof report.text === "string" && NOTICE_LEVELS.includes(report.level as NoticeLevel);
 }
 
 /**
@@ -517,8 +542,32 @@ function headlessContext(
 	host: AcpCommandHost,
 	notice: (level: NoticeLevel, text: string) => void,
 	push: (text: string) => void,
+	pending: Promise<void>[],
 ): SlashCommandContext {
 	const submitTurn = host.submitTurn;
+	// Runs a host operation and, when it answers later, holds the reply for it.
+	const awaited = (label: string, run: () => unknown): void => {
+		let result: unknown;
+		try {
+			result = run();
+		} catch (error) {
+			notice("error", `${label} failed: ${error instanceof Error ? error.message : String(error)}`);
+			return;
+		}
+		if (!(result instanceof Promise)) return;
+		pending.push(
+			result.then(
+				(report) => {
+					if (isHostReport(report)) notice(report.level, report.text);
+				},
+				(error: unknown) => {
+					notice("error", `${label} failed: ${error instanceof Error ? error.message : String(error)}`);
+				},
+			),
+		);
+	};
+	const runContextRecall = host.runContextRecall;
+	const runContextRefresh = host.runContextRefresh;
 	return {
 		io: { stdout: push, stderr: push },
 		notice,
@@ -536,18 +585,21 @@ function headlessContext(
 		...(host.isTurnInFlight ? { isTurnInFlight: host.isTurnInFlight } : {}),
 		...(host.getWorkerRosters ? { getWorkerRosters: host.getWorkerRosters } : {}),
 		...(host.runCouncilDispatch ? { runCouncilDispatch: host.runCouncilDispatch } : {}),
-		...(host.runContextRecall ? { runContextRecall: host.runContextRecall } : {}),
-		...(host.runContextRefresh ? { runContextRefresh: host.runContextRefresh } : {}),
+		...(runContextRecall
+			? { runContextRecall: (ref: string) => awaited("context recall", () => runContextRecall(ref)) }
+			: {}),
+		...(runContextRefresh ? { runContextRefresh: () => awaited("context refresh", () => runContextRefresh()) } : {}),
 		...(host.runLocalOperation ? { runLocalOperation: host.runLocalOperation } : {}),
 		...(host.clearSkillSurface ? { clearSkillSurface: host.clearSkillSurface } : {}),
 		...(host.seedTaskMemory ? { seedTaskMemory: host.seedTaskMemory } : {}),
 		...(host.userTasks ? { userTasks: host.userTasks } : {}),
 		runInit: (options) => {
-			if (!host.runInit) {
+			const runInit = host.runInit;
+			if (!runInit) {
 				notice("error", "context init is not wired in this session");
 				return;
 			}
-			host.runInit(options);
+			awaited("context init", () => runInit(options));
 		},
 		runContextClear: (options) => {
 			if (!host.runContextClear) {
@@ -557,11 +609,12 @@ function headlessContext(
 			host.runContextClear(options);
 		},
 		runCompact: (instructions) => {
-			if (!host.runCompact) {
+			const runCompact = host.runCompact;
+			if (!runCompact) {
 				notice("error", "context compact is not wired in this session");
 				return;
 			}
-			host.runCompact(instructions);
+			awaited("context compact", () => runCompact(instructions));
 		},
 		exportTranscript: (path) => {
 			if (!host.exportTranscript) {
