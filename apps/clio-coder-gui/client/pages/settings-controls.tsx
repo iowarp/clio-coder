@@ -107,6 +107,7 @@ function ControlRow({
 	draft,
 	onDraft,
 	catalog,
+	compact = false,
 }: {
 	control: SettingControl;
 	save: (write: { path: string; value: string; confirmed?: boolean }) => Promise<SettingWritten>;
@@ -114,6 +115,7 @@ function ControlRow({
 	draft: string | null;
 	onDraft: (value: string | null) => void;
 	catalog?: ModelCatalog | undefined;
+	compact?: boolean;
 }) {
 	const fieldId = useId(),
 		helpId = useId();
@@ -155,7 +157,7 @@ function ControlRow({
 				<small className="setting-control__source">
 					<code>{control.path}</code>
 					<Link to={`/settings/effective?${new URLSearchParams({ workspace: workspaceId, q: control.path })}`}>
-						{sourceLabel(control.source)} · inspect effective value
+						{sourceLabel(control.source)} · {compact ? "open effective value page" : "inspect effective value"}
 					</Link>
 					<span title={TIMING_SENTENCE[control.timing]}>{TIMING_LABEL[control.timing]}</span>
 				</small>
@@ -273,12 +275,27 @@ function ControlRow({
 	);
 }
 
-export function SettingsControlsView({ client, workspaceId }: { client: Client; workspaceId: string }) {
+export function SettingsControlsView({
+	client,
+	workspaceId,
+	compact = false,
+}: {
+	client: Client;
+	workspaceId: string;
+	compact?: boolean;
+}) {
 	const queries = useQueryClient();
 	const [search, setSearch] = useSearchParams();
-	const section = search.get("section"),
-		filter = search.get("q") ?? "";
-	const discover = (sectionId: string | null, query: string, replace = false) =>
+	const [localDiscovery, setLocalDiscovery] = useState<{ section: string | null; q: string }>({ section: null, q: "" });
+	const [selectedControl, setSelectedControl] = useState<string | null>(null);
+	const section = compact ? localDiscovery.section : search.get("section"),
+		filter = compact ? localDiscovery.q : (search.get("q") ?? "");
+	const discover = (sectionId: string | null, query: string, replace = false) => {
+		if (compact) {
+			setLocalDiscovery({ section: sectionId, q: query });
+			setSelectedControl(null);
+			return;
+		}
 		setSearch(
 			(current) => {
 				const next = new URLSearchParams(current);
@@ -290,6 +307,7 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 			},
 			{ replace },
 		);
+	};
 	const [showDrafts, setShowDrafts] = useState(false),
 		[drafts, setDrafts] = useState<Record<string, string>>({});
 	const key = ["settings-controls", workspaceId];
@@ -409,13 +427,15 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 		(control) => drafts[control.path] !== undefined && drafts[control.path] !== control.value,
 	);
 	const active =
-		showDrafts || filter.trim()
+		showDrafts || filter.trim() || (compact && section === "all")
 			? null
 			: (sections.find((candidate) => candidate.id === section)?.id ?? sections[0]?.id ?? null);
 	const visible = showDrafts
 		? unsaved
 		: controls.filter((control) => (active ? control.section === active : matchesControl(control, filter)));
 	const current = sections.find((candidate) => candidate.id === active);
+	const chosen = visible.find((control) => control.path === selectedControl) ?? visible[0];
+	const editorControls = compact && chosen ? [chosen] : visible;
 	return (
 		<>
 			{report.error ? (
@@ -447,37 +467,86 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 					}}
 				/>
 			</label>
-			<nav className="settings-tabs" aria-label="Settings sections">
-				{sections.map((candidate) => (
-					<button
-						type="button"
-						key={candidate.id}
-						aria-pressed={active === candidate.id}
-						onClick={() => {
-							discover(candidate.id, "");
-							setShowDrafts(false);
-						}}
-					>
-						{candidate.label} · {controls.filter((control) => control.section === candidate.id).length}
-					</button>
-				))}
-				{unsaved.length > 0 || showDrafts ? (
-					<button
-						type="button"
-						aria-pressed={showDrafts}
-						onClick={() => {
-							discover(section, "");
-							setShowDrafts(true);
-						}}
-					>
-						Unsaved · {unsaved.length}
-					</button>
-				) : null}
-			</nav>
-			<h2>
-				{showDrafts ? `Unsaved changes · ${visible.length}` : current ? current.label : `Matches · ${visible.length}`}
-			</h2>
-			{current && <p>{current.description}</p>}
+			{compact ? (
+				<div className="sidebar-settings__selection">
+					<label>
+						Section
+						<select
+							value={active ?? "all"}
+							onChange={(event) => {
+								discover(event.target.value, "");
+								setShowDrafts(false);
+							}}
+						>
+							<option value="all">All sections</option>
+							{sections.map((candidate) => (
+								<option key={candidate.id} value={candidate.id}>
+									{candidate.label}
+								</option>
+							))}
+						</select>
+					</label>
+					<label>
+						Setting · {visible.length}
+						<select
+							value={chosen?.path ?? ""}
+							disabled={!visible.length}
+							onChange={(event) => setSelectedControl(event.target.value)}
+						>
+							{!visible.length && <option value="">No settings match</option>}
+							{groupControls(visible).map(({ group, controls: rows }) => (
+								<optgroup key={group} label={group}>
+									{rows.map((control) => (
+										<option key={control.path} value={control.path}>
+											{control.label}
+											{drafts[control.path] !== undefined ? " · unsaved" : ""}
+										</option>
+									))}
+								</optgroup>
+							))}
+						</select>
+					</label>
+					{unsaved.length > 0 || showDrafts ? (
+						<button type="button" aria-pressed={showDrafts} onClick={() => setShowDrafts(!showDrafts)}>
+							Unsaved · {unsaved.length}
+						</button>
+					) : null}
+				</div>
+			) : (
+				<nav className="settings-tabs" aria-label="Settings sections">
+					{sections.map((candidate) => (
+						<button
+							type="button"
+							key={candidate.id}
+							aria-pressed={active === candidate.id}
+							onClick={() => {
+								discover(candidate.id, "");
+								setShowDrafts(false);
+							}}
+						>
+							{candidate.label} · {controls.filter((control) => control.section === candidate.id).length}
+						</button>
+					))}
+					{unsaved.length > 0 || showDrafts ? (
+						<button
+							type="button"
+							aria-pressed={showDrafts}
+							onClick={() => {
+								discover(section, "");
+								setShowDrafts(true);
+							}}
+						>
+							Unsaved · {unsaved.length}
+						</button>
+					) : null}
+				</nav>
+			)}
+			{!compact && (
+				<h2>
+					{showDrafts ? `Unsaved changes · ${visible.length}` : current ? current.label : `Matches · ${visible.length}`}
+				</h2>
+			)}
+			{current && !compact && <p>{current.description}</p>}
 			{unsaved.length > 0 && (
 				<p className="settings-draft-note" role="status">
 					{unsaved.length} unsaved {unsaved.length === 1 ? "change" : "changes"}. Save each control to apply it; filtering
@@ -487,7 +556,7 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 			{startCheck.error && <p role="alert">Could not start the model check: {startCheck.error.message}</p>}
 			{checkOperation.error && <p role="alert">Model check progress is unavailable: {checkOperation.error.message}</p>}
 			{!visible.length && <p>{showDrafts ? "No unsaved changes." : "No settings match."}</p>}
-			{groupControls(visible).map(({ group, controls: rows }) => (
+			{groupControls(editorControls).map(({ group, controls: rows }) => (
 				<section key={group} className="setting-group" aria-label={group}>
 					<h3>{group}</h3>
 					{rows.map((control) => (
@@ -499,6 +568,7 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 							draft={drafts[control.path] ?? null}
 							onDraft={(value) => updateDraft(control.path, value)}
 							catalog={catalogFor(control)}
+							compact={compact}
 						/>
 					))}
 				</section>

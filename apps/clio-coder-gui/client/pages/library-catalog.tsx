@@ -387,23 +387,37 @@ export function LibraryCatalog({
 	workspaceId,
 	packages,
 	filter,
+	compact = false,
 }: {
 	client: Client;
 	workspaceId: string;
 	packages: Package[];
 	filter: string;
+	compact?: boolean;
 }) {
 	const [search, setSearch] = useSearchParams();
-	const kind = PACKAGE_KINDS.find((candidate) => candidate === search.get("kind")) ?? "all";
-	const installedOnly = search.get("installed") === "true",
-		selected = search.get("package");
-	const discover = (key: string, value: string | null) =>
+	const [localDiscovery, setLocalDiscovery] = useState<Record<string, string>>({});
+	const valueFor = (key: string) => (compact ? localDiscovery[key] : search.get(key));
+	const kind = PACKAGE_KINDS.find((candidate) => candidate === valueFor("kind")) ?? "all";
+	const installedOnly = valueFor("installed") === "true",
+		selected = valueFor("package");
+	const discover = (key: string, value: string | null) => {
+		if (compact) {
+			setLocalDiscovery((current) => {
+				const next = { ...current };
+				if (value) next[key] = value;
+				else delete next[key];
+				return next;
+			});
+			return;
+		}
 		setSearch((current) => {
 			const next = new URLSearchParams(current);
 			if (value) next.set(key, value);
 			else next.delete(key);
 			return next;
 		});
+	};
 	const [limit, setLimit] = useState(40),
 		[request, setRequest] = useState<Request | null>(null);
 	const visible = packages.filter(
@@ -461,7 +475,7 @@ export function LibraryCatalog({
 			)}
 			<ul className="library-packages">
 				{displayed.map((pkg) => (
-					<li key={pkg.ref} aria-label={pkg.ref}>
+					<li key={pkg.ref} aria-label={pkg.ref} data-selected={selected === pkg.ref}>
 						<div className="library-package__identity">
 							<h3>
 								{pkg.name}
@@ -479,50 +493,52 @@ export function LibraryCatalog({
 								aria-expanded={selected === pkg.ref}
 								onClick={() => discover("package", selected === pkg.ref ? null : pkg.ref)}
 							>
-								Inspect package
+								{compact ? `Inspect ${pkg.name}` : "Inspect package"}
 							</button>
 						</div>
-						<div className="library-package__copies">
-							{!pkg.copies.length && <StatusMark tone="neutral" label="Not installed" />}
-							{pkg.copies.map((copy) => {
-								const state = copyState(String(copy.state));
-								const scope = copy.scope as Scope;
-								return (
-									<div className="library-copy" key={scope}>
-										<span>
-											{scopeCopy(scope)} <StatusMark tone={state.tone} label={state.label} />
-										</span>
-										<span className="library-copy__actions">
-											{copyOperations(String(copy.state)).map((operation) => (
-												<button
-													type="button"
-													key={operation}
-													aria-label={`${verb(operation)} the ${scope} copy of ${pkg.ref}`}
-													onClick={() => setRequest({ operation, ref: pkg.ref, scope })}
-												>
-													{verb(operation)}
-												</button>
-											))}
-										</span>
-									</div>
-								);
-							})}
-							{pkg.catalogOrigin !== "installed" && (
-								<span className="library-copy__actions">
-									{missingScopes(pkg).map((scope) => (
-										<button
-											type="button"
-											key={scope}
-											className={pkg.copies.length ? undefined : scope === "user" ? "primary" : undefined}
-											aria-label={`Install ${pkg.ref} ${scope === "user" ? "for me" : "in this project"}`}
-											onClick={() => setRequest({ operation: "install", ref: pkg.ref, scope })}
-										>
-											{scope === "user" ? "Install for me" : "Install in this project"}
-										</button>
-									))}
-								</span>
-							)}
-						</div>
+						{(!compact || selected === pkg.ref) && (
+							<div className="library-package__copies">
+								{!pkg.copies.length && <StatusMark tone="neutral" label="Not installed" />}
+								{pkg.copies.map((copy) => {
+									const state = copyState(String(copy.state));
+									const scope = copy.scope as Scope;
+									return (
+										<div className="library-copy" key={scope}>
+											<span>
+												{scopeCopy(scope)} <StatusMark tone={state.tone} label={state.label} />
+											</span>
+											<span className="library-copy__actions">
+												{copyOperations(String(copy.state)).map((operation) => (
+													<button
+														type="button"
+														key={operation}
+														aria-label={`${verb(operation)} the ${scope} copy of ${pkg.ref}`}
+														onClick={() => setRequest({ operation, ref: pkg.ref, scope })}
+													>
+														{verb(operation)}
+													</button>
+												))}
+											</span>
+										</div>
+									);
+								})}
+								{pkg.catalogOrigin !== "installed" && (
+									<span className="library-copy__actions">
+										{missingScopes(pkg).map((scope) => (
+											<button
+												type="button"
+												key={scope}
+												className={pkg.copies.length ? undefined : scope === "user" ? "primary" : undefined}
+												aria-label={`Install ${pkg.ref} ${scope === "user" ? "for me" : "in this project"}`}
+												onClick={() => setRequest({ operation: "install", ref: pkg.ref, scope })}
+											>
+												{scope === "user" ? "Install for me" : "Install in this project"}
+											</button>
+										))}
+									</span>
+								)}
+							</div>
+						)}
 						{selected === pkg.ref && (
 							<div className="library-package__detail">
 								<h4>Package source & requirements</h4>

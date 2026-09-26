@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { type KeyboardEvent, useRef, useState } from "react";
+import { type KeyboardEvent, useId, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
@@ -104,14 +104,33 @@ const purpose: Record<Collection, string> = {
 	Extensions: "Installed packages that add executable capabilities. Admission state shows whether Clio can load them.",
 	Verifiers: "Checks Clio discovered for this workspace. Viewing this list does not run them.",
 };
-export function LibraryPage({ client }: { client: Client }) {
-	const selection = useWorkspaceSelection(client),
-		{ id } = selection;
+export function LibraryPage({
+	client,
+	compact = false,
+	workspaceId,
+}: {
+	client: Client;
+	compact?: boolean;
+	workspaceId?: string | undefined;
+}) {
+	const selection = useWorkspaceSelection(client);
+	const id = workspaceId ?? selection.id;
 	const [search, setSearch] = useSearchParams();
-	const active = collections.find((name) => name.toLowerCase() === search.get("collection")) ?? "Catalog";
-	const filter = search.get("q") ?? "";
+	const [localDiscovery, setLocalDiscovery] = useState<{ collection: Collection; q: string }>({
+		collection: "Catalog",
+		q: "",
+	});
+	const active = compact
+		? localDiscovery.collection
+		: (collections.find((name) => name.toLowerCase() === search.get("collection")) ?? "Catalog");
+	const filter = compact ? localDiscovery.q : (search.get("q") ?? "");
+	const tabId = useId();
 	const [limit, setLimit] = useState(40);
-	const discover = (collection: Collection, query: string, replace = false) =>
+	const discover = (collection: Collection, query: string, replace = false) => {
+		if (compact) {
+			setLocalDiscovery({ collection, q: query });
+			return;
+		}
 		setSearch(
 			(current) => {
 				const next = new URLSearchParams(current);
@@ -127,6 +146,7 @@ export function LibraryPage({ client }: { client: Client }) {
 			},
 			{ replace },
 		);
+	};
 	const inventory = useQuery({
 		queryKey: ["library", id],
 		enabled: !!id,
@@ -215,9 +235,9 @@ export function LibraryPage({ client }: { client: Client }) {
 		name === "Catalog" ? (inventory.data?.packages.length ?? 0) : entries[name].length;
 	return (
 		<section>
-			<PanelHeading panel={PANELS.library} level={1} />
-			<WorkspacePicker selection={selection} />
-			<p>Explore the capabilities available to Clio in this workspace, and see where they come from.</p>
+			{!compact && <PanelHeading panel={PANELS.library} level={1} />}
+			{!workspaceId && <WorkspacePicker selection={selection} />}
+			{!compact && <p>Explore the capabilities available to Clio in this workspace, and see where they come from.</p>}
 			{!id && !selection.workspaces.isPending && <PanelEmpty>{emptyState.unread("library of a workspace")}</PanelEmpty>}
 			<div className="settings-tabs" role="tablist" aria-label="Library collections" onKeyDown={onTabKey}>
 				{collections.map((name) => (
@@ -225,9 +245,9 @@ export function LibraryPage({ client }: { client: Client }) {
 						type="button"
 						role="tab"
 						key={name}
-						id={`library-tab-${name}`}
+						id={`${tabId}-library-tab-${name}`}
 						aria-selected={active === name}
-						aria-controls="library-panel"
+						aria-controls={`${tabId}-library-panel`}
 						// One tab stop for the whole list; the arrow keys move inside it.
 						tabIndex={active === name ? 0 : -1}
 						ref={(node) => {
@@ -240,9 +260,9 @@ export function LibraryPage({ client }: { client: Client }) {
 					</button>
 				))}
 			</div>
-			<div role="tabpanel" id="library-panel" aria-labelledby={`library-tab-${active}`}>
-				<h2>{active}</h2>
-				<p>{purpose[active]}</p>
+			<div role="tabpanel" id={`${tabId}-library-panel`} aria-labelledby={`${tabId}-library-tab-${active}`}>
+				{!compact && <h2>{active}</h2>}
+				{!compact && <p>{purpose[active]}</p>}
 				<label className="settings-filter">
 					Search {active.toLowerCase()}
 					<input
@@ -277,7 +297,14 @@ export function LibraryPage({ client }: { client: Client }) {
 					</>
 				)}
 				{active === "Catalog" && inventory.data && (
-					<LibraryCatalog key={id} client={client} workspaceId={id} packages={inventory.data.packages} filter={filter} />
+					<LibraryCatalog
+						key={id}
+						client={client}
+						workspaceId={id}
+						packages={inventory.data.packages}
+						filter={filter}
+						compact={compact}
+					/>
 				)}
 				{active !== "Catalog" && source.data && !visible.length && (
 					<PanelEmpty>
