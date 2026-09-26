@@ -1587,7 +1587,7 @@ const MUTATION_VALIDATION_EXAMPLE = '{"name":"npm test","passed":true,"evidence"
  * says which one happened and shows the entry that would have passed.
  */
 function mutationValidationsReason(): string {
-	return `Mutation result must carry typed validation results: every validations entry is shaped like ${MUTATION_VALIDATION_EXAMPLE}, with a string name, a boolean passed, a string evidence, and no other keys.`;
+	return `Mutation result must carry executed validation results: every validations entry is shaped like ${MUTATION_VALIDATION_EXAMPLE}, with a string name, a boolean passed, a string evidence, and no other keys. Use validations:[] when no check executed. Put source reads and edit observations in observations, and checks not run in declaredChecks; neither carries passed.`;
 }
 
 /**
@@ -1628,20 +1628,19 @@ function validateMutation(contract: ResultContract, input: ResultContractValidat
 	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
 	const value = parsed.value;
 	if (
-		!hasOnlyKeys(value, ["mutatedPaths", "validations", "commitMessage", "summary"]) ||
+		!hasOnlyKeys(value, ["mutatedPaths", "validations", "observations", "declaredChecks", "commitMessage", "summary"]) ||
 		!Array.isArray(value.mutatedPaths) ||
-		value.mutatedPaths.some((entry) => !string(entry))
+		value.mutatedPaths.some((entry) => !string(entry)) ||
+		["observations", "declaredChecks"].some(
+			(key) => value[key] !== undefined && (!Array.isArray(value[key]) || !value[key].every((entry) => string(entry))),
+		)
 	) {
 		return failure(contract, "unmeasured", "Mutation result must carry mutatedPaths and validations");
 	}
 	const authorship = validateAuthorship(value, resultSummaryMaxBytes(contract));
 	if (authorship !== null) return failure(contract, "unmeasured", authorship);
 	const validations =
-		Array.isArray(value.validations) &&
-		value.validations.length === 0 &&
-		(value.mutatedPaths.length === 0 || input.observedRunEffects?.checksAllBlocked === true)
-			? []
-			: parseChecks(value.validations);
+		Array.isArray(value.validations) && value.validations.length === 0 ? [] : parseChecks(value.validations);
 	if (validations === null) return failure(contract, "unmeasured", mutationValidationsReason());
 	const reportedFailure = !validations.every((check) => check.passed);
 	const effects = input.observedRunEffects;
@@ -1879,7 +1878,7 @@ export function resultContractShape(contract: ResultContract): string {
 		case "world-knowledge-report":
 			return '{"discovery":"performed|caller-supplied-only|unavailable","facts":[{"claim":"...","evidence":"...","sources":["URL or document id"]}],"synthesis":["comparison or advisory conclusion"],"uncertainties":["..."],"followUpVerification":["..."]}';
 		case "mutation-report":
-			return `{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"commitMessage":"optional: the commit message for this change","summary":"the requested explanation or deliverable, or a specific limitation; otherwise optional"}. summary allows at most ${resultSummaryMaxBytes(contract)} UTF-8 bytes and commitMessage at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} UTF-8 bytes. Preserve the requested explanation and citations in summary when repairing the report; if they cannot fit or be grounded, state that specific limitation. Report only actual mutations and checks; leave out checks that were denied. A task that changed no files has mutatedPaths:[] and validations:[] when no check ran; editing tasks may use validations:[] only when every attempted check was blocked; otherwise they require a concrete executed check; put source reads and citations in summary`;
+			return `{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"observations":["optional source or edit observations"],"declaredChecks":["optional checks not run; state why host execution is needed"],"commitMessage":"optional: the commit message for this change","summary":"the requested explanation or deliverable, or a specific limitation; otherwise optional"}. summary allows at most ${resultSummaryMaxBytes(contract)} UTF-8 bytes and commitMessage at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} UTF-8 bytes. Preserve the requested explanation and citations in summary when repairing the report; if they cannot fit or be grounded, state that specific limitation. Report only actual mutations. validations contains executed checks only; reads and edits are observations, never passed validations. Use validations:[] whenever no check executed, including a successful write without execution authority; this is unmeasured, not tests passed. observations and declaredChecks are optional arrays of strings with no passed status. Checks that were denied or unavailable belong in declaredChecks. Host checks are separate evidence from this worker's result.`;
 		case "provenance-report":
 			return '{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}';
 		case "delegation-plan":

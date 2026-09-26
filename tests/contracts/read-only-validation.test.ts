@@ -51,7 +51,7 @@ it("mutation reports accept omitted denied checks as an empty array without asse
 	});
 	strictEqual(result.conformance, "pass");
 	strictEqual(result.quality, "unmeasured");
-	match(resultContractShape(contract), /leave out.*denied/i);
+	match(resultContractShape(contract), /Checks that were denied.*declaredChecks/i);
 });
 
 it("read-only verifier verdicts and executable path claims still require command grounding", () => {
@@ -81,15 +81,35 @@ it("read-only verifier verdicts and executable path claims still require command
 		null,
 	);
 });
-it("editing reports keep the concrete validation requirement", () => {
+it("successful writes without executed checks conform without claiming validation", () => {
+	const recorder = createRunEffectsRecorder(process.cwd());
+	recorder.start("write", "write", { path: "src/math.ts" });
+	recorder.finish("write", false);
+	const output = JSON.stringify({
+		mutatedPaths: ["src/math.ts"],
+		validations: [],
+		observations: ["Read and edited source; this is not a passed check."],
+		declaredChecks: ["Run npm test on the host; execution tools unavailable."],
+	});
 	const result = validateResultContract({
 		contract: { kind: "mutation-report" },
-		output: '{"mutatedPaths":["src/math.ts"],"validations":[]}',
+		output,
 		cwd: process.cwd(),
 		networkAllowed: false,
 		filesystem: { readFile: () => null },
+		observedRunEffects: recorder.snapshot(),
 	});
-	strictEqual(result.conformance, "fail");
+	strictEqual(result.conformance, "pass");
+	strictEqual(result.quality, "unmeasured");
+	strictEqual(
+		groundClaimedValidations({
+			contractKind: "mutation-report",
+			output,
+			executedCommands: new Set(),
+			executedCheckingCalls: 0,
+		}),
+		null,
+	);
 });
 it("anonymous verify successes are not failed by denied retries", () => {
 	const stats = [{ tool: "verify", count: 2, ok: 1, errors: 0, blocked: 1 }];
@@ -114,12 +134,12 @@ it("mutation-report recipes omit denied checks and put source reads in summary",
 			prompt,
 			/validations.*(?:never empty|nonempty)|inspection evidence as a validation|source read as the check/iu,
 		);
-		match(prompt, /leave out checks that were denied/iu);
-		match(prompt, /source reads.*summary/iu);
+		match(prompt, /declaredChecks/iu);
+		match(prompt, /source (?:reads|citations).*summary/iu);
 	}
 });
 
-it("review round 2 F: editing reports with only blocked checks conform with unmeasured quality", () => {
+it("editing reports distinguish lack of measured checks from execution success", () => {
 	const cwd = process.cwd();
 	for (const outcomes of [
 		[],
@@ -146,10 +166,7 @@ it("review round 2 F: editing reports with only blocked checks conform with unme
 			filesystem: { readFile: () => null },
 			observedRunEffects: recorder.snapshot(),
 		});
-		strictEqual(
-			result.conformance,
-			outcomes.length > 0 && outcomes.every((outcome) => outcome === "blocked") ? "pass" : "fail",
-		);
+		strictEqual(result.conformance, "pass");
 		strictEqual(result.quality, "unmeasured");
 	}
 });
