@@ -32,10 +32,7 @@ const serverReport = (meta: unknown) => ({
 			: undefined,
 });
 const sameLaunch = (left: BackgroundConfig["launch"], right: BackgroundConfig["launch"]) =>
-	left.node === right.node &&
-	left.loader === right.loader &&
-	left.entry === right.entry &&
-	left.icon === right.icon;
+	left.node === right.node && left.loader === right.loader && left.entry === right.entry && left.icon === right.icon;
 async function sameInstallation(left: string, right: string) {
 	return Promise.all([realpath(left), realpath(right)]).then(
 		([installed, current]) => installed === current,
@@ -154,9 +151,7 @@ export async function installBackground(
 				"Background setup belongs to another installation. Run gui background uninstall before installing this one.",
 			);
 		launchMoved = !sameLaunch(state.config.launch, proposed.launch);
-		config = launchMoved
-			? { ...state.config, packageRoot: proposed.packageRoot, launch: proposed.launch }
-			: state.config;
+		config = launchMoved ? { ...state.config, packageRoot: proposed.packageRoot, launch: proposed.launch } : state.config;
 	}
 	const desktopConfig = state.status === "installed" ? state.config : config;
 	const desktop = await launcherStatus(config.desktopPrefix);
