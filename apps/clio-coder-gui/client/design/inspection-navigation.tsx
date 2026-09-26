@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import { Link, NavLink } from "react-router";
+import { ApiProblem } from "../api/client.js";
 import type { AreaNavigationProps } from "./area-navigation-props.js";
 import { StatusMark, type StatusTone } from "./status.js";
 import "./inspection-navigation.css";
@@ -15,6 +16,10 @@ export interface InspectionRow {
 
 export type InspectionNavigationProps = AreaNavigationProps;
 
+export function referenceRefused(error: unknown): boolean {
+	return error instanceof ApiProblem && error.problem.status === 403;
+}
+
 export function InspectionSelection({
 	title,
 	row,
@@ -23,6 +28,8 @@ export function InspectionSelection({
 	dismiss,
 	close,
 	children,
+	recover,
+	recovering = false,
 }: {
 	title: string;
 	row: InspectionRow | undefined;
@@ -31,6 +38,8 @@ export function InspectionSelection({
 	dismiss: () => void;
 	close?: (() => void) | undefined;
 	children: ReactNode;
+	recover?: (() => void) | undefined;
+	recovering?: boolean;
 }) {
 	const heading = useRef<HTMLHeadingElement>(null);
 	useEffect(() => {
@@ -60,7 +69,14 @@ export function InspectionSelection({
 					{viewerLabel}
 				</Link>
 			) : (
-				<p>Refresh history and select the record again to open its viewer.</p>
+				<p>
+					Refresh history and select the record again to open its viewer.
+					{recover ? (
+						<button type="button" disabled={recovering} onClick={recover}>
+							Refresh history
+						</button>
+					) : null}
+				</p>
 			)}
 		</section>
 	);

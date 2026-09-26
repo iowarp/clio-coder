@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
@@ -16,11 +16,13 @@ import {
 	type InspectionNavigationProps,
 	InspectionRecords,
 	InspectionSelection,
+	referenceRefused,
 } from "./inspection-navigation.js";
 import { toneForOutcome } from "./status.js";
 
 export function FleetNavigation({ client, close, conversationPath }: InspectionNavigationProps) {
 	const navigate = useNavigate();
+	const queries = useQueryClient();
 	const [urlSearch] = useSearchParams();
 	const [localSearch, setLocalSearch] = useState(new URLSearchParams());
 	const search = conversationPath ? localSearch : urlSearch;
@@ -79,13 +81,23 @@ export function FleetNavigation({ client, close, conversationPath }: InspectionN
 	const rootDetail = useQuery({
 		queryKey: ["fleet-root", selected?.id ?? ""],
 		queryFn: () => client.call(routes.fleetRoot, { ...emptyInput, params: { id: selected?.id ?? "" } }),
-		enabled: !!conversationPath && !!selectedRow && !!selectedLive && selected?.dispatch === false,
+		enabled: (query) =>
+			!!conversationPath &&
+			!!selectedRow &&
+			!!selectedLive &&
+			selected?.dispatch === false &&
+			!referenceRefused(query.state.error),
 		retry: false,
 	});
 	const dispatchDetail = useQuery({
 		queryKey: ["fleet-dispatch", selected?.id ?? ""],
 		queryFn: () => client.call(routes.dispatchRun, { ...emptyInput, params: { id: selected?.id ?? "" } }),
-		enabled: !!conversationPath && !!selectedRow && !!selectedLive && selected?.dispatch === true,
+		enabled: (query) =>
+			!!conversationPath &&
+			!!selectedRow &&
+			!!selectedLive &&
+			selected?.dispatch === true &&
+			!referenceRefused(query.state.error),
 		retry: false,
 	});
 	const detailQuery = selected?.dispatch ? dispatchDetail : rootDetail;
@@ -124,7 +136,12 @@ export function FleetNavigation({ client, close, conversationPath }: InspectionN
 					<InspectionSelection
 						title="Selected Fleet record"
 						row={selectedRow}
-						live={selectedLive}
+						live={selectedLive && !referenceRefused(detailQuery.error)}
+						recover={() => {
+							setSelected(undefined);
+							void (selected.dispatch ? dispatches.refetch() : roots.refetch());
+						}}
+						recovering={selected.dispatch ? dispatches.isFetching : roots.isFetching}
 						viewerLabel="Open Fleet viewer"
 						dismiss={() => setSelected(undefined)}
 						close={close}
@@ -133,7 +150,13 @@ export function FleetNavigation({ client, close, conversationPath }: InspectionN
 						{detailQuery.error ? (
 							<p role="alert">
 								{detailQuery.error.message}{" "}
-								<button type="button" onClick={() => void detailQuery.refetch()}>
+								<button
+									type="button"
+									disabled={!selectedRow || !selectedLive || detailQuery.isFetching || referenceRefused(detailQuery.error)}
+									onClick={() => {
+										if (selectedRow && selectedLive && !referenceRefused(detailQuery.error)) void detailQuery.refetch();
+									}}
+								>
 									Retry
 								</button>
 							</p>
@@ -172,7 +195,16 @@ export function FleetNavigation({ client, close, conversationPath }: InspectionN
 				) : null}
 				<InspectionRecords
 					title="Fleet executions"
-					onSelect={conversationPath ? (row) => setSelected({ id: row.id, dispatch: false }) : undefined}
+					onSelect={
+						conversationPath
+							? (row) => {
+									const key = ["fleet-root", row.id];
+									if (referenceRefused(queries.getQueryState(key)?.error))
+										void queries.resetQueries({ queryKey: key, exact: true });
+									setSelected({ id: row.id, dispatch: false });
+								}
+							: undefined
+					}
 					selectedId={selected?.dispatch === false ? selected.id : undefined}
 					rows={executionRows}
 					query={roots}
@@ -182,7 +214,16 @@ export function FleetNavigation({ client, close, conversationPath }: InspectionN
 				/>
 				<InspectionRecords
 					title="Dispatched workers"
-					onSelect={conversationPath ? (row) => setSelected({ id: row.id, dispatch: true }) : undefined}
+					onSelect={
+						conversationPath
+							? (row) => {
+									const key = ["fleet-dispatch", row.id];
+									if (referenceRefused(queries.getQueryState(key)?.error))
+										void queries.resetQueries({ queryKey: key, exact: true });
+									setSelected({ id: row.id, dispatch: true });
+								}
+							: undefined
+					}
 					selectedId={selected?.dispatch === true ? selected.id : undefined}
 					rows={dispatchRows}
 					query={dispatches}

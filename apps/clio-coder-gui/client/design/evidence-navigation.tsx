@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
@@ -16,6 +16,7 @@ import {
 	type InspectionNavigationProps,
 	InspectionRecords,
 	InspectionSelection,
+	referenceRefused,
 } from "./inspection-navigation.js";
 import type { StatusTone } from "./status.js";
 
@@ -28,6 +29,7 @@ const verdictTones: Record<string, StatusTone> = {
 };
 export function EvidenceNavigation({ client, close, conversationPath }: InspectionNavigationProps) {
 	const navigate = useNavigate();
+	const queries = useQueryClient();
 	const [urlSearch] = useSearchParams();
 	const [localSearch, setLocalSearch] = useState(new URLSearchParams());
 	const search = conversationPath ? localSearch : urlSearch;
@@ -71,7 +73,7 @@ export function EvidenceNavigation({ client, close, conversationPath }: Inspecti
 	const detail = useQuery({
 		queryKey: ["evidence-detail", selectedId ?? ""],
 		queryFn: () => client.call(routes.evidenceDetail, { ...emptyInput, params: { id: selectedId ?? "" } }),
-		enabled: !!conversationPath && !!selected && live,
+		enabled: (query) => !!conversationPath && !!selected && live && !referenceRefused(query.state.error),
 		retry: false,
 	});
 	return (
@@ -110,7 +112,12 @@ export function EvidenceNavigation({ client, close, conversationPath }: Inspecti
 					<InspectionSelection
 						title="Selected evidence"
 						row={selected}
-						live={live}
+						live={live && !referenceRefused(detail.error)}
+						recover={() => {
+							setSelectedId(undefined);
+							void inventory.refetch();
+						}}
+						recovering={inventory.isFetching}
 						viewerLabel="Open evidence viewer"
 						dismiss={() => setSelectedId(undefined)}
 						close={close}
@@ -119,7 +126,13 @@ export function EvidenceNavigation({ client, close, conversationPath }: Inspecti
 						{detail.error ? (
 							<p role="alert">
 								{detail.error.message}{" "}
-								<button type="button" onClick={() => void detail.refetch()}>
+								<button
+									type="button"
+									disabled={!selected || !live || detail.isFetching || referenceRefused(detail.error)}
+									onClick={() => {
+										if (selected && live && !referenceRefused(detail.error)) void detail.refetch();
+									}}
+								>
 									Retry
 								</button>
 							</p>
@@ -142,7 +155,16 @@ export function EvidenceNavigation({ client, close, conversationPath }: Inspecti
 				) : null}
 				<InspectionRecords
 					title="Collected bundles"
-					onSelect={conversationPath ? (row) => setSelectedId(row.id) : undefined}
+					onSelect={
+						conversationPath
+							? (row) => {
+									const key = ["evidence-detail", row.id];
+									if (referenceRefused(queries.getQueryState(key)?.error))
+										void queries.resetQueries({ queryKey: key, exact: true });
+									setSelectedId(row.id);
+								}
+							: undefined
+					}
 					selectedId={selectedId}
 					rows={rows}
 					query={inventory}

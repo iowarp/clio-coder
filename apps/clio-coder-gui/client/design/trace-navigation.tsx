@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { type Input, routes } from "../../contracts/routes.js";
@@ -10,11 +10,13 @@ import {
 	type InspectionNavigationProps,
 	InspectionRecords,
 	InspectionSelection,
+	referenceRefused,
 } from "./inspection-navigation.js";
 import { toneForOutcome } from "./status.js";
 
 export function TraceNavigation({ client, close, conversationPath }: InspectionNavigationProps) {
 	const navigate = useNavigate();
+	const queries = useQueryClient();
 	const [search] = useSearchParams();
 	const [localSearch, setLocalSearch] = useState(new URLSearchParams());
 	const [selectedId, setSelectedId] = useState<string>();
@@ -66,7 +68,7 @@ export function TraceNavigation({ client, close, conversationPath }: InspectionN
 	const detail = useQuery({
 		queryKey: ["trace-sidebar-run", selectedId],
 		queryFn: () => client.call(routes.traceRun, { ...emptyInput, params: { runId: selectedId ?? "" } }),
-		enabled: !!conversationPath && !!selected,
+		enabled: (query) => !!conversationPath && !!selected && !referenceRefused(query.state.error),
 		retry: false,
 		refetchInterval: selected ? 5000 : false,
 	});
@@ -122,6 +124,12 @@ export function TraceNavigation({ client, close, conversationPath }: InspectionN
 					<InspectionSelection
 						title="Selected trace"
 						row={selected}
+						live={!!selected && !referenceRefused(detail.error)}
+						recover={() => {
+							setSelectedId(undefined);
+							void runs.refetch();
+						}}
+						recovering={runs.isFetching}
 						viewerLabel="Open trace viewer"
 						dismiss={() => setSelectedId(undefined)}
 						close={close}
@@ -130,7 +138,13 @@ export function TraceNavigation({ client, close, conversationPath }: InspectionN
 						{detail.error ? (
 							<p role="alert">
 								{detail.error.message}{" "}
-								<button type="button" onClick={() => void detail.refetch()}>
+								<button
+									type="button"
+									disabled={!selected || detail.isFetching || referenceRefused(detail.error)}
+									onClick={() => {
+										if (selected && !referenceRefused(detail.error)) void detail.refetch();
+									}}
+								>
 									Retry
 								</button>
 							</p>
@@ -157,7 +171,16 @@ export function TraceNavigation({ client, close, conversationPath }: InspectionN
 				) : null}
 				<InspectionRecords
 					title="Recorded runs"
-					onSelect={conversationPath ? (row) => setSelectedId(row.id) : undefined}
+					onSelect={
+						conversationPath
+							? (row) => {
+									const key = ["trace-sidebar-run", row.id];
+									if (referenceRefused(queries.getQueryState(key)?.error))
+										void queries.resetQueries({ queryKey: key, exact: true });
+									setSelectedId(row.id);
+								}
+							: undefined
+					}
 					selectedId={selectedId}
 					rows={rows}
 					query={runs}
