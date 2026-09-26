@@ -64,7 +64,7 @@ export type AcpFleetPreview =
 			stepCount: number;
 			waves: Array<{ index: number; steps: AcpFleetStep[] }>;
 			budget: { ceilingUsd: number; currentUsd: number; contractUsd: number | null };
-			/** True when steps, command arguments or write paths were cut at the wire bounds. */
+			/** True when steps, lists or displayed text were cut at the wire bounds. */
 			truncated: boolean;
 	  }
 	| { status: "refused"; name: string; diagnostics: string[] };
@@ -92,9 +92,13 @@ export function projectFleetPreview(result: FleetRunPreviewResult): AcpFleetPrev
 	const { preview } = result;
 	let budget = ACP_FLEET_MAX_STEPS;
 	let truncated = false;
+	const previewText = (text: string) => {
+		if (Buffer.byteLength(text, "utf8") > MAX_TEXT_BYTES) truncated = true;
+		return bounded(text);
+	};
 	const boundedList = (values: ReadonlyArray<string>) => {
 		if (values.length > MAX_LIST) truncated = true;
-		return values.slice(0, MAX_LIST).map((value) => bounded(value));
+		return values.slice(0, MAX_LIST).map((value) => previewText(value));
 	};
 	const waves = preview.waves.map((wave) => {
 		const kept = wave.steps.slice(0, Math.max(0, budget));
@@ -104,36 +108,36 @@ export function projectFleetPreview(result: FleetRunPreviewResult): AcpFleetPrev
 			index: wave.index,
 			steps: kept.map(
 				(step): AcpFleetStep => ({
-					stepId: bounded(step.stepId),
+					stepId: previewText(step.stepId),
 					kind: step.kind === "code" ? "code" : "agent",
 					scope: step.scope,
-					...(step.agentId !== undefined ? { agentId: bounded(step.agentId) } : {}),
-					...(step.commandId !== undefined ? { commandId: bounded(step.commandId) } : {}),
+					...(step.agentId !== undefined ? { agentId: previewText(step.agentId) } : {}),
+					...(step.commandId !== undefined ? { commandId: previewText(step.commandId) } : {}),
 					...(step.argv !== undefined ? { argv: boundedList(step.argv) } : {}),
 					writes: step.writes === undefined ? null : boundedList(step.writes),
 					...(step.route !== undefined
 						? {
 								route: {
-									targetId: bounded(step.route.targetId),
-									model: bounded(step.route.wireModelId),
-									nodeId: bounded(step.route.nodeId),
+									targetId: previewText(step.route.targetId),
+									model: previewText(step.route.wireModelId),
+									nodeId: previewText(step.route.nodeId),
 									...(step.route.endpoint !== undefined
-										? { endpoint: { label: bounded(step.route.endpoint.label), limit: step.route.endpoint.limit } }
+										? { endpoint: { label: previewText(step.route.endpoint.label), limit: step.route.endpoint.limit } }
 										: {}),
 								},
 							}
 						: {}),
-					...(step.loop !== undefined ? { loop: { ...step.loop, loopId: bounded(step.loop.loopId) } } : {}),
-					...(step.gate !== undefined ? { gate: { path: bounded(step.gate.path) } } : {}),
-					...(step.target !== undefined ? { target: bounded(step.target) } : {}),
-					...(step.profile !== undefined ? { profile: bounded(step.profile) } : {}),
+					...(step.loop !== undefined ? { loop: { ...step.loop, loopId: previewText(step.loop.loopId) } } : {}),
+					...(step.gate !== undefined ? { gate: { path: previewText(step.gate.path) } } : {}),
+					...(step.target !== undefined ? { target: previewText(step.target) } : {}),
+					...(step.profile !== undefined ? { profile: previewText(step.profile) } : {}),
 				}),
 			),
 		};
 	});
 	return {
 		status: "ready",
-		name: bounded(preview.name),
+		name: previewText(preview.name),
 		planHash: preview.planHash,
 		stepCount: preview.plan.steps.length,
 		waves: waves.filter((wave) => wave.steps.length > 0),
