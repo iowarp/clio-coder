@@ -21,6 +21,7 @@ import {
 	TIMING_SENTENCE,
 	writtenSentences,
 } from "./settings-control-model.js";
+import { useSettingsDrafts } from "./settings-drafts.js";
 import "./settings-controls.css";
 
 /** A model setting's catalog: the paired target's models as Clio Coder last read them, and where from. */
@@ -308,8 +309,8 @@ export function SettingsControlsView({
 			{ replace },
 		);
 	};
-	const [showDrafts, setShowDrafts] = useState(false),
-		[drafts, setDrafts] = useState<Record<string, string>>({});
+	const [showDrafts, setShowDrafts] = useState(false);
+	const [drafts, setDrafts] = useSettingsDrafts(client, workspaceId);
 	const key = ["settings-controls", workspaceId];
 	const report = useQuery({
 		queryKey: key,
@@ -327,7 +328,7 @@ export function SettingsControlsView({
 			}
 			return changed ? next : current;
 		});
-	}, [report.data]);
+	}, [report.data, setDrafts]);
 	// Model settings pick from their target's catalog. The inventory is read only when one is on
 	// screen, and "Check again" asks that target's endpoint for its current list.
 	const modelsVisible = (report.data?.controls ?? []).some((control) => MODEL_TARGET_PATHS[control.path]);
