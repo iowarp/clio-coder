@@ -55,6 +55,11 @@ export function sessionRoutes(
 	register(app, hub, routes.forkSession, ({ params, body }, context) =>
 		commands.run(`fork:${params.id}`, idempotencyKey(context), body, () => supervisor.fork(params.id, body.turnId)),
 	);
+	register(app, hub, routes.previewFleetRun, ({ params, body }) => supervisor.fleetPreview(params.id, body));
+	// A retried start answers from the ledger rather than starting the plan twice.
+	register(app, hub, routes.startFleetRun, ({ params, body }, context) =>
+		commands.run(`fleet.run:${params.id}`, idempotencyKey(context), body, () => supervisor.fleetRun(params.id, body)),
+	);
 	// A retried draft answers from the ledger rather than spending a second model round.
 	register(app, hub, routes.prepareHandoff, ({ params, body }, context) =>
 		commands.run(`handoff:${params.id}`, idempotencyKey(context), body, () =>

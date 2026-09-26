@@ -108,6 +108,15 @@ export type {
 	FleetRunStepOutcome,
 } from "./fleet-run.js";
 export { executeFleetRun, fleetPlanWaveIndex, planFleetResume } from "./fleet-run.js";
+export type {
+	FleetRunPreview,
+	FleetRunPreviewInput,
+	FleetRunPreviewResult,
+	FleetRunPreviewRoute,
+	FleetRunPreviewStep,
+	FleetRunPreviewWave,
+} from "./fleet-run-preview.js";
+export { compileFleetRunPreview, fleetRouteResolver } from "./fleet-run-preview.js";
 export type { GateDecisionArtifact, GateDecisionOutcome } from "./gate-decisions.js";
 export {
 	readGateDecisionArtifacts,

@@ -1,6 +1,7 @@
 import { type Static, Type } from "typebox";
 import { BoardCapability } from "./board.js";
 import { BranchesCapability } from "./branches.js";
+import { FleetCapability } from "./fleet-run.js";
 import { HandoffCapability } from "./handoff.js";
 
 const closed = { additionalProperties: false };
@@ -94,6 +95,8 @@ export const AgentCapabilities = Type.Object(
 		branches: Type.Optional(BranchesCapability),
 		/** Draw up, review and commit a handoff to a new session. */
 		handoff: Type.Optional(HandoffCapability),
+		/** Preview a fleet contract and start only the approved plan. */
+		fleet: Type.Optional(FleetCapability),
 		/** ACP promptCapabilities.image: the agent accepts image blocks with a request. */
 		images: Type.Optional(Type.Boolean()),
 		/** True when the agent mediates every tool through its own safety policy. */

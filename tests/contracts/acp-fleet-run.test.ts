@@ -1,0 +1,241 @@
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { realpathSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { AgentsContract } from "../../src/domains/agents/contract.js";
+import type { FleetContract } from "../../src/domains/agents/index.js";
+import {
+	agentRoleFactsResolver,
+	compileFleetRunPreview,
+	type FleetRunPreview,
+} from "../../src/domains/dispatch/index.js";
+import { AcpRequestError } from "../../src/engine/acp/errors.js";
+import {
+	ACP_FLEET_MAX_STEPS,
+	type AcpFleetControl,
+	type AcpFleetPreview,
+	projectFleetPreview,
+} from "../../src/engine/acp/fleet-run.js";
+import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
+import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
+
+function contract(root: string, stepIds: string[], agent = "coder"): FleetContract {
+	return {
+		version: 3,
+		name: "survey",
+		description: "Survey fixture",
+		path: join(root, "survey.md"),
+		body: "Survey {{site}} and report.",
+		maxWorkers: 1,
+		budgetUsd: null,
+		onFailure: "stop",
+		steps: stepIds.map((id, index) => ({
+			kind: "agent",
+			id,
+			agent,
+			scope: "readonly",
+			dependencies: index === 0 ? [] : [stepIds[index - 1] as string],
+		})),
+	} as FleetContract;
+}
+
+async function peer() {
+	const scratch = await isolateClioEnv("clio-coder-acp-fleet-");
+	const root = realpathSync(scratch.dir);
+	const context = dispatchStubContext({ settings: DEFAULT_SETTINGS });
+	const agents = context.getContract<AgentsContract>("agents");
+	ok(agents);
+	const state = { steps: ["survey", "report"], agent: "coder" };
+	const started: FleetRunPreview[] = [];
+	const control: AcpFleetControl = {
+		preview: (name, vars) =>
+			compileFleetRunPreview({
+				workspaceRoot: root,
+				name,
+				vars,
+				getAgentSpec: (id) => agents.getSpec(id),
+				roleFacts: agentRoleFactsResolver((id) => agents.getSpec(id)),
+				load: () => ({ commands: null, contract: contract(root, state.steps, state.agent) }),
+			}),
+		run: (preview) => {
+			started.push(preview);
+			return { fleetRootId: "fleet-0123456789ab" };
+		},
+	};
+	const handlers = new Map<string, (params: unknown) => unknown>();
+	let close: () => void = () => {};
+	let streaming = false;
+	const transport: AcpJsonRpcPeerTransport = {
+		closed: false,
+		request: async () => ({}) as never,
+		notify: () => {},
+		onNotification: () => () => {},
+		onRequest: (method, handler) => {
+			handlers.set(method, handler);
+			return () => handlers.delete(method);
+		},
+		onClose: (handler) => {
+			close = handler;
+			return () => {};
+		},
+		close: () => close(),
+	};
+	const done = serveClioAcpAgent({
+		transport,
+		cwd: root,
+		fleet: control,
+		autonomy: () => "default",
+		chat: {
+			submit: async () => {},
+			cancel: () => {},
+			onEvent: () => () => {},
+			isStreaming: () => streaming,
+			getSessionId: () => null,
+		},
+	});
+	const call = async (method: string, params: unknown) =>
+		(await handlers.get(method)?.(params)) as Record<string, unknown>;
+	const init = await call("initialize", { protocolVersion: 1 });
+	const { sessionId } = (await call("session/new", { cwd: root, mcpServers: [] })) as { sessionId: string };
+	return {
+		init,
+		sessionId,
+		call,
+		state,
+		started,
+		set streaming(value: boolean) {
+			streaming = value;
+		},
+		stop: async () => {
+			close();
+			await done;
+			scratch.restore();
+		},
+	};
+}
+
+async function refusal(promise: Promise<unknown>, code: string) {
+	await rejects(promise, (error: unknown) => {
+		ok(error instanceof AcpRequestError, String(error));
+		strictEqual(error.detail.code, code);
+		return true;
+	});
+}
+
+test("fleet preview compiles the contract, announces its hash, and dispatches nothing", async () => {
+	const agent = await peer();
+	try {
+		deepStrictEqual((agent.init.agentCapabilities as { _meta: Record<string, unknown> })._meta["clio-coder/fleet"], {
+			version: 1,
+			preview: "_clio-coder/fleet/preview",
+			run: "_clio-coder/fleet/run",
+		});
+		const preview = (await agent.call("_clio-coder/fleet/preview", {
+			sessionId: agent.sessionId,
+			name: "survey",
+			vars: { site: "plot-7" },
+		})) as AcpFleetPreview;
+		strictEqual(preview.status, "ready");
+		if (preview.status !== "ready") return;
+		ok(/^[0-9a-f]{64}$/u.test(preview.planHash));
+		strictEqual(preview.stepCount, 2);
+		deepStrictEqual(
+			preview.waves.map((wave) => wave.steps.map((step) => [step.stepId, step.agentId, step.scope])),
+			[[["survey", "coder", "readonly"]], [["report", "coder", "readonly"]]],
+		);
+		strictEqual(agent.started.length, 0, "preview is side-effect free");
+		await refusal(
+			agent.call("_clio-coder/fleet/preview", { sessionId: agent.sessionId, name: "../etc" }),
+			"invalid_params",
+		);
+	} finally {
+		await agent.stop();
+	}
+});
+
+test("fleet run starts only the plan whose hash was approved and refuses a changed or broken one first", async () => {
+	const agent = await peer();
+	try {
+		const base = { sessionId: agent.sessionId, name: "survey", vars: { site: "plot-7" } };
+		const preview = (await agent.call("_clio-coder/fleet/preview", base)) as Extract<
+			AcpFleetPreview,
+			{ status: "ready" }
+		>;
+
+		agent.streaming = true;
+		await refusal(agent.call("_clio-coder/fleet/run", { ...base, planHash: preview.planHash }), "prompt_active");
+		agent.streaming = false;
+
+		const otherVars = await agent.call("_clio-coder/fleet/run", {
+			...base,
+			vars: { site: "plot-8" },
+			planHash: preview.planHash,
+		});
+		strictEqual(otherVars.status, "changed", "the rendered task is part of what was approved");
+
+		agent.state.steps = ["survey", "report", "archive"];
+		const changed = await agent.call("_clio-coder/fleet/run", { ...base, planHash: preview.planHash });
+		strictEqual(changed.status, "changed");
+		ok(changed.planHash !== preview.planHash);
+		strictEqual(agent.started.length, 0, "a changed plan dispatches nothing");
+
+		agent.state.agent = "no-such-agent";
+		const broken = await agent.call("_clio-coder/fleet/run", { ...base, planHash: preview.planHash });
+		strictEqual(broken.status, "refused");
+		ok((broken.diagnostics as string[]).some((line) => line.includes("unknown agent 'no-such-agent'")));
+		strictEqual(agent.started.length, 0);
+
+		agent.state.steps = ["survey", "report"];
+		agent.state.agent = "coder";
+		const started = await agent.call("_clio-coder/fleet/run", { ...base, planHash: preview.planHash });
+		deepStrictEqual(started, {
+			status: "started",
+			name: "survey",
+			planHash: preview.planHash,
+			fleetRootId: "fleet-0123456789ab",
+			stepCount: 2,
+		});
+		strictEqual(agent.started.length, 1);
+		strictEqual(agent.started[0]?.planHash, preview.planHash, "the run is the plan that was approved");
+		await refusal(agent.call("_clio-coder/fleet/run", { ...base, planHash: "not-a-hash" }), "invalid_params");
+	} finally {
+		await agent.stop();
+	}
+});
+
+test("the fleet projection caps steps and diagnostics and strips control characters", () => {
+	const steps = Array.from({ length: ACP_FLEET_MAX_STEPS + 6 }, (_, index) => ({
+		stepId: `step-${index}\u001b[2J`,
+		kind: "agent" as const,
+		scope: "readonly" as const,
+		agentId: "coder",
+		writes: undefined,
+	}));
+	const preview = {
+		name: "wide",
+		vars: {},
+		planHash: "a".repeat(64),
+		waves: [{ index: 0, steps }],
+		budget: { ceilingUsd: 0, currentUsd: 0, contractUsd: null },
+		plan: { steps },
+	} as unknown as FleetRunPreview;
+	const ready = projectFleetPreview({ ok: true, preview });
+	strictEqual(ready.status, "ready");
+	if (ready.status !== "ready") return;
+	strictEqual(ready.truncated, true);
+	strictEqual(ready.waves[0]?.steps.length, ACP_FLEET_MAX_STEPS);
+	strictEqual(ready.stepCount, ACP_FLEET_MAX_STEPS + 6);
+	ok(ready.waves[0]?.steps.every((step) => !step.stepId.includes("\u001b")));
+	const refused = projectFleetPreview({
+		ok: false,
+		name: "wide",
+		diagnostics: Array.from({ length: 50 }, () => "x".repeat(5000)),
+	});
+	strictEqual(refused.status, "refused");
+	if (refused.status !== "refused") return;
+	strictEqual(refused.diagnostics.length, 32);
+	ok(refused.diagnostics.every((line) => Buffer.byteLength(line) <= 1024));
+});

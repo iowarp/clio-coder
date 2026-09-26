@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -337,6 +337,55 @@ const replayPath = (leaf) => {
 	}
 	return turn;
 };
+// One fleet contract, "survey": two agent steps in two waves. Its hash covers the vars, as the
+// real plan's does through the rendered task, so a changed variable is a changed plan.
+const fleetHash = (vars) =>
+	createHash("sha256")
+		.update(`survey:${JSON.stringify(vars ?? {})}`)
+		.digest("hex");
+const fleetPreview = (name, vars) =>
+	name !== "survey"
+		? {
+				status: "refused",
+				name,
+				diagnostics: [`fleet contract not found: .clio-coder/fleets/${name}.md (and no builtin named '${name}')`],
+			}
+		: {
+				status: "ready",
+				name,
+				planHash: fleetHash(vars),
+				stepCount: 2,
+				waves: [
+					{
+						index: 0,
+						steps: [
+							{
+								stepId: "survey",
+								kind: "agent",
+								scope: "readonly",
+								agentId: "scout",
+								writes: null,
+								route: { targetId: "fixture", model: "fixture-model", nodeId: "local" },
+							},
+						],
+					},
+					{
+						index: 1,
+						steps: [
+							{
+								stepId: "report",
+								kind: "agent",
+								scope: "workspace",
+								agentId: "writer",
+								writes: ["reports/"],
+								route: { targetId: "fixture", model: "fixture-small", nodeId: "local" },
+							},
+						],
+					},
+				],
+				budget: { ceilingUsd: 5, currentUsd: 0.25, contractUsd: 1 },
+				truncated: false,
+			};
 // The /handoff lifecycle a real agent runs through its shared service: a draft is
 // held under an id until it is committed, discarded, or a request moves the session.
 let pendingHandoff = null;
@@ -495,6 +544,11 @@ async function handle(frame) {
 														...(process.env.CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS !== "0" ? { promptTurns: true } : {}),
 													},
 													"clio-coder/board": { version: 1, method: "_clio-coder/session/board" },
+													"clio-coder/fleet": {
+														version: 1,
+														preview: "_clio-coder/fleet/preview",
+														run: "_clio-coder/fleet/run",
+													},
 													"clio-coder/handoff": {
 														version: 1,
 														prepare: "_clio-coder/session/handoff/prepare",
@@ -713,6 +767,33 @@ async function handle(frame) {
 					leafId: treeLeaf,
 					_meta: { "clio-coder/session": { replayed: { turns, truncated: false } } },
 				};
+				break;
+			}
+			case "_clio-coder/fleet/preview":
+				if (!COMMANDS) throw Error("method_not_found");
+				result = fleetPreview(frame.params.name, frame.params.vars);
+				break;
+			case "_clio-coder/fleet/run": {
+				if (!COMMANDS) throw Error("method_not_found");
+				const preview = fleetPreview(frame.params.name, frame.params.vars);
+				if (preview.status !== "ready") result = preview;
+				else if (preview.planHash !== frame.params.planHash)
+					result = {
+						status: "changed",
+						name: preview.name,
+						planHash: preview.planHash,
+						reason: "the plan changed since it was previewed; review it again. Nothing was dispatched",
+					};
+				else {
+					log({ fleetStarted: preview.planHash });
+					result = {
+						status: "started",
+						name: preview.name,
+						planHash: preview.planHash,
+						fleetRootId: "fleet-0123456789ab",
+						stepCount: 2,
+					};
+				}
 				break;
 			}
 			case "_clio-coder/session/handoff/prepare": {

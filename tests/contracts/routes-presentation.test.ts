@@ -1,8 +1,8 @@
 import { doesNotMatch, match, ok } from "node:assert/strict";
 import { test } from "node:test";
+import type { FleetRunPreview } from "../../src/domains/dispatch/fleet-run-preview.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createDispatchBoardView } from "../../src/interactive/dispatch-board.js";
-import type { FleetRunPreview } from "../../src/interactive/fleet-run-preview.js";
 import { formatFleetRunApprovalBody } from "../../src/interactive/overlays/fleet-run-approval.js";
 import { footerState } from "../harness/footer-fixture.js";
 

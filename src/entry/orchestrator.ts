@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
@@ -63,7 +63,12 @@ import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
 import { scheduleSpeculativeHold } from "../domains/dispatch/held-workers.js";
-import { createDispatchDomainModule } from "../domains/dispatch/index.js";
+import {
+	compileFleetRunPreview,
+	createDispatchDomainModule,
+	executeFleetRun,
+	fleetRouteResolver,
+} from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
@@ -2899,6 +2904,50 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 											: { activeLeafTurnId: leafTurnId }),
 									continuity: continuityContextFromSession(session),
 								}),
+						}
+					: {}),
+				// /fleet run's approval, split across preview and run. Both compile
+				// through the dispatch domain exactly as the terminal overlay does.
+				...(agents
+					? {
+							fleet: {
+								preview: (name: string, vars: Readonly<Record<string, string>>) => {
+									const roleFacts = agentRoleFactsResolver((id: string) => agents.getSpec(id));
+									const budget = result.getContract<SchedulingContract>("scheduling")?.preflight();
+									return compileFleetRunPreview({
+										workspaceRoot: process.cwd(),
+										name,
+										vars,
+										getAgentSpec: (agentId) => agents.getSpec(agentId),
+										roleFacts,
+										...(budget ? { budget } : {}),
+										resolveRoute: fleetRouteResolver(dispatch.preview, roleFacts),
+									});
+								},
+								run: (preview) => {
+									const fleetRootId = `fleet-${randomBytes(6).toString("hex")}`;
+									// Progress reaches the client as dispatch events; how the run
+									// ended is on its receipts and the stderr tail.
+									void executeFleetRun({
+										plan: preview.plan,
+										contractName: preview.name,
+										commands: preview.commands,
+										workspaceRoot: process.cwd(),
+										fleetRootId,
+										dispatch,
+										agents: { getSpec: (agentId) => agents.getSpec(agentId) },
+										getDecisionBoard: () => decisionBoard.snapshot(),
+										attributionEnabled: getCurrentSettings().integrations.git.commitAttribution,
+										vars: preview.vars,
+										onNotice: (text) => process.stderr.write(`[clio-coder:acp] fleet ${preview.name}: ${text}\n`),
+									}).catch((error: unknown) => {
+										process.stderr.write(
+											`[clio-coder:acp] fleet ${preview.name} failed: ${error instanceof Error ? error.message : String(error)}\n`,
+										);
+									});
+									return { fleetRootId };
+								},
+							},
 						}
 					: {}),
 				// /handoff runs the lifecycle the terminal runs. The successor is minted

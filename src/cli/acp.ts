@@ -127,6 +127,7 @@ export async function runAcpCommand(
 					board: true,
 					branches: true,
 					handoff: true,
+					fleet: true,
 					images: true,
 				});
 				const serving = serveDeferredAcp({

@@ -1,7 +1,7 @@
 import { ok } from "node:assert/strict";
 import { test } from "node:test";
+import type { FleetRunPreview } from "../../src/domains/dispatch/fleet-run-preview.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
-import type { FleetRunPreview } from "../../src/interactive/fleet-run-preview.js";
 import { formatFleetRunApprovalBody } from "../../src/interactive/overlays/fleet-run-approval.js";
 import { formatLibraryPlanReview } from "../../src/interactive/overlays/library-review.js";
 import { libraryPlanFixture } from "../harness/library-plan-fixture.js";

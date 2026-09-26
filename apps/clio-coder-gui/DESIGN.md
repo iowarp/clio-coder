@@ -528,6 +528,16 @@ and nothing is written. On success the conversation moves to the successor and s
 keeps a note naming it; the seeded document is model context, not a replayed turn, so the successor
 opens without an earlier record above the composer.
 
+Run a fleet contract in Session tools is the terminal's `/fleet run <name>` approval split in two.
+The operator names a contract and its variables (one name=value per line, checked before anything is
+sent); Preview the plan compiles it through the same dispatch-domain compiler and starts nothing. The
+plan reads as waves of steps: the step id as an exact key, the agent or command, and a quiet line
+with target, model, a remote node, the scope in words and the declared writes; then the budget in a
+sentence and the plan's short hash. A contract that cannot run lists every diagnostic with no run
+action. Run this plan carries amber, is disabled while a turn runs, and starts the plan only if it
+still hashes to the one shown; when it does not, nothing is dispatched, the panel says so, and the new
+plan replaces the old one for another review. The started runs appear in the fleet history beside it.
+
 A model is always picked from its target's catalog, never typed from memory. The route picker, the
 Settings page (`chat.model`, `fleet.default.model`, `context.memory.model` and
 `context.compaction.model`, which runs on the chat target) and the new-connection form share one
@@ -570,8 +580,8 @@ Every UI change must preserve:
 
 Covered states the smoke must visit: home in both themes, toolchain, traces and run detail,
 workspaces and sessions, a Markdown/code/Mermaid conversation, session controls, the branch view,
-a branch switch and a fork, a handoff review and its successor, a dispatch plan approval, permission
-and cancellation, and a problem notification. This design work adds three: the six status tones rendered
+a branch switch and a fork, a handoff review and its successor, a dispatch plan approval, a fleet
+contract preview and run, permission and cancellation, and a problem notification. This design work adds three: the six status tones rendered
 side by side, a focus-visible capture of a button, an input and a table cell, and one forced-colors
 pass.
 

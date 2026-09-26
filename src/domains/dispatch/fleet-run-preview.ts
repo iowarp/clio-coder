@@ -6,7 +6,9 @@
  * the same write-boundary preflight the headless `fleet` subcommands call, so
  * the overlay cannot show an operator a run that differs from the one the
  * scheduler would execute. No fleet logic is reimplemented here; this module
- * only arranges the compiled facts into rows a terminal can render.
+ * only arranges the compiled facts into rows a surface can render. The
+ * terminal's approval overlay and the ACP fleet methods both read it, so the
+ * plan a person approves is compiled one way wherever they approve it.
  *
  * A preflight failure is data, not an exception. Every diagnostic is collected
  * and returned so the overlay can render the whole list with no accept action,
@@ -24,21 +26,14 @@ import {
 	renderFleetPrompt,
 	validateFleetCommands,
 	validateFleetGraph,
-} from "../domains/agents/index.js";
-import type { AgentSpec } from "../domains/agents/spec.js";
-import {
-	bindExecutionPlanEndpoints,
-	type ExecutionPlan,
-	type ExecutionPlanStep,
-} from "../domains/dispatch/execution-plan.js";
-import {
-	type AgentRoleFactsResolver,
-	requestExecutionRole,
-	withAttemptRole,
-} from "../domains/dispatch/execution-role.js";
-import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
-import { preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
-import { formatUsd } from "./footer/widgets.js";
+} from "../agents/index.js";
+import type { AgentSpec } from "../agents/spec.js";
+import { foregroundStreamUsage } from "../providers/index.js";
+import type { DispatchContract, DispatchRequest } from "./contract.js";
+import { bindExecutionPlanEndpoints, type ExecutionPlan, type ExecutionPlanStep } from "./execution-plan.js";
+import { type AgentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "./execution-role.js";
+import { compileFleetExecutionPlan } from "./fleet-plan.js";
+import { preflightWriteBoundaries } from "./write-boundary-enforcer.js";
 
 /** Where a step would run, as the dispatch domain resolves it today. */
 export interface FleetRunPreviewRoute {
@@ -134,6 +129,13 @@ function defaultLoad(
 	// loadFleetContract already refused any unregistered command id; this read
 	// is the binding the runner executes.
 	return { contract, commands: loadFleetCommands(workspaceRoot) };
+}
+
+/** The footer's dollar format, restated so a diagnostic reads the same wherever it is shown. */
+function formatUsd(value: number): string {
+	if (!Number.isFinite(value) || value <= 0) return "$0.00";
+	if (value < 0.01) return `$${value.toFixed(4)}`;
+	return `$${value.toFixed(2)}`;
 }
 
 function describeError(error: unknown): string {
@@ -332,5 +334,38 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 			commands,
 			task,
 		},
+	};
+}
+
+/**
+ * The route each agent step would take, as the dispatch domain resolves it
+ * now, with the foreground streams already holding its endpoint. Resolution
+ * only: nothing is reserved or dispatched.
+ */
+export function fleetRouteResolver(
+	preview: DispatchContract["preview"],
+	roleFacts: AgentRoleFactsResolver,
+	foregroundUsage: () => Readonly<Record<string, number>> = foregroundStreamUsage,
+): NonNullable<FleetRunPreviewInput["resolveRoute"]> {
+	return (step) => {
+		const request: DispatchRequest = {
+			agentId: step.agentId,
+			executionRole: requestExecutionRole({ agentId: step.agentId, resolveFacts: roleFacts }),
+			task: step.task,
+			...(step.scope === "readonly" ? { readOnly: true as const } : {}),
+			...(step.target !== undefined ? { target: step.target } : {}),
+			...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
+		};
+		const resolution = preview?.(request);
+		if (!resolution) return null;
+		const foregroundHeld = resolution.endpoint === undefined ? 0 : (foregroundUsage()[resolution.endpoint.key] ?? 0);
+		return {
+			targetId: resolution.targetId,
+			wireModelId: resolution.wireModelId,
+			nodeId: resolution.node.id,
+			...(resolution.endpoint !== undefined
+				? { endpoint: { ...resolution.endpoint, ...(foregroundHeld > 0 ? { foregroundHeld } : {}) } }
+				: {}),
+		};
 	};
 }

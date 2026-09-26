@@ -11,9 +11,9 @@
  * without a TUI.
  */
 
+import type { FleetRunPreview, FleetRunPreviewStep } from "../../domains/dispatch/index.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
-import type { FleetRunPreview, FleetRunPreviewStep } from "../fleet-run-preview.js";
 import { formatUsd } from "../footer/widgets.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, formatTargetLabel, rule } from "../theme/index.js";

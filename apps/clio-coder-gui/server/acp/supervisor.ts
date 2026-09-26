@@ -5,6 +5,12 @@ import { TURN_IMAGES_MAX_BASE64, type TurnImage } from "../../contracts/attachme
 import { SessionBoard } from "../../contracts/board.js";
 import { SessionTree } from "../../contracts/branches.js";
 import { Id } from "../../contracts/common.js";
+import {
+	FleetPreview,
+	type FleetPreviewRequest,
+	type FleetRunRequest,
+	FleetRunResult,
+} from "../../contracts/fleet-run.js";
 import { HandoffCancelled, HandoffCommitted, HandoffDraft } from "../../contracts/handoff.js";
 import type { PermissionDecision } from "../../contracts/permissions.js";
 import type { SetConfigOption } from "../../contracts/session-config.js";
@@ -738,6 +744,23 @@ export class Supervisor {
 		} finally {
 			delete entry.rebase;
 		}
+	}
+	private fleeting(id: string) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.fleet)
+			throw new AppProblem("conflict", "This Clio Coder build cannot preview or start a fleet contract.");
+		return entry;
+	}
+	fleetPreview(id: string, body: Static<typeof FleetPreviewRequest>) {
+		this.fleeting(id);
+		// Compiling reads the contract, the agents and every route; a large fleet is not instant.
+		return this.projected(id, "_clio-coder/fleet/preview", { sessionId: id, ...body }, FleetPreview, BRANCH_TIMEOUT_MS);
+	}
+	fleetRun(id: string, body: Static<typeof FleetRunRequest>) {
+		const entry = this.fleeting(id);
+		if (entry.turnId || entry.rebase || entry.drafting)
+			throw new AppProblem("conflict", "Wait for the current turn to finish before starting a fleet run.");
+		return this.projected(id, "_clio-coder/fleet/run", { sessionId: id, ...body }, FleetRunResult, BRANCH_TIMEOUT_MS);
 	}
 	private handing(id: string) {
 		const entry = this.active(id);

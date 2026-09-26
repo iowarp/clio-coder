@@ -22,6 +22,7 @@ import {
 	STARTER_PROMPTS,
 	TRUNCATION_NOTE,
 } from "../chat/chat-turn.js";
+import { FleetRunPanel } from "../chat/FleetRunPanel.js";
 import { FleetStrip, LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import { HandoffPanel } from "../chat/HandoffPanel.js";
@@ -409,6 +410,13 @@ function SessionTools({
 						running={session.turns.at(-1)?.status === "running"}
 					/>
 					<CommandPanel client={client} sessionId={session.id} sessionOpen={session.state === "open"} />
+					<FleetRunPanel
+						client={client}
+						sessionId={session.id}
+						sessionOpen={session.state === "open"}
+						capabilities={capabilities}
+						running={session.turns.at(-1)?.status === "running"}
+					/>
 					<FleetStrip client={client} session={session} />
 					<div className="conversation__close">
 						<p>

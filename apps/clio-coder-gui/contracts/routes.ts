@@ -17,6 +17,7 @@ import {
 	FleetRootDetail,
 	FleetRoots,
 } from "./fleet.js";
+import { FleetPreview, FleetPreviewRequest, FleetRunRequest, FleetRunResult } from "./fleet-run.js";
 import {
 	HandoffCancelled,
 	HandoffCancelRequest,
@@ -461,6 +462,24 @@ export const routes = {
 		body: BranchRequest,
 		response: Forked,
 		summary: "Start a new conversation from a turn; workspace files are not rewound",
+	}),
+	previewFleetRun: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/fleet/preview",
+		params: operationParams,
+		body: FleetPreviewRequest,
+		response: FleetPreview,
+		summary: "Compile a fleet contract for review; nothing is dispatched",
+	}),
+	startFleetRun: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/fleet/run",
+		params: operationParams,
+		body: FleetRunRequest,
+		response: FleetRunResult,
+		summary: "Start a fleet contract only when its plan still hashes to the approved one",
 	}),
 	prepareHandoff: defineRoute({
 		...post,

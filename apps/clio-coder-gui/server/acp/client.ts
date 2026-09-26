@@ -13,6 +13,7 @@ import {
 	ToolProgressCapability,
 } from "../../contracts/capabilities.js";
 import { Id } from "../../contracts/common.js";
+import { FleetCapability } from "../../contracts/fleet-run.js";
 import { HandoffCapability } from "../../contracts/handoff.js";
 import type { SessionConfig } from "../../contracts/session-config.js";
 import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
@@ -66,6 +67,7 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("board", optional(BoardCapability, meta["clio-coder/board"])),
 		...maybe("branches", optional(BranchesCapability, meta["clio-coder/branches"])),
 		...maybe("handoff", optional(HandoffCapability, meta["clio-coder/handoff"])),
+		...maybe("fleet", optional(FleetCapability, meta["clio-coder/fleet"])),
 	};
 }
 const closed = { additionalProperties: false };

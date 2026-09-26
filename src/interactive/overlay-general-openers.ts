@@ -3,8 +3,13 @@ import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
-import type { DispatchContract, DispatchRequest } from "../domains/dispatch/index.js";
-import { agentRoleFactsResolver, executeFleetRun, requestExecutionRole } from "../domains/dispatch/index.js";
+import type { DispatchContract, FleetRunPreview, FleetRunPreviewInput } from "../domains/dispatch/index.js";
+import {
+	agentRoleFactsResolver,
+	compileFleetRunPreview,
+	executeFleetRun,
+	fleetRouteResolver,
+} from "../domains/dispatch/index.js";
 import type { MemoryRecord } from "../domains/memory/index.js";
 import {
 	canonicalMemoryRepositoryIdentity,
@@ -13,7 +18,6 @@ import {
 } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { renderCostAggregate } from "../domains/observability/index.js";
-import { foregroundStreamUsage } from "../domains/providers/index.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionMeta } from "../domains/session/index.js";
 import { foldSessionArtifacts } from "../domains/session/session-artifacts.js";
@@ -30,8 +34,6 @@ import { openContextOverlay } from "./context-overlay.js";
 import type { createDispatchBoardView } from "./dispatch-board.js";
 import { isDispatchBoardRowCancellable, isDispatchBoardRowSteerable } from "./dispatch-board.js";
 import type { DraftVerdict } from "./drafts.js";
-import type { FleetRunPreview, FleetRunPreviewInput } from "./fleet-run-preview.js";
-import { compileFleetRunPreview } from "./fleet-run-preview.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
 import type { HintEntry } from "./overlay-frame.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
@@ -542,33 +544,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			roleFacts,
 			...(budget ? { budget } : {}),
 			...(deps.loadFleetSources ? { load: deps.loadFleetSources } : {}),
-			resolveRoute: (step) => {
-				const request: DispatchRequest = {
-					agentId: step.agentId,
-					executionRole: requestExecutionRole({ agentId: step.agentId, resolveFacts: roleFacts }),
-					task: step.task,
-					...(step.scope === "readonly" ? { readOnly: true as const } : {}),
-					...(step.target !== undefined ? { target: step.target } : {}),
-					...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
-				};
-				const resolution = deps.dispatch.preview?.(request);
-				if (!resolution) return null;
-				const foregroundHeld =
-					resolution.endpoint === undefined ? 0 : (foregroundStreamUsage()[resolution.endpoint.key] ?? 0);
-				return {
-					targetId: resolution.targetId,
-					wireModelId: resolution.wireModelId,
-					nodeId: resolution.node.id,
-					...(resolution.endpoint !== undefined
-						? {
-								endpoint: {
-									...resolution.endpoint,
-									...(foregroundHeld > 0 ? { foregroundHeld } : {}),
-								},
-							}
-						: {}),
-				};
-			},
+			resolveRoute: fleetRouteResolver(deps.dispatch.preview, roleFacts),
 		});
 
 		deps.transitions.state = "fleet-run-approval";

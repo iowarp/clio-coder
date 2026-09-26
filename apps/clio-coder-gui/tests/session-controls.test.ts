@@ -300,6 +300,38 @@ test("a dispatch ask carries the admitted plan to the permission, and an unknown
 	assert.match(await readFile(join(h.home.path, "acp.jsonl"), "utf8"), /"planPermission".*"approved":true/);
 });
 
+test("a fleet preview dispatches nothing and a run starts only the approved hash", async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const base = `/api/sessions/${session.id}/fleet`;
+	const preview = await json(
+		await h.post(`${base}/preview`, { name: "survey", vars: { site: "plot-7" } }),
+		routes.previewFleetRun.response,
+	);
+	assert.equal(preview.status, "ready");
+	if (preview.status !== "ready") return;
+	assert.equal(preview.waves.length, 2);
+	assert.doesNotMatch(await readFile(join(h.home.path, "acp.jsonl"), "utf8"), /fleetStarted/);
+	const missing = await json(await h.post(`${base}/preview`, { name: "nope" }), routes.previewFleetRun.response);
+	assert.equal(missing.status, "refused");
+	assert.equal((await h.post(`${base}/preview`, { name: "../x" })).status, 422);
+	const changed = await json(
+		await h.post(`${base}/run`, { name: "survey", vars: { site: "plot-8" }, planHash: preview.planHash }),
+		routes.startFleetRun.response,
+	);
+	assert.equal(changed.status, "changed");
+	assert.doesNotMatch(await readFile(join(h.home.path, "acp.jsonl"), "utf8"), /fleetStarted/);
+	const run = { name: "survey", vars: { site: "plot-7" }, planHash: preview.planHash };
+	const started = await json(await h.post(`${base}/run`, run, "fleet-1"), routes.startFleetRun.response);
+	assert.equal(started.status, "started");
+	assert.equal((await h.post(`${base}/run`, run, "fleet-1")).status, 200);
+	assert.equal((await readFile(join(h.home.path, "acp.jsonl"), "utf8")).match(/fleetStarted/g)?.length, 1);
+	assert.equal((await h.post(`/api/sessions/${session.id}/turns`, { text: "[stream]" })).status, 202);
+	assert.equal((await h.post(`${base}/run`, run)).status, 409, "a running turn owns the workspace");
+});
+
 test("an older ACP peer has no branches and refuses tree, switch and fork before sending", async (t) => {
 	const h = await harness();
 	t.after(h.close);
@@ -310,9 +342,10 @@ test("an older ACP peer has no branches and refuses tree, switch and fork before
 	assert.equal((await h.post(`${base}/branch`, { turnId: "a1" })).status, 409);
 	assert.equal((await h.post(`${base}/fork`, { turnId: "a1" })).status, 409);
 	assert.equal((await h.post(`${base}/handoff`, { goal: "Finish the survey report" })).status, 409);
+	assert.equal((await h.post(`${base}/fleet/preview`, { name: "survey" })).status, 409);
 	assert.doesNotMatch(
 		await readFile(join(h.home.path, "acp.jsonl"), "utf8"),
-		/session\/(tree|switch_turn|fork|handoff)/,
+		/session\/(tree|switch_turn|fork|handoff)|fleet\//,
 	);
 });
 

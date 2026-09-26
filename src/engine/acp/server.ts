@@ -43,6 +43,13 @@ import type { AcpCommandCatalog, AcpCommandControl } from "./commands.js";
 import { ACP_DISPATCH_PLAN_META_KEY, projectDispatchPlanMeta } from "./dispatch-plan-meta.js";
 import { ACP_TURN_FAILED_MESSAGE, AcpRequestError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
 import {
+	ACP_FLEET_META_KEY,
+	ACP_FLEET_PREVIEW_METHOD,
+	ACP_FLEET_RUN_METHOD,
+	type AcpFleetControl,
+	projectFleetPreview,
+} from "./fleet-run.js";
+import {
 	ACP_SESSION_FORK_METHOD,
 	ACP_SESSION_SWITCH_TURN_METHOD,
 	ACP_SESSION_TREE_METHOD,
@@ -211,6 +218,12 @@ export interface ClioAcpServerOptions {
 	 * the three handoff methods are not announced and refuse.
 	 */
 	handoff?: AcpHandoffControl;
+	/**
+	 * The terminal's `/fleet run` approval: compile a named fleet contract for
+	 * review and start it only against the hash that was approved. Absent means
+	 * the two fleet methods are not announced and refuse.
+	 */
+	fleet?: AcpFleetControl;
 	/**
 	 * Expands operator syntax in a prompt as the terminal does before it submits:
 	 * `@path` file and image references, prompt templates and `/skill` requests,
@@ -2127,6 +2140,8 @@ export interface AcpHandshakeFeatures {
 	branches?: boolean;
 	/** Whether the handoff prepare, commit and cancel methods answer; absent reads as false. */
 	handoff?: boolean;
+	/** Whether the fleet preview and run methods answer; absent reads as false. */
+	fleet?: boolean;
 	/** Whether prompts are expanded, which is what admits image blocks; absent reads as false. */
 	images?: boolean;
 }
@@ -2361,6 +2376,15 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 									},
 								}
 							: {}),
+						...(features.fleet
+							? {
+									[ACP_FLEET_META_KEY]: {
+										version: 1,
+										preview: ACP_FLEET_PREVIEW_METHOD,
+										run: ACP_FLEET_RUN_METHOD,
+									},
+								}
+							: {}),
 						...(features.handoff
 							? {
 									[ACP_HANDOFF_META_KEY]: {
@@ -2434,6 +2458,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			board: options.board !== undefined,
 			branches: branchesWired(options),
 			handoff: handoffWired(options),
+			fleet: options.fleet !== undefined,
 			images: options.expandPrompt !== undefined,
 		});
 	const workspaceInstanceId = handshake.workspaceInstanceId;
@@ -3554,6 +3579,93 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const cancelled = pendingHandoff?.handoffId === handoffId && pendingHandoff.sessionId === bound.id;
 		if (cancelled) pendingHandoff = null;
 		return { cancelled };
+	});
+
+	const requireFleet = (): AcpFleetControl => {
+		if (options.fleet === undefined) throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		return options.fleet;
+	};
+	/** A contract name is a file stem under the workspace's fleets, never a path. */
+	const fleetName = (value: unknown): string => {
+		const name = requireBoundedClientString(value, "name", 128);
+		if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(name) || name.includes("..")) {
+			throw new AcpRequestError(-32602, "name is invalid", { code: "invalid_params" });
+		}
+		return name;
+	};
+	const fleetVars = (value: unknown): Record<string, string> => {
+		if (value === undefined) return {};
+		if (!isRecord(value) || Object.keys(value).length > 32) {
+			throw new AcpRequestError(-32602, "vars must be an object of at most 32 strings", { code: "invalid_params" });
+		}
+		const vars: Record<string, string> = {};
+		for (const [key, entry] of Object.entries(value)) {
+			if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/u.test(key)) {
+				throw new AcpRequestError(-32602, "a variable name is invalid", { code: "invalid_params" });
+			}
+			vars[key] = requireBoundedClientString(entry, "vars", 4096, { allowEmpty: true });
+		}
+		return vars;
+	};
+	const compileFleet = (control: AcpFleetControl, name: string, vars: Record<string, string>) => {
+		try {
+			return control.preview(name, vars);
+		} catch (error) {
+			options.diagnostics?.(`fleet preview failed: ${acpErrorMessage(error)}`);
+			throw new AcpRequestError(-32603, "fleet preview failed", { code: "internal_error" });
+		}
+	};
+
+	// Compile a named fleet contract for review. Nothing is dispatched, reserved or written.
+	options.transport.onRequest(ACP_FLEET_PREVIEW_METHOD, (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "name", "vars"]));
+		const control = requireFleet();
+		getSession(request);
+		return projectFleetPreview(compileFleet(control, fleetName(request.name), fleetVars(request.vars)));
+	});
+
+	// Start the plan the client approved, and only that plan: it is compiled
+	// again here and refused before any dispatch when its hash moved.
+	options.transport.onRequest(ACP_FLEET_RUN_METHOD, (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "name", "vars", "planHash"]));
+		const control = requireFleet();
+		const bound = getSession(request);
+		// Refused, never queued: an approved plan describes the workspace as it
+		// stands, and a turn still in flight is about to change it.
+		requireIdle(bound, "start a fleet run");
+		const name = fleetName(request.name);
+		const vars = fleetVars(request.vars);
+		if (typeof request.planHash !== "string" || !/^[0-9a-f]{64}$/u.test(request.planHash)) {
+			throw new AcpRequestError(-32602, "planHash is invalid", { code: "invalid_params" });
+		}
+		const result = compileFleet(control, name, vars);
+		if (!result.ok) return projectFleetPreview(result);
+		if (result.preview.planHash !== request.planHash) {
+			return {
+				status: "changed" as const,
+				name: projectFleetPreview(result).name,
+				planHash: result.preview.planHash,
+				reason: "the plan changed since it was previewed; review it again. Nothing was dispatched",
+			};
+		}
+		let started: { fleetRootId: string };
+		try {
+			started = control.run(result.preview);
+		} catch (error) {
+			options.diagnostics?.(`fleet run failed to start: ${acpErrorMessage(error)}`);
+			throw new AcpRequestError(-32603, "fleet run failed to start", { code: "internal_error" });
+		}
+		return {
+			status: "started" as const,
+			name,
+			planHash: result.preview.planHash,
+			fleetRootId: boundString(started.fleetRootId, 128),
+			stepCount: result.preview.plan.steps.length,
+		};
 	});
 
 	options.transport.onRequest("_clio-coder/session/label", (params) => {

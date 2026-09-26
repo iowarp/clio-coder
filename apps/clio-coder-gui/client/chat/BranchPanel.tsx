@@ -106,7 +106,8 @@ export const BranchPanel = memo(function BranchPanel({
 					</p>
 					{view.forkedFrom ? (
 						<p className="session-board__note">
-							Forked from an earlier conversation at turn <code>{view.forkedFrom.turnId}</code>.
+							Forked from an earlier conversation at turn <span className="session-board__hash">{view.forkedFrom.turnId}</span>
+							.
 						</p>
 					) : null}
 					{view.rows.length === 0 ? (

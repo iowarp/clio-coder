@@ -155,3 +155,13 @@
 .handoff-panel__refusal--warning strong {
 	color: var(--status-warn-fg);
 }
+.session-board__hash {
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink);
+}
+.fleet-run-panel .handoff-panel__refusal ul {
+	margin: var(--space-2) 0 0;
+	padding-inline-start: var(--space-5);
+}

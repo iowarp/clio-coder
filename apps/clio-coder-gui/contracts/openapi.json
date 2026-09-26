@@ -9918,6 +9918,25 @@
 											},
 											"additionalProperties": false
 										},
+										"fleet": {
+											"type": "object",
+											"required": ["version", "preview", "run"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"preview": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"run": {
+													"type": "string",
+													"maxLength": 128
+												}
+											},
+											"additionalProperties": false
+										},
 										"images": {
 											"type": "boolean"
 										},
@@ -11684,6 +11703,639 @@
 										}
 									},
 									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/fleet/preview": {
+			"post": {
+				"operationId": "previewFleetRun",
+				"summary": "Compile a fleet contract for review; nothing is dispatched",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["name"],
+								"properties": {
+									"name": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128,
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+									},
+									"vars": {
+										"type": "object",
+										"patternProperties": {
+											"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$": {
+												"type": "string",
+												"maxLength": 4096
+											}
+										},
+										"maxProperties": 32
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["status", "name", "planHash", "stepCount", "waves", "budget", "truncated"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "ready"
+												},
+												"name": {
+													"type": "string",
+													"maxLength": 520
+												},
+												"planHash": {
+													"type": "string",
+													"pattern": "^[0-9a-f]{64}$"
+												},
+												"stepCount": {
+													"type": "integer",
+													"minimum": 0
+												},
+												"waves": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["index", "steps"],
+														"properties": {
+															"index": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"steps": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["stepId", "kind", "scope", "writes"],
+																	"properties": {
+																		"stepId": {
+																			"type": "string",
+																			"maxLength": 520
+																		},
+																		"kind": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "agent"
+																				},
+																				{
+																					"type": "string",
+																					"const": "code"
+																				}
+																			]
+																		},
+																		"scope": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "readonly"
+																				},
+																				{
+																					"type": "string",
+																					"const": "workspace"
+																				}
+																			]
+																		},
+																		"agentId": {
+																			"type": "string",
+																			"maxLength": 520
+																		},
+																		"commandId": {
+																			"type": "string",
+																			"maxLength": 520
+																		},
+																		"argv": {
+																			"type": "array",
+																			"items": {
+																				"type": "string",
+																				"maxLength": 520
+																			},
+																			"maxItems": 16
+																		},
+																		"writes": {
+																			"anyOf": [
+																				{
+																					"type": "array",
+																					"items": {
+																						"type": "string",
+																						"maxLength": 520
+																					},
+																					"maxItems": 16
+																				},
+																				{
+																					"type": "null"
+																				}
+																			]
+																		},
+																		"route": {
+																			"type": "object",
+																			"required": ["targetId", "model", "nodeId"],
+																			"properties": {
+																				"targetId": {
+																					"type": "string",
+																					"maxLength": 520
+																				},
+																				"model": {
+																					"type": "string",
+																					"maxLength": 520
+																				},
+																				"nodeId": {
+																					"type": "string",
+																					"maxLength": 520
+																				},
+																				"endpoint": {
+																					"type": "object",
+																					"required": ["label", "limit"],
+																					"properties": {
+																						"label": {
+																							"type": "string",
+																							"maxLength": 520
+																						},
+																						"limit": {
+																							"type": "integer",
+																							"minimum": 0
+																						}
+																					},
+																					"additionalProperties": false
+																				}
+																			},
+																			"additionalProperties": false
+																		},
+																		"loop": {
+																			"type": "object",
+																			"required": ["loopId", "role", "attempt"],
+																			"properties": {
+																				"loopId": {
+																					"type": "string",
+																					"maxLength": 520
+																				},
+																				"role": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"const": "check"
+																						},
+																						{
+																							"type": "string",
+																							"const": "repair"
+																						}
+																					]
+																				},
+																				"attempt": {
+																					"type": "integer",
+																					"minimum": 0
+																				}
+																			},
+																			"additionalProperties": false
+																		},
+																		"gate": {
+																			"type": "object",
+																			"required": ["path"],
+																			"properties": {
+																				"path": {
+																					"type": "string",
+																					"maxLength": 520
+																				}
+																			},
+																			"additionalProperties": false
+																		},
+																		"target": {
+																			"type": "string",
+																			"maxLength": 520
+																		},
+																		"profile": {
+																			"type": "string",
+																			"maxLength": 520
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																"maxItems": 64
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 64
+												},
+												"budget": {
+													"type": "object",
+													"required": ["ceilingUsd", "currentUsd", "contractUsd"],
+													"properties": {
+														"ceilingUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"currentUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"contractUsd": {
+															"anyOf": [
+																{
+																	"type": "number",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														}
+													},
+													"additionalProperties": false
+												},
+												"truncated": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status", "name", "diagnostics"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "refused"
+												},
+												"name": {
+													"type": "string",
+													"maxLength": 520
+												},
+												"diagnostics": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 1100
+													},
+													"maxItems": 32
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/fleet/run": {
+			"post": {
+				"operationId": "startFleetRun",
+				"summary": "Start a fleet contract only when its plan still hashes to the approved one",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["name", "planHash"],
+								"properties": {
+									"name": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128,
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+									},
+									"vars": {
+										"type": "object",
+										"patternProperties": {
+											"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$": {
+												"type": "string",
+												"maxLength": 4096
+											}
+										},
+										"maxProperties": 32
+									},
+									"planHash": {
+										"type": "string",
+										"pattern": "^[0-9a-f]{64}$"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["status", "name", "planHash", "fleetRootId", "stepCount"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "started"
+												},
+												"name": {
+													"type": "string",
+													"maxLength": 520
+												},
+												"planHash": {
+													"type": "string",
+													"pattern": "^[0-9a-f]{64}$"
+												},
+												"fleetRootId": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"stepCount": {
+													"type": "integer",
+													"minimum": 0
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status", "name", "planHash", "reason"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "changed"
+												},
+												"name": {
+													"type": "string",
+													"maxLength": 520
+												},
+												"planHash": {
+													"type": "string",
+													"pattern": "^[0-9a-f]{64}$"
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 512
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status", "name", "diagnostics"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "refused"
+												},
+												"name": {
+													"type": "string",
+													"maxLength": 520
+												},
+												"diagnostics": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 1100
+													},
+													"maxItems": 32
+												}
+											},
+											"additionalProperties": false
+										}
+									]
 								}
 							}
 						},

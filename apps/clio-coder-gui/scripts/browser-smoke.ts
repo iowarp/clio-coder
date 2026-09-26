@@ -887,6 +887,25 @@ try {
 		await page.getByRole("button", { name: "Stop turn", exact: true }).click();
 		await page.waitForFunction(() => !document.querySelector(".session-status")?.textContent?.includes("working"));
 		await check("cancelled");
+		// A fleet contract: preview compiles and starts nothing; the run starts the plan shown.
+		await page.locator(".conversation__tools > summary").click();
+		await page.getByText("Run a fleet contract", { exact: true }).click();
+		const fleetPanel = page.locator(".fleet-run-panel");
+		await fleetPanel.getByLabel("Contract name", { exact: true }).fill("survey");
+		await fleetPanel.getByLabel("Variables, one name=value per line", { exact: true }).fill("site=plot-7");
+		await fleetPanel.getByRole("button", { name: "Preview the plan", exact: true }).click();
+		await fleetPanel.getByRole("heading", { name: "Fleet survey: 2 steps in 2 waves", exact: true }).waitFor();
+		assert.match(await fleetPanel.innerText(), /Writes reports\//);
+		await check("fleet-run-preview");
+		if (width === 1600 || width === 390) {
+			await fleetPanel.scrollIntoViewIfNeeded();
+			await page.screenshot({ path: join(output, `fleet-run-preview-${width}.png`) });
+		}
+		await fleetPanel.getByRole("button", { name: "Run this plan", exact: true }).click();
+		await page.locator(".notice-region .notice", { hasText: "Fleet survey started" }).waitFor();
+		// Dismissing the notice is a press outside Session tools, which closes the menu.
+		await page.getByRole("button", { name: "Dismiss Fleet survey started", exact: true }).click();
+		await page.waitForFunction(() => !(document.querySelector(".conversation__tools") as HTMLDetailsElement).open);
 		// Branches: continuing from an earlier reply replays only that branch; forking moves the
 		// conversation to a new session and says the project's files were left alone.
 		await page.locator(".conversation__tools > summary").click();
