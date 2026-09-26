@@ -1,3 +1,4 @@
+import { inertQuotedMatch } from "./literal-exemption.js";
 import { globSync, lstatSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -5,7 +6,8 @@ import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
 import { normalizeToolPath } from "../../tools/path-utils.js";
-import { type CommandPathEvent, extractCommandPathWalks } from "./protected-artifacts.js";
+import type { CommandPathEvent } from "./protected-artifacts.js";
+import { extractCommandPathWalks } from "./protected-artifacts.js";
 
 /**
  * Deterministic action classifier for tool calls. Pure function, no I/O, no
@@ -195,7 +197,7 @@ function scanStringOf(args: Record<string, unknown> | undefined): string {
 
 function matchFirst(patterns: ReadonlyArray<NamedPattern>, haystack: string): NamedPattern | null {
 	for (const p of patterns) {
-		if (p.re.test(haystack)) return p;
+		if (p.re.test(haystack) && !inertQuotedMatch(haystack, p.re)) return p;
 	}
 	return null;
 }

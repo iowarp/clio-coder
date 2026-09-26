@@ -1,3 +1,4 @@
+import { inertQuotedMatch } from "./literal-exemption.js";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1073,7 +1074,14 @@ function blockDecision(
  */
 function matchSourcedRule(candidates: ReadonlyArray<string>, rules: ReadonlyArray<SourcedRule>) {
 	for (const entry of rules) {
-		if (!candidates.some((candidate) => entry.rule.pattern.test(candidate))) continue;
+		if (
+			!candidates.some(
+				(candidate) =>
+					entry.rule.pattern.test(candidate) &&
+					!inertQuotedMatch(candidates[0] ?? candidate, entry.rule.pattern, entry.rule.id),
+			)
+		)
+			continue;
 		const match: DamageControlMatch = {
 			ruleId: entry.rule.id,
 			reason: `matched ${entry.rule.id}: ${entry.rule.description}`,
