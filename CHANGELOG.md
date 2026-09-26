@@ -2,6 +2,52 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Safety
+
+- Damage control no longer blocks a destructive command that appears only as quoted text in `echo` or `printf` arguments, a `git commit -m` or `git tag -m` message, or a `grep` or `rg` pattern, including when the bash call names a working directory. The exemption applies only when the whole command has no `eval`, pipe, heredoc, substitution, shell, interpreter or wrapper command, and never to SQL rules. Every other command is still scanned whole.
+- Git commands are normalized before rule matching. Quoted program, subcommand and option words, global options before the subcommand (`-C`, `--git-dir`, `-c`), combined short flags, unique abbreviations of destructive long options and backslash-newline continuations get the same handling as their plain spellings, so commands like these may now ask or hit a hard block where they used to run.
+- Checking out the whole worktree and forced checkout ask for confirmation, and a `+`-prefixed push refspec is blocked like `--force`.
+- `git push --force-with-lease` follows the ordinary git rail instead of being blocked as an unconditional force push.
+- `git clean` previews (`-n`, `--dry-run` and combined forms such as `-nd`) run, while a forced clean is still blocked.
+- `git restore --source=<ref>` for named files follows the ordinary git rail. Whole-worktree restores and `git branch -d` still ask.
+
+### Receipts and evidence
+
+- A `verify` check whose only calls were blocked seals no typed validation fact, so a check that never ran no longer reads as failed, and read-only runs stop showing `quality validation failed` for denied checks.
+- Worker instructions leave denied checks out of `validations` and cite read sources in the summary. A report that changed nothing may use an empty `validations` array with unmeasured quality, and so may an editing report when every check it attempted was blocked. Receipts sealed by earlier builds still verify unchanged.
+- Validation grounding treats `npm test`, `pnpm test` and `yarn test` and their `run test` forms as one command, including the test command `verify` records and a claim that ends in a colon. Other script names stay distinct.
+
+### Providers and doctor
+
+- Inception Mercury keeps its required `reasoning_effort: "instant"` in chat turns and tool probes. Before, model discovery could strip it, and Mercury spent the token budget on hidden reasoning.
+- `doctor --deep` reports a target whose runtime has no live probe, such as OpenAI Codex and Anthropic Max subscriptions, as INFO with its credential source. Missing credentials and failed health checks stay WARN.
+- `doctor --fix` regenerates a stale or missing Yazi files-pane profile. A profile that is missing before first use is INFO, a failed generation stays WARN until it succeeds, and an unwritable cache reports a profile error instead of throwing.
+- Doctor no longer reports an installed Slurm client as a working scheduler when the host has no Slurm configuration or controller to reach, and it says so.
+
+### Quota
+
+- **Behavior change:** When any Clio directory is relocated through `CLIO_CODER_HOME` or a `CLIO_CODER_*_DIR` variable, quota no longer reads the Codex, Claude Code or agy CLI credentials from your real home unless that product's own home is set (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `ANTIGRAVITY_HOME`). Default homes keep showing those accounts, and Clio's own Anthropic Max credentials work in either.
+- The Local AI `$0.00` row appears only when a local-runtime target is configured.
+
+### Terminal interface
+
+- Live Fleet runs sit in a section just above the composer instead of an island painted over the transcript, and the section takes no rows when nothing is running.
+- `/settings targets` adds a target and edits a target's URL, runtime and default model inside the TUI through the configure wizard in the dock, and `/config` opens the same settings surface (#385).
+- With an empty composer, `?` opens a docked key card, `←` opens Fleet Runs and `↓` opens Tasks. With a draft, those keys type and move the cursor as before.
+- Task cards are grouped under section headings with empty states.
+- `/usage` opens on a new Activity tab with a workspace heatmap of session, git and quota activity, and the other tabs move to `2` through `5`.
+- The footer, fleet route labels, model picker marks and council detail share one wording and one set of marks, and machine metrics are sampled only while Status is open.
+
+### Fixes
+
+- Internal dispatches (bootstrap, wiki generation, oracle, watchdog and retries) report their typed-scope diagnostic once per root run instead of repeating the path inventory on every attempt.
+
+### Development
+
+- CI runs the installed-package suite on every push as part of the required `ci (22)` check, so a packaging break no longer waits for release qualification to surface.
+
 ## 0.5.6 - 2026-09-25
 
 ### Autonomy
