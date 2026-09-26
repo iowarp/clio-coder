@@ -90,7 +90,7 @@ describe("contracts/acp exposes the operator command catalog only when one is wi
 		strictEqual(init.agentCapabilities._meta["clio-coder/commands"], undefined);
 		await rejects(
 			() => peer.call("_clio-coder/commands/list", {}),
-			(error: unknown) => error instanceof AcpRequestError && error.detail?.code === "internal_error",
+			(error: unknown) => error instanceof AcpRequestError && error.detail?.code === "method_not_found",
 		);
 		peer.transport.close();
 		strictEqual(await served, 0);
@@ -108,11 +108,13 @@ describe("contracts/acp exposes the operator command catalog only when one is wi
 		});
 		const init = (await peer.call("initialize", { protocolVersion: 1, clientCapabilities: {} })) as {
 			protocolVersion: number;
-			agentCapabilities: { _meta: Record<string, { count?: number }> };
+			agentCapabilities: { _meta: Record<string, { count?: number; list?: string; invoke?: string }> };
 		};
 		// Everything rides `_meta`; the version stays where every existing client expects it.
 		strictEqual(init.protocolVersion, 1);
-		strictEqual(init.agentCapabilities._meta["clio-coder/commands"]?.count, 13);
+		// The announcement names the two methods; how many commands the host wired is the catalog's to say.
+		strictEqual(init.agentCapabilities._meta["clio-coder/commands"]?.list, "_clio-coder/commands/list");
+		strictEqual(init.agentCapabilities._meta["clio-coder/commands"]?.count, undefined);
 		const session = (await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
 		strictEqual(await peer.call("_clio-coder/commands/list", {}), CATALOG);
 		await peer.call("_clio-coder/commands/list", {});

@@ -2809,10 +2809,20 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		modes: modeState(session),
 		configOptions: configOptions(session),
 	});
+	// The catalog is rebuilt from `commandReference()` on every call and a
+	// palette legitimately re-reads it after a reload, so it is memoized against
+	// a client that polls and against every prompt that checks for a typed
+	// command. Availability is fixed by the host callbacks wired when this server
+	// is created; session/route changes do not alter that wiring.
+	let commandCatalog: AcpCommandCatalog | null = null;
+	const catalog = () => {
+		if (options.commands === undefined) return undefined;
+		commandCatalog ??= options.commands.catalog();
+		return commandCatalog;
+	};
 	const availableCommands = () =>
-		options.commands
-			?.catalog()
-			.commands.filter((command) => command.injectsUserTurn !== true && command.streams === undefined)
+		catalog()
+			?.commands.filter((command) => command.injectsUserTurn !== true && command.streams === undefined)
 			.map((command) => ({
 				name: command.name,
 				description: command.summary,
@@ -3220,20 +3230,14 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 	});
 
-	// The catalog is rebuilt from `commandReference()` on every call and a
-	// palette legitimately re-reads it after a reload, so it is memoized against
-	// a client that polls. Availability is fixed by the host callbacks wired
-	// when this server is created; session/route changes do not alter that wiring.
-	let commandCatalog: AcpCommandCatalog | null = null;
-
 	options.transport.onRequest(ACP_COMMANDS_LIST_METHOD, (params) => {
 		requireInitialized();
 		assertParamKeys(params, new Set());
-		if (options.commands === undefined) {
+		const listed = catalog();
+		if (listed === undefined) {
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
-		commandCatalog ??= options.commands.catalog();
-		return commandCatalog;
+		return listed;
 	});
 
 	options.transport.onRequest(ACP_COMMANDS_INVOKE_METHOD, (params) => {
