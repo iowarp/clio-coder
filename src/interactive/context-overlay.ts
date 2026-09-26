@@ -100,6 +100,8 @@ function formatChurn(view: WorkingSetView): string {
 export interface WorkingSetConfigView {
 	enabled: boolean;
 	policy: string;
+	profile?: string;
+	rearmFraction?: number;
 }
 
 /**
@@ -120,7 +122,9 @@ function workingSetPolicyLabel(view: WorkingSetView, config: WorkingSetConfigVie
 	const state = view.evictionEvents === 0 ? " · no events yet" : "";
 	const lastRan =
 		view.lastPolicyId !== null && view.lastPolicyId !== config.policy ? ` (last event by ${view.lastPolicyId})` : "";
-	return `policy ${config.policy}${lastRan}${state}`;
+	const profile = config.profile && config.profile !== "default" ? ` · profile ${config.profile}` : "";
+	const band = config.rearmFraction === undefined ? "" : ` · rearm ${Number((config.rearmFraction * 100).toFixed(2))}%`;
+	return `policy ${config.policy}${lastRan}${profile}${band}${state}`;
 }
 
 function renderWorkingSetLines(view: WorkingSetView, config: WorkingSetConfigView | null | undefined): string[] {
