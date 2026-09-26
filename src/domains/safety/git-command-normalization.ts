@@ -54,6 +54,7 @@ export function normalizedGitCommands(command: string): string[] {
 /** Git parses combined flags and unique long-option prefixes before acting. */
 function normalizeGitFlags(words: string[]): string[] {
 	const subcommand = words[0] ?? "";
+	// Clean and checkout each have one --f... option, so Git accepts its force prefixes.
 	const options =
 		subcommand === "reset"
 			? [
@@ -69,7 +70,9 @@ function normalizeGitFlags(words: string[]): string[] {
 				]
 			: subcommand === "push"
 				? ["--force", "--force-with-lease", "--force-if-includes", "--follow-tags", "--delete", "--dry-run"]
-				: [];
+				: subcommand === "clean" || subcommand === "checkout"
+					? ["--force"]
+					: [];
 	let operands = false;
 	return words.flatMap((word, index) => {
 		if (index === 0 || operands) return [word];

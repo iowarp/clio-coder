@@ -39,3 +39,21 @@ it("review round 2 G: checkout discard forms and force push refspecs are gated",
 		for (const level of ["default", "yolo"] as const)
 			strictEqual(engine.evaluate({ tool: "bash", args: { command } }, level).kind, expected, command);
 });
+
+it("accepted clean and checkout force prefixes retain destructive rails", () => {
+	const engine = createSafetyPolicyEngine({ cwd: process.cwd() });
+	for (const flag of ["--f", "--fo", "--for", "--forc"]) {
+		for (const level of ["default", "yolo"] as const) {
+			for (const command of [`git clean ${flag}`, `git -C . clean ${flag} -d`])
+				strictEqual(engine.evaluate({ tool: "bash", args: { command } }, level).kind, "block", command);
+			for (const command of [`git checkout ${flag} main`, `git -c k=v checkout ${flag} main`])
+				strictEqual(engine.evaluate({ tool: "bash", args: { command } }, level).kind, "ask", command);
+			for (const command of [`git clean ${flag} --dry-run`, `git clean ${flag} -nd`])
+				strictEqual(engine.evaluate({ tool: "bash", args: { command } }, level).kind, "allow", command);
+			strictEqual(
+				engine.evaluate({ tool: "bash", args: { command: `git clean ${flag} -- --dry-run` } }, level).kind,
+				"block",
+			);
+		}
+	}
+});
