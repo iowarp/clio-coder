@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Static } from "typebox";
@@ -116,6 +116,21 @@ test("real CLI builds evidence once per key, follows typed storage, and rechecks
 		assert.equal(failed.reason, "ledger-mismatch");
 		assert.equal((await h.post(path, { argv: ["--session", "escape"] })).status, 422);
 		assert.equal(h.cli.activeCount, 0);
+	} finally {
+		await h.close();
+	}
+});
+
+test("evidence inventory distinguishes an absent directory from a present empty directory", async () => {
+	const h = await harness();
+	try {
+		const absent = await json(await h.request("/api/evidence"), EvidencePage);
+		assert.equal(absent.present, false);
+		assert.deepEqual(absent.items, []);
+		await mkdir(join(h.home.path, "data/evidence"), { recursive: true });
+		const empty = await json(await h.request("/api/evidence"), EvidencePage);
+		assert.equal(empty.present, true);
+		assert.deepEqual(empty.items, []);
 	} finally {
 		await h.close();
 	}

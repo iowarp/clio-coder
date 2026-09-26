@@ -82,7 +82,10 @@ export const EvidenceOverview = Type.Object(
 	closed,
 );
 export const EvidenceItem = Type.Object({ overview: EvidenceOverview, verdict: Verdict }, closed);
-export const EvidencePage = Type.Object({ items: Type.Array(EvidenceItem), nextCursor: nullable }, closed);
+export const EvidencePage = Type.Object(
+	{ items: Type.Array(EvidenceItem), nextCursor: nullable, present: Type.Boolean() },
+	closed,
+);
 export const EvidenceDetail = Type.Object(
 	{
 		overview: EvidenceOverview,

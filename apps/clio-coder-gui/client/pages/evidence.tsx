@@ -127,7 +127,10 @@ function EvidenceActions({ client, initialRun = "" }: { client: Client; initialR
 							</select>
 						</label>
 						{dispatches.data?.pages[0]?.items.length === 0 && (
-							<PanelEmpty>No dispatch runs have been recorded. Start work from a conversation.</PanelEmpty>
+							<PanelEmpty>
+								{dispatches.data.pages[0].present ? "No dispatch runs have been recorded." : "No dispatch ledger is available."}{" "}
+								Start work from a conversation.
+							</PanelEmpty>
 						)}
 						{dispatches.hasNextPage && !dispatches.isRefetchError && (
 							<button type="button" disabled={dispatches.isFetching} onClick={() => void dispatches.fetchNextPage()}>
@@ -293,7 +296,10 @@ export function EvidencePage({ client }: { client: Client }) {
 			{inventory.error && <p role="alert">{inventory.error.message}</p>}
 			{inventory.data?.pages[0]?.items.length === 0 && (
 				<PanelEmpty>
-					{emptyState.emptyStore("evidence bundle")} Collect evidence from a completed dispatch run to start one.
+					{inventory.data.pages[0].present
+						? emptyState.emptyStore("evidence bundle")
+						: emptyState.missingStore("evidence inventory")}{" "}
+					Collect evidence from a completed dispatch run to start one.
 				</PanelEmpty>
 			)}
 			{loaded.length > 0 && bundles.length === 0 && (

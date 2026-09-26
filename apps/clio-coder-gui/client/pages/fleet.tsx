@@ -212,7 +212,11 @@ export function FleetPage({ client }: { client: Client }) {
 				A fleet execution records the plan and completed steps. Each step can point to its terminal worker dispatch.
 			</p>
 			{roots.isPending && <p>Reading fleet history…</p>}
-			{roots.data?.pages[0]?.items.length === 0 && <PanelEmpty>{emptyState.emptyStore("fleet run")}</PanelEmpty>}
+			{roots.data?.pages[0]?.items.length === 0 && (
+				<PanelEmpty>
+					{roots.data.pages[0].present ? emptyState.emptyStore("fleet run") : emptyState.missingStore("fleet history")}
+				</PanelEmpty>
+			)}
 			{loadedRoots.length > 0 && matchingRoots.length === 0 && (
 				<PanelEmpty>No loaded fleet execution matches these filters.</PanelEmpty>
 			)}
@@ -241,7 +245,11 @@ export function FleetPage({ client }: { client: Client }) {
 			)}
 			<h2 id="fleet-workers">Dispatched workers</h2>
 			{runs.isPending && <p>Reading dispatch history…</p>}
-			{runs.data?.pages[0]?.items.length === 0 && <PanelEmpty>{emptyState.emptyStore("dispatch run")}</PanelEmpty>}
+			{runs.data?.pages[0]?.items.length === 0 && (
+				<PanelEmpty>
+					{runs.data.pages[0].present ? emptyState.emptyStore("dispatch run") : emptyState.missingStore("dispatch ledger")}
+				</PanelEmpty>
+			)}
 			{loadedRuns.length > 0 && matchingRuns.length === 0 && (
 				<PanelEmpty>No loaded worker dispatch matches these filters.</PanelEmpty>
 			)}

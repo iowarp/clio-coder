@@ -23,7 +23,7 @@ export const FleetRoot = Type.Object(
 	closed,
 );
 export const FleetRoots = Type.Object(
-	{ items: Type.Array(FleetRoot), nextCursor: Type.Union([PageCursor, Type.Null()]) },
+	{ items: Type.Array(FleetRoot), nextCursor: Type.Union([PageCursor, Type.Null()]), present: Type.Boolean() },
 	closed,
 );
 export const DispatchRun = Type.Object(
@@ -50,7 +50,7 @@ export const DispatchRun = Type.Object(
 	closed,
 );
 export const DispatchRuns = Type.Object(
-	{ items: Type.Array(DispatchRun), nextCursor: Type.Union([PageCursor, Type.Null()]) },
+	{ items: Type.Array(DispatchRun), nextCursor: Type.Union([PageCursor, Type.Null()]), present: Type.Boolean() },
 	closed,
 );
 export const FleetReceipt = Type.Object(

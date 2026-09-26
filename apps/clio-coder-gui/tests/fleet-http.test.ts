@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Councils, DispatchRuns, FleetGates, FleetReceipt, FleetRootDetail, FleetRoots } from "../contracts/fleet.js";
@@ -57,6 +57,28 @@ test("fleet REST: every durable root paginates once beyond 64 entries, corrupt r
 		assert.equal(oversized.status, 503, "An unreadable ledger must not masquerade as empty history");
 		assert.equal((await oversized.json()).code, "unavailable");
 		assert.equal((await h.request("/api/meta")).status, 200);
+	} finally {
+		await h.close();
+	}
+});
+
+test("fleet inventory distinguishes an absent store from a present empty store", async () => {
+	const h = await harness();
+	try {
+		const absentRoots = await json(await h.request("/api/fleet/runs"), FleetRoots);
+		const absentDispatches = await json(await h.request("/api/fleet/dispatches"), DispatchRuns);
+		assert.equal(absentRoots.present, false);
+		assert.equal(absentDispatches.present, false);
+		assert.deepEqual(absentRoots.items, []);
+		assert.deepEqual(absentDispatches.items, []);
+		await mkdir(join(h.home.path, "state/fleet-runs"), { recursive: true });
+		await writeFile(join(h.home.path, "state/runs.json"), "[]");
+		const emptyRoots = await json(await h.request("/api/fleet/runs"), FleetRoots);
+		const emptyDispatches = await json(await h.request("/api/fleet/dispatches"), DispatchRuns);
+		assert.equal(emptyRoots.present, true);
+		assert.equal(emptyDispatches.present, true);
+		assert.deepEqual(emptyRoots.items, []);
+		assert.deepEqual(emptyDispatches.items, []);
 	} finally {
 		await h.close();
 	}

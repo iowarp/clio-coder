@@ -195,3 +195,28 @@ test("Fleet filters search only loaded records and preserve their destination", 
 	assert.match(finished, /No loaded worker dispatch matches these filters/);
 	assert.doesNotMatch(finished, /href="\/fleet\/dispatches/);
 });
+
+test("artifact pages distinguish missing stores from present empty history", () => {
+	for (const present of [false, true]) {
+		const queries = new QueryClient({
+			defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
+		});
+		const page = { pageParams: [undefined], pages: [{ present, items: [], nextCursor: null }] };
+		queries.setQueryData(["fleet-roots"], page);
+		queries.setQueryData(["fleet-dispatches"], page);
+		queries.setQueryData(["evidence"], page);
+		const fleet = render(queries, <FleetPage client={client} />);
+		const evidence = render(queries, <EvidencePage client={client} />);
+		if (present) {
+			assert.match(fleet, /recorded no fleet run/);
+			assert.match(fleet, /recorded no dispatch run/);
+			assert.match(evidence, /recorded no evidence bundle/);
+			assert.doesNotMatch(fleet + evidence, /missing store/);
+		} else {
+			assert.match(fleet, /no fleet history store/);
+			assert.match(fleet, /no dispatch ledger store/);
+			assert.match(evidence, /no evidence inventory store/);
+			assert.doesNotMatch(fleet + evidence, /recorded no (fleet run|dispatch run|evidence bundle)/);
+		}
+	}
+});
