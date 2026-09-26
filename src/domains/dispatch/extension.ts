@@ -3889,7 +3889,13 @@ export function createDispatchBundle(
 		targetBreaker.record(cooldownKey(targetId, runtimeId, wireModelId), runId, outcome, failureClass);
 	}
 
+	const publishedPathScopeRoots = new Set<string>();
+
 	function publishDispatchPathScope(req: DispatchRequest, pathScope: DispatchPathScope): void {
+		const rootRunId = req.lineage?.rootRunId ?? req.runIdHint;
+		// Scope provenance remains in receipts; retries must not repeat a generated path inventory.
+		if ((req.lineage?.attempt ?? 0) > 0 || (rootRunId !== undefined && publishedPathScopeRoots.has(rootRunId))) return;
+		if (rootRunId !== undefined) publishedPathScopeRoots.add(rootRunId);
 		const replacementDiagnostic = declaredScopeReplacementDiagnostic(pathScope);
 		if (replacementDiagnostic !== null) {
 			reportDispatchDiagnostic("typed scope replacement", new Error(replacementDiagnostic));
@@ -7380,6 +7386,7 @@ export function createDispatchBundle(
 			capacityAdmission.stop();
 			for (const ownerId of ownedReservations) rollbackDispatchReservation(ownerId, now());
 			ownedReservations.clear();
+			publishedPathScopeRoots.clear();
 			await Promise.allSettled([...assignmentWrites]);
 			// After drain(), so the last run's terminal line is written before the
 			// bridge stops listening.

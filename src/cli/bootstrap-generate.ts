@@ -1,6 +1,7 @@
 import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
-import { type LoadResult, loadDomains } from "../core/domain-loader.js";
+import type { LoadResult } from "../core/domain-loader.js";
+import { loadDomains } from "../core/domain-loader.js";
 import { isResponseSchemaRejection, UnsupportedResponseSchemaError } from "../core/response-schema.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
@@ -10,19 +11,20 @@ import {
 	buildBootstrapPrompt,
 	parseBootstrapModelOutput,
 } from "../domains/context/bootstrap-prompt.js";
-import {
-	type BootstrapFallbackMode,
-	type BootstrapGenerate,
-	type BootstrapGenerateInput,
-	type BootstrapGenerationTelemetry,
-	type BootstrapParserOutcome,
-	type BootstrapRunTelemetry,
-	type BootstrapStructuredOutput,
-	fallbackBootstrapOutput,
+import type {
+	BootstrapFallbackMode,
+	BootstrapGenerate,
+	BootstrapGenerateInput,
+	BootstrapGenerationTelemetry,
+	BootstrapParserOutcome,
+	BootstrapRunTelemetry,
+	BootstrapStructuredOutput,
 } from "../domains/context/index.js";
+import { fallbackBootstrapOutput } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { declaredScopeIntent } from "../domains/dispatch/intent.js";
+import { newRunId } from "../domains/dispatch/state.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { createObservabilityDomainModule } from "../domains/observability/index.js";
@@ -404,8 +406,11 @@ async function generateBootstrapWithModel(
 		message: "dispatching internal context-bootstrap agent",
 		detail: `agent=${CONTEXT_BOOTSTRAP_AGENT_ID}`,
 	});
+	// Schema refusal happens before a worker starts, so parser fallback can reuse the same root identity.
+	const runIdHint = newRunId();
 	const dispatchBootstrap = (nativeSchema: boolean) =>
 		dispatch.dispatch({
+			runIdHint,
 			intent: scope.intent,
 			agentId: CONTEXT_BOOTSTRAP_AGENT_ID,
 			executionRole: "researcher",

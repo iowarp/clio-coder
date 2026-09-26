@@ -1220,4 +1220,4 @@ Validation grounding treats `npm test`, `pnpm test`, and `yarn test` as aliases 
 
 A terminal colon in a validation claim, such as `npm test:`, is punctuation and grounds against `npm run test`. Script suffixes such as `test:unit` remain distinct (review round 2 C).
 
-Typed-scope replacement warnings appear in the transcript for user and agent dispatches. Harness-owned internal dispatches, including `context init` bootstrap schema retries, retain scope diagnostics and receipt provenance without printing generated prompt path inventories. This presentation rule does not change working-context paths, rule selection, or worker authority.
+Typed-scope replacement warnings appear in the transcript for the first attempt of user and agent dispatches. Harness-owned internal dispatches retain one diagnostic per root run and receipt provenance without transcript path inventories. Retries, including retries of user dispatches and `context init` schema fallback, are quiet in both diagnostics and transcript notices. This presentation rule does not change working-context paths, rule selection, or worker authority.
