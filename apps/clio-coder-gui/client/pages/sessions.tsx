@@ -699,7 +699,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						onClose={() => close.mutate()}
 					/>
 				</div>
-				<SessionDashboard session={snapshot} health={health} workers={liveWorkers} model={route.model} />
+				<SessionDashboard session={snapshot} health={health} workers={liveWorkers} model={route.model ?? null} />
 				<SessionHealth summary={health} />
 			</header>
 			<div className="conversation__approval">
