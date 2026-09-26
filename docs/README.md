@@ -141,6 +141,7 @@ validation, reference data, or human scientific judgment.
 | Package kinds, catalog resolution, integrity, and trust | [Library Architecture](architecture/library.md) |
 | Pi framework boundary and Clio-owned policy | [Pi Boundary](architecture/pi-boundary.md) |
 | Clock, duration, timestamp, and ordering conventions | [Time Conventions](architecture/time-conventions.md) |
+| Package, npm, GitHub, website, docs, Wiki, and communications checkpoints | [Release Readiness](guide/release-readiness.md) |
 | Core terms mapped to source concepts | [Glossary](guide/glossary.md) |
 
 ## Developer quick start

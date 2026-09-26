@@ -14,7 +14,10 @@ Use Node >=22.19 and the pnpm version pinned in `package.json`.
 | `pnpm test:maintenance` | Focused keyboard routing and draft contracts | Isolated deterministic fixtures; no model calls | Routine CI |
 | `pnpm test:package` | Installed tarball and native call timing contracts | Scratch installs from an absolute `CLIO_CODER_RELEASE_TARBALL`; no model calls | Hosted CI on pushes and pull requests; release qualification |
 | `pnpm ci:release` | `release-candidate.mjs`: clean committed source, CI, package audit, installed-package checks, exact tarball qualification | npm registry audit; scratch installs; receipt and tarball in user cache | Release qualification |
+| `pnpm release:readiness` / `pnpm release:readiness -- --release` | Check package/README/site versions, docs provenance, tracked media, and an isolated website build; immutable mode also requires dated release state | Read-only; temporary website output | Release preparation |
 | `pnpm release:preflight` | Check source, Node version, age and package digest against the qualified artifact | Temporary tarball; no rebuild | Publication |
+| `python3 scripts/media-assets.py --check` / `--sync` | Check approved media hashes/dimensions and synchronize manifest-declared website/GUI delivery copies | Check is read-only; sync writes only declared copies | Website/media preparation |
+| `node site/render-cards.mjs` | Render four social cards at declared dimensions after fonts load and record source/export hashes | Writes approved PNG exports and `assets/media-manifest.json`; no network | Website/media preparation |
 | `node scripts/check-release.mjs` | Package contents, budgets, versions, recipe contracts and dependency advisories | npm pack dry run and registry audit | Called by qualification |
 | `bash scripts/install.sh --dry-run` | Preview public npm installer | Actual install accesses npm and selected prefix; dry run previews | Installer contract checks in routine CI |
 | `pnpm install:local --dry-run` | Preview checkout installation | Actual install can sync dependencies, build, replace launcher symlink and run doctor repair | Dry-run/launcher checks in lint |

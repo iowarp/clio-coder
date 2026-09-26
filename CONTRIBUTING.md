@@ -30,7 +30,8 @@ pnpm run ci
 | `pnpm run test` | Standard test suite (contracts + fast smoke tests). |
 | `pnpm run ci` | Routine gate: types, lint, build, test, maintenance, and GUI checks. |
 | `pnpm run test:full` | Full root test investigation, including extended regressions. |
-| `pnpm run ci:release` | Qualify a candidate and its exact installed tarball (see [release checklist](CONTRIBUTING.md#validation-reference)). |
+| `pnpm run ci:release` | Qualify a candidate and its exact installed tarball. |
+| `pnpm run release:readiness` | Read-only package, website/docs provenance, and media readiness check; use `-- --release` only for an immutable candidate. |
 
 Use `pnpm test:file` (which preloads `tests/harness/tmp-root.ts`) and `tests/harness/scratch-env.ts` for state isolation. Never mutate `process.stdout.write` across async test boundaries.
 
@@ -66,7 +67,7 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
 - Required elements: the Markdown `# Clio Coder` title, the product screenshot `assets/readme/clio-session.png` referenced from `main`, the source install block that `readme-install-block` pins, and the collapsed **For agents** block under Documentation.
 - Images use absolute `https://` URLs, because npm renders the README without `assets/`.
 - Release numbers appear only in the Install pin. Release notes belong in [CHANGELOG.md](CHANGELOG.md).
-- A release changes the Install pin and, when the terminal interface changed visibly, the screenshot. Nothing else is a required release edit.
+- A release changes the Install pin and, when the terminal interface changed visibly, the screenshot. Coordinate package, GitHub, npm, website/docs, Wiki, and communications through the [release-readiness runbook](docs/guide/release-readiness.md); those surfaces do not add README sections.
 - A feature documents itself in `docs/`. The README gains at most a bullet in Why Clio, a row in an existing table, or a line in an existing collapsed block.
 - Changing the structure changes this section and `README_SECTIONS` in `scripts/check-hygiene.ts` in the same commit, with the maintainer's approval.
 
