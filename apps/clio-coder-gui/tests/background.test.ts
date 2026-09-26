@@ -202,7 +202,11 @@ test("installed background configuration launches plain Node and preserves a bra
 	const config = await newBackgroundConfig(4317, { node: process.execPath, entry, icon }, join(root, "desktop"));
 	assert.equal(config.launch.loader, undefined);
 	assert.ok(!backgroundUnit(config, directory).includes("--import"));
-	const control = async () => "";
+	const calls: string[] = [];
+	const control: typeof controlService = async (action) => {
+		calls.push(action);
+		return "";
+	};
 	await installBackground(directory, config, control, async () => {});
 	assert.deepEqual(await readBackgroundConfig(backgroundPaths(directory).config), config);
 	const desktop = await launcherStatus(config.desktopPrefix);
@@ -211,12 +215,70 @@ test("installed background configuration launches plain Node and preserves a bra
 	assert.equal(text, desktopEntry({ ...config.launch, background: directory }));
 	assert.ok(text.includes(`Icon=${icon}`));
 	assert.ok(!text.includes("--import"));
+	const movedEntry = join(root, "moved-server.js"),
+		packageAlias = join(root, "same-package-root");
+	await writeFile(movedEntry, "export {};\n");
+	await symlink(config.packageRoot, packageAlias);
+	const current = await newBackgroundConfig(
+		4317,
+		{ node: process.execPath, entry: movedEntry, icon },
+		config.desktopPrefix,
+	);
+	const moved = { ...current, packageRoot: packageAlias };
+	await installBackground(directory, moved, control, async () => {});
+	const repinned = await readBackgroundConfig(backgroundPaths(directory).config);
+	assert.equal(repinned.token, config.token);
+	assert.equal(repinned.launch.entry, movedEntry);
+	assert.deepEqual(calls.slice(-2), ["reload", "enable"]);
+	const movedDesktop = await launcherStatus(config.desktopPrefix);
+	assert.equal(movedDesktop.status, "installed");
+	assert.equal(
+		await readFile(movedDesktop.entry, "utf8"),
+		desktopEntry({ ...repinned.launch, background: directory }),
+	);
 	await assert.rejects(
-		installBackground(directory, { ...config, packageRoot: root }, control, async () => {}),
+		installBackground(directory, { ...moved, packageRoot: root }, control, async () => {}),
 		/another installation/,
 	);
 	assert.equal((await uninstallBackground(directory, control)).status, "absent");
 	assert.equal(serverOptions(["--open", "--no-open"]).open, "never");
+});
+
+test("restart repins moved launch paths for the same installation before starting", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-web-background-repin-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const directory = join(root, "background"),
+		prefix = join(root, "desktop"),
+		oldEntry = join(root, "old-server.js"),
+		currentEntry = join(root, "current-server.js");
+	await writeFile(oldEntry, "export {};\n");
+	await writeFile(currentEntry, "export {};\n");
+	const config = await newBackgroundConfig(4317, { node: process.execPath, entry: oldEntry }, prefix);
+	const files = backgroundPaths(directory);
+	const calls: string[] = [];
+	const control: typeof controlService = async (action) => {
+		calls.push(action);
+		return `FragmentPath=${calls.includes("enable") ? files.unitFile : ""}\nActiveState=active\n`;
+	};
+	const ready = async () => ({ clio: "0.5.7", idle: true });
+	await installBackground(directory, config, control, ready);
+	const result = await restartBackgroundIfIdle(directory, control, ready, ready, {
+		node: process.execPath,
+		entry: currentEntry,
+	});
+	assert.deepEqual(result, { status: "restarted", running: "0.5.7" });
+	assert.deepEqual(calls.slice(-3), ["reload", "show", "restart"]);
+	const repinned = await readBackgroundConfig(files.config);
+	assert.equal(repinned.token, config.token);
+	assert.equal(repinned.launch.entry, currentEntry);
+	assert.ok((await readFile(files.unitFile, "utf8")).includes(currentEntry));
+	const desktop = await launcherStatus(prefix);
+	assert.equal(desktop.status, "installed");
+	assert.equal(
+		await readFile(desktop.entry, "utf8"),
+		desktopEntry({ ...repinned.launch, background: directory }),
+	);
+	assert.equal((await uninstallBackground(directory, control)).status, "absent");
 });
 
 test("a bare launch reuses only this installation's verified background app and otherwise explains", async (t) => {
