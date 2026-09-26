@@ -306,6 +306,7 @@ export interface KeyBindingDeps {
 	cycleScopedModelBackward: () => void;
 	dismissNotifications: () => void;
 	cycleOutputStyle: () => void;
+	toggleAutonomy?: () => void;
 	/** Note a harness feature the operator used, for demo guidance. */
 	recordFeature?: (feature: string) => void;
 	openExternalEditor: () => void;
@@ -326,6 +327,10 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 	switch (id) {
 		case "clio-coder.output.cycle":
 			deps.cycleOutputStyle();
+			return true;
+		case "clio-coder.autonomy.toggle":
+			if (!deps.toggleAutonomy) return false;
+			deps.toggleAutonomy();
 			return true;
 		case "clio-coder.notifications.dismiss":
 			deps.dismissNotifications();
@@ -591,6 +596,28 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		chatRenderer,
 		io,
 	} = presentation;
+	// Every operator entry point reports the effective state after a successful
+	// change. One observer keeps shortcuts, slash commands, and forms consistent.
+	const withSettingFeedback =
+		<Args extends unknown[], Result>(action: (...args: Args) => Result) =>
+		(...args: Args): Result => {
+			const result = action(...args);
+			presentation.announceSettingChanges();
+			return result;
+		};
+	const settingActions = {
+		...(deps.commitSetting ? { commitSetting: withSettingFeedback(deps.commitSetting) } : {}),
+		...(deps.writeSettings ? { writeSettings: withSettingFeedback(deps.writeSettings) } : {}),
+		...(deps.onSetThinkingLevel ? { onSetThinkingLevel: withSettingFeedback(deps.onSetThinkingLevel) } : {}),
+		...(deps.onSelectModel ? { onSelectModel: withSettingFeedback(deps.onSelectModel) } : {}),
+		...(deps.onCycleThinking ? { onCycleThinking: withSettingFeedback(deps.onCycleThinking) } : {}),
+		...(deps.onCycleScopedModelForward
+			? { onCycleScopedModelForward: withSettingFeedback(deps.onCycleScopedModelForward) }
+			: {}),
+		...(deps.onCycleScopedModelBackward
+			? { onCycleScopedModelBackward: withSettingFeedback(deps.onCycleScopedModelBackward) }
+			: {}),
+	};
 	// The factory arrives only from an active `--with-panes` boot (or a test); a
 	// plain session has no deps.panes and no factory, and loads no yazi code.
 	const yaziBridge =
@@ -672,7 +699,10 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			operatorExtensions?.observe({ event: "turn_end", reason: "completed" });
 		},
 		refreshLiveWorkspaceGit,
-		refreshFooter: () => footer.refresh(),
+		refreshFooter: () => {
+			presentation.announceSettingChanges();
+			footer.refresh();
+		},
 		requestRender: () => tui.requestRender(),
 		notify,
 		dismissNotification: (key) => notifications.dismiss(key),
@@ -680,6 +710,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		refreshSettingsOverlay: () => overlayLifecycle.refreshSettingsOverlay(),
 		onConfigHotReload: (settings) => {
 			keybindings.reload(settings.interface.keybindings ?? {});
+			presentation.announceSettingChanges();
 			footer.refresh();
 			tui.requestRender();
 			const mode = settings.interface.smoothStreaming;
@@ -767,10 +798,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.share ? { share: deps.share } : {}),
 		...(deps.userTasks ? { userTasks: deps.userTasks } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
-		...(deps.writeSettings ? { writeSettings: deps.writeSettings } : {}),
-		...(deps.commitSetting ? { commitSetting: deps.commitSetting } : {}),
-		...(deps.onSelectModel ? { onSelectModel: deps.onSelectModel } : {}),
-		...(deps.onSetThinkingLevel ? { onSetThinkingLevel: deps.onSetThinkingLevel } : {}),
+		...settingActions,
 		...(deps.onCompact ? { onCompact: deps.onCompact } : {}),
 		...(deps.onRecoverHandoff ? { onRecoverHandoff: deps.onRecoverHandoff } : {}),
 		...(deps.onInit ? { onInit: deps.onInit } : {}),
@@ -889,7 +917,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	overlayLifecycle = createOverlayLifecycle({
 		getQuotaSnapshots: presentation.getQuotaSnapshots,
 		getDispatchRows: () => dispatchBoardStore.rows(),
-		app: deps,
+		app: { ...deps, ...settingActions },
 		tui,
 		footer,
 		interactiveTickers,
@@ -1174,17 +1202,26 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				presentation.changeOutputStyle(() => {
 					const next = structuredClone(settings) as ClioSettings;
 					next.interface.outputDetail = nextOutputStyle(next.interface.outputDetail);
-					deps.commitSetting?.("interface.outputDetail", next, "session");
+					settingActions.commitSetting?.("interface.outputDetail", next, "session");
 				});
 				footer.refresh();
 			},
+			toggleAutonomy: () => {
+				const settings = deps.getSettings?.();
+				if (!settings || !settingActions.commitSetting) return;
+				const next = structuredClone(settings) as ClioSettings;
+				next.safety.autonomy = settings.safety.autonomy === "yolo" ? "default" : "yolo";
+				settingActions.commitSetting("safety.autonomy", next, "session");
+				footer.refresh();
+				tui.requestRender();
+			},
 			availableThinkingLevels: () => availableInteractiveThinkingLevels(deps),
-			onCycleThinking: () => deps.onCycleThinking?.(),
+			onCycleThinking: () => settingActions.onCycleThinking?.(),
 			cycleScopedModelForward: () => {
-				if (deps.onCycleScopedModelForward?.() === false) announceEmptyScopedSet();
+				if (settingActions.onCycleScopedModelForward?.() === false) announceEmptyScopedSet();
 			},
 			cycleScopedModelBackward: () => {
-				if (deps.onCycleScopedModelBackward?.() === false) announceEmptyScopedSet();
+				if (settingActions.onCycleScopedModelBackward?.() === false) announceEmptyScopedSet();
 			},
 			backgroundActiveDispatch,
 			toggleFilesPane: () => {

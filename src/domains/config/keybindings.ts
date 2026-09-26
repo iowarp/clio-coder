@@ -22,6 +22,7 @@ import { TUI_KEYBINDINGS } from "../../engine/tui.js";
 export interface ClioAppKeybindings {
 	"clio-coder.output.cycle": true;
 	"clio-coder.thinking.cycle": true;
+	"clio-coder.autonomy.toggle": true;
 	"clio-coder.exit": true;
 	"clio-coder.status.toggle": true;
 	"clio-coder.session.tree": true;
@@ -119,6 +120,14 @@ export const CLIO_APP_KEYBINDINGS = {
 		kind: "cycle",
 		repeat: false,
 		leader: "t",
+	},
+	"clio-coder.autonomy.toggle": {
+		defaultKeys: "ctrl+alt+shift+y",
+		description: "Toggle default / YOLO autonomy (this session)",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
+		leader: "y",
 	},
 	"clio-coder.message.followUp": {
 		defaultKeys: "ctrl+q",

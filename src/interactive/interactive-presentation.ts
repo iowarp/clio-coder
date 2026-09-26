@@ -174,6 +174,7 @@ export interface InteractivePresentation {
 	io: RunIo;
 	root: Component;
 	changeOutputStyle(mutation: () => void): void;
+	announceSettingChanges(): void;
 	setLocalBashRunning(running: boolean): void;
 	getQuotaSnapshots(): ReadonlyArray<UsageSnapshot>;
 	/** Fold one raw chat event into the ephemeral throughput shown only while this turn is active. */
@@ -528,6 +529,32 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getNewlineKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.newLine")[0], "Ctrl+J"),
 	};
 	const editor = deps.editor ?? factories.createEditor(deps.tui, editorChrome);
+	const readSettingState = () => ({
+		thinking: editorChrome.getThinkingLabel(),
+		output: editorChrome.getOutputStyle?.() ?? "standard",
+		autonomy: editorChrome.getAutonomy?.() ?? "default",
+	});
+	let lastSettingState = readSettingState();
+	const announceSettingChanges = (): void => {
+		const next = readSettingState();
+		const previous = lastSettingState;
+		lastSettingState = next;
+		const changes: string[] = [];
+		const title = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+		if (next.thinking !== previous.thinking) changes.push(`Think ${title(next.thinking)}`);
+		if (next.output !== previous.output)
+			changes.push(`Verbose ${{ compact: "Minimal", standard: "Default", detailed: "Detailed" }[next.output]}`);
+		if (next.autonomy !== previous.autonomy)
+			changes.push(`Autonomy ${next.autonomy === "yolo" ? "YOLO" : title(next.autonomy)}`);
+		if (changes.length)
+			notifications.add({
+				level: "info",
+				text: changes.join(" · "),
+				key: "settings:feedback",
+				presentation: "setting",
+				ttlMs: 3_000,
+			});
+	};
 	editor.focused = true;
 	const autocomplete: AutocompleteProvider = factories.createAutocomplete({
 		// Completion runs per keystroke and only names templates, so it reads the
@@ -754,6 +781,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		changeOutputStyle: (mutation) =>
 			chatRenderer.mutate(() => preserveTranscriptScroll(transcriptView, deps.terminal.columns, mutation), "output-style"),
+		announceSettingChanges,
 		getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
 		recordChatEvent,
 		recordToolStart: (toolCallId, toolName) => {

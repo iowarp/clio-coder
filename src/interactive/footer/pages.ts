@@ -309,9 +309,17 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const phase = workers ? `${workers} ${workers === 1 ? "worker" : "workers"}` : "Model";
 	const phaseToken = workers ? "activity" : "fieldName";
 	const identity = clean(state.session.target ?? "No model selected");
+	const feedback = topNotification(
+		state.notices.filter((notice) => notice.presentation === "setting"),
+		state.now,
+	);
+	const valueSlot = feedback ? theme.fg("changedValue", clean(feedback.text)) : "";
+	const valueWidth = Math.min(Math.floor(w * 0.4), visibleWidth(valueSlot));
+	const modeBadge = state.session.autonomy === "yolo" ? theme.style("yoloLabel", "YOLO", { bold: true }) : "";
+	const modeRoom = modeBadge ? visibleWidth(modeBadge) + 3 : 0;
 
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
-	const leftRoom = w;
+	const leftRoom = Math.max(1, w - valueWidth - (valueSlot ? 3 : 0));
 	// An armed skill narrows the tools every turn uses until `/skill off`, so it
 	// rides next to the activity and outranks the identity and quota badge.
 	// Where `skill <names>` does not fit, the knowledge mark
@@ -330,11 +338,11 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			: `${theme.fg("skillAction", skillLead)}${theme.fg("counter", fittedSkill.slice(skillLead.length))}`;
 	const skillRoom = skill ? visibleWidth(skill) + 3 : 0;
 	// Workers and armed skills take priority over the model identity and quota badge.
-	const activityRoom = Math.max(5, leftRoom - skillRoom);
+	const activityRoom = Math.max(5, leftRoom - skillRoom - modeRoom);
 	const activity = theme.fg(phaseToken, truncateToWidth(phase, activityRoom, GLYPH.ellipsis, false));
 	const activityWidth = visibleWidth(activity);
 	const badge =
-		weekly && leftRoom - activityWidth - skillRoom - visibleWidth(weekly.label) >= 16
+		weekly && leftRoom - activityWidth - skillRoom - modeRoom - visibleWidth(weekly.label) >= 16
 			? theme.fg(
 					weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "counter" : "warning",
 					weekly.label,
@@ -342,7 +350,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			: "";
 	const identitySeparator = narrow ? " · " : "  ·  ";
 	const baseRoom =
-		leftRoom - activityWidth - skillRoom - (badge ? visibleWidth(badge) + 3 : 0) - identitySeparator.length;
+		leftRoom - activityWidth - skillRoom - modeRoom - (badge ? visibleWidth(badge) + 3 : 0) - identitySeparator.length;
 	// Too narrow for a readable identity: drop it rather than cut it to a stub
 	// such as `bl…_m`, which names neither the target nor the model.
 	const identityMin = Math.min(visibleWidth(identity), IDENTITY_MIN_CELLS);
@@ -356,9 +364,12 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				})
 			: fitIdentityLabel(identity, identityRoom);
 	const shownIdentity = readable ? `${identitySeparator}${theme.fg("footerIdentity", fittedIdentity)}` : "";
-	const left = `${activity}${skill ? ` · ${skill}` : ""}${shownIdentity}${badge ? ` · ${badge}` : ""}`;
+	const left = `${activity}${modeBadge ? ` · ${modeBadge}` : ""}${skill ? ` · ${skill}` : ""}${shownIdentity}${badge ? ` · ${badge}` : ""}`;
 	const pair = (l: string, r: string, rw: number) => `${fit(l, w - rw - 3)}   ${fit(r, rw)}`;
-	const notice = topNotification(state.notices, state.now);
+	const notice = topNotification(
+		state.notices.filter((entry) => entry.presentation !== "setting"),
+		state.now,
+	);
 	const key =
 		getKeybindings()
 			.getKeys("clio-coder.status.toggle")
@@ -380,7 +391,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
 				: theme.fg("keyboardHint", (state.demo !== false ? footerKeyHint(state.now, w < 120) : null) ?? `${key} Dashboard`);
 	if (narrow) {
-		const rows = [fit(left)];
+		const rows = [valueSlot ? fit(pair(left, valueSlot, valueWidth)) : fit(left)];
 		if (urgent || notice) rows.push(fit(foot));
 		return rows;
 	}
@@ -397,7 +408,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	);
 	const cwdWidth = Math.max(1, workspaceWidth - gitWidth - 3);
 	const workspace = `${theme.fg("workspacePath", fitIdentityLabel(clean(state.workspace.cwd), cwdWidth))} · ${theme.fg("branch", fitIdentityLabel(git, Math.max(1, gitWidth - visibleWidth(dirtyMarker))))}${dirtyMarker}`;
-	return [fit(left), fit(pair(workspace, foot, hintWidth))];
+	return [valueSlot ? fit(pair(left, valueSlot, valueWidth)) : fit(left), fit(pair(workspace, foot, hintWidth))];
 }
 
 function statusPage(state: FooterDashboardRenderState, width: number): string[] {

@@ -288,22 +288,46 @@ export class ClioEditor extends Editor {
 		return this.topRail(width, theme, rail, label, suffix);
 	}
 
-	/** Both the editable composer and its menus share mode, activity, and occupancy. */
+	/** The top rail holds harness activity or the active menu's title. */
 	private topRail(width: number, theme: ClioTheme, rail: EditorRailState, label: string, suffix = ""): string {
-		const left = rail.yolo ? `${theme.fg("composerRail", "━")} ${theme.style("yoloLabel", "YOLO", { bold: true })}` : "";
-		const room = Math.max(0, this.railLabelRoom(width) - (left ? visibleWidth(left) + 1 : 0));
-		const context = this.chrome.getContextUsage?.();
-		const contextRoom = Math.min(
-			30,
-			Math.max(0, room - visibleWidth(suffix) - (suffix ? 3 : 0) - (label ? Math.min(16, visibleWidth(label)) + 3 : 0)),
-		);
-		const usage = context ? contextRailHint(context, width >= 100 ? 14 : 8, contextRoom, theme) : "";
-		const tail = [suffix, usage].filter(Boolean).join(theme.fg("border", " · "));
-		const labelRoom = Math.max(0, room - visibleWidth(tail) - (label && tail ? 3 : 0));
-		const right = [truncateToWidth(label, labelRoom, GLYPH.ellipsis, false), tail]
+		const room = this.railLabelRoom(width);
+		const labelRoom = Math.max(0, room - visibleWidth(suffix) - (label && suffix ? 3 : 0));
+		const right = [truncateToWidth(label, labelRoom, GLYPH.ellipsis, false), suffix]
 			.filter(Boolean)
 			.join(theme.fg("border", " · "));
-		return renderEditorRail(theme, width, { left, leftRaw: true, right, rightRaw: true }, rail);
+		return renderEditorRail(theme, width, { right, rightRaw: true }, rail);
+	}
+
+	/** Thinking and context stay together; permission and menu keys have priority. */
+	private bottomRail(width: number, theme: ClioTheme, rail: EditorRailState, right = ""): string {
+		const room = this.railLabelRoom(width);
+		const fittedRight = truncateToWidth(right, room, GLYPH.ellipsis, false);
+		const leftRoom = Math.max(0, room - visibleWidth(fittedRight) - (fittedRight ? 3 : 0) - 2);
+		const thinking =
+			leftRoom > 0
+				? truncateToWidth(
+						thinkingRailHint(
+							theme,
+							this.chrome.getThinking?.() ?? { label: this.chrome.getThinkingLabel(), hasLevels: false },
+							leftRoom,
+						),
+						leftRoom,
+						GLYPH.ellipsis,
+						false,
+					)
+				: "";
+		const context = this.chrome.getContextUsage?.();
+		const usage = context
+			? contextRailHint(
+					context,
+					width >= 100 ? 14 : 8,
+					Math.max(0, leftRoom - visibleWidth(thinking) - (thinking ? 3 : 0)),
+					theme,
+				)
+			: "";
+		const hint = [thinking, usage].filter(Boolean).join(theme.fg("border", " · "));
+		const left = hint ? `${theme.fg("composerRail", "━")} ${hint}` : "";
+		return renderEditorRail(theme, width, { left, leftRaw: true, right: fittedRight, rightRaw: true }, rail);
 	}
 
 	private railLabelRoom(width: number): number {
@@ -319,27 +343,19 @@ export class ClioEditor extends Editor {
 		const rail = this.railState(mode);
 		const scroll = hiddenLineCount > 0 ? `${GLYPH.down}${hiddenLineCount}` : "";
 		const room = this.railLabelRoom(width);
-		const hintRoom = Math.max(1, room - (scroll ? visibleWidth(scroll) + 3 : 0));
 		const hint =
 			mode === "CONFIRM"
-				? confirmRailHint(theme, hintRoom + 3, text.length > 0, this.chrome.getPermissionInspection?.() ?? "none")
-				: thinkingRailHint(
+				? confirmRailHint(
 						theme,
-						this.chrome.getThinking?.() ?? { label: this.chrome.getThinkingLabel(), hasLevels: false },
-						hintRoom,
-					);
+						Math.max(1, room - (scroll ? visibleWidth(scroll) + 3 : 0)) + 3,
+						text.length > 0,
+						this.chrome.getPermissionInspection?.() ?? "none",
+					)
+				: "";
 		const right = [scroll ? theme.fg("positionCount", scroll) : "", theme.base("keyboardHint", hint)]
 			.filter(Boolean)
 			.join(theme.fg("border", " · "));
-		this.renderedBottomRail = renderEditorRail(
-			theme,
-			width,
-			{
-				right: truncateToWidth(right, room, GLYPH.ellipsis, false),
-				rightRaw: true,
-			},
-			rail,
-		);
+		this.renderedBottomRail = this.bottomRail(width, theme, rail, right);
 		return this.renderedBottomRail;
 	}
 
@@ -392,17 +408,7 @@ export class ClioEditor extends Editor {
 		];
 		if (entry.keepComposer) return lines;
 		const hint = entry.frame.dockHint(labelRoom + 4);
-		lines.push(
-			renderEditorRail(
-				theme,
-				width,
-				{
-					...(hint && hint.trim().length > 0 ? { right: hint, rightRaw: true } : {}),
-					fillToken: "composerRail",
-				},
-				rail,
-			),
-		);
+		lines.push(this.bottomRail(width, theme, rail, hint?.trim().length ? hint : ""));
 		return lines;
 	}
 

@@ -28,6 +28,8 @@ export interface NotificationInput {
 	key?: string;
 	/** Override the level default. Use 0 to pin (never auto-expire). */
 	ttlMs?: number;
+	/** Brief setting feedback occupies the compact footer's separate value slot. */
+	presentation?: "setting";
 }
 
 export interface Notification {
@@ -38,6 +40,7 @@ export interface Notification {
 	addedAt: number;
 	/** Absolute expiry timestamp, or null when the entry is pinned. */
 	expiresAt: number | null;
+	presentation?: "setting";
 }
 
 export interface NotificationCenter {
@@ -386,6 +389,7 @@ export function createNotificationCenter(options: NotificationCenterOptions = {}
 				key: input.key ?? null,
 				addedAt,
 				expiresAt,
+				...(input.presentation ? { presentation: input.presentation } : {}),
 			};
 			if (entry.key !== null) {
 				const existing = entries.findIndex((candidate) => candidate.key === entry.key);
