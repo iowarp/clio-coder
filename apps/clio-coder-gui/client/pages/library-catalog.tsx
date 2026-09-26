@@ -295,6 +295,16 @@ function PlanDialog({
 		},
 	});
 	const busy = planning.isPending || applying.isPending || releasing.isPending;
+	useEffect(() => {
+		const button = cancel.current;
+		const dialog = button?.closest<HTMLElement>(".dialog");
+		if (!button || !dialog) return;
+		// Staging disables Cancel after it received initial focus. Keep keyboard focus in the review.
+		if (!dialog.contains(document.activeElement)) {
+			if (busy) dialog.focus();
+			else button.focus();
+		} else if (!busy && document.activeElement === dialog) button.focus();
+	}, [busy]);
 	const close = () => {
 		// Keep the review open until staging or writes settle, and report failed release so it can be retried.
 		if (busy) return;
@@ -388,12 +398,14 @@ export function LibraryCatalog({
 	packages,
 	filter,
 	compact = false,
+	onReview,
 }: {
 	client: Client;
 	workspaceId: string;
 	packages: Package[];
 	filter: string;
 	compact?: boolean;
+	onReview?: (() => void) | undefined;
 }) {
 	const [search, setSearch] = useSearchParams();
 	const [localDiscovery, setLocalDiscovery] = useState<Record<string, string>>({});
@@ -420,6 +432,11 @@ export function LibraryCatalog({
 	};
 	const [limit, setLimit] = useState(40),
 		[request, setRequest] = useState<Request | null>(null);
+	const review = (input: Request) => {
+		// Release a native navigation dialog's top layer before the review claims focus.
+		onReview?.();
+		setRequest(input);
+	};
 	const visible = packages.filter(
 		(pkg) =>
 			(kind === "all" || pkg.kind === kind) && (!installedOnly || pkg.copies.length > 0) && matchesPackage(pkg, filter),
@@ -513,7 +530,7 @@ export function LibraryCatalog({
 														type="button"
 														key={operation}
 														aria-label={`${verb(operation)} the ${scope} copy of ${pkg.ref}`}
-														onClick={() => setRequest({ operation, ref: pkg.ref, scope })}
+														onClick={() => review({ operation, ref: pkg.ref, scope })}
 													>
 														{verb(operation)}
 													</button>
@@ -530,7 +547,7 @@ export function LibraryCatalog({
 												key={scope}
 												className={pkg.copies.length ? undefined : scope === "user" ? "primary" : undefined}
 												aria-label={`Install ${pkg.ref} ${scope === "user" ? "for me" : "in this project"}`}
-												onClick={() => setRequest({ operation: "install", ref: pkg.ref, scope })}
+												onClick={() => review({ operation: "install", ref: pkg.ref, scope })}
 											>
 												{scope === "user" ? "Install for me" : "Install in this project"}
 											</button>

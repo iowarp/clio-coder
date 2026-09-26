@@ -108,10 +108,12 @@ export function LibraryPage({
 	client,
 	compact = false,
 	workspaceId,
+	onReview,
 }: {
 	client: Client;
 	compact?: boolean;
 	workspaceId?: string | undefined;
+	onReview?: (() => void) | undefined;
 }) {
 	const selection = useWorkspaceSelection(client);
 	const id = workspaceId ?? selection.id;
@@ -304,6 +306,7 @@ export function LibraryPage({
 						packages={inventory.data.packages}
 						filter={filter}
 						compact={compact}
+						onReview={onReview}
 					/>
 				)}
 				{active !== "Catalog" && source.data && !visible.length && (

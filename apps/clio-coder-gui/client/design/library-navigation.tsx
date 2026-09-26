@@ -19,7 +19,7 @@ export function LibraryNavigation({ client, close, workspaceId }: AreaNavigation
 			</div>
 			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users can scroll the library independently. */}
 			<section className="sidebar-library__content" tabIndex={0} aria-label="Library collections and packages">
-				<LibraryPage key={id} client={client} workspaceId={workspaceId} compact />
+				<LibraryPage key={id} client={client} workspaceId={workspaceId} compact onReview={close} />
 			</section>
 		</section>
 	);
