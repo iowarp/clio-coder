@@ -170,10 +170,7 @@ async function runBackgroundRestart(installation: Installation): Promise<string>
 		[installation.entry, "gui", "background", "restart", "--if-idle"],
 		"clio-coder gui background restart --if-idle",
 	);
-	const lines = output
-		.trim()
-		.split(/\r?\n/)
-		.filter(Boolean);
+	const lines = output.trim().split(/\r?\n/).filter(Boolean);
 	if (lines.length !== 1) throw new Error("background restart did not return its one-line result");
 	return lines[0] ?? "";
 }

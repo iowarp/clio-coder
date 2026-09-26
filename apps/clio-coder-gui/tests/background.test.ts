@@ -232,10 +232,7 @@ test("installed background configuration launches plain Node and preserves a bra
 	assert.deepEqual(calls.slice(-2), ["reload", "enable"]);
 	const movedDesktop = await launcherStatus(config.desktopPrefix);
 	assert.equal(movedDesktop.status, "installed");
-	assert.equal(
-		await readFile(movedDesktop.entry, "utf8"),
-		desktopEntry({ ...repinned.launch, background: directory }),
-	);
+	assert.equal(await readFile(movedDesktop.entry, "utf8"), desktopEntry({ ...repinned.launch, background: directory }));
 	await assert.rejects(
 		installBackground(directory, { ...moved, packageRoot: root }, control, async () => {}),
 		/another installation/,
@@ -274,10 +271,7 @@ test("restart repins moved launch paths for the same installation before startin
 	assert.ok((await readFile(files.unitFile, "utf8")).includes(currentEntry));
 	const desktop = await launcherStatus(prefix);
 	assert.equal(desktop.status, "installed");
-	assert.equal(
-		await readFile(desktop.entry, "utf8"),
-		desktopEntry({ ...repinned.launch, background: directory }),
-	);
+	assert.equal(await readFile(desktop.entry, "utf8"), desktopEntry({ ...repinned.launch, background: directory }));
 	assert.equal((await uninstallBackground(directory, control)).status, "absent");
 });
 
@@ -378,10 +372,12 @@ test("a bare launch restarts this installation's idle background app when it run
 	let idle: boolean | undefined = true;
 	const ready = async () => ({ clio: running, ...(idle === undefined ? {} : { idle }) });
 	await installBackground(directory, config, control, ready);
-	const restartTo = (version: string): typeof controlService => async (action, unit, unitFile) => {
-		if (action === "restart") running = version;
-		return control(action, unit, unitFile);
-	};
+	const restartTo =
+		(version: string): typeof controlService =>
+		async (action, unit, unitFile) => {
+			if (action === "restart") running = version;
+			return control(action, unit, unitFile);
+		};
 	const upgraded = await preferBackground(directory, config.packageRoot, restartTo("0.5.7"), ready, "linux", "0.5.7");
 	assert.deepEqual(upgraded, {
 		kind: "open",

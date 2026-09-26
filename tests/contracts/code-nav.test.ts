@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -104,11 +105,35 @@ describe("code_nav tool", () => {
 		strictEqual(existsSync(join(workspace, ".clio-coder")), false);
 	});
 
+	it("rejects an invalid mode without reading source", { skip: process.platform === "win32" }, () => {
+		// A source FIFO makes an accidental index build hang in a bounded child.
+		// Artifact absence alone would not detect a private read-only build.
+		execFileSync("mkfifo", [join(workspace, "blocked.ts")]);
+		const module = new URL("../../src/tools/codewiki/code-nav.ts", import.meta.url).href;
+		const loader = new URL("../../node_modules/tsx/dist/loader.mjs", import.meta.url).pathname;
+		const output = execFileSync(
+			process.execPath,
+			[
+				"--import",
+				loader,
+				"--input-type=module",
+				"-e",
+				`import {codeNavTool} from ${JSON.stringify(module)}; console.log(JSON.stringify(await codeNavTool.run({mode:"invalid"})))`,
+			],
+			{ cwd: workspace, timeout: 5000, encoding: "utf8" },
+		);
+		match(output, /mode must be/);
+		strictEqual(existsSync(join(workspace, ".clio-coder")), false);
+	});
+
 	it("names the malformed argument for every mode and refuses an arbitrary source root", async () => {
 		const cases: Array<[Record<string, unknown>, RegExp]> = [
 			[{ source: workspace, mode: "symbol", query: "solve" }, /source must be workspace or clio; got '/],
 			[{ source: "clio", mode: "wiki" }, /source=clio does not provide mode=wiki/],
-			[{ mode: "grep", query: "x" }, /mode must be symbol, path, entries, outline, deps, dependents, or wiki; got 'grep'/],
+			[
+				{ mode: "grep", query: "x" },
+				/mode must be symbol, path, entries, outline, deps, dependents, wiki, or project; got 'grep'/,
+			],
 			[{ mode: "symbol" }, /mode=symbol requires query/],
 			[{ mode: "path", query: "  " }, /mode=path requires query/],
 			[{ mode: "outline" }, /mode=outline requires query path/],

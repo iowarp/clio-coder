@@ -92,7 +92,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_fast",
 	},
 	[ToolNames.CodeNav]: {
-		objective: "Navigate the codewiki index by symbol, path, entry points, outline, imports, or importers.",
+		objective: "Navigate the codemap index by symbol, path, entry points, outline, imports, or importers.",
 		uiLabel: "Nav",
 		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(OBSERVE_SELF_CAPS.codeNav, "Raise limit or use a narrower mode/query."),

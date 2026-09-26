@@ -4,6 +4,21 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## Unreleased
 
+### Project context
+
+- The structural index is now called a codemap and uses `.clio-coder/codemap.json`; legacy `codewiki.json` artifacts remain readable and reset clears both names. Compact JSON and the existing index schema remain in place.
+- Indexed projects record bounded deterministic orientation in existing lifecycle state: declared purpose and commands, source/test coverage, areas, entry candidates, provenance and input freshness. Oversized or unreadable manifests remain unknown while facts from other checked inputs retain explicit partial coverage. `code_nav mode=project` retrieves current Git and durable operator-task evidence without treating task status as verified completion.
+- Prompt compilation reports recorded snapshots without synchronously hashing the whole project or checking every wiki source. Bounded workers receive codemap, orientation and wiki discovery even without a handbook; worktree handbook fallback retains the worktree's structural context.
+- Changed-file reconciliation avoids building dependencies twice. Bootstrap completion and session timestamp updates preserve newer index state under the shared lease. Retrieved navigation JSON is compact, and partial wiki checkpoints remain explicitly unvalidated.
+- CMake orientation ignores declarations inside comments and quoted examples, and preset commands preserve literal names with shell quoting. Project status counts and bounds complete Git rename/copy records; a failed codemap rebuild leaves orientation unavailable while retaining readable Git and operator-task evidence.
+
+### Session context
+
+- `structural-v2` is the default reversible working-set policy, with assistant-step protection, repeated-recall protection, and `default`, `data-analysis`, and `web-design` profiles. A rearm band delays another automatic eviction or summary until the projected ledger grows; request-fit recovery still bypasses it.
+- Model recall accepts an evicted read's path while its marker remains visible; historical results behind a summary remain discoverable and recallable by ref. An unchanged reread records recall provenance, repeated reread copies retain the body's recall lineage, and recall-recording failures preserve a successful read.
+- **Compatibility:** Session format 6 adds eviction reasons, reread triggers, and optional content hashes. Supported older ledgers remain readable and are restamped when opened; older readers that support only format 5 refuse format 6. Upgrade clients together before reopening these sessions.
+- `/context` shows the selected non-default profile and rearm percentage. Replay retains recorded recall evidence, uses the same projected-ledger headroom as live eviction, and pairs non-default profile results with default-profile runs over the same corpus in Markdown and JSON reports.
+
 ### Safety
 
 - Damage control no longer blocks a destructive command that appears only as quoted text in `echo` or `printf` arguments, a `git commit -m` or `git tag -m` message, or a `grep` or `rg` pattern, including when the bash call names a working directory. The exemption applies only when the whole command has no `eval`, pipe, heredoc, substitution, shell, interpreter or wrapper command, and never to SQL rules. Every other command is still scanned whole.

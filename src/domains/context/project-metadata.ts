@@ -200,16 +200,33 @@ const pomXml: MetadataReader = (cwd) => {
  * `project(<name> [LANGUAGES ...] [VERSION ...] [DESCRIPTION "..."])`, the
  * closest thing a C, C++, CUDA, or Fortran repository has to a manifest.
  */
+export function cmakeProjectDeclaration(raw: string): { name: string | null; description: string | null } {
+	// Blank comments and string arguments without changing offsets. Command-like
+	// examples inside them are not declarations. Unterminated regions stay blank
+	// through EOF, so malformed input cannot expose an example as a command.
+	const commands = raw.replace(
+		/#\[(=*)\[[\s\S]*?(?:\]\1\]|$)|#[^\r\n]*|"(?:\\[\s\S]|[^"\\])*(?:"|$)|\[(=*)\[[\s\S]*?(?:\]\2\]|$)/gu,
+		(region) => region.replace(/[^\r\n]/g, " "),
+	);
+	const project = /^[ \t]*project[ \t]*\(([\s\S]*?)\)/imu.exec(commands);
+	if (!project) return { name: null, description: null };
+	const args = project[1] ?? "";
+	const start = project.index + project[0].indexOf("(") + 1;
+	const declaration = raw.slice(start, start + args.length);
+	const projectName = /^\s*([A-Za-z0-9_.+-]+)(?=\s|$)/u.exec(declaration)?.[1];
+	const purpose = /\bDESCRIPTION\b/u.exec(args);
+	const projectDescription = purpose
+		? /^\s*"((?:[^"\\]|\\.)*)"/u.exec(declaration.slice(purpose.index + purpose[0].length))?.[1]
+		: undefined;
+	return { name: name(projectName), description: description(projectDescription) };
+}
+
 const cmakeLists: MetadataReader = (cwd) => {
 	const raw = readText(cwd, "CMakeLists.txt");
 	if (raw === null) return null;
-	const call = /^[ \t]*project[ \t]*\(([\s\S]*?)\)/imu.exec(raw)?.[1];
-	if (!call) return { file: "CMakeLists.txt", fragment: {} };
-	const projectName = /^\s*([A-Za-z0-9_.+-]+)/u.exec(call)?.[1];
-	const projectDescription = /\bDESCRIPTION\s+"((?:[^"\\]|\\.)*)"/u.exec(call)?.[1];
 	return {
 		file: "CMakeLists.txt",
-		fragment: { name: name(projectName), description: description(projectDescription) },
+		fragment: cmakeProjectDeclaration(raw),
 	};
 };
 
@@ -400,7 +417,7 @@ function isCalloutParagraph(lines: ReadonlyArray<string>): boolean {
  * The first paragraph of a README that reads like a description of the project,
  * with headings, underlines, badge rows, callouts, and tables removed.
  */
-function readmeSummary(content: string): string | null {
+export function readmeSummary(content: string): string | null {
 	const paragraphs = stripReadmeMarkup(content)
 		.split(/\n\s*\n/u)
 		.map((part) => part.split(/\r?\n/u))
@@ -424,7 +441,7 @@ function readmeSummary(content: string): string | null {
  * The first heading a README declares, used as a project name when no manifest
  * names one. Understands Markdown `#`, Setext underlines, and AsciiDoc `=`.
  */
-function readmeTitle(content: string): string | null {
+export function readmeTitle(content: string): string | null {
 	const lines = stripReadmeMarkup(content).split(/\r?\n/u);
 	for (let index = 0; index < lines.length; index += 1) {
 		const line = (lines[index] ?? "").trim();

@@ -91,14 +91,14 @@ Without `--cwd`, ACP binds the first session's absolute workspace path before it
 | `clio-coder dev share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
 | `clio-coder dev share inspect <path> [--json]` | Inspect a share archive without importing it. Each share command refuses, with exit 2, a flag it does not use. |
 | `clio-coder export --out <path> ...` / `clio-coder import <path> ...` | Top-level aliases for `dev share export` and `dev share import`. Each `dev` command also resolves without the `dev` prefix. |
-| `clio-coder context` | Show project context status, preload class, codewiki freshness, and the codewiki digest when present. |
-| `clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose\|--apply\|--rewrite] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO-CODER.md`, `.clio-coder/codewiki.json`, and `.clio-coder/state.json`. |
-| `clio-coder context refresh [--wiki]` | Rebuild the codewiki and state without touching `CLIO-CODER.md`; with `--wiki`, update an existing Markdown wiki. |
+| `clio-coder context` | Show project context status, preload class, codemap freshness, and the codemap digest when present. |
+| `clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose\|--apply\|--rewrite] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO-CODER.md`, `.clio-coder/codemap.json`, and `.clio-coder/state.json`. |
+| `clio-coder context refresh [--wiki]` | Rebuild the codemap and state without touching `CLIO-CODER.md`; with `--wiki`, update an existing Markdown wiki. |
 | `clio-coder context wiki [--update\|--retry-pending] [--status] [--depth auto\|simple\|medium\|detailed] [--target <id>] [--model <id>] [--thinking off\|low\|medium\|high]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio-coder/wiki/`. |
 | `clio-coder context reset [--all] [--yes]` | Clear accumulated project context artifacts; `--all` also removes `CLIO-CODER.md`. `--yes` (or `-y`) answers every confirmation and is required when stdin is not a terminal. |
-| `clio-coder context index [--json]` | Build the structural codewiki index without model calls; writes `.clio-coder/codewiki.json` and `.clio-coder/state.json` and prints coverage plus a structural hash. |
+| `clio-coder context index [--json]` | Build the structural codemap index without model calls; writes `.clio-coder/codemap.json` and `.clio-coder/state.json` and prints coverage plus a structural hash. |
 | `clio-coder context map [--out <path>] [--json]` | Write an archify architecture seed from the structural index without model calls. |
-| `clio-coder context replay (--sessions <path>... \| --synthetic <ids>) [--policies <ids>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--protect-last-turns <n>] [--min-evictable-tokens <n>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio session ledgers or the seeded procedural corpora and report retention, precision, token savings, recall cost, cold-prefix cost, saturation, and summary headroom. |
+| `clio-coder context replay (--sessions <path>... \| --synthetic <ids>) [--policies <ids>] [--profile <id>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--protect-last-turns <n>] [--protect-last-steps <n>] [--min-evictable-tokens <n>] [--rearm-fraction <ratio>] [--overflow-fraction <ratio>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio session ledgers or the seeded procedural corpora and report retention, precision, token savings, recall cost, cold-prefix cost, saturation, and summary headroom. Non-default profiles include paired default-profile comparisons. |
 | `clio-coder context working-set --session <id\|path>` | Inspect one session's durable working-set fold and path-index summary without modifying the ledger. |
 
 ACP frontends can list, load, resume, and delete sessions through the stable session methods. Clio offers `default` and `yolo` as ACP modes. A frontend can change autonomy with `session/set_mode` or the `mode` configuration option. The `model` and `thought_level` options change only the hosted session; saved defaults stay as they were. Mode and option changes wait until the current prompt finishes.
@@ -610,9 +610,9 @@ Clio-specific and ambient variables are listed in the [environment variable refe
 
 `CLIO-CODER.md` is the project guidance file. Context operations are exposed through `clio-coder context` and `/context`; the maintained architecture and lifecycle details live in [Context continuity](context-continuity.md) and the [context engine](../architecture/context-engine.md).
 
-### Codewiki index
+### Codemap index
 
-`clio-coder context index` builds the structural codewiki without model calls. `context map` derives an architecture map from that index. Pinned source citations require a clean repository and matching indexed bytes; dirty or unknown source state falls back to uncited seeds.
+`clio-coder context index` builds the structural codemap and bounded orientation without model calls. `context map` derives an architecture map from that index. Pinned source citations require a clean repository and matching indexed bytes; dirty or unknown source state falls back to uncited seeds.
 
 ### Working-set replay
 
@@ -624,7 +624,7 @@ Clio-specific and ambient variables are listed in the [environment variable refe
 
 ### code_nav modes
 
-The read-only `code_nav` tool queries the local index. Its modes and argument schema are in [Tool usage](tool-usage.md#codenav-navigate-the-codewiki-index).
+The read-only `code_nav` tool queries the local index. Its modes and argument schema are in [Tool usage](tool-usage.md#codenav-navigate-the-codemap).
 
 
 ## Output styles

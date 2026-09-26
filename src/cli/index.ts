@@ -34,7 +34,7 @@ Usage:
   clio-coder run [flags] <task>   run one headless main-agent turn
   clio-coder --version, -v        print the Clio Coder version
   clio-coder --api-key <key>      override the active target API key for this run
-  clio-coder --no-context-files, -nc  skip CLIO-CODER.md project-context injection
+  clio-coder --no-context-files, -nc  skip main-session project context preload
   clio-coder --with-panes         activate the panes extension (terminal panes for workers and tools)
   clio-coder --no-panes           keep panes off even when settings turn them on
   clio-coder --autonomy <level>   start this interactive session at default|yolo
@@ -51,13 +51,13 @@ Usage:
   clio-coder paths [--json]       print resolved config/data/cache directories
   clio-coder config inspect [--json]  inspect effective customization and provenance
   clio-coder reset                recover or wipe Clio Coder state
-  clio-coder context              show project context status (CLIO-CODER.md, preload, codewiki)
-  clio-coder context init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO-CODER.md and codewiki
-  clio-coder context refresh [--wiki]  re-index the codewiki and optionally update the Markdown wiki
+  clio-coder context              show project context status (CLIO-CODER.md, preload, codemap)
+  clio-coder context init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO-CODER.md and codemap
+  clio-coder context refresh [--wiki]  re-index the codemap and optionally update the Markdown wiki
   clio-coder context wiki [--update] [--status] [--depth auto|simple|medium|detailed] [--target <id>] [--model <id>]
   clio-coder context reset [--all] [--yes]  clear accumulated project context artifacts
-  clio-coder context index [--json]  build the codewiki index without model calls
-  clio-coder context map [--out <path>] [--json]  write an archify architecture seed from the codewiki index
+  clio-coder context index [--json]  build the codemap index without model calls
+  clio-coder context map [--out <path>] [--json]  write an archify architecture seed from the codemap index
   clio-coder context replay --sessions <path>...  compare working-set policies over Clio ledgers
   clio-coder context working-set --session <id|path>  inspect one session's working-set state
   clio-coder uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher

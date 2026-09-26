@@ -30,7 +30,11 @@ import {
 	serializeClioMd,
 	tryReadClioMd,
 } from "./clio-md.js";
-import { buildCodewikiCandidate, coordinateCodewikiWrite } from "./codewiki/coordinator.js";
+import {
+	buildCodewikiCandidate,
+	coordinateCodewikiExclusive,
+	coordinateCodewikiWrite,
+} from "./codewiki/coordinator.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import { collectEnforcementInventory, type EnforcementInventory } from "./enforcement-inventory.js";
 import type { Fingerprint } from "./fingerprint.js";
@@ -643,7 +647,7 @@ const VERIFICATION_SECTION_RE = /\bverification\b/i;
 interface ModelGroundingCorpus {
 	lower: string;
 	indexedPaths: ReadonlySet<string>;
-	/** Every visible repository path, including docs, configs and CI files the codewiki does not index. */
+	/** Every visible repository path, including docs, configs and CI files the codemap does not index. */
 	repositoryPaths: ReadonlySet<string>;
 	/** Lowercased text of the visible repository files, read once on first need. */
 	repositoryText: () => string;
@@ -1083,7 +1087,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 		const adoptionLine = formatAdoptionLine(summary);
 		return [
 			"clio-coder context init preview",
-			`  ${contextLine}; codewiki would index ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; ${dirtyLine}; no files written`,
+			`  ${contextLine}; codemap would index ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; ${dirtyLine}; no files written`,
 			...(adoptionLine ? [adoptionLine] : []),
 			"",
 		].join("\n");
@@ -1093,7 +1097,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	if (summary.action === "preserved") {
 		return [
 			"clio-coder context init preserved CLIO-CODER.md",
-			`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
+			`  ${contextLine}; codemap rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
 			"  CLIO-CODER.md is treated as human-owned. Use --apply to replace it with a generated draft, --propose to write an ignored proposal, or --adopt to refresh only imported agent context.",
 			...(adoptionLine ? [adoptionLine] : []),
 			"",
@@ -1102,7 +1106,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	if (summary.action === "proposed") {
 		return [
 			"clio-coder context init proposed CLIO-CODER.md",
-			`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
+			`  ${contextLine}; codemap rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
 			...(proposalLine ? [proposalLine] : []),
 			"  CLIO-CODER.md was not changed. Re-run with --apply only after reviewing the proposal.",
 			...(adoptionLine ? [adoptionLine] : []),
@@ -1111,7 +1115,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	}
 	return [
 		`clio-coder context init ${summary.action} CLIO-CODER.md`,
-		`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
+		`  ${contextLine}; codemap rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
 		"  git policy: .clio-coder/ stays ignored by default; CLIO-CODER.md stays versioned and human-owned. Force-add .clio-coder assets only when you explicitly intend to share them.",
 		...(proposalLine ? [proposalLine] : []),
 		...(adoptionLine ? [adoptionLine] : []),
@@ -1121,6 +1125,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 
 const CLIO_GITIGNORE_LINE = ".clio-coder/";
 const CLIO_GITIGNORE_DYNAMIC_LINES = new Set<string>([
+	".clio-coder/codemap.json",
 	".clio-coder/codewiki.json",
 	".clio-coder/state.json",
 	".clio-coder/handoffs/",
@@ -1303,12 +1308,17 @@ function writeProjectState(
 	const contextSourceHash = contextSources ? adoptionSnapshotsHash(contextSources) : undefined;
 	writeClioState(cwd, {
 		version: 1,
-		projectType,
-		fingerprint,
-		codewikiVersion,
+		projectType: prev?.projectType ?? projectType,
+		fingerprint: prev?.fingerprint ?? fingerprint,
+		codewikiVersion: prev?.codewikiVersion ?? codewikiVersion,
+		...(published
+			? { bootstrapFingerprint: fingerprint }
+			: prev?.bootstrapFingerprint
+				? { bootstrapFingerprint: prev.bootstrapFingerprint }
+				: {}),
 		lastInitAt: now.toISOString(),
 		lastSessionAt: now.toISOString(),
-		lastIndexedAt: indexedAt,
+		lastIndexedAt: prev?.lastIndexedAt ?? indexedAt,
 		...(lastBootstrap ? { lastBootstrap } : {}),
 		...(contextSources ? { contextSources } : {}),
 		...(contextSourceHash ? { contextSourceHash } : {}),
@@ -1330,18 +1340,23 @@ function persistCodewikiForGeneration(
 	fingerprint: Fingerprint,
 ): void {
 	const prev = readClioState(cwd);
-	writeClioState(cwd, {
-		version: 1,
-		projectType,
-		fingerprint,
-		codewikiVersion: codewiki.version,
-		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
-		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
-		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
-		...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
-		lastSessionAt: prev?.lastSessionAt ?? indexedAt,
-		lastIndexedAt: indexedAt,
-	});
+	writeClioState(
+		cwd,
+		{
+			version: 1,
+			projectType,
+			fingerprint,
+			codewikiVersion: codewiki.version,
+			...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
+			...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+			...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
+			...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
+			...(prev?.bootstrapFingerprint ? { bootstrapFingerprint: prev.bootstrapFingerprint } : {}),
+			lastSessionAt: prev?.lastSessionAt ?? indexedAt,
+			lastIndexedAt: indexedAt,
+		},
+		codewiki,
+	);
 }
 
 function summarizeAdoption(
@@ -1396,7 +1411,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	const indexedAt = now.toISOString();
 	// Index the repository before generation so the generator can ground CLIO-CODER.md
 	// in the real structure (entry points, key modules), not just sibling prose.
-	progress(input, { phase: "codewiki", status: "started", message: "building codewiki index" });
+	progress(input, { phase: "codewiki", status: "started", message: "building codemap index" });
 	let codewiki: Codewiki;
 	let codewikiFingerprint: Fingerprint;
 	if (input.preview === true) {
@@ -1587,23 +1602,25 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		detail: proposalPath ?? clioMdPath,
 	});
 	const adoptionApplied = input.adopt === true && (action === "wrote" || action === "refreshed");
-	progress(input, { phase: "state", status: "started", message: "persisting codewiki and project state" });
-	const statePath = writeProjectState(
-		cwd,
-		projectType,
-		now,
-		indexedAt,
-		adoption,
-		adoptionApplied,
-		codewiki.version,
-		codewikiFingerprint,
-		generation,
-		action === "wrote" || action === "refreshed",
+	progress(input, { phase: "state", status: "started", message: "persisting codemap and project state" });
+	const statePath = await coordinateCodewikiExclusive(cwd, () =>
+		writeProjectState(
+			cwd,
+			projectType,
+			now,
+			indexedAt,
+			adoption,
+			adoptionApplied,
+			codewiki.version,
+			codewikiFingerprint,
+			generation,
+			action === "wrote" || action === "refreshed",
+		),
 	);
 	progress(input, {
 		phase: "state",
 		status: "completed",
-		message: `state updated; ${codewikiEntryCount} codewiki entr${codewikiEntryCount === 1 ? "y" : "ies"}`,
+		message: `state updated; ${codewikiEntryCount} codemap entr${codewikiEntryCount === 1 ? "y" : "ies"}`,
 	});
 
 	const postStatus = gitStatus(cwd);

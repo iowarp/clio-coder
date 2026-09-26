@@ -230,7 +230,7 @@ describe("read scope admission", () => {
 		for (const path of [
 			join(packageRoot, "package.json"),
 			join(packageRoot, "node_modules"),
-			join(packageRoot, "dist", "assets", "codewiki.json"),
+			join(packageRoot, "dist", "assets", "codemap.json"),
 			`${join(packageRoot, "docs")}/../package.json`,
 		]) {
 			strictEqual(engine.evaluate({ tool: ToolNames.Read, args: { path } }).readScope, "outside-workspace", path);

@@ -25,13 +25,14 @@ import {
 import { loadCodewikiForTool, renderJson } from "./shared.js";
 
 const REGEX_SYNTAX_HINTS = /\.\*|\.\+|\^|\$|\\[dDwWsSbB]|\(\?:|\(\?=|\(\?!/;
-const CLIO_CODEWIKI_RELATIVE_PATH = join("dist", "assets", "codewiki.json");
+const CLIO_CODEWIKI_RELATIVE_PATH = join("dist", "assets", "codemap.json");
 
 type CodeNavSource = "workspace" | "clio";
 
 interface LoadedNavSource {
 	codewiki: Codewiki;
 	entryRoot: string | null;
+	fingerprint?: import("../../domains/context/fingerprint.js").Fingerprint;
 }
 
 interface NavIndex {
@@ -85,9 +86,10 @@ function loadClioCodewikiForTool(): { ok: true; loaded: LoadedNavSource } | { ok
 		if (clioCodewikiCache?.packageRoot === packageRoot) {
 			return { ok: true, loaded: { codewiki: clioCodewikiCache.codewiki, entryRoot: packageRoot } };
 		}
-		const artifactPath = join(packageRoot, CLIO_CODEWIKI_RELATIVE_PATH);
+		const canonical = join(packageRoot, CLIO_CODEWIKI_RELATIVE_PATH);
+		const artifactPath = existsSync(canonical) ? canonical : join(packageRoot, "dist", "assets", "codewiki.json");
 		const parsed = parseCodewikiRaw(readFileSync(artifactPath, "utf8"));
-		if (!parsed) throw new Error("bundled artifact is not a valid codewiki");
+		if (!parsed) throw new Error("bundled artifact is not a valid codemap");
 		const codewiki = packageRootResolvedCodewiki(packageRoot, parsed);
 		clioCodewikiCache = { packageRoot, codewiki };
 		return { ok: true, loaded: { codewiki, entryRoot: packageRoot } };
@@ -106,7 +108,7 @@ async function loadNavSource(
 	if (source === "clio") return loadClioCodewikiForTool();
 	const loaded = await loadCodewikiForTool(process.cwd(), { readOnly: true });
 	return loaded.ok
-		? { ok: true, loaded: { codewiki: loaded.codewiki, entryRoot: null } }
+		? { ok: true, loaded: { codewiki: loaded.codewiki, entryRoot: null, fingerprint: loaded.fingerprint } }
 		: { ok: false, message: loaded.message };
 }
 
@@ -510,7 +512,7 @@ function runWiki(cwd: string, query: string): NavPayload | ToolResult {
 	const owed = wikiCompletenessFromMeta(meta)?.owed ?? 0;
 	if (owed > 0) {
 		messages.push(
-			`${owed} planned page${owed === 1 ? " is" : "s are"} not written yet; run \`${WIKI_UPDATE_COMMAND}\` to finish them.`,
+			`${owed} planned page${owed === 1 ? " is" : "s are"} await successful generation/validation; run \`${WIKI_UPDATE_COMMAND}\` to finish them.`,
 		);
 	}
 	if (query.length > 0) {
@@ -561,16 +563,14 @@ export const codeNavTool: ToolSpec = {
 		}
 		const source: CodeNavSource = rawSource === "clio" ? "clio" : "workspace";
 		const mode = typeof args.mode === "string" ? args.mode : "";
-		if (source === "clio" && mode === "wiki") {
+		if (source === "clio" && (mode === "wiki" || mode === "project")) {
 			return {
 				kind: "error",
 				message:
-					"code_nav: source=clio does not provide mode=wiki; use the clio_docs capability through gateway for Clio documentation",
+					"code_nav: source=clio does not provide mode=wiki/project; use the clio_docs capability through gateway for Clio documentation",
 			};
 		}
-		const loaded = await loadNavSource(source);
-		if (!loaded.ok) return { kind: "error", message: loaded.message };
-		const index = navIndexFor(loaded.loaded.codewiki);
+
 		const query = typeof args.query === "string" ? args.query.trim() : "";
 		const limit = parseLimit(args.limit, mode === "entries" ? DEFAULT_ENTRY_LIMIT : DEFAULT_LIMIT);
 		const reservation = reserveObservation(OBSERVE_SELF_CAPS.codeNav, options);
@@ -600,6 +600,29 @@ export const codeNavTool: ToolSpec = {
 				...(options ? { options } : {}),
 			});
 		};
+		if (!["symbol", "path", "entries", "outline", "deps", "dependents", "wiki", "project"].includes(mode))
+			return {
+				kind: "error",
+				message: `code_nav: mode must be symbol, path, entries, outline, deps, dependents, wiki, or project; got '${mode}'`,
+			};
+		if (mode === "wiki") return close(runWiki(process.cwd(), query));
+		const loaded = await loadNavSource(source);
+		if (mode === "project") {
+			const { readProjectStatus } = await import("../../domains/context/project-status.js");
+			return close({
+				payload: await readProjectStatus(
+					process.cwd(),
+					loaded.ok && loaded.loaded.fingerprint
+						? { codewiki: loaded.loaded.codewiki, fingerprint: loaded.loaded.fingerprint }
+						: undefined,
+					loaded.ok ? undefined : loaded.message,
+				),
+				shownCount: 1,
+				totalCount: 1,
+			});
+		}
+		if (!loaded.ok) return { kind: "error", message: loaded.message };
+		const index = navIndexFor(loaded.loaded.codewiki);
 		if (mode === "symbol") {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=symbol requires query" };
 			return close(runSymbol(index, query, limit));
@@ -621,10 +644,9 @@ export const codeNavTool: ToolSpec = {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=dependents requires query path" };
 			return close(runDependents(index, query, limit));
 		}
-		if (mode === "wiki") return close(runWiki(process.cwd(), query));
 		return {
 			kind: "error",
-			message: `code_nav: mode must be symbol, path, entries, outline, deps, dependents, or wiki; got '${mode}'`,
+			message: `code_nav: mode must be symbol, path, entries, outline, deps, dependents, wiki, or project; got '${mode}'`,
 		};
 	},
 };

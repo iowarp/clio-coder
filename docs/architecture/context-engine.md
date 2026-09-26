@@ -18,7 +18,7 @@ The core thesis of Clio's context architecture is that **context management must
 | Reversibly prune past observations | `/context compact` or `self_compact()` | Working-set eviction first; LLM summary handoff only if still over budget. |
 | Recover an interrupted compaction | `/context recover <handoffId> <reduce\|deliver>` | Branch-bound transaction recovery with preserved continuity identity. |
 | Inspect an evicted tool observation | `/context recall <ref>` | Shows the original body in the transcript; model recall uses the context tool. |
-| Initialize or refresh structural index | `clio-coder context init` / `refresh` | Model-free indexing of symbols, files, and dependencies into `.clio-coder/codewiki.json`. |
+| Initialize or refresh structural index | `clio-coder context index` / `refresh` | Model-free indexing of symbols, files, and dependencies into `.clio-coder/codemap.json`; `context init` also generates a handbook. |
 | Generate architectural Markdown wiki | `clio-coder context wiki` | Dispatched worker generation of persistent documentation under `.clio-coder/wiki/`. |
 | Inspect effective session settings | `context(scope="settings")` | Read-only view of active configuration, targets, and compaction thresholds. |
 
@@ -170,7 +170,7 @@ Clio maintains two distinct repository knowledge layers:
 ```
 Repository Source Code
        │
-       ├─► [context init / refresh] ──► .clio-coder/codewiki.json (Model-Free Structural Index)
+       ├─► [context init / refresh] ──► .clio-coder/codemap.json (Model-Free Structural Index)
        │                                     │
        │                                     ▼
        │                                Fast code_nav Symbol Resolution
@@ -181,20 +181,20 @@ Repository Source Code
                                         Deep Architectural Navigation
 ```
 
-| Dimension | Structural Codewiki | Markdown Architecture Wiki |
+| Dimension | Structural Codemap | Markdown Architecture Wiki |
 | :--- | :--- | :--- |
-| **Artifact** | `.clio-coder/codewiki.json` (schema v5) | `.clio-coder/wiki/**/*.md` + `meta.json` |
+| **Artifact** | `.clio-coder/codemap.json` (schema v5) | `.clio-coder/wiki/**/*.md` + `meta.json` |
 | **Generation** | `clio-coder context init` (model-free) | `clio-coder context wiki` (worker dispatches) |
 | **Inference Cost** | 0 tokens (pure AST and lexical parsing) | Planning turn + 1 worker dispatch per page |
-| **Prompt Representation**| `<codewiki>` tag enabling `code_nav` | `<wiki>` summary index with page pointers |
+| **Prompt Representation**| `<codemap>` tag enabling `code_nav` | `<wiki>` summary index with page pointers |
 | **Update Triggers** | File save, git checkout, `context refresh` | Explicit operator command |
 
 <details>
 <summary>Structural index schema v5 and symbol resolution</summary>
 
-`.clio-coder/codewiki.json` records:
-- **Files**: Path, language, line count, role (source, test, config, doc), and content hash.
-- **Symbols**: Top-level exported functions, classes, interfaces, and types with exact line ranges.
+`.clio-coder/codemap.json` records:
+- **Files**: Path, language, line count, role (entry, test, module, config), and content hash.
+- **Symbols**: Extracted functions, classes, interfaces, and types with source line positions.
 - **Dependencies**: Explicit import specifiers and internal module references.
 - **Fast Navigation**: Powers the `code_nav` tool, allowing the agent to locate symbols and callers without running full repository text searches.
 
@@ -209,5 +209,7 @@ Repository Source Code
 | Token Accounting & Budgets | [context-accounting.ts](../../src/domains/session/context-accounting.ts) | `contextUsageSnapshot`, `reconcileSnapshot` |
 | Context Ledger | [context-ledger.ts](../../src/domains/session/context-ledger.ts) | `ContextLedger`, `buildContextLedger` |
 | Compaction summary | [compact.ts](../../src/domains/session/compaction/compact.ts) | `compact`, `captureSkillContext` |
-| Codewiki artifact | [artifact.ts](../../src/domains/context/codewiki/artifact.ts) | `writeCodewiki`, `readCodewiki` |
+| Codemap artifact | [artifact.ts](../../src/domains/context/codewiki/artifact.ts) | `writeCodewiki`, `readCodewiki` |
 | Docs & Guidance Engine | [docs-engine.ts](../../src/tools/context/docs-engine.ts) | `listDocsCorpus`, `searchDocs` |
+
+For artifact ownership, compatibility, bounded orientation, current operator-task evidence and worker consumption, see [Project context](project-context.md).

@@ -18,13 +18,13 @@ const HELP = `Usage:
   clio-coder context working-set --session <id|path>
 
 Project context commands:
-  clio-coder context              show project context status (CLIO-CODER.md, preload, codewiki)
-  clio-coder context init         explore the repo and bootstrap CLIO-CODER.md and codewiki
-  clio-coder context refresh      re-index the codewiki and optionally update the Markdown wiki
+  clio-coder context              show project context status (CLIO-CODER.md, preload, codemap)
+  clio-coder context init         explore the repo and bootstrap CLIO-CODER.md and codemap
+  clio-coder context refresh      re-index the codemap and optionally update the Markdown wiki
   clio-coder context wiki         generate or inspect the agent-authored Markdown wiki
   clio-coder context reset        clear accumulated project context artifacts
-  clio-coder context index        build the codewiki index without model calls
-  clio-coder context map          write an archify architecture seed from the codewiki index
+  clio-coder context index        build the codemap index without model calls
+  clio-coder context map          write an archify architecture seed from the codemap index
   clio-coder context replay       compare working-set policies over Clio ledgers
   clio-coder context working-set  inspect one session's working-set fold and path index
 `;
@@ -124,7 +124,7 @@ async function printContextStatus(): Promise<number> {
 		: state && !context.isStale(state.fingerprint, context.computeFingerprint(cwd, codewiki))
 			? "fresh"
 			: "stale (run clio-coder context refresh)";
-	const codewikiLines = [`codewiki: ${codewikiState} (${codewikiCount} entr${codewikiCount === 1 ? "y" : "ies"})`];
+	const codewikiLines = [`codemap: ${codewikiState} (${codewikiCount} entr${codewikiCount === 1 ? "y" : "ies"})`];
 	if (codewiki) codewikiLines.push(context.renderCodewikiDigest(codewiki));
 
 	const adoptionSources = state?.contextSources ?? [];

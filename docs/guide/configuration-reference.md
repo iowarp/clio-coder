@@ -204,7 +204,11 @@ Tool schemas are registered in [`src/tools/`](../../src/tools/registry.ts). Use 
 | `--model` | For `context wiki`, wire model id for the documenter model instead of the configured one; pair with `--target`. |
 | `--no-filter` | For `context replay`, include every readable transcript instead of only the filtered active-path sessions. |
 | `--policies` | For `context replay`, comma-separated policy ids from none, random, age-horizon, structural-v1, structural-v2, oracle, or a rung composition (`<id>+<rung>`, `<id>-<rung>`, `rungs:<a>/<b>`). |
+| `--profile` | For `context replay`, `default`, `data-analysis`, or `web-design`; a non-default profile includes paired default-profile results over the same corpus. |
+| `--protect-last-steps` | For `context replay`, positive integer count of recent assistant steps whose observations are protected. |
 | `--protect-last-turns` | For `context replay`, integer (at least 1) count of recent user turns whose observations are never evicted. |
+| `--rearm-fraction` | For `context replay`, projected growth as a fraction of the window before another automatic reduction; default 0.1. |
+| `--overflow-fraction` | For `context replay`, modeled request-fit limit as a fraction of the budget; reduction bypasses the rearm band above it, default 0.95. |
 | `--seed` | For `context replay`, integer seed for the deterministic random policy. |
 | `--session` | For `context working-set`, the session id or path whose working-set fold and path index are printed (required). |
 

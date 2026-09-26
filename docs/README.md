@@ -71,6 +71,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Runtime discovery, model capabilities, local overlays, and field notes | [Model Catalog](architecture/model-catalog.md) |
 | Argonne ALCF Sophia and Metis targets over Globus OAuth | [ALCF Provider](architecture/alcf-provider.md) |
 | Project handbooks, context windows, accounting, compaction, and indexing | [Context Engine](architecture/context-engine.md) |
+| Codemap, bounded orientation, current project evidence, and artifact compatibility | [Project Context](architecture/project-context.md) |
 | Choose compaction and recover interrupted handoffs | [Context Continuity](guide/context-continuity.md) |
 | Non-destructive working-set eviction, markers, and recall | [Context Working Set](architecture/context-working-set.md) |
 | Session ledgers, branches, checkpoints, resume, and recovery | [Session Lifecycle](architecture/session-lifecycle.md) |
