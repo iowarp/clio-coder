@@ -4733,6 +4733,7 @@ export function createDispatchBundle(
 					blockedAttempts,
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
+					...(req.readOnly === true ? { readOnly: true as const } : {}),
 					toolTelemetry: {
 						coverage: "unavailable",
 						ingestionErrors: toolTelemetryIngestionErrors,
@@ -6105,6 +6106,7 @@ export function createDispatchBundle(
 					blockedAttempts,
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
+					...(lifecycle.readOnly ? { readOnly: true as const } : {}),
 					toolTelemetry: {
 						coverage: toolTelemetryCoverage,
 						ingestionErrors: telemetryIngestionErrors,

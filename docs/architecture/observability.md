@@ -273,6 +273,7 @@ The base provenance sets, steering, routing, quality, worker identity, result-co
 | `safety.toolTelemetry.ingestionErrors` | `number` | Current dispatch receipts | Malformed or lost frames, event-fold/source errors, and drain timeouts that make otherwise mediated telemetry incomplete | experimental |
 | `safety.toolTelemetry.unfinished` | `{ tool, count }[]` | Current dispatch receipts | Tool starts that had no matching finish when the receipt sealed | experimental |
 | `safety.toolTelemetry.workspaceMutationPossible` | `boolean` | Current dispatch receipts | Whether incomplete or unavailable telemetry could conceal a shared-workspace mutation; retry admission fails closed when true | experimental |
+| `safety.readOnly` | `true` | Read-only worker runs | The run had no write authority, because the request asked for a read-only run or the recipe's capability class is read-only. Absent on runs that could write, so their receipts keep their shape and digest | experimental |
 | `autonomy` | `"default" \| "yolo"` | Current receipts | The level used for this run. Workers record `default`, including read-only runs; the headless main agent records the session level. | experimental |
 | `validationGrounding.claimed` | `number` | Validation grounding evaluated | Count of validations claimed by worker | experimental |
 | `validationGrounding.grounded` | `number` | Validation grounding evaluated | Count of claimed validations matched against executed commands | experimental |

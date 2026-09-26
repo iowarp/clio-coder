@@ -657,6 +657,14 @@ export interface RunReceiptSafetySummary {
 	requestedActions?: ReadonlyArray<string>;
 	toolProfile?: ToolProfileName;
 	/**
+	 * The run had no write authority: the request asked for a read-only run, or
+	 * the recipe's capability class is read-only. Enforcement alone left no
+	 * record of it unless the worker tried to write and was denied (BT-016).
+	 * Present only on such runs, so a run that could write keeps its exact
+	 * shape and digest.
+	 */
+	readOnly?: true;
+	/**
 	 * Whether Clio observed a complete start/finish stream for this runtime's
 	 * tool activity. Retry admission consumes this sealed fact before reusing
 	 * the same checkout after a failed attempt.
