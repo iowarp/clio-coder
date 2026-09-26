@@ -26,10 +26,21 @@ Select **Sessions** to browse conversations grouped by project in the sidebar.
 Expand a project to open or resume a conversation; **Show more** reveals earlier
 conversations. **Navigation** returns to the application sections.
 
+During a conversation, selecting another area opens its controls in the sidebar
+and keeps the chat and its draft in place. Settings edits supported controls
+inline; Library keeps package inspection and plan review beside the chat. Traces,
+Fleet, Evidence, Toolchain, and System have their own lists and controls.
+Explicit viewer links open larger inspection pages, with a return to the conversation.
+
 The conversation input keeps attachments and message options on the left, with
 model, thinking, and send/stop controls on the right. Message options includes
 the Enter preference and delivery controls for steering or queuing a message
 while Clio is working.
+
+The conversation header provides **Configure harness**, a compact dashboard of
+reported session activity, and **Show artifacts**. The artifacts inspector shows
+recorded file activity, tool results, and linked evidence. It docks on the right
+on wide screens and opens as a dismissible drawer on smaller screens.
 
 ## Inspecting work and configuration
 

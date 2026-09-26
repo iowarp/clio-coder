@@ -94,3 +94,7 @@
 	max-height: none;
 	margin: 0;
 }
+.navigation-dialog:has(.sidebar-area-title) > :is(.inspection-navigation, .sidebar-library, .sidebar-settings, .tool-navigation, .system-navigation) {
+	min-height: 0;
+	max-height: none;
+}
