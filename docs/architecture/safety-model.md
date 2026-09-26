@@ -77,6 +77,7 @@ A parked call carries a request id. A main-agent approval resumes only that call
 ## Evidence and the finish contract
 
 - The finish contract ([finish-contract.ts](../../src/domains/safety/finish-contract.ts)) checks the end of a turn that changed files. It looks for validation evidence, such as a validation command that ran or a dispatch receipt, or for a `limitation` receipt. With neither, the model receives an advisory to report the change as unverified.
+- A [project quality policy](../guide/quality-policy.md) adds path-scoped required checks. Native verification receipts must match current source, check declaration, and policy snapshots. A valid policy selects high rigor unless explicitly overridden; recovery stays within the turn's existing authority. Check-scoped limitations settle requirements only when the policy explicitly allows them, and remain unverified.
 - Checks named in a dispatch's `verification` run on the host after the worker finishes. The worker's report is a claim until then.
 - Each current receipt carries a SHA-256 digest over its canonical receipt fields and reconstructible ledger provenance. Verification checks shared ledger fields and recomputes the digest, so an edited sealed field fails. The digest detects tampering; it is not a signature.
 

@@ -108,24 +108,31 @@ export function createFinishContractRegistration(
 					typeof input.metadata?.activeToolNames === "string" ? input.metadata.activeToolNames.split(",") : undefined;
 				const available = (name: string) =>
 					turnAllowsTool(constraints, name) && (attached === undefined || attached.includes(name));
-				const verificationTools = ["verify", "bash", "run_script"].filter(available);
-				const canRecordLimitation = available("limitation");
+				const verificationTools = (assessment.quality?.length ? ["verify"] : ["verify", "bash", "run_script"]).filter(
+					available,
+				);
+				const canRecordLimitation =
+					available("limitation") &&
+					(assessment.quality
+						?.filter((finding) => finding.state !== "passed" && finding.state !== "limited")
+						.every((finding) => finding.allowLimitation) ??
+						true);
 				if (!turnAllowsContinuation(constraints) || (verificationTools.length === 0 && !canRecordLimitation)) {
 					return [
 						{
 							kind: "inject_reminder",
 							severity: "warn",
-							message:
-								"[Clio Coder] validation evidence is missing. Report the change as unverified and name outstanding acceptance checks. The current task scope does not permit automatic validation recovery; this notice grants no additional authority.",
+							message: `${assessment.message} The current task scope does not permit automatic validation recovery; report the change as unverified. This notice grants no additional authority.`,
 						},
 					];
 				}
 				// Withhold the completion and force a re-prompt: a continuation
 				// request carries the turn onward, and the paired reminder gives
 				// the directive its own visible system-reminder line.
-				const message =
-					verificationTools.length > 0 && canRecordLimitation
-						? activeAcceptance?.verification.length
+				const message = assessment.quality?.length
+					? `${assessment.message}${canRecordLimitation ? " Alternatively, record a limitation with each outstanding check's exact ID in limitation.paths; these checks remain unverified." : ""}`
+					: verificationTools.length > 0 && canRecordLimitation
+						? activeAcceptance?.verification.length || assessment.message.includes("quality policy")
 							? assessment.message
 							: HIGH_RIGOR_REVALIDATION_MESSAGE
 						: `[Clio Coder] high-rigor finish gate: validation evidence is missing. ${verificationTools.length > 0 ? `Use an authorized check through ${verificationTools.join(" or ")}; if the operator excluded validation, report the blocker without running it.` : "Record the unavailable validation with limitation."} Do not claim checks passed without evidence.`;
@@ -159,6 +166,7 @@ function recordDecision(
 			rigor,
 			mutatedPaths: assessment.mutatedPaths,
 			evidenceKinds,
+			...(assessment.quality ? { quality: assessment.quality } : {}),
 		});
 	} catch {
 		// Audit must never break the hot path; a failed ledger write is silent.

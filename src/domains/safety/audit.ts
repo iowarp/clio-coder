@@ -3,6 +3,7 @@ import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
+import type { QualityFinding } from "../../tools/verify/quality-policy.js";
 import type { SafetyPolicyDecision } from "./policy-engine.js";
 
 /**
@@ -155,6 +156,7 @@ export interface CompletionContractAuditRecord {
 	rigor: string;
 	mutatedPaths: ReadonlyArray<string>;
 	evidenceKinds: ReadonlyArray<string>;
+	quality?: ReadonlyArray<QualityFinding>;
 }
 
 export interface CompletionContractAuditInput {
@@ -166,6 +168,7 @@ export interface CompletionContractAuditInput {
 	rigor: string;
 	mutatedPaths: ReadonlyArray<string>;
 	evidenceKinds: ReadonlyArray<string>;
+	quality?: ReadonlyArray<QualityFinding>;
 	now?: Date;
 }
 
@@ -393,6 +396,8 @@ export function buildCompletionContractAuditRecord(input: CompletionContractAudi
 	};
 	if (input.runId !== undefined) record.runId = input.runId;
 	if (input.sessionId !== undefined) record.sessionId = input.sessionId;
+	if (input.quality !== undefined)
+		record.quality = input.quality.map((finding) => ({ ...finding, message: redactString(finding.message) }));
 	return record;
 }
 

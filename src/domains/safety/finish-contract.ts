@@ -3,6 +3,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
 import { effectiveToolCall } from "../../tools/surface.js";
 import { type DeclaredCheckSourceRef, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../../tools/verify/catalog.js";
+import { assessQualityPolicy, loadQualityPolicy, type QualityFinding } from "../../tools/verify/quality-policy.js";
 import { validateTrustStatus } from "../evidence/trust-status.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
 import {
@@ -57,6 +58,7 @@ export type FinishContractAssessment =
 			reason: "no_mutation" | "validation_evidence" | "explicit_limitation";
 			evidence: ReadonlyArray<FinishContractEvidence>;
 			mutatedPaths: ReadonlyArray<string>;
+			quality?: ReadonlyArray<QualityFinding>;
 	  }
 	| {
 			kind: "engage";
@@ -64,6 +66,7 @@ export type FinishContractAssessment =
 			message: string;
 			evidence: ReadonlyArray<FinishContractEvidence>;
 			mutatedPaths: ReadonlyArray<string>;
+			quality?: ReadonlyArray<QualityFinding>;
 	  };
 
 export interface FinishContractInput {
@@ -122,6 +125,29 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 	const acceptanceChecks = new Set(input.activeAcceptance?.verification.map((item) => item.check) ?? []);
 	const evidence = collectValidationEvidence(window, acceptanceChecks, input.workspaceRoot);
 	const limitations = collectLimitationEvidence(window);
+	let quality: QualityFinding[] = [];
+	if (input.workspaceRoot) {
+		const loaded = loadQualityPolicy(input.workspaceRoot);
+		if (!loaded.ok)
+			return {
+				kind: "engage",
+				reason: "unvalidated_mutation",
+				message: `[Clio Coder] quality policy cannot be assessed: ${loaded.reason}. Report the change as unverified; this notice grants no additional authority.`,
+				evidence: [...evidence, ...limitations],
+				mutatedPaths,
+			};
+		if (loaded.policy) quality = assessQualityPolicy(input.workspaceRoot, loaded.policy, mutatedPaths, window);
+		const outstanding = quality.filter((finding) => finding.state !== "passed" && finding.state !== "limited");
+		if (outstanding.length)
+			return {
+				kind: "engage",
+				reason: "unvalidated_mutation",
+				message: `[Clio Coder] project quality policy has outstanding checks: ${outstanding.map((finding) => `${finding.rule}/${finding.check}: ${finding.state} (${finding.message})`).join("; ")}. Run checks only within the operator's authorized scope; this notice grants no additional authority.`,
+				evidence: [...evidence, ...limitations],
+				mutatedPaths,
+				quality,
+			};
+	}
 	const required = input.rigor === "high" ? (input.activeAcceptance?.verification ?? []) : [];
 	if (required.length > 0) {
 		const passes = new Set(
@@ -144,8 +170,17 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 			reason: passes.size === required.length ? "validation_evidence" : "explicit_limitation",
 			evidence: [...evidence, ...limitations],
 			mutatedPaths,
+			...(quality.length ? { quality } : {}),
 		};
 	}
+	if (quality.length > 0)
+		return {
+			kind: "ok",
+			reason: quality.every((finding) => finding.state === "passed") ? "validation_evidence" : "explicit_limitation",
+			evidence: [...evidence, ...limitations],
+			mutatedPaths,
+			quality,
+		};
 	if (evidence.length > 0) {
 		return { kind: "ok", reason: "validation_evidence", evidence, mutatedPaths };
 	}

@@ -89,6 +89,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Topic | Guide |
 | --- | --- |
 | Autonomy, default-deny execution, project policy, and damage-control rules | [Safety Model](architecture/safety-model.md) |
+| Required checks by changed path, fresh verification snapshots, and completion findings | [Project Quality Policies](guide/quality-policy.md) |
 | Receipts, run inspection, costs, and observability routing | [Observability](architecture/observability.md) |
 | Durable evidence bundles, findings, and reviewed memory | [Evidence and Memory](architecture/evidence-and-memory.md) |
 | SQLite trace mirror, schemas, cursors, and rebuildability | [Trace Store](architecture/trace-store.md) |

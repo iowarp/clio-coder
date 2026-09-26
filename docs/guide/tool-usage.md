@@ -366,6 +366,8 @@ dispatch(tasks=[{agent: "coder", task: "Fix the admission test", intent: {write_
 
 One entry point for listing/running declared checks and validating frontend artifacts. Sources: [`src/tools/verify/`](../../src/tools/verify/index.ts), [`src/cli/verifiers.ts`](../../src/cli/verifiers.ts).
 
+Projects can declare [quality policies](quality-policy.md) in `.clio-coder/quality.yaml` to require named checks for changed paths. Listing includes the policy; complete check invocations record source, policy, and declaration snapshots in `details.quality`. The completion assessment reports missing, failed, or stale requirements and records structured findings in the completion audit.
+
 | Argument | Contract |
 | --- | --- |
 | `check` | Omit or pass an empty string to list; otherwise a catalog ID, verification-family package script, derived check ID, or `frontend`. A bare family word (`test`, `lint`, `check`, `typecheck`, `format`, `build`, `ci`) that no package script declares resolves to the one derived check tagged with it. |
