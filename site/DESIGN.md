@@ -1,0 +1,57 @@
+# Clio Coder public site
+
+This is the public window into an open-source coding tool. It helps a reader understand Clio Coder, install it, and learn to use it. It is not a hosted agent platform, a company brochure, or a development report.
+
+## Identity and visual language
+
+Use **Clio Coder** as the product name. The executable and package are `clio-coder` and `@iowarp/clio-coder`. Describe its interfaces as **Clio Coder on the desktop** and **Clio Coder in the terminal**. The desktop interface opens locally in the user's browser and is in alpha. Do not imply a native desktop binary or complete feature parity.
+
+The direction is an editorial field guide: confident typography, generous margins, fine rules, real product captures, and useful technical detail. Newsreader supplies the expressive headings; IBM Plex Sans supplies interface and body text; IBM Plex Mono supplies commands and small labels. Fonts are self-hosted. The canonical mark is the existing cyan Clio ring with a copper center, adopted from the IOWarp ecosystem. It is in assets/brand/clio-mark.png, with an optimized WebP. Retain its geometry and colors. The terminal-orbit icon and old neon banner are legacy assets and must not appear in new public designs. Do not recolor product screenshots.
+
+`design-system.json` is the sole sanctioned color source. `tokens.mjs` generates `css/brand.css`; the build rejects drift. Black and warm ivory form the foundation. Cyan is the primary chromatic accent. Copper is a restrained secondary accent for chapter labels and the existing logo core. Use accent for links, selected controls, and one important action. Both dark and light themes use the same semantic roles. Follow the operating-system preference until the user chooses a theme; persist that choice. Code and product captures retain dark surfaces.
+
+Component CSS must use semantic variables: `--paper`, `--paper-raised`, `--ink`, `--ink-soft`, `--muted`, `--line`, `--line-control`, `--accent`, `--accent-soft`, `--on-accent`, and `--secondary`. Literal colors, inline styles, new color names, and alternative palettes are rejected by `policy.mjs`. New sanctioned colors require an explicit user request and a documented reason here. Tokens for space, radius, fonts, and page width also live in the generated layer. Favor rules and open layouts over nested panels and grids of interchangeable cards.
+
+## Public information structure
+
+Primary navigation has three entries: Overview, Docs, Tutorials. Installation is on the overview. Capabilities, models, project attribution, and interface selection also belong there. Existing page URLs redirect to the appropriate section or guide. Avoid a new top-level page when a section or tutorial answers the need.
+
+`public-docs.json` is an explicit allowlist of user-facing repository guides with short labels and four task-oriented groups. The sync script reads those files directly; the build renders them as HTML, rewrites links, and generates search and navigation. Public docs do not include the generated Wiki, architecture corpus, development audits, agent scratch notes, or internal work journals. Do not add those directories to the allowlist. A link to source code is sufficient for developer detail.
+
+Tutorials are real Markdown articles declared in `content/tutorials.json`. Publish useful workflows, actual screenshots, and recorded demonstrations. No empty video frames, invented testimonials, fabricated product screens, engagement counters, or promises of unpublished media. Media needs a useful title, description, accessible alternative, and attribution. An optional YouTube recording uses a real 11-character ID and the privacy-enhanced embed origin. Maintain captions in the recording itself.
+
+## Copywriting and copyright
+
+Write for someone using the product, not for the team building it. Lead with what a reader can do. Use concrete verbs and familiar nouns. Prefer one short paragraph per idea, with commands, examples, or links for detail. Marketing paragraphs have a hard limit of 65 words. Technical reference pages may be longer when the information is necessary for a task.
+
+Do not use superlatives, fabricated outcomes, corporate sales language, rhetorical contrasts, repetitive slogans, unexplained runtime jargon, or development status narration. Avoid wording such as “revolutionary,” “seamlessly,” “unlock the power,” and “single pane of glass.” Do not expose agent deliberations, coding-session transcripts, implementation audits, check inventories, or repository paths as promotional prose. Document user commands and behavior accurately. Claims must be supported by the repository; identify experimental or alpha features where the user chooses them.
+
+The public site footer reads **Copyright 2026 iowarp.ai**, as explicitly directed by the project owner. Keep the repository LICENSE and NOTICE linked; do not rewrite their legal contents as part of site copy work. The project is licensed under **Apache 2.0**. Link the license and notice; retain the bundled font licenses. The project section uses the small label “Created by researchers who love to code” and the heading “Meet the Clio team.” Keep the legal copyright separate from the product story. Attribute the IOWarp ecosystem with its mark in the project section and a “Part of IOWarp” link beside the source and tutorial links; do not repeat the IOWarp logo/link in the footer. Academic attribution belongs only in a small footer link reading “Developed by Gnosis Research Center” linking to https://grc.iit.edu. Do not write research-roots or institutional-pedigree sentences in the product copy. Do not put NSF, grant numbers, or funder branding in the hero, navigation, or footer. The small Gnosis credit above is the sanctioned academic attribution. Do not add unsupported affiliations, sponsors, copyright owners, or legal claims. Do not replace upstream notices or claim ownership of third-party tools or artwork.
+
+## Accessibility and implementation
+
+Use semantic HTML, a single main heading, a visible keyboard focus, a skip link, labeled controls, accurate alt text, and readable line lengths. Body and muted text and text links must meet WCAG AA contrast. Interactive boundaries meet 3:1. Layout must work at 320px and 200% zoom. Menus close with Escape and return focus. Motion respects `prefers-reduced-motion`. Core content and navigation work without JavaScript.
+
+The site is static HTML and CSS with small progressive enhancements. Use CSS layers, fluid type, grid, logical properties, and semantic themes. JavaScript adds theme choice, copying, article search, and local live reload. No public telemetry, remote font requests, autoplay, or dependency-heavy client framework is required. Build and browser checks are part of delivery. Keep verification artifacts in ignored local scratch, never in the published output.
+
+## Interaction and motion
+
+`design-system.json.motion` supplies shared timings, easing, reveal distance, and feedback duration. Use the generated `--motion-*` variables; the build rejects literal durations and custom easing in component CSS. Fast hover and focus feedback uses 160ms, theme and disclosure changes use 240ms, and one-time entrances use 640ms. Avoid loops, parallax, autoplay, pointer tracking, and animation that moves a layout boundary. Keep the hero visible during its entrance so motion does not delay the main content paint. Decorative rings echo the Clio mark and use sanctioned theme tokens.
+
+Hover and keyboard focus receive equivalent feedback. Directional link arrows move only a few pixels. Copy controls give a brief success or failure state, restore their label after repeated use, and announce the outcome. Code controls stay outside the scrolling code surface. Mobile controls have at least a 44px touch area; code examples reserve space for their copy control. Native disclosures retain a useful immediate fallback when smooth size interpolation is unsupported.
+
+Product captures open in a native modal dialog with fit and actual-size views, previous and next controls, Escape dismissal, and focus return. Load the full WebP only on demand; preserve the original PNG link and modified-click behavior. The image can scroll at actual size. No-JavaScript readers retain the direct image links.
+
+Only below-fold sections receive a one-time reveal. Focus reveals content immediately. An operating-system change to reduced motion completes pending reveals and disables animation. Content remains accessible without JavaScript or IntersectionObserver. Documentation search supports arrow keys and Escape, and both contents lists reflect the currently read section.
+
+## Responsive assets, performance, and search
+
+Generate image derivatives from the actual captures and sanctioned marks with `python3 site/image-variants.py`. The builder checks source and derivative hashes before publishing them. Use intrinsic dimensions, `srcset`, and accurate `sizes` to limit downloads and prevent layout shifts. The hero has high fetch priority; below-fold product captures load lazily. Fonts stay local, the two principal text faces are preloaded, and only the five used fonts and their licenses enter the public build. Never load a full-resolution image viewer capture before it is requested.
+
+Documentation navigation is closed in server-rendered HTML and opened in its desktop column by progressive enhancement. Avoid initially opening a mobile sidebar and closing it after paint. Page and tutorial metadata, canonical URLs, sitemap entries, social previews, article data, and breadcrumbs are generated from the same records. Software source metadata uses the approved site/source version, v0.5.7 for this launch. Keep the recorded npm version accurate, and link the version badge to the actual pinned source until its package release exists. Do not invent publish dates, reviews, offers, or unsupported rich-result claims.
+
+Run the browser check for layout, keyboard, touch, both themes, and reduced motion, and run the performance check against a quiet local preview. Its cold-cache mobile lab budgets are FCP below 2.5s, LCP below 3s, and CLS below 0.1 under 2Mbps, 100ms latency, and 4x CPU slowdown. These are local regression checks; field Core Web Vitals require observation after production deployment.
+
+## Brand research and adoption
+
+The live parent website at https://iowarp.ai uses black, cyan (#00d4db), and copper. Its IOWarp mark is a blue lattice with copper cores and cyan connection points. The original 1080px PNG was found in ~/iowarp/iowarp.ai/static/images/logos/iowarp/iowarp_logo.png. The Clio ring is already used in the parent site’s Clio lockup; a larger original with a copper C is available in ~/iowarp/gact-tui/apps/design/assets/brand/clio-icon-lg.png. assets/brand/provenance.json records both originals and hashes. The selected family is rings for Clio and the lattice for IOWarp. Do not create distinct product logos for Coder, Kit, or other Clio applications: use the Clio mark plus a typographic product descriptor. This site implements the first adoption; other repositories can adopt the assets and semantic tokens without importing site layout CSS.

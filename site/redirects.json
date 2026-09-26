@@ -1,0 +1,10 @@
+{
+	"/start.html": "/#start",
+	"/capabilities.html": "/#tools",
+	"/harness.html": "/#workflow",
+	"/compare.html": "/docs/guide/interop.html",
+	"/vision.html": "/#project",
+	"/library.html": "/docs/guide/resource-library.html",
+	"/share.html": "/#project",
+	"/docs/guide/installation-and-lifecycle.html": "/docs.html"
+}

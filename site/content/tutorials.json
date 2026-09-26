@@ -1,0 +1,4 @@
+[
+  {"slug":"first-session","title":"Your first session with Clio","description":"Connect a model, open a repository, and ask Clio to explain how it builds and runs its tests.","category":"Getting started","time":"5 min","author":"The Clio team","image":"/assets/tui-boot.webp","width":1920,"height":1021,"alt":"Clio Coder terminal ready for a first request, with model details and keyboard shortcuts","source":"first-session.md"},
+  {"slug":"desktop-and-terminal","title":"Desktop or terminal: find your workspace","description":"See both interfaces, learn how to launch them, and choose where to start your next coding session.","category":"Product tour","time":"4 min","author":"The Clio team","image":"/assets/gui-overview.webp","width":1920,"height":1188,"alt":"Clio Coder desktop overview with project selection and recent conversations","source":"desktop-and-terminal.md"}
+]

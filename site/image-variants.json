@@ -1,0 +1,121 @@
+{
+	"assets/gui-overview.webp": {
+		"width": 1920,
+		"height": 1188,
+		"sha256": "938bb8feef5e3d6498e932180f6ec1fb5bb1a7d1ac94944f33ad35d50b52581a",
+		"variants": [
+			{
+				"path": "assets/responsive/gui-overview-640.webp",
+				"width": 640,
+				"height": 396,
+				"sha256": "ca485646820ee579c34ba20bab8ed84a6da6ddfe7b763d8aac58636e77c9c7ae"
+			},
+			{
+				"path": "assets/responsive/gui-overview-960.webp",
+				"width": 960,
+				"height": 594,
+				"sha256": "1af37a0fee56c85f96b61c9a5e0c027bee99f64f496013c883fcadb1a8f3f49c"
+			},
+			{
+				"path": "assets/responsive/gui-overview-1280.webp",
+				"width": 1280,
+				"height": 792,
+				"sha256": "f0bae17dfb21e14970e1a02b50cb4d77d096042f87d305bbaea51af7233be017"
+			}
+		]
+	},
+	"assets/gui-conversation.webp": {
+		"width": 1513,
+		"height": 1489,
+		"sha256": "300b1b010491ec3a130103fb15d406c00492a74b25879327547570eccf376451",
+		"variants": [
+			{
+				"path": "assets/responsive/gui-conversation-480.webp",
+				"width": 480,
+				"height": 472,
+				"sha256": "23dde3b245050e5bfd31219a24a7b293795078f7c943bdcbc7357dd7348c5f1e"
+			},
+			{
+				"path": "assets/responsive/gui-conversation-768.webp",
+				"width": 768,
+				"height": 756,
+				"sha256": "1299a24c766f6b8efde440acb275f5dfc27375c9cb68884875e79940c1ab497e"
+			},
+			{
+				"path": "assets/responsive/gui-conversation-1120.webp",
+				"width": 1120,
+				"height": 1102,
+				"sha256": "c7536b6615564e622865b7014a8769d0229c76136e0c6c74e2ccc1e01949e3b3"
+			}
+		]
+	},
+	"assets/tui-boot.webp": {
+		"width": 1920,
+		"height": 1021,
+		"sha256": "f8ffd53ad1ea14eb6d62fa874eab66aeb6e06c3de03b81e931230a92bf6ac976",
+		"variants": [
+			{
+				"path": "assets/responsive/tui-boot-640.webp",
+				"width": 640,
+				"height": 340,
+				"sha256": "60e3a3c94d843cd27fc2e13736a213df1d1f6cbd557bf8296b7451aff7901896"
+			},
+			{
+				"path": "assets/responsive/tui-boot-960.webp",
+				"width": 960,
+				"height": 510,
+				"sha256": "ead96e234c7abef5fcd0d5ac4b380d761183fba8e7917ad811246a066bdde139"
+			},
+			{
+				"path": "assets/responsive/tui-boot-1280.webp",
+				"width": 1280,
+				"height": 681,
+				"sha256": "0ec270672d4442abf125b90869363e92605c5003bbd6e0771ecfc031d1328f0f"
+			}
+		]
+	},
+	"assets/brand/clio-mark.webp": {
+		"width": 466,
+		"height": 512,
+		"sha256": "0ccf2efeb679fb2269c5f758ed201adb0497f955be433f331615f15ee89c80c1",
+		"variants": [
+			{
+				"path": "assets/responsive/clio-mark-32.webp",
+				"width": 32,
+				"height": 35,
+				"sha256": "d5000fe84d97e19fdcca0657daf16de78f11aa6f3f537b6389cce5746f17b0c0"
+			},
+			{
+				"path": "assets/responsive/clio-mark-64.webp",
+				"width": 64,
+				"height": 70,
+				"sha256": "6cbb3905237e092c354ee4cd2e72a13d69704e3a1cf1c54685f2464f174d0392"
+			},
+			{
+				"path": "assets/responsive/clio-mark-128.webp",
+				"width": 128,
+				"height": 141,
+				"sha256": "aa71391a35f873888d3c83971e89615aec71a408fc86012d3379587bc4c2aa4c"
+			}
+		]
+	},
+	"assets/brand/iowarp-mark.webp": {
+		"width": 512,
+		"height": 512,
+		"sha256": "7282e1868a2d863e978f9d1dcdfae991606d4ab2aece46fc534a664e9b9170ec",
+		"variants": [
+			{
+				"path": "assets/responsive/iowarp-mark-128.webp",
+				"width": 128,
+				"height": 128,
+				"sha256": "cd8572a1927e60418aa98a475ef2ca04b77506fa767ad16266a73c843f5a5506"
+			},
+			{
+				"path": "assets/responsive/iowarp-mark-256.webp",
+				"width": 256,
+				"height": 256,
+				"sha256": "d173c3865e760af12b2a234aae53832f408ea27c32a3836b3ac27e80fbfce16b"
+			}
+		]
+	}
+}

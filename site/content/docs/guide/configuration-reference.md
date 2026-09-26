@@ -1,5 +1,7 @@
 # Configuration reference
 
+Look up configuration settings and their supported values.
+
 The [model catalog contract](../architecture/model-catalog.md) explains how live discovery and catalog settings interact.
 
 This page is a map to the implemented configuration surface. Source defines the complete key, flag, and argument contracts; use the linked files when exact schemas or defaults matter. For setup choices, see [Configuration and targets](configuration-and-targets.md). For `CLIO_*` variables, see the [environment variable reference](environment-variables.md).
@@ -64,10 +66,13 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `fleet.history.journal` | `true` |
 | `context.toolResultMaxBytes` | `65536` |
 | `context.workingSet.enabled` | `true` |
-| `context.workingSet.policy` | `"structural-v1"` |
+| `context.workingSet.policy` | `"structural-v2"` |
+| `context.workingSet.profile` | `"default"` |
 | `context.workingSet.target` | `0.6` |
 | `context.workingSet.protectLastTurns` | `6` |
+| `context.workingSet.protectLastSteps` | `8` |
 | `context.workingSet.minEvictableTokens` | `200` |
+| `context.workingSet.rearmFraction` | `0.1` |
 | `context.compaction.auto` | `true` |
 | `context.compaction.threshold` | `0.8` |
 | `context.memory.enabled` | `true` |
@@ -119,7 +124,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | User `settings.yaml` | Personal defaults under the resolved Clio config directory. |
 | .clio-coder/settings.yaml | Shared project defaults. Credential-bearing keys are ignored. |
 | .clio-coder/settings.local.yaml | Untracked project overrides. Credential-bearing keys are ignored. |
-| Session controls | `/settings`, `/model`, and `/thinking` change the active session where supported. |
+| Session controls | `/settings` (alias `/config`), `/model`, and `/thinking` change the active session where supported. |
 | CLI options | Run-specific values such as `--target`, `--model`, and turn constraints. |
 
 The schema, validation, migration paths, and user settings path are in [`src/core/config.ts`](../../src/core/config.ts). Layering and project-file merge behavior are in [`src/core/settings-layers.ts`](../../src/core/settings-layers.ts). Settings control groups are defined in [`src/core/settings-controls.ts`](../../src/core/settings-controls.ts) and [`src/core/settings-navigation.ts`](../../src/core/settings-navigation.ts).
@@ -200,8 +205,12 @@ Tool schemas are registered in [`src/tools/`](../../src/tools/registry.ts). Use 
 | `--min-evictable-tokens` | For `context replay`, non-negative integer tool-result size in tokens below which results are never evicted. |
 | `--model` | For `context wiki`, wire model id for the documenter model instead of the configured one; pair with `--target`. |
 | `--no-filter` | For `context replay`, include every readable transcript instead of only the filtered active-path sessions. |
-| `--policies` | For `context replay`, comma-separated policy ids from none, random, age-horizon, structural-v1, oracle. |
+| `--policies` | For `context replay`, comma-separated policy ids from none, random, age-horizon, structural-v1, structural-v2, oracle, or a rung composition (`<id>+<rung>`, `<id>-<rung>`, `rungs:<a>/<b>`). |
+| `--profile` | For `context replay`, `default`, `data-analysis`, or `web-design`; a non-default profile includes paired default-profile results over the same corpus. |
+| `--protect-last-steps` | For `context replay`, positive integer count of recent assistant steps whose observations are protected. |
 | `--protect-last-turns` | For `context replay`, integer (at least 1) count of recent user turns whose observations are never evicted. |
+| `--rearm-fraction` | For `context replay`, projected growth as a fraction of the window before another automatic reduction; default 0.1. |
+| `--overflow-fraction` | For `context replay`, modeled request-fit limit as a fraction of the budget; reduction bypasses the rearm band above it, default 0.95. |
 | `--seed` | For `context replay`, integer seed for the deterministic random policy. |
 | `--session` | For `context working-set`, the session id or path whose working-set fold and path index are printed (required). |
 

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Build or check the release-pinned website product-documentation snapshot."""
-
+"""Generate an explicit public documentation snapshot from the repository."""
 import argparse
 import hashlib
 import json
@@ -11,175 +10,131 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
 SITE = Path(__file__).resolve().parent
+ROOT = SITE.parent
 CONTENT = SITE / "content"
 DEST = CONTENT / "docs"
 INDEX = CONTENT / "index.json"
 MANIFEST = CONTENT / "docs-manifest.json"
-POLICY = ROOT / "docs" / "corpus.json"
-PRODUCT = SITE / "product.json"
 
 
-def run_git(*args: str) -> bytes:
+def git(*args):
     return subprocess.check_output(["git", *args], cwd=ROOT, stderr=subprocess.PIPE)
 
 
-def source_commit(ref: str) -> str:
-    try:
-        return run_git("rev-parse", "--verify", f"{ref}^{{commit}}").decode().strip()
-    except subprocess.CalledProcessError as error:
-        detail = error.stderr.decode(errors="replace").strip()
-        raise ValueError(f"cannot resolve documentation source ref {ref!r}: {detail}") from error
-
-
-def product_doc(path: str, roots: list[str]) -> bool:
-    return any(path.startswith(root) if root.endswith("/") else path == root for root in roots)
-
-
-def source_files(commit: str, roots: list[str]) -> dict[str, bytes]:
-    names = run_git("ls-tree", "-r", "--name-only", commit, "docs").decode().splitlines()
-    files: dict[str, bytes] = {}
-    for name in sorted(names):
-        if not name.endswith(".md") or not name.startswith("docs/"):
-            continue
-        relative = name.removeprefix("docs/")
-        if product_doc(relative, roots):
-            files[relative] = run_git("show", f"{commit}:{name}")
-    if not files:
-        raise ValueError(f"no product Markdown documents found at {commit}")
-    if any(path == "wiki" or path.startswith("wiki/") for path in files):
-        raise ValueError("the product documentation corpus includes generated docs/wiki content")
-    return files
-
-
-def excerpt(text: str) -> str:
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith(("#", "<", "|", "```", "!", "- ", "* ")):
-            continue
-        return re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", stripped)[:240]
-    return ""
-
-
-def index_bytes(files: dict[str, bytes]) -> bytes:
-    items = []
-    for path, raw in sorted(files.items()):
-        text = raw.decode(errors="replace")
-        title_match = re.search(r"^#\s+(.+)$", text, re.M)
-        title = re.sub(r"<[^>]+>", "", title_match.group(1)).strip() if title_match else path
-        headings = [
-            re.sub(r"<[^>]+>", "", heading).strip()
-            for heading in re.findall(r"^#{2,3}\s+(.+)$", text, re.M)
-        ][:16]
-        items.append({"path": path, "title": title, "headings": headings, "excerpt": excerpt(text)})
-    return (json.dumps(items, indent=2, ensure_ascii=False) + "\n").encode()
-
-
-def manifest_bytes(version: str, ref: str, commit: str, files: dict[str, bytes]) -> bytes:
-    value = {
-        "schema": 1,
-        "corpus": "product",
-        "corpusPolicy": "docs/corpus.json#product",
-        "source": {"version": version, "ref": ref, "commit": commit},
-        "files": [
-            {"path": path, "sha256": hashlib.sha256(raw).hexdigest()} for path, raw in sorted(files.items())
-        ],
-    }
+def encoded(value):
     return (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode()
 
 
-def inputs(ref: str) -> tuple[str, str, dict[str, bytes], bytes, bytes]:
-    product = json.loads(PRODUCT.read_text())
-    policy = json.loads(POLICY.read_text())
-    version = product.get("version")
-    roots = policy.get("product", {}).get("roots")
-    if not isinstance(version, str) or not version:
-        raise ValueError("site/product.json has no version")
-    if not isinstance(roots, list) or not all(isinstance(root, str) and root for root in roots):
-        raise ValueError("docs/corpus.json has no valid product roots")
-    commit = source_commit(ref)
-    files = source_files(commit, roots)
-    return version, commit, files, index_bytes(files), manifest_bytes(version, ref, commit, files)
+def inputs(ref, worktree, source_ref=None, repository_snapshot=False):
+    product = json.loads((SITE / "product.json").read_text())
+    version = product["version"]
+    if not worktree and not repository_snapshot and ref != f"v{version}":
+        raise ValueError(f"release snapshots require --source-ref v{version}")
+    commit = git("rev-parse", "--verify", f"{ref}^{{commit}}").decode().strip()
+    catalog = json.loads((SITE / "public-docs.json").read_text())
+    files, index, entries = {}, [], []
+    for item in catalog:
+        source, path = item["source"], item["path"]
+        if not (source.startswith("docs/guide/") or source == "README.md") or ".." in Path(source).parts:
+            raise ValueError(f"source is not a public user guide: {source}")
+        if not path.endswith(".md") or ".." in Path(path).parts or path in files:
+            raise ValueError(f"invalid or duplicate public path: {path}")
+        raw = (ROOT / source).read_bytes() if worktree else git("show", f"{commit}:{source}")
+        text = raw.decode()
+        intro = re.split(r"^## ", text, maxsplit=1, flags=re.M)[0]
+        intro = re.sub(r"^# .*\n", "", intro, count=1).strip()
+        # Introductory implementation pointers belong in the repository, while
+        # actual setup instructions and usage examples must remain public.
+        intro = "\n\n".join(block for block in intro.split("\n\n") if not (
+            re.search(r"\.ts\)", block) and block.lstrip().startswith("`")
+            or block.lstrip().startswith("The [TUI design contract]")
+        ))
+        if item.get("sections"):
+            chunks = re.split(r"(?=^## )", text, flags=re.M)
+            by_heading = {chunk.split("\n", 1)[0][3:].strip(): chunk for chunk in chunks if chunk.startswith("## ")}
+            missing = set(item["sections"]) - by_heading.keys()
+            if missing:
+                raise ValueError(f"public section disappeared from {source}: {sorted(missing)}")
+            text = "\n\n".join(([intro] if item.get("includeIntro") and intro else []) + [by_heading[heading].strip() for heading in item["sections"]])
+        else:
+            body = re.sub(r"\A[\s\S]*?(?=^## )", "", text, count=1, flags=re.M) if re.search(r"^## ", text, re.M) else ""
+            text = f"{intro}\n\n{body}"
+        if item.get("stripDetails"):
+            text = re.sub(r"<details>[\s\S]*?</details>", "", text)
+        text = f"# {item['title']}\n\n{item['excerpt']}\n\n{text.strip()}\n"
+        files[path] = text.encode()
+        index.append({**item, "headings": re.findall(r"^#{2,3}\s+(.+)$", text, re.M)})
+        entries.append({"path": path, "source": source, "sha256": hashlib.sha256(files[path]).hexdigest(), "sourceSha256": hashlib.sha256(raw).hexdigest()})
+    if worktree:
+        repo_version = json.loads((ROOT / "package.json").read_text())["version"]
+    else:
+        repo_version = json.loads(git("show", f"{commit}:package.json"))["version"]
+    if repo_version != version:
+        raise ValueError(f"repository version {repo_version} differs from site version {version}")
+    manifest = {
+        "schema": 2, "corpus": "public-guides", "corpusPolicy": "site/public-docs.json",
+        "source": {"version": version, "ref": commit if repository_snapshot else (source_ref or git("branch", "--show-current").decode().strip() or commit) if worktree else ref, "commit": commit,
+                   "mode": "working-tree" if worktree else "repository" if repository_snapshot else "release"}, "files": entries,
+    }
+    return files, encoded(index), encoded(manifest)
 
 
-def compare(ref: str) -> list[str]:
-    version, commit, files, expected_index, expected_manifest = inputs(ref)
-    errors: list[str] = []
-    actual = {
-        path.relative_to(DEST).as_posix(): path.read_bytes() for path in DEST.rglob("*") if path.is_file()
-    } if DEST.is_dir() else {}
-    expected_paths = set(files)
-    actual_paths = set(actual)
-    for path in sorted(expected_paths - actual_paths):
-        errors.append(f"missing snapshot file: {path}")
-    for path in sorted(actual_paths - expected_paths):
-        errors.append(f"extra snapshot file: {path}")
-    for path in sorted(expected_paths & actual_paths):
-        if files[path] != actual[path]:
-            errors.append(f"content drift: {path}")
-    if not INDEX.is_file() or INDEX.read_bytes() != expected_index:
-        errors.append("content/index.json does not match the declared source")
-    if not MANIFEST.is_file() or MANIFEST.read_bytes() != expected_manifest:
-        errors.append("content/docs-manifest.json does not match the declared source")
+def check():
+    manifest = json.loads(MANIFEST.read_text())
+    source = manifest["source"]
+    worktree = source.get("mode") == "working-tree"
+    # A working-tree snapshot records a fixed base; its file hashes identify the
+    # selected current bytes. Comparing to HEAD would invalidate every commit.
+    files, index, expected = inputs(source["commit"] if worktree else source["ref"], worktree, source["ref"], source.get("mode") == "repository")
+    actual = {p.relative_to(DEST).as_posix(): p.read_bytes() for p in DEST.rglob("*") if p.is_file()}
+    errors = []
+    for path in sorted(set(files) | set(actual)):
+        if files.get(path) != actual.get(path):
+            errors.append(f"documentation drift: {path}")
+    if INDEX.read_bytes() != index:
+        errors.append("documentation search index differs from the repository")
+    if MANIFEST.read_bytes() != expected:
+        errors.append("documentation source manifest differs from the repository")
     if errors:
-        errors.insert(0, f"documentation snapshot drift for {ref} ({commit}) and site v{version}:")
-    return errors
+        raise ValueError("\n".join(errors))
+    print(f"Checked {len(files)} public guides against their declared repository source.")
 
 
-def check() -> int:
-    try:
-        manifest = json.loads(MANIFEST.read_text())
-        ref = manifest["source"]["ref"]
-        if not isinstance(ref, str) or not ref:
-            raise ValueError("manifest source.ref is empty")
-        errors = compare(ref)
-    except (OSError, KeyError, TypeError, json.JSONDecodeError, ValueError) as error:
-        errors = [f"documentation snapshot cannot be checked: {error}"]
-    if errors:
-        print("\n".join(errors), file=sys.stderr)
-        return 1
-    count = len(json.loads(MANIFEST.read_text())["files"])
-    print(f"checked {count} release-pinned product docs; generated docs/wiki pages are excluded")
-    return 0
-
-
-def sync(ref: str) -> int:
-    version, commit, files, generated_index, generated_manifest = inputs(ref)
-    required_ref = f"v{version}"
-    if ref != required_ref:
-        raise ValueError(
-            f"public docs are release-pinned: site v{version} must use --source-ref {required_ref}, not {ref}"
-        )
+def sync(ref, worktree, repository_snapshot=False):
+    files, index, manifest = inputs(ref, worktree, repository_snapshot=repository_snapshot)
     CONTENT.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="docs-snapshot-", dir=CONTENT) as temporary:
-        staged = Path(temporary) / "docs"
-        for path, raw in sorted(files.items()):
-            destination = staged / path
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(raw)
+    with tempfile.TemporaryDirectory(prefix="docs-snapshot-", dir=CONTENT) as temp:
+        staged = Path(temp) / "docs"
+        for path, raw in files.items():
+            target = staged / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(raw)
         if DEST.exists():
             shutil.rmtree(DEST)
         staged.rename(DEST)
-    INDEX.write_bytes(generated_index)
-    MANIFEST.write_bytes(generated_manifest)
-    print(
-        f"snapshotted {len(files)} product docs from {ref} ({commit}) for site v{version}; docs/wiki excluded"
-    )
-    return 0
+    INDEX.write_bytes(index)
+    MANIFEST.write_bytes(manifest)
+    print(f"Generated {len(files)} public guides from {'the working repository' if worktree else ref}.")
 
 
-def main() -> int:
+def main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--check", action="store_true", help="report drift without changing files")
-    mode.add_argument("--source-ref", help="write from the release tag matching site/product.json")
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--worktree", action="store_true", help="read current repository files for local development")
+    mode.add_argument("--source-ref", help="read the release tag matching product.json")
+    mode.add_argument("--snapshot-ref", help="pin public docs to an existing repository commit without creating a package release")
     args = parser.parse_args()
     try:
-        return check() if args.check else sync(args.source_ref)
-    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, ValueError) as error:
+        if args.check:
+            check()
+        else:
+            sync("HEAD" if args.worktree else args.snapshot_ref or args.source_ref, args.worktree, bool(args.snapshot_ref))
+    except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         print(f"sync-docs: {error}", file=sys.stderr)
         return 1
+    return 0
 
 
 if __name__ == "__main__":

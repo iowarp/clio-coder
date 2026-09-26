@@ -14,8 +14,16 @@ origin = product['origin']
 manifest = json.loads((root / 'content/docs-manifest.json').read_text())
 docs_source = manifest['source']
 repository = product['repository'].rstrip('/')
-source_tree = f"{repository}/tree/{docs_source['ref']}/docs"
+source_tree = f"{repository}/tree/{docs_source['ref']}"
+doc_sources = {item["path"]: item["source"] for item in manifest["files"]}
 errors = []
+for private in ('content/docs', 'content/tutorials', 'review', 'vendor', 'cards'):
+    if (root / private).exists():
+        errors.append(f'Private source directory entered the public output: {private}')
+for private in ('assets/brand/provenance.json', 'assets/logo.webp', 'assets/banner.webp'):
+    if (root / private).exists():
+        errors.append(f'Private or legacy brand asset entered the public output: {private}')
+public_copyright = json.loads((site / 'design-system.json').read_text())['copyright']
 
 
 class Page(HTMLParser):
@@ -52,6 +60,13 @@ class Page(HTMLParser):
             self.refs.append(a['href'])
         if tag in ('img', 'script', 'iframe') and 'src' in a:
             self.refs.append(a['src'])
+        if tag == 'img':
+            if not a.get('width') or not a.get('height'):
+                errors.append(f'{self.path}: image has no intrinsic dimensions')
+            if a.get('srcset'):
+                self.refs.extend(candidate.strip().split()[0] for candidate in a['srcset'].split(','))
+                if not a.get('sizes'):
+                    errors.append(f'{self.path}: responsive image has no sizes')
         if tag == 'meta' and a.get('name') == 'description':
             self.description = a.get('content')
         if tag == 'meta' and a.get('property', a.get('name', '')).startswith(('og:', 'twitter:')):
@@ -107,6 +122,8 @@ for url in urls:
     page = Page(path)
     source = file.read_text()
     page.feed(source)
+    if public_copyright not in source:
+        errors.append(f'{path}: public copyright wording is missing')
     page.title = page.title.strip()
     pages[path] = page
     if page.canonical != url:
@@ -116,7 +133,7 @@ for url in urls:
     for key, value in [('og:title', page.title), ('twitter:title', page.title), ('og:description', page.description), ('twitter:description', page.description)]:
         if page.social.get(key) != value:
             errors.append(f'{path}: {key} does not match page metadata')
-    if page.doc_path and page.doc_source != f"{repository}/blob/{docs_source['ref']}/docs/{page.doc_path}":
+    if page.doc_path and page.doc_source != f"{repository}/blob/{docs_source['ref']}/{doc_sources.get(page.doc_path)}":
         errors.append(f'{path}: source link points to the wrong document')
     if page.doc_path and (
         page.snapshot_source != source_tree
@@ -126,8 +143,21 @@ for url in urls:
     ):
         errors.append(f'{path}: visible documentation provenance differs from the manifest')
     try:
-        json.loads(''.join(page.jsonld))
-    except (ValueError, TypeError):
+        graph = json.loads(''.join(page.jsonld))['@graph']
+        entity = next(node for node in graph if node.get('@id') == f'{url}#page')
+        if entity.get('url') != url or entity.get('name') != page.title or entity.get('description') != page.description:
+            errors.append(f'{path}: structured page metadata differs from the HTML')
+        if path != '/':
+            crumbs = next(node for node in graph if node.get('@type') == 'BreadcrumbList')['itemListElement']
+            if [item['position'] for item in crumbs] != list(range(1, len(crumbs) + 1)) or crumbs[-1]['item'] != url:
+                errors.append(f'{path}: structured breadcrumbs are not a valid path to this page')
+        if path.startswith('/tutorials/') and (entity.get('@type') != 'TechArticle' or not entity.get('headline') or not entity.get('author')):
+            errors.append(f'{path}: tutorial article metadata is incomplete')
+        if path == '/':
+            software = next(node for node in graph if node.get('@type') == 'SoftwareSourceCode')
+            if software.get('version') != product['version']:
+                errors.append('Software source metadata differs from the site version')
+    except (ValueError, TypeError, KeyError, StopIteration):
         errors.append(f'{path}: missing or invalid structured data')
     if path.startswith('/docs') and ('data-doc=' not in source or 'Opening the page' in source):
         errors.append(f'{path}: documentation is not rendered in the HTML')

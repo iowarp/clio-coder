@@ -3,6 +3,13 @@
 	"root": false,
 	"extends": ["../biome.json"],
 	"files": {
-		"includes": ["!vendor", "!content", "!public", "!**/*.html"]
+		"includes": ["!vendor", "!content", "!public", "!.preview*", "!assets", "!css/brand.css", "!**/*.html"]
+	},
+	"linter": {
+		"rules": {
+			"style": {
+				"noDescendingSpecificity": "off"
+			}
+		}
 	}
 }

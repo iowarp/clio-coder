@@ -1,0 +1,89 @@
+{
+	"schema": 1,
+	"identity": "Clio Coder",
+	"palette": {
+		"black": "#000000",
+		"charcoal": "#0d0d0c",
+		"graphite": "#151412",
+		"ivory": "#f0ece1",
+		"warmGray": "#d6cebf",
+		"stone": "#a3998a",
+		"darkLine": "#23211d",
+		"darkControl": "#736a5f",
+		"teal": "#00d4db",
+		"darkTealWash": "#052629",
+		"paper": "#f3eee4",
+		"raisedPaper": "#faf7f2",
+		"ink": "#1a1612",
+		"softInk": "#3c342c",
+		"mutedInk": "#524a42",
+		"lightLine": "#d4cbbd",
+		"lightControl": "#756c5e",
+		"deepTeal": "#0a666c",
+		"lightTealWash": "#e3f2f3",
+		"copper": "#ee852f",
+		"deepCopper": "#9a4812"
+	},
+	"themes": {
+		"dark": {
+			"paper": "black",
+			"paper-raised": "charcoal",
+			"paper-sunk": "graphite",
+			"ink": "ivory",
+			"ink-soft": "warmGray",
+			"muted": "stone",
+			"line": "darkLine",
+			"line-control": "darkControl",
+			"accent": "teal",
+			"accent-soft": "darkTealWash",
+			"on-accent": "black",
+			"secondary": "copper"
+		},
+		"light": {
+			"paper": "paper",
+			"paper-raised": "raisedPaper",
+			"paper-sunk": "lightLine",
+			"ink": "ink",
+			"ink-soft": "softInk",
+			"muted": "mutedInk",
+			"line": "lightLine",
+			"line-control": "lightControl",
+			"accent": "deepTeal",
+			"accent-soft": "lightTealWash",
+			"on-accent": "raisedPaper",
+			"secondary": "deepCopper"
+		}
+	},
+	"copyright": "Copyright 2026 iowarp.ai",
+	"prose": {
+		"maxMarketingParagraphWords": 65,
+		"forbidden": [
+			"world-class",
+			"revolutionary",
+			"game-changing",
+			"unlock the power",
+			"seamlessly",
+			"cutting-edge",
+			"single pane of glass",
+			"audit closeout",
+			"development audit",
+			"agent dev log",
+			"lane closeout",
+			"TODO",
+			"placeholder video",
+			"coming soon",
+			"with research roots",
+			"institutional pedigree",
+			"NSF-funded"
+		]
+	},
+	"motion": {
+		"fast": "160ms",
+		"base": "240ms",
+		"entry": "640ms",
+		"feedback": "1800ms",
+		"ease": "cubic-bezier(0.2, 0.7, 0.2, 1)",
+		"distance": "12px",
+		"stagger": "80ms"
+	}
+}

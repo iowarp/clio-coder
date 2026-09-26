@@ -1,4 +1,6 @@
-# Portable plugins and the library
+# Install plugins
+
+Add reusable resources to your Clio installation.
 
 A plugin is a complete, versioned bundle of skills and supporting files. The portable root `plugin.json` follows [Agent Plugins 1.0.0](https://agent-plugins.org/). Clio reads native prompts, agent recipes, and fleets from its namespaced manifest extension. Installing a bundle keeps those resources and their references together.
 
@@ -37,31 +39,6 @@ clio-coder library remove materio
 Every successful installation records a verified pin. `pin` reports and verifies it; it does not approve edited files. Drifted content is blocked from loading. Update refuses to replace local edits unless `--force` is supplied; the install result reports any recovery copies of edited content. Updating a catalog package uses the current catalog version and pin. Updating a local package uses its recorded source directory, even when the catalog contains the same plugin name. Updates and replacements preserve an existing disabled state; enable the plugin explicitly when ready. Removal preserves edited content and reports its recovery path.
 
 In an active session, open `/library` or press Alt+L. Use the Plugins category, `b` for Browse or Installed, and `s` for User or Project scope. Enter opens a package's members; the selected row offers `i` to review installation, `u` to review an update, `e` to enable or disable, and `r` to review removal when those actions apply. Use the CLI `library pin` and `library drift` commands for pin and drift checks. Run `/library reload` to refresh resources in that session after changes. The headless `library reload` command refreshes only its own process.
-
-## Private catalogs
-
-The ordinary library catalog supports an `entries` list and plugin entries with explicit versions and pins:
-
-```yaml
-entries:
-  - kind: plugin
-    name: lab-workflow
-    description: Lab analysis workflow and references.
-    version: 1.0.0
-    sourceUrl: ./lab-workflow
-    sha256: <64 lowercase hexadecimal characters>
-```
-
-Relative paths resolve against the catalog's directory. Remote bundles use an explicit GitHub tree URL such as `https://github.com/owner/repository/tree/v1.0.0/plugins/lab-workflow`, together with the full-tree digest and version. The bounded Git transport fetches the selected branch or tag; the installer verifies every bundle file against the catalog pin. Other URL formats are rejected as unsupported. Automatic skill offers select only kind `skill`; they use the same package engine. Catalog `requires` references use the same typed dependency graph as other library entries. Installed plugin dependencies must also be loadable; disabled or damaged dependencies require explicit enabling or repair before installation continues.
-
-Maintainers regenerate the shipped catalog after changing a bundled package:
-
-```bash
-pnpm library:pin
-pnpm library:check
-```
-
-The pin command reads each bundle's actual portable manifest and hashes the complete bundle. `library:check` fails on stale catalog metadata or content digests and is part of release hygiene.
 
 ## Plugins and extensions
 

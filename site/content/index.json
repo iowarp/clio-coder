@@ -1,508 +1,62 @@
 [
   {
     "path": "README.md",
-    "title": "Clio Coder documentation",
+    "source": "README.md",
+    "title": "Install Clio Coder",
+    "group": "Start",
+    "excerpt": "Install, update, and launch Clio Coder on your machine.",
+    "stripDetails": true,
+    "sections": [
+      "Get started"
+    ],
+    "headings": [
+      "Get started"
+    ]
+  },
+  {
+    "path": "guide/configuration-and-targets.md",
+    "source": "docs/guide/configuration-and-targets.md",
+    "title": "Connect a model",
+    "group": "Start",
+    "excerpt": "Set up local models, institutional endpoints, and cloud connections.",
+    "sections": [
+      "Start here",
+      "First-run flow",
+      "Settings Center",
+      "Configure targets",
+      "Local model settings",
+      "Auth",
+      "Subscription-based Targets and Runtimes",
+      "Troubleshooting checklist"
+    ],
     "headings": [
       "Start here",
-      "Using Clio day to day",
-      "Safety, evidence, and reproducibility",
-      "Delegation and fleets",
-      "Automation and integration",
-      "Architecture and contributing",
-      "Developer quick start",
-      "Project context in a source checkout",
-      "Where Clio finds these docs when it is running in someone else's project",
-      "Reading in the application",
-      "Writing documentation"
-    ],
-    "excerpt": "This is the documentation map for Clio Coder. Start with the path closest to"
-  },
-  {
-    "path": "architecture/acp.md",
-    "title": "Agent Client Protocol (ACP) Server",
-    "headings": [
-      "1. Overview & Protocol Specification",
-      "2. Server Command & Transport Wiring",
-      "3. Supported ACP Methods",
-      "4. Initial Safe Profile",
-      "Error envelope",
-      "One session per process",
-      "Workspace pinning",
-      "Session attribution and load replay",
-      "Session list, label, delete, modes, and configuration options",
-      "Safe settings and targets",
-      "Opt-in extension events",
-      "Prompt input",
-      "Bounds",
-      "Admission failure",
-      "Permission requests",
-      "Cancel, close, and shutdown"
-    ],
-    "excerpt": "The coding agent interoperability guide covers the operator workflow for external agents."
-  },
-  {
-    "path": "architecture/alcf-provider.md",
-    "title": "ALCF Inference Provider",
-    "headings": [
-      "Configure",
-      "Implementation Notes"
-    ],
-    "excerpt": "The configuration guide walks through choosing an ALCF target."
-  },
-  {
-    "path": "architecture/architecture.md",
-    "title": "Clio Coder Architecture and Boundaries",
-    "headings": [
-      "Source layout",
-      "Session Routing vs. Persisted Settings",
-      "Workspace Enumeration and Language Classification",
-      "Codewiki ownership and worker boundary",
-      "Lazy built-in tool boundary",
-      "Boundary invariants",
-      "Rule 1: `@earendil-works/pi-*` imports stay in `src/engine/**`",
-      "Rule 2: Workers do not value-import domains except runtime rehydration",
-      "Rule 3: Domains do not import each other's `extension.ts`",
-      "Rule 4: Tool substrate is surface-agnostic (`src/tools/**` never imports `src/interactive/**`)",
-      "Rule 5: One-way entry point composition (`chat-loop.ts` never imports `src/entry/**`)",
-      "Rule 6: Stage 0 remains behind declared seams",
-      "Runtime flow",
-      "Event and audit model",
-      "Interactive render transactions",
-      "Command spec"
-    ],
-    "excerpt": "Clio Coder is an experimental, terminal-first coding harness for the CLIO ecosystem. CLIO stands for Context Layer for Input/Output; the project is named for the Greek muse of history and developed by the Gnosis Research Center at Illinois "
-  },
-  {
-    "path": "architecture/artifact-placement.md",
-    "title": "Artifact Placement",
-    "headings": [
-      "Three audiences",
-      "Placement by class",
-      "The `artifact` tool default",
-      "Script run records and retention",
-      "`.clio-coder/` and git",
-      "Finding what was hidden"
-    ],
-    "excerpt": "Every file Clio generates has one home, decided by who reads it. The rule that"
-  },
-  {
-    "path": "architecture/artifact-versions.md",
-    "title": "Artifact Versions & Serialization Contracts",
-    "headings": [
-      "1. Operator-facing Artifact Registry",
-      "2. Integrity Verification Contracts",
-      "Receipt Integrity (Version 20)",
-      "3. Migration Mechanics"
-    ],
-    "excerpt": "This document is an operator-facing registry of compatibility-sensitive file"
-  },
-  {
-    "path": "architecture/capacity-and-scheduling.md",
-    "title": "Capacity Leases & Fleet Scheduling",
-    "headings": [
-      "1. Capacity Model & Admission Invariants",
-      "Persisted Slot Discovery",
-      "State Storage & Format",
-      "2. Capacity Lease Schema & TTLs",
-      "What `/council` Needs on a Single-GPU Setup",
-      "Constants & Operational Bounds",
-      "3. Heartbeats & Dead-Process Recovery",
-      "4. Cluster Drain & Emergency Control",
-      "5. Fail-Closed Invariants"
-    ],
-    "excerpt": "The fleet dispatch guide explains node setup and capacity controls."
-  },
-  {
-    "path": "architecture/context-engine.md",
-    "title": "Context Engine",
-    "headings": [
-      "Action Map",
-      "Context Window Resolution",
-      "Token Accounting & Ledger Snapshots",
-      "Single-Threshold Compaction",
-      "1. Working-Set Eviction (Reversible)",
-      "2. Targeted Recall",
-      "3. LLM Summary Handoff (Last Resort)",
-      "Cache-Divergence Honesty & Prefix Caching",
-      "Prompt Layering Hierarchy",
-      "Cache Honesty Contract",
-      "Configuration Settings",
-      "Project Handbooks & Preload Hierarchy",
-      "Codewiki & Architecture Index",
-      "Source Implementation Map"
-    ],
-    "excerpt": "`contextUsageSnapshot` in context-accounting.ts computes the active budget. The context continuity guide explains operator recovery."
-  },
-  {
-    "path": "architecture/context-working-set.md",
-    "title": "Working Set",
-    "headings": [
-      "Vocabulary",
-      "Eviction is a projection, not a rewrite",
-      "Ledger records and format v4",
-      "The marker contract",
-      "Policies",
-      "Protection predicates",
-      "`age-horizon`",
-      "`structural-v1` (default)",
-      "Recall",
-      "Settings",
-      "What the operator sees",
-      "Not in this release",
-      "See also"
-    ],
-    "excerpt": "The working set is the part of the session ledger the model actually receives on the next request. When context pressure crosses `context.compaction.threshold`, Clio narrows that view before it considers summarizing anything: selected tool-"
-  },
-  {
-    "path": "architecture/dispatch-architecture-rationale.md",
-    "title": "Dispatch Architecture Rationale",
-    "headings": [
-      "Size does not argue for a split",
-      "Invariants that cross the proposed seams",
-      "What a split would have to preserve",
-      "Recommendation",
-      "The repository has no barrel-only import convention"
-    ],
-    "excerpt": "The fleet dispatch guide shows the operator workflows this domain serves."
-  },
-  {
-    "path": "architecture/dispatch-typed-intent.md",
-    "title": "Typed Dispatch Intent: Migration and Refusal Policy",
-    "headings": [
-      "1. The Shape",
-      "2. Compatibility Rules",
-      "2.1 Omitted intent",
-      "2.2 Partial intent",
-      "2.3 Stale or unsupported version",
-      "2.4 Contradictory intent",
-      "3. Producer Compatibility Table",
-      "4. Persisted and Serialized Contract Table",
-      "4.1 Determinism across source and installed-package paths",
-      "5. Reason Codes",
-      "6. Examples",
-      "6.1 Main-agent call, single writer",
-      "6.2 Batch with a shared ceiling and per-task narrowing",
-      "6.3 Read-only fan-out",
-      "6.4 Fleet contract",
-      "6.5 Extension-authored request"
-    ],
-    "excerpt": "Typed dispatch intent is the structured declaration of what a dispatched worker"
-  },
-  {
-    "path": "architecture/evidence-and-memory.md",
-    "title": "Evidence Corpus and Long-Term Memory",
-    "headings": [
-      "Evidence CLI",
-      "Evidence directory layout",
-      "Core files",
-      "Run attribution under concurrency",
-      "Task and decision provenance",
-      "Evidence Tag Taxonomy and Failure Causes",
-      "Complete Taxonomy",
-      "Failure-Cause Tag Subset",
-      "Receipt findingsSummary",
-      "Computation and Lifecycle",
-      "Canonical trust status",
-      "Trust projection",
-      "Mutation-Report Grounding",
-      "Memory CLI",
-      "Memory record lifecycle",
-      "Explicit scope selection"
-    ],
-    "excerpt": "The proactive memory guide explains when memory is offered and restored."
-  },
-  {
-    "path": "architecture/library.md",
-    "title": "Library architecture",
-    "headings": [
-      "Invariants",
-      "Identity at runtime",
-      "Owners and boundaries"
-    ],
-    "excerpt": "The library guide explains package installation and operator controls."
-  },
-  {
-    "path": "architecture/middleware-and-components.md",
-    "title": "Middleware and Component Registry",
-    "headings": [
-      "Component scanner",
-      "Component kinds",
-      "Reload classes",
-      "Component CLI",
-      "Middleware contract",
-      "Built-in registrations",
-      "Validation helpers"
-    ],
-    "excerpt": "The harness extensions guide explains how operators install command tools."
-  },
-  {
-    "path": "architecture/model-catalog.md",
-    "title": "Model Catalog, Runtime Refresh, and Field Notes",
-    "headings": [
-      "Runtime refresh controls",
-      "Live provider lists and labeled fallbacks",
-      "Measuring models",
-      "What \"sanctioned\" means",
-      "Local catalog overlays",
-      "Field note template",
-      "on",
-      "Serving config",
-      "Smoke tests",
-      "Outcome",
-      "Reasoning Controls and Thinking Replay Semantics",
-      "Output token limit interruption during reasoning and thinking replay",
-      "Subscription Catalog Models",
-      "Local Runtime Resolution & Quirks",
-      "LM Studio Host and Instance Resolution",
-      "llama.cpp Residency and Sleep Handling"
-    ],
-    "excerpt": "The configuration guide explains model and target selection."
-  },
-  {
-    "path": "architecture/observability.md",
-    "title": "Observability Viewer",
-    "headings": [
-      "Trace retention and state usage",
-      "The Evidence Spine End-to-End",
-      "Auto-Build on Dispatch Completion",
-      "The Sidecar Index",
-      "Cross-Session Usage Facts",
-      "The Out-of-Turn Usage Store",
-      "Artifact Categories and Path Layouts",
-      "The Accountability Panel",
-      "First-Pass Success Rate",
-      "Unverified Successes and Ungrounded Claims",
-      "Failure-Cause Histogram",
-      "Receipt Integrity Verification",
-      "Receipt Fields for Dispatch Provenance",
-      "Worked Example: End-to-End Spine Flow",
-      "1. Dispatch Completion",
-      "2. Forensic Build"
-    ],
-    "excerpt": "`/view` is the interactive artifact viewer for a Clio session. It keeps the live transcript compact while preserving a full inspection path for durable artifacts, task ledgers, and successful workspace outputs."
-  },
-  {
-    "path": "architecture/pi-boundary.md",
-    "title": "Pi SDK Boundary",
-    "headings": [
-      "Boundary table",
-      "0.87.1 integration",
-      "0.86.1 integration",
-      "Dispatch schema compatibility found during live verification",
-      "Earlier 0.85.1 integration",
-      "Thin-wrapper watch list",
-      "Architecture boundary enforcement and tests",
-      "Pi regression net"
-    ],
-    "excerpt": "Clio Coder pins Pi 0.87.1 as its provider, agent-loop, and terminal SDK. This"
-  },
-  {
-    "path": "architecture/prompt-envelope-and-tools.md",
-    "title": "Prompt Envelope and Tools",
-    "headings": [
-      "Typed composition and cache identity",
-      "Section order: stable prefix first",
-      "What not to add to the prefix",
-      "Prompt template expansion",
-      "Directory-scoped handbook overrides",
-      "One tool surface per session",
-      "Canonical worker harness",
-      "Eight planes, thirty-two builtin tools",
-      "Consolidated call shapes",
-      "One ignore policy for path walkers",
-      "The observation envelope",
-      "Description tiering",
-      "Direct placement and the capability gateway",
-      "Context protection",
-      "Inspecting a session",
-      "Self-documentation retrieval"
-    ],
-    "excerpt": "Clio Coder keeps the model-facing envelope stable and moves enforcement into the runtime registry and safety policy."
-  },
-  {
-    "path": "architecture/provider-adapter-cookbook.md",
-    "title": "Provider Adapter Cookbook",
-    "headings": [
-      "1. Anatomy of a Runtime Descriptor",
-      "2. Probing Mechanisms",
-      "2.1 Endpoint Probing (`probe`)",
-      "2.2 Reasoning Probing (`probeReasoning`)",
-      "2.3 Exact-ID Capability Selection (`probeCapabilitiesForModel`)",
-      "2.4 LM Studio as a reference adapter",
-      "3. Model Synthesis",
-      "3.1 Stream Filters and Sentinel Stripping",
-      "3.2 OpenAI-compatible sampling and vLLM budgets",
-      "3.3 Thinking controls through LiteLLM",
-      "4. Configuring Reasoning & Thinking Formats",
-      "5. Adding the Adapter to Clio",
-      "5.1 Static Built-in Registration",
-      "5.2 Dynamic Plugin Loading"
-    ],
-    "excerpt": "The configuration guide explains how operators use registered runtimes."
-  },
-  {
-    "path": "architecture/safety-model.md",
-    "title": "Clio Coder Safety Model",
-    "headings": [
-      "What this is not",
-      "Autonomy",
-      "The safety net",
-      "Damage-control rules",
-      "Approvals",
-      "Workers",
-      "Evidence and the finish contract",
-      "Source map"
-    ],
-    "excerpt": "`createSafetyPolicyEngine` in policy-engine.ts decides what a tool call may do. The tool registry in registry.ts applies that decision and then the autonomy mapping in autonomy.ts. The tool usage guide shows the operator surface."
-  },
-  {
-    "path": "architecture/session-lifecycle.md",
-    "title": "Session Lifecycle",
-    "headings": [
-      "1. On-Disk Session Layout",
-      "2. Session Metadata (`meta.json`)",
-      "3. Append-Only Context Ledger (`current.jsonl`)",
-      "Header Line",
-      "Entry Taxonomy",
-      "Write Durability & Atomicity",
-      "4. Conversation Tree Graph (`tree.json`) & Lineage",
-      "Tree Structure",
-      "Active Path Lineage Selection",
-      "Branch Forking (`/fork`)",
-      "Handoff (`/handoff `)",
-      "Streaming Turn Settlement During Session Transitions",
-      "5. Session Resumption (`/resume`) & Working Directory Fallback",
-      "Model-Facing Custom Entry Replay",
-      "How new sessions, resume and fork differ in history and workspace",
-      "6. Session Export"
-    ],
-    "excerpt": "The context continuity guide explains operator recovery after a paused handoff."
-  },
-  {
-    "path": "architecture/time-conventions.md",
-    "title": "Time and Clock Conventions",
-    "headings": [
-      "1. Choose a clock for the lifetime of the fact",
-      "Combined anchor and span pattern",
-      "Cross-host and restart boundaries",
-      "Injectable seams are local contracts",
-      "2. UTC storage and local rendering",
-      "3. Receipt and audit integrity",
-      "4. Review checklist"
-    ],
-    "excerpt": "This document describes the time practices implemented in the current Clio"
-  },
-  {
-    "path": "architecture/trace-store.md",
-    "title": "Trace store contract",
-    "headings": [
-      "Connection and version contract",
-      "Tables",
-      "Polling contract",
-      "Failure behavior",
-      "CLI Commands",
-      "Database Resolution and Error Handling",
-      "Subcommand Specifications",
-      "Unified Web Trace API"
-    ],
-    "excerpt": "The tool usage guide explains how to inspect evidence from a run."
-  },
-  {
-    "path": "architecture/tui-design.md",
-    "title": "Clio TUI Design System",
-    "headings": [
-      "Output Styles",
-      "1. Color System",
-      "1.1 Color Tokens",
-      "1.2 Placement Invariants",
-      "1.3 Composer Rail States",
-      "2. Glyph Vocabulary",
-      "3. Structural Layouts",
-      "3.1 The Island (Framed Block)",
-      "3.2 Overlays & Modals",
-      "3.3 Status Pills",
-      "3.4 Width Degradation",
-      "3.5 Pinned Islands and the Dynamic Transcript",
-      "4. Screen Surfaces & State Choreography",
-      "4.1 Welcome Launchpad & Session Header",
-      "4.2 Composer (ClioEditor)",
-      "4.3 Progressively Disclosed Footer"
-    ],
-    "excerpt": "`ClioEditor` in clio-editor.ts owns composer editing. The commands and modes guide lists operator controls."
-  },
-  {
-    "path": "architecture/worker-context.md",
-    "title": "Worker context inheritance",
-    "headings": [
-      "Dispatch API",
-      "Capture, ownership, and reproducibility",
-      "Context pressure and recovery",
-      "Evidence and compatibility",
-      "A worker's output token limit",
-      "Validation"
-    ],
-    "excerpt": "The fleet dispatch guide explains worker context choices during dispatch."
-  },
-  {
-    "path": "architecture/worker-dispatch-mechanics.md",
-    "title": "Worker Dispatch Mechanics",
-    "headings": [
-      "1. Spawning Sequence & Environment Isolation",
-      "2. Standard Input/Output NDJSON Protocol",
-      "2.1 Worker Output Lanes",
-      "2.2 Worker Input (`stdin`)",
-      "3. Heartbeats and the Watchdog",
-      "4. Permission Escalation and Parking",
-      "4.1 Answered-escalation memory",
-      "5. Assignment-aware retry and failover",
-      "5.1 Failure Taxonomy & Route Exclusion",
-      "5.2 Canonical Receipt Integrity Serialization",
-      "5.3 Acceptance Coverage",
-      "5.4 Helper Acceptance and Capture Ceilings",
-      "6. Worker Exit Codes",
-      "Antigravity conversation identity"
-    ],
-    "excerpt": "The fleet dispatch guide explains how operators start and monitor these workers."
-  },
-  {
-    "path": "guide/authoring-plugins.md",
-    "title": "Authoring a portable agent plugin",
-    "headings": [
-      "Native Clio components",
-      "Validation and lifecycle",
-      "Host projections and runtime capabilities",
-      "Authoring templates and contributor journey"
-    ],
-    "excerpt": "`isPluginId` in discovery.ts validates package identifiers. An agent plugin packages a workflow and its supporting resources as one versioned installation. Its canonical identity is the Agent Plugins 1.0.0 manifest. Clio keeps the complete "
-  },
-  {
-    "path": "guide/built-in-agents.md",
-    "title": "Clio Coder Agent Fleet",
-    "headings": [
-      "Agent Architecture Semantics",
-      "Discovery, Overrides, and Precedence",
-      "Built-in catalog",
-      "Shipped Base Agents",
-      "Shipped Shadow and Internal Agents",
-      "Frontmatter schema",
-      "Skills",
-      "Dispatching agents",
-      "Measured agent automation",
-      "ACP Delegation Agents as First-Class Workers",
-      "Restricted Shadow Agent Delegation",
-      "Subscription Worker Runtimes",
-      "Ad-hoc specialists",
-      "Worker context injection",
-      "Fleet Management and Fault Tolerance",
-      "1. In-Memory Retry Queue"
-    ],
-    "excerpt": "Clio Coder dispatches focused fleet agents from Markdown recipes. Recipes are data files, not hidden code plugins: YAML frontmatter declares identity, tool requirements, skill bindings, audience, capability and latency classes, budget, and "
+      "First-run flow",
+      "Settings Center",
+      "Configure targets",
+      "Local model settings",
+      "LM Studio load profile",
+      "Auth",
+      "Subscription-based Targets and Runtimes",
+      "Troubleshooting checklist"
+    ]
   },
   {
     "path": "guide/commands-and-modes.md",
-    "title": "Commands and Modes",
+    "source": "docs/guide/commands-and-modes.md",
+    "title": "Commands and shortcuts",
+    "group": "Everyday use",
+    "excerpt": "Navigate the terminal, choose models, and control a session.",
+    "sections": [
+      "CLI Commands",
+      "Headless Run Flags",
+      "Interactive Slash Commands",
+      "Keybindings",
+      "Live Steering",
+      "Output styles",
+      "Troubleshooting"
+    ],
     "headings": [
-      "Demo guidance",
       "CLI Commands",
       "Project trust",
       "Headless Run Flags",
@@ -517,230 +71,68 @@
       "Keybindings",
       "What Ctrl+C does",
       "Typing before Clio has finished starting",
-      "Live Steering"
-    ],
-    "excerpt": "This guide covers the installed CLI, headless run behavior, interactive commands, keyboard controls, and operator workflows. The command registry and parser are authoritative: CLI, run arguments, slash-command registry, and keybinding manag"
+      "Live Steering",
+      "The same three modes against a background worker",
+      "Output styles",
+      "Troubleshooting"
+    ]
   },
   {
-    "path": "guide/configuration-and-targets.md",
-    "title": "Configuration, Targets, Runtimes, and Auth",
-    "headings": [
-      "Start here",
-      "Directory locations",
-      "First-run flow",
-      "Advanced settings",
-      "Strict validation and lifecycle repair",
-      "Live routing vs saved defaults",
-      "Settings Center",
-      "Settings inventory",
-      "Structural and target catalog",
-      "Chat",
-      "Configure a different model for workers",
-      "Fleet",
-      "Context",
-      "Safety",
-      "Interface",
-      "Integrations"
+    "path": "guide/tool-usage.md",
+    "source": "docs/guide/tool-usage.md",
+    "title": "Tools and permissions",
+    "group": "Everyday use",
+    "excerpt": "Read, search, edit, and run commands with Clio's repository tools.",
+    "sections": [
+      "Search scope: read, ls, grep, and find outside the workspace",
+      "read: page through a file with offset, limit, and tail",
+      "edit: exact text replacements in one file",
+      "write: create or overwrite a whole file",
+      "bash: run a shell command",
+      "grep: search file contents with ripgrep",
+      "find: locate files and directories by glob pattern",
+      "ls: list one directory",
+      "verify: run declared verification checks",
+      "git: read-only inspection of git repository state"
     ],
-    "excerpt": "Use this guide to connect a provider and choose where chat and workers run. Exact settings and runtime contracts live in source: settings, validation, target descriptors, and the runtime registry."
-  },
-  {
-    "path": "guide/configuration-reference.md",
-    "title": "Configuration reference",
     "headings": [
-      "Settings keys",
-      "Chat settings",
-      "Project files",
-      "Local stdio MCP configuration and trust",
-      "Let Clio propose settings changes",
-      "Exact CLI and tool contracts",
-      "CLI flags",
-      "`context`",
-      "Tool arguments",
-      "`context`"
-    ],
-    "excerpt": "The model catalog contract explains how live discovery and catalog settings interact."
+      "Search scope: read, ls, grep, and find outside the workspace",
+      "read: page through a file with offset, limit, and tail",
+      "edit: exact text replacements in one file",
+      "write: create or overwrite a whole file",
+      "bash: run a shell command",
+      "grep: search file contents with ripgrep",
+      "find: locate files and directories by glob pattern",
+      "ls: list one directory",
+      "verify: run declared verification checks",
+      "Derived checks",
+      "Project verifier catalog",
+      "Guided catalog authoring",
+      "git: read-only inspection of git repository state"
+    ]
   },
   {
     "path": "guide/context-continuity.md",
-    "title": "Context continuity and recovery",
+    "source": "docs/guide/context-continuity.md",
+    "title": "Save and resume work",
+    "group": "Everyday use",
+    "excerpt": "Resume conversations, manage context, and prepare a handoff.",
+    "sections": [
+      "Choosing a reduction",
+      "Recovering an interrupted handoff"
+    ],
+    "includeIntro": true,
     "headings": [
       "Choosing a reduction",
-      "What the receipt means",
-      "Recovering an interrupted handoff",
-      "Request budgets and memory"
-    ],
-    "excerpt": "`compact` in compact.ts implements summary handoff. The context engine explains the budget and trigger."
-  },
-  {
-    "path": "guide/doctor.md",
-    "title": "Doctor",
-    "headings": [
-      "Running it",
-      "Reading a row",
-      "HPC toolchain rows",
-      "Task worktree rows",
-      "Slurm MCP rows",
-      "Deep checks",
-      "Tool probe: `tools `",
-      "Validation contract dry run: `validator `",
-      "In the session"
-    ],
-    "excerpt": "`runDoctorCommand` in doctor.ts runs the CLI checks. The safety model explains command authority."
-  },
-  {
-    "path": "guide/environment-variables.md",
-    "title": "Environment Variables",
-    "headings": [
-      "Behavior knobs without a settings key",
-      "Directory and install layout",
-      "Ambient provider, runtime, and terminal inputs",
-      "Debug and trace toggles",
-      "File-writing traces",
-      "Internal plumbing",
-      "Test-only"
-    ],
-    "excerpt": "This page inventories Clio-specific runtime variables and the ambient variables that materially change documented operator behavior. `settings.yaml` is the durable home for operator policy; environment variables support per-process override"
-  },
-  {
-    "path": "guide/exit-codes-and-output.md",
-    "title": "Exit Codes & Machine-Readable Output Contracts",
-    "headings": [
-      "1. Global Exit Codes",
-      "2. The `--help` Standard",
-      "Global vs Subcommand Flag Positioning",
-      "3. Standard I/O Separation & Headless Execution",
-      "4. Machine-Readable Output Formats (`--json` & `--json-events`)",
-      "Subcommand JSON Summary",
-      "Incremental Streaming & Deduplication Invariant (#122, #123)"
-    ],
-    "excerpt": "This document specifies the process exit codes, machine-readable JSON streaming formats, standard I/O separation rules, and `--help` conventions across all Clio Coder CLI commands in the current source tree."
-  },
-  {
-    "path": "guide/extensions-and-sharing.md",
-    "title": "Extensions, Resources, and Share Archives",
-    "headings": [
-      "Resource roots and precedence",
-      "Native skills, foreign compatibility roots, and collision resolution",
-      "Prompt templates",
-      "Display-only templates",
-      "Foreign prompt roots",
-      "Skills",
-      "Naming and validation",
-      "Trust and compatibility roots",
-      "Library and skill commands",
-      "Agent Skills compatibility",
-      "Prompt envelope and safety",
-      "Extension package manifest",
-      "Callers that dispatch",
-      "Extension CLI",
-      "Generations and reload",
-      "Skill pack distribution"
-    ],
-    "excerpt": "Clio Coder has two package kinds. A plugin is a domain bundle: prompts, skills, agent recipes, fleet contracts, scripts, and reference files, installed with `clio-coder library install <path>`. A harness extension is executable runtime capa"
-  },
-  {
-    "path": "guide/fleet-dispatch.md",
-    "title": "Fleet Dispatch",
-    "headings": [
-      "Start here",
-      "Architecture",
-      "Worker prompt and budget admission",
-      "Node setup",
-      "Doctor preflight",
-      "Placement and process-safe admission",
-      "Worker limits and `fleet.concurrency: auto`",
-      "Failure semantics",
-      "Topologies",
-      "Single-writer token",
-      "Declared step scope",
-      "Worktree per task",
-      "Typed intent and host-run verification",
-      "Agent ledger",
-      "Detached fan-out, backgrounding, and collect",
-      "Review gate"
-    ],
-    "excerpt": "Clio Coder dispatches bounded worker agents. With a fleet configured, those"
-  },
-  {
-    "path": "guide/glossary.md",
-    "title": "Clio Coder Glossary",
-    "headings": [
-      "Terms & Concept Definitions",
-      "1. Assignment",
-      "2. Run",
-      "3. Attempt",
-      "4. Batch",
-      "5. Plan",
-      "6. Receipt",
-      "7. Envelope",
-      "8. Phase",
-      "9. Gate",
-      "10. Recipe",
-      "11. Worker",
-      "12. Target",
-      "13. Node",
-      "14. Route",
-      "15. Posture (Autonomy Level)"
-    ],
-    "excerpt": "This document defines the 50 core architectural concepts and terminology used throughout Clio Coder, mapped to their authoritative TypeScript type definitions in `src/`."
-  },
-  {
-    "path": "guide/harness-extensions.md",
-    "title": "Harness extensions",
-    "headings": [
-      "Create a command tool",
-      "Command contract",
-      "Admission and lifecycle",
-      "Extension reload: runtime capabilities, integrity verification, and frozen session tool schemas",
-      "Operator commands, status, and panels",
-      "Invoke and manage operator runtimes",
-      "Scientific examples"
-    ],
-    "excerpt": "The component and middleware architecture explains discovery and hook boundaries."
-  },
-  {
-    "path": "guide/installation-and-lifecycle.md",
-    "title": "Installation and Lifecycle Operations",
-    "headings": [
-      "Start, change settings, or recover",
-      "Optional dependency: the Claude Agent SDK",
-      "1. Directory Layout & Platform Defaults",
-      "Platform Defaults",
-      "Environment Overrides",
-      "The Project `.clio-coder/` Directory",
-      "2. File & Permissions Matrix",
-      "3. Bootstrap Initialization",
-      "4. Source Checkout Install",
-      "5. Lifecycle Commands",
-      "A. Integrity Diagnostics (`clio-coder doctor`)",
-      "B. Upgrades (`clio-coder upgrade`)",
-      "C. System Resets (`clio-coder reset`)",
-      "D. Uninstallation (`clio-coder uninstall`)",
-      "E. Interactive Configuration (`clio-coder configure`)",
-      "6. Residues Checklist for Manual Purging"
-    ],
-    "excerpt": "The architecture overview explains the installed runtime and its entry points."
-  },
-  {
-    "path": "guide/interop.md",
-    "title": "Coding agent interoperability",
-    "headings": [
-      "Delegate work to an installed coding agent",
-      "Outbound: Use this library from Claude Code",
-      "Not every library package is published",
-      "Outbound: Use this library from Codex",
-      "Inspect installed hosts",
-      "Inbound: Review and adopt foreign resources",
-      "Reviewing foreign plugin source, trust, and unsupported components",
-      "Inbound: Install or import an explicit foreign package (Claude Code, Codex)",
-      "Terminal flow"
-    ],
-    "excerpt": "`detectInteropAgents` in detect.ts discovers local agents. The library architecture explains package trust."
+      "Recovering an interrupted handoff"
+    ]
   },
   {
     "path": "guide/panes-and-files.md",
-    "title": "Panes and the Files Pane",
+    "source": "docs/guide/panes-and-files.md",
+    "title": "Files and terminal panes",
+    "group": "Everyday use",
+    "excerpt": "Attach files and open companion terminal panes.",
     "headings": [
       "What you get",
       "Install, from a clean machine",
@@ -753,111 +145,175 @@
       "Theme",
       "Troubleshooting",
       "Where things live"
-    ],
-    "excerpt": "The TUI design contract explains the layout and rendering rules behind these controls."
+    ]
   },
   {
-    "path": "guide/plugins.md",
-    "title": "Portable plugins and the library",
-    "headings": [
-      "Private catalogs",
-      "Plugins and extensions",
-      "Other package kinds"
+    "path": "guide/fleet-dispatch.md",
+    "source": "docs/guide/fleet-dispatch.md",
+    "title": "Workers and fleets",
+    "group": "Extend Clio",
+    "excerpt": "Assign focused tasks and combine workers into a workflow.",
+    "sections": [
+      "Node setup",
+      "Doctor preflight",
+      "Topologies",
+      "Operator visibility"
     ],
-    "excerpt": "A plugin is a complete, versioned bundle of skills and supporting files. The portable root `plugin.json` follows Agent Plugins 1.0.0. Clio reads native prompts, agent recipes, and fleets from its namespaced manifest extension. Installing a "
-  },
-  {
-    "path": "guide/proactive-memory.md",
-    "title": "Proactive task memory",
     "headings": [
-      "Inspect or configure memory",
-      "Architecture",
-      "Paper mapping and Clio constraints",
-      "Intervention Defaults & Cadence Knobs",
-      "Trigger semantics",
-      "Two delivery channels",
-      "Background steps never hold a turn open",
-      "Outcome semantics",
-      "Cost and the default decision",
-      "The measurement",
-      "The decision",
-      "Dedicated routing, chat fallback and endpoint capacity",
-      "Choosing a background model",
-      "Operator setup",
-      "Where what the tier writes ends up",
-      "What the LLM tier actually writes"
-    ],
-    "excerpt": "The evidence and memory contract explains durable memory records and their provenance."
+      "Node setup",
+      "Doctor preflight",
+      "Topologies",
+      "Single-writer token",
+      "Declared step scope",
+      "Worktree per task",
+      "Typed intent and host-run verification",
+      "Agent ledger",
+      "Detached fan-out, backgrounding, and collect",
+      "Review gate",
+      "Compete",
+      "Council",
+      "ExecutionPlan and plan approval",
+      "Shipped fleets and contract versions",
+      "Fleet authoring",
+      "Per-step write boundaries (Contract v4)",
+      "Bounded check/repair loops",
+      "Deterministic code steps",
+      "Operator visibility"
+    ]
   },
   {
     "path": "guide/resource-library.md",
-    "title": "Library packages",
+    "source": "docs/guide/resource-library.md",
+    "title": "Skills and resources",
+    "group": "Extend Clio",
+    "excerpt": "Browse and use skills, prompts, agents, fleets, and plugins.",
+    "sections": [
+      "Browse and install",
+      "Scope and workspace state",
+      "Keyboard shortcuts: Alt+L for Library and Alt+M for Model picker",
+      "Interactive library navigation",
+      "Session reload and package disable behavior"
+    ],
+    "includeIntro": true,
     "headings": [
       "Browse and install",
       "Scope and workspace state",
-      "One index format",
-      "Register and publish",
       "Keyboard shortcuts: Alt+L for Library and Alt+M for Model picker",
       "Interactive library navigation",
-      "Session reload and package disable behavior",
-      "One inventory for the operator and the model"
-    ],
-    "excerpt": "The **library** is Clio's collection of installable **packages**. Each package has one kind: `plugin`, `skill`, `agent`, `prompt`, or `fleet`. Every kind uses a root `plugin.json`, an explicit Semantic Version, a full-tree SHA-256 pin, and "
+      "Session reload and package disable behavior"
+    ]
   },
   {
-    "path": "guide/skills-marketplace.md",
-    "title": "Skills in the library",
-    "headings": [
-      "Operator ownership of installed skills",
-      "Library keys and runtime use",
-      "Matching and authoring",
-      "Publishing a skill"
+    "path": "guide/plugins.md",
+    "source": "docs/guide/plugins.md",
+    "title": "Install plugins",
+    "group": "Extend Clio",
+    "excerpt": "Add reusable resources to your Clio installation.",
+    "includeIntro": true,
+    "sections": [
+      "Plugins and extensions",
+      "Other package kinds"
     ],
-    "excerpt": "`loadSkills` in loader.ts selects runtime skills. The library architecture explains package integrity."
+    "headings": [
+      "Plugins and extensions",
+      "Other package kinds"
+    ]
+  },
+  {
+    "path": "guide/interop.md",
+    "source": "docs/guide/interop.md",
+    "title": "Editors and other agents",
+    "group": "Extend Clio",
+    "excerpt": "Use supported agent connections and editor integrations.",
+    "headings": [
+      "Delegate work to an installed coding agent",
+      "Outbound: Use this library from Claude Code",
+      "Not every library package is published",
+      "Outbound: Use this library from Codex",
+      "Inspect installed hosts",
+      "Inbound: Review and adopt foreign resources",
+      "Reviewing foreign plugin source, trust, and unsupported components",
+      "Inbound: Install or import an explicit foreign package (Claude Code, Codex)",
+      "Terminal flow"
+    ]
   },
   {
     "path": "guide/slurm.md",
-    "title": "Slurm through the clio-kit MCP server",
+    "source": "docs/guide/slurm.md",
+    "title": "Slurm workflows",
+    "group": "Extend Clio",
+    "excerpt": "Connect Clio to supported Slurm tools for cluster work.",
     "headings": [
       "Set it up",
       "The five capabilities",
       "How autonomy treats them",
       "The skill"
-    ],
-    "excerpt": "`slurmMcpFindings` in doctor-slurm.ts checks the local Slurm setup. The MCP tool guide explains capability calls."
+    ]
   },
   {
-    "path": "guide/tool-usage.md",
-    "title": "Tool Usage Reference",
+    "path": "guide/doctor.md",
+    "source": "docs/guide/doctor.md",
+    "title": "Check your installation",
+    "group": "Reference",
+    "excerpt": "Diagnose installation and connection problems with doctor.",
     "headings": [
-      "The tool surface at a glance",
-      "gateway: discover and call secondary capabilities",
-      "Observation envelope: truncation notices, offload, next hints, and the turn budget",
-      "Search scope: read, ls, grep, and find outside the workspace",
-      "read: page through a file with offset, limit, and tail",
-      "edit: exact text replacements in one file",
-      "write: create or overwrite a whole file",
-      "bash: run a shell command",
-      "run_script: stream a scientific processing step to disk",
-      "data: inspect structured files through the gateway",
-      "grep: search file contents with ripgrep",
-      "find: locate files and directories by glob pattern",
-      "ls: list one directory",
-      "credential_present: check environment or file for a credential key",
-      "dispatch: run bounded tasks on fleet agents",
-      "verify: run declared verification checks"
-    ],
-    "excerpt": "Operational reference for agents and readers using the web app. Sections summarize each tool's arguments, boundaries, outputs, and core workflow; schemas and implementation live in `src/tools/` and linked source files. Retrieve a section th"
+      "Running it",
+      "Reading a row",
+      "HPC toolchain rows",
+      "Task worktree rows",
+      "Slurm MCP rows",
+      "Deep checks",
+      "Tool probe: `tools <target>`",
+      "Validation contract dry run: `validator <n>`",
+      "In the session"
+    ]
   },
   {
     "path": "guide/troubleshooting.md",
-    "title": "Troubleshooting & Error Remediation",
+    "source": "docs/guide/troubleshooting.md",
+    "title": "Troubleshooting",
+    "group": "Reference",
+    "excerpt": "Resolve common connection, terminal, and runtime problems.",
     "headings": [
       "Error Catalog & Remediation Matrix",
       "Reading a cold cache",
       "A TUI that stops answering the keyboard",
       "Diagnostic Commands"
-    ],
-    "excerpt": "This guide provides concrete, actionable remediation procedures for"
+    ]
+  },
+  {
+    "path": "guide/configuration-reference.md",
+    "source": "docs/guide/configuration-reference.md",
+    "title": "Configuration reference",
+    "group": "Reference",
+    "excerpt": "Look up configuration settings and their supported values.",
+    "headings": [
+      "Settings keys",
+      "Chat settings",
+      "Project files",
+      "Local stdio MCP configuration and trust",
+      "Let Clio propose settings changes",
+      "Exact CLI and tool contracts",
+      "CLI flags",
+      "`context`",
+      "Tool arguments",
+      "`context`"
+    ]
+  },
+  {
+    "path": "guide/environment-variables.md",
+    "source": "docs/guide/environment-variables.md",
+    "title": "Environment variables",
+    "group": "Reference",
+    "excerpt": "Look up environment variables used by Clio Coder.",
+    "headings": [
+      "Behavior knobs without a settings key",
+      "Directory and install layout",
+      "Ambient provider, runtime, and terminal inputs",
+      "Debug and trace toggles",
+      "File-writing traces",
+      "Internal plumbing",
+      "Test-only"
+    ]
   }
 ]

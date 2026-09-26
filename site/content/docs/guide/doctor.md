@@ -1,6 +1,6 @@
-# Doctor
+# Check your installation
 
-`runDoctorCommand` in [doctor.ts](../../src/cli/doctor.ts) runs the CLI checks. The [safety model](../architecture/safety-model.md) explains command authority.
+Diagnose installation and connection problems with doctor.
 
 `clio-coder doctor` diagnoses a Clio install and the workspace it runs in. It
 reads, probes, and reports; plain `doctor` writes nothing. This page covers
@@ -54,7 +54,9 @@ seconds from a scratch directory, and all of them run at once.
   `sbatch` is missing.
 - An installed tool whose `--version` exits nonzero is `WARN`. An
   unconfigured Slurm client, which cannot reach its controller, shows up this
-  way.
+  way. Slurm client version timeouts also warn; other HPC version timeouts
+  retain their informational detail on an OK row. The scheduler row reuses
+  the bounded sbatch result rather than spawning a second probe.
 
 ## Task worktree rows
 
@@ -95,7 +97,8 @@ through the path a real turn uses.
 | The model streamed a valid tool call | `OK`, with the model and latency |
 | The probe ran and the call was missing or malformed | `WARN`, with the reason |
 | The probe could not run: no model is set, or the runtime does not stream through the engine | `INFO` |
-| The target did not answer its health probe | `WARN` |
+| An available runtime has no live probe | `INFO`, with the credential source |
+| Credentials are missing or the target did not answer its health probe | `WARN`, with the actual error |
 
 The probe generates tokens and can load a cold model on a local server. It
 unloads afterwards only the model it loaded itself, on the server it probed.
@@ -138,3 +141,7 @@ With no contract, or a contract with no validators, the dry run adds no rows.
 by a tally, for example `doctor: 58 checks, 0 error(s), 3 warning(s)`. The
 notice takes the level of the worst row. `/doctor` never repairs anything;
 run `clio-coder doctor --fix` from a shell for that.
+
+Deep tool-probe rows report INFO when an available runtime has no live probe, naming the credential source. A failed health probe remains WARN and reports its last error.
+
+If the managed Yazi cache cannot be written, profile generation returns a profile error. Its diagnostic failure marker is best-effort; a cache failure does not crash either launcher.

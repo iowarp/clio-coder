@@ -1,4 +1,6 @@
-# Environment Variables
+# Environment variables
+
+Look up environment variables used by Clio Coder.
 
 This page inventories Clio-specific runtime variables and the ambient variables that materially change documented operator behavior. `settings.yaml` is the durable home for operator policy; environment variables support per-process overrides, directory layout, debugging, credentials, terminal integration, and internal plumbing. When prose and source disagree, prefer the cited read site.
 
@@ -126,5 +128,4 @@ Set by Clio for its own processes; not operator knobs.
 | `CLIO_CODER_WORKER_FAUX` (+ `_MODEL`, `_TEXT`, `_STOP_REASON`, `_ERROR_MESSAGE`) | Fake worker model for tests ([ai.ts](../../src/engine/ai.ts)). |
 | `CLIO_CODER_REQUIRE_HOME_PREFIX` | Test guardrail: abort if resolved directories escape `CLIO_CODER_HOME` ([init.ts](../../src/core/init.ts)). |
 
-Variables used only by external benchmark harnesses or install scripts are not
-part of the shipped runtime and should be documented with those harnesses.
+At the default Clio directories, authenticated sibling CLIs remain connected accounts even without a Clio target. When any resolved Clio directory differs from its platform/XDG default, sibling quota adapters are excluded unless their own home is explicitly set: `CODEX_HOME` for Codex, `CLAUDE_CONFIG_DIR` for Claude Code, or `ANTIGRAVITY_HOME` for agy. Those directories contain `auth.json`, `.credentials.json`, and `antigravity-oauth-token`, respectively. Excluded adapters read no credentials, make no requests, and display no cached account rows. Clio-owned Anthropic Max credentials remain available in relocated homes.

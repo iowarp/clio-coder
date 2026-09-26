@@ -1,13 +1,11 @@
-# Panes and the Files Pane
+# Files and terminal panes
 
-The [TUI design contract](../architecture/tui-design.md) explains the layout and rendering rules behind these controls.
+Attach files and open companion terminal panes.
 
 This page is the operator's path from a clean machine to a working files pane
 beside a Clio Coder session: what to install, how a session joins its pane
 host, the commands and keys, the settings that govern them, what `doctor`
-says at each stage, and what to do when something does not open. Every step
-below was run on Linux x64 against Clio Coder 0.4.2 with herdr 0.8.2 and the
-pinned files-pane engine; the outputs quoted are what those runs printed.
+says at each stage, and how to resolve a missing dependency or unavailable pane host.
 
 Panes are optional. A session without them behaves exactly as before, and
 nothing on a startup path downloads, probes a socket, or writes a file unless
@@ -39,7 +37,7 @@ when it quits:
   that run's stream in a pane to the right. It is documented with the fleet
   in [Fleet Dispatch](fleet-dispatch.md); this page covers the utility panes.
 
-When an `@file` mention expands to an image and the routed model cannot accept images, Clio warns before submitting the turn. The warning names the current model and lists up to five known vision-capable models to choose in `/model`. This behavior is shipped and tested.
+When an `@file` mention expands to an image and the routed model cannot accept images, Clio warns before submitting the turn. The warning names the current model and lists up to five known vision-capable models to choose in `/model`.
 
 Outside herdr, `/files` still works: the file view takes over the terminal
 for one pick and returns to the session with the selection in the composer.
@@ -54,15 +52,9 @@ when an operator asks, from a registry that pins each release's URL and
 sha256 per platform. A copy already on `PATH` wins over a vendored one when it
 clears the registry's minimum version.
 
-On-demand install is the decision, not a gap (#274). Bundling the two
-programs would add roughly 22 MB for herdr and 32 MB for yazi per platform
-across five platforms, and the release audit in [check-release.mjs](../../scripts/check-release.mjs)
-holds the tarball to 10 MB and the unpacked package to 50 MB as its tripwire
-against packaging defects; one bundled platform alone would trip it. Both
-programs also carry their own licenses and notices, which the package would
-then have to ship. So the first `/files` on a clean machine is a refusal that
-names the install command, `doctor` warns row by row with the same command,
-and the download happens only when you ask for it.
+The first `/files` invocation reports any missing dependency and names its
+install command. `doctor` reports the same dependencies. Downloads occur only
+through the explicit install commands:
 
 ```bash
 npm install -g @iowarp/clio-coder
@@ -71,26 +63,10 @@ clio-coder tools install herdr     # or: clio-coder panes install
 clio-coder tools install yazi
 ```
 
-Both installs verified their checksums and finished in under a second on
-this machine:
-
-```text
-$ clio-coder tools install yazi
-  downloading https://github.com/sxyazi/yazi/releases/download/v26.8.15/yazi-x86_64-unknown-linux-gnu.zip
-  checksum verified (cc67eb7991550c2f9407cda52d3f5af0937627aa6884e7de99a04fcf059807e0)
-ok: installed yazi 26.8.15 (MIT) at ~/.local/share/clio-coder/tools/yazi/26.8.15
-```
-
-`clio-coder tools list` then shows where each program resolves. On the test
-machine a file manager from a distribution package sat on `PATH` below the
-registry floor, and the listing said exactly that rather than reporting it
-missing:
-
-```text
-TOOL   PIN      LICENSE     SOURCE    RESOLVED
-herdr  0.8.2    Apache-2.0  path      PATH /home/you/.local/bin/herdr (0.8.2, pin 0.8.2)
-yazi   26.8.15  MIT         vendored  vendored .../tools/yazi/26.8.15/yazi (26.8.15); PATH copy /home/you/.local/bin/yazi is 26.1.22, below the 26.8.15 floor, so Clio runs the vendored copy
-```
+Install verifies the registry's checksum before publishing the executable.
+`clio-coder tools list` shows the selected binary and version. If a `PATH` copy
+is below the registry's minimum version, the listing explains why Clio selects
+the vendored copy or requests installation.
 
 The vendored programs live under the data root (`clio-coder paths`), so
 `clio-coder reset --data` removes them and `tools install` brings them back.
@@ -124,9 +100,8 @@ connects, and a ping answered inside one second. `HERDR_SOCKET_PATH` and
 ## What doctor says
 
 `clio-coder doctor` never fails an install for missing panes; the rows are
-warnings that name the next step. With the settings above and Clio started
-from a plain terminal rather than a herdr pane, the run on this machine
-printed:
+warnings that name the next step. For example, with panes enabled in a plain
+terminal and an outdated files engine, the diagnostics include:
 
 ```text
 OK   external tool herdr    PATH /home/you/.local/bin/herdr (0.8.2, pin 0.8.2)
@@ -177,10 +152,9 @@ What arrives in the composer is appended to the draft, never submitted. A
 file becomes `@src/a.ts`; a directory or a path with spaces is inserted as
 plain backticked text, because those cannot be file mentions. Up to 32 paths
 and 4,096 characters land per pick, duplicates are skipped, and a notice
-counts what was inserted. The run on this machine, after picking
-`SECURITY.md` with `Ctrl+Y`, showed the composer holding `@SECURITY.md` with
-the keyboard back in it and the notice `1 path from the files pane added to
-the draft`.
+counts what was inserted. Picking `SECURITY.md`, for example, appends
+`@SECURITY.md` to the draft, returns focus to the composer, and reports one added
+path.
 
 ### What closes what
 
@@ -191,10 +165,8 @@ the draft`.
 - `/panes close shell`, `/panes close logs`, `/panes close all` close the
   utility panes.
 - `/quit` closes the docks Clio manages, the files pane and the workers
-  watch pane, and leaves a shell or logs pane you opened. That is the
-  decided policy (#272): a dock is a Clio surface and goes with the session,
-  while a utility pane is a terminal you may be typing in, and Clio does not
-  kill it behind your back. The next session does not reclaim it either, so
+  watch pane, and preserves a shell or logs pane you opened. Utility panes
+  have their own lifetime and are not reclaimed by the next session, so
   `/quit` prints what it left, one line after the terminal is restored:
 
   ```text
@@ -298,3 +270,7 @@ what" above.
 | `<state>/runs/<runId>/events.ndjson` | The journal the logs pane follows. |
 
 Resolve `<data>`, `<cache>`, and `<state>` with `clio-coder paths`.
+
+Doctor reports an absent managed Yazi profile as INFO before first use or after a profile reset. With the files pane enabled and usable `yazi` and `ya` binaries, `doctor --fix` regenerates missing or stale profiles and validates them with Yazi before installation. A stale profile or failed regeneration remains WARN.
+
+A failed managed-profile generation leaves a failure marker in Clio’s cache. Later doctor runs keep reporting WARN "generation failed" until regeneration succeeds or the operator explicitly resets the profile. A profile that was never generated remains INFO.

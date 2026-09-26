@@ -1,0 +1,153 @@
+[
+	{
+		"path": "README.md",
+		"source": "README.md",
+		"title": "Install Clio Coder",
+		"group": "Start",
+		"excerpt": "Install, update, and launch Clio Coder on your machine.",
+		"stripDetails": true,
+		"sections": ["Get started"]
+	},
+	{
+		"path": "guide/configuration-and-targets.md",
+		"source": "docs/guide/configuration-and-targets.md",
+		"title": "Connect a model",
+		"group": "Start",
+		"excerpt": "Set up local models, institutional endpoints, and cloud connections.",
+		"sections": [
+			"Start here",
+			"First-run flow",
+			"Settings Center",
+			"Configure targets",
+			"Local model settings",
+			"Auth",
+			"Subscription-based Targets and Runtimes",
+			"Troubleshooting checklist"
+		]
+	},
+	{
+		"path": "guide/commands-and-modes.md",
+		"source": "docs/guide/commands-and-modes.md",
+		"title": "Commands and shortcuts",
+		"group": "Everyday use",
+		"excerpt": "Navigate the terminal, choose models, and control a session.",
+		"sections": [
+			"CLI Commands",
+			"Headless Run Flags",
+			"Interactive Slash Commands",
+			"Keybindings",
+			"Live Steering",
+			"Output styles",
+			"Troubleshooting"
+		]
+	},
+	{
+		"path": "guide/tool-usage.md",
+		"source": "docs/guide/tool-usage.md",
+		"title": "Tools and permissions",
+		"group": "Everyday use",
+		"excerpt": "Read, search, edit, and run commands with Clio's repository tools.",
+		"sections": [
+			"Search scope: read, ls, grep, and find outside the workspace",
+			"read: page through a file with offset, limit, and tail",
+			"edit: exact text replacements in one file",
+			"write: create or overwrite a whole file",
+			"bash: run a shell command",
+			"grep: search file contents with ripgrep",
+			"find: locate files and directories by glob pattern",
+			"ls: list one directory",
+			"verify: run declared verification checks",
+			"git: read-only inspection of git repository state"
+		]
+	},
+	{
+		"path": "guide/context-continuity.md",
+		"source": "docs/guide/context-continuity.md",
+		"title": "Save and resume work",
+		"group": "Everyday use",
+		"excerpt": "Resume conversations, manage context, and prepare a handoff.",
+		"sections": ["Choosing a reduction", "Recovering an interrupted handoff"],
+		"includeIntro": true
+	},
+	{
+		"path": "guide/panes-and-files.md",
+		"source": "docs/guide/panes-and-files.md",
+		"title": "Files and terminal panes",
+		"group": "Everyday use",
+		"excerpt": "Attach files and open companion terminal panes."
+	},
+	{
+		"path": "guide/fleet-dispatch.md",
+		"source": "docs/guide/fleet-dispatch.md",
+		"title": "Workers and fleets",
+		"group": "Extend Clio",
+		"excerpt": "Assign focused tasks and combine workers into a workflow.",
+		"sections": ["Node setup", "Doctor preflight", "Topologies", "Operator visibility"]
+	},
+	{
+		"path": "guide/resource-library.md",
+		"source": "docs/guide/resource-library.md",
+		"title": "Skills and resources",
+		"group": "Extend Clio",
+		"excerpt": "Browse and use skills, prompts, agents, fleets, and plugins.",
+		"sections": [
+			"Browse and install",
+			"Scope and workspace state",
+			"Keyboard shortcuts: Alt+L for Library and Alt+M for Model picker",
+			"Interactive library navigation",
+			"Session reload and package disable behavior"
+		],
+		"includeIntro": true
+	},
+	{
+		"path": "guide/plugins.md",
+		"source": "docs/guide/plugins.md",
+		"title": "Install plugins",
+		"group": "Extend Clio",
+		"excerpt": "Add reusable resources to your Clio installation.",
+		"includeIntro": true,
+		"sections": ["Plugins and extensions", "Other package kinds"]
+	},
+	{
+		"path": "guide/interop.md",
+		"source": "docs/guide/interop.md",
+		"title": "Editors and other agents",
+		"group": "Extend Clio",
+		"excerpt": "Use supported agent connections and editor integrations."
+	},
+	{
+		"path": "guide/slurm.md",
+		"source": "docs/guide/slurm.md",
+		"title": "Slurm workflows",
+		"group": "Extend Clio",
+		"excerpt": "Connect Clio to supported Slurm tools for cluster work."
+	},
+	{
+		"path": "guide/doctor.md",
+		"source": "docs/guide/doctor.md",
+		"title": "Check your installation",
+		"group": "Reference",
+		"excerpt": "Diagnose installation and connection problems with doctor."
+	},
+	{
+		"path": "guide/troubleshooting.md",
+		"source": "docs/guide/troubleshooting.md",
+		"title": "Troubleshooting",
+		"group": "Reference",
+		"excerpt": "Resolve common connection, terminal, and runtime problems."
+	},
+	{
+		"path": "guide/configuration-reference.md",
+		"source": "docs/guide/configuration-reference.md",
+		"title": "Configuration reference",
+		"group": "Reference",
+		"excerpt": "Look up configuration settings and their supported values."
+	},
+	{
+		"path": "guide/environment-variables.md",
+		"source": "docs/guide/environment-variables.md",
+		"title": "Environment variables",
+		"group": "Reference",
+		"excerpt": "Look up environment variables used by Clio Coder."
+	}
+]

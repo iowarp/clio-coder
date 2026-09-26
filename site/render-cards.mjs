@@ -35,6 +35,13 @@ try {
 				await document.fonts.ready;
 				await new Promise((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(resolveFrame)));
 			});
+			const clipped = await page.evaluate(() =>
+				[...document.querySelectorAll("body > main, body > aside, footer")].some((element) => {
+					const bounds = element.getBoundingClientRect();
+					return bounds.bottom > innerHeight + 1 || bounds.right > innerWidth + 1;
+				}),
+			);
+			if (clipped) throw new Error(`Social card ${card.id} clips content outside its export dimensions.`);
 			await page.screenshot({
 				path: join(root, card.output),
 				animations: "disabled",

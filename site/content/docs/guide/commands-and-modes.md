@@ -1,14 +1,6 @@
-# Commands and Modes
+# Commands and shortcuts
 
-This guide covers the installed CLI, headless run behavior, interactive commands, keyboard controls, and operator workflows. The command registry and parser are authoritative: [CLI](../../src/cli/index.ts), [run arguments](../../src/cli/args.ts), [slash-command registry](../../src/interactive/slash-commands.ts), and [keybinding manager](../../src/interactive/keybinding-manager.ts). Exit codes and stdout guarantees are in [Exit codes and output](exit-codes-and-output.md).
-
-## Demo guidance
-
-Demo guidance is on by default before 1.0. After a turn, Clio may show one `[tip]` row that fits what the turn did: a question about Clio's own settings, a side question that `/btw` would keep out of the transcript, a correction that `/tree` could rewind, a long answer that another output style would fold. The harness picks the tip. The model never sees it, and no model call is made. At most four tips appear per session, spaced several turns apart, and a tip retires once you use its feature yourself or it has been shown twice.
-
-Guidance keeps a small profile in the state directory (`harness-profile.json`): the tips shown, the Clio features you used, and the topics you asked Clio about. It stays on this machine and never enters a prompt.
-
-Turn it off under Settings → Appearance → Demo guidance (`interface.demo`), or for one invocation with `--no-demo`. Off means no tips, no idle footer tips or rotating key hints, no demo prompt line, and no profile reads or writes. Guidance adds hints only; it does not grant tool authority. Headless runs, ACP sessions and workers do not receive it.
+Navigate the terminal, choose models, and control a session.
 
 ## CLI Commands
 
@@ -91,14 +83,14 @@ Without `--cwd`, ACP binds the first session's absolute workspace path before it
 | `clio-coder dev share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
 | `clio-coder dev share inspect <path> [--json]` | Inspect a share archive without importing it. Each share command refuses, with exit 2, a flag it does not use. |
 | `clio-coder export --out <path> ...` / `clio-coder import <path> ...` | Top-level aliases for `dev share export` and `dev share import`. Each `dev` command also resolves without the `dev` prefix. |
-| `clio-coder context` | Show project context status, preload class, codewiki freshness, and the codewiki digest when present. |
-| `clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose\|--apply\|--rewrite] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO-CODER.md`, `.clio-coder/codewiki.json`, and `.clio-coder/state.json`. |
-| `clio-coder context refresh [--wiki]` | Rebuild the codewiki and state without touching `CLIO-CODER.md`; with `--wiki`, update an existing Markdown wiki. |
+| `clio-coder context` | Show project context status, preload class, codemap freshness, and the codemap digest when present. |
+| `clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose\|--apply\|--rewrite] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO-CODER.md`, `.clio-coder/codemap.json`, and `.clio-coder/state.json`. |
+| `clio-coder context refresh [--wiki]` | Rebuild the codemap and state without touching `CLIO-CODER.md`; with `--wiki`, update an existing Markdown wiki. |
 | `clio-coder context wiki [--update\|--retry-pending] [--status] [--depth auto\|simple\|medium\|detailed] [--target <id>] [--model <id>] [--thinking off\|low\|medium\|high]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio-coder/wiki/`. |
 | `clio-coder context reset [--all] [--yes]` | Clear accumulated project context artifacts; `--all` also removes `CLIO-CODER.md`. `--yes` (or `-y`) answers every confirmation and is required when stdin is not a terminal. |
-| `clio-coder context index [--json]` | Build the structural codewiki index without model calls; writes `.clio-coder/codewiki.json` and `.clio-coder/state.json` and prints coverage plus a structural hash. |
+| `clio-coder context index [--json]` | Build the structural codemap index without model calls; writes `.clio-coder/codemap.json` and `.clio-coder/state.json` and prints coverage plus a structural hash. |
 | `clio-coder context map [--out <path>] [--json]` | Write an archify architecture seed from the structural index without model calls. |
-| `clio-coder context replay (--sessions <path>... \| --synthetic <ids>) [--policies <ids>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--protect-last-turns <n>] [--min-evictable-tokens <n>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio session ledgers or the seeded procedural corpora and report retention, precision, token savings, recall cost, cold-prefix cost, saturation, and summary headroom. |
+| `clio-coder context replay (--sessions <path>... \| --synthetic <ids>) [--policies <ids>] [--profile <id>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--protect-last-turns <n>] [--protect-last-steps <n>] [--min-evictable-tokens <n>] [--rearm-fraction <ratio>] [--overflow-fraction <ratio>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio session ledgers or the seeded procedural corpora and report retention, precision, token savings, recall cost, cold-prefix cost, saturation, and summary headroom. Non-default profiles include paired default-profile comparisons. |
 | `clio-coder context working-set --session <id\|path>` | Inspect one session's durable working-set fold and path-index summary without modifying the ledger. |
 
 ACP frontends can list, load, resume, and delete sessions through the stable session methods. Clio offers `default` and `yolo` as ACP modes. A frontend can change autonomy with `session/set_mode` or the `mode` configuration option. The `model` and `thought_level` options change only the hosted session; saved defaults stay as they were. Mode and option changes wait until the current prompt finishes.
@@ -187,9 +179,9 @@ reachable herdr session.
 
 `clio-coder run --cwd <dir> "<task>"` behaves the same as `cd <dir> && clio-coder run "<task>"`. The process enters `<dir>` before it reads layered project settings, context files, skills, `@file` references, or the session ledger, and every tool path resolves against it. Relative paths in other arguments, such as `--skill`, `--steer-channel`, and `@file`, resolve against `<dir>` as well. The path is canonicalized first, so the run ledger records the physical directory as the run's `cwd`.
 
-Image `@file` references in a headless prompt or stdin require the routed model's image-input capability. Clio refuses the turn before sending the image when the route is text-only. The run exits nonzero and prints `IMAGE_INPUT_UNSUPPORTED` with the target and model. A turn refused before admission has no run receipt. This behavior is shipped and tested.
+Image `@file` references in a headless prompt or stdin require the routed model's image-input capability. Clio refuses the turn before sending the image when the route is text-only. The run exits nonzero and prints `IMAGE_INPUT_UNSUPPORTED` with the target and model. A turn refused before admission has no run receipt.
 
-Inline image references accept PNG, JPEG, GIF, or WebP bytes detected by file signature. Clio attempts to resize them to at most 2,000 by 2,000 pixels and below 4.5 MiB of base64 before submission; an image that cannot fit is omitted with a note. There is currently no settings key to disable images or change this inline cap. The image gate and these fixed bounds cover the present need, so a new setting is not planned. The limits are shipped and tested; the setting decision is planned.
+Inline image references accept PNG, JPEG, GIF, or WebP bytes detected by file signature. Clio attempts to resize them to at most 2,000 by 2,000 pixels and below 4.5 MiB of base64 before submission; an image that cannot fit is omitted with a note. There is currently no settings key to disable images or change this inline cap.
 
 - A missing path, a file, or a directory the process cannot enter fails with exit code 2 and a message naming the resolved path. No model is called.
 - `--cwd` with no value is a usage error with exit code 2.
@@ -293,7 +285,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
 | `/council` | `/council [--roster <name>] [--rounds <n>] [--synthesis <judge\|vote\|none>] <task>` | Ask a roster of read-only members the same task, with an optional vote or judge synthesis |
 | `/agents` | `/agents` | Open the Library on Agents. |
-| `/usage` | `/usage` | Show subscription quota, credits, and session token and cost totals |
+| `/usage` | `/usage` | Show workspace activity, subscription quota, credits, and session token and cost totals |
 | `/doctor` | `/doctor [deep]` | Show a diagnostic report with errors and warnings first and full wrapped check details; `deep` adds live tool probes on the session's targets and a validation-contract dry run at the session's autonomy. See [Doctor](doctor.md). |
 | `/context` | `/context compact [instructions] \| /context recall <ref> \| /context init [--preview] [--heuristic] [--adopt] [--global] [--propose\|--apply\|--rewrite] \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, init, refresh, and reset |
 | `/fleet` | `/fleet [run [--var <key=value>] <name>]` | Open Fleet Runs, or run a fleet contract with an approval preview. Configure fleets with `/settings fleet`. |
@@ -305,6 +297,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/files` | `/files [open\|close\|pick]` | Toggle the files pane docked below the session; picks land in the composer as `@` mentions. See [Panes and the Files Pane](panes-and-files.md) |
 | `/thinking` | `/thinking [level]` | Set the chat thinking level; bare `/thinking` opens a picker of the levels this route supports |
 | `/model` | `/model [pattern]` | Open model selector or set a model |
+| `/config` | `/config [area] [group]` | Open settings; alias for `/settings`, including target setup in the dock |
 | `/settings` | `/settings [chat\|fleet\|targets\|context\|safety\|interface\|integrations] [group]` | Open interactive settings, optionally at a durable area and UI group |
 | `/resume` | `/resume` | Resume a past session on the route it last ran on |
 | `/new` | `/new` | Start a fresh session |
@@ -313,9 +306,9 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/fork` | `/fork` | Fork from an assistant turn |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
 
-The `/model` selector marks image-capable rows with `V` and spells out `image input yes` or `image input no` in the selected row's details. A completed `/model <pattern>` switch includes the same image-input state in its notice. The expanded dashboard's session capabilities always say `images yes` or `images no` for the active route. These states use the resolved deployment capability and are shipped and tested.
+The `/model` selector marks image-capable rows with `V` and spells out `image input yes` or `image input no` in the selected row's details. A completed `/model <pattern>` switch includes the same image-input state in its notice. The expanded dashboard's session capabilities always say `images yes` or `images no` for the active route. These states use the resolved deployment capability.
 
-When a session with earlier images moves to a text-only model, the next turn shows a warning. Clio replaces each historical image block with an explicit omission note in that model's request. The saved session keeps the original blocks, so switching back to a vision-capable model can use them again. This behavior is shipped and tested.
+When a session with earlier images moves to a text-only model, the next turn shows a warning. Clio replaces each historical image block with an explicit omission note in that model's request. The saved session keeps the original blocks, so switching back to a vision-capable model can use them again.
 
 ### Subscription quota and session usage
 
@@ -417,7 +410,6 @@ show equal percentages are never merged.
 | Unknown slash command | Rejected before model submission. Use `\/text` to send text that begins with a slash. The command list is [above](#interactive-slash-commands). |
 
 The command spellings and arguments are the [slash-command registry](../../src/interactive/slash-commands.ts); this table calls out only session workflows that need explanation.
-
 
 ## Keybindings
 
@@ -593,39 +585,6 @@ retry. At narrow widths, the footer prioritizes available steer/cancel actions o
 subprocess runtimes and ACP delegation do not expose a live steering channel
 and are labeled accordingly.
 
-## Operating Posture and Autonomy
-
-The settings UI offers **default** for supervised workspace edits and **yolo** for work that should proceed without ordinary confirmation prompts. Hard blocks and damage-control asks remain active at both levels. `--turn-mode proposal` is workflow guidance, not a read-only permission boundary; use `--allow-tools` when execution must be restricted. An interactive session can preview a Clio settings change with `configure_clio`; `default` requests the host's Apply choice and cannot raise autonomy, while `yolo` applies the exact preview directly. See the [settings reference](configuration-reference.md#let-clio-propose-settings-changes), [safety model](../architecture/safety-model.md), and [Bash policy](tool-usage.md#bash-run-a-shell-command).
-
-## Dispatch and Built-In Agents
-
-Use `clio-coder agents` to inspect the installed agent catalog and `clio-coder run --agent <id> "<task>"` for a non-interactive dispatch. In the TUI, `/run` starts a fleet worker or a configured headless coding peer, `/delegate` starts a configured ACP peer, and `/peer` opens an interactive handoff pane. Fleet profiles determine target, model, and limits; worker execution and receipts are covered by [Fleet dispatch](fleet-dispatch.md). Agent ids and recipe contracts are maintained in [Built-in agents](built-in-agents.md). See [Coding Agent Interoperability](interop.md#delegate-work-to-an-installed-coding-agent) for peer setup and workspace choices.
-
-## Environment Variables
-
-Clio-specific and ambient variables are listed in the [environment variable reference](environment-variables.md).
-
-## Project Context
-
-`CLIO-CODER.md` is the project guidance file. Context operations are exposed through `clio-coder context` and `/context`; the maintained architecture and lifecycle details live in [Context continuity](context-continuity.md) and the [context engine](../architecture/context-engine.md).
-
-### Codewiki index
-
-`clio-coder context index` builds the structural codewiki without model calls. `context map` derives an architecture map from that index. Pinned source citations require a clean repository and matching indexed bytes; dirty or unknown source state falls back to uncited seeds.
-
-### Working-set replay
-
-`clio-coder context replay --sessions <path>...` replays saved ledgers; `--synthetic <ids>` adds deterministic procedural traces. `--json` writes a stable report, and `--md <file>` writes Markdown. `clio-coder context working-set --session <id|path>` inspects eviction, recall, and path observations for one session. These are read-only; replay-specific policy overrides never write settings. See [working-set design](../architecture/context-working-set.md).
-
-### Markdown wiki commands
-
-`clio-coder context wiki` creates the optional model-authored wiki through the wiki-writer agent. `--status` is read-only; `--update` refreshes stale pages; `--retry-pending` retries pending pages. `clio-coder context refresh` rebuilds only the structural index; `context refresh --wiki` also updates an existing wiki and does not create the first one.
-
-### code_nav modes
-
-The read-only `code_nav` tool queries the local index. Its modes and argument schema are in [Tool usage](tool-usage.md#codenav-navigate-the-codewiki-index).
-
-
 ## Output styles
 
 **Alt+O** cycles **Compact → Standard → Detailed → Compact**. Standard is the default, so the first press reveals Detailed. The current style appears in the footer. Cycling applies immediately to the current session, including streaming output and history. Save a preferred startup style through **/settings interface → Output style → Apply and save globally**, or `clio-coder configure --section panes`.
@@ -677,15 +636,3 @@ actual behavior. Redact secrets and private repository content.
 > CLI subcommands (`targets use/remove/rename/profile/convert`, `context refresh`,
 > `fleet list/run/status/drain/resume`, `auth login`), passing `--help` prints
 > usage instructions and exits with code 0.
-
-## Operator-task handoff and continuation
-
-`clio-coder tasks hand <uN>` prints the inbox record as JSON on stdout and an actionable pickup prompt on stderr. Submit that prompt to the intended session. Before task work, the model must pick the intended `uN`, confirm its durable session and board linkage, and use the returned `tN`. Handing a task does not itself pick it. Completion should be checked against the linked board and inbox with the actual IDs; manual CLI completion is an operator action, not evidence of model completion.
-
-Acceptance rows labeled Required declare expected checks and timeout limits; they are not pending executions or passing results. Inspect verification receipts for outcomes. Under high rigor, the finish gate requires the applicable passing checks or explicit limitations.
-
-Task-board guidance and ordinary continuation preserve proposal-only scope. Deferred implementation should be blocked or dropped while awaiting an explicit operator go-ahead. A skill-install decision is separate from implementation authorization, and yolo authority does not expand the task. These are model instructions, not a guarantee of model adherence.
-
-## Library packages
-
-Use `/library`, `/skills`, `/agents`, and `/prompts` to browse resources. `/skill <name>` activates a loaded skill; `/interop` reviews external coding-agent peers; `/extensions` manages harness extensions. See [Resource library](resource-library.md), [Interop](interop.md), and [Extensions and sharing](extensions-and-sharing.md).

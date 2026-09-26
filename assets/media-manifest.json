@@ -12,7 +12,10 @@
 				"height": 750
 			},
 			"role": "Lossless brand banner master",
-			"channels": ["repository", "press"],
+			"channels": [
+				"repository",
+				"press"
+			],
 			"altTextSeed": "Clio Coder, IOWarp's terminal coding agent for scientific software.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -27,10 +30,15 @@
 				"height": 750
 			},
 			"role": "Web brand banner",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"altTextSeed": "Clio Coder, IOWarp's terminal coding agent for scientific software.",
 			"representation": "brand-artwork",
-			"copies": ["site/assets/banner.webp"]
+			"copies": [
+				"site/assets/banner.webp"
+			]
 		},
 		{
 			"id": "brand-avatar-512",
@@ -42,7 +50,10 @@
 				"height": 512
 			},
 			"role": "Profile avatar master",
-			"channels": ["social-profile", "press"],
+			"channels": [
+				"social-profile",
+				"press"
+			],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -57,7 +68,9 @@
 				"height": 32
 			},
 			"role": "Small logo master",
-			"channels": ["application"],
+			"channels": [
+				"application"
+			],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -72,7 +85,9 @@
 				"height": 64
 			},
 			"role": "Compact logo master",
-			"channels": ["application"],
+			"channels": [
+				"application"
+			],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -87,10 +102,17 @@
 				"height": 128
 			},
 			"role": "Primary application and website logo master",
-			"channels": ["application", "website", "social-card"],
+			"channels": [
+				"application",
+				"website",
+				"social-card"
+			],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"copies": ["site/assets/logo.webp", "apps/clio-coder-gui/client/public/clio-coder-logo.webp"]
+			"copies": [
+				"site/assets/logo.webp",
+				"apps/clio-coder-gui/client/public/clio-coder-logo.webp"
+			]
 		},
 		{
 			"id": "brand-logo-256",
@@ -102,7 +124,10 @@
 				"height": 256
 			},
 			"role": "Medium logo master",
-			"channels": ["application", "press"],
+			"channels": [
+				"application",
+				"press"
+			],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -117,10 +142,15 @@
 				"height": 512
 			},
 			"role": "Large website logo master",
-			"channels": ["website", "press"],
+			"channels": [
+				"website",
+				"press"
+			],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
-			"copies": ["site/assets/logo-512.webp"]
+			"copies": [
+				"site/assets/logo-512.webp"
+			]
 		},
 		{
 			"id": "brand-logo-1024",
@@ -132,7 +162,9 @@
 				"height": 1024
 			},
 			"role": "High-resolution logo master",
-			"channels": ["press"],
+			"channels": [
+				"press"
+			],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -147,7 +179,9 @@
 				"height": 2048
 			},
 			"role": "Maximum-resolution logo master",
-			"channels": ["press"],
+			"channels": [
+				"press"
+			],
 			"altTextSeed": "Clio Coder logo.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -162,10 +196,14 @@
 				"height": 192
 			},
 			"role": "GUI PWA application icon",
-			"channels": ["gui"],
+			"channels": [
+				"gui"
+			],
 			"altTextSeed": "Clio Coder application icon.",
 			"representation": "brand-artwork",
-			"copies": ["apps/clio-coder-gui/client/public/icon-192.png"]
+			"copies": [
+				"apps/clio-coder-gui/client/public/icon-192.png"
+			]
 		},
 		{
 			"id": "gui-icon-512",
@@ -177,10 +215,14 @@
 				"height": 512
 			},
 			"role": "GUI PWA application icon",
-			"channels": ["gui"],
+			"channels": [
+				"gui"
+			],
 			"altTextSeed": "Clio Coder application icon.",
 			"representation": "brand-artwork",
-			"copies": ["apps/clio-coder-gui/client/public/icon-512.png"]
+			"copies": [
+				"apps/clio-coder-gui/client/public/icon-512.png"
+			]
 		},
 		{
 			"id": "terminal-session-png",
@@ -192,10 +234,15 @@
 				"height": 2104
 			},
 			"role": "Full-resolution terminal product capture",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"altTextSeed": "A Clio Coder terminal session showing a failing numerical test, diagnosis, a two-line solver edit, and the passing test run.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/session.png"]
+			"copies": [
+				"site/assets/session.png"
+			]
 		},
 		{
 			"id": "terminal-session-webp",
@@ -207,10 +254,14 @@
 				"height": 1052
 			},
 			"role": "Inline website terminal capture",
-			"channels": ["website"],
+			"channels": [
+				"website"
+			],
 			"altTextSeed": "A Clio Coder terminal session showing a failing numerical test, diagnosis, a two-line solver edit, and the passing test run.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/session.webp"]
+			"copies": [
+				"site/assets/session.webp"
+			]
 		},
 		{
 			"id": "tui-boot-png",
@@ -222,10 +273,15 @@
 				"height": 2003
 			},
 			"role": "Terminal boot screen",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"altTextSeed": "Clio Coder terminal boot screen with the model, workspace, fleet, shortcuts, composer and context footer.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/tui-boot.png"],
+			"copies": [
+				"site/assets/tui-boot.png"
+			],
 			"capturedVersion": "0.5.6"
 		},
 		{
@@ -238,10 +294,15 @@
 				"height": 1021
 			},
 			"role": "Terminal boot screen",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"altTextSeed": "Clio Coder terminal boot screen with the model, workspace, fleet, shortcuts, composer and context footer.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/tui-boot.webp"],
+			"copies": [
+				"site/assets/tui-boot.webp"
+			],
 			"capturedVersion": "0.5.6"
 		},
 		{
@@ -254,10 +315,15 @@
 				"height": 1489
 			},
 			"role": "Browser conversation view",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"altTextSeed": "Clio Coder browser conversation with project prompts, session tools, file attachments and model selection.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-conversation.png"]
+			"copies": [
+				"site/assets/gui-conversation.png"
+			]
 		},
 		{
 			"id": "gui-conversation-webp",
@@ -269,10 +335,15 @@
 				"height": 1489
 			},
 			"role": "Browser conversation view",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"altTextSeed": "Clio Coder browser conversation with project prompts, session tools, file attachments and model selection.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-conversation.webp"]
+			"copies": [
+				"site/assets/gui-conversation.webp"
+			]
 		},
 		{
 			"id": "gui-overview-png",
@@ -284,10 +355,15 @@
 				"height": 1282
 			},
 			"role": "Browser overview view",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"altTextSeed": "Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-overview.png"]
+			"copies": [
+				"site/assets/gui-overview.png"
+			]
 		},
 		{
 			"id": "gui-overview-webp",
@@ -299,10 +375,15 @@
 				"height": 1188
 			},
 			"role": "Browser overview view",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"altTextSeed": "Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-overview.webp"]
+			"copies": [
+				"site/assets/gui-overview.webp"
+			]
 		}
 	],
 	"socialExports": [
@@ -310,96 +391,124 @@
 			"id": "social-link-dark",
 			"template": "site/cards/link.html",
 			"output": "site/assets/social-card.png",
-			"sourceSha256": "f9a692fd4556ac0e19ba42499948994750932c074c6e7f8aef372eb7e387b85d",
-			"sha256": "05179b7c4717a63e12779b72354b63e683d8d723e43d84926e4f4f766dd8f543",
+			"sourceSha256": "4934c7ae00c763b7cb0a954cec109b980b869c41c72d51b1d7e785953aabddb3",
+			"sha256": "9444c30a8d3ea3343616989d3795cefbab0c8d0bd8e45c63f1b06d702769b8ce",
 			"sources": [
 				"site/cards/link.html",
 				"site/css/cards.css",
 				"site/css/brand.css",
-				"site/assets/logo.webp",
 				"site/assets/fonts/plex-sans.woff2",
 				"site/assets/fonts/plex-400.woff2",
-				"site/assets/fonts/plex-500.woff2"
+				"site/assets/fonts/plex-500.woff2",
+				"site/assets/brand/clio-mark.webp",
+				"site/assets/fonts/news-normal-500.woff2",
+				"site/assets/fonts/news-italic-480.woff2"
 			],
 			"dimensions": {
 				"width": 1200,
 				"height": 630
 			},
 			"role": "Dark landscape social preview",
-			"channels": ["open-graph", "x", "linkedin", "release"],
-			"altTextSeed": "Clio Coder social preview: AI coding for the code science runs on, with an illustrative request-to-review workflow.",
+			"channels": [
+				"open-graph",
+				"x",
+				"linkedin",
+				"release"
+			],
+			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		},
 		{
 			"id": "social-link-light",
 			"template": "site/cards/link-light.html",
 			"output": "site/assets/social-card-light.png",
-			"sourceSha256": "8ec05b6d0a3190d31837781a3554956f9ffeaef7b3c0a279bc239947d98bac91",
-			"sha256": "49f8d6d3c2d0b258391b3465d8e3aca422e32d2cc645512cc9b61013fe0b8bc8",
+			"sourceSha256": "120c0766be97e0d75cf9ac4c8aba631200a1bdd8244af8a2120ef7f601dc7ea8",
+			"sha256": "eb9be3297c2ecb4b82c313e1cdb2f09d79e0a50688b7fcd4509f86bd33977277",
 			"sources": [
 				"site/cards/link-light.html",
 				"site/css/cards.css",
 				"site/css/brand.css",
-				"site/assets/logo.webp",
 				"site/assets/fonts/plex-sans.woff2",
 				"site/assets/fonts/plex-400.woff2",
-				"site/assets/fonts/plex-500.woff2"
+				"site/assets/fonts/plex-500.woff2",
+				"site/assets/brand/clio-mark.webp",
+				"site/assets/fonts/news-normal-500.woff2",
+				"site/assets/fonts/news-italic-480.woff2"
 			],
 			"dimensions": {
 				"width": 1200,
 				"height": 630
 			},
 			"role": "Light landscape social preview",
-			"channels": ["open-graph", "x", "linkedin", "release"],
-			"altTextSeed": "Light Clio Coder social preview: AI coding for the code science runs on, with an illustrative request-to-review workflow.",
+			"channels": [
+				"open-graph",
+				"x",
+				"linkedin",
+				"release"
+			],
+			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		},
 		{
 			"id": "social-square-dark",
 			"template": "site/cards/square.html",
 			"output": "site/assets/social-square.png",
-			"sourceSha256": "5fa3636e952516e175795c768b6509415dc4a49c7c70faa71d68cfaea3e1d260",
-			"sha256": "00169fe4399dcaf274e32a5c25d231ac10fe4e8876803d09ca8ec66de2e46bf2",
+			"sourceSha256": "91703be0faa2bc5d3c7fb10b279a167de25bf2398dfb736316fa15a4417cec5e",
+			"sha256": "cd7378e8427c6f6dfb66f110c9a5934f4814fd83b09dff33bddf7066031f1f8e",
 			"sources": [
 				"site/cards/square.html",
 				"site/css/cards.css",
 				"site/css/brand.css",
-				"site/assets/logo.webp",
 				"site/assets/fonts/plex-sans.woff2",
 				"site/assets/fonts/plex-400.woff2",
-				"site/assets/fonts/plex-500.woff2"
+				"site/assets/fonts/plex-500.woff2",
+				"site/assets/brand/clio-mark.webp",
+				"site/assets/fonts/news-normal-500.woff2",
+				"site/assets/fonts/news-italic-480.woff2"
 			],
 			"dimensions": {
 				"width": 1080,
 				"height": 1080
 			},
 			"role": "Dark square social preview",
-			"channels": ["mastodon", "bluesky", "instagram", "release"],
-			"altTextSeed": "Square Clio Coder social preview: AI coding for the code science runs on, with an illustrative request-to-review workflow.",
+			"channels": [
+				"mastodon",
+				"bluesky",
+				"instagram",
+				"release"
+			],
+			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		},
 		{
 			"id": "social-square-light",
 			"template": "site/cards/square-light.html",
 			"output": "site/assets/social-square-light.png",
-			"sourceSha256": "dbe1b6af6997d6861f7ee8f95adf99a34957b850094e3b47703908af98a170ce",
-			"sha256": "ed6bb9233ce59b931eb7b360bb0aeb34b007ee3cb668f4e9564bc9f89e3a1aaf",
+			"sourceSha256": "18023b9536eaffba7110227dcaa1c2e757562829f2301ce5fc3437cf42579305",
+			"sha256": "626115cba346eb9da188790d2f4b7de42bcf0024a442ff89a543387d72dc0d13",
 			"sources": [
 				"site/cards/square-light.html",
 				"site/css/cards.css",
 				"site/css/brand.css",
-				"site/assets/logo.webp",
 				"site/assets/fonts/plex-sans.woff2",
 				"site/assets/fonts/plex-400.woff2",
-				"site/assets/fonts/plex-500.woff2"
+				"site/assets/fonts/plex-500.woff2",
+				"site/assets/brand/clio-mark.webp",
+				"site/assets/fonts/news-normal-500.woff2",
+				"site/assets/fonts/news-italic-480.woff2"
 			],
 			"dimensions": {
 				"width": 1080,
 				"height": 1080
 			},
 			"role": "Light square social preview",
-			"channels": ["mastodon", "bluesky", "instagram", "release"],
-			"altTextSeed": "Light square Clio Coder social preview: AI coding for the code science runs on, with an illustrative request-to-review workflow.",
+			"channels": [
+				"mastodon",
+				"bluesky",
+				"instagram",
+				"release"
+			],
+			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		}
 	]

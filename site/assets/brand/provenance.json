@@ -1,0 +1,17 @@
+{
+	"references": ["https://iowarp.ai", "https://iowarp.ai/images/brand/clio-lockup-cyan.png"],
+	"assets": [
+		{
+			"name": "clio-mark",
+			"source": "/home/akougkas/iowarp/gact-tui/apps/design/assets/brand/clio-icon-lg.png",
+			"sha256": "b26bf6396d87a6f821add201f19bfb0fbfcf77a2b82278c942453aac19e8b75a",
+			"dimensions": [584, 641]
+		},
+		{
+			"name": "iowarp-mark",
+			"source": "/home/akougkas/iowarp/iowarp.ai/static/images/logos/iowarp/iowarp_logo.png",
+			"sha256": "98b6da241569cfac317a92cd17855497824d3164827cfa838f514a2a15f0b658",
+			"dimensions": [1080, 1080]
+		}
+	]
+}
