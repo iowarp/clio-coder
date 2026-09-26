@@ -114,7 +114,7 @@ packs:
         block: true
       - id: git-push-force
         description: "git push --force; use --force-with-lease if explicitly needed"
-        pattern: "\\bgit\\s+push\\s+.*--force(?!-with-lease)"
+        pattern: "\\bgit\\s+push\\s+.*--force(?![\\w-])"
         class: git_destructive
         block: true
       - id: git-push-force-short

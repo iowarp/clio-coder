@@ -106,3 +106,5 @@ Whole-worktree `git checkout .` and forced checkout ask for confirmation at both
 Inert quoted-argument exemptions inspect the shell command alone. A bash call’s `cwd` is path metadata and cannot turn quoted documentation into shell execution.
 
 `git clean` previews with `-n` or `--dry-run` run at both autonomy levels, including combined short flags and previews that also carry force flags. Forced deletion without a preview flag remains blocked. Each command in a shell chain is checked separately.
+
+`git push --force-with-lease`, including an explicit lease value, uses the recognized Git command rail and runs at both autonomy levels. Unconditional `--force`, `-f`, and plus-prefixed force refspecs remain blocked.

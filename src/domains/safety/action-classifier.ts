@@ -34,7 +34,7 @@ interface NamedPattern {
 }
 
 const GIT_DESTRUCTIVE_PATTERNS: ReadonlyArray<NamedPattern> = [
-	{ name: "git-push-force-long", re: /\bgit\s+push\s+--force\b/i },
+	{ name: "git-push-force-long", re: /\bgit\s+push\s+--force(?![\w-])/i },
 	{ name: "git-push-force-short", re: /\bgit\s+push\s+-f\b/i },
 	{ name: "git-reset-hard", re: /\bgit\s+reset\s+--hard\b/i },
 	// Preview flags can follow force flags; the damage-control rule checks the whole clean command.
