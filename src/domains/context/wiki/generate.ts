@@ -135,19 +135,24 @@ async function loadOrBuildCodewiki(cwd: string): Promise<{
 		{
 			afterCommit: ({ codewiki, fingerprint, changed }, workspace) => {
 				const prev = readClioState(workspace);
-				if (!changed && prev) return;
-				writeClioState(workspace, {
-					version: 1,
-					projectType: prev?.projectType ?? projectType,
-					fingerprint,
-					codewikiVersion: codewiki.version,
-					...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
-					...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
-					...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
-					...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
-					lastSessionAt: prev?.lastSessionAt ?? generatedAt,
-					lastIndexedAt: generatedAt,
-				});
+				if (!changed && prev?.orientation) return;
+				writeClioState(
+					workspace,
+					{
+						version: 1,
+						projectType: prev?.projectType ?? projectType,
+						fingerprint,
+						codewikiVersion: codewiki.version,
+						...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
+						...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+						...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
+						...(prev?.bootstrapFingerprint ? { bootstrapFingerprint: prev.bootstrapFingerprint } : {}),
+						...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
+						lastSessionAt: prev?.lastSessionAt ?? generatedAt,
+						lastIndexedAt: generatedAt,
+					},
+					codewiki,
+				);
 			},
 		},
 	);

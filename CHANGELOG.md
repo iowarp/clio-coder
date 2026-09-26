@@ -4,6 +4,13 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## Unreleased
 
+### Project context
+
+- The structural index is now called a codemap and uses `.clio-coder/codemap.json`; legacy `codewiki.json` artifacts remain readable and reset clears both names. Compact JSON and the existing index schema remain in place.
+- Indexed projects record bounded deterministic orientation in existing lifecycle state: declared purpose and commands, source/test coverage, areas, entry candidates, provenance and input freshness. `code_nav mode=project` retrieves current Git and durable operator-task evidence without treating task status as verified completion.
+- Prompt compilation reports recorded snapshots without synchronously hashing the whole project or checking every wiki source. Bounded workers receive codemap, orientation and wiki discovery even without a handbook; worktree handbook fallback retains the worktree's structural context.
+- Changed-file reconciliation avoids building dependencies twice. Bootstrap completion and session timestamp updates preserve newer index state under the shared lease. Retrieved navigation JSON is compact, and partial wiki checkpoints remain explicitly unvalidated.
+
 ### Safety
 
 - Damage control no longer blocks a destructive command that appears only as quoted text in `echo` or `printf` arguments, a `git commit -m` or `git tag -m` message, or a `grep` or `rg` pattern, including when the bash call names a working directory. The exemption applies only when the whole command has no `eval`, pipe, heredoc, substitution, shell, interpreter or wrapper command, and never to SQL rules. Every other command is still scanned whole.

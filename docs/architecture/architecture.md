@@ -35,7 +35,7 @@ functions callers import directly.
 | agents | `src/domains/agents/**` | Built-in, plugin, user, and project agent recipes. |
 | components | `src/domains/components/**` | Component snapshots, diffs, and classification. |
 | config | `src/domains/config/**`, [config.ts](../../src/core/config.ts) | `settings.yaml`, keybindings, hot reload. |
-| context | `src/domains/context/**` | Layered `CLIO-CODER.md` and subtree `CLIO-CODER.override.md` guidance, codewiki indexer, repository context. |
+| context | `src/domains/context/**` | Layered `CLIO-CODER.md` and subtree `CLIO-CODER.override.md` guidance, codemap indexer, repository context. |
 | dispatch | `src/domains/dispatch/**` | Fleet-agent jobs, receipts, worker spawning, route policies. |
 | evidence | `src/domains/evidence/**` | Forensic evidence bundles, failure attribution. |
 | evolution | `src/domains/evolution/**` | Authority-tiered self-edit manifests and gates. |
@@ -110,9 +110,9 @@ Source: [workspace-files.ts](../../src/core/workspace-files.ts), [c-header-langu
    - Tier 2: Distinctive `#include` directives (standard C++ headers vs standard C headers).
    - Tier 3: Language-exclusive tokens (`template<`, `namespace `, `class `, `nullptr`, `constexpr`).
 
-## Codewiki ownership and worker boundary
+## Codemap ownership and worker boundary
 
-Codewiki keeps its boot-time read surface separate from its build graph:
+The codemap keeps its boot-time read surface separate from its build graph:
 
 - [schema.ts](../../src/domains/context/codewiki/schema.ts), `artifact.ts`, and `paths.ts` own the
   stable data shapes, normalized artifact compatibility, synchronous and
@@ -121,10 +121,10 @@ Codewiki keeps its boot-time read surface separate from its build graph:
 - `indexer.ts` owns full, synchronized, and incremental candidate construction.
   Its tree-sitter adapter is a real dynamic import; grammars load only for the
   source paths an actual build needs.
-- `build-worker.ts` is the sole runtime execution boundary for codewiki
+- `build-worker.ts` is the sole runtime execution boundary for codemap
   candidate walks, freshness fingerprinting, and parsing. Other context surfaces
   independently detect project metadata, but the interactive process does not
-  run a codewiki scan or an uninterruptible parser call on its render/input loop.
+  run a codemap scan or an uninterruptible parser call on its render/input loop.
 - `coordinator.ts` owns production commits. One FIFO per workspace establishes
   generation order inside a process, and `withStateFileLock` extends that order
   across Clio processes. Each transaction rereads the artifact after acquiring
@@ -316,7 +316,7 @@ hydration after shutdown; every failure path shares one idempotent close and
 terminal restoration transaction. The source boundary checker protects the
 declared Stage 0 closure and seams. There is no committed built-chunk budget
 contract at this revision; the installed-package smoke test still exercises
-lazy codewiki loading. ACP, headless, ordinary non-TTY invocation, help, and
+lazy codemap loading. ACP, headless, ordinary non-TTY invocation, help, and
 subcommands never construct a lease; the established explicit
 `CLIO_CODER_INTERACTIVE=1` non-TTY override remains force-interactive.
 

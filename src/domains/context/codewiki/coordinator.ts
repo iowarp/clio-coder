@@ -4,7 +4,14 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 import { withStateFileLock } from "../../../core/state-file-lock.js";
-import { codewikiNeedsBackfill, codewikiPath, readCodewiki, writeCodewiki } from "./artifact.js";
+import {
+	codemapPath,
+	codewikiNeedsBackfill,
+	codewikiPath,
+	legacyCodewikiPath,
+	readCodewiki,
+	writeCodewiki,
+} from "./artifact.js";
 import type {
 	CodewikiArtifactRef,
 	CodewikiBuildWorkerMessage,
@@ -119,7 +126,7 @@ async function executeInWorker(request: CodewikiBuildWorkerRequest): Promise<Cod
 }
 
 function enqueueWorkspace<T>(cwd: string, task: () => Promise<T>): Promise<T> {
-	const key = codewikiPath(cwd);
+	const key = legacyCodewikiPath(cwd);
 	const previous = workspaceTails.get(key) ?? Promise.resolve();
 	const result = previous.catch(() => undefined).then(task);
 	const tail = result.then(
@@ -174,7 +181,7 @@ export function coordinateCodewikiWrite(
 		// has already finished and this one sees it. The recheck under the lock
 		// stays, and is what still decides the race.
 		if (options.requireExisting && !existsSync(codewikiPath(workspace))) return Promise.resolve(null);
-		return withStateFileLock(codewikiPath(workspace), async () => {
+		return withStateFileLock(legacyCodewikiPath(workspace), async () => {
 			if (options.requireExisting && !existsSync(codewikiPath(workspace))) return null;
 			const current = options.readCurrent?.(workspace) ?? readCodewiki(workspace);
 			const request = await select(current, workspace);
@@ -184,7 +191,7 @@ export function coordinateCodewikiWrite(
 			if (!codewiki) throw new Error("codewiki reconciliation returned no artifact");
 			const worker: CodewikiBuildWorkerResult = { codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
 			await options.beforeCommit?.(worker, workspace);
-			const wrote = worker.changed || !existsSync(codewikiPath(workspace));
+			const wrote = worker.changed || !existsSync(codemapPath(workspace));
 			if (wrote) writeCodewiki(workspace, worker.codewiki);
 			await options.afterCommit?.(worker, workspace);
 			return { codewiki: !worker.changed && current ? current : worker.codewiki, worker, wrote };
@@ -195,7 +202,7 @@ export function coordinateCodewikiWrite(
 /** Serialize a non-build artifact transaction such as reset with every writer. */
 export function coordinateCodewikiExclusive<T>(cwd: string, task: (workspace: string) => T | Promise<T>): Promise<T> {
 	const workspace = resolve(cwd);
-	return enqueueWorkspace(workspace, () => withStateFileLock(codewikiPath(workspace), () => task(workspace)));
+	return enqueueWorkspace(workspace, () => withStateFileLock(legacyCodewikiPath(workspace), () => task(workspace)));
 }
 
 /** Reconcile a read tool's private snapshot without a writer lease or workspace mutation. */
@@ -222,9 +229,9 @@ export async function buildCodewikiCandidate(
 export async function drainCodewikiWrites(cwd: string): Promise<void> {
 	const workspace = resolve(cwd);
 	for (;;) {
-		const tail = workspaceTails.get(codewikiPath(workspace));
+		const tail = workspaceTails.get(legacyCodewikiPath(workspace));
 		if (!tail) return;
 		await tail;
-		if (workspaceTails.get(codewikiPath(workspace)) === tail) return;
+		if (workspaceTails.get(legacyCodewikiPath(workspace)) === tail) return;
 	}
 }

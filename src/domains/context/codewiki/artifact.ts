@@ -116,6 +116,14 @@ function normalizeCodewiki(codewiki: Codewiki): Codewiki {
 }
 
 export function codewikiPath(cwd: string): string {
+	const canonical = codemapPath(cwd);
+	return existsSync(canonical) ? canonical : existsSync(legacyCodewikiPath(cwd)) ? legacyCodewikiPath(cwd) : canonical;
+}
+export function codemapPath(cwd: string): string {
+	return join(cwd, ".clio-coder", "codemap.json");
+}
+/** Also retained as the lease identity for mixed-version writers. */
+export function legacyCodewikiPath(cwd: string): string {
 	return join(cwd, ".clio-coder", "codewiki.json");
 }
 export function serializeCodewiki(codewiki: Codewiki): string {
@@ -123,7 +131,7 @@ export function serializeCodewiki(codewiki: Codewiki): string {
 }
 export function writeCodewiki(cwd: string, codewiki: Codewiki): string {
 	const serialized = serializeCodewiki(codewiki);
-	safeResourceWrite(codewikiPath(cwd), serialized, { encoding: "utf8" });
+	safeResourceWrite(codemapPath(cwd), serialized, { encoding: "utf8" });
 	return serialized;
 }
 
@@ -369,7 +377,7 @@ export async function readCodewikiAsync(cwd: string): Promise<Codewiki | null> {
 	}
 }
 export function codewikiNeedsBackfill(codewiki: Codewiki): boolean {
-	return codewiki.files.some((file) => file.lang !== "config" && file.hash.length === 0);
+	return codewiki.files.some((file) => file.hash.length === 0);
 }
 export function structuralCodewikiHash(codewiki: Codewiki): string {
 	return createHash("sha256")

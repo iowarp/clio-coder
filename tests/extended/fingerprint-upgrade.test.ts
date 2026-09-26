@@ -192,8 +192,8 @@ describe("context fingerprint upgrade", () => {
 				throws(() => computeFingerprint(cwd, current), { code: "EACCES" });
 				const prompt = renderPromptContext(cwd);
 				ok(prompt.text.includes("Keep authored guidance."));
-				ok(prompt.text.includes("available (stale; run /context refresh)"));
-				ok(prompt.warnings.some((warning) => warning.includes("codewiki freshness unavailable")));
+				ok(prompt.text.includes("available snapshot; freshness checked on retrieval"));
+				deepStrictEqual(prompt.warnings, []);
 			} finally {
 				chmodSync(path, 0o600);
 			}

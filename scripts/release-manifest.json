@@ -18,7 +18,7 @@
 		"dist/assets/gui-notices/hono-LICENSE",
 		"dist/assets/gui-notices/@hono__node-server-LICENSE",
 		"dist/worker/entry.js",
-		"dist/assets/codewiki.json",
+		"dist/assets/codemap.json",
 		"dist/assets/tui-notices/pi-tui-LICENSE",
 		"dist/assets/tui-notices/marked-LICENSE",
 		"dist/assets/tui-notices/get-east-asian-width-LICENSE",

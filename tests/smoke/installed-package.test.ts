@@ -781,8 +781,8 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			const overriddenPackageRoot = join(work, "overridden-package-root");
 			mkdirSync(join(overriddenPackageRoot, "dist", "assets"), { recursive: true });
 			copyFileSync(
-				join(packageRoot, "dist", "assets", "codewiki.json"),
-				join(overriddenPackageRoot, "dist", "assets", "codewiki.json"),
+				join(packageRoot, "dist", "assets", "codemap.json"),
+				join(overriddenPackageRoot, "dist", "assets", "codemap.json"),
 			);
 			const rawOverriddenResult = execFileSync(
 				process.execPath,

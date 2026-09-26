@@ -706,7 +706,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		const rendered = selfAwareness.body
 			.replace("{CLIO_DOCS_PATH}", join(packageRoot, "docs"))
 			.replace("{CLIO_SRC_PATH}", join(packageRoot, "src"))
-			.replace("{CLIO_CODEWIKI_PATH}", join(packageRoot, "dist", "assets", "codewiki.json"))
+			.replace("{CLIO_CODEWIKI_PATH}", join(packageRoot, "dist", "assets", "codemap.json"))
 			.replace("{CLIO_SETTINGS_PATH}", join(clioDirs.config, "settings.yaml"))
 			.replace("{CLIO_STATE_PATH}", clioDirs.state);
 		const settingsRouting = sessionHasContext(session) ? table.byId.get("identity.settings-routing") : undefined;

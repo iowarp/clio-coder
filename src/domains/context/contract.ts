@@ -46,7 +46,7 @@ export interface ContextContract extends DomainContract {
 	runBootstrap(input?: RunBootstrapInput): Promise<RunBootstrapResult>;
 	runContextClear(input?: RunContextClearInput): Promise<RunContextClearResult>;
 	/**
-	 * Rebuild the codewiki index and `.clio-coder` state without touching project handbooks.
+	 * Rebuild the codemap index and `.clio-coder` state without touching project handbooks.
 	 * Markdown wiki updates require the explicit refresh input flag.
 	 * Backs `/context refresh` and `clio-coder context refresh`.
 	 */
@@ -55,9 +55,9 @@ export interface ContextContract extends DomainContract {
 	contextState(cwd?: string): ContextState;
 	startupHints(): string[];
 	/**
-	 * Incrementally refresh the codewiki for files changed during the session
+	 * Incrementally refresh the codemap for files changed during the session
 	 * (e.g. after an edit or write). No-op when the project was never indexed;
-	 * full reconciliation still happens at session start and stop. Best-effort:
+	 * full reconciliation happens at session start and on demand; stop only drains pending writes. Best-effort:
 	 * failures are swallowed so a tool call is never blocked by indexing.
 	 */
 	noteFileChanges(paths: ReadonlyArray<string>, cwd?: string): void;

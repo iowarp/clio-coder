@@ -66,7 +66,7 @@ describe("self-knowledge in the session prompt", () => {
 
 	it("names the shipped code map and never routes to the removed docs scope", () => {
 		const prompt = compileSession("safety.default");
-		match(prompt, /dist[/\\]assets[/\\]codewiki\.json/);
+		match(prompt, /dist[/\\]assets[/\\]codemap\.json/);
 		doesNotMatch(prompt, /\{CLIO_[A-Z_]+\}/);
 		doesNotMatch(codeNavToolSurface.description, /scope=docs/);
 		match(codeNavToolSurface.description, /clio_docs/);

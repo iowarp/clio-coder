@@ -400,7 +400,7 @@ function isCalloutParagraph(lines: ReadonlyArray<string>): boolean {
  * The first paragraph of a README that reads like a description of the project,
  * with headings, underlines, badge rows, callouts, and tables removed.
  */
-function readmeSummary(content: string): string | null {
+export function readmeSummary(content: string): string | null {
 	const paragraphs = stripReadmeMarkup(content)
 		.split(/\n\s*\n/u)
 		.map((part) => part.split(/\r?\n/u))
@@ -424,7 +424,7 @@ function readmeSummary(content: string): string | null {
  * The first heading a README declares, used as a project name when no manifest
  * names one. Understands Markdown `#`, Setext underlines, and AsciiDoc `=`.
  */
-function readmeTitle(content: string): string | null {
+export function readmeTitle(content: string): string | null {
 	const lines = stripReadmeMarkup(content).split(/\r?\n/u);
 	for (let index = 0; index < lines.length; index += 1) {
 		const line = (lines[index] ?? "").trim();

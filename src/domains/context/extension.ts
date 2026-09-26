@@ -9,13 +9,13 @@ import { readSessionEntriesForId } from "../session/archive-readers.js";
 import type { SessionContract } from "../session/contract.js";
 import { foldDecisionBoard } from "../session/decision-board.js";
 import { filterEntriesToActivePath } from "../session/tree/active-path.js";
-import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
+import { detectProjectTypeHint, type ProjectType } from "../session/workspace/project-type.js";
 import { adoptionSourcesChanged } from "./adoption.js";
 import { runBootstrap } from "./bootstrap.js";
 import { runContextClear } from "./clear.js";
 import { loadProjectClioMd } from "./clio-md.js";
 import { codewikiPath } from "./codewiki/artifact.js";
-import { coordinateCodewikiWrite, drainCodewikiWrites } from "./codewiki/coordinator.js";
+import { coordinateCodewikiExclusive, coordinateCodewikiWrite, drainCodewikiWrites } from "./codewiki/coordinator.js";
 import type { ContextContract, ContextState } from "./contract.js";
 import { renderPromptContext } from "./prompt-context.js";
 import { runContextRefresh } from "./refresh.js";
@@ -31,21 +31,26 @@ function persistState(
 	fingerprint: ClioProjectState["fingerprint"],
 	indexedAt: string,
 	prev: ClioProjectState | null,
-	codewikiVersion: number,
+	codewiki: import("./codewiki/schema.js").Codewiki,
 	projectType: ProjectType,
 ): void {
-	writeClioState(cwd, {
-		version: 1,
-		projectType: prev?.projectType ?? projectType,
-		fingerprint,
-		codewikiVersion,
-		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
-		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
-		...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
-		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
-		lastSessionAt: prev?.lastSessionAt ?? new Date().toISOString(),
-		lastIndexedAt: indexedAt,
-	});
+	writeClioState(
+		cwd,
+		{
+			version: 1,
+			projectType: prev?.projectType ?? projectType,
+			fingerprint,
+			codewikiVersion: codewiki.version,
+			...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
+			...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+			...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
+			...(prev?.bootstrapFingerprint ? { bootstrapFingerprint: prev.bootstrapFingerprint } : {}),
+			...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
+			lastSessionAt: prev?.lastSessionAt ?? new Date().toISOString(),
+			lastIndexedAt: indexedAt,
+		},
+		codewiki,
+	);
 }
 
 /**
@@ -80,7 +85,7 @@ async function ensureCodewikiFresh(cwd: string): Promise<void> {
 		},
 		{
 			afterCommit: ({ codewiki, fingerprint }, workspace) =>
-				persistState(workspace, fingerprint, indexedAt, readClioState(workspace), codewiki.version, codewiki.language),
+				persistState(workspace, fingerprint, indexedAt, readClioState(workspace), codewiki, codewiki.language),
 		},
 	);
 }
@@ -134,13 +139,13 @@ export interface ContextBundleOptions {
 
 function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): string[] {
 	const hints: string[] = [];
-	// Runs at session start with the TUI mounting. Detection walks the tree and
-	// reads every header, so an indexed project answers from the type its state
+	// Runs at session start with the TUI mounting. Use a root-only hint; an
+	// indexed project answers from the type its state
 	// already records; only a never-indexed directory pays for detection.
 	const state = readClioState(cwd);
-	let projectType: ReturnType<typeof detectProjectType>;
+	let projectType: ReturnType<typeof detectProjectTypeHint>;
 	try {
-		projectType = state?.projectType ?? detectProjectType(cwd);
+		projectType = state?.projectType ?? detectProjectTypeHint(cwd);
 	} catch {
 		projectType = "unknown";
 	}
@@ -223,7 +228,7 @@ export function createContextBundle(
 								fingerprint,
 								new Date().toISOString(),
 								readClioState(committedWorkspace),
-								codewiki.version,
+								codewiki,
 								codewiki.language,
 							);
 						},
@@ -254,11 +259,13 @@ export function createContextBundle(
 			// next session, and a never-indexed cwd stays that way; indexing an
 			// arbitrary directory because a process exited in it is not a favor.
 			await Promise.all([incrementalQueue, drainCodewikiWrites(lastCwd)]);
-			const state = readClioState(lastCwd);
-			if (!state) return;
-			// The fingerprint is left as the last index wrote it. Stamping a fresh
-			// one without re-indexing would hide drift from the next start.
-			writeClioState(lastCwd, { ...state, lastSessionAt: new Date().toISOString() });
+			if (!readClioState(lastCwd)) return;
+			await coordinateCodewikiExclusive(lastCwd, (workspace) => {
+				// Read under the same lease as index publication: a late session
+				// timestamp cannot overwrite another process's newer source snapshot.
+				const state = readClioState(workspace);
+				if (state) writeClioState(workspace, { ...state, lastSessionAt: new Date().toISOString() });
+			});
 		},
 	};
 

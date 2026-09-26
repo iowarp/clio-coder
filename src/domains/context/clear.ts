@@ -19,6 +19,7 @@ export interface RunContextClearResult {
 }
 
 const ACCUMULATED_CONTEXT_PATHS = [
+	".clio-coder/codemap.json",
 	".clio-coder/codewiki.json",
 	".clio-coder/state.json",
 	".clio-coder/handoffs",

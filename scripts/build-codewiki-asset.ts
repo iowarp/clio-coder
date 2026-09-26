@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Build step: generate the package's own code map, dist/assets/codewiki.json,
+ * Build step: generate the package's own code map, dist/assets/codemap.json,
  * fresh from the exact tree being packed.
  *
  * This runs the same model-free, deterministic indexer as `clio-coder context
@@ -14,7 +14,7 @@
  * the grammars it loads are the vendored ones.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serializeCodewiki } from "../src/domains/context/codewiki/artifact.js";
@@ -22,7 +22,7 @@ import { buildCodewiki } from "../src/domains/context/codewiki/indexer.js";
 import { detectProjectProfile } from "../src/domains/session/workspace/project-type.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const target = join(root, "dist", "assets", "codewiki.json");
+const target = join(root, "dist", "assets", "codemap.json");
 
 const report = JSON.parse(
 	execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
@@ -46,6 +46,8 @@ const codewiki = await buildCodewiki(
 );
 mkdirSync(dirname(target), { recursive: true });
 writeFileSync(target, serializeCodewiki(codewiki), "utf8");
+// Remove the superseded generated asset when rebuilding an existing dist.
+rmSync(join(root, "dist", "assets", "codewiki.json"), { force: true });
 process.stdout.write(
-	`build-codewiki-asset: ${codewiki.files.length} files, ${codewiki.symbols.length} symbols, ${codewiki.edges.length} edges -> dist/assets/codewiki.json\n`,
+	`build-codewiki-asset: ${codewiki.files.length} files, ${codewiki.symbols.length} symbols, ${codewiki.edges.length} edges -> dist/assets/codemap.json\n`,
 );

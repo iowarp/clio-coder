@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { ProjectType } from "../session/workspace/project-type.js";
 import type { AdoptionProvider, AdoptionScope, AdoptionSourceKind, AdoptionSourceSnapshot } from "./adoption.js";
+import type { Codewiki } from "./codewiki/schema.js";
 import type { Fingerprint } from "./fingerprint.js";
+import { buildProjectOrientation, type ProjectOrientation, parseProjectOrientation } from "./orientation.js";
 
 /**
  * How the last handbook was produced. "model" is the `context-bootstrap`
@@ -38,6 +40,7 @@ export interface BootstrapGenerationState {
 
 export interface ClioProjectState {
 	version: 1;
+	orientation?: ProjectOrientation;
 	projectType?: ProjectType;
 	fingerprint: Fingerprint;
 	bootstrapFingerprint?: Fingerprint;
@@ -229,9 +232,19 @@ export function readClioState(cwd: string): ClioProjectState | null {
 		return null;
 	}
 	migrateLegacyGenerationMode(parsed);
-	return isProjectState(parsed) ? parsed : null;
+	if (!isProjectState(parsed)) return null;
+	const orientation = parseProjectOrientation(parsed.orientation);
+	if (orientation) parsed.orientation = orientation;
+	else delete parsed.orientation;
+	return parsed;
 }
 
-export function writeClioState(cwd: string, state: ClioProjectState): void {
-	safeResourceWrite(statePath(cwd), `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8" });
+export function writeClioState(cwd: string, state: ClioProjectState, codewiki?: Codewiki): void {
+	const orientation = codewiki
+		? buildProjectOrientation(cwd, codewiki, state.fingerprint)
+		: (state.orientation ?? readClioState(cwd)?.orientation);
+	const next = { ...state };
+	if (orientation?.treeHash === state.fingerprint.treeHash) next.orientation = orientation;
+	else delete next.orientation;
+	safeResourceWrite(statePath(cwd), `${JSON.stringify(next, null, 2)}\n`, { encoding: "utf8" });
 }

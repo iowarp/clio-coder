@@ -538,6 +538,7 @@ export function commitCandidateWork(worktree: CandidateWorktree, message: string
 	// The caller's pending .gitignore update is not part of the candidate base;
 	// exclude the exact files, while keeping operator-owned project assets.
 	return commitWorktreePath(worktree.path, COMPETE_COMMIT_IDENTITY, message, [
+		".clio-coder/codemap.json",
 		".clio-coder/codewiki.json",
 		".clio-coder/state.json",
 	]);

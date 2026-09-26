@@ -97,7 +97,7 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 | `.clio-coder/skills/**` | Overlay | Loose project skills placed here by the operator, trusted as repository-local. Library installations use the managed package store below. | Yes; loose skills must be restored by the operator. | Kept, and named |
 | `.clio-coder/plugins/<name>/`, `.clio-coder/plugins/state.json` | Operator input | Complete installed library packages of all five kinds and their scoped state. `clio-coder library install skill:<name> --project` installs here. The bundled `library/` remains the catalog source. | Use `clio-coder library remove <kind>:<name> --project` to keep package state consistent. | Kept, not named |
 | `CLIO-CODER.md` (repository root) | Runtime state | The generated project handbook. Human-reviewable, but written by `context init`. | Yes; regenerate with `clio-coder context init`. | Kept unless `--all` |
-| `.clio-coder/codewiki.json` | Runtime state | Structural index, schema v5. | Yes; rebuilt by `clio-coder context index`. | **Removed** |
+| `.clio-coder/codemap.json` | Runtime state | Structural index, schema v5. | Yes; rebuilt by `clio-coder context index`. | **Removed** |
 | `.clio-coder/state.json` | Runtime state | Index fingerprint and freshness stamps. | Yes; forces a rebuild. | **Removed** |
 | `.clio-coder/proposals/` | Runtime state | Ignored handbook drafts from `context init --propose`. | Yes. | **Removed** |
 | `.clio-coder/handoffs/` | Runtime state | Session handoff notes. | Yes. | **Removed** |
