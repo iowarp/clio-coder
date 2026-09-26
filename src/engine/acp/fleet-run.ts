@@ -64,7 +64,7 @@ export type AcpFleetPreview =
 			stepCount: number;
 			waves: Array<{ index: number; steps: AcpFleetStep[] }>;
 			budget: { ceilingUsd: number; currentUsd: number; contractUsd: number | null };
-			/** True when steps were cut at {@link ACP_FLEET_MAX_STEPS}. */
+			/** True when steps, command arguments or write paths were cut at the wire bounds. */
 			truncated: boolean;
 	  }
 	| { status: "refused"; name: string; diagnostics: string[] };
@@ -92,6 +92,10 @@ export function projectFleetPreview(result: FleetRunPreviewResult): AcpFleetPrev
 	const { preview } = result;
 	let budget = ACP_FLEET_MAX_STEPS;
 	let truncated = false;
+	const boundedList = (values: ReadonlyArray<string>) => {
+		if (values.length > MAX_LIST) truncated = true;
+		return values.slice(0, MAX_LIST).map((value) => bounded(value));
+	};
 	const waves = preview.waves.map((wave) => {
 		const kept = wave.steps.slice(0, Math.max(0, budget));
 		if (kept.length < wave.steps.length) truncated = true;
@@ -105,8 +109,8 @@ export function projectFleetPreview(result: FleetRunPreviewResult): AcpFleetPrev
 					scope: step.scope,
 					...(step.agentId !== undefined ? { agentId: bounded(step.agentId) } : {}),
 					...(step.commandId !== undefined ? { commandId: bounded(step.commandId) } : {}),
-					...(step.argv !== undefined ? { argv: step.argv.slice(0, MAX_LIST).map((arg) => bounded(arg)) } : {}),
-					writes: step.writes === undefined ? null : step.writes.slice(0, MAX_LIST).map((path) => bounded(path)),
+					...(step.argv !== undefined ? { argv: boundedList(step.argv) } : {}),
+					writes: step.writes === undefined ? null : boundedList(step.writes),
 					...(step.route !== undefined
 						? {
 								route: {

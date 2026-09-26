@@ -167,7 +167,9 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 						</div>
 					))}
 					{view.truncated ? (
-						<p className="session-board__note">Only the first 64 steps are shown; the terminal shows the whole plan.</p>
+						<p className="session-board__note">
+							This preview omits steps or details. Review the full plan in the terminal before starting.
+						</p>
 					) : null}
 					<p className="session-board__note">{view.budget}</p>
 					<p className="session-board__note">

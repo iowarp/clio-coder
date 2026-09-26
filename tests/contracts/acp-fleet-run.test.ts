@@ -439,6 +439,34 @@ test("the fleet projection caps steps and diagnostics and strips control charact
 	ok(refused.diagnostics.every((line) => Buffer.byteLength(line) <= 1024));
 });
 
+test("a bounded fleet argument or write-path list marks the approval preview as incomplete", () => {
+	for (const field of ["argv", "writes"] as const) {
+		const steps = [
+			{
+				stepId: "check",
+				kind: "code" as const,
+				scope: "readonly" as const,
+				writes: [],
+				[field]: Array.from({ length: 20 }, (_, index) => `item-${index}`),
+			},
+		];
+		const result = projectFleetPreview({
+			ok: true,
+			preview: {
+				name: "bounded",
+				vars: {},
+				planHash: "a".repeat(64),
+				waves: [{ index: 0, steps }],
+				budget: { ceilingUsd: 0, currentUsd: 0, contractUsd: null },
+				plan: { steps },
+			} as unknown as FleetRunPreview,
+		});
+		ok(result.status === "ready");
+		strictEqual(result.waves[0]?.steps[0]?.[field]?.length, 16);
+		strictEqual(result.truncated, true, `${field} must not look complete after it was shortened`);
+	}
+});
+
 test("a fleet run that fails before its first step says so instead of reading as started", async () => {
 	const agent = await peer();
 	try {
