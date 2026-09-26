@@ -11,6 +11,7 @@ function fixture(
 	entries: ReadonlyArray<SessionEntry> = [],
 	onSubmit?: (emit: (event: unknown) => void) => void,
 	commands?: AcpCommandControl,
+	saveSettings = false,
 ) {
 	const requests = new Map<string, (params: unknown) => unknown>();
 	const updates: Array<Record<string, unknown>> = [];
@@ -37,6 +38,12 @@ function fixture(
 	let promptPending = false;
 	let resets = 0;
 	const routingChanges: Array<{ model?: string; thinkingLevel?: string }> = [];
+	let safeSettings = {
+		target: "target-a",
+		model: "model-a",
+		thinkingLevel: "medium" as "medium" | "high",
+		autonomy: "default" as const,
+	};
 	let eventHandler: (event: unknown) => void = () => {};
 	const transport: AcpJsonRpcPeerTransport = {
 		closed: false,
@@ -93,8 +100,16 @@ function fixture(
 		autonomy: () => "default",
 		routing: () => ({ target: "target-a", model: "model-a" }),
 		settings: {
-			read: () => ({ target: "target-a", model: "model-a", thinkingLevel: "medium", autonomy: "default" }),
-			commit: () => {
+			read: () => safeSettings,
+			commit: (patch) => {
+				if (saveSettings) {
+					safeSettings = {
+						...safeSettings,
+						model: patch["chat.model"] ?? safeSettings.model,
+						thinkingLevel: patch["chat.thinkingLevel"] === "high" ? "high" : safeSettings.thinkingLevel,
+					};
+					return safeSettings;
+				}
 				throw new Error("config option must not persist a default");
 			},
 		},
@@ -156,6 +171,31 @@ function fixture(
 		},
 	};
 }
+
+test("ACP saved routing updates the bound session config before a conversation choice", async () => {
+	const peer = fixture([], undefined, undefined, true);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/new", { cwd: peer.cwd, mcpServers: [] });
+		await peer.call("_clio-coder/settings/patch_safe", {
+			patch: { "chat.model": "model-b", "chat.thinkingLevel": "high" },
+		});
+		const latest = peer.updates.at(-1)?.update as {
+			sessionUpdate: string;
+			configOptions: Array<{ id: string; currentValue: string }>;
+		};
+		strictEqual(latest.sessionUpdate, "config_option_update");
+		strictEqual(latest.configOptions.find((row) => row.id === "model")?.currentValue, "model-b");
+		const selected = (await peer.call("session/set_config_option", {
+			sessionId: "created",
+			configId: "model",
+			value: "model-b",
+		})) as { configOptions: Array<{ id: string; currentValue: string }> };
+		strictEqual(selected.configOptions.find((row) => row.id === "thinkingLevel")?.currentValue, "high");
+	} finally {
+		await peer.stop();
+	}
+});
 
 test("ACP stable session list pages SessionInfo and filters cwd", async () => {
 	const peer = fixture();

@@ -2,6 +2,7 @@ import { type Static, Type } from "typebox";
 import { Id, Problem } from "./common.js";
 import { FleetItem, HealthItem } from "./fleet-events.js";
 import { Permission } from "./permissions.js";
+import { SessionConfig } from "./session-config.js";
 
 const closed = { additionalProperties: false };
 const string = Type.String();
@@ -153,6 +154,7 @@ export const SessionSnapshot = Type.Object(
 		turns: Type.Array(Turn),
 		recoveredOrphan: Type.Boolean(),
 		label: nullableString,
+		config: Type.Optional(SessionConfig),
 		permissions: Type.Array(Permission, { maxItems: 32 }),
 		fleet: Type.Array(FleetItem, { maxItems: 128 }),
 		// Session health, bounded far tighter than the fleet feed: a context
@@ -203,6 +205,7 @@ export const SessionDeltas = {
 	"health.toolBudget": healthPayload,
 	"health.provider": healthPayload,
 	"session.labelled": Type.Object({ ...base, label: nullableString }, closed),
+	"session.configured": Type.Object({ ...base, config: SessionConfig }, closed),
 	"session.changed": Type.Object({ ...base, state: SessionState, recoveredOrphan: Type.Boolean() }, closed),
 };
 export type SessionDelta = {

@@ -3,6 +3,7 @@
 // actions row, beside Send, because that is where the next request leaves from. A target in any
 // state other than healthy is also written out in full under the conversation header.
 
+import type { SessionConfig } from "../../contracts/session-config.js";
 import type { StatusTone } from "../design/status.js";
 import type { HealthSummary } from "./health.js";
 
@@ -13,6 +14,7 @@ export interface RouteSettings {
 }
 
 export interface RouteFacts {
+	readonly config?: SessionConfig;
 	readonly tone: StatusTone;
 	/** What the chip prints: `target · model`, or the one fact that is known. */
 	readonly text: string;
@@ -26,9 +28,20 @@ export interface RouteFacts {
  * Without reported settings the chip says so rather than printing a bare label: a target's health
  * row names that target, and nothing at all is "Model not reported", never a guessed default.
  */
-export function routeFacts(settings: RouteSettings | undefined, health: HealthSummary): RouteFacts {
+export function routeFacts(
+	settings: RouteSettings | undefined,
+	health: HealthSummary,
+	config?: SessionConfig,
+): RouteFacts {
+	if (config && (config.options.length > 0 || config.target !== undefined))
+		settings = {
+			target: config.target !== undefined ? config.target : (settings?.target ?? null),
+			model: config.options.find((row) => row.id === "model")?.currentValue ?? settings?.model ?? null,
+			thinking:
+				config.options.find((row) => row.id === "thinkingLevel")?.currentValue ?? settings?.thinking ?? "not reported",
+		};
 	const target = settings?.target ?? null;
-	const provider = health.providers.find((row) => row.key === target) ?? health.providers[0];
+	const provider = target === null ? health.providers[0] : health.providers.find((row) => row.key === target);
 	const tone = provider?.tone ?? "unverified";
 	const healthText = provider
 		? `Target ${provider.key}: ${sentenceEnd(provider.detail ?? provider.label)}`
@@ -42,6 +55,7 @@ export function routeFacts(settings: RouteSettings | undefined, health: HealthSu
 		};
 	}
 	return {
+		...(config ? { config } : {}),
 		tone,
 		text: `${settings.target ?? "automatic routing"} · ${settings.model ?? "default model"}`,
 		title: `Target: ${settings.target ?? "automatic"}. Model: ${settings.model ?? "configured default"}. Thinking: ${settings.thinking}. ${healthText}`,

@@ -12,9 +12,11 @@ import {
 	ToolProgressCapability,
 } from "../../contracts/capabilities.js";
 import { Id } from "../../contracts/common.js";
+import type { SessionConfig } from "../../contracts/session-config.js";
 import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
 import { type AcpJsonRpcTransport, AcpProtocolError, AcpTimeoutError } from "../clio/http-shims.js";
 import { AppProblem } from "../services/problem.js";
+import { projectConfigOptions } from "./session-config.js";
 
 const Initialize = Type.Object({ protocolVersion: Type.Literal(1) });
 /**
@@ -107,6 +109,7 @@ export function acpProblem(error: unknown) {
 	return new AppProblem("upstream_acp", "Clio ACP process is unavailable.");
 }
 export class AcpClient {
+	config: SessionConfig | undefined;
 	private readonly modes = new Map<string, { level: "default" | "yolo"; source: "settings" | "session" }>();
 	constructor(readonly transport: AcpJsonRpcTransport) {}
 	async request<T>(method: string, params: unknown, timeoutMs = 15000): Promise<T> {
@@ -146,6 +149,13 @@ export class AcpClient {
 			...(sessionId ? { sessionId } : {}),
 		});
 		const mode = record(record(result).modes).currentModeId;
+		const options = projectConfigOptions(record(result).configOptions);
+		const target = record(record(record(result)._meta)["clio-coder/session"]).target;
+		if (options !== undefined)
+			this.config = {
+				options,
+				...(target === null || (typeof target === "string" && target.length <= 128) ? { target } : {}),
+			};
 		if (sessionId) {
 			if (mode === "default" || mode === "yolo") this.rememberMode(sessionId, mode);
 			return sessionId;

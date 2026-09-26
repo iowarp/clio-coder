@@ -637,10 +637,21 @@ try {
 		await check("conversation-dark");
 		if (width === 1600) await page.screenshot({ path: join(output, "conversation-dark.png"), fullPage: true });
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
-		// The route beside Send is the one place to change target, model and thinking. The runtime can
-		// only save them for every project, and the picker says so before its button.
+		// Conversation controls use ACP config options, and saved scope alone can switch targets.
 		const route = page.locator(".route-picker");
 		await route.locator("summary").click();
+		await route.getByText("This conversation.", { exact: true }).waitFor();
+		assert.equal(await route.getByLabel("Target", { exact: true }).isDisabled(), true);
+		await route.getByLabel("Model", { exact: true }).selectOption("fixture-small");
+		await route.getByLabel("Thinking", { exact: true }).selectOption("high");
+		await check("route-picker-conversation");
+		await route.getByRole("button", { name: "Apply to this conversation", exact: true }).click();
+		await route.locator("summary").getByText("fixture · fixture-small", { exact: true }).waitFor();
+		await page.waitForFunction(() => !(document.querySelector(".route-picker") as HTMLDetailsElement).open);
+		assert.match((await route.locator("summary").getAttribute("title")) ?? "", /Thinking: high/);
+		assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
+		await route.locator("summary").click();
+		await route.getByLabel("Apply to", { exact: true }).selectOption("every-project");
 		await route.getByText("Saved for every project.", { exact: true }).waitFor();
 		await route.getByLabel("Target", { exact: true }).selectOption("field-station");
 		assert.equal(await route.getByLabel("Model", { exact: true }).inputValue(), "");
@@ -650,11 +661,12 @@ try {
 		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `route-picker-${width}.png`) });
 		await route.getByRole("button", { name: "Save for every project", exact: true }).click();
 		await route.locator("summary").getByText("field-station · survey-small", { exact: true }).waitFor();
+		await page.waitForFunction(() => !(document.querySelector(".route-picker") as HTMLDetailsElement).open);
 		assert.equal(await route.evaluate((element) => (element as HTMLDetailsElement).open), false);
 		assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
 		// Escape closes it without saving and hands focus back to the chip.
 		await route.locator("summary").click();
-		await route.getByLabel("Thinking", { exact: true }).selectOption("high");
+		await route.getByLabel("Thinking", { exact: true }).selectOption("low");
 		await page.keyboard.press("Escape");
 		assert.equal(await route.evaluate((element) => (element as HTMLDetailsElement).open), false);
 		assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);

@@ -18,6 +18,7 @@ export const Event = Type.Union([
 	Type.Object({ ...base, type: Type.Literal("permission.resolved"), payload: SessionDeltas["permission.resolved"] }),
 	Type.Object({ ...base, type: Type.Literal("permission.expired"), payload: SessionDeltas["permission.expired"] }),
 	Type.Object({ ...base, type: Type.Literal("session.labelled"), payload: SessionDeltas["session.labelled"] }),
+	Type.Object({ ...base, type: Type.Literal("session.configured"), payload: SessionDeltas["session.configured"] }),
 	Type.Object({ ...base, type: Type.Literal("fleet.loopBlocked"), payload: SessionDeltas["fleet.loopBlocked"] }),
 	Type.Object({ ...base, type: Type.Literal("fleet.enqueued"), payload: SessionDeltas["fleet.enqueued"] }),
 	Type.Object({ ...base, type: Type.Literal("fleet.started"), payload: SessionDeltas["fleet.started"] }),

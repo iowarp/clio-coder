@@ -506,6 +506,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const follow = useFollowLatest(scroll, snapshot !== undefined, snapshot?.timeline);
 	// One object per change of reported settings or health, so a streamed delta leaves the composer alone.
 	const settings = snapshot?.state === "open" ? sessionSettings.data?.settings.chat : undefined;
+	const config = snapshot?.state === "open" ? snapshot.config : undefined;
 	const route = useMemo(
 		() =>
 			routeFacts(
@@ -513,8 +514,9 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					? { target: settings.target ?? null, model: settings.model ?? null, thinking: settings.thinkingLevel }
 					: undefined,
 				health,
+				config,
 			),
-		[settings, health],
+		[settings, health, config],
 	);
 	if (session.error && !snapshot)
 		return (

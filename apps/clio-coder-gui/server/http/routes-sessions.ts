@@ -51,6 +51,9 @@ export function sessionRoutes(
 		),
 	);
 	register(app, hub, routes.sessionSettings, ({ params }) => supervisor.settings(params.id));
+	register(app, hub, routes.setSessionConfig, ({ params, body }, context) =>
+		commands.run(`config:${params.id}`, idempotencyKey(context), body, () => supervisor.setConfig(params.id, body)),
+	);
 	register(app, hub, routes.patchSessionSettings, ({ params, body }, context) =>
 		commands.run(`settings:${params.id}`, idempotencyKey(context), body, () => supervisor.settings(params.id, body)),
 	);

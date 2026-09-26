@@ -15,6 +15,22 @@ const settings = {
 	safety: { autonomy: "default" },
 };
 const editable = ["chat.target", "chat.model", "chat.thinkingLevel", "safety.autonomy"];
+const configOptions = () => [
+	{ id: "autonomy", currentValue: autonomy, options: [] },
+	{
+		id: "model",
+		currentValue: settings.chat.model,
+		options: (settings.chat.target === "field-station"
+			? ["survey-large", "survey-small"]
+			: ["fixture-model", "fixture-small"]
+		).map((value) => ({ value, name: value })),
+	},
+	{
+		id: "thinkingLevel",
+		currentValue: settings.chat.thinkingLevel,
+		options: ["off", "minimal", "low", "medium", "high", "xhigh", "max"].map((value) => ({ value, name: value })),
+	},
+];
 const pending = new Map();
 const log = (event) => {
 	if (process.env.CLIO_CODER_WEB_FIXTURE_LOG)
@@ -355,6 +371,9 @@ async function handle(frame) {
 				update({ sessionUpdate: "available_commands_update", availableCommands: [] });
 				result = {
 					sessionId,
+					...(ROUTE
+						? { configOptions: configOptions(), _meta: { "clio-coder/session": { target: settings.chat.target } } }
+						: {}),
 					modes: {
 						currentModeId: autonomy,
 						availableModes: [
@@ -372,6 +391,9 @@ async function handle(frame) {
 			case "session/load":
 				sessionId = frame.params.sessionId;
 				result = {
+					...(ROUTE
+						? { configOptions: configOptions(), _meta: { "clio-coder/session": { target: settings.chat.target } } }
+						: {}),
 					modes: {
 						currentModeId: autonomy,
 						availableModes: [
@@ -568,6 +590,11 @@ async function handle(frame) {
 					settings[group][name] = value;
 				}
 				result = { settings, editable };
+				if (ROUTE)
+					update(
+						{ sessionUpdate: "config_option_update", configOptions: configOptions() },
+						{ "clio-coder/session": { target: settings.chat.target } },
+					);
 				break;
 			case "_clio-coder/settings/get_safe":
 				result = { settings, editable, privateCredential: "must-be-stripped" };
@@ -578,7 +605,7 @@ async function handle(frame) {
 						{
 							id: "fixture",
 							runtime: "openai-compatible",
-							models: ["fixture-model"],
+							models: ["fixture-model", "fixture-small"],
 							isOrchestrator: true,
 							apiKey: "must-be-stripped",
 						},
@@ -600,10 +627,18 @@ async function handle(frame) {
 			case "_clio-coder/targets/probe":
 				result = { targetId: frame.params.targetId, healthy: true, latencyMs: 5, reason: null };
 				break;
+			case "session/set_config_option": {
+				const option = configOptions().find((row) => row.id === frame.params.configId);
+				if (!option?.options.some((row) => row.value === frame.params.value)) throw Error("invalid_params");
+				settings.chat[frame.params.configId] = frame.params.value;
+				update({ sessionUpdate: "config_option_update", configOptions: configOptions() });
+				result = { configOptions: configOptions() };
+				break;
+			}
 			case "session/set_mode":
 				autonomy = frame.params.modeId;
 				update({ sessionUpdate: "current_mode_update", currentModeId: autonomy });
-				update({ sessionUpdate: "config_option_update", configOptions: [] });
+				update({ sessionUpdate: "config_option_update", configOptions: ROUTE ? configOptions() : [] });
 				break;
 			case "_clio-coder/session/label":
 			case "session/delete":

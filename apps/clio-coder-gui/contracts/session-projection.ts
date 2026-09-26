@@ -172,6 +172,8 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 			return { ...state, health: [...state.health, event.payload.item].slice(-32) };
 		case "session.changed":
 			return { ...state, state: event.payload.state, recoveredOrphan: event.payload.recoveredOrphan };
+		case "session.configured":
+			return { ...state, config: event.payload.config };
 		case "turn.started": {
 			const turn = event.payload.turn;
 			state = { ...state, turns: [...state.turns, turn].slice(-128) };

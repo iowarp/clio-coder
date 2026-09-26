@@ -16,6 +16,56 @@ async function until(check: () => boolean) {
 	}
 	throw new Error("Session control did not settle.");
 }
+test("session config retains open/load options, publishes updates, and never saves conversation choices", {
+	timeout: 15000,
+}, async (t) => {
+	const h = await harness({}, { scenario: "markdown", env: { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" } });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const base = `/api/sessions/${session.id}`;
+	const configOf = (snapshot: unknown) =>
+		(snapshot as { config?: { options: Array<{ id: string; currentValue: string }> } }).config;
+	assert.equal(configOf(session)?.options.find((option) => option.id === "model")?.currentValue, "fixture-model");
+	const events: Event[] = [];
+	t.after(h.hub.connect(undefined, (event) => events.push(event)));
+	const before = await readFile(join(h.home.path, "acp.jsonl"), "utf8");
+	assert.equal((await h.post(`${base}/config`, { configId: "target", value: "other" })).status, 422);
+	assert.equal((await h.post(`${base}/config`, { configId: "model", value: "not-listed" })).status, 422);
+	assert.equal(await readFile(join(h.home.path, "acp.jsonl"), "utf8"), before);
+	const choice = { configId: "model", value: "fixture-small" };
+	const changed = await h.post(`${base}/config`, choice, "model-choice");
+	assert.equal(changed.status, 200);
+	assert.equal((await h.post(`${base}/config`, choice, "model-choice")).status, 200);
+	assert.equal((await h.post(`${base}/config`, { configId: "thinkingLevel", value: "high" })).status, 200);
+	const snapshot = h.supervisor.get(session.id);
+	assert.equal(configOf(snapshot)?.options.find((option) => option.id === "model")?.currentValue, "fixture-small");
+	assert.equal(configOf(snapshot)?.options.find((option) => option.id === "thinkingLevel")?.currentValue, "high");
+	assert.ok(events.some((event) => event.type === ("session.configured" as Event["type"])));
+	for (const event of events) assert.ok(Value.Check(Event, event));
+	const log = await readFile(join(h.home.path, "acp.jsonl"), "utf8");
+	assert.equal(log.match(/"method":"session\/set_config_option"/g)?.length, 2);
+	assert.doesNotMatch(log, /settings\/patch_safe/);
+	h.supervisor.startTurn(session.id, "[stream]");
+	assert.equal((await h.post(`${base}/config`, { configId: "thinkingLevel", value: "low" })).status, 409);
+	await h.supervisor.close(session.id);
+	const loaded = await h.supervisor.open(workspace.id, session.id);
+	assert.equal(configOf(loaded)?.options.find((option) => option.id === "model")?.currentValue, "fixture-model");
+	assert.ok(loaded.timeline.some((item) => item.origin === "replay"));
+});
+
+test("an older ACP peer has no conversation config and refuses the write locally", async (t) => {
+	const h = await harness();
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const before = await readFile(join(h.home.path, "acp.jsonl"), "utf8");
+	assert.equal(
+		(await h.post(`/api/sessions/${session.id}/config`, { configId: "model", value: "fixture-model" })).status,
+		409,
+	);
+	assert.equal(await readFile(join(h.home.path, "acp.jsonl"), "utf8"), before);
+});
 test("permission allows once, restores pending snapshot, and rejects stale/duplicate conflicting decisions", {
 	timeout: 15000,
 }, async (t) => {

@@ -4,6 +4,7 @@ import { Value } from "typebox/value";
 import { TURN_IMAGES_MAX_BASE64, type TurnImage } from "../../contracts/attachments.js";
 import { SessionBoard } from "../../contracts/board.js";
 import type { PermissionDecision } from "../../contracts/permissions.js";
+import type { SetConfigOption } from "../../contracts/session-config.js";
 import { applySessionDelta, boundedText, emptySession } from "../../contracts/session-projection.js";
 import {
 	Provenance,
@@ -35,6 +36,7 @@ import { type ChildRow, ChildrenFile } from "./children-file.js";
 import { AcpClient, acpProblem, record } from "./client.js";
 import { fleetEvent } from "./fleet-events.js";
 import { Permissions, type PermissionTimers } from "./permissions.js";
+import { projectConfigOptions } from "./session-config.js";
 
 /**
  * The text of an ACP tool-call content array, or undefined when the frame
@@ -78,6 +80,7 @@ export class Supervisor {
 	private readonly opening = new Set<Promise<SessionSnapshot>>();
 	private readonly controls = new Set<Promise<void>>();
 	private readonly loading = new Set<string>();
+	private readonly configuring = new Set<string>();
 	private stopping = false;
 	private readonly monitor: ReturnType<typeof setInterval>;
 	constructor(
@@ -109,8 +112,14 @@ export class Supervisor {
 	}
 	get busy() {
 		return (
-			!!(this.starting || this.opening.size || this.controls.size || this.loading.size || this.reapers.size) ||
-			[...this.entries.values()].some((entry) => entry.turnId !== null || !!entry.closing)
+			!!(
+				this.starting ||
+				this.opening.size ||
+				this.controls.size ||
+				this.loading.size ||
+				this.configuring.size ||
+				this.reapers.size
+			) || [...this.entries.values()].some((entry) => entry.turnId !== null || !!entry.closing)
 		);
 	}
 	private publish(event: SessionDelta) {
@@ -252,6 +261,11 @@ export class Supervisor {
 			}
 			await this.children.bind(row, boundId);
 			entry.bound = true;
+			if (entry.client.config)
+				this.publish({
+					type: "session.configured",
+					payload: { resource: boundId, revision: this.revision(boundId), config: entry.client.config },
+				});
 			if (this.stopping) {
 				await this.retire(entry);
 				throw new AppProblem("unavailable", "Server shut down while opening the session.");
@@ -271,6 +285,7 @@ export class Supervisor {
 		if (!entry || entry.closing || this.snapshot(id).state !== "open")
 			throw new AppProblem("conflict", "Session is not available for a turn.");
 		if (entry.turnId) throw new AppProblem("conflict", "A turn is already running in this session.");
+		if (this.configuring.has(id)) throw new AppProblem("conflict", "Session configuration is being changed.");
 		if (images.length > 0 && !entry.client.capabilities.images)
 			throw new AppProblem("conflict", "This Clio Coder build does not accept images with a request.");
 		if (images.reduce((total, image) => total + image.data.length, 0) > TURN_IMAGES_MAX_BASE64)
@@ -346,6 +361,20 @@ export class Supervisor {
 		if (metadataUpdate && !entry.bound && params.sessionId !== entry.id) return;
 		if (params.sessionId !== entry.id)
 			throw new AppProblem("upstream_acp", "ACP update has a different session identity.");
+		if (update.sessionUpdate === "config_option_update") {
+			const options = projectConfigOptions(update.configOptions);
+			if (options === undefined) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
+			const target = record(meta["clio-coder/session"]).target;
+			const config = {
+				...this.snapshot(entry.id).config,
+				options,
+				...(target === null || (typeof target === "string" && target.length <= 128) ? { target } : {}),
+			};
+			this.publish({
+				type: "session.configured",
+				payload: { resource: entry.id, revision: this.revision(entry.id), config },
+			});
+		}
 		if (metadataUpdate) return;
 		const replay = record(meta["clio-coder/replay"]).turn;
 		if (typeof replay === "number" && Number.isInteger(replay) && replay > 0 && replay !== entry.replay) {
@@ -495,6 +524,27 @@ export class Supervisor {
 			patch ? { patch } : {},
 			SafeSettings,
 		);
+	}
+	async setConfig(id: string, body: SetConfigOption) {
+		const entry = this.active(id);
+		if (entry.turnId || this.configuring.has(id))
+			throw new AppProblem("conflict", "Wait for the current turn or configuration change to finish.");
+		const config = this.snapshot(id).config;
+		const option = config?.options.find((row) => row.id === body.configId);
+		if (!option) throw new AppProblem("conflict", "This Clio Coder build does not offer that conversation control.");
+		if (Buffer.byteLength(body.value) > 256 || !option.options.some((row) => row.value === body.value))
+			throw new AppProblem("validation", "Choose a value Clio Coder reports for this conversation.");
+		this.configuring.add(id);
+		try {
+			const result = record(await entry.client.request("session/set_config_option", { sessionId: id, ...body }));
+			const options = projectConfigOptions(result.configOptions);
+			if (options === undefined) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
+			const next = { ...this.snapshot(id).config, options };
+			this.publish({ type: "session.configured", payload: { resource: id, revision: this.revision(id), config: next } });
+			return next;
+		} finally {
+			this.configuring.delete(id);
+		}
 	}
 	async targets(id: string) {
 		const raw = record(await this.active(id).client.request("_clio-coder/targets/list", {}));

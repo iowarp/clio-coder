@@ -2849,6 +2849,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		options.transport.notify("session/update", {
 			sessionId: session.id,
 			update: { sessionUpdate: "config_option_update", configOptions: configOptions(session) },
+			_meta: { [ACP_SESSION_META_KEY]: { target: session.target } },
 		});
 	};
 	const setAutonomy = (session: AcpServerSession, level: unknown): void => {
@@ -3293,7 +3294,20 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32602, "model requires a configured target", { code: "invalid_params" });
 		}
 		try {
-			return safeSettingsProjection(options.settings.commit(patch));
+			const committed = options.settings.commit(patch);
+			const session = boundSessionId === null ? undefined : sessions.get(boundSessionId);
+			if (
+				session &&
+				(patch["chat.target"] !== undefined ||
+					patch["chat.model"] !== undefined ||
+					patch["chat.thinkingLevel"] !== undefined)
+			) {
+				session.target = committed.target;
+				session.model = committed.model;
+				session.thinkingLevel = committed.thinkingLevel;
+				notifyConfigOptions(session);
+			}
+			return safeSettingsProjection(committed);
 		} catch {
 			throw new AcpRequestError(-32603, "safe settings could not be updated", { code: "internal_error" });
 		}

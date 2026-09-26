@@ -14,10 +14,12 @@ import {
 import { type HealthItemLike, summarizeHealth } from "../client/chat/health.js";
 import { isLive, LIVE_GLYPHS, LIVE_TONES, type LiveState, liveStatus } from "../client/chat/live-status.js";
 import { routeFacts } from "../client/chat/route.js";
+import { conversationChanges, routeDraft, savedRoutePatch } from "../client/chat/route-picker-model.js";
 import { activeTurn, type ChatTurn, groupTurns, sameTurnView, turnStatuses } from "../client/chat/turns.js";
 import type { HealthItem } from "../contracts/fleet-events.js";
 import type { Permission } from "../contracts/permissions.js";
 import type { TimelineItem, Turn } from "../contracts/sessions.js";
+import { projectConfigOptions } from "../server/acp/session-config.js";
 
 function item(
 	overrides: Partial<TimelineItem> & { id: string; turnId: string; kind: TimelineItem["kind"] },
@@ -655,6 +657,80 @@ test("routeFacts names the reported route and never guesses one it was not told"
 	const onlyHealth = routeFacts(undefined, healthy);
 	assert.equal(onlyHealth.text, "alpha", "a health row names its target even without settings");
 	assert.match(onlyHealth.spoken, /^Model not reported\./);
+	const otherTarget = routeFacts({ target: "beta", model: "m-2", thinking: "off" }, healthy);
+	assert.equal(otherTarget.tone, "unverified", "health for alpha does not verify beta");
+	assert.match(otherTarget.title, /No target health reported/);
+	assert.equal(routeFacts(undefined, summarizeHealth([]), { options: [] }).text, "Model not reported");
+});
+
+test("conversation routing takes reported current values and keeps target changes out of its writes", () => {
+	const config = {
+		target: "alpha",
+		options: [
+			{
+				id: "model" as const,
+				currentValue: "session-model",
+				options: [{ value: "session-model", name: "Session model" }],
+			},
+			{ id: "thinkingLevel" as const, currentValue: "high", options: [{ value: "high", name: "High" }] },
+		],
+	};
+	const settings = {
+		settings: {
+			chat: { target: "saved-target", model: "saved-model", thinkingLevel: "off" as const },
+			safety: { autonomy: "default" as const },
+		},
+		editable: [],
+	};
+	const draft = routeDraft(settings, config, "conversation");
+	assert.deepEqual(draft, { target: "alpha", model: "session-model", thinking: "high" });
+	assert.ok(draft);
+	const next = { target: "other-target", model: "next-model", thinking: "low" };
+	assert.deepEqual(conversationChanges(next, draft), [
+		{ configId: "model", value: "next-model" },
+		{ configId: "thinkingLevel", value: "low" },
+	]);
+	assert.deepEqual(savedRoutePatch(next, draft), {
+		"chat.target": "other-target",
+		"chat.model": "next-model",
+		"chat.thinkingLevel": "low",
+	});
+	const route = routeFacts(
+		{ target: "saved-target", model: "saved-model", thinking: "off" },
+		summarizeHealth([]),
+		config,
+	);
+	assert.equal(route.text, "alpha · session-model");
+	assert.match(route.title, /Thinking: high/);
+	assert.equal(route.config, config);
+	assert.equal(routeDraft(undefined, undefined, "conversation"), null);
+});
+
+test("config projection drops unknown controls and private metadata, and refuses malformed known options", () => {
+	const raw = [
+		{ id: "autonomy", internal: "private" },
+		{
+			id: "model",
+			currentValue: "model-a",
+			private: "secret",
+			options: [{ value: "model-a", name: "Model A", url: "private" }],
+		},
+	];
+	assert.deepEqual(projectConfigOptions(raw), [
+		{ id: "model", currentValue: "model-a", options: [{ value: "model-a", name: "Model A" }] },
+	]);
+	assert.equal(projectConfigOptions(undefined), undefined);
+	assert.throws(() => projectConfigOptions([{ id: "model", currentValue: "bad\n", options: [] }]));
+	assert.throws(() => projectConfigOptions([raw[1], raw[1]]));
+	assert.throws(() =>
+		projectConfigOptions([
+			{
+				id: "model",
+				currentValue: "model-a",
+				options: Array.from({ length: 65 }, () => ({ value: "model-a", name: "Model A" })),
+			},
+		]),
+	);
 });
 
 test("a refused call and a stopped run end without breaking, so groups count them apart from failures", () => {

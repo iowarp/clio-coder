@@ -457,15 +457,20 @@ else the first request), the live status as a glyph and a sentence, and one **Se
 The route (target and model, with the target's reported health folded into its glyph) sits in the
 composer's actions row beside Send, because that is where the next request leaves from. Without
 reported settings it reads "Model not reported", or the target a health fact names, and never a
-guessed default. The composer takes the route as one object memoized on the reported settings and
-health, so a streamed delta still leaves the composer unrendered. When the agent lets the GUI edit
-its safe settings, the route chip is the summary of the route picker, the one place to change target,
-model and thinking. It opens above the composer, right-aligned, and states its scope before its
-button: "Saved for every project. This conversation uses it from its next request, and so do new
-conversations, the CLI and the TUI." The runtime's only write is `settings/patch_safe`, which saves
-the operator's user settings, so the button reads "Save for every project" and nothing on the page
-suggests a choice for this conversation alone until the runtime offers one. It is disabled while a
-turn runs, because the runtime refuses the write then. The menu holds the project path, switching,
+guessed default. The composer takes the route as one object memoized on the reported settings,
+ACP session configuration and health, so a streamed delta still leaves the composer unrendered.
+The route chip is the summary of the route picker, the one place to change target, model and thinking.
+It opens above the composer, right-aligned, and offers “This conversation” when ACP reports session
+config options, and “Every project” when the agent permits `settings/patch_safe`. Conversation scope
+is the initial choice when available: model and thinking use `session/set_config_option`, apply from
+the next request and leave saved defaults unchanged. Its target is read-only and the scope text says
+ACP cannot switch targets for one conversation. The model and thinking choices come from ACP's
+bounded config options, and the chip follows their current values on open, load and updates. Every
+project scope uses the target catalog and says “Saved for every project. This conversation uses it
+from its next request, and so do new conversations, the CLI and the TUI.” Its button reads “Save for
+every project”; conversation scope reads “Apply to this conversation”. Both are disabled while a
+turn runs. An older agent without config options retains only the saved scope it supports.
+The menu holds the project path, switching,
 the conversation's label and working freedom (for this conversation, and the saved default for new
 ones, again "Saved for every project"), a pointer to the route beside Send and to the Targets page,
 Clio Coder commands, the full history of dispatched workers and Close session, and it hangs below its

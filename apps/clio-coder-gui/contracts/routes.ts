@@ -31,6 +31,7 @@ import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
 import { UsageReport } from "./reports.js";
+import { SessionConfig, SetConfigOption } from "./session-config.js";
 import { SessionSnapshot, SessionSummary, Workspace, WorkspaceFolders } from "./sessions.js";
 import { ConfigGraph, SettingsReport } from "./settings.js";
 import { SettingsControls, SettingWrite, SettingWritten } from "./settings-controls.js";
@@ -449,6 +450,15 @@ export const routes = {
 		params: operationParams,
 		response: SafeSettings,
 		summary: "The four ACP safe settings",
+	}),
+	setSessionConfig: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/config",
+		params: operationParams,
+		body: SetConfigOption,
+		response: SessionConfig,
+		summary: "Choose a reported model or thinking level for this conversation",
 	}),
 	patchSessionSettings: defineRoute({
 		...post,
