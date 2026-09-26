@@ -14,6 +14,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { readClioVersion, resolvePackageRoot } from "../../../core/package-root.js";
+import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { parseTomlDocument } from "../../../core/toml.js";
 import { clioCacheDir, resolveClioDirs } from "../../../core/xdg.js";
 import { findPinnedTool } from "../../toolchain/registry.js";
@@ -23,6 +24,7 @@ import { renderYaziTheme } from "./theme.js";
 const PROFILE_FILES = ["yazi.toml", "keymap.toml", "theme.toml", "init.lua"] as const;
 const PROFILE_PLUGIN_FILES = ["main.lua", "types.lua", "LICENSE", "README.md"] as const;
 const STAMP_FILE = "stamp.json";
+const FAILURE_FILE = "generation-failed.txt";
 
 export interface YaziProfileStamp {
 	yaziVersion: string;
@@ -37,7 +39,7 @@ export interface YaziProfile {
 	stamp: Readonly<YaziProfileStamp>;
 }
 
-export type YaziProfileState = "current" | "stale" | "missing";
+export type YaziProfileState = "current" | "stale" | "missing" | "generation-failed";
 
 export interface YaziProfileInspection {
 	dir: string;
@@ -203,7 +205,13 @@ export function inspectYaziProfile(options: YaziProfileOptions): YaziProfileInsp
 	return {
 		dir: inputs.dir,
 		userConfigDir: userYaziConfigDir(),
-		state: current ? "current" : present ? "stale" : "missing",
+		state: statSync(join(inputs.dir, FAILURE_FILE), { throwIfNoEntry: false })?.isFile()
+			? "generation-failed"
+			: current
+				? "current"
+				: present
+					? "stale"
+					: "missing",
 		stamp: inputs.stamp,
 	};
 }
@@ -215,7 +223,7 @@ export function inspectCurrentYaziProfile(): YaziProfileInspection {
 
 /** One shared sentence for `tools status yazi` and the doctor profile row. */
 export function describeYaziProfile(inspection: Readonly<YaziProfileInspection>): string {
-	return `${inspection.dir} (${inspection.state}); user config ${inspection.userConfigDir} is separate and untouched`;
+	return `${inspection.dir} (${inspection.state === "generation-failed" ? "generation failed" : inspection.state}); user config ${inspection.userConfigDir} is separate and untouched`;
 }
 
 function parseGenerated(dir: string): boolean {
@@ -259,6 +267,17 @@ function validatesWithYazi(dir: string, yaziPath: string): boolean {
 	}
 }
 
+/** Doctor must distinguish a failed generation from a profile never used (review round 1, finding 8). */
+function recordGenerationFailure(dir: string): void {
+	try {
+		rmSync(dir, { recursive: true, force: true });
+		mkdirSync(dir, { recursive: true });
+		safeResourceWrite(join(dir, FAILURE_FILE), "Yazi profile generation failed validation. Run doctor --fix to retry.\n");
+	} catch {
+		// Review round 2 B: the marker is diagnostic; returning null safely prevents either launcher from using a failed profile.
+	}
+}
+
 /**
  * Materialize Clio's deterministic Yazi profile, replacing it only when its
  * recorded inputs differ. No path outside `<cache>/yazi/` is read or written.
@@ -274,9 +293,10 @@ export function ensureYaziProfile(options: EnsureYaziProfileOptions): YaziProfil
 		return { dir: inputs.dir, stamp: inputs.stamp };
 	}
 
-	mkdirSync(dirname(inputs.dir), { recursive: true });
-	const staging = mkdtempSync(join(dirname(inputs.dir), ".profile-"));
+	let staging: string | null = null;
 	try {
+		mkdirSync(dirname(inputs.dir), { recursive: true });
+		staging = mkdtempSync(join(dirname(inputs.dir), ".profile-"));
 		cpSync(join(inputs.assetDir, "init.lua"), join(staging, "init.lua"));
 		cpSync(join(inputs.assetDir, "plugins"), join(staging, "plugins"), { recursive: true });
 		writeFileSync(join(staging, "yazi.toml"), inputs.yaziToml);
@@ -284,16 +304,20 @@ export function ensureYaziProfile(options: EnsureYaziProfileOptions): YaziProfil
 		writeFileSync(join(staging, "theme.toml"), inputs.themeToml);
 		writeFileSync(join(staging, STAMP_FILE), `${JSON.stringify(inputs.stamp, null, 2)}\n`);
 		if (!parseGenerated(staging) || !validatesWithYazi(staging, options.yaziPath)) {
-			rmSync(inputs.dir, { recursive: true, force: true });
+			recordGenerationFailure(inputs.dir);
 			return null;
 		}
 		rmSync(inputs.dir, { recursive: true, force: true });
 		renameSync(staging, inputs.dir);
 		return { dir: inputs.dir, stamp: inputs.stamp };
 	} catch {
-		rmSync(inputs.dir, { recursive: true, force: true });
+		recordGenerationFailure(inputs.dir);
 		return null;
 	} finally {
-		rmSync(staging, { recursive: true, force: true });
+		try {
+			if (staging !== null) rmSync(staging, { recursive: true, force: true });
+		} catch {
+			// Review round 2 B: leftover cache staging is safe and must not hide the profile-error result.
+		}
 	}
 }

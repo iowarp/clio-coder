@@ -1,18 +1,20 @@
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import {
 	describeYaziProfile,
+	ensureYaziProfile,
 	inspectCurrentYaziProfile,
 	userYaziConfigDir,
 	yaziProfileDir,
 } from "../domains/mux/index.js";
-import { describeResolution, toolStatuses } from "../domains/toolchain/index.js";
+import { describeResolution, resolveToolBinary, toolStatuses } from "../domains/toolchain/index.js";
 
 export interface ToolchainFindingOptions {
 	panesEnabled?: boolean;
 	filesEnabled?: boolean;
+	fix?: boolean;
 }
 
-function yaziProfileFinding(enabled: boolean): DoctorFinding {
+function yaziProfileFinding(enabled: boolean, fix: boolean): DoctorFinding {
 	if (!enabled) {
 		return {
 			ok: true,
@@ -21,12 +23,27 @@ function yaziProfileFinding(enabled: boolean): DoctorFinding {
 		};
 	}
 	try {
-		const profile = inspectCurrentYaziProfile();
+		let profile = inspectCurrentYaziProfile();
+		if (fix && profile.state !== "current") {
+			const yazi = resolveToolBinary("yazi").binaryPath;
+			const ya = resolveToolBinary("ya").binaryPath;
+			if (yazi && ya) {
+				if (!ensureYaziProfile({ yaziPath: yazi, yaPath: ya })) {
+					return {
+						ok: true,
+						name: "files pane profile",
+						level: "warn",
+						detail: "managed profile regeneration failed Yazi validation",
+					};
+				}
+				profile = inspectCurrentYaziProfile();
+			}
+		}
 		return {
 			ok: true,
 			name: "files pane profile",
 			detail: describeYaziProfile(profile),
-			level: profile.state === "current" ? "ok" : "warn",
+			level: profile.state === "current" ? "ok" : profile.state === "missing" ? "info" : "warn",
 		};
 	} catch (error) {
 		return {
@@ -74,5 +91,5 @@ export function toolchainFindings(options: ToolchainFindingOptions = {}): Doctor
 					? ("warn" as const)
 					: ("ok" as const),
 	}));
-	return [...tools, yaziProfileFinding(filesEnabled)];
+	return [...tools, yaziProfileFinding(filesEnabled, options.fix === true)];
 }

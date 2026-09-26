@@ -140,7 +140,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	// Resolution reads PATH and the vendor root and creates nothing, but on an
 	// untouched home there is no vendor root to look at and the answer would be
 	// "none" for every row regardless, so the sweep stays with the others.
-	const toolChecks = untouched ? [] : toolchainFindings({ panesEnabled, filesEnabled });
+	const toolChecks = untouched ? [] : toolchainFindings({ panesEnabled, filesEnabled, fix });
 	// Compilers, MPI, build systems, and the scheduler. Each probe resolves PATH
 	// and runs a bounded `--version` in a scratch directory, so it creates
 	// nothing and runs on an untouched home too.
