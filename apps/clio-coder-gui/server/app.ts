@@ -59,6 +59,7 @@ export function createApp(options: {
 	clientDir?: string;
 	diagnostics?: boolean;
 	pwa?: boolean;
+	idle: () => boolean;
 	runtime?: () => Promise<{ server: Omit<RuntimeInfo, "threadId">; reads: RuntimeInfo; ops: RuntimeInfo }>;
 }) {
 	const app = new Hono();
@@ -89,6 +90,7 @@ export function createApp(options: {
 		apiVersion: API_VERSION as 1,
 		epoch: hub.epoch,
 		pwa: options.pwa ?? false,
+		idle: options.idle(),
 	}));
 	register(app, hub, routes.openapi, () => openapi());
 	register(app, hub, routes.events, ({ query }, context) => events(context, hub, query.after));

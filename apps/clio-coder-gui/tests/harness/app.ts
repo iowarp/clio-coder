@@ -80,6 +80,7 @@ export async function harness(
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations, reads),
 		sessions,
+		idle: () => !(operations.activeCount || cli.activeCount || supervisor.busy || supervisor.hasOpenSessions),
 		...(options.snapshotHold ? { snapshotHold: options.snapshotHold } : {}),
 		diagnostics: true,
 		pwa: options.pwa ?? false,

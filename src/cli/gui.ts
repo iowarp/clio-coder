@@ -9,7 +9,7 @@ const HELP = `Clio Coder graphical application
 Usage:
   clio-coder gui [--path </app/path>] [--open | --no-open] [--foreground]
   clio-coder gui background install [--open] [--port <1-65535>]
-  clio-coder gui background status|start|open|restart|stop|uninstall
+  clio-coder gui background status|start|open|restart [--if-idle]|stop|uninstall
   clio-coder gui launcher install|status|uninstall
 
 clio-coder gui opens Clio Coder in your browser. When this installation's
@@ -25,10 +25,11 @@ of starting a private server when the background app cannot be used.
 
 On Linux with a systemd user session, background install keeps the app at a
 stable address from login, so the browser can install it as an app. Background
-restart loads a newly installed version, stop stops it until the next login or
-the next clio-coder gui, and uninstall also removes its login and desktop
-entries. macOS and Windows run the private server only; Windows prints the link
-instead of opening it. Your CLI, terminal interface, headless runs, and
+restart loads a newly installed version; --if-idle leaves it alone when work or
+a conversation is open. Stop stops it until the next login or the next
+clio-coder gui, and uninstall also removes its login and desktop entries.
+macOS and Windows run the private server only; Windows prints the link instead
+of opening it. Your CLI, terminal interface, headless runs, and
 graphical app use the same Clio Coder runtime and configuration.
 `;
 

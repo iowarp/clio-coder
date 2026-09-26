@@ -9,6 +9,7 @@ import {
 	installBackground,
 	preferBackground,
 	restartBackground,
+	restartBackgroundIfIdle,
 	startBackground,
 	stopBackground,
 	tryStartBackground,
@@ -297,4 +298,95 @@ test("launch options: bare reuses and opens on a desktop; any listener flag keep
 	);
 	assert.equal(autoOpenBrowser({}, "darwin", true), true);
 	assert.equal(autoOpenBrowser({}, "win32", true), false, "Windows prints the link until its opener is verified");
+});
+
+test("a bare launch restarts this installation's idle background app when it runs an older version, and only then", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-web-background-version-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const directory = join(root, "background"),
+		files = backgroundPaths(directory);
+	const config = await newBackgroundConfig(4318, launch, join(root, "desktop"), { PATH: "/usr/bin" });
+	const calls: string[] = [];
+	const control: typeof controlService = async (action) => {
+		calls.push(action);
+		return `FragmentPath=${calls.includes("enable") ? files.unitFile : ""}\nActiveState=active\n`;
+	};
+	// The running app answers with its version and whether anything is open in it; a restart loads the new one.
+	let running = "0.5.6";
+	let idle: boolean | undefined = true;
+	const ready = async () => ({ clio: running, ...(idle === undefined ? {} : { idle }) });
+	await installBackground(directory, config, control, ready);
+	const restartTo = (version: string): typeof controlService => async (action, unit, unitFile) => {
+		if (action === "restart") running = version;
+		return control(action, unit, unitFile);
+	};
+	const upgraded = await preferBackground(directory, config.packageRoot, restartTo("0.5.7"), ready, "linux", "0.5.7");
+	assert.deepEqual(upgraded, {
+		kind: "open",
+		url: `http://127.0.0.1:4318/#token=${config.token}`,
+		running: "0.5.7",
+		restartedFrom: "0.5.6",
+	});
+	assert.deepEqual(calls.slice(-2), ["show", "restart"]);
+	// Something is open in it: the operator's work outlives the version check, and the caller says so.
+	running = "0.5.6";
+	idle = false;
+	const busy = await preferBackground(directory, config.packageRoot, restartTo("0.5.7"), ready, "linux", "0.5.7");
+	assert.deepEqual(busy, { kind: "open", url: `http://127.0.0.1:4318/#token=${config.token}`, running: "0.5.6" });
+	assert.notEqual(calls.at(-1), "restart");
+	// An older app that does not report idleness is treated as in use.
+	idle = undefined;
+	const unknown = await preferBackground(directory, config.packageRoot, restartTo("0.5.7"), ready, "linux", "0.5.7");
+	assert.equal((unknown as { running: string }).running, "0.5.6");
+	assert.notEqual(calls.at(-1), "restart");
+	// The same version is never restarted.
+	idle = true;
+	running = "0.5.7";
+	const same = await preferBackground(directory, config.packageRoot, restartTo("0.5.8"), ready, "linux", "0.5.7");
+	assert.deepEqual(same, { kind: "open", url: `http://127.0.0.1:4318/#token=${config.token}`, running: "0.5.7" });
+	assert.notEqual(calls.at(-1), "restart");
+	assert.equal((await uninstallBackground(directory, control)).status, "absent");
+});
+
+test("restart --if-idle restarts only an idle background app and says why it left a busy one", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-web-background-if-idle-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const directory = join(root, "background"),
+		files = backgroundPaths(directory);
+	const config = await newBackgroundConfig(4319, launch, join(root, "desktop"), { PATH: "/usr/bin" });
+	const calls: string[] = [];
+	const control: typeof controlService = async (action) => {
+		calls.push(action);
+		return `FragmentPath=${calls.includes("enable") ? files.unitFile : ""}\nActiveState=active\n`;
+	};
+	let idle: boolean | undefined = false;
+	const ready = async () => ({ clio: "0.5.6", ...(idle === undefined ? {} : { idle }) });
+	const probe = async () => ({ clio: "0.5.6", ...(idle === undefined ? {} : { idle }) });
+	assert.deepEqual(await restartBackgroundIfIdle(directory, control, ready, probe), { status: "absent" });
+	await installBackground(directory, config, control, ready);
+	assert.deepEqual(await restartBackgroundIfIdle(directory, control, ready, probe), {
+		status: "left",
+		reason: "busy",
+		running: "0.5.6",
+	});
+	assert.notEqual(calls.at(-1), "restart");
+	idle = undefined;
+	assert.deepEqual(await restartBackgroundIfIdle(directory, control, ready, probe), {
+		status: "left",
+		reason: "unknown",
+		running: "0.5.6",
+	});
+	idle = true;
+	assert.deepEqual(await restartBackgroundIfIdle(directory, control, ready, probe), {
+		status: "restarted",
+		running: "0.5.6",
+	});
+	assert.equal(calls.at(-1), "restart");
+	// A stopped app has nothing open in it; restarting would start it, so it is left stopped.
+	assert.deepEqual(await restartBackgroundIfIdle(directory, control, ready, async () => null), {
+		status: "left",
+		reason: "stopped",
+		running: null,
+	});
+	assert.equal((await uninstallBackground(directory, control)).status, "absent");
 });

@@ -69,17 +69,28 @@ export async function main(args = process.argv.slice(2)) {
 	if (values.reuse !== "never") {
 		const directory = join(resolveClioDirs().state, "gui/background");
 		const background = await import("./launcher/background.js");
+		const version = getVersionInfo().clio;
 		const reused =
 			values.reuse === "required"
 				? await background
 						.tryStartBackground(directory, resolvePackageRoot())
 						.then((url) => (url ? { kind: "open" as const, url, running: null } : { kind: "absent" as const }))
-				: await background.preferBackground(directory, resolvePackageRoot());
+				: await background.preferBackground(
+						directory,
+						resolvePackageRoot(),
+						undefined,
+						undefined,
+						process.platform,
+						version,
+					);
 		if (reused.kind === "open") {
 			const url = new URL(reused.url);
 			url.pathname = values.path;
 			console.log(`[clio-coder:gui] ${url.href}`);
-			const version = getVersionInfo().clio;
+			if ("restartedFrom" in reused)
+				console.error(
+					`[clio-coder:gui] Restarted the idle background app from Clio Coder ${reused.restartedFrom} to ${reused.running ?? version}.`,
+				);
 			if (reused.running && reused.running !== version)
 				console.error(
 					`[clio-coder:gui] The background app is still running Clio Coder ${reused.running}; this installation is ${version}. Restart it to use this version: clio-coder gui background restart`,
@@ -155,6 +166,7 @@ export async function main(args = process.argv.slice(2)) {
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations, reads),
 		sessions,
+		idle: () => !(operations.activeCount || cli.activeCount || supervisor.busy || supervisor.hasOpenSessions),
 		clientDir,
 		pwa: !!persistent,
 		...(process.env.NODE_ENV === "test"

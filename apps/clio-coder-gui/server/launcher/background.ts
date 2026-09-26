@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { resolveClioDirs } from "../clio/http-shims.js";
-import { type LocalServerMeta, localServerReady, waitForLocalServer } from "../local-server.js";
+import { type LocalServerMeta, localServerMeta, localServerReady, waitForLocalServer } from "../local-server.js";
 import { controlService, openBrowser } from "../process-policy.js";
 import {
 	type BackgroundConfig,
@@ -21,10 +21,16 @@ type Control = typeof controlService;
 type Files = ReturnType<typeof backgroundPaths>;
 /** Resolves once the app answers; a fake in tests may resolve without its report. */
 type Ready = (port: number, token: string) => Promise<LocalServerMeta | unknown>;
-const runningVersion = (meta: unknown) =>
-	meta && typeof meta === "object" && typeof (meta as LocalServerMeta).clio === "string"
-		? (meta as LocalServerMeta).clio
-		: null;
+const serverReport = (meta: unknown) => ({
+	running:
+		meta && typeof meta === "object" && typeof (meta as LocalServerMeta).clio === "string"
+			? (meta as LocalServerMeta).clio
+			: null,
+	idle:
+		meta && typeof meta === "object" && typeof (meta as LocalServerMeta).idle === "boolean"
+			? (meta as LocalServerMeta).idle
+			: undefined,
+});
 
 async function owned(directory: string) {
 	const files = backgroundPaths(directory);
@@ -161,12 +167,13 @@ type Installed = Extract<Awaited<ReturnType<typeof owned>>, { status: "installed
 async function startOwned(state: Installed, control: Control, ready: Ready, action: "start" | "restart" = "start") {
 	await serviceState(state.files, control);
 	await control(action, state.files.unit, state.files.unitFile);
-	const meta = await ready(state.config.port, state.config.token);
+	const report = serverReport(await ready(state.config.port, state.config.token));
 	return {
 		url: `http://127.0.0.1:${state.config.port}/#token=${state.config.token}`,
-		running: runningVersion(meta),
+		...report,
 	};
 }
+const publicStart = ({ url, running }: Awaited<ReturnType<typeof startOwned>>) => ({ url, running });
 export async function startBackground(
 	directory: string,
 	control: Control = controlService,
@@ -185,11 +192,11 @@ export async function restartBackground(
 	const state = await owned(directory);
 	if (state.status !== "installed")
 		throw new Error("Background service is not installed. Run background install first.");
-	return startOwned(state, control, ready, "restart");
+	return publicStart(await startOwned(state, control, ready, "restart"));
 }
 
 export type BackgroundPreference =
-	| { kind: "open"; url: string; running: string | null }
+	| { kind: "open"; url: string; running: string | null; restartedFrom?: string }
 	| { kind: "absent" }
 	| { kind: "unavailable"; reason: string };
 
@@ -204,6 +211,7 @@ export async function preferBackground(
 	control: Control = controlService,
 	ready: Ready = waitForLocalServer,
 	platform: NodeJS.Platform = process.platform,
+	version?: string,
 ): Promise<BackgroundPreference> {
 	if (platform !== "linux") return { kind: "absent" };
 	let state: Awaited<ReturnType<typeof owned>>;
@@ -227,11 +235,36 @@ export async function preferBackground(
 			reason: "The background app belongs to another Clio Coder installation, so this one will not take it over.",
 		};
 	try {
-		return { kind: "open", ...(await startOwned(state, control, ready)) };
+		const started = await startOwned(state, control, ready);
+		if (version && started.running && started.running !== version && started.idle === true) {
+			const restarted = await startOwned(state, control, ready, "restart");
+			return { kind: "open", ...publicStart(restarted), restartedFrom: started.running };
+		}
+		return { kind: "open", ...publicStart(started) };
 	} catch (error) {
 		return { kind: "unavailable", reason: error instanceof Error ? error.message : String(error) };
 	}
 }
+export async function restartBackgroundIfIdle(
+	directory: string,
+	control: Control = controlService,
+	ready: Ready = waitForLocalServer,
+	probe: typeof localServerMeta = localServerMeta,
+) {
+	const state = await owned(directory);
+	if (state.status === "absent") return { status: "absent" as const };
+	const report = serverReport(await probe(state.config.port, state.config.token));
+	if (report.running === null) return { status: "left" as const, reason: "stopped" as const, running: null };
+	if (report.idle !== true)
+		return {
+			status: "left" as const,
+			reason: report.idle === false ? ("busy" as const) : ("unknown" as const),
+			running: report.running,
+		};
+	const restarted = await startOwned(state, control, ready, "restart");
+	return { status: "restarted" as const, running: restarted.running };
+}
+
 /** Navigation may reuse a verified installation, but never silently takes over another package. */
 export async function tryStartBackground(
 	directory: string,
@@ -290,6 +323,7 @@ export async function background(args: string[], launch: LaunchPaths) {
 			prefix: { type: "string" },
 			port: { type: "string" },
 			open: { type: "boolean" },
+			"if-idle": { type: "boolean" },
 		},
 	});
 	const command = positionals[0];
@@ -298,10 +332,12 @@ export async function background(args: string[], launch: LaunchPaths) {
 		!["install", "status", "start", "open", "restart", "stop", "uninstall"].includes(command ?? "")
 	)
 		throw new Error(
-			"Usage: background install|status|start|open|restart|stop|uninstall [--directory <absolute private directory>] [install: --port <port> --prefix <XDG data directory> --open]",
+			"Usage: background install|status|start|open|restart [--if-idle]|stop|uninstall [--directory <absolute private directory>] [install: --port <port> --prefix <XDG data directory> --open]",
 		);
 	if (command !== "install" && (values.prefix !== undefined || values.port !== undefined || values.open !== undefined))
 		throw new Error("--port, --prefix and --open apply to background install only.");
+	if (command !== "restart" && values["if-idle"] !== undefined)
+		throw new Error("--if-idle applies to background restart only.");
 	const directory = values.directory ?? join(resolveClioDirs().state, "gui/background");
 	if (!isAbsolute(directory) || resolve(directory) !== directory)
 		throw new Error("--directory must be an absolute normalized path.");
@@ -338,6 +374,21 @@ export async function background(args: string[], launch: LaunchPaths) {
 		}
 	}
 	if (command === "restart") {
+		if (values["if-idle"]) {
+			const result = await restartBackgroundIfIdle(directory);
+			const line =
+				result.status === "absent"
+					? "Clio Coder background app is not installed."
+					: result.status === "restarted"
+						? "Clio Coder background app restarted."
+						: result.reason === "busy"
+							? "Clio Coder background app was left running because it is busy."
+							: result.reason === "unknown"
+								? "Clio Coder background app was left running because it does not report whether it is idle."
+								: "Clio Coder background app was left stopped.";
+			console.log(line);
+			return;
+		}
 		const restarted = await restartBackground(directory);
 		console.log(`Clio Coder background app restarted and ready at ${new URL(restarted.url).origin}.`);
 		return;

@@ -13,6 +13,7 @@ export const Meta = Type.Object(
 		apiVersion: Type.Literal(API_VERSION),
 		epoch: Type.String(),
 		pwa: Type.Boolean(),
+		idle: Type.Boolean(),
 	},
 	{ additionalProperties: false },
 );

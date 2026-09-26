@@ -146,6 +146,9 @@ export class Supervisor {
 	list() {
 		return [...this.snapshots.values()].map((value) => structuredClone(value));
 	}
+	get hasOpenSessions() {
+		return this.entries.size > 0;
+	}
 	get busy() {
 		return (
 			!!(
