@@ -234,24 +234,7 @@ source and authority plus bounded references to detailed artifacts. The full
 state vocabulary and compatibility map are documented in
 [`evidence-and-memory.md`](evidence-and-memory.md#canonical-trust-status).
 
-### 5.3 Acceptance Coverage
-
-The current reduced contract suite divides dispatch coverage by ownership:
-
-| Contract | Current executable coverage |
-| --- | --- |
-| [dispatch-lifecycle.test.ts](../../tests/contracts/dispatch-lifecycle.test.ts) | Attached and detached lifecycle deduplication, durable transitions, terminal finalization, and orphan recovery from durable attempts. |
-| [dispatch-admission.test.ts](../../tests/contracts/dispatch-admission.test.ts) | Typed-scope authority, capability pairing, deterministic capacity admission, conservative slot defaults, and ACP authority boundaries. |
-| [dispatch-schema.test.ts](../../tests/extended/dispatch-schema.test.ts) | Capability-shaped model schema, self-contained nested objects on Pi’s Anthropic wire, and hidden-field compatibility. |
-
-Earlier releases carried separate envelope, assignment, detached-assignment,
-and failure-class test files for the detailed retry scenarios. Those files are
-not present in the current tree, so this page does not cite them as executable
-coverage. Retry and failover behavior remains owned by the dispatch source and
-the three maintained contracts above cover only the responsibilities stated in
-this table.
-
-### 5.4 Helper Acceptance and Capture Ceilings
+### 5.3 Helper Acceptance and Capture Ceilings
 
 Structured helper results ([result-contract.ts](../../src/domains/agents/result-contract.ts)) enforce an aligned acceptance and capture ceiling of 32 KiB (`STRUCTURED_HELPER_RESULT_MAX_BYTES = 32_768`). A worker rejects outputs exceeding 32 KiB during validation, guaranteeing that a worker cannot accept a helper result that exceeds the orchestrator's durable receipt capture allowance.
 

@@ -244,7 +244,7 @@ separately and never substitute one hash for another.
 
 The evidence bundle renders these sets in `transcript.md` (human sentences), `clio-coder evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`, including `trust`, the bounded canonical trust projection described in [evidence-and-memory.md](evidence-and-memory.md#trust-projection). A timed-out or denied escalation also raises an `escalation` finding in the bundle.
 
-The base provenance sets, steering, routing, quality, worker identity, result-conformance, and council provenance use the strict v20 shape frozen for the release. Version 20 also seals provenance for each declared dispatch-intent path. Receipts written before 0.5.6 may also carry the resolved `pathScope`, fleet gate provenance (`fleetGate`), the worker `attestation` projection, `ledgerContribution`, `staticShellHash`, `identity.hpc`, and `reproducibility.git`. Nothing read those fields, so they are no longer written; the digest still covers them, so those receipts verify. These fields are labeled `experimental` until the schema is promoted post-1.0. For the operator-facing registry of receipt and related persistent compatibility contracts, see [artifact-versions.md](artifact-versions.md).
+The base provenance sets, steering, routing, quality, worker identity, result-conformance, and council provenance use the strict v20 receipt shape. Version 20 also seals provenance for declared dispatch-intent paths. The reader accepts optional legacy fields such as `pathScope`, `fleetGate`, `attestation`, `ledgerContribution`, `staticShellHash`, `identity.hpc`, and `reproducibility.git`; their integrity remains checked when present, while current writers omit them. Receipt fields are labeled `experimental`. See [artifact-versions.md](artifact-versions.md) for persistent compatibility contracts.
 
 | Field path | Type | When present | Meaning | Status |
 | --- | --- | --- | --- | --- |
@@ -360,4 +360,6 @@ first-pass success: 1/1 (100%)
 none
 ```
 
-Quota account isolation is shipped and tested. At the default Clio directories, authenticated sibling CLIs remain connected accounts even without a Clio target. When any resolved Clio directory differs from its platform/XDG default, sibling quota adapters are excluded unless their own home is explicitly set: `CODEX_HOME` for Codex, `CLAUDE_CONFIG_DIR` for Claude Code, or `ANTIGRAVITY_HOME` for agy. Those directories contain `auth.json`, `.credentials.json`, and `antigravity-oauth-token`, respectively. Excluded adapters read no credentials, make no requests, and display no cached account rows. Clio-owned Anthropic Max credentials remain available in relocated homes.
+Quota adapters use the resolved Clio and sibling-CLI homes to select connected
+accounts. See [Subscription quota and session usage](../guide/commands-and-modes.md#subscription-quota-and-session-usage)
+for account isolation and cache behavior.

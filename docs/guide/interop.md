@@ -28,16 +28,12 @@ are selected explicitly; Clio does not silently switch agents or modes.
 | Antigravity CLI | No verified ACP recipe | `antigravity-code` | `antigravity` |
 | Pi CLI | No verified ACP recipe | `pi-cli` | `pi` |
 
-The Claude Code and Antigravity headless runners existed before 0.5.5; this
-release routes them through the shared connector registry alongside the new
-Codex, OpenCode, and Pi runners. Claude Code's pinned ACP bridge also predates
-this release. Clio's ACP client improvements in 0.5.5 apply to that bridge, but
-Antigravity CLI and Pi have no built-in ACP connection. Clio can still use an
-operator-configured ACP peer entry when a compatible adapter is available.
+Antigravity CLI and Pi have no built-in ACP connection. An operator-configured
+ACP peer entry can use a compatible adapter.
 
-When Clio herself serves an ACP frontend, she advertises stable session listing, deletion, resume, modes, and configuration options. Loading a session streams its full active history; resuming restores it without replay. The `default` and `yolo` modes control the hosted session's autonomy. Model and thinking options change the hosted session's route without saving a new default. See [ACP architecture](../architecture/acp.md) for the wire contract.
+When Clio itself serves an ACP frontend, it advertises stable session listing, deletion, resume, modes, and configuration options. Loading a session streams its full active history; resuming restores it without replay. The `default` and `yolo` modes control the hosted session's autonomy. Model and thinking options change the hosted session's route without saving a new default. See [ACP architecture](../architecture/acp.md) for the wire contract.
 
-With `clio-coder acp`, the first session request can select a workspace different from the directory where the frontend launched Clio. Clio loads that workspace's settings, trust, context, hooks, and tools before answering the request. A frontend can pass stdio MCP servers with a session; Clio makes their tools available through her gateway and closes them with that session. `acp --cwd PATH` binds the root at launch when the frontend already knows it.
+With `clio-coder acp`, the first session request can select a workspace different from the directory where the frontend launched Clio. Clio loads that workspace's settings, trust, context, hooks, and tools before answering the request. A frontend can pass stdio MCP servers with a session; Clio makes their tools available through its gateway and closes them with that session. `acp --cwd PATH` binds the root at launch when the frontend already knows it.
 
 Install and authenticate the peer's own CLI first. Run
 `clio-coder interop inspect --json` or open `/interop` to see the installed binary, configured
@@ -145,8 +141,8 @@ from it, and only when it carries nothing that host default-scans into a native
 component. Claude Code scans a plugin root for `agents/`, `commands/`, `hooks/`,
 `output-styles/` and `.mcp.json` without being asked, so a package that keeps
 Clio agent recipes in a top-level `agents/` directory would have them shown as
-native Claude agents. That is a compatibility claim nobody measured, so the
-generator leaves the package out and `pnpm run library:pin` prints the reason.
+native Claude agents. The generator excludes packages with those conflicting roots, and
+`pnpm run library:pin` prints the reason.
 
 Those packages remain valid first-class library packages, and agent-, prompt- and
 fleet-only packages are normal contributions. They simply have no peer-host
@@ -269,7 +265,7 @@ Claude-only and Codex-only plugin manifests use the same reviewed conversion as
 bindings are retained when their required skills convert in the same package.
 Unsupported companions and host features are listed in the plan. A portable
 package is refused when retained recipes require omitted files; for example,
-the tested WTF-P bundle requires action JSON files outside the supported text
+the WTF-P bundle requires action JSON files outside the supported text
 projection. Use ordinary `library install` for a reviewed portable package whose
 complete recipe assets are required, or import supported individual resources.
 

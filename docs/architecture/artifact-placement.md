@@ -92,9 +92,7 @@ git add -f .clio-coder/rules/backend.md
 git add -f .clio-coder/safety.yaml
 ```
 
-Review the forced path before committing it. This repository commits none of
-those project-local assets, and its `.gitignore` contains the blanket rule.
-Benchmark workspaces are temporary external repositories.
+Review the forced path before committing it.
 
 ## Finding what was hidden
 

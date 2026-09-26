@@ -59,7 +59,7 @@ If protected context still cannot fit, the worker ends with `worker_context_exha
 
 Non-isolated requests record context mode, parent session/leaf/workspace, snapshot digest, selected-content digest, estimated tokens, bytes, selected refs, omitted messages, the excluded unfinished tail, and excluded interrupted responses. The resolved plan displays the selection's digest and size; the run envelope and receipt carry the provenance under `workerContext`. Receipt integrity binds it, and context provenance remains separate from independent validation evidence.
 
-The host persists the selected seed at `$XDG_STATE_HOME/clio-coder/context-seeds/<contentHash>.json`, using mode 0600 and durable writes. These are exact historical artifacts with the same sensitivity as session history; no automatic garbage collection is introduced in this change. Native seeds are self-contained over the wire, including for remote workers. Their metadata and contents are validated before model use and are covered by the existing whole-spec attestation.
+The host persists the selected seed at `$XDG_STATE_HOME/clio-coder/context-seeds/<contentHash>.json`, using mode 0600 and durable writes. These are exact historical artifacts with the same sensitivity as session history; there is no automatic garbage collection. Native seeds are self-contained over the wire, including for remote workers. Their metadata and contents are validated before model use and are covered by the existing whole-spec attestation.
 
 WorkerSpec version **5** is required. Rebuild/update remote workers together with the orchestrator; an older worker must reject the new specification rather than silently ignore inherited history. ACP and other runtime adapters receive bounded splice text but do not implement native history forking or Clio's native pressure/recall loop.
 
@@ -97,11 +97,3 @@ effort is enabled ([openai-completions.ts](../../src/engine/apis/openai-completi
 compatibility allowance and not a universal provider contract. A per-response cap
 also caps one response, not a task: it does not bound total task tokens or
 guarantee the task finishes.
-
-[worker-output-settings.test.ts](../../tests/extended/worker-output-settings.test.ts) covers the eight combinations of
-trust state and layer (trusted project at low/medium/xhigh effort, trusted local
-override, untrusted, changed-after-trust, malformed, and user settings only).
-
-## Validation
-
-The worker-context contract tests cover incomplete multi-tool batches, copy isolation, path and explicit-ref selection, stale duplicate reads, mandatory constraints and errors, images, admission freezing, active-branch eviction replay, receipt tampering, scoped recall, and provider-usage reconciliation after eviction. Dispatch integration tests run the actual Pi worker against a controlled HTTP provider and verify single delivery, exclusion of later parent turns, absence of inherited fork events, wire validation, and rejection before a provider call when context is oversized. The normal full CI gate also exercises existing dispatch, session replay, worker transport, and operator behavior.

@@ -27,9 +27,8 @@ The worker protocol is transport-neutral: the orchestrator writes one
 WorkerSpec JSON line to the worker's stdin and reads NDJSON events from its
 stdout. A remote worker is exactly the same protocol tunneled through
 `ssh -T`, so nothing about prompts, safety, receipts, or telemetry changes
-with distance. Transport is a ladder: `local` and `ssh` exist today; a future
-container or cloud tier implements the same `WorkerTransport` interface
-([transport.ts](../../src/domains/dispatch/transport.ts)) without touching the protocol.
+with distance. The `local` and `ssh` transports implement the same
+`WorkerTransport` interface ([transport.ts](../../src/domains/dispatch/transport.ts)).
 
 Both local and SSH native workers must emit `worker_announce` as their first
 protocol event over the structured stderr control lane. The transport consumes it,
@@ -250,8 +249,8 @@ A `readOnly` dispatch restriction denies mutation and outside reads; reviewers a
 
 ### Single-writer token
 
-A parallel batch may declare `writers: 1`. One is the only accepted value in
-this release, and omission retains ordinary parallel admission. The scheduler
+A parallel batch may declare `writers: 1`. One is the only accepted value;
+omission retains ordinary parallel admission. The scheduler
 admits at most one write-scope step at a time. An agent step with a nonempty
 `writes` allowlist is a writer, as is a workspace-scope step that may mutate
 the checkout. Read-scope steps and agent steps with `writes: []` remain

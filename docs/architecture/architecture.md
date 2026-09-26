@@ -1,6 +1,6 @@
 # Clio Coder Architecture and Boundaries
 
-Clio Coder is an experimental, terminal-first coding harness for the CLIO ecosystem. CLIO stands for Context Layer for Input/Output; the project is named for the Greek muse of history and developed by the Gnosis Research Center at Illinois Tech. Its architecture favors small, auditable subsystems over a single monolithic agent loop: CLI entry points, the interactive TUI, provider/runtime code, worker subprocesses, tools, and feature domains are kept separate so local-model support and scientific-software workflows can evolve without collapsing safety boundaries.
+Clio Coder is a coding harness for terminal and browser sessions, with provider runtimes, mediated tools, and dispatched workers. CLI entry points, the interactive TUI, runtime adapters, worker subprocesses, and feature domains have separate ownership. These boundaries support local models and scientific-software workflows while keeping admission, safety, and persistence contracts explicit.
 
 This page is source-code aligned for the current source tree.
 
@@ -62,8 +62,7 @@ The `interop` domain owns one question: which other coding agents are on this
 machine and in this project. [registry.ts](../../src/domains/interop/registry.ts) is pure data, one
 entry per known agent carrying its binaries, the directories it owns, its skill
 and prompt roots, its instruction filenames, and the ACP launch recipe when it
-has one. Every other module that used to keep its own copy of that list now
-derives it: the skills loader and the prompts loader take their compatibility
+has one. Consumers derive their agent-specific behavior from this table: the skills loader and the prompts loader take their compatibility
 roots from the table, the adoption scanner takes its candidate files from it,
 and the safety path policy takes the foreign directories it refuses to write
 into from it.
@@ -314,9 +313,7 @@ FIFO records shown in the shell and admitted exactly once through the normal
 slash/bash/chat pipeline after attachment. A generation guard rejects a late
 hydration after shutdown; every failure path shares one idempotent close and
 terminal restoration transaction. The source boundary checker protects the
-declared Stage 0 closure and seams. There is no committed built-chunk budget
-contract at this revision; the installed-package smoke test still exercises
-lazy codemap loading. ACP, headless, ordinary non-TTY invocation, help, and
+declared Stage 0 closure and seams. ACP, headless, ordinary non-TTY invocation, help, and
 subcommands never construct a lease; the established explicit
 `CLIO_CODER_INTERACTIVE=1` non-TTY override remains force-interactive.
 

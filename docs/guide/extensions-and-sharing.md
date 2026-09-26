@@ -179,7 +179,7 @@ Clio is local-first. Skills run from disk and no chat turn depends on network ac
 npx skills add <skill> -a codex   # installs into ~/.codex/skills
 ```
 
-Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are not enabled in this release. Clio supports library package discovery and installation via `clio-coder library install <path|kind:name|name> [--user|--project]`: bare names and `kind:name` references resolve through the library catalog, and local paths require a valid package containing a root `plugin.json`. Raw or unindexed GitHub URLs cannot be installed directly; remote package installation requires a catalog entry with version and full-tree SHA-256 pin.
+Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are unavailable. Clio supports library package discovery and installation via `clio-coder library install <path|kind:name|name> [--user|--project]`: bare names and `kind:name` references resolve through the library catalog, and local paths require a valid package containing a root `plugin.json`. Raw or unindexed GitHub URLs cannot be installed directly; remote package installation requires a catalog entry with version and full-tree SHA-256 pin.
 
 ### Prompt envelope and safety
 

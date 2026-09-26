@@ -1,15 +1,14 @@
 # Typed Dispatch Intent: Migration and Refusal Policy
 
 Typed dispatch intent is the structured declaration of what a dispatched worker
-may read, may write, is expected to produce, and must verify. It replaces the
-practice of reconstructing that answer from optional `writeRoots` plus path-like
-tokens recalled from task and briefing prose.
+may read, may write, is expected to produce, and must verify. When supplied, it provides structured scope instead of inferring scope from
+optional `writeRoots` and path-like tokens in task and briefing prose.
 
 This page is the migration contract. It names every dispatch producer and every
 persisted structure typed intent touches, states what happens when intent is
 omitted, partial, versioned differently, or contradictory, lists the stable
-reason codes an operator or integrator can branch on, and states the measurable
-condition under which the legacy inference fallback may be proposed for removal.
+reason codes an operator or integrator can branch on, and describes the legacy
+inference fallback.
 
 Related pages: [tool-usage.md](../guide/tool-usage.md) for the `dispatch` tool arguments,
 [fleet-dispatch.md](../guide/fleet-dispatch.md) for fleet contracts,
@@ -177,7 +176,7 @@ inference path, whose malformed-path errors remain terminal.
 | **`dispatch` review gate, builder** | `src/tools/dispatch-admission.ts` | Inherited unchanged | Legacy inference | All codes |
 | **`dispatch` review gate, reviewer** | `src/tools/dispatch-admission.ts` | None on the request. `expected_outputs` and `verification` reach the reviewer as rendered *requirements*, never as evidence | Legacy inference over the reviewer's own task | Legacy inference errors only |
 | **`dispatch` `apply_winner`** | `src/tools/dispatch-admission.ts` | Not applicable. Branch application runs no worker | Not applicable | Branch-shape refusals only |
-| **`from_scout` continuation** | [dispatch-scout-admission.ts](../../src/tools/dispatch-scout-admission.ts) | **None today.** The compiled continuation plan carries no intent | Legacy inference per step | Legacy inference errors only |
+| **`from_scout` continuation** | [dispatch-scout-admission.ts](../../src/tools/dispatch-scout-admission.ts) | **None.** The compiled continuation plan carries no intent | Legacy inference per step | Legacy inference errors only |
 | **Fleet contract agent step (v4+ `writes:`)** | [fleet-run.ts](../../src/domains/dispatch/fleet-run.ts) | Declared. The contract's `writes:` compiles to `relevant_paths` | Legacy inference for pre-v4 contracts and readonly steps | All codes |
 | **Fleet contract gate / plan step** | `src/domains/dispatch/fleet-run.ts` | Declared, same path (`writes` is the gate path or the plan step's boundary) | Legacy inference when undeclared | All codes |
 | **Fleet delegation-plan spliced step** | `src/domains/dispatch/fleet-run.ts` | Declared from the validated plan task's `writes` | Legacy inference when the task declares none | All codes |
@@ -185,10 +184,10 @@ inference path, whose malformed-path errors remain terminal.
 | **ACP delegation target** | [extension.ts](../../src/domains/dispatch/extension.ts) | Accepted and carried into the plan, but the external agent runs its own tool surface | Legacy inference | All codes, plus a hard refusal of any resolved `writeRoots` on this transport |
 | **Custom agent recipe** | `src/domains/agents/` | Not a producer. A recipe narrows the tool surface and capability class; it never declares dispatch scope | Not applicable | Not applicable |
 | **Extension-authored `DispatchRequest`** | Any `DispatchContract` consumer | Declared, if the extension builds one through `declaredScopeIntent()` or the normalizer | Legacy inference | All codes |
-| **`clio-coder run --agent`** | [run.ts](../../src/cli/run.ts) | **None today** | Legacy inference | Legacy inference errors only |
-| **`clio-coder wiki generate`** | [wiki-generate.ts](../../src/cli/wiki-generate.ts) | **None today.** Sets legacy `writeRoots` | Legacy inference plus a derived write boundary | Legacy inference errors only |
-| **`clio-coder bootstrap generate`** | [bootstrap-generate.ts](../../src/cli/bootstrap-generate.ts) | **None today** | Legacy inference | Legacy inference errors only |
-| **Interactive slash commands, overlays, watchdog** | `src/interactive/` | **None today** | Legacy inference | Legacy inference errors only |
+| **`clio-coder run --agent`** | [run.ts](../../src/cli/run.ts) | **None** | Legacy inference | Legacy inference errors only |
+| **`clio-coder context wiki`** | [wiki-generate.ts](../../src/cli/wiki-generate.ts) | **None.** Sets legacy `writeRoots` | Legacy inference plus a derived write boundary | Legacy inference errors only |
+| **`clio-coder context init`** | [bootstrap-generate.ts](../../src/cli/bootstrap-generate.ts) | **None** | Legacy inference | Legacy inference errors only |
+| **Interactive slash commands, overlays, watchdog** | `src/interactive/` | **None** | Legacy inference | Legacy inference errors only |
 
 "All codes" means every terminal code in section 5 that can apply to the row's
 shape. "Legacy inference errors only" means the row cannot declare intent, so
@@ -201,8 +200,8 @@ only malformed or absolute prose-path inference can refuse it.
 | Contract | Version | Carries intent | Migration policy |
 | :--- | :--- | :--- | :--- |
 | **`DispatchIntent`** | `2` | It *is* the intent | **Refused, never migrated.** Any other version fails admission with `intent_version_unsupported`. A stored declaration is restated on a fresh call. |
-| **`DispatchPathScopeProvenance`** | `1` | Resolved scope with field source and confidence, never source prose | Sealed inside receipts written before 0.5.6, which still verify; newer receipts do not carry it. |
-| **Run Receipt** | `20` | `intent` inside the integrity digest, plus `pathScope` on receipts written before 0.5.6 | **Refused, never migrated.** A receipt below v20 is reported as retired: intact, but never read as evidence. |
+| **`DispatchPathScopeProvenance`** | `1` | Resolved scope with field source and confidence, never source prose | Optional legacy receipt field; verified when present and omitted by current writers. |
+| **Run Receipt** | `20` | `intent` inside the integrity digest, plus optional legacy `pathScope` | **Refused, never migrated.** A receipt below v20 is reported as retired: intact, but never read as evidence. |
 | **`ResolvedDispatchPlanArtifact`** | `3` | `intent` and `resolvedVerification` per task | **Refused, never migrated.** `resolvedDispatchPlanFromArgs` returns `null` for any version but 3, and a task whose `intent` fails `isDispatchIntent` invalidates the whole artifact. The call falls back to unresolved admission rather than executing a half-understood plan. |
 | **Dispatch plan approval text and hash** | Rendered, hashed | `intent_sha256` for a declared task; the full inferred scope table for a legacy task | Not persisted across versions. The hash binds the exact rendering an operator approved. |
 | **Worker Spec** | `3` | **No.** Carries the *resolved* `writeRoots`, not the declaration | Fail-closed preflight rejection. Deliberate: a worker receives an enforced boundary, never a statement of intent it could reinterpret. |
@@ -379,28 +378,8 @@ is refused outright rather than accepted and left unenforced.
 
 ---
 
-## 7. Retirement Criterion for Legacy Inference
+## 7. Legacy compatibility
 
-Removing the inference fallback requires a later explicit issue. This is the
-gate that issue has to clear, and it is measured rather than argued.
-
-Receipts written since 0.5.6 no longer carry `pathScope`, so the share of
-dispatches still resolving policy-bearing scope from prose is not in the
-evidence store today. Measuring it is planned work for the retirement issue:
-that issue must record the resolved mode again and read nothing but that mode,
-so the aggregate stays safe to report from records whose prose must not be
-quoted. The two bounds are declared in
-[intent-compatibility.ts](../../src/domains/dispatch/intent-compatibility.ts).
-
-The criterion is met when, over a window of dispatches:
-
-- at least `DISPATCH_INTENT_RETIREMENT_MIN_SAMPLE` (200) dispatches carry a
-  recorded resolution mode, and
-- at most `DISPATCH_INTENT_RETIREMENT_MAX_LEGACY_SHARE` (2%) of them resolved
-  as `legacy-inferred`.
-
-A window with no measured dispatches must never count as ready, so an empty
-record cannot read as full adoption. The producer
-rows in section 3 marked **None today** are the concrete work that has to land
-before the share can fall: each is a producer that cannot currently declare, so
-each one contributes to the legacy count no matter how the model behaves.
+Omitted intent uses the legacy inference path described above. Current receipts
+do not persist the resolved `pathScope`, and no runtime adoption threshold
+removes this fallback.

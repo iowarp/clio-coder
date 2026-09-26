@@ -41,11 +41,22 @@ export interface ClioSessionMeta {
   piMonoVersion: string;
   platform: string;
   nodeVersion: string;
-  sessionFormatVersion?: number; // CURRENT_SESSION_FORMAT_VERSION = 4
+  sessionFormatVersion?: number; // CURRENT_SESSION_FORMAT_VERSION = 6
 }
 ```
 
-Format version `CURRENT_SESSION_FORMAT_VERSION = 4` ([session.ts](../../src/engine/session.ts)) is stamped on all sessions created since the working-set layer landed. Version 4 adds the `contextEviction` and `contextRecall` ledger kinds. `runMigrations` in `src/domains/session/migrations/` performs the one supported additive migration from version 3 to version 4. A missing version or a version below 3 names the remedy (remove the session directory), while a version above 4 says the session was written by a newer Clio and must not be read by this build.
+New sessions use format `CURRENT_SESSION_FORMAT_VERSION = 6`
+([session.ts](../../src/engine/session.ts)). The reader accepts versions 3–6.
+Opening version 3, 4, or 5 restamps metadata as version 6 without transforming
+the existing ledger or tree. Version 4 adds `contextEviction` and `contextRecall`;
+version 5 adds `handoffTransaction`, `continuityCommit`, and optional continuity
+payloads on compaction summaries; version 6 adds eviction reasons, the `reread`
+recall trigger, and optional evicted-body content hashes.
+
+A missing format or a version below 3 is refused with guidance to remove the
+incompatible session directory. Versions above 6 require a newer Clio. Older
+binaries may refuse a session after its metadata is restamped; upgrade clients
+before reopening shared sessions.
 
 Session admission checks metadata format before any recovering ledger read. It
 validates replay entries before parking the current session. Required headerless
@@ -63,7 +74,7 @@ The session ledger `current.jsonl` records all conversation events, model turns,
 The first line of `current.jsonl` is the canonical session header:
 
 ```json
-{"type":"session","version":4,"id":"01912a34-b567-7890-abcd-ef0123456789","timestamp":"2026-08-14T12:00:00.000Z","cwd":"/path/to/project"}
+{"type":"session","version":6,"id":"01912a34-b567-7890-abcd-ef0123456789","timestamp":"2026-08-14T12:00:00.000Z","cwd":"/path/to/project"}
 ```
 
 ### Entry Taxonomy
@@ -86,6 +97,14 @@ Subsequent lines represent typed `SessionEntry` objects ([entries.ts](../../src/
 4. **`compactionSummary`**: Progressive compaction snapshot retaining historical context up to `firstKeptTurnId`.
 5. **`taskLedger`**: Full session task-board snapshot with a stable board id, goal and subgoal states, active run ids, required validation evidence, and optional operator provenance through `origin: "user"` plus `userTaskId`.
 6. **`decisionLedger`**: Branch-anchored snapshot of a completed or cancelled `ask_user` interview, including its timing, round count, settled values, superseded values, and operator corrections.
+
+7. **`contextEviction`**: Policy, trigger, estimated token changes, and references to evicted observations or thinking blocks; the original bodies remain in the ledger.
+8. **`contextRecall`**: Reference, trigger, and token readmission for explicit recall or a matching reread.
+9. **`handoffTransaction`** and **`continuityCommit`**: Durable records for staged context continuity and its committed checkpoint. See [Context continuity](../guide/context-continuity.md).
+
+Other typed entries record bash executions, custom data, model/thinking changes,
+file observations, branch summaries, protected artifacts, skill activations, and
+worker runs. Their shapes are defined in `entries.ts`.
 
 `taskLedger` and `decisionLedger` are context-free bookkeeping entries. They refold the `/tasks` and `/decisions` surfaces and enter evidence projection, but do not consume model-context tokens or become model messages by themselves.
 

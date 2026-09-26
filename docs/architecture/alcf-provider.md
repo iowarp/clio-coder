@@ -57,8 +57,7 @@ clio-coder models --target alcf-sophia
 
 ## Implementation Notes
 
-The implementation is intentionally inside Clio Coder rather than downstream
-scientific apps:
+The runtime uses these components:
 
 - [alcf-oauth.ts](../../src/engine/alcf-oauth.ts) implements the Globus PKCE paste-code OAuth flow.
 - [oauth.ts](../../src/engine/oauth.ts) registers the Clio-owned OAuth provider through the

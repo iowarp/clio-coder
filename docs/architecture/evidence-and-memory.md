@@ -53,10 +53,8 @@ Run/session evidence files:
 └── findings.md
 ```
 
-Bundles built before 0.5.6 also hold `trace.raw.jsonl`, `trace.cleaned.jsonl`,
-`audit-linked.jsonl` and `protected-artifacts.json`. No reader opened them, so
-new bundles do not write them; older bundles still read, because every reader
-opens the files above by name.
+Readers open the named core files above. Older bundles may include additional
+trace or audit copies; those files are not required to read a bundle.
 
 ### Core files
 

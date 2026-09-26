@@ -55,34 +55,23 @@ catalog is ordered by key; `preferredModelFor` does not treat the first
 catalog row as the provider's preferred model. Operators can still enter the
 wire ID documented by the provider when no list is available.
 
-## Measuring models
+## Capability records and serving provenance
 
-Each sealed receipt records the target, runtime, wire model, thinking level,
-and usage of its run. Measurement campaigns, their prompts, raw artifacts,
-credentials, and private endpoint details belong outside this repository.
+Sealed receipts record a run's target, runtime, wire model, thinking level, and
+usage. Catalog records describe model capabilities and request quirks; runtime
+probes and server configuration establish the deployed context and slots. A
+shared KV pool is not an independent full context allocation for each slot.
 
-Record deployment facts with each measurement rather than treating a particular
-host/model pairing as a product default. Use a live probe and server configuration
-to establish context and slots; a shared KV pool is not one full independent
-context allocation per slot.
-
-## What "sanctioned" means
-
-A model family is "sanctioned" only when we can say what was tested and under which runtime. It is not a blanket endorsement. For each family, capture:
-
-- exact model id / artifact / quantization;
-- provider or runtime surface (`lmstudio`, `ollama`, `llamacpp`, `openrouter`, `openai-codex`, etc.);
-- hardware and serving configuration;
-- context window and max output actually exercised;
-- tool-use, reasoning, vision, embeddings/rerank/FIM behavior where relevant;
-- quirks needed by the engine (thinking mechanism and sampling), plus serving provenance such as KV cache;
-- failures and "do not use this route yet" notes.
+When authoring a catalog entry or field note, identify the exact model, artifact,
+quantization, runtime, hardware, and serving configuration. State the context and
+output limits used, relevant tool/reasoning/vision capabilities, required quirks,
+and known failures. These details qualify the scope of each observation.
 
 Engine-visible quirks belong in catalog YAML entries under `quirks.sampling` and `quirks.thinking`. Serving calibration such as KV cache recommendations remains free-form provenance.
 
-Clio sends `quirks.sampling.thinking` on every request whose turn reasons and `quirks.sampling.instruct` on every other one, on OpenAI-compatible, LiteLLM and native Ollama runtimes. A family with only `instruct` sends it in both modes. A server's sampler preset applies only to a request that carries no sampler, so it is the fallback for other clients and never the setting for a Clio turn. Through LiteLLM, `temperature`, `top_p` and `presence_penalty` travel as OpenAI fields and `top_k`, `min_p` and `repeat_penalty` travel in `extra_body`, which reaches llama.cpp and LM Studio as ordinary body fields. The one-run flags (`--temperature`, `--top-p`, `--top-k`, `--min-p`) override both profiles. A fine-tune whose vendor card states no sampler of its own takes its base model's per-mode sampler; the Qwopus3.6 and Qwopus3.8 entries follow Qwen3.6 and Qwen3.8 this way (`tests/contracts/qwopus-sampling.test.ts`).
+Clio sends `quirks.sampling.thinking` on every request whose turn reasons and `quirks.sampling.instruct` on every other one, on OpenAI-compatible, LiteLLM and native Ollama runtimes. A family with only `instruct` sends it in both modes. A server's sampler preset applies only to a request that carries no sampler, so it is the fallback for other clients and never the setting for a Clio turn. Through LiteLLM, `temperature`, `top_p` and `presence_penalty` travel as OpenAI fields and `top_k`, `min_p` and `repeat_penalty` travel in `extra_body`, which reaches llama.cpp and LM Studio as ordinary body fields. The one-run flags (`--temperature`, `--top-p`, `--top-k`, `--min-p`) override both profiles. A fine-tune whose vendor card states no sampler of its own takes its base model's per-mode sampler; the Qwopus3.6 and Qwopus3.8 entries follow Qwen3.6 and Qwen3.8 this way.
 
-Bundled entries under `src/domains/providers/models/**/*.yaml` are for curated Clio-supported families. User/lab/project experiments should start as overlays before they are promoted into source. Free-form notes can live alongside catalog entries and in this docs area for later cookbooks/blog posts. Catalog entries for LM Studio (`lmstudio`) no longer promise native SDK behavior or track SDK versions; all routing and capability reporting now reflects the strict HTTP adapter.
+Bundled entries under `src/domains/providers/models/**/*.yaml` describe curated model families. User and project overlays supply deployment-specific facts and quirks. LM Studio (`lmstudio`) routing and capability reporting use the HTTP adapter.
 
 ## Local catalog overlays
 

@@ -163,14 +163,14 @@ Project-level context is authored in Markdown and discovered hierarchically, fro
 
 ---
 
-## Codewiki & Architecture Index
+## Codemap and architecture wiki
 
 Clio maintains two distinct repository knowledge layers:
 
 ```
 Repository Source Code
        │
-       ├─► [context init / refresh] ──► .clio-coder/codemap.json (Model-Free Structural Index)
+       ├─► [context index / refresh] ──► .clio-coder/codemap.json (Model-Free Structural Index)
        │                                     │
        │                                     ▼
        │                                Fast code_nav Symbol Resolution
@@ -184,10 +184,10 @@ Repository Source Code
 | Dimension | Structural Codemap | Markdown Architecture Wiki |
 | :--- | :--- | :--- |
 | **Artifact** | `.clio-coder/codemap.json` (schema v5) | `.clio-coder/wiki/**/*.md` + `meta.json` |
-| **Generation** | `clio-coder context init` (model-free) | `clio-coder context wiki` (worker dispatches) |
+| **Generation** | `clio-coder context index` (model-free); `context init` can also generate guidance | `clio-coder context wiki` (worker dispatches) |
 | **Inference Cost** | 0 tokens (pure AST and lexical parsing) | Planning turn + 1 worker dispatch per page |
-| **Prompt Representation**| `<codemap>` tag enabling `code_nav` | `<wiki>` summary index with page pointers |
-| **Update Triggers** | File save, git checkout, `context refresh` | Explicit operator command |
+| **Prompt Representation** | Snapshot availability and bounded orientation, with `code_nav` retrieval pointers | Bounded checkpoint-coverage hint; pages are retrieved with `code_nav mode=wiki` |
+| **Update Triggers** | Session-start reconciliation, notified tool edits, demand navigation, and explicit index/refresh commands | Explicit operator command |
 
 <details>
 <summary>Structural index schema v5 and symbol resolution</summary>

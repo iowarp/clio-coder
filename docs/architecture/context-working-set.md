@@ -94,13 +94,15 @@ A policy answers one question: which units should leave. It never writes, never 
 
 ### `age-horizon`
 
-The rule `maskStaleObservations` applied, recorded instead of destroyed. Every `tool_result` body older than the protection horizon leaves the working set, and every `assistant` message older than the horizon loses its thinking blocks. Same turn-start definition, same cutoff, and a body carrying a legacy compaction marker is skipped the same way.
+Outside the protected horizon, `age-horizon` evicts eligible tool-result bodies
+at or above `minEvictableTokens` and removes assistant thinking blocks. Bodies
+containing legacy compaction markers are skipped. Thinking blocks have no size
+floor because their removal adds no marker.
 
-One skip condition is new, so this is today's selection minus small results rather than a byte-identical reproduction of it: a result whose estimated body is below `minEvictableTokens` (200 tokens by default) stays, whatever its age. The engine already rejects markers that save no tokens; the higher default is a measured low-yield churn guard. The old mask had no such floor and masked those results too. Thinking has no size floor either way, because dropping it renders no marker.
-
-`age-horizon` has no target stop. It evicts everything beyond the horizon in one event, exactly as the mask did, and ignores `context.workingSet.target`; the replay tables show this as `saturated events = 1.000` on every row. That is deliberate: the policy exists to reproduce the old selection through the ledger, and an operator who wants batching to a target wants a structural policy. Candidates arrive newest-safe-first, so a caller that stops early has evicted the newest safe unit rather than the oldest one.
-
-Age is not a quality signal. A file read twenty turns ago and never touched since is more useful than a directory listing from two turns ago, which is why the structural compositions exist.
+The policy evicts all eligible candidates in one event and ignores
+`context.workingSet.target`. Candidates arrive newest-safe-first. Structural
+policies add relevance rules and stop their pressure-driven age rung at a target
+size.
 
 ### `structural-v2` (default) and `structural-v1`
 
@@ -121,7 +123,7 @@ The final `recalled_twice` rung is a protection flag rather than an eviction rea
 
 Rungs 1 through 7 do not test pressure themselves; the live scheduler gates the checkpoint. The age rung stops once the projected size reaches `context.workingSet.target × contextWindow`. Candidates arrive newest-safe-first within a rung to limit the cold prefix caused by an event. The composer in [compose.ts](../../src/domains/context/working-set/policies/compose.ts) owns protection, duplicate refusal, and shared headroom accounting.
 
-Three other measured rungs remain available for replay experiments, outside the default: `search_narrowed` accepts searches whose paths were read or edited; `diff_applied` accepts mutation echoes superseded by a covering read or later mutation; `dispatch_receipt_settled` accepts receipts acknowledged by later continuity records. In the measured local corpus, search narrowing selected nothing, mutation echoes were below the 200-token floor, and eight dispatch receipts moved no objective metric. These observations do not promise the same result on another corpus.
+Three additional rungs are available in replay outside the default composition: `search_narrowed` accepts searches whose paths were read or edited; `diff_applied` accepts mutation echoes superseded by a covering read or later mutation; `dispatch_receipt_settled` accepts receipts acknowledged by later continuity records.
 
 The path index records tool identity, canonical paths, ranges, outcomes, and ledger position. Call arguments establish identical-call supersession. Content hashes serve reread matching rather than candidate ranking.
 
@@ -157,7 +159,7 @@ A successful text `read` also checks whether the returned body matches an evicte
 
 That also makes recall the churn signal. `churn = recalls / itemsEvicted` over the active path. A high churn number means the policy keeps evicting content the session still needs, which is a reason to change the policy rather than to raise the threshold.
 
-The procedural replay retains recorded `contextRecall` events and their result provenance, but does not synthesize churn from path reuse. Its reference graph distinguishes genuine rereads from rereads after a rewrite, counts listing discovery only at the first subsequent read, and treats identical calls as coverage, while a real `contextRecall` is an explicit model choice of one ref. A later reread already returns current content at the tail, so also injecting the old body would duplicate data and misread stale or superseded observations as recall demand. Replay reports `recallTokens` as a one-time demand bound per evicted item and waits for explicit `contextRecall` records before reporting recall count, churn, or tail growth. Graph-density measurements and reopening calculations are generated local artifacts rather than a versioned replay README.
+The procedural replay retains recorded `contextRecall` events and their result provenance, but does not synthesize churn from path reuse. Its reference graph distinguishes genuine rereads from rereads after a rewrite, counts listing discovery only at the first subsequent read, and treats identical calls as coverage, while a real `contextRecall` is an explicit model choice of one ref. A later reread already returns current content at the tail, so also injecting the old body would duplicate data and misread stale or superseded observations as recall demand. Replay reports `recallTokens` as a one-time demand bound per evicted item and waits for explicit `contextRecall` records before reporting recall count, churn, or tail growth.
 
 An offloaded result returns its pointer, never the file. The model gets the same `full: <path>` promise the original tool result ended with and reads it with `read` when it wants it.
 
@@ -198,7 +200,7 @@ context:
 
 The retired `compaction.excludeLastTurns` key is not accepted by settings v2. The temporary legacy mask uses a compiled six-turn fallback; working-set protection uses `context.workingSet.protectLastTurns`. Settings validation is strict, so an unknown key under this block fails startup with its exact path.
 
-`CLIO_CODER_LEGACY_MASK=1` restores the destructive stale-observation stage for one release as a compatibility escape hatch. It rewrites the ledger, and it is removed in the next release.
+`CLIO_CODER_LEGACY_MASK=1` enables the legacy stale-observation stage for compatibility. That stage rewrites the ledger rather than projecting a working set.
 
 ## What the operator sees
 
@@ -208,18 +210,14 @@ The retired `compaction.excludeLastTurns` key is not accepted by settings v2. Th
 - **Prompt cache line.** Every applied event stamps `working_set_evict` on the next assistant entry's `promptCache.expectedColdReasons`. When the last settled run came back cold for that reason, the overlay adds `last cold turn: working-set eviction (expected)` and drops the shell-reused-but-backend-cold warning, because the cold turn is explained rather than surprising.
 - **Notice.** One line per applied event: `[context engine] working set: N items evicted by <policy>; ~X -> ~Y tokens, recall by ref with context(scope="recall")`. The numbers are the plan's, priced over the visible ledger slice, and they are the same numbers the `contextEviction` entry, the `[Compaction] Reclaimed context` toast, and the overlay's `last compaction` line carry. The footer meter is a separate live estimate over the agent message list and can differ from them by the tool schemas and replay text it includes.
 
-## Not in this release
-
-These are tracked follow-ups, not available behavior:
-
-- **Predictive readmission.** Matching an actual reread is shipped; prefetching a body before the model requests it is not.
-- **Deferred scheduling.** Replay reports cold-prefix tokens per event and combined cache-miss cost including modeled summaries. There is no break-even scheduler or deferred eviction plan; the pressure threshold and rearm band govern automatic reduction.
-- **Worker runtimes.** Dispatched workers replay their own ledgers without the working-set stage.
-- **Digests.** A marker carries tool, size, and a first-line preview. The generated summaries from #165 are not embedded in it.
+Dispatched workers replay their own ledgers without the working-set stage.
+Automatic reduction uses the pressure threshold and rearm band. Recall markers
+contain tool identity, size, and a first-line preview; a reread restores current
+content when requested.
 
 ## See also
 
-- `clio-coder context replay --sessions <path>...` replays Clio ledgers, and `--synthetic <ids>` replays the seeded procedural corpora, through the same fold, projection, and policy code with `none`, `random`, and `oracle` controls; `clio-coder context working-set --session <id|path>` prints one session's fold and path index. Both are described under [Working-set replay](../guide/commands-and-modes.md#working-set-replay). Reports include per-reason items and tokens, events and checkpoints per trace, modeled cache-miss cost, and overflow reductions. With `--profile data-analysis` or `--profile web-design`, a profile section lists effective settings and pairs every policy/budget row with a default-profile run over the same loaded corpus. JSON schema `clio-coder-context-replay-v3` contains the same profile fields and baseline results. Copy a changing session corpus before comparing runs. Generated replay tables are local artifacts rather than versioned benchmark results.
+- `clio-coder context replay --sessions <path>...` replays Clio ledgers, and `--synthetic <ids>` replays the seeded procedural corpora, through the same fold, projection, and policy code with `none`, `random`, and `oracle` controls; `clio-coder context working-set --session <id|path>` prints one session's fold and path index. Both are described under [Working-set replay](../guide/commands-and-modes.md#working-set-replay). Reports include per-reason items and tokens, events and checkpoints per trace, modeled cache-miss cost, and overflow reductions. With `--profile data-analysis` or `--profile web-design`, a profile section lists effective settings and pairs every policy/budget row with a default-profile run over the same loaded corpus. JSON schema `clio-coder-context-replay-v3` contains the same profile fields and baseline results. Copy a changing session corpus before comparing runs.
 - [context-engine.md](context-engine.md) for context window resolution, token accounting, and how this stage sits ahead of summary compaction.
 - [session-lifecycle.md](session-lifecycle.md) for the ledger format, active-path lineage, and branching.
 - [glossary.md](../guide/glossary.md) for the one-line definitions of these terms.

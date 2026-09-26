@@ -2,7 +2,7 @@
 
 The [library guide](../guide/resource-library.md) explains package installation and operator controls.
 
-Clio uses **library** for the collection and **package** for a distributable item. This name covers both local authoring and indexed distribution without suggesting a remote store or a purchase. CLI `library`, slash `/library`, the Library overlay and the bundled `library/registry.yaml` describe the same collection. The Pi API snapshot does not contain the retired command names, so top-level `plugins`, top-level `skills`, and `/resources` are removed rather than retained as aliases. Retired slash commands `/plugins` and `/resources` return an explicit usage error pointing to `/library` (for recipe packages) and `/extensions` (for harness extensions). Bare `/skill` returns usage guidance pointing to `/skills`, while `/skill <name>` activates a skill and `/skill off` clears the active skill's armed tool surface (without erasing instructions already loaded in transcript or context).
+Clio uses **library** for the collection and **package** for a distributable item. This name covers both local authoring and indexed distribution without suggesting a remote store or a purchase. CLI `library`, slash `/library`, the Library overlay and the bundled `library/registry.yaml` describe the same collection. Retired slash commands `/plugins` and `/resources` return an explicit usage error pointing to `/library` (for recipe packages) and `/extensions` (for harness extensions). Bare `/skill` returns usage guidance pointing to `/skills`, while `/skill <name>` activates a skill and `/skill off` clears the active skill's armed tool surface (without erasing instructions already loaded in transcript or context).
 
 ## Invariants
 
@@ -20,7 +20,7 @@ Clio uses **library** for the collection and **package** for a distributable ite
 
 Package identity, component identity and invocation identity are distinct. The package reference is `kind:name`. A component reference such as `${component:agent:researcher}` is local to one package and resolves a contained file. It does not rename the agent. Prompt invocation names derive from paths beneath the prompt root, agent IDs derive from recipe filenames, and fleets use their authored names. Authors must choose unique runtime names, normally with their package prefix. Installation does not add an automatic colon namespace to agents or fleets.
 
-This is a deliberate refinement of the earlier sprint proposal for automatic namespaces. It preserves Materio's `materio-*` agents and fleets, `/materio:*` prompts, and the WTF-P bridge targets `/wtfp:new-paper`, `/wtfp:map-project`, and `/wtfp:create-outline`. Runtime collisions continue to use each resource loader's documented precedence and diagnostics.
+For example, Materio uses `materio-*` agents and fleets and `/materio:*` prompts; the WTF-P bridge uses `/wtfp:new-paper`, `/wtfp:map-project`, and `/wtfp:create-outline`. Runtime collisions use each resource loader's documented precedence and diagnostics.
 
 ## Owners and boundaries
 
@@ -28,4 +28,4 @@ This is a deliberate refinement of the earlier sprint proposal for automatic nam
 
 Unmanaged local resource files remain discoverable in established Clio and foreign roots. The worker's bounded raw-skill preparation helper and authoring audits are not library installations. Their normalized skill-body hashes describe activation/provenance evidence, not installable package integrity. Maintainer `skills:check` validates authored skill metadata and audit records; the release's distribution integrity rule is `library:check` over full package trees.
 
-Package scripts versus harness extensions: library packages may carry contained scripts for explicit evaluation or verification workflows without registering runtime harness tools or session UI. Harness extensions remain a separate executable integration contract for command tools and hook declarations. They cannot own domain resource roots. No new framework, registry server or installer is introduced by the library.
+Package scripts versus harness extensions: library packages may carry contained scripts for explicit evaluation or verification workflows without registering runtime harness tools or session UI. Harness extensions remain a separate executable integration contract for command tools and hook declarations. They cannot own domain resource roots.

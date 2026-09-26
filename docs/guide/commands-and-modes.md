@@ -187,9 +187,9 @@ reachable herdr session.
 
 `clio-coder run --cwd <dir> "<task>"` behaves the same as `cd <dir> && clio-coder run "<task>"`. The process enters `<dir>` before it reads layered project settings, context files, skills, `@file` references, or the session ledger, and every tool path resolves against it. Relative paths in other arguments, such as `--skill`, `--steer-channel`, and `@file`, resolve against `<dir>` as well. The path is canonicalized first, so the run ledger records the physical directory as the run's `cwd`.
 
-Image `@file` references in a headless prompt or stdin require the routed model's image-input capability. Clio refuses the turn before sending the image when the route is text-only. The run exits nonzero and prints `IMAGE_INPUT_UNSUPPORTED` with the target and model. A turn refused before admission has no run receipt. This behavior is shipped and tested.
+Image `@file` references in a headless prompt or stdin require the routed model's image-input capability. Clio refuses the turn before sending the image when the route is text-only. The run exits nonzero and prints `IMAGE_INPUT_UNSUPPORTED` with the target and model. A turn refused before admission has no run receipt.
 
-Inline image references accept PNG, JPEG, GIF, or WebP bytes detected by file signature. Clio attempts to resize them to at most 2,000 by 2,000 pixels and below 4.5 MiB of base64 before submission; an image that cannot fit is omitted with a note. There is currently no settings key to disable images or change this inline cap. The image gate and these fixed bounds cover the present need, so a new setting is not planned. The limits are shipped and tested; the setting decision is planned.
+Inline image references accept PNG, JPEG, GIF, or WebP bytes detected by file signature. Clio attempts to resize them to at most 2,000 by 2,000 pixels and below 4.5 MiB of base64 before submission; an image that cannot fit is omitted with a note. There is currently no settings key to disable images or change this inline cap.
 
 - A missing path, a file, or a directory the process cannot enter fails with exit code 2 and a message naming the resolved path. No model is called.
 - `--cwd` with no value is a usage error with exit code 2.
@@ -314,9 +314,9 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/fork` | `/fork` | Fork from an assistant turn |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
 
-The `/model` selector marks image-capable rows with `V` and spells out `image input yes` or `image input no` in the selected row's details. A completed `/model <pattern>` switch includes the same image-input state in its notice. The expanded dashboard's session capabilities always say `images yes` or `images no` for the active route. These states use the resolved deployment capability and are shipped and tested.
+The `/model` selector marks image-capable rows with `V` and spells out `image input yes` or `image input no` in the selected row's details. A completed `/model <pattern>` switch includes the same image-input state in its notice. The expanded dashboard's session capabilities always say `images yes` or `images no` for the active route. These states use the resolved deployment capability.
 
-When a session with earlier images moves to a text-only model, the next turn shows a warning. Clio replaces each historical image block with an explicit omission note in that model's request. The saved session keeps the original blocks, so switching back to a vision-capable model can use them again. This behavior is shipped and tested.
+When a session with earlier images moves to a text-only model, the next turn shows a warning. Clio replaces each historical image block with an explicit omission note in that model's request. The saved session keeps the original blocks, so switching back to a vision-capable model can use them again.
 
 ### Subscription quota and session usage
 
@@ -699,6 +699,6 @@ Live Fleet runs reserve a section just above the composer. This summary never co
 
 Open `/settings targets` or `/config targets` to add or edit targets inside the TUI. Choose **Add target**, or select a target and choose **Edit URL, runtime and default model**. The shared configure wizard stays in the composer dock. Use arrows to select, type to edit or filter a model list, Enter to continue, Esc to go back, and Ctrl+C to cancel setup. Target settings remain a draft until **Save target**, which writes global settings; credentials are stored when browser sign-in succeeds. Editing a target preserves explicit chat, fleet and memory model defaults.
 
-Quota account isolation is shipped and tested. At the default Clio directories, authenticated sibling CLIs remain connected accounts even without a Clio target. When any resolved Clio directory differs from its platform/XDG default, sibling quota adapters are excluded unless their own home is explicitly set: `CODEX_HOME` for Codex, `CLAUDE_CONFIG_DIR` for Claude Code, or `ANTIGRAVITY_HOME` for agy. Those directories contain `auth.json`, `.credentials.json`, and `antigravity-oauth-token`, respectively. Excluded adapters read no credentials, make no requests, and display no cached account rows. Clio-owned Anthropic Max credentials remain available in relocated homes.
+At the default Clio directories, authenticated sibling CLIs remain connected accounts even without a Clio target. When any resolved Clio directory differs from its platform/XDG default, sibling quota adapters are excluded unless their own home is explicitly set: `CODEX_HOME` for Codex, `CLAUDE_CONFIG_DIR` for Claude Code, or `ANTIGRAVITY_HOME` for agy. Those directories contain `auth.json`, `.credentials.json`, and `antigravity-oauth-token`, respectively. Excluded adapters read no credentials, make no requests, and display no cached account rows. Clio-owned Anthropic Max credentials remain available in relocated homes.
 
 The Local AI `$0.00` quota row is shown only when settings contain a target whose registered runtime tier is `local-native`. A cloud-only configuration has no local-cost row.

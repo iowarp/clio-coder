@@ -224,13 +224,10 @@ released high/max selections to xhigh. That vendor default does not overwrite
 Clio's explicit chat preference or saved low setting. Disabling thinking does
 not remove historical reasoning or discard reasoning a server actually returns.
 
-Controlled gateway filtering tests cover discovery, capability transfer, actual
-HTTP payloads, off/on switching, and built CLI persistence. Live same-route
-probes on the selected LiteLLM deployment returned reasoning with the flag or
-none alone, zero reasoning on two calls with none plus the explicit allowance,
-and positive reasoning for an allowed low control. This verifies the measured
-route and request contract; unknown or heterogeneous gateway aliases need their
-own declared capabilities and acceptance.
+Gateway aliases need declared upstream capabilities to select the appropriate
+thinking control. Heterogeneous or unknown upstream runtimes cannot establish
+a single request dialect; explicit parameter forwarding remains subject to
+the gateway's configured filtering.
 
 ---
 

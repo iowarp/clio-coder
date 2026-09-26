@@ -39,7 +39,7 @@ clio-coder acp [--cwd PATH] [--permission-timeout MS]
 both spellings reach the same command dispatcher, option parser, stdout guard,
 and server boot path.
 
-- `--cwd PATH`: Bind this workspace before `initialize`. The path is resolved and canonicalized with `fs.realpath`, so a symlinked root, a trailing slash, and a `/.` suffix all name the same workspace. Clio enters that path before she reads settings, builds project context, or opens a session ledger. A path that does not exist or that the process cannot enter exits 2 without starting the server.
+- `--cwd PATH`: Bind this workspace before `initialize`. The path is resolved and canonicalized with `fs.realpath`, so a symlinked root, a trailing slash, and a `/.` suffix all name the same workspace. Clio enters that path before it reads settings, builds project context, or opens a session ledger. A path that does not exist or that the process cannot enter exits 2 without starting the server.
 
 Without `--cwd`, Clio opens the stdio transport and answers `initialize`, `authenticate`, and `logout` before loading a workspace. The first `session/new`, `session/load`, or `session/resume` selects its absolute existing `cwd`. A first `session/list` with a `cwd` filter selects that directory; one without a filter selects the launch directory. Other workspace dependent session and Clio extension methods select the launch directory if called first. The selected root is canonicalized, entered, and held for the process lifetime. Requests received during boot wait for the normal project trust, settings, context, hooks, and tools to load. Later session requests naming another canonical root fail with `-32602` and name the bound root.
 - `--permission-timeout MS`: The server-side fail-safe ceiling for one mediated permission request, as a whole number from 1 through Node's maximum schedulable timer delay (`2147483647`) milliseconds. Values outside that range are refused before the protocol server starts. If the timer wins, the approval expires, the active turn is aborted, every parked call for that turn is settled only so execution can unwind, and `session/prompt` fails with `permission_expired`. Expiry is audited as `expired`, never as a human denial, and no denial result is fed into a continuing model loop. The flag overrides `integrations.externalAgents.defaults.permissionTimeoutMs` for this server only, which itself defaults to `DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000` ([defaults.ts](../../src/core/defaults.ts)). The graphical application treats the remaining ACP request window as a hard ceiling on its own approval budget, projects that duration onto its own clock, escalates immediately when the remaining window is shorter than its escalation delay, and cancels without publishing a card if the window has already elapsed. Other clients may enforce a shorter operator-facing policy by sending ordinary `session/cancel`.
@@ -156,7 +156,7 @@ Every replay notification precedes the `session/load` response and carries `para
 
 `modes` offers `default` and `yolo`. `session/set_mode` changes the hosted session's autonomy, emits `current_mode_update` and `config_option_update`, and returns `{}`. The same autonomy control appears as a `mode` config option. A `model` option appears when a model is selected, and a `thought_level` option offers the thinking levels. `session/set_config_option` changes one option and returns the full list. Model and thinking changes use the session route without saving a default. All three controls refuse a change during a prompt. A global safe-settings autonomy patch changes the future-session default and does not silently mutate this bound snapshot.
 
-When the command host is wired, the server sends `available_commands_update` for commands it can execute from an ACP prompt. Tool start updates include the tool's `name`. Clio retains per-turn token and cost details in `_meta["clio-coder/usage"]`, including cost provenance. She does not send `usage_update` because she cannot derive a reliable current-context token count from cumulative turn usage. The task board can contain blocked and dropped tasks, which ACP plan status cannot represent, so she does not send a `plan` update for that board.
+When the command host is wired, the server sends `available_commands_update` for commands it can execute from an ACP prompt. Tool start updates include the tool's `name`. Clio retains per-turn token and cost details in `_meta["clio-coder/usage"]`, including cost provenance. She does not send `usage_update` because it cannot derive a reliable current-context token count from cumulative turn usage. The task board can contain blocked and dropped tasks, which ACP plan status cannot represent, so it does not send a `plan` update for that board.
 
 ### Safe settings and targets
 
@@ -536,12 +536,16 @@ The submission procedure follows these steps:
 4. Verify that `agent.json` adheres to the registry schema and that `icon.svg` remains monochrome with viewBox `0 0 16 16`.
 5. Submit a pull request to the upstream registry repository. Once merged, clients that consume the ACP registry discover and install Clio Coder automatically.
 
-## Independent lifecycle coverage
+## Session close and isolation
 
-Host replacement and direct ACP session isolation are separate checks. For the supported host API lifecycle, open a session and complete a turn, close, then use New and complete another turn. Close retires child A and initializes unbound child B; New binds B without a third launch. Record actual PIDs and host generations: both must change. A reused session ID alone cannot prove child replacement.
+The GUI session-close action retires that session's managed ACP child. During
+retirement, the host cancels an active turn, closes the client, and checks child
+termination; a child whose exit cannot be confirmed leaves an `unknown` state.
+A subsequent New action creates a fresh managed session.
 
-For direct ACP isolation, keep one stdio child alive through new, turn, close, new, and turn. Record the same live PID and distinct session IDs. Check that the second request and persisted ledger exclude first-session history and turn ancestry and that the actual tasks list has no board. Explicitly resuming the first session must restore its own history and task state without second-session text. Record bounded teardown and child exit.
-
-The host contract uses a fixture subprocess; the direct ACP smoke uses built Clio with a loopback provider. Neither establishes browser interaction or live-provider behavior. The GUI has no close control, and the host API retires its child on close. Record host restart and direct same-child isolation independently, with the actions, process identities, evidence mode, and limits.
+A direct stdio ACP client can close a session and create another in the same
+process. The server clears session history, turn ancestry, and task-board state
+for the new session. Explicit resume restores the selected session's own history
+and task state.
 
 ACP delegation receipts preserve peer-reported token totals, including explicit zero usage, and supported cost provenance without double-counting event metering. A peer total is used when supplied; otherwise components determine the total. Unknown cost is not evidence of free execution.

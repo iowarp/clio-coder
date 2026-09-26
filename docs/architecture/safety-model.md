@@ -2,11 +2,11 @@
 
 `createSafetyPolicyEngine` in [policy-engine.ts](../../src/domains/safety/policy-engine.ts) decides what a tool call may do. The tool registry in [registry.ts](../../src/tools/registry.ts) applies that decision and then the autonomy mapping in [autonomy.ts](../../src/domains/safety/autonomy.ts). The [tool usage guide](../guide/tool-usage.md) shows the operator surface.
 
-Safety is enforced by code, not by the prompt. The session prompt describes the rules, and the registry enforces them whether or not the model followed that description.
+The registry enforces safety rules before admitted tool calls execute. The session prompt describes those rules to the model.
 
-## What this is not
+## Execution boundary
 
-Clio gates tool calls before they run. It is not an operating-system sandbox. Commands, hooks and external agents run with the operator's own permissions. Environment filtering narrows what a child process inherits; it does not isolate the child.
+Clio gates tool calls before they run. Commands, hooks, and external agents run with the operator's operating-system permissions. Environment filtering controls inherited variables; filesystem and process isolation require an external sandbox.
 
 ## Autonomy
 

@@ -72,7 +72,7 @@ when the tool is, the same rule the Fleet block follows.
 | `identity.self-awareness` | The selected identity is `identity.clio` and the fragment is present in the table (`compiler.ts:673`). | Installed paths, code outranks docs, configuration locations. Names no tool. |
 | `operating.delegation` | `sessionCanDispatch` holds, meaning provider tool support is not explicitly false, `dispatch` is on the surface, and `turnAllowsTool` admits it; and the turn mode is not `answer` (`compiler.ts:244`, `compiler.ts:701`). `proposal` mode still renders it. | The delegation threshold as a count taken before the first edit, the dispatch call shape, receipts, spot-checks, and shared `[worker result]` notes. |
 | `operating.skills` | `sessionCanUseSkills` holds: provider tool support is not explicitly false, `context` is on the surface and admitted by `turnAllowsTool`, `skillDiscoveryEnabled` is not false, turn constraints do not disable skills, the mode is not `answer`, and `readySkillCount` is not zero (`compiler.ts:259`). | Skill-shaped tasks and `/skill <name>` suggestions, plus direct `context(scope="skills")` listing and autonomy-aware activation guidance. |
-| `identity.docs-routing` | `identity.self-awareness` rendered, provider tool support is not explicitly false, `gateway` is on the surface, and `turnAllowsTool` admits `clio_docs` (`compiler.ts:676`). | Routes questions about Clio herself through `gateway(op="call", capability="clio_docs", args={query: ...})` before answering or searching the workspace. |
+| `identity.docs-routing` | `identity.self-awareness` rendered, provider tool support is not explicitly false, `gateway` is on the surface, and `turnAllowsTool` admits `clio_docs` (`compiler.ts:676`). | Routes questions about Clio through `gateway(op="call", capability="clio_docs", args={query: ...})` before answering or searching the workspace. |
 | `operating.worker` | The reader is a dispatched worker, which never sees the coordinator fragments. | The assigned-task contract. |
 | `safety.<level>` | Always, selected by the effective autonomy level. | What runs, what is approval-required, and what is blocked, in the safety net's action-class vocabulary (read, write, command, `system_modify`, `git_destructive`) and never by tool name. |
 
@@ -123,7 +123,7 @@ rule, tool-free answering, the narrow-orientation tool list, validation for
 authorized file changes within scope, and schema correction after argument
 errors. Policy denials do not invite another route.
 
-Six tools carry hints today: `ask_user`, `bash`, `code_nav`, `context`, `panes`,
+Six tools carry hints: `ask_user`, `bash`, `code_nav`, `context`, `panes`,
 and `tasks`. A hint carries only a decision-local call shape the tool's own
 description cannot; policy that applies across tools is said once in its prompt
 section, so `dispatch` carries no hint.
@@ -309,9 +309,7 @@ Tool descriptions are tiered by how much a wrong call costs. The hot tools the m
 
 `gateway(op="find"|"describe"|"call", capability?, query?, args?)` is read class and sequential. Its inner call runs through canonical registry admission with the capability's own class, skill restrictions, approvals, and cancellation. Nested accounting counts the model call once. `effectiveToolCall` restores capability identity for artifact folding, mutation observers, path indexing, exported evidence, and transcripts. Terminal artifact results, images, and details survive routing. Gateway placement changes schema attachment, not authority or evidence.
 
-Native worker recipes continue to name capabilities such as `git`; `effectiveToolNames` adds `gateway` to the attached and attested direct projection while preserving the admitted capability allowlist for inner calls. Find and describe use that allowlist too. MCP sources are session-owned and are not installed into worker registries in this release.
-
-The recorded prompt fixture measured **31,272 bytes across 19 attached tools**, using `wireParameterSchema` and JSON serialization of name, description, and parameters. It excludes optional `ask_user` and `panes`. The historical full-surface figure was a different surface; a post-change full-surface total was derived by adding schemas, not measured. These figures do not establish an overall schema-size reduction. The placement decision and new contracts should be assessed independently of that incomparable total.
+Native worker recipes continue to name capabilities such as `git`; `effectiveToolNames` adds `gateway` to the attached and attested direct projection while preserving the admitted capability allowlist for inner calls. Find and describe use that allowlist too. MCP sources are session-owned and are not installed into worker registries.
 
 ## Context protection
 

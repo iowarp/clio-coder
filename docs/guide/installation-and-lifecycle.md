@@ -46,7 +46,7 @@ npm install -g @iowarp/clio-coder --omit=optional
 # Or: bun add -g @iowarp/clio-coder --omit=optional
 ```
 
-Historical Linux x64 measurement before the web package integration (`--omit=dev`): 387 MB across 118 packages with the SDK, 143 MB across 109 packages without it. Treat those numbers as a comparison, not the current install size: the platform, dependency versions and optional packages change the total. The release tarball size excludes separately installed npm dependencies.
+Installed size depends on platform, dependency versions, and optional packages. The release tarball size excludes separately installed npm dependencies.
 
 Everything except the `claude-sdk` runtime works on the smaller install: boot, `clio-coder doctor`, every other target and worker runtime. Dispatching a `claude-sdk` target on an install that omitted the package fails that run with a diagnostic naming the package and the command that fixes it (`npm install @anthropic-ai/claude-agent-sdk@0.3.186`); nothing else degrades, and nothing fails at startup.
 
@@ -329,73 +329,6 @@ later failure does not cause it to run again. `clio-coder upgrade --dry-run`
 lists the migrations not yet recorded as applied. `--skip-migrations` is a recovery override that lets
 the independent install and metadata work proceed after a migration failure.
 Fix the migration's cause and rerun the ordinary upgrade afterward.
-
-#### Historical record: upgrading from 0.3.0 to 0.3.1
-
-The following behavior records the 0.3.0 and 0.3.1 release binaries. It is not
-the current migration inventory or current upgrade output.
-
-Nothing has to be done by hand. On an npm install, one command does it all:
-
-```bash
-clio-coder upgrade
-```
-
-The 0.3.0 binary prints its header (`install npm`, `channel latest`,
-`current 0.3.0`), runs `npm install -g @iowarp/clio-coder@latest`, and then
-hands over to the binary that install just put on `PATH` with
-`clio-coder upgrade --post-install`. That newer binary runs the migration
-check, records `2026-08-18-lmstudio-runtime-id` in `state/migrations.json`, and
-normalizes any legacy LM Studio target id, websocket URL, and stored credential
-name. It then runs `clio-coder doctor --fix`,
-which refreshes `install.json`, and reports the transition as
-`ok: 0.3.0 -> 0.3.1 (migrations: 1)`. The outer 0.3.0 process closes with
-`ok: 0.3.0 -> post-install checks complete`. Under nvm or a custom npm prefix
-this works because `npm install -g` and the bare `clio-coder` resolve through
-the same prefix; the doctor rows the child prints are the proof of which binary
-answered. `clio-coder upgrade --dry-run` first names the exact command it would
-run, names the pending LM Studio migration, and prints
-`would refresh state metadata 0.3.0 -> 0.3.1` without touching the record.
-
-If you instead ran `npm install -g @iowarp/clio-coder` yourself, or launched
-the new binary before running `upgrade`, plain `clio-coder doctor` shows one
-failing row, `state metadata  stale 0.3.0 (...); current 0.3.1`, pointing at
-`clio-coder doctor --fix`, and exits 1. Either `clio-coder doctor --fix` or the
-next `clio-coder` launch refreshes it. `install.json` then reads
-`version: 0.3.1`, keeps the original `installedAt`, and gains `upgradedAt` and
-`upgradedFrom: "0.3.0"`; doctor's row becomes
-`0.3.1 (installed ..., upgraded ... from 0.3.0)`.
-
-#### Historical record: 0.3.x release notes
-
-The retained notes below span the 0.3.3 upgrade and later 0.3.7 operational
-changes. Upgrading from 0.3.1 to 0.3.3 was automated:
-
-```bash
-clio-coder upgrade
-```
-
-Key lifecycle and operational updates in v0.3.7:
-- Upgraded the underlying engine SDK libraries to 0.84.0 with signal-aware OAuth cancellation.
-- Hardened migration resilience: damaged `credentials.yaml` files no longer block upgrades when no renames are needed (#121); `--skip-migrations` is available as a recovery override.
-- Fullscreen TUI mode (`interface.mode`, `interface.fullscreenScrollbar`) is
-  available through `/settings interface` and requires a restart. Adaptive
-  presentation pacing is the live `interface.smoothStreaming` setting; it
-  defaults to conservative `auto`, with `off` and explicit `on` available from
-  the same area.
-- Interactive launch paints a measured Stage 0 shell on the same terminal and editor that Stage 1 hydrates. Typing, queued submits, resize, and Ctrl+C remain live during hydration; set `CLIO_CODER_INSTANT_SHELL=0` for the legacy fully hydrated first-frame path.
-- Turn settlement is enforced on `/new`, `/resume`, `/tree`, and `/fork` to cleanly commit in-flight streams before session writer replacement (#114).
-- Resumed and forked session entry replays standardize message prefixes through [messages.ts](../../src/engine/messages.ts).
-- `AI_AGENT=clio-coder` is set on all child processes for system attribution.
-
-The first interactive launch after that upgrade showed this contemporary
-version notice:
-`clio: upgraded 0.3.1 → 0.3.3. What changed at the keyboard: ...`
-Recorded once per version in `install.json` as `noticedVersion`.
-
-Current launches use the `clio-coder:` prefix. Version 0.3.1 has specialized
-keyboard-facing text; all other target versions use the generic form
-`clio-coder: upgraded <from> → <to>. What changed is in CHANGELOG.md, section <to>.`
 
 ### C. System Resets (`clio-coder reset`)
 Selective recovery wipes:
