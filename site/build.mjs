@@ -186,12 +186,15 @@ function renderDoc(path, markdown) {
 }
 
 // Only replace an output directory previously created by this builder.
-const marker = join(out, ".clio-site-build");
+const marker = join(out, ".clio-coder-site-build");
 const existing = await readdir(out).catch((error) => {
 	if (error.code === "ENOENT") return [];
 	throw error;
 });
-if (existing.length && (!existing.includes(".clio-site-build") || (await readFile(marker, "utf8")) !== `${root}\n`)) {
+if (
+	existing.length &&
+	(!existing.includes(".clio-coder-site-build") || (await readFile(marker, "utf8")) !== `${root}\n`)
+) {
 	throw new Error("Refusing to replace a nonempty directory that this builder does not own.");
 }
 await rm(out, { recursive: true, force: true });
