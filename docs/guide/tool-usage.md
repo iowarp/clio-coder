@@ -705,7 +705,7 @@ Tracks the agent's own work plan. Source: [tasks.ts](../../src/tools/tasks.ts); 
 
 Plan replaces the prior board and assigns pending IDs `t1..tN`. Start activates one task and returns any other active task to pending. Done records the agent's completion claim on the session ledger; its note does not certify validation. Verification receipts record observed checks separately. Block requires a reason and suppresses the open-task nudge; drop cancels without reusing the ID. Pick links an operator inbox task; a self-authored plan is not operator authorization. Every action returns the whole board.
 
-Mutations persist full-snapshot `taskLedger` entries, replayable after resume/fork and available to the footer and `/tasks` overlay. At turn end, pending/active tasks trigger one nudge; record an honest terminal state. Live fleet runs link to the board through `activeRunIds`; this process-live link clears after resume/fork. Claude TODO calls map to the same board.
+Mutations persist full-snapshot `taskLedger` entries, replayable after resume/fork and available to the footer and `/tasks` overlay. At turn end, pending/active tasks trigger one nudge; record the resulting terminal state. Live fleet runs link to the board through `activeRunIds`; this process-live link clears after resume/fork. Claude TODO calls map to the same board.
 
 ```text
 tasks(action="plan", title="Fix scheduler test", tasks=["reproduce", "fix and verify"])

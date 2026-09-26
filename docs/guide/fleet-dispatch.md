@@ -73,7 +73,7 @@ Design decisions that shape everything else:
 
 ## Worker prompt and budget admission
 
-Dispatch resolves the recipe, target, read-only restriction, and final canonical toolkit before compiling one stable Clio worker harness. The harness contains identity-lite, the shared operating contract, the exact native tool surface (or honest no-tools wording), default safety and any read-only dispatch restriction, and the recipe or bounded override persona. Project context, memory, bounded briefing, pipeline input, task text, and run posture remain dynamic messages and therefore do not churn stable hashes. Briefing is explicitly untrusted task data and does not transport conversation or session history.
+Dispatch resolves the recipe, target, read-only restriction, and final canonical toolkit before compiling one stable Clio worker harness. The harness contains identity-lite, the shared operating contract, the exact native tool surface (or a description of its tool-free scope), default safety and any read-only dispatch restriction, and the recipe or bounded override persona. Project context, memory, bounded briefing, pipeline input, task text, and run posture remain dynamic messages and therefore do not churn stable hashes. Briefing is explicitly untrusted task data and does not transport conversation or session history.
 
 One run has a first-class singular shape: `task` is the worker assignment and
 `briefing` is separate bounded context/data. Briefing never replaces task,

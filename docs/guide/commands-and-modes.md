@@ -685,7 +685,7 @@ actual behavior. Redact secrets and private repository content.
 
 Acceptance rows labeled Required declare expected checks and timeout limits; they are not pending executions or passing results. Inspect verification receipts for outcomes. Under high rigor, the finish gate requires the applicable passing checks or explicit limitations.
 
-Task-board guidance and ordinary continuation preserve proposal-only scope. Deferred implementation should be blocked or dropped while awaiting an explicit operator go-ahead. A skill-install decision is separate from implementation authorization, and yolo authority does not expand the task. These are model instructions, not a guarantee of model adherence.
+Task-board guidance and ordinary continuation preserve proposal-only scope. Deferred implementation should be blocked or dropped while awaiting an explicit operator go-ahead. A skill-install decision is separate from implementation authorization, and yolo authority does not expand the task. Task guidance is included in the model prompt; tool admission independently applies the configured policy.
 
 ## Library packages
 

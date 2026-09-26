@@ -63,7 +63,7 @@ The host persists the selected seed at `$XDG_STATE_HOME/clio-coder/context-seeds
 
 WorkerSpec version **5** is required. Rebuild/update remote workers together with the orchestrator; an older worker must reject the new specification rather than silently ignore inherited history. ACP and other runtime adapters receive bounded splice text but do not implement native history forking or Clio's native pressure/recall loop.
 
-No extra LLM request is needed for capture or selection. Optional splice budgeting uses additive size estimates and one final serialization, rather than serializing the growing packet for every candidate. Stable projections help repeated requests retain an unchanged prefix, but provider cache reuse is measured behavior, not guaranteed: worker system prompts, tool surfaces, models, and provider cache rules can differ from the parent.
+No extra LLM request is needed for capture or selection. Optional splice budgeting uses additive size estimates and one final serialization, rather than serializing the growing packet for every candidate. Stable projections help repeated requests retain an unchanged prefix. Cache reuse depends on the worker system prompt, tool surface, model, and provider cache policy.
 
 ## A worker's output token limit
 

@@ -98,42 +98,55 @@ Recall is available on demand, not a compaction stage. The model uses `context(s
 Profiles add numeric-output or edited-component pins to structural policies. See [Working Set](context-working-set.md) for the rung order, protection horizon, recall rules, replay reports and format-6 compatibility.
 
 ### 3. LLM Summary Handoff (Last Resort)
-When working-set eviction cannot reclaim sufficient space (e.g. extensive user prompts or hundreds of conversation turns), Clio executes an assistant-authored summary handoff:
-- The model (or a dedicated compaction model specified via `context.compaction.model`) synthesizes a structured `note_to_self`.
-- The summary captures critical operational state: task objectives, discovered constraints, modified files, active hypothesis, and immediate next steps.
-- The summary is appended to the ledger as a `self_compact` record in session format v6.
-- Earlier conversation turns are retired from active context but remain completely intact in session logs and `/view transcript`.
+When working-set eviction cannot reclaim sufficient space, Clio summarizes the
+older conversation using the current model or the dedicated route configured
+under `context.compaction.model`. The summary captures objectives, constraints,
+modified files, hypotheses, and next steps. It persists as a `compactionSummary`
+ledger entry. Earlier turns leave active model context and remain in the session
+ledger and `/view transcript`.
+
+Separately, the assistant can request reduction with `self_compact` and an exact
+`note_to_self`. Clio preserves that note as assistant-authored recall and records
+the handoff's prepare, reduction, and delivery phases. See
+[context continuity and recovery](../guide/context-continuity.md) for its limits
+and recovery commands.
 
 <details>
-<summary>Compaction recovery and transaction guarantees</summary>
+<summary>Assistant-directed handoff recovery</summary>
 
-Compaction operations are transactional:
-- Each handoff generates a unique `handoffId` bound to the branch.
-- If a crash or timeout occurs during compaction, `/context recover <handoffId> <reduce|deliver>` allows explicit recovery without duplicate turn execution.
-- Handoff attempts are bounded to prevent infinite compaction loops.
+Assistant-directed handoffs have a unique `handoffId` bound to the branch and
+durable phase records. After interruption,
+`/context recover <handoffId> <reduce|deliver>` checks those records before
+resuming reduction or delivery.
+Reduction attempts and the automatic recovery window are bounded.
 
 </details>
 
 ---
 
-## Cache-Divergence Honesty & Prefix Caching
+## Prefix caching and cache observations
 
-Clio is engineered to exploit prompt prefix caching on providers that support it (Anthropic prompt caching, OpenAI/Codex prefix reuse, Gemini context caching, and local llama.cpp KV-cache slots).
+Clio arranges stable prompt sections before turn-specific inputs to support provider prefix caching, including Anthropic prompt caching, OpenAI/Codex prefix reuse, Gemini context caching, and local llama.cpp KV-cache slots.
 
 ### Prompt Layering Hierarchy
-To maximize cache hits, Clio structures the prompt from most static to most dynamic:
+Prompt sections have different update boundaries:
 
-| Layer | Volatility | Position | Cache Reuse Guarantee |
+| Layer | Volatility | Position | Update boundary |
 | :--- | :--- | :--- | :--- |
-| **System Identity & Engine Rules** | Static | Prefix (Top) | Reused across all turns in a session. |
-| **Tool & Gateway Schemas** | Infrequent | Header | Remains warm until tools are toggled or armed. |
-| **Project Handbook & Codewiki** | Low | Upper-Middle | Reused until project files or index change. |
-| **Durable Memories & Lessons** | Medium | Lower-Middle | Evaluated and frozen at turn boundaries. |
-| **Session Working Set & Turns** | High | Suffix (Tail) | Incremental append-only growth. |
+| **System identity and engine rules** | Low | Prefix | Recompiled when effective settings or prompt inputs change. |
+| **Tool and gateway schemas** | Infrequent | Header | Changes with the admitted tool surface. |
+| **Project handbook and bounded orientation** | Low | Upper-middle | Captured for the session and workspace; context-source invalidation or configuration hot reload recaptures it. The full codemap is retrieved separately. |
+| **Durable memories and lessons** | Medium | Lower-middle | Selected and frozen at turn boundaries. |
+| **Session working set and turns** | High | Suffix | Changes with new turns, eviction, recall, and compaction. |
 
-### Cache Honesty Contract
-- **No False Claims**: `/context` and turn receipts report only provider-attested cache reads (`cached <N> tokens`).
-- **Divergence Notices**: When prompt compilation drifts (e.g., when a skill is armed or dynamic tools are added), Clio displays `cold: prompt recompiled` in turn receipts, honestly communicating why cache reuse dropped.
+### Reading cache telemetry
+
+`/context` and turn receipts display provider-reported cache reads and available
+backend timing. Recorded cold-prefix causes include dispatch, residency changes,
+background memory, compaction, working-set eviction, prompt recompilation, tool
+surface changes, and thinking-setting changes. These observations distinguish
+prompt changes from server cache behavior. Provider policy and slot residency
+determine whether a stable prefix is reused.
 
 ---
 

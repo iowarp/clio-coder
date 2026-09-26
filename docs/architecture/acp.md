@@ -205,7 +205,7 @@ rather than forwarded under a repaired one.
 `safety.loopBlocked` is emitted only during the hosted active prompt, and its
 `interrupted` is true exactly for a `stop` disposition. `safety.toolBudgetExceeded`
 has no disposition; its `interrupted` is the bus payload's own flag. The loop detector fires before the
-blocked call executes, so no honest ACP tool-call id exists, and the bus has no
+blocked call executes, so no executed ACP tool-call id exists, and the bus has no
 disclosure-safe normalized shape; both fields stay null rather than being
 fabricated.
 
@@ -466,8 +466,8 @@ transcript as the same attributed block, with the same fold behavior, the same
 from a sealed receipt. There is no ACP-specific UI path.
 
 The header is where the difference shows. A local Clio worker names the target
-and model it ran on; a peer runs behind someone else's process and can honestly
-name only the protocol it was reached through, so its header reads `◇ codex
+and model it ran on; a peer runs behind someone else's process and identifies
+the protocol used to reach it, so its header reads `◇ codex
 (acp) · run 7hq2ab`. Its footer reports elapsed and, when the peer reports no
 token usage, the count of mediated tool calls in place of a token count; a peer
 that does report usage gets the same `tok` unit a local worker does.

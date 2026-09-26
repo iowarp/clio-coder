@@ -279,7 +279,7 @@ a render retain `frameId: null`; they are never fabricated into frames.
 The root component is timed in place so its identity and fullscreen layout
 markers do not change. Public pi-tui seams provide component/layout, overlay,
 normalization, and cursor-extraction phases. Viewport selection, diffing, ANSI
-construction, and remaining cursor work are reported honestly as one combined
+construction, and remaining cursor work are reported as one combined
 remainder because the engine does not expose narrower hooks. The stdout
 boundary records enqueue duration, return value, backpressure, and drain.
 

@@ -48,4 +48,4 @@ Successful durable reductions invalidate older private-memory content jobs and q
 
 Approved durable-memory selection is frozen for a prepared turn and its continuations. Changes in session, repository, runtime, model, or memory configuration invalidate that authority. A subsequent turn reads the current bounded store contents; a same-size rewrite cannot hide behind a file-size cache key. Default selection limits remain five records and 400 tokens. Experimental lexical ranking is not enabled by default.
 
-Token counts remain estimates unless a provider has attested the relevant prefix. Flush and checkpoint success establish the filesystem durability available to the running process; they do not guarantee survival of every hardware or power failure, or exactly-once execution by a remote provider.
+Request admission combines provider token observations with estimates for unmeasured content. Ledger flushes and checkpoints record local persistence; remote delivery recovery uses the stored handoff phase and requires the explicit operator command described above.

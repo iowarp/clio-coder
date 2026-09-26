@@ -118,7 +118,7 @@ The report also prints a prompt-cache block, one row per session that recorded a
 OK cache telemetry  last session 3vpu6z19ee7t: hot 4 · partial 3 · cold 2 · small 0; top expected reason dispatch (3)
 ```
 
-The row reads `top expected reason none` when the session recorded verdicts but no expected-cold reason, and it degrades to a warning saying `no prompt-cache telemetry recorded` when the latest session has none at all, which is the honest answer for a target whose backend reports nothing rather than a claim of a perfect cache. "Latest" selects the most recent `current.jsonl` by its newest entry timestamp, falling back to the file's mtime, so the other diagnostic JSONL files in a session directory cannot be mistaken for the conversation.
+The row reads `top expected reason none` when the session recorded verdicts but no expected-cold reason, and displays `no prompt-cache telemetry recorded` when the latest session has no observations. "Latest" selects the most recent `current.jsonl` by its newest entry timestamp, falling back to the file's mtime, so the other diagnostic JSONL files in a session directory cannot be mistaken for the conversation.
 
 ### The Out-of-Turn Usage Store
 
