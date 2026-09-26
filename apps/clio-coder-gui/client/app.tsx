@@ -7,6 +7,7 @@ import { useTokenRejected } from "./api/auth-state.js";
 import { type Client, emptyInput } from "./api/client.js";
 import { type ConnectionState, subscribe } from "./api/events.js";
 import { lastTokenWasRefused } from "./api/token.js";
+import { Icon } from "./design/icons.js";
 import {
 	MobileNavigation,
 	Navigation,
@@ -17,6 +18,7 @@ import {
 	useSidebarCollapsed,
 } from "./design/navigation.js";
 import { dismissAll, LiveRegions, NoticeToasts, reportProblem, useNotices } from "./design/notifications.js";
+import { ProjectNavigation } from "./design/project-navigation.js";
 import { AppPreferences } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
 import { CommandPalette } from "./interaction/CommandPalette.js";
@@ -127,14 +129,44 @@ export function App({ client }: { client: Client }) {
 						version={meta.data?.clio}
 						platform={meta.data?.platform}
 					/>
-					<MobileNavigation onHelp={() => setHelpOpen(true)} />
+					<MobileNavigation
+						onHelp={() => setHelpOpen(true)}
+						projects={
+							client.token && !refused
+								? (close) => <ProjectNavigation client={client} activeWorkspace={snapshot?.workspaceId} close={close} />
+								: undefined
+						}
+					/>
 				</div>
 			</header>
 			<div className="workspace" data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"} inert={layered}>
 				<aside className="desktop-navigation" id={SIDEBAR_ID}>
 					<div className="sidebar">
-						<SidebarToggle collapsed={sidebarCollapsed} toggle={toggleSidebar} />
-						<Navigation collapsed={sidebarCollapsed} onHelp={() => setHelpOpen(true)} />
+						<div className="sidebar-actions">
+							<NavLink to="/" className="sidebar-compose" data-tip="New conversation">
+								<Icon name="plus" />
+								<span className="nav-label">New conversation</span>
+							</NavLink>
+							<button
+								type="button"
+								className="sidebar-search"
+								aria-label="Search commands"
+								title="Search commands (Ctrl K)"
+								onClick={() => setPaletteOpen(true)}
+							>
+								<Icon name="search" />
+							</button>
+							<SidebarToggle collapsed={sidebarCollapsed} toggle={toggleSidebar} />
+						</div>
+						<Navigation
+							collapsed={sidebarCollapsed}
+							onHelp={() => setHelpOpen(true)}
+							projects={
+								client.token && !refused ? (
+									<ProjectNavigation client={client} activeWorkspace={snapshot?.workspaceId} />
+								) : undefined
+							}
+						/>
 					</div>
 				</aside>
 				<main id="main" tabIndex={-1}>

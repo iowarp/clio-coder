@@ -29,6 +29,10 @@ const paths = {
 	diff:
 		"M6 3v12m0 6v-2M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 21V9m0-6v2M18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM9 6h4a5 5 0 0 1 5 5",
 	plus: "M12 5v14M5 12h14",
+	folder: "M3 7V5h6l2 2h10v13H3Z",
+	arrowUp: "M12 19V5m-6 6 6-6 6 6",
+	paperclip: "m8 13 7-7a3 3 0 0 1 4 4l-9 9a5 5 0 0 1-7-7l9-9m-5 12 8-8",
+	keyboard: "M2 5h20v14H2zM6 9h1m4 0h1m4 0h1M6 13h1m4 0h1m4 0h1M7 16h10",
 	filter: "M3 5h18l-7 8v6l-4 2v-8Z",
 	external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
 	play: "M7 5l12 7-12 7V5Z",

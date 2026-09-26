@@ -97,7 +97,7 @@
 
 	/* ---- shell metrics --------------------------------------------------- */
 	--masthead-height: 58px;
-	--rail-width: 204px;
+	--rail-width: 260px;
 	--rail-collapsed-width: 68px;
 	--reading-measure: 72ch;
 	/* About 90 characters of reading text: long enough for tables and code, short enough to read. */

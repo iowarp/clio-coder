@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router";
 import { announce, composeTitle, useLiveState } from "../interaction/announcer.js";
 import { formatKeybinding, KEYBINDINGS } from "../interaction/keybindings.js";
@@ -85,10 +85,12 @@ export function Navigation({
 	close,
 	collapsed = false,
 	onHelp,
+	projects,
 }: {
 	close?: () => void;
 	collapsed?: boolean;
 	onHelp: () => void;
+	projects?: ReactNode;
 }) {
 	const location = useLocation();
 	const link = (item: (typeof navigation)[number]) => (
@@ -109,8 +111,9 @@ export function Navigation({
 	);
 	return (
 		<>
-			<nav aria-label="Main navigation">
-				{navigation.filter((item) => item.group === "work").map(link)}
+			<nav aria-label="Main navigation">{navigation.filter((item) => item.group === "work").map(link)}</nav>
+			{projects}
+			<nav aria-label="Inspection and settings">
 				<p className="nav-group" aria-hidden="true">
 					<span className="nav-label">Inspect &amp; configure</span>
 				</p>
@@ -132,8 +135,16 @@ export function Navigation({
 		</>
 	);
 }
-export function MobileNavigation({ onHelp }: { onHelp: () => void }) {
+export function MobileNavigation({
+	onHelp,
+	projects,
+}: {
+	onHelp: () => void;
+	projects?: ((close: () => void) => ReactNode) | undefined;
+}) {
 	const dialog = useRef<HTMLDialogElement>(null);
+	const location = useLocation();
+	useEffect(() => { dialog.current?.close(); }, [location.pathname]);
 	return (
 		<>
 			<button
@@ -159,7 +170,11 @@ export function MobileNavigation({ onHelp }: { onHelp: () => void }) {
 						<Icon name="close" />
 					</button>
 				</div>
-				<Navigation close={() => dialog.current?.close()} onHelp={onHelp} />
+				<Navigation
+					close={() => dialog.current?.close()}
+					onHelp={onHelp}
+					projects={projects?.(() => dialog.current?.close())}
+				/>
 			</dialog>
 		</>
 	);
