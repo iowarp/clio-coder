@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
+import { TURN_IMAGES_MAX_BASE64, type TurnImage } from "../../contracts/attachments.js";
 import { SessionBoard } from "../../contracts/board.js";
 import type { PermissionDecision } from "../../contracts/permissions.js";
 import { applySessionDelta, boundedText, emptySession } from "../../contracts/session-projection.js";
@@ -265,15 +266,22 @@ export class Supervisor {
 			if (existingId) this.loading.delete(existingId);
 		}
 	}
-	startTurn(id: string, text: string) {
+	startTurn(id: string, text: string, images: ReadonlyArray<TurnImage> = []) {
 		const entry = this.entries.get(id);
 		if (!entry || entry.closing || this.snapshot(id).state !== "open")
 			throw new AppProblem("conflict", "Session is not available for a turn.");
 		if (entry.turnId) throw new AppProblem("conflict", "A turn is already running in this session.");
+		if (images.length > 0 && !entry.client.capabilities.images)
+			throw new AppProblem("conflict", "This Clio Coder build does not accept images with a request.");
+		if (images.reduce((total, image) => total + image.data.length, 0) > TURN_IMAGES_MAX_BASE64)
+			throw new AppProblem(
+				"validation",
+				"Attached images exceed what one request can carry. Remove one or use smaller images.",
+			);
 		entry.replay = null;
-		const turnId = this.begin(entry, text, "live");
+		const turnId = this.begin(entry, text, "live", randomUUID(), images.length);
 		entry.prompt = entry.client
-			.prompt(id, text)
+			.prompt(id, text, images)
 			.then((result) => {
 				if (entry.turnId === turnId) this.finish(entry, result.stopReason, result.usage, null, new Date().toISOString());
 			})
@@ -282,7 +290,7 @@ export class Supervisor {
 			});
 		return { turnId };
 	}
-	private begin(entry: Entry, prompt: string, origin: "live" | "replay", id: string = randomUUID()) {
+	private begin(entry: Entry, prompt: string, origin: "live" | "replay", id: string = randomUUID(), images = 0) {
 		const turn: Turn = {
 			id,
 			prompt,
@@ -293,6 +301,7 @@ export class Supervisor {
 			stopReason: null,
 			usage: null,
 			problem: null,
+			...(images > 0 ? { images } : {}),
 		};
 		entry.turnId = id;
 		this.publish({ type: "turn.started", payload: { resource: entry.id, revision: this.revision(entry.id), turn } });

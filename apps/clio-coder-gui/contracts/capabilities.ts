@@ -82,6 +82,8 @@ export const AgentCapabilities = Type.Object(
 		decision: Type.Optional(DecisionCapability),
 		events: Type.Optional(EventsCapability),
 		board: Type.Optional(BoardCapability),
+		/** ACP promptCapabilities.image: the agent accepts image blocks with a request. */
+		images: Type.Optional(Type.Boolean()),
 		/** True when the agent mediates every tool through its own safety policy. */
 		mediatedTools: Type.Boolean(),
 	},

@@ -129,6 +129,8 @@ export const Turn = Type.Object(
 		stopReason: nullableString,
 		usage: Type.Union([Usage, Type.Null()]),
 		problem: Type.Union([Problem, Type.Null()]),
+		/** How many images this app sent with the request; a replayed turn does not know. */
+		images: Type.Optional(Type.Integer({ minimum: 1, maximum: 4 })),
 	},
 	closed,
 );

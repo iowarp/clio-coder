@@ -155,6 +155,11 @@ export const ChatTurnView = memo(function ChatTurnView({
 				<p className={`chat-request__prompt${request.missing ? " is-missing" : ""}`}>{request.text}</p>
 				<div className="chat-request__meta">
 					{request.replay ? <span className="chat-request__replay">{REPLAY_CHIP}</span> : null}
+					{row?.images ? (
+						<span className="chat-request__images">
+							{row.images} {row.images === 1 ? "image" : "images"} attached
+						</span>
+					) : null}
 					{startedAt === null ? (
 						<span className="chat-request__time">{formatTime(null)}</span>
 					) : (

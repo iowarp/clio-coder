@@ -9869,6 +9869,9 @@
 											},
 											"additionalProperties": false
 										},
+										"images": {
+											"type": "boolean"
+										},
 										"mediatedTools": {
 											"type": "boolean"
 										}
@@ -13287,6 +13290,11 @@
 																"type": "null"
 															}
 														]
+													},
+													"images": {
+														"type": "integer",
+														"minimum": 1,
+														"maximum": 4
 													}
 												},
 												"additionalProperties": false
@@ -15755,6 +15763,11 @@
 																"type": "null"
 															}
 														]
+													},
+													"images": {
+														"type": "integer",
+														"minimum": 1,
+														"maximum": 4
 													}
 												},
 												"additionalProperties": false
@@ -17149,6 +17162,11 @@
 																"type": "null"
 															}
 														]
+													},
+													"images": {
+														"type": "integer",
+														"minimum": 1,
+														"maximum": 4
 													}
 												},
 												"additionalProperties": false
@@ -18507,6 +18525,11 @@
 																	"type": "null"
 																}
 															]
+														},
+														"images": {
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 4
 														}
 													},
 													"additionalProperties": false
@@ -19445,7 +19468,7 @@
 		"/api/sessions/{id}/turns": {
 			"post": {
 				"operationId": "turn",
-				"summary": "Start a streamed turn",
+				"summary": "Start a streamed turn, with any images the request carries",
 				"security": [
 					{
 						"bearer": []
@@ -19485,6 +19508,44 @@
 										"minLength": 1,
 										"maxLength": 32000,
 										"pattern": "\\S"
+									},
+									"images": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"required": ["mimeType", "data"],
+											"properties": {
+												"mimeType": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "image/png"
+														},
+														{
+															"type": "string",
+															"const": "image/jpeg"
+														},
+														{
+															"type": "string",
+															"const": "image/gif"
+														},
+														{
+															"type": "string",
+															"const": "image/webp"
+														}
+													]
+												},
+												"data": {
+													"type": "string",
+													"minLength": 4,
+													"maxLength": 900000,
+													"pattern": "^[A-Za-z0-9+/]+={0,2}$"
+												}
+											},
+											"additionalProperties": false
+										},
+										"minItems": 1,
+										"maxItems": 4
 									}
 								},
 								"additionalProperties": false
@@ -20051,6 +20112,11 @@
 																"type": "null"
 															}
 														]
+													},
+													"images": {
+														"type": "integer",
+														"minimum": 1,
+														"maximum": 4
 													}
 												},
 												"additionalProperties": false
@@ -26369,6 +26435,11 @@
 														"type": "null"
 													}
 												]
+											},
+											"images": {
+												"type": "integer",
+												"minimum": 1,
+												"maximum": 4
 											}
 										},
 										"additionalProperties": false

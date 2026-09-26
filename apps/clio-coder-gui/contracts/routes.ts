@@ -1,4 +1,5 @@
 import { type Static, type TSchema, Type } from "typebox";
+import { TURN_IMAGE_MAX, TurnImage } from "./attachments.js";
 import { SessionBoard } from "./board.js";
 import { AgentCapabilities } from "./capabilities.js";
 import { Empty, Id } from "./common.js";
@@ -590,11 +591,14 @@ export const routes = {
 		params: operationParams,
 		path: "/api/sessions/:id/turns",
 		body: Type.Object(
-			{ text: Type.String({ minLength: 1, maxLength: 32000, pattern: "\\S" }) },
+			{
+				text: Type.String({ minLength: 1, maxLength: 32000, pattern: "\\S" }),
+				images: Type.Optional(Type.Array(TurnImage, { minItems: 1, maxItems: TURN_IMAGE_MAX })),
+			},
 			{ additionalProperties: false },
 		),
 		response: Type.Object({ turnId: Id }, { additionalProperties: false }),
-		summary: "Start a streamed turn",
+		summary: "Start a streamed turn, with any images the request carries",
 	}),
 	closeSession: defineRoute({
 		...post,

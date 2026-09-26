@@ -321,6 +321,7 @@ async function handle(frame) {
 					agentInfo: { name: "fixture", version: "1" },
 					agentCapabilities: {
 						loadSession: true,
+						promptCapabilities: { audio: false, embeddedContext: false, image: scenario === "markdown" },
 						...(STEERING
 							? {
 									_meta: {
@@ -417,6 +418,8 @@ async function handle(frame) {
 					}
 				} else {
 					if (scenario === "fleet") fleet();
+					const images = frame.params.prompt?.filter((block) => block.type === "image").length ?? 0;
+					if (images > 0) text(`Received ${images} ${images === 1 ? "image" : "images"} with the request.\n\n`);
 					if (scenario === "markdown") {
 						for (const chunk of [
 							"# Fixture findings\n\nThe change is **verified** against a local fixture.\n\n",

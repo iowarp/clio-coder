@@ -455,12 +455,20 @@
 	.composer__enter-mode {
 		margin-right: auto;
 	}
+	/* The attach control keeps its glyph and accessible name; its words would push Send to a new row. */
+	.composer__attach-label {
+		display: none;
+	}
+	.composer__attach {
+		padding-inline: var(--space-2);
+	}
 	.route-chip {
 		max-width: 11rem;
 	}
-	/* Padding and the caret take the difference, so Send keeps its place on the row. */
+	/* Padding and the caret take the difference, so Send keeps its place on the row beside the
+	   attach control; the full route is in the picker. */
 	.route-picker > summary {
-		max-width: 9rem;
+		max-width: 7rem;
 	}
 	.route-picker__panel {
 		padding-inline: var(--space-4);
@@ -472,4 +480,46 @@
 	.route-picker__fields > label:not(:first-child) {
 		margin-top: var(--space-2);
 	}
+}
+
+/* Images waiting to go with the next request: a quiet row above the actions, each removable. */
+.composer__attachments {
+	list-style: none;
+	margin: 0;
+	padding: 0 var(--space-4);
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2) var(--space-4);
+}
+.composer__attachments > li {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-width: 0;
+}
+.composer__attachments img {
+	width: 48px;
+	height: 48px;
+	object-fit: cover;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-xs);
+	background: var(--surface-sunken);
+}
+.composer__attachment-name {
+	display: grid;
+	min-width: 0;
+	max-width: 14rem;
+	font-size: var(--text-meta);
+	overflow-wrap: anywhere;
+}
+.composer__attachment-name small {
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink-muted);
+}
+.composer__attach {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
 }

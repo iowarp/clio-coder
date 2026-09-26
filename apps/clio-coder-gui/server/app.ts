@@ -70,12 +70,18 @@ export function createApp(options: {
 		const inspect = options.runtime;
 		app.get("/api/_diagnostics/runtime", async (context) => context.json(await inspect()));
 	}
-	app.use(
-		"/api/*",
-		bodyLimit({
-			maxSize: 64 * 1024,
-			onError: (context) => problemResponse(new AppProblem("validation", "Request body exceeds 64 KiB."), context),
-		}),
+	// Every request body is small except a request that carries images, which the agent bounds at
+	// its 1 MiB stdio line; that one route gets room for the images and its text.
+	const smallBody = bodyLimit({
+		maxSize: 64 * 1024,
+		onError: (context) => problemResponse(new AppProblem("validation", "Request body exceeds 64 KiB."), context),
+	});
+	const turnBody = bodyLimit({
+		maxSize: 1024 * 1024,
+		onError: (context) => problemResponse(new AppProblem("validation", "Request body exceeds 1 MiB."), context),
+	});
+	app.use("/api/*", (context, next) =>
+		(/^\/api\/sessions\/[^/]+\/turns$/.test(context.req.path) ? turnBody : smallBody)(context, next),
 	);
 	register(app, hub, routes.meta, () => ({
 		...getVersionInfo(),

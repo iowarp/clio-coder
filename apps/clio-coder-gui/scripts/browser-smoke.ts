@@ -569,7 +569,17 @@ try {
 		// transcript at its live edge while that grid row changes height.
 		const composerField = page.getByLabel("Message Clio Coder", { exact: true });
 		const restingComposer = await page.locator(".composer").evaluate((element) => element.getBoundingClientRect().height);
-		assert.ok(restingComposer <= 180, `resting composer is ${restingComposer}px tall at ${width}px`);
+		// Name each action's box in the failure, so a wrap on a narrow screen says which control caused it.
+		const actionBoxes = await page.locator(".composer__actions > *").evaluateAll((elements) =>
+			elements.map((element) => {
+				const box = element.getBoundingClientRect();
+				return `${element.className || element.tagName}:${Math.round(box.width)}@${Math.round(box.top)}`;
+			}),
+		);
+		assert.ok(
+			restingComposer <= 180,
+			`resting composer is ${restingComposer}px tall at ${width}px; actions ${actionBoxes.join(", ")}`,
+		);
 		const restingField = await composerField.evaluate((element) => element.getBoundingClientRect().height);
 		await composerField.fill("one\ntwo\nthree\nfour\nfive\nsix\nseven\neight");
 		await page.waitForFunction(
@@ -704,6 +714,26 @@ try {
 		if (width === 1600) await page.screenshot({ path: join(output, "session-board.png"), fullPage: true });
 		await page.getByText("Tasks and decisions", { exact: true }).click();
 		await page.locator(".conversation__tools > summary").click();
+		// An image rides a request when the agent announces image prompts: attach, see it listed, send, see it counted.
+		await page.getByRole("button", { name: "Attach images", exact: true }).waitFor();
+		await page.locator('.composer input[type="file"]').setInputFiles({
+			name: "fixture.png",
+			mimeType: "image/png",
+			buffer: Buffer.from(
+				"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+				"base64",
+			),
+		});
+		await page
+			.getByRole("list", { name: "Images to send with this request" })
+			.locator(".composer__attachment-name", { hasText: "fixture.png" })
+			.waitFor();
+		await check("composer-attachment");
+		await page.getByLabel("Message Clio Coder", { exact: true }).fill("Describe the attached image.");
+		await page.getByRole("button", { name: "Send", exact: true }).click();
+		await page.getByText("Received 1 image with the request.", { exact: true }).waitFor();
+		await page.locator(".chat-request__images", { hasText: "1 image attached" }).waitFor();
+		assert.equal(await page.getByRole("list", { name: "Images to send with this request" }).count(), 0);
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[approval] Write the fixture file.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
 		await page.getByRole("button", { name: "Allow once", exact: true }).first().waitFor();

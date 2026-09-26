@@ -130,6 +130,10 @@
 	color: var(--ink-strong);
 	font-size: var(--text-meta);
 }
+.chat-request__images {
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
 .chat-request__replay {
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-pill);

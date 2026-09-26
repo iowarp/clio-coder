@@ -1,5 +1,6 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
+import type { TurnImage } from "../../contracts/attachments.js";
 import { BoardCapability } from "../../contracts/board.js";
 import {
 	type AgentCapabilities,
@@ -39,6 +40,7 @@ function readCapabilities(result: unknown): AgentCapabilities {
 	return {
 		loadSession: capabilities.loadSession === true,
 		mediatedTools: meta["clio-coder/tools"] === "mediated",
+		...(record(capabilities.promptCapabilities).image === true ? { images: true } : {}),
 		...(Object.keys(stableSession).length > 0 || Object.keys(extensionSession).length > 0
 			? {
 					session: {
@@ -173,10 +175,16 @@ export class AcpClient {
 		if (!current) throw new AppProblem("upstream_acp", "Clio did not provide a session mode.");
 		return current;
 	}
-	async prompt(sessionId: string, text: string) {
+	async prompt(sessionId: string, text: string, images: ReadonlyArray<TurnImage> = []) {
 		const result = await this.request<unknown>(
 			"session/prompt",
-			{ sessionId, prompt: [{ type: "text", text }] },
+			{
+				sessionId,
+				prompt: [
+					{ type: "text", text },
+					...images.map((image) => ({ type: "image", mimeType: image.mimeType, data: image.data })),
+				],
+			},
 			24 * 60 * 60 * 1000,
 		);
 		const projected = Value.Clean(PromptResult, result);

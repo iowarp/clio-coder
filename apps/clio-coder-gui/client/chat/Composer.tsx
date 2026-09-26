@@ -20,6 +20,8 @@ import type { Client } from "../api/client.js";
 import { StatusMark } from "../design/status.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
+import { readAttachment } from "./attachment-image.js";
+import { type Attachment, admitAttachment, attachmentRefusal, attachmentSummary } from "./attachments-model.js";
 import {
 	capabilityRefusal,
 	composerKeyAction,
@@ -95,6 +97,11 @@ export const Composer = memo(function Composer({
 	const fieldId = useId();
 	const hintId = useId();
 	const [enterSends, setEnterSends] = useState(initialEnterSends);
+	const [attachments, setAttachments] = useState<Attachment[]>([]);
+	const [attachProblem, setAttachProblem] = useState<string | null>(null);
+	const attached = useRef<Attachment[]>([]);
+	const picker = useRef<HTMLInputElement | null>(null);
+	const pickerId = useId();
 	const layerOwned = useLayersActive();
 	const running = runningTurnId !== null;
 	const params = { params: { id: sessionId }, query: {}, body: {} };
@@ -148,9 +155,26 @@ export const Composer = memo(function Composer({
 	const queued = projectQueue(queue.data);
 
 	const send = useMutation({
-		mutationFn: async ({ intent }: { intent: Exclude<SubmitIntent, { kind: "blocked" }>; draft: typeof draft }) => {
+		mutationFn: async ({
+			intent,
+			images,
+		}: {
+			intent: Exclude<SubmitIntent, { kind: "blocked" }>;
+			draft: typeof draft;
+			images: readonly Attachment[];
+		}) => {
 			if (intent.kind === "prompt") {
-				await client.call(routes.turn, { ...params, body: { text: intent.text } }, intent.idempotencyKey);
+				await client.call(
+					routes.turn,
+					{
+						...params,
+						body: {
+							text: intent.text,
+							...(images.length > 0 ? { images: images.map(({ mimeType, data }) => ({ mimeType, data })) } : {}),
+						},
+					},
+					intent.idempotencyKey,
+				);
 				return null;
 			}
 			return client.call(
@@ -162,6 +186,11 @@ export const Composer = memo(function Composer({
 		onSuccess: (result, submitted) => {
 			if (result !== null && !result.accepted) store.refuse(submitted.draft);
 			else store.acknowledge(submitted.draft);
+			if (result === null && submitted.images.length > 0) {
+				const sent = new Set(submitted.images.map((image) => image.id));
+				attached.current = attached.current.filter((image) => !sent.has(image.id));
+				setAttachments(attached.current);
+			}
 			// The event stream normally paints the turn. A snapshot also catches up if
 			// this browser was reconnecting when the request was accepted.
 			void queries.invalidateQueries({ queryKey: ["session", sessionId] });
@@ -210,16 +239,41 @@ export const Composer = memo(function Composer({
 		...(steeringUnavailable === undefined ? {} : { steeringUnavailable }),
 	} as const;
 	const intent = submitIntent(draft, situation);
+	const canAttach = capabilities.data?.images === true && sessionState === "open";
+	const attachBlock = attachmentRefusal(attachments, running);
+	// One at a time, so each admission sees the images the previous one added.
+	const attach = async (files: readonly File[]) => {
+		setAttachProblem(null);
+		for (const file of files) {
+			try {
+				const image = await readAttachment(file, crypto.randomUUID());
+				const admitted = admitAttachment(attached.current, image);
+				if (!admitted.ok) {
+					setAttachProblem(admitted.reason);
+					break;
+				}
+				attached.current = [...attached.current, image];
+				setAttachments(attached.current);
+			} catch (error) {
+				setAttachProblem(error instanceof Error ? error.message : String(error));
+			}
+		}
+	};
+	const detach = (id: string) => {
+		attached.current = attached.current.filter((image) => image.id !== id);
+		setAttachments(attached.current);
+		setAttachProblem(null);
+	};
 	// Recomputed from the store rather than closed over, so a keystroke that
 	// lands between render and keydown still sends the text the operator sees.
 	const submit = () => {
 		if (sending.current) return;
 		const current = store.snapshot();
 		const next = submitIntent(current, situation);
-		if (next.kind !== "blocked") {
+		if (next.kind !== "blocked" && attachmentRefusal(attached.current, running) === null) {
 			sending.current = true;
 			store.markSubmitted(current);
-			send.mutate({ intent: next, draft: current });
+			send.mutate({ intent: next, draft: current, images: attached.current });
 		}
 	};
 
@@ -234,6 +288,14 @@ export const Composer = memo(function Composer({
 			onSubmit={(event) => {
 				event.preventDefault();
 				submit();
+			}}
+			onDragOver={(event) => {
+				if (canAttach && event.dataTransfer.types.includes("Files")) event.preventDefault();
+			}}
+			onDrop={(event) => {
+				if (!canAttach || event.dataTransfer.files.length === 0) return;
+				event.preventDefault();
+				void attach([...event.dataTransfer.files]);
 			}}
 		>
 			<label className="composer__label sr-only" htmlFor={fieldId}>
@@ -259,6 +321,12 @@ export const Composer = memo(function Composer({
 				onChange={(event) => {
 					store.write(event.target.value);
 					if (!send.isPending) send.reset();
+				}}
+				onPaste={(event) => {
+					const images = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
+					if (!canAttach || images.length === 0) return;
+					event.preventDefault();
+					void attach(images);
 				}}
 				onKeyDown={(event) => {
 					const action = composerKeyAction(
@@ -308,14 +376,68 @@ export const Composer = memo(function Composer({
 					</span>
 				</fieldset>
 			) : null}
+			{attachments.length > 0 ? (
+				<ul className="composer__attachments" aria-label="Images to send with this request">
+					{attachments.map((image) => (
+						<li key={image.id}>
+							<img src={`data:${image.mimeType};base64,${image.data}`} alt="" width={48} height={48} />
+							<span className="composer__attachment-name">
+								{image.name}
+								<small>
+									{image.width}×{image.height}
+								</small>
+							</span>
+							<button type="button" className="composer__secondary" onClick={() => detach(image.id)}>
+								Remove<span className="sr-only"> {image.name}</span>
+							</button>
+						</li>
+					))}
+				</ul>
+			) : null}
+			{attachProblem ? (
+				<p className="composer__notice" role="alert">
+					<StatusMark tone="fail" label="Not attached" />
+					{attachProblem}
+				</p>
+			) : null}
 			<div className="composer__actions">
 				<label className="composer__enter-mode">
 					<input type="checkbox" checked={enterSends} onChange={(event) => setEnterSends(event.target.checked)} />
 					Enter sends
 				</label>
 				<p className="composer__hint" id={hintId}>
-					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"}
+					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @path adds a project file
+					{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
 				</p>
+				{canAttach ? (
+					<>
+						<input
+							ref={picker}
+							id={pickerId}
+							hidden
+							type="file"
+							accept="image/png,image/jpeg,image/gif,image/webp"
+							multiple
+							onChange={(event) => {
+								const files = [...(event.target.files ?? [])];
+								event.target.value = "";
+								void attach(files);
+							}}
+						/>
+						<button
+							type="button"
+							className="composer__secondary composer__attach"
+							onClick={() => picker.current?.click()}
+							aria-label="Attach images"
+							title="Attach images to this request. You can also paste or drop them here."
+						>
+							<span aria-hidden="true">+</span>
+							<span className="composer__attach-label" aria-hidden="true">
+								Attach images
+							</span>
+						</button>
+					</>
+				) : null}
 				<RoutePicker
 					client={client}
 					sessionId={sessionId}
@@ -350,12 +472,17 @@ export const Composer = memo(function Composer({
 				<button
 					className="composer__submit primary"
 					type="submit"
-					disabled={intent.kind === "blocked"}
-					title={intent.kind === "blocked" ? intent.reason : undefined}
+					disabled={intent.kind === "blocked" || attachBlock !== null}
+					title={intent.kind === "blocked" ? intent.reason : (attachBlock ?? undefined)}
 				>
 					{send.isPending ? "Sending…" : submitLabel(intent, situation, draft.mode)}
 				</button>
 			</div>
+			{attachBlock !== null && intent.kind !== "blocked" ? (
+				<p className="composer__blocked" role="status">
+					{attachBlock}
+				</p>
+			) : null}
 			{intent.kind === "blocked" && draft.text.trim() !== "" ? (
 				<p className="composer__blocked" role="status">
 					{intent.reason}

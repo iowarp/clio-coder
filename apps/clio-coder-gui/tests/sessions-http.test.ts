@@ -149,3 +149,50 @@ test("concurrent admission allows four ACP children and refuses the fifth withou
 	await h.supervisor.shutdown();
 	assert.deepEqual(await h.files.read("children"), []);
 });
+
+test("a request carries images to the agent as ACP image blocks, within the one-line bound", {
+	timeout: 20000,
+}, async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), routes.openWorkspace.response);
+	const session = await json(
+		await h.post(`/api/workspaces/${workspace.id}/sessions`, {}, "images-session"),
+		routes.newSession.response,
+	);
+	const capabilities = await json(
+		await h.request(`/api/sessions/${session.id}/capabilities`),
+		routes.sessionCapabilities.response,
+	);
+	assert.equal(capabilities.images, true);
+	// Past the 64 KiB every other route allows, and inside the agent's line.
+	const data = Buffer.alloc(150_000, 7).toString("base64");
+	const turn = await h.post(
+		`/api/sessions/${session.id}/turns`,
+		{ text: "Describe these.", images: [{ mimeType: "image/png", data }] },
+		"images-turn",
+	);
+	assert.equal(turn.status, 202);
+	let log = "";
+	for (let i = 0; i < 200 && !log.includes('"session/prompt"'); i++) {
+		await setTimeout(25);
+		log = await readFile(join(h.home.path, "acp.jsonl"), "utf8").catch(() => "");
+	}
+	const prompt = log
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line) as { method?: string; params?: { prompt?: Array<{ type: string }> } })
+		.find((frame) => frame.method === "session/prompt");
+	assert.deepEqual(
+		prompt?.params?.prompt?.map((block) => block.type),
+		["text", "image"],
+	);
+	const tooMany = await h.post(
+		`/api/sessions/${session.id}/turns`,
+		{ text: "Too many.", images: Array.from({ length: 5 }, () => ({ mimeType: "image/png", data: "AAAA" })) },
+		"images-too-many",
+	);
+	assert.equal(tooMany.status, 422);
+	const other = await h.post(`/api/sessions/${session.id}/steer`, { text: "x".repeat(70 * 1024) }, "big-steer");
+	assert.equal(other.status, 422, "every other route keeps its 64 KiB body limit");
+});
