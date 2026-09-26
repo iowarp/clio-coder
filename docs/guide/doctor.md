@@ -54,7 +54,9 @@ seconds from a scratch directory, and all of them run at once.
   `sbatch` is missing.
 - An installed tool whose `--version` exits nonzero is `WARN`. An
   unconfigured Slurm client, which cannot reach its controller, shows up this
-  way.
+  way. Slurm client version timeouts also warn; other HPC version timeouts
+  retain their informational detail on an OK row. The scheduler row reuses
+  the bounded sbatch result rather than spawning a second probe.
 
 ## Task worktree rows
 

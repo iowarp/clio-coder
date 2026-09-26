@@ -4,6 +4,7 @@ import { resolveClioDirs } from "../core/xdg.js";
 import { resolveMcpServers } from "../domains/gateway/mcp/index.js";
 import { resolveOnPath } from "../domains/interop/detect.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
+import { versionLine } from "./doctor-hpc.js";
 
 const PROBE_TIMEOUT_MS = 5_000;
 const PROBE_MAX_OUTPUT_BYTES = 16 * 1024;
@@ -16,6 +17,8 @@ export interface SlurmMcpOptions {
 	timeoutMs?: number;
 	/** Override for the user config directory (tests). */
 	configDir?: string;
+	/** Reuse the bounded sbatch probe already performed by doctor. */
+	sbatchFinding?: DoctorFinding;
 }
 
 async function run(binary: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; text: string }> {
@@ -118,13 +121,31 @@ export async function slurmMcpFindings(options: SlurmMcpOptions = {}): Promise<D
 		["sbatch", sbatch],
 		["squeue", squeue],
 	] as const;
+	const clientFaults = await Promise.all(
+		clients.map(async ([name, found]) => {
+			if (found.presence !== "present" || !found.binary) return null;
+			if (name === "sbatch" && options.sbatchFinding) {
+				return options.sbatchFinding.level === "warn" ? options.sbatchFinding.detail : null;
+			}
+			const version = await versionLine(found.binary, timeoutMs);
+			return version.timedOut
+				? `${name}: Slurm client version probe timed out: ${version.line}`
+				: version.fault
+					? `${name}: ${version.fault}: ${version.line}`
+					: null;
+		}),
+	);
+	const faults = clientFaults.filter((fault) => fault !== null);
 	findings.push({
 		ok: true,
-		level: schedulerPresent ? "ok" : "info",
+		level: faults.length > 0 ? "warn" : schedulerPresent ? "ok" : "info",
 		name: "slurm scheduler",
-		detail: clients
-			.map(([name, found]) => `${name} ${found.presence === "present" ? found.binary : "not on PATH"}`)
-			.join("; "),
+		detail:
+			faults.length > 0
+				? faults.join("; ")
+				: clients
+						.map(([name, found]) => `${name} ${found.presence === "present" ? found.binary : "not on PATH"}`)
+						.join("; "),
 	});
 	return findings;
 }

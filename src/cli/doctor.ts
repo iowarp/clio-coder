@@ -147,7 +147,8 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	const hpcChecks = await hpcToolchainFindings({ workspaceRoot });
 	// Slurm through the clio-kit MCP server. PATH lookups and two bounded
 	// clio-kit spawns; the mcp.yaml lookup is skipped on an untouched home.
-	const slurmChecks = await slurmMcpFindings({ workspaceRoot, untouched });
+	const sbatchFinding = hpcChecks.find((finding) => finding.name === "toolchain sbatch");
+	const slurmChecks = await slurmMcpFindings({ workspaceRoot, untouched, ...(sbatchFinding ? { sbatchFinding } : {}) });
 	// The pane sweep pings a socket and reads PATH; it creates nothing except the
 	// journal directory it is asked about, which is inside the state root doctor
 	// has already agreed not to build on an untouched home.

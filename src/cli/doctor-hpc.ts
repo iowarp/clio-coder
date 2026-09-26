@@ -68,9 +68,10 @@ interface VersionProbe {
 	line: string;
 	/** Set when `--version` failed, which marks an installed tool that does not work. */
 	fault?: string;
+	timedOut?: boolean;
 }
 
-async function versionLine(binary: string, timeoutMs: number): Promise<VersionProbe> {
+export async function versionLine(binary: string, timeoutMs: number): Promise<VersionProbe> {
 	// A scratch cwd, as interop's version probe uses: a tool that reads config
 	// from its working directory must not pick up the workspace's.
 	const cwd = tmpdir();
@@ -80,10 +81,25 @@ async function versionLine(binary: string, timeoutMs: number): Promise<VersionPr
 		timeoutMs,
 		maxOutputBytes: HPC_VERSION_MAX_OUTPUT_BYTES,
 	});
-	if (result.timedOut) return { line: `no version line (--version did not answer within ${timeoutMs}ms)` };
+	if (result.timedOut)
+		return {
+			line: `no version line (--version did not answer within ${timeoutMs}ms)`,
+			timedOut: true,
+		};
 	const output = lines(`${result.stdout}\n${result.stderr}`);
 	const line = output.find((entry) => /\d+\.\d+/.test(entry)) ?? output[0] ?? "no version line";
-	if (result.exitCode !== 0) return { line, fault: `--version exited ${result.exitCode ?? "on a signal"}` };
+	if (result.exitCode !== 0) {
+		const slurmUnavailable =
+			/resolve_ctls_from_dns_srv|fetch_config: DNS SRV lookup failed|could not establish a configuration source|unable to contact slurm controller|slurm.conf.*(no such file|not found)/i.test(
+				output.join("\n"),
+			);
+		return {
+			line,
+			fault: slurmUnavailable
+				? "host has no Slurm configuration or controller to reach"
+				: `--version exited ${result.exitCode ?? "on a signal"}`,
+		};
+	}
 	return { line };
 }
 
@@ -96,6 +112,14 @@ async function probeTool(
 	const resolved = resolveOnPath(tool.binaries);
 	if (resolved.presence === "present" && resolved.binary !== undefined) {
 		const version = await versionLine(resolved.binary, timeoutMs);
+		if (tool.name === "sbatch" && version.timedOut) {
+			return {
+				ok: true,
+				name,
+				level: "warn",
+				detail: `${resolved.binary}: Slurm client version probe timed out: ${version.line}`,
+			};
+		}
 		if (version.fault !== undefined) {
 			return { ok: true, name, level: "warn", detail: `${resolved.binary}: ${version.fault}: ${version.line}` };
 		}

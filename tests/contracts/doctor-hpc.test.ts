@@ -65,7 +65,7 @@ describe("doctor HPC toolchain probes", () => {
 			ok: true,
 			name: "toolchain sbatch",
 			level: "warn",
-			detail: `${path.join(bin, "sbatch")}: --version exited 1: sbatch: error: fetch_config: DNS SRV lookup failed`,
+			detail: `${path.join(bin, "sbatch")}: host has no Slurm configuration or controller to reach: sbatch: error: fetch_config: DNS SRV lookup failed`,
 		});
 		deepStrictEqual(byName.get("toolchain mpirun"), {
 			ok: true,
