@@ -28,3 +28,14 @@ it("review round 2 G: combined and abbreviated destructive git flags cannot bypa
 		for (const level of ["default", "yolo"] as const)
 			strictEqual(engine.evaluate({ tool: "bash", args: { command } }, level).kind, "block", command);
 });
+
+it("review round 2 G: checkout discard forms and force push refspecs are gated", () => {
+	const engine = createSafetyPolicyEngine({ cwd: process.cwd() });
+	for (const [command, expected] of [
+		["git checkout .", "ask"],
+		["git checkout -f", "ask"],
+		["git push origin +main", "block"],
+	] as const)
+		for (const level of ["default", "yolo"] as const)
+			strictEqual(engine.evaluate({ tool: "bash", args: { command } }, level).kind, expected, command);
+});

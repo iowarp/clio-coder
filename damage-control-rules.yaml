@@ -107,6 +107,11 @@ packs:
         pattern: "\\bgit\\s+push\\s+(--force|-f)\\s+\\S+\\s+(main|master|production)\\b"
         class: git_destructive
         block: true
+      - id: git-push-force-refspec
+        description: "a plus-prefixed push refspec forces an update"
+        pattern: "\\bgit\\s+push\\b[^;&|]*\\s\\+[^\\s]+"
+        class: git_destructive
+        block: true
       - id: git-push-force
         description: "git push --force; use --force-with-lease if explicitly needed"
         pattern: "\\bgit\\s+push\\s+.*--force(?!-with-lease)"
@@ -363,6 +368,18 @@ packs:
         pattern: "\\bDROP\\s+SCHEMA\\b"
         class: system_modify
         block: true
+      - id: git-checkout-force
+        description: "forced checkout discards local changes"
+        pattern: "\\bgit\\s+checkout\\b[^;&|]*\\s(?:-f|--force)\\b"
+        class: git_destructive
+        block: false
+        ask: true
+      - id: git-checkout-dot
+        description: "checkout of the whole worktree discards local changes"
+        pattern: "\\bgit\\s+checkout\\s+(?:\\.|\\./|:/)\\s*$"
+        class: git_destructive
+        block: false
+        ask: true
       - id: git-checkout-discard-all
         description: "git checkout -- . discards all uncommitted changes"
         pattern: "\\bgit\\s+checkout\\b[^;&|]*\\s--\\s*(?:\\.|\\./|:/)\\s*$"
