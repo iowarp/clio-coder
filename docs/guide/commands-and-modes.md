@@ -624,7 +624,7 @@ Clio-specific and ambient variables are listed in the [environment variable refe
 
 ### code_nav modes
 
-The read-only `code_nav` tool queries the local index. Its modes and argument schema are in [Tool usage](tool-usage.md#codenav-navigate-the-codewiki-index).
+The read-only `code_nav` tool queries the local index. Its modes and argument schema are in [Tool usage](tool-usage.md#codenav-navigate-the-codemap).
 
 
 ## Output styles

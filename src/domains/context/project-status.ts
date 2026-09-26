@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { createUserTasksStore, USER_TASKS_RELATIVE_PATH } from "../user-tasks/store.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import type { Fingerprint } from "./fingerprint.js";
-import { buildProjectOrientation, orientationInputsMatch } from "./orientation.js";
+import { buildProjectOrientation, orientationInputsMatch, orientationKnownInputsMatch } from "./orientation.js";
 import { readClioState } from "./state.js";
 
 const exec = promisify(execFile);
@@ -81,7 +81,9 @@ export async function readProjectStatus(
 					...orientation,
 					freshness: orientationInputsMatch(cwd, orientation)
 						? "recorded snapshot; manifests match"
-						: "stale or different workspace",
+						: orientationKnownInputsMatch(cwd, orientation)
+							? "recorded snapshot; manifest coverage partial (unknown inputs)"
+							: "stale or different workspace",
 				}
 			: null,
 		git,

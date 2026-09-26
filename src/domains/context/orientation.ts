@@ -115,8 +115,16 @@ export function buildProjectOrientation(cwd: string, codewiki: Codewiki, fingerp
 		] as const) {
 			const values = presets?.[key];
 			if (!Array.isArray(values)) continue;
-			for (const value of values) {
-				const preset = record(value);
+			const selected = values
+				.map(record)
+				.filter((preset) => preset && preset.hidden !== true && text(preset.name, 80))
+				.sort((a, b) => {
+					const rank = (preset: Record<string, unknown> | null) =>
+						preset?.name === "release" ? 0 : preset?.name === "debug" ? 1 : 2;
+					return rank(a) - rank(b);
+				})
+				.slice(0, 2);
+			for (const preset of selected) {
 				const name = text(preset?.name, 80);
 				if (!name || preset?.hidden === true || commands.length >= 7) continue;
 				commands.push({
@@ -236,25 +244,44 @@ export function orientationInputsMatch(cwd: string, orientation: ProjectOrientat
 	);
 }
 
+/** Match only captured readable/absent inputs; unknown inputs never become certified facts. */
+export function orientationKnownInputsMatch(cwd: string, orientation: ProjectOrientation): boolean {
+	return (
+		orientation.workspace === resolve(cwd) &&
+		INPUTS.every(
+			(path) =>
+				orientation.inputs[path] === "unknown" ||
+				inputIdentity(cwd, path, readInput(cwd, path)) === orientation.inputs[path],
+		)
+	);
+}
+
 /** Snapshot labels never certify a current tree, tests, task completion, or assistant conclusions. */
 export function renderProjectOrientation(
 	cwd: string,
 	orientation: ProjectOrientation,
 	fingerprint: Fingerprint,
 ): string {
-	if (orientation.treeHash !== fingerprint.treeHash || !orientationInputsMatch(cwd, orientation))
+	if (orientation.treeHash !== fingerprint.treeHash || !orientationKnownInputsMatch(cwd, orientation))
 		return "<project-orientation>snapshot unavailable for current manifests/workspace; use code_nav mode=project</project-orientation>";
 	const lines = [
 		"<project-orientation>",
 		`Recorded source snapshot ${orientation.observedAt}; current source/status must be checked with tools.`,
 	];
-	if (orientation.identity)
+	const knownSource = (source: string) => /^[a-f0-9]{64}$/.test(orientation.inputs[source.split("#")[0] ?? ""] ?? "");
+	const unknownInputs = INPUTS.filter((path) => orientation.inputs[path] === "unknown");
+	if (unknownInputs.length)
 		lines.push(
-			`Declared project (${orientation.identity.source}): ${JSON.stringify(orientation.identity.name)}${orientation.identity.purpose ? ` — ${JSON.stringify(orientation.identity.purpose)}${orientation.identity.purposeSource ? ` [${orientation.identity.purposeSource}]` : ""}` : ""}`,
+			`Manifest coverage partial: ${unknownInputs.join(", ")} unreadable or oversized; their facts are unknown.`,
 		);
-	if (orientation.commands.length)
+	if (orientation.identity && knownSource(orientation.identity.source))
 		lines.push(
-			`Declared commands: ${orientation.commands
+			`Declared project (${orientation.identity.source}): ${JSON.stringify(orientation.identity.name)}${orientation.identity.purpose && knownSource(orientation.identity.purposeSource ?? orientation.identity.source) ? ` — ${JSON.stringify(orientation.identity.purpose)}${orientation.identity.purposeSource ? ` [${orientation.identity.purposeSource}]` : ""}` : ""}`,
+		);
+	const commands = orientation.commands.filter((command) => knownSource(command.source));
+	if (commands.length)
+		lines.push(
+			`Declared commands: ${commands
 				.slice(0, 6)
 				.map((c) => `${c.command} [${c.source}]`)
 				.join("; ")}`,
@@ -270,10 +297,11 @@ export function renderProjectOrientation(
 		"Navigation: code_nav mode=symbol|path|entries|outline|deps|dependents; use code_nav mode=project to retrieve current Git and durable operator task evidence. Session progress/blockers: tasks action=list. Recorded task status is not passing verification.",
 		"</project-orientation>",
 	);
-	const required = [lines[0] ?? "", lines[1] ?? "", ...lines.slice(-2)];
-	const selected = required.slice(0, 2);
-	for (const line of lines.slice(2, -2)) {
-		if ([...selected, line, ...required.slice(2)].join("\n").length <= 2100) selected.push(line);
+	const prefixCount = unknownInputs.length ? 3 : 2;
+	const required = [...lines.slice(0, prefixCount), ...lines.slice(-2)];
+	const selected = required.slice(0, prefixCount);
+	for (const line of lines.slice(prefixCount, -2)) {
+		if ([...selected, line, ...required.slice(prefixCount)].join("\n").length <= 2100) selected.push(line);
 	}
-	return [...selected, ...required.slice(2)].join("\n");
+	return [...selected, ...required.slice(prefixCount)].join("\n");
 }

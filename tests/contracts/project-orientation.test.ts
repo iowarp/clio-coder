@@ -263,7 +263,7 @@ test("unreadable or oversized manifest evidence remains unknown", async () => {
 		writeFileSync(join(env.dir, "a.ts"), "export const value = 1;\n");
 		await index(env.dir);
 		strictEqual(readClioState(env.dir)?.orientation?.inputs["package.json"], "unknown");
-		match(renderPromptContext(env.dir).text, /snapshot unavailable/);
+		match(renderPromptContext(env.dir).text, /Manifest coverage partial/);
 	} finally {
 		env.restore();
 	}
@@ -298,6 +298,39 @@ test("wiki indexing refreshes orientation and preserves handbook generation prov
 		await runWikiGenerate({ cwd: env.dir, model: "fixture", generate: () => {} });
 		strictEqual(readClioState(env.dir)?.orientation?.identity?.name, "updated-wiki-project");
 		deepStrictEqual(readClioState(env.dir)?.bootstrapFingerprint, state.fingerprint);
+	} finally {
+		env.restore();
+	}
+});
+
+test("oversized CMake does not hide checked Python/preset facts or certify unknown CMake inputs", async () => {
+	const env = await isolateClioEnv("clio-partial-orientation-");
+	try {
+		mkdirSync(join(env.dir, ".git"));
+		writeFileSync(join(env.dir, "a.py"), "def solve(): pass\n");
+		writeFileSync(join(env.dir, "CMakeLists.txt"), `# ${"x".repeat(66_000)}`);
+		writeFileSync(join(env.dir, "pyproject.toml"), '[project]\nname="flux"\ndescription="Preserve conservation"\n');
+		writeFileSync(
+			join(env.dir, "CMakePresets.json"),
+			JSON.stringify({
+				configurePresets: ["cuda", "rocm", "release", "debug"].map((name) => ({ name })),
+				buildPresets: [{ name: "release" }],
+				testPresets: [{ name: "release" }],
+			}),
+		);
+		await index(env.dir);
+		const prompt = renderPromptContext(env.dir).text;
+		match(prompt, /Manifest coverage partial: CMakeLists.txt/);
+		match(prompt, /Declared project \(pyproject.toml#project\): "flux"/);
+		match(prompt, /cmake --preset/);
+		match(prompt, /cmake --build --preset/);
+		match(prompt, /ctest --preset/);
+		match(
+			String(((await readProjectStatus(env.dir)).orientation as { freshness: string }).freshness),
+			/coverage partial/,
+		);
+		writeFileSync(join(env.dir, "pyproject.toml"), '[project]\nname="changed"\n');
+		match(renderPromptContext(env.dir).text, /snapshot unavailable/);
 	} finally {
 		env.restore();
 	}

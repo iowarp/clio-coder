@@ -6,7 +6,7 @@ Operational reference for agents and readers using the web app. Sections summari
 
 | Purpose | Tools |
 | --- | --- |
-| Read and search the workspace | [`read`](#read-page-through-a-file-with-offset-limit-and-tail), [`grep`](#grep-search-file-contents-with-ripgrep), [`find`](#find-locate-files-and-directories-by-glob-pattern), [`ls`](#ls-list-one-directory), [`code_nav`](#codenav-navigate-the-codewiki-index) |
+| Read and search the workspace | [`read`](#read-page-through-a-file-with-offset-limit-and-tail), [`grep`](#grep-search-file-contents-with-ripgrep), [`find`](#find-locate-files-and-directories-by-glob-pattern), [`ls`](#ls-list-one-directory), [`code_nav`](#codenav-navigate-the-codemap) |
 | Change the workspace | [`edit`](#edit-exact-text-replacements-in-one-file), [`write`](#write-create-or-overwrite-a-whole-file), [`bash`](#bash-run-a-shell-command), [`run_script`](#runscript-stream-a-scientific-processing-step-to-disk) |
 | Prove something works | [`verify`](#verify-run-declared-verification-checks), [`evidence`](#evidence-inspect-canonical-evidence-and-trust-status), [`limitation`](#limitation-record-what-a-turn-could-not-verify) |
 | Delegate and supervise work | [`dispatch`](#dispatch-run-bounded-tasks-on-fleet-agents), [`monitor`](#monitor-inspect-dispatched-runs), [`steer`](#steer-guide-or-cancel-a-running-worker), [`ledger`](#ledger-coordinate-peer-workers-through-typed-entries) |
