@@ -21,7 +21,15 @@ function Failure({ error }: { error: Error }) {
 		</div>
 	);
 }
-export function Toolchain({ client }: { client: Client }) {
+export function Toolchain({
+	client,
+	compact = false,
+	filter = "",
+}: {
+	client: Client;
+	compact?: boolean;
+	filter?: string;
+}) {
 	const queries = useQueryClient();
 	const tools = useQuery({ queryKey: ["tools"], queryFn: () => client.call(routes.tools, emptyInput) });
 	const [operationId, setOperationId] = useState<string | null>(null);
@@ -40,27 +48,35 @@ export function Toolchain({ client }: { client: Client }) {
 		(!!operationId && operation.isPending) ||
 		operation.data?.status === "running" ||
 		operation.data?.status === "queued";
+	const needle = filter.trim().toLocaleLowerCase();
+	const visibleTools = tools.data?.filter((tool) =>
+		`${tool.id} ${tool.summary} ${tool.version} ${toolResolution(tool).label}`.toLocaleLowerCase().includes(needle),
+	);
 	return (
 		<>
-			<PanelHeading
-				panel={PANELS.toolchain}
-				level={1}
-				title={
-					<>
-						Toolchain<span className="period">.</span>
-					</>
-				}
-				action={<span className="count">{tools.data?.length ?? "—"} pinned tools</span>}
-			/>
-			<p className="intro">Inspect the executable Clio resolves and manage its pinned, vendored copy.</p>
-			<p className="panel-note">
-				A compatible PATH installation may take precedence over the pinned copy. Removing a vendored copy leaves PATH
-				installations intact.
-			</p>
-			<div className="section-rule">
-				<span>TOOL / PINNED VERSION</span>
-				<span>RESOLUTION & INSTALLATION</span>
-			</div>
+			{!compact && (
+				<>
+					<PanelHeading
+						panel={PANELS.toolchain}
+						level={1}
+						title={
+							<>
+								Toolchain<span className="period">.</span>
+							</>
+						}
+						action={<span className="count">{tools.data?.length ?? "—"} pinned tools</span>}
+					/>
+					<p className="intro">Inspect the executable Clio resolves and manage its pinned, vendored copy.</p>
+					<p className="panel-note">
+						A compatible PATH installation may take precedence over the pinned copy. Removing a vendored copy leaves PATH
+						installations intact.
+					</p>
+					<div className="section-rule">
+						<span>TOOL / PINNED VERSION</span>
+						<span>RESOLUTION & INSTALLATION</span>
+					</div>
+				</>
+			)}
 			{tools.isPending && <p>Resolving tools…</p>}
 			{tools.error && (
 				<>
@@ -71,26 +87,39 @@ export function Toolchain({ client }: { client: Client }) {
 				</>
 			)}
 			{tools.data && !tools.data.length && <PanelEmpty>{emptyState.emptyStore("pinned tool")}</PanelEmpty>}
+			{!!tools.data?.length && !visibleTools?.length && <PanelEmpty>No pinned tools match this filter.</PanelEmpty>}
 			<div className="tools">
-				{tools.data?.map((tool, index) => {
+				{visibleTools?.map((tool, index) => {
 					const candidate = toolCandidateNote(tool);
+					const ToolContainer = compact ? "details" : "article";
 					return (
-						<article className="tool" key={tool.id} aria-label={tool.id}>
-							<div className="tool-identity">
-								<span className="tool-number">0{index + 1}</span>
-								<div>
-									<h2>
-										{tool.id}
-										<span className="version">{tool.version}</span>
-									</h2>
-									<p>{tool.summary}</p>
-									<small>
-										{tool.license} · {tool.platform ?? "Unsupported platform"}
-									</small>
+						<ToolContainer className="tool" key={tool.id} aria-label={tool.id}>
+							{compact && (
+								<summary>
+									<span className="tool-compact-identity">
+										<strong>{tool.id}</strong>
+										<span>{tool.version}</span>
+									</span>
+									<StatusMark {...toolResolution(tool)} />
+								</summary>
+							)}
+							{!compact && (
+								<div className="tool-identity">
+									<span className="tool-number">0{index + 1}</span>
+									<div>
+										<h2>
+											{tool.id}
+											<span className="version">{tool.version}</span>
+										</h2>
+										<p>{tool.summary}</p>
+										<small>
+											{tool.license} · {tool.platform ?? "Unsupported platform"}
+										</small>
+									</div>
 								</div>
-							</div>
+							)}
 							<div className="tool-resolution">
-								<StatusMark {...toolResolution(tool)} />
+								{!compact && <StatusMark {...toolResolution(tool)} />}
 								<p>{tool.resolution.description}</p>
 								<dl className="tool-facts">
 									<div>
@@ -159,7 +188,7 @@ export function Toolchain({ client }: { client: Client }) {
 									)}
 								</div>
 							</div>
-						</article>
+						</ToolContainer>
 					);
 				})}
 			</div>

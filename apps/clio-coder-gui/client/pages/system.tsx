@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Link, NavLink, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
@@ -35,12 +35,21 @@ function SystemTabs() {
 		</nav>
 	);
 }
-export function SystemPage({ client }: { client: Client }) {
+export function SystemPage({
+	client,
+	compact = false,
+	filter: sidebarFilter = "",
+}: {
+	client: Client;
+	compact?: boolean;
+	filter?: string;
+}) {
 	const report = useQuery({ queryKey: ["system"], queryFn: () => client.call(routes.system, emptyInput) });
 	const meta = useQuery({ queryKey: ["meta"], queryFn: () => client.call(routes.meta, emptyInput) });
 	const [search, setSearch] = useSearchParams();
-	const filter = search.get("q") ?? "",
-		attentionOnly = search.get("attention") === "true";
+	const [sidebarAttention, setSidebarAttention] = useState(false);
+	const filter = compact ? sidebarFilter : (search.get("q") ?? ""),
+		attentionOnly = compact ? sidebarAttention : search.get("attention") === "true";
 	const discover = (key: string, value: string | null, replace = false) =>
 		setSearch(
 			(current) => {
@@ -55,15 +64,19 @@ export function SystemPage({ client }: { client: Client }) {
 	const attention = report.data?.findings.filter((row) => row.level === "error" || row.level === "warn").length ?? 0;
 	return (
 		<section>
-			<PanelHeading
-				panel={PANELS.system}
-				level={1}
-				action={report.data ? <span className="count">Checked {formatTime(report.data.checkedAt)}</span> : null}
-			/>
-			<SystemTabs />
-			<p>Installation diagnostics and local folders. Check again refreshes these observations without changing files.</p>
+			{!compact && (
+				<>
+					<PanelHeading
+						panel={PANELS.system}
+						level={1}
+						action={report.data ? <span className="count">Checked {formatTime(report.data.checkedAt)}</span> : null}
+					/>
+					<SystemTabs />
+					<p>Installation diagnostics and local folders. Check again refreshes these observations without changing files.</p>
+				</>
+			)}
 			<button type="button" disabled={report.isFetching} onClick={() => void report.refetch()}>
-				Check again
+				{compact ? "Refresh diagnostics" : "Check again"}
 			</button>
 			{report.isPending && <p>Checking installation…</p>}
 			{report.error && (
@@ -92,14 +105,18 @@ export function SystemPage({ client }: { client: Client }) {
 						/>
 					</div>
 					<div className="system-discovery">
-						<label className="settings-filter">
-							Find a diagnostic
-							<input type="search" value={filter} onChange={(event) => discover("q", event.target.value, true)} />
-						</label>
+						{!compact && (
+							<label className="settings-filter">
+								Find a diagnostic
+								<input type="search" value={filter} onChange={(event) => discover("q", event.target.value, true)} />
+							</label>
+						)}
 						<button
 							type="button"
 							aria-pressed={attentionOnly}
-							onClick={() => discover("attention", attentionOnly ? null : "true")}
+							onClick={() =>
+								compact ? setSidebarAttention(!attentionOnly) : discover("attention", attentionOnly ? null : "true")
+							}
 						>
 							Needs review only · {attention}
 						</button>
@@ -117,12 +134,16 @@ export function SystemPage({ client }: { client: Client }) {
 							</h3>
 							{group.findings.map((row) => {
 								const action = findingAction(row);
+								const FindingContainer = compact ? "details" : "article";
 								return (
-									<article className="system-finding" key={row.name}>
-										<div>
-											<h4>{row.name}</h4>
-											<StatusMark tone={group.tone} label={group.label} />
-										</div>
+									<FindingContainer className="system-finding" key={row.name}>
+										{compact && <summary>{row.name}</summary>}
+										{!compact && (
+											<div>
+												<h4>{row.name}</h4>
+												<StatusMark tone={group.tone} label={group.label} />
+											</div>
+										)}
 										<div>
 											<p>{row.detail}</p>
 											{row.detailRedacted && (
@@ -132,7 +153,7 @@ export function SystemPage({ client }: { client: Client }) {
 											)}
 											{action && <Link to={action.path}>{action.label}</Link>}
 										</div>
-									</article>
+									</FindingContainer>
 								);
 							})}
 						</section>
@@ -165,18 +186,34 @@ export function SystemPage({ client }: { client: Client }) {
 							</dl>
 						</details>
 					)}
-					<h2>Clio folders</h2>
-					<dl className="settings-list">
-						{Object.entries(report.data.paths).map(([role, path]) => (
-							<div key={role}>
-								<dt>{humanizeKey(role)}</dt>
-								<dd>
-									<code>{path}</code>
-								</dd>
-								<dd />
-							</div>
-						))}
-					</dl>
+					{!compact && <h2>Clio folders</h2>}
+					{compact ? (
+						<details className="system-compact-paths">
+							<summary>Clio folders</summary>
+							<dl className="settings-list">
+								{Object.entries(report.data.paths).map(([role, path]) => (
+									<div key={role}>
+										<dt>{humanizeKey(role)}</dt>
+										<dd>
+											<code>{path}</code>
+										</dd>
+									</div>
+								))}
+							</dl>
+						</details>
+					) : (
+						<dl className="settings-list">
+							{Object.entries(report.data.paths).map(([role, path]) => (
+								<div key={role}>
+									<dt>{humanizeKey(role)}</dt>
+									<dd>
+										<code>{path}</code>
+									</dd>
+									<dd />
+								</div>
+							))}
+						</dl>
+					)}
 				</>
 			)}
 		</section>
