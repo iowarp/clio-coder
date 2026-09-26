@@ -3104,7 +3104,7 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["items", "nextCursor"],
+									"required": ["items", "nextCursor", "present"],
 									"properties": {
 										"items": {
 											"type": "array",
@@ -3398,6 +3398,9 @@
 													"type": "null"
 												}
 											]
+										},
+										"present": {
+											"type": "boolean"
 										}
 									},
 									"additionalProperties": false
@@ -4447,7 +4450,7 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["items", "nextCursor"],
+									"required": ["items", "nextCursor", "present"],
 									"properties": {
 										"items": {
 											"type": "array",
@@ -4520,6 +4523,9 @@
 													"type": "null"
 												}
 											]
+										},
+										"present": {
+											"type": "boolean"
 										}
 									},
 									"additionalProperties": false
@@ -5283,7 +5289,7 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["items", "nextCursor"],
+									"required": ["items", "nextCursor", "present"],
 									"properties": {
 										"items": {
 											"type": "array",
@@ -5422,6 +5428,9 @@
 													"type": "null"
 												}
 											]
+										},
+										"present": {
+											"type": "boolean"
 										}
 									},
 									"additionalProperties": false
@@ -26760,7 +26769,10 @@
 												],
 												"properties": {
 													"run_id": {
-														"type": "string"
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256,
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 													},
 													"assignment_id": {
 														"type": "string"
@@ -26969,7 +26981,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					}
 				],
@@ -26998,7 +27012,10 @@
 									],
 									"properties": {
 										"run_id": {
-											"type": "string"
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256,
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 										},
 										"assignment_id": {
 											"type": "string"
@@ -27191,7 +27208,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					}
 				],
@@ -27230,10 +27249,16 @@
 										],
 										"properties": {
 											"phase_id": {
-												"type": "string"
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256,
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 											},
 											"run_id": {
-												"type": "string"
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256,
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 											},
 											"seq": {
 												"type": "integer"
@@ -27505,7 +27530,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					}
 				],
@@ -27534,10 +27561,16 @@
 												"type": "integer"
 											},
 											"run_id": {
-												"type": "string"
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256,
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 											},
 											"phase_id": {
-												"type": "string"
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256,
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 											},
 											"attempt": {
 												"type": "integer"
@@ -27675,7 +27708,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					}
 				],
@@ -27694,7 +27729,10 @@
 												"type": "integer"
 											},
 											"run_id": {
-												"type": "string"
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256,
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 											},
 											"kind": {
 												"type": "string"
@@ -27853,7 +27891,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					},
 					{
@@ -27912,10 +27952,16 @@
 														"type": "string"
 													},
 													"run_id": {
-														"type": "string"
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256,
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 													},
 													"phase_id": {
-														"type": "string"
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256,
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 													},
 													"parent_id": {
 														"anyOf": [
@@ -28086,7 +28132,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					},
 					{
@@ -28245,7 +28293,9 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							"minLength": 1,
+							"maxLength": 256,
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
 						}
 					},
 					{

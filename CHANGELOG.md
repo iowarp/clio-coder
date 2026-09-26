@@ -25,6 +25,9 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ### Browser application and ACP
 
+- The browser application adopts the canonical cyan Clio mark, warm dark/light palette, and locally bundled IBM Plex and Newsreader fonts across navigation, installation icons, and offline recovery.
+- Traces, Fleet, Evidence, Library, Toolchain, Settings, and System gain focused inspection, URL-backed discovery, reviewed operations, and clearer storage/error states. Recorded session traces open correctly, and unpriced model usage remains unavailable rather than displaying zero spend.
+
 - The alpha browser application exposes session boards, operator tasks, plans, decisions, memory proposals, context inspection and recovery, conversation branches, and reviewed handoffs through ACP host capabilities.
 - Fleet previews show waves, routes, write boundaries, gates, command arguments, and budget. Execution checks the approved recipes, resolved routes, and registered invocation bindings; bounded previews mark omitted details.
 - Requests accept supported images, workspace `@path` references, and bounded UTF-8 text attachments. Model and thinking controls distinguish conversation settings from saved project defaults.
@@ -51,7 +54,6 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 ### Documentation and distribution
 
 - Removed `clio-coder docs`, its documentation server, and the browser application’s native Docs reader. Help opens the public documentation and identifies the installed Markdown reference; offline `clio_docs` retrieval and bundled resources remain available.
-
 - Product documentation describes the current architecture, configuration, context, verification, and delegation interfaces. Generated development wiki pages retain independent **v0.1** versioning.
 - Website documentation is linked to its release source. README and website include terminal and browser captures, and reusable media have checked hashes, dimensions, and delivery copies.
 - The installed package contains authored product documentation and its corpus metadata; generated development wiki pages remain in the repository and GitHub Wiki.

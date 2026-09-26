@@ -161,6 +161,14 @@ export function NoticeToasts() {
 				onFocusCapture={() => setPaused(true)}
 				onBlurCapture={() => setPaused(false)}
 			>
+				{values.length > 1 && (
+					<div className="notice-region__controls">
+						<span>{values.length} notifications</span>
+						<button type="button" onClick={dismissAll}>
+							Dismiss all
+						</button>
+					</div>
+				)}
 				{values.map((notice) => (
 					<article className={`notice notice--${notice.tone}`} key={notice.id}>
 						<div className="notice__heading">

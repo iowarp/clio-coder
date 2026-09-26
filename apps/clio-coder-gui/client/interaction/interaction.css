@@ -319,9 +319,26 @@
 	display: grid;
 	gap: 12px;
 	width: min(390px, calc(100vw - 40px));
-	max-height: 70vh;
+	max-height: 36dvh;
 	overflow: auto;
+	overscroll-behavior: contain;
 	z-index: 10;
+}
+.notice-region__controls {
+	position: sticky;
+	top: 0;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 6px 10px;
+	background: var(--surface);
+	border: 1px solid var(--line);
+	font-size: var(--text-sm);
+	z-index: 1;
+}
+.notice-region__controls button {
+	min-height: 44px;
 }
 .notice {
 	padding: 16px 18px;
