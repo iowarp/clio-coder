@@ -267,14 +267,14 @@ function validatesWithYazi(dir: string, yaziPath: string): boolean {
 	}
 }
 
-/** Doctor must distinguish a failed generation from a profile never used (review round 1, finding 8). */
+/** Doctor must distinguish a failed generation from a profile never used. */
 function recordGenerationFailure(dir: string): void {
 	try {
 		rmSync(dir, { recursive: true, force: true });
 		mkdirSync(dir, { recursive: true });
 		safeResourceWrite(join(dir, FAILURE_FILE), "Yazi profile generation failed validation. Run doctor --fix to retry.\n");
 	} catch {
-		// Review round 2 B: the marker is diagnostic; returning null safely prevents either launcher from using a failed profile.
+		// The marker is diagnostic; returning null safely prevents either launcher from using a failed profile.
 	}
 }
 
@@ -317,7 +317,7 @@ export function ensureYaziProfile(options: EnsureYaziProfileOptions): YaziProfil
 		try {
 			if (staging !== null) rmSync(staging, { recursive: true, force: true });
 		} catch {
-			// Review round 2 B: leftover cache staging is safe and must not hide the profile-error result.
+			// Leftover cache staging is safe and must not hide the profile-error result.
 		}
 	}
 }

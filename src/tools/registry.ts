@@ -1008,7 +1008,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				entry.closePark();
 				const verdict = await runSpec(outcome.spec, entry.call, outcome.decision, approvedOptions);
 				// A grant is invisible in the result otherwise, and the model reported
-				// a confirmed call as one that never asked (BT-003). The note names the
+				// a confirmed call as one that never asked. The note names the
 				// surface that released the call, because an ACP client or a
 				// remembered escalation is not this session's operator. Only this path
 				// runs a released call, so no ordinary call is annotated.

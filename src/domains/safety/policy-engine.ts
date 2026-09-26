@@ -1070,7 +1070,7 @@ function blockDecision(
 
 /**
  * Rule order is precedence, so the outer loop stays over the rules and each one
- * is offered every scan candidate (BT-001). A rule fires on the first candidate
+ * is offered every scan candidate. A rule fires on the first candidate
  * it matches, which can only add matches, never reorder or drop one.
  */
 function matchSourcedRule(candidates: ReadonlyArray<string>, rules: ReadonlyArray<SourcedRule>) {
@@ -1325,7 +1325,7 @@ const CONTENT_BEARING_TOOLS: ReadonlySet<string> = new Set([
  * stopped matching the moment the model also supplied `cwd` or `timeout_ms`:
  * `git restore .` ran at both levels and the authored `git checkout -- .`
  * confirm rail fell through to the classifier's unconditional git_destructive
- * block (BT-001). The command is offered on its own as well. The blob stays a
+ * block. The command is offered on its own as well. The blob stays a
  * candidate so no rule that matched before stops matching now.
  */
 function damageControlScans(call: ClassifierCall): string[] {
@@ -1350,7 +1350,7 @@ function damageControlScans(call: ClassifierCall): string[] {
  * A damage-control pattern anchored with `$` matches only at the end of the
  * string it is tested against, so `git restore . && echo RESTORED` hid its
  * destructive segment and ran at yolo with no card, discarding a dirty tracked
- * file (BT-002). Every operator opened the same hole, and the audit blamed
+ * file. Every operator opened the same hole, and the audit blamed
  * `bash-shell-operators` because no rule had matched.
  *
  * Segments are sliced out of the original text rather than rebuilt from tokens,

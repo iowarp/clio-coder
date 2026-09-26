@@ -92,16 +92,15 @@ A parked call carries a request id. A main-agent approval resumes only that call
 | Audit records | [audit.ts](../../src/domains/safety/audit.ts) | `buildAuditRecord`, `openAuditWriter` |
 | Finish contract and rigor | [finish-contract.ts](../../src/domains/safety/finish-contract.ts) | `assessFinishContract` |
 
-BT-014 exempts rule matches only when every span is inside an inert quoted argument to echo, printf, git commit/tag messages or grep/rg patterns. Whole-command and segment scans remain active. SQL and operator matches, substitutions, pipelines, heredocs and executable wrapper words prevent the exemption (review round 2 A).
+The policy exempts rule matches only when every span is inside an inert quoted argument to echo, printf, git commit/tag messages or grep/rg patterns. Whole-command and segment scans remain active. SQL and operator matches, substitutions, pipelines, heredocs and executable wrapper words prevent the exemption.
 
-Git damage-control scans also dequote simple-command words, join backslash-newline continuations, and skip recognized git global options to find the subcommand. Original scans remain active, so normalization adds coverage without removing conservative matches (review round 2 G).
+Git damage-control scans also dequote simple-command words, join backslash-newline continuations, and skip recognized git global options to find the subcommand. Original scans remain active, so normalization adds coverage without removing conservative matches.
 
-Each scan candidate must independently prove its matches inert before an exemption applies. Quoted prose cannot suppress a destructive normalized git command elsewhere in the same call (review round 2 A/G).
+Each scan candidate must independently prove its matches inert before an exemption applies. Quoted prose cannot suppress a destructive normalized git command elsewhere in the same call.
 
+For git clean, push and checkout, combined short flags are expanded for damage-control matching. Unique destructive long-option prefixes for reset and push are expanded; ambiguous prefixes and `--force-with-lease` are preserved.
 
-For git clean, push and checkout, combined short flags are expanded for damage-control matching. Unique destructive long-option prefixes for reset and push are expanded; ambiguous prefixes and `--force-with-lease` are preserved (review round 2 G).
-
-Whole-worktree `git checkout .` and forced checkout ask for confirmation at both autonomy levels. Plus-prefixed push refspecs such as `git push origin +main` hard-block as force updates (review round 2 G).
+Whole-worktree `git checkout .` and forced checkout ask for confirmation at both autonomy levels. Plus-prefixed push refspecs such as `git push origin +main` hard-block as force updates.
 
 Inert quoted-argument exemptions inspect the shell command alone. A bash call’s `cwd` is path metadata and cannot turn quoted documentation into shell execution.
 

@@ -1,7 +1,7 @@
 /**
  * Registry of quota adapters.
  *
- * Order is display order. BT-006 excludes implicit sibling accounts from
+ * Order is display order. Relocated-home isolation excludes implicit sibling accounts from
  * relocated homes before cache lookup or credential detection.
  */
 

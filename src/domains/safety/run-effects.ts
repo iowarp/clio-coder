@@ -47,7 +47,7 @@ export interface RunEffects {
 	failedMutationPaths: ReadonlySet<string>;
 	/** Canonical validation commands the run ran to a clean exit. */
 	validationCommands: ReadonlySet<string>;
-	/** Review round 2 F: true only when every observed checking call has an authoritative blocked outcome. */
+	/** True only when every observed checking call has an authoritative blocked outcome. */
 	checksAllBlocked?: boolean;
 	/**
 	 * The same commands read under the wider `grounding` vocabulary, which adds

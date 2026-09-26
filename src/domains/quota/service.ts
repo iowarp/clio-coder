@@ -23,7 +23,7 @@ export interface QuotaServiceOptions {
 	providers?: QuotaProvider[];
 	cache?: QuotaCache;
 	ttlMs?: number;
-	/** Override local-inference visibility; by default a configured local-native target is required (BT-006). */
+	/** Override local-inference visibility; by default a configured local-native target is required. */
 	includeLocal?: boolean;
 	localRuntimeLabel?: string;
 }

@@ -6,7 +6,7 @@ const EXECUTORS = new Set(
 	),
 );
 
-/** BT-014 and review round 2 A: exempt only proven inert spans, retaining conservative scans. */
+/** Only proven inert spans can be exempted; executable quoted content still needs conservative scans. */
 export function inertQuotedMatch(command: string, pattern: RegExp, ruleId = ""): boolean {
 	if (ruleId.startsWith("sql-") || /\beval\b|\||<<|\$'|\$\(|`/iu.test(command)) return false;
 	const tokens = scanShellLike(command);

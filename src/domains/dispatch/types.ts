@@ -659,7 +659,7 @@ export interface RunReceiptSafetySummary {
 	/**
 	 * The run had no write authority: the request asked for a read-only run, or
 	 * the recipe's capability class is read-only. Enforcement alone left no
-	 * record of it unless the worker tried to write and was denied (BT-016).
+	 * record of it unless the worker tried to write and was denied.
 	 * Present only on such runs, so a run that could write keeps its exact
 	 * shape and digest.
 	 */
@@ -978,7 +978,7 @@ export interface RunReceipt {
 	 * The failover mode that governed this run's retries, which is a different
 	 * question from the `routingIntent.failover` the request asked for: that
 	 * axis has two values and defaults to `none`, while this one answers
-	 * `automatic` for an unpinned request (BT-010). Optional, so a receipt
+	 * `automatic` for an unpinned request. Optional, so a receipt
 	 * sealed before the field existed digests exactly as it did.
 	 */
 	effectiveFailover?: DispatchFailoverMode;

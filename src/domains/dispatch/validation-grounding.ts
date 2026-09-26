@@ -64,7 +64,7 @@ export interface ValidationGrounding {
 
 export interface ValidationGroundingInput {
 	contractKind: ResultContract["kind"] | null;
-	/** BT-016: read claims in restricted runs are not command validation claims. */
+	/** Read claims in restricted runs are not command validation claims. */
 	readOnly?: boolean;
 	/** The run's terminal assistant text, or null when none was captured. */
 	output: string | null;

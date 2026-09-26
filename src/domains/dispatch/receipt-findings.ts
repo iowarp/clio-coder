@@ -93,7 +93,7 @@ export interface VerifyCallOutcome {
  * `max_output_bytes` only bound the same check, so a retry with more time is
  * still that check. `args` narrows a script (`test` against one file) and
  * `browser` weakens a frontend check, so either one makes a different check:
- * a narrower pass must never clear a wider failure (BT-017).
+ * a narrower pass must never clear a wider failure.
  */
 const VERIFY_IDENTITY_FIELDS = ["check", "path", "cwd", "browser"] as const;
 
@@ -153,8 +153,8 @@ function typedVerifyFact(
  * Typed validation facts for `verify`, one per check the run ran. A check's
  * latest executed outcome decides it: an earlier failure the run fixed and
  * re-ran clean seals as passed, and a pass the run later broke seals as failed
- * (BT-017). A blocked attempt never ran the check, so it supersedes nothing,
- * and a check with only blocked calls seals no validation fact (BT-016).
+ *. A blocked attempt never ran the check, so it supersedes nothing,
+ * and a check with only blocked calls seals no validation fact.
  *
  * Calls that cannot be tied to a check share one fact that passes only when
  * every such call passed. When no call can be tied to a check, the result is
@@ -325,7 +325,7 @@ function hasValidationEvidence(draft: Pick<RunReceiptDraft, "toolStats">): boole
 /**
  * Whether some validation tool passed. `verify` answers through its typed
  * facts when the receipt has them, because the per-tool aggregate cannot tell
- * a check the run fixed and re-ran from one it left failing (BT-017). Other
+ * a check the run fixed and re-ran from one it left failing. Other
  * validation tools carry no check identity, so their aggregate still decides.
  */
 function hasPassingValidation(
@@ -360,7 +360,7 @@ export function deriveReceiptVerification(
 	// verdict (glossary: grounded is "observed to run and pass, named by its
 	// claimant"). A validation tool that ran and failed was still observed, so
 	// reporting `no-validation-tool` contradicted the receipt's own typed
-	// validations (BT-012). It also outranks the ACP basis, which exists for a
+	// validations. It also outranks the ACP basis, which exists for a
 	// peer whose validation Clio could not see.
 	if (ranValidationTool(draft)) {
 		return { state: "unverified", basis: "validation-tool" };

@@ -110,7 +110,7 @@ export function resolveClioDirs(): ClioDirs {
 	};
 }
 
-/** BT-006: compare resolved roots without creating directories or reading credentials. */
+/** Credential isolation must compare resolved roots without creating directories or reading credentials. */
 export function isClioHomeRelocated(): boolean {
 	const defaults = platformDefaults();
 	const dirs = resolveClioDirs();

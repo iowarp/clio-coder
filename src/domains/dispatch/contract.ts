@@ -210,7 +210,7 @@ export interface DispatchSnapshot {
 		 * `input` is fresh input only, as on the receipt. `cacheRead` travels
 		 * beside it so observability can fold it in the way it folds a settled
 		 * receipt; without it the live island undercounted input against the
-		 * worker card (BT-007).
+		 * worker card.
 		 */
 		tokens: { input: number; output: number; total: number; cacheRead?: number };
 		costUsd: number;

@@ -30,7 +30,7 @@ export function retryDecisionWithinFailover(decision: RetryDecision, failover: D
  * `automatic` for an unpinned one. An unpinned run therefore sealed a receipt
  * reading `failover: "none"` while its retries were free to exclude the failed
  * route part, which made a sealed route and a drifting one indistinguishable in
- * evidence (BT-010). The receipt records this answer as well.
+ * evidence. The receipt records this answer as well.
  *
  * This is the reading the retry path already used; extracting it changes no
  * route selection.

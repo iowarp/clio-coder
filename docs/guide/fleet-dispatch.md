@@ -1214,10 +1214,10 @@ Ordinary dispatcher, council, and wiki planning time and tool estimates are advi
 
 A pipeline stops before admitting a dependent when a completed step reports failed quality. Execution success, result conformance, and deliverable quality remain separate facts. An independent recovery has its own receipt and does not replace the failed pipeline result. When delivery is missing or incomplete, report the terminal result and limitation; a successful process exit alone does not establish the requested deliverable.
 
-An editing mutation report may omit all validations when every checking call it attempted has an observed blocked outcome. It conforms with unmeasured quality. No attempts, unknown outcomes, or any executed check retain the concrete validation requirement (review round 2 F).
+An editing mutation report may omit all validations when every checking call it attempted has an observed blocked outcome. It conforms with unmeasured quality. No attempts, unknown outcomes, or any executed check retain the concrete validation requirement.
 
 Validation grounding treats `npm test`, `pnpm test`, and `yarn test` as aliases of the canonical `npm run test` command across all three managers. The test aliases also match the package-manager-neutral `verify(check="test")` summary recorded as `npm run test`. Other script names remain distinct; `npm run test:unit` does not ground a claim of `npm test`.
 
-A terminal colon in a validation claim, such as `npm test:`, is punctuation and grounds against `npm run test`. Script suffixes such as `test:unit` remain distinct (review round 2 C).
+A terminal colon in a validation claim, such as `npm test:`, is punctuation and grounds against `npm run test`. Script suffixes such as `test:unit` remain distinct.
 
 Typed-scope replacement warnings appear in the transcript for the first attempt of user and agent dispatches. Harness-owned internal dispatches retain one diagnostic per root run and receipt provenance without transcript path inventories. Retries, including retries of user dispatches and `context init` schema fallback, are quiet in both diagnostics and transcript notices. This presentation rule does not change working-context paths, rule selection, or worker authority.

@@ -4,7 +4,7 @@
  * A one-shot grant was invisible in the tool result: a damage-control
  * confirmation the operator approved produced the same result text as a call
  * that never asked, so the model reported "no prompt, no block" for a run the
- * audit recorded as `permission_requested` then `allowed` (BT-003). The
+ * audit recorded as `permission_requested` then `allowed`. The
  * transcript marker is the operator's record; this is the model's.
  *
  * Four sources release a parked call and they are not the same fact. The main
@@ -64,8 +64,8 @@ type NotedResult = ({ kind: "ok"; output: string } | { kind: "error"; message: s
 /**
  * Prepend the note to every text the result can show the model. A tool that
  * declares a result disposition, bash among them, is read through its
- * `modelContext` projection rather than `output`, and the live retest of
- * BT-003 lost the note there. The note lands after the projection's byte cap,
+ * `modelContext` projection rather than `output`. Projecting the text early
+ * lost the note in that model-facing result. The note lands after the projection's byte cap,
  * so it displaces none of the result, and `contextBytes` counts it so the
  * recorded size stays the size the model received.
  */

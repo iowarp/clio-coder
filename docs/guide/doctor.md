@@ -144,4 +144,4 @@ run `clio-coder doctor --fix` from a shell for that.
 
 Deep tool-probe rows report INFO when an available runtime has no live probe, naming the credential source. A failed health probe remains WARN and reports its last error.
 
-If the managed Yazi cache cannot be written, profile generation returns a profile error. Its diagnostic failure marker is best-effort; a cache failure does not crash either launcher (review round 2 B).
+If the managed Yazi cache cannot be written, profile generation returns a profile error. Its diagnostic failure marker is best-effort; a cache failure does not crash either launcher.

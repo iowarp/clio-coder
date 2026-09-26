@@ -754,7 +754,7 @@ interface VerifyCallLog {
  * carries the arguments and the Clio finish carries the authoritative outcome;
  * the engine's own `isError` cannot tell a blocked call, which never ran the
  * check, from one that ran and failed. The two are joined on the call id.
- * BT-017: the receipt judges each check by its latest run.
+ * The receipt judges each check by its latest run.
  */
 function recordWorkerVerifyCall(log: VerifyCallLog, event: Record<string, unknown>): void {
 	if (event.type === "tool_execution_start") {
@@ -3908,7 +3908,7 @@ export function createDispatchBundle(
 		// approval artifact renders every inferred entry in full before a
 		// supervised dispatch runs, which is where an operator can still act on it.
 		const notice = declaredScopeReplacementNotice(pathScope);
-		// Operator bootstrap report: harness-owned prompts deliberately use typed scope;
+		// Harness-owned prompts deliberately use typed scope;
 		// schema fallback retries must not repeat their prose path inventories in the transcript.
 		if (notice !== null && req.requestOrigin !== "internal") {
 			context.bus.emit(BusChannels.DispatchScopeNotice, {

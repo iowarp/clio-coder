@@ -1,6 +1,6 @@
 import { scanShellLike } from "./protected-artifacts.js";
 
-/** Review round 2 G: add canonical git scans without removing original conservative candidates. */
+/** Canonical Git scans cover alternate spellings while retaining the original conservative candidates. */
 export function normalizedGitCommands(command: string): string[] {
 	const candidates: string[] = [];
 	let words: string[] = [];
@@ -51,7 +51,7 @@ export function normalizedGitCommands(command: string): string[] {
 	return candidates;
 }
 
-/** Review round 2 G: git parses combined flags and unique long-option prefixes before acting. */
+/** Git parses combined flags and unique long-option prefixes before acting. */
 function normalizeGitFlags(words: string[]): string[] {
 	const subcommand = words[0] ?? "";
 	const options =
