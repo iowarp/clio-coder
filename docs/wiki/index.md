@@ -14,7 +14,6 @@ Wiki **v0.1** is a developing implementation reference, versioned independently 
 
 ## Sections
 
-- [apps/](apps/index.md)
 - [domains/](domains/index.md)
 - [engine/](engine/index.md)
 - [interactive/](interactive/index.md)

@@ -1,8 +1,5 @@
-// The rendering workload `scripts/perf-workload.ts` measures: one long Markdown answer covering every
-// construct the renderer handles, hostile input included, split at blank lines outside fences so
-// tool calls land between blocks the way a real agent finishes a block before it calls a tool. The
-// text is the retired workbench's `stream-workload` answer, kept so the numbers stay comparable with
-// the reference budgets in DESIGN.md "Streaming cadence".
+// Markdown and hostile-input workload for scripts/perf-workload.ts. Tool calls
+// land between blocks; chunk size and pace are fixed for comparable measurements.
 
 /** Characters per `agent_message_chunk`, and chunks sent between two pace ticks. */
 export const WORKLOAD_CHUNK_CHARS = 5;

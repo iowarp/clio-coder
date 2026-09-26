@@ -22,9 +22,13 @@ for source in (args.kit / "assets" / "fonts").iterdir():
 brand = public / "brand"
 brand.mkdir(exist_ok=True)
 mark = args.kit / "assets" / "brand" / "clio-mark.png"
-shutil.copy2(mark, brand / "clio-mark.png")
 provenance = json.loads((args.kit / "assets" / "brand" / "provenance.json").read_text())
 provenance["assets"] = [item for item in provenance["assets"] if item["name"] == "clio-mark"]
+if (
+    len(provenance["assets"]) != 1
+    or provenance["assets"][0]["sha256"] != hashlib.sha256(mark.read_bytes()).hexdigest()
+):
+    raise ValueError("Canonical mark does not match its provenance.")
 provenance["projection"] = {
     "source": "site/export-brand.mjs",
     "designSha256": hashlib.sha256((args.kit / "design-system.json").read_bytes()).hexdigest(),

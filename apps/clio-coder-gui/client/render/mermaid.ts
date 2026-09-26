@@ -29,7 +29,7 @@ interface SanitizerLike {
  */
 const THEME_VARIABLES = {
 	background: "transparent",
-	fontFamily: '"Atkinson Hyperlegible Next Variable", "Segoe UI", sans-serif',
+	fontFamily: '"IBM Plex Sans", "Segoe UI", system-ui, sans-serif',
 	fontSize: "13px",
 	primaryColor: "#1c1915",
 	primaryTextColor: "#f3ecdf",

@@ -76,7 +76,7 @@ Without `--cwd`, ACP binds the first session's absolute workspace path before it
 | `clio-coder dev evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
 | `clio-coder extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. `clio-coder ext` is an accepted alias. |
 | `clio-coder library list\|search\|register\|inspect\|validate\|install\|update\|enable\|disable\|drift\|pin\|remove` | Manage packages of kind plugin, skill, agent, prompt or fleet at user/project scope; `install/update --dry-run` preview. `library skills` lists runtime skills; `library inventory --json` is the fixed GUI read. |
-| `clio-coder gui [--open]`, `clio-coder dev gui` | Start the graphical application, an opt-in alpha for power users listed under `clio-coder --help --all`; the terminal UI stays the primary interface and nothing starts the application unless you run it. `--open` opens the browser. See the [GUI reference](commands-and-modes.md). |
+| `clio-coder gui [--open]`, `clio-coder dev gui` | Start the graphical application, an opt-in alpha for power users listed under `clio-coder --help --all`; the terminal UI stays the primary interface and nothing starts the application unless you run it. `--open` opens the browser. See the [GUI reference](#graphical-application). |
 | `clio-coder usage report [--repo <path>] [--days <n>] [--json]` | Cross-session usage facts from session/run ledgers and retained out-of-turn calls, including known failed-compaction spending and missing coverage. The window defaults to 30 days and the JSON schema is marked experimental. |
 | `clio-coder dev share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--agents] [--fleets] [--settings] [--extensions] [--all] [--dry-run] [--json]` | Export project context, prompts, skills, agents, fleets, settings fragments, and extension bundles. `--dry-run` lists what the archive would hold and writes nothing. |
 | `clio-coder dev share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
@@ -95,6 +95,22 @@ Without `--cwd`, ACP binds the first session's absolute workspace path before it
 ACP frontends can list, load, resume, and delete sessions through the stable session methods. Clio offers `default` and `yolo` as ACP modes. A frontend can change autonomy with `session/set_mode` or the `mode` configuration option. The `model` and `thought_level` options change only the hosted session; saved defaults stay as they were. Mode and option changes wait until the current prompt finishes.
 
 The startup flags `--api-key`, `--no-context-files` (`-nc`), `--no-skills` and `--skill` apply to the interactive session, `clio-coder run` and `clio-coder acp`. `--with-panes` and `--no-panes` apply to the interactive session alone. A startup flag given before any other subcommand is refused with exit 2 and a message naming the flag and the subcommand, because that command would ignore it.
+
+### Graphical application
+
+Run `clio-coder gui --open` to open the local browser application. It reuses this
+installation's owned background application when present; otherwise it starts a
+private foreground server. Use `--foreground` to select a private server explicitly.
+On Linux with a systemd user session, `clio-coder gui background install --open`
+installs the optional login service. `clio-coder gui launcher install` adds a
+desktop entry; each has an `uninstall` command.
+
+Select a project and start or resume a conversation. Selecting another area during
+a conversation opens its controls in the sidebar and preserves the chat and draft.
+Explicit viewer links open larger inspection pages. Model controls distinguish
+current-conversation choices from saved defaults; save actions state their scope.
+Help opens the public documentation and identifies the installed Markdown reference.
+Offline `clio_docs` retrieval remains available.
 
 ### Project trust
 

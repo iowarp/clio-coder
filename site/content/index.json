@@ -58,6 +58,7 @@
     ],
     "headings": [
       "CLI Commands",
+      "Graphical application",
       "Project trust",
       "Headless Run Flags",
       "Headless Working Directory",

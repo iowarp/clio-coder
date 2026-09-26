@@ -1,20 +1,6 @@
-// Streaming performance against the ACP fixture; DESIGN.md "Streaming cadence" has the budgets and
-// the last recorded results. Each turn streams the Markdown workload in
-// `tests/fixtures/stream-workload.mjs` (6.7 KB by default, or `--bytes`, in 5-character chunks with a
-// 4 ms tick every four chunks and tool bursts between blocks) into a production build in headless
-// Chrome, and reports long tasks, animation-frame intervals, keystroke latency, event-to-paint
-// latency, DOM and heap growth. It then waits for the turn's two diagrams (one valid, one malformed)
-// to settle and keeps measuring for another second, because diagram layout runs after the stream.
-// The first turn is quiet: nobody types, so every composer render in its streaming window would have
-// been caused by a streamed delta. The later turns type 64 characters into the composer and scroll
-// the transcript up while text arrives, then check the draft and the scroll held.
-//
-//   npx vite build --outDir <scratch>/client-build --emptyOutDir
-//   pnpm run perf --client <scratch>/client-build/ --out <scratch>/perf --label now
-//   pnpm run perf --client <scratch>/client-build/ --out <scratch>/perf --label now-16k --bytes 16384
-//
-// Headless Chrome paints at the rate its compositor chooses; the report records the measured
-// animation-frame interval rather than assuming one, and never stands for a real 120 Hz display.
+// Measure streamed Markdown, code, tools and diagrams in a private production client.
+// Reports observed frame intervals, input and paint latency, long tasks, DOM and heap
+// growth; checks that streaming preserves the draft and scroll position.
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { cpus, loadavg, totalmem } from "node:os";

@@ -114,8 +114,11 @@ export default defineConfig({
 	async onSuccess() {
 		const appRequire = createRequire(join(process.cwd(), "apps/clio-coder-gui/package.json"));
 		const { build: buildClient } = await import(appRequire.resolve("vite"));
-		await buildClient({ configFile: "apps/clio-coder-gui/vite.config.ts", configLoader: "runner" });
-		cpSync("apps/clio-coder-gui/dist/client", "dist/gui/client", { recursive: true });
+		await buildClient({
+			configFile: "apps/clio-coder-gui/vite.config.ts",
+			configLoader: "runner",
+			build: { outDir: join(process.cwd(), "dist/gui/client"), emptyOutDir: true },
+		});
 		vendorGrammars();
 		vendorTuiNotices();
 		const notices = join("dist", "assets", "gui-notices");

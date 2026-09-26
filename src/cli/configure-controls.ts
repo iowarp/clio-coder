@@ -10,12 +10,10 @@ import {
 	applyControlValue,
 	controlInstructions,
 	formatControlValue,
-	orderedSectionControls,
 	type SettingControl,
 } from "../core/settings-controls.js";
-import { SETTINGS_SECTIONS, type SettingsSectionId } from "../core/settings-navigation.js";
 import { diffSettings } from "../domains/config/classify.js";
-import { ConfigureNavigation, type ConfigurePrompts } from "./configure-prompts.js";
+import type { ConfigurePrompts } from "./configure-prompts.js";
 import { createLifecyclePresenter } from "./lifecycle-presenter.js";
 
 function editText(control: SettingControl, value: unknown): string {
@@ -84,33 +82,4 @@ export async function editSettingControl(prompts: ConfigurePrompts, control: Set
 	if ((await prompts.choose(`Save ${control.label} globally?`, ["Save", "Cancel"], "Save")) !== "Save") return false;
 	saveControl(control.path, value);
 	return true;
-}
-
-/** Legacy direct entry retained for callers; it now uses one complete list instead of a group drill-down. */
-export async function runSectionControls(prompts: ConfigurePrompts, section: SettingsSectionId): Promise<void> {
-	const entries = orderedSectionControls(section);
-	const title = SETTINGS_SECTIONS.find((entry) => entry.id === section)?.label ?? section;
-	for (;;) {
-		try {
-			prompts.clearScreen();
-			const presenter = createLifecyclePresenter({ stream: prompts.output });
-			presenter.header(title, "configure");
-			presenter.note("Every setting in this area is listed here. Choose one to see its meaning, default, and timing.");
-			const labels = entries.map(({ group, control }) => `${group} · ${control.label}`);
-			const chosen = await prompts.choose("Setting", [...labels, "Back"], labels[0] ?? "Back", true);
-			if (chosen === "Back") return;
-			const entry = entries[labels.indexOf(chosen)];
-			if (!entry) continue;
-			try {
-				await editSettingControl(prompts, entry.control);
-			} catch (error) {
-				if (error instanceof ConfigureNavigation) {
-					if (error.kind === "quit") throw error;
-				} else presenter.warn(`Not saved: ${error instanceof Error ? error.message : String(error)}`);
-			}
-		} catch (error) {
-			if (error instanceof ConfigureNavigation && error.kind === "back") return;
-			throw error;
-		}
-	}
 }

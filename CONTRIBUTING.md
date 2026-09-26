@@ -35,6 +35,18 @@ pnpm run ci
 
 Use `pnpm test:file` (which preloads `tests/harness/tmp-root.ts`) and `tests/harness/scratch-env.ts` for state isolation. Never mutate `process.stdout.write` across async test boundaries.
 
+## GUI development
+
+Run the API server and browser client in separate terminals. The API listens on
+4317 and Vite on 4318; open the printed access link on the Vite port.
+
+```bash
+pnpm --filter @iowarp/clio-coder-gui dev:server
+pnpm --filter @iowarp/clio-coder-gui dev:client
+pnpm run check:gui
+pnpm --filter @iowarp/clio-coder-gui test:full
+```
+
 ## Architecture Boundaries
 
 The lint suite enforces 6 boundary invariants:

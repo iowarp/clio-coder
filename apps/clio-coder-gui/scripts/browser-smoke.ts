@@ -211,7 +211,7 @@ try {
 			const previous = new URL(page.url()).pathname;
 			await selectArea(label);
 			// Area selection keeps an active conversation mounted. Leaving it is a separate,
-			// explicit viewer action; legacy full-page checks still exercise those pages.
+			// explicit viewer action; full-page checks still exercise those pages.
 			if (/^\/sessions\/[^/]+$/.test(previous) && new URL(page.url()).pathname === previous) {
 				const viewer = label === "Sessions" ? "Manage projects" : `Open ${label} page`;
 				await page.getByRole("link", { name: viewer, exact: true }).filter({ visible: true }).click();

@@ -121,9 +121,7 @@
 	--syntax-deleted: #f58e85;
 	--syntax-inserted: #8fd1a7;
 
-	/* ---- compatibility aliases. client/pages/*.css, render/markdown.css and
-	   public/offline.css still reference these two names; they are out of this
-	   track's scope, so the names stay until those sheets are converted. -- */
+	/* Compatibility names used by page, Markdown and offline styles. */
 	--muted: var(--ink-muted);
 	--inset: var(--surface-sunken);
 

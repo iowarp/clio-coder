@@ -3,23 +3,8 @@
 	"updatedAt": "2026-09-26T07:16:59.978Z",
 	"gitHead": null,
 	"model": "dynamo/qwopus3.8-27b-flash@q5_k_m",
-	"contentHash": "553afe566a2bc8b019f26f2e85b002bef2336bca1adeee8f4dd8996692f23ffa",
+	"contentHash": "e87999f015135c2c0ac4269bcb08de6ed08a235cc2017ba1485976e521919b54",
 	"pages": [
-		{
-			"path": "apps/clio-coder-gui/client.md",
-			"title": "Clio Coder GUI Client",
-			"summary": "The browser frontend for Clio Coder: a React SPA with React Router, TanStack Query, and pure decision modules for composer, approval, tool presentation, and Markdown rendering. The client separates pure policy (tested under node:test) from declarative components, and communicates with a local ACP server through a typed HTTP contract."
-		},
-		{
-			"path": "apps/clio-coder-gui/server.md",
-			"title": "Apps clio coder gui server",
-			"summary": "The loopback Node.js backend that supervises ACP sessions, runs the Clio CLI, offloads blocking work to worker threads, and persists state for the Clio Coder GUI."
-		},
-		{
-			"path": "apps/clio-coder-gui/tests.md",
-			"title": "Apps clio coder gui tests",
-			"summary": "The GUI test suite splits into pure-logic node:test files that exercise client decision models and HTTP-harness integration tests that drive the ACP fixture child, plus the JSON-RPC fixture subprocess that simulates the engine."
-		},
 		{
 			"path": "architecture.md",
 			"title": "Architecture",
@@ -253,8 +238,6 @@
 			"NOTICE": "140bce40dcc3aec54acc80496211e11d634696b4e28c65ed733076dda546f509",
 			"README.md": "3f3eaf070a0493c8de95ae001dc3db32e4dc1f1ef1094211b77724296c591918",
 			"SECURITY.md": "7e79888c9328f3c2d1aca28f803a99a51f5e1f1aa0072cf8849bc94197600fbe",
-			"apps/clio-coder-gui/DESIGN.md": "d41e5dc1334933717ebf38306bbef5b8828d8587e9336e8aae4670d2491dafd2",
-			"apps/clio-coder-gui/README.md": "905b7797221a7212a851a5825fa7ea3886886b5fb74527b136d94226b1937159",
 			"apps/clio-coder-gui/biome.json": "1e4a7b84f5f59290538a3cb1520b5b2b5e79961a83b7d481534185feed33df8a",
 			"apps/clio-coder-gui/client/api/auth-state.ts": "071fa822747e5b1a289b13b8f688db68733d37a6ea7da5f99d6103a9f4fe39a0",
 			"apps/clio-coder-gui/client/api/client.ts": "20933fc46a5a42b12c56c39803a5d2c63f89697d66e560941b0c0593541ae889",
@@ -3061,43 +3044,6 @@
 				]
 			},
 			{
-				"path": "apps/clio-coder-gui/client.md",
-				"title": "Apps clio coder gui client",
-				"intent": "Assigned scope (97 indexed files, 18267 lines): document responsibilities and key entry points/symbols; explain lifecycle rules, callers, dependencies, and specific test cases only where inspected source or tests establish them. Anchors are starting points, not the full assignment. Assigned areas: apps/clio-coder-gui/client.",
-				"sources": [
-					"apps/clio-coder-gui/client/main.tsx",
-					"apps/clio-coder-gui/client/chat/tool-presentation.ts",
-					"apps/clio-coder-gui/client/render/Markdown.tsx",
-					"apps/clio-coder-gui/client/chat/composer-model.ts",
-					"apps/clio-coder-gui/client/pages/sessions.tsx",
-					"apps/clio-coder-gui/client/chat/diff-model.ts",
-					"apps/clio-coder-gui/client/chat/approval-model.ts",
-					"apps/clio-coder-gui/client/pages/settings-controls.tsx"
-				],
-				"status": "pending",
-				"attempts": 1,
-				"lastFailure": {
-					"phase": "validation",
-					"detail": "evidence check failed: Replace or remove unresolved repository reference \"*.tsx\"; inspect the current file path.; Replace or remove unresolved repository reference \"*-model.ts\"; inspect the current file path.; Replace or remove unresolved repository reference \"server/local-server.ts\"; inspect the current file path.; Replace or remove unresolved repository reference \"server/process-policy.ts\"; inspect the current file path.",
-					"runId": "1kagsgibg0yy"
-				},
-				"dependencies": [
-					"apps/clio-coder-gui/client/main.tsx",
-					"apps/clio-coder-gui/client/chat/tool-presentation.ts",
-					"apps/clio-coder-gui/client/chat/composer-model.ts",
-					"apps/clio-coder-gui/client/chat/approval-model.ts",
-					"apps/clio-coder-gui/client/chat/diff-model.ts",
-					"apps/clio-coder-gui/client/render/Markdown.tsx",
-					"apps/clio-coder-gui/client/pages/sessions.tsx",
-					"apps/clio-coder-gui/client/pages/settings-controls.tsx",
-					"apps/clio-coder-gui/client/api/client.ts",
-					"apps/clio-coder-gui/contracts/routes.ts",
-					"apps/clio-coder-gui/tests/chat-tools.test.ts",
-					"apps/clio-coder-gui/tests/chat-composer.test.ts",
-					"apps/clio-coder-gui/tests/chat-approval.test.ts"
-				]
-			},
-			{
 				"path": "domains/context.md",
 				"title": "Domains context",
 				"intent": "Assigned scope (80 indexed files, 18055 lines): document responsibilities and key entry points/symbols; explain lifecycle rules, callers, dependencies, and specific test cases only where inspected source or tests establish them. Anchors are starting points, not the full assignment. Assigned areas: src/domains/context.",
@@ -3287,39 +3233,6 @@
 				]
 			},
 			{
-				"path": "apps/clio-coder-gui/tests.md",
-				"title": "Apps clio coder gui tests",
-				"intent": "Assigned scope (90 indexed files, 11318 lines): document responsibilities and key entry points/symbols; explain lifecycle rules, callers, dependencies, and specific test cases only where inspected source or tests establish them. Anchors are starting points, not the full assignment. Assigned areas: apps/clio-coder-gui/tests.",
-				"sources": [
-					"apps/clio-coder-gui/tests/chat-tools.test.ts",
-					"apps/clio-coder-gui/tests/chat-turns.test.ts",
-					"apps/clio-coder-gui/tests/fixtures/acp-fixture-child.mjs",
-					"apps/clio-coder-gui/tests/chat-approval.test.ts",
-					"apps/clio-coder-gui/tests/chat-composer.test.ts",
-					"apps/clio-coder-gui/tests/markdown.test.tsx",
-					"apps/clio-coder-gui/tests/chat-shell.test.ts",
-					"apps/clio-coder-gui/tests/artifact-window.test.ts"
-				],
-				"status": "pending",
-				"attempts": 1,
-				"lastFailure": {
-					"phase": "validation",
-					"detail": "evidence check failed: Replace or remove unresolved repository reference \"tests/chat-composer.test.ts\"; inspect the current file path.; Replace or remove unresolved repository reference \"tests/chat-turns.test.ts\"; inspect the current file path.; Replace or remove unresolved repository reference \"tests/chat-tools.test.ts\"; inspect the current file path.; Replace or remove unresolved repository reference \"tests/chat-approval.test.ts\"; inspect the current file path.; Replace or remove unresolved re",
-					"runId": "3f901062ei0a"
-				},
-				"dependencies": [
-					"apps/clio-coder-gui/client/chat/composer-model.ts",
-					"apps/clio-coder-gui/client/chat/turns.ts",
-					"apps/clio-coder-gui/client/chat/diff-model.ts",
-					"apps/clio-coder-gui/server/services/artifact-window.ts",
-					"apps/clio-coder-gui/tests/fixtures/acp-fixture-child.mjs",
-					"apps/clio-coder-gui/tests/chat-composer.test.ts",
-					"apps/clio-coder-gui/tests/chat-turns.test.ts",
-					"apps/clio-coder-gui/tests/chat-tools.test.ts",
-					"apps/clio-coder-gui/tests/artifact-window.test.ts"
-				]
-			},
-			{
 				"path": "domains/safety.md",
 				"title": "Domains safety",
 				"intent": "Assigned scope (34 indexed files, 9257 lines): document responsibilities and key entry points/symbols; explain lifecycle rules, callers, dependencies, and specific test cases only where inspected source or tests establish them. Anchors are starting points, not the full assignment. Assigned areas: src/domains/safety.",
@@ -3494,48 +3407,6 @@
 					"tests/contracts/acp-client-mcp.test.ts",
 					"tests/contracts/acp-peer-error.test.ts",
 					"tests/extended/acp-commands.test.ts"
-				]
-			},
-			{
-				"path": "apps/clio-coder-gui/server.md",
-				"title": "Apps clio coder gui server",
-				"intent": "Assigned scope (76 indexed files, 6485 lines): document responsibilities and key entry points/symbols; explain lifecycle rules, callers, dependencies, and specific test cases only where inspected source or tests establish them. Anchors are starting points, not the full assignment. Assigned areas: apps/clio-coder-gui/server.",
-				"sources": [
-					"apps/clio-coder-gui/server/main.ts",
-					"apps/clio-coder-gui/server/acp/supervisor.ts",
-					"apps/clio-coder-gui/server/launcher/background.ts",
-					"apps/clio-coder-gui/server/clio/adapters/docs.ts",
-					"apps/clio-coder-gui/server/services/targets-cli.ts",
-					"apps/clio-coder-gui/server/process-policy.ts",
-					"apps/clio-coder-gui/server/clio/adapters/settings-controls.ts",
-					"apps/clio-coder-gui/server/acp/client.ts"
-				],
-				"status": "pending",
-				"attempts": 1,
-				"lastFailure": {
-					"phase": "validation",
-					"detail": "evidence check failed: Replace or remove unresolved repository reference \"routes.ts\"; inspect the current file path.; Replace or remove unresolved repository reference \"/api/openapi.json\"; inspect the current file path.; Replace or remove unresolved repository reference \"reads-main.ts\"; inspect the current file path.; Replace or remove unresolved repository reference \"ops-main.ts\"; inspect the current file path.; Replace or remove unresolved repository reference \"reads-worker.js\"; inspect the cu",
-					"runId": "evkwv70f8i1b"
-				},
-				"dependencies": [
-					"apps/clio-coder-gui/server/main.ts",
-					"apps/clio-coder-gui/server/app.ts",
-					"apps/clio-coder-gui/server/acp/supervisor.ts",
-					"apps/clio-coder-gui/server/process-policy.ts",
-					"apps/clio-coder-gui/server/worker/host.ts",
-					"apps/clio-coder-gui/server/launcher/background.ts",
-					"apps/clio-coder-gui/server/services/targets-cli.ts",
-					"apps/clio-coder-gui/server/services/cli-runner.ts",
-					"apps/clio-coder-gui/server/clio/adapters/settings-controls.ts",
-					"apps/clio-coder-gui/server/clio/adapters/docs.ts",
-					"apps/clio-coder-gui/server/state/files.ts",
-					"apps/clio-coder-gui/server/network-policy.ts",
-					"apps/clio-coder-gui/tests/boundaries.test.ts",
-					"apps/clio-coder-gui/tests/worker-rpc.test.ts",
-					"apps/clio-coder-gui/tests/process-policy.test.ts",
-					"apps/clio-coder-gui/tests/docs.test.ts",
-					"apps/clio-coder-gui/tests/targets-http.test.ts",
-					"apps/clio-coder-gui/tests/background.test.ts"
 				]
 			},
 			{

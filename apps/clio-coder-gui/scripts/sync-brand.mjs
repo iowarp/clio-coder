@@ -92,10 +92,13 @@ if (process.argv.includes("--check")) {
 			)
 		)
 			throw new Error(`GUI canonical font or notice differs: ${name}`);
+	const mark = provenance.assets.find((asset) => asset.name === "clio-mark");
 	if (
-		!(await readFile(file("../client/public/brand/clio-mark.png"))).equals(
-			await readFile(file("../../../site/assets/brand/clio-mark.png")),
-		)
+		!mark ||
+		mark.sha256 !==
+			createHash("sha256")
+				.update(await readFile(file("../../../site/assets/brand/clio-mark.png")))
+				.digest("hex")
 	)
-		throw new Error("GUI canonical mark differs.");
+		throw new Error("GUI canonical mark provenance differs.");
 } else await writeFile(target, formatted);

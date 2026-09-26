@@ -1,7 +1,4 @@
-// Visual review against the ACP fixture: photographs the conversation, the project pages, an
-// approval, a held worker and seven inspection areas at the three review viewports, or keeps a fixture API up on 4317
-// for `pnpm dev:client`. Evidence for a visual change comes from these images, looked at before and
-// after; the smoke remains the gate.
+// Capture fixture pages at configured viewports, or serve the fixture API for `pnpm dev:client`.
 //
 //   npx vite build --outDir <scratch>/client-build --emptyOutDir
 //   pnpm run visual --client <scratch>/client-build/ --out <scratch>/shots/before

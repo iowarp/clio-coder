@@ -141,7 +141,7 @@ clio-coder gui background install --open
 
 Bare `clio-coder gui` reuses this installation's owned background application
 when present, or starts a private foreground server. See the
-[GUI guide](apps/clio-coder-gui/README.md).
+[GUI guide](docs/guide/commands-and-modes.md#graphical-application).
 
 </details>
 
