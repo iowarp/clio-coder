@@ -79,13 +79,16 @@ Three faces, three jobs, no overlap.
   legibility matters more than fashionable neutrality.
 - **Newsreader** marks research questions, notebook headings, outcomes and major wayfinding. Use it
   selectively, so the interface keeps a field-note character rather than becoming a magazine.
-- **Commit Mono** is reserved for paths, exact keys, timestamps, measurements, compact labels and
-  machine-attributed values. It is never the conversation voice.
+- **IBM Plex Mono** is the public Clio Coder brand's exact face for paths, keys, timestamps,
+  measurements, compact labels and machine-attributed values. Regular 400 carries exact values and
+  medium 500 carries emphasis. It is never the conversation voice.
 
-Fonts are local `@fontsource` package assets, never a CDN link; the CSP is `font-src 'self'`. The
-fallback stacks in `--font-ui`, `--font-editorial` and `--font-mono` are real and are what a reader
-sees before the font files resolve: Segoe UI / system-ui, Georgia, and Cascadia Code / Consolas.
-`:root` carries `font-synthesis: none` so a missing weight is never faked into mush.
+Fonts are local assets, never a CDN link; the CSP is `font-src 'self'`. Atkinson Hyperlegible Next
+and Newsreader come from pinned `@fontsource` packages. IBM Plex Mono's 400 and 500 WOFF2 files and
+OFL licence are bundled from the public site. The fallback stacks in `--font-ui`,
+`--font-editorial` and `--font-mono` are real and are what a reader sees before the font files
+resolve: Segoe UI / system-ui, Georgia, and Cascadia Code / ui-monospace. `:root` carries
+`font-synthesis: none` so a missing weight is never faked into mush.
 
 Banned: Inter, monospaced body copy, terminal prompts, all-caps paragraphs. Uppercase is limited to
 the short `.eyebrow` label on inspector pages. Every status mark is a glyph and a word in sentence

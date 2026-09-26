@@ -9,7 +9,6 @@ import { Home } from "./pages/home.js";
 import "./styles.css";
 import "@fontsource-variable/atkinson-hyperlegible-next/index.css";
 import "@fontsource-variable/newsreader/index.css";
-import "@fontsource/commit-mono/latin-400.css";
 import "./design/tokens.css";
 import "./render/markdown.css";
 
