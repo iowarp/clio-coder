@@ -46,7 +46,11 @@ export function ProjectNavigation({
 					</button>
 				</p>
 			) : null}
-			{sessions.error ? <p className="sidebar-note" role="alert">Current conversations unavailable.</p> : null}
+			{sessions.error ? (
+				<p className="sidebar-note" role="alert">
+					Current conversations unavailable.
+				</p>
+			) : null}
 			{!workspaces.isPending && !workspaces.error && !projects.length ? (
 				<p className="sidebar-note">Choose a project to keep your conversations together.</p>
 			) : null}
@@ -185,7 +189,11 @@ function ProjectGroup({
 							{history.isPending ? "Loading conversations…" : history.error ? "History unavailable." : "No conversations yet."}
 						</p>
 					) : null}
-					{rows.length && history.error ? <p className="sidebar-note" role="alert">Saved history unavailable.</p> : null}
+					{rows.length && history.error ? (
+						<p className="sidebar-note" role="alert">
+							Saved history unavailable.
+						</p>
+					) : null}
 					<Link className="sidebar-all-chats" to={`/workspaces/${project.id}/sessions`} onClick={close}>
 						View conversations <span aria-hidden="true">→</span>
 					</Link>

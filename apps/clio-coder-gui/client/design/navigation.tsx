@@ -144,7 +144,11 @@ export function MobileNavigation({
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const location = useLocation();
-	useEffect(() => { dialog.current?.close(); }, [location.pathname]);
+	const previousPath = useRef(location.pathname);
+	useEffect(() => {
+		if (previousPath.current !== location.pathname) dialog.current?.close();
+		previousPath.current = location.pathname;
+	}, [location.pathname]);
 	return (
 		<>
 			<button
