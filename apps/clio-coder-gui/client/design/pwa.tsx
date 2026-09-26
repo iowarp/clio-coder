@@ -55,7 +55,7 @@ function PwaControls({ enabled, token }: { enabled: boolean; token: string }) {
 	return (
 		<details className="pwa-controls">
 			<summary>{installed ? "Installed app preferences" : "Install Clio Coder"}</summary>
-			<p>Keep Clio beside your other apps. It uses the same projects and conversations as this browser.</p>
+			<p>Keep Clio Coder beside your other apps. It uses the same projects and conversations as this browser.</p>
 			{!storage ? (
 				<p role="alert">
 					This browser cannot save your connection. Allow site storage before installing so Clio can reconnect when reopened.
@@ -99,10 +99,13 @@ export function AppPreferences({
 	enabled,
 	token,
 	version,
+	platform,
 }: {
 	enabled: boolean;
 	token: string;
 	version: string | undefined;
+	/** The server's `process.platform-arch`, which decides whether background setup exists at all. */
+	platform: string | undefined;
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
 	return (
@@ -134,10 +137,18 @@ export function AppPreferences({
 				<p className="app-version">{version ? `Version ${version}` : "Connecting to Clio…"}</p>
 				<PwaControls enabled={enabled} token={token} />
 				{!enabled && (
-					<p>
-						Clio is running for this session. To keep the installed app available, enable the background server from the
-						terminal.
-					</p>
+					<div className="app-dialog__launch">
+						<p>This window's server belongs to the terminal that started it, and its address changes each time it starts.</p>
+						{platform?.startsWith("linux") ? (
+							<p>
+								For one address from login that this browser can install as an app, run{" "}
+								<code>clio-coder gui background install --open</code> in a terminal. Afterwards <code>clio-coder gui</code>{" "}
+								reopens it.
+							</p>
+						) : (
+							<p>Keeping Clio Coder at one address from login currently needs Linux with a systemd user session.</p>
+						)}
+					</div>
 				)}
 			</dialog>
 		</>

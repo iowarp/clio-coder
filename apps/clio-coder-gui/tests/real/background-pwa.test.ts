@@ -228,8 +228,9 @@ test("native user service and installed Chrome PWA retain access through window,
 		await page.getByRole("button", { name: "App preferences", exact: true }).click();
 		await page.getByText("Installed app preferences", { exact: true }).click();
 		await page.getByRole("button", { name: "Forget this browser" }).click();
-		await page.getByText(/Open Clio Coder from your applications/).waitFor();
-		await other.getByText(/Open Clio Coder from your applications/).waitFor();
+		// A forgotten browser lands on the reconnect panel, which names the command that prints a new link.
+		await page.getByRole("heading", { name: /Open your launch link|no longer connected/ }).waitFor();
+		await other.getByRole("heading", { name: /Open your launch link|no longer connected/ }).waitFor();
 		assert.equal(await localServerReady(config.port, config.token), true);
 		checks.push("forget browser removes access in all open windows while the service keeps running");
 		await cdp.send("PWA.uninstall", { manifestId });

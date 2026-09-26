@@ -15,7 +15,7 @@ async function reconnect() {
 	} catch {
 		/* An unavailable local service is expected during restart or sleep. */
 	}
-	status.textContent = "Still waiting for Clio. Your work stays in Clio; nothing has been sent.";
+	status.textContent = "Still waiting for Clio Coder. Your work stays in Clio Coder; nothing has been sent.";
 	pending = false;
 	button.disabled = false;
 	clearTimeout(timer);

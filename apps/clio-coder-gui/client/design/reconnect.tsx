@@ -4,7 +4,7 @@ import { adoptToken } from "../api/token.js";
 
 /**
  * Shown when this browser has no launch token or the server refused the one it had. A refused token
- * never starts working again, so this names the two commands that print a fresh link and accepts one.
+ * never starts working again, so this names the command that prints a fresh link and accepts one.
  */
 export function Reconnect({ refused }: { refused: boolean }) {
 	const field = useId();
@@ -19,9 +19,8 @@ export function Reconnect({ refused }: { refused: boolean }) {
 					: "This browser has no launch token yet."}
 			</p>
 			<p>
-				Run <code className="reconnect__command">clio-coder gui --open</code> for a foreground server, or{" "}
-				<code className="reconnect__command">clio-coder gui background open</code> if the app runs in the background. Either
-				opens a fresh link. You can also paste the printed link here.
+				Run <code className="reconnect__command">clio-coder gui</code> in a terminal. It reopens the background app when one
+				is installed, or starts a new server, and opens a fresh link. You can also paste the printed link here.
 			</p>
 			<form
 				onSubmit={(event) => {

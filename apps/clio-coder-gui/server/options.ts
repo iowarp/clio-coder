@@ -1,5 +1,8 @@
 import { parseArgs } from "node:util";
 
+export type OpenMode = "always" | "never" | "auto";
+export type ReuseMode = "required" | "preferred" | "never";
+
 export function serverOptions(args: string[]) {
 	const { values } = parseArgs({
 		args,
@@ -14,6 +17,7 @@ export function serverOptions(args: string[]) {
 			persistent: { type: "string" },
 			path: { type: "string" },
 			"reuse-background": { type: "boolean", default: false },
+			foreground: { type: "boolean", default: false },
 		},
 	});
 	const integer = (name: string, value: string, min: number, max: number) => {
@@ -41,6 +45,16 @@ export function serverOptions(args: string[]) {
 		new URL(path, "http://clio.invalid").pathname !== path
 	)
 		throw new Error("--path must be an absolute path within the app.");
+	if (values["reuse-background"] && values.foreground)
+		throw new Error("--reuse-background and --foreground ask for opposite servers; choose one.");
+	// Any flag that configures this process's own listener asks for a private foreground server.
+	const configuresForeground =
+		values.port !== undefined ||
+		values.token !== undefined ||
+		values.fixture ||
+		values.persistent !== undefined ||
+		values["idle-exit"] !== undefined ||
+		values["log-file"] !== undefined;
 	if (
 		values["reuse-background"] &&
 		(values.port !== undefined ||
@@ -67,11 +81,20 @@ export function serverOptions(args: string[]) {
 		port: integer("port", values.port ?? "0", 0, 65535),
 		idleMs: values["idle-exit"] === undefined ? undefined : integer("idle-exit", values["idle-exit"], 1, 2_147_483_647),
 		fixture: values.fixture,
-		open: values.open && !values["no-open"],
+		/** `auto` opens a browser only for a person at a desktop terminal; see `autoOpenBrowser`. */
+		open: values["no-open"] || values.persistent !== undefined ? "never" : values.open ? "always" : ("auto" as OpenMode),
 		token: values.token,
 		logFile: values["log-file"],
 		persistent: values.persistent,
 		path,
-		reuseBackground: values["reuse-background"],
+		/**
+		 * `required` fails rather than start a second server; `preferred` reuses this installation's own
+		 * background app when it is installed and verifiable, and otherwise starts a foreground server.
+		 */
+		reuse: values["reuse-background"]
+			? "required"
+			: values.foreground || configuresForeground
+				? "never"
+				: ("preferred" as ReuseMode),
 	};
 }

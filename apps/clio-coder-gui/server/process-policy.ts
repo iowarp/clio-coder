@@ -126,6 +126,23 @@ export function browserCommand(url: string, platform: NodeJS.Platform = process.
 	throw new Error("Automatic browser opening is supported on Linux and macOS. Open the printed URL in your browser.");
 }
 
+/**
+ * Whether a bare launch should open a browser without being asked. Only a person at an interactive
+ * terminal with a desktop to open it on gets one: a pipe, a script, a test or an SSH session without
+ * a forwarded display prints the link instead, and Windows prints it because its opener is refused.
+ */
+export function autoOpenBrowser(
+	env: NodeJS.ProcessEnv = process.env,
+	platform: NodeJS.Platform = process.platform,
+	interactive = process.stdout.isTTY === true,
+) {
+	if (!interactive) return false;
+	if (platform === "darwin") return true;
+	if (platform !== "linux") return false;
+	// WSL opens the Windows browser through xdg-open or wslview even without a Linux display.
+	return !!(env.DISPLAY || env.WAYLAND_DISPLAY || env.WSL_DISTRO_NAME);
+}
+
 /** The OS opener owns the browser. Reap only our short-lived opener, never the user's browser. */
 export async function openBrowser(url: string, env: NodeJS.ProcessEnv = process.env) {
 	const command = browserCommand(url);
@@ -147,7 +164,7 @@ export async function openBrowser(url: string, env: NodeJS.ProcessEnv = process.
 }
 
 export function serviceCommand(
-	action: "show" | "enable" | "start" | "stop" | "disable" | "reload",
+	action: "show" | "enable" | "start" | "restart" | "stop" | "disable" | "reload",
 	unit: string,
 	unitFile: string,
 ) {

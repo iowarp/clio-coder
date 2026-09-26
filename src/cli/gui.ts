@@ -7,22 +7,29 @@ import { printError } from "./argv.js";
 const HELP = `Clio Coder graphical application
 
 Usage:
-  clio-coder gui [--open] [--port <0-65535>]
+  clio-coder gui [--path </app/path>] [--open | --no-open] [--foreground]
   clio-coder gui background install [--open] [--port <1-65535>]
-  clio-coder gui background status|start|open|stop|uninstall
+  clio-coder gui background status|start|open|restart|stop|uninstall
   clio-coder gui launcher install|status|uninstall
 
-The foreground server prints a private launch link. --open opens your default
-browser. Press Ctrl+C to stop. --no-open explicitly disables browser opening.
-Optional --idle-exit <milliseconds> stops an idle foreground server.
-Use --path </app/path> to open a particular page. --reuse-background uses this
-installation's background app when configured, or starts a foreground server.
+clio-coder gui opens Clio Coder in your browser. When this installation's
+background app is installed, it reopens that app at its stable address and
+returns your terminal. Otherwise it starts a private server for this terminal,
+prints its launch link and opens it; press Ctrl+C to stop it.
 
-On Linux with a systemd user session, background install keeps the app available
-at login. Open its launch link once, then install it from your browser. Background
-stop stops it now; background uninstall also removes its login and desktop entries.
-Other platforms can run the foreground app. Your CLI, terminal interface,
-headless runs, and graphical app use the same Clio runtime and configuration.
+A browser opens by itself only from an interactive terminal on a desktop.
+--open always opens one, --no-open never does. --foreground always starts a
+private server, and so does any of --port, --idle-exit <milliseconds>, --token
+or --log-file. --path opens a particular page. --reuse-background fails instead
+of starting a private server when the background app cannot be used.
+
+On Linux with a systemd user session, background install keeps the app at a
+stable address from login, so the browser can install it as an app. Background
+restart loads a newly installed version, stop stops it until the next login or
+the next clio-coder gui, and uninstall also removes its login and desktop
+entries. macOS and Windows run the private server only; Windows prints the link
+instead of opening it. Your CLI, terminal interface, headless runs, and
+graphical app use the same Clio Coder runtime and configuration.
 `;
 
 export async function runGuiCommand(args: string[]): Promise<number> {

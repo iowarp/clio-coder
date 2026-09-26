@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { resolveClioDirs } from "../clio/http-shims.js";
-import { localServerReady, waitForLocalServer } from "../local-server.js";
+import { type LocalServerMeta, localServerReady, waitForLocalServer } from "../local-server.js";
 import { controlService, openBrowser } from "../process-policy.js";
 import {
 	type BackgroundConfig,
@@ -19,6 +19,12 @@ import { contents, installLauncher, launcherStatus, uninstallLauncher } from "./
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 type Control = typeof controlService;
 type Files = ReturnType<typeof backgroundPaths>;
+/** Resolves once the app answers; a fake in tests may resolve without its report. */
+type Ready = (port: number, token: string) => Promise<LocalServerMeta | unknown>;
+const runningVersion = (meta: unknown) =>
+	meta && typeof meta === "object" && typeof (meta as LocalServerMeta).clio === "string"
+		? (meta as LocalServerMeta).clio
+		: null;
 
 async function owned(directory: string) {
 	const files = backgroundPaths(directory);
@@ -77,7 +83,7 @@ export async function installBackground(
 	directory: string,
 	proposed: BackgroundConfig,
 	control: Control = controlService,
-	ready = waitForLocalServer,
+	ready: Ready = waitForLocalServer,
 ) {
 	if (process.platform !== "linux")
 		throw new Error("Background setup currently requires Linux with a systemd user session.");
@@ -151,25 +157,87 @@ export async function backgroundStatus(directory: string, control: Control = con
 		desktop: (await desktopOwned(state.config, directory)) ? "installed" : "absent",
 	};
 }
+type Installed = Extract<Awaited<ReturnType<typeof owned>>, { status: "installed" }>;
+async function startOwned(state: Installed, control: Control, ready: Ready, action: "start" | "restart" = "start") {
+	await serviceState(state.files, control);
+	await control(action, state.files.unit, state.files.unitFile);
+	const meta = await ready(state.config.port, state.config.token);
+	return {
+		url: `http://127.0.0.1:${state.config.port}/#token=${state.config.token}`,
+		running: runningVersion(meta),
+	};
+}
 export async function startBackground(
 	directory: string,
 	control: Control = controlService,
-	ready = waitForLocalServer,
+	ready: Ready = waitForLocalServer,
 ) {
 	const state = await owned(directory);
 	if (state.status !== "installed")
 		throw new Error("Background service is not installed. Run background install first.");
-	await serviceState(state.files, control);
-	await control("start", state.files.unit, state.files.unitFile);
-	await ready(state.config.port, state.config.token);
-	return `http://127.0.0.1:${state.config.port}/#token=${state.config.token}`;
+	return (await startOwned(state, control, ready)).url;
+}
+export async function restartBackground(
+	directory: string,
+	control: Control = controlService,
+	ready: Ready = waitForLocalServer,
+) {
+	const state = await owned(directory);
+	if (state.status !== "installed")
+		throw new Error("Background service is not installed. Run background install first.");
+	return startOwned(state, control, ready, "restart");
+}
+
+export type BackgroundPreference =
+	| { kind: "open"; url: string; running: string | null }
+	| { kind: "absent" }
+	| { kind: "unavailable"; reason: string };
+
+/**
+ * A bare launch reuses this installation's own background app. It never fails over it: files it
+ * cannot verify, another installation's service, or a service manager that will not start it each
+ * become a reason the caller prints before starting a private server, and nothing is changed.
+ */
+export async function preferBackground(
+	directory: string,
+	packageRoot: string,
+	control: Control = controlService,
+	ready: Ready = waitForLocalServer,
+	platform: NodeJS.Platform = process.platform,
+): Promise<BackgroundPreference> {
+	if (platform !== "linux") return { kind: "absent" };
+	let state: Awaited<ReturnType<typeof owned>>;
+	try {
+		state = await owned(directory);
+	} catch {
+		return {
+			kind: "unavailable",
+			reason:
+				"Background app files could not be verified, so they were left untouched. See clio-coder gui background status.",
+		};
+	}
+	if (state.status === "absent") return { kind: "absent" };
+	const same = await Promise.all([realpath(state.config.packageRoot), realpath(packageRoot)]).then(
+		([theirs, ours]) => theirs === ours,
+		() => false,
+	);
+	if (!same)
+		return {
+			kind: "unavailable",
+			reason: "The background app belongs to another Clio Coder installation, so this one will not take it over.",
+		};
+	try {
+		return { kind: "open", ...(await startOwned(state, control, ready)) };
+	} catch (error) {
+		return { kind: "unavailable", reason: error instanceof Error ? error.message : String(error) };
+	}
 }
 /** Navigation may reuse a verified installation, but never silently takes over another package. */
 export async function tryStartBackground(
 	directory: string,
 	packageRoot: string,
 	control: Control = controlService,
-	ready = waitForLocalServer,
+	ready: Ready = waitForLocalServer,
 ) {
 	const state = await owned(directory);
 	if (state.status === "absent") return undefined;
@@ -225,9 +293,12 @@ export async function background(args: string[], launch: LaunchPaths) {
 		},
 	});
 	const command = positionals[0];
-	if (positionals.length !== 1 || !["install", "status", "start", "open", "stop", "uninstall"].includes(command ?? ""))
+	if (
+		positionals.length !== 1 ||
+		!["install", "status", "start", "open", "restart", "stop", "uninstall"].includes(command ?? "")
+	)
 		throw new Error(
-			"Usage: background install|status|start|open|stop|uninstall [--directory <absolute private directory>] [install: --port <port> --prefix <XDG data directory> --open]",
+			"Usage: background install|status|start|open|restart|stop|uninstall [--directory <absolute private directory>] [install: --port <port> --prefix <XDG data directory> --open]",
 		);
 	if (command !== "install" && (values.prefix !== undefined || values.port !== undefined || values.open !== undefined))
 		throw new Error("--port, --prefix and --open apply to background install only.");
@@ -244,7 +315,7 @@ export async function background(args: string[], launch: LaunchPaths) {
 	}
 	if (command === "stop") {
 		await stopBackground(directory);
-		console.log("Clio background service stopped. It remains enabled for the next login.");
+		console.log("Clio Coder background app stopped. It starts again at your next login, or with clio-coder gui.");
 		return;
 	}
 	if (command === "install") {
@@ -259,11 +330,26 @@ export async function background(args: string[], launch: LaunchPaths) {
 		const config = await newBackgroundConfig(port, launch, prefix);
 		console.log(JSON.stringify(await installBackground(directory, config), null, 2));
 		console.log(
-			"Background sessions use Clio's saved credentials. If a target key exists only in your terminal environment, save it with clio-coder auth login <target> before starting a conversation.",
+			"Background sessions use Clio Coder's saved credentials. If a target key exists only in your terminal environment, save it with clio-coder auth login <target> before starting a conversation.",
 		);
-		if (!values.open) return;
+		if (!values.open) {
+			console.log("Open it any time with: clio-coder gui");
+			return;
+		}
+	}
+	if (command === "restart") {
+		const restarted = await restartBackground(directory);
+		console.log(`Clio Coder background app restarted and ready at ${new URL(restarted.url).origin}.`);
+		return;
 	}
 	const url = await startBackground(directory);
-	if (command === "start") console.log(`Clio background service is ready at ${new URL(url).origin}.`);
-	else await openBrowser(url);
+	if (command === "start") {
+		console.log(`Clio Coder background app is ready at ${new URL(url).origin}.`);
+		return;
+	}
+	// The link is the way in when no desktop can take it, so a failed opener hands it over instead of failing.
+	await openBrowser(url).catch(() => {
+		console.log(`[clio-coder:gui] ${url}`);
+		console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
+	});
 }

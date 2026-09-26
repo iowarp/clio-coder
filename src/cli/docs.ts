@@ -117,7 +117,8 @@ export async function runDocsCommand(args: readonly string[] = []): Promise<numb
 			return 2;
 		}
 		// A foreground request is a private server for this terminal; it never adopts the background app.
-		if (args.includes("--foreground")) return runGuiCommand(["--path", path, noOpen ? "--no-open" : "--open"]);
+		if (args.includes("--foreground"))
+			return runGuiCommand(["--path", path, "--foreground", noOpen ? "--no-open" : "--open"]);
 		if (backgroundAppInstalled())
 			return runGuiCommand(["--path", path, "--reuse-background", noOpen ? "--no-open" : "--open"]);
 		const server = await ensureDocsServer(root);

@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import {
 	backgroundStatus,
 	installBackground,
+	preferBackground,
+	restartBackground,
 	startBackground,
 	stopBackground,
 	tryStartBackground,
@@ -23,7 +25,7 @@ import {
 import { desktopEntry } from "../server/launcher/desktop-entry.js";
 import { launcherStatus } from "../server/launcher/install.js";
 import { serverOptions } from "../server/options.js";
-import { type controlService, serviceCommand } from "../server/process-policy.js";
+import { autoOpenBrowser, type controlService, serviceCommand } from "../server/process-policy.js";
 
 const launch = {
 	node: process.execPath,
@@ -213,5 +215,86 @@ test("installed background configuration launches plain Node and preserves a bra
 		/another installation/,
 	);
 	assert.equal((await uninstallBackground(directory, control)).status, "absent");
-	assert.equal(serverOptions(["--open", "--no-open"]).open, false);
+	assert.equal(serverOptions(["--open", "--no-open"]).open, "never");
+});
+
+test("a bare launch reuses only this installation's verified background app and otherwise explains", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-web-background-prefer-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const directory = join(root, "background"),
+		files = backgroundPaths(directory);
+	const config = await newBackgroundConfig(4317, launch, join(root, "desktop"), { PATH: "/usr/bin" });
+	const calls: string[] = [];
+	let failStart = false;
+	const control: typeof controlService = async (action) => {
+		calls.push(action);
+		if (failStart && action === "start") throw new Error("Background service start failed.");
+		return `FragmentPath=${calls.includes("enable") ? files.unitFile : ""}\nActiveState=active\n`;
+	};
+	const ready = async () => ({ clio: "0.0.1-running" });
+	assert.deepEqual(await preferBackground(directory, config.packageRoot, control, ready), { kind: "absent" });
+	assert.deepEqual(calls, [], "An absent app is decided from files alone");
+	await installBackground(directory, config, control, ready);
+	assert.deepEqual(await preferBackground(directory, config.packageRoot, control, ready), {
+		kind: "open",
+		url: `http://127.0.0.1:4317/#token=${config.token}`,
+		running: "0.0.1-running",
+	});
+	assert.equal(calls.at(-1), "start");
+	// A readiness fake that reports nothing leaves the running version unknown rather than guessed.
+	assert.equal(
+		((await preferBackground(directory, config.packageRoot, control, async () => {})) as { running: unknown }).running,
+		null,
+	);
+	const before = calls.length;
+	const foreign = await preferBackground(directory, root, control, ready);
+	assert.equal(foreign.kind, "unavailable");
+	assert.match((foreign as { reason: string }).reason, /another Clio Coder installation/);
+	assert.equal(calls.length, before, "Another installation's service is never touched");
+	assert.deepEqual(await preferBackground(directory, config.packageRoot, control, ready, "darwin"), { kind: "absent" });
+	failStart = true;
+	const failed = await preferBackground(directory, config.packageRoot, control, ready);
+	assert.deepEqual(failed, { kind: "unavailable", reason: "Background service start failed." });
+	failStart = false;
+	const restarted = await restartBackground(directory, control, ready);
+	assert.equal(calls.at(-1), "restart");
+	assert.equal(restarted.running, "0.0.1-running");
+	const unit = await readFile(files.unitFile, "utf8");
+	await writeFile(files.unitFile, `${unit}# user edit\n`);
+	const tampered = calls.length;
+	const refused = await preferBackground(directory, config.packageRoot, control, ready);
+	assert.equal(refused.kind, "unavailable");
+	assert.match((refused as { reason: string }).reason, /could not be verified/);
+	assert.equal(calls.length, tampered, "Unverifiable files are left alone");
+	await writeFile(files.unitFile, unit);
+	assert.equal((await uninstallBackground(directory, control)).status, "absent");
+});
+
+test("launch options: bare reuses and opens on a desktop; any listener flag keeps a private server", () => {
+	assert.deepEqual((({ open, reuse }) => ({ open, reuse }))(serverOptions([])), { open: "auto", reuse: "preferred" });
+	assert.equal(serverOptions(["--path", "/docs"]).reuse, "preferred");
+	for (const flags of [
+		["--foreground"],
+		["--port", "0"],
+		["--idle-exit", "60000"],
+		["--log-file", "/tmp/x"],
+		["--fixture"],
+	])
+		assert.equal(serverOptions(flags).reuse, "never", flags.join(" "));
+	assert.equal(serverOptions(["--reuse-background"]).reuse, "required");
+	assert.throws(() => serverOptions(["--reuse-background", "--foreground"]), /opposite/);
+	assert.equal(serverOptions(["--open"]).open, "always");
+	assert.equal(serverOptions(["--no-open"]).open, "never");
+	assert.equal(serverOptions(["--persistent", "/tmp/server.json"]).open, "never");
+	assert.equal(autoOpenBrowser({ DISPLAY: ":0" }, "linux", false), false, "A pipe or a test never opens a browser");
+	assert.equal(autoOpenBrowser({ DISPLAY: ":0" }, "linux", true), true);
+	assert.equal(autoOpenBrowser({ WAYLAND_DISPLAY: "wayland-0" }, "linux", true), true);
+	assert.equal(autoOpenBrowser({ WSL_DISTRO_NAME: "Ubuntu" }, "linux", true), true);
+	assert.equal(
+		autoOpenBrowser({ SSH_TTY: "/dev/pts/1" }, "linux", true),
+		false,
+		"SSH without a display prints the link",
+	);
+	assert.equal(autoOpenBrowser({}, "darwin", true), true);
+	assert.equal(autoOpenBrowser({}, "win32", true), false, "Windows prints the link until its opener is verified");
 });

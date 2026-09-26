@@ -121,7 +121,12 @@ export function App({ client }: { client: Client }) {
 						<span className="connection-label">{connection}</span>
 					</span>
 					<ThemeToggle />
-					<AppPreferences enabled={meta.data?.pwa ?? false} token={client.token} version={meta.data?.clio} />
+					<AppPreferences
+						enabled={meta.data?.pwa ?? false}
+						token={client.token}
+						version={meta.data?.clio}
+						platform={meta.data?.platform}
+					/>
 					<MobileNavigation />
 				</div>
 			</header>

@@ -7,11 +7,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { serve } from "@hono/node-server";
 import { Supervisor } from "./acp/supervisor.js";
 import { createApp } from "./app.js";
-import { resolveClioDirs, resolvePackageRoot } from "./clio/http-shims.js";
+import { getVersionInfo, resolveClioDirs, resolvePackageRoot } from "./clio/http-shims.js";
 import { backgroundEnvironment, readBackgroundConfig } from "./launcher/background-config.js";
 import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
-import { openBrowser } from "./process-policy.js";
+import { autoOpenBrowser, openBrowser } from "./process-policy.js";
 import { CliRunner } from "./services/cli-runner.js";
 import { DocsService } from "./services/docs.js";
 import { EventHub } from "./services/event-hub.js";
@@ -56,19 +56,40 @@ export async function main(args = process.argv.slice(2)) {
 		return;
 	}
 	const values = serverOptions(args);
-	if (values.reuseBackground) {
-		const { tryStartBackground } = await import("./launcher/background.js");
-		const existing = await tryStartBackground(join(resolveClioDirs().state, "gui/background"), resolvePackageRoot());
-		if (existing) {
-			const url = new URL(existing);
+	const open = values.open === "always" || (values.open === "auto" && autoOpenBrowser());
+	const openLink = (href: string) =>
+		openBrowser(href).catch(() => {
+			console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
+		});
+	// A person at a terminal gets guidance; a pipe, a script or a test gets only the link on stdout.
+	const hint = (line: string) => {
+		if (process.stderr.isTTY) console.error(`[clio-coder:gui] ${line}`);
+	};
+	let backgroundAbsent = false;
+	if (values.reuse !== "never") {
+		const directory = join(resolveClioDirs().state, "gui/background");
+		const background = await import("./launcher/background.js");
+		const reused =
+			values.reuse === "required"
+				? await background
+						.tryStartBackground(directory, resolvePackageRoot())
+						.then((url) => (url ? { kind: "open" as const, url, running: null } : { kind: "absent" as const }))
+				: await background.preferBackground(directory, resolvePackageRoot());
+		if (reused.kind === "open") {
+			const url = new URL(reused.url);
 			url.pathname = values.path;
 			console.log(`[clio-coder:gui] ${url.href}`);
-			if (values.open)
-				await openBrowser(url.href).catch(() => {
-					console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
-				});
+			const version = getVersionInfo().clio;
+			if (reused.running && reused.running !== version)
+				console.error(
+					`[clio-coder:gui] The background app is still running Clio Coder ${reused.running}; this installation is ${version}. Restart it to use this version: clio-coder gui background restart`,
+				);
+			if (open) await openLink(url.href);
 			return;
 		}
+		if (reused.kind === "unavailable")
+			console.error(`[clio-coder:gui] ${reused.reason} Starting a private server for this terminal instead.`);
+		backgroundAbsent = reused.kind === "absent";
 	}
 	if (bundled && values.fixture) throw new Error("Fabricated tool fixtures are available in source mode only.");
 	const persistent = values.persistent ? await readBackgroundConfig(values.persistent) : undefined;
@@ -152,7 +173,18 @@ export async function main(args = process.argv.slice(2)) {
 		if (scratch) console.log(`[clio-coder:gui] Fabricated tool fixture; isolated state: ${scratch}`);
 		console.log(persistent ? `[clio-coder:gui] Background app ready at ${origin}.` : `[clio-coder:gui] ${launchUrl}`);
 		void log.write(`Listening at ${origin}; idle exit ${values.idleMs ?? "disabled"}.`).catch(fail);
-		if (values.open)
+		if (!persistent) {
+			hint(
+				values.idleMs === undefined
+					? "Clio Coder runs while this terminal stays open. Press Ctrl+C to stop it."
+					: "Clio Coder stops after it has been idle. Press Ctrl+C to stop it now.",
+			);
+			if (backgroundAbsent && process.platform === "linux")
+				hint(
+					"For a stable address that survives this terminal and installs as an app: clio-coder gui background install --open",
+				);
+		}
+		if (open)
 			void openBrowser(launchUrl).catch(() => {
 				console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
 				void log.write("Could not open the browser; server remains available.").catch(fail);
