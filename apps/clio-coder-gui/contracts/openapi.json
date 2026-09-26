@@ -9854,6 +9854,21 @@
 											},
 											"additionalProperties": false
 										},
+										"board": {
+											"type": "object",
+											"required": ["version", "method"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"method": {
+													"type": "string",
+													"maxLength": 128
+												}
+											},
+											"additionalProperties": false
+										},
 										"mediatedTools": {
 											"type": "boolean"
 										}
@@ -10656,6 +10671,376 @@
 										"reason": {
 											"type": "string",
 											"maxLength": 64
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/board": {
+			"get": {
+				"operationId": "sessionBoard",
+				"summary": "The operator's tasks, the session plan, its decisions and the memory tier",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["version", "operatorTasks", "plan", "decisions", "memory", "truncated"],
+									"properties": {
+										"version": {
+											"type": "number",
+											"const": 1
+										},
+										"operatorTasks": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "title", "status", "expectedOutputs", "verificationChecks"],
+												"properties": {
+													"id": {
+														"type": "string",
+														"maxLength": 32
+													},
+													"title": {
+														"type": "string",
+														"maxLength": 1100
+													},
+													"status": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "open"
+															},
+															{
+																"type": "string",
+																"const": "handed"
+															},
+															{
+																"type": "string",
+																"const": "picked"
+															},
+															{
+																"type": "string",
+																"const": "done"
+															},
+															{
+																"type": "string",
+																"const": "dropped"
+															}
+														]
+													},
+													"expectedOutputs": {
+														"type": "array",
+														"items": {
+															"type": "string",
+															"maxLength": 1100
+														},
+														"maxItems": 8
+													},
+													"verificationChecks": {
+														"type": "integer",
+														"minimum": 0
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 100
+										},
+										"plan": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["title", "tasks"],
+													"properties": {
+														"title": {
+															"type": "string",
+															"maxLength": 1100
+														},
+														"tasks": {
+															"type": "array",
+															"items": {
+																"type": "object",
+																"required": ["id", "title", "status", "origin", "reason"],
+																"properties": {
+																	"id": {
+																		"type": "string",
+																		"maxLength": 64
+																	},
+																	"title": {
+																		"type": "string",
+																		"maxLength": 1100
+																	},
+																	"status": {
+																		"type": "string",
+																		"maxLength": 32
+																	},
+																	"origin": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "agent"
+																			},
+																			{
+																				"type": "string",
+																				"const": "user"
+																			}
+																		]
+																	},
+																	"reason": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 1100
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	}
+																},
+																"additionalProperties": false
+															},
+															"maxItems": 100
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"decisions": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["ref", "key", "label", "value", "status", "source", "decidedAt", "rationale", "correction"],
+												"properties": {
+													"ref": {
+														"type": "string",
+														"maxLength": 2300
+													},
+													"key": {
+														"type": "string",
+														"maxLength": 1100
+													},
+													"label": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 1100
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"value": {
+														"type": "string",
+														"maxLength": 1100
+													},
+													"status": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "active"
+															},
+															{
+																"type": "string",
+																"const": "superseded"
+															}
+														]
+													},
+													"source": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "operator"
+															},
+															{
+																"type": "string",
+																"const": "agent"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"decidedAt": {
+														"type": "string",
+														"maxLength": 64
+													},
+													"rationale": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 1100
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"correction": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 1100
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 100
+										},
+										"memory": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["enabled", "tier", "entries", "stepInFlight"],
+													"properties": {
+														"enabled": {
+															"type": "boolean"
+														},
+														"tier": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "llm"
+																},
+																{
+																	"type": "string",
+																	"const": "rules"
+																}
+															]
+														},
+														"entries": {
+															"type": "integer",
+															"minimum": 0
+														},
+														"stepInFlight": {
+															"type": "boolean"
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"truncated": {
+											"type": "boolean"
 										}
 									},
 									"additionalProperties": false

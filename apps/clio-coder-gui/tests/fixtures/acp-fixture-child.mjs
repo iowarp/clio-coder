@@ -142,9 +142,51 @@ const COMMANDS =
 						requiresSubcommand: true,
 						args: { subcommands: { compact: { positionals: [{ name: "instructions", required: false, rest: true }] } } },
 					},
+					{
+						name: "tasks",
+						summary: "Keep your own task list",
+						usage: "/tasks <add|done|drop>",
+						group: "Session",
+						requiresSubcommand: true,
+						args: {
+							subcommands: {
+								add: { positionals: [{ name: "text", required: true, rest: true }] },
+								done: { positionals: [{ name: "id", required: true }] },
+								drop: { positionals: [{ name: "id", required: true }] },
+							},
+						},
+					},
 				],
 			}
 		: null;
+// The session board a real agent folds from its ledger: the operator's tasks change through the
+// `tasks` command above; the plan and decisions are the agent's own report.
+const BOARD = {
+	version: 1,
+	operatorTasks: [],
+	plan: {
+		title: "Survey the fixture",
+		tasks: [
+			{ id: "1", title: "Read the fixture workspace", status: "completed", origin: "agent", reason: null },
+			{ id: "2", title: "Summarize the findings", status: "active", origin: "agent", reason: null },
+		],
+	},
+	decisions: [
+		{
+			ref: "interview-1/format",
+			key: "format",
+			label: "Report format",
+			value: "Markdown with one table",
+			status: "active",
+			source: "operator",
+			decidedAt: "2026-09-26T00:00:00.000Z",
+			rationale: null,
+			correction: null,
+		},
+	],
+	memory: { enabled: true, tier: "rules", entries: 2, stepInFlight: false },
+	truncated: false,
+};
 // Visual review can ask the smoke scenario to advertise safe settings and targets, so the composer's
 // route chip shows a reported model. The smoke itself leaves it off and asserts the missing controls.
 const ROUTE = process.env.CLIO_CODER_WEB_FIXTURE_ROUTE === "1";
@@ -297,6 +339,7 @@ async function handle(frame) {
 														invoke: "_clio-coder/commands/invoke",
 														count: COMMANDS.commands.length,
 													},
+													"clio-coder/board": { version: 1, method: "_clio-coder/session/board" },
 												}
 											: {}),
 									},
@@ -447,12 +490,37 @@ async function handle(frame) {
 			case "_clio-coder/commands/invoke": {
 				if (!COMMANDS?.commands.some((row) => row.name === frame.params.command)) throw Error("command_not_exposed");
 				const { command, argv = [] } = frame.params;
+				if (command === "tasks") {
+					const [action, ...rest] = argv;
+					if (action === "add") {
+						const id = `u${BOARD.operatorTasks.length + 1}`;
+						BOARD.operatorTasks.push({
+							id,
+							title: rest.join(" "),
+							status: "open",
+							expectedOutputs: [],
+							verificationChecks: 0,
+						});
+						result = { level: "success", lines: [`added ${id}`] };
+					} else {
+						const task = BOARD.operatorTasks.find((row) => row.id === rest[0]);
+						if (task) task.status = action === "done" ? "done" : "dropped";
+						result = task
+							? { level: "success", lines: [`${task.id} ${task.status}`] }
+							: { level: "error", lines: [`no task ${rest[0]}`] };
+					}
+					break;
+				}
 				result =
 					command === "doctor"
 						? { level: "success", lines: [argv.includes("deep") ? "Deep checks completed." : "Checks completed."] }
 						: { level: "info", lines: [`Context action: ${argv.join(" ")}`] };
 				break;
 			}
+			case "_clio-coder/session/board":
+				if (!COMMANDS) throw Error("method_not_found");
+				result = BOARD;
+				break;
 			case "_clio-coder/session/steer": {
 				const followUp = frame.params.mode === "end-of-turn";
 				(followUp ? queues.followUp : queues.steer).push(frame.params.text);

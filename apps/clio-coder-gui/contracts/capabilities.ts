@@ -1,4 +1,5 @@
 import { type Static, Type } from "typebox";
+import { BoardCapability } from "./board.js";
 
 const closed = { additionalProperties: false };
 const method = Type.String({ maxLength: 128 });
@@ -80,6 +81,7 @@ export const AgentCapabilities = Type.Object(
 		toolProgress: Type.Optional(ToolProgressCapability),
 		decision: Type.Optional(DecisionCapability),
 		events: Type.Optional(EventsCapability),
+		board: Type.Optional(BoardCapability),
 		/** True when the agent mediates every tool through its own safety policy. */
 		mediatedTools: Type.Boolean(),
 	},

@@ -1,5 +1,6 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
+import { BoardCapability } from "../../contracts/board.js";
 import {
 	type AgentCapabilities,
 	CommandsCapability,
@@ -56,6 +57,7 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("toolProgress", optional(ToolProgressCapability, meta["clio-coder/toolProgress"])),
 		...maybe("decision", optional(DecisionCapability, meta["clio-coder/decision"])),
 		...maybe("events", optional(EventsCapability, meta["clio-coder/events"])),
+		...maybe("board", optional(BoardCapability, meta["clio-coder/board"])),
 	};
 }
 const closed = { additionalProperties: false };

@@ -43,6 +43,7 @@ export function sessionRoutes(
 			supervisor.steerDispatchRun(params.id, body),
 		),
 	);
+	register(app, hub, routes.sessionBoard, ({ params }) => supervisor.board(params.id));
 	register(app, hub, routes.sessionCommands, ({ params }) => supervisor.commands(params.id));
 	register(app, hub, routes.invokeSessionCommand, ({ params, body }, context) =>
 		commands.run(`command:${params.id}:${body.command}`, idempotencyKey(context), body, () =>

@@ -1,4 +1,5 @@
 import { type Static, type TSchema, Type } from "typebox";
+import { SessionBoard } from "./board.js";
 import { AgentCapabilities } from "./capabilities.js";
 import { Empty, Id } from "./common.js";
 import { DocPage, DocsSearch, DocsTree } from "./docs.js";
@@ -417,6 +418,13 @@ export const routes = {
 		body: DispatchSteerRequest,
 		response: DispatchSteerResult,
 		summary: "Queue guidance on, or abort, one running worker",
+	}),
+	sessionBoard: defineRoute({
+		...get,
+		path: "/api/sessions/:id/board",
+		params: operationParams,
+		response: SessionBoard,
+		summary: "The operator's tasks, the session plan, its decisions and the memory tier",
 	}),
 	sessionCommands: defineRoute({
 		...get,

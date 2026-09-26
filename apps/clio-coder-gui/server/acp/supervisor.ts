@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
+import { SessionBoard } from "../../contracts/board.js";
 import type { PermissionDecision } from "../../contracts/permissions.js";
 import { applySessionDelta, boundedText, emptySession } from "../../contracts/session-projection.js";
 import {
@@ -551,6 +552,12 @@ export class Supervisor {
 			{ sessionId: id, runId, action, ...(action === "guide" && message ? { message } : {}) },
 			DispatchSteerResult,
 		);
+	}
+	board(id: string) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.board)
+			throw new AppProblem("conflict", "This Clio build does not report tasks and decisions.");
+		return this.projected(id, "_clio-coder/session/board", { sessionId: id }, SessionBoard);
 	}
 	commands(id: string) {
 		const entry = this.active(id);

@@ -25,6 +25,7 @@ import { FleetStrip, LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/health.js";
 import { routeFacts } from "../chat/route.js";
+import { SessionBoardPanel } from "../chat/SessionBoard.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
@@ -382,6 +383,13 @@ function SessionTools({
 					) : (
 						<p>Checking session controls…</p>
 					)}
+					<SessionBoardPanel
+						client={client}
+						sessionId={session.id}
+						sessionOpen={session.state === "open"}
+						capabilities={capabilities}
+						settledTurns={session.turns.filter((turn) => turn.status !== "running").length}
+					/>
 					<CommandPanel client={client} sessionId={session.id} sessionOpen={session.state === "open"} />
 					<FleetStrip client={client} session={session} />
 					<div className="conversation__close">

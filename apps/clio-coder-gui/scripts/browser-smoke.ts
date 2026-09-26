@@ -690,6 +690,19 @@ try {
 		await check("session-commands");
 		if (width === 1600) await page.screenshot({ path: join(output, "session-commands.png"), fullPage: true });
 		await page.getByText("Clio Coder commands", { exact: true }).click();
+		// The session board: the operator's tasks change through the tasks command, the plan and decisions only read.
+		await page.getByText("Tasks and decisions", { exact: true }).click();
+		const board = page.locator(".session-board");
+		await board.getByText("Read the fixture workspace", { exact: true }).waitFor();
+		await board.getByText("Markdown with one table", { exact: false }).waitFor();
+		await board.getByText("You have not added a task.", { exact: true }).waitFor();
+		await board.getByLabel("Add a task", { exact: true }).fill("Draft the summary");
+		await board.getByRole("button", { name: "Add", exact: true }).click();
+		await board.getByRole("button", { name: "Mark done: Draft the summary", exact: true }).click();
+		await board.locator(".status-mark", { hasText: "Done" }).waitFor();
+		await check("session-board");
+		if (width === 1600) await page.screenshot({ path: join(output, "session-board.png"), fullPage: true });
+		await page.getByText("Tasks and decisions", { exact: true }).click();
 		await page.locator(".conversation__tools > summary").click();
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[approval] Write the fixture file.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();

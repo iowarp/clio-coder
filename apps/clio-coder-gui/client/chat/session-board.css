@@ -1,0 +1,96 @@
+/* The session board sits in Session tools beside the command panel and wears its frame
+   (`.command-panel`): rows divide by hairline, ids read as exact values, and every state is a glyph
+   and a word. */
+.session-board section {
+	margin-block: var(--space-4);
+}
+.session-board h3 {
+	margin: 0 0 var(--space-2);
+	font-size: var(--text-body);
+}
+.session-board__empty,
+.session-board__note {
+	margin: 0;
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.session-board__rows {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	border-top: 1px solid var(--line);
+}
+.session-board__rows > li {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: baseline;
+	gap: var(--space-2) var(--space-3);
+	padding-block: var(--space-2);
+	border-bottom: 1px solid var(--line);
+}
+.session-board__id {
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+.session-board__title {
+	min-width: 0;
+	overflow-wrap: anywhere;
+	font-size: var(--text-meta);
+}
+.session-board__title small,
+.session-board__decisions small {
+	display: block;
+	color: var(--ink-muted);
+	font-size: var(--text-exact);
+}
+.session-board__actions {
+	grid-column: 2 / -1;
+	display: flex;
+	gap: var(--space-2);
+}
+.session-board__actions button,
+.session-board__add button {
+	min-height: 32px;
+	padding: 0 var(--space-3);
+	font-size: var(--text-exact);
+}
+.session-board__add {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+	margin-top: var(--space-3);
+}
+.session-board__add label {
+	font-size: var(--text-meta);
+}
+.session-board__add input {
+	flex: 1 1 12rem;
+	min-width: 0;
+}
+.session-board__decisions {
+	margin: 0;
+	display: grid;
+	gap: var(--space-2);
+}
+.session-board__decisions > div {
+	display: grid;
+	grid-template-columns: minmax(7rem, 12rem) minmax(0, 1fr);
+	gap: var(--space-3);
+	font-size: var(--text-meta);
+}
+.session-board__decisions dt {
+	color: var(--ink-muted);
+	overflow-wrap: anywhere;
+}
+.session-board__decisions dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+@media (max-width: 650px) {
+	.session-board__decisions > div {
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--space-1);
+	}
+}
