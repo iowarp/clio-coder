@@ -247,62 +247,70 @@
 		{
 			"id": "gui-conversation-png",
 			"source": "assets/screenshots/gui-conversation.png",
-			"sha256": "684e598e04c075ec5f7005bc2559e759d21650a025acfb72bddc78b306dd9827",
-			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"sha256": "21a108f30a3aad6e430c540431791ce033790c05e146e7361de2c76caeb64400",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
 			"dimensions": {
-				"width": 1513,
-				"height": 1489
+				"width": 1600,
+				"height": 1000
 			},
-			"role": "Browser conversation view",
+			"role": "Browser conversation reporting eight passing calibration tests from a real verification call.",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Clio Coder browser conversation with project prompts, session tools, file attachments and model selection.",
+			"altTextSeed": "Browser conversation reporting eight passing calibration tests from a real verification call.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-conversation.png"]
+			"copies": ["site/assets/gui-conversation.png"],
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef"
 		},
 		{
 			"id": "gui-conversation-webp",
 			"source": "assets/screenshots/gui-conversation.webp",
-			"sha256": "300b1b010491ec3a130103fb15d406c00492a74b25879327547570eccf376451",
-			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"sha256": "e711f5873d77c4080eaf07d4ab16af3ad35775675cdccddd1479b282f6a54e4f",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
 			"dimensions": {
-				"width": 1513,
-				"height": 1489
+				"width": 1600,
+				"height": 1000
 			},
-			"role": "Browser conversation view",
+			"role": "Browser conversation reporting eight passing calibration tests from a real verification call.",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Clio Coder browser conversation with project prompts, session tools, file attachments and model selection.",
+			"altTextSeed": "Browser conversation reporting eight passing calibration tests from a real verification call.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-conversation.webp"]
+			"copies": ["site/assets/gui-conversation.webp"],
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef"
 		},
 		{
 			"id": "gui-overview-png",
 			"source": "assets/screenshots/gui-overview.png",
-			"sha256": "559811a320c674dd05b31780c856547475c3cd08ecb8f673cea4403863c467f8",
-			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"sha256": "423a83933dc2557b5fb97e582e94f60c3651c09ce16ceba7c7b649904e381d3d",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
 			"dimensions": {
-				"width": 2072,
-				"height": 1282
+				"width": 1600,
+				"height": 1000
 			},
-			"role": "Browser overview view",
+			"role": "Browser overview with project selection and real calibration conversations.",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings.",
+			"altTextSeed": "Browser overview with project selection and real calibration conversations.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-overview.png"]
+			"copies": ["site/assets/gui-overview.png"],
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef"
 		},
 		{
 			"id": "gui-overview-webp",
 			"source": "assets/screenshots/gui-overview.webp",
-			"sha256": "938bb8feef5e3d6498e932180f6ec1fb5bb1a7d1ac94944f33ad35d50b52581a",
-			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"sha256": "1de5984ffba6a2f3e6bbf8e066104b6f0078a25cbd431794e6a0662c832c28b6",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
 			"dimensions": {
-				"width": 1920,
-				"height": 1188
+				"width": 1600,
+				"height": 1000
 			},
-			"role": "Browser overview view",
+			"role": "Browser overview with project selection and real calibration conversations.",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings.",
+			"altTextSeed": "Browser overview with project selection and real calibration conversations.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-overview.webp"]
+			"copies": ["site/assets/gui-overview.webp"],
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef"
 		},
 		{
 			"id": "gui-clio-mark",
@@ -333,6 +341,74 @@
 			"altTextSeed": "Cyan Clio ring with a copper C.",
 			"representation": "brand-artwork",
 			"copies": ["apps/clio-coder-gui/client/public/favicon.png"]
+		},
+		{
+			"id": "gui-trace-png",
+			"source": "assets/screenshots/gui-trace.png",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
+			"channels": ["repository"],
+			"altTextSeed": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
+			"representation": "real-product-capture",
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef",
+			"copies": [],
+			"sha256": "c21cc60302edb07282f6a0b0573e45af375feb578350613ce51dde8689d1ffa0"
+		},
+		{
+			"id": "gui-trace-webp",
+			"source": "assets/screenshots/gui-trace.webp",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
+			"channels": ["repository"],
+			"altTextSeed": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
+			"representation": "real-product-capture",
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef",
+			"copies": [],
+			"sha256": "7f6b367d4238b90f934b07b11b256272ef2b242f685d84eabd7bda8eb89041f7"
+		},
+		{
+			"id": "gui-library-png",
+			"source": "assets/screenshots/gui-library.png",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Library catalog search with available package sources and explicit installation controls.",
+			"channels": ["repository"],
+			"altTextSeed": "Library catalog search with available package sources and explicit installation controls.",
+			"representation": "real-product-capture",
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef",
+			"copies": [],
+			"sha256": "41697b87f67362fc2c5a061772fc60d2c3f3bd52fed244831af8928ac9a3f3be"
+		},
+		{
+			"id": "gui-library-webp",
+			"source": "assets/screenshots/gui-library.webp",
+			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile and authentic calibration project, fresh verify/check test turn. No fixture mode.",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Library catalog search with available package sources and explicit installation controls.",
+			"channels": ["repository"],
+			"altTextSeed": "Library catalog search with available package sources and explicit installation controls.",
+			"representation": "real-product-capture",
+			"capturedVersion": "0.5.7",
+			"capturedRevision": "dda290671ad40a63d7e548f63944c665991770ef",
+			"copies": [],
+			"sha256": "8d8c953015e8f819e771bbf41081e08bf2ab6ad128e278e26671b85b717fc8ec"
 		}
 	],
 	"socialExports": [

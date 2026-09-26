@@ -112,11 +112,14 @@ configuration through the same runtime. The browser interface is in alpha.
   <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-conversation.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-conversation.webp" alt="Browser conversation with project prompts, session tools, file attachments and model selection" width="800" /></a>
 </p>
 
+[Watch a real calibration verification (33 seconds, MP4)](https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/recordings/gui-calibration.mp4)
+· [GIF preview](https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/recordings/gui-calibration-preview.gif)
+
 ```bash
 clio-coder gui --open
 ```
 
-On Linux, an optional background application serves the GUI and installed docs:
+On Linux, an optional background application serves the GUI:
 
 ```bash
 clio-coder gui background install --open

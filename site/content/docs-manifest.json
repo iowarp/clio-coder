@@ -5,7 +5,7 @@
   "source": {
     "version": "0.5.7",
     "ref": "feat/gui-brand-workflows",
-    "commit": "69a644924fe1b48a33e8184110315c634b676d29",
+    "commit": "dda290671ad40a63d7e548f63944c665991770ef",
     "mode": "working-tree"
   },
   "files": [
@@ -13,7 +13,7 @@
       "path": "README.md",
       "source": "README.md",
       "sha256": "9b113d76b1f5a2b525d816eddff9b3dfb1e52ac5102a7f815c835fe561122c32",
-      "sourceSha256": "512b4d8d265cd100a16004c351a289095123a6694be0c4ef8c8e1547ceea6757"
+      "sourceSha256": "481fd0050bd0913b1c0f152d6b629e7fe610f5fbb58e322bc701974dfa897cd6"
     },
     {
       "path": "guide/configuration-and-targets.md",
