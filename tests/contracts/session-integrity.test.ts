@@ -151,7 +151,7 @@ describe("session integrity", () => {
 		}
 	}
 
-	for (const version of [2, 3, 4, 5, 6]) {
+	for (const version of [2, 3, 4, 5, CURRENT_SESSION_FORMAT_VERSION, CURRENT_SESSION_FORMAT_VERSION + 1]) {
 		it(`preserves version ${version} admission and torn-tail recovery`, async () => {
 			const current = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
 			const old = current.create({ cwd: scratch.dir });
@@ -168,7 +168,7 @@ describe("session integrity", () => {
 			if (version === 3) fs.writeFileSync(paths.current, `${JSON.stringify(entry("candidate"))}\n`);
 			fs.appendFileSync(paths.current, '{"interrupted":');
 			try {
-				if (version === 2 || version === 6) {
+				if (version === 2 || version > CURRENT_SESSION_FORMAT_VERSION) {
 					const before = fs.readFileSync(paths.meta, "utf8");
 					throws(() => current.resume(candidate.meta.id), /unsupported format version|newer Clio/u);
 					strictEqual(current.current()?.id, old.id);
@@ -505,7 +505,7 @@ describe("session integrity", () => {
 	}
 
 	for (const transition of ["resume", "switchBranch"] as const) {
-		for (const version of [2, 6]) {
+		for (const version of [2, CURRENT_SESSION_FORMAT_VERSION + 1]) {
 			it(`${transition} refuses version ${version} before publishing recovery files`, async () => {
 				const events: unknown[] = [];
 				const current = createSessionBundle({

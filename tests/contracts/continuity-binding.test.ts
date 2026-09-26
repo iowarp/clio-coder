@@ -23,7 +23,7 @@ import {
 } from "../../src/domains/session/continuity/ports.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
-import { sessionPaths } from "../../src/engine/session.js";
+import { CURRENT_SESSION_FORMAT_VERSION, sessionPaths } from "../../src/engine/session.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /**
@@ -313,7 +313,7 @@ describe("continuity persistence bound to the real session writer", () => {
 		contract.flushAppends?.();
 		const lines = readFileSync(currentPath, "utf8").split("\n");
 		const header = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
-		for (const version of [2, 6]) {
+		for (const version of [2, CURRENT_SESSION_FORMAT_VERSION + 1]) {
 			writeFileSync(currentPath, [JSON.stringify({ ...header, version }), ...lines.slice(1)].join("\n"), "utf8");
 			const readback = readContinuityRecordExact({ sessionId, cwdHash }, record);
 			strictEqual(readback.status, "unresolved", `version ${version} must not resolve`);
