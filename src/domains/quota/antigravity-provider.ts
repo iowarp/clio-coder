@@ -19,8 +19,9 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-
-import { formatPlan, type QuotaProvider, type UsageSnapshot, type UsageWindow } from "./types.js";
+import { isClioHomeRelocated } from "../../core/xdg.js";
+import type { QuotaProvider, UsageSnapshot, UsageWindow } from "./types.js";
+import { formatPlan } from "./types.js";
 
 export const ANTIGRAVITY_QUOTA_PROVIDER_ID = "antigravity";
 
@@ -54,8 +55,10 @@ export interface AntigravityQuotaOptions {
 	now?: () => Date;
 }
 
-function defaultCredentialsPath(): string {
-	return join(homedir(), ".gemini", "antigravity-cli", "antigravity-oauth-token");
+function defaultCredentialsPath(): string | null {
+	const home = process.env.ANTIGRAVITY_HOME?.trim();
+	if (home) return join(home, "antigravity-oauth-token");
+	return isClioHomeRelocated() ? null : join(homedir(), ".gemini", "antigravity-cli", "antigravity-oauth-token");
 }
 
 function parseCredentials(raw: unknown): AntigravityCredentials | null {
@@ -97,7 +100,9 @@ type CollectResult =
 /** Build the read-only Antigravity quota adapter. */
 export function createAntigravityQuotaProvider(options: AntigravityQuotaOptions = {}): QuotaProvider {
 	const credentialsPath = options.credentialsPath ?? defaultCredentialsPath();
-	const readCredentials = options.readCredentials ?? (() => readCredentialsFile(credentialsPath));
+	const readCredentials =
+		options.readCredentials ??
+		(() => (credentialsPath === null ? Promise.resolve(null) : readCredentialsFile(credentialsPath)));
 	const doFetch = options.fetch ?? globalThis.fetch;
 	const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
 	const now = options.now ?? (() => new Date());

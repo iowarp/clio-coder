@@ -10,6 +10,7 @@ import { createClaudeCodeQuotaProvider, parseClaudeCredentials } from "../../src
 import { buildQuotaProviders } from "../../src/domains/quota/registry.js";
 import type { QuotaProvider, UsageSnapshot } from "../../src/domains/quota/types.js";
 import { formatPlan, parseRetryAfterSeconds } from "../../src/domains/quota/types.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const NOW = new Date("2026-01-01T00:00:00.000Z");
 
@@ -362,14 +363,22 @@ it("reports a failure directly when nothing good was ever cached", async () => {
 	assert.equal(cache.read("claude-code"), null);
 });
 
-it("registers one adapter per supported runtime, in display order", () => {
-	const providers = buildQuotaProviders();
-	assert.deepEqual(
-		providers.map((entry) => entry.id),
-		["anthropic-max", "claude-code", "codex", "antigravity"],
-	);
-	assert.deepEqual(
-		providers.map((entry) => entry.displayName),
-		["Anthropic Max", "Claude Code", "Codex", "Antigravity"],
-	);
+it("registers explicitly connected adapters in display order", async () => {
+	const env = await isolateClioEnv();
+	try {
+		process.env.CODEX_HOME = env.dir;
+		process.env.CLAUDE_CONFIG_DIR = env.dir;
+		process.env.ANTIGRAVITY_HOME = env.dir;
+		const providers = buildQuotaProviders();
+		assert.deepEqual(
+			providers.map((entry) => entry.id),
+			["anthropic-max", "claude-code", "codex", "antigravity"],
+		);
+		assert.deepEqual(
+			providers.map((entry) => entry.displayName),
+			["Anthropic Max", "Claude Code", "Codex", "Antigravity"],
+		);
+	} finally {
+		env.restore();
+	}
 });

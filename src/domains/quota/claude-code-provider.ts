@@ -14,9 +14,11 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { isClioHomeRelocated } from "../../core/xdg.js";
 
 import { fetchAnthropicUsage } from "./anthropic-usage.js";
-import { formatPlan, type QuotaProvider, type UsageSnapshot } from "./types.js";
+import type { QuotaProvider, UsageSnapshot } from "./types.js";
+import { formatPlan } from "./types.js";
 
 export const CLAUDE_CODE_QUOTA_PROVIDER_ID = "claude-code";
 
@@ -45,8 +47,10 @@ export interface ClaudeCodeQuotaOptions {
 	now?: () => Date;
 }
 
-function defaultClaudeCredentialsPath(): string {
-	return join(homedir(), ".claude", ".credentials.json");
+function defaultClaudeCredentialsPath(): string | null {
+	const home = process.env.CLAUDE_CONFIG_DIR?.trim();
+	if (home) return join(home, ".credentials.json");
+	return isClioHomeRelocated() ? null : join(homedir(), ".claude", ".credentials.json");
 }
 
 /** Extract the OAuth access token from a parsed credential document. */
@@ -101,7 +105,9 @@ async function readCredentialsFile(path: string): Promise<ClaudeCodeCredentials 
 /** Build the read-only `claude-code` quota adapter. */
 export function createClaudeCodeQuotaProvider(options: ClaudeCodeQuotaOptions = {}): QuotaProvider {
 	const credentialsPath = options.credentialsPath ?? defaultClaudeCredentialsPath();
-	const readCredentials = options.readCredentials ?? (() => readCredentialsFile(credentialsPath));
+	const readCredentials =
+		options.readCredentials ??
+		(() => (credentialsPath === null ? Promise.resolve(null) : readCredentialsFile(credentialsPath)));
 	const doFetch = options.fetch ?? globalThis.fetch;
 	const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
 	const now = options.now ?? (() => new Date());

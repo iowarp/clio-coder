@@ -1,10 +1,11 @@
 /**
  * Registry of quota adapters.
  *
- * Order is display order. Every adapter is read-only and reports a missing
- * credential as a snapshot status, so listing one costs nothing when the
- * operator does not use that product.
+ * Order is display order. BT-006 excludes implicit sibling accounts from
+ * relocated homes before cache lookup or credential detection.
  */
+
+import { isClioHomeRelocated } from "../../core/xdg.js";
 
 import { createAnthropicMaxQuotaProvider } from "./anthropic-max-provider.js";
 import { createAntigravityQuotaProvider } from "./antigravity-provider.js";
@@ -15,9 +16,9 @@ import type { QuotaProvider } from "./types.js";
 export function buildQuotaProviders(): QuotaProvider[] {
 	return [
 		createAnthropicMaxQuotaProvider(),
-		createClaudeCodeQuotaProvider(),
-		createCodexQuotaProvider(),
-		createAntigravityQuotaProvider(),
+		...(!isClioHomeRelocated() || process.env.CLAUDE_CONFIG_DIR?.trim() ? [createClaudeCodeQuotaProvider()] : []),
+		...(!isClioHomeRelocated() || process.env.CODEX_HOME?.trim() ? [createCodexQuotaProvider()] : []),
+		...(!isClioHomeRelocated() || process.env.ANTIGRAVITY_HOME?.trim() ? [createAntigravityQuotaProvider()] : []),
 		// The copilot adapter attaches here once its credential shape is confirmed.
 	];
 }

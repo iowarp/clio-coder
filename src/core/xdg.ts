@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { homedir, platform } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 /**
  * Resolve per-platform config/data/state/cache directories for Clio.
@@ -108,6 +108,15 @@ export function resolveClioDirs(): ClioDirs {
 		state: resolveRole("CLIO_CODER_STATE_DIR", "state", defaults),
 		cache: resolveRole("CLIO_CODER_CACHE_DIR", "cache", defaults),
 	};
+}
+
+/** BT-006: compare resolved roots without creating directories or reading credentials. */
+export function isClioHomeRelocated(): boolean {
+	const defaults = platformDefaults();
+	const dirs = resolveClioDirs();
+	return (Object.keys(defaults) as Array<keyof ClioDirs>).some(
+		(role) => resolve(dirs[role]) !== resolve(defaults[role]),
+	);
 }
 
 export function clioConfigDir(): string {

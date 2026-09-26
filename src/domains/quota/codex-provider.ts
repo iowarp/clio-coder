@@ -10,8 +10,9 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-
-import { formatPlan, type QuotaProvider, type UsageCredits, type UsageSnapshot, type UsageWindow } from "./types.js";
+import { isClioHomeRelocated } from "../../core/xdg.js";
+import type { QuotaProvider, UsageCredits, UsageSnapshot, UsageWindow } from "./types.js";
+import { formatPlan } from "./types.js";
 
 export const CODEX_QUOTA_PROVIDER_ID = "codex";
 export const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
@@ -38,9 +39,10 @@ export interface CodexQuotaOptions {
 }
 
 /** Codex's default credential file path. */
-function defaultCodexCredentialsPath(): string {
-	const codexHome = process.env.CODEX_HOME;
-	return codexHome ? join(codexHome, "auth.json") : join(homedir(), ".codex", "auth.json");
+function defaultCodexCredentialsPath(): string | null {
+	const home = process.env.CODEX_HOME?.trim();
+	if (home) return join(home, "auth.json");
+	return isClioHomeRelocated() ? null : join(homedir(), ".codex", "auth.json");
 }
 
 /** Extract the access token and account id from a parsed credential document. */
@@ -74,7 +76,9 @@ async function readCredentialsFile(path: string): Promise<CodexCredentials | nul
 /** Build the read-only `codex` quota adapter. */
 export function createCodexQuotaProvider(options: CodexQuotaOptions = {}): QuotaProvider {
 	const credentialsPath = options.credentialsPath ?? defaultCodexCredentialsPath();
-	const readCredentials = options.readCredentials ?? (() => readCredentialsFile(credentialsPath));
+	const readCredentials =
+		options.readCredentials ??
+		(() => (credentialsPath === null ? Promise.resolve(null) : readCredentialsFile(credentialsPath)));
 	const doFetch = options.fetch ?? globalThis.fetch;
 	const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
 	const now = options.now ?? (() => new Date());
