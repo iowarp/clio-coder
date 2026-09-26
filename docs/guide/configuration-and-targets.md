@@ -338,3 +338,5 @@ OAuth providers, sanctioned worker runtimes, and external-agent delegation have 
     clio-coder auth status <target-or-runtime>
 
 For a report, include the Clio and Node versions, target id/runtime, model id, probe result, and a redacted receipt or transcript. Do not include API keys or credential files.
+
+Inception Mercury requests retain the runtime-required `reasoning_effort: "instant"` for both tool probes and chat, including after discovery classifies the model as nonreasoning. Thinking controls supplied by callers are still removed for nonreasoning models.

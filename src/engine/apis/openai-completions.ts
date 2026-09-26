@@ -505,6 +505,12 @@ function applyThinkingPayload(
 ): Record<string, unknown> {
 	if (applied.mechanism === "none" || applied.mechanism === "always-on") {
 		const next = applied.mechanism === "none" ? stripThinkingRequestFields(payload) : { ...payload };
+		// Inception P1: Mercury requires its runtime-pinned off value even after discovery resolves no thinking.
+		if (applied.mechanism === "none" && model.samplingParams) {
+			for (const key of ["enable_thinking", "reasoning", "reasoning_effort", "thinking"]) {
+				if (Object.hasOwn(model.samplingParams, key)) next[key] = model.samplingParams[key];
+			}
+		}
 		if (resolved.request.chatTemplateKwargs && !chatTemplateKwargsUnsupported(model)) {
 			const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
 			next.chat_template_kwargs = { ...existing, ...resolved.request.chatTemplateKwargs };
