@@ -93,3 +93,7 @@ A parked call carries a request id. A main-agent approval resumes only that call
 | Finish contract and rigor | [finish-contract.ts](../../src/domains/safety/finish-contract.ts) | `assessFinishContract` |
 
 BT-014 exempts rule matches only when every span is inside an inert quoted argument to echo, printf, git commit/tag messages or grep/rg patterns. Whole-command and segment scans remain active. SQL and operator matches, substitutions, pipelines, heredocs and executable wrapper words prevent the exemption (review round 2 A).
+
+Git damage-control scans also dequote simple-command words, join backslash-newline continuations, and skip recognized git global options to find the subcommand. Original scans remain active, so normalization adds coverage without removing conservative matches (review round 2 G).
+
+Each scan candidate must independently prove its matches inert before an exemption applies. Quoted prose cannot suppress a destructive normalized git command elsewhere in the same call (review round 2 A/G).

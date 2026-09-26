@@ -1,4 +1,3 @@
-import { inertQuotedMatch } from "./literal-exemption.js";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -29,6 +28,8 @@ import {
 	mergePathPolicyInputs,
 	OPERATOR_PATH_POLICY,
 } from "./default-path-policy.js";
+import { normalizedGitCommands } from "./git-command-normalization.js";
+import { inertQuotedMatch } from "./literal-exemption.js";
 import {
 	type CompiledPathPolicy,
 	compilePathPolicy,
@@ -1078,7 +1079,10 @@ function matchSourcedRule(candidates: ReadonlyArray<string>, rules: ReadonlyArra
 			!candidates.some(
 				(candidate) =>
 					entry.rule.pattern.test(candidate) &&
-					!inertQuotedMatch(candidates[0] ?? candidate, entry.rule.pattern, entry.rule.id),
+					!(
+						inertQuotedMatch(candidates[0] ?? candidate, entry.rule.pattern, entry.rule.id) &&
+						inertQuotedMatch(candidate, entry.rule.pattern, entry.rule.id)
+					),
 			)
 		)
 			continue;
@@ -1335,7 +1339,7 @@ function damageControlScans(call: ClassifierCall): string[] {
 	// so a call that carries a command is scanned as a command. `cwd` keeps its
 	// own path policy.
 	const command = call.args?.command;
-	if (typeof command === "string") return [command, ...shellCommandSegments(command)];
+	if (typeof command === "string") return [command, ...shellCommandSegments(command), ...normalizedGitCommands(command)];
 	return [serializeArgs(call.args)];
 }
 

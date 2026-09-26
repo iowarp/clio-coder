@@ -1,4 +1,3 @@
-import { inertQuotedMatch } from "./literal-exemption.js";
 import { globSync, lstatSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -6,6 +5,8 @@ import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
 import { normalizeToolPath } from "../../tools/path-utils.js";
+import { normalizedGitCommands } from "./git-command-normalization.js";
+import { inertQuotedMatch } from "./literal-exemption.js";
 import type { CommandPathEvent } from "./protected-artifacts.js";
 import { extractCommandPathWalks } from "./protected-artifacts.js";
 
@@ -545,7 +546,11 @@ export function classify(rawCall: ClassifierCall): Classification {
 
 	if (call.tool === ToolNames.Bash) {
 		const scan = scanStringOf(call.args);
-		const gitHit = matchFirst(GIT_DESTRUCTIVE_PATTERNS, scan);
+		const gitHit =
+			matchFirst(GIT_DESTRUCTIVE_PATTERNS, scan) ??
+			normalizedGitCommands(typeof call.args?.command === "string" ? call.args.command : "")
+				.map((candidate) => matchFirst(GIT_DESTRUCTIVE_PATTERNS, candidate))
+				.find((hit) => hit !== null);
 		if (gitHit) {
 			return { actionClass: "git_destructive", reasons: [`pattern:${gitHit.name}`] };
 		}
