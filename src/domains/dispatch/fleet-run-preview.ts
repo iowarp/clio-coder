@@ -15,6 +15,7 @@
  * rather than surfacing the first failure and hiding the rest.
  */
 
+import { createHash } from "node:crypto";
 import {
 	FLEET_COMMANDS_REMEDY,
 	type FleetCommandRegistry,
@@ -27,7 +28,7 @@ import {
 	validateFleetCommands,
 	validateFleetGraph,
 } from "../agents/index.js";
-import type { AgentSpec } from "../agents/spec.js";
+import { type AgentSpec, agentSpecFingerprint } from "../agents/spec.js";
 import { foregroundStreamUsage } from "../providers/index.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { bindExecutionPlanEndpoints, type ExecutionPlan, type ExecutionPlanStep } from "./execution-plan.js";
@@ -81,6 +82,7 @@ export interface FleetRunPreview {
 	name: string;
 	/** Variables rendered into the plan and sealed into its durable run record. */
 	vars: Readonly<Record<string, string>>;
+	/** Approval identity includes resolved recipes, routes, commands and budget; plan.hash seals the DAG. */
 	planHash: string;
 	waves: ReadonlyArray<FleetRunPreviewWave>;
 	budget: FleetRunPreviewBudget;
@@ -177,6 +179,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 	}
 
 	let plan: ExecutionPlan;
+	const recipeFingerprints = new Map<string, string>();
 	try {
 		plan = compileFleetExecutionPlan({
 			commands,
@@ -191,6 +194,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 				if (spec.capabilityClass === "orchestration" || spec.capabilityClass === "internal") {
 					throw new Error(`fleet step '${context.stepId}' has no automatable agent authority`);
 				}
+				recipeFingerprints.set(spec.id, agentSpecFingerprint(spec));
 				const requestRole = requestExecutionRole({
 					agentId: context.agentId,
 					resolveFacts: input.roleFacts,
@@ -301,7 +305,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 						...base,
 						kind: "code" as const,
 						commandId: step.commandId,
-						...(command !== undefined ? { argv: [...command.argv] } : {}),
+						...(command !== undefined ? { argv: [...command.argv, ...(step.args ?? [])] } : {}),
 					},
 				];
 			}
@@ -320,13 +324,30 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 		}),
 	}));
 	if (diagnostics.length > 0) return fail();
+	// The DAG names recipes and command IDs, but their current bindings and the
+	// resolved model are separate facts. Approval must change when those change.
+	const commandBindings = [...(commands?.commands.values() ?? [])]
+		.sort((left, right) => left.id.localeCompare(right.id))
+		.map(({ id, argv, cwd, timeoutMs, env, argumentSlots }) => ({ id, argv, cwd, timeoutMs, env, argumentSlots }));
+	const planHash = createHash("sha256")
+		.update(
+			JSON.stringify({
+				version: 1,
+				plan: plan.hash,
+				recipes: [...recipeFingerprints].sort(([left], [right]) => left.localeCompare(right)),
+				commands: commandBindings,
+				waves,
+				budget,
+			}),
+		)
+		.digest("hex");
 
 	return {
 		ok: true,
 		preview: {
 			name: contract.name,
 			vars: { ...input.vars },
-			planHash: plan.hash,
+			planHash,
 			waves,
 			budget,
 			plan,

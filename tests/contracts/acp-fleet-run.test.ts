@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -48,7 +48,18 @@ async function peer() {
 	const context = dispatchStubContext({ settings: DEFAULT_SETTINGS });
 	const agents = context.getContract<AgentsContract>("agents");
 	ok(agents);
-	const state = { steps: ["survey", "report"], agent: "coder", refuseAtAdmission: null as string | null };
+	const state = {
+		steps: ["survey", "report"],
+		agent: "coder",
+		model: "approved-model",
+		recipeSuffix: "",
+		command: null as { argv: string[]; cwd: string; env: string[] } | null,
+		refuseAtAdmission: null as string | null,
+	};
+	const getSpec = (id: string) => {
+		const spec = agents.getSpec(id);
+		return spec === null ? null : { ...spec, body: spec.body + state.recipeSuffix };
+	};
 	const started: FleetRunPreview[] = [];
 	const control: AcpFleetControl = {
 		preview: (name, vars) =>
@@ -56,9 +67,29 @@ async function peer() {
 				workspaceRoot: root,
 				name,
 				vars,
-				getAgentSpec: (id) => agents.getSpec(id),
-				roleFacts: agentRoleFactsResolver((id) => agents.getSpec(id)),
-				load: () => ({ commands: null, contract: contract(root, state.steps, state.agent) }),
+				getAgentSpec: getSpec,
+				roleFacts: agentRoleFactsResolver(getSpec),
+				resolveRoute: () => ({
+					targetId: "target",
+					wireModelId: state.model,
+					nodeId: "local",
+					endpoint: { key: "same-endpoint", label: "Local", limit: 1 },
+				}),
+				load: () => {
+					const fleet = contract(root, state.steps, state.agent);
+					if (state.command === null) return { commands: null, contract: fleet };
+					return {
+						contract: {
+							...fleet,
+							steps: [...fleet.steps, { kind: "code", id: "check", command: "test", scope: "readonly", dependencies: [] }],
+						} as FleetContract,
+						commands: {
+							version: 1,
+							path: join(root, "commands.yaml"),
+							commands: new Map([["test", { id: "test", ...state.command, timeoutMs: 1000, description: "Run checks" }]]),
+						},
+					};
+				},
 			}),
 		run: async (preview) => {
 			started.push(preview);
@@ -108,6 +139,7 @@ async function peer() {
 		call,
 		state,
 		started,
+		compile: () => control.preview("survey", { site: "plot-7" }),
 		set streaming(value: boolean) {
 			streaming = value;
 		},
@@ -126,6 +158,104 @@ async function refusal(promise: Promise<unknown>, code: string) {
 		return true;
 	});
 }
+
+test("fleet approval changes when the resolved model changes on the same endpoint", async () => {
+	const scratch = await isolateClioEnv("clio-coder-fleet-route-seal-");
+	try {
+		const root = realpathSync(scratch.dir);
+		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract<AgentsContract>("agents");
+		ok(agents);
+		const compile = (model: string) =>
+			compileFleetRunPreview({
+				workspaceRoot: root,
+				name: "survey",
+				vars: { site: "plot-7" },
+				getAgentSpec: (id) => agents.getSpec(id),
+				roleFacts: agentRoleFactsResolver((id) => agents.getSpec(id)),
+				resolveRoute: () => ({
+					targetId: "target",
+					wireModelId: model,
+					nodeId: "local",
+					endpoint: { key: "same-endpoint", label: "Local", limit: 1 },
+				}),
+				load: () => ({ commands: null, contract: contract(root, ["survey"]) }),
+			});
+		const approved = compile("approved-model");
+		const changed = compile("changed-model");
+		ok(approved.ok && changed.ok);
+		strictEqual(approved.preview.waves[0]?.steps[0]?.route?.wireModelId, "approved-model");
+		strictEqual(changed.preview.waves[0]?.steps[0]?.route?.wireModelId, "changed-model");
+		notStrictEqual(
+			changed.preview.planHash,
+			approved.preview.planHash,
+			"an endpoint identity cannot stand in for its model",
+		);
+	} finally {
+		scratch.restore();
+	}
+});
+
+test("fleet approval changes when a registered command's argv changes under the same id", async () => {
+	const scratch = await isolateClioEnv("clio-coder-fleet-command-seal-");
+	try {
+		const root = realpathSync(scratch.dir);
+		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract<AgentsContract>("agents");
+		ok(agents);
+		const compile = (argv: string[], args?: string[]) =>
+			compileFleetRunPreview({
+				workspaceRoot: root,
+				name: "survey",
+				vars: { site: "plot-7" },
+				getAgentSpec: (id) => agents.getSpec(id),
+				roleFacts: agentRoleFactsResolver((id) => agents.getSpec(id)),
+				load: () => ({
+					contract: {
+						...contract(root, []),
+						steps: [
+							{ kind: "code", id: "check", command: "test", scope: "readonly", dependencies: [], ...(args ? { args } : {}) },
+						],
+					} as FleetContract,
+					commands: {
+						version: 1,
+						path: join(root, "commands.yaml"),
+						commands: new Map([
+							[
+								"test",
+								{
+									id: "test",
+									argv,
+									cwd: "",
+									timeoutMs: 1000,
+									env: [],
+									description: "Run the checks",
+									...(args ? { argumentSlots: [{ name: "path", maxLength: 64 }] } : {}),
+								},
+							],
+						]),
+					},
+				}),
+			});
+		const approved = compile(["node", "approved-check.js"]);
+		const changed = compile(["node", "changed-check.js"]);
+		ok(approved.ok && changed.ok);
+		const withArgs = compile(["node", "check.js"], ["src/solver.ts"]);
+		ok(withArgs.ok);
+		deepStrictEqual(
+			withArgs.preview.waves[0]?.steps[0]?.argv,
+			["node", "check.js", "src/solver.ts"],
+			"approval shows the complete declared invocation",
+		);
+		deepStrictEqual(approved.preview.waves[0]?.steps[0]?.argv, ["node", "approved-check.js"]);
+		deepStrictEqual(changed.preview.waves[0]?.steps[0]?.argv, ["node", "changed-check.js"]);
+		notStrictEqual(
+			changed.preview.planHash,
+			approved.preview.planHash,
+			"a command id cannot stand in for its invocation",
+		);
+	} finally {
+		scratch.restore();
+	}
+});
 
 test("fleet preview compiles the contract, announces its hash, and dispatches nothing", async () => {
 	const agent = await peer();
@@ -203,6 +333,73 @@ test("fleet run starts only the plan whose hash was approved and refuses a chang
 		strictEqual(agent.started.length, 1);
 		strictEqual(agent.started[0]?.planHash, preview.planHash, "the run is the plan that was approved");
 		await refusal(agent.call("_clio-coder/fleet/run", { ...base, planHash: "not-a-hash" }), "invalid_params");
+	} finally {
+		await agent.stop();
+	}
+});
+
+test("ACP refuses an old approval after model, recipe, or command bindings drift without a DAG change", async () => {
+	const agent = await peer();
+	try {
+		const base = { sessionId: agent.sessionId, name: "survey", vars: { site: "plot-7" } };
+		const reset = () => {
+			agent.state.model = "approved-model";
+			agent.state.recipeSuffix = "";
+			agent.state.command = { argv: ["node", "approved-check.js"], cwd: "", env: [] };
+		};
+		const changes = [
+			[
+				"model on the same endpoint",
+				() => {
+					agent.state.model = "changed-model";
+				},
+			],
+			[
+				"recipe body",
+				() => {
+					agent.state.recipeSuffix = "\nUse a different analysis method.";
+				},
+			],
+			[
+				"command argv",
+				() => {
+					ok(agent.state.command);
+					agent.state.command.argv = ["node", "changed-check.js"];
+				},
+			],
+			[
+				"command cwd",
+				() => {
+					ok(agent.state.command);
+					agent.state.command.cwd = "src";
+				},
+			],
+			[
+				"command env allowance",
+				() => {
+					ok(agent.state.command);
+					agent.state.command.env = ["NODE_OPTIONS"];
+				},
+			],
+		] as const;
+		for (const [label, change] of changes) {
+			reset();
+			const before = agent.compile();
+			ok(before.ok);
+			const approved = (await agent.call("_clio-coder/fleet/preview", base)) as Extract<
+				AcpFleetPreview,
+				{ status: "ready" }
+			>;
+			strictEqual(approved.status, "ready");
+			change();
+			const after = agent.compile();
+			ok(after.ok);
+			strictEqual(after.preview.plan.hash, before.preview.plan.hash, `${label} leaves the DAG unchanged`);
+			notStrictEqual(after.preview.planHash, before.preview.planHash, `${label} changes approval identity`);
+			const result = await agent.call("_clio-coder/fleet/run", { ...base, planHash: approved.planHash });
+			strictEqual(result.status, "changed", `${label} must be reapproved`);
+			strictEqual(agent.started.length, 0, `${label} cannot dispatch under the earlier approval`);
+		}
 	} finally {
 		await agent.stop();
 	}
