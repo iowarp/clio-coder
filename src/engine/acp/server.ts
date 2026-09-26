@@ -38,6 +38,7 @@ import type { McpCapabilitySource, McpClientServerSpec } from "../../tools/gatew
 import type { ToolRegistry } from "../../tools/registry.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import type { AgentMessage } from "../types.js";
+import { ACP_BOARD_META_KEY, ACP_BOARD_METHOD, type AcpBoardSource, projectSessionBoard } from "./board.js";
 import type { AcpCommandCatalog, AcpCommandControl } from "./commands.js";
 import { ACP_TURN_FAILED_MESSAGE, AcpRequestError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
 import type { AcpJsonRpcPeerTransport } from "./transport.js";
@@ -155,6 +156,12 @@ export interface ClioAcpServerOptions {
 	 * wired no fleet, bus, or provider contract must observe.
 	 */
 	commands?: AcpCommandControl;
+	/**
+	 * The operator's tasks, the session's plan, its decisions and the memory
+	 * tier, read for `_clio-coder/session/board`. Absent means the method is not
+	 * announced and refuses.
+	 */
+	board?: () => AcpBoardSource;
 	toolRegistry?: ToolRegistry;
 	mcpCapabilities?: Pick<McpCapabilitySource, "attachClientServers" | "detachClientServers">;
 	bus?: SafeEventBus;
@@ -1991,6 +1998,8 @@ export interface AcpHandshakeFeatures {
 	dispatch: boolean;
 	toolRegistry: boolean;
 	bus: boolean;
+	/** Whether `_clio-coder/session/board` answers; absent reads as false. */
+	board?: boolean;
 }
 
 /** ACP stdio declarations are client authority for one session, never saved settings. */
@@ -2212,6 +2221,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 								}
 							: {}),
 						...(features.toolRegistry ? { "clio-coder/tools": "mediated" } : {}),
+						...(features.board ? { [ACP_BOARD_META_KEY]: { version: 1, method: ACP_BOARD_METHOD } } : {}),
 					},
 				},
 				authMethods:
@@ -2265,6 +2275,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			dispatch: options.dispatch !== undefined,
 			toolRegistry: options.toolRegistry !== undefined,
 			bus: options.bus !== undefined,
+			board: options.board !== undefined,
 		});
 	const workspaceInstanceId = handshake.workspaceInstanceId;
 	const now = options.now ?? Date.now;
@@ -3051,6 +3062,16 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					}
 				: {}),
 		};
+	});
+
+	options.transport.onRequest(ACP_BOARD_METHOD, (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		if (options.board === undefined) {
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		}
+		getSession(request);
+		return projectSessionBoard(options.board());
 	});
 
 	options.transport.onRequest("_clio-coder/session/label", (params) => {

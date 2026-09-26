@@ -2725,6 +2725,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 
+	// A configured memory model runs the LLM tier; otherwise the rules tier answers.
+	const taskMemoryTier = (): "llm" | "rules" => {
+		const memory = getCurrentSettings().context.memory;
+		return memory.target && memory.model ? "llm" : "rules";
+	};
+
 	// One context-init runner for the TUI and ACP hosts.
 	const runContextInit = async (
 		options: {
@@ -2866,6 +2872,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				settings: {
 					read: readAcpSafeSettings,
 					commit: commitAcpSafeSettings,
+				},
+				// The read half of the terminal's /tasks, /decisions and /memory views.
+				board: () => {
+					const memory = getCurrentSettings().context.memory;
+					return {
+						operatorTasks: userTasks.snapshot(),
+						plan: taskBoard.cachedSnapshot(),
+						decisions: decisionBoard.snapshot(),
+						memory: {
+							enabled: memory.enabled,
+							tier: taskMemoryTier(),
+							bank: taskMemoryBank.snapshot(),
+							stepInFlight: memoryIntervention.stepInFlight(),
+						},
+					};
 				},
 				// The operator-command host. Only the members the thirteen
 				// allowlisted commands actually reach are passed; every TUI-only
@@ -3199,7 +3220,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const bank = taskMemoryBank.snapshot();
 			return {
 				enabled: settings.context.memory.enabled,
-				tier: settings.context.memory.target && settings.context.memory.model ? "llm" : "rules",
+				tier: taskMemoryTier(),
 				size: taskMemoryBankSize(bank),
 				lastDecision: memoryIntervention.lastDecision(),
 				bank,
