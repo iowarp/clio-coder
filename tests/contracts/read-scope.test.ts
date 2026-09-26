@@ -13,7 +13,7 @@ import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { findTool } from "../../src/tools/find.js";
 import { grepTool } from "../../src/tools/grep.js";
 import { lsTool } from "../../src/tools/ls.js";
-import { readTool } from "../../src/tools/read.js";
+import { createReadTool, readTool } from "../../src/tools/read.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { writeTool } from "../../src/tools/write.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -36,6 +36,22 @@ describe("read scope admission", () => {
 		{ tool: ToolNames.Grep, spec: grepTool, outside: "../outside", linked: "data/out/outside" },
 		{ tool: ToolNames.Find, spec: findTool, outside: "../outside", linked: "data/out/outside" },
 	] as const;
+
+	for (const failingPhase of ["match", "record"] as const) {
+		it(`keeps a successful read when recall ${failingPhase} throws`, async () => {
+			const tool = createReadTool({
+				matchEvictedRead: () => {
+					if (failingPhase === "match") throw new Error("ledger unavailable");
+					return { ref: "old-read" };
+				},
+				recordReread: () => {
+					throw new Error("ledger unavailable");
+				},
+			});
+			const args = { path: "data/inside.txt" };
+			deepStrictEqual(await tool.run(args), await readTool.run(args));
+		});
+	}
 
 	function argsFor(tool: string, path: string): Record<string, unknown> {
 		if (tool === ToolNames.Grep) return { pattern: "OUTSIDE", literal: true, path };

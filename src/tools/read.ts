@@ -775,19 +775,20 @@ export function createReadTool(port?: ReadRecallPort): ToolSpec {
 			const text = toolResultContextText(result);
 			const contentHash = readBodyHash(text);
 			let match: ReturnType<ReadRecallPort["matchEvictedRead"]>;
+			let recallTurnId: string | null;
 			try {
 				match = port.matchEvictedRead(resolveReadPath(args.path), contentHash);
+				if (match === null) return result;
+				recallTurnId = port.recordReread({
+					ref: match.ref,
+					...(options?.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }),
+					tokensReadmitted: ceilChars(text.length),
+				});
 			} catch {
 				// The interception is provenance, never the read: a port that
 				// cannot answer leaves an ordinary read result.
 				return result;
 			}
-			if (match === null) return result;
-			const recallTurnId = port.recordReread({
-				ref: match.ref,
-				...(options?.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }),
-				tokensReadmitted: ceilChars(text.length),
-			});
 			if (recallTurnId === null) return result;
 			return {
 				...result,
