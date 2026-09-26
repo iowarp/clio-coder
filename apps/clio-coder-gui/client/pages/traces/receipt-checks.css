@@ -1,0 +1,105 @@
+/* One row per sealed fact: label, state, then what it means and who said so. Rows divide by hairline,
+   not by card, because they are one instrument reading, not six widgets. */
+.receipt-checks {
+	margin-block: var(--space-4) var(--space-6);
+}
+.receipt-checks > h3 {
+	margin: 0;
+}
+.receipt-checks__intro {
+	margin: var(--space-1) 0 var(--space-3);
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.receipt-checks__rows {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	border-top: 1px solid var(--line);
+}
+.receipt-check {
+	display: grid;
+	/* Fixed state track so every meaning starts on one line down the list. */
+	grid-template-columns: minmax(8rem, 11rem) 12rem minmax(0, 1fr);
+	gap: var(--space-2) var(--space-5);
+	align-items: baseline;
+	padding-block: var(--space-3);
+	border-bottom: 1px solid var(--line);
+}
+.receipt-check__label {
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.receipt-check__body {
+	min-width: 0;
+}
+.receipt-check__state .status-mark {
+	white-space: normal;
+}
+.receipt-checks .receipt-check__meaning {
+	margin: 0;
+	font-size: var(--text-meta);
+	line-height: var(--leading-body);
+}
+.receipt-checks .receipt-check__source {
+	margin: var(--space-1) 0 0;
+	color: var(--ink-muted);
+	font-size: var(--text-exact);
+	line-height: var(--leading-body);
+}
+.receipt-checks .receipt-check__exact {
+	margin: var(--space-1) 0 0;
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink-muted);
+	overflow-wrap: anywhere;
+}
+.receipt-check__items {
+	list-style: none;
+	margin: var(--space-2) 0 0;
+	padding: 0;
+	display: grid;
+	gap: var(--space-2);
+}
+.receipt-check__items > li {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-1) var(--space-3);
+	min-width: 0;
+}
+.receipt-check__item-name {
+	overflow-wrap: anywhere;
+	font-size: var(--text-meta);
+}
+.receipt-check__facts {
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink-muted);
+}
+.receipt-check__items details {
+	flex-basis: 100%;
+}
+.receipt-check__output {
+	margin: var(--space-2) 0 0;
+	max-height: 16rem;
+	overflow: auto;
+	padding: var(--space-3);
+	border-radius: var(--radius-xs);
+	background: var(--code-paper);
+	color: var(--code-ink);
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+@media (max-width: 1050px) {
+	.receipt-check {
+		grid-template-columns: minmax(7rem, 9rem) minmax(0, 1fr);
+	}
+	.receipt-check__body {
+		grid-column: 1 / -1;
+	}
+}

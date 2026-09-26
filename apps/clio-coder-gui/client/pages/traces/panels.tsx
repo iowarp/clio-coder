@@ -1,10 +1,12 @@
 import { Fragment } from "react";
+import { Link } from "react-router";
 import type { Static } from "typebox";
 import type { TraceEvent, TraceGate, TracePhase, TraceReceipt, TraceRun } from "../../../contracts/traces.js";
 import { clock, formatCost, formatDuration, formatTime, formatTokens } from "../../api/clock.js";
 import { Facts as RecordFacts } from "../../design/facts.js";
 import { humanizeKey } from "../../design/facts-model.js";
 import { StatusMark } from "../../design/status.js";
+import { ReceiptChecks } from "./receipt-checks.js";
 import { provenanceFacts } from "./trace-model.js";
 export function object(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -220,16 +222,20 @@ export function ReceiptPanel({
 			{!r ? (
 				<p>No sealed receipt was found for this run.</p>
 			) : (
+				<>
+					<p className="trace-receipt__source">
+						Read from the saved receipt. This page does not recheck its seal; <Link to="/evidence">Evidence</Link> does.
+					</p>
+					<ReceiptChecks receipt={r} />
+				</>
+			)}
+			{r ? (
 				<div className="trace-receipt-grid">
 					<div>
 						<h3>Outcome</h3>
 						<Facts
 							entries={["outcome", "outcomeCode", "outcomeDetail", "exitCode", "failureMessage"].map((key) => [key, r[key]])}
 						/>
-					</div>
-					<div>
-						<h3>Verification</h3>
-						<Facts entries={Object.entries(object(r.verification))} />
 					</div>
 					<div>
 						<h3>Spend</h3>
@@ -288,7 +294,7 @@ export function ReceiptPanel({
 						<Facts entries={provenanceFacts(r)} />
 					</div>
 				</div>
-			)}
+			) : null}
 			<h3>Findings</h3>
 			{r?.findingsSummary ? (
 				<>

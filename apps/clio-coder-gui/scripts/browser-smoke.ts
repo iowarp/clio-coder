@@ -204,6 +204,13 @@ try {
 		await page.locator('a[href="/traces/run-0000"]').click();
 		await page.getByRole("heading", { name: "Inspect fixture 0", exact: true }).waitFor();
 		await page.getByText("Fixture workspace", { exact: false }).first().waitFor({ state: "attached" });
+		// Format conformance and contract quality are separate facts; an unmeasured quality never reads as a pass.
+		const checkRow = (label: string) => page.locator(".receipt-check", { has: page.getByText(label, { exact: true }) });
+		const mark = (label: string, word: string) =>
+			checkRow(label).locator(".receipt-check__state .status-mark", { hasText: word }).waitFor();
+		await mark("Result format", "Conforms");
+		await mark("Result quality", "Not measured");
+		await mark("Claimed checks", "1 of 2 claims grounded");
 		await check("trace-run");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `trace-run-${width}.png`), fullPage: true });

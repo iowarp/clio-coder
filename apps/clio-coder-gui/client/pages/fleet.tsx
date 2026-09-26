@@ -11,6 +11,7 @@ import { DISPATCH_SCOPE, emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
 import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE, admittedPages, retainedLinksLive } from "./artifact-pagination.js";
+import { ReceiptChecks } from "./traces/receipt-checks.js";
 
 function Topologies({
 	councils,
@@ -262,7 +263,13 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 			)}
 			<h2>Receipt</h2>
 			{artifact ? (
-				<Facts value={artifact} hide={["version"]} />
+				<>
+					<ReceiptChecks receipt={artifact} />
+					<details>
+						<summary>Every receipt field</summary>
+						<Facts value={artifact} hide={["version"]} />
+					</details>
+				</>
 			) : (
 				<PanelEmpty>{emptyState.emptyStore("readable receipt", "for this run")}</PanelEmpty>
 			)}
