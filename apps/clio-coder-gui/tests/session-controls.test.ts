@@ -328,6 +328,16 @@ test("a fleet preview dispatches nothing and a run starts only the approved hash
 	assert.equal(started.status, "started");
 	assert.equal((await h.post(`${base}/run`, run, "fleet-1")).status, 200);
 	assert.equal((await readFile(join(h.home.path, "acp.jsonl"), "utf8")).match(/fleetStarted/g)?.length, 1);
+	const blockedPreview = await json(
+		await h.post(`${base}/preview`, { name: "survey", vars: { site: "blocked" } }),
+		routes.previewFleetRun.response,
+	);
+	if (blockedPreview.status !== "ready") throw new Error("expected a plan");
+	const failed = await json(
+		await h.post(`${base}/run`, { name: "survey", vars: { site: "blocked" }, planHash: blockedPreview.planHash }),
+		routes.startFleetRun.response,
+	);
+	assert.equal(failed.status === "failed" && failed.reason, "dispatch: agent 'writer' is not admitted for this task");
 	assert.equal((await h.post(`/api/sessions/${session.id}/turns`, { text: "[stream]" })).status, 202);
 	assert.equal((await h.post(`${base}/run`, run)).status, 409, "a running turn owns the workspace");
 });

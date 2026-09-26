@@ -112,6 +112,17 @@ export const FleetRunResult = Type.Union([
 		{ status: Type.Literal("changed"), name: text, planHash: Hash, reason: Type.String({ maxLength: 512 }) },
 		closed,
 	),
+	/** The run ended before its first step: dispatch admission refused what the compiler accepted. */
+	Type.Object(
+		{
+			status: Type.Literal("failed"),
+			name: text,
+			planHash: Hash,
+			fleetRootId: Type.String({ maxLength: 128 }),
+			reason: Type.String({ maxLength: 1100 }),
+		},
+		closed,
+	),
 	Refused,
 ]);
 export type FleetRunResult = Static<typeof FleetRunResult>;

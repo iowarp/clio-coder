@@ -2924,29 +2924,54 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										resolveRoute: fleetRouteResolver(dispatch.preview, roleFacts),
 									});
 								},
-								run: (preview) => {
-									const fleetRootId = `fleet-${randomBytes(6).toString("hex")}`;
-									// Progress reaches the client as dispatch events; how the run
-									// ended is on its receipts and the stderr tail.
-									void executeFleetRun({
-										plan: preview.plan,
-										contractName: preview.name,
-										commands: preview.commands,
-										workspaceRoot: process.cwd(),
-										fleetRootId,
-										dispatch,
-										agents: { getSpec: (agentId) => agents.getSpec(agentId) },
-										getDecisionBoard: () => decisionBoard.snapshot(),
-										attributionEnabled: getCurrentSettings().integrations.git.commitAttribution,
-										vars: preview.vars,
-										onNotice: (text) => process.stderr.write(`[clio-coder:acp] fleet ${preview.name}: ${text}\n`),
-									}).catch((error: unknown) => {
-										process.stderr.write(
-											`[clio-coder:acp] fleet ${preview.name} failed: ${error instanceof Error ? error.message : String(error)}\n`,
+								run: (preview) =>
+									new Promise((resolve) => {
+										const fleetRootId = `fleet-${randomBytes(6).toString("hex")}`;
+										let admitted = false;
+										const admit = () => {
+											if (admitted) return;
+											admitted = true;
+											clearTimeout(admissionCap);
+											resolve({ status: "started", fleetRootId });
+										};
+										// A first step that waits on proposals or endpoint capacity is running, not
+										// failed; the answer stops waiting before a client's own deadline does.
+										const admissionCap = setTimeout(admit, 30_000);
+										admissionCap.unref?.();
+										const refuse = (reason: string) => {
+											if (admitted) return false;
+											admitted = true;
+											clearTimeout(admissionCap);
+											resolve({ status: "failed", fleetRootId, reason });
+											return true;
+										};
+										// Progress reaches the client as dispatch events; a run that ends before its
+										// first step answers the request with why, as the terminal's notice does.
+										void executeFleetRun({
+											plan: preview.plan,
+											contractName: preview.name,
+											commands: preview.commands,
+											workspaceRoot: process.cwd(),
+											fleetRootId,
+											dispatch,
+											agents: { getSpec: (agentId) => agents.getSpec(agentId) },
+											getDecisionBoard: () => decisionBoard.snapshot(),
+											attributionEnabled: getCurrentSettings().integrations.git.commitAttribution,
+											vars: preview.vars,
+											onStepDispatched: admit,
+											onNotice: (text) => process.stderr.write(`[clio-coder:acp] fleet ${preview.name}: ${text}\n`),
+										}).then(
+											(outcome) => {
+												refuse(
+													`the run ended before dispatching a step: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded`,
+												);
+											},
+											(error: unknown) => {
+												const message = error instanceof Error ? error.message : String(error);
+												if (!refuse(message)) process.stderr.write(`[clio-coder:acp] fleet ${preview.name} failed: ${message}\n`);
+											},
 										);
-									});
-									return { fleetRootId };
-								},
+									}),
 							},
 						}
 					: {}),

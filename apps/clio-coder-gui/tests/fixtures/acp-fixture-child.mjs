@@ -784,6 +784,14 @@ async function handle(frame) {
 						planHash: preview.planHash,
 						reason: "the plan changed since it was previewed; review it again. Nothing was dispatched",
 					};
+				else if (frame.params.vars?.site === "blocked")
+					result = {
+						status: "failed",
+						name: preview.name,
+						planHash: preview.planHash,
+						fleetRootId: "fleet-0123456789ab",
+						reason: "dispatch: agent 'writer' is not admitted for this task",
+					};
 				else {
 					log({ fleetStarted: preview.planHash });
 					result = {

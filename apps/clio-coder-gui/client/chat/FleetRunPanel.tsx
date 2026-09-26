@@ -33,6 +33,7 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 	const [varsText, setVarsText] = useState("");
 	const [shown, setShown] = useState<{ preview: FleetPreview; vars: Record<string, string> } | null>(null);
 	const [note, setNote] = useState<string | null>(null);
+	const [failure, setFailure] = useState<string | null>(null);
 	const params = { params: { id: sessionId }, query: {} };
 	const parsed = parseFleetVars(varsText);
 	const preview = useMutation({
@@ -65,6 +66,12 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 				preview.mutate({ name: input.preview.name, vars: input.vars });
 				return;
 			}
+			if (result.status === "failed") {
+				setShown(null);
+				setNote(null);
+				setFailure(`Fleet ${result.name} did not start: ${result.reason}`);
+				return;
+			}
 			setShown({ preview: result, vars: input.vars });
 		},
 	});
@@ -83,6 +90,7 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 						event.preventDefault();
 						if ("error" in parsed) return;
 						setNote(null);
+						setFailure(null);
 						preview.mutate({ name: name.trim(), vars: parsed.vars });
 					}}
 				>
@@ -116,6 +124,11 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 						{preview.isPending ? "Compiling…" : "Preview the plan"}
 					</button>
 				</form>
+			) : null}
+			{failure ? (
+				<p role="alert" className="handoff-panel__refusal handoff-panel__refusal--error">
+					{failure}
+				</p>
 			) : null}
 			{note ? (
 				<p role="status" className="session-board__note">

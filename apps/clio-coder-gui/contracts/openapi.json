@@ -12314,6 +12314,33 @@
 										},
 										{
 											"type": "object",
+											"required": ["status", "name", "planHash", "fleetRootId", "reason"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "failed"
+												},
+												"name": {
+													"type": "string",
+													"maxLength": 520
+												},
+												"planHash": {
+													"type": "string",
+													"pattern": "^[0-9a-f]{64}$"
+												},
+												"fleetRootId": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 1100
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
 											"required": ["status", "name", "diagnostics"],
 											"properties": {
 												"status": {

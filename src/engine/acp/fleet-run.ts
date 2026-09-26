@@ -20,6 +20,8 @@ export const ACP_FLEET_PREVIEW_METHOD = "_clio-coder/fleet/preview";
 export const ACP_FLEET_RUN_METHOD = "_clio-coder/fleet/run";
 export const ACP_FLEET_MAX_STEPS = 64;
 const MAX_TEXT_BYTES = 512;
+/** A run's own refusal is dispatch-domain prose; it is bounded like a diagnostic. */
+export const ACP_FLEET_MAX_REASON_BYTES = 1024;
 const MAX_DIAGNOSTICS = 32;
 const MAX_DIAGNOSTIC_BYTES = 1024;
 const MAX_LIST = 16;
@@ -27,8 +29,15 @@ const MAX_LIST = 16;
 /** What the composition root binds; the server never compiles or dispatches a plan itself. */
 export interface AcpFleetControl {
 	preview(name: string, vars: Readonly<Record<string, string>>): FleetRunPreviewResult;
-	/** Start an approved, freshly compiled plan. Returns once the run is admitted, not when it ends. */
-	run(preview: FleetRunPreview): { fleetRootId: string };
+	/**
+	 * Start an approved, freshly compiled plan. Settles when its first step is
+	 * dispatched, or with the reason when the run ends before dispatching one:
+	 * dispatch admission can refuse a step the compiler accepted, and a client
+	 * told "started" would otherwise wait on a run that never began.
+	 */
+	run(
+		preview: FleetRunPreview,
+	): Promise<{ status: "started"; fleetRootId: string } | { status: "failed"; fleetRootId: string; reason: string }>;
 }
 
 type AcpFleetStep = {
@@ -60,7 +69,7 @@ export type AcpFleetPreview =
 	  }
 	| { status: "refused"; name: string; diagnostics: string[] };
 
-function bounded(text: string, maxBytes = MAX_TEXT_BYTES): string {
+export function bounded(text: string, maxBytes = MAX_TEXT_BYTES): string {
 	let safe = "";
 	for (const character of text) {
 		const code = character.codePointAt(0) ?? 0;

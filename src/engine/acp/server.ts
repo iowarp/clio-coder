@@ -43,10 +43,12 @@ import type { AcpCommandCatalog, AcpCommandControl } from "./commands.js";
 import { ACP_DISPATCH_PLAN_META_KEY, projectDispatchPlanMeta } from "./dispatch-plan-meta.js";
 import { ACP_TURN_FAILED_MESSAGE, AcpRequestError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
 import {
+	ACP_FLEET_MAX_REASON_BYTES,
 	ACP_FLEET_META_KEY,
 	ACP_FLEET_PREVIEW_METHOD,
 	ACP_FLEET_RUN_METHOD,
 	type AcpFleetControl,
+	bounded as boundedFleetText,
 	projectFleetPreview,
 } from "./fleet-run.js";
 import {
@@ -3628,7 +3630,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	// Start the plan the client approved, and only that plan: it is compiled
 	// again here and refused before any dispatch when its hash moved.
-	options.transport.onRequest(ACP_FLEET_RUN_METHOD, (params) => {
+	options.transport.onRequest(ACP_FLEET_RUN_METHOD, async (params) => {
 		requireInitialized();
 		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId", "name", "vars", "planHash"]));
@@ -3652,18 +3654,28 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				reason: "the plan changed since it was previewed; review it again. Nothing was dispatched",
 			};
 		}
-		let started: { fleetRootId: string };
+		let started: Awaited<ReturnType<AcpFleetControl["run"]>>;
 		try {
-			started = control.run(result.preview);
+			started = await control.run(result.preview);
 		} catch (error) {
 			options.diagnostics?.(`fleet run failed to start: ${acpErrorMessage(error)}`);
 			throw new AcpRequestError(-32603, "fleet run failed to start", { code: "internal_error" });
+		}
+		const fleetRootId = boundString(started.fleetRootId, 128);
+		if (started.status === "failed") {
+			return {
+				status: "failed" as const,
+				name,
+				planHash: result.preview.planHash,
+				fleetRootId,
+				reason: boundedFleetText(started.reason, ACP_FLEET_MAX_REASON_BYTES),
+			};
 		}
 		return {
 			status: "started" as const,
 			name,
 			planHash: result.preview.planHash,
-			fleetRootId: boundString(started.fleetRootId, 128),
+			fleetRootId,
 			stepCount: result.preview.plan.steps.length,
 		};
 	});

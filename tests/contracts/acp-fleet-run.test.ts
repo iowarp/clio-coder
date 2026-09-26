@@ -48,7 +48,7 @@ async function peer() {
 	const context = dispatchStubContext({ settings: DEFAULT_SETTINGS });
 	const agents = context.getContract<AgentsContract>("agents");
 	ok(agents);
-	const state = { steps: ["survey", "report"], agent: "coder" };
+	const state = { steps: ["survey", "report"], agent: "coder", refuseAtAdmission: null as string | null };
 	const started: FleetRunPreview[] = [];
 	const control: AcpFleetControl = {
 		preview: (name, vars) =>
@@ -60,9 +60,11 @@ async function peer() {
 				roleFacts: agentRoleFactsResolver((id) => agents.getSpec(id)),
 				load: () => ({ commands: null, contract: contract(root, state.steps, state.agent) }),
 			}),
-		run: (preview) => {
+		run: async (preview) => {
 			started.push(preview);
-			return { fleetRootId: "fleet-0123456789ab" };
+			return state.refuseAtAdmission === null
+				? { status: "started", fleetRootId: "fleet-0123456789ab" }
+				: { status: "failed", fleetRootId: "fleet-0123456789ab", reason: state.refuseAtAdmission };
 		},
 	};
 	const handlers = new Map<string, (params: unknown) => unknown>();
@@ -238,4 +240,26 @@ test("the fleet projection caps steps and diagnostics and strips control charact
 	if (refused.status !== "refused") return;
 	strictEqual(refused.diagnostics.length, 32);
 	ok(refused.diagnostics.every((line) => Buffer.byteLength(line) <= 1024));
+});
+
+test("a fleet run that fails before its first step says so instead of reading as started", async () => {
+	const agent = await peer();
+	try {
+		const base = { sessionId: agent.sessionId, name: "survey", vars: { site: "plot-7" } };
+		const preview = (await agent.call("_clio-coder/fleet/preview", base)) as Extract<
+			AcpFleetPreview,
+			{ status: "ready" }
+		>;
+		agent.state.refuseAtAdmission = "dispatch: agent 'verifier' cannot write to the workspace\u0007";
+		const failed = await agent.call("_clio-coder/fleet/run", { ...base, planHash: preview.planHash });
+		deepStrictEqual(failed, {
+			status: "failed",
+			name: "survey",
+			planHash: preview.planHash,
+			fleetRootId: "fleet-0123456789ab",
+			reason: "dispatch: agent 'verifier' cannot write to the workspace ",
+		});
+	} finally {
+		await agent.stop();
+	}
 });
