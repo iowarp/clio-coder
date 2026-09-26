@@ -69,6 +69,13 @@ function excludedDirsFor(searchPath: string, includeIgnored: boolean): string[] 
 	return dirs.filter((dir) => !segments.has(dir));
 }
 
+/** Explain filtered no-matches without claiming anything about excluded paths' existence. */
+export function internalSearchExclusionNotice(searchPath: string): string {
+	const excluded = excludedDirsFor(searchPath, true);
+	if (excluded.length === 0) return "";
+	return `\n[Internal directories ${excluded.join(", ")} are excluded from this search, even with include_ignored=true. No match does not prove a supplied file is absent. Search inside its explicit directory (for example path=".clio-coder/prototypes") or read the supplied exact file.]`;
+}
+
 /** Ignore-policy argv fragment for ripgrep. */
 export function rgIgnoreArgs(searchPath: string, includeIgnored: boolean): string[] {
 	const args = ["--hidden"];

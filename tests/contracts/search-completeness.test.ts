@@ -59,6 +59,39 @@ function matchLine() {
 	});
 }
 
+async function checkInternalSearchRoots() {
+	const internal = join(root, ".clio-coder", "prototypes");
+	fs.mkdirSync(internal, { recursive: true });
+	fs.writeFileSync(join(internal, "example.html"), "internal-prototype-needle\n");
+	for (const [tool, pattern] of [
+		[findTool, "*.html"],
+		[grepTool, "internal-prototype-needle"],
+	] as const) {
+		const broad = await tool.run({ path: root, pattern, include_ignored: true });
+		assert.equal(
+			ok(broad).details?.observation && (ok(broad).details?.observation as { shownCount: number }).shownCount,
+			0,
+		);
+		assert.match(ok(broad).output, /\.clio-coder.*excluded.*even with include_ignored=true/);
+		assert.match(ok(broad).output, /No match does not prove.*absent/);
+		assert.match(ok(broad).output, /path="\.clio-coder\/prototypes"/);
+		assert.doesNotMatch(ok(broad).output, /example\.html/);
+		const explicit = await tool.run({ path: internal, pattern });
+		assert.match(ok(explicit).output, /example\.html/);
+		assert.equal(search(explicit).complete, true);
+	}
+}
+
+test("fallback searches explain internal exclusions and honor explicit roots", checkInternalSearchRoots);
+
+test("native searches explain internal exclusions and honor explicit roots", {
+	skip: !installedFd || !installedRg,
+}, async () => {
+	fs.symlinkSync(installedFd as string, join(bin, "fd"));
+	fs.symlinkSync(installedRg as string, join(bin, "rg"));
+	await checkInternalSearchRoots();
+});
+
 test("rg keeps partial matches and counts per-file errors beyond the stderr retention cap", async () => {
 	binary(
 		"rg",

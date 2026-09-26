@@ -6,7 +6,13 @@ import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { StringEnum } from "../engine/ai.js";
 import { resolveRgBinary } from "./executables.js";
-import { compileGlobRegex, fallbackIgnoredDirs, normalizeGlobInput, rgIgnoreArgs } from "./ignore-policy.js";
+import {
+	compileGlobRegex,
+	fallbackIgnoredDirs,
+	internalSearchExclusionNotice,
+	normalizeGlobInput,
+	rgIgnoreArgs,
+} from "./ignore-policy.js";
 import {
 	commitObservationReservation,
 	createObservationPathFilter,
@@ -101,6 +107,7 @@ function observedGrepLines(lines: ReadonlyArray<RenderedLine>): GrepObservedLine
 }
 
 interface GrepRenderInput {
+	searchPath: string;
 	search: SearchCompleteness;
 	fallback?: boolean;
 	withheldPaths: number;
@@ -145,7 +152,10 @@ function renderGrepResult(input: GrepRenderInput): ToolResult {
 			withheldPaths: input.withheldPaths,
 			unit: MODE_UNITS[mode],
 			output:
-				(search.complete ? NO_MATCH_OUTPUT : "Search incomplete") + searchNotice(search, 0, "matches") + fallbackNotice,
+				(search.complete ? NO_MATCH_OUTPUT : "Search incomplete") +
+				searchNotice(search, 0, "matches") +
+				fallbackNotice +
+				internalSearchExclusionNotice(input.searchPath),
 			details: { search },
 			shownCount: 0,
 			totalCount: search.complete ? 0 : null,
@@ -323,6 +333,7 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 		};
 	}
 	return renderGrepResult({
+		searchPath: input.searchPath,
 		search,
 		withheldPaths: input.pathFilter.withheldPaths,
 		mode: input.mode,
@@ -506,6 +517,7 @@ async function fallbackGrep(input: FallbackSearchInput): Promise<ToolResult> {
 		search.reason = signal?.aborted ? "cancelled" : "limit";
 	}
 	return renderGrepResult({
+		searchPath: input.searchPath,
 		fallback: true,
 		search,
 		withheldPaths: input.pathFilter.withheldPaths,

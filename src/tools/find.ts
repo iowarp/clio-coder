@@ -5,7 +5,13 @@ import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { StringEnum } from "../engine/ai.js";
 import { resolveFdBinary } from "./executables.js";
-import { compileGlobRegex, fallbackIgnoredDirs, fdIgnoreArgs, normalizeGlobInput } from "./ignore-policy.js";
+import {
+	compileGlobRegex,
+	fallbackIgnoredDirs,
+	fdIgnoreArgs,
+	internalSearchExclusionNotice,
+	normalizeGlobInput,
+} from "./ignore-policy.js";
 import {
 	commitObservationReservation,
 	createObservationPathFilter,
@@ -187,6 +193,7 @@ function orderByMtime(
 }
 
 function renderFindResult(input: {
+	searchPath: string;
 	search: SearchCompleteness;
 	fallback: boolean;
 	withheldPaths: number;
@@ -214,7 +221,8 @@ function renderFindResult(input: {
 			output:
 				(search.complete ? "No visible files found matching pattern" : "Search incomplete") +
 				searchNotice(search, 0, "paths") +
-				coverageNotice,
+				coverageNotice +
+				internalSearchExclusionNotice(input.searchPath),
 			details: { search, symlinkDirectories: { counted: input.fallback } },
 			shownCount: 0,
 			totalCount: search.complete ? 0 : null,
@@ -359,6 +367,7 @@ export const findTool: ToolSpec = {
 					? orderByMtime(collectedPaths, searchPath, limit, collectLimit, search)
 					: { paths: collectedPaths.slice(0, limit), candidateCapHit: false, candidateCap: null };
 			return renderFindResult({
+				searchPath,
 				search,
 				fallback: !fdPath,
 				withheldPaths: pathFilter.withheldPaths,
