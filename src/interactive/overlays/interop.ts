@@ -113,7 +113,7 @@ function buildItems(deps: InteropOverlayDeps): ListOverlayItem[] {
 		items.push({
 			id: `peer:${record.kind}`,
 			label: `${kind.label.padEnd(16)}${record.version ?? record.binary ?? "version unknown"}`,
-			meta: theme.fg("dim", record.presence),
+			meta: theme.fg("annotation", record.presence),
 			group: GROUP_DETECTED,
 			detail: () => [
 				`# ${kind.label}`,
@@ -137,7 +137,7 @@ function buildItems(deps: InteropOverlayDeps): ListOverlayItem[] {
 		items.push({
 			id: `declined:${agent.kind}`,
 			label: `${agent.kind.padEnd(16)}${agent.binary ?? agent.installDir ?? ""}`,
-			meta: theme.fg("dim", `declined ${agent.decidedAt ?? ""}`.trim()),
+			meta: theme.fg("annotation", `declined ${agent.decidedAt ?? ""}`.trim()),
 			group: GROUP_DECLINED,
 			detail: () => [`# ${agent.kind}`, "Declined. Clio proposes it again when its binary version or path changes."],
 		});

@@ -16,8 +16,8 @@ const TAB_WIDTH = 4;
 export function renderReferenceCard(card: PromptReferenceCard, width: number): string[] {
 	const theme = clioTheme();
 	const safeWidth = Math.max(8, width);
-	const header = `${theme.fg("dim", GLYPH.user)} ${theme.style("title", `/${card.command}`, { bold: true })}  ${theme.fg(
-		"dim",
+	const header = `${theme.fg("toolMetadata", GLYPH.user)} ${theme.style("toolAction", `/${card.command}`, { bold: true })}  ${theme.fg(
+		"toolMetadata",
 		`reference · ${card.source}`,
 	)}`;
 	const lines = wrapTextWithAnsi(header, safeWidth);
@@ -28,7 +28,8 @@ export function renderReferenceCard(card: PromptReferenceCard, width: number): s
 			lines.push("");
 			continue;
 		}
-		for (const wrapped of wrapTextWithAnsi(expanded, bodyWidth)) lines.push(`${CARD_GUTTER}${wrapped}`);
+		for (const wrapped of wrapTextWithAnsi(expanded, bodyWidth))
+			lines.push(`${CARD_GUTTER}${theme.base("body", wrapped)}`);
 	}
 	lines.push("");
 	return lines;

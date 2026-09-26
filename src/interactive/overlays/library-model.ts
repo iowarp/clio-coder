@@ -117,17 +117,18 @@ export function libraryStatusLine(
 	const unit = view.member ? "member" : view.mode === "browse" ? "package" : "entry";
 	const plural = unit === "entry" ? "entries" : `${unit}s`;
 	const total = `${counts.rows} ${counts.rows === 1 ? unit : plural}`;
-	if (width < 34) return theme.fg("accent", `${mode}·Actions:${scope}`);
+	if (width < 34) return theme.fg("fieldValue", `${mode}·Actions:${scope}`);
 	const parts =
 		width < 72
-			? [theme.fg("accent", width >= 48 ? `${mode} ${total}` : total), theme.fg("dim", `s:${scope}`)]
-			: [theme.fg("accent", `${mode} · Actions: ${scope}`), theme.fg("dim", total)];
+			? [theme.fg("fieldValue", width >= 48 ? `${mode} ${total}` : total), theme.fg("annotation", `s:${scope}`)]
+			: [theme.fg("fieldValue", `${mode} · Actions: ${scope}`), theme.fg("annotation", total)];
 	if (counts.notices > 0)
 		parts.push(theme.fg("warning", `n:${counts.notices} ${counts.notices === 1 ? "notice" : "notices"}`));
-	else if (width < 72) parts.push(theme.fg("dim", "n notices"));
+	else if (width < 72) parts.push(theme.fg("annotation", "n notices"));
 	if (counts.truncated) parts.push(theme.fg("warning", "incomplete results"));
-	if (view.member && width >= 72) parts.push(theme.fg("dim", `members of ${sanitizeCallTargetText(view.member.ref)}`));
-	return parts.join(theme.fg("frame", " │ "));
+	if (view.member && width >= 72)
+		parts.push(theme.fg("annotation", `members of ${sanitizeCallTargetText(view.member.ref)}`));
+	return parts.join(theme.fg("border", " │ "));
 }
 
 /** The composer text a `use` on this recipe writes, or null when its use is another surface. */
@@ -262,7 +263,7 @@ function copyStateWord(copy: LibraryCopy): string {
 	const theme = clioTheme();
 	if (copy.state === "loadable") return theme.fg("success", "loadable");
 	if (copy.state === "disabled") return theme.fg("warning", "disabled");
-	if (copy.state === "shadowed") return theme.fg("dim", "shadowed");
+	if (copy.state === "shadowed") return theme.fg("disabledOption", "shadowed");
 	return theme.fg("error", sanitizeCallTargetText(copy.state));
 }
 
@@ -270,7 +271,7 @@ function availabilityWord(resource: LibraryResource): string {
 	const theme = clioTheme();
 	if (resource.availability === "available") return theme.fg("success", "available");
 	if (resource.availability === "untrusted") return theme.fg("warning", "untrusted");
-	if (resource.availability === "shadowed") return theme.fg("dim", "shadowed");
+	if (resource.availability === "shadowed") return theme.fg("disabledOption", "shadowed");
 	return theme.fg("error", sanitizeCallTargetText(resource.availability));
 }
 
@@ -557,7 +558,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 			};
 			push(set, view, `note:ancillary:${item.kind}:${item.id}`, subject, {
 				label: `${item.kind}: ${item.id}`,
-				meta: theme.fg("dim", "companion file"),
+				meta: theme.fg("annotation", "companion file"),
 				group: LIBRARY_GROUP_NOTICES,
 				detail: () => [`# ${item.id}`, `**Declared as:** ${item.kind}`, `**Path:** \`${item.path}\``, "", subject.message],
 			});
@@ -567,7 +568,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 			const subject: LibraryRowSubject = { kind: "notice", message: diagnostic };
 			push(set, view, `note:member-diag:${set.notices}`, subject, {
 				label: `${theme.fg("warning", GLYPH.warnInline)} ${diagnostic}`,
-				meta: theme.fg("dim", "inspection"),
+				meta: theme.fg("annotation", "inspection"),
 				group: LIBRARY_GROUP_NOTICES,
 				detail: () => ["# Inspection diagnostic", diagnostic],
 			});
@@ -636,7 +637,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 		const subject: LibraryRowSubject = { kind: "notice", message };
 		push(set, view, `note:${set.notices}`, subject, {
 			label: `${theme.fg("warning", GLYPH.warnInline)} ${message}`,
-			meta: theme.fg("dim", "library"),
+			meta: theme.fg("annotation", "library"),
 			group: LIBRARY_GROUP_NOTICES,
 			detail: () => [
 				"# Library notice",

@@ -19,6 +19,8 @@ export interface DockFrame {
 	dockTitle(): string;
 	dockHint(width: number): string | undefined;
 	dockTone(): import("./theme/index.js").ClioToken | undefined;
+	/** A decision needs the operator's answer, rather than an ordinary open menu. */
+	dockAwaitingInput?(): boolean;
 	invalidate(): void;
 }
 
@@ -34,14 +36,15 @@ export interface DockEntry {
 	keepComposer: boolean;
 }
 
-/** Body rows a dock may draw. Fixed, so a picker is the same instrument at every window height. */
+/** Every open menu shares this body height while the terminal has room. */
 export const DOCK_BODY_ROWS_MAX = 16;
-/** Rows the dock leaves for the footer, the two rails and a sliver of transcript. */
-const DOCK_RESERVED_ROWS = 7;
+/** Two rails and a sliver of transcript, in addition to the current footer. */
+const DOCK_RESERVED_ROWS = 5;
 const DOCK_BODY_ROWS_MIN = 3;
 const DEFAULT_TERMINAL_ROWS = 24;
 
 const registries = new WeakMap<object, DockEntry[]>();
+const footerHeights = new WeakMap<object, number>();
 let orderCounter = 0;
 
 function entriesFor(tui: object): DockEntry[] {
@@ -88,7 +91,17 @@ function terminalRows(tui: object): number {
 
 /** Body rows the dock draws on this terminal. */
 export function dockBodyRows(tui: object): number {
-	return Math.max(DOCK_BODY_ROWS_MIN, Math.min(DOCK_BODY_ROWS_MAX, terminalRows(tui) - DOCK_RESERVED_ROWS));
+	return Math.max(
+		DOCK_BODY_ROWS_MIN,
+		Math.min(DOCK_BODY_ROWS_MAX, terminalRows(tui) - DOCK_RESERVED_ROWS - (footerHeights.get(tui) ?? 2)),
+	);
+}
+
+export function setDockFooterRows(tui: object, rows: number): boolean {
+	const height = Math.max(0, Math.floor(rows));
+	if (footerHeights.get(tui) === height) return false;
+	footerHeights.set(tui, height);
+	return true;
 }
 
 /**

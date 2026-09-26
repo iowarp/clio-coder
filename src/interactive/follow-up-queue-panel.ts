@@ -39,11 +39,13 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 			// the user glyph painted in the action color. The tool ledger keeps
 			// exclusive ownership of the toolHeader glyph.
 			const marker =
-				message.kind === "steer" ? theme.fg("action", `${GLYPH.user} steer`) : theme.fg("muted", `${GLYPH.queued} queued`);
-			lines.push(`${marker} ${theme.fg("muted", preview)}`);
+				message.kind === "steer"
+					? theme.fg("attention", `${GLYPH.user} steer`)
+					: theme.fg("body", `${GLYPH.queued} queued`);
+			lines.push(`${marker} ${theme.fg("body", preview)}`);
 		}
 		const restoreKey = key && key.length > 0 ? key : "see /help";
-		lines.push(theme.fg("dim", `[${restoreKey}] restore to editor`));
+		lines.push(theme.fg("annotation", `[${restoreKey}] restore to editor`));
 
 		cachedLines = frame(theme, "Steering Queue", lines, bodyWidth + 4);
 		cachedWidth = width;

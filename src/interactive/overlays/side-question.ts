@@ -6,6 +6,7 @@
  * answer was for the operator, in the moment, and the session never saw it.
  */
 
+import { AssistantProseProjection } from "../../core/assistant-prose.js";
 import { type Component, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "../overlay-frame.js";
 import { animationStep, clioTheme, GLYPH, rule, spinnerFrame } from "../theme/index.js";
@@ -55,7 +56,8 @@ function formatSideQuestionBody(
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
 	const lines: string[] = [];
-	for (const line of wrapTextWithAnsi(theme.fg("dim", `${GLYPH.user} ${question}`), contentWidth)) lines.push(line);
+	for (const line of wrapTextWithAnsi(theme.fg("userProse", `${GLYPH.user} ${question}`), contentWidth))
+		lines.push(line);
 	lines.push(rule(theme, contentWidth));
 	if (phase.kind === "error") {
 		for (const line of wrapTextWithAnsi(theme.fg("error", phase.reason), contentWidth)) lines.push(line);
@@ -68,15 +70,15 @@ function formatSideQuestionBody(
 				lines.push("");
 				continue;
 			}
-			for (const line of wrapTextWithAnsi(theme.fg("muted", paragraph), contentWidth)) lines.push(line);
+			for (const line of wrapTextWithAnsi(theme.fg("assistantProse", paragraph), contentWidth)) lines.push(line);
 		}
 	}
 	if (phase.kind === "streaming") {
-		lines.push(theme.fg("dim", body.length > 0 ? spinner : `${spinner} asking…`));
+		lines.push(theme.fg("activity", body.length > 0 ? spinner : `${spinner} asking…`));
 	} else if (phase.kind === "aborted") {
-		lines.push(theme.fg("muted", "cancelled"));
+		lines.push(theme.fg("menuDescription", "cancelled"));
 	} else if (body.length === 0) {
-		lines.push(theme.fg("dim", "the model returned no text"));
+		lines.push(theme.fg("annotation", "the model returned no text"));
 	}
 	return lines;
 }
@@ -88,6 +90,7 @@ function formatSideQuestionBody(
  */
 export class SideQuestionOverlayBody implements Component {
 	private phase: SideQuestionOverlayPhase = { kind: "streaming", text: "" };
+	private readonly prose = new AssistantProseProjection();
 
 	constructor(
 		private readonly question: string,
@@ -95,7 +98,8 @@ export class SideQuestionOverlayBody implements Component {
 	) {}
 
 	set(phase: SideQuestionOverlayPhase): void {
-		this.phase = phase;
+		this.phase =
+			phase.kind === "error" ? phase : { ...phase, text: this.prose.project(phase.text, phase.kind !== "streaming") };
 	}
 
 	render(width: number): string[] {

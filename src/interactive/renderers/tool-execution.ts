@@ -32,9 +32,19 @@ import {
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import { mutationFactsLine } from "../mutation-preview.js";
 import type { ApprovalRequestView } from "../permission-overlay.js";
-import { clioTheme, formatCompactMs, GLYPH, holdFact, joinFacts, releaseSpaces } from "../theme/index.js";
+import {
+	clioTheme,
+	formatCompactMs,
+	functionText,
+	GLYPH,
+	holdFact,
+	joinFacts,
+	releaseSpaces,
+	toolFunction,
+} from "../theme/index.js";
 import { renderDiffLines } from "./diff.js";
-import { tryRenderJson, tryRenderXml } from "./structured.js";
+import { shellCommandInk, toolOutputInk } from "./code-ink.js";
+import { highlightJsonLine, tryRenderJson, tryRenderXml } from "./structured.js";
 
 // The argument projection lives in the safety domain so the worker tool seam
 // scrubs by the same rules; re-exported here because this renderer is where
@@ -42,13 +52,13 @@ import { tryRenderJson, tryRenderXml } from "./structured.js";
 export { classifyResourceRead, redactToolArgs };
 
 const theme = clioTheme();
-const dim = (text: string): string => theme.fg("dim", text);
+const toolMeta = (text: string): string => theme.fg("toolMetadata", text);
 const red = (text: string): string => theme.fg("error", text);
 const green = (text: string): string => theme.fg("success", text);
 const yellow = (text: string): string => theme.fg("warning", text);
-const steel = (text: string): string => theme.fg("info", text);
-const cyan = (text: string): string => theme.fg("accent", text);
-const cyanBold = (text: string): string => theme.style("accent", text, { bold: true });
+const informational = (text: string): string => theme.fg("info", text);
+const cyan = (text: string): string => theme.fg("guidance", text);
+const shellMark = (text: string): string => functionText(theme, "shell", text);
 
 // The transcript is a two-cell gutter plus a content column. The action row
 // puts `▸` in the gutter; its body nests under it with the rail in the content
@@ -67,9 +77,9 @@ const STATUS_OK_GLYPH = GLYPH.ok;
 const STATUS_ERROR_GLYPH = GLYPH.error;
 
 // Hoisted rail prefixes. `indentAndWrap` would otherwise allocate two fresh
-// styled strings per rendered line; by precomputing the dim and error variants
+// styled strings per rendered line; by precomputing the structural and error variants
 // once at module scope, repeated rendering of long result blocks stays cheap.
-const RAIL_DIM = `${CONTENT_INDENT}${dim("│ ")}`;
+const RAIL_NORMAL = `${CONTENT_INDENT}${theme.fg("gutter", "│ ")}`;
 const RAIL_ERROR = `${CONTENT_INDENT}${red("│ ")}`;
 
 export interface ToolExecutionStart {
@@ -412,25 +422,25 @@ function refusalFact(refusal: SkillLoadRefusal): string {
 	const skill = `/skill ${refusal.name}`;
 	switch (refusal.kind) {
 		case "manual-only":
-			return `${dim("manual-only: ")}${command(skill)}`;
+			return `${toolMeta("manual-only: ")}${command(skill)}`;
 		case "untrusted":
-			return `${dim("untrusted: review it in ")}${command("/library")}`;
+			return `${toolMeta("untrusted: review it in ")}${command("/library")}`;
 		case "not-imported":
-			return dim(sanitizeCallTargetText(`not imported: found in ${refusal.source ?? "?"}/${refusal.scope ?? "?"}`));
+			return toolMeta(sanitizeCallTargetText(`not imported: found in ${refusal.source ?? "?"}/${refusal.scope ?? "?"}`));
 		case "not-installed":
-			return `${dim("not installed: ")}${command(skill)}`;
+			return `${toolMeta("not installed: ")}${command(skill)}`;
 		case "not-ready":
-			return `${dim(`installed but ${sanitizeCallTargetText(refusal.state ?? "not ready")}: `)}${command("/library")}`;
+			return `${toolMeta(`installed but ${sanitizeCallTargetText(refusal.state ?? "not ready")}: `)}${command("/library")}`;
 		case "operator-only":
-			return `${dim("only you can load it: ")}${command(skill)}`;
+			return `${toolMeta("only you can load it: ")}${command(skill)}`;
 		case "recipe-bound":
-			return dim("not declared for this run");
+			return toolMeta("not declared for this run");
 		case "not-requested":
-			return dim("not requested this turn");
+			return toolMeta("not requested this turn");
 		case "already-loaded":
-			return dim("already loaded");
+			return toolMeta("already loaded");
 		default:
-			return dim("unknown skill");
+			return toolMeta("unknown skill");
 	}
 }
 
@@ -642,7 +652,7 @@ function structuredExitCode(finished: ToolExecutionFinished): string | null {
 }
 
 /**
- * The dim facts after a settled row's object: the class facts, then the
+ * The toolMeta facts after a settled row's object: the class facts, then the
  * flags every class shares, and the offload path for a truncated call. The
  * change stat rides first in its own colors. One line of plain text carries
  * the call and its outcome when copied.
@@ -669,22 +679,22 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 	// Every fact is held together, so a narrow row wraps between facts
 	// (`… · exit 0 ·` then `18 lines`), never inside one.
 	const statText =
-		stat === null ? "" : `${dim(" · ")}${green(`+${stat.added}`)}${holdFact(" ")}${red(`-${stat.removed}`)}`;
+		stat === null ? "" : `${toolMeta(" · ")}${green(`+${stat.added}`)}${holdFact(" ")}${red(`-${stat.removed}`)}`;
 	// A skill whose content no longer matches its recorded hash is the one
 	// skill fact that is a warning rather than provenance.
-	const driftText = skillLoadFacts(finished)?.drifted === true ? `${dim(" · ")}${yellow("drifted")}` : "";
+	const driftText = skillLoadFacts(finished)?.drifted === true ? `${toolMeta(" · ")}${yellow("drifted")}` : "";
 	// An offloaded result says where the rest is, not what its path is: the
 	// path is a 64-hex name that wrapped a row across three, and /view and the
 	// full body's footer state it.
 	const offloadPath = executed ? offloadPathOf(finished) : null;
 	return {
-		facts: `${statText}${parts.length > 0 ? dim(joinFacts(["", ...parts.map((part) => sanitizeCallTargetText(part))])) : ""}${driftText}`,
+		facts: `${statText}${parts.length > 0 ? toolMeta(joinFacts(["", ...parts.map((part) => sanitizeCallTargetText(part))])) : ""}${driftText}`,
 		offload:
 			offloadPath === null
 				? ""
 				: offloadFileMissing(finished)
-					? dim(" · full output gone after the 14-day retention sweep")
-					: dim(" · full output · /view"),
+					? toolMeta(" · full output gone after the 14-day retention sweep")
+					: toolMeta(" · full output · /view"),
 	};
 }
 
@@ -693,7 +703,7 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
  * in place of the elapsed counter so a parked call never reads as executing
  * work; the ⏸ glyph matches the footer's blocked phase.
  */
-const AWAITING_APPROVAL_TAIL = ` ${yellow(GLYPH.phaseBlocked)}${dim(" awaiting approval")}`;
+const AWAITING_APPROVAL_TAIL = ` ${yellow(GLYPH.phaseBlocked)}${toolMeta(" awaiting approval")}`;
 
 /**
  * Subline for an in-flight call whose body is parked at the permission gate.
@@ -722,7 +732,7 @@ export function renderToolAwaitingApproval(
 		...(view.mutation !== undefined ? [["mutation", mutationFactsLine(view.mutation)]] : []),
 	] as const;
 	for (const [label, value] of facts) {
-		lines.push(...indentAndWrap(`${dim(`${label} ·`)} ${value}`, width, false));
+		lines.push(...indentAndWrap(`${toolMeta(`${label} ·`)} ${value}`, width, false));
 	}
 	return lines;
 }
@@ -744,7 +754,7 @@ function operatorGrantRows(
 ): string[] {
 	const axis = "result" in call ? call.operatorGrant : undefined;
 	if (axis === undefined) return [];
-	return indentAndWrap(`${yellow(GLYPH.classInteraction)} ${dim(`allowed by you · ${axis}`)}`, width, failure);
+	return indentAndWrap(`${yellow(GLYPH.classInteraction)} ${toolMeta(`allowed by you · ${axis}`)}`, width, failure);
 }
 
 /**
@@ -768,25 +778,25 @@ interface StatusMeta {
 
 function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	if (status === undefined) return "";
-	if (status === "forming") return ` ${dim(GLYPH.queued)}${dim(" forming call")}`;
-	if (status === "ready") return ` ${dim(GLYPH.queued)}${dim(" ready")}`;
+	if (status === "forming") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" forming call")}`;
+	if (status === "ready") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" ready")}`;
 	if (status === "running") {
 		// The progressive verb already says the call is running; the tail adds
 		// only the live mark and the elapsed time.
 		const elapsed = optionalCompactMs(meta.elapsedMs);
-		return ` ${cyan(GLYPH.running)}${elapsed === null ? "" : dim(` ${elapsed}`)}`;
+		return ` ${theme.fg("activity", GLYPH.running)}${elapsed === null ? "" : toolMeta(` ${elapsed}`)}`;
 	}
 	const duration = optionalCompactMs(meta.durationMs);
-	const durationSuffix = duration ? dim(` · ${duration}`) : "";
+	const durationSuffix = duration ? toolMeta(` · ${duration}`) : "";
 	if (status === "ok") return ` ${green(STATUS_OK_GLYPH)}${durationSuffix}`;
 	// A blocked row says `blocked` as its verb; an aborted or orphaned one names
 	// its outcome here. The exit status is a fact on the row, never a suffix.
-	const outcomeSuffix = meta.outcome !== undefined && meta.outcome !== "blocked" ? dim(` ${meta.outcome}`) : "";
+	const outcomeSuffix = meta.outcome !== undefined && meta.outcome !== "blocked" ? toolMeta(` ${meta.outcome}`) : "";
 	// A refusal that names no rule tells the operator only that something was
 	// stopped. The reason rides the same tail as the outcome so the collapsed
 	// row and the expanded header state it identically.
 	const reason = meta.outcome !== undefined ? meta.blockReason?.trim() : undefined;
-	const reasonSuffix = reason ? dim(` · ${truncate(reason, BLOCK_REASON_LIMIT)}`) : "";
+	const reasonSuffix = reason ? toolMeta(` · ${truncate(reason, BLOCK_REASON_LIMIT)}`) : "";
 	return ` ${red(STATUS_ERROR_GLYPH)}${outcomeSuffix}${reasonSuffix}${durationSuffix}`;
 }
 
@@ -802,9 +812,9 @@ const CLASS_MARKS: Readonly<Record<ToolClass, string>> = {
 	external: GLYPH.classExternal,
 };
 
-/** The class mark in the gutter, dim, with the space that separates it from the verb. */
+/** The class mark in the gutter, toolMeta, with the space that separates it from the verb. */
 function classMark(toolClass: ToolClass): string {
-	return dim(`${CLASS_MARKS[toolClass]} `);
+	return theme.fg(toolClass === "execute" ? "shellAction" : "toolGlyph", `${CLASS_MARKS[toolClass]} `);
 }
 
 /** The row a call reads as, from its redacted arguments and, once settled, its result. */
@@ -833,15 +843,22 @@ function objectLimit(toolClass: ToolClass, width?: number): number {
  * an MCP or extension capability as `server › tool`. Always one sanitized line.
  */
 function rowObject(row: ResolvedToolRow, finished: ToolExecutionFinished | null, width?: number): string {
-	if (row.externalLabel !== null) return sanitizeCallTargetText(row.externalLabel);
+	if (row.externalLabel !== null) {
+		const [server, capability] = sanitizeCallTargetText(row.externalLabel).split(" › ");
+		return `${theme.fg("toolMetadata", server ?? "")}${theme.fg("divider", " › ")}${theme.fg("toolCapability", capability ?? "")}`;
+	}
 	const skill = finished === null ? null : skillLoadFacts(finished);
-	if (skill !== null) return `skill ${cyan(truncate(sanitizeCallTargetText(skill.name), ARG_PREVIEW_LIMIT))}`;
+	if (skill !== null)
+		return `skill ${theme.fg("skillIdentity", truncate(sanitizeCallTargetText(skill.name), ARG_PREVIEW_LIMIT))}`;
 	if (row.spec.object === undefined) return sanitizeCallTargetText(row.toolName);
 	const display = objectDisplay(row, width);
 	if (display === null) return "";
-	if (display.style === "url" || display.style === "path") return display.shown;
+	if (display.style === "url" || display.style === "path") return theme.fg("toolTarget", display.shown);
 	const clean = display.shown.length < display.full.length ? `${display.shown}${GLYPH.ellipsis}` : display.shown;
-	return display.style === "code" ? `\`${clean}\`` : clean;
+	return theme.fg(
+		display.style === "code" ? "toolCommand" : "toolTarget",
+		display.style === "code" ? `\`${clean}\`` : clean,
+	);
 }
 
 /**
@@ -948,8 +965,16 @@ function inlinePair(row: ResolvedToolRow, pairs: readonly ToolRowPair[]): ToolRo
 	return display !== null && display.full === displayText(only.question) ? only : null;
 }
 
-function styledVerb(verb: string, toolClass: ToolClass): string {
-	return theme.style(toolClass === "delegate" ? "agent" : "tool", verb, { bold: true });
+function styledVerb(verb: string, row?: ResolvedToolRow): string {
+	const kind =
+		row === undefined
+			? "builtin"
+			: toolFunction(
+					row.toolName,
+					row.spec.class,
+					row.toolName === "context" && row.args.scope === "skills" ? "skill" : classifyResourceRead(row.toolName, row.args),
+				);
+	return functionText(theme, kind, verb);
 }
 
 function headerLine(
@@ -996,7 +1021,7 @@ function sublineParts(
 	// and the move that changes it.
 	const refusal = skillRefusalOf(finished);
 	if (refusal !== null) {
-		const lead = `${classMark("knowledge")}${dim("skill")} ${cyan(sanitizeCallTargetText(refusal.name))} ${styledVerb("not loaded", "knowledge")}${dim(" · ")}${refusalFact(refusal)}`;
+		const lead = `${classMark("knowledge")}${toolMeta("skill")} ${theme.fg("skillIdentity", sanitizeCallTargetText(refusal.name))} ${functionText(theme, "skill", "not loaded")}${toolMeta(" · ")}${refusalFact(refusal)}`;
 		return { lead, tail: statusGlyph(status, meta) };
 	}
 	const settled = status === "ok" || status === "error";
@@ -1008,23 +1033,23 @@ function sublineParts(
 	const answer =
 		inline === null
 			? ""
-			: ` ${dim("→")} ${theme.fg("muted", truncate(sanitizeCallTargetText(inline.answer), ARG_PREVIEW_LIMIT))}`;
+			: ` ${toolMeta("→")} ${theme.fg("body", truncate(sanitizeCallTargetText(inline.answer), ARG_PREVIEW_LIMIT))}`;
 	const scalars = inlineArgs(row, finished);
 	// A resource read names what it read (`handbook`) unless the path the row
 	// shows already says so (`docs/retry.md`, `SKILL.md`).
 	const resourceLabel = classifyResourceRead(call.toolName, call.args);
 	const resource =
 		resourceLabel !== null && !stripTerminalSequences(object).toLowerCase().includes(resourceLabel)
-			? dim(` · ${resourceLabel}`)
+			? toolMeta(` · ${resourceLabel}`)
 			: "";
-	const inlineText = scalars.length > 0 ? dim(` · ${scalars.join(" · ")}`) : "";
-	const head = `${classMark(row.spec.class)}${styledVerb(verb, row.spec.class)}${object.length > 0 ? ` ${object}` : ""}${scope}${answer}${resource}${inlineText}`;
+	const inlineText = scalars.length > 0 ? theme.fg("toolArgument", ` · ${scalars.join(" · ")}`) : "";
+	const head = `${classMark(row.spec.class)}${isNonExecutedOutcome(finished?.outcome) ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${scope}${answer}${resource}${inlineText}`;
 	if (finished !== null) {
 		const ledger = ledgerTail(finished, row);
 		return { lead: `${head}${ledger.facts}`, tail: `${statusGlyph(status, meta)}${ledger.offload}` };
 	}
-	const via = row.viaGateway ? dim(" · via gateway") : "";
-	const local = call.excludeFromContext === true ? dim(" · not sent to model") : "";
+	const via = row.viaGateway ? toolMeta(" · via gateway") : "";
+	const local = call.excludeFromContext === true ? toolMeta(" · not sent to model") : "";
 	return { lead: `${head}${via}${local}`, tail: statusGlyph(status, meta) };
 }
 
@@ -1069,24 +1094,24 @@ function indentRows(rows: string[]): string[] {
  * action.
  */
 function wrapHanging(line: string, width: number): string[] {
-	if (visibleWidth(line) <= width) return [releaseSpaces(line)];
+	if (visibleWidth(line) <= width) return [theme.base("toolSummary", releaseSpaces(line))];
 	const rows = wrap(line, contentWidth(width));
-	return rows.map((row, index) => (index === 0 ? row : `${CONTENT_INDENT}${row}`));
+	return rows.map((row, index) => theme.base("toolSummary", index === 0 ? row : `${CONTENT_INDENT}${row}`));
 }
 
 /**
- * Apply the body rail to a line and wrap it. The rail (`│ `) is dim by
+ * Apply the body rail to a line and wrap it. The rail (`│ `) is quiet by
  * default and red on error so the tool block reads as a single visual unit
- * even when its result spans many lines. Uses the hoisted `RAIL_DIM` /
+ * even when its result spans many lines. Uses the hoisted `RAIL_NORMAL` /
  * `RAIL_ERROR` constants so we do not allocate a fresh styled prefix per
  * wrapped line.
  */
 function indentAndWrap(line: string, width: number, isError: boolean): string[] {
-	const rail = isError ? RAIL_ERROR : RAIL_DIM;
+	const rail = isError ? RAIL_ERROR : RAIL_NORMAL;
 	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
 	const out: string[] = [];
 	for (const wrapped of wrap(line, bodyWidth)) {
-		out.push(`${rail}${wrapped}`);
+		out.push(`${rail}${theme.base("toolSummary", wrapped)}`);
 	}
 	return out;
 }
@@ -1109,6 +1134,7 @@ export function renderToolArguments(
 	isError = false,
 	maxRows = Number.POSITIVE_INFINITY,
 	joinScalarLists = false,
+	syntax?: "shell",
 ): string[] {
 	if (isEmptyArgs(args)) return [];
 	const safeArgs = redactToolArgs(args);
@@ -1126,22 +1152,33 @@ export function renderToolArguments(
 					: JSON.stringify(value, null, 2);
 		const full = String(text ?? value);
 		const chars = Number.isFinite(maxRows) ? Math.max(1, maxRows * Math.max(1, width) * 4) : full.length;
-		const lines = full.slice(0, chars).split("\n");
+		const source = sanitizeMultilineDisplayText(full.slice(0, chars)).text;
+		const lines =
+			typeof value === "string" && key === "command" && syntax === "shell" ? shellCommandInk(source) : source.split("\n");
+		const argumentLine = (line: string): string => {
+			if (typeof value === "string" && key === "command" && syntax === "shell") return line;
+			const safe = sanitizeMultilineDisplayText(line).text;
+			return typeof value === "string"
+				? theme.fg("toolArgument", safe)
+				: joinScalarLists && isScalarList(value)
+					? theme.fg("toolArgument", safe)
+					: highlightJsonLine(safe);
+		};
 		out.push(
 			...indentAndWrap(
-				`${cyan(sanitizeCallTargetText(key))} ${dim("›")} ${sanitizeMultilineDisplayText(lines[0] ?? "").text}`,
+				`${theme.fg("toolArgumentName", sanitizeCallTargetText(key))} ${toolMeta("›")} ${argumentLine(lines[0] ?? "")}`,
 				width,
 				isError,
 			),
 		);
 		for (const line of lines.slice(1)) {
 			if (out.length > maxRows) break;
-			out.push(...indentAndWrap(`  ${sanitizeMultilineDisplayText(line).text}`, width, isError));
+			out.push(...indentAndWrap(`  ${argumentLine(line)}`, width, isError));
 		}
 		if (out.length > maxRows || full.length > chars) {
 			return [
 				...out.slice(0, Math.max(0, maxRows - 1)),
-				...indentAndWrap(dim("… more arguments · /view"), width, isError),
+				...indentAndWrap(toolMeta("… more arguments · /view"), width, isError),
 			];
 		}
 	}
@@ -1236,21 +1273,23 @@ function resultText(result: unknown, limit = FULL_RESULT_PREVIEW_LIMIT): string 
 function truncateRowsMiddle(rows: ReadonlyArray<string>, rowLimit: number, isError: boolean): string[] {
 	if (rows.length <= rowLimit) return [...rows];
 	if (rowLimit <= 1)
-		return [`${isError ? RAIL_ERROR : RAIL_DIM}${dim(`${GLYPH.ellipsis} ${rows.length} lines hidden`)}`];
+		return [
+			`${isError ? RAIL_ERROR : RAIL_NORMAL}${theme.fg("foldedHint", `${GLYPH.ellipsis} ${rows.length} lines hidden`)}`,
+		];
 	const available = rowLimit - 1;
 	const head = Math.floor(available / 2);
 	const tail = available - head;
 	const hidden = Math.max(0, rows.length - head - tail);
 	return [
 		...rows.slice(0, head),
-		`${isError ? RAIL_ERROR : RAIL_DIM}${dim(`${GLYPH.ellipsis} ${hidden} lines hidden`)}`,
+		`${isError ? RAIL_ERROR : RAIL_NORMAL}${theme.fg("foldedHint", `${GLYPH.ellipsis} ${hidden} lines hidden`)}`,
 		...rows.slice(-tail),
 	];
 }
 
 function renderOutputRows(text: string, width: number, isError: boolean, rowLimit: number): string[] {
 	const rows: string[] = [];
-	for (const raw of text.split("\n")) {
+	for (const raw of toolOutputInk(text)) {
 		rows.push(...indentAndWrap(raw, width, isError));
 	}
 	return truncateRowsMiddle(rows, rowLimit, isError);
@@ -1276,19 +1315,7 @@ function renderStructuredOutputRows(
 }
 
 function highlightBashCommand(command: string): string {
-	// Every character lands in some token: a lone `&` (`2>&1`, a background
-	// job) is an operator, never dropped.
-	const tokens = command.match(/'[^']*'|"[^"]*"|\|\||&&|[|;&()<>]|[^\s|;&()<>]+|\s+/gu) ?? [command];
-	return tokens
-		.map((token) => {
-			if (/^\s+$/u.test(token)) return token;
-			if (/^'[^']*'$|^"[^"]*"$/u.test(token)) return green(token);
-			if (/^(?:\|\||&&|[|;&()<>])$/u.test(token)) return dim(token);
-			// A flag is a parameter, not a warning; it shares code ink's literal color.
-			if (/^-{1,2}[\w-]+/u.test(token)) return steel(token);
-			return token;
-		})
-		.join("");
+	return shellCommandInk(sanitizeMultilineDisplayText(command).text).join("\n");
 }
 
 function resultDiff(result: unknown): string | null {
@@ -1320,7 +1347,7 @@ function changeStat(result: unknown): { added: number; removed: number } | null 
 
 function renderMutationDiffBlock(diff: string, width: number, color: boolean): string[] {
 	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
-	return renderDiffLines(diff, bodyWidth, { color }).map((line) => `${RAIL_DIM}${line}`);
+	return renderDiffLines(diff, bodyWidth, { color }).map((line) => `${RAIL_NORMAL}${line}`);
 }
 
 interface BashArgs {
@@ -1399,8 +1426,8 @@ function renderOutputMeta(
 	label = "output",
 ): string[] {
 	const facts = outputFacts(finished);
-	const suffix = facts.length > 0 ? dim(` · ${facts.join(" · ")}`) : "";
-	return indentAndWrap(`${cyanBold(label)}${suffix}`, width, isError);
+	const suffix = facts.length > 0 ? toolMeta(` · ${facts.join(" · ")}`) : "";
+	return indentAndWrap(`${theme.fg("toolSummary", label)}${suffix}`, width, isError);
 }
 
 function renderOutputFooter(finished: ToolExecutionFinished, width: number, isError: boolean): string[] {
@@ -1408,11 +1435,11 @@ function renderOutputFooter(finished: ToolExecutionFinished, width: number, isEr
 	const offloadPath = isNonExecutedOutcome(finished.outcome) ? null : offloadPathOf(finished);
 	if (offloadPath !== null) {
 		const pointer = offloadFileMissing(finished) ? "gone after the 14-day retention sweep" : offloadPath;
-		out.push(...indentAndWrap(`${steel("full output")}  ${pointer}`, width, isError));
+		out.push(...indentAndWrap(`${informational("full output")}  ${pointer}`, width, isError));
 	}
 	const hint =
 		stringField(resultSizeOf(finished), "followUpHint") ?? stringField(finished.resultSummary ?? null, "followUpHint");
-	if (hint !== null) out.push(...indentAndWrap(`${dim("next")}  ${hint}`, width, isError));
+	if (hint !== null) out.push(...indentAndWrap(`${toolMeta("next")}  ${hint}`, width, isError));
 	return out;
 }
 
@@ -1431,11 +1458,11 @@ function renderBashResultBlock(
 	opts: ToolBodyRenderOptions = {},
 ): string[] {
 	const out: string[] = [];
-	const commandLine = `${cyanBold("$")} ${highlightBashCommand(stripShellWrapperForDisplay(args.command))}`;
+	const commandLine = `${shellMark("$")} ${highlightBashCommand(stripShellWrapperForDisplay(args.command))}`;
 	out.push(...indentAndWrap(commandLine, width, isError));
 	const unwrapped = unwrapResultEnvelope(result);
 	if (isEmptyResult(unwrapped)) {
-		out.push(...indentAndWrap(dim("(no output)"), width, isError));
+		out.push(...indentAndWrap(toolMeta("(no output)"), width, isError));
 		return out;
 	}
 	out.push(...renderOutputRows(resultText(unwrapped, resultCharLimit(opts)), width, isError, resultRowLimit(opts)));
@@ -1450,7 +1477,7 @@ function renderResultBlock(
 ): string[] {
 	const unwrapped = unwrapResultEnvelope(result);
 	if (isEmptyResult(unwrapped)) {
-		return indentAndWrap(dim("(no output)"), width, isError);
+		return indentAndWrap(toolMeta("(no output)"), width, isError);
 	}
 	const structured = renderStructuredOutputRows(unwrapped, width, isError, resultRowLimit(opts));
 	if (structured) return structured;
@@ -1476,7 +1503,7 @@ export function renderToolSubline(call: ToolExecutionStart | ToolExecutionFinish
 	// A failed call always shows its bounded body, which carries the diagnosis;
 	// the row states the outcome once and never excerpts the body onto itself.
 	const parts = sublineParts(call, status, meta, width);
-	return wrapSublineWithTail(parts.lead, parts.tail, width);
+	return wrapSublineWithTail(parts.lead, parts.tail, width).map((line) => theme.base("toolSummary", line));
 }
 
 /**
@@ -1533,7 +1560,7 @@ export function renderToolExecution(
 	if (row.spec.class === "execute") {
 		const bashArgs = asBashArgs(redactToolArgs(finished.args));
 		if (bashArgs !== null) {
-			out.push(...renderToolArguments(finished.args, width, finished.isError));
+			out.push(...renderToolArguments(finished.args, width, finished.isError, Number.POSITIVE_INFINITY, false, "shell"));
 			out.push(
 				...renderOutputMeta(
 					finished,
@@ -1760,6 +1787,7 @@ export function renderToolPreview(
 			failure,
 			previewBudget(detail.invocationRows, options.terminalRows),
 			true,
+			command ? "shell" : undefined,
 		),
 	);
 	// A refused skill load states its reason on the row; its message is the
@@ -1773,7 +1801,7 @@ export function renderToolPreview(
 		for (const line of [surface, skill.description]) {
 			if (line === null || line.length === 0) continue;
 			rows.push(
-				`${RAIL_DIM}${theme.fg("muted", truncateToWidth(sanitizeCallTargetText(line), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH), GLYPH.ellipsis))}`,
+				`${RAIL_NORMAL}${theme.fg("body", truncateToWidth(sanitizeCallTargetText(line), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH), GLYPH.ellipsis))}`,
 			);
 		}
 	}
@@ -1785,7 +1813,7 @@ export function renderToolPreview(
 		for (const { question, answer } of pairs) {
 			pairRows.push(
 				...indentAndWrap(
-					`${dim(sanitizeCallTargetText(question))} ${dim("→")} ${theme.fg("muted", sanitizeCallTargetText(answer))}`,
+					`${toolMeta(sanitizeCallTargetText(question))} ${toolMeta("→")} ${theme.fg("body", sanitizeCallTargetText(answer))}`,
 					width,
 					false,
 				),
@@ -1797,7 +1825,7 @@ export function renderToolPreview(
 				previewBudget(detail.invocationRows, options.terminalRows),
 				width,
 				false,
-				RAIL_DIM,
+				RAIL_NORMAL,
 				BODY_INDENT_VISIBLE_WIDTH,
 			),
 		);
@@ -1811,7 +1839,7 @@ export function renderToolPreview(
 				previewBudget(detail.diffRows, options.terminalRows),
 				width,
 				false,
-				RAIL_DIM,
+				RAIL_NORMAL,
 				BODY_INDENT_VISIBLE_WIDTH,
 			),
 		);
@@ -1837,24 +1865,24 @@ export function renderToolPreview(
 		const runId = row.toolName === "monitor" ? row.args.run_id : undefined;
 		if (typeof runId === "string" && text.startsWith(`${runId} · `)) text = text.slice(runId.length + 3);
 		if (text.trim().length > 0) {
-			const body = indentAndWrap(redactSecretString(text), width, failure);
+			const body = toolOutputInk(redactSecretString(text)).flatMap((line) => indentAndWrap(line, width, failure));
 			rows.push(
 				...previewRows(
 					body,
 					limit,
 					width,
 					command || !finished,
-					failure ? RAIL_ERROR : RAIL_DIM,
+					failure ? RAIL_ERROR : RAIL_NORMAL,
 					BODY_INDENT_VISIBLE_WIDTH,
 				),
 			);
 		}
 		// Guidance middleware attached for the model is not the tool's output: it
-		// states as one dim row, and /view keeps the result as the model read it.
+		// states as one toolMeta row, and /view keeps the result as the model read it.
 		if (notes.length > 0) {
 			const more = notes.length > 1 ? ` · +${notes.length - 1} more` : "";
 			rows.push(
-				`${failure ? RAIL_ERROR : RAIL_DIM}${dim(truncateToWidth(sanitizeCallTargetText(`note to model · ${notes[0]}`), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH - more.length), GLYPH.ellipsis))}${dim(more)}`,
+				`${failure ? RAIL_ERROR : RAIL_NORMAL}${toolMeta(truncateToWidth(sanitizeCallTargetText(`note to model · ${notes[0]}`), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH - more.length), GLYPH.ellipsis))}${toolMeta(more)}`,
 			);
 		}
 	}
@@ -1868,7 +1896,7 @@ export function renderToolPreview(
  * gap around the rest.
  */
 export function hasToolBody(lines: readonly string[]): boolean {
-	return lines.some((line) => line.startsWith(RAIL_DIM) || line.startsWith(RAIL_ERROR));
+	return lines.some((line) => line.startsWith(RAIL_NORMAL) || line.startsWith(RAIL_ERROR));
 }
 
 /** Which Compact fold a settled call can join: explorations, knowledge lookups, or changes. */
@@ -1937,13 +1965,16 @@ export function renderFoldedGroup(
 		const file = detailsOf(call.result)?.file;
 		const created = isPlainObject(file) && "before" in file && file.before === null;
 		targets.push(
-			`${target}${stat === null ? "" : ` ${green(`+${stat.added}`)} ${red(`-${stat.removed}`)}`}${created ? dim(" new") : ""}`,
+			`${target}${stat === null ? "" : ` ${green(`+${stat.added}`)} ${red(`-${stat.removed}`)}`}${created ? toolMeta(" new") : ""}`,
 		);
 	}
 	const toolClass: ToolClass = family === "explore" ? "observe" : family;
 	const verb = family === "explore" ? "explored" : family === "knowledge" ? "consulted" : "edited";
-	const totals = family === "mutate" && complete ? `${dim(" · ")}${green(`+${added}`)} ${red(`-${removed}`)}` : "";
-	const head = `${classMark(toolClass)}${styledVerb(verb, toolClass)} ${countNouns(calls)}${totals} ${green(STATUS_OK_GLYPH)}`;
-	const body = indentAndWrap(joinFacts(targets, dim), width, false);
-	return [...wrapHanging(head, width), ...previewRows(body, maxRows, width, false, RAIL_DIM, BODY_INDENT_VISIBLE_WIDTH)];
+	const totals = family === "mutate" && complete ? `${toolMeta(" · ")}${green(`+${added}`)} ${red(`-${removed}`)}` : "";
+	const head = `${classMark(toolClass)}${styledVerb(verb)} ${theme.fg("toolSummary", countNouns(calls))}${totals} ${green(STATUS_OK_GLYPH)}`;
+	const body = indentAndWrap(joinFacts(targets, toolMeta), width, false);
+	return [
+		...wrapHanging(head, width),
+		...previewRows(body, maxRows, width, false, RAIL_NORMAL, BODY_INDENT_VISIBLE_WIDTH),
+	];
 }

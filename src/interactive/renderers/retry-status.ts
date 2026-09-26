@@ -58,13 +58,13 @@ export function renderRetryStatus(
 		const hint = " /view";
 		return [
 			headingRow,
-			`  ${clioTheme().fg("muted", truncateToWidth(`${truncateToWidth(diagnosis, Math.max(1, inner - hint.length))}${hint}`, inner))}`,
+			`  ${clioTheme().fg("body", truncateToWidth(`${truncateToWidth(diagnosis, Math.max(1, inner - hint.length))}${hint}`, inner))}`,
 		];
 	}
 	return [
 		headingRow,
 		...previewRows(
-			rows.map((row) => `  ${clioTheme().fg("muted", row)}`),
+			rows.map((row) => `  ${clioTheme().fg("body", row)}`),
 			limit - 1,
 			width,
 			false,

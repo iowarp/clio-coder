@@ -2,9 +2,9 @@ import { type ClioToken, clioTheme } from "../theme/index.js";
 
 /**
  * Code ink: quiet syntax highlighting for fenced code blocks. Code inside a
- * fence is quoted material, not UI state, so it borrows exactly four existing
- * tokens and nothing else: comments render dim, string literals success,
- * language keywords reason, and numeric literals info. Everything else,
+ * fence is quoted material, not UI state: comments use supporting ink,
+ * strings use terminal green, keywords action orange, and literals turquoise.
+ * Everything else,
  * including identifiers, types, function names, and punctuation, stays plain.
  * The mapping is closed to extension. When the lexer is unsure it leaves text
  * plain: under-highlighting is correct behavior, mis-highlighting is a defect.
@@ -13,10 +13,10 @@ import { type ClioToken, clioTheme } from "../theme/index.js";
 type InkKind = "comment" | "string" | "keyword" | "number";
 
 const INK_TOKEN: Record<InkKind, ClioToken> = {
-	comment: "dim",
-	string: "success",
-	keyword: "reason",
-	number: "info",
+	keyword: "syntaxKeyword",
+	string: "syntaxString",
+	number: "syntaxLiteral",
+	comment: "syntaxComment",
 };
 
 /**
@@ -341,6 +341,14 @@ function scanLine(line: string, spec: LangSpec, carry: Carry): { spans: Span[]; 
 			i = end;
 			continue;
 		}
+		if (spec.shellPrompt && ch === "-" && (i === 0 || /\s/u.test(prev))) {
+			const flag = /^--?[\w-]+/u.exec(line.slice(i));
+			if (flag) {
+				spans.push({ start: i, end: i + flag[0].length, kind: "number" });
+				i += flag[0].length;
+				continue;
+			}
+		}
 		if (/\d/.test(ch) && !isIdentPart(prev)) {
 			const match = NUMBER_RE.exec(line.slice(i));
 			if (match) {
@@ -385,7 +393,7 @@ function paintLine(line: string, spans: ReadonlyArray<Span>, theme: ReturnType<t
  * are neither added nor removed content, so they stay plain.
  */
 function inkDiffLine(line: string, theme: ReturnType<typeof clioTheme>): string {
-	if (line.startsWith("@@")) return theme.fg("dim", line);
+	if (line.startsWith("@@")) return theme.fg("toolMetadata", line);
 	if (line.startsWith("+++") || line.startsWith("---")) return line;
 	if (line.startsWith("+")) return theme.fg("success", line);
 	if (line.startsWith("-")) return theme.fg("error", line);
@@ -409,7 +417,7 @@ export function codeInk(lang: string | undefined, lines: ReadonlyArray<string>):
 			const rest = line.slice(2);
 			const scanned = scanLine(rest, spec, carry);
 			carry = scanned.carry;
-			out.push(`${theme.fg("dim", "$")} ${paintLine(rest, scanned.spans, theme)}`);
+			out.push(`${theme.fg("toolMetadata", "$")} ${paintLine(rest, scanned.spans, theme)}`);
 			continue;
 		}
 		const scanned = scanLine(line, spec, carry);
@@ -417,4 +425,68 @@ export function codeInk(lang: string | undefined, lines: ReadonlyArray<string>):
 		out.push(paintLine(line, scanned.spans, theme));
 	}
 	return out;
+}
+
+/** Shell syntax, with Python ink for a declared `python -c` source argument. */
+export function shellCommandInk(command: string): string[] {
+	const tokens = command.matchAll(/'[^']*'|"(?:\\[\s\S]|[^"\\])*"|[|;&()<>]+|[^\s'"|;&()<>]+|\s+|./gu);
+	let python = false;
+	let sourceArgument = false;
+	let expectCommand = true;
+	let cursor = 0;
+	const theme = clioTheme();
+	const painted: string[] = [];
+	for (const match of tokens) {
+		const token = match[0];
+		if (/^\s+$/u.test(token)) {
+			if (token.includes("\n")) expectCommand = true;
+			continue;
+		}
+		const quote = token[0];
+		const quoted = (quote === "'" || quote === '"') && token.endsWith(quote) && token.length >= 2;
+		if (python && sourceArgument && quoted) {
+			painted.push(codeInk("bash", command.slice(cursor, match.index).split("\n")).join("\n"));
+			const source = token.slice(1, -1);
+			painted.push(
+				theme.fg("syntaxString", quote),
+				codeInk("python", source.split("\n")).join("\n"),
+				theme.fg("syntaxString", quote),
+			);
+			cursor = match.index + token.length;
+			python = false;
+		}
+		if (/^[|;&()<>]+$/u.test(token)) {
+			python = false;
+			expectCommand = true;
+		} else if (expectCommand && !/^[A-Za-z_][\w]*=/u.test(token)) {
+			python = /(?:^|\/)python(?:[23](?:\.\d+)?)?$/u.test(token);
+			expectCommand = token === "env";
+		}
+		sourceArgument = python && token === "-c";
+	}
+	painted.push(codeInk("bash", command.slice(cursor).split("\n")).join("\n"));
+	return painted.join("").split("\n");
+}
+
+/** Explicit code fences in tool evidence keep syntax ink and their exact rows. */
+export function toolOutputInk(text: string): string[] {
+	const lines = text.split("\n");
+	const output: string[] = [];
+	for (let index = 0; index < lines.length; index += 1) {
+		const line = lines[index] ?? "";
+		const fence = /^ {0,3}(`{3,}|~{3,})\s*([^\s]*)/u.exec(line);
+		if (!fence) {
+			output.push(line);
+			continue;
+		}
+		const mark = fence[1] ?? "```";
+		const closing = new RegExp(`^ {0,3}${mark[0]}{${mark.length},}\\s*$`, "u");
+		const start = index + 1;
+		let end = start;
+		while (end < lines.length && !closing.test(lines[end] ?? "")) end += 1;
+		output.push(clioTheme().fg("toolMetadata", line), ...codeInk(fence[2], lines.slice(start, end)));
+		if (end < lines.length) output.push(clioTheme().fg("toolMetadata", lines[end] ?? ""));
+		index = end;
+	}
+	return output;
 }

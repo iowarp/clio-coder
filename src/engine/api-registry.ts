@@ -26,6 +26,7 @@ import {
 import "@earendil-works/pi-ai/providers/images/register-builtins";
 
 import { normalizeContext } from "./context.js";
+import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 import { getEngineEnvApiKey } from "./env-api-keys.js";
 import { engineModels } from "./models.js";
 import { instrumentProviderCall } from "./provider-diagnostics.js";
@@ -175,7 +176,10 @@ export function engineStream(
 	context: Context,
 	options?: StreamOptions,
 ): AssistantMessageEventStream {
-	return instrumentProviderCall(model, options, (effective) => dispatchEngineStream(model, context, effective));
+	return filterAssistantProseStream(
+		instrumentProviderCall(model, options, (effective) => dispatchEngineStream(model, context, effective)),
+		model,
+	);
 }
 
 export function engineStreamSimple(
@@ -183,7 +187,10 @@ export function engineStreamSimple(
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
-	return instrumentProviderCall(model, options, (effective) => dispatchEngineStreamSimple(model, context, effective));
+	return filterAssistantProseStream(
+		instrumentProviderCall(model, options, (effective) => dispatchEngineStreamSimple(model, context, effective)),
+		model,
+	);
 }
 
 export async function completeEngineSimple(

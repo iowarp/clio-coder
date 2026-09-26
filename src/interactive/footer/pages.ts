@@ -4,14 +4,23 @@ import type { UsageSnapshot } from "../../domains/quota/types.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import { contextCategorySwatch, renderContextMeterGrid } from "../context-meter.js";
+import { contextCategorySwatch, contextPercentRole, renderContextMeterGrid } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import { dispatchStatusPresentation, renderDispatchActivity } from "../dispatch-board.js";
 import { ACTIVE_DISPATCH_STATUSES, FAILED_DISPATCH_STATUSES, formatFooterTokens } from "../footer-panel.js";
 import { formatKeyLabel } from "../keybinding-manager.js";
 import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
 import { previewRows } from "../renderers/preview.js";
-import { brandMark, clioTheme, formatCompactMs, formatContextPercent, GLYPH, rule } from "../theme/index.js";
+import {
+	brandMark,
+	metricText,
+	clioTheme,
+	formatCompactMs,
+	formatContextPercent,
+	GLYPH,
+	padAnsi,
+	rule,
+} from "../theme/index.js";
 import { fitIdentityLabel, formatTargetLabel } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
@@ -43,13 +52,13 @@ function agentCard(
 		(_, gap: string, letter: string) => `${gap ? " " : ""}${letter.toUpperCase()}`,
 	);
 	const audience = row.agentAudience === "shadow" || row.agentAudience === "internal" ? "internal agent" : "fleet agent";
-	const heading = theme.style("agent", `${GLYPH.subProcess} ${name}`, { bold: true });
+	const heading = `${theme.fg(row.agentAudience === "shadow" || row.agentAudience === "internal" ? "shadowDispatchAction" : "dispatchAction", GLYPH.subProcess)} ${theme.fg("footerIdentity", name)}`;
 	const lines = wrapTextWithAnsi(
-		`${heading}  ${theme.fg(presentation.token, `${presentation.glyph} ${presentation.label}`)}  ${theme.fg("dim", `${formatCompactMs(row.elapsedMs)} · ${audience}`)}`,
+		`${heading}  ${theme.fg(presentation.token, `${presentation.glyph} ${presentation.label}`)}  ${theme.fg("annotation", `${formatCompactMs(row.elapsedMs)} · ${audience}`)}`,
 		width,
 	);
 	const field = (label: string, value: string) =>
-		wrapTextWithAnsi(`${theme.fg("dim", `${label}  `)}${clean(value)}`, width);
+		wrapTextWithAnsi(`${theme.fg("annotation", `${label}  `)}${clean(value)}`, width);
 	lines.push(...previewRows(field("Route", `${row.targetId}/${row.wireModelId}`), 2, width));
 	const weekly = routeWeeklyQuota(row, quota);
 	if (weekly)
@@ -108,7 +117,11 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 	const active = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
 	const history = state.dispatchRows.filter((row) => !ACTIVE_DISPATCH_STATUSES.has(row.status));
 	if (!state.dispatchRows.length)
-		return [...summary, "", theme.fg("dim", "No agent invocations yet. Worker cards appear here as agents start.")];
+		return [
+			...summary,
+			"",
+			theme.fg("annotation", "No agent invocations yet. Worker cards appear here as agents start."),
+		];
 	const midpoint = Math.ceil(summary.length / 2);
 	const summaryRows = sideBySide
 		? zipColumns(summary.slice(0, midpoint), summary.slice(midpoint), summaryWidth, width - summaryWidth - 3, "   ")
@@ -120,8 +133,8 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 			.getKeys("clio-coder.dispatchBoard.toggle")
 			.map((key) => formatKeyLabel(key))
 			.join("/") || "Workers shortcut";
-	if (active.length) cards.push(rule(theme, width, { left: "AGENT ACTIVITY", leftToken: "agent" }));
-	else cards.push(theme.fg("muted", "No agents running."));
+	if (active.length) cards.push(rule(theme, width, { left: "AGENT ACTIVITY", leftToken: "sectionHeading" }));
+	else cards.push(theme.fg("counter", "No agents running."));
 	let shown = 0;
 	if (width >= 120 && active.length >= 2) {
 		const col = Math.floor((width - 5) / 2);
@@ -134,7 +147,7 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 					agentCard(second, width - col - 5, true, state.quota),
 					col,
 					width - col - 5,
-					`  ${theme.fg("frame", GLYPH.rail)}  `,
+					`  ${theme.fg("border", GLYPH.rail)}  `,
 				),
 				"",
 			);
@@ -148,9 +161,11 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 			shown++;
 		}
 	if (shown < active.length)
-		cards.push(theme.fg("dim", `${active.length - shown} more active agents · ${inspectAll} for all`));
+		cards.push(theme.fg("annotation", `${active.length - shown} more active agents · ${inspectAll} for all`));
 	if (history.length) {
-		cards.push(rule(theme, width, { left: `INVOCATION HISTORY · ${history.length} finished`, leftToken: "muted" }));
+		cards.push(
+			rule(theme, width, { left: `INVOCATION HISTORY · ${history.length} finished`, leftToken: "groupHeading" }),
+		);
 		let historyShown = 0;
 		for (const row of history.slice(0, 4)) {
 			const presentation = dispatchStatusPresentation(row.status, { compact: false });
@@ -165,11 +180,11 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 					: "";
 			const compact = [
 				...wrapTextWithAnsi(
-					`${theme.fg(presentation.token, `${presentation.glyph} ${name} · ${presentation.label}`)} · ${audience} · ${formatCompactMs(row.elapsedMs)}${usage}`,
+					`${theme.fg(presentation.token, presentation.glyph)} ${theme.fg("footerIdentity", name)} · ${theme.fg(presentation.token, presentation.label)} · ${theme.fg("annotation", audience)} · ${theme.fg("counter", `${formatCompactMs(row.elapsedMs)}${usage}`)}`,
 					width,
 				),
 				...wrapTextWithAnsi(
-					theme.fg("dim", `${row.outcomeDetail ? `${clean(row.outcomeDetail)} · ` : ""}/view dispatch:${row.runId}`),
+					theme.fg("annotation", `${row.outcomeDetail ? `${clean(row.outcomeDetail)} · ` : ""}/view dispatch:${row.runId}`),
 					width,
 				),
 			];
@@ -178,29 +193,31 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 			historyShown++;
 		}
 		if (historyShown < history.length)
-			cards.push(theme.fg("dim", `${history.length - historyShown} more finished runs · ${inspectAll} for full history`));
+			cards.push(
+				theme.fg("annotation", `${history.length - historyShown} more finished runs · ${inspectAll} for full history`),
+			);
 	}
 	return [...summaryRows, "", ...cards];
 }
 
-function contextPage(state: FooterDashboardRenderState, width: number): string[] {
+function contextPage(state: FooterDashboardRenderState, width: number, budget: number): string[] {
 	const theme = clioTheme();
 	const ledger = state.context.ledger;
 	if (!ledger)
 		return [
 			...contextQuadrant(state.context, { width }).slice(1),
 			"",
-			theme.fg("dim", "Detailed context accounting appears after the prompt is compiled."),
+			theme.fg("annotation", "Detailed context accounting appears after the prompt is compiled."),
 		];
 	const out = [
 		...wrapTextWithAnsi(
-			theme.style(
-				"accent",
+			`${metricText(
+				theme,
 				state.context.budget
-					? `${contextUsageText(state.context)} tokens`
-					: `${formatFooterTokens(ledger.usedTokens)} / ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.contextWindow) : "unknown window"} tokens${ledger.percent === null ? "" : ` · ${ledger.percent.toFixed(1)}% occupied`}`,
-				{ bold: true },
-			),
+					? contextUsageText(state.context)
+					: `${formatFooterTokens(ledger.usedTokens)} / ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.contextWindow) : "unknown window"}`,
+				"tokens",
+			)}${ledger.percent === null ? "" : ` · ${theme.fg("counter", `${ledger.percent.toFixed(1)}%`)} ${theme.fg("metricUnit", "occupied")}`}`,
 			width,
 		),
 		...wrapTextWithAnsi(
@@ -208,34 +225,33 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 			width,
 		),
 	];
-	out.push(theme.fg("dim", "Context occupancy is per request; subscription limits are account-wide · /usage"));
 	const gridWidth = Math.max(12, Math.min(64, width >= FOOTER_SPLIT_COLUMNS ? Math.floor(width * 0.38) : width));
-	const gridHeight = width >= FOOTER_SPLIT_COLUMNS ? 8 : 3;
+	const gridHeight = Math.max(1, Math.min(4, budget - 5));
 	const grid = renderContextMeterGrid(ledger, gridWidth, gridHeight, theme);
 	const legendWidth = width >= FOOTER_SPLIT_COLUMNS ? width - gridWidth - 4 : width;
 	const legend = ledger.meter
 		.filter((group) => group.tokens > 0)
 		.flatMap((group) =>
 			wrapTextWithAnsi(
-				`${contextCategorySwatch(group.category, theme)} ${group.label.padEnd(20)} ${formatFooterTokens(group.tokens).padStart(7)}  ${group.percent === null ? "unknown" : `${group.percent.toFixed(1)}%`}`,
+				`${contextCategorySwatch(group.category, theme)} ${theme.fg("legend", group.label.padEnd(20))} ${theme.fg("counter", formatFooterTokens(group.tokens).padStart(7))}  ${theme.fg(group.percent === null ? "unknownValue" : "counter", group.percent === null ? "unknown" : `${group.percent.toFixed(1)}%`)}`,
 				legendWidth,
 			),
 		);
 	out.push(
-		"",
 		rule(theme, width, {
 			left: state.context.budget ? "CAPTURE DIAGNOSTICS" : "CONTEXT COMPOSITION",
-			leftToken: "accent",
+			leftToken: "groupHeading",
 		}),
 	);
 	out.push(
 		...(width >= FOOTER_SPLIT_COLUMNS
-			? zipColumns(grid, legend, gridWidth, legendWidth, "    ")
+			? zipColumns(grid, previewRows(legend, gridHeight, legendWidth), gridWidth, legendWidth, "    ")
 			: [...grid, "", ...legend]),
 	);
+	out.push(theme.fg("annotation", "Context is per request · subscription limits are account-wide · /usage"));
 	out.push(
 		...wrapTextWithAnsi(
-			theme.fg("muted", "Filled = context · empty = available · shaded = reserve; small buckets receive one cell."),
+			theme.fg("counter", "Filled = context · empty = available · shaded = reserve; small buckets receive one cell."),
 			width,
 		),
 	);
@@ -244,7 +260,7 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 		"",
 		...wrapTextWithAnsi(
 			theme.fg(
-				"dim",
+				"annotation",
 				`${ledger.measured ? "Provider-anchored total; category splits estimated" : "Estimated usage"} · window source: ${ledger.contextWindowSource ?? "unknown"}`,
 			),
 			width,
@@ -304,11 +320,11 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const theme = clioTheme();
 	const w = Math.max(1, width);
 	const narrow = w <= 60;
-	const fit = (s: string, n = w) => truncateToWidth(s, Math.max(1, n), GLYPH.ellipsis, true);
+	const fit = (s: string, n = w) => theme.base("counter", truncateToWidth(s, Math.max(1, n), GLYPH.ellipsis, true));
 	const ledger = state.context.ledger;
 	const workers = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
-	const phase = state.agent.statusText ?? "Ready";
-	const workerText = workers ? ` · ${workers} active` : "";
+	const phase = workers ? `${workers} ${workers === 1 ? "worker" : "workers"}` : "Model";
+	const phaseToken = workers ? "activity" : "fieldName";
 	const identity = clean(state.session.target ?? "No model selected");
 	const usage = contextUsageText(state.context);
 	const meter = ledger || state.context.budget ? contextOccupancyBar(state.context, w >= 100 ? 14 : 8, theme) : "";
@@ -316,7 +332,10 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	// in half, and keeps the percent. The segmented meter states its percent;
 	// the ledger meter states only counts, so its percent joins it here.
 	const rightBudget = Math.floor(w * 0.48);
-	const percent = state.context.budget || !ledger ? "" : ` ${formatContextPercent(contextUsagePercent(state.context))}`;
+	const percent =
+		state.context.budget || !ledger
+			? ""
+			: ` ${theme.fg(contextPercentRole(contextUsagePercent(state.context)), formatContextPercent(contextUsagePercent(state.context)))}`;
 	const withCounts = `${meter} ${usage}`;
 	const fullContext =
 		meter.length === 0 || visibleWidth(withCounts) <= rightBudget ? withCounts : `${meter}${percent}`.trimEnd();
@@ -332,7 +351,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 					? "~"
 					: "";
 	const context = narrow
-		? `${theme.fg("dim", "ctx ")}${theme.fg("muted", `${source}${formatContextPercent(occupancy)}`)}`
+		? `${theme.fg("fieldName", "ctx ")}${theme.fg(contextPercentRole(occupancy), `${source}${formatContextPercent(occupancy)}`)}`
 		: fullContext;
 	const rightWidth = Math.min(rightBudget, visibleWidth(context));
 
@@ -345,30 +364,24 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const skills = state.session.activeSkills ?? [];
 	const skillBudget = Math.max(5, Math.floor(leftRoom / 3));
 	const skillWords = `skill ${clean(skills.join(", "))}`;
+	const skillLead = visibleWidth(skillWords) <= skillBudget ? "skill" : GLYPH.classKnowledge;
+	const fittedSkill =
+		visibleWidth(skillWords) <= skillBudget
+			? skillWords
+			: fitNames(`${GLYPH.classKnowledge} `, skills.map(clean), skillBudget);
 	const skill =
 		skills.length === 0
 			? ""
-			: theme.fg(
-					"muted",
-					visibleWidth(skillWords) <= skillBudget
-						? skillWords
-						: fitNames(`${GLYPH.classKnowledge} `, skills.map(clean), skillBudget),
-				);
+			: `${theme.fg("skillAction", skillLead)}${theme.fg("counter", fittedSkill.slice(skillLead.length))}`;
 	const skillRoom = skill ? visibleWidth(skill) + 3 : 0;
-	// The phase and the worker count are the live facts: the activity takes the
-	// room it needs beside the skill badge, before the identity and quota badge
-	// get theirs. A row too narrow for both drops the
-	// worker count before it cuts the phase.
+	// Workers and armed skills take priority over the model identity and quota badge.
 	const activityRoom = Math.max(5, leftRoom - skillRoom);
-	const activity =
-		visibleWidth(`${phase}${workerText}`) <= activityRoom
-			? `${theme.fg("accent", phase)}${theme.fg("agent", workerText)}`
-			: theme.fg("accent", truncateToWidth(phase, activityRoom, GLYPH.ellipsis));
+	const activity = theme.fg(phaseToken, truncateToWidth(phase, activityRoom, GLYPH.ellipsis, false));
 	const activityWidth = visibleWidth(activity);
 	const badge =
 		weekly && leftRoom - activityWidth - skillRoom - visibleWidth(weekly.label) >= 16
 			? theme.fg(
-					weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "muted" : "warning",
+					weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "counter" : "warning",
 					weekly.label,
 				)
 			: "";
@@ -387,7 +400,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 					abbreviate: false,
 				})
 			: fitIdentityLabel(identity, identityRoom);
-	const shownIdentity = readable ? `${identitySeparator}${theme.fg("muted", fittedIdentity)}` : "";
+	const shownIdentity = readable ? `${identitySeparator}${theme.fg("footerIdentity", fittedIdentity)}` : "";
 	const left = `${activity}${skill ? ` · ${skill}` : ""}${shownIdentity}${badge ? ` · ${badge}` : ""}`;
 	const pair = (l: string, r: string, rw: number) => `${fit(l, w - rw - 3)}   ${fit(r, rw)}`;
 	const notice = topNotification(state.notices, state.now);
@@ -409,8 +422,8 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		: notice
 			? theme.fg(notificationToken(notice.level), `${notificationGlyph(notice.level)} ${clean(notice.text)}`)
 			: state.demoHint
-				? `${theme.fg("accent", "Tip")} ${theme.fg("muted", clean(state.demoHint))}`
-				: theme.fg("dim", (state.demo !== false ? footerKeyHint(state.now, w < 120) : null) ?? `${key} Dashboard`);
+				? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
+				: theme.fg("keyboardHint", (state.demo !== false ? footerKeyHint(state.now, w < 120) : null) ?? `${key} Dashboard`);
 	if (narrow) {
 		const rows = [fit(pair(left, context, rightWidth))];
 		if (urgent || notice) rows.push(fit(foot));
@@ -421,13 +434,14 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const hintBudget = urgent ? Math.max(1, w - 3 - 8) : Math.floor(w * 0.48);
 	const hintWidth = Math.min(hintBudget, visibleWidth(foot));
 	const workspaceWidth = Math.max(1, w - hintWidth - 3);
-	const git = `${clean(state.workspace.branch ?? "no Git branch")}${state.workspace.dirty ? " *" : ""}`;
-	const gitWidth = Math.min(visibleWidth(git), Math.max(4, Math.floor(workspaceWidth * 0.45)));
-	const cwdWidth = Math.max(1, workspaceWidth - gitWidth - 3);
-	const workspace = theme.fg(
-		"dim",
-		`${fitIdentityLabel(clean(state.workspace.cwd), cwdWidth)} · ${fitIdentityLabel(git, gitWidth)}`,
+	const git = clean(state.workspace.branch ?? "no Git branch");
+	const dirtyMarker = state.workspace.dirty ? theme.fg("warning", " *") : "";
+	const gitWidth = Math.min(
+		visibleWidth(git) + visibleWidth(dirtyMarker),
+		Math.max(4, Math.floor(workspaceWidth * 0.45)),
 	);
+	const cwdWidth = Math.max(1, workspaceWidth - gitWidth - 3);
+	const workspace = `${theme.fg("workspacePath", fitIdentityLabel(clean(state.workspace.cwd), cwdWidth))} · ${theme.fg("branch", fitIdentityLabel(git, Math.max(1, gitWidth - visibleWidth(dirtyMarker))))}${dirtyMarker}`;
 	return [fit(pair(left, context, rightWidth)), fit(pair(workspace, foot, hintWidth))];
 }
 
@@ -438,7 +452,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 
 	const quotaRows = [
 		theme.style(
-			"accent",
+			"metricValue",
 			`SESSION · ${formatFooterTokens(state.sessionTokens?.totalTokens ?? 0)} recorded tokens · ${formatCostAggregate(state.sessionCost) ?? "cost not yet priced"}`,
 			{ bold: true },
 		),
@@ -456,20 +470,25 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	const section = (title: string, entries: ReadonlyArray<SectionEntry>, columns: number) => {
 		const labelWidth = Math.min(17, Math.floor(columns * 0.4));
 		return [
-			theme.fg("accent", title),
-			"",
+			rule(theme, columns, { left: title, leftToken: "sectionHeading" }),
 			...entries.map(([label, value]) => {
 				const room = Math.max(1, columns - labelWidth - 2);
 				let rendered: string;
-				if (typeof value === "string") rendered = truncateToWidth(clean(value), room, GLYPH.ellipsis, true);
-				else if (value.percent === null) rendered = "warming up";
+				if (typeof value === "string")
+					rendered = theme.fg(
+						/^(unknown|unreported|unavailable|not sampled|sampling|warming up|pending)/u.test(value)
+							? "unknownValue"
+							: "fieldValue",
+						truncateToWidth(clean(value), room, GLYPH.ellipsis, true),
+					);
+				else if (value.percent === null) rendered = theme.fg("unknownValue", "warming up");
 				else {
 					const percent = Number.isFinite(value.percent) ? Math.max(0, Math.min(100, value.percent)) : 0;
 					const filled = Math.round(percent / 10);
-					rendered = `${theme.fg("accent", GLYPH.meterFull.repeat(filled))}${theme.fg("frame", GLYPH.meterEmpty.repeat(10 - filled))} ${percent.toFixed(0)}%${value.suffix ? `  ${clean(value.suffix)}` : ""}`;
+					rendered = `${theme.fg("meterFill", GLYPH.meterFull.repeat(filled))}${theme.fg("meterFree", GLYPH.meterEmpty.repeat(10 - filled))} ${theme.fg("metricValue", percent.toFixed(0))}${theme.fg("metricUnit", "%")}${value.suffix ? `  ${theme.fg("fieldValue", clean(value.suffix))}` : ""}`;
 					rendered = truncateToWidth(rendered, room, GLYPH.ellipsis, true);
 				}
-				return `${theme.fg("dim", truncateToWidth(label, labelWidth, GLYPH.ellipsis, true))}  ${rendered}`;
+				return `${theme.fg("fieldName", truncateToWidth(label, labelWidth, GLYPH.ellipsis, true))}  ${rendered}`;
 			}),
 			"",
 		];
@@ -558,9 +577,11 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 			...quotaRows,
 			...section("COST & CONNECTIONS", left, width),
 			...section("LOCAL MACHINE", right, width),
-			theme.fg("accent", "CONTEXT ENGINE"),
+			theme.style("sectionHeading", "CONTEXT ENGINE", { bold: true }),
 			...wrapTextWithAnsi(
-				extras.map(([label, value]) => `${theme.fg("dim", label)} ${clean(value)}`).join("  ·  "),
+				extras
+					.map(([label, value]) => `${theme.fg("fieldName", label)} ${theme.fg("fieldValue", clean(value))}`)
+					.join("  ·  "),
 				width,
 			),
 		];
@@ -572,10 +593,15 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 			section("LOCAL MACHINE", right, width - col - 5),
 			col,
 			width - col - 5,
-			`  ${theme.fg("frame", GLYPH.rail)}  `,
+			`  ${theme.fg("border", GLYPH.rail)}  `,
 		),
-		theme.fg("accent", "CONTEXT ENGINE"),
-		...wrapTextWithAnsi(extras.map(([label, value]) => `${theme.fg("dim", label)} ${clean(value)}`).join("  ·  "), width),
+		theme.style("sectionHeading", "CONTEXT ENGINE", { bold: true }),
+		...wrapTextWithAnsi(
+			extras
+				.map(([label, value]) => `${theme.fg("fieldName", label)} ${theme.fg("fieldValue", clean(value))}`)
+				.join("  ·  "),
+			width,
+		),
 	];
 }
 
@@ -588,21 +614,34 @@ export function renderDashboardPage(
 ): string[] {
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
-	const budget = Math.max(8, Math.floor(terminalRows / 4));
+	const gutter = safeWidth >= 20 ? 2 : 0;
+	const innerWidth = Math.max(1, safeWidth - gutter * 2);
+	const pad = " ".repeat(gutter);
+	const inset = (line: string): string =>
+		theme.base(
+			"fieldValue",
+			padAnsi(`${pad}${truncateToWidth(line, innerWidth, GLYPH.ellipsis, true)}${pad}`, safeWidth),
+		);
+	const budget = Math.max(6, Math.min(12, terminalRows - 6));
 	const tabs = DASHBOARD_PAGES.map((name, index) =>
 		name === page
-			? theme.style("accent", ` ${index + 1} ${name.toUpperCase()} `, { bold: true, underline: true })
-			: theme.fg("dim", ` ${index + 1} ${name} `),
+			? theme.style("selectedOption", `${GLYPH.cursor} ${index + 1} ${name}`, { bold: true })
+			: theme.fg("menuOption", `  ${index + 1} ${name}`),
 	);
 
-	const tabText = `${brandMark(theme)} ${tabs.join(" ")}`;
+	const tabText =
+		innerWidth >= 52
+			? `${brandMark(theme)} ${tabs.join(" ")}`
+			: `${brandMark(theme)} ${theme.style("selectedOption", `${GLYPH.cursor} ${page}`, { bold: true })} ${theme.fg("positionCount", `${DASHBOARD_PAGES.indexOf(page) + 1}/${DASHBOARD_PAGES.length}`)}`;
 
-	const identityRoom = safeWidth - visibleWidth(tabText) - 4;
+	const identityRoom = innerWidth - visibleWidth(tabText) - 4;
 	const identity = clean(state.session.target ?? "No model selected");
 	const heading = [
 		truncateToWidth(
-			identityRoom >= 20 ? `${tabText}    ${theme.fg("muted", fitIdentityLabel(identity, identityRoom))}` : tabText,
-			safeWidth,
+			identityRoom >= 20
+				? `${tabText}    ${theme.fg("footerIdentity", fitIdentityLabel(identity, identityRoom))}`
+				: tabText,
+			innerWidth,
 			GLYPH.ellipsis,
 			true,
 		),
@@ -610,19 +649,19 @@ export function renderDashboardPage(
 	const next = page === "Status" ? "close" : DASHBOARD_PAGES[DASHBOARD_PAGES.indexOf(page) + 1];
 	const hint = truncateToWidth(
 		theme.fg(
-			"muted",
+			"counter",
 			`${cycleKey || "Dashboard"} ${GLYPH.next} ${next}   ·   ${page === "Status" ? "/usage · /mcp · /library" : "composer stays active"}`,
 		),
-		safeWidth,
+		innerWidth,
 		GLYPH.ellipsis,
 		true,
 	);
 	const available = budget - 4;
 	let content: string[];
-	if (page === "Activity") content = activityPage(state, safeWidth, available);
-	else if (page === "Context") content = contextPage(state, safeWidth);
-	else content = statusPage(state, safeWidth);
-	content = content.flatMap((line) => (visibleWidth(line) > safeWidth ? wrapTextWithAnsi(line, safeWidth) : [line]));
+	if (page === "Activity") content = activityPage(state, innerWidth, available);
+	else if (page === "Context") content = contextPage(state, innerWidth, available);
+	else content = statusPage(state, innerWidth);
+	content = content.flatMap((line) => (visibleWidth(line) > innerWidth ? wrapTextWithAnsi(line, innerWidth) : [line]));
 	if (content.length > available) {
 		const detail =
 			page === "Activity"
@@ -637,9 +676,9 @@ export function renderDashboardPage(
 					: "/usage · /context";
 		content = [
 			...content.slice(0, available - 1),
-			truncateToWidth(theme.fg("dim", `More detail: ${detail}`), safeWidth, GLYPH.ellipsis, true),
+			truncateToWidth(theme.fg("annotation", `More detail: ${detail}`), innerWidth, GLYPH.ellipsis, true),
 		];
 	}
 	while (content.length < available) content.push("");
-	return [...heading, rule(theme, safeWidth), ...content, rule(theme, safeWidth), hint];
+	return [...heading.map(inset), rule(theme, safeWidth), ...content.map(inset), rule(theme, safeWidth), inset(hint)];
 }

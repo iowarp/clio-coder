@@ -38,7 +38,7 @@ export interface RenderBranchSummaryOptions {
  */
 function renderBranchSummaryHeader(entry: BranchSummaryEntry, width: number): string[] {
 	const label = screenTitle(theme, `[${LABEL}]`);
-	const meta = theme.fg("dim", `from turn ${entry.fromTurnId}`);
+	const meta = theme.fg("toolMetadata", `from turn ${entry.fromTurnId}`);
 	return wrapTextWithAnsi(`${label} ${meta}`, width);
 }
 

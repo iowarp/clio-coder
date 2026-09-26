@@ -35,13 +35,14 @@ import {
 	dotSep,
 	fitUnits,
 	formatCompactMs,
+	functionText,
 	formatTargetLabel,
 	frame,
 	GLYPH,
 	innerDivider,
 	padAnsi,
-	screenTitle,
 	spinnerFrame,
+	toolFunction,
 } from "./theme/index.js";
 import { fitIdentityLabel } from "./theme/labels.js";
 import { workerActivityWords } from "./worker-activity.js";
@@ -216,13 +217,13 @@ export interface AgentAudiencePresentation {
 
 /**
  * Visual treatment for a run Clio started for itself: the sub-process glyph in
- * a muted tone for a shadow worker, the same glyph dimmed for internal harness
+ * the subordinate orange tone for shadow and internal harness
  * machinery. Returns null for base/custom agents, which the operator asked for
  * directly and which therefore render like any other row.
  */
 function agentAudiencePresentation(row: Pick<DispatchBoardRow, "agentAudience">): AgentAudiencePresentation | null {
-	if (row.agentAudience === "shadow") return { glyph: GLYPH.subProcess, token: "muted" };
-	if (row.agentAudience === "internal") return { glyph: GLYPH.subProcess, token: "dim" };
+	if (row.agentAudience === "shadow") return { glyph: GLYPH.subProcess, token: "shadowDispatchAction" };
+	if (row.agentAudience === "internal") return { glyph: GLYPH.subProcess, token: "shadowDispatchAction" };
 	return null;
 }
 
@@ -251,9 +252,9 @@ export interface DispatchOriginPresentation {
  * quadrant's single orange, so here the filled glyph carries origin by shape.
  */
 function dispatchOriginPresentation(row: Pick<DispatchBoardRow, "requestOrigin">): DispatchOriginPresentation | null {
-	if (row.requestOrigin === "user") return { glyph: GLYPH.workerHuman, token: "accent" };
-	if (row.requestOrigin === "agent") return { glyph: GLYPH.workerAgent, token: "muted" };
-	if (row.requestOrigin === "internal") return { glyph: GLYPH.workerInternal, token: "dim" };
+	if (row.requestOrigin === "user") return { glyph: GLYPH.workerHuman, token: "guidance" };
+	if (row.requestOrigin === "agent") return { glyph: GLYPH.workerAgent, token: "body" };
+	if (row.requestOrigin === "internal") return { glyph: GLYPH.workerInternal, token: "annotation" };
 	return null;
 }
 
@@ -277,7 +278,7 @@ function dispatchRowPrefix(
 export interface DispatchStatusPresentation {
 	glyph: string;
 	label: string;
-	/** A live glyph may take the scarce action token while its word stays neutral. */
+	/** A live glyph uses the activity accent; its phase word uses the dispatch role. */
 	glyphToken?: ClioToken;
 	token: ClioToken;
 }
@@ -295,13 +296,12 @@ export function dispatchStatusPresentation(
 	const compact = options.compact === true;
 	switch (status) {
 		case "running":
-			// The glyph alone signals live action; several active rows must not
-			// paint an entire column of words orange.
+			// Glyph and phase have distinct roles; identities and telemetry stay separate.
 			return {
 				glyph: options.tick !== undefined ? spinnerFrame(options.tick) : GLYPH.running,
 				label: "running",
-				glyphToken: "action",
-				token: "muted",
+				glyphToken: "activity",
+				token: "dispatchAction",
 			};
 		case "cancelling":
 			return { glyph: GLYPH.cancelled, label: "cancelling", token: "warning" };
@@ -314,11 +314,11 @@ export function dispatchStatusPresentation(
 		case "dead":
 			return { glyph: GLYPH.error, label: "dead", token: "error" };
 		case "aborted":
-			return { glyph: GLYPH.cancelled, label: compact ? "abort" : "aborted", token: "dim" };
+			return { glyph: GLYPH.cancelled, label: compact ? "abort" : "aborted", token: "annotation" };
 		case "stale":
 			return { glyph: GLYPH.warnInline, label: "stale", token: "warning" };
 		case "enqueued":
-			return { glyph: GLYPH.queued, label: "queued", token: "muted" };
+			return { glyph: GLYPH.queued, label: "queued", token: "body" };
 	}
 }
 
@@ -406,7 +406,7 @@ function evidenceStatePresentation(state: EvidenceState): EvidenceGlyphPresentat
 const CARD_KV_KEY_WIDTH = "telemetry".length;
 
 function cardKvKey(theme: ClioTheme, key: string): string {
-	return theme.fg("dim", `${key.padEnd(CARD_KV_KEY_WIDTH)} `);
+	return theme.fg("fieldName", `${key.padEnd(CARD_KV_KEY_WIDTH)} `);
 }
 
 // A card key-value row built from whole units. A row that fits keeps its dim
@@ -435,8 +435,8 @@ function evidenceCardLine(theme: ClioTheme, evidence: RunEvidencePresentation, c
 	const presentation = evidenceStatePresentation(evidence.state);
 	if (!presentation) return null;
 	const units = [theme.fg(presentation.token, `${presentation.glyph} ${presentation.word}`)];
-	if (evidence.state === "failed" && evidence.reason) units.push(theme.fg("muted", evidence.reason));
-	units.push(theme.fg("dim", evidence.viewFilter));
+	if (evidence.state === "failed" && evidence.reason) units.push(theme.fg("body", evidence.reason));
+	units.push(theme.fg("annotation", evidence.viewFilter));
 	return cardUnitsLine(theme, "proof", units, contentWidth);
 }
 
@@ -451,10 +451,12 @@ function retryCountdown(retry: DispatchRetryPresentation, now = Date.now()): str
  * seam, so this composes text and never inspects an argument.
  */
 function actionPhrase(action: WorkerAction): string {
+	const theme = clioTheme();
 	const descriptor = action.descriptor;
-	if (descriptor === undefined) return action.tool;
+	if (descriptor === undefined)
+		return functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(action.tool));
 	const object = descriptor.object === undefined ? "" : ` ${descriptor.object}${descriptor.truncated ? "…" : ""}`;
-	return `${action.tool} ${descriptor.verb}${object}`;
+	return `${theme.fg("toolCapability", sanitizeCallTargetText(action.tool))} ${functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(descriptor.verb))}${theme.fg("toolTarget", object.length === 0 ? "" : ` ${sanitizeCallTargetText(object)}`)}`;
 }
 
 /** The phase word an expanded card names, or null for a phase that says nothing new. */
@@ -462,13 +464,13 @@ function progressPhaseUnit(theme: ClioTheme, progress: WorkerProgressSnapshot): 
 	switch (progress.phase) {
 		case "thinking":
 			// The phase only. Reasoning content never reaches an operator surface.
-			return theme.fg("reason", `${GLYPH.phaseThinking} thinking`);
+			return theme.fg("dispatchAction", `${GLYPH.phaseThinking} thinking`);
 		case "writing":
-			return theme.fg("accent", `${GLYPH.phaseWriting} writing`);
+			return theme.fg("dispatchAction", `${GLYPH.phaseWriting} writing`);
 		case "tool":
-			return theme.fg("muted", `${GLYPH.phaseTool} tool`);
+			return theme.fg("dispatchAction", `${GLYPH.phaseTool} tool`);
 		case "waiting":
-			return theme.fg("info", `${GLYPH.phaseWaiting} waiting`);
+			return theme.fg("dispatchAction", `${GLYPH.phaseWaiting} waiting`);
 		case "settled":
 		case "starting":
 			return null;
@@ -482,8 +484,9 @@ function progressActionLine(theme: ClioTheme, progress: WorkerProgressSnapshot, 
 	const recent = progress.recentActions[0];
 	const units: string[] = [];
 	if (phase !== null && current === null) units.push(phase);
-	if (current !== null) units.push(theme.fg("muted", `now ${actionPhrase(current)}`));
-	else if (recent !== undefined) units.push(theme.fg("dim", `last ${actionPhrase(recent)}`));
+	if (current !== null) units.push(theme.base("body", `${theme.fg("toolMetadata", "now")} ${actionPhrase(current)}`));
+	else if (recent !== undefined)
+		units.push(theme.base("body", `${theme.fg("toolMetadata", "last")} ${actionPhrase(recent)}`));
 	if (units.length === 0) return null;
 	return cardUnitsLine(theme, "doing", units, contentWidth);
 }
@@ -502,15 +505,12 @@ export function renderDispatchActivity(row: DispatchBoardRow, width: number): st
 		waiting: "Between tool calls · awaiting next worker event",
 		settled: "Worker output finished",
 	}[progress.phase];
-	lines.push(...wrapTextWithAnsi(`${theme.style("agent", "Now", { bold: true })}  ${phase}`, width));
-	if (progress.currentAction)
-		lines.push(...wrapTextWithAnsi(`  → ${sanitizeCallTargetText(actionPhrase(progress.currentAction))}`, width));
+	lines.push(...wrapTextWithAnsi(`${theme.fg("harnessHeading", "Now")}  ${phase}`, width));
+	if (progress.currentAction) lines.push(...wrapTextWithAnsi(`  → ${actionPhrase(progress.currentAction)}`, width));
 	for (const action of progress.recentActions.slice(0, 3))
-		lines.push(
-			...wrapTextWithAnsi(`${theme.fg("dim", "Recent")}  ${sanitizeCallTargetText(actionPhrase(action))}`, width),
-		);
+		lines.push(...wrapTextWithAnsi(`${theme.fg("annotation", "Recent")}  ${actionPhrase(action)}`, width));
 	if (progress.tailText.trim()) {
-		lines.push(theme.fg("dim", progress.settled ? "Worker output" : "Live response · provisional"));
+		lines.push(theme.fg("annotation", progress.settled ? "Worker output" : "Live response · provisional"));
 		lines.push(...progressAnswerLines(theme, progress, row.runId, width, row.resultContract, 3));
 	}
 	return lines;
@@ -549,8 +549,8 @@ function progressAnswerLines(
 	}
 	const shown = progress.settled ? wrapped.slice(0, maxRows) : wrapped.slice(Math.max(0, wrapped.length - maxRows));
 	const hiddenRows = wrapped.length - shown.length;
-	const rail = theme.fg("dim", `${GLYPH.rail} `);
-	const body = shown.map((row) => `${rail}${theme.fg("muted", row)}`);
+	const rail = theme.fg("gutter", `${GLYPH.rail} `);
+	const body = shown.map((row) => `${rail}${theme.fg("assistantProse", row)}`);
 	const hiddenLines = progress.droppedLines + hiddenRows;
 	if (hiddenLines > 0 || progress.droppedBytes > 0) {
 		const facts = [
@@ -558,7 +558,7 @@ function progressAnswerLines(
 			...(hiddenLines > 0 ? [`${hiddenLines} more line${hiddenLines === 1 ? "" : "s"}`] : []),
 			...(progress.droppedBytes > 0 ? [`${progress.droppedBytes} bytes outran the view`] : []),
 		];
-		body.push(`${rail}${theme.fg("dim", truncateToWidth(facts.join(" · "), railWidth, "…", false))}`);
+		body.push(`${rail}${theme.fg("annotation", truncateToWidth(facts.join(" · "), railWidth, "…", false))}`);
 	}
 	// The key labels the block once and the rest hangs under it, which is the
 	// card's key-value grammar applied to a body rather than to one value.
@@ -583,13 +583,12 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 		axes.completionEvidence === "absent";
 	const trust =
 		row.trust === undefined
-			? theme.fg("dim", isTerminalStatus(row.status) ? "receipt not read back" : "not sealed yet")
+			? theme.fg("annotation", isTerminalStatus(row.status) ? "receipt not read back" : "not sealed yet")
 			: theme.fg(
 					trustVerdictToken(row.trust.verdict),
 					`${trustVerdictMark(row.trust.verdict)}${row.trust.verdict}; ${compact ? trustStateWord("validationGrounding", "absent") : row.trust.text}`,
 				);
-	const host =
-		row.hostVerification === undefined ? "" : ` · ${theme.fg("muted", `host checks ${row.hostVerification}`)}`;
+	const host = row.hostVerification === undefined ? "" : ` · ${theme.fg("body", `host checks ${row.hostVerification}`)}`;
 	return wrapTextWithAnsi(`${trust}${host}`, valueWidth).map(
 		(line, index) => `${index === 0 ? cardKvKey(theme, "trust") : " ".repeat(gutter)}${line}`,
 	);
@@ -617,8 +616,7 @@ function renderDispatchCard(
 	const presentation = dispatchStatusPresentation(row.status, {
 		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
-	// Only a running glyph takes action orange; its word and the card's cost and
-	// TTFT remain neutral telemetry.
+	// The function phase is orange, while identity, cost and TTFT keep their own roles.
 	const statusStr = `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`;
 
 	const ttft = row.ttftMs !== null ? `${row.ttftMs}ms` : row.status === "running" ? `waiting${GLYPH.ellipsis}` : "n/a";
@@ -632,30 +630,30 @@ function renderDispatchCard(
 	const clampedLabel = truncateToWidth(agentLabel, labelBudget, GLYPH.ellipsis, false);
 	const cardTitle =
 		options.selected === true
-			? `${theme.fg("accent", GLYPH.cursor)} ${rowPrefix.text}${screenTitle(theme, clampedLabel)}`
-			: `${rowPrefix.text}${clampedLabel}`;
+			? `${theme.fg("selectedOption", GLYPH.cursor)} ${rowPrefix.text}${theme.fg("selectedOption", clampedLabel)}`
+			: `${rowPrefix.text}${theme.fg("workerIdentity", clampedLabel)}`;
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
 	// A queued run has produced nothing yet, so it never carries a throughput.
 	const showRate = row.status !== "enqueued" && tokensPerSec > 0;
-	const up = theme.fg("muted", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`);
+	const up = theme.fg("body", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`);
 	const down = theme.fg(
-		"muted",
+		"body",
 		`${GLYPH.down} ${formatFooterTokens(row.outputTokens)}${showRate ? ` (${tokensPerSec}/s)` : ""}`,
 	);
-	const total = theme.fg("muted", `total ${formatFooterTokens(row.tokenCount)}`);
+	const total = theme.fg("body", `total ${formatFooterTokens(row.tokenCount)}`);
 
 	// The model id is user data and can outrun the card; mark the cut with `…`
 	// rather than hard-clipping it mid-token into a string that reads whole.
 	const targetKey = cardKvKey(theme, "target");
 	const route = `${sanitizeCallTargetText(String(row.runtimeKind))}${dotSep(theme)}${formatTargetLabel(row.targetId, row.wireModelId, { abbreviate: false })}`;
-	const targetLine = `${targetKey}${theme.fg("muted", fitIdentityLabel(route, Math.max(1, contentWidth - visibleWidth(targetKey))))}`;
+	const targetLine = `${targetKey}${theme.fg("footerIdentity", fitIdentityLabel(route, Math.max(1, contentWidth - visibleWidth(targetKey))))}`;
 	// Fleet facts: node placement (absent means local), gate role badge, and
 	// reroute lineage. Whole units so overflow drops a fact, never clips one.
 	const statusUnits = [
 		statusStr,
-		theme.fg("muted", `node ${row.node ?? "local"}`),
+		theme.fg("body", `node ${row.node ?? "local"}`),
 		...(row.endpoint !== undefined
 			? [
 					theme.fg(
@@ -671,8 +669,8 @@ function renderDispatchCard(
 		...(row.failoverHops !== undefined && row.failoverHops > 0
 			? [theme.fg("warning", `failed over x${row.failoverHops}`)]
 			: []),
-		`${theme.fg("dim", "ttft")} ${theme.fg("muted", ttft)}`,
-		`${theme.fg("dim", "cost")} ${theme.fg("muted", cost)}`,
+		`${theme.fg("annotation", "ttft")} ${theme.fg("body", ttft)}`,
+		`${theme.fg("annotation", "cost")} ${theme.fg("body", cost)}`,
 	];
 	const contextUnit = formatWorkerContextMeter(row.lastContextTokens ?? 0, row.contextWindow, theme);
 	// The phase column: a fleet step says which wave it belongs to and which
@@ -680,17 +678,17 @@ function renderDispatchCard(
 	// position, so the column reads as "not a fleet step" and not as wave zero.
 	const phaseCell = formatDispatchPhaseCell(row.phase, contentWidth);
 	const fullTask = row.taskSummary
-		? cardWrappedValueLines(theme, "task", theme.fg("muted", row.taskSummary), contentWidth)
+		? cardWrappedValueLines(theme, "task", theme.fg("body", row.taskSummary), contentWidth)
 		: [];
 	const taskLines =
 		options.expanded === true || fullTask.length <= 3
 			? fullTask
-			: [...fullTask.slice(0, 2), theme.fg("dim", "… Enter detail for full task")];
+			: [...fullTask.slice(0, 2), theme.fg("annotation", "… Enter detail for full task")];
 	const bodyLines = [
-		cardUnitsLine(theme, "run", [theme.fg("dim", row.runId)], contentWidth),
+		cardUnitsLine(theme, "run", [theme.fg("annotation", row.runId)], contentWidth),
 		...(phaseCell === null ? [] : [cardUnitsLine(theme, "phase", [theme.fg("info", phaseCell)], contentWidth)]),
 		...(options.expanded === true
-			? cardWrappedValueLines(theme, "target", theme.fg("muted", route), contentWidth)
+			? cardWrappedValueLines(theme, "target", theme.fg("body", route), contentWidth)
 			: [targetLine]),
 		...taskLines,
 		cardUnitsLine(theme, "status", statusUnits, contentWidth),
@@ -700,13 +698,13 @@ function renderDispatchCard(
 					...cardWrappedValueLines(
 						theme,
 						"policy",
-						theme.fg("muted", `${formatBudgetPolicy(row.budget)}; requested ${formatBudgetRequest(row.budget)}`),
+						theme.fg("body", `${formatBudgetPolicy(row.budget)}; requested ${formatBudgetRequest(row.budget)}`),
 						contentWidth,
 					),
 					...cardWrappedValueLines(
 						theme,
 						"budget",
-						theme.fg("muted", `${formatEffectiveBudget(row.budget)}; reason ${formatBudgetReasons(row.budget)}`),
+						theme.fg("body", `${formatEffectiveBudget(row.budget)}; reason ${formatBudgetReasons(row.budget)}`),
 						contentWidth,
 					),
 				]
@@ -720,8 +718,8 @@ function renderDispatchCard(
 				"retry",
 				[
 					theme.fg("warning", `attempt ${row.retry.attempt}`),
-					theme.fg("muted", retryCountdown(row.retry)),
-					...(row.retry.reason.length > 0 ? [theme.fg("muted", row.retry.reason)] : []),
+					theme.fg("body", retryCountdown(row.retry)),
+					...(row.retry.reason.length > 0 ? [theme.fg("body", row.retry.reason)] : []),
 				],
 				contentWidth,
 			),
@@ -733,8 +731,8 @@ function renderDispatchCard(
 	const recentTools = row.recentTools ?? [];
 	if (!row.progress && (currentTool !== null || recentTools.length > 0)) {
 		const toolUnits = [
-			currentTool !== null ? theme.fg("muted", `${currentTool} running`) : theme.fg("dim", "idle"),
-			...(recentTools.length > 0 ? [theme.fg("muted", `recent ${recentTools.join(" ")}`)] : []),
+			currentTool !== null ? theme.fg("body", `${currentTool} running`) : theme.fg("annotation", "idle"),
+			...(recentTools.length > 0 ? [theme.fg("body", `recent ${recentTools.join(" ")}`)] : []),
 		];
 		bodyLines.push(cardUnitsLine(theme, "tools", toolUnits, contentWidth));
 	}
@@ -750,7 +748,7 @@ function renderDispatchCard(
 			cardUnitsLine(
 				theme,
 				"control",
-				[theme.fg("success", `${GLYPH.ok} steer received`), theme.fg("muted", `${row.steerAcknowledgement.chars} chars`)],
+				[theme.fg("success", `${GLYPH.ok} steer received`), theme.fg("body", `${row.steerAcknowledgement.chars} chars`)],
 				contentWidth,
 			),
 		);
@@ -772,7 +770,8 @@ function renderDispatchCard(
 		const proofLine = evidenceCardLine(theme, evidence, contentWidth);
 		if (proofLine !== null) bodyLines.push(proofLine);
 	}
-	if (detail !== null) bodyLines.push(...cardWrappedValueLines(theme, "detail", theme.fg("dim", detail), contentWidth));
+	if (detail !== null)
+		bodyLines.push(...cardWrappedValueLines(theme, "detail", theme.fg("annotation", detail), contentWidth));
 
 	return frame(theme, cardTitle, bodyLines, width, { rightMeta: elapsed });
 }
@@ -796,7 +795,12 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: Readon
 		row.status === "running" && row.progress !== undefined
 			? sanitizeCallTargetText(workerActivityWords(row.progress))
 			: presentation.label;
-	const statusStr = theme.fg(presentation.token, statusLabel);
+	const statusStr = theme.fg(
+		row.status === "running" && (row.agentAudience === "shadow" || row.agentAudience === "internal")
+			? "shadowDispatchAction"
+			: presentation.token,
+		statusLabel,
+	);
 
 	// Reserve the glyph, separators, status word, and elapsed so a long agent
 	// label is clipped with a `…` marker rather than shoved off the row unmarked.
@@ -819,26 +823,25 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: Readon
 		false,
 	);
 
-	// The agent label drops its accent color for plain bold; the status word is
-	// the only status-colored element on the row, with dim middot separators.
-	const line1 = `${glyph} ${rowPrefix.text}${theme.paint(clampedLabel, { bold: true })}${dot}${statusStr}${dot}${theme.fg("muted", elapsed)}${showPhase ? phaseColumn : ""}`;
+	// Worker identity, function phase, outcome and telemetry each keep their role.
+	const line1 = `${glyph} ${rowPrefix.text}${theme.fg("workerIdentity", clampedLabel)}${dot}${statusStr}${dot}${theme.fg("toolMetadata", elapsed)}${showPhase ? phaseColumn : ""}`;
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
 	// A queued run has produced nothing yet, so it never carries a throughput.
 	const showRate = row.status !== "enqueued" && tokensPerSec > 0;
-	const up = theme.fg("muted", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`);
+	const up = theme.fg("body", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`);
 	const down = theme.fg(
-		"muted",
+		"body",
 		`${GLYPH.down} ${formatFooterTokens(row.outputTokens)}${showRate ? ` (${tokensPerSec}/s)` : ""}`,
 	);
 	const telemetry = row.retry
-		? `  ${theme.fg("warning", `attempt ${row.retry.attempt}`)}${dot}${theme.fg("muted", retryCountdown(row.retry))}`
-		: `  ${up}${dot}${down}${dot}${theme.fg("muted", cost)}`;
+		? `  ${theme.fg("warning", `attempt ${row.retry.attempt}`)}${dot}${theme.fg("body", retryCountdown(row.retry))}`
+		: `  ${up}${dot}${down}${dot}${theme.fg("body", cost)}`;
 	const task = row.taskSummary
 		? wrapTextWithAnsi(row.taskSummary, Math.max(1, width - 2))
 				.slice(0, 3)
-				.map((line) => `  ${theme.fg("muted", line)}`)
+				.map((line) => `  ${theme.fg("body", line)}`)
 		: [];
 
 	const quality = isTerminalStatus(row.status)
@@ -849,21 +852,21 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: Readon
 		: [];
 	return [
 		padAnsi(line1, width),
-		...quality.map((line) => padAnsi(theme.fg("muted", line), width)),
+		...quality.map((line) => padAnsi(theme.fg("body", line), width)),
 		...task.map((line) => padAnsi(line, width)),
 		padAnsi(telemetry, width),
 		...(weekly
 			? [
 					padAnsi(
 						theme.fg(
-							weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "dim" : "warning",
+							weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "annotation" : "warning",
 							`  Shared account · ${weekly.label}`,
 						),
 						width,
 					),
 				]
 			: []),
-		...wrapTextWithAnsi(theme.fg("dim", `  /view dispatch:${row.runId}`), width),
+		...wrapTextWithAnsi(theme.fg("annotation", `  /view dispatch:${row.runId}`), width),
 	];
 }
 
@@ -998,7 +1001,7 @@ function selectableBoardRows(rows: ReadonlyArray<DispatchBoardRow>): DispatchBoa
 function renderCouncilCard(group: CouncilGroupView, width: number): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(0, width - 4);
-	const title = `${theme.fg("info", "council")} ${theme.paint(group.group, { bold: true })}`;
+	const title = `${theme.fg("dispatchAction", "council")} ${theme.fg("boldEmphasis", group.group)}`;
 	return frame(theme, title, councilGroupBody(theme, group, contentWidth), width, { rightMeta: group.elapsed });
 }
 
@@ -1016,8 +1019,8 @@ function formatDispatchBoardLines(
 		// empty section reads; a centered sentence in a left-aligned dock was the
 		// one thing on the surface that floated.
 		return [
-			`  ${theme.fg("muted", "No fleet runs yet")}`,
-			...wrapTextWithAnsi(theme.fg("dim", "Use /run or /delegate to start a run."), Math.max(1, width - 2)).map(
+			`  ${theme.fg("body", "No fleet runs yet")}`,
+			...wrapTextWithAnsi(theme.fg("annotation", "Use /run or /delegate to start a run."), Math.max(1, width - 2)).map(
 				(line) => `  ${line}`,
 			),
 		];
@@ -1162,8 +1165,8 @@ export function formatTaskIslandLines(
 
 	if (visibleItems.length === 0) {
 		const theme = clioTheme();
-		body.push(theme.fg("dim", "No active fleet runs."));
-		body.push(theme.fg("dim", "Use /run or /delegate to spawn agents."));
+		body.push(theme.fg("annotation", "No active fleet runs."));
+		body.push(theme.fg("annotation", "Use /run or /delegate to spawn agents."));
 	} else {
 		for (let i = 0; i < visibleItems.length; i++) {
 			const item = visibleItems[i];
@@ -1180,7 +1183,7 @@ export function formatTaskIslandLines(
 		const hidden = items.length - visibleItems.length;
 		if (hidden > 0) {
 			body.push(innerDivider(clioTheme(), contentWidth));
-			body.push(clioTheme().fg("dim", `+ ${hidden} more`));
+			body.push(clioTheme().fg("annotation", `+ ${hidden} more`));
 		}
 	}
 
@@ -1204,11 +1207,11 @@ function trustVerdictToken(verdict: TrustVerdict): ClioToken {
 		case "grounded":
 			return "info";
 		case "unverified":
-			return "muted";
+			return "body";
 		case "compromised":
 			return "error";
 		default:
-			return "dim";
+			return "annotation";
 	}
 }
 

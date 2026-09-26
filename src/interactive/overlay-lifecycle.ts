@@ -322,6 +322,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				// Not derived from the title: that one is classified per decision
 				// axis and is one of five strings for the same modal.
 				markerId: "permission-confirm",
+				awaitingInput: true,
 				title: permissionOverlayTitle(view),
 				tone: permissionOverlayTone(view),
 				// Read per frame: the footer names what Enter does right now, and

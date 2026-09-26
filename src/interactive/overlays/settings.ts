@@ -362,7 +362,7 @@ export class SubmenuWrapper implements Component {
 		lines.push(screenTitle(theme, `  ${title}`));
 		if (this.note) {
 			for (const line of wrapTextWithAnsi(this.note, Math.max(1, width - 2))) {
-				lines.push(theme.fg("dim", `  ${line}`));
+				lines.push(theme.fg("annotation", `  ${line}`));
 			}
 		}
 		lines.push("");
@@ -372,14 +372,18 @@ export class SubmenuWrapper implements Component {
 		// `width`, the indent pushed them to `width + 2`, and the panel then cut
 		// two columns off each one and marked the cut, so every entry wore a
 		// trailing … it had not earned.
-		lines.push(...this.child.render(Math.max(1, width - 2)).map((line) => `  ${line}`));
+		lines.push(
+			...this.child
+				.render(Math.max(1, width - 2))
+				.map((line) => `  ${theme.base(this.child instanceof Input ? "inputText" : "menuOption", line)}`),
+		);
 		if (this.problem !== null) {
 			for (const line of wrapTextWithAnsi(this.problem, Math.max(1, width - 2))) {
-				lines.push(theme.fg("error", `  ${line}`));
+				lines.push(theme.fg("validationError", `  ${line}`));
 			}
 		}
 		lines.push("");
-		lines.push(theme.fg("dim", `  ${this.hint}`));
+		lines.push(theme.fg("keyboardHint", `  ${this.hint}`));
 		return lines;
 	}
 
@@ -772,23 +776,25 @@ class ScopedModelChecklist implements Component {
 	render(width: number): string[] {
 		const theme = clioTheme();
 		if (!this.rows.some((row) => row.kind === "entry")) {
-			return [theme.fg("dim", "No models are available to select.")];
+			return [theme.fg("emptyState", "No models are available to select.")];
 		}
 		const visibleRows = Math.min(10, this.rows.length);
 		const [start, end] = centeredWindow(this.rows.length, this.selectedRow, visibleRows);
 		const lines = this.rows.slice(start, end).map((row, offset) => {
-			if (row.kind === "group") return theme.style("dim", row.label, { bold: true });
+			if (row.kind === "group") return theme.style("groupHeading", row.label, { bold: true });
 			const selected = start + offset === this.selectedRow;
 			const checked = this.selectedKeys.has(row.key);
 			const pointer = `${selectionMark(selected)} `;
-			const check = theme.fg(checked ? "accent" : "dim", checked ? "[x]" : "[ ]");
-			const label = selected ? theme.style("accent", row.label, { bold: true }) : theme.fg("muted", row.label);
+			const check = theme.fg(checked ? "selectedOption" : "annotation", checked ? "[x]" : "[ ]");
+			const label = selected
+				? theme.style("selectedOption", row.label, { bold: true })
+				: theme.fg("menuOption", row.label);
 			return truncateToWidth(`${pointer}${check} ${label}`, Math.max(1, width), GLYPH.ellipsis, true);
 		});
 		const selected = this.rows[this.selectedRow];
 		if (selected?.kind === "entry") {
 			const detail = selected.available ? selected.detail : `Unavailable · ${selected.detail}`;
-			const wrapped = wrapTextWithAnsi(theme.fg("dim", detail), Math.max(1, width));
+			const wrapped = wrapTextWithAnsi(theme.fg("annotation", detail), Math.max(1, width));
 			const kept = wrapped.slice(0, 3);
 			// A capability sentence that stops at "context 131" reads as the whole
 			// fact, so the line that survives the clip says it is not.
@@ -2775,9 +2781,9 @@ function formatSettingRow(
 	if (item.targetConsole) return formatTargetConsoleRow(item, width, selected, indentWidth);
 	if (item.id === "targets.add-cta") {
 		const prefix = `${selectionMark(selected)} `;
-		const label = theme.style("accentDeep", item.label, { bold: true });
+		const label = theme.style("commandHint", item.label, { bold: true });
 		return truncateToWidth(
-			`${indent}${prefix}${label}${ROW_GAP}${theme.fg(selected ? "accent" : "muted", item.currentValue)}`,
+			`${indent}${prefix}${label}${ROW_GAP}${theme.fg(selected ? "selectedOption" : "menuDescription", item.currentValue)}`,
 			width,
 			GLYPH.ellipsis,
 			true,
@@ -2786,20 +2792,20 @@ function formatSettingRow(
 	const prefix = `${selectionMark(selected)} `;
 	const labelText = padAnsi(item.label, columns.label, GLYPH.ellipsis);
 	const label = selected
-		? theme.style("accent", labelText, { bold: true })
+		? theme.style("selectedOption", labelText, { bold: true })
 		: item.presentationKind === "group-header"
-			? theme.style("dim", labelText, { bold: true })
+			? theme.style("groupHeading", labelText, { bold: true })
 			: item.presentationKind === "action"
-				? theme.style("accentDeep", labelText, { bold: true })
-				: labelText;
+				? theme.style("commandHint", labelText, { bold: true })
+				: theme.fg("fieldName", labelText);
 	if (item.presentationKind === "group-header") {
 		return truncateToWidth(`${indent}  ${label}`, width, GLYPH.ellipsis, true);
 	}
 	const modified = !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue;
 	const marker = pending
-		? theme.fg("accent", `${GLYPH.scoped} `)
+		? theme.fg("changedValue", `${GLYPH.scoped} `)
 		: modified
-			? theme.fg("accent", `${GLYPH.scoped} `)
+			? theme.fg("changedValue", `${GLYPH.scoped} `)
 			: "  ";
 	let used = visibleWidth(indent) + 2 + columns.label + visibleWidth(ROW_GAP);
 	let pathSegment = "";
@@ -2808,7 +2814,7 @@ function formatSettingRow(
 	// is the expendable metadata; keeping it would collapse `chat+fleet` to
 	// `cha…` beside an otherwise readable health state.
 	if (columns.path > 0 && !(item.presentationKind === "status" && width < 64)) {
-		pathSegment = `${theme.fg("dim", padAnsi(item.configPath, columns.path, GLYPH.ellipsis))}${ROW_GAP}`;
+		pathSegment = `${theme.fg("configPath", padAnsi(item.configPath, columns.path, GLYPH.ellipsis))}${ROW_GAP}`;
 		used += columns.path + visibleWidth(ROW_GAP);
 	}
 	const valueWidth = Math.max(1, width - used - 2);
@@ -2817,7 +2823,7 @@ function formatSettingRow(
 		: item.presentationKind === "read-only-fact"
 			? [{ text: "— ", tone: "neutral" as const }, ...item.valueSegments]
 			: item.valueSegments;
-	const value = renderSettingValue(valueSegments, valueWidth, selected, item.readOnly);
+	const value = renderSettingValue(valueSegments, valueWidth, selected, item.readOnly, pending || modified);
 	return truncateToWidth(
 		`${indent}${prefix}${label}${ROW_GAP}${pathSegment}${marker}${value}`,
 		width,
@@ -2883,7 +2889,7 @@ function formatTargetConsoleHeader(width: number, indentWidth: number): string {
 		padAnsi(labels[column.key], column.width, GLYPH.ellipsis),
 	);
 	return truncateToWidth(
-		`${indent}  ${theme.style("dim", cells.join(ROW_GAP), { bold: true })}`,
+		`${indent}  ${theme.style("annotation", cells.join(ROW_GAP), { bold: true })}`,
 		width,
 		GLYPH.ellipsis,
 		true,
@@ -2907,8 +2913,8 @@ function formatTargetConsoleRow(
 		const padded = padAnsi(text, column.width, GLYPH.ellipsis);
 		if (column.key === "health")
 			return renderSettingValue([{ ...console.health, text: padded }], column.width, selected, false);
-		if (column.key === "id" && selected) return theme.style("accent", padded, { bold: true });
-		return theme.fg(selected ? "accent" : "muted", padded);
+		if (column.key === "id" && selected) return theme.style("selectedOption", padded, { bold: true });
+		return theme.fg(column.key === "id" ? "modelIdentity" : "fieldValue", padded);
 	});
 	return truncateToWidth(`${indent}${prefix}${cells.join(ROW_GAP)}`, width, GLYPH.ellipsis, true);
 }
@@ -2918,6 +2924,7 @@ function renderSettingValue(
 	width: number,
 	selected: boolean,
 	readOnly: boolean,
+	changed = false,
 ): string {
 	const theme = clioTheme();
 	let semantic: SettingsValueSegment | null = null;
@@ -2958,23 +2965,27 @@ function renderSettingValue(
 		if (remaining <= 0) break;
 		const text = truncateToWidth(segment.text, remaining, GLYPH.ellipsis);
 		remaining -= visibleWidth(text);
-		const token =
+		const role =
+			segment.tone === "activity"
+				? "activity"
+				: segment.tone === "unknown"
+					? "unknownValue"
+					: changed
+						? "changedValue"
+						: "fieldValue";
+		const state =
 			segment.tone === "healthy"
 				? "success"
 				: segment.tone === "degraded"
 					? "warning"
 					: segment.tone === "unhealthy"
 						? "error"
-						: segment.tone === "activity"
-							? "action"
-							: segment.tone === "unknown"
-								? "dim"
-								: readOnly
-									? "dim"
-									: selected
-										? "accent"
-										: "muted";
-		rendered.push(theme.fg(token, text));
+						: selected
+							? "selected"
+							: readOnly
+								? "readOnly"
+								: "normal";
+		rendered.push(theme.fg(role, text, state));
 	}
 	return rendered.join("");
 }
@@ -3053,6 +3064,7 @@ export class SettingsCenter implements Component {
 	}
 
 	render(width: number): string[] {
+		// Category, filter, and submenu changes share one viewport. Only terminal size changes its height.
 		const bodyHeight = Math.max(1, this.options.getBodyHeight());
 		this.normalizeSelection();
 		const lines =
@@ -3534,7 +3546,7 @@ export class SettingsCenter implements Component {
 		if (this.filterDraft === null) return [];
 		// The editor draws its own caret, so the row stops faking one with `_`.
 		this.filterInput.focused = true;
-		return this.filterInput.render(width);
+		return this.filterInput.render(width).map((line) => clioTheme().base("searchQuery", line));
 	}
 
 	private emptyFilterLines(width: number, height: number): string[] {
@@ -3542,10 +3554,10 @@ export class SettingsCenter implements Component {
 		return fitRows(
 			[
 				theme.fg(
-					"muted",
+					"menuDescription",
 					truncateToWidth(`No settings match “${this.effectiveFilterQuery()}”`, width, GLYPH.ellipsis, true),
 				),
-				theme.fg("dim", truncateToWidth("/ edit filter · empty Enter clears", width, GLYPH.ellipsis, true)),
+				theme.fg("annotation", truncateToWidth("/ edit filter · empty Enter clears", width, GLYPH.ellipsis, true)),
 			],
 			width,
 			height,
@@ -3567,21 +3579,21 @@ export class SettingsCenter implements Component {
 			const rows = [
 				screenTitle(theme, section.label),
 				"",
-				...wrapTextWithAnsi(theme.fg("muted", SETTINGS_SECTION_DESCRIPTIONS[section.id]), width),
+				...wrapTextWithAnsi(theme.fg("body", SETTINGS_SECTION_DESCRIPTIONS[section.id]), width),
 				"",
-				theme.fg("dim", "Tab or → to edit its settings"),
+				theme.fg("keyboardHint", "Tab or → to edit its settings"),
 			];
 			return fitRows(rows, width, height);
 		}
 		const body: string[] = [
 			screenTitle(theme, item.label),
 			"",
-			...wrapTextWithAnsi(theme.fg("muted", item.description), width),
+			...wrapTextWithAnsi(theme.fg("body", item.description), width),
 		];
-		if (item.help) body.push("", ...wrapTextWithAnsi(theme.fg("dim", item.help), width));
+		if (item.help) body.push("", ...wrapTextWithAnsi(theme.fg("help", item.help), width));
 		const detail = this.footerDetail(item, theme);
 		if (detail) body.push("", ...wrapTextWithAnsi(detail, width));
-		const note = wrapTextWithAnsi(theme.fg("dim", this.footerScopeNote(item)), width);
+		const note = wrapTextWithAnsi(theme.fg("annotation", this.footerScopeNote(item)), width);
 		// The note is the answer to "where does this land", so it keeps its rows
 		// and the explanation above it is what gets cut, with a marker.
 		const bodyBudget = Math.max(0, height - note.length - 1);
@@ -3633,7 +3645,7 @@ export class SettingsCenter implements Component {
 
 	private renderSectionLane(width: number, height: number): string[] {
 		const theme = clioTheme();
-		const rows = [{ line: theme.fg("dim", "Sections"), sectionId: null as SettingsSectionId | null }];
+		const rows = [{ line: theme.fg("groupHeading", "Sections"), sectionId: null as SettingsSectionId | null }];
 		rows.push(...this.sectionCatalogRows());
 		const selectedLine = Math.max(
 			0,
@@ -3663,11 +3675,11 @@ export class SettingsCenter implements Component {
 				(item) => !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue,
 			).length;
 			const badge = filtering
-				? theme.fg("accent", ` ${matchCount}`)
+				? theme.fg("positionCount", ` ${matchCount}`)
 				: modifiedCount > 0
-					? theme.fg("accent", ` ${GLYPH.scoped}${modifiedCount}`)
+					? theme.fg("changedValue", ` ${GLYPH.scoped}${modifiedCount}`)
 					: "";
-			const label = selected ? theme.style("accent", section.label, { bold: true }) : section.label;
+			const label = selected ? theme.style("selectedOption", section.label, { bold: true }) : section.label;
 			rows.push({ line: `${cursor}${label}${badge}`, sectionId: section.id });
 		}
 		return rows;
@@ -3723,7 +3735,7 @@ export class SettingsCenter implements Component {
 			const item = this.selectedItem();
 			if (item) trail.push(item.label);
 		}
-		const query = this.filterQuery.trim().length > 0 ? theme.fg("accent", `  /${this.filterQuery}`) : "";
+		const query = this.filterQuery.trim().length > 0 ? theme.fg("searchQuery", `  /${this.filterQuery}`) : "";
 		return truncateToWidth(`${screenTitle(theme, trail.join(" › "))}${query}`, width, GLYPH.ellipsis, true);
 	}
 
@@ -3741,7 +3753,7 @@ export class SettingsCenter implements Component {
 		if (!section) return [];
 		const item = this.level === "rows" ? this.selectedItem() : null;
 		const text = item ? item.description : SETTINGS_SECTION_DESCRIPTIONS[section.id];
-		const wrapped = wrapTextWithAnsi(theme.fg("muted", text), Math.max(1, width));
+		const wrapped = wrapTextWithAnsi(theme.fg("body", text), Math.max(1, width));
 		const kept = wrapped.slice(0, budget);
 		const last = kept.at(-1);
 		return wrapped.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept;
@@ -3785,42 +3797,42 @@ export class SettingsCenter implements Component {
 		const item = this.selectedItem();
 		if (!section) return [];
 		const position = sections.findIndex((entry) => entry.id === section.id) + 1;
-		const query = this.filterQuery.trim().length > 0 ? `  ${theme.fg("accent", `/${this.filterQuery}`)}` : "";
-		const positionText = `${theme.fg("dim", `section ${position}/${sections.length}`)}${query}`;
+		const query = this.filterQuery.trim().length > 0 ? `  ${theme.fg("searchQuery", `/${this.filterQuery}`)}` : "";
+		const positionText = `${theme.fg("positionCount", `section ${position}/${sections.length}`)}${query}`;
 
 		// The note is prose the operator acts on ("choose session, global, or
 		// cancel"), so it wraps under the same rule as the description above it. A
 		// truncated instruction is the one line in this footer that cannot afford
 		// to be a fragment.
-		const noteLines = (text: string, tone: "dim" | "muted"): string[] =>
+		const noteLines = (text: string, tone: "help" | "body"): string[] =>
 			wrapTextWithAnsi(theme.fg(tone, text), safeWidth);
 
 		if (this.level === "sections") {
-			const breadcrumb = `${screenTitle(theme, section.label)}  ${theme.fg("dim", "·")}  ${positionText}`;
-			const body = wrapTextWithAnsi(theme.fg("muted", SETTINGS_SECTION_DESCRIPTIONS[section.id]), safeWidth);
+			const breadcrumb = `${screenTitle(theme, section.label)}  ${theme.fg("annotation", "·")}  ${positionText}`;
+			const body = wrapTextWithAnsi(theme.fg("body", SETTINGS_SECTION_DESCRIPTIONS[section.id]), safeWidth);
 			return this.assembleFooter(
 				[separator, breadcrumb],
 				body,
-				noteLines(this.footerNoteText(), "dim"),
+				noteLines(this.footerNoteText(), "help"),
 				maxFooterLines,
 				safeWidth,
 			);
 		}
 
 		if (!item) {
-			return this.assembleFooter([separator], [], noteLines(this.footerNoteText(), "muted"), maxFooterLines, safeWidth);
+			return this.assembleFooter([separator], [], noteLines(this.footerNoteText(), "body"), maxFooterLines, safeWidth);
 		}
 
-		const breadcrumb = `${screenTitle(theme, section.label)} ${theme.fg("dim", "›")} ${theme.style("accent", item.label, { bold: true })}  ${theme.fg("dim", "·")}  ${positionText}`;
+		const breadcrumb = `${screenTitle(theme, section.label)} ${theme.fg("annotation", "›")} ${theme.style("selectedOption", item.label, { bold: true })}  ${theme.fg("annotation", "·")}  ${positionText}`;
 		const contentLines: string[] = [];
-		contentLines.push(...wrapTextWithAnsi(theme.fg("muted", item.description), safeWidth));
-		if (item.help) contentLines.push(...wrapTextWithAnsi(theme.fg("dim", item.help), safeWidth));
+		contentLines.push(...wrapTextWithAnsi(theme.fg("body", item.description), safeWidth));
+		if (item.help) contentLines.push(...wrapTextWithAnsi(theme.fg("help", item.help), safeWidth));
 		const detail = this.footerDetail(item, theme);
 		if (detail) contentLines.push(...wrapTextWithAnsi(detail, safeWidth));
 		return this.assembleFooter(
 			[separator, breadcrumb],
 			contentLines,
-			noteLines(this.footerScopeNote(item), "dim"),
+			noteLines(this.footerScopeNote(item), "help"),
 			maxFooterLines,
 			safeWidth,
 		);
@@ -3841,20 +3853,20 @@ export class SettingsCenter implements Component {
 	}
 
 	private footerDetail(item: SettingsCenterItem, theme: ReturnType<typeof clioTheme>): string {
-		const parts: string[] = [theme.fg("dim", item.affordance)];
+		const parts: string[] = [theme.fg("help", item.affordance)];
 		if (!item.readOnly && item.defaultValue !== undefined) {
 			const modified = item.currentValue !== item.defaultValue;
 			parts.push(
 				modified
-					? theme.fg("accent", `${GLYPH.scoped} changed (default: ${item.defaultValue})`)
-					: theme.fg("dim", `default: ${item.defaultValue}`),
+					? `${theme.fg("changedValue", `${GLYPH.scoped} changed`)} ${theme.fg("defaultValue", `(default: ${item.defaultValue})`)}`
+					: theme.fg("defaultValue", `default: ${item.defaultValue}`),
 			);
 		}
 		const valueMeaning = item.valueHelp?.[item.currentValue];
-		if (!item.readOnly && valueMeaning) parts.push(theme.fg("muted", valueMeaning));
+		if (!item.readOnly && valueMeaning) parts.push(theme.fg("menuDescription", valueMeaning));
 		const propagation = propagationFor(item.id);
-		if (propagation) parts.push(theme.fg("dim", propagation));
-		return parts.join(theme.fg("frame", "  ·  "));
+		if (propagation) parts.push(theme.fg("annotation", propagation));
+		return parts.join(theme.fg("border", "  ·  "));
 	}
 
 	private footerScopeNote(item: SettingsCenterItem): string {

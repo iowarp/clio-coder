@@ -233,7 +233,7 @@ interface Unit {
  */
 function fitByPriority(theme: ClioTheme, units: ReadonlyArray<Unit>, maxWidth: number, protectRank = 0): string {
 	const separator = " · ";
-	const sep = theme.fg("dim", separator);
+	const sep = theme.fg("annotation", separator);
 	const sepWidth = visibleWidth(separator);
 	const kept = units.map((unit) => ({ ...unit, dropped: false }));
 	const total = (): number => {
@@ -276,11 +276,11 @@ function workspaceLabel(theme: ClioTheme, stats: WelcomeDashboardStats, room: nu
 	if (room <= 0) return "";
 	const path = workspacePath(stats);
 	const branch = workspaceBranch(stats);
-	const paint = (text: string): string => theme.fg("muted", text);
+	const paint = (text: string): string => theme.fg("workspacePath", text);
 	if (branch === null) return paint(fitPathTail(path, room));
 
 	const dirty = stats.workspace?.dirty === true;
-	const branchText = `${theme.fg("info", branch)}${dirty ? theme.fg("warning", "*") : ""}`;
+	const branchText = `${theme.fg("branch", branch)}${dirty ? theme.fg("warning", "*") : ""}`;
 	const pathRoom = room - visibleWidth(branch) - (dirty ? 1 : 0) - 3;
 	// Keep the branch only while the path's leaf survives whole beside it.
 	if (pathRoom > 0) {
@@ -290,7 +290,7 @@ function workspaceLabel(theme: ClioTheme, stats: WelcomeDashboardStats, room: nu
 				.split("/")
 				.filter((segment) => segment.length > 0)
 				.at(-1) ?? path;
-		if (fitted.endsWith(leaf)) return `${paint(fitted)}${theme.fg("dim", " · ")}${branchText}`;
+		if (fitted.endsWith(leaf)) return `${paint(fitted)}${theme.fg("annotation", " · ")}${branchText}`;
 	}
 	return paint(fitPathTail(path, room));
 }
@@ -299,7 +299,7 @@ function routeToken(route: WelcomeRouteState): ClioToken {
 	if (route === "ready") return "success";
 	if (route === "degraded") return "warning";
 	if (route === "unavailable") return "error";
-	return "dim";
+	return "annotation";
 }
 
 function routeGlyph(route: WelcomeRouteState): string {
@@ -326,21 +326,22 @@ function routeRow(theme: ClioTheme, stats: WelcomeDashboardStats, room: number):
 	const prefix = `${theme.fg(token, routeGlyph(stats.route))} `;
 	const available = room - 2;
 	if (available <= 0) return theme.fg(token, routeGlyph(stats.route));
-	const muted = (text: string): string => theme.fg("muted", text);
+	const identity = (text: string): string => theme.fg("modelIdentity", text);
 	const reason = stats.routeReason;
-	if (reason === null) return `${prefix}${muted(truncateToWidth(target, available, GLYPH.ellipsis, false))}`;
+	if (reason === null) return `${prefix}${identity(truncateToWidth(target, available, GLYPH.ellipsis, false))}`;
 
 	const reasonWidth = visibleWidth(reason);
-	if (visibleWidth(target) + 1 + reasonWidth <= available) return `${prefix}${muted(target)} ${theme.fg(token, reason)}`;
+	if (visibleWidth(target) + 1 + reasonWidth <= available)
+		return `${prefix}${identity(target)} ${theme.fg(token, reason)}`;
 	const targetRoom = available - reasonWidth - 1;
 	if (targetRoom >= ROUTE_TARGET_FLOOR)
-		return `${prefix}${muted(truncateToWidth(target, targetRoom, GLYPH.ellipsis, false))} ${theme.fg(token, reason)}`;
+		return `${prefix}${identity(truncateToWidth(target, targetRoom, GLYPH.ellipsis, false))} ${theme.fg(token, reason)}`;
 	const floor = Math.min(ROUTE_TARGET_FLOOR, available);
 	const reasonRoom = available - floor - 1;
 	if (reasonRoom >= ROUTE_REASON_FLOOR) {
-		return `${prefix}${muted(truncateToWidth(target, floor, GLYPH.ellipsis, false))} ${theme.fg(token, truncateToWidth(reason, reasonRoom, GLYPH.ellipsis, false))}`;
+		return `${prefix}${identity(truncateToWidth(target, floor, GLYPH.ellipsis, false))} ${theme.fg(token, truncateToWidth(reason, reasonRoom, GLYPH.ellipsis, false))}`;
 	}
-	return `${prefix}${muted(truncateToWidth(target, available, GLYPH.ellipsis, false))}`;
+	return `${prefix}${identity(truncateToWidth(target, available, GLYPH.ellipsis, false))}`;
 }
 
 /**
@@ -364,11 +365,11 @@ function actionRow(theme: ClioTheme, stats: WelcomeDashboardStats, room: number)
 	if (stats.route === "unavailable") return say("error", "route unavailable · /settings targets");
 	if (stats.route === "degraded") return say("warning", "route degraded · /settings targets");
 	if (stats.projectContext === "malformed") return say("warning", "CLIO-CODER.md malformed · /context to inspect");
-	if (stats.projectContext === "none") return say("dim", "describe a task · /context init to index this repo");
-	if (stats.projectContext === "stale") return say("dim", "describe a task · /context refresh to update it");
+	if (stats.projectContext === "none") return say("guidance", "describe a task · /context init to index this repo");
+	if (stats.projectContext === "stale") return say("guidance", "describe a task · /context refresh to update it");
 	// A printed key must be a key that works, so an unbound submit says nothing.
 	const send = stats.submitKeyLabel === null ? null : `${stats.submitKeyLabel} to send`;
-	return say("dim", ["describe a task", send, "/ for commands"].filter((part) => part !== null).join(" · "));
+	return say("guidance", ["describe a task", send, "/ for commands"].filter((part) => part !== null).join(" · "));
 }
 
 /**
@@ -389,16 +390,22 @@ function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: str
 	const room = width - markWidth - 1;
 	const branch = workspaceBranch(stats);
 	const units: Unit[] = [
-		{ text: `${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${version}`)}`, rank: 3 },
 		{
-			text: theme.fg("muted", plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel, { abbreviate: false }))),
+			text: `${theme.style("wordmark", "Clio Coder", { bold: true })} ${theme.fg("annotation", `v${version}`)}`,
+			rank: 3,
+		},
+		{
+			text: theme.fg(
+				"footerIdentity",
+				plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel, { abbreviate: false })),
+			),
 			rank: 0,
 		},
-		{ text: theme.fg("muted", fitPathTail(workspacePath(stats), Math.max(8, Math.floor(room * 0.5)))), rank: 1 },
+		{ text: theme.fg("workspacePath", fitPathTail(workspacePath(stats), Math.max(8, Math.floor(room * 0.5)))), rank: 1 },
 		...(branch
 			? [
 					{
-						text: `${theme.fg("info", branch)}${stats.workspace?.dirty === true ? theme.fg("warning", "*") : ""}`,
+						text: `${theme.fg("branch", branch)}${stats.workspace?.dirty === true ? theme.fg("warning", "*") : ""}`,
 						rank: 2,
 					},
 				]
@@ -495,15 +502,17 @@ function welcomeHints(theme: ClioTheme, page: number, getKeyLabel?: WelcomeDashb
 	if (!hint) return [];
 	const keys = hint.keys.flatMap(([action, description]) => {
 		const label = getKeyLabel?.(action);
-		return label ? [`${theme.fg("accent", label)}  ${theme.fg("muted", description)}`] : [];
+		return label ? [`${theme.fg("guidance", label)}  ${theme.fg("body", description)}`] : [];
 	});
 	return [
-		theme.style("accent", hint.title, { bold: true }) +
-			theme.fg("dim", `  ${(page % WELCOME_HINTS.length) + 1}/${WELCOME_HINTS.length}`),
+		theme.style("sectionHeading", hint.title, { bold: true }) +
+			theme.fg("annotation", `  ${(page % WELCOME_HINTS.length) + 1}/${WELCOME_HINTS.length}`),
 		"",
-		...hint.commands.map(([command, description]) => `${theme.fg("accent", command)}  ${theme.fg("muted", description)}`),
+		...hint.commands.map(
+			([command, description]) => `${theme.fg("guidance", command)}  ${theme.fg("body", description)}`,
+		),
 		"",
-		...(keys.length ? [theme.fg("dim", "Keyboard shortcuts"), ...keys] : []),
+		...(keys.length ? [theme.fg("sectionHeading", "Keyboard shortcuts"), ...keys] : []),
 	];
 }
 
@@ -532,43 +541,43 @@ export function buildWelcomeDashboardLines(
 	const hintWidth = room - contentWidth - 3;
 	const hints = showHints ? welcomeHints(theme, hintPage, getKeyLabel) : [];
 	const detailWidth = sideBySide ? contentWidth - artWidth - 3 : contentWidth;
-	const field = (label: string, value: string) => `${theme.fg("dim", `${label}  `)}${value}`;
-	const tagline = theme.fg("title", WELCOME_TAGLINE);
+	const field = (label: string, value: string) => `${theme.fg("fieldName", `${label}  `)}${value}`;
+	const tagline = theme.fg("body", WELCOME_TAGLINE);
 	const taglineLines = sideBySide ? wrapTextWithAnsi(tagline, Math.max(1, detailWidth)) : [tagline];
 	const details = [
-		sideBySide ? (taglineLines[0] ?? "") : theme.style("title", "CLIO CODER", { bold: true }),
+		sideBySide ? (taglineLines[0] ?? "") : theme.style("wordmark", "CLIO CODER", { bold: true }),
 		sideBySide ? (taglineLines[1] ?? "") : tagline,
-		theme.fg("dim", "Model"),
+		theme.fg("sectionHeading", "Model"),
 		routeRow(theme, stats, detailWidth),
 		field("Workspace", workspaceLabel(theme, stats, Math.max(1, detailWidth - 11))),
-		field("Permissions", theme.fg(stats.autonomy === "yolo" ? "editorDanger" : "muted", stats.autonomy)),
-		theme.fg("dim", "Ask Clio how to use or extend her."),
-		theme.fg("dim", "Targets"),
-		theme.fg("muted", stats.targets),
+		field("Permissions", theme.fg(stats.autonomy === "yolo" ? "yoloLabel" : "fieldValue", stats.autonomy)),
+		theme.fg("body", "Ask Clio how to use or extend her."),
+		theme.fg("sectionHeading", "Targets"),
+		theme.fg("body", stats.targets),
 		// Keep the subscription field beside the wordmark, between Targets and
 		// Fleet. Wrap at the actual detail-column width instead of clipping the
 		// last accounts (especially Local) off a single concatenated line.
 		...(stats.quota === null
 			? []
 			: wrapTextWithAnsi(
-					field("Subscriptions", theme.fg("muted", sanitizeCallTargetText(stats.quota))),
+					field("Subscriptions", theme.fg("body", sanitizeCallTargetText(stats.quota))),
 					Math.max(1, detailWidth),
 				)),
-		theme.fg("dim", "Fleet"),
-		theme.fg("muted", stats.fleet),
+		theme.fg("sectionHeading", "Fleet"),
+		theme.fg("body", stats.fleet),
 	];
 
 	const rows = Array.from(
 		{ length: Math.max(details.length, hints.length, sideBySide ? wordmark.length : 0) },
 		(_, index) => {
 			const detail = details[index] ?? "";
-			// Two-tone like the logo: mint CLIO over cyan CODER.
-			const artToken = index < WELCOME_WORDMARK_SPLIT ? "accent" : "title";
+			// Cyan identity over the warm neutral product descriptor.
+			const artToken = index < WELCOME_WORDMARK_SPLIT ? "wordmark" : "brandDescriptor";
 			const art = sideBySide ? `${padAnsi(theme.fg(artToken, wordmark[index] ?? ""), artWidth)}   ` : "";
 			const content = `${art}${truncateToWidth(detail, detailWidth, GLYPH.ellipsis, false)}`;
 			return fit(
 				showHints
-					? `${padAnsi(content, contentWidth)} ${theme.fg("frame", GLYPH.rail)} ${truncateToWidth(hints[index] ?? "", hintWidth, GLYPH.ellipsis, false)}`
+					? `${padAnsi(content, contentWidth)} ${theme.fg("border", GLYPH.rail)} ${truncateToWidth(hints[index] ?? "", hintWidth, GLYPH.ellipsis, false)}`
 					: content,
 			);
 		},

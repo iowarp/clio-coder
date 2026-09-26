@@ -86,6 +86,7 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 			if (stop === "cancelled" || stop === "aborted")
 				return { text: `${GLYPH.cancelled} Cancelled${elapsed}`, toneHint: "muted" };
 			if (stop === "error") return { text: `${GLYPH.error} Failed${elapsed}`, toneHint: "error" };
+			if (stop === "length") return { text: `${GLYPH.warn} Output limit${elapsed}`, toneHint: "warn" };
 			return { text: `${GLYPH.ok} Done${elapsed}`, toneHint: "ok" };
 		}
 		default:

@@ -19,15 +19,15 @@ function codeSpan(line: string): string {
 function styleSpan(span: Span, theme: ClioTheme): string {
 	switch (span.cls) {
 		case "border":
-			return theme.fg("frame", span.text);
+			return theme.fg("border", span.text);
 		case "text":
 			return span.text;
 		case "edge":
-			return theme.fg("accent", span.text);
+			return theme.fg("guidance", span.text);
 		case "edgeLabel":
-			return theme.fg("muted", span.text);
+			return theme.fg("body", span.text);
 		case "title":
-			return theme.style("accent", span.text, { bold: true });
+			return theme.style("guidance", span.text, { bold: true });
 		case "none":
 			return span.text;
 	}

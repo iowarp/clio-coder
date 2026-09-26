@@ -13,7 +13,15 @@ import {
 import { dockBodyRows, dockMount, dockRaise, dockUnmount, dockViewportRows } from "./dock.js";
 import { keyboardOwner } from "./keyboard-owner.js";
 import { enterModal, type ModalMarkerSink } from "./modal-marker.js";
-import { type ClioToken, clioTheme, GLYPH, padAnsi, screenTitle, selectListTheme } from "./theme/index.js";
+import {
+	type ClioToken,
+	clioTheme,
+	GLYPH,
+	padAnsi,
+	screenTitle,
+	selectListTheme,
+	withThemeContext,
+} from "./theme/index.js";
 
 export const DEFAULT_SELECT_THEME: SelectListTheme = selectListTheme(clioTheme());
 
@@ -70,7 +78,7 @@ function resolveTone(tone: OverlayTone | undefined): ClioToken | undefined {
 	return typeof tone === "function" ? tone() : tone;
 }
 
-function clioFrame(text: string, token: ClioToken = "frame"): string {
+function clioFrame(text: string, token: ClioToken = "border"): string {
 	return clioTheme().fg(token, text);
 }
 
@@ -90,11 +98,11 @@ export function clioError(text: string): string {
  * as three different things.
  */
 export function selectionMark(focused: boolean): string {
-	return focused ? clioTheme().fg("accent", GLYPH.cursor) : " ";
+	return focused ? clioTheme().fg("selectedOption", GLYPH.cursor) : " ";
 }
 
 export function selectionLabel(focused: boolean, label: string): string {
-	return focused ? clioTheme().style("accent", label, { bold: true }) : label;
+	return clioTheme().fg("menuOption", label, focused ? "selected" : "normal");
 }
 
 /**
@@ -106,9 +114,14 @@ export function fitRow(text: string, width: number): string {
 	return visibleWidth(text) <= safeWidth ? text : truncateToWidth(text, safeWidth, GLYPH.ellipsis, true);
 }
 
+/** At most `height` rows of `width` cells, without adding blank rows. */
+export function fitContentRows(lines: ReadonlyArray<string>, width: number, height: number): string[] {
+	return lines.slice(0, Math.max(0, height)).map((line) => padAnsi(line, width, GLYPH.ellipsis));
+}
+
 /** Exactly `height` rows of `width` cells: fitted, then blank-filled. */
 export function fitRows(lines: ReadonlyArray<string>, width: number, height: number): string[] {
-	const out = lines.slice(0, height).map((line) => padAnsi(line, width, GLYPH.ellipsis));
+	const out = fitContentRows(lines, width, height);
 	while (out.length < height) out.push(" ".repeat(Math.max(0, width)));
 	return out;
 }
@@ -125,7 +138,7 @@ export function centeredWindow(total: number, selected: number, height: number):
 }
 
 function brandedTopBorder(label: string, innerWidth: number, tone?: ClioToken): string {
-	const frame = (text: string): string => clioFrame(text, tone ?? "frame");
+	const frame = (text: string): string => clioFrame(text, tone ?? "border");
 	const clean = label.replace(/^[┌┐└┘├┤─│\s]+/, "").replace(/[┌┐└┘├┤─│\s]+$/, "");
 	const formatted = clean.length > 0 ? `─ ${clean} ` : "─";
 	const clipped = visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, "…", true) : formatted;
@@ -303,7 +316,7 @@ function fitHint(hint: string, maxCleanWidth: number): string {
 }
 
 function brandedBottomBorder(innerWidth: number, hint?: string, tone?: ClioToken): string {
-	const frame = (text: string): string => clioFrame(text, tone ?? "frame");
+	const frame = (text: string): string => clioFrame(text, tone ?? "border");
 	if (!hint || hint.trim().length === 0) {
 		return `${frame("└")}${frame("─".repeat(innerWidth))}${frame("┘")}`;
 	}
@@ -319,7 +332,7 @@ function brandedBottomBorder(innerWidth: number, hint?: string, tone?: ClioToken
 	if (cleanIndex !== -1) {
 		const prefix = clipped.slice(0, cleanIndex);
 		const suffix = clipped.slice(cleanIndex + clean.length);
-		return `${frame("└")}${frame(prefix)}${clioTheme().fg("dim", clean)}${frame(suffix)}${frame(fill)}${frame("┘")}`;
+		return `${frame("└")}${frame(prefix)}${clioTheme().fg("keyboardHint", clean)}${frame(suffix)}${frame(fill)}${frame("┘")}`;
 	}
 	return `${frame("└")}${frame(clipped)}${frame(fill)}${frame("┘")}`;
 }
@@ -334,7 +347,7 @@ export function formatRuntimeResolutionDiagnostic(diagnostic: RuntimeResolutionD
  * and the targets hub's error rail so both surfaces color severity identically.
  */
 export function diagnosticSeverityToken(severity: RuntimeResolutionDiagnostic["severity"]): ClioToken {
-	return severity === "error" ? "error" : severity === "warning" ? "warning" : "muted";
+	return severity === "error" ? "error" : severity === "warning" ? "warning" : "body";
 }
 
 export type FrameAlign = "left" | "center" | "right";
@@ -355,7 +368,7 @@ function fitBody(lines: ReadonlyArray<string>, rowBudget: number, contentWidth: 
 	if (lines.length <= bodyBudget) return lines;
 	const kept = lines.slice(0, bodyBudget - 1);
 	const hidden = lines.length - kept.length;
-	return [...kept, clioTheme().fg("dim", truncateToWidth(`… ${hidden} more rows`, contentWidth, "", true))];
+	return [...kept, clioTheme().fg("annotation", truncateToWidth(`… ${hidden} more rows`, contentWidth, "", true))];
 }
 
 /**
@@ -420,6 +433,7 @@ export class ClioOverlayFrame implements Component {
 		 */
 		private readonly tone?: OverlayTone,
 		private readonly fullscreen = false,
+		private readonly awaitingInput?: boolean | (() => boolean),
 	) {}
 
 	setRowBudget(rows: number): void {
@@ -452,8 +466,8 @@ export class ClioOverlayFrame implements Component {
 			return cached.lines;
 		}
 		const label = titleText.length > 0 ? `─ ${titleText} ` : "─ ";
-		const side = clioFrame("│", tone ?? "frame");
-		const body = [...fitBody(childLines, this.rowBudget, contentWidth)];
+		const side = clioFrame("│", tone ?? "border");
+		const body = fitBody(childLines, this.rowBudget, contentWidth).map((line) => clioTheme().base("menuOption", line));
 		if (this.fullscreen) {
 			while (body.length < Math.max(0, this.rowBudget - 2)) body.push("");
 		}
@@ -461,7 +475,7 @@ export class ClioOverlayFrame implements Component {
 			? [
 					padAnsi(`  ${clioTitle(titleText, tone)}`, boxWidth),
 					...body.map((line) => `  ${padAnsi(line, contentWidth)}  `),
-					padAnsi(`  ${clioTheme().fg("muted", hint ?? "")}`, boxWidth),
+					padAnsi(`  ${clioTheme().fg("keyboardHint", hint ?? "")}`, boxWidth),
 				]
 			: [
 					brandedTopBorder(label, contentWidth + 2, tone),
@@ -483,17 +497,26 @@ export class ClioOverlayFrame implements Component {
 	/**
 	 * The dock path: body rows only, fitted to `bodyRows` and padded to
 	 * `contentWidth`. The composer draws the title and the hint on its own rails,
-	 * so the box borders, the alignment slack and the fullscreen padding are all
-	 * gone; what is left is exactly what the child drew.
+	 * so every command and submenu occupies the same viewport.
 	 */
+	private dockContext: string | undefined;
 	private cachedDock: { contentWidth: number; bodyRows: number; childLines: string[]; lines: string[] } | undefined;
 
 	renderDockBody(contentWidth: number, bodyRows: number): string[] {
+		const context = clioTheme().context;
+		const key = `${context.surface}:${context.mode}`;
+		if (this.dockContext !== key) {
+			this.child.invalidate();
+			this.cachedDock = undefined;
+			this.dockContext = key;
+		}
 		const safeWidth = Math.max(1, contentWidth);
 		const rows = Math.max(1, bodyRows);
 		this.rowBudget = rows + 2;
 		if (isRowBudgeted(this.child)) this.child.setBodyRows(rows);
-		const childLines = this.child.render(safeWidth);
+		const childLines = withThemeContext({ surface: "composerDock", mode: clioTheme().context.mode }, () =>
+			this.child.render(safeWidth),
+		);
 		const cached = this.cachedDock;
 		if (
 			cached !== undefined &&
@@ -503,7 +526,7 @@ export class ClioOverlayFrame implements Component {
 		) {
 			return cached.lines;
 		}
-		const lines = fitBody(childLines, rows + 2, safeWidth).map((line) => padAnsi(line, safeWidth));
+		const lines = fitRows(fitBody(childLines, rows + 2, safeWidth), safeWidth, rows);
 		this.cachedDock = { contentWidth: safeWidth, bodyRows: rows, childLines, lines };
 		return lines;
 	}
@@ -531,6 +554,10 @@ export class ClioOverlayFrame implements Component {
 
 	dockTone(): ClioToken | undefined {
 		return resolveTone(this.tone);
+	}
+
+	dockAwaitingInput(): boolean {
+		return typeof this.awaitingInput === "function" ? this.awaitingInput() : this.awaitingInput === true;
 	}
 
 	get keyboardScope() {
@@ -587,10 +614,12 @@ export function showClioOverlayFrame(
 		fullscreen?: boolean;
 		/** Keep the composer's own text beneath the body (the permission card). */
 		keepComposer?: boolean;
+		/** Only unanswered decisions receive the small attention cue. */
+		awaitingInput?: boolean | (() => boolean);
 	},
 ): OverlayHandle {
-	const { title, footerHint, tone, visible, markerId, keepComposer, ...overlayOptions } = options;
-	const frame = new ClioOverlayFrame(child, title, footerHint, 0, "left", tone, false);
+	const { title, footerHint, tone, visible, markerId, keepComposer, awaitingInput, ...overlayOptions } = options;
+	const frame = new ClioOverlayFrame(child, title, footerHint, 0, "left", tone, false, awaitingInput);
 	const entry = dockMount(tui, frame, keepComposer === true);
 	// The engine keeps this overlay for focus and input routing only. It paints
 	// nothing: the composer draws the frame inline, in normal flow, so the

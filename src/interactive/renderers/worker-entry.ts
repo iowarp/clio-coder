@@ -20,19 +20,21 @@ import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tu
 import { councilLabelText } from "../council-grid.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import {
-	type ClioToken,
+	type SemanticRole,
 	clioTheme,
 	fitUnits,
 	formatCompactMs,
+	functionText,
 	GLYPH,
 	joinFacts,
 	releaseSpaces,
+	toolFunction,
 } from "../theme/index.js";
 import { workerPhaseActivity } from "../worker-activity.js";
 import { type WorkerEntryState, type WorkerReceiptSummary, workerAskedByModel } from "../worker-stream.js";
 
 const theme = clioTheme();
-const dim = (text: string): string => theme.fg("dim", text);
+const meta = (text: string): string => theme.fg("toolMetadata", text);
 
 // The worker card follows the transcript's gutter grammar: the origin glyph
 // sits in the gutter and the card's body nests under it in the content column.
@@ -60,11 +62,11 @@ export interface WorkerEntryRenderOptions {
 /**
  * Who started the run, in the gutter: `◆` the model, `◇` the operator, `↳`
  * Clio's own helper work. Settled or running, the mark keeps its token; the
- * live state is the `●` on the row, never an orange mark.
+ * function family uses orange; the separate `●` on the row conveys live state.
  */
 function originGlyph(entry: WorkerEntryState): string {
-	if (entry.helper) return dim(GLYPH.subProcess);
-	return workerAskedByModel(entry) ? theme.fg("agent", GLYPH.workerAgent) : theme.fg("accent", GLYPH.workerHuman);
+	if (entry.helper) return functionText(theme, "shadowDispatch", GLYPH.subProcess);
+	return functionText(theme, "dispatch", workerAskedByModel(entry) ? GLYPH.workerAgent : GLYPH.workerHuman);
 }
 
 /**
@@ -82,14 +84,14 @@ function identityUnits(entry: WorkerEntryState): string[] {
 	const who =
 		entry.council !== undefined
 			? councilLabelText(theme, entry.council.label, entry.council.color)
-			: theme.fg("muted", kind === "acp" ? `${entry.agentId} (acp)` : entry.agentId);
+			: theme.fg("workerIdentity", kind === "acp" ? `${entry.agentId} (acp)` : entry.agentId);
 	return [
 		who,
-		...(entry.helper ? [dim("internal")] : []),
-		...(kind !== "acp" && route !== undefined ? [dim(route)] : []),
-		dim(`run ${entry.runId}`),
+		...(entry.helper ? [meta("internal")] : []),
+		...(kind !== "acp" && route !== undefined ? [meta(route)] : []),
+		meta(`run ${entry.runId}`),
 		// A failover keeps the card; the header says which attempt it shows.
-		...(entry.attempts.length > 1 ? [dim(`attempt ${entry.attempts.length}`)] : []),
+		...(entry.attempts.length > 1 ? [meta(`attempt ${entry.attempts.length}`)] : []),
 	];
 }
 
@@ -100,7 +102,12 @@ function identityUnits(entry: WorkerEntryState): string[] {
  */
 function councilHeader(entry: WorkerEntryState, width: number): string {
 	const round = entry.council?.round ?? 1;
-	return fitUnits(theme, `${originGlyph(entry)} `, [theme.fg("muted", "council"), dim(`round ${round}`)], width);
+	return fitUnits(
+		theme,
+		`${originGlyph(entry)} `,
+		[functionText(theme, "dispatch", "council"), meta(`round ${round}`)],
+		width,
+	);
 }
 
 /** A card's own row starts in the gutter, or, for a council member, in the content column. */
@@ -117,7 +124,7 @@ function cardPrefix(entry: WorkerEntryState): string {
  */
 function outcomeUnit(receipt: WorkerReceiptSummary): string {
 	if (receipt.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
-	if (receipt.outcome === "canceled") return theme.fg("dim", `${GLYPH.cancelled} canceled`);
+	if (receipt.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} canceled`);
 	if (receipt.abandonedDetail !== undefined) return theme.fg("error", GLYPH.error);
 	return theme.fg("error", `${GLYPH.error} ${receipt.outcomeCode ?? receipt.outcome}`);
 }
@@ -151,7 +158,7 @@ function needsInputUnit(): string {
  * progress line says what the run is doing; `/view` spells the state out.
  */
 function pendingUnit(): string {
-	return theme.fg("accent", GLYPH.running);
+	return theme.fg("activity", GLYPH.running);
 }
 
 /**
@@ -165,9 +172,11 @@ function isPending(entry: WorkerEntryState): boolean {
 }
 
 /** Wrap one annotation onto the rail, prefixed on its first row and hanging under it after. */
-function railLines(text: string, token: ClioToken, width: number): string[] {
+function railLines(text: string, token: SemanticRole, width: number): string[] {
 	const contentWidth = Math.max(1, width - RAIL_WIDTH);
-	return wrapTextWithAnsi(text, contentWidth).map((row) => `${dim(RAIL)}${theme.fg(token, releaseSpaces(row))}`);
+	return wrapTextWithAnsi(text, contentWidth).map(
+		(row) => `${theme.fg("gutter", RAIL)}${theme.base(token, releaseSpaces(row))}`,
+	);
 }
 
 function presentedContractAnswer(entry: WorkerEntryState): PresentedContractAnswer | null {
@@ -235,7 +244,15 @@ function bodySourceLines(entry: WorkerEntryState): string[] {
 function toolLine(entry: WorkerEntryState, width: number): string | null {
 	if (entry.tools.length === 0) return null;
 	const contentWidth = Math.max(1, width - RAIL_WIDTH);
-	return `${dim(RAIL)}${theme.fg("muted", fitUnits(theme, `${GLYPH.phaseTool} `, entry.tools, contentWidth))}`;
+	return `${theme.fg("gutter", RAIL)}${theme.fg(
+		"body",
+		fitUnits(
+			theme,
+			`${theme.fg("toolGlyph", GLYPH.phaseTool)} `,
+			entry.tools.map((tool) => functionText(theme, toolFunction(tool), tool)),
+			contentWidth,
+		),
+	)}`;
 }
 
 /** One rail line per failover, naming the attempt and the route it moved to. */
@@ -269,7 +286,7 @@ function failureLines(entry: WorkerEntryState, width: number): string[] {
  * unbound key never advertises a wrong chord.
  */
 function actionLine(entry: WorkerEntryState, width: number): string {
-	const identity = `${cardPrefix(entry)}${identityUnits(entry).join(dim(SEPARATOR))}`;
+	const identity = `${cardPrefix(entry)}${identityUnits(entry).join(meta(SEPARATOR))}`;
 	const status =
 		isPending(entry) || entry.receipt === undefined
 			? pendingUnit()
@@ -277,7 +294,7 @@ function actionLine(entry: WorkerEntryState, width: number): string {
 				? needsInputUnit()
 				: outcomeUnit(entry.receipt);
 	const elapsed =
-		entry.receipt?.durationMs === undefined ? "" : dim(`${SEPARATOR}${formatCompactMs(entry.receipt.durationMs)}`);
+		entry.receipt?.durationMs === undefined ? "" : meta(`${SEPARATOR}${formatCompactMs(entry.receipt.durationMs)}`);
 	const full = ` ${status}${elapsed}`;
 	let tail = visibleWidth(identity) + visibleWidth(full) <= width ? full : ` ${status}`;
 	// Reserve one identity cell. The optional hint yields before execution
@@ -345,10 +362,12 @@ function finishedAction(action: WorkerAction): string {
 	const descriptor = action.descriptor;
 	const actionText =
 		descriptor === undefined
-			? action.tool
-			: `${FINISHED_VERBS[descriptor.verb] ?? descriptor.verb}${descriptorObject(descriptor)}`;
+			? functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(action.tool))
+			: `${functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(FINISHED_VERBS[descriptor.verb] ?? descriptor.verb))}${theme.fg("toolTarget", descriptor.object === undefined ? "" : ` ${sanitizeCallTargetText(descriptorObject(descriptor))}`)}`;
 	const failure = action.outcome === "blocked" ? "blocked" : action.outcome === "error" ? "failed" : null;
-	return failure === null ? actionText : `${actionText} ${GLYPH.error} ${failure}`;
+	return failure === null
+		? actionText
+		: `${actionText} ${theme.fg(action.outcome === "blocked" ? "warning" : "error", `${GLYPH.error} ${failure}`)}`;
 }
 
 /**
@@ -400,14 +419,22 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number): st
 	// action's text and then drops the spend, never the clock.
 	const room = Math.max(1, width - RAIL_WIDTH);
 	const activity = sanitizeCallTargetText(redactSecretString(doing));
+	const current = entry.progress?.currentAction;
+	const prefix =
+		action === null ? `${glyph} ${idle}` : `${GLYPH.phaseTool} ${current?.descriptor?.verb ?? current?.tool ?? ""}`;
+	const kind = current ? toolFunction(current.tool) : entry.helper ? "shadowDispatch" : "dispatch";
+	const styledActivity = (shown: string): string => {
+		const lead = shown.slice(0, sanitizeCallTargetText(prefix).length);
+		return `${functionText(theme, kind, lead)}${theme.fg("toolTarget", shown.slice(lead.length))}`;
+	};
 	for (let kept = facts.length; kept >= 0; kept -= 1) {
 		const tail = kept === 0 ? "" : `${SEPARATOR}${facts.slice(0, kept).join(SEPARATOR)}`;
 		const activityRoom = room - tail.length;
 		if (kept > 1 && activityRoom < Math.min(24, activity.length)) continue;
 		const shown = truncateToWidth(activity, Math.max(1, activityRoom), GLYPH.ellipsis, false);
-		return `${dim(RAIL)}${theme.fg("muted", shown)}${dim(tail)}`;
+		return `${theme.fg("gutter", RAIL)}${styledActivity(shown)}${meta(tail)}`;
 	}
-	return `${dim(RAIL)}${theme.fg("muted", truncateToWidth(activity, room, GLYPH.ellipsis, false))}`;
+	return `${theme.fg("gutter", RAIL)}${styledActivity(truncateToWidth(activity, room, GLYPH.ellipsis, false))}`;
 }
 
 /**
@@ -430,7 +457,7 @@ function helperRow(
 	const status = pending
 		? pendingUnit()
 		: entry.receipt?.outcome === "canceled"
-			? theme.fg("dim", GLYPH.cancelled)
+			? theme.fg("toolMetadata", GLYPH.cancelled)
 			: failed
 				? theme.fg("error", GLYPH.error)
 				: theme.fg("success", GLYPH.ok);
@@ -438,8 +465,8 @@ function helperRow(
 	// A running row's tail is the live mark and its clock (`● 3.1s`), a settled
 	// one its outcome and duration (`✓ · 7.3s`), as on an action row.
 	const elapsed = elapsedMs === undefined ? "" : formatCompactMs(elapsedMs);
-	const tail = ` ${status}${elapsed.length === 0 ? "" : dim(pending ? ` ${elapsed}` : `${SEPARATOR}${elapsed}`)}`;
-	const lead = `${originGlyph(entry)} ${theme.fg("muted", clean(entry.agentId))}${dim(SEPARATOR)}${theme.fg("muted", clean(what))}`;
+	const tail = ` ${status}${elapsed.length === 0 ? "" : meta(pending ? ` ${elapsed}` : `${SEPARATOR}${elapsed}`)}`;
+	const lead = `${originGlyph(entry)} ${functionText(theme, "shadowDispatch", clean(entry.agentId))}${meta(SEPARATOR)}${theme.fg("body", clean(what))}`;
 	const row = `${truncateToWidth(lead, Math.max(1, width - visibleWidth(tail)), GLYPH.ellipsis, false)}${tail}`;
 	return [
 		truncateToWidth(row, width, GLYPH.ellipsis, false),
@@ -448,7 +475,7 @@ function helperRow(
 			previewBudget(detail.errorRows, terminalRows),
 			width,
 			false,
-			dim(RAIL),
+			meta(RAIL),
 			RAIL_WIDTH,
 		),
 		...(entry.receipt?.receiptUnavailable ? railLines("receipt unavailable", "warning", width) : []),
@@ -481,7 +508,7 @@ export function renderWorkerEntryLines(
 		? []
 		: railLines(
 				`quality ${trustStateWord("validationGrounding", entry.receipt?.trust?.validationGrounding.state ?? "unknown")}`,
-				"muted",
+				"body",
 				safeWidth,
 			);
 	const budget = (limit: number) => (inspect ? Number.POSITIVE_INFINITY : previewBudget(limit, options.terminalRows));
@@ -495,7 +522,7 @@ export function renderWorkerEntryLines(
 		entry.text.length === 0
 			? []
 			: (inspect ? safeWorkerAnswerText(entry.text).split("\n") : bodySourceLines(entry)).flatMap((line) =>
-					railLines(redactSecretString(line), needsInput ? "warning" : "muted", safeWidth),
+					railLines(redactSecretString(line), needsInput ? "warning" : "assistantProse", safeWidth),
 				);
 	// A running card says what it is doing on its one live line in every style,
 	// and Detailed adds the call it finished last. A settled card in Detailed
@@ -508,20 +535,20 @@ export function renderWorkerEntryLines(
 	const trail = pending
 		? recent
 				.slice(0, 1)
-				.flatMap((action) => railLines(`${GLYPH.phaseTool} last: ${finishedAction(action)}`, "muted", safeWidth))
+				.flatMap((action) => railLines(`${GLYPH.phaseTool} last: ${finishedAction(action)}`, "body", safeWidth))
 		: [
 				...(earlierCalls > 0
 					? [`… ${earlierCalls} earlier call${earlierCalls === 1 ? "" : "s"} · /view dispatch:${entry.runId}`]
 					: []),
 				...trailCalls(recent),
-			].flatMap((call) => railLines(`${GLYPH.phaseTool} ${call}`, "muted", safeWidth));
+			].flatMap((call) => railLines(`${GLYPH.phaseTool} ${call}`, "body", safeWidth));
 	const tools = detail.workerActivity && !pending && trail.length === 0 ? toolLine(entry, safeWidth) : null;
 	const failure = previewRows(
 		failureLines(entry, safeWidth),
 		budget(detail.errorRows),
 		safeWidth,
 		false,
-		dim(RAIL),
+		meta(RAIL),
 		RAIL_WIDTH,
 	);
 	const presented = presentedContractAnswer(entry)?.footer;
@@ -531,33 +558,33 @@ export function renderWorkerEntryLines(
 		...council,
 		actionLine(entry, safeWidth),
 		...(pending ? [progressLine(entry, safeWidth, options.nowMs ?? Date.now())] : []),
-		...(metrics.length ? railLines(joinFacts(metrics), "dim", safeWidth) : []),
+		...(metrics.length ? railLines(joinFacts(metrics), "toolMetadata", safeWidth) : []),
 		...(entry.helper && entry.task
 			? previewRows(
-					railLines(entry.task, "muted", safeWidth),
+					railLines(entry.task, "body", safeWidth),
 					budget(detail.invocationRows),
 					safeWidth,
 					false,
-					dim(RAIL),
+					meta(RAIL),
 					RAIL_WIDTH,
 				)
 			: []),
 		...(detail.workerRows > 0 || needsInput
-			? previewRows(summary, summaryRows, safeWidth, entry.pending, dim(RAIL), RAIL_WIDTH)
+			? previewRows(summary, summaryRows, safeWidth, entry.pending, meta(RAIL), RAIL_WIDTH)
 			: []),
-		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true, dim(RAIL), RAIL_WIDTH),
+		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true, meta(RAIL), RAIL_WIDTH),
 		...(tools ? [tools] : []),
 		...(detail.workerActivity
-			? previewRows(trail, budget(WORKER_ACTION_TRAIL_LIMIT + 1), safeWidth, true, dim(RAIL), RAIL_WIDTH)
+			? previewRows(trail, budget(WORKER_ACTION_TRAIL_LIMIT + 1), safeWidth, true, meta(RAIL), RAIL_WIDTH)
 			: []),
 		...failure,
-		...(presented ? railLines(presented, "muted", safeWidth) : []),
+		...(presented ? railLines(presented, "body", safeWidth) : []),
 		...(entry.receipt?.abandonedDetail ? railLines(entry.receipt.abandonedDetail, "warning", safeWidth) : []),
 		...(entry.receipt?.receiptUnavailable ? railLines("receipt unavailable", "warning", safeWidth) : []),
 		...(entry.droppedLines
 			? railLines(
 					`… ${entry.droppedLines} earlier lines unavailable here · /view dispatch:${entry.runId}`,
-					"muted",
+					"body",
 					safeWidth,
 				)
 			: []),

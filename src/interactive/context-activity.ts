@@ -94,7 +94,7 @@ function progressBar(theme: ClioTheme, activity: ContextActivitySnapshot, width:
 	const pct = activityProgress(activity);
 	const filled = Math.max(0, Math.min(width, Math.round(pct * width)));
 	const empty = Math.max(0, width - filled);
-	return `${theme.fg("accent", "▰".repeat(filled))}${theme.fg("dim", "▱".repeat(empty))}`;
+	return `${theme.fg("meterFill", "▰".repeat(filled))}${theme.fg("meterFree", "▱".repeat(empty))}`;
 }
 
 function phaseTrail(theme: ClioTheme, activity: ContextActivitySnapshot, width: number): string {
@@ -104,16 +104,16 @@ function phaseTrail(theme: ClioTheme, activity: ContextActivitySnapshot, width: 
 		.map((phase, index) => {
 			const label = phaseLabel(phase);
 			if (index < currentIndex) return theme.fg("success", label);
-			if (index === currentIndex && activity.status !== "completed") return theme.fg("accent", label);
-			return theme.fg("dim", label);
+			if (index === currentIndex && activity.status !== "completed") return theme.fg("contextAction", label);
+			return theme.fg("annotation", label);
 		});
-	return padAnsi(parts.join(theme.fg("frame", " › ")), width, GLYPH.ellipsis);
+	return padAnsi(parts.join(theme.fg("border", " › ")), width, GLYPH.ellipsis);
 }
 
 function statusLabel(theme: ClioTheme, activity: ContextActivitySnapshot, tick: number): string {
 	if (activity.status === "failed") return theme.fg("error", `${GLYPH.error} failed`);
 	if (activity.status === "completed") return theme.fg("success", `${GLYPH.ok} done`);
-	return theme.fg("accent", `${spinnerFrame(tick)} ${phaseLabel(activity.phase)}`);
+	return theme.fg("contextAction", `${spinnerFrame(tick)} ${phaseLabel(activity.phase)}`);
 }
 
 export function formatContextActivityIslandLines(
@@ -133,11 +133,11 @@ export function formatContextActivityIslandLines(
 					? "Context Compact"
 					: "Context";
 	const elapsedMs = Math.max(0, (activity.completedAtMs ?? now) - activity.startedAtMs);
-	const topLine = `${theme.style("accent", title, { bold: true })} ${theme.fg("dim", "·")} ${statusLabel(theme, activity, tick)} ${theme.fg("dim", "·")} ${theme.fg("info", formatCompactMs(elapsedMs))}`;
+	const topLine = `${theme.fg("harnessHeading", title)} ${theme.fg("annotation", "·")} ${statusLabel(theme, activity, tick)} ${theme.fg("annotation", "·")} ${theme.fg("toolMetadata", formatCompactMs(elapsedMs))}`;
 	const barWidth = Math.max(8, Math.min(24, bodyWidth - 10));
 	const percent = `${Math.round(activityProgress(activity) * 100)}%`.padStart(4);
-	const progressLine = `${progressBar(theme, activity, barWidth)} ${theme.fg("dim", percent)}`;
-	const message = theme.fg(activity.status === "failed" ? "error" : "muted", activity.message);
+	const progressLine = `${progressBar(theme, activity, barWidth)} ${theme.fg("counter", percent)}`;
+	const message = theme.fg(activity.status === "failed" ? "error" : "body", activity.message);
 	// The trail is compact navigation chrome and marks its cut. The message and
 	// detail are the only explanation of this operation, so they wrap in full.
 	// The progress bar is sized to fit and never cuts.
@@ -148,7 +148,9 @@ export function formatContextActivityIslandLines(
 		...wrapTextWithAnsi(message, bodyWidth).map((line) => padAnsi(line, bodyWidth)),
 	];
 	if (activity.detail) {
-		body.push(...wrapTextWithAnsi(theme.fg("dim", activity.detail), bodyWidth).map((line) => padAnsi(line, bodyWidth)));
+		body.push(
+			...wrapTextWithAnsi(theme.fg("annotation", activity.detail), bodyWidth).map((line) => padAnsi(line, bodyWidth)),
+		);
 	}
 	return frame(theme, "Context", body, width);
 }

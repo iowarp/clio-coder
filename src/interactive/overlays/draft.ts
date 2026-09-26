@@ -91,19 +91,19 @@ function candidateRows(state: DraftOverlayState, width: number): string[] {
 	const verdict = state.judge.kind === "judged" ? state.judge.verdict : null;
 	return state.candidates.map((phase, index) => {
 		const label = DRAFT_LABELS[index] ?? String(index + 1);
-		const cursor = index === state.selected ? theme.fg("accent", GLYPH.cursor) : " ";
-		const head = `${cursor} ${index === state.selected ? theme.fg("accent", label) : label}  `;
+		const cursor = index === state.selected ? theme.fg("selectedOption", GLYPH.cursor) : " ";
+		const head = `${cursor} ${index === state.selected ? theme.fg("selectedOption", label) : label}  `;
 		let body: string;
 		if (verdict && phase.kind === "drafted") {
 			const mass = verdict.probabilities[label as keyof DraftVerdict["probabilities"]] ?? 0;
 			const picked = verdict.picked === label;
 			const sound = verdict.sound[label as keyof DraftVerdict["sound"]];
 			const soundNote = sound === false ? theme.fg("warning", "  judged unsound") : "";
-			body = `${theme.fg(picked ? "success" : "dim", bar(mass))} ${mass.toFixed(2)}${picked ? theme.fg("success", `  ${GLYPH.ok} picked`) : ""}${soundNote}  ${theme.fg("dim", candidateStatus(phase))}`;
+			body = `${theme.fg(picked ? "success" : "annotation", bar(mass))} ${mass.toFixed(2)}${picked ? theme.fg("success", `  ${GLYPH.ok} picked`) : ""}${soundNote}  ${theme.fg("annotation", candidateStatus(phase))}`;
 		} else if (phase.kind === "failed") {
 			body = theme.fg("error", `${GLYPH.error} ${phase.reason}`);
 		} else {
-			body = theme.fg(phase.kind === "streaming" ? "dim" : "muted", candidateStatus(phase));
+			body = theme.fg(phase.kind === "streaming" ? "annotation" : "menuDescription", candidateStatus(phase));
 		}
 		return truncateToWidth(`${head}${body}`, width);
 	});
@@ -112,10 +112,10 @@ function candidateRows(state: DraftOverlayState, width: number): string[] {
 function judgeLine(state: DraftOverlayState): string {
 	const theme = clioTheme();
 	const judge = state.judge;
-	if (judge.kind === "waiting") return theme.fg("dim", "judge waits for every draft");
-	if (judge.kind === "judging") return theme.fg("dim", "judging…");
+	if (judge.kind === "waiting") return theme.fg("annotation", "judge waits for every draft");
+	if (judge.kind === "judging") return theme.fg("annotation", "judging…");
 	if (judge.kind === "unjudged") return theme.fg("warning", judge.reason);
-	return theme.fg("dim", `judged by ${judge.verdict.source} in ${judge.verdict.elapsedMs}ms`);
+	return theme.fg("annotation", `judged by ${judge.verdict.source} in ${judge.verdict.elapsedMs}ms`);
 }
 
 function dimLines(text: string, width: number): string[] {
@@ -126,7 +126,7 @@ function dimLines(text: string, width: number): string[] {
 			wrapped.push("");
 			continue;
 		}
-		for (const part of wrapTextWithAnsi(theme.fg("dim", line), width)) wrapped.push(part);
+		for (const part of wrapTextWithAnsi(theme.fg("annotation", line), width)) wrapped.push(part);
 	}
 	return wrapped;
 }
@@ -154,7 +154,7 @@ function selectedText(state: DraftOverlayState, width: number, maxLines: number)
 	if (!phase) return [];
 	if (phase.kind === "failed") return wrapTextWithAnsi(theme.fg("error", phase.reason), width);
 	const text = phase.text.trim();
-	if (text.length === 0) return [theme.fg("dim", "…")];
+	if (text.length === 0) return [theme.fg("annotation", "…")];
 	// A streaming candidate is a diffusion frame: noise until it settles, so it
 	// reads dim until its round completes. A settled one renders as the
 	// transcript would render the same answer.
@@ -162,7 +162,7 @@ function selectedText(state: DraftOverlayState, width: number, maxLines: number)
 	const start = Math.min(state.scroll, Math.max(0, wrapped.length - maxLines));
 	const window = wrapped.slice(start, start + maxLines);
 	const below = wrapped.length - (start + window.length);
-	if (below > 0) window.push(theme.fg("dim", `${GLYPH.down} ${below} more ${below === 1 ? "line" : "lines"}`));
+	if (below > 0) window.push(theme.fg("annotation", `${GLYPH.down} ${below} more ${below === 1 ? "line" : "lines"}`));
 	return window;
 }
 
@@ -171,7 +171,7 @@ export function formatDraftOverlayBody(state: DraftOverlayState, width: number, 
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
 	const lines: string[] = [];
-	for (const line of wrapTextWithAnsi(theme.fg("dim", `${GLYPH.user} ${state.request}`), contentWidth)) {
+	for (const line of wrapTextWithAnsi(theme.fg("annotation", `${GLYPH.user} ${state.request}`), contentWidth)) {
 		lines.push(line);
 	}
 	lines.push(rule(theme, contentWidth));

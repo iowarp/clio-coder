@@ -97,7 +97,7 @@ function renderCompactionSummaryHeader(entry: CompactionSummaryEntry, width: num
 	const label = screenTitle(theme, `[${LABEL}]`);
 	const tokens = Number.isFinite(entry.tokensBefore) ? entry.tokensBefore.toLocaleString() : "0";
 	const trigger = entry.trigger ? ` via ${entry.trigger}` : "";
-	const meta = theme.fg("dim", `~${tokens} tokens before, cont. at turn ${entry.firstKeptTurnId}${trigger}`);
+	const meta = theme.fg("toolMetadata", `~${tokens} tokens before, cont. at turn ${entry.firstKeptTurnId}${trigger}`);
 	return wrapTextWithAnsi(`${label} ${meta}`, width);
 }
 

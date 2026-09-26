@@ -93,8 +93,8 @@ function buildFullscreenLayout(parts: LayoutParts, options: LayoutOptions = {}):
 		primary: true,
 		overscroll: "chain",
 		scrollbar: options.fullscreenScrollbar ?? "auto",
-		scrollbarTrackStyle: (text) => theme.fg("frame", text),
-		scrollbarThumbStyle: () => theme.fg("frameStrong", GLYPH.barFull),
+		scrollbarTrackStyle: (text) => theme.fg("border", text),
+		scrollbarThumbStyle: () => theme.fg("scrollMarker", GLYPH.barFull),
 	});
 	options.onTranscript?.(transcript);
 	const dock = new VStack();

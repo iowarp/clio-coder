@@ -182,10 +182,10 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 		const rows: string[] = [];
 		if (!pending) {
 			rows.push(...this.messages.slice(-Math.max(1, this.bodyRows - 1)).flatMap((line) => wrapTextWithAnsi(line, width)));
-			rows.push(theme.fg("dim", this.complete ? "Enter returns to Settings" : "Reading target details…"));
+			rows.push(theme.fg("annotation", this.complete ? "Enter returns to Settings" : "Reading target details…"));
 			return fitRows(rows, width, this.bodyRows);
 		}
-		if (this.messages.length) rows.push(theme.fg("muted", this.messages.at(-1) ?? ""));
+		if (this.messages.length) rows.push(theme.fg("body", this.messages.at(-1) ?? ""));
 		const heading = pending.options.heading;
 		const headings = (typeof heading === "string" ? [heading] : [...(heading ?? [])]).filter((line) => line.trim());
 		for (const line of headings) rows.push(...wrapTextWithAnsi(stripTerminalSequences(line), width));
@@ -197,21 +197,21 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 		if (pending.kind === "text") {
 			rows.push(
 				...(pending.options.mask
-					? [theme.fg("accent", "•".repeat(this.input.getValue().length))]
-					: this.input.render(width)),
+					? [theme.fg("inputText", "•".repeat(this.input.getValue().length))]
+					: this.input.render(width).map((line) => theme.base("inputText", line))),
 			);
 		} else {
 			const choices = this.choices(pending);
-			if (pending.options.searchable) rows.push(theme.fg("dim", `Filter: ${this.input.getValue()}`));
+			if (pending.options.searchable) rows.push(theme.fg("searchQuery", `Filter: ${this.input.getValue()}`));
 			const height = Math.max(1, this.bodyRows - rows.length);
 			const [start, end] = centeredWindow(choices.length, choices.indexOf(pending.selected), height);
-			if (!choices.length) rows.push(theme.fg("muted", "No matching choices"));
+			if (!choices.length) rows.push(theme.fg("emptyState", "No matching choices"));
 			for (const index of choices.slice(start, end)) {
 				const choice = pending.options.choices[index];
 				if (!choice) continue;
 				const selected = index === pending.selected;
 				rows.push(
-					`${selectionMark(selected)} ${selectionLabel(selected, stripTerminalSequences(choice.label))}${choice.hint ? theme.fg("dim", ` · ${stripTerminalSequences(choice.hint)}`) : ""}`,
+					`${selectionMark(selected)} ${selectionLabel(selected, stripTerminalSequences(choice.label))}${choice.hint ? theme.fg("annotation", ` · ${stripTerminalSequences(choice.hint)}`) : ""}`,
 				);
 			}
 		}

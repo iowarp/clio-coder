@@ -27,13 +27,13 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: L
 				...targets.slice(start, end).map((entry, index) => {
 					const focused = start + index === selected;
 					const label = entry.label ?? entry.id;
-					const reason = entry.disabledReason ? theme.fg("dim", ` (${entry.disabledReason})`) : "";
+					const reason = entry.disabledReason ? theme.fg("annotation", ` (${entry.disabledReason})`) : "";
 					// The selection rule: cursor and label in accent, nothing else recolored.
 					// An unbound key is a blank, because `·` is the internal-run mark in a
 					// board's first column and this is a first column.
 					const mark = selectionMark(focused);
 					const name = selectionLabel(focused, label);
-					return `${mark} ${entry.key || " "}  ${name}  ${theme.fg("dim", keyLabel(entry.id))}${reason}`;
+					return `${mark} ${entry.key || " "}  ${name}  ${theme.fg("annotation", keyLabel(entry.id))}${reason}`;
 				}),
 				`${targets.length ? `${selected + 1}/${targets.length}` : "No actions in this scope"}${state.notice ? ` · ${state.notice}` : ""}`,
 			].map((line) => truncateToWidth(line, width, GLYPH.ellipsis));
