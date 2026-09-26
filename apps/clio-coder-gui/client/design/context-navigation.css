@@ -33,7 +33,7 @@
 	font-size: 13px;
 	color: var(--ink-muted);
 }
-.sidebar-area-actions .sidebar-toggle,
+.sidebar .sidebar-area-actions .sidebar-toggle,
 .sidebar-area-actions .sidebar-search {
 	width: 36px;
 	min-height: 44px;
@@ -44,7 +44,7 @@
 	flex: 0 0 36px;
 	justify-content: center;
 }
-.sidebar-area-actions .sidebar-toggle .nav-label {
+.sidebar .sidebar-area-actions .sidebar-toggle .nav-label {
 	display: none;
 }
 @media (max-width: 750px) {

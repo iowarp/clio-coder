@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
@@ -38,6 +38,11 @@ export function App({ client }: { client: Client }) {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const [navigationAt, setNavigationAt] = useState<string | null>(null);
+	const previousPath = useRef(location.pathname);
+	useEffect(() => {
+		if (previousPath.current !== location.pathname) setNavigationAt(null);
+		previousPath.current = location.pathname;
+	}, [location.pathname]);
 	const [connection, setConnection] = useState<ConnectionState>(client.token ? "Connecting…" : "Not connected");
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [helpOpen, setHelpOpen] = useState(false);
@@ -110,13 +115,29 @@ export function App({ client }: { client: Client }) {
 		[client, navigate, notices.length, queries, runningTurnId, sessionId, snapshot?.state, toggleSidebar],
 	);
 	const selectArea = (path: string) => {
-		if (path === "/sessions") setNavigationAt(null);
+		if (path === "/sessions") {
+			setNavigationAt(null);
+			if (sidebarCollapsed) toggleSidebar();
+			requestAnimationFrame(() =>
+				document.querySelector<HTMLElement>(".desktop-navigation .sidebar-projects__compose")?.focus(),
+			);
+		}
 	};
 	const navigationContent = (close?: () => void, collapsed = false) =>
 		showSessions && !collapsed ? (
 			<>
 				<div className="sidebar-area-actions">
-					<button type="button" className="sidebar-back" onClick={() => setNavigationAt(location.pathname)}>
+					<button
+						type="button"
+						className="sidebar-back"
+						onClick={(event) => {
+							const container = event.currentTarget.closest(".sidebar, .navigation-dialog");
+							setNavigationAt(location.pathname);
+							requestAnimationFrame(() =>
+								container?.querySelector<HTMLElement>('nav[aria-label="Main navigation"] a')?.focus(),
+							);
+						}}
+					>
 						<span aria-hidden="true">←</span> Navigation
 					</button>
 					<button
