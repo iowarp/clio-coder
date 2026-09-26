@@ -533,7 +533,9 @@ export function invokeAcpCommand(
 	if (outcome === "rejected") rank = NOTICE_LEVELS.length - 1;
 	// A dispatch command returns before its worker produces anything, and a
 	// silent success would read as a control that did nothing.
-	if (rule.streams === "dispatch" && lines.length === 0 && outcome === "accepted") {
+	// A command whose reply waits for its own work (`/oracle`, `/council`) has
+	// finished by then, so it is not described as starting.
+	if (rule.streams === "dispatch" && lines.length === 0 && outcome === "accepted" && pending.length === 0) {
 		push(`${rule.name} started; progress arrives as _clio-coder/event dispatch kinds`);
 	}
 	return pending.length === 0 ? Promise.resolve(finish()) : Promise.all(pending).then(finish);

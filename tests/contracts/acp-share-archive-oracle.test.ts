@@ -123,6 +123,7 @@ test("oracle dispatches the internal read-only advisor on the active record and 
 	assert.match(requests[0]?.briefing ?? "", /Should we keep the lexer\?/);
 	assert.equal(notes.length, 1);
 	assert.match(notes[0] ?? "", /Keep the lexer/);
+	assert.doesNotMatch(result.lines.join("\n"), /started; progress arrives/, "a finished oracle does not claim to be starting");
 
 	streaming = true;
 	const refused = await control.invoke({ command: "oracle", argv: ["Again?"] });
