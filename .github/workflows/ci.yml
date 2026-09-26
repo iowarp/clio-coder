@@ -61,7 +61,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - name: Contract and smoke tests (shard ${{ matrix.shard }}/3)
-        run: pnpm run test --test-shard=${{ matrix.shard }}/3
+        # `pnpm run test --test-shard=N/3` appends the flag after the file
+        # list, where node ignores it, so every shard used to run the whole
+        # suite. Place it after `--test` in the package script instead.
+        run: |
+          command="$(node -p "require('./package.json').scripts.test.replace('--test ', '--test --test-shard=${{ matrix.shard }}/3 ')")"
+          case "$command" in *" --test --test-shard=${{ matrix.shard }}/3 "*) ;; *) echo "shard flag not placed: $command" >&2; exit 1 ;; esac
+          echo "$command"
+          sh -c "$command"
 
   runtime-compatibility:
     name: ci (24)
