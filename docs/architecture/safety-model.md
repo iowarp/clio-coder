@@ -51,7 +51,7 @@ A project `.clio-coder/safety.yaml` can declare commands and path entries, but i
 
 ### Damage-control rules
 
-Hard blocks include recursive or forced `rm`, `sudo rm`, `find -delete`, `rsync --delete`, `shred`, `chmod 777`, `dd` to a device, `mkfs`, fork bombs, forced process kills, clearing shell history, force pushes, `git reset --hard`, `git clean` on directories, stash and reflog destruction, `git filter-branch`, `curl` or `wget` piped to a shell, writes to system roots, cloud deletion commands (AWS, gcloud, Firebase, Vercel, Netlify, Wrangler), and SQL `DROP`, `TRUNCATE` and unbounded `DELETE`.
+Hard blocks include recursive or forced `rm`, `sudo rm`, `find -delete`, `rsync --delete`, `shred`, `chmod 777`, `dd` to a device, `mkfs`, fork bombs, forced process kills, clearing shell history, force pushes, `git reset --hard`, forced `git clean`, stash and reflog destruction, `git filter-branch`, `curl` or `wget` piped to a shell, writes to system roots, cloud deletion commands (AWS, gcloud, Firebase, Vercel, Netlify, Wrangler), and SQL `DROP`, `TRUNCATE` and unbounded `DELETE`.
 
 Confirmation rules ask at both levels: `git checkout -- .`, `git restore .`, `git stash drop`, `git branch -D`, deleting a remote branch with `git push`, `gcloud iam policies`, SQL `DELETE` by id, `truncate -s 0`, and `:>`. The whole-worktree spellings `./`, `:/` and a pathspec after `--` count as `.` for the two git rules.
 
@@ -104,3 +104,5 @@ For git clean, push and checkout, combined short flags are expanded for damage-c
 Whole-worktree `git checkout .` and forced checkout ask for confirmation at both autonomy levels. Plus-prefixed push refspecs such as `git push origin +main` hard-block as force updates (review round 2 G).
 
 Inert quoted-argument exemptions inspect the shell command alone. A bash call’s `cwd` is path metadata and cannot turn quoted documentation into shell execution.
+
+`git clean` previews with `-n` or `--dry-run` run at both autonomy levels, including combined short flags and previews that also carry force flags. Forced deletion without a preview flag remains blocked. Each command in a shell chain is checked separately.

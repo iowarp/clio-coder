@@ -133,8 +133,8 @@ packs:
         class: git_destructive
         block: true
       - id: git-clean-force-directory
-        description: "git clean with force and directory flags deletes untracked trees"
-        pattern: "\\bgit\\s+clean\\s+(-[^\\s]*)*-[fd]"
+        description: "forced git clean deletes untracked files and trees"
+        pattern: "\\bgit\\s+clean\\b(?!(?:(?!\\s--(?:\\s|$))[^;&|\\n])*(?:\\s-(?!-)[a-zA-Z]*n[a-zA-Z]*\\b|\\s--dry-run(?![\\w-])))(?:(?!\\s--(?:\\s|$))[^;&|\\n])*\\s(?:-(?!-)[a-zA-Z]*f[a-zA-Z]*\\b|--force(?![\\w-]))"
         class: git_destructive
         block: true
       - id: git-stash-clear

@@ -37,7 +37,7 @@ const GIT_DESTRUCTIVE_PATTERNS: ReadonlyArray<NamedPattern> = [
 	{ name: "git-push-force-long", re: /\bgit\s+push\s+--force\b/i },
 	{ name: "git-push-force-short", re: /\bgit\s+push\s+-f\b/i },
 	{ name: "git-reset-hard", re: /\bgit\s+reset\s+--hard\b/i },
-	{ name: "git-clean-fd", re: /\bgit\s+clean\s+-fd?\b/i },
+	// Preview flags can follow force flags; the damage-control rule checks the whole clean command.
 	{ name: "git-checkout-dot", re: /\bgit\s+checkout\s+--\s+\./i },
 	{ name: "git-branch-D", re: /\bgit\s+branch\s+-D\b/i },
 	{ name: "git-restore-source", re: /\bgit\s+restore\s+--source\b/i },
