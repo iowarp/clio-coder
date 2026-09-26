@@ -2,7 +2,10 @@ name: clio-coder-site
 
 services:
   site:
-    build: .
+    build:
+      context: .
+      args:
+        SITE_REVISION: ${CLIO_SITE_REVISION:-}
     image: clio-coder-site:local
     container_name: clio-coder-site
     read_only: true

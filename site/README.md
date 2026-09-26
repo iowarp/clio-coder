@@ -1,67 +1,88 @@
-# Clio Coder website
+# Clio Coder public site
 
-The public website at **https://coder.iowarp.ai/** is a static Node build served
-by Nginx. Product pages and documentation are readable HTML; JavaScript adds
-themes, menus, copy controls, search, and legacy query links.
+A static public window into Clio Coder: one overview, user documentation, and practical tutorials. The site has no account flow or hosted agent service. Read [DESIGN.md](DESIGN.md) before making changes.
 
-## Build and preview
+## Live local preview
 
-```bash
+From the repository root:
+
+```sh
+node site/dev.mjs
+```
+
+Open **http://localhost:4173/**. The server builds the site, regenerates the public guides from current repository files, watches source changes, and reloads connected browsers. Use `node site/dev.mjs --snapshot` to preview a pinned documentation snapshot without regenerating it. It listens on all local interfaces so a forwarded browser can reach it. Pass `--host 127.0.0.1` for loopback-only access, or `--port 4180` for another port. Generated output is in ignored `.preview/` directories; verification screenshots stay outside the public tree.
+
+## Design and prose rules
+
+- `design-system.json` is the sanctioned palette, semantic theme map, shared motion tokens, and copy policy.
+- `tokens.mjs` generates `css/brand.css`; component CSS cannot introduce literal colors.
+- `DESIGN.md` documents the selected Clio identity, IOWarp references, naming, writing, copyright, and accessibility rules.
+- `partials.html` supplies one header and footer. Primary navigation is Overview, Docs, Tutorials.
+- `policy.mjs` runs on every build and checks palette drift, color declarations, motion tokens, public copy length, disallowed phrases, navigation, attribution, and documentation boundaries.
+
+The identity uses IOWarp’s existing cyan Clio ring with a copper center. `assets/brand/` holds its high-quality original and the IOWarp lattice mark. Its provenance file records source artwork and hashes. Legacy terminal-orbit artwork remains in the repository for compatibility but is not published by the new site. Export the selected artwork, tokens, fonts, and licenses for another Clio project with `node site/export-brand.mjs --out /tmp/clio-brand-kit`. The kit contains no site layout code.
+
+After an explicitly authorized token change:
+
+```sh
+node site/tokens.mjs
+```
+
+## Generated documentation
+
+`public-docs.json` explicitly selects user-facing repository sources, short labels, task groups, and optional source sections. `sync-docs.py` produces the Markdown snapshot, search index, and provenance manifest. It never copies the architecture corpus, generated Wiki, audits, or agent work journals. Selected sections must still exist, so upstream heading changes cannot silently empty a guide. Omitted source sections remain accessible through repository links.
+
+```sh
+python3 site/sync-docs.py --worktree
 python3 site/sync-docs.py --check
-clio_site_preview=$(mktemp -d)
-node site/build.mjs --out "$clio_site_preview/public"
-python3 site/check.py "$clio_site_preview/public"
-python3 -m http.server 4173 --bind 127.0.0.1 --directory "$clio_site_preview/public"
 ```
 
-Open http://127.0.0.1:4173/. The builder shares navigation and footer markup,
-renders documentation, and generates canonical URLs, structured data, search
-metadata, and the sitemap. Output is generated; use an empty directory or one
-carrying the builder's ownership marker. Remove the preview directory afterward.
+Working-tree snapshots record a fixed source base, branch, full input hashes, and generated document hashes. `--check` validates current source bytes, selected sections, index, and manifest using the recorded base; it does not compare that base with a new HEAD. Committing an unchanged snapshot therefore does not invalidate it. The base is provenance, not a claim that modified source bytes were committed there.
 
-## Content and media
+For a future release snapshot, after its matching tag exists:
 
-`product.json` supplies version, origin, and repository identity. Product pages
-use self-hosted IBM Plex Sans and Mono, semantic colors in `css/brand.css`, and
-layout rules in `css/site.css`. Canonical image masters live in root `assets/`;
-`assets/media-manifest.json` maps their website copies. The homepage uses the
-terminal and browser captures; card templates remain in `cards/`.
-
-```bash
-python3 scripts/media-assets.py --sync
-python3 scripts/media-assets.py --check
-node site/render-cards.mjs
+```sh
+python3 site/sync-docs.py --source-ref v<VERSION>
 ```
 
-## Documentation snapshot
+`product.json.version` describes the documentation source; `publishedVersion` describes the released npm package. They intentionally differ during development. The overview and structured source metadata use `version`, explicitly set to v0.5.7 for this website launch. The source version link points to the pinned repository snapshot. Keep `publishedVersion` accurate to the npm registry; update it only after confirming the published package. Installation always uses the actual npm package, with no link to an unpublished release tag.
 
-`content/docs/` contains the authored product corpus declared in
-`docs/corpus.json`. The snapshot manifest records the release ref, source commit,
-and file hashes. The independent generated development Wiki is published
-separately. After creating the matching release tag:
+A website can also pin the reviewed source without creating a package release:
 
-```bash
-clio_release_version=$(node -p 'require("./package.json").version')
-python3 site/sync-docs.py --source-ref "v${clio_release_version}"
+```sh
+python3 site/sync-docs.py --snapshot-ref <COMMIT>
 python3 site/sync-docs.py --check
-pnpm run release:readiness -- --release
 ```
 
-Documentation source links resolve to that release. Learning labs are written
-workflows; `content/recordings.json` supplies optional published video IDs.
+Repository snapshots use a full commit as their source reference and validate against its original document bytes. They remain valid after later working-tree changes. Production accepts an immutable repository or release snapshot and rejects a working-tree draft.
+
+## Tutorials and recordings
+
+Write a useful Markdown article in `content/tutorials/` and register it in `content/tutorials.json`. Supply a slug, title, description, category, reading time, author, image dimensions, alt text, and source filename. The builder creates both its article and listing entry. An optional `video` field accepts a real YouTube ID and uses the privacy-enhanced embed domain. Publish captions with the recording. Empty media entries and fictional product demonstrations are not allowed.
+
+## Build and verify
+
+```sh
+python3 site/sync-docs.py --check
+node site/tokens.mjs --check
+node site/policy.mjs
+node site/build.mjs
+python3 site/check.py
+python3 site/tests/sync-docs.test.py
+python3 site/image-variants.py --check
+pnpm exec biome check site
+node site/browser-check.mjs
+node site/performance-check.mjs
+```
+
+The static checker validates the link graph, anchors, metadata, source provenance, and rendered documentation. The browser check covers both themes at 320, 390, 768, 850, 1024, and 1440px; all guides receive desktop accessibility checks. It exercises repeated copying, search keyboard navigation, active contents links, FAQ controls, screenshot viewing and zoom, menu keyboard behavior, saved themes, runtime reduced-motion changes, touch tablet rotation, redirects, 404 handling, and navigation without JavaScript. It writes screenshots and results to `/tmp/clio-site-review` by default. Pass `--url`, `--out`, or `--chrome` to override defaults; browser dependencies are reused from the GUI workspace.
+
+Responsive images and square browser icons are generated from approved originals with `python3 site/image-variants.py`; `image-variants.json` records the hashes and sizes. Every build verifies these assets and adds responsive image attributes. The full-size viewer capture loads only when opened. The performance check measures cold-cache mobile FCP, LCP, layout shift, and initial asset transfers at 2Mbps download, 100ms latency, and 4x CPU slowdown. It writes `/tmp/clio-site-review/performance.json` and enforces documented budgets. Run it without another browser audit in parallel. These local measurements do not represent field Core Web Vitals.
+
+`node site/build.mjs --out <directory>` supports an alternative output path. It refuses to replace a nonempty directory without its ownership marker. Output contains only published HTML, selected browser scripts and styles, product assets, fonts and licenses, search metadata, and the source manifest.
 
 ## Deployment
 
-The existing route is Cloudflare → Blade Tunnel → Traefik → the site container.
-For infrastructure operations, read the local HLab skill at
-`/home/akougkas/dotfiles/homelab/skills/hlab/SKILL.md`.
+The existing production route is Cloudflare → Blade Tunnel → Traefik → Nginx. The owner authorized this website launch with v0.5.7 metadata. Website deployment is independent of npm publication, release tags, and GitHub Releases. Do not cut a package release through this workflow.
 
-```bash
-bash site/deploy-blade.sh
-```
-
-The script builds and checks the site, synchronizes its source to Blade, updates
-only the `clio-coder-site` Compose service, and validates Nginx and the origin
-response. Check the HTTPS pages, mobile layout, themes, documentation, search,
-and install links after deployment. DNS and tunnel configuration are managed
-separately.
+When deployment is authorized, read `/home/akougkas/dotfiles/homelab/skills/hlab/SKILL.md`, generate an immutable repository or matching release snapshot, commit the complete site, run the checks above, and use `bash site/deploy-blade.sh`. The script archives the exact committed site, validates it, saves the previous source and running image, checks the new Nginx configuration, and publishes only the site Compose service. A failed origin check restores the previous website. The running image and HTTP headers identify its Git revision. Rollback backups remain under `~/webhosting/clio-coder-site-backups/<commit>` on Blade. DNS and tunnel configuration are managed separately. The Docker build uses the checked site snapshot and does not read outside `site/`.
