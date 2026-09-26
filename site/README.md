@@ -24,9 +24,16 @@ Documentation snapshots are under `content/docs/`. Public docs are release-pinne
 
 The installed package remains the authority for its own version. Website “view source” links use the manifest's declared release ref rather than `main`, and every rendered docs page displays that provenance. The written labs in `learn.html` remain useful without recordings. Add a supplied YouTube ID to `content/recordings.json`; the builder renders only valid, published recordings and omits empty entries.
 
-## Social previews
+## Media and social previews
 
-The templates in `cards/` use the same fonts, palette, and hierarchy as the website. Regenerate the four PNG assets with browser screenshots after changing their templates or typography. Render `link.html` and `link-light.html` at 1200 × 630, and `square.html` and `square-light.html` at 1080 × 1080. Wait for `document.fonts.ready` before capture. `share.html` links to the exported images.
+Root `assets/` is the canonical home for brand and product-media masters. `assets/media-manifest.json` records provenance, dimensions, role, channels, alt-text seeds, real or illustrative status, approval, supersession, delivery copies, and social export hashes. Check or synchronize declared website and GUI copies with:
+
+```bash
+python3 scripts/media-assets.py --check
+python3 scripts/media-assets.py --sync
+```
+
+The templates in `cards/` use the same fonts, palette, and hierarchy as the website. Regenerate all four PNGs with `node site/render-cards.mjs`; pass `--chrome <path>` when Chrome is not at `/usr/bin/google-chrome`. The renderer uses the GUI workspace's pinned `playwright-core`, sets link cards to 1200×630 and square cards to 1080×1080, waits for `document.fonts.ready`, and records source/export hashes. Run the media check afterward. `share.html` links to dark and light exports and labels the workflow artwork illustrative. See `assets/README.md` for capture promotion and retention rules.
 
 ## Production
 
