@@ -92,7 +92,7 @@ Each file owns one rendering concern:
 The `ChatPanel` calls `renderToolExecution` (full render) and `renderToolPreview` (bounded preview) for tool segments. The flow through `renderToolExecution`:
 
 1. **Header line**: `sublineParts` resolves the row via `resolveToolRow` (from `src/tools/presentation.ts`), which classifies the tool by name and admission action class. The header carries the class mark, verb, object, scope, inline scalar args, and resource label.
-2. **Operator grant**: `operatorGrantRows` renders a dim `allowed by you · <axis>` row when the call was preceded by an operator approval (BT-003).
+2. **Operator grant**: `operatorGrantRows` renders a dim `allowed by you · <axis>` row when the call was preceded by an operator approval.
 3. **Mutation diff**: For `mutate` class tools with a successful result, `renderMutationDiffBlock` calls `renderDiffLines` (`src/interactive/renderers/diff.ts`) to parse the diff text into numbered added/removed rows, optionally with intra-line diff highlighting.
 4. **Bash echo**: For `execute` class tools with a `command` arg, `renderBashResultBlock` emits a `$ <cmd>` line with syntax highlighting via `highlightBashCommand`, then the unwrapped output.
 5. **Result block**: `renderResultBlock` calls `unwrapResultEnvelope` (which handles the `{ content: [...] }` envelope from pi-agent-core), then `renderStructuredOutputRows` (which tries `tryRenderJson` and `tryRenderXml`) or falls back to `renderOutputRows`.
@@ -144,7 +144,7 @@ Every renderer is pure: no I/O, no console writes, no module-level mutable state
 
 ### Worker answer admission
 
-The `presentWorkerContractAnswer` gate in `worker-answer.ts` enforces that a contract summary is shown only when the receipt's integrity check passes and the contract conformance is `"pass"`. The test `tests/contracts/completed-worker-presentation.test.ts` verifies that a `tampered` receipt (modified after sealing), a `missing-ledger` receipt, and a `retired` receipt all produce the raw output with a note that the seal is broken or unavailable, never the structured summary. The `worker-card-mutation-report.test.ts` test (BT-011) verifies that a mutation report that outgrew the live tail settles into prose, not raw JSON.
+The `presentWorkerContractAnswer` gate in `worker-answer.ts` enforces that a contract summary is shown only when the receipt's integrity check passes and the contract conformance is `"pass"`. The test `tests/contracts/completed-worker-presentation.test.ts` verifies that a `tampered` receipt (modified after sealing), a `missing-ledger` receipt, and a `retired` receipt all produce the raw output with a note that the seal is broken or unavailable, never the structured summary. The `worker-card-mutation-report.test.ts` test verifies that a mutation report that outgrew the live tail settles into prose, not raw JSON.
 
 ### Code-ink closed mapping
 
@@ -169,7 +169,7 @@ The transcript uses a two-cell gutter plus a content column. Action rows use the
 
 ### `tests/contracts/worker-card-mutation-report.test.ts`
 
-- **BT-011: A mutation report that outgrew the live tail settles into prose**: Constructs a ~5 KB mutation report, streams it through a worker stream (which cuts the live tail), then settles it. Asserts that `renderWorkerEntryLines` produces prose (`changed lib/math.js, test/math.test.js`) not raw JSON, and that the sealed answer lost no bytes.
+- **A mutation report that outgrew the live tail settles into prose**: Constructs a ~5 KB mutation report, streams it through a worker stream (which cuts the live tail), then settles it. Asserts that `renderWorkerEntryLines` produces prose (`changed lib/math.js, test/math.test.js`) not raw JSON, and that the sealed answer lost no bytes.
 
 ### `tests/contracts/completed-worker-presentation.test.ts`
 
@@ -179,7 +179,7 @@ The transcript uses a two-cell gutter plus a content column. Action rows use the
 
 ### `tests/contracts/fleet-island-activity.test.ts`
 
-- **BT-007: The island and the card name the same activity**: For each progress phase (`starting`, `thinking`, `writing`, `tool`), asserts that the `formatTaskIslandLines` output and the `renderWorkerEntryLines` output both contain the phase word and neither says `· running ·`.
+- **The island and the card name the same activity**: For each progress phase (`starting`, `thinking`, `writing`, `tool`), asserts that the `formatTaskIslandLines` output and the `renderWorkerEntryLines` output both contain the phase word and neither says `· running ·`.
 
 ### `tests/contracts/tui-workbench-ergonomics.test.ts`
 
@@ -202,7 +202,7 @@ The transcript uses a two-cell gutter plus a content column. Action rows use the
 
 **Do not change the wrap discipline without updating `hasToolBody`**: The `hasToolBody` function in `tool-execution.ts` checks whether any row starts with `RAIL_DIM` or `RAIL_ERROR`. The `ChatPanel` uses it to decide whether to insert a blank line around a tool block. A change to the rail prefix (e.g., from `  │ ` to something else) must update `hasToolBody` in the same change.
 
-**Do not weaken the `presentWorkerContractAnswer` gate**: The three-part gate (`settled && complete && contract.conformance === "pass"`) is the only thing preventing a live or partially-sealed worker from acquiring a structured summary. The `worker-card-mutation-report.test.ts` (BT-011) regression exists because a stale `droppedBytes` count caused a settled answer to be misclassified as truncated.
+**Do not weaken the `presentWorkerContractAnswer` gate**: The three-part gate (`settled && complete && contract.conformance === "pass"`) is the only thing preventing a live or partially-sealed worker from acquiring a structured summary. The `worker-card-mutation-report.test.ts` regression exists because a stale `droppedBytes` count caused a settled answer to be misclassified as truncated.
 
 **Do not change the `MODEL_NOTE_LINE` regex without updating `splitModelNotes`**: The regex `/^\[middleware:[a-z-]+\] (.+)$/u` matches the tag format that the middleware domain writes. If the middleware changes its tag format, both the regex and the `splitModelNotes` function must change together, and the test in `rendering-invariants.test.ts` (`states guidance middleware attached for the model as one note`) must pass.
 

@@ -3,7 +3,7 @@
 	"updatedAt": "2026-09-26T07:16:59.978Z",
 	"gitHead": null,
 	"model": "dynamo/qwopus3.8-27b-flash@q5_k_m",
-	"contentHash": "85e206fccaf5a452343b8394c4b688d0892e1916768de16c54f4240b0aa3f2ee",
+	"contentHash": "553afe566a2bc8b019f26f2e85b002bef2336bca1adeee8f4dd8996692f23ffa",
 	"pages": [
 		{
 			"path": "apps/clio-coder-gui/client.md",

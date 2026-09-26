@@ -417,7 +417,7 @@ usage overlay (`src/interactive/usage-overlay.ts`), and the dispatch board
   the selected runtime "claude" shows "weekly 91% left" and no other account;
   switching to a local target removes quota rows entirely.
 
-`tests/contracts/quota-local-target.test.ts` (tag BT-006): with an isolated env
+`tests/contracts/quota-local-target.test.ts`: with an isolated env
 and empty provider list, configuring a target with runtime `openrouter` yields
 no local row from `peek()`/`read()`, switching the same target to runtime
 `ollama` yields exactly one `local` snapshot, and `includeLocal: false` forces
