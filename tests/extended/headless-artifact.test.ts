@@ -84,9 +84,65 @@ function blockedThenRead(actionClass: "execute" | "write"): ChatLoopEvent[] {
 	];
 }
 
+function hostChecks(checks: Array<{ check: string; outcome: "ok" | "error" }>): ChatLoopEvent[] {
+	return checks.flatMap(({ check, outcome }, index) => [
+		{ type: "tool_execution_start", toolName: "verify", toolCallId: `host-${index}`, args: { check } },
+		{
+			type: "tool_execution_end",
+			toolName: "verify",
+			toolCallId: `host-${index}`,
+			outcome,
+			isError: outcome !== "ok",
+			result: { content: [{ type: "text", text: "Host check result" }], details: {} },
+		} as ChatLoopEvent,
+	]);
+}
+
 // Event-fold coverage, not a provider reproduction. Unlike the original
 // local diagnostic, this exercises real receipt persistence and integrity too.
 for (const scenario of [
+	{
+		name: "host check seals separate observed validation facts",
+		events: [
+			...hostChecks([{ check: "test", outcome: "ok" }]),
+			assistant("stop", [{ type: "text", text: "Host test passed." }]),
+		],
+		code: 0,
+		outcome: "succeeded",
+		calls: 1,
+		verification: "verified",
+		facts: [true],
+	},
+	{
+		name: "host check rerun supersedes its own earlier failure",
+		events: [
+			...hostChecks([
+				{ check: "test", outcome: "error" },
+				{ check: "test", outcome: "ok" },
+			]),
+			assistant("stop", [{ type: "text", text: "Host test passed on rerun." }]),
+		],
+		code: 0,
+		outcome: "succeeded",
+		calls: 1,
+		verification: "verified",
+		facts: [true],
+	},
+	{
+		name: "a passing host check cannot clear a different failed check",
+		events: [
+			...hostChecks([
+				{ check: "test", outcome: "error" },
+				{ check: "typecheck", outcome: "ok" },
+			]),
+			assistant("stop", [{ type: "text", text: "Host typecheck passed; tests failed." }]),
+		],
+		code: 0,
+		outcome: "succeeded",
+		calls: 1,
+		verification: "unverified",
+		facts: [false, true],
+	},
 	{
 		name: "native read cannot certify recovery of denied execution",
 		events: blockedThenRead("execute"),
@@ -292,6 +348,11 @@ for (const scenario of [
 				strictEqual(journal.receipts.length, 1);
 				const receipt = journal.receipts[0];
 				ok(receipt);
+				if ("verification" in scenario) {
+					deepStrictEqual(receipt.verification, { state: scenario.verification, basis: "validation-tool" });
+					deepStrictEqual(receipt.quality.typedValidations.map((fact) => fact.passed).sort(), scenario.facts);
+					ok(receipt.quality.typedValidations.every((fact) => fact.sourceId === "tool:verify"));
+				}
 				const envelope = journal.envelopes.get(receipt.runId);
 				ok(envelope);
 				strictEqual(envelope.exitCode, scenario.code);

@@ -13,7 +13,13 @@ import { getTerminationCoordinator } from "../../core/termination.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { runStatusForOutcome } from "../../domains/dispatch/outcome.js";
-import { createRunReceiptQuality } from "../../domains/dispatch/receipt-findings.js";
+import {
+	createRunReceiptQuality,
+	deriveReceiptVerification,
+	typedValidationFactsFromVerifyCalls,
+	type VerifyCallOutcome,
+	verifyCheckIdentity,
+} from "../../domains/dispatch/receipt-findings.js";
 import { newRunId, openLedger } from "../../domains/dispatch/state.js";
 import type {
 	RunKind,
@@ -117,6 +123,8 @@ interface HeadlessMainAgentResult {
 
 interface HeadlessMainAgentReceiptStats {
 	toolStats: Map<string, ToolCallStat>;
+	pendingVerifyCalls: Map<string, string | null>;
+	verifyCalls: VerifyCallOutcome[];
 	skillActivations: SkillActivation[];
 	usage: RunUsageSummary | null;
 	/** The decision axis, counted the way a worker receipt counts it. */
@@ -256,6 +264,10 @@ function durationMsFromEvent(event: ChatLoopEvent): number | undefined {
 }
 
 function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEvent): void {
+	if (event.type === "tool_execution_start" && event.toolName === ToolNames.Verify) {
+		stats.pendingVerifyCalls.set(event.toolCallId, verifyCheckIdentity(event.args));
+		return;
+	}
 	if (event.type !== "tool_execution_end") return;
 	const tool = typeof event.toolName === "string" && event.toolName.length > 0 ? event.toolName : "tool";
 	const stat = stats.toolStats.get(tool) ?? blankToolStat(tool);
@@ -264,6 +276,20 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 	if (durationMs !== undefined) stat.totalDurationMs += durationMs;
 	// Registry settlement is authoritative; legacy producers only expose isError.
 	const outcome = (event as { outcome?: unknown }).outcome;
+	if (tool === ToolNames.Verify) {
+		stats.verifyCalls.push({
+			check: stats.pendingVerifyCalls.get(event.toolCallId) ?? null,
+			outcome:
+				outcome === "ok" || outcome === "error" || outcome === "blocked"
+					? outcome
+					: outcome === undefined
+						? event.isError
+							? "error"
+							: "ok"
+						: null,
+		});
+		stats.pendingVerifyCalls.delete(event.toolCallId);
+	}
 	if (outcome === "blocked") stat.blocked += 1;
 	else if (outcome === "error") stat.errors += 1;
 	else if (outcome === "ok") stat.ok += 1;
@@ -519,6 +545,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 	});
 	if (!updated) return;
 	const toolStats = sortedToolStats(input.stats.toolStats);
+	const typedValidations = typedValidationFactsFromVerifyCalls(toolStats, input.stats.verifyCalls);
 	const receipt: RunReceiptDraft = {
 		runId: envelope.id,
 		agentId: "main-agent",
@@ -532,10 +559,8 @@ async function recordHeadlessMainAgentReceipt(input: {
 		outcome,
 		outcomeDetail,
 		lineage,
-		// A print-mode session run is the main agent, not a dispatched worker: no
-		// validation tool gates it, and its cost comes from the session usage
-		// meter rather than a resolved worker pricing table.
-		verification: { state: "unverified", basis: "no-validation-tool" },
+		// Host checks belong to this run, independently of any worker it dispatched.
+		verification: deriveReceiptVerification({ toolStats, typedValidations }),
 		routingIntent: {
 			posture: "manual",
 			maxCostUsd: null,
@@ -545,7 +570,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 			locality: "any",
 			failover: "none",
 		},
-		quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null }),
+		quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, typedValidations }),
 		costProvenance: "unknown",
 		startedAt: input.startedAt,
 		endedAt: input.endedAt,
@@ -614,6 +639,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	};
 	const receiptStats: HeadlessMainAgentReceiptStats = {
 		toolStats: new Map<string, ToolCallStat>(),
+		pendingVerifyCalls: new Map(),
+		verifyCalls: [],
 		skillActivations: [],
 		usage: null,
 		decisions: { allowed: 0, blocked: 0, permissionRequested: 0 },
