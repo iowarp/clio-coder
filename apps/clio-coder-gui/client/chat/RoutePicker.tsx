@@ -27,7 +27,12 @@ function RouteFace({ route }: { route: RouteFacts }) {
 			<span className="route-chip__glyph" aria-hidden="true">
 				{TONE_GLYPHS[route.tone]}
 			</span>
-			<span className="route-chip__text">{route.text}</span>
+			<span className="route-chip__text">{route.model ?? route.text}</span>
+			{route.thinking ? (
+				<span className="route-chip__thinking" aria-hidden="true">
+					{route.thinking}
+				</span>
+			) : null}
 			<span className="sr-only">{route.spoken}</span>
 		</>
 	);
