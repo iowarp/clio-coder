@@ -1,4 +1,4 @@
-import { isReadOnlyCall } from "../../core/read-only-calls.js";
+import { dispatchTargetsScout, isReadOnlyCall } from "../../core/read-only-calls.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { DispatchContract } from "../dispatch/contract.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../dispatch/ownership.js";
@@ -29,8 +29,6 @@ export const READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID = "nudge.read-only-expl
 export const READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD = 9;
 export const UNBACKED_WORKER_CLAIM_REGISTRATION_ID = "rail.unbacked-worker-claim";
 
-const SCOUT_AGENT_ID = "scout";
-
 const EXPLORATION_NUDGE_TURN_LIMIT = 32;
 const NO_TURN = "no-turn";
 
@@ -45,71 +43,9 @@ export function buildReadOnlyExplorationMessage(): string {
 	return `[Clio Coder] This turn used ${READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD}+ read-only exploration calls without a successful Scout dispatch; delegate broad repository reconnaissance to Scout when more exploration is needed. If Scout already failed, confirm its useful leads with focused reads and synthesize; do not repeat its entire search.`;
 }
 
-function stringValue(value: unknown): string | null {
-	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function recordValue(value: unknown): Readonly<Record<string, unknown>> | null {
-	return value !== null && typeof value === "object" && !Array.isArray(value)
-		? (value as Readonly<Record<string, unknown>>)
-		: null;
-}
-
-/**
- * Resolve the effective agents for an ordinary dispatch using the same weak-
- * model task normalization and agent aliases as the live dispatch parser.
- * Keep this small mirror local: middleware must not depend on the tool layer.
- */
-function ordinaryDispatchAgents(args: MiddlewareHookInput["toolArgs"]): ReadonlyArray<string> | null {
-	if (
-		!args ||
-		args.list === true ||
-		args.apply_winner !== undefined ||
-		(args.review !== undefined && args.review !== false) ||
-		args.mode === "compete"
-	) {
-		return null;
-	}
-
-	let tasks: unknown = args.tasks;
-	if (typeof tasks === "string") {
-		const raw = tasks.trim();
-		if (raw.startsWith("[") || raw.startsWith("{")) {
-			try {
-				tasks = JSON.parse(raw) as unknown;
-			} catch {
-				// Leave malformed JSON in its original shape, as the tool does.
-			}
-		}
-	}
-	if (recordValue(tasks) !== null || typeof tasks === "string") tasks = [tasks];
-	if (tasks === undefined && typeof args.task === "string") tasks = [{ task: args.task }];
-	if (!Array.isArray(tasks) || tasks.length === 0) return null;
-
-	const sharedAgent = stringValue(args.agent) ?? stringValue(args.agent_id) ?? "coder";
-	const agents: string[] = [];
-	for (const task of tasks) {
-		if (typeof task === "string") {
-			if (stringValue(task) === null) return null;
-			agents.push(sharedAgent);
-			continue;
-		}
-		const record = recordValue(task);
-		if (!record || stringValue(record.task) === null) return null;
-		// Task-local agent/agent_id overrides the shared default. `agentId` is
-		// intentionally ignored because the production parser does not accept it.
-		agents.push(stringValue(record.agent) ?? stringValue(record.agent_id) ?? sharedAgent);
-	}
-	return agents;
-}
-
-function dispatchTargetsScout(args: MiddlewareHookInput["toolArgs"]): boolean {
-	return ordinaryDispatchAgents(args)?.some((agent) => agent.toLowerCase() === SCOUT_AGENT_ID) === true;
-}
-
 function isNonRepositoryContextCall(input: MiddlewareHookInput): boolean {
 	if (input.toolName !== ToolNames.Context) return false;
-	const scope = stringValue(input.toolArgs?.scope)?.toLowerCase();
+	const scope = typeof input.toolArgs?.scope === "string" ? input.toolArgs.scope.trim().toLowerCase() : null;
 	return scope !== null && scope !== "workspace";
 }
 
@@ -152,7 +88,10 @@ function markScoutSuccess(state: ExplorationTurnState): void {
  * advisory per user turn: a later model round of the same turn re-counts its
  * own calls but stays silent once the operator has been told.
  */
-export function createReadOnlyExplorationNudgeRegistration(): MiddlewareHookRegistration {
+export function createReadOnlyExplorationNudgeRegistration(): {
+	registration: MiddlewareHookRegistration;
+	rememberHarnessScout(turnId: string): void;
+} {
 	const byTurn = new Map<string, ExplorationTurnState>();
 	const turnKey = (input: MiddlewareHookInput): string => {
 		const userTurnId = input.hook === "turn_end" ? input.metadata?.userTurnId : undefined;
@@ -175,7 +114,9 @@ export function createReadOnlyExplorationNudgeRegistration(): MiddlewareHookRegi
 	const takeTurnEndState = (key: string): ExplorationTurnState | null => {
 		const bound = byTurn.get(key);
 		if (bound === undefined) return null;
-		byTurn.set(key, newExplorationTurnState(bound.advised));
+		const carried = newExplorationTurnState(bound.advised);
+		carried.scoutSucceeded = bound.scoutSucceeded;
+		byTurn.set(key, carried);
 		return bound;
 	};
 	const markAdvised = (key: string): void => {
@@ -183,39 +124,44 @@ export function createReadOnlyExplorationNudgeRegistration(): MiddlewareHookRegi
 		if (carried) carried.advised = true;
 	};
 	return {
-		id: READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID,
-		description: "advise Scout delegation after prolonged read-only repository exploration",
-		hooks: ["before_tool", "after_tool", "turn_end"],
-		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
-			const key = turnKey(input);
-			if (input.hook === "before_tool" || input.hook === "after_tool") {
-				if (input.metadata?.origin === "harness") return [];
-				const state = stateForTool(key);
-				if (input.toolName === ToolNames.Dispatch) {
-					if (input.hook === "after_tool" && dispatchTargetsScout(input.toolArgs)) {
-						if (input.metadata?.resultKind === "ok") markScoutSuccess(state);
+		rememberHarnessScout(turnId) {
+			markScoutSuccess(stateForTool(turnId));
+		},
+		registration: {
+			id: READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID,
+			description: "advise Scout delegation after prolonged read-only repository exploration",
+			hooks: ["before_tool", "after_tool", "turn_end"],
+			evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
+				const key = turnKey(input);
+				if (input.hook === "before_tool" || input.hook === "after_tool") {
+					if (input.metadata?.origin === "harness") return [];
+					const state = stateForTool(key);
+					if (input.toolName === ToolNames.Dispatch) {
+						if (input.hook === "after_tool" && dispatchTargetsScout(input.toolArgs)) {
+							if (input.metadata?.resultKind === "ok") markScoutSuccess(state);
+						}
+						return [];
 					}
+					if (input.hook === "after_tool" || !isReadOnlyExplorationCall(input)) return [];
+					state.readOnlyCalls += 1;
 					return [];
 				}
-				if (input.hook === "after_tool" || !isReadOnlyExplorationCall(input)) return [];
-				state.readOnlyCalls += 1;
-				return [];
-			}
-			if (input.hook !== "turn_end") return [];
-			const state = takeTurnEndState(key);
-			const stopReason = input.metadata?.stopReason;
-			if (stopReason !== undefined && stopReason !== "stop") return [];
-			if (!hasActiveTool(input, ToolNames.Dispatch)) return [];
-			if (
-				!state ||
-				state.advised ||
-				state.scoutSucceeded ||
-				state.readOnlyCalls < READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD
-			) {
-				return [];
-			}
-			markAdvised(key);
-			return [{ kind: "inject_reminder", message: buildReadOnlyExplorationMessage(), severity: "info" }];
+				if (input.hook !== "turn_end") return [];
+				const state = takeTurnEndState(key);
+				const stopReason = input.metadata?.stopReason;
+				if (stopReason !== undefined && stopReason !== "stop") return [];
+				if (!hasActiveTool(input, ToolNames.Dispatch)) return [];
+				if (
+					!state ||
+					state.advised ||
+					state.scoutSucceeded ||
+					state.readOnlyCalls < READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD
+				) {
+					return [];
+				}
+				markAdvised(key);
+				return [{ kind: "inject_reminder", message: buildReadOnlyExplorationMessage(), severity: "info" }];
+			},
 		},
 	};
 }

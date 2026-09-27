@@ -60,6 +60,13 @@ it("reduces a question, a duplicate dispatch, and a canceled turn without mutati
 		stopReason: "stop",
 		durationMs: 10,
 	};
+	const control = {
+		producer: "decision-site" as const,
+		decision: "orientation" as const,
+		decisionHash: "hash",
+		executed: true,
+	};
+	deepStrictEqual(reduceTurnOutcome({ ...base, control }).control, control);
 	const question = reduceTurnOutcome(base);
 	strictEqual(question.version, 1);
 	strictEqual(question.control, null);

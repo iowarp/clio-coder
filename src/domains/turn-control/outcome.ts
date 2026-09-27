@@ -1,10 +1,16 @@
 import type { TokenSplit } from "../../core/token-split.js";
+import type { WorkflowDecision } from "./decide.js";
 
 export interface TurnOutcomeRecord {
 	readonly version: 1;
 	readonly turnId: string; // the user turn id that started the turn
 	readonly turnIndex: number; // operator turns before this one in the session
-	readonly control: null; // populated by a later slice
+	readonly control: {
+		producer: "decision-site" | "main-model" | null;
+		decision: WorkflowDecision["kind"];
+		decisionHash: string | null;
+		executed: boolean;
+	} | null;
 	readonly coordinator: {
 		readonly toolCalls: number;
 		readonly byTool: Readonly<Record<string, number>>;
@@ -35,6 +41,7 @@ export interface TurnOutcomeRecord {
 }
 
 export interface TurnOutcomeInput {
+	readonly control?: TurnOutcomeRecord["control"];
 	readonly turnId: string;
 	readonly turnIndex: number;
 	readonly toolNames: ReadonlyArray<string>;
@@ -105,7 +112,7 @@ export function reduceTurnOutcome(input: TurnOutcomeInput): TurnOutcomeRecord {
 		version: 1,
 		turnId: input.turnId,
 		turnIndex: input.turnIndex,
-		control: null,
+		control: input.control ?? null,
 		coordinator: {
 			toolCalls: input.toolNames.length,
 			byTool: { ...byTool },

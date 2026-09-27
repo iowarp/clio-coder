@@ -209,6 +209,7 @@ import { writeTranscriptExport } from "../domains/session/transcript-export.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
+import type { TurnControlRecord, TurnInterpretation } from "../domains/turn-control/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
@@ -243,7 +244,7 @@ import {
 } from "../engine/loop-guard.js";
 import { cwdHash, openSession, readSessionTailTurns, sessionCurrentPath, sessionPaths } from "../engine/session.js";
 import type { EngineModel } from "../engine/types.js";
-import { createChatLoop } from "../interactive/chat-loop.js";
+import { createChatLoop, createTurnControlRunner, interpretTurnWithMainModel } from "../interactive/chat-loop.js";
 import type { RunIo } from "../interactive/index.js";
 import {
 	buildModelReplayAgentMessagesFromTurns,
@@ -1658,7 +1659,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 		return protectedArtifactsGuard.state();
 	};
-	middleware.registerHook(createDispatchDedupRegistration());
+	const dispatchDedup = createDispatchDedupRegistration();
+	middleware.registerHook(dispatchDedup.registration);
 	// Observers run after the guards; they emit no effects and their sinks are
 	// best-effort (session ledger, codewiki refresh).
 	middleware.registerHook(
@@ -2567,11 +2569,89 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// precedes the finish-contract advisory in effect order.
 	middleware.registerHook(createToolProseRegistration());
 	middleware.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
-	middleware.registerHook(createReadOnlyExplorationNudgeRegistration());
+	const explorationNudge = createReadOnlyExplorationNudgeRegistration();
+	middleware.registerHook(explorationNudge.registration);
 	middleware.registerHook(createUnbackedWorkerClaimRegistration());
 	middleware.registerHook(
 		createDetachedDispatchNudgeRegistration({ getOpenBatches: () => openDetachedBatchViews(dispatch) }),
 	);
+	const taskEstablished = (): boolean => {
+		const board = taskBoard.snapshot();
+		return (
+			board?.tasks.some((task) => task.status === "active" || task.status === "pending" || task.status === "blocked") ===
+				true || userTasks.snapshot().some((task) => task.status === "handed" || task.status === "picked")
+		);
+	};
+	const turnControl = createTurnControlRunner({
+		getSettings: getCurrentSettings,
+		getAutonomy: resolveEffectiveAutonomy,
+		dispatch,
+		agents,
+		toolRegistry,
+		getTurnConstraints: () => chat.currentTurnConstraints?.(),
+		isContinuation: () => false,
+		readInterpretation: () => turnRelevance.current().get("turnControl")?.value as TurnInterpretation | undefined,
+		fallback: async (input) => {
+			const settings = getCurrentSettings();
+			if (!settings.chat.target || !settings.chat.model) return { interpretation: null };
+			const { model, refined } = prepareBackgroundMemoryModel(providers, settings.chat.target, settings.chat.model);
+			const apiKey = targetRequiresAuth(refined.target, refined.runtime)
+				? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: input.signal })).apiKey
+				: LOCAL_API_KEY_FALLBACK;
+			return interpretTurnWithMainModel({
+				...input,
+				model,
+				runtimeId: refined.runtime.id,
+				...(apiKey === undefined ? {} : { apiKey }),
+			});
+		},
+		facts: {
+			turnIndex: () =>
+				readCurrentSessionEntries().filter(
+					(entry) =>
+						entry.kind === "message" &&
+						entry.role === "user" &&
+						(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
+				).length,
+			taskEstablished,
+			clarificationStreak: () => turnOutcomeCollector.clarificationStreak(),
+			finishedDetachedBatchIds: () => [],
+		},
+		cwd: process.cwd(),
+		bus,
+		emitNotice: (text) => {
+			if (deferredWatchdogNoticeSink) deferredWatchdogNoticeSink(text);
+			else bootStderr(`${text}\n`);
+		},
+		...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
+		rememberOrientation(turnId, runId, succeeded) {
+			dispatchDedup.rememberHarnessOrientation(turnId, runId);
+			if (succeeded) explorationNudge.rememberHarnessScout(turnId);
+		},
+	});
+	const seedOrientationFromSession = (): void => {
+		let snapshot: TurnControlRecord["orientation"];
+		try {
+			const meta = session?.current();
+			const latest = meta
+				? [...readRecentSessionEntriesForContract(meta.id)]
+						.reverse()
+						.find(
+							(entry) =>
+								entry.kind === "custom" &&
+								entry.customType === "turnControl" &&
+								(entry.data as TurnControlRecord | null)?.orientation !== undefined,
+						)
+				: undefined;
+			if (latest?.kind === "custom") snapshot = (latest.data as TurnControlRecord).orientation;
+		} catch {
+			/* S6: an unreadable tail cannot seed reuse. */
+		}
+		turnControl.seedOrientation(snapshot ?? null);
+	};
+	seedOrientationFromSession();
+	const unsubscribeOrientationResume = bus.on(BusChannels.SessionResumed, seedOrientationFromSession);
+	termination.onDrain(() => unsubscribeOrientationResume());
 	// The opt-in turn-end watchdog. Headless and ACP runs pass `false` for the
 	// surface: neither has an operator reading a transcript, so a notice they
 	// cannot see would be a worker run spent on nothing whatever the setting says.
@@ -2646,6 +2726,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	middleware.registerHook(
 		createDecisionHintsRegistration({
 			getHints: () => preTurnHints(turnRelevance.sites, turnRelevance.current()),
+			controllerActed: () => turnControl.controllerActed(),
 			getTurnConstraints: () => chat.currentTurnConstraints?.(),
 		}),
 	);
@@ -2656,16 +2737,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let cancelQueuedSpeculativeHold: (() => void) | null = null;
 	let previousSpeculativeStats = dispatch?.speculativeStats?.() ?? { held: 0, adopted: 0, discarded: 0, live: 0 };
 	const chat = createChatLoop({
+		turnControl,
 		turnOutcomeCollector,
 		...(dispatch ? { outcomeDispatch: dispatch } : {}),
 		getTurnBriefUsage: () => turnRelevance.usage(),
-		getTaskEstablished: () => {
-			const board = taskBoard.snapshot();
-			return (
-				board?.tasks.some((task) => task.status === "active" || task.status === "pending" || task.status === "blocked") ===
-					true || userTasks.snapshot().some((task) => task.status === "handed" || task.status === "picked")
-			);
-		},
+		getTaskEstablished: taskEstablished,
 		visionSidecar,
 		getReadySkillCount,
 		interactiveGuidance: !options.headless && !options.acp,
@@ -2692,7 +2768,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { session } : {}),
 		getMemorySection: createMemoryPromptReader({ getDataDir: clioDataDir }),
 		refreshTurnRelevance: async (taskText, previous, signal) => {
-			if ((session?.current()?.id ?? null) !== outcomeSessionId) seedOutcomeFromSession();
+			if ((session?.current()?.id ?? null) !== outcomeSessionId) {
+				seedOutcomeFromSession();
+				seedOrientationFromSession();
+			}
 			await turnRelevance.refresh({ task: taskText, previous }, signal);
 			// The hold runs before the awaiting turn resumes, so an immediate
 			// dispatch can adopt it. Settlement cancels a queued hold first.

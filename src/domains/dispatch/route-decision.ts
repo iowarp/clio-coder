@@ -84,7 +84,7 @@ export interface RouteCandidate {
 
 export type RouteDecisionMode = "fixed" | "shadow" | "active";
 
-export type AgentSelectionAuthorityBasis = "operator-plan-approval" | "yolo-policy";
+export type AgentSelectionAuthorityBasis = "operator-plan-approval" | "yolo-policy" | "harness-read-only";
 
 export interface RouteDecisionAgentSelectionInput {
 	request: "explicit" | "auto";
@@ -192,7 +192,10 @@ export function isRouteDecisionAgentSelection(value: unknown): value is RouteDec
 		value.baselineAgentId.length === 0 ||
 		typeof value.recommendedAgentId !== "string" ||
 		value.recommendedAgentId.length === 0 ||
-		(authorityBasis !== null && authorityBasis !== "operator-plan-approval" && authorityBasis !== "yolo-policy") ||
+		(authorityBasis !== null &&
+			authorityBasis !== "operator-plan-approval" &&
+			authorityBasis !== "yolo-policy" &&
+			authorityBasis !== "harness-read-only") ||
 		!Array.isArray(value.evaluations) ||
 		value.evaluations.length === 0 ||
 		value.evaluations.length > 64 ||
@@ -309,7 +312,8 @@ export function isRouteDecisionAgentSelection(value: unknown): value is RouteDec
 			transition.to.length === 0 ||
 			(transitionBasis !== "same-authority" &&
 				transitionBasis !== "operator-plan-approval" &&
-				transitionBasis !== "yolo-policy")
+				transitionBasis !== "yolo-policy" &&
+				transitionBasis !== "harness-read-only")
 		) {
 			return false;
 		}

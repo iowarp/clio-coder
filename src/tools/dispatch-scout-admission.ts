@@ -120,7 +120,8 @@ export function loadVerifiedScoutSource(input: {
 
 export function prepareScoutContinuation(input: {
 	source: VerifiedScoutSource;
-	authorization: "operator-plan-approval" | "yolo-policy";
+	authorization: "operator-plan-approval" | "yolo-policy" | "harness-read-only";
+	maxWorkers?: number;
 	planAgentSelection: DispatchContract["planAgentSelection"];
 	costCeilingUsd: number;
 }): PreparedScoutContinuation {
@@ -128,6 +129,11 @@ export function prepareScoutContinuation(input: {
 	const proposals: Array<
 		DispatchAgentPlanResolution & { subtask: ScoutResult["proposedSubtasks"][number]; routingIntent: RoutingIntent }
 	> = [];
+	if (
+		input.authorization === "harness-read-only" &&
+		input.source.scout.proposedSubtasks.some((task) => task.requestedAuthority !== "read-only")
+	)
+		throw new Error("split refused: harness orientation permits read-only subtasks only");
 	for (const subtask of input.source.scout.proposedSubtasks) {
 		const sourceIntent = input.source.receipt.routingIntent;
 		const routingIntent: RoutingIntent =
@@ -146,7 +152,8 @@ export function prepareScoutContinuation(input: {
 			executionRole: "researcher",
 			task: subtask.task,
 			cwd: input.source.envelope.cwd,
-			requestOrigin: "user",
+			requestOrigin: input.authorization === "harness-read-only" ? "harness" : "user",
+			...(input.authorization === "harness-read-only" ? { readOnly: true } : {}),
 			routingIntent,
 			failover: "approved",
 			...(input.authorization === "yolo-policy" && sourceIntent.posture === "manual"
@@ -183,12 +190,17 @@ export function prepareScoutContinuation(input: {
 		bindings,
 		authority: {
 			basis: input.authorization,
-			approvedAuthorities: input.authorization === "yolo-policy" ? requestedAuthorities : [],
+			approvedAuthorities:
+				input.authorization === "harness-read-only"
+					? ["read-only"]
+					: input.authorization === "yolo-policy"
+						? requestedAuthorities
+						: [],
 		},
-		maxWorkers: 4,
+		maxWorkers: input.maxWorkers ?? 4,
 	});
 	if (transition.kind === "settled") throw new Error("dispatch: Scout phase unexpectedly settled during compilation");
-	if (input.authorization === "yolo-policy" && transition.kind !== "ready") {
+	if (input.authorization !== "operator-plan-approval" && transition.kind !== "ready") {
 		throw new Error("dispatch: yolo policy does not grant every requested Scout authority");
 	}
 	const plan = transition.plan;
@@ -212,7 +224,8 @@ export function prepareScoutContinuation(input: {
 			executionRole: selected.executionRole,
 			task: step.task,
 			cwd: input.source.envelope.cwd,
-			requestOrigin: "user",
+			requestOrigin: input.authorization === "harness-read-only" ? "harness" : "user",
+			...(input.authorization === "harness-read-only" ? { readOnly: true } : {}),
 			agentSelection: selection,
 			routingIntent: { ...proposal.routingIntent, maxCostUsd: explicitCostCeiling, deadlineMs, failover: "none" },
 			failover: "none",

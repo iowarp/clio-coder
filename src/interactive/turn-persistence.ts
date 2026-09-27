@@ -110,6 +110,7 @@ export interface TurnPersistence {
 		synthetic: boolean,
 		operatorText?: string,
 		displayText?: string,
+		id?: string,
 	): string | null;
 	appendRetryStatus(status: RetryStatusPayload): void;
 	appendModelChangeEntry(target: ChatLoopTarget): void;
@@ -541,7 +542,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			finishTracedTurn("success", null);
 		},
 
-		appendSubmittedUserTurn(agentRuntime, text, images, synthetic, operatorText, displayText): string | null {
+		appendSubmittedUserTurn(agentRuntime, text, images, synthetic, operatorText, displayText, id): string | null {
 			if (!deps.session) return null;
 			if (!deps.session.current()) {
 				deps.session.create({
@@ -558,6 +559,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				payload.source = "middleware_request_continuation";
 			}
 			const userTurn = appendTurn(deps.session, {
+				...(id === undefined ? {} : { id }),
 				kind: "user",
 				payload,
 			});

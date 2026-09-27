@@ -1,11 +1,12 @@
 import { isReadOnlyCall } from "../core/read-only-calls.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { MiddlewareHookInput, MiddlewareHookRegistration } from "../domains/middleware/index.js";
-import type { TurnOutcomeRecord } from "../domains/turn-control/index.js";
+import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import { dispatchKeysFromArgs } from "../domains/turn-control/index.js";
 import { effectiveToolCall } from "../tools/surface.js";
 
 export interface CollectedTurn {
+	readonly control: TurnOutcomeRecord["control"];
 	readonly toolNames: ReadonlyArray<string>;
 	readonly readOnlyCallsBeforeFirstDispatch: number;
 	readonly dispatches: TurnOutcomeRecord["coordinator"]["dispatches"];
@@ -24,10 +25,13 @@ export interface TurnOutcomeCollector extends MiddlewareHookRegistration {
 		evidenceKinds: ReadonlyArray<string>,
 	): void;
 	seedClarificationStreak(value: number): void;
+	clarificationStreak(): number;
+	recordControl(record: TurnControlRecord): void;
 }
 
 function emptyTurn(previousClarificationStreak: number): CollectedTurn {
 	return {
+		control: null,
 		toolNames: [],
 		readOnlyCallsBeforeFirstDispatch: 0,
 		dispatches: [],
@@ -66,6 +70,21 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		id: "observer.turn-outcome",
 		description: "collect host facts for the operator turn without steering it",
 		hooks: ["turn_start", "before_tool", "after_tool", "turn_end"],
+		clarificationStreak: () => previousClarificationStreak,
+		recordControl(record) {
+			userTurnId = record.turnId;
+			const runIds = record.executed !== null && "runIds" in record.executed ? record.executed.runIds : [];
+			active = {
+				...active,
+				control: {
+					producer: record.producer,
+					decision: record.decision.kind,
+					decisionHash: record.decisionHash,
+					executed: runIds.length > 0,
+				},
+				harness: { ...active.harness, runIds: [...active.harness.runIds, ...runIds] },
+			};
+		},
 		seedClarificationStreak(value) {
 			previousClarificationStreak = value;
 		},

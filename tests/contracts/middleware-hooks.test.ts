@@ -5,8 +5,11 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { Type } from "typebox";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { createDispatchDedupRegistration } from "../../src/domains/dispatch/dedup.js";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
 import { installExtension } from "../../src/domains/extensions/state.js";
+import { createDecisionHintsRegistration } from "../../src/domains/middleware/decision-hints.js";
+import { createReadOnlyExplorationNudgeRegistration } from "../../src/domains/middleware/dispatch-nudge.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { type HookReceipt, normalizeUserHook } from "../../src/domains/middleware/hooks.js";
 import { buildUserHookRegistrations, readHookSources } from "../../src/domains/middleware/hooks-io.js";
@@ -81,6 +84,7 @@ describe("middleware hook boundary", () => {
 		hook({ hook: "turn_end", turnId: "assistant-1", metadata: { userTurnId: "user-1" } });
 		collector.recordCompletion("assistant-1", "ok", 0, ["verification"]);
 		deepStrictEqual(collector.take("user-1"), {
+			control: null,
 			toolNames: ["read", "bash", "dispatch", "read"],
 			readOnlyCallsBeforeFirstDispatch: 2,
 			dispatches: [{ mode: "detached", agentIds: ["scout"], runIds: ["run-1"] }],
@@ -694,4 +698,44 @@ describe("user hook applicability", () => {
 			["continues"],
 		);
 	});
+});
+
+it("blocks remembered harness orientation for Scout but permits coder", () => {
+	const dedup = createDispatchDedupRegistration();
+	dedup.rememberHarnessOrientation("user-1", "scout-1");
+	const middleware = createMiddlewareBundle({ registrations: [dedup.registration] }).contract;
+	const input: MiddlewareHookInput = {
+		hook: "before_tool",
+		turnId: "user-1",
+		toolName: "dispatch",
+		toolArgs: { agent: "scout", task: "another tour" },
+	};
+	deepStrictEqual(middleware.runHook(input).effects, [
+		{
+			kind: "block_tool",
+			severity: "hard-block",
+			reason:
+				"dispatch duplicate blocked: Clio already ran Scout for orientation this turn (run scout-1); answer from the [Orientation] findings or ask a focused question.",
+		},
+	]);
+	deepStrictEqual(middleware.runHook({ ...input, toolArgs: { agent: "coder", task: "change it" } }).effects, []);
+	deepStrictEqual(middleware.runHook({ ...input, turnId: "user-2" }).effects, []);
+});
+it("keeps Scope hints after controller execution and suppresses the exploration nudge", () => {
+	const hints = createDecisionHintsRegistration({
+		getHints: () => ["[Plan] plan", "[Harness routing] scout", "[Scope] answer"],
+		controllerActed: () => true,
+	});
+	const nudge = createReadOnlyExplorationNudgeRegistration();
+	nudge.rememberHarnessScout("u");
+	const middleware = createMiddlewareBundle({ registrations: [hints, nudge.registration] }).contract;
+	deepStrictEqual(middleware.runHook({ hook: "turn_start", turnId: "u" }).effects, [
+		{ kind: "inject_reminder", severity: "info", message: "[Scope] answer" },
+	]);
+	for (let i = 0; i < 12; i++) middleware.runHook({ hook: "before_tool", turnId: "u", toolName: "read" });
+	deepStrictEqual(
+		middleware.runHook({ hook: "turn_end", turnId: "a", metadata: { userTurnId: "u", activeToolNames: "dispatch,read" } })
+			.effects,
+		[],
+	);
 });

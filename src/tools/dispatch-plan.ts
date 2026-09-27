@@ -59,7 +59,7 @@ export type DispatchPlanSource = null | {
 
 export type DispatchPlanAuthorityGrant = null | {
 	requested: AgentAutomationAuthority;
-	basis: "operator-plan-approval" | "yolo-policy";
+	basis: "operator-plan-approval" | "yolo-policy" | "harness-read-only";
 };
 
 export interface DispatchPlanTaskView {
@@ -688,7 +688,8 @@ function isAuthorityGrant(value: unknown): value is Exclude<DispatchPlanAuthorit
 		Object.keys(value).sort().join("\u0000") === "basis\u0000requested" &&
 		AGENT_AUTOMATION_AUTHORITIES.includes(value.requested as AgentAutomationAuthority) &&
 		(normalizeYoloAuthorityBasis(value.basis) === "operator-plan-approval" ||
-			normalizeYoloAuthorityBasis(value.basis) === "yolo-policy")
+			normalizeYoloAuthorityBasis(value.basis) === "yolo-policy" ||
+			normalizeYoloAuthorityBasis(value.basis) === "harness-read-only")
 	);
 }
 
@@ -719,7 +720,12 @@ function isResolvedAgentSelection(value: unknown): value is NonNullable<Dispatch
 	if (value.version !== 1 || value.mode !== "auto") return false;
 	if (typeof value.baselineAgentId !== "string" || value.baselineAgentId.trim().length === 0) return false;
 	const authorityBasis = normalizeYoloAuthorityBasis(value.authorityBasis);
-	if (authorityBasis !== "operator-plan-approval" && authorityBasis !== "yolo-policy") return false;
+	if (
+		authorityBasis !== "operator-plan-approval" &&
+		authorityBasis !== "yolo-policy" &&
+		authorityBasis !== "harness-read-only"
+	)
+		return false;
 	if (
 		!Array.isArray(value.approvedAuthorities) ||
 		value.approvedAuthorities.length === 0 ||

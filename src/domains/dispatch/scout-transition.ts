@@ -5,7 +5,11 @@ import type { AgentAutomationAuthority, AgentSpec } from "../agents/spec.js";
 import { compileExecutionPlan, type ExecutionPlan } from "./execution-plan.js";
 import { deriveExecutionRole } from "./execution-role.js";
 
-export type TrustedTransitionAuthorityBasis = "existing-plan" | "operator-plan-approval" | "yolo-policy";
+export type TrustedTransitionAuthorityBasis =
+	| "existing-plan"
+	| "operator-plan-approval"
+	| "yolo-policy"
+	| "harness-read-only";
 
 export interface TrustedTransitionAuthority {
 	basis: TrustedTransitionAuthorityBasis;

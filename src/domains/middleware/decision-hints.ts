@@ -21,6 +21,7 @@ export const DECISION_HINTS_REGISTRATION_ID = "observer.decision-hints";
 export interface DecisionHintsDeps {
 	/** This turn's hint lines, already rendered. Empty when no site had one. */
 	getHints(): ReadonlyArray<string>;
+	controllerActed?: () => boolean;
 	/** Explicit host scope for the turn; when present it already says what the turn is. */
 	getTurnConstraints?(): TurnConstraints | undefined;
 }
@@ -42,6 +43,8 @@ export function createDecisionHintsRegistration(deps: DecisionHintsDeps): Middle
 			let hints: ReadonlyArray<string>;
 			try {
 				hints = deps.getHints();
+				if (deps.controllerActed?.())
+					hints = hints.filter((line) => !line.startsWith("[Plan]") && !line.startsWith("[Harness routing]"));
 			} catch {
 				return NO_EFFECTS;
 			}

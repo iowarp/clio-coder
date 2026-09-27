@@ -39,7 +39,9 @@ export function materializeAgentPlanSelection(
 		routingIntent: { ...intent, failover: "approved" },
 		failover: "approved",
 	};
-	const mode = input.authorization === "yolo-policy" ? "active" : "shadow";
+	if (input.authorization === "harness-read-only" && input.requestedAuthority !== "read-only")
+		throw new Error("dispatch: harness Scout continuation permits read-only authority only");
+	const mode = input.authorization === "operator-plan-approval" ? "shadow" : "active";
 	const decision = adapters.resolve(request, mode, {
 		expectedResultContractKind: input.expectedResultContract,
 		requestedAuthority: input.requestedAuthority,

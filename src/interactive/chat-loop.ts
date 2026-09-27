@@ -1,3 +1,10 @@
+import { randomUUID } from "node:crypto";
+import type { TurnControlRecord } from "../domains/turn-control/index.js";
+import type { TurnControlRunner } from "./turn-control-runner.js";
+
+export { createTurnControlRunner } from "./turn-control-runner.js";
+export { interpretTurnWithMainModel } from "./turn-interpretation-fallback.js";
+
 import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import type { LiveBudgetView } from "../domains/context/budget/live-view.js";
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
@@ -548,6 +555,7 @@ export interface ChatLoop {
 }
 
 export interface CreateChatLoopDeps {
+	turnControl?: TurnControlRunner;
 	turnOutcomeCollector?: TurnOutcomeCollector;
 	getTurnBriefUsage?: () => TokenSplit;
 	getTaskEstablished?: () => boolean;
@@ -1634,20 +1642,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// Guarded even though the store never rejects: this is an injected
 			// dependency on the turn's critical path, and no ranking is worth a
 			// turn. Both sites read an empty store as no ranking.
+			let previous = "";
+			const messages = agentRuntime.agent.state.messages;
+			for (let index = messages.length - 1; index >= 0; index -= 1) {
+				if (messages[index]?.role === "assistant") {
+					previous = extractText(messages[index]);
+					break;
+				}
+			}
 			if (deps.refreshTurnRelevance) {
 				const briefAbort = new AbortController();
 				pendingDecisionBrief = briefAbort;
 				try {
 					// The last assistant message is evidence for a short follow-up: "ok go
 					// ahead" is an action after a proposal and a pleasantry without one.
-					let previous = "";
-					const messages = agentRuntime.agent.state.messages;
-					for (let index = messages.length - 1; index >= 0; index -= 1) {
-						if (messages[index]?.role === "assistant") {
-							previous = extractText(messages[index]);
-							break;
-						}
-					}
 					await deps.refreshTurnRelevance(text, previous, briefAbort.signal);
 				} catch {
 					// Ranking degrades to the order each site had before the pass.
@@ -1657,6 +1665,28 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// Cancellation before prompt admission leaves no user turn or model
 				// request behind, even if an injected brief ignored its signal.
 				if (briefAbort.signal.aborted) return;
+			}
+
+			const reservedUserTurnId = randomUUID();
+			let orientationBlock: string | null = null;
+			let turnControlRecord: TurnControlRecord | null = null;
+			if (deps.turnControl && options.requestContinuation !== true) {
+				const controllerAbort = new AbortController();
+				pendingDecisionBrief = controllerAbort;
+				setTurnPreparation("preparing");
+				try {
+					const result = await deps.turnControl.run({
+						operatorText: text,
+						previous,
+						userTurnId: reservedUserTurnId,
+						signal: controllerAbort.signal,
+					});
+					orientationBlock = result.block;
+					turnControlRecord = result.record;
+				} finally {
+					if (pendingDecisionBrief === controllerAbort) pendingDecisionBrief = null;
+				}
+				if (controllerAbort.signal.aborted) return;
 			}
 			// A skill the operator activated narrows the tools for the workflow
 			// it started, and that workflow outlives the turn it began in. A
@@ -1709,7 +1739,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 			}
 			const composeSubmittedText = () =>
-				[reminderProjection(), skillPreamble, taskMemoryHandoffSource, text].filter((part) => part.length > 0).join("\n\n");
+				[reminderProjection(), orientationBlock ?? "", skillPreamble, taskMemoryHandoffSource, text]
+					.filter((part) => part.length > 0)
+					.join("\n\n");
 			let submittedText = composeSubmittedText();
 
 			// 2. Pre-submit auto-compaction trigger
@@ -1796,6 +1828,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				options.requestContinuation === true,
 				operatorText,
 				options.display?.text,
+				reservedUserTurnId,
 			);
 			const turnIndex = (deps.readSessionEntries?.() ?? []).filter((entry) => {
 				if (entry.kind !== "message" || entry.role !== "user") return false;
@@ -1829,6 +1862,22 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 				} catch {
 					// Recording a forecast is best effort and never costs the turn.
+				}
+			}
+			if (turnControlRecord) {
+				outcomeCollector.recordControl(turnControlRecord);
+				if (deps.session?.current()) {
+					try {
+						deps.session.appendEntry({
+							kind: "custom",
+							customType: "turnControl",
+							parentTurnId: state.lastTurnId,
+							display: false,
+							data: turnControlRecord,
+						});
+					} catch {
+						/* S6: ledger recording is best effort and never costs the admitted turn. */
+					}
 				}
 			}
 			const previousThinkingLevel = previousRunSnapshot?.runtimeResolution?.effectiveThinkingLevel;

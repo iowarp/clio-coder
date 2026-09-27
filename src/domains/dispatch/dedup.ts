@@ -8,6 +8,7 @@
  * Orchestrator-only: workers never register the dispatch tool.
  */
 
+import { dispatchTargetsScout } from "../../core/read-only-calls.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 
@@ -17,7 +18,11 @@ export const DISPATCH_DEDUP_REGISTRATION_ID = "guard.dispatch-dedup";
 const DISPATCH_GUARD_TURN_LIMIT = 32;
 const DISPATCH_DEFAULT_AGENT_ID = "coder";
 
-export function createDispatchDedupRegistration(): MiddlewareHookRegistration {
+export function createDispatchDedupRegistration(): {
+	registration: MiddlewareHookRegistration;
+	rememberHarnessOrientation(turnId: string, runId: string): void;
+} {
+	const harnessByTurn = new Map<string, string>();
 	const successfulDispatchesByTurn = new Map<string, Set<string>>();
 
 	const remember = (turnId: string, fingerprint: string): void => {
@@ -35,32 +40,48 @@ export function createDispatchDedupRegistration(): MiddlewareHookRegistration {
 	};
 
 	return {
-		id: DISPATCH_DEDUP_REGISTRATION_ID,
-		description: "blocks re-running a dispatch that already completed successfully in this user turn",
-		hooks: ["before_tool", "after_tool"],
-		toolNames: [ToolNames.Dispatch],
-		evaluate(input): ReadonlyArray<MiddlewareEffect> {
-			if (input.turnId === undefined) return [];
-			const fingerprint = dispatchFingerprint(input.toolArgs);
-			if (fingerprint === null) return [];
-			if (input.hook === "before_tool") {
-				const seen = successfulDispatchesByTurn.get(input.turnId);
-				if (!seen?.has(fingerprint)) return [];
-				const summary = formatDispatchDuplicateSummary(input.toolArgs);
-				return [
-					{
-						kind: "block_tool",
-						reason:
-							`dispatch duplicate blocked: ${summary} already completed successfully in this user turn. ` +
-							`Use the existing dispatch receipt/output to answer instead of repeating the same fleet dispatch.`,
-						severity: "hard-block",
-					},
-				];
-			}
-			if (input.metadata?.resultKind !== "ok") return [];
-			if (input.toolResultDetails?.exitCode !== 0) return [];
-			remember(input.turnId, fingerprint);
-			return [];
+		rememberHarnessOrientation(turnId, runId) {
+			harnessByTurn.set(turnId, runId);
+			while (harnessByTurn.size > DISPATCH_GUARD_TURN_LIMIT)
+				harnessByTurn.delete(harnessByTurn.keys().next().value as string);
+		},
+		registration: {
+			id: DISPATCH_DEDUP_REGISTRATION_ID,
+			description: "blocks re-running a dispatch that already completed successfully in this user turn",
+			hooks: ["before_tool", "after_tool"],
+			toolNames: [ToolNames.Dispatch],
+			evaluate(input): ReadonlyArray<MiddlewareEffect> {
+				if (input.turnId === undefined || input.metadata?.origin === "harness") return [];
+				const runId = harnessByTurn.get(input.turnId);
+				if (input.hook === "before_tool" && runId && dispatchTargetsScout(input.toolArgs))
+					return [
+						{
+							kind: "block_tool",
+							severity: "hard-block",
+							reason: `dispatch duplicate blocked: Clio already ran Scout for orientation this turn (run ${runId}); answer from the [Orientation] findings or ask a focused question.`,
+						},
+					];
+				const fingerprint = dispatchFingerprint(input.toolArgs);
+				if (fingerprint === null) return [];
+				if (input.hook === "before_tool") {
+					const seen = successfulDispatchesByTurn.get(input.turnId);
+					if (!seen?.has(fingerprint)) return [];
+					const summary = formatDispatchDuplicateSummary(input.toolArgs);
+					return [
+						{
+							kind: "block_tool",
+							reason:
+								`dispatch duplicate blocked: ${summary} already completed successfully in this user turn. ` +
+								`Use the existing dispatch receipt/output to answer instead of repeating the same fleet dispatch.`,
+							severity: "hard-block",
+						},
+					];
+				}
+				if (input.metadata?.resultKind !== "ok") return [];
+				if (input.toolResultDetails?.exitCode !== 0) return [];
+				remember(input.turnId, fingerprint);
+				return [];
+			},
 		},
 	};
 }

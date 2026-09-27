@@ -787,3 +787,106 @@ test("settled speculative counts reach the live event stream after persistence",
 		await loop.whenSettled();
 	}
 });
+
+test("orientation is persisted before the first model call while operator text stays raw", async () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.prewarm = false;
+	const context = dispatchStubContext({ settings });
+	const target = settings.targets[0];
+	assert.ok(target);
+	settings.chat.target = target.id;
+	settings.chat.model = target.defaultModel ?? "gpt-4o";
+	const entries: SessionEntry[] = [];
+	let leaf: string | null = null;
+	const session = {
+		current: () => ({ id: "orientation-session", cwd: process.cwd() }),
+		tree: () => ({ leafId: leaf }),
+		append(turn: Parameters<SessionContract["append"]>[0]) {
+			const id = turn.id ?? `turn-${entries.length + 1}`;
+			leaf = id;
+			entries.push({
+				kind: "message",
+				turnId: id,
+				parentTurnId: turn.parentId,
+				timestamp: new Date().toISOString(),
+				role: turn.kind,
+				payload: turn.payload,
+			} as SessionEntry);
+			return { id };
+		},
+		appendEntry(entry: Parameters<SessionContract["appendEntry"]>[0]) {
+			const row = { ...entry, turnId: `entry-${entries.length + 1}`, timestamp: new Date().toISOString() } as SessionEntry;
+			entries.push(row);
+			return row;
+		},
+	} as unknown as SessionContract;
+	const block = "[Orientation] run scout-1\nFindings (cited):\n- Entry point (src/cli/index.ts:1)";
+	let submitted = "";
+	const loop = createChatLoop({
+		getSettings: () => settings,
+		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		knownTargets: () => new Set([target.id]),
+		session,
+		readSessionEntries: () => entries,
+		turnControl: {
+			seedOrientation() {},
+			controllerActed: () => true,
+			async run(input) {
+				assert.equal(entries.filter((entry) => entry.kind === "message" && entry.role === "user").length, 0);
+				return {
+					block,
+					record: {
+						version: 1,
+						turnId: input.userTurnId,
+						producer: "decision-site",
+						interpretation: null,
+						factsDigest: "facts",
+						decision: {
+							kind: "orientation",
+							question: "Tour",
+							breadth: "repository",
+							reuse: null,
+							budget: { maxScouts: 1, toolCallsPerScout: 36 },
+						},
+						decisionHash: "decision",
+						executed: { runIds: ["scout-1"], blockChars: block.length, durationMs: 1 },
+					},
+				};
+			},
+		},
+		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
+			agent: {
+				state: options?.initialState,
+				subscribe: () => () => {},
+				abort() {},
+				async prompt(text: string) {
+					submitted = text;
+					assert.ok(entries.some((entry) => entry.kind === "custom" && entry.customType === "turnControl"));
+				},
+			},
+		})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+	});
+	try {
+		await loop.submit("explore this repo");
+		const user = entries.find((entry) => entry.kind === "message" && entry.role === "user");
+		assert.ok(user?.kind === "message");
+		const payload = user.payload as { text: string; operatorText: string };
+		assert.equal(payload.text, submitted);
+		assert.match(payload.text, /\[Orientation\]/);
+		assert.equal(payload.operatorText, "explore this repo");
+		const control = entries.find((entry) => entry.kind === "custom" && entry.customType === "turnControl");
+		assert.ok(control?.kind === "custom");
+		assert.equal((control.data as { turnId: string }).turnId, user.turnId);
+		const outcome = entries.find((entry) => entry.kind === "custom" && entry.customType === "turnOutcome");
+		assert.ok(outcome?.kind === "custom");
+		assert.deepEqual((outcome.data as { control: unknown }).control, {
+			producer: "decision-site",
+			decision: "orientation",
+			decisionHash: "decision",
+			executed: true,
+		});
+	} finally {
+		loop.dispose();
+		await loop.whenSettled();
+	}
+});
