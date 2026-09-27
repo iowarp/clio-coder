@@ -23,6 +23,7 @@ import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { type AgentLedgerEntry, parseAgentLedgerBody } from "../../worker/protocol.js";
+import type { RenderAgentLedgerOptions } from "./agent-ledger.js";
 import { AGENT_LEDGER_PROMPT_MAX_CHARS, claimConflicts, renderAgentLedger } from "./agent-ledger.js";
 
 /** Bounded ring: newest first, oldest dropped past this count. */
@@ -132,12 +133,21 @@ export function readAgentLedger(id: string): AgentLedgerRecord | null {
  * byte-identical to one that never had a ledger. A closed ledger keeps its
  * entries, so a late read still renders.
  */
-export function renderAgentLedgerBoard(id: string): string | null {
+export function renderAgentLedgerBoard(
+	id: string,
+	projection: Omit<RenderAgentLedgerOptions, "maxChars"> = {},
+): string | null {
 	const record = readAgentLedger(id);
-	if (record === null || record.entries.length === 0) return null;
+	if (
+		record === null ||
+		(record.entries.length === 0 &&
+			(projection.assignments?.length ?? 0) === 0 &&
+			(projection.receiptFindings?.length ?? 0) === 0)
+	)
+		return null;
 	const count = record.entries.length;
 	const head = `agent ledger (${count} ${count === 1 ? "entry" : "entries"}, sequence ${record.sequence})`;
-	return `${head}\n${renderAgentLedger(record.entries, { maxChars: AGENT_LEDGER_PROMPT_MAX_CHARS })}`;
+	return `${head}\n${renderAgentLedger(record.entries, { ...projection, maxChars: AGENT_LEDGER_PROMPT_MAX_CHARS })}`;
 }
 
 /**

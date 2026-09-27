@@ -6,6 +6,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { parseJsonObjectPayload } from "../core/json-payload.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { CouncilReport, CouncilReportMember } from "../domains/agents/result-contract.js";
+import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import { closeAgentLedger, openAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DetachedBatchRun } from "../domains/dispatch/batch-store.js";
 import type { AbortReason, DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
@@ -46,7 +47,13 @@ import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownershi
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { explainRouteDecision } from "../domains/dispatch/routing-intent.js";
-import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceipt } from "../domains/dispatch/types.js";
+import type {
+	RunEnvelope,
+	RunGateProvenance,
+	RunGateSubjectRef,
+	RunPlanProvenance,
+	RunReceipt,
+} from "../domains/dispatch/types.js";
 import { isLegacyReadOnlyReceipt } from "../domains/dispatch/types.js";
 import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
@@ -985,6 +992,26 @@ function readVerifiedGateReceipt(deps: DispatchToolDeps, runId: string): RunRece
 	return receipt;
 }
 
+function ledgerProjectionFor(deps: DispatchToolDeps, ledgerId: string) {
+	const runs = deps.dispatch.listRuns().filter((run) => run.projection?.ledgerId === ledgerId);
+	const receipts = new Map<string, RunReceipt | null>();
+	const readReceipt = (run: RunEnvelope): RunReceipt | null => {
+		if (!receipts.has(run.id)) {
+			try {
+				receipts.set(run.id, readVerifiedGateReceipt(deps, run.id));
+			} catch {
+				// S8: unauthenticated or missing evidence cannot appear as receipt facts on the board.
+				receipts.set(run.id, null);
+			}
+		}
+		return receipts.get(run.id) ?? null;
+	};
+	return {
+		assignments: projectLedgerAssignments(runs, readReceipt),
+		receiptFindings: projectReceiptFindings(runs, readReceipt),
+	};
+}
+
 function recoveredCorrelation(
 	deps: DispatchToolDeps,
 	subjects: ReadonlyArray<RunGateSubjectRef>,
@@ -1658,7 +1685,7 @@ async function runCompete(
 	await Promise.allSettled(ownedRuns.map((run) => run.settlement));
 	// Every worker has settled, so no further post can be admitted. The board is
 	// read here, on the way past, for the model that started the compete.
-	const board = renderAgentLedgerBoard(ledgerId);
+	const board = renderAgentLedgerBoard(ledgerId, ledgerProjectionFor(deps, ledgerId));
 	await closeAgentLedger(ledgerId);
 	finalizationErrors.push(...abortErrors);
 
@@ -2837,7 +2864,7 @@ async function runBatch(
 		// Every worker has settled and the board has not closed yet, so this is
 		// the whole board the peers built, read once for the model that started
 		// them.
-		const board = renderAgentLedgerBoard(ledgerId);
+		const board = renderAgentLedgerBoard(ledgerId, ledgerProjectionFor(deps, ledgerId));
 		return {
 			runs: receipts.map((receipt) =>
 				completeRun(
@@ -2901,7 +2928,7 @@ async function runWriterLimitedBatch(
 				const run = completed.get(request);
 				return run === undefined ? [] : [run];
 			}),
-			board: renderAgentLedgerBoard(ledgerId),
+			board: renderAgentLedgerBoard(ledgerId, ledgerProjectionFor(deps, ledgerId)),
 		};
 	} finally {
 		if (timer !== null) clearTimeout(timer);

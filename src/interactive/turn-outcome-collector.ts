@@ -66,6 +66,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 	let sessionId: string | undefined;
 	let dispatched = false;
 	const succeededKeys = new Set<string>();
+	const harnessReads = new Map<string, number>();
 	return {
 		id: "observer.turn-outcome",
 		description: "collect host facts for the operator turn without steering it",
@@ -80,10 +81,15 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 					producer: record.producer,
 					decision: record.decision.kind,
 					decisionHash: record.decisionHash,
-					executed: runIds.length > 0,
+					executed: record.executed !== null && "runIds" in record.executed,
 				},
-				harness: { ...active.harness, runIds: [...active.harness.runIds, ...runIds] },
+				harness: {
+					...active.harness,
+					reads: harnessReads.get(record.turnId) ?? active.harness.reads,
+					runIds: [...active.harness.runIds, ...runIds],
+				},
 			};
+			harnessReads.delete(record.turnId);
 		},
 		seedClarificationStreak(value) {
 			previousClarificationStreak = value;
@@ -104,6 +110,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		evaluate(input) {
 			if (input.sessionId !== undefined && input.sessionId !== sessionId) {
 				succeededKeys.clear();
+				harnessReads.clear();
 				sessionId = input.sessionId;
 			}
 			if (input.hook === "turn_start") {
@@ -125,6 +132,14 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 			const args = call.args;
 			if (input.metadata?.origin === "harness") {
 				if (input.hook !== "after_tool") return [];
+				if (toolName !== ToolNames.Dispatch && input.turnId !== undefined) {
+					// S7: observations precede turn_start; retain them under the reserved user id.
+					if (harnessReads.size >= 32 && !harnessReads.has(input.turnId)) {
+						const oldest = harnessReads.keys().next().value;
+						if (oldest !== undefined) harnessReads.delete(oldest);
+					}
+					harnessReads.set(input.turnId, (harnessReads.get(input.turnId) ?? 0) + 1);
+				}
 				active = {
 					...active,
 					harness:

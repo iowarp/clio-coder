@@ -58,3 +58,79 @@ test("dispatch batch shows sealed tool calls and provenance-aware cost without i
 		/batch observed_tool_calls=7 cost=\$0\.30 \+\? unobservable_tool_runs=1 excluded_untrusted_runs=1/u,
 	);
 });
+
+test("parallel dispatch returns scheduler assignments on a board with no worker posts", async () => {
+	const { writeFileSync } = await import("node:fs");
+	const { join } = await import("node:path");
+	const { isolateClioEnv } = await import("../harness/scratch-env.js");
+	const { runDispatchTool } = await import("../../src/tools/dispatch-runner.js");
+	const { describeDispatchPlan } = await import("../../src/tools/dispatch-plan.js");
+	const env = await isolateClioEnv("clio-settled-board-");
+	try {
+		const requests = ["Inspect entry points", "Inspect boundaries"].map((task) => ({
+			agentId: "scout",
+			executionRole: "researcher" as const,
+			task,
+		}));
+		const envelopes: ReturnType<typeof fixtureEnvelope>[] = [];
+		const dispatch = {
+			async dispatchBatch(ledgered: ReadonlyArray<import("../../src/domains/dispatch/contract.js").DispatchRequest>) {
+				const receipts = ledgered.map((request, index) => {
+					const run = {
+						...fixtureEnvelope(`board-${index}`),
+						agentId: request.agentId,
+						task: request.task,
+						receiptPath: join(env.dir, `receipt-${index}.json`),
+						projection: {
+							version: 1 as const,
+							ledgerId: request.ledger?.id ?? null,
+							readRoots: [],
+							writeRoots: [],
+							scopeSource: "none" as const,
+						},
+					};
+					const receipt = withReceiptIntegrity(fixtureReceiptDraft(run), run);
+					envelopes.push(run);
+					writeFileSync(run.receiptPath, JSON.stringify(receipt));
+					return receipt;
+				});
+				return {
+					batchId: "attached",
+					assignmentIds: envelopes.map((run) => run.id),
+					events: (async function* () {})(),
+					finalPromise: Promise.resolve(receipts),
+				};
+			},
+			getRun: (id: string) => envelopes.find((run) => run.id === id) ?? null,
+			listRuns: () => envelopes,
+			abort() {},
+		} as unknown as import("../../src/domains/dispatch/contract.js").DispatchContract;
+		const args = { mode: "parallel", tasks: requests.map((request) => ({ agent: request.agentId, task: request.task })) };
+		const state: import("../../src/tools/dispatch-admission.js").DispatchAdmissionState = {
+			preparedAdmissionArgs: new WeakSet(),
+			trustedResolvedPlans: new WeakMap(),
+			trustedReservationOwners: new WeakMap(),
+			trustedExecutionSnapshots: new WeakMap(),
+			trustedExecutionPlans: new WeakMap(),
+			taskResolutions: new WeakMap(),
+		};
+		state.trustedExecutionSnapshots.set(args, {
+			kind: "dispatch",
+			planView: describeDispatchPlan(args),
+			requests,
+			mode: "parallel",
+			writers: undefined,
+			review: undefined,
+			compete: undefined,
+			council: undefined,
+			detach: false,
+			timeoutMs: undefined,
+			maxOutputBytes: 16384,
+		});
+		const result = await runDispatchTool({ dispatch, getAgentSpecs: () => [], getAutonomy: () => "yolo" }, state, args);
+		ok(result.kind === "ok", JSON.stringify(result));
+		match(String(result.details?.agentLedgerBoard), /Assignments:[\s\S]*Inspect entry points[\s\S]*Inspect boundaries/u);
+	} finally {
+		env.restore();
+	}
+});

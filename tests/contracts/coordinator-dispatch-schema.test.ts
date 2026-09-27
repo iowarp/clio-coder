@@ -174,7 +174,7 @@ describe("compact coordinator dispatch contract", () => {
 		const prompt = compiled.systemPrompt.replace(/\s+/gu, " ");
 		match(prompt, /Handle a trivial local change directly when delegation adds no value/u);
 		match(prompt, /Delegate substantial implementation before editing/u);
-		match(prompt, /open-ended repository exploration belongs to Scout/u);
+		strictEqual(prompt.includes("open-ended repository exploration belongs to Scout"), false);
 		match(prompt, /honor explicit requests to delegate/u);
 		match(prompt, /respect explicit no-delegation/u);
 	});

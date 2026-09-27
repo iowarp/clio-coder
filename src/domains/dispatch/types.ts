@@ -464,7 +464,17 @@ export interface RunReceiptFindingsSummary {
 	findingCount: number;
 }
 
+/** Host display facts only: persisted with the run, excluded from receipt integrity and authority. */
+export interface RunLedgerProjection {
+	version: 1;
+	ledgerId: string | null;
+	readRoots: ReadonlyArray<string>;
+	writeRoots: ReadonlyArray<string>;
+	scopeSource: "intent" | "legacy-write-roots" | "none";
+}
+
 export interface RunEnvelope {
+	projection?: RunLedgerProjection;
 	version: 1;
 	id: string;
 	agentId: string;

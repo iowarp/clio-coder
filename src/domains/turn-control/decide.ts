@@ -42,11 +42,11 @@ export function decide(
 	facts: TurnFacts,
 	settings: TurnControlSettings,
 ): WorkflowDecision {
-	if (facts.continuation) return { kind: "none", reason: "continuation" };
 	if (facts.explicitConstraints) return { kind: "none", reason: "constraints" };
 	if (settings.workflows.length === 0) return { kind: "none", reason: "off" };
 	if (settings.workflows.includes("detached-collection") && facts.finishedDetachedBatchIds.length > 0)
 		return { kind: "collect", batchIds: [...facts.finishedDetachedBatchIds] };
+	if (facts.continuation) return { kind: "none", reason: "continuation" };
 	if (interpretation === null) return { kind: "none", reason: "no-interpretation" };
 	const breadth = interpretation.orientation.breadth;
 	const orientationEligible =

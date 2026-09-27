@@ -99,6 +99,7 @@ import {
 	createReadOnlyExplorationNudgeRegistration,
 	createUnbackedWorkerClaimRegistration,
 	openDetachedBatchViews,
+	finishedDetachedBatchIds,
 } from "../domains/middleware/dispatch-nudge.js";
 import { createGuidanceRegistration } from "../domains/middleware/guidance.js";
 import {
@@ -2588,6 +2589,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		dispatch,
 		agents,
 		toolRegistry,
+		getInvokeOptions: () => {
+			const sessionId = session?.current()?.id;
+			return sessionId === undefined ? {} : { sessionId };
+		},
 		getTurnConstraints: () => chat.currentTurnConstraints?.(),
 		isContinuation: () => false,
 		readInterpretation: () => turnRelevance.current().get("turnControl")?.value as TurnInterpretation | undefined,
@@ -2615,7 +2620,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				).length,
 			taskEstablished,
 			clarificationStreak: () => turnOutcomeCollector.clarificationStreak(),
-			finishedDetachedBatchIds: () => [],
+			finishedDetachedBatchIds: () => finishedDetachedBatchIds(dispatch),
 		},
 		cwd: process.cwd(),
 		bus,

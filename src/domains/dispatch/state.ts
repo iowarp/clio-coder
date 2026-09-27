@@ -265,6 +265,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				...(input.agentAudience !== undefined ? { agentAudience: input.agentAudience } : {}),
 				...(input.requestOrigin !== undefined ? { requestOrigin: input.requestOrigin } : {}),
 				task: input.task,
+				...(input.projection !== undefined ? { projection: structuredClone(input.projection) } : {}),
 				...(input.budget !== undefined ? { budget: structuredClone(input.budget) } : {}),
 				...(input.briefing !== undefined ? { briefing: structuredClone(input.briefing) } : {}),
 				...(input.workerContext !== undefined ? { workerContext: structuredClone(input.workerContext) } : {}),
