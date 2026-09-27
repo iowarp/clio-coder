@@ -44,7 +44,15 @@ describe("tool-orchestrator seed", { concurrency: false }, () => {
 			const request = fixture.requests.find((entry) => JSON.stringify(entry.messages).includes(marker));
 			ok(request, `no chat request carried ${marker}`);
 			const tools = request.tools as Array<{ function: { name: string } }>;
-			deepStrictEqual(tools.map((tool) => tool.function.name).sort(), ["dispatch", "edit", "gateway", "read", "write"]);
+			deepStrictEqual(tools.map((tool) => tool.function.name).sort(), [
+				"bash",
+				"dispatch",
+				"edit",
+				"gateway",
+				"read",
+				"verify",
+				"write",
+			]);
 			const first = (request.messages as Array<{ role?: string; content?: unknown }> | undefined)?.[0];
 			match(typeof first?.content === "string" ? first.content : "", new RegExp(`Autonomy: ${level}\\.`, "u"));
 

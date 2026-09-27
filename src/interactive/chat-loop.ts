@@ -87,6 +87,7 @@ import { cwdHash } from "../engine/session.js";
 import type { AgentEvent, AgentMessage, ImageContent, Usage } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
 import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
+import { isGatewayChain } from "../tools/gateway-display.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { effectiveToolCall } from "../tools/surface.js";
 import {
@@ -1086,11 +1087,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			});
 			// Include the complete skill messages and tool receipts already in the
 			// protected suffix. The final guard still prices the actual replay.
+			// A chain that loaded a skill carries that load's instructions too; it
+			// is identified by its activation stamp, never named a context call.
 			const protectedSkills = messages
 				.filter(
 					(message) =>
 						message.role === "toolResult" &&
-						effectiveToolCall(message.toolName, undefined, message.details).toolName === "context",
+						(effectiveToolCall(message.toolName, undefined, message.details).toolName === "context" ||
+							(isGatewayChain(message.toolName, undefined, message.details) &&
+								(message.details as { capability?: unknown } | undefined)?.capability === "context")),
 				)
 				.reduce((sum, message) => sum + estimateAgentMessageTokens(message), 0);
 			const floor =
@@ -1163,6 +1168,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const turnRuntime = createTurnRuntime({
 		state,
+		gatewayCapabilityNames: () => deps.toolRegistry?.listGateway().map((spec) => spec.name) ?? [],
 		getSettings: deps.getSettings,
 		providers: deps.providers,
 		knownTargets: deps.knownTargets,
@@ -1614,7 +1620,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				turnRuntime.toolTelemetry,
 			);
 			const toolSignature = toolSignatureFromState(agentRuntime.agent.state.tools);
-			const askUserPolicy = createAskUserToolPolicy(agentRuntime.agent.state.tools);
+			const askUserPolicy = createAskUserToolPolicy(
+				agentRuntime.agent.state.tools,
+				deps.toolRegistry,
+				state.currentTurnConstraints,
+			);
 			// turn_start: the prompt is accepted; registrations may inject
 			// context for this request. Accumulated reminders (turn_end
 			// advisories from the previous turn plus anything turn_start just
@@ -1626,7 +1636,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const reminderProjection = middleware.takePendingReminderProjection();
 			// Pending skill requests are plain visible text in the user message
 			// itself: persisted in the ledger, no hidden prompt machinery.
-			const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests);
+			const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests, agentRuntime.agent.state.tools);
 			let taskMemoryHandoffSource = "";
 			if (pendingSkillRequests.some((request) => request.name.trim() === "context-handoff")) {
 				try {

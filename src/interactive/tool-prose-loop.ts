@@ -17,6 +17,12 @@ export function runtimeNarratesToolCalls(runtimeTier: string | undefined): boole
 export interface ToolProseLoopInput {
 	text: string;
 	activeToolNames: ReadonlyArray<string>;
+	/**
+	 * Capabilities reachable only through the attached gateway. A coordinator
+	 * session attaches a small surface, and a local model narrating "use the
+	 * grep tool" is the same loop even though grep has no schema of its own.
+	 */
+	gatewayToolNames?: ReadonlyArray<string>;
 	hasStructuredToolCall?: boolean;
 }
 
@@ -58,6 +64,14 @@ export function shouldAssessToolProse(textLength: number, lastAssessedChars: num
 	return textLength - lastAssessedChars >= TOOL_PROSE_ASSESS_STRIDE_CHARS;
 }
 
+function countByName(pattern: RegExp, text: string, tally: Map<string, number>): void {
+	pattern.lastIndex = 0;
+	for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
+		const name = match[1]?.replace(/[ _-]+/g, "_") ?? "";
+		tally.set(name, (tally.get(name) ?? 0) + 1);
+	}
+}
+
 function count(pattern: RegExp, text: string): number {
 	let matches = 0;
 	pattern.lastIndex = 0;
@@ -85,21 +99,28 @@ function normalizedToolNames(names: ReadonlyArray<string>): string[] {
 export function assessToolProseLoop(input: ToolProseLoopInput): ToolProseLoopAssessment {
 	if (input.hasStructuredToolCall === true) return { kind: "ok" };
 	if (input.text.length < MIN_TOOL_PROSE_CHARS) return { kind: "ok" };
-	const tools = normalizedToolNames(input.activeToolNames);
+	const attached = normalizedToolNames(input.activeToolNames);
+	const tools = normalizedToolNames([...attached, ...(input.gatewayToolNames ?? [])]);
 	if (tools.length === 0) return { kind: "ok" };
 
 	const text = input.text.toLowerCase().replace(/\s+/g, " ");
 	let maxToolMatches = 0;
 	let matchedTool = "";
 
+	// One alternation per phrasing, longest names first so `web_read` is not
+	// also counted as `read`. Three scans regardless of surface size keep the
+	// streaming hot path flat as gateway catalogs grow.
+	const names = [...tools].sort((left, right) => right.length - left.length || left.localeCompare(right));
+	const alternation = `(${names.map(toolPattern).join("|")})`;
+	const tally = new Map<string, number>();
+	for (const pattern of [
+		new RegExp(`\\b(?:execute|call|make|use)\\s+the\\s+${alternation}\\s+tool\\s+call\\b`, "g"),
+		new RegExp(`\\b(?:execute|call|use)\\s+the\\s+${alternation}\\s+tool\\b`, "g"),
+		new RegExp(`\\b${alternation}\\s+tool\\s+call\\b`, "g"),
+	])
+		countByName(pattern, text, tally);
 	for (const toolName of tools) {
-		const name = toolPattern(toolName);
-		const patterns = [
-			new RegExp(`\\b(?:execute|call|make|use)\\s+the\\s+${name}\\s+tool\\s+call\\b`, "g"),
-			new RegExp(`\\b(?:execute|call|use)\\s+the\\s+${name}\\s+tool\\b`, "g"),
-			new RegExp(`\\b${name}\\s+tool\\s+call\\b`, "g"),
-		];
-		const matches = patterns.reduce((sum, pattern) => sum + count(pattern, text), 0);
+		const matches = tally.get(toolName.replace(/[ _-]+/g, "_")) ?? 0;
 		if (matches > maxToolMatches) {
 			maxToolMatches = matches;
 			matchedTool = toolName;
@@ -114,9 +135,15 @@ export function assessToolProseLoop(input: ToolProseLoopInput): ToolProseLoopAss
 	if (matchCount < TOOL_PROSE_REPEAT_THRESHOLD) return { kind: "ok" };
 
 	const target = matchedTool.length > 0 ? ` for '${matchedTool}'` : "";
+	// Narrating a gateway capability usually means the model is looking for a
+	// schema it does not have; the recovery names the call that exists.
+	const route =
+		matchedTool.length > 0 && !attached.includes(matchedTool) && attached.includes("gateway")
+			? `; ${matchedTool} has no attached schema, so call gateway(op="call", capability="${matchedTool}", args={...})`
+			: "";
 	return {
 		kind: "loop",
 		matchCount,
-		reason: `local model repeated tool-call narration${target} ${matchCount} times without emitting a structured tool call`,
+		reason: `local model repeated tool-call narration${target} ${matchCount} times without emitting a structured tool call${route}`,
 	};
 }

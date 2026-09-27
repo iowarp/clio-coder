@@ -43,6 +43,8 @@ import {
 } from "../../domains/session/prompt-manifest.js";
 import { foldSessionArtifacts, resolveSessionArtifactPath } from "../../domains/session/session-artifacts.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
+import { displayToolCall } from "../../tools/gateway-display.js";
+import { expandChainMessages } from "../../tools/surface.js";
 import { formatUsd } from "../footer/widgets.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { clockLocal } from "../format-time.js";
@@ -863,10 +865,12 @@ function messagePayload(entry: SessionEntry): Record<string, unknown> | null {
 	return isRecord(entry.payload) ? entry.payload : null;
 }
 
+/** The capability a result came from: a gateway op=call names what it ran, as a direct call did. */
 function toolNameFor(entry: SessionEntry): string {
 	const payload = messagePayload(entry);
 	const name = payload?.toolName ?? payload?.name;
-	return typeof name === "string" && name.length > 0 ? name : "tool";
+	if (typeof name !== "string" || name.length === 0) return "tool";
+	return displayToolCall(name, payload?.args, resultDetails(payload?.result)).toolName;
 }
 
 function pathFromToolResult(entry: SessionEntry): string | null {
@@ -1187,10 +1191,15 @@ export class ToolOutputArtifactProvider implements ArtifactProvider {
 				continue;
 			}
 			if (entry.kind !== "message" || entry.role !== "tool_result") continue;
-			const path = pathFromToolResult(entry);
-			if (!path || seen.has(path)) continue;
-			seen.add(path);
-			out.push(this.toolResultArtifact(entry, path));
+			// A chain's settled steps keep their own offloaded outputs; the
+			// aggregate result carries none of its own.
+			for (const [index, result] of expandChainMessages([entry]).entries()) {
+				if (result.kind !== "message" || result.role !== "tool_result") continue;
+				const path = pathFromToolResult(result);
+				if (!path || seen.has(path)) continue;
+				seen.add(path);
+				out.push(this.toolResultArtifact(result, path, index > 0));
+			}
 		}
 		return out;
 	}
@@ -1210,10 +1219,12 @@ export class ToolOutputArtifactProvider implements ArtifactProvider {
 		};
 	}
 
-	private toolResultArtifact(entry: MessageEntry, path: string): ViewArtifact {
+	private toolResultArtifact(entry: MessageEntry, path: string, chainStep = false): ViewArtifact {
 		const toolName = toolNameFor(entry);
+		const stepCallId = chainStep ? readStringField(messagePayload(entry) ?? {}, "toolCallId") : null;
 		const artifact: ViewArtifact = {
-			id: `tool:${entry.turnId}`,
+			// Steps share their chain's ledger row, so the step's call id keeps them apart.
+			id: stepCallId === null ? `tool:${entry.turnId}` : `tool:${entry.turnId}:${stepCallId}`,
 			category: this.category,
 			title: safeTitle(`${toolName} · ${basename(path)}`, `${toolName} output`),
 			timestamp: parseTime(entry.timestamp),

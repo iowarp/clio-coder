@@ -12,6 +12,8 @@
 
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { displayToolCall } from "../../tools/gateway-display.js";
+import { expandChainMessages } from "../../tools/surface.js";
 import type { MessageEntry, SessionEntry } from "./entries.js";
 import { HANDOFF_NOTE_CUSTOM_TYPE, HANDOFF_SEED_CUSTOM_TYPE, isHandoffNoteData, isHandoffSeedData } from "./handoff.js";
 import { filterEntriesToActivePath } from "./tree/active-path.js";
@@ -22,8 +24,8 @@ const MAX_RESULT_CHARS = 8000;
 export type TranscriptBlock =
 	| { kind: "request"; text: string }
 	| { kind: "response"; text: string; reasoning: boolean }
-	| { kind: "tool"; name: string; args: string }
-	| { kind: "result"; name: string; text: string; failed: boolean }
+	| { kind: "tool"; name: string; args: string; viaGateway: boolean }
+	| { kind: "result"; name: string; text: string; failed: boolean; viaGateway: boolean }
 	| { kind: "note"; title: string; text: string };
 
 export interface TranscriptExportInput {
@@ -72,11 +74,21 @@ function resultText(result: unknown): string {
 	return result === undefined ? "" : JSON.stringify(result, null, 2);
 }
 
-/** The branch the session is on, as blocks a renderer lays out. */
+/**
+ * The branch the session is on, as blocks a renderer lays out. A gateway
+ * op=call reads as the capability it ran, marked as reached through the
+ * gateway, and a chain's settled steps follow its aggregate result as their own
+ * call and result. The ledger keeps the wire record; only the reading changes.
+ */
 function transcriptBlocks(input: TranscriptExportInput): { blocks: TranscriptBlock[]; turns: number } {
 	const blocks: TranscriptBlock[] = [];
 	let turns = 0;
-	for (const entry of filterEntriesToActivePath(input.entries, input.leafTurnId ?? undefined)) {
+	// A refused capability's result carries no capability name of its own, so
+	// a result takes the name its call was shown under.
+	const shownCalls = new Map<string, { name: string; viaGateway: boolean }>();
+	const branch = filterEntriesToActivePath(input.entries, input.leafTurnId ?? undefined);
+	const recorded = new Set<SessionEntry>(branch);
+	for (const entry of expandChainMessages(branch)) {
 		if (entry.kind === "compactionSummary") {
 			blocks.push({ kind: "note", title: "Earlier turns were compacted", text: entry.summary });
 			continue;
@@ -111,20 +123,36 @@ function transcriptBlocks(input: TranscriptExportInput): { blocks: TranscriptBlo
 			if (text.trim().length > 0 || reasoning) blocks.push({ kind: "response", text, reasoning });
 			continue;
 		}
+		const toolCallId = typeof payload?.toolCallId === "string" ? payload.toolCallId : null;
+		// An entry the ledger never recorded is a chain step expanded after its aggregate.
+		const chainStep = !recorded.has(entry);
 		if (entry.role === "tool_call") {
-			const name =
+			const wireName =
 				typeof payload?.name === "string"
 					? payload.name
 					: typeof payload?.toolName === "string"
 						? payload.toolName
 						: "tool";
-			blocks.push({ kind: "tool", name, args: clip(JSON.stringify(payload?.args ?? {}, null, 2), MAX_ARGS_CHARS) });
+			const call = displayToolCall(wireName, payload?.args);
+			const shown = { name: call.toolName, viaGateway: call.viaGateway || chainStep };
+			if (toolCallId !== null) shownCalls.set(toolCallId, shown);
+			blocks.push({
+				kind: "tool",
+				...shown,
+				args: clip(JSON.stringify((call.viaGateway ? call.args : payload?.args) ?? {}, null, 2), MAX_ARGS_CHARS),
+			});
 			continue;
 		}
 		if (entry.role === "tool_result") {
-			const name = typeof payload?.toolName === "string" ? payload.toolName : "tool";
+			const result = isRecord(payload?.result) ? payload.result : undefined;
+			const wireName = typeof payload?.toolName === "string" ? payload.toolName : "tool";
+			const call = displayToolCall(wireName, undefined, result?.details);
+			const shown = (toolCallId === null ? undefined : shownCalls.get(toolCallId)) ?? {
+				name: call.toolName,
+				viaGateway: call.viaGateway || chainStep,
+			};
 			const failed = payload?.isError === true || payload?.outcome === "error" || payload?.outcome === "blocked";
-			blocks.push({ kind: "result", name, text: clip(resultText(payload?.result), MAX_RESULT_CHARS), failed });
+			blocks.push({ kind: "result", ...shown, text: clip(resultText(payload?.result), MAX_RESULT_CHARS), failed });
 		}
 	}
 	return { blocks, turns };
@@ -151,9 +179,10 @@ function renderTranscriptMarkdown(input: TranscriptExportInput): { text: string;
 			if (block.reasoning) lines.push("_Reasoning was reported for this reply and is not included._", "");
 			if (block.text.trim().length > 0) lines.push(block.text, "");
 		}
-		if (block.kind === "tool") lines.push(`**Tool call:** \`${block.name}\``, "", fenced(block.args, "json"), "");
+		const via = (block.kind === "tool" || block.kind === "result") && block.viaGateway ? " via gateway" : "";
+		if (block.kind === "tool") lines.push(`**Tool call:** \`${block.name}\`${via}`, "", fenced(block.args, "json"), "");
 		if (block.kind === "result")
-			lines.push(`**${block.failed ? "Failed" : "Result"}:** \`${block.name}\``, "", fenced(block.text, "text"), "");
+			lines.push(`**${block.failed ? "Failed" : "Result"}:** \`${block.name}\`${via}`, "", fenced(block.text, "text"), "");
 		if (block.kind === "note") lines.push(`> **${block.title}**`, "", fenced(block.text, "text"), "");
 	}
 	return { text: `${lines.join("\n")}\n`, turns };
@@ -196,13 +225,17 @@ function renderTranscriptHtml(input: TranscriptExportInput): { text: string; tur
 			if (block.reasoning) body.push('<p class="meta">Reasoning was reported for this reply and is not included.</p>');
 			if (block.text.trim().length > 0) body.push(`<div class="response">${escapeHtml(block.text)}</div>`);
 		}
+		const via =
+			(block.kind === "tool" || block.kind === "result") && block.viaGateway
+				? ' <span class="tool-name">via gateway</span>'
+				: "";
 		if (block.kind === "tool")
 			body.push(
-				`<details><summary>Tool call · <span class="tool-name">${escapeHtml(block.name)}</span></summary><pre>${escapeHtml(block.args)}</pre></details>`,
+				`<details><summary>Tool call · <span class="tool-name">${escapeHtml(block.name)}</span>${via}</summary><pre>${escapeHtml(block.args)}</pre></details>`,
 			);
 		if (block.kind === "result")
 			body.push(
-				`<details${block.failed ? " open" : ""}><summary class="${block.failed ? "failed" : ""}">${block.failed ? "Failed" : "Result"} · <span class="tool-name">${escapeHtml(block.name)}</span></summary><pre>${escapeHtml(block.text)}</pre></details>`,
+				`<details${block.failed ? " open" : ""}><summary class="${block.failed ? "failed" : ""}">${block.failed ? "Failed" : "Result"} · <span class="tool-name">${escapeHtml(block.name)}</span>${via}</summary><pre>${escapeHtml(block.text)}</pre></details>`,
 			);
 		if (block.kind === "note")
 			body.push(`<p class="note-title">${escapeHtml(block.title)}</p><pre>${escapeHtml(block.text)}</pre>`);

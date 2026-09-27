@@ -21,12 +21,14 @@ import {
 } from "../core/response-model-id.js";
 import type { PendingSkillRequest, PendingSkillToolPolicy, SkillDeclaredToolPolicy } from "../core/skill-activation.js";
 import { ToolNames } from "../core/tool-names.js";
+import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import { sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
 import { ceilChars, extractReasoningTokens } from "../domains/session/context-accounting.js";
 import type { AgentMessage } from "../engine/types.js";
-import type { AskUserToolPolicy } from "../tools/registry.js";
+import type { AskUserToolPolicy, ToolRegistry } from "../tools/registry.js";
+import { toolSpecPlacement } from "../tools/surface.js";
 import { attachedToolSchemaBytes, attachedToolSchemasFromState } from "./prompt-cache-identity.js";
 
 /** Minimal structural view of the engine agent used by state-inspection helpers. */
@@ -258,7 +260,10 @@ export function noticeMessage(text: string): AgentMessage {
  * same user message. Plain visible text, persisted in the ledger: skill
  * requests are turn data, not prompt machinery.
  */
-export function pendingSkillRequestPreamble(requests: ReadonlyArray<PendingSkillRequest>): string {
+export function pendingSkillRequestPreamble(
+	requests: ReadonlyArray<PendingSkillRequest>,
+	activeTools: ReadonlyArray<{ name: string }> = [],
+): string {
 	const named = requests.filter((request) => request.name.trim().length > 0);
 	if (named.length === 0) return "";
 	const allowed = [...new Set(named.map((request) => request.name.trim()))];
@@ -270,7 +275,11 @@ export function pendingSkillRequestPreamble(requests: ReadonlyArray<PendingSkill
 	return [
 		"[Skill request]",
 		...lines,
-		`First call context with scope="skills" and name for: ${allowed.join(", ")}. Only these pending skill names are allowed this turn. After the skill loads, follow the loaded workflow.`,
+		// The coordinator attaches gateway, not context; name the call it can make.
+		!activeTools.some((tool) => tool.name === ToolNames.Context) &&
+		activeTools.some((tool) => tool.name === ToolNames.Gateway)
+			? `First load each through gateway(op="call", capability="context", args={scope:"skills",name:"<name>"}) for: ${allowed.join(", ")}. Only these pending skill names are allowed this turn. After the skill loads, follow the loaded workflow.`
+			: `First call context with scope="skills" and name for: ${allowed.join(", ")}. Only these pending skill names are allowed this turn. After the skill loads, follow the loaded workflow.`,
 	].join("\n");
 }
 
@@ -316,8 +325,33 @@ export function createPendingSkillToolPolicy(
 	};
 }
 
-export function createAskUserToolPolicy(activeTools: ReadonlyArray<{ name: string }>): AskUserToolPolicy | undefined {
-	if (!activeTools.some((tool) => tool.name === ToolNames.AskUser)) return undefined;
+/**
+ * The coordinator reaches ask_user through the attached gateway. That interview
+ * still needs the turn-scoped policy: without it every call gets a standalone
+ * policy, so the round cap and question dedup reset per call and the turn-end
+ * finalization never writes the operator's decisions to the ledger.
+ */
+function askUserReachable(
+	activeTools: ReadonlyArray<{ name: string }>,
+	registry: Pick<ToolRegistry, "get"> | undefined,
+	constraints: TurnConstraints | undefined,
+): boolean {
+	if (activeTools.some((tool) => tool.name === ToolNames.AskUser)) return true;
+	const spec = registry?.get(ToolNames.AskUser);
+	return (
+		spec !== undefined &&
+		toolSpecPlacement(spec) === "gateway" &&
+		activeTools.some((tool) => tool.name === ToolNames.Gateway) &&
+		turnAllowsTool(constraints, ToolNames.AskUser)
+	);
+}
+
+export function createAskUserToolPolicy(
+	activeTools: ReadonlyArray<{ name: string }>,
+	registry?: Pick<ToolRegistry, "get">,
+	constraints?: TurnConstraints,
+): AskUserToolPolicy | undefined {
+	if (!askUserReachable(activeTools, registry, constraints)) return undefined;
 	const now = new Date().toISOString();
 	return {
 		id: randomUUID(),

@@ -209,7 +209,7 @@ When resuming a session via `/resume` or a headless `clio-coder run --session <i
 
 ### Model-Facing Custom Entry Replay
 
-When resumed or forked session history is replayed to the model, compaction summaries, branch summaries, and operator bash executions use standardized user-role text through [messages.ts](../../src/engine/messages.ts). Working-set projection runs before compaction counting and summary serialization, while raw ledger entries remain intact. Tool results hidden by summaries are discoverable with `context(scope="recall")` and recoverable by exact ref through the normal observation envelope; older destructive logs cannot recover removed bytes.
+When resumed or forked session history is replayed to the model, compaction summaries, branch summaries, and operator bash executions use standardized user-role text through [messages.ts](../../src/engine/messages.ts). Replayed text and tool results are capped at 20,000 characters, except a skill load that is still selected and whose receipt verifies whole: it replays uncut, direct or through the gateway, because the model read it whole and the session still stands on those instructions ([chat-renderer.ts](../../src/interactive/chat-renderer.ts)). Working-set projection runs before compaction counting and summary serialization, while raw ledger entries remain intact. Tool results hidden by summaries are discoverable with `context(scope="recall")` and recoverable by exact ref through the normal observation envelope; older destructive logs cannot recover removed bytes.
 
 ## How new sessions, resume and fork differ in history and workspace
 

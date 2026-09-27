@@ -86,7 +86,7 @@ async function provider(command: string): Promise<{ server: Server; url: string 
 							index: 0,
 							id: "call-lifecycle",
 							type: "function",
-							function: { name: "gateway", arguments: JSON.stringify({ op: "call", capability: "bash", args: { command } }) },
+							function: { name: "bash", arguments: JSON.stringify({ command }) },
 						},
 					],
 				}

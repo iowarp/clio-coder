@@ -126,7 +126,8 @@ function contextToolEnd(events: Array<Record<string, unknown>>): Record<string, 
 	return events.find(
 		(event) =>
 			event.type === "tool_execution_end" &&
-			event.toolName === "gateway" &&
+			event.toolName === "context" &&
+			event.via === "gateway" &&
 			(event.result as { details?: { capability?: string } } | undefined)?.details?.capability === "context",
 	);
 }
@@ -173,8 +174,7 @@ async function headlessSkillTurn(
 	const scratch = scratchHome();
 	const fixed = await runCli(["doctor", "--fix"], { env: scratch.env });
 	strictEqual(fixed.code, 0, fixed.stderr);
-	// One scripted tool call per turn: the model asks to load the skill by name,
-	// which is the call that is operator-gated today at every level.
+	// The model loads an installed skill; its display names context while replay keeps gateway.
 	const fixture = await startOpenAICompatFixture("done", {
 		toolCall: {
 			name: "gateway",

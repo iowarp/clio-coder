@@ -44,12 +44,24 @@ function resultOf(verdict: Awaited<ReturnType<ToolRegistry["invoke"]>>): ToolRes
 	return verdict.result;
 }
 
+/** A chain aggregate: status and boundary from its plain-text head, steps and pending from its details. */
+function chainOf(result: ToolResult) {
+	const text = result.kind === "ok" ? result.output : result.message;
+	const details = (result.details ?? {}) as {
+		steps?: Array<{ id: string; kind: string; truncated: boolean }>;
+		pending?: string[];
+	};
+	return {
+		text,
+		status: /^Chain (complete|paused|failed): /u.exec(text)?.[1],
+		boundary: /^Boundary: (.*)$/mu.exec(text)?.[1],
+		pending: details.pending ?? [],
+		steps: details.steps ?? [],
+	};
+}
+
 function payloadOf(result: ToolResult) {
 	return JSON.parse(result.kind === "ok" ? result.output : result.message) as {
-		status?: string;
-		boundary?: string;
-		pending?: string[];
-		results?: Array<{ id: string; kind: string; output: string }>;
 		capabilities?: Array<{ name: string }>;
 		total?: number;
 		nextOffset?: number;
@@ -91,7 +103,7 @@ describe("coordinator discovery and dependency composition", () => {
 		return name;
 	};
 
-	it("attaches five coordinator schemas, retains canonical dispatch validation, and keeps worker execution tools", async () => {
+	it("attaches the basic coordinator schemas, retains canonical dispatch validation, and keeps worker execution tools", async () => {
 		const bundle = makeDispatchBundle(dispatchStubContext());
 		await bundle.extension.start();
 		try {
@@ -99,7 +111,7 @@ describe("coordinator discovery and dependency composition", () => {
 			const tools = resolveAgentTools({ registry });
 			deepStrictEqual(
 				tools.map((tool) => tool.name),
-				["dispatch", "edit", "gateway", "read", "write"],
+				["bash", "dispatch", "edit", "gateway", "read", "verify", "write"],
 			);
 			const wireDispatch = tools.find((tool) => tool.name === "dispatch");
 			ok(wireDispatch);
@@ -158,8 +170,8 @@ describe("coordinator discovery and dependency composition", () => {
 			middleware.fireTurnStart(runtime, "Implement solver");
 			await middleware.fireTurnEnd(runtime, [], { toolCallId: "fixture", toolName: "gateway" });
 			for (const input of observed) {
-				strictEqual(input.metadata?.activeToolNames, "dispatch,edit,gateway,read,write");
-				for (const name of ["tasks", "monitor", "verify"]) {
+				strictEqual(input.metadata?.activeToolNames, "bash,dispatch,edit,gateway,read,verify,write");
+				for (const name of ["tasks", "monitor", "grep"]) {
 					ok(String(input.metadata?.activeCapabilityNames).split(",").includes(name));
 				}
 			}
@@ -298,7 +310,7 @@ describe("coordinator discovery and dependency composition", () => {
 			},
 		]);
 		strictEqual(result.kind, "ok");
-		strictEqual(payloadOf(result).status, "complete");
+		strictEqual(chainOf(result).status, "complete");
 		strictEqual(readFileSync(join(env.dir, "result.txt"), "utf8"), "bound data\n");
 	});
 
@@ -353,9 +365,10 @@ describe("coordinator discovery and dependency composition", () => {
 			{ id: "next", capability: next, args: {}, after: ["failed"] },
 		]);
 		strictEqual(result.kind, "error");
-		const payload = payloadOf(result);
+		const payload = chainOf(result);
 		strictEqual(payload.status, "failed");
 		deepStrictEqual(payload.pending, ["next"]);
+		match(payload.text, /^### step failed \(extension_fixture__fail\): error\nsource unavailable$/mu);
 		strictEqual(writes, 0);
 	});
 
@@ -378,7 +391,7 @@ describe("coordinator discovery and dependency composition", () => {
 			{ id: "interview", capability: "ask_user", args: { question: { $from: "inspect", path: ["json", "question"] } } },
 			{ id: "edit", capability: "write", after: ["interview"], args: { path: join(env.dir, "unexpected"), content: "x" } },
 		]);
-		const payload = payloadOf(result);
+		const payload = chainOf(result);
 		strictEqual(payload.status, "paused");
 		deepStrictEqual(payload.pending, ["edit"]);
 		match(payload.boundary ?? "", /operator replied/u);
@@ -405,7 +418,7 @@ describe("coordinator discovery and dependency composition", () => {
 		controller.abort();
 		const result = await chain([{ id: "cancelled", capability: name, args: {} }], { signal: controller.signal });
 		strictEqual(calls, 0);
-		match(payloadOf(result).boundary ?? "", /cancelled/u);
+		match(chainOf(result).boundary ?? "", /cancelled/u);
 	});
 
 	it("describes the chain contract without executing steps", async () => {
@@ -510,13 +523,13 @@ describe("coordinator discovery and dependency composition", () => {
 			.filter((block) => block.type === "text")
 			.map((block) => block.text)
 			.join("\n");
-		const payload = JSON.parse(text);
-		strictEqual(payload.status, "paused");
-		deepStrictEqual(payload.pending, ["save"]);
+		match(text, /^Chain paused: 1 of 2 steps settled\. Pending: save\.$/mu);
+		deepStrictEqual(result.details.pending, ["save"]);
 		ok(
-			payload.results[0].output.includes(body.trim()),
+			text.includes(`### step load (context): ok\n`) && text.includes(body.trim()),
 			"activation instructions are not divided by the chain output allowance",
 		);
+		strictEqual((result.details.steps as Array<{ truncated: boolean }>)[0]?.truncated, false);
 		const denied = resultOf(
 			await registry.invoke(
 				{
@@ -550,7 +563,7 @@ describe("coordinator discovery and dependency composition", () => {
 		strictEqual(result.kind, "error");
 		strictEqual(guard.callCount(), 3, "wrapper and both child attempts are counted");
 		deepStrictEqual(
-			payloadOf(result).results?.map((row) => row.kind),
+			chainOf(result).steps.map((row) => row.kind),
 			["ok", "error"],
 		);
 	});

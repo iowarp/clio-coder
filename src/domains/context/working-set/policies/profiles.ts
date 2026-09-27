@@ -72,6 +72,17 @@ function printedNumbers(entry: SessionEntry): boolean {
 }
 
 /**
+ * A bash-class result whose output printed figures. A chain aggregate counts
+ * when one of its bash-class members did, judged on that member's own output,
+ * so the pin keeps the whole aggregate the way it keeps a lone command.
+ */
+function isNumericBash(entry: SessionEntry, index: PathIndex): boolean {
+	const members = index.chainMembers.get(entry.turnId);
+	if (members === undefined) return index.byRef.get(entry.turnId)?.op === "bash" && printedNumbers(entry);
+	return members.some((member) => member.observation?.op === "bash" && NUMERIC_LINE.test(toolResultText(member.result)));
+}
+
+/**
  * The units a profile pins, as entry turnIds. Computed once per selection
  * over the visible entries, so every rung sees the same pins.
  */
@@ -85,8 +96,7 @@ export function profilePins(
 		let kept = 0;
 		for (let i = entries.length - 1; i >= 0 && kept < profile.pinLastNumericBash; i -= 1) {
 			const entry = entries[i];
-			if (entry === undefined || index.byRef.get(entry.turnId)?.op !== "bash") continue;
-			if (!printedNumbers(entry)) continue;
+			if (entry === undefined || !isNumericBash(entry, index)) continue;
 			pins.add(entry.turnId);
 			kept += 1;
 		}

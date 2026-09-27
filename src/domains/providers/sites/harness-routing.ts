@@ -20,7 +20,13 @@ export interface HarnessRouting {
 }
 
 export const HARNESS_ROUTING_VERSION = "harness-routing-v1";
-const MAX_CANDIDATES = 256;
+/**
+ * Candidates the backend scores per turn. Each is one yes/no question in the
+ * shared pre-turn request, so the catalog is narrowed locally first: task-term
+ * matches lead, then builtin tools, agents and skills fill the remainder.
+ */
+const MAX_CANDIDATES = 32;
+const KIND_ORDER: Readonly<Record<HarnessCandidateKind, number>> = { tool: 0, agent: 1, skill: 2 };
 const SHORTLIST_SIZE = 10;
 
 /**
@@ -35,14 +41,17 @@ export function createHarnessRoutingSite(
 		site: "harnessRouting",
 		version: HARNESS_ROUTING_VERSION,
 		prepare: (evidence) => {
-			const candidates = [
+			const scored = [
 				...new Map(listCandidates().map((candidate) => [`${candidate.kind}:${candidate.id}`, candidate])).values(),
-			].sort(
-				(left, right) =>
-					discoveryScore(evidence.task, right.id, right.description) -
-						discoveryScore(evidence.task, left.id, left.description) ||
-					`${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`),
-			);
+			].map((candidate) => ({ candidate, score: discoveryScore(evidence.task, candidate.id, candidate.description) }));
+			const candidates = scored
+				.sort(
+					(left, right) =>
+						right.score - left.score ||
+						KIND_ORDER[left.candidate.kind] - KIND_ORDER[right.candidate.kind] ||
+						left.candidate.id.localeCompare(right.candidate.id),
+				)
+				.map(({ candidate }) => candidate);
 			const selected = candidates.slice(0, MAX_CANDIDATES);
 			const questions = {
 				intent: pick(

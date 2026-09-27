@@ -262,14 +262,7 @@ async function provider(options: {
 										name: "gateway",
 										arguments: JSON.stringify({ op: "call", capability: next.tool.name, args: next.tool.args }),
 									}
-								: {
-										name: "gateway",
-										arguments: JSON.stringify({
-											op: "call",
-											capability: "bash",
-											args: { command: "printf 'from ACP' > note.txt" },
-										}),
-									},
+								: { name: "bash", arguments: '{"command":"printf \'from ACP\' > note.txt"}' },
 						},
 					],
 				}

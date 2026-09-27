@@ -33,6 +33,7 @@ import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
 import type { TurnPersistence } from "../../src/interactive/turn-persistence.js";
 import { createTurnRecovery } from "../../src/interactive/turn-recovery.js";
 import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import { renderChainOutput } from "../../src/tools/gateway/chain.js";
 import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 
 const timestamp = "2026-09-06T00:00:00.000Z";
@@ -517,17 +518,15 @@ describe("typed historical skill checkpoints (pure source)", () => {
 			payload.toolName = "gateway";
 			if (chained) {
 				const child = structuredClone(payload.result);
-				const aggregate = JSON.stringify({
-					status: "paused",
-					results: [{ id: "load", capability: "context", kind: "ok", output: f.body, truncated: false }],
-					pending: [],
-				});
+				const row = { id: "load", capability: "context", kind: "ok" as const, output: f.body, truncated: false };
+				const aggregate = renderChainOutput({ status: "paused", total: 1, rows: [row], pending: [] });
 				payload.result = {
 					content: [{ type: "text", text: aggregate }],
 					details: {
 						...child.details,
 						capability: "context",
 						op: "chain",
+						steps: [{ id: row.id, capability: row.capability, kind: row.kind, truncated: false }],
 						chainResults: [{ id: "load", capability: "context", args: innerArgs, isError: false, result: child }],
 					},
 				};

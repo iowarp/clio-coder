@@ -4,6 +4,7 @@
 // happening. No server field is added for any of it.
 
 import type { TimelineItem } from "../../contracts/sessions.js";
+import { readGateway } from "./gateway-model.js";
 import { notApproved, readWire, stoppedRun } from "./tool-presentation.js";
 
 export type ActivityTone = "neutral" | "info" | "action" | "success" | "warning" | "error";
@@ -216,7 +217,9 @@ export function activityDigest(items: readonly TimelineItem[]): string {
 	const tallies = new Map<string, { calls: number; paths: Set<string> }>();
 	for (const item of items) {
 		if (item.kind === "thought") continue;
-		const title = item.title ?? "";
+		// A gateway op=call counts as the capability it ran, with that capability's own path.
+		const gateway = readGateway(item);
+		const title = gateway.name ?? item.title ?? "";
 		const key =
 			item.kind === "notice"
 				? "notice"
@@ -232,7 +235,7 @@ export function activityDigest(items: readonly TimelineItem[]): string {
 			order.push(key);
 		}
 		tally.calls += 1;
-		const path = item.rawInput?.path;
+		const path = gateway.input.path;
 		if (typeof path === "string" && path.length > 0) tally.paths.add(path);
 	}
 	return order

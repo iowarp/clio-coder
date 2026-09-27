@@ -2,6 +2,7 @@ import { skillActivationFromToolDetails } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "../registry.js";
 import { toolResultContextText } from "../result-disposition.js";
+import { CHAIN_OUTPUT_TRUNCATED_MARKER } from "../surface.js";
 import { truncateUtf8 } from "../truncate-utf8.js";
 
 export const CHAIN_MAX_STEPS = 16;
@@ -17,6 +18,51 @@ interface Step {
 export interface ChainDeps {
 	getSpec(name: string): ToolSpec | undefined;
 	call(name: string, args: Record<string, unknown>, options?: ToolInvokeOptions): Promise<ToolResult>;
+}
+
+export type ChainStatus = "complete" | "paused" | "failed";
+
+/** One settled step as the model reads it: raw output under its header, never JSON-escaped. */
+export interface ChainStepRow {
+	id: string;
+	capability: string;
+	kind: ToolResult["kind"];
+	/** The step's output after the per-step allowance, or the whole activation projection. */
+	output: string;
+	truncated: boolean;
+}
+
+/**
+ * The line a settled step's raw output follows. Compaction proves a chained
+ * skill load was fully visible by finding the child body directly under this
+ * header (`historicalSkillReceipt` in src/domains/session/compaction/compact.ts),
+ * so a format change here must move there too.
+ */
+function chainStepHeader(row: Pick<ChainStepRow, "id" | "capability" | "kind" | "truncated">): string {
+	// Step ids are validated; a capability is free text, and a line break in it
+	// would open a forged section.
+	const capability = row.capability.replace(/\s+/gu, " ");
+	return `### step ${row.id} (${capability}): ${row.kind}${row.truncated ? ", truncated" : ""}`;
+}
+
+/**
+ * The aggregate text: a status line, the boundary that stopped scheduling,
+ * then every settled step in plan order. File contents and command output
+ * stay byte-exact so the model can read them and quote them into an edit.
+ */
+export function renderChainOutput(input: {
+	status: ChainStatus;
+	total: number;
+	rows: ReadonlyArray<ChainStepRow>;
+	pending: ReadonlyArray<string>;
+	boundary?: string;
+}): string {
+	const noun = input.total === 1 ? "step" : "steps";
+	const pending = input.pending.length > 0 ? ` Pending: ${input.pending.join(", ")}.` : "";
+	const head = [`Chain ${input.status}: ${input.rows.length} of ${input.total} ${noun} settled.${pending}`];
+	if (input.boundary !== undefined) head.push(`Boundary: ${input.boundary}`);
+	const sections = input.rows.map((row) => `${chainStepHeader(row)}\n${row.output}`);
+	return [head.join("\n"), ...sections].join("\n\n");
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -131,6 +177,8 @@ export async function runGatewayChain(
 	}
 	const results = new Map<string, ToolResult>();
 	const executedArgs = new Map<string, Record<string, unknown>>();
+	/** Steps whose `$from` binding failed: they settled as failures without ever running. */
+	const bindingErrors = new Map<string, string>();
 	let boundary: string | undefined;
 	let terminal = false;
 	let activationDetails: Record<string, unknown> | undefined;
@@ -147,8 +195,17 @@ export async function runGatewayChain(
 		);
 	};
 	const execute = async (step: Step): Promise<void> => {
+		let args: Record<string, unknown>;
 		try {
-			const args = bind(step.args, results) as Record<string, unknown>;
+			args = bind(step.args, results) as Record<string, unknown>;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			bindingErrors.set(step.id, message);
+			results.set(step.id, { kind: "error", message });
+			boundary = `step ${step.id} failed; review its evidence before continuing`;
+			return;
+		}
+		try {
 			executedArgs.set(step.id, args);
 			const result = await deps.call(step.capability, args, {
 				...options,
@@ -197,27 +254,28 @@ export async function runGatewayChain(
 		// The context tool already budgets activation instructions. Preserve
 		// that projection so it can be read before another operation.
 		if (step.capability === ToolNames.Context && activationDetails === result.details) return output;
-		return truncateUtf8(output, allowance, "\n[chain output truncated]");
+		return truncateUtf8(output, allowance, CHAIN_OUTPUT_TRUNCATED_MARKER);
 	};
-	const rows = steps.flatMap((step) => {
+	const rows = steps.flatMap((step): ChainStepRow[] => {
 		const result = results.get(step.id);
 		if (result === undefined) return [];
-		const text = toolResultContextText(result);
+		const output = projectedOutput(step, result);
 		return [
 			{
 				id: step.id,
 				capability: step.capability,
 				kind: result.kind,
-				output: projectedOutput(step, result),
-				truncated: projectedOutput(step, result) !== text,
+				output,
+				truncated: output !== toolResultContextText(result),
 			},
 		];
 	});
 	const pending = steps.filter((step) => !results.has(step.id)).map((step) => step.id);
 	const failed = rows.some((row) => row.kind === "error");
-	const output = JSON.stringify({
+	const output = renderChainOutput({
 		status: failed ? "failed" : terminal ? "complete" : boundary ? "paused" : "complete",
-		results: rows,
+		total: steps.length,
+		rows,
 		pending,
 		...(boundary ? { boundary } : {}),
 	});
@@ -225,11 +283,33 @@ export async function runGatewayChain(
 		...activationDetails,
 		...(activationDetails ? { capability: ToolNames.Context } : {}),
 		op: "chain",
-		steps: rows.map(({ id, capability, kind }) => ({ id, capability, kind })),
+		// `truncated` lets a consumer tell a complete step from a cut one
+		// without reading the model-facing text.
+		steps: rows.map(({ id, capability, kind, truncated }) => ({ id, capability, kind, truncated })),
 		pending,
-		chainResults: [...results].flatMap(([id, result]) => {
+		chainResults: [...results].flatMap(([id, result]): Array<Record<string, unknown>> => {
 			const step = steps.find((candidate) => candidate.id === id);
 			if (!step) return [];
+			const bindingError = bindingErrors.get(step.id);
+			if (bindingError !== undefined) {
+				// A failed binding is a settled failure that never ran. It carries no
+				// `args`, because no arguments were ever resolved or executed, so every
+				// consumer that counts executed operations skips it; displays and
+				// eviction still see the failure through `bindingError`.
+				return [
+					{
+						id: step.id,
+						capability: step.capability,
+						isError: true,
+						bindingError,
+						requestedArgs: step.args,
+						result: {
+							content: [{ type: "text", text: projectedOutput(step, result) }],
+							details: { kind: "error" },
+						},
+					},
+				];
+			}
 			const args = executedArgs.get(step.id);
 			if (!result || !args) return [];
 			return [

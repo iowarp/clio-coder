@@ -57,7 +57,7 @@ export function coordinatorDispatchParameters() {
 			}),
 		),
 		expected_outputs: Type.Optional(Type.Array(Type.String())),
-		verification: Type.Optional(Type.Array(Type.Object({ check: Type.String() }))),
+		verification: Type.Optional(DispatchVerificationSchema),
 	});
 	return Type.Object({
 		list: Type.Optional(Type.Boolean({ description: "Discover available worker recipes and their tools." })),
@@ -67,19 +67,25 @@ export function coordinatorDispatchParameters() {
 		),
 		tasks: Type.Optional(
 			Type.Array(
-				Type.Object({
-					agent: Type.Optional(Type.String()),
-					task: Type.String(),
-					briefing: Type.Optional(Type.String()),
-					intent: Type.Optional(intent),
-				}),
+				Type.Union([
+					Type.String(),
+					Type.Object({
+						agent: Type.Optional(Type.String()),
+						task: Type.String(),
+						briefing: Type.Optional(Type.String()),
+						intent: Type.Optional(intent),
+					}),
+				]),
 			),
 		),
 		intent: Type.Optional(intent),
 		briefing: Type.Optional(Type.String({ description: "Relevant parent evidence, separate from instructions." })),
+		// A plain string: this schema is checked before the canonical one, so an
+		// enum here would refuse the compete and council modes describe teaches.
 		mode: Type.Optional(
-			StringEnum(["parallel", "sequential", "pipeline"], {
-				description: "Independent tasks, ordered tasks, or tasks consuming the previous result.",
+			Type.String({
+				description:
+					"parallel: independent tasks; sequential: ordered tasks; pipeline: tasks consuming the previous result.",
 			}),
 		),
 		worktree: Type.Optional(Type.Literal(true)),
@@ -127,7 +133,11 @@ const DispatchVerificationSchema = Type.Array(
 		},
 		{ additionalProperties: false },
 	),
-	{ maxItems: 8 },
+	{
+		maxItems: 8,
+		description:
+			'Array of {check:"<declared id>"} entries from verify() discovery; never invent ids such as "test suite" or pass an object or shell command.',
+	},
 );
 
 // Keep nested schemas self-contained. Pi's non-strict Anthropic adapter carries

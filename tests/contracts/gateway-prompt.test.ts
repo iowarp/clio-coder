@@ -176,7 +176,7 @@ describe("gateway in the session prompt", () => {
 			console.log(
 				`attached schema bytes: total ${total}\n${sizes.map((entry) => `  ${entry.name}: ${entry.bytes}`).join("\n")}`,
 			);
-			ok(total <= 9_000, `five attached tools must stay within 9,000 bytes, down from ${ATTACHED_BUDGET_BYTES}`);
+			ok(total <= 10_000, `seven attached tools must stay within 10,000 bytes, down from ${ATTACHED_BUDGET_BYTES}`);
 			const gateway = sizes.find((entry) => entry.name === ToolNames.Gateway);
 			ok(gateway !== undefined && gateway.bytes < 2_048, `the gateway schema stays small: ${gateway?.bytes}`);
 			doesNotMatch(

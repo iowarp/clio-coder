@@ -26,15 +26,37 @@
  *   - `turn_end` keeps its assistant message (stop reason and usage live
  *     there) and drops `toolResults`, each of which already crossed the wire
  *     as a `tool_execution_end`.
+ *   - `tool_execution_*` frames name the capability that ran. A gateway
+ *     op=call carries the capability as `toolName`, its own arguments as
+ *     `args`, and `via: "gateway"`, so a consumer written against v056 direct
+ *     calls keeps reading `bash` and `command`. A chain keeps its `gateway`
+ *     frames and is followed by a start/end pair per settled step, each with
+ *     `toolCallId` `<parent>:<step id>` and `parentToolCallId`.
  *   - Every other event passes through unchanged.
  */
 
 import type { AgentMessage } from "../../engine/types.js";
 import type { ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { sumRunUsage } from "../../interactive/chat-loop-messages.js";
+import {
+	chainStepToolCallId,
+	displayToolCall,
+	type GatewayChainStep,
+	gatewayChainSteps,
+	VIA_GATEWAY,
+} from "../../tools/gateway-display.js";
 
 export function projectHeadlessJsonEvent(event: ChatLoopEvent): unknown | null {
 	if (event.type === "message_update") return null;
+	if (event.type === "tool_execution_start" || event.type === "tool_execution_update") {
+		const call = displayToolCall(event.toolName, event.args);
+		return call.viaGateway ? { ...event, toolName: call.toolName, args: call.args ?? {}, via: VIA_GATEWAY } : event;
+	}
+	if (event.type === "tool_execution_end") {
+		const details = isRecord(event.result) ? event.result.details : undefined;
+		const call = displayToolCall(event.toolName, undefined, details);
+		return call.viaGateway ? { ...event, toolName: call.toolName, via: VIA_GATEWAY } : event;
+	}
 	if (event.type === "text_delta") {
 		return { type: event.type, contentIndex: event.contentIndex, delta: event.delta };
 	}
@@ -49,6 +71,63 @@ export function projectHeadlessJsonEvent(event: ChatLoopEvent): unknown | null {
 		return { type: event.type, message: withoutStreamedContent(event.message) };
 	}
 	return event;
+}
+
+export interface HeadlessJsonProjector {
+	/** The wire frames one chat-loop event becomes, in order; empty when the event is dropped. */
+	project(event: ChatLoopEvent): unknown[];
+}
+
+/**
+ * The stateful half of the headless projection. A gateway call's end frame
+ * carries no arguments, and a refused capability's result carries no
+ * `details.capability`, so the end frame takes the capability its start frame
+ * named. A chain's end frame is followed by each settled step as its own
+ * start/end pair; the provider and the session keep the single aggregate.
+ */
+export function createHeadlessJsonProjector(): HeadlessJsonProjector {
+	const capabilities = new Map<string, string>();
+	return {
+		project(event) {
+			let projected = projectHeadlessJsonEvent(event);
+			if (projected === null) return [];
+			if (event.type === "tool_execution_start" && isRecord(projected) && projected.via === VIA_GATEWAY) {
+				capabilities.set(event.toolCallId, String(projected.toolName));
+			}
+			if (event.type !== "tool_execution_end") return [projected];
+			const started = capabilities.get(event.toolCallId);
+			capabilities.delete(event.toolCallId);
+			if (started !== undefined && isRecord(projected) && projected.via !== VIA_GATEWAY) {
+				projected = { ...projected, toolName: started, via: VIA_GATEWAY };
+			}
+			const steps = gatewayChainSteps(event.toolName, event.result);
+			return [projected, ...steps.flatMap((step) => chainStepFrames(event.toolCallId, step))];
+		},
+	};
+}
+
+/** One settled chain step as the start/end pair a direct call of its capability would have produced. */
+function chainStepFrames(parentToolCallId: string, step: GatewayChainStep): unknown[] {
+	const identity = {
+		toolCallId: chainStepToolCallId(parentToolCallId, step.id),
+		parentToolCallId,
+		toolName: step.capability,
+	};
+	return [
+		{ type: "tool_execution_start", ...identity, args: step.args, via: VIA_GATEWAY },
+		{
+			type: "tool_execution_end",
+			...identity,
+			result: step.result,
+			isError: step.isError,
+			via: VIA_GATEWAY,
+			...(step.outcome !== undefined ? { outcome: step.outcome } : {}),
+			...(step.actionClass !== undefined ? { actionClass: step.actionClass } : {}),
+			...(step.decision !== undefined ? { decision: step.decision } : {}),
+			...(step.blockReason !== undefined ? { blockReason: step.blockReason } : {}),
+			...(step.bindingError !== undefined ? { bindingError: step.bindingError } : {}),
+		},
+	];
 }
 
 /**

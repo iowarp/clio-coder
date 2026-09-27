@@ -13,7 +13,7 @@ import type { ContinuityCheckpointPayload } from "../continuity/contract.js";
 
 import { streamSimple } from "../../../engine/ai.js";
 import type { EngineModel, Usage } from "../../../engine/types.js";
-import { effectiveToolCall } from "../../../tools/surface.js";
+import { effectiveToolCall, expandChainMessages } from "../../../tools/surface.js";
 import type { WorkingSetView } from "../../context/working-set/contract.js";
 import { foldWorkingSet } from "../../context/working-set/fold.js";
 import { projectWorkingSet } from "../../context/working-set/project.js";
@@ -317,7 +317,11 @@ function historicalSkillCall(payload: Record<string, unknown> | null, name: stri
 	return steps.length === 1 && typeof step?.id === "string" && stepArgs ? { args: stepArgs, stepId: step.id } : null;
 }
 
-/** Prove the child instructions were actually visible in the complete aggregate. */
+/**
+ * Prove the child instructions were actually visible in the complete
+ * aggregate: the step settled untruncated (`details.steps`), the child receipt
+ * pairs with the call, and the aggregate text carries that receipt verbatim.
+ */
 function historicalSkillReceipt(
 	call: HistoricalSkillCall,
 	result: Record<string, unknown> | null,
@@ -330,6 +334,7 @@ function historicalSkillReceipt(
 		details.capability !== "context" ||
 		summary?.truncated !== false ||
 		!Array.isArray(details.chainResults) ||
+		!Array.isArray(details.steps) ||
 		!Array.isArray(result?.content)
 	)
 		return null;
@@ -344,25 +349,26 @@ function historicalSkillReceipt(
 		!Array.isArray(receipt?.content)
 	)
 		return null;
-	try {
-		const text = (content: unknown[]) => content.map((block) => payloadObject(block)?.text).join("\n");
-		const aggregate = JSON.parse(text(result.content)) as Record<string, unknown>;
-		if (!Array.isArray(aggregate.results)) return null;
-		const rows = aggregate.results.map(payloadObject).filter((row) => row?.id === call.stepId);
-		const row = rows[0];
-		const body = text(receipt.content);
-		if (
-			rows.length !== 1 ||
-			row?.capability !== "context" ||
-			row.kind !== "ok" ||
-			row.truncated !== false ||
-			row.output !== body
-		)
-			return null;
-		return { result: receipt, summary: { bytes: Buffer.byteLength(body, "utf8"), truncated: false } };
-	} catch {
+	const rows = details.steps.map(payloadObject).filter((row) => row?.id === call.stepId);
+	const row = rows[0];
+	if (rows.length !== 1 || row?.capability !== "context" || row.kind !== "ok" || row.truncated !== false) return null;
+	const text = (content: unknown[]) => content.map((block) => payloadObject(block)?.text).join("\n");
+	const aggregate = text(result.content);
+	const body = text(receipt.content);
+	// The model read the body only if it sits whole under its own step header
+	// and runs to the next section or the end. The header spelling mirrors
+	// `chainStepHeader` in src/tools/gateway/chain.ts; the chained-skill
+	// contract in tests/contracts/chain-output-eviction.test.ts fails if they drift.
+	const section = `### step ${call.stepId} (context): ok\n${body}`;
+	const at = aggregate.indexOf(section);
+	const end = at + section.length;
+	if (
+		at < 0 ||
+		(at > 0 && !aggregate.startsWith("\n\n", at - 2)) ||
+		(end !== aggregate.length && !aggregate.startsWith("\n\n", end))
+	)
 		return null;
-	}
+	return { result: receipt, summary: { bytes: Buffer.byteLength(body, "utf8"), truncated: false } };
 }
 
 /** Recover only complete, uniquely paired historical main-agent loads. Never consult current disk. */
@@ -630,7 +636,8 @@ function extractFileOpsFromPriorSummary(summary: string, fileOps: FileOperations
 
 function extractFileOps(entries: ReadonlyArray<SessionEntry>): FileOperations {
 	const fileOps = createFileOps();
-	for (const entry of entries) {
+	// Chained read, write and edit steps touch files the summary must name.
+	for (const entry of expandChainMessages(entries)) {
 		if (entry.kind === "fileEntry") {
 			recordFileOperation(fileOps, entry.operation, entry.path);
 			continue;

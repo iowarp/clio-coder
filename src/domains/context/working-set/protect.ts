@@ -12,10 +12,9 @@
  * Pure over the entry, the index, and the policy input.
  */
 
-import { expandChainMessages } from "../../../tools/surface.js";
 import type { SessionEntry } from "../../session/entries.js";
 import type { PolicyInput } from "./contract.js";
-import type { PathIndex, PathObservation } from "./path-index.js";
+import type { ChainMember, PathIndex, PathObservation } from "./path-index.js";
 import { hasLegacyCompactionMarker, isRecord, recalledRef, toolResultBodyTokens } from "./payload.js";
 
 export interface ProtectionContext {
@@ -102,6 +101,46 @@ function isActiveTurnMutation(observation: PathObservation, index: PathIndex): b
 	return observation.turnIndex >= index.turnCount;
 }
 
+/**
+ * What an observed result keeps on its own: a mutation the turn in flight
+ * stands on, or a failure nothing later resolved or re-ran.
+ */
+function isKeptObservation(observation: PathObservation, index: PathIndex): boolean {
+	if (isActiveTurnMutation(observation, index)) return true;
+	return (
+		observation.isError && findLaterSuccess(observation, index) === null && findLaterRun(observation, index) === null
+	);
+}
+
+/**
+ * Whether one member of a chain aggregate would be kept as a standalone result
+ * of its capability, and nothing stricter: a refused step, an unindexed
+ * failure, or what `isKeptObservation` keeps. Size, pins and the recent window
+ * belong to the aggregate, because it is the unit a marker replaces.
+ */
+function isKeptChainMember(member: ChainMember, index: PathIndex): boolean {
+	if (member.isBlocked) return true;
+	if (member.observation === null) return member.isError;
+	return isKeptObservation(member.observation, index);
+}
+
+/**
+ * A failed step the member list cannot account for. A step whose `$from`
+ * binding failed never ran, so it is no member, yet the aggregate's failure
+ * rests on it. Nothing can say that failure was resolved, so the aggregate
+ * stays, exactly as an unindexed standalone failure does.
+ */
+function hasUnindexedChainFailure(payload: unknown, members: ReadonlyArray<ChainMember>): boolean {
+	const result = isRecord(payload) && isRecord(payload.result) ? payload.result : null;
+	const steps = result !== null && isRecord(result.details) ? result.details.steps : undefined;
+	if (!Array.isArray(steps)) return false;
+	// Member ids are `<aggregate toolCallId>:<step id>`; step ids never contain a colon.
+	const indexed = new Set(members.map((member) => member.toolCallId.slice(member.toolCallId.lastIndexOf(":") + 1)));
+	return steps.some(
+		(row) => isRecord(row) && row.kind === "error" && typeof row.id === "string" && !indexed.has(row.id),
+	);
+}
+
 export function isProtected(entry: SessionEntry, ctx: ProtectionContext): boolean {
 	// Only two things ever leave the working set: a tool result's body and an
 	// assistant turn's thinking. Everything else (operator words, summaries,
@@ -113,10 +152,13 @@ export function isProtected(entry: SessionEntry, ctx: ProtectionContext): boolea
 	// The recent window is untouchable for both kinds.
 	if (ctx.entryIndex >= ctx.cutoffIndex) return true;
 	if (entry.role === "assistant") return false;
-	// Eviction addresses whole persisted results. A child becoming stale must
-	// not erase sibling evidence; retain compound receipts until eviction can
-	// assess every member together.
-	if (expandChainMessages([entry]).length > 1) return true;
+	// Eviction addresses whole persisted results, so a chain aggregate leaves
+	// as one unit or not at all: one member a standalone result would keep
+	// keeps every sibling. The composer separately requires every member to earn a
+	// rung reason before it claims the aggregate (`policies/compose.ts`).
+	const members = ctx.index.chainMembers.get(entry.turnId);
+	if (members?.some((member) => isKeptChainMember(member, ctx.index))) return true;
+	if (members !== undefined && hasUnindexedChainFailure(entry.payload, members)) return true;
 
 	// Profile pins and the churn pin come before the floor: a pinned unit stays
 	// whatever its size.
@@ -134,19 +176,14 @@ export function isProtected(entry: SessionEntry, ctx: ProtectionContext): boolea
 	// A body the legacy destructive stage already replaced has nothing left to evict.
 	if (hasLegacyCompactionMarker(entry.payload)) return true;
 	if (isBlockedResult(entry.payload)) return true;
+	// A failed chain is an error result as a whole; its members, and the
+	// unindexed-failure check above, already answered the failure question.
+	if (members !== undefined) return false;
 
 	const observation = ctx.index.byRef.get(entry.turnId);
 	// No observation means no way to ask whether a failure was resolved, so an
 	// unindexed failure stays. Everything else unindexed is an ordinary result
 	// the age rung may still take under pressure.
 	if (observation === undefined) return isErrorResult(entry.payload);
-
-	if (isActiveTurnMutation(observation, ctx.index)) return true;
-	if (
-		observation.isError &&
-		findLaterSuccess(observation, ctx.index) === null &&
-		findLaterRun(observation, ctx.index) === null
-	)
-		return true;
-	return false;
+	return isKeptObservation(observation, ctx.index);
 }

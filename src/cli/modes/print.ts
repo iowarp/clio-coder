@@ -40,7 +40,7 @@ import { TOOL_PLANES } from "../../tools/policy.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { setupSteerChannel } from "../steer-channel.js";
-import { projectHeadlessJsonEvent } from "./json-stream.js";
+import { createHeadlessJsonProjector } from "./json-stream.js";
 import { serializeJsonLine } from "./jsonl.js";
 
 export interface HeadlessSamplingOverrides {
@@ -758,19 +758,20 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		textSessionIdWritten = true;
 		process.stderr.write(`clio-coder run: session ${sessionId}\n`);
 	};
+	const jsonProjector = createHeadlessJsonProjector();
 	const unsubscribe = chat.onEvent((event) => {
 		writeTextSessionId();
 		if (mode === "json") {
-			const projected = projectHeadlessJsonEvent(event);
+			const frames = jsonProjector.project(event);
 			if (jsonEvents === "terminal") {
 				writeTerminalTurnStart();
 				writeJsonHeader(true);
-				if (projected !== null && TERMINAL_JSON_EVENT_TYPES.has(event.type)) {
-					writeRawStdout(serializeJsonLine(projected));
+				if (TERMINAL_JSON_EVENT_TYPES.has(event.type)) {
+					for (const frame of frames) writeRawStdout(serializeJsonLine(frame));
 				}
 			} else {
 				writeJsonHeader(false);
-				if (projected !== null) writeRawStdout(serializeJsonLine(projected));
+				for (const frame of frames) writeRawStdout(serializeJsonLine(frame));
 			}
 		}
 		recordToolEnd(receiptStats, event);

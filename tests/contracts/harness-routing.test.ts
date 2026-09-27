@@ -101,7 +101,7 @@ describe("optional System One harness routing foundation", () => {
 		const site = createHarnessRoutingSite(() => candidates);
 		const ask = site.prepare({ task: "boundary condition", previous: "" });
 		ok(ask);
-		strictEqual(Object.keys(ask.questions).length, 257);
+		strictEqual(Object.keys(ask.questions).length, 33);
 		ok(Object.hasOwn(ask.state?.harnessCandidates ?? {}, "tool:item_0999"));
 		const routing = site.read(
 			Object.fromEntries(

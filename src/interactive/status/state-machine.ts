@@ -1,5 +1,6 @@
 import type { RunAbortSource } from "../../core/bus-events.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { effectiveToolCall } from "../../tools/surface.js";
 import type { ChatLoopEvent, RetryStatusPhase } from "../chat-loop.js";
 import { buildSummary, emptyRunTally, foldMessageIntoRunTally, summaryFromRunTally } from "./summary.js";
 import {
@@ -463,11 +464,14 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			return next;
 		}
 		case "tool_execution_start": {
+			// Name the capability, not the gateway wrapper: the operator-wait
+			// watchdog exemption and the footer key on ask_user, bash and friends.
+			const call = effectiveToolCall(event.toolName, event.args);
 			const tool: ToolOverlay = {
 				toolCallId: event.toolCallId,
 				startedAt: ctx.now,
-				toolName: event.toolName,
-				toolPreview: compactPreview(event.args),
+				toolName: call.toolName,
+				toolPreview: compactPreview(call.viaGateway ? call.args : event.args),
 			};
 			// Stamp this call's own start so the footer's running-tool timer counts
 			// from here, not from turn start.

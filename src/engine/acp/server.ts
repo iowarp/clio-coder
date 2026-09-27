@@ -36,8 +36,10 @@ import type { MessageEntry, SessionEntry } from "../../domains/session/entries.j
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import { askUserExposure } from "../../tools/ask-user.js";
 import type { McpCapabilitySource, McpClientServerSpec } from "../../tools/gateway/mcp-capabilities.js";
+import { gatewayChainPlan } from "../../tools/gateway-display.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
+import { effectiveToolCall } from "../../tools/surface.js";
 import type { AgentMessage, ImageContent } from "../types.js";
 import {
 	ACP_ASIDE_ASK_METHOD,
@@ -1397,15 +1399,23 @@ function handleChatEvent(
 		const toolCallId = startToolCallId(active, eventString(event, "toolCallId"));
 		active.openToolCalls.add(toolCallId);
 		active.lastEmittedToolCallId = toolCallId;
-		const locations = toolLocations(toolName, event.args, cwd);
+		// Clients render kind, title and locations per capability, and the
+		// coordinator reaches most capabilities through gateway op=call.
+		const call = toolName === undefined ? undefined : effectiveToolCall(toolName, event.args);
+		const chainSteps = toolName === undefined ? [] : gatewayChainPlan(toolName, event.args);
+		const capability =
+			chainSteps.length > 0
+				? `gateway chain(${chainSteps.map((step) => step.capability).join(", ")})`
+				: (call?.toolName ?? toolName);
+		const locations = toolLocations(capability, call?.viaGateway ? call.args : event.args, cwd);
 		// Built once and kept: the permission request for this call must send the
 		// same objects rather than recompute them from a copy of the arguments that
 		// may since have been normalized.
 		const snapshot: AcpToolCallSnapshot = {
 			rawInput: boundRawRecord(event.args),
 			...(locations !== null ? { locations } : {}),
-			title: boundString(toolName ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
-			kind: toolKind(toolName),
+			title: boundString(capability ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
+			kind: toolKind(chainSteps.length > 0 ? toolName : capability),
 		};
 		active.toolCallSnapshots.set(toolCallId, snapshot);
 		sendUpdate(transport, sessionId, active, {
@@ -1443,6 +1453,7 @@ function handleChatEvent(
 		active.openToolCalls.delete(toolCallId);
 		active.terminalToolCalls.add(toolCallId);
 		const output = boundString(outputText(event.result), ACP_MAX_CHUNK_BYTES);
+		const started = active.toolCallSnapshots.get(toolCallId);
 		sendUpdate(
 			transport,
 			sessionId,
@@ -1450,8 +1461,8 @@ function handleChatEvent(
 			{
 				sessionUpdate: "tool_call_update",
 				toolCallId,
-				title: boundString(toolName ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
-				kind: toolKind(toolName),
+				title: started?.title ?? boundString(toolName ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
+				kind: started?.kind ?? toolKind(toolName),
 				status: toolStatus(event),
 				...(output.length > 0 ? { content: toolCallContent(output) } : {}),
 				rawOutput: boundRawRecord({ result: event.result, isError: event.isError === true }),

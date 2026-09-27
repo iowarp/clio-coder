@@ -2,10 +2,9 @@
 
 Clio Coder keeps the model-facing envelope stable and moves enforcement into the runtime registry and safety policy.
 
-Main sessions use a five-tool coordinator surface and discover secondary tools,
-recipes, and workflows progressively. See [the harness discovery audit](harness-discovery-audit.md)
-for the measured footprint, chain boundaries, and optional fast routing site.
-Workers keep their recipe execution surfaces. The compiler receives registered
+Main sessions attach a small coordinator surface (read, bash, edit, write,
+verify, ask_user, gateway and dispatch) and discover other tools, recipes, and
+workflows progressively through the gateway. Workers keep their recipe execution surfaces. The compiler receives registered
 builtin presence separately from attached schemas so it can teach reachable
 gateway capabilities without claiming those tools are attached. Lazy MCP tool
 registration does not change this builtin presence input or the stable prefix.

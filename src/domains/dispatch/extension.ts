@@ -125,7 +125,11 @@ import { assessFinishContract, type FinishContractAssessment } from "../safety/f
 import { WRITE_ROOT_REFUSED_TOOLS } from "../safety/policy-engine.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js";
-import { createRunEffectsRecorder, type RunEffectsRecorder } from "../safety/run-effects.js";
+import {
+	createRunEffectsRecorder,
+	type RunEffectsRecorder,
+	recordToolExecutionEffects,
+} from "../safety/run-effects.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
@@ -733,24 +737,7 @@ function recordWorkerRunEffect(recorder: RunEffectsRecorder, event: Record<strin
 			recorder.checkOutcome(id, outcome);
 		return;
 	}
-	const toolCallId = readStringOrNull(event.toolCallId);
-	if (toolCallId === null) return;
-	if (event.type === "tool_execution_start") {
-		const toolName = readStringOrNull(event.toolName) ?? readStringOrNull(event.tool);
-		if (toolName === null) return;
-		const call = effectiveToolCall(toolName, event.args);
-		recorder.start(toolCallId, call.toolName, call.args);
-		return;
-	}
-	if (event.type === "tool_execution_end") {
-		for (const child of gatewayChainReceipts(String(event.toolName), event.result)) {
-			const id = `${toolCallId}:${child.id}`;
-			recorder.start(id, child.capability, child.args);
-			recorder.checkOutcome(id, child.admission.outcome);
-			recorder.finish(id, child.admission.outcome !== "ok");
-		}
-		recorder.finish(toolCallId, event.isError === true);
-	}
+	if (typeof event.type === "string") recordToolExecutionEffects(recorder, { ...event, type: event.type });
 }
 
 interface VerifyCallLog {

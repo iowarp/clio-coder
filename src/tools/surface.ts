@@ -1,7 +1,7 @@
 /**
  * Tool placement: which registered tools carry an attached schema on every
  * turn (direct) and which are reached through the gateway's find/describe/call
- * results (gateway). The coordinator uses a five-tool projection; the builtin
+ * results (gateway). The coordinator uses a small basic projection; the builtin
  * table and namespace rules preserve the worker and legacy surfaces. Registry
  * declarations take precedence over those defaults.
  *
@@ -25,13 +25,22 @@ import {
 
 export type ToolPlacement = "direct" | "gateway";
 
-/** The coordinator learns execution capabilities on demand; workers retain their recipe surface. */
+/**
+ * The coordinator's attached surface: the four basic coding tools a minimal
+ * coding agent carries (read, bash, edit, write), gateway as the composition
+ * wrapper, and the three the orchestrator needs to do its own job (dispatch,
+ * verify, ask_user). Everything else is learned on demand; workers retain their
+ * recipe surface.
+ */
 export const COORDINATOR_DIRECT_TOOLS: ReadonlySet<string> = new Set([
 	ToolNames.Read,
-	ToolNames.Write,
+	ToolNames.Bash,
 	ToolNames.Edit,
+	ToolNames.Write,
 	ToolNames.Gateway,
 	ToolNames.Dispatch,
+	ToolNames.Verify,
+	ToolNames.AskUser,
 ]);
 
 export function coordinatorToolPlacement(name: string): ToolPlacement {
@@ -157,11 +166,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * What a chain appends to a step output it cut to that step's share of the
+ * aggregate allowance. The text before it is exactly what the model saw.
+ */
+export const CHAIN_OUTPUT_TRUNCATED_MARKER = "\n[chain output truncated]";
+
 export interface GatewayChainReceipt {
 	id: string;
 	capability: string;
 	args: Record<string, unknown>;
 	result: Record<string, unknown>;
+	/** The chain cut this step's output; `result.content` holds only the part the model saw. */
+	truncated?: true;
 	admission: {
 		outcome: "ok" | "error" | "blocked";
 		decision: "allowed" | "blocked" | "permission_requested";
@@ -183,7 +200,14 @@ export function gatewayChainReceipts(toolName: string, result: unknown): Gateway
 		!Array.isArray(details.chainResults)
 	)
 		return [];
+	const cut = new Set(
+		(Array.isArray(details.steps) ? details.steps : []).flatMap((row) =>
+			isRecord(row) && row.truncated === true && typeof row.id === "string" ? [row.id] : [],
+		),
+	);
 	return details.chainResults.slice(0, 16).flatMap((child) => {
+		// A step whose `$from` binding failed carries no `args` and no admission:
+		// it never ran, so it is never an admitted operation here.
 		if (
 			!isRecord(child) ||
 			typeof child.id !== "string" ||
@@ -210,6 +234,7 @@ export function gatewayChainReceipts(toolName: string, result: unknown): Gateway
 				capability: child.capability,
 				args: child.args,
 				result: child.result,
+				...(cut.has(child.id) ? { truncated: true as const } : {}),
 				admission: {
 					outcome: admission.outcome,
 					decision: admission.decision,
@@ -233,12 +258,17 @@ export function gatewayChainReceipts(toolName: string, result: unknown): Gateway
  *
  * The capability comes from the result details when they are present (the
  * gateway stamps `details.capability` on every call result) and from the
- * call arguments (`op: "call"`, `capability`) otherwise. Find and describe
- * records stay `gateway`.
+ * call arguments (`op: "call"`, `capability`) otherwise. Find, describe and
+ * chain records stay `gateway`. A chain that loaded a skill stamps
+ * `capability: "context"` on its aggregate details for activation telemetry;
+ * the aggregate is still the chain, and its children speak for themselves
+ * through `gatewayChainReceipts` and `expandChainMessages`.
  */
 export function effectiveToolCall(toolName: string, args: unknown, details?: unknown): EffectiveToolCall {
 	const record = isRecord(args) ? args : undefined;
 	if (toolName !== ToolNames.Gateway) return { toolName, args: record, viaGateway: false };
+	if (record?.op === "chain" || (isRecord(details) && details.op === "chain"))
+		return { toolName, args: record, viaGateway: false };
 	const fromDetails = isRecord(details) && typeof details.capability === "string" ? details.capability : null;
 	const fromArgs = record?.op === "call" && typeof record.capability === "string" ? record.capability : null;
 	const capability = (fromDetails ?? fromArgs)?.trim() ?? "";

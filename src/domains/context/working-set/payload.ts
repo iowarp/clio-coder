@@ -13,6 +13,8 @@
  * whatever the tool returned, usually `{ content: [...], details: {...} }`.
  */
 
+import { effectiveToolCall } from "../../../tools/surface.js";
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -28,11 +30,14 @@ export interface ToolResultPayload {
 export function toolResultPayload(payload: unknown): ToolResultPayload {
 	const obj = isRecord(payload) ? payload : { result: payload };
 	const result = obj.result ?? obj.output ?? obj.out ?? obj.content ?? payload;
-	const toolName =
+	const recorded =
 		(typeof obj.toolName === "string" && obj.toolName) ||
 		(typeof obj.name === "string" && obj.name) ||
 		(typeof obj.tool === "string" && obj.tool) ||
 		"tool";
+	// The coordinator runs monitor, bash and the search tools through gateway
+	// op=call; receipt settlement, markers and recall key on the capability.
+	const toolName = effectiveToolCall(recorded, undefined, isRecord(result) ? result.details : undefined).toolName;
 	return { obj, result, toolName };
 }
 

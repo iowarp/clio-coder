@@ -25,6 +25,7 @@
  */
 
 import { basename, isAbsolute, join, normalize, resolve } from "node:path";
+import { ToolNames } from "../../../core/tool-names.js";
 import { effectiveToolCall, expandChainMessages } from "../../../tools/surface.js";
 import type { MessageEntry, SessionEntry } from "../../session/entries.js";
 import type { WorkingSetRef } from "./contract.js";
@@ -101,10 +102,30 @@ export interface PathObservation {
 	argsKey: string;
 }
 
+/**
+ * One settled step of a gateway chain aggregate. The aggregate is the unit
+ * eviction addresses, so protection and the composer judge it through these:
+ * it may leave only when every member could leave on its own.
+ */
+export interface ChainMember {
+	/** `<aggregate toolCallId>:<step id>`, the id `expandChainMessages` gives the child. */
+	toolCallId: string;
+	capability: string;
+	/** The member's own observation; null when its capability observes no path. */
+	observation: PathObservation | null;
+	isError: boolean;
+	/** The step's own admission refused it. */
+	isBlocked: boolean;
+	/** The member's persisted result, for readers that judge its body alone. */
+	result: unknown;
+}
+
 export interface PathIndex {
 	/** Ledger order. */
 	observations: ReadonlyArray<PathObservation>;
 	byRef: ReadonlyMap<string, PathObservation>;
+	/** Settled members of every gateway chain aggregate, in `chainResults` order, keyed by the aggregate turnId. */
+	chainMembers: ReadonlyMap<string, ReadonlyArray<ChainMember>>;
 	byPath: ReadonlyMap<string, ReadonlyArray<PathObservation>>;
 	/** Every entry's turn position, including entries that observe no path. */
 	turnIndexOf: ReadonlyMap<string, number>;
@@ -363,6 +384,33 @@ function fileEntryOp(operation: "read" | "write" | "edit" | "create" | "delete")
 	return "write";
 }
 
+function resultDetails(obj: Record<string, unknown> | null): Record<string, unknown> | null {
+	const result = obj?.result;
+	return isRecord(result) && isRecord(result.details) ? result.details : null;
+}
+
+/**
+ * A chain step carries its own admission verdict in `details.chainAdmission`
+ * rather than on the payload, so a refused step reads as refused here exactly
+ * as a refused direct call does.
+ */
+function chainStepBlocked(obj: Record<string, unknown> | null): boolean {
+	const admission = resultDetails(obj)?.chainAdmission;
+	return isRecord(admission) && (admission.outcome === "blocked" || typeof admission.blockReason === "string");
+}
+
+function chainMember(child: MessageEntry, observation: PathObservation | null): ChainMember {
+	const obj = payloadRecord(child.payload);
+	return {
+		toolCallId: stringField(obj, "toolCallId") ?? "",
+		capability: stringField(obj, "toolName") ?? "tool",
+		observation,
+		isError: obj?.isError === true,
+		isBlocked: chainStepBlocked(obj),
+		result: obj?.result,
+	};
+}
+
 function toolResultObservation(
 	entry: MessageEntry,
 	context: { entryIndex: number; turnIndex: number; cwd: string | null; calls: ReadonlyMap<string, ToolCallFacts> },
@@ -370,12 +418,14 @@ function toolResultObservation(
 	const obj = payloadRecord(entry.payload);
 	const toolCallId = stringField(obj, "toolCallId", "tool_call_id", "id");
 	const call = toolCallId === null ? undefined : context.calls.get(toolCallId);
-	const toolName = stringField(obj, "toolName", "name", "tool") ?? call?.toolName ?? "tool";
+	// The paired call is already unwrapped; a gateway op=call result names only the wrapper.
+	const recorded = stringField(obj, "toolName", "name", "tool");
+	const toolName = (recorded === ToolNames.Gateway ? call?.toolName : recorded) ?? call?.toolName ?? "tool";
 	const op = TOOL_OPS.get(toolName);
 	if (op === undefined) return null;
 	const args = call !== undefined && isRecord(call.args) ? call.args : null;
 	const isError = obj?.isError === true || obj?.error === true;
-	const isBlocked = obj?.outcome === "blocked" || typeof obj?.blockReason === "string";
+	const isBlocked = obj?.outcome === "blocked" || typeof obj?.blockReason === "string" || chainStepBlocked(obj);
 	const path = observedPath(op, args, context.cwd);
 	const surfaced = shouldParseSurfaced(op, args, isError)
 		? surfacedPaths(op, args, toolResultText(obj?.result ?? entry.payload), path, context.cwd)
@@ -402,6 +452,7 @@ export function buildPathIndex(entries: ReadonlyArray<SessionEntry>, options?: P
 	const observations: PathObservation[] = [];
 	const byRef = new Map<string, PathObservation>();
 	const byPath = new Map<string, PathObservation[]>();
+	const chainMembers = new Map<string, ChainMember[]>();
 	const turnIndexOf = new Map<string, number>();
 	let turnIndex = 0;
 
@@ -426,11 +477,15 @@ export function buildPathIndex(entries: ReadonlyArray<SessionEntry>, options?: P
 				argsKey: "",
 			});
 		} else if (entry.kind === "message" && entry.role === "tool_result") {
-			for (const child of expandChainMessages([entry])) {
+			const expanded = expandChainMessages([entry]);
+			const members: ChainMember[] | null = expanded.length > 1 ? [] : null;
+			for (const child of expanded) {
 				if (child.role !== "tool_result") continue;
 				const observation = toolResultObservation(child, { entryIndex, turnIndex, cwd, calls });
 				if (observation) entryObservations.push(observation);
+				if (members !== null && child !== entry) members.push(chainMember(child, observation));
 			}
+			if (members !== null) chainMembers.set(entry.turnId, members);
 		}
 		for (const observation of entryObservations) {
 			observations.push(observation);
@@ -446,5 +501,5 @@ export function buildPathIndex(entries: ReadonlyArray<SessionEntry>, options?: P
 		if (isTurnStart(entry)) turnIndex += 1;
 	}
 
-	return { observations, byRef, byPath, turnIndexOf, turnCount: turnIndex };
+	return { observations, byRef, byPath, chainMembers, turnIndexOf, turnCount: turnIndex };
 }

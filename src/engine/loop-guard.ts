@@ -35,7 +35,9 @@ import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.j
 import type { MiddlewareEffect, MiddlewareHookInput } from "../domains/middleware/types.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
+import { isGatewayChain } from "../tools/gateway-display.js";
 import { resolveReadPath } from "../tools/path-utils.js";
+import { effectiveToolCall } from "../tools/surface.js";
 import type { AgentMessage } from "./types.js";
 
 export const LOOP_GUARD_REGISTRATION_ID = "guard.loop";
@@ -1176,14 +1178,49 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			reserveDenials = { denials: 0 };
 			return true;
 		},
-		evaluate(input): ReadonlyArray<MiddlewareEffect> {
+		evaluate(hookInput): ReadonlyArray<MiddlewareEffect> {
 			// A nested invocation (the gateway calling the capability the model
 			// asked for) is the same model call the outer gateway occurrence
 			// already counted and fingerprinted. Counting it again would spend
 			// the worker cap and the turn budget twice per gateway call, and its
 			// inner fingerprint would never repeat across a model's retries the
 			// outer one does not already show.
-			if (input.metadata?.nested === true) return [];
+			if (hookInput.metadata?.nested === true) return [];
+			// Judge that outer op=call as the capability it runs. The coordinator
+			// reaches monitor, bash and the search tools only this way, and the
+			// collect exemption, size-only stagnation and mutation epochs key on
+			// the capability and its own arguments. Unwrapping from arguments
+			// alone keeps before_tool and after_tool fingerprints identical, and
+			// the repeat fingerprint is re-derived the same way so the repeat
+			// detector and the success memory share one identity (#F8).
+			const unwrapped = effectiveToolCall(hookInput.toolName ?? "", hookInput.toolArgs);
+			const input: MiddlewareHookInput = unwrapped.viaGateway
+				? {
+						...hookInput,
+						toolName: unwrapped.toolName,
+						toolArgs: unwrapped.args ?? {},
+						...(typeof hookInput.metadata?.callFingerprint === "string"
+							? {
+									metadata: {
+										...hookInput.metadata,
+										callFingerprint: hashToolCall(unwrapped.toolName, unwrapped.args ?? {}),
+									},
+								}
+							: {}),
+					}
+				: hookInput;
+			if (input.hook === "after_tool" && isGatewayChain(hookInput.toolName ?? "", hookInput.toolArgs)) {
+				// A chain's completion is aggregate bookkeeping. Each step already ran
+				// its own after_tool as the capability it is, so the steps own the
+				// progress signals (stagnation, identical-result streaks, read
+				// coverage, EOF streaks, recovery and mutation epochs); letting the
+				// aggregate record them would overwrite the streak its steps built,
+				// which is how a wrapped grep escaped stagnation (#F4). The wrapper
+				// keeps its own call charge and its success memory for a verbatim
+				// repeat of the whole plan.
+				recordSuccessfulResult(input);
+				return [];
+			}
 			if (input.hook === "after_tool") {
 				const turnKey = input.turnId ?? NO_TURN_BUCKET;
 				const blocked = lastBlockedCallByTurn.get(turnKey);

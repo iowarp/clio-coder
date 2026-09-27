@@ -395,14 +395,19 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	const admitted = new Set(names.filter((name) => turnAllowsTool(inputs.turnConstraints, name)));
 	const hasGateway = admitted.has("gateway");
 	if (inputs.coordinatorCapabilities !== undefined) {
+		// Attached or behind the admitted gateway; the guidance names whichever route exists.
 		const reachable = (name: string) =>
-			hasGateway &&
-			toolSurfaceHasTool(inputs.coordinatorCapabilities, name) &&
-			turnAllowsTool(inputs.turnConstraints, name);
+			admitted.has(name) ||
+			(hasGateway &&
+				toolSurfaceHasTool(inputs.coordinatorCapabilities, name) &&
+				turnAllowsTool(inputs.turnConstraints, name));
 		return [
 			"# Tool Contract",
 			TOOL_RESULT_TRUST_CONTRACT,
 			`Direct tools: ${names.map((name) => `\`${name}\``).join(", ")}.`,
+			hasGateway
+				? "When asked what tools you have, copy the Direct tools line verbatim and add that gateway reaches the rest on demand; call nothing."
+				: "When asked what tools you have, copy the Direct tools line verbatim and call nothing.",
 			"Use attached schemas exactly. A greeting or question answerable from supplied context needs no tools.",
 			...(hasGateway
 				? [
@@ -420,7 +425,9 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 				: []),
 			...(reachable("ask_user")
 				? [
-						"If inspection reveals a consequential decision the request leaves open, discover ask_user and interview the operator before dependent work. Honor answers already given.",
+						admitted.has("ask_user")
+							? "If inspection reveals a consequential decision the request leaves open, interview the operator with ask_user before dependent work. Honor answers already given."
+							: "If inspection reveals a consequential decision the request leaves open, discover ask_user and interview the operator before dependent work. Honor answers already given.",
 					]
 				: []),
 			...(reachable("verify") && inputs.turnConstraints?.mode !== "answer" && inputs.turnConstraints?.mode !== "proposal"
@@ -789,7 +796,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			? 'Load matching ready Clio skills with context(scope="skills", name="<name>") and continue the task; skill restrictions still apply.'
 			: "Suggest matching skills as /skill <name> (in order when several compose), then continue without them; only the operator activates skills.";
 	const resolvedSkillActivation =
-		session.coordinatorCapabilities !== undefined && modelMayActivateSkills()
+		session.coordinatorCapabilities !== undefined && isAutonomyLevel(autonomyLevel) && modelMayActivateSkills()
 			? 'Load a matching ready skill through gateway(op="call", capability="context", args={scope:"skills",name:"<name>"}); honor its workflow and tool restrictions. Load the next skill only when its step is reached.'
 			: skillActivation;
 

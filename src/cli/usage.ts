@@ -24,6 +24,8 @@ import {
 	readAuditRows,
 } from "../domains/session/index.js";
 import { cwdHash } from "../engine/session.js";
+import { displayToolCall } from "../tools/gateway-display.js";
+import { expandChainMessages } from "../tools/surface.js";
 import { formatColumns, printError } from "./shared.js";
 
 const HELP = `clio-coder usage report [--repo <path>] [--days <n>] [--json]
@@ -1012,13 +1014,21 @@ async function readSessions(
 				usage.skillActivations.add(entry.activation.name);
 				continue;
 			}
-			let command: string | null = null;
+			const commands: string[] = [];
 			if (entry.kind === "bashExecution") {
-				command = entry.command;
+				commands.push(entry.command);
 			} else if (entry.kind === "message" && entry.role === "tool_call") {
-				command = bashCommandFromToolCallPayload(entry.payload);
+				const command = bashCommandFromToolCallPayload(entry.payload);
+				if (command !== null) commands.push(command);
+			} else if (entry.kind === "message" && entry.role === "tool_result") {
+				// A chain's bash steps ran as bash; its one call record names only gateway.
+				for (const step of expandChainMessages([entry]).slice(1)) {
+					if (step.kind !== "message" || step.role !== "tool_call") continue;
+					const command = bashCommandFromToolCallPayload(step.payload);
+					if (command !== null) commands.push(command);
+				}
 			}
-			if (command !== null) {
+			for (const command of commands) {
 				const shape = bashShape(command);
 				if (shape.length > 0) usage.bashShapes.set(shape, (usage.bashShapes.get(shape) ?? 0) + 1);
 			}
@@ -1028,14 +1038,15 @@ async function readSessions(
 	return sessions;
 }
 
-/** Extract the bash command from a tool_call session payload, else null. */
+/** Extract the bash command from a tool_call session payload, a gateway op=call to bash included, else null. */
 function bashCommandFromToolCallPayload(payload: unknown): string | null {
 	if (!isRecord(payload)) return null;
-	const tool = firstString(payload.name, payload.toolName, payload.tool);
-	if (tool !== "bash") return null;
-	const args = payload.arguments ?? payload.args ?? payload.input;
-	const argRecord = isRecord(args) ? args : maybeJsonRecord(args);
-	const command = argRecord?.command;
+	const wire = firstString(payload.name, payload.toolName, payload.tool);
+	if (wire === null) return null;
+	const rawArgs = payload.arguments ?? payload.args ?? payload.input;
+	const call = displayToolCall(wire, isRecord(rawArgs) ? rawArgs : maybeJsonRecord(rawArgs));
+	if (call.toolName !== "bash") return null;
+	const command = call.args?.command;
 	return typeof command === "string" && command.length > 0 ? command : null;
 }
 
