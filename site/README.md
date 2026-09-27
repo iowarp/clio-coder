@@ -12,6 +12,8 @@ node site/dev.mjs
 
 Open **http://localhost:4173/**. The server builds the site, regenerates the public guides from current repository files, watches source changes, and reloads connected browsers. Use `node site/dev.mjs --snapshot` to preview a pinned documentation snapshot without regenerating it. It listens on all local interfaces so a forwarded browser can reach it. Pass `--host 127.0.0.1` for loopback-only access, or `--port 4180` for another port. Generated output is in ignored `.preview/` directories; verification screenshots stay outside the public tree.
 
+Review the unregistered guides in `content/drafts/` in a second preview with its own output directory: `node site/dev.mjs --snapshot --review --dir .preview-review --port 4191`. Two previews must never share a directory.
+
 ## Design and prose rules
 
 - `design-system.json` is the sanctioned palette, semantic theme map, shared motion tokens, and copy policy.
@@ -60,7 +62,7 @@ Repository snapshots use a full commit as their source reference and validate ag
 
 ## Tutorials and recordings
 
-Write a useful Markdown article in `content/tutorials/` and register it in `content/tutorials.json`. Supply a slug, title, description, category, reading time, author, image dimensions, alt text, and source filename. The builder creates both its article and listing entry. An optional `video` field accepts a real YouTube ID and uses the privacy-enhanced embed domain. Publish captions with the recording. Empty media entries and fictional product demonstrations are not allowed.
+Write a useful Markdown article in `content/tutorials/` and register it in `content/tutorials.json`. [CONTENT.md](CONTENT.md) describes the guide blocks, the capture registry, and review builds; a `cover` names a capture in `content/captures.json` in place of `image`, `width`, `height`, and `alt`. Supply a slug, title, description, category, reading time, author, image dimensions, alt text, and source filename. The builder creates both its article and listing entry. An optional `video` field accepts a real YouTube ID and uses the privacy-enhanced embed domain. Publish captions with the recording. Empty media entries and fictional product demonstrations are not allowed.
 
 `assets/temperature-calibration.zip` is the standalone runnable example from the recorded local Clio session. It contains only the implementation, seven tests, private package manifest, and README. It is published through the explicit build asset list so the tutorial does not depend on a separate product repository push. Test an extracted archive with `npm test` in its `temperature-calibration/` directory when replacing it.
 
@@ -77,6 +79,7 @@ python3 site/image-variants.py --check
 pnpm exec biome check site
 node site/browser-check.mjs
 node site/performance-check.mjs
+# add --paths /tutorials/<slug>.html to measure guides with captures
 ```
 
 The static checker validates the link graph, anchors, metadata, source provenance, and rendered documentation. The browser check covers both themes at 320, 390, 768, 850, 1024, and 1440px; all guides receive desktop accessibility checks. It exercises repeated copying, search keyboard navigation, active contents links, FAQ controls, screenshot viewing and zoom, menu keyboard behavior, saved themes, runtime reduced-motion changes, touch tablet rotation, redirects, 404 handling, and navigation without JavaScript. It writes screenshots and results to `/tmp/clio-site-review` by default. Pass `--url`, `--out`, or `--chrome` to override defaults; browser dependencies are reused from the GUI workspace.

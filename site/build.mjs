@@ -9,7 +9,12 @@ import * as markedModule from "./vendor/marked.min.js";
 
 const marked = markedModule.default ?? globalThis.marked;
 const root = dirname(fileURLToPath(import.meta.url));
-const { values } = parseArgs({ options: { out: { type: "string" }, revision: { type: "string" } } });
+const { values } = parseArgs({
+	options: { out: { type: "string" }, revision: { type: "string" }, review: { type: "boolean", default: false } },
+});
+// A review build adds the unregistered manuscripts in content/drafts. It must
+// name its own output so drafts can never enter the public directory.
+if (values.review && !values.out) throw new Error("A review build needs --out; drafts never enter site/public.");
 if (values.revision && !/^[a-f0-9]{40}$/.test(values.revision))
 	throw new Error("Site revision must be a full Git commit.");
 const out = resolve(values.out ?? join(root, "public"));
@@ -21,7 +26,30 @@ const brand = JSON.parse(await read("design-system.json"));
 const manifest = JSON.parse(await read("content/docs-manifest.json"));
 const index = JSON.parse(await read("content/index.json"));
 const catalog = JSON.parse(await read("public-docs.json"));
+const captures = JSON.parse(await read("content/captures.json")).captures;
+const guideDiagrams = JSON.parse(await read("content/guide-diagrams.json")).diagrams;
 const tutorials = JSON.parse(await read("content/tutorials.json"));
+if (values.review)
+	for (const item of JSON.parse(await read("content/drafts/review-catalog.json")).articles)
+		tutorials.push({ ...item, draft: true });
+for (const [id, item] of Object.entries(captures)) {
+	for (const key of ["image", "original", "alt", "caption", "label", "interface", "version", "capturedAt", "source"])
+		if (!item[key]) throw new Error(`Capture ${id} is missing ${key}.`);
+	if (!/^assets\/[a-z0-9/.-]+\.webp$/.test(item.image) || !/^assets\/[a-z0-9/.-]+\.png$/.test(item.original))
+		throw new Error(`Capture ${id} must name a WebP image and its PNG original under assets/.`);
+	await readFile(join(root, item.image));
+	await readFile(join(root, item.original));
+}
+for (const item of tutorials) {
+	if (item.cover && !captures[item.cover]) throw new Error(`Tutorial ${item.slug} names an unknown cover capture.`);
+	if (item.cover)
+		Object.assign(item, {
+			image: `/${captures[item.cover].image}`,
+			width: captures[item.cover].width,
+			height: captures[item.cover].height,
+			alt: captures[item.cover].alt,
+		});
+}
 const redirects = JSON.parse(await read("redirects.json"));
 const imageVariants = JSON.parse(await read("image-variants.json"));
 for (const [source, item] of Object.entries(imageVariants)) {
@@ -83,11 +111,13 @@ function responsiveImages(html, path) {
 			? "36px"
 			: parent
 				? "(max-width: 600px) 130px, 220px"
-				: article
-					? "(max-width: 600px) calc(100vw - 40px), (max-width: 850px) calc(100vw - 64px), 760px"
-					: hero
-						? "(max-width: 600px) calc(100vw - 64px), (max-width: 850px) calc(100vw - 96px), (max-width: 1344px) calc(100vw - 128px), 1216px"
-						: "(max-width: 600px) calc(100vw - 40px), (max-width: 850px) calc((100vw - 96px) / 2), (max-width: 1344px) calc((100vw - 128px) / 2), 600px";
+				: path.startsWith("/tutorials/")
+					? "(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px"
+					: article
+						? "(max-width: 600px) calc(100vw - 40px), (max-width: 850px) calc(100vw - 64px), 760px"
+						: hero
+							? "(max-width: 600px) calc(100vw - 64px), (max-width: 850px) calc(100vw - 96px), (max-width: 1344px) calc(100vw - 128px), 1216px"
+							: "(max-width: 600px) calc(100vw - 40px), (max-width: 850px) calc((100vw - 96px) / 2), (max-width: 1344px) calc((100vw - 128px) / 2), 600px";
 		const srcset = [...item.variants, { path: source, width: item.width }]
 			.map((v) => `/${v.path} ${v.width}w`)
 			.join(", ");
@@ -176,7 +206,11 @@ function shell(html, path, title, description, type) {
 		.replace("<!-- site-footer -->", footer)
 		.replaceAll("<!-- version -->", escapeHtml(product.version))
 		.replace("<!-- version-source -->", `${repository}/tree/${ref}`)
-		.replace(/<pre>/g, () => `<div class="code-block"><pre tabindex="0" aria-label="Code example ${++number}">`)
+		.replace(
+			/<pre(?: data-label="([^"]*)")?>/g,
+			(_, label) =>
+				`<div class="code-block">${label ? `<p class="code-label eyebrow">${label}</p>` : ""}<pre tabindex="0" aria-label="Code example ${++number}">`,
+		)
 		.replace(/<\/pre>/g, "</pre></div>")
 		.replace(
 			/<span aria-hidden="true">([↗→←↓])<\/span>/g,
@@ -192,7 +226,94 @@ function shell(html, path, title, description, type) {
 		path,
 	);
 }
-function renderMarkdown(markdown, sourcePath) {
+// Guide directives: a line `::: name arguments` opens a block and `:::`
+// closes it. The body is Markdown. Directives compose the product's existing
+// vocabulary (eyebrows, copper step numbers, rules, captures) into a guide.
+function directives(markdown, render) {
+	const lines = markdown.split("\n");
+	let html = "";
+	let buffer = [];
+	const flush = () => {
+		if (buffer.join("").trim()) html += render(buffer.join("\n"));
+		buffer = [];
+	};
+	for (let i = 0; i < lines.length; i++) {
+		const open = lines[i].match(/^:::\s*([a-z]+)(?:\s+(.*))?$/);
+		if (!open) {
+			buffer.push(lines[i]);
+			continue;
+		}
+		flush();
+		const inner = [];
+		for (i++; i < lines.length && lines[i].trim() !== ":::"; i++) inner.push(lines[i]);
+		if (i >= lines.length) throw new Error(`Unclosed guide directive: ${open[1]}`);
+		html += directive(open[1], (open[2] ?? "").trim(), inner.join("\n"), render);
+	}
+	flush();
+	return html;
+}
+function captureFigure(id, { frame = false, index = 0 } = {}) {
+	const item = captures[id];
+	if (!item) throw new Error(`Unknown capture: ${id}`);
+	const image = `<a class="capture-frame" href="/${item.original}"><img src="/${item.image}" width="${item.width}" height="${item.height}" alt="${escapeHtml(item.alt)}" loading="lazy" decoding="async"></a>`;
+	const source = `<span class="tag">${escapeHtml(item.interface)} · v${escapeHtml(item.version)}</span>`;
+	if (frame)
+		return `<li class="guide-frame" id="frame-${escapeHtml(id)}" data-label="${escapeHtml(item.label)}">${image}<p class="caption"><span class="step-number">${String(index + 1).padStart(2, "0")}</span> ${escapeHtml(item.caption)} ${source}</p></li>`;
+	return `<figure class="guide-capture">${image}<figcaption class="caption">${escapeHtml(item.caption)} ${source}</figcaption></figure>`;
+}
+function guideDiagram(id) {
+	const item = guideDiagrams[id];
+	if (!item) throw new Error(`Unknown guide diagram: ${id}`);
+	const nodes = item.stages
+		.map(
+			(stage) =>
+				`<li class="guide-node">${stage.via ? `<p class="guide-via">${escapeHtml(stage.via)}</p>` : ""}${stage.place ? `<p class="eyebrow">${escapeHtml(stage.place)}</p>` : ""}<h3 class="guide-node-label">${escapeHtml(stage.label)}</h3>${stage.body ? `<p>${escapeHtml(stage.body)}</p>` : ""}</li>`,
+		)
+		.join("");
+	return `<figure class="guide-diagram guide-diagram-${escapeHtml(item.type)}"><p class="eyebrow"><span class="chapter">${escapeHtml(item.title)}</span></p><ol class="guide-flow">${nodes}</ol><figcaption class="caption">${escapeHtml(item.caption)}</figcaption></figure>`;
+}
+function directive(name, args, inner, render) {
+	const plain = (text) =>
+		text
+			.replace(/[*_`>]/g, "")
+			.replace(/\s+/g, " ")
+			.trim();
+	switch (name) {
+		case "needs":
+			return `<section class="guide-needs">${render(`## ${args || "Before you start"}\n\n${inner}`)}</section>`;
+		case "steps": {
+			const steps = render(inner)
+				.split(/(?=<h3 )/)
+				.filter((part) => part.trim());
+			return `<ol class="guide-steps">${steps.map((step, index) => `<li class="guide-step"><span class="step-number" aria-hidden="true">${String(index + 1).padStart(2, "0")}</span><div>${step}</div></li>`).join("")}</ol>`;
+		}
+		case "prompt":
+			return `<figure class="guide-prompt"><figcaption class="eyebrow"><span class="chapter">${escapeHtml(args || "Ask Clio")}</span></figcaption><blockquote>${render(inner)}</blockquote><button type="button" class="copy" data-copy="${escapeHtml(plain(inner))}" aria-label="Copy the request">Copy</button></figure>`;
+		case "result":
+			return `<section class="guide-result"><p class="eyebrow"><span class="chapter">${escapeHtml(args || "What you should see")}</span></p>${render(inner)}</section>`;
+		case "limits":
+			return `<section class="guide-limits"><p class="eyebrow"><span class="chapter">${escapeHtml(args || "Boundaries")}</span></p>${render(inner)}</section>`;
+		case "note":
+			return `<aside class="guide-note"><p class="eyebrow">${escapeHtml(args || "Note")}</p>${render(inner)}</aside>`;
+		case "capture": {
+			const ids = args.split(/\s+/).filter(Boolean);
+			if (ids.length === 1) return captureFigure(ids[0]);
+			const caption = inner.trim()
+				? `<figcaption class="caption">${render(inner).replace(/<\/?p>/g, "")}</figcaption>`
+				: "";
+			return `<figure class="guide-sequence" data-sequence><ol class="guide-frames">${ids.map((id, index) => captureFigure(id, { frame: true, index })).join("")}</ol>${caption}</figure>`;
+		}
+		case "diagram":
+			return guideDiagram(args);
+		case "compare":
+			return `<div class="guide-compare">${render(inner)}</div>`;
+		case "next":
+			return `<nav class="guide-next" aria-label="${escapeHtml(args || "Next steps")}">${render(inner).replace(/<\/a><\/li>/g, ' <span aria-hidden="true">→</span></a></li>')}</nav>`;
+		default:
+			throw new Error(`Unknown guide directive: ${name}`);
+	}
+}
+function renderMarkdown(markdown, sourcePath, guide = false) {
 	const ids = new Map();
 	const target = (href, image = false) => {
 		if (/^(?:https?:|mailto:|\/)/i.test(href)) return href;
@@ -228,9 +349,16 @@ function renderMarkdown(markdown, sourcePath) {
 	};
 	renderer.image = ({ href, text }) =>
 		`<img src="${escapeHtml(target(href, true))}" alt="${escapeHtml(text)}" loading="lazy" decoding="async">`;
+	renderer.code = ({ text, lang }) => {
+		const [language, ...rest] = (lang ?? "").split(/\s+/);
+		const title = rest.join(" ").match(/^title=(.+)$/)?.[1];
+		const label = title ?? { sh: "Shell", bash: "Shell", yaml: "YAML", json: "JSON", text: "" }[language] ?? "";
+		return `<pre${label ? ` data-label="${escapeHtml(label)}"` : ""}><code${language ? ` class="language-${escapeHtml(language)}"` : ""}>${escapeHtml(text)}</code></pre>\n`;
+	};
 	let table = 0;
-	return marked
-		.parse(markdown, { gfm: true, renderer })
+	const render = (text) => marked.parse(text, { gfm: true, renderer });
+	const body = guide ? directives(markdown, render) : render(markdown);
+	return body
 		.replace(
 			/<table>/g,
 			() => `<div class="doc-table" role="region" aria-label="Reference table ${++table}" tabindex="0"><table>`,
@@ -297,6 +425,11 @@ for (const name of [
 	"social-square-light.png",
 ])
 	await cp(join(root, "assets", name), join(out, "assets", name));
+for (const item of Object.values(captures))
+	for (const path of [item.image, item.original]) {
+		await mkdir(dirname(join(out, path)), { recursive: true });
+		await cp(join(root, path), join(out, path));
+	}
 for (const name of ["clio-mark.webp", "clio-mark.png", "iowarp-mark.webp", "iowarp-mark.png"])
 	await cp(join(root, "assets/brand", name), join(out, "assets/brand", name));
 await mkdir(join(out, "css"));
@@ -381,9 +514,33 @@ await writeFile(join(out, "content/index.json"), `${JSON.stringify(search, null,
 
 const tutorialTemplate = await read("tutorial.html");
 for (const item of tutorials) {
-	const markdown = await read(`content/tutorials/${item.source}`);
+	const folder = item.draft ? "content/drafts" : "content/tutorials";
+	const markdown = await read(`${folder}/${item.source}`);
+	const content = renderMarkdown(markdown, `site/${folder}/${item.source}`, true);
+	const headings = [...content.matchAll(/<h2 id="([^"]+)">([\s\S]*?)<\/h2>/g)];
+	const toc = headings.map(([, id, text]) => `<a href="#${id}">${text.replace(/<[^>]+>/g, "")}</a>`).join("\n");
+	const facts = [
+		["Written for", `v${item.versionScope ?? product.version}`],
+		["Works in", (item.interfaces ?? ["Terminal", "Desktop alpha"]).join(" · ")],
+		["Basis", item.basis ?? "Documented workflow"],
+	]
+		.map(([label, value]) => `<div><dt class="eyebrow">${label}</dt><dd>${escapeHtml(value)}</dd></div>`)
+		.join("");
+	const cover = item.cover
+		? captureFigure(item.cover)
+				.replace('class="guide-capture"', 'class="guide-capture guide-cover"')
+				.replace(' loading="lazy"', ' fetchpriority="high"')
+		: `<img class="cover" src="${escapeHtml(item.image)}" width="${item.width}" height="${item.height}" alt="${escapeHtml(item.alt)}" />`;
 	let html = tutorialTemplate;
 	const slots = {
+		"tutorial-description": escapeHtml(item.description),
+		"tutorial-facts": facts,
+		"tutorial-cover": cover,
+		"tutorial-toc": toc ? `<h2>On this page</h2>${toc}` : "",
+		"tutorial-toc-mobile": toc ? `<details class="doc-toc-mobile"><summary>On this page</summary>${toc}</details>` : "",
+		"tutorial-status": item.draft
+			? `<p class="guide-review"><span class="status-dot"></span>Draft for review · not in the published catalog</p>`
+			: "",
 		"tutorial-title": escapeHtml(item.title),
 		"tutorial-category": escapeHtml(item.category),
 		"tutorial-time": escapeHtml(item.time),
@@ -392,7 +549,7 @@ for (const item of tutorials) {
 		"tutorial-width": item.width,
 		"tutorial-height": item.height,
 		"tutorial-author": escapeHtml(item.author),
-		"tutorial-content": renderMarkdown(markdown, `site/content/tutorials/${item.source}`),
+		"tutorial-content": content,
 		"tutorial-video": item.video
 			? `<iframe class="video" loading="lazy" src="https://www.youtube-nocookie.com/embed/${item.video}" title="${escapeHtml(item.title)} recording" allowfullscreen></iframe>`
 			: "",

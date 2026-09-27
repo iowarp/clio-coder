@@ -1,20 +1,35 @@
-Your conversation and a worker process do not have to run on the same machine. Clio Coder can coordinate native workers over SSH, letting a local session direct work in a configured remote environment.
+Your conversation and a worker process do not have to run on the same machine. Clio Coder can coordinate native workers over SSH, so a local session directs work in a configured remote environment.
 
-The v0.5.7 fleet has specific prerequisites: SSH access, a matching Clio runtime, a writable state directory, an available model route, and the project at the same absolute path on each node. A cluster login or a VPS account alone does not satisfy that setup.
+::: note Version scope
+This guide describes the v0.5.7 fleet. The configuration below is a template, not a recorded deployment, and this workflow does not grant access to institutional systems or override their scheduler and data rules.
+:::
 
-## Choose the right execution location
+::: needs
+- SSH access to the node, under your own configuration.
+- A matching Clio runtime on the node and a writable state directory.
+- The project at the same absolute path on each node.
+- A model route the worker can reach from the node.
+:::
 
-First distinguish inference from execution. A local worker calling a remote model endpoint still runs its tools locally. A remote native worker runs its tools on the selected SSH node. A target URL using localhost resolves on that worker's machine.
+A cluster login or a VPS account alone does not satisfy that setup.
 
-This matters when a project needs a particular compiler, filesystem, or dataset. It also matters for information policy: a remote worker configured with a cloud target may send model input onward to that provider.
+## Choose where each part runs
 
-Use machines and routes permitted for your project. This workflow does not grant access to institutional systems or override their scheduler and data rules.
+::: diagram remote-placement
+:::
 
-## Declare one node first
+Inference and execution are separate. A local worker calling a remote model endpoint still runs its tools locally; a remote native worker runs its tools on the selected node. A target URL that uses localhost resolves on the worker's machine.
 
-Fleet nodes are configured under `fleet.nodes` in user settings. The local node already exists and is not declared there.
+This matters when a project needs a particular compiler, filesystem, or dataset. It also matters for information policy: a remote worker configured with a cloud target may send model input on to that provider.
 
-```yaml
+## Declare one node
+
+Fleet nodes live under `fleet.nodes` in user settings. The local node already exists and is not declared there. **Settings**, **Fleet** chooses the default worker node for work that does not name one.
+
+::: capture gui-settings-fleet
+:::
+
+```yaml title=settings.yaml
 fleet:
   nodes:
     - id: build-node
@@ -22,34 +37,63 @@ fleet:
       maxWorkers: 1
 ```
 
-This is a configuration template, not a live host or a recorded deployment. Replace the host and use your own SSH configuration. Ensure the project is available at the same absolute path before admitting work. The [fleet guide](/docs/guide/fleet-dispatch.html) describes additional fields and profile pins.
+Replace the host and use your own SSH configuration, then make sure the project is at the same absolute path before admitting work. The [fleet guide](/docs/guide/fleet-dispatch.html) describes the other fields and profile pins.
 
-A remote VPS with a different checkout path is not automatically compatible. The current transport does not promise to synchronize an arbitrary repository or stage datasets for you. Establish a supported filesystem layout deliberately.
+A remote server with a different checkout path is not automatically compatible. The transport does not synchronize an arbitrary repository or stage datasets for you; establish a supported filesystem layout deliberately.
 
-## Run preflight before dispatch
+## Check the node before dispatch
+
+::: steps
+### Run the diagnostic
 
 ```sh
 clio-coder doctor
 ```
 
-Plain doctor is diagnostic. It reports node probes without refreshing dispatch eligibility. After reviewing the setup and understanding the changes, the documented `clio-coder doctor --fix` records passing preflight results.
+Plain doctor reports node probes without refreshing dispatch eligibility.
 
-An unavailable or incompatible remote node can remain a warning while local work stays usable. A changed host, project root, or local runtime upgrade invalidates the relevant preflight record. Refresh the setup instead of expecting a pinned task to fall back silently to another machine.
+::: capture cli-doctor
+:::
 
-Worker specification v5 requires compatible fleet nodes. Upgrade clients and workers together when release notes require it; session format changes also affect which clients can reopen conversations.
+### Record passing preflight
+
+```sh
+clio-coder doctor --fix
+```
+
+After you review the setup and understand the changes, this records passing preflight results.
+
+### Upgrade together
+
+Worker specification v5 requires compatible fleet nodes. Upgrade the client and workers together when release notes say so; session format changes also affect which clients can reopen conversations.
+:::
+
+::: result What doctor tells you
+An unavailable or incompatible node can stay a warning while local work remains usable. A changed host, project root, or local runtime upgrade invalidates the node's preflight record, and a pinned task does not fall back silently to another machine.
+:::
 
 ## Keep the first task bounded
 
-Ask one worker to inspect a familiar part of the project or run a known check. Select its node through the supported profile or dispatch configuration and review the assignment before execution.
+Ask one worker to inspect a familiar part of the project or run a known check. Select its node through the supported profile or dispatch configuration and review the assignment before it runs.
 
-Remote workers retain default worker authority, even when the coordinating session uses yolo. Capacity limits bound concurrent work; they do not create a scheduler allocation or permission to use another person's resources.
+Remote workers keep default worker authority, even when the coordinating session uses yolo. Capacity limits bound concurrent work; they do not create a scheduler allocation or permission to use another person's resources.
 
-On a university or laboratory cluster, use an approved execution environment. Do not launch a fleet on a login node merely because SSH works. The [Slurm guide](/docs/guide/slurm.html) describes the project's separate allocation-aware tooling; SSH fleet support is not universal batch-scheduler integration.
+On a university or laboratory cluster, use an approved execution environment. Do not launch a fleet on a login node merely because SSH works. The [Slurm guide](/docs/guide/slurm.html) describes separate allocation-aware tooling; SSH fleet support is not universal batch-scheduler integration.
 
-## Follow work from the local session
+## Follow the work from your laptop
 
-The terminal remains the primary interface for the full workflow. The desktop alpha can show conversations, fleet activity, and recorded results, but it has a subset of terminal workflows. A local browser interface is not a public hosted control service.
+The terminal is the primary interface for the full workflow. The desktop alpha shows conversations, fleet activity, and recorded results for a subset of terminal workflows; it is a local browser interface, not a hosted control service.
 
-Check queued, active, failed, and completed work, then review results and the actual project changes. Some external peers cannot receive live steering; native SSH workers and peer bridges are different execution paths.
+Open **Workers** with Alt+W to see queued, active, failed, and completed work, then review results and the actual project changes. Some external peers cannot receive live steering; native SSH workers and peer bridges are different execution paths.
 
-[Install Clio](/#start) and complete a local [first session](/tutorials/first-session.html) before adding a node. The useful next step is one remote task you can inspect, followed by a deployment that respects your environment's access and capacity rules.
+::: limits
+- SSH, a matching runtime, and the same absolute project path are prerequisites, not details.
+- Clio does not stage repositories or datasets onto a node.
+- Institutional access rules and schedulers still govern where work may run.
+:::
+
+::: next
+- [Your first session with Clio](/tutorials/first-session.html)
+- [Fleet guide](/docs/guide/fleet-dispatch.html)
+- [Install Clio](/#start)
+:::

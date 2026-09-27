@@ -1,0 +1,64 @@
+{
+	"schema": 1,
+	"note": "HTML diagrams for tutorials. Labels and captions must describe documented v0.5.7 behavior; sources name the public guides or release notes.",
+	"diagrams": {
+		"model-placement": {
+			"type": "flow",
+			"title": "Where each part runs",
+			"caption": "Clio, its tools, and inference can run in different places. Choosing a remote model does not move your files or tools there.",
+			"sources": ["https://github.com/iowarp/clio-coder/blob/v0.5.7/docs/guide/configuration-and-targets.md"],
+			"stages": [
+				{ "place": "Your computer", "label": "Clio and its tools", "body": "The session, repository tools, and approvals run where you start Clio." },
+				{ "via": "model requests", "place": "The route you choose", "label": "Inference", "body": "A local app, a model server, a subscription, or a provider API." },
+				{ "via": "delegated work", "place": "Where a worker runs", "label": "Worker tools", "body": "On this computer by default, or on an SSH node you configure." }
+			]
+		},
+		"context-controls": {
+			"type": "flow",
+			"title": "Four controls for a long task",
+			"caption": "Inspect first; reduce, hand off, or recover only for a stated reason.",
+			"sources": ["https://github.com/iowarp/clio-coder/blob/v0.5.7/docs/guide/context-continuity.md"],
+			"stages": [
+				{ "place": "/context", "label": "Inspect", "body": "Usage, reserved output, remaining headroom, and any pending handoff." },
+				{ "via": "history grows", "place": "/context compact", "label": "Reduce", "body": "A focused summary that keeps what you name." },
+				{ "via": "the work continues", "place": "/handoff", "label": "Hand off", "body": "A continuation bound to this branch and its decisions." },
+				{ "via": "a transition stops", "place": "/context recover", "label": "Recover", "body": "Reduce or deliver, chosen explicitly by its ID." }
+			]
+		},
+		"check-freshness": {
+			"type": "flow",
+			"title": "When a passing check still counts",
+			"caption": "A recorded result belongs to the inputs it ran against; an edit to those inputs makes it stale until the check runs again.",
+			"sources": ["https://github.com/iowarp/clio-coder/blob/v0.5.7/docs/guide/quality-policy.md"],
+			"stages": [
+				{ "place": "Your project", "label": "Declared check", "body": "A package script, build target, or CI definition the project already owns." },
+				{ "via": "verify runs it", "place": "Results", "label": "Recorded pass", "body": "Stored with source, check-declaration, and policy fingerprints." },
+				{ "via": "an input changes", "place": "Assessment", "label": "Stale", "body": "The earlier pass no longer describes the files." },
+				{ "via": "verify runs again", "place": "Assessment", "label": "Current", "body": "A result for the work that exists now." }
+			]
+		},
+		"library-flow": {
+			"type": "flow",
+			"title": "From the catalog to one task",
+			"caption": "Installing a package makes it available; a task loads what it needs. Neither step grants extra authority.",
+			"sources": ["https://github.com/iowarp/clio-coder/blob/v0.5.7/docs/guide/resource-library.md", "https://github.com/iowarp/clio-coder/blob/v0.5.7/docs/guide/plugins.md"],
+			"stages": [
+				{ "place": "/library or Alt+L", "label": "Browse", "body": "Catalog content that ships with Clio; nothing is installed yet." },
+				{ "via": "--dry-run", "place": "Install review", "label": "Preview", "body": "Destination, dependencies, scope, and the package pin." },
+				{ "via": "install", "place": "Project or user scope", "label": "Pinned copy", "body": "Drifted content is blocked from loading." },
+				{ "via": "/skill", "place": "One conversation", "label": "Loaded for a task", "body": "Recipes load on demand." }
+			]
+		},
+		"remote-placement": {
+			"type": "flow",
+			"title": "One remote task",
+			"caption": "The conversation stays on your laptop, the worker runs its tools on the node, and the worker's model route resolves from the node.",
+			"sources": ["https://github.com/iowarp/clio-coder/blob/v0.5.7/docs/guide/fleet-dispatch.md"],
+			"stages": [
+				{ "place": "Your laptop", "label": "Session", "body": "The conversation, your approvals, and the dispatch." },
+				{ "via": "SSH dispatch", "place": "Fleet node", "label": "Worker", "body": "Runs at default authority in the same absolute project path." },
+				{ "via": "model requests", "place": "The worker's route", "label": "Inference", "body": "A localhost address resolves on the node, not on your laptop." }
+			]
+		}
+	}
+}

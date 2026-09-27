@@ -18,12 +18,14 @@ const { values } = parseArgs({
 			default: process.env.CLIO_CODER_CHROME ?? "/home/akougkas/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome",
 		},
 		baseline: { type: "boolean", default: false },
+		// Extra routes, comma-separated, such as a guide with captures.
+		paths: { type: "string", default: "" },
 	},
 });
 const browser = await chromium.launch({ executablePath: values.chrome, headless: true });
 const results = [];
 try {
-	for (const path of ["/", "/docs.html", "/learn.html"]) {
+	for (const path of ["/", "/docs.html", "/learn.html", ...values.paths.split(",").filter(Boolean)]) {
 		const context = await browser.newContext({
 			viewport: { width: 390, height: 844 },
 			deviceScaleFactor: 2,

@@ -180,6 +180,55 @@
 		});
 		viewer.addEventListener("close", () => opener?.focus({ preventScroll: true }));
 	}
+	// Capture sequences: one frame at a time behind a tab list. The frames share
+	// one grid cell, so switching never moves the page. Without script every
+	// frame stays visible in order.
+	for (const [number, sequence] of [...document.querySelectorAll("[data-sequence]")].entries()) {
+		const frames = [...sequence.querySelectorAll(".guide-frame")];
+		const tabs = document.createElement("div");
+		tabs.className = "guide-tabs";
+		tabs.setAttribute("role", "tablist");
+		tabs.setAttribute("aria-label", sequence.querySelector("figcaption")?.textContent.trim() || "Screens");
+		const buttons = frames.map((frame, index) => {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.id = `sequence-${number}-tab-${index}`;
+			button.setAttribute("role", "tab");
+			button.setAttribute("aria-controls", frame.id);
+			button.innerHTML = `<span class="step-number">${String(index + 1).padStart(2, "0")}</span> `;
+			button.append(frame.dataset.label);
+			frame.setAttribute("role", "tabpanel");
+			frame.setAttribute("aria-labelledby", button.id);
+			tabs.append(button);
+			return button;
+		});
+		const select = (index, focus = false) => {
+			for (const [position, button] of buttons.entries()) {
+				const active = position === index;
+				button.setAttribute("aria-selected", String(active));
+				button.tabIndex = active ? 0 : -1;
+				frames[position].dataset.active = String(active);
+				frames[position].inert = !active;
+			}
+			if (focus) buttons[index].focus();
+		};
+		tabs.addEventListener("click", (event) => {
+			const button = event.target.closest("[role=tab]");
+			if (button) select(buttons.indexOf(button));
+		});
+		tabs.addEventListener("keydown", (event) => {
+			const current = buttons.indexOf(document.activeElement);
+			const next = { ArrowRight: current + 1, ArrowLeft: current - 1, Home: 0, End: buttons.length - 1 }[event.key];
+			if (current < 0 || next === undefined) return;
+			event.preventDefault();
+			select((next + buttons.length) % buttons.length, true);
+		});
+		// The frames become tab panels, so the list stops being a list.
+		sequence.querySelector(".guide-frames")?.setAttribute("role", "none");
+		sequence.prepend(tabs);
+		sequence.dataset.sequence = "ready";
+		select(0);
+	}
 	const wideNav = matchMedia("(min-width: 601px)");
 	wideNav.addEventListener("change", () => {
 		if (wideNav.matches)
@@ -206,7 +255,7 @@
 			{ threshold: 0.08, rootMargin: "0px 0px -32px 0px" },
 		);
 		for (const el of document.querySelectorAll(
-			".section-heading, .interface-grid, .model-routes, .workflow-grid, .tutorial-card, .project-section",
+			".section-heading, .interface-grid, .model-routes, .workflow-grid, .tutorial-card, .project-section, .guide-step, .guide-capture, .guide-sequence, .guide-diagram, .guide-result",
 		)) {
 			if (el.getBoundingClientRect().top < innerHeight - 32) continue;
 			el.dataset.reveal = "pending";

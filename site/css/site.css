@@ -1771,3 +1771,412 @@
 		}
 	}
 }
+
+/* Guides: a tutorial composed as a field guide. The heading states the answer
+   and the version it was written for; the body keeps a reading measure while
+   captures, sequences, and diagrams use the full column; steps carry copper
+   numbers on one rule. Only semantic colors, the space scale, and the motion
+   tokens are used. */
+@layer docs {
+	.guide {
+		padding-block-end: var(--space-9);
+	}
+	.guide-head {
+		padding-block-end: var(--space-7);
+	}
+	.guide-head > .text-link {
+		margin-block-end: var(--space-6);
+	}
+	.guide-head h1 {
+		max-inline-size: 18ch;
+	}
+	.guide-review {
+		display: flex;
+		align-items: center;
+		margin-block-end: var(--space-4);
+		color: var(--secondary);
+		font-family: var(--font-mono);
+	}
+	.guide-facts {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, max-content));
+		gap: var(--space-2) var(--space-8);
+		margin-block-start: var(--space-6);
+		padding-block-start: var(--space-4);
+		border-block-start: 1px solid var(--line-control);
+	}
+	.guide-facts dd {
+		margin-block-start: var(--space-1);
+		color: var(--ink);
+	}
+	.guide-cover {
+		margin-block-end: var(--space-8);
+	}
+	.guide-layout {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 13rem;
+		gap: var(--space-8);
+		align-items: start;
+	}
+	.guide-body {
+		padding-block-start: 0;
+	}
+	.guide-body
+		> :where(
+			p,
+			ul,
+			ol:not(.guide-steps),
+			h2,
+			h3,
+			blockquote,
+			.code-block,
+			.doc-table,
+			.guide-note,
+			.guide-needs,
+			.guide-result,
+			.guide-limits,
+			.guide-prompt,
+			.guide-next,
+			details
+		) {
+		max-inline-size: var(--measure);
+	}
+	.guide-body > h2 {
+		padding-block-start: var(--space-5);
+		border-block-start: 1px solid var(--line);
+	}
+	/* A labelled code block: the label band also holds the copy control. */
+	.code-block .code-label {
+		display: flex;
+		align-items: center;
+		min-block-size: calc(2.5rem + var(--space-4));
+		margin: 0;
+		padding-inline: var(--space-4);
+		background: var(--code-sunk);
+		color: var(--code-muted);
+		border: 1px solid var(--code-border);
+		border-block-end: 0;
+		border-radius: var(--radius) var(--radius) 0 0;
+	}
+	.code-block .code-label + pre {
+		border-start-start-radius: 0;
+		border-start-end-radius: 0;
+	}
+	/* Captures keep their own dark surface in both themes. */
+	.guide-capture,
+	.guide-sequence,
+	.guide-diagram {
+		margin-block: var(--space-7);
+	}
+	.capture-frame {
+		display: block;
+		padding: var(--space-3);
+		background: var(--code);
+		border: 1px solid var(--line-control);
+		border-radius: var(--radius);
+	}
+	.capture-frame img {
+		inline-size: 100%;
+		border-radius: var(--radius);
+	}
+	.guide-capture figcaption,
+	.guide-frame > .caption,
+	.guide-sequence > figcaption {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: var(--space-2) var(--space-3);
+		margin-block-start: var(--space-3);
+	}
+	.guide-capture .tag,
+	.guide-frame .tag {
+		margin-inline-start: auto;
+	}
+	.guide-frames {
+		display: grid;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.guide-frame + .guide-frame {
+		margin-block-start: var(--space-6);
+	}
+	/* Frames share one cell; each fills it as a dark viewer so a shorter
+	   capture sits at the top instead of leaving a gap below the caption. */
+	[data-sequence="ready"] .guide-frame {
+		grid-area: 1 / 1;
+		display: flex;
+		flex-direction: column;
+		margin-block-start: 0;
+	}
+	[data-sequence="ready"] .capture-frame {
+		flex: 1;
+	}
+	[data-sequence="ready"] .guide-frame[data-active="false"] {
+		visibility: hidden;
+		opacity: 0;
+	}
+	.guide-tabs {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-1) var(--space-5);
+		margin-block-end: var(--space-4);
+		border-block-end: 1px solid var(--line);
+	}
+	.guide-tabs button {
+		position: relative;
+		min-block-size: 2.75rem;
+		padding: 0;
+		background: transparent;
+		border: 0;
+		color: var(--muted);
+	}
+	.guide-tabs button::after {
+		content: "";
+		position: absolute;
+		inset-inline: 0;
+		inset-block-end: -1px;
+		block-size: 2px;
+		background: var(--accent);
+		transform: scaleX(0);
+		transform-origin: left;
+	}
+	.guide-tabs button[aria-selected="true"],
+	.guide-tabs button:is(:hover, :focus-visible) {
+		color: var(--ink);
+	}
+	.guide-tabs button[aria-selected="true"]::after {
+		transform: scaleX(1);
+	}
+	/* Steps: one rule down the side, a copper number at each step. */
+	.guide-steps {
+		margin: var(--space-6) 0;
+		padding: 0;
+		list-style: none;
+	}
+	.guide-step {
+		display: grid;
+		grid-template-columns: var(--space-7) minmax(0, 1fr);
+		gap: var(--space-3);
+		padding-block: var(--space-5);
+		border-block-start: 1px solid var(--line);
+	}
+	.guide-step .step-number {
+		padding-block-start: var(--space-1);
+	}
+	.guide-step > div > h3:first-child {
+		margin-block-start: 0;
+	}
+	.guide-step > div > :where(p, ul, ol, .code-block, .guide-prompt) {
+		max-inline-size: var(--measure);
+	}
+	.guide-needs {
+		margin-block: var(--space-6);
+	}
+	.guide-needs ul {
+		padding: 0;
+		list-style: none;
+		border-block-start: 1px solid var(--line-control);
+	}
+	.guide-needs li {
+		margin: 0;
+		padding-block: var(--space-2);
+		padding-inline-start: var(--space-5);
+		border-block-end: 1px solid var(--line);
+		position: relative;
+	}
+	.guide-needs li::before {
+		content: "";
+		position: absolute;
+		inset-inline-start: var(--space-1);
+		inset-block-start: calc(var(--space-2) + 0.55em);
+		inline-size: var(--space-2);
+		block-size: var(--space-1);
+		border-inline-start: 2px solid var(--accent);
+		border-block-end: 2px solid var(--accent);
+		transform: rotate(-45deg);
+	}
+	.guide-prompt {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: var(--space-2) var(--space-4);
+		align-items: start;
+		margin-block: var(--space-5);
+		padding-block: var(--space-4);
+		border-block: 1px solid var(--line-control);
+	}
+	.guide-prompt figcaption {
+		grid-column: 1 / -1;
+	}
+	/* The prompt sits on paper, not on the code surface. */
+	.guide-prompt .copy {
+		color: var(--muted);
+		border-color: var(--line-control);
+	}
+	.guide-prompt .copy:is(:hover, :focus-visible) {
+		color: var(--accent);
+		border-color: var(--accent);
+	}
+	.guide-body .guide-prompt blockquote {
+		margin: 0;
+		color: var(--ink);
+	}
+	.guide-body .guide-prompt blockquote p {
+		margin: 0;
+		color: var(--ink);
+	}
+	.guide-result,
+	.guide-limits {
+		margin-block: var(--space-6);
+		padding-block-start: var(--space-4);
+		border-block-start: 2px solid var(--accent);
+	}
+	.guide-limits {
+		border-block-start-color: var(--secondary);
+	}
+	.guide-note {
+		margin-block: var(--space-5);
+		padding-inline-start: var(--space-4);
+		border-inline-start: 2px solid var(--secondary);
+	}
+	.guide-note > :last-child,
+	.guide-result > :last-child,
+	.guide-limits > :last-child {
+		margin-block-end: 0;
+	}
+	.guide-next ul {
+		padding: 0;
+		list-style: none;
+		border-block-start: 1px solid var(--line-control);
+	}
+	.guide-next li {
+		margin: 0;
+		border-block-end: 1px solid var(--line);
+	}
+	.guide-next a {
+		display: flex;
+		justify-content: space-between;
+		gap: var(--space-4);
+		padding-block: var(--space-3);
+		color: var(--ink);
+		text-decoration: none;
+	}
+	.guide-next a:is(:hover, :focus-visible) {
+		color: var(--accent);
+	}
+	/* Diagrams: exact labels in HTML on one rule, stacking on phones. */
+	.guide-flow {
+		display: grid;
+		grid-auto-columns: minmax(0, 1fr);
+		grid-auto-flow: column;
+		gap: var(--space-5);
+		margin: var(--space-4) 0 0;
+		padding: 0;
+		list-style: none;
+	}
+	.guide-node {
+		position: relative;
+		padding-block-start: var(--space-4);
+	}
+	.guide-node::before {
+		content: "";
+		position: absolute;
+		inset: 0 0 auto;
+		block-size: 2px;
+		background: var(--line-control);
+		transform-origin: left;
+	}
+	.guide-node:first-child::before {
+		background: var(--accent);
+	}
+	.guide-body .guide-node p {
+		margin-block: var(--space-2) 0;
+	}
+	.guide-body .guide-node .guide-node-label {
+		margin-block: var(--space-1) 0;
+	}
+	.guide-via {
+		color: var(--secondary);
+		font-family: var(--font-mono);
+	}
+	.guide-diagram > figcaption {
+		margin-block-start: var(--space-4);
+		padding-block-start: var(--space-3);
+		border-block-start: 1px solid var(--line);
+	}
+	.guide-toc {
+		padding-block-start: var(--space-2);
+	}
+	/* A comparison names its rows in the first column. */
+	.guide-compare {
+		max-inline-size: var(--measure);
+	}
+	.guide-compare th {
+		background: transparent;
+		border-block-end: 2px solid var(--accent);
+	}
+	.guide-compare td:first-child {
+		color: var(--ink);
+		font-weight: 500;
+	}
+}
+@layer motion {
+	.guide-tabs button::after {
+		transition: transform var(--motion-base) var(--motion-ease);
+	}
+	[data-sequence="ready"] .guide-frame {
+		transition:
+			opacity var(--motion-base) var(--motion-ease),
+			visibility var(--motion-base) allow-discrete;
+	}
+	.guide-node::before {
+		transition: transform var(--motion-entry) var(--motion-ease);
+	}
+	.guide-node:nth-child(2)::before {
+		transition-delay: var(--motion-stagger);
+	}
+	.guide-node:nth-child(3)::before {
+		transition-delay: calc(var(--motion-stagger) * 2);
+	}
+	.guide-node:nth-child(4)::before {
+		transition-delay: calc(var(--motion-stagger) * 3);
+	}
+	.guide-diagram[data-reveal="pending"] .guide-node::before {
+		transform: scaleX(0);
+	}
+	.guide-step {
+		transition: border-color var(--motion-fast) var(--motion-ease);
+	}
+	.guide-step:hover {
+		border-block-start-color: var(--line-control);
+	}
+}
+@layer responsive {
+	@media (max-width: 1100px) {
+		.guide-layout {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+	@media (max-width: 850px) {
+		.guide-facts {
+			grid-template-columns: minmax(0, 1fr);
+		}
+		.guide-flow {
+			grid-auto-flow: row;
+		}
+	}
+	@media (max-width: 600px) {
+		.guide-step {
+			grid-template-columns: minmax(0, 1fr);
+			gap: var(--space-2);
+		}
+		.guide-prompt {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.guide-diagram[data-reveal="pending"] .guide-node::before {
+			transform: none;
+		}
+	}
+}

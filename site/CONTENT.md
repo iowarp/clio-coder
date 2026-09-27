@@ -63,3 +63,50 @@ The desired outcome is a useful installed workflow. Search ranking and adoption
 are hypotheses until measured. Aggregate npm downloads are a noisy proxy, not
 unique installations. This site has no public telemetry; this content batch adds
 no tracker or unsupported adoption claim.
+
+## Guide composition
+
+Tutorials and draft guides render through `tutorial.html` as field guides. The
+heading states the answer (the catalog `description`), the version it was
+written for, the interfaces it uses, and its basis: "Recorded session" only
+when the workflow ran as described; otherwise "Documented workflow". The cover
+is a capture id from `content/captures.json`, chosen for the task, never a
+generic screen reused across guides.
+
+Markdown stays the source. A line `::: name arguments` opens a guide block and
+`:::` closes it; the body is Markdown.
+
+| Block | Use it for |
+| --- | --- |
+| `::: note Label` | Version scope or what a result establishes |
+| `::: needs` | The "Before you start" checklist |
+| `::: steps` | An ordered procedure; each `###` heading is one numbered step |
+| `::: prompt Label` | A request to type into Clio, with a copy control |
+| `::: result Label` | What the reader should see, and what it does not prove |
+| `::: limits Label` | Boundaries of the workflow |
+| `::: compare` | A table whose first column names the rows |
+| `::: capture id [id ...]` | One capture, or a sequence of states with a caption line |
+| `::: diagram id` | An HTML diagram from `content/guide-diagrams.json` |
+| `::: next` | A short list of links; arrows are added |
+
+A code fence can name its file: ` ```yaml title=.clio-coder/quality.yaml `.
+Keep paragraphs within the 65-word limit; `policy.mjs` checks drafts too.
+
+## Captures
+
+`content/captures.json` registers every product capture used by a guide: the
+WebP image, its PNG original, dimensions, a short tab label, specific alt text,
+a one-sentence caption, the interface, the version, the capture date, and how
+it was made. Capture the released package, not a development build, in an
+isolated profile with no credentials, private endpoints, conversations, or
+host names. Caption what the screen shows, including unwelcome results. Add new
+WebP images to `image-variants.py` and regenerate derivatives.
+
+## Review builds
+
+`node site/build.mjs --review --out <directory>` adds the manuscripts in
+`content/drafts/` to a scratch build; it refuses the public output. For a live
+review preview beside the normal one, run
+`node site/dev.mjs --snapshot --review --dir .preview-review --port 4191`, and
+check it with `node site/browser-check.mjs --review --url http://127.0.0.1:4191`.
+
