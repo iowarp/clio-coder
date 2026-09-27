@@ -99,6 +99,7 @@ import {
 	createReadOnlyExplorationNudgeRegistration,
 	createUnbackedWorkerClaimRegistration,
 	openDetachedBatchViews,
+	finishedDetachedBatchIds,
 } from "../domains/middleware/dispatch-nudge.js";
 import { createGuidanceRegistration } from "../domains/middleware/guidance.js";
 import {
@@ -2619,7 +2620,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				).length,
 			taskEstablished,
 			clarificationStreak: () => turnOutcomeCollector.clarificationStreak(),
-			finishedDetachedBatchIds: () => [],
+			finishedDetachedBatchIds: () => finishedDetachedBatchIds(dispatch),
 		},
 		cwd: process.cwd(),
 		bus,

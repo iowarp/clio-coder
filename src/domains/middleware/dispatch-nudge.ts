@@ -13,8 +13,8 @@ import type { MiddlewareEffect, MiddlewareHookInput } from "./types.js";
  * A detached batch returns before its runs finish, so nothing in the turn
  * forces the model back to the results. When a settled turn ends while at
  * least one uncollected batch has every run terminal, the turn is carried
- * onward with a `request_continuation` plus a paired reminder naming the
- * ready batches. Collecting a batch (monitor mode="collect") marks it in the
+ * onward with a `request_continuation`. The turn controller collects the
+ * ready batches before the next model call and supplies their results. Collection marks the batch in the
  * durable store, which removes it from the open list and silences the nudge,
  * including across session resume.
  *
@@ -310,7 +310,7 @@ function incrementTerminalOutcome(counts: DetachedTerminalOutcomeCounts, outcome
  * to collect results it knew nothing about.
  */
 export function openDetachedBatchViews(
-	dispatch: Pick<DispatchContract, "detached" | "getRun" | "owner">,
+	dispatch: Pick<DispatchContract, "detached" | "getRun" | "owner" | "assignments">,
 ): DetachedBatchNudgeView[] {
 	const detached = dispatch.detached;
 	if (!detached) return [];
@@ -326,7 +326,9 @@ export function openDetachedBatchViews(
 		let terminal = 0;
 		const terminalOutcomes: DetachedTerminalOutcomeCounts = {};
 		for (const run of record.runs) {
-			const row = dispatch.getRun(run.runId);
+			const assignment = dispatch.assignments?.getStored(run.assignmentId) ?? null;
+			if (assignment?.status === "running") continue;
+			const row = dispatch.getRun(assignment?.terminalRunId ?? run.runId);
 			if (row === null) {
 				terminal += 1;
 				incrementTerminalOutcome(terminalOutcomes, "missing");
@@ -337,6 +339,14 @@ export function openDetachedBatchViews(
 		}
 		return { id: record.id, total: record.runs.length, terminal, terminalOutcomes };
 	});
+}
+
+export function finishedDetachedBatchIds(
+	dispatch: Pick<DispatchContract, "detached" | "getRun" | "owner" | "assignments">,
+): ReadonlyArray<string> {
+	return openDetachedBatchViews(dispatch)
+		.filter((view) => view.total > 0 && view.terminal >= view.total)
+		.map((view) => view.id);
 }
 
 function detachedBatchProgress(view: DetachedBatchNudgeView): string {
@@ -380,7 +390,8 @@ export function createDetachedDispatchNudgeRegistration(
 ): MiddlewareHookRegistration {
 	return {
 		id: DETACHED_DISPATCH_NUDGE_REGISTRATION_ID,
-		description: "carry the turn onward when detached dispatch results are ready to collect",
+		description:
+			"request continuation so the turn controller collects finished detached results before the next model call",
 		hooks: ["turn_end"],
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook !== "turn_end") return [];
@@ -401,11 +412,11 @@ export function createDetachedDispatchNudgeRegistration(
 			}
 			const ready = views.filter((view) => view.total > 0 && view.terminal >= view.total);
 			if (ready.length === 0) return [];
-			const running = views.filter((view) => view.total > 0 && view.terminal < view.total);
-			const message = buildDetachedBatchesMessage(ready, running);
 			return [
-				{ kind: "request_continuation", message },
-				{ kind: "inject_reminder", message, severity: "warn" },
+				{
+					kind: "request_continuation",
+					message: `Clio will collect ${ready.length} finished detached batch(es) before the next model call.`,
+				},
 			];
 		},
 	};

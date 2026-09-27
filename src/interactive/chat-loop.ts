@@ -1670,13 +1670,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const reservedUserTurnId = randomUUID();
 			let orientationBlock: string | null = null;
 			let turnControlRecord: TurnControlRecord | null = null;
-			if (deps.turnControl && options.requestContinuation !== true) {
+			if (deps.turnControl) {
 				const controllerAbort = new AbortController();
 				pendingDecisionBrief = controllerAbort;
 				setTurnPreparation("preparing");
 				try {
 					const result = await deps.turnControl.run({
 						operatorText: text,
+						continuation: options.requestContinuation === true,
 						previous,
 						userTurnId: reservedUserTurnId,
 						signal: controllerAbort.signal,

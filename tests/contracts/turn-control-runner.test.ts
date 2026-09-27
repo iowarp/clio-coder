@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import type { DetachedBatchRecord } from "../../src/domains/dispatch/batch-store.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { TurnInterpretation } from "../../src/domains/turn-control/index.js";
 import type { TurnControlRunnerDeps } from "../../src/interactive/turn-control-runner.js";
@@ -235,6 +236,61 @@ test("direction provides admitted workspace observations without dispatching a w
 		assert.ok(result.record.executed && "runIds" in result.record.executed);
 		assert.deepEqual(result.record.executed.runIds, []);
 		assert.deepEqual(h.notices, ["[Direction] observed 0 read-only facts"]);
+	} finally {
+		h.cleanup();
+	}
+});
+
+test("collect combines two finished batches on a continuation and durably marks both", async () => {
+	const { fixtureEnvelope } = await import("../harness/receipt.js");
+	const records: DetachedBatchRecord[] = ["batch-a", "batch-b"].map((id) => ({
+		id,
+		runs: [{ runId: id, assignmentId: id, agentId: "scout" }],
+		sessionId: "owner",
+		createdAt: "fixture",
+		collectedAt: null,
+	}));
+	const runs = records.map((record) => fixtureEnvelope(record.id));
+	const marked: string[] = [];
+	const dispatch = {
+		owner: () => ({ sessionId: "owner", cwd: "/workspace" }),
+		getRun: (id: string) => runs.find((run) => run.id === id) ?? null,
+		listRuns: () => runs,
+		detached: {
+			get: (id: string) => records.find((record) => record.id === id) ?? null,
+			async markCollected(id: string) {
+				marked.push(id);
+				const record = records.find((record) => record.id === id);
+				if (record) record.collectedAt = "collected";
+				return record ?? null;
+			},
+		},
+	} as unknown as DispatchContract;
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.turnControl.workflows = ["detached-collection"];
+	const h = harness({
+		dispatch,
+		getSettings: () => settings,
+		readInterpretation: () => undefined,
+		facts: {
+			turnIndex: () => 2,
+			taskEstablished: () => false,
+			clarificationStreak: () => 0,
+			finishedDetachedBatchIds: () => records.filter((record) => record.collectedAt === null).map((record) => record.id),
+		},
+	});
+	try {
+		const result = await h.runner.run({ ...input(), continuation: true });
+		assert.match(result.block ?? "", /^\[Collected\]/u);
+		assert.match(result.block ?? "", /collect complete for batch batch-a/u);
+		assert.match(result.block ?? "", /collect complete for batch batch-b/u);
+		assert.deepEqual(marked, ["batch-a", "batch-b"]);
+		assert.deepEqual(h.notices, ["[Collected] 2 batch(es)"]);
+		assert.ok(result.record.executed && "runIds" in result.record.executed);
+		assert.deepEqual(result.record.executed.runIds, ["batch-a", "batch-b"]);
+		assert.equal(h.requests.length, 0);
+		const next = await h.runner.run({ ...input(), continuation: true });
+		assert.deepEqual(next.record.decision, { kind: "none", reason: "continuation" });
 	} finally {
 		h.cleanup();
 	}

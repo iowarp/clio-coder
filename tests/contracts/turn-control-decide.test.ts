@@ -47,7 +47,7 @@ const interpretation: TurnInterpretation = {
 const settings = DEFAULT_SETTINGS.turnControl;
 const prior = { runId: "prior-run", receiptDigest: "digest", fingerprint: { ...facts.workspace } };
 
-it("decides twelve workflow cases in the required order, including each reachable none reason", () => {
+it("decides workflow cases in the required order, including each reachable none reason", () => {
 	const direction = {
 		...interpretation,
 		orientation: { ...interpretation.orientation, wanted: 0 },
@@ -61,9 +61,23 @@ it("decides twelve workflow cases in the required order, including each reachabl
 		expected: WorkflowDecision;
 	}> = [
 		{
-			name: "continuation precedes constraints and collect",
+			name: "constraints still precede collection on continuations",
 			interpretation,
 			facts: { ...facts, continuation: true, explicitConstraints: true, finishedDetachedBatchIds: ["batch"] },
+			settings,
+			expected: { kind: "none", reason: "constraints" },
+		},
+		{
+			name: "finished batches are collected on continuations without interpretation",
+			interpretation: null,
+			facts: { ...facts, continuation: true, finishedDetachedBatchIds: ["batch"] },
+			settings,
+			expected: { kind: "collect", batchIds: ["batch"] },
+		},
+		{
+			name: "continuation without finished batches performs no other workflow",
+			interpretation,
+			facts: { ...facts, continuation: true },
 			settings,
 			expected: { kind: "none", reason: "continuation" },
 		},

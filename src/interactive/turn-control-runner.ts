@@ -11,6 +11,7 @@ import { parseScoutResult } from "../domains/agents/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { requestExecutionRole } from "../domains/dispatch/execution-role.js";
+import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
@@ -26,10 +27,13 @@ import {
 	decisionHash,
 	factsDigest,
 	renderDirectionBlock,
+	renderCollectedBlock,
 	renderOrientationBlock,
 	renderOrientationUnavailable,
 } from "../domains/turn-control/index.js";
 import { loadVerifiedScoutSource, prepareScoutContinuation } from "../tools/dispatch-scout-admission.js";
+import { collectDetachedBatch } from "../tools/monitor-collect.js";
+import type { MonitorToolDeps } from "../tools/monitor.js";
 import type { ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { receiptHelperResult } from "../tools/worker-evidence.js";
 import { observeWorkspace } from "./direction-observations.js";
@@ -55,6 +59,7 @@ export interface TurnControlRunnerDeps {
 	agents: AgentsContract | undefined;
 	toolRegistry: Pick<ToolRegistry, "get" | "invoke"> | undefined;
 	getInvokeOptions?: () => ToolInvokeOptions;
+	monitorDeps?: MonitorToolDeps;
 	getTurnConstraints(): TurnConstraints | undefined;
 	isContinuation(): boolean;
 	readInterpretation(): TurnInterpretation | undefined;
@@ -179,6 +184,50 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 				executed: null,
 			};
 			if (input.signal.aborted) return { block: null, record: { ...record, executed: { refused: "canceled" } } };
+			if (decision.kind === "collect") {
+				try {
+					const monitorDeps = deps.monitorDeps ?? (deps.dispatch ? { dispatch: deps.dispatch } : null);
+					if (monitorDeps === null) throw new Error("detached collection is unavailable");
+					const ownership = dispatchOwnership(dispatchOwnerOf(monitorDeps.dispatch, deps.getInvokeOptions?.().sessionId));
+					const rendered: string[] = [];
+					const runIds: string[] = [];
+					let collectedCount = 0;
+					const failures: string[] = [];
+					for (const batchId of decision.batchIds) {
+						if (input.signal.aborted) throw new Error("canceled");
+						try {
+							const outcome = await collectDetachedBatch(monitorDeps, batchId, ownership);
+							if (outcome.kind !== "ok") throw new Error(outcome.message);
+							if (outcome.details?.complete !== true || outcome.details.collected !== true)
+								throw new Error(`batch ${batchId} is not durably collected`);
+							rendered.push(outcome.output);
+							collectedCount += 1;
+							if (Array.isArray(outcome.details.runs))
+								for (const run of outcome.details.runs) {
+									if (run !== null && typeof run === "object" && typeof run.runId === "string") runIds.push(run.runId);
+								}
+						} catch (error) {
+							// S9: a later failure must not discard results from an already marked batch.
+							failures.push(`batch ${batchId}: ${error instanceof Error ? error.message : String(error)}`);
+						}
+					}
+					if (input.signal.aborted) throw new Error("canceled");
+					if (collectedCount === 0) throw new Error(failures.join("; "));
+					const block = renderCollectedBlock(
+						[...rendered, ...failures.map((failure) => `Collection unavailable for ${failure}`)].join("\n\n"),
+					);
+					deps.emitNotice(`[Collected] ${collectedCount} batch(es)`);
+					acted = true;
+					return {
+						block,
+						record: { ...record, executed: { runIds, blockChars: block.length, durationMs: performance.now() - started } },
+					};
+				} catch (error) {
+					const message = input.signal.aborted ? "canceled" : error instanceof Error ? error.message : String(error);
+					if (!input.signal.aborted) deps.emitNotice(`[Collected] unavailable: ${message}`);
+					return { block: null, record: { ...record, executed: { refused: message } } };
+				}
+			}
 			if (decision.kind === "direction" && deps.toolRegistry) {
 				const observations = await observeWorkspace({
 					registry: deps.toolRegistry,

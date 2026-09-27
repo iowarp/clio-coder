@@ -177,7 +177,7 @@ describe("coordinator discovery and dependency composition", () => {
 			}
 			const reminder = middleware.flushPendingReminders();
 			match(reminder, /Check solver/u);
-			match(reminder, /batch finished/u);
+			strictEqual(reminder.includes("batch finished"), false);
 			strictEqual(state.pendingRequestContinuation, true);
 			// Scope changes cannot be defeated by retaining a gateway schema.
 			state.currentTurnConstraints = { allowedTools: ["read"] };
