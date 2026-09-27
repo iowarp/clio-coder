@@ -1,0 +1,42 @@
+{
+	"description": "Questions about available built-in capabilities.",
+	"project": "examples/temperature-calibration",
+	"cases": [
+		{
+			"id": "e1",
+			"turns": [
+				{
+					"text": "does Clio have a built-in way to review a scientific Python package, and how would I start it?",
+					"expect": {
+						"control": "none",
+						"dispatch": false
+					}
+				}
+			]
+		},
+		{
+			"id": "e2",
+			"turns": [
+				{
+					"text": "is there a workflow for planning a research software change before implementing it?",
+					"expect": {
+						"control": "none",
+						"dispatch": false
+					}
+				}
+			]
+		},
+		{
+			"id": "e3",
+			"turns": [
+				{
+					"text": "can you run a literature search on arXiv from here?",
+					"expect": {
+						"control": "none",
+						"dispatch": false
+					}
+				}
+			]
+		}
+	]
+}

@@ -1,0 +1,42 @@
+{
+	"description": "Natural requests for a repository orientation.",
+	"project": "self",
+	"cases": [
+		{
+			"id": "a1",
+			"turns": [
+				{
+					"text": "explore this repo",
+					"expect": {
+						"control": "orientation",
+						"dispatch": null
+					}
+				}
+			]
+		},
+		{
+			"id": "a2",
+			"turns": [
+				{
+					"text": "give me a tour of this codebase",
+					"expect": {
+						"control": "orientation",
+						"dispatch": null
+					}
+				}
+			]
+		},
+		{
+			"id": "a3",
+			"turns": [
+				{
+					"text": "what is this project and how is it organized?",
+					"expect": {
+						"control": "orientation",
+						"dispatch": null
+					}
+				}
+			]
+		}
+	]
+}

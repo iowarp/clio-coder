@@ -1,0 +1,42 @@
+{
+	"description": "Orientation across independent implementation areas.",
+	"project": "self",
+	"cases": [
+		{
+			"id": "b1",
+			"turns": [
+				{
+					"text": "how do the safety classifier and the dispatch scheduler relate?",
+					"expect": {
+						"control": "orientation",
+						"dispatch": null
+					}
+				}
+			]
+		},
+		{
+			"id": "b2",
+			"turns": [
+				{
+					"text": "explain how tool argument validation and receipt sealing work; they are separate areas",
+					"expect": {
+						"control": "orientation",
+						"dispatch": null
+					}
+				}
+			]
+		},
+		{
+			"id": "b3",
+			"turns": [
+				{
+					"text": "compare the memory promotion path with the evidence bundle builder",
+					"expect": {
+						"control": "orientation",
+						"dispatch": null
+					}
+				}
+			]
+		}
+	]
+}

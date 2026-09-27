@@ -1,0 +1,105 @@
+{
+	"description": "Repeated undecided messages eventually call for direction.",
+	"project": "examples/temperature-calibration",
+	"cases": [
+		{
+			"id": "d1",
+			"turns": [
+				{
+					"text": "hi",
+					"expect": {
+						"control": "none",
+						"dispatch": false
+					}
+				},
+				{
+					"text": "not sure",
+					"expect": {
+						"control": "none",
+						"dispatch": false
+					}
+				},
+				{
+					"text": "not sure",
+					"expect": {
+						"control": "direction",
+						"dispatch": false
+					}
+				},
+				{
+					"text": "help me",
+					"expect": {
+						"control": "direction",
+						"dispatch": false
+					}
+				}
+			]
+		},
+		{
+			"id": "d2",
+			"turns": [
+				{
+					"text": "hello",
+					"expect": {
+						"control": "none",
+						"dispatch": false
+					}
+				},
+				{
+					"text": "hmm, I don't know",
+					"expect": {
+						"control": "none",
+						"dispatch": false
+					}
+				},
+				{
+					"text": "no idea",
+					"expect": {
+						"control": "direction",
+						"dispatch": false
+					}
+				},
+				{
+					"text": "what should I do here?",
+					"expect": {
+						"control": "direction",
+						"dispatch": false
+					}
+				}
+			]
+		},
+		{
+			"id": "d3",
+			"turns": [
+				{
+					"text": "hey",
+					"expect": {
+						"control": "none",
+						"dispatch": false
+					}
+				},
+				{
+					"text": "not sure yet",
+					"expect": {
+						"control": "none",
+						"dispatch": false
+					}
+				},
+				{
+					"text": "can't decide",
+					"expect": {
+						"control": "direction",
+						"dispatch": false
+					}
+				},
+				{
+					"text": "suggest something",
+					"expect": {
+						"control": "direction",
+						"dispatch": false
+					}
+				}
+			]
+		}
+	]
+}
