@@ -161,6 +161,11 @@ const ORCHESTRATOR = "src/entry/orchestrator.ts";
 
 const STAGE0_SEAMS: ReadonlyArray<Stage0Seam> = [
 	{
+		module: "src/interactive/turn-outcome-collector.ts",
+		reason:
+			"the composition root registers a surface-neutral observer whose value closure contains only core, pure turn-control, and tool-call shapes, never terminal rendering.",
+	},
+	{
 		module: "src/interactive/terminal-lease.ts",
 		reason:
 			"the Stage 0 owner itself. src/cli/clio.ts is the surface that opens the instant shell, so this edge is the budget rather than a leak, and the closure guard below skips it.",
@@ -399,6 +404,8 @@ function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoo
  *      to rehydrate runtime descriptors from stdin. Type-only imports are
  *      allowed because they erase at compile time.
  *   3. src/domains/<x> never imports src/domains/<y>/extension.ts for y != x.
+ *   7. src/domains/turn-control/** imports no interactive, engine, tools or
+ *      worker modules, and reaches other domains only through index.ts.
  *   4. src/tools/** never imports src/interactive/**. The tool substrate is
  *      surface-agnostic: headless, interactive, ACP, and worker runs share it,
  *      so a tool reaching into TUI code would make one surface's presentation
@@ -462,6 +469,23 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 
 			if (!(specifier.startsWith(".") || specifier.startsWith("/"))) return;
 			const resolved = resolveRelativeImport(filePath, specifier);
+			const targetDomain = domainOf(resolved, domainsRoot);
+			if (
+				fromDomain === "turn-control" &&
+				(isWithin(resolved, interactiveRoot) ||
+					isWithin(resolved, engineRoot) ||
+					isWithin(resolved, toolsRoot) ||
+					isWithin(resolved, workerRoot) ||
+					(targetDomain !== null &&
+						targetDomain !== fromDomain &&
+						resolved !== path.join(domainsRoot, targetDomain, "index.ts")))
+			) {
+				const qualifier = typeOnly ? " (type-only)" : "";
+				violations.push(
+					`rule7: ${path.relative(projectRoot, filePath)} ${kind}${qualifier} ${specifier}; turn-control is pure and other domains are accessed only through index.ts`,
+				);
+				return;
+			}
 
 			if (inWorker && isWithin(resolved, domainsRoot)) {
 				if (!typeOnly && !isAllowedWorkerProviderValueImport(resolved, providersDomainRoot)) {

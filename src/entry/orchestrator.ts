@@ -249,6 +249,7 @@ import {
 	buildModelReplayAgentMessagesFromTurns,
 	continuityContextFromSession,
 } from "../interactive/model-session-replay.js";
+import { createTurnOutcomeCollector } from "../interactive/turn-outcome-collector.js";
 import { resizeImage } from "../utils/image-resize.js";
 import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
@@ -2535,6 +2536,32 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return readSessionEntriesForCompact(meta.id);
 	};
 
+	const turnOutcomeCollector = createTurnOutcomeCollector();
+	let outcomeSessionId: string | null = null;
+	const seedOutcomeFromSession = (): void => {
+		const meta = session?.current();
+		outcomeSessionId = meta?.id ?? null;
+		let streak = 0;
+		try {
+			const latest = meta
+				? [...readRecentSessionEntriesForContract(meta.id)]
+						.reverse()
+						.find((entry) => entry.kind === "custom" && entry.customType === "turnOutcome")
+				: undefined;
+			if (latest?.kind === "custom") {
+				const data = latest.data as { conversation?: { clarificationStreak?: unknown } } | null;
+				if (typeof data?.conversation?.clarificationStreak === "number") streak = data.conversation.clarificationStreak;
+			}
+		} catch {
+			// An unreadable tail provides no previous measurement; it must not prevent opening a session.
+		}
+		turnOutcomeCollector.seedClarificationStreak(streak);
+	};
+	seedOutcomeFromSession();
+	const unsubscribeOutcomeResume = bus.on(BusChannels.SessionResumed, seedOutcomeFromSession);
+	termination.onDrain(() => unsubscribeOutcomeResume());
+	middleware.registerHook(turnOutcomeCollector);
+
 	// turn_end assessors, fired by the chat-loop when the final assistant
 	// message of a run lands. Tool-prose first so its hard-block interruption
 	// precedes the finish-contract advisory in effect order.
@@ -2583,7 +2610,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					resolveRigor({ cwd: process.cwd(), override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) }),
 				readActiveAcceptance: (window) =>
 					activeUserTaskAcceptance(userTasks.snapshot(), taskBoard.snapshot(), session.current()?.id ?? null, window),
-				recordDecision: (record) => safety.audit.recordCompletionContract?.(record),
+				recordDecision: (record) => {
+					turnOutcomeCollector.recordCompletion(
+						record.turnId,
+						record.decision,
+						record.mutatedPaths.length,
+						record.evidenceKinds,
+					);
+					safety.audit.recordCompletionContract?.(record);
+				},
 			}),
 		);
 	}
@@ -2621,6 +2656,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let cancelQueuedSpeculativeHold: (() => void) | null = null;
 	let previousSpeculativeStats = dispatch?.speculativeStats?.() ?? { held: 0, adopted: 0, discarded: 0, live: 0 };
 	const chat = createChatLoop({
+		turnOutcomeCollector,
+		...(dispatch ? { outcomeDispatch: dispatch } : {}),
+		getTurnBriefUsage: () => turnRelevance.usage(),
+		getTaskEstablished: () => {
+			const board = taskBoard.snapshot();
+			return (
+				board?.tasks.some((task) => task.status === "active" || task.status === "pending" || task.status === "blocked") ===
+					true || userTasks.snapshot().some((task) => task.status === "handed" || task.status === "picked")
+			);
+		},
 		visionSidecar,
 		getReadySkillCount,
 		interactiveGuidance: !options.headless && !options.acp,
@@ -2647,6 +2692,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { session } : {}),
 		getMemorySection: createMemoryPromptReader({ getDataDir: clioDataDir }),
 		refreshTurnRelevance: async (taskText, previous, signal) => {
+			if ((session?.current()?.id ?? null) !== outcomeSessionId) seedOutcomeFromSession();
 			await turnRelevance.refresh({ task: taskText, previous }, signal);
 			// The hold runs before the awaiting turn resumes, so an immediate
 			// dispatch can adopt it. Settlement cancels a queued hold first.

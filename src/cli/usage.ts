@@ -69,6 +69,8 @@ interface UsageReceipt {
 }
 
 interface SessionUsage {
+	harnessActions: number;
+	duplicateDispatches: number;
 	sessionId: string;
 	cwdHash: string;
 	bashShapes: Map<string, number>;
@@ -348,6 +350,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		(receipt) => repoRunIds === null || repoRunIds.has(receipt.runId),
 	);
 	const sessions = await readSessions(stateDir, windowStart, now, repoHash, diagnostics);
+	const harnessActions = sessions.reduce((total, session) => total + session.harnessActions, 0);
+	const duplicateDispatches = sessions.reduce((total, session) => total + session.duplicateDispatches, 0);
 	// Side questions and handoff rounds append nothing to the session ledger by
 	// design, so their spend lives in its own store and is folded in here.
 	const outOfTurn = readOutOfTurnUsageRows(stateDir);
@@ -570,6 +574,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		if (presence.receiptsPresent) emit({ kind: "fact", fact: "dispatch-runs", value: receipts.length });
 		else emit({ kind: "fact", fact: "receipt-store-missing", path: presence.receiptsPath });
 		emit({ kind: "fact", fact: "unverified-successes", value: accountability.unverifiedSuccesses });
+		emit({ kind: "fact", fact: "harness-actions", value: harnessActions });
+		emit({ kind: "fact", fact: "duplicate-dispatches", value: duplicateDispatches });
 		emit({ kind: "fact", fact: "ungrounded-claims", value: accountability.ungroundedClaims });
 		emit({ kind: "fact", fact: "audit-tool-calls", value: auditToolCalls.length, blocked: auditBlocked.length });
 		emit({ kind: "fact", fact: "permission-approval", ...permissions });
@@ -824,6 +830,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		);
 	}
 	out(`  unverified successes: ${accountability.unverifiedSuccesses}`);
+	out(`  harness actions: ${harnessActions}`);
+	out(`  duplicate dispatches: ${duplicateDispatches}`);
 	out(`  ungrounded claims: ${accountability.ungroundedClaims}`);
 	if (tagCounts.size > 0) {
 		out("");
@@ -996,6 +1004,8 @@ async function readSessions(
 			(entry) => entry.kind === "modelChange" || inWindow(entry.timestamp, windowStart, windowEnd),
 		);
 		const usage: SessionUsage = {
+			harnessActions: 0,
+			duplicateDispatches: 0,
 			sessionId: ref.sessionId,
 			cwdHash: ref.cwdHash,
 			bashShapes: new Map(),
@@ -1010,6 +1020,16 @@ async function readSessions(
 		for (const entry of parsedEntries.entries) {
 			if (!inWindow(entry.timestamp, windowStart, windowEnd)) continue;
 			usage.entriesInWindow += 1;
+			if (entry.kind === "custom" && entry.customType === "turnOutcome" && isRecord(entry.data)) {
+				const harness = entry.data.harness;
+				if (
+					isRecord(harness) &&
+					((Array.isArray(harness.runIds) && harness.runIds.length > 0) || numberOr0(harness.reads) > 0)
+				)
+					usage.harnessActions += 1;
+				const coordinator = entry.data.coordinator;
+				if (isRecord(coordinator) && coordinator.duplicateDispatch === true) usage.duplicateDispatches += 1;
+			}
 			if (entry.kind === "skillActivation") {
 				usage.skillActivations.add(entry.activation.name);
 				continue;

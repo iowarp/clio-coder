@@ -25,6 +25,7 @@ import {
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareRule } from "../../src/domains/middleware/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { capturedHookSourcesFor } from "../../src/entry/extension-hook-sources.js";
+import { createTurnOutcomeCollector } from "../../src/interactive/turn-outcome-collector.js";
 import type { ToolInvokeOptions } from "../../src/tools/registry.js";
 import { createRegistry } from "../../src/tools/registry.js";
 
@@ -45,6 +46,62 @@ function scratch(): string {
 }
 
 describe("middleware hook boundary", () => {
+	it("collects turn facts without effects, separating harness calls and detecting succeeded dispatch repeats", () => {
+		const collector = createTurnOutcomeCollector();
+		collector.seedClarificationStreak(2);
+		const middleware = createMiddlewareBundle({ registrations: [collector] }).contract;
+		const hook = (input: MiddlewareHookInput) =>
+			deepStrictEqual(middleware.runHook({ sessionId: "session-1", ...input }).effects, []);
+		hook({ hook: "turn_start", turnId: "user-1" });
+		for (const metadata of [{ nested: true }, { origin: "harness" }]) {
+			hook({ hook: "before_tool", turnId: "user-1", toolName: "read", metadata });
+			hook({ hook: "after_tool", turnId: "user-1", toolName: "read", metadata });
+		}
+		hook({ hook: "before_tool", turnId: "user-1", toolName: "read" });
+		hook({ hook: "before_tool", turnId: "user-1", toolName: "bash", toolArgs: { command: "rg task src" } });
+		const args = { agent: "scout", task: " Inspect   Source " };
+		const details = { mode: "detached", runs: [{ runId: "run-1", agentId: "scout" }] };
+		hook({ hook: "before_tool", turnId: "user-1", toolName: "dispatch", toolArgs: args });
+		hook({
+			hook: "after_tool",
+			turnId: "user-1",
+			toolName: "dispatch",
+			toolArgs: args,
+			toolResultDetails: details,
+			metadata: { resultKind: "ok" },
+		});
+		hook({ hook: "before_tool", turnId: "user-1", toolName: "read" });
+		hook({
+			hook: "after_tool",
+			turnId: "user-1",
+			toolName: "dispatch",
+			toolResultDetails: { runs: [{ runId: "harness-1" }] },
+			metadata: { origin: "harness", resultKind: "ok" },
+		});
+		hook({ hook: "turn_end", turnId: "assistant-1", metadata: { userTurnId: "user-1" } });
+		collector.recordCompletion("assistant-1", "ok", 0, ["verification"]);
+		deepStrictEqual(collector.take("user-1"), {
+			toolNames: ["read", "bash", "dispatch", "read"],
+			readOnlyCallsBeforeFirstDispatch: 2,
+			dispatches: [{ mode: "detached", agentIds: ["scout"], runIds: ["run-1"] }],
+			duplicateDispatch: false,
+			harness: { runIds: ["harness-1"], reads: 1 },
+			previousClarificationStreak: 2,
+			completion: { decision: "ok", mutatedPaths: 0, evidenceKinds: ["verification"] },
+		});
+		hook({ hook: "turn_start", turnId: "user-2" });
+		hook({ hook: "before_tool", turnId: "user-2", toolName: "dispatch", toolArgs: args });
+		hook({
+			hook: "after_tool",
+			turnId: "user-2",
+			toolName: "dispatch",
+			toolArgs: { ...args, task: "inspect source" },
+			toolResultDetails: details,
+			metadata: { resultKind: "ok" },
+		});
+		strictEqual(collector.take("user-2").duplicateDispatch, true);
+		deepStrictEqual(collector.take("user-2").toolNames, []);
+	});
 	afterEach(() => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});

@@ -1,3 +1,4 @@
+import { isReadOnlyCall } from "../../core/read-only-calls.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { DispatchContract } from "../dispatch/contract.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../dispatch/ownership.js";
@@ -30,18 +31,8 @@ export const UNBACKED_WORKER_CLAIM_REGISTRATION_ID = "rail.unbacked-worker-claim
 
 const SCOUT_AGENT_ID = "scout";
 
-const EXPLORATION_TOOL_NAMES = new Set<string>([
-	ToolNames.Read,
-	ToolNames.Grep,
-	ToolNames.Find,
-	ToolNames.Ls,
-	ToolNames.CodeNav,
-	ToolNames.Context,
-	ToolNames.Git,
-]);
 const EXPLORATION_NUDGE_TURN_LIMIT = 32;
 const NO_TURN = "no-turn";
-const READ_ONLY_SHELL_COMMAND_PATTERN = /^\s*(?:awk|cat|fd|find|git|grep|head|jq|ls|rg|sed|tail|tree|wc)\b/;
 
 interface ExplorationTurnState {
 	readOnlyCalls: number;
@@ -124,10 +115,7 @@ function isNonRepositoryContextCall(input: MiddlewareHookInput): boolean {
 
 function isReadOnlyExplorationCall(input: MiddlewareHookInput): boolean {
 	if (isNonRepositoryContextCall(input)) return false;
-	if (input.toolName && EXPLORATION_TOOL_NAMES.has(input.toolName)) return true;
-	if (input.toolName !== ToolNames.Bash) return false;
-	const command = input.toolArgs?.command;
-	return typeof command === "string" && READ_ONLY_SHELL_COMMAND_PATTERN.test(command);
+	return isReadOnlyCall(input.toolName ?? "", input.toolArgs);
 }
 
 function hasActiveTool(input: MiddlewareHookInput, toolName: string): boolean {

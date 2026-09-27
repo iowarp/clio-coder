@@ -13,6 +13,7 @@ import type { SessionTurnUsage } from "../domains/observability/trace-store.js";
 import { normalizeCostProvenance } from "../domains/providers/types/cost-provenance.js";
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
+import type { TokenSplit } from "../domains/turn-control/index.js";
 import { replaceEngineMessages } from "../engine/agent.js";
 import type { ClioTurnRecord } from "../engine/session.js";
 import type { AgentEvent, AgentMessage, Usage } from "../engine/types.js";
@@ -70,6 +71,9 @@ export interface TurnPersistenceDeps {
 }
 
 export interface TurnPersistence {
+	currentTurnUsage(): TokenSplit;
+	lastTracedTurn(): { runId: string; usage: SessionTurnUsage | null } | null;
+	traceEventForRun(runId: string, input: TurnTraceEventInput): void;
 	/** True when this exact assistant message object was already persisted. */
 	wasPersisted(message: unknown): boolean;
 	appendAssistantTurn(
@@ -119,6 +123,16 @@ export interface TurnPersistence {
  */
 const SESSION_TRACE_AGENT = "orchestrator";
 
+export interface TurnTraceEventInput {
+	eventId?: string;
+	type: string;
+	name: string;
+	payload?: unknown;
+	tokens?: number | null;
+	startedAt?: string;
+	endedAt?: string | null;
+}
+
 export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistence {
 	const { state } = deps;
 	const persistedAssistantMessages = new WeakSet<object>();
@@ -153,6 +167,9 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	let traceRunId: string | null = null;
 	let traceEventSeq = 0;
 	let traceUsage: SessionTurnUsage | null = null;
+	let lastTracedTurn: { runId: string; usage: SessionTurnUsage | null } | null = null;
+	let usageSources = 0;
+	let reportedUsageSources = 0;
 	const traceToolStarts = new Map<string, string>();
 	// Trace rows and the terminal row name the capability a gateway op=call
 	// ran. Its result may not name it (a refused capability), so the call's own
@@ -170,6 +187,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	const finishTracedTurn = (status: "success" | "fail", error: string | null): void => {
 		if (traceRunId === null) return;
 		mirror({ kind: "finish", runId: traceRunId, status, error, usage: traceUsage, at: traceNow() });
+		// Settlement runs after the assessor; keep the facts even though the trace is already closed.
+		lastTracedTurn = { runId: traceRunId, usage: traceUsage };
 		traceRunId = null;
 		traceUsage = null;
 		traceToolStarts.clear();
@@ -177,6 +196,9 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	};
 
 	const startTracedTurn = (userTurnId: string, prompt: string, submitted?: AgentRuntime): void => {
+		lastTracedTurn = null;
+		usageSources = 0;
+		reportedUsageSources = 0;
 		if (deps.observability === undefined) return;
 		const runtime = submitted ?? state.runtime;
 		if (!runtime) return;
@@ -198,20 +220,11 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		});
 	};
 
-	const traceEvent = (input: {
-		eventId?: string;
-		type: string;
-		name: string;
-		payload?: unknown;
-		tokens?: number | null;
-		startedAt?: string;
-		endedAt?: string | null;
-	}): void => {
-		if (traceRunId === null) return;
+	const traceEventForRun = (runId: string, input: TurnTraceEventInput): void => {
 		traceEventSeq += 1;
 		mirror({
 			kind: "event",
-			runId: traceRunId,
+			runId,
 			eventId: input.eventId ?? `event:${traceEventSeq}`,
 			type: input.type,
 			name: input.name,
@@ -221,12 +234,17 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			endedAt: input.endedAt ?? null,
 		});
 	};
+	const traceEvent = (input: TurnTraceEventInput): void => {
+		if (traceRunId !== null) traceEventForRun(traceRunId, input);
+	};
 
 	/** Fold one assistant message's provider-reported usage into the turn total. */
 	const accumulateTraceUsage = (message: AgentMessage): void => {
 		if (traceRunId === null) return;
 		const summary = sumRunUsage([message]);
+		usageSources += 1;
 		if (!summary.hadUsage) return;
+		reportedUsageSources += 1;
 		const total: SessionTurnUsage = traceUsage ?? {
 			inputTokens: 0,
 			outputTokens: 0,
@@ -318,6 +336,21 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	};
 
 	return {
+		lastTracedTurn: () =>
+			lastTracedTurn === null
+				? null
+				: { runId: lastTracedTurn.runId, usage: lastTracedTurn.usage === null ? null : { ...lastTracedTurn.usage } },
+		traceEventForRun,
+		currentTurnUsage() {
+			const usage = traceUsage ?? lastTracedTurn?.usage;
+			return {
+				inputTokens: usage?.inputTokens ?? 0,
+				outputTokens: usage?.outputTokens ?? 0,
+				cacheReadTokens: usage?.cacheReadTokens ?? 0,
+				totalTokens: usage?.totalTokens ?? 0,
+				provenance: reportedUsageSources === 0 ? "none" : reportedUsageSources === usageSources ? "reported" : "partial",
+			};
+		},
 		wasPersisted(message: unknown): boolean {
 			return !!message && typeof message === "object" && persistedAssistantMessages.has(message as object);
 		},

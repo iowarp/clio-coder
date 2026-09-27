@@ -21,6 +21,7 @@
  */
 
 import type { DecisionSite } from "../../core/defaults.js";
+import type { TokenSplit } from "../turn-control/index.js";
 import { inspectDecisionSite, type ResolveDeciderInput } from "./decision-sites.js";
 import type { Decider } from "./decisions.js";
 import type { DecisionAnswer, DecisionQuestion } from "./types/inference.js";
@@ -179,6 +180,7 @@ export async function runPreTurnBrief(
 	sites: ReadonlyArray<PreTurnSite<unknown>>,
 	evidence: PreTurnEvidence,
 	signal?: AbortSignal,
+	onUsage?: (usage: { input: number; output: number } | undefined) => void,
 ): Promise<PreTurnBrief> {
 	const shared: Required<PreTurnEvidence> = {
 		task: bounded(evidence.task, MAX_TASK_CHARS),
@@ -212,9 +214,11 @@ export async function runPreTurnBrief(
 						questions[`${entry.definition.site}.${id}`] = question;
 					}
 				}
-				const answers = await (group[0] as Prepared).decider.ask(stateFor(group, shared), questions, {
+				const result = await (group[0] as Prepared).decider.askDetailed(stateFor(group, shared), questions, {
 					...(signal !== undefined ? { signal } : {}),
 				});
+				onUsage?.(result.tokensUsed);
+				const answers = result.answers;
 				const latencyMs = Math.round(performance.now() - startedAt);
 				const out: Array<[DecisionSite, PreTurnAnswer<unknown>]> = [];
 				for (const entry of group) {
@@ -230,6 +234,7 @@ export async function runPreTurnBrief(
 			} catch {
 				// A refused connection, a timeout and a contract break all mean the
 				// same thing to a caller: behave the way you did before.
+				onUsage?.(undefined);
 				return [];
 			}
 		}),
@@ -266,18 +271,35 @@ export interface PreTurnBriefStore {
 	get<T>(site: PreTurnSite<T>): T | undefined;
 	/** Every settled answer this turn, for the ledger and the hint registration. */
 	current(): PreTurnBrief;
+	/** Usage from all answering model calls, including calls whose sites abstained. */
+	usage(): TokenSplit;
 	/** Drop the answers, so a turn that never refreshed cannot read a stale one. */
 	clear(): void;
 }
 
 export function createPreTurnBriefStore(options: PreTurnBriefStoreOptions): PreTurnBriefStore {
 	let brief: PreTurnBrief = EMPTY_BRIEF;
+	let calls = 0;
+	let reported = 0;
+	let inputTokens = 0;
+	let outputTokens = 0;
 	const clear = (): void => {
 		brief = EMPTY_BRIEF;
+		calls = 0;
+		reported = 0;
+		inputTokens = 0;
+		outputTokens = 0;
 	};
 	return {
 		clear,
 		current: () => brief,
+		usage: () => ({
+			inputTokens,
+			outputTokens,
+			cacheReadTokens: 0,
+			totalTokens: inputTokens + outputTokens,
+			provenance: reported === 0 ? "none" : reported === calls ? "reported" : "partial",
+		}),
 		get<T>(site: PreTurnSite<T>): T | undefined {
 			const answer = brief.get(site.site);
 			return answer === undefined ? undefined : (answer.value as T);
@@ -289,7 +311,13 @@ export function createPreTurnBriefStore(options: PreTurnBriefStoreOptions): PreT
 			try {
 				const input = options.resolve();
 				if (input === null) return;
-				brief = await runPreTurnBrief(input, options.sites, evidence, signal);
+				brief = await runPreTurnBrief(input, options.sites, evidence, signal, (usage) => {
+					calls += 1;
+					if (usage === undefined) return;
+					reported += 1;
+					inputTokens += usage.input;
+					outputTokens += usage.output;
+				});
 			} catch {
 				clear();
 			}

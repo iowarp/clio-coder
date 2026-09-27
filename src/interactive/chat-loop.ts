@@ -26,6 +26,8 @@ import { ContinuityController } from "./continuity-controller.js";
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { BusChannels, type RunAbortSource } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -44,6 +46,7 @@ import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-cons
 import { clioStateDir } from "../core/xdg.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
+import type { DispatchContract } from "../domains/dispatch/index.js";
 import {
 	createMiddlewareToolChoiceControl,
 	type MiddlewareContract,
@@ -81,6 +84,8 @@ import {
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
 import { isRetryableErrorMessage, type RetrySettings } from "../domains/session/retry.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import type { TokenSplit } from "../domains/turn-control/index.js";
+import { reduceTurnOutcome } from "../domains/turn-control/index.js";
 import { createEngineAgent } from "../engine/agent.js";
 import { countImageBlocks } from "../engine/image-context.js";
 import { cwdHash } from "../engine/session.js";
@@ -113,6 +118,8 @@ import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult, sideQuesti
 import type { AgentStatusEvent } from "./status/types.js";
 import { createTurnContext, type LiveContextUsage } from "./turn-context.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
+import type { TurnOutcomeCollector } from "./turn-outcome-collector.js";
+import { createTurnOutcomeCollector } from "./turn-outcome-collector.js";
 import { createTurnPersistence } from "./turn-persistence.js";
 import { createTurnPrewarm, type PrewarmOutcome, subscribePrewarmToCompaction } from "./turn-prewarm.js";
 import {
@@ -236,6 +243,54 @@ export interface SpeculativeDispatchCounts {
 	held: number;
 	adopted: number;
 	discarded: number;
+}
+
+function noOutcomeUsage(): TokenSplit {
+	return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0, provenance: "none" };
+}
+
+function workerOutcomeUsage(
+	runIds: ReadonlyArray<string>,
+	dispatch: Pick<DispatchContract, "getRun"> | undefined,
+): TokenSplit {
+	let inputTokens = 0;
+	let outputTokens = 0;
+	let cacheReadTokens = 0;
+	let totalTokens = 0;
+	let reported = 0;
+	let available = 0;
+	const ids = [...new Set(runIds)];
+	for (const runId of ids) {
+		try {
+			const envelope = dispatch?.getRun(runId);
+			if (!envelope) continue;
+			const path = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${runId}.json`);
+			const receipt = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+			if (receipt.runId !== runId) continue;
+			const count = (key: string) =>
+				typeof receipt[key] === "number" && Number.isFinite(receipt[key]) ? (receipt[key] as number) : 0;
+			inputTokens += count("inputTokenCount");
+			outputTokens += count("outputTokenCount");
+			cacheReadTokens += count("cacheReadTokenCount");
+			totalTokens += count("tokenCount");
+			if (typeof receipt.inputTokenCount === "number" || typeof receipt.outputTokenCount === "number") available += 1;
+			if (
+				typeof receipt.inputTokenCount === "number" &&
+				typeof receipt.outputTokenCount === "number" &&
+				typeof receipt.tokenCount === "number"
+			)
+				reported += 1;
+		} catch {
+			// Detached runs may not have receipts at settlement; missing usage stays visible in provenance.
+		}
+	}
+	return {
+		inputTokens,
+		outputTokens,
+		cacheReadTokens,
+		totalTokens,
+		provenance: available === 0 ? "none" : reported === ids.length ? "reported" : "partial",
+	};
 }
 
 export type ChatLoopEvent =
@@ -493,6 +548,10 @@ export interface ChatLoop {
 }
 
 export interface CreateChatLoopDeps {
+	turnOutcomeCollector?: TurnOutcomeCollector;
+	getTurnBriefUsage?: () => TokenSplit;
+	getTaskEstablished?: () => boolean;
+	outcomeDispatch?: Pick<DispatchContract, "getRun">;
 	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
 	interactiveGuidance?: boolean;
 	/**
@@ -1147,6 +1206,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		promptSideTokens: () => context.promptSideTokens(),
 		observability: deps.observability,
 	});
+	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
+	if (deps.turnOutcomeCollector === undefined) deps.middleware?.registerHook(outcomeCollector);
 
 	const recovery = createTurnRecovery({
 		state,
@@ -1410,6 +1471,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		queuedMessages: () => queues.queuedMessages(),
 
 		async submit(text: string, options: ChatSubmitOptions = {}): Promise<void> {
+			const submittedAt = performance.now();
 			let interrupted = false;
 			if (state.streaming) {
 				let mode: SteeringMode = options.steering ?? DEFAULT_STEERING_MODE;
@@ -1735,6 +1797,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				operatorText,
 				options.display?.text,
 			);
+			const turnIndex = (deps.readSessionEntries?.() ?? []).filter((entry) => {
+				if (entry.kind !== "message" || entry.role !== "user") return false;
+				const payload = entry.payload as { synthetic?: unknown } | null;
+				return payload?.synthetic !== true && entry.turnId !== userTurnId;
+			}).length;
 			context.installMemoryRestoration(agentRuntime, submittedText);
 			context.commitMemoryTurn(agentRuntime);
 			// An interrupt was submitted while a run was active, so no caller drew
@@ -1897,6 +1964,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 				await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflow, images);
 			} finally {
+				const canceled = state.activeInterruptReason !== null && state.activeInterruptByOperator;
 				releaseForeground();
 				if (askUserPolicy) {
 					try {
@@ -1939,6 +2007,59 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 					state.interruptedAssistantMessage = null;
 					state.interruptedUsage = null;
+				}
+				if (userTurnId !== null && options.requestContinuation !== true && deps.session?.current()) {
+					try {
+						const collected = outcomeCollector.take(userTurnId);
+						const finalMessage = [...agentRuntime.agent.state.messages]
+							.reverse()
+							.find((message) => message.role === "assistant");
+						const finalEntry = deps.readSessionEntries?.().find((entry) => entry.turnId === state.lastTurnId);
+						const finalPayload =
+							finalEntry?.kind === "message" && finalEntry.role === "assistant"
+								? (finalEntry.payload as { text?: unknown; stopReason?: unknown })
+								: undefined;
+						const traced = persistence.lastTracedTurn();
+						const matchesTrace = traced?.runId === `session:${userTurnId}`;
+						const record = reduceTurnOutcome({
+							...collected,
+							turnId: userTurnId,
+							turnIndex,
+							finalAssistantText:
+								typeof finalPayload?.text === "string" ? finalPayload.text : finalMessage ? extractText(finalMessage) : "",
+							taskEstablished: deps.getTaskEstablished?.() ?? false,
+							canceled,
+							tokens: {
+								coordinator: matchesTrace ? persistence.currentTurnUsage() : noOutcomeUsage(),
+								decisionModel: deps.getTurnBriefUsage?.() ?? noOutcomeUsage(),
+								workers: workerOutcomeUsage(
+									[...collected.dispatches.flatMap((item) => item.runIds), ...collected.harness.runIds],
+									deps.outcomeDispatch,
+								),
+							},
+							stopReason:
+								typeof finalPayload?.stopReason === "string"
+									? finalPayload.stopReason
+									: typeof finalMessage?.stopReason === "string"
+										? finalMessage.stopReason
+										: canceled
+											? "aborted"
+											: "error",
+							durationMs: Math.max(0, performance.now() - submittedAt),
+						});
+						deps.session.appendEntry({
+							kind: "custom",
+							customType: "turnOutcome",
+							parentTurnId: state.lastTurnId,
+							display: false,
+							data: record,
+						});
+						outcomeCollector.seedClarificationStreak(record.conversation.clarificationStreak);
+						if (matchesTrace && traced)
+							persistence.traceEventForRun(traced.runId, { type: "turn_outcome", name: "turn_outcome", payload: record });
+					} catch {
+						// Measurement must not change turn settlement when a ledger or receipt is unavailable.
+					}
 				}
 				state.currentPendingSkillPolicy = priorPendingSkillPolicy;
 				state.currentAskUserPolicy = priorAskUserPolicy;

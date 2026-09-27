@@ -14,6 +14,7 @@
  */
 
 import type { PrecomputedRanking } from "../../core/precomputed-rank.js";
+import type { TokenSplit } from "../turn-control/index.js";
 import type { ResolveDeciderInput } from "./decision-sites.js";
 import {
 	createPreTurnBriefStore,
@@ -50,6 +51,7 @@ export interface TurnRelevanceStore {
 	get<T>(site: PreTurnSite<T>): T | undefined;
 	/** Every settled answer this turn. */
 	current(): PreTurnBrief;
+	usage(): TokenSplit;
 	/** The task text of the last refresh, for a mid-turn site that ranks against it. */
 	task(): string;
 	/** Every site this store asks, relevance sites first. */
@@ -82,6 +84,7 @@ export function createTurnRelevanceStore(options: TurnRelevanceStoreOptions): Tu
 		skills: () => ranking("skills"),
 		get: (site) => store.get(site),
 		current: () => store.current(),
+		usage: () => store.usage(),
 		clear: () => store.clear(),
 	};
 }
