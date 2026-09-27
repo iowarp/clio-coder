@@ -59,7 +59,7 @@ export function createDispatchTool(
 		// Keep the selection cue beside the schema; detailed coordination and
 		// evidence discipline live in the role prompt.
 		description:
-			"Delegate work to Clio helpers. For repository tours and broad code discovery, discover Scout with list:true and dispatch before doing the survey yourself. Independent areas use one tasks batch with mode=parallel. Configured profiles select worker models. task dispatches one assignment, tasks a batch, never both. context selects isolated (default), fork (native only), or splice inheritance. briefing adds parent evidence. Auto-waits for receipts; detach:true returns ids to collect with monitor. Declare intent on every dispatch.",
+			"Delegate work to Clio helpers. Configured profiles select worker models. task dispatches one assignment, tasks a batch, never both. context selects isolated (default), fork (native only), or splice inheritance. briefing adds parent evidence. Auto-waits for receipts; detach:true returns ids to collect with monitor. Declare intent on every dispatch.",
 		// Composed once per session: council, compete, and adaptive-routing fields
 		// are advertised only when the fleet can exercise them (see dispatch-schema.ts).
 		parameters: buildDispatchParameters(deps.getSchemaComposition?.() ?? FULL_DISPATCH_SCHEMA_COMPOSITION),
