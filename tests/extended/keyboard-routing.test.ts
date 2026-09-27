@@ -706,7 +706,7 @@ it("scrolls the expanded footer with a draft while overlays and search retain ke
 	const footer = buildFooterDashboard({
 		providers: { list: () => [] } as never,
 		getTerminalColumns: () => 40,
-		getTerminalRows: () => 18,
+		getTerminalRows: () => 12,
 		resolveCurrentBranch: async () => null,
 	});
 	cleanups.push(() => footer.dispose());
@@ -733,4 +733,22 @@ it("scrolls the expanded footer with a draft while overlays and search retain ke
 	f.terminal.input("\x12");
 	f.terminal.input("\x1b[6;3~");
 	assert.deepEqual(deltas, [4, -4]);
+	f.terminal.input("\x1b");
+	const reached = [...footer.view.render(40)];
+	let settled = false;
+	for (let press = 0; press < 100; press++) {
+		const previous = footer.view.render(40);
+		f.terminal.input("\x1b[6;3~");
+		const current = footer.view.render(40);
+		reached.push(...current);
+		if (JSON.stringify(current) === JSON.stringify(previous)) {
+			settled = true;
+			break;
+		}
+	}
+	assert.ok(settled, "scrolling reaches a bounded end");
+	const content = reached.map(stripTerminalSequences).join("\n");
+	for (const label of ["CPU", "RAM", "Workers", "Worker cap", "Sampling", "Scope", "GPU"])
+		assert.match(content, new RegExp(label), "the shortest viewport leaves no Status field unreachable");
+	assert.equal(f.editor.getText(), "keep this draft");
 });

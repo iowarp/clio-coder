@@ -212,6 +212,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	let page: DashboardPage = "Activity";
 	let scrollOffset = 0;
 	let maxScrollOffset = 0;
+	let scrollRows = 8;
 	let disposed = false;
 	const state = (width: number): FooterDashboardRenderState => {
 		const now = deps.now?.() ?? Date.now();
@@ -376,6 +377,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		if (!Array.isArray(grid)) {
 			scrollOffset = grid.offset;
 			maxScrollOffset = grid.maxOffset;
+			scrollRows = Math.max(1, grid.rows.length - 4);
 		}
 		const lines = [...(Array.isArray(grid) ? grid : grid.rows), ...supplementary];
 		deps.onHeightChange?.(Math.max(2, lines.length));
@@ -415,7 +417,8 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		setExpanded,
 		scroll(delta) {
 			if (dashboardMode !== "expanded") return false;
-			scrollOffset = Math.max(0, Math.min(maxScrollOffset, scrollOffset + delta));
+			const step = Math.sign(delta) * Math.min(Math.abs(delta), scrollRows);
+			scrollOffset = Math.max(0, Math.min(maxScrollOffset, scrollOffset + step));
 			refresh();
 			return true;
 		},
