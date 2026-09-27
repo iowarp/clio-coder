@@ -1,5 +1,5 @@
 import type { OutputStyle } from "../core/defaults.js";
-import { colorDisabled } from "../core/terminal-preferences.js";
+import { colorDisabled, nerdFontEnabled } from "../core/terminal-preferences.js";
 import {
 	Editor,
 	getKeybindings,
@@ -41,6 +41,8 @@ export interface EditorChrome {
 	getAutonomy?: () => string;
 	/** Monotonic animation clock, injectable for deterministic rendering tests. */
 	getAnimationTime?: () => number;
+	/** Demo-off keeps optional attention motion static. */
+	getMotionEnabled?: () => boolean;
 	/** Whether Enter currently targets the active Clio response. */
 	isStreaming?: () => boolean;
 	/**
@@ -126,7 +128,8 @@ function thinkingRailHint(
 	const level = thinking.label;
 	const levels = thinking.supportedLevels ?? [];
 	const count = Object.hasOwn(THINKING_BRAINS, level) ? THINKING_BRAINS[level] : undefined;
-	const glyphWidth = visibleWidth(GLYPH.brain);
+	const glyph = nerdFontEnabled() ? GLYPH.brain : "●";
+	const glyphWidth = visibleWidth(glyph);
 	const graphicalWidth = THINKING_BRAIN_SLOTS * glyphWidth + THINKING_BRAIN_SLOTS - 1;
 	if (
 		!thinking.hasLevels ||
@@ -140,7 +143,7 @@ function thinkingRailHint(
 		return theme.fg("thinkingLevel", `think ${level}`);
 	const activeRole = level === "max" || level === "ultra" ? "thinkingMaximum" : "thinkingActive";
 	return Array.from({ length: THINKING_BRAIN_SLOTS }, (_, index) =>
-		theme.fg(index < count ? activeRole : "thinkingInactive", GLYPH.brain),
+		theme.fg(index < count ? activeRole : "thinkingInactive", index < count || nerdFontEnabled() ? glyph : "○"),
 	).join(" ");
 }
 
@@ -272,7 +275,7 @@ export class ClioEditor extends Editor {
 		let lead = "";
 		let activity = "";
 		if (mode === "CONFIRM") {
-			lead = theme.fg("composerRail", attentionCue(this.railAnimationTime));
+			lead = theme.fg("composerRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true));
 			activity = theme.style("decisionCue", "needs approval", { bold: true });
 		} else if (mode === "PREPARING" || mode === "COMPACTING") {
 			lead = theme.fg("harnessAction", spinner);
@@ -394,7 +397,7 @@ export class ClioEditor extends Editor {
 		);
 		const title =
 			!entry.keepComposer && entry.frame.dockAwaitingInput?.()
-				? `${theme.fg("composerRail", attentionCue(this.railAnimationTime))} ${titleText}`
+				? `${theme.fg("composerRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true))} ${titleText}`
 				: titleText;
 		const labelRoom = this.railLabelRoom(width);
 		const top = entry.keepComposer

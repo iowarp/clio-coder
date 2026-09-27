@@ -2,6 +2,8 @@
 
 `ClioEditor` in [clio-editor.ts](../../src/interactive/clio-editor.ts) owns composer editing. The [commands and modes guide](../guide/commands-and-modes.md) lists operator controls.
 
+Measured startup and rendering costs, the demo-off path, and reproduction commands are recorded in [TUI boot presentation measurements](tui-boot-performance.md).
+
 This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior across [src/interactive/](../../src/interactive/interactive-shell.ts).
 
 The governing architectural principle: **the user reads state from color, structure from frames, and identity from brand marks.** Everything that is not state or structure remains visually quiet.

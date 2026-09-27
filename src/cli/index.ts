@@ -77,7 +77,7 @@ Usage:
   clio-coder interop inspect --json  detected external coding agents and how far each one is wired
   clio-coder panes install|theme  install the pane multiplexer (alias for 'tools install herdr'), or print Clio's theme as a herdr block
   clio-coder dev <command>        harness instruments and power-user surfaces; run 'clio-coder dev' for the list
-  clio-coder --demo|--no-demo      enable or disable interactive guidance for this session
+  clio-coder --demo|--no-demo      full welcome and guidance, or compact startup for this session
   clio-coder --help, -h           this message
   clio-coder --help --all         this message plus every command under 'clio-coder dev'
 `;

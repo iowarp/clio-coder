@@ -28,8 +28,9 @@ import { spawn } from "node-pty";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const MARKER = "Z";
-/** The hydrated footer's idle status. Stage 0 paints no footer. */
-const HYDRATED = /\bReady\b/u;
+/** Only the hydrated footer paints a parenthesized context percentage (known or unknown).
+ * Boot trace lines are deferred until exit and cannot drive the settle window. */
+const HYDRATED = /\([^\r\n()]*%\)/u;
 /** Wide enough that the whole marker run stays on one editor line. */
 const COLUMNS = 180;
 
@@ -47,6 +48,10 @@ const { values } = parseArgs({
 		cli: { type: "string", default: join(ROOT, "dist", "cli", "index.js") },
 		"user-plugins": { type: "string" },
 		"no-compile-cache": { type: "boolean", default: false },
+		profile: { type: "string", default: "all" },
+		mode: { type: "string", default: "fullscreen" },
+		json: { type: "string" },
+		"cpu-profile-dir": { type: "string" },
 	},
 });
 const RUNS = Number(values.runs);
@@ -56,8 +61,24 @@ const INTERVAL_MS = Number(values.interval);
 const SETTLE_MS = Number(values.settle);
 const CWD = resolve(values.cwd);
 const CLI = resolve(values.cli);
+const cpuProfileDir = values["cpu-profile-dir"] ? resolve(values["cpu-profile-dir"]) : undefined;
+if (cpuProfileDir) mkdirSync(cpuProfileDir, { recursive: true });
+
+type Profile = "full" | "normal" | "portable";
+const PROFILES: Profile[] = values.profile === "all" ? ["full", "normal", "portable"] : [values.profile as Profile];
+if (PROFILES.some((profile) => !["full", "normal", "portable"].includes(profile)))
+	throw new Error("profile must be full, normal, portable, or all");
+if (!["regular", "fullscreen"].includes(values.mode)) throw new Error("mode must be regular or fullscreen");
+for (const [label, value] of Object.entries({ runs: RUNS, keys: KEYS, interval: INTERVAL_MS, settle: SETTLE_MS })) {
+	if (!Number.isInteger(value) || value <= 0) throw new Error(`${label} must be a positive integer`);
+}
 
 interface Run {
+	profile: Profile;
+	firstPaintMs: number | undefined;
+	outputBytes: number;
+	hydratedBytes: number | undefined;
+	complete: boolean;
 	stage0Ms: number | undefined;
 	hydratedMs: number | undefined;
 	inputBlockedMaxMs: number | undefined;
@@ -74,35 +95,55 @@ function median(values: ReadonlyArray<number | undefined>): string {
 	return (present[Math.floor(present.length / 2)] as number).toFixed(0);
 }
 
-function prepareHome(endpoint: string): string {
+function prepareHome(endpoint: string, profile: Profile): string {
 	const home = mkdtempSync(join(tmpdir(), "clio-coder-bench-boot-"));
 	mkdirSync(join(home, "config"), { recursive: true });
 	if (values["user-plugins"])
 		cpSync(resolve(values["user-plugins"]), join(home, "config", "plugins"), { recursive: true });
 	writeFileSync(
 		join(home, "config", "settings.yaml"),
-		`version: 1
+		`version: 2
 targets:
   - id: bench-local
     runtime: lmstudio
     url: ${endpoint}
     defaultModel: bench-model
     lifecycle: user-managed
-orchestrator:
+chat:
   target: bench-local
   model: bench-model
-panes:
-  enabled: off
+interface:
+  demo: ${profile === "full"}
+  mode: ${values.mode}
+  panes:
+    enabled: off
 `,
 	);
-	execFileSync(process.execPath, [CLI, "upgrade"], { env: homeEnv(home), stdio: ["ignore", "ignore", "inherit"] });
+	execFileSync(process.execPath, [CLI, "upgrade"], {
+		env: homeEnv(home, profile),
+		stdio: ["ignore", "ignore", "inherit"],
+	});
 	return home;
 }
 
-function homeEnv(home: string): NodeJS.ProcessEnv {
-	return {
+function homeEnv(home: string, profile: Profile): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		TERM: "xterm-256color",
+		COLORTERM: "truecolor",
+		SSH_CONNECTION: "",
+		SSH_TTY: "",
+		TMUX: "",
+		STY: "",
+		CI: "",
+		CLIO_CODER_THEME: "dark",
+		NO_COLOR: profile === "portable" ? "1" : "",
+		FORCE_COLOR: profile === "portable" ? "0" : "1",
+		CLIO_CODER_SCREEN_READER: "0",
+		CLIO_CODER_REDUCE_MOTION: "0",
+		CLIO_CODER_NERD_FONT: "0",
+		CLIO_CODER_INSTANT_SHELL: "1",
+		CLIO_CODER_RENDER_TRACE: "",
 		CLIO_CODER_HOME: home,
 		CLIO_CODER_CONFIG_DIR: join(home, "config"),
 		CLIO_CODER_DATA_DIR: join(home, "data"),
@@ -111,23 +152,33 @@ function homeEnv(home: string): NodeJS.ProcessEnv {
 		CLIO_CODER_REQUIRE_HOME_PREFIX: "1",
 		...(values["no-compile-cache"] ? { NODE_DISABLE_COMPILE_CACHE: "1" } : {}),
 	};
+	if (!values["no-compile-cache"]) delete env.NODE_DISABLE_COMPILE_CACHE;
+	return env;
 }
 
-function runOnce(home: string): Promise<Run> {
+function runOnce(home: string, profile: Profile): Promise<Run> {
 	return new Promise((settle) => {
 		const started = performance.now();
-		const child = spawn(process.execPath, [CLI], {
-			cols: COLUMNS,
-			rows: 30,
-			cwd: CWD,
-			name: "xterm-256color",
-			env: { ...homeEnv(home), CLIO_CODER_INTERACTIVE: "1", CLIO_CODER_TRACE_BOOT: "1" },
-		});
+		const child = spawn(
+			process.execPath,
+			[...(cpuProfileDir ? ["--cpu-prof", `--cpu-prof-dir=${cpuProfileDir}`] : []), CLI],
+			{
+				cols: COLUMNS,
+				rows: 30,
+				cwd: CWD,
+				name: "xterm-256color",
+				env: { ...homeEnv(home, profile), CLIO_CODER_INTERACTIVE: "1", CLIO_CODER_TRACE_BOOT: "1" },
+			},
+		);
 		let output = "";
+		let outputBytes = 0;
+		let firstPaintMs: number | undefined;
+		let hydratedBytes: number | undefined;
 		const typedAt: number[] = [];
 		const echoedAt: number[] = [];
 		let typing: NodeJS.Timeout | undefined;
 		let typingDone = false;
+		let settledHydration = false;
 		let hydratedSeenAt: number | undefined;
 		let stopping = false;
 		const stopWhenEchoed = (): void => {
@@ -138,12 +189,18 @@ function runOnce(home: string): Promise<Run> {
 		child.onData((data) => {
 			const now = performance.now() - started;
 			output += data;
+			outputBytes += Buffer.byteLength(data);
 			const visible = stripVTControlCharacters(output.slice(-8000));
-			if (hydratedSeenAt === undefined && HYDRATED.test(visible)) hydratedSeenAt = now;
+			if (hydratedSeenAt === undefined && HYDRATED.test(visible)) {
+				hydratedSeenAt = now;
+				hydratedBytes = outputBytes;
+			}
 			if (!typing && /Ask Clio/u.test(output)) {
+				firstPaintMs = now;
 				typing = setInterval(() => {
 					const at = performance.now() - started;
-					if (typedAt.length >= KEYS || (hydratedSeenAt !== undefined && at - hydratedSeenAt >= SETTLE_MS)) {
+					settledHydration = hydratedSeenAt !== undefined && at - hydratedSeenAt >= SETTLE_MS;
+					if (typedAt.length >= KEYS || settledHydration) {
 						clearInterval(typing);
 						typingDone = true;
 						stopWhenEchoed();
@@ -171,6 +228,12 @@ function runOnce(home: string): Promise<Run> {
 			const latencies = echoedAt.map((at, index) => at - (typedAt[index] as number));
 			const blocked = trace("Stage 0 input blocked")?.detail?.match(/max=([\d.]+)ms/u)?.[1];
 			settle({
+				profile,
+				firstPaintMs,
+				outputBytes,
+				hydratedBytes,
+				complete:
+					hydratedSeenAt !== undefined && typedAt.length > 0 && echoedAt.length === typedAt.length && settledHydration,
 				stage0Ms: trace("Stage 0 shell commit")?.at,
 				hydratedMs: trace("Stage 1 hydration")?.at,
 				inputBlockedMaxMs: blocked === undefined ? undefined : Number(blocked),
@@ -194,30 +257,65 @@ const server = createServer((request, response) => {
 	}
 });
 await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
-const home = prepareHome(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+const homes = new Map<Profile, string>();
 try {
+	for (const profile of PROFILES)
+		homes.set(profile, prepareHome(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, profile));
 	console.log(
-		`node ${process.version} ${process.platform}-${process.arch} cwd=${CWD} runs=${RUNS}` +
+		`node ${process.version} ${process.platform}-${process.arch} cwd=${CWD} runs=${RUNS} mode=${values.mode}` +
 			` keys<=${KEYS}@${INTERVAL_MS}ms settle=${SETTLE_MS}ms compile-cache=${values["no-compile-cache"] ? "disabled" : "default"}`,
 	);
-	// The first boot fills the compile cache and migrates settings; it is not reported.
-	await runOnce(home);
+	const cold: Run[] = [];
+	for (const profile of PROFILES) cold.push(await runOnce(homes.get(profile) as string, profile));
 	const runs: Run[] = [];
+	// Interleave profiles, rotating which goes first to reduce cache/order bias.
 	for (let index = 0; index < RUNS; index++) {
-		const run = await runOnce(home);
-		runs.push(run);
+		for (let offset = 0; offset < PROFILES.length; offset++) {
+			const profile = PROFILES[(index + offset) % PROFILES.length] as Profile;
+			const run = await runOnce(homes.get(profile) as string, profile);
+			runs.push(run);
+			console.log(
+				`${profile} run ${index + 1}: stage0=${run.stage0Ms ?? "-"}ms hydrated=${run.hydratedMs ?? "-"}ms` +
+					` input-blocked-max=${run.inputBlockedMaxMs ?? "-"}ms first-echo=${run.firstEchoMs?.toFixed(0) ?? "-"}ms` +
+					` max-echo=${run.maxEchoMs?.toFixed(0) ?? "-"}ms bytes-to-hydration=${run.hydratedBytes ?? "-"} echoed=${run.echoed}/${run.typed} complete=${run.complete}`,
+			);
+		}
+	}
+	for (const profile of PROFILES) {
+		const group = runs.filter((run) => run.profile === profile);
 		console.log(
-			`run ${index + 1}: stage0=${run.stage0Ms ?? "-"}ms hydrated=${run.hydratedMs ?? "-"}ms` +
-				` input-blocked-max=${run.inputBlockedMaxMs ?? "-"}ms first-echo=${run.firstEchoMs?.toFixed(0) ?? "-"}ms` +
-				` max-echo=${run.maxEchoMs?.toFixed(0) ?? "-"}ms echoed=${run.echoed}/${run.typed}`,
+			`${profile} median: stage0=${median(group.map((run) => run.stage0Ms))}ms hydrated=${median(group.map((run) => run.hydratedMs))}ms` +
+				` input-blocked-max=${median(group.map((run) => run.inputBlockedMaxMs))}ms` +
+				` first-echo=${median(group.map((run) => run.firstEchoMs))}ms max-echo=${median(group.map((run) => run.maxEchoMs))}ms` +
+				` bytes-to-hydration=${median(group.map((run) => run.hydratedBytes))}`,
 		);
 	}
-	console.log(
-		`median: stage0=${median(runs.map((run) => run.stage0Ms))}ms hydrated=${median(runs.map((run) => run.hydratedMs))}ms` +
-			` input-blocked-max=${median(runs.map((run) => run.inputBlockedMaxMs))}ms` +
-			` first-echo=${median(runs.map((run) => run.firstEchoMs))}ms max-echo=${median(runs.map((run) => run.maxEchoMs))}ms`,
-	);
+	if (values.json)
+		writeFileSync(
+			resolve(values.json),
+			`${JSON.stringify(
+				{
+					node: process.version,
+					platform: process.platform,
+					arch: process.arch,
+					cwd: CWD,
+					cli: CLI,
+					mode: values.mode,
+					runsPerProfile: RUNS,
+					compileCache: !values["no-compile-cache"],
+					cpuProfileDir,
+					cold,
+					runs,
+				},
+				null,
+				2,
+			)}\n`,
+		);
+	if ([...cold, ...runs].some((run) => !run.complete || run.stage0Ms === undefined || run.hydratedMs === undefined)) {
+		console.error("Incomplete boot or input echo: do not treat these results as a valid comparison.");
+		process.exitCode = 1;
+	}
 } finally {
 	server.close();
-	rmSync(home, { recursive: true, force: true });
+	for (const home of homes.values()) rmSync(home, { recursive: true, force: true });
 }

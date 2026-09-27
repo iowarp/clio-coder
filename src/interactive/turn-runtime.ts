@@ -161,6 +161,8 @@ export interface TurnRuntimeDeps {
 	sessionId?: () => string | undefined;
 	emit: (event: AgentEvent | AssistantDeltaEvent) => void;
 	emitNotice: (text: string) => void;
+	/** Transport advisories belong in the footer, separate from conversation. */
+	emitFooterNotice: (level: "info" | "warning", text: string, key: string) => void;
 	/** Tool-call id to its `performance.now()` start mark; spans only, never an instant. */
 	toolStartTimes: Map<string, number>;
 }
@@ -224,9 +226,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	 * Resolution warnings the operator has already been shown, keyed by
 	 * target+model+message. A resolution runs on every turn, so without this the
 	 * same context-window warning would print on every submit; without any
-	 * surfacing at all, it printed nowhere. The chat is the only place an
-	 * interactive operator will see it: dispatch receipts carry the same facts,
-	 * but nobody reads a receipt for the run they are in the middle of.
+	 * surfacing at all, it printed nowhere. Known template-option limitations
+	 * use a brief footer advisory; actionable resolution warnings retain their
+	 * transcript notice. Detailed diagnostics remain on the resolution.
 	 */
 	const announcedResolutionWarnings = new Set<string>();
 
@@ -254,10 +256,21 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				failure?.code ?? "admission-failed",
 			);
 		}
+		for (const entry of resolved.diagnostics) {
+			if (entry.code !== "chat-template-kwargs-undeliverable") continue;
+			const key = `${targetId}|${wireModelId}|${entry.code}`;
+			if (announcedResolutionWarnings.has(key)) continue;
+			announcedResolutionWarnings.add(key);
+			deps.emitFooterNotice(
+				resolved.target.modelRuntime.request.undeliverableChatTemplateKwargs?.declaredUnsupported ? "info" : "warning",
+				`${resolved.target.runtime.id} ignores custom template options; continuing.`,
+				key,
+			);
+		}
 		// emitThinkingClampNotice prints the one combined thinking line when the
 		// dial takes effect; the thinking diagnostics are its two halves.
 		for (const message of runtimeResolutionWarningsBesideThinkingNotice(
-			resolved.diagnostics,
+			resolved.diagnostics.filter((entry) => entry.code !== "chat-template-kwargs-undeliverable"),
 			resolved.target.modelRuntime.thinking.notice,
 		)) {
 			const key = `${targetId}|${wireModelId}|${message}`;

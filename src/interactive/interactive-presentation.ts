@@ -405,6 +405,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 
 	let localBashStartedAt: number | null = null;
 	const footerDeps: FooterDashboardDeps = {
+		getWelcomeVisible: () => banner.isLaunchpadVisible?.() === true,
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.getConnections ? { getConnections: deps.getConnections } : {}),
@@ -519,6 +520,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			};
 		},
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
+		getMotionEnabled: () => deps.getSettings?.().interface.demo !== false,
 		isStreaming: () => deps.chat.isStreaming(),
 		getAutonomy: () => deps.getSettings?.().safety.autonomy ?? "default",
 		...(deps.isAwaitingApproval ? { isAwaitingApproval: deps.isAwaitingApproval } : {}),
@@ -627,7 +629,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			? {
 					streamIngress: deps.resolveStreamIngress,
 					getSmoothStreamingMode: () => {
-						const mode = deps.getSettings?.().interface.smoothStreaming ?? "off";
+						const current = deps.getSettings?.();
+						const mode = current?.interface.demo === false ? "off" : (current?.interface.smoothStreaming ?? "off");
 						const autoAllowed = processAutoPacingAllowed(deps.hasObservedBackpressure?.() ?? false);
 						deps.onSmoothStreamingMode?.(mode, mode === "on" || (mode === "auto" && autoAllowed));
 						return mode;
@@ -689,7 +692,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	// Only a visible unanswered decision temporarily asks for a slow attention cue.
 	const needsAttention = (): boolean =>
 		deps.isAwaitingApproval?.() === true || dockTop(deps.tui)?.frame.dockAwaitingInput?.() === true;
-	const presentationInterval = (): number => (motionEnabled() && needsAttention() ? ATTENTION_STEP_MS : 1_000);
+	const presentationInterval = (): number =>
+		deps.getSettings?.().interface.demo !== false && motionEnabled() && needsAttention() ? ATTENTION_STEP_MS : 1_000;
 	let tickerInterval = presentationInterval();
 	let lastActivitySecond = -1;
 	let tickersStopped = false;

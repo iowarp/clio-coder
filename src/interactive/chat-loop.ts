@@ -1253,6 +1253,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		sessionId: () => deps.session?.current()?.id,
 		emit: emitRuntimeEvent,
 		emitNotice,
+		emitFooterNotice,
 		toolStartTimes,
 	});
 	// A fresh ledger and footer render before the first submit. Start the same

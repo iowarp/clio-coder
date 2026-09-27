@@ -597,3 +597,29 @@ test("the compact footer shows the most severe live notice with its level glyph 
 		for (const row of rows) ok(visibleWidth(row) <= width, `${width}: ${stripTerminalSequences(row)}`);
 	}
 });
+
+test("visible welcome owns idle teaching while the footer preserves operational notices", () => {
+	const input = state();
+	input.welcomeVisible = true;
+	input.demoHint = "Explore /help";
+	const idle = renderCompactDashboard(input, 100).map(stripTerminalSequences)[1] ?? "";
+	doesNotMatch(idle, /Dashboard|newline|send|Model|Thinking|Library|Explore/iu);
+	input.notices = [
+		{
+			id: "welcome-priority",
+			text: "Permission needed",
+			level: "warning",
+			key: null,
+			addedAt: input.now,
+			expiresAt: null,
+		},
+	];
+	match(plain(renderCompactDashboard(input, 100)), /Permission needed/u);
+	input.notices = [];
+	input.welcomeVisible = false;
+	input.demoHint = null;
+	match(
+		renderCompactDashboard(input, 100).map(stripTerminalSequences)[1] ?? "",
+		/newline|send|Library|Model|Thinking|queue|Dashboard/iu,
+	);
+});

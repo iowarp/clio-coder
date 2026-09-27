@@ -310,7 +310,7 @@ export type FullscreenScrollbar = "hidden" | "auto" | "always";
 export type SmoothStreaming = "off" | "auto" | "on";
 
 export interface InterfaceSettings {
-	/** Interactive project-work guidance and contextual footer tips. */
+	/** Full welcome presentation, interactive guidance, and contextual footer tips. */
 	demo: boolean;
 	terminalProgress: boolean;
 	/** Output style: Compact, Standard, or Detailed bounded previews. */

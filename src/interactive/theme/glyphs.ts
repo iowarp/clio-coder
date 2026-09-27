@@ -53,7 +53,7 @@ export const GLYPH = {
 	phaseWaiting: "◔",
 	phaseThinking: "◐",
 	// Nerd Font nf-fa-brain: a full, symmetric two-hemisphere monochrome glyph.
-	// The composer keeps its textual effort fallback for accessible/narrow layouts.
+	// Opt-in only; the composer uses ordinary dots unless font support is declared.
 	brain: "\uEE9C",
 	phaseWriting: "◑",
 	phaseTool: "⚙",
@@ -108,6 +108,7 @@ export function spinnerFrame(tick: number, attention = false): string {
 	return SPINNER_FRAMES[index] ?? SPINNER_FRAMES[0];
 }
 
-export function attentionCue(nowMs: number): string {
+export function attentionCue(nowMs: number, animate = true): string {
+	if (!animate) return GLYPH.running;
 	return spinnerFrame(Math.floor(nowMs / ATTENTION_STEP_MS), true);
 }

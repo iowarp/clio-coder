@@ -17,9 +17,27 @@ import {
 	innerDivider,
 	padAnsi,
 } from "./theme/index.js";
-import { WELCOME_WORDMARK, WELCOME_WORDMARK_SPLIT, WELCOME_WORDMARK_WIDE } from "./welcome-art.js";
+import { paintWelcomeWordmark, WELCOME_WORDMARK, WELCOME_WORDMARK_WIDE } from "./welcome-art.js";
 
-const WELCOME_TAGLINE = "Systems engineering beats vibes! Built by researchers who love to code.";
+/** Reduced terminals and screen readers get the same compact identity as demo-off. */
+function richWelcomeEnabled(demo: boolean | undefined): boolean {
+	return (
+		demo !== false &&
+		process.env.TERM !== "dumb" &&
+		process.env.TERM !== "unknown" &&
+		process.env.CLIO_CODER_SCREEN_READER !== "1"
+	);
+}
+
+// One process-start timestamp shared by Stage 0 and hydration; no live clock timer.
+const SESSION_STARTED_AT = new Intl.DateTimeFormat("en-US", {
+	weekday: "short",
+	month: "short",
+	day: "numeric",
+	hour: "numeric",
+	minute: "2-digit",
+	timeZoneName: "short",
+}).format(new Date(performance.timeOrigin));
 
 /**
  * What the route can honestly be said to be.
@@ -100,6 +118,8 @@ export type WelcomeDashboardMode = "launchpad" | "session";
 
 export interface WelcomeDashboardComponent extends Component {
 	collapseToSessionHeader(): boolean;
+	/** The welcome owns idle teaching while its full panel is visible. */
+	isLaunchpadVisible?(): boolean;
 	resetToLaunchpad(): boolean;
 	/** Stop off-render refreshes from requesting frames after teardown. */
 	dispose(): void;
@@ -120,10 +140,6 @@ export const WELCOME_PROJECT_CONTEXT_RETRY_MS = 2_000;
 
 /** Columns the route's failure reason is allowed before it is cut. */
 const ROUTE_REASON_MAX = 48;
-/** The route text is shrunk to this before a failure reason is cut instead. */
-const ROUTE_TARGET_FLOOR = 12;
-/** Below this a reason is dropped; the action row still names the fault. */
-const ROUTE_REASON_FLOOR = 8;
 
 /**
  * Neutralize a string that came from outside this process before it is styled.
@@ -267,84 +283,6 @@ function workspaceBranch(stats: WelcomeDashboardStats): string | null {
 }
 
 /**
- * The workspace as `path · branch`, giving up the branch before the path's leaf.
- * A branch name can be far longer than the directory it belongs to, and a header
- * showing `feature/some-very-long-branch` while hiding which checkout it belongs
- * to has kept the less useful half.
- */
-function workspaceLabel(theme: ClioTheme, stats: WelcomeDashboardStats, room: number): string {
-	if (room <= 0) return "";
-	const path = workspacePath(stats);
-	const branch = workspaceBranch(stats);
-	const paint = (text: string): string => theme.fg("workspacePath", text);
-	if (branch === null) return paint(fitPathTail(path, room));
-
-	const dirty = stats.workspace?.dirty === true;
-	const branchText = `${theme.fg("branch", branch)}${dirty ? theme.fg("warning", "*") : ""}`;
-	const pathRoom = room - visibleWidth(branch) - (dirty ? 1 : 0) - 3;
-	// Keep the branch only while the path's leaf survives whole beside it.
-	if (pathRoom > 0) {
-		const fitted = fitPathTail(path, pathRoom);
-		const leaf =
-			path
-				.split("/")
-				.filter((segment) => segment.length > 0)
-				.at(-1) ?? path;
-		if (fitted.endsWith(leaf)) return `${paint(fitted)}${theme.fg("annotation", " · ")}${branchText}`;
-	}
-	return paint(fitPathTail(path, room));
-}
-
-function routeToken(route: WelcomeRouteState): ClioToken {
-	if (route === "ready") return "success";
-	if (route === "degraded") return "warning";
-	if (route === "unavailable") return "error";
-	return "annotation";
-}
-
-function routeGlyph(route: WelcomeRouteState): string {
-	if (route === "ready") return GLYPH.ok;
-	if (route === "degraded") return GLYPH.warnInline;
-	if (route === "unavailable") return GLYPH.error;
-	return GLYPH.queued;
-}
-
-/**
- * The route Clio will use, and — only when there is one — why it cannot answer.
- *
- * A failure reason is given room by shrinking the route text down to a floor
- * before the reason is cut at all, because a failure is least useful exactly
- * where the old header made it least visible. Below the floor the reason is
- * truncated rather than dropped, and only when neither fits does the row fall
- * back to the route alone; the action row still names the fault there.
- */
-function routeRow(theme: ClioTheme, stats: WelcomeDashboardStats, room: number): string {
-	const target = plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel, { abbreviate: false }));
-	if (stats.route === "unset") return theme.fg("warning", truncateToWidth(target, room, GLYPH.ellipsis, false));
-	const token = routeToken(stats.route);
-	// A glyph rather than a word, so the verdicts stay distinct with no color.
-	const prefix = `${theme.fg(token, routeGlyph(stats.route))} `;
-	const available = room - 2;
-	if (available <= 0) return theme.fg(token, routeGlyph(stats.route));
-	const identity = (text: string): string => theme.fg("modelIdentity", text);
-	const reason = stats.routeReason;
-	if (reason === null) return `${prefix}${identity(truncateToWidth(target, available, GLYPH.ellipsis, false))}`;
-
-	const reasonWidth = visibleWidth(reason);
-	if (visibleWidth(target) + 1 + reasonWidth <= available)
-		return `${prefix}${identity(target)} ${theme.fg(token, reason)}`;
-	const targetRoom = available - reasonWidth - 1;
-	if (targetRoom >= ROUTE_TARGET_FLOOR)
-		return `${prefix}${identity(truncateToWidth(target, targetRoom, GLYPH.ellipsis, false))} ${theme.fg(token, reason)}`;
-	const floor = Math.min(ROUTE_TARGET_FLOOR, available);
-	const reasonRoom = available - floor - 1;
-	if (reasonRoom >= ROUTE_REASON_FLOOR) {
-		return `${prefix}${identity(truncateToWidth(target, floor, GLYPH.ellipsis, false))} ${theme.fg(token, truncateToWidth(reason, reasonRoom, GLYPH.ellipsis, false))}`;
-	}
-	return `${prefix}${identity(truncateToWidth(target, available, GLYPH.ellipsis, false))}`;
-}
-
-/**
  * The one next step, chosen by what actually blocks work.
  *
  * Route faults outrank project-context state: a task cannot be answered by a
@@ -365,11 +303,12 @@ function actionRow(theme: ClioTheme, stats: WelcomeDashboardStats, room: number)
 	if (stats.route === "unavailable") return say("error", "route unavailable · /settings targets");
 	if (stats.route === "degraded") return say("warning", "route degraded · /settings targets");
 	if (stats.projectContext === "malformed") return say("warning", "CLIO-CODER.md malformed · /context to inspect");
-	if (stats.projectContext === "none") return say("guidance", "describe a task · /context init to index this repo");
-	if (stats.projectContext === "stale") return say("guidance", "describe a task · /context refresh to update it");
-	// A printed key must be a key that works, so an unbound submit says nothing.
-	const send = stats.submitKeyLabel === null ? null : `${stats.submitKeyLabel} to send`;
-	return say("guidance", ["describe a task", send, "/ for commands"].filter((part) => part !== null).join(" · "));
+	if (stats.projectContext === "none") return say("guidance", "/context init to index this repo");
+	if (stats.projectContext === "stale") return say("guidance", "Stale project awareness: /context refresh to fix.");
+	return say(
+		"guidance",
+		stats.projectContext === "checking" ? "Checking project awareness…" : "/context to inspect project awareness",
+	);
 }
 
 /**
@@ -414,42 +353,10 @@ function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: str
 	return `${mark} ${fitByPriority(theme, units, room)}`;
 }
 
-function shortNames(names: string[]): string {
-	return names.slice(0, 3).map(plainOneLine).join(", ") + (names.length > 3 ? ` +${names.length - 3}` : "");
-}
-
-/** Inventory is configuration plus existing observations; rendering never probes. */
-function inventory(
-	settings: Readonly<ClioSettings> | undefined,
-	statuses?: ReadonlyArray<TargetStatus>,
-	agentCount?: number,
-): { targets: string; fleet: string } {
-	const configured = settings?.targets ?? statuses?.map((status) => status.target) ?? [];
-	const ready = statuses?.filter((status) => status.available && status.health.status === "healthy").length ?? 0;
-	const down = statuses?.filter((status) => !status.available || status.health.status === "down").length ?? 0;
-	const degraded = statuses?.filter((status) => status.available && status.health.status === "degraded").length ?? 0;
-	const targets =
-		configured.length === 0
-			? "None configured · /settings targets"
-			: [
-					`${configured.length} configured`,
-					...(ready ? [`${ready} ready`] : []),
-					...(degraded ? [`${degraded} degraded`] : []),
-					...(down ? [`${down} unavailable`] : []),
-					shortNames(configured.map((target) => target.id)),
-				].join(" · ");
-	const profiles = Object.keys(settings?.fleet?.profiles ?? {});
-	const rosters = Object.keys(settings?.fleet?.rosters ?? {});
-	const fleet =
-		[
-			...(agentCount === undefined ? [] : [`${agentCount} agent recipes`]),
-			...(rosters.length ? [`Rosters: ${shortNames(rosters)}`] : profiles.length ? [`${profiles.length} profiles`] : []),
-		].join(" · ") || "Uses main model · /agents to explore";
-	return { targets, fleet };
-}
-
 const WELCOME_HINT_INTERVAL_MS = 15_000;
 const WELCOME_HINT_MIN_WIDTH = 160;
+/** Reserved before provider reads so quota hydration cannot move the frame. */
+const WELCOME_SUBSCRIPTION_ROWS = 2;
 
 const WELCOME_HINTS: ReadonlyArray<{
 	title: string;
@@ -500,16 +407,24 @@ const WELCOME_HINTS: ReadonlyArray<{
 function welcomeHints(theme: ClioTheme, page: number, getKeyLabel?: WelcomeDashboardDeps["getKeyLabel"]): string[] {
 	const hint = WELCOME_HINTS[page % WELCOME_HINTS.length];
 	if (!hint) return [];
-	const keys = hint.keys.flatMap(([action, description]) => {
+	const commandWidth = Math.max(
+		...WELCOME_HINTS.flatMap((entry) => entry.commands.map(([command]) => visibleWidth(command))),
+	);
+	const bindings = hint.keys.flatMap(([action, description]) => {
 		const label = getKeyLabel?.(action);
-		return label ? [`${theme.fg("guidance", label)}  ${theme.fg("body", description)}`] : [];
+		return label ? [{ label, description }] : [];
 	});
+	const keyWidth = Math.max(0, ...bindings.map(({ label }) => visibleWidth(label)));
+	const keys = bindings.map(
+		({ label, description }) => `${theme.fg("guidance", padAnsi(label, keyWidth))}  ${theme.fg("body", description)}`,
+	);
 	return [
 		theme.style("sectionHeading", hint.title, { bold: true }) +
 			theme.fg("annotation", `  ${(page % WELCOME_HINTS.length) + 1}/${WELCOME_HINTS.length}`),
 		"",
 		...hint.commands.map(
-			([command, description]) => `${theme.fg("guidance", command)}  ${theme.fg("body", description)}`,
+			([command, description]) =>
+				`${theme.fg("guidance", padAnsi(command, commandWidth))}  ${theme.fg("body", description)}`,
 		),
 		"",
 		...(keys.length ? [theme.fg("sectionHeading", "Keyboard shortcuts"), ...keys] : []),
@@ -531,53 +446,103 @@ export function buildWelcomeDashboardLines(
 	const panelWidth = safeWidth;
 	const room = Math.max(1, panelWidth - 4);
 	const fit = (text: string): string => truncateToWidth(text, room, GLYPH.ellipsis, false);
-	const wordmark = panelWidth >= 100 ? WELCOME_WORDMARK_WIDE : WELCOME_WORDMARK;
+	const wordmark = paintWelcomeWordmark(panelWidth >= 100 ? WELCOME_WORDMARK_WIDE : WELCOME_WORDMARK, theme);
 	const sideBySide = panelWidth >= 76;
 	const artWidth = sideBySide ? visibleWidth(wordmark[0] ?? "") : 0;
 	const showHints = panelWidth >= WELCOME_HINT_MIN_WIDTH;
-	const contentWidth = showHints
-		? Math.max(artWidth + 3 + visibleWidth(WELCOME_TAGLINE), Math.min(132, Math.floor((room - 3) * 0.58)))
-		: room;
+	const contentWidth = showHints ? Math.max(artWidth + 3 + 42, Math.min(132, Math.floor((room - 3) * 0.66))) : room;
 	const hintWidth = room - contentWidth - 3;
 	const hints = showHints ? welcomeHints(theme, hintPage, getKeyLabel) : [];
 	const detailWidth = sideBySide ? contentWidth - artWidth - 3 : contentWidth;
-	const field = (label: string, value: string) => `${theme.fg("fieldName", `${label}  `)}${value}`;
-	const tagline = theme.fg("body", WELCOME_TAGLINE);
-	const taglineLines = sideBySide ? wrapTextWithAnsi(tagline, Math.max(1, detailWidth)) : [tagline];
-	const details = [
-		sideBySide ? (taglineLines[0] ?? "") : theme.style("wordmark", "CLIO CODER", { bold: true }),
-		sideBySide ? (taglineLines[1] ?? "") : tagline,
-		theme.fg("sectionHeading", "Model"),
-		routeRow(theme, stats, detailWidth),
-		field("Workspace", workspaceLabel(theme, stats, Math.max(1, detailWidth - 11))),
-		field("Permissions", theme.fg(stats.autonomy === "yolo" ? "yoloLabel" : "fieldValue", stats.autonomy)),
-		"",
-		theme.fg("sectionHeading", "Targets"),
-		theme.fg("body", stats.targets),
-		// Keep the subscription field beside the wordmark, between Targets and
-		// Fleet. Wrap at the actual detail-column width instead of clipping the
-		// last accounts (especially Local) off a single concatenated line.
-		...(stats.quota === null
+	// Give the wide three-column panel one value axis, including wrapped quotas.
+	// Narrow layouts keep short labels so padding does not consume the route.
+	const fieldWidth = showHints ? "Awareness".length : 0;
+	const fieldPrefix = (label: string) => `${label.padEnd(fieldWidth)}  `;
+	const field = (label: string, value: string) => `${theme.fg("fieldName", fieldPrefix(label))}${value}`;
+	const wrappedField = (label: string, value: string): string[] => {
+		if (!showHints) return wrapTextWithAnsi(field(label, value), Math.max(1, detailWidth));
+		const prefixWidth = fieldPrefix(label).length;
+		return wrapTextWithAnsi(value, Math.max(1, detailWidth - prefixWidth)).map((line, index) =>
+			index === 0 ? field(label, line) : `${" ".repeat(prefixWidth)}${line}`,
+		);
+	};
+	const subscriptions =
+		stats.quota === null
 			? []
-			: wrapTextWithAnsi(
-					field("Subscriptions", theme.fg("body", sanitizeCallTargetText(stats.quota))),
-					Math.max(1, detailWidth),
-				)),
-		theme.fg("sectionHeading", "Fleet"),
-		theme.fg("body", stats.fleet),
+			: wrappedField(
+					"Accounts",
+					theme.fg(
+						"body",
+						sanitizeCallTargetText(stats.quota)
+							.replace(/% used/g, "%")
+							.replace(/\/wk /g, " · wk "),
+					),
+				);
+	if (subscriptions.length > WELCOME_SUBSCRIPTION_ROWS) {
+		const link = theme.fg("guidance", `${GLYPH.ellipsis} /usage`);
+		const linkWidth = visibleWidth(link);
+		const lastRow = WELCOME_SUBSCRIPTION_ROWS - 1;
+		subscriptions[lastRow] =
+			detailWidth > linkWidth
+				? `${truncateToWidth(subscriptions[lastRow] ?? "", detailWidth - linkWidth - 1, "", false)} ${link}`
+				: truncateToWidth(link, Math.max(1, detailWidth), "", false);
+	}
+	const subscriptionRows = Array.from({ length: WELCOME_SUBSCRIPTION_ROWS }, (_, index) => subscriptions[index] ?? "");
+	const awareness = {
+		checking: "Checking…",
+		ok: "Current",
+		stale: "Stale",
+		none: "Not indexed",
+		malformed: "Needs repair",
+	}[stats.projectContext];
+	const workspace = stats.workspace;
+	const git =
+		workspace === null
+			? "Checking…"
+			: !workspace.isGit
+				? "No Git repository"
+				: [
+						workspaceBranch(stats) || "Detached HEAD",
+						workspace.dirty === null ? "changes unknown" : workspace.dirty ? "uncommitted changes" : "clean",
+						...(workspace.ahead ? [`${workspace.ahead} ahead`] : []),
+						...(workspace.behind ? [`${workspace.behind} behind`] : []),
+					].join(" · ");
+	const details = [
+		"",
+		theme.style("sectionHeading", "Session started", { bold: true }),
+		theme.fg("body", SESSION_STARTED_AT),
+		"",
+		theme.style("sectionHeading", "Project", { bold: true }),
+		field(
+			"Workspace",
+			theme.fg(
+				"workspacePath",
+				fitPathTail(workspacePath(stats), Math.max(1, detailWidth - fieldPrefix("Workspace").length)),
+			),
+		),
+		field("Git", theme.fg("body", git)),
+		field(
+			"Awareness",
+			theme.fg(stats.projectContext === "stale" || stats.projectContext === "malformed" ? "warning" : "body", awareness),
+		),
+		"",
+		theme.style("sectionHeading", "AI usage · used", { bold: true }),
+		...subscriptionRows.map((row, index) => row || (index === 0 ? theme.fg("annotation", "No account reading yet") : "")),
+		showHints
+			? theme.fg("annotation", "/usage for limits and reset times")
+			: theme.fg("guidance", "/help  Commands and shortcuts · /usage  Limits"),
 	];
+	const artOffset = Math.floor((details.length - wordmark.length) / 2);
 
 	const rows = Array.from(
 		{ length: Math.max(details.length, hints.length, sideBySide ? wordmark.length : 0) },
 		(_, index) => {
 			const detail = details[index] ?? "";
-			// Cyan identity over the warm neutral product descriptor.
-			const artToken = index < WELCOME_WORDMARK_SPLIT ? "wordmark" : "brandDescriptor";
-			const art = sideBySide ? `${padAnsi(theme.fg(artToken, wordmark[index] ?? ""), artWidth)}   ` : "";
+			const art = sideBySide ? `${padAnsi(wordmark[index - artOffset] ?? "", artWidth)}   ` : "";
 			const content = `${art}${truncateToWidth(detail, detailWidth, GLYPH.ellipsis, false)}`;
 			return fit(
 				showHints
-					? `${padAnsi(content, contentWidth)} ${theme.fg("border", GLYPH.rail)} ${truncateToWidth(hints[index] ?? "", hintWidth, GLYPH.ellipsis, false)}`
+					? `${padAnsi(content, contentWidth)} ${theme.fg("border", GLYPH.rail)} ${truncateToWidth(hints[index - 1] ?? "", hintWidth, GLYPH.ellipsis, false)}`
 					: content,
 			);
 		},
@@ -609,16 +574,13 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 	const workspace = stats.workspace;
 	return [
 		stats.cwd,
-		workspace && `${workspace.isGit}\x01${workspace.branch}\x01${workspace.dirty}`,
+		workspace &&
+			`${workspace.isGit}\x01${workspace.branch}\x01${workspace.dirty}\x01${workspace.ahead}\x01${workspace.behind}`,
 		stats.targetLabel,
 		stats.modelLabel,
 		stats.route,
 		stats.routeReason,
 		stats.projectContext,
-		stats.submitKeyLabel,
-		stats.autonomy,
-		stats.targets,
-		stats.fleet,
 		stats.quota,
 	].join("\0");
 }
@@ -668,22 +630,27 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 	}
 
 	render(width: number): string[] {
-		const stats = this.stats();
+		const mode = richWelcomeEnabled(this.deps.getSettings?.().interface?.demo) ? this.mode : "session";
+		const stats = this.stats(mode);
 		// Existing presentation refreshes advance the hints; no extra timer or startup work.
 		const hintPage =
-			this.mode === "launchpad" && width >= WELCOME_HINT_MIN_WIDTH
+			mode === "launchpad" && width >= WELCOME_HINT_MIN_WIDTH
 				? Math.floor(Math.max(0, this.now() - this.hintStartedAt) / WELCOME_HINT_INTERVAL_MS) % WELCOME_HINTS.length
 				: 0;
 		const shortcutSignature =
-			this.mode === "launchpad" && width >= WELCOME_HINT_MIN_WIDTH
+			mode === "launchpad" && width >= WELCOME_HINT_MIN_WIDTH
 				? WELCOME_HINTS[hintPage]?.keys.map(([action]) => this.deps.getKeyLabel?.(action)).join("|")
 				: "";
-		const signature = `${this.mode}\0${statsSignature(stats)}\0${hintPage}\0${shortcutSignature}`;
+		const signature = `${mode}\0${statsSignature(stats)}\0${hintPage}\0${shortcutSignature}`;
 		const cached = this.cachedRender;
 		if (cached !== null && cached.width === width && cached.signature === signature) return cached.lines;
-		const lines = buildWelcomeDashboardLines(stats, this.version, width, this.mode, hintPage, this.deps.getKeyLabel);
+		const lines = buildWelcomeDashboardLines(stats, this.version, width, mode, hintPage, this.deps.getKeyLabel);
 		this.cachedRender = { width, signature, lines };
 		return lines;
+	}
+
+	isLaunchpadVisible(): boolean {
+		return this.mode === "launchpad" && richWelcomeEnabled(this.deps.getSettings?.().interface?.demo);
 	}
 
 	/** Collapse once, before first-submit dispatch can append transcript output. */
@@ -726,7 +693,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 		}
 	}
 
-	private stats(): WelcomeDashboardStats {
+	private stats(mode: WelcomeDashboardMode): WelcomeDashboardStats {
 		const settings = this.deps.getSettings?.();
 		const statuses = this.deps.providers.list();
 		const current = findCurrentStatus(statuses, settings);
@@ -739,7 +706,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 		// no background context read, and no cache invalidation when either
 		// changes while the header cannot show it. `/new` returns to the launchpad
 		// and the check resumes on the next frame.
-		const launchpad = this.mode === "launchpad";
+		const launchpad = mode === "launchpad";
 		return {
 			cwd,
 			workspace,
@@ -748,10 +715,11 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			route,
 			routeReason,
 			projectContext: launchpad ? this.projectContext(cwd) : "checking",
-			submitKeyLabel: launchpad ? (this.deps.getSubmitKeyLabel?.() ?? null) : null,
+			submitKeyLabel: null,
 			autonomy: settings?.safety?.autonomy ?? "default",
 			quota: launchpad ? (this.deps.getQuotaSummary?.() ?? null) : null,
-			...inventory(settings, statuses, this.deps.getAgentCount?.()),
+			targets: "",
+			fleet: "",
 		};
 	}
 
@@ -839,6 +807,7 @@ export function createBootWelcome(
 	const target = settings.targets.find((entry) => entry.id === settings.chat.target);
 	const model = settings.chat.model ?? target?.defaultModel ?? null;
 	const version = readClioVersion();
+	const mode = richWelcomeEnabled(settings.interface.demo) ? "launchpad" : "session";
 	const stats: WelcomeDashboardStats = {
 		cwd: process.cwd(),
 		workspace: null,
@@ -848,13 +817,22 @@ export function createBootWelcome(
 		routeReason: null,
 		projectContext: "checking",
 		submitKeyLabel,
-		// Boot paints before any provider has been read, so the row stays hidden.
+		// Boot reserves the quota slots without making a provider read.
 		quota: null,
 		autonomy: settings.safety.autonomy,
-		...inventory(settings),
+		targets: "",
+		fleet: "",
 	};
+	let cached: { width: number; lines: string[] } | null = null;
 	return {
-		render: (width) => buildWelcomeDashboardLines(stats, version, width, "launchpad", 0, getKeyLabel),
-		invalidate: () => {},
+		render: (width) => {
+			if (cached?.width === width) return cached.lines;
+			const lines = buildWelcomeDashboardLines(stats, version, width, mode, 0, getKeyLabel);
+			cached = { width, lines };
+			return lines;
+		},
+		invalidate: () => {
+			cached = null;
+		},
 	};
 }

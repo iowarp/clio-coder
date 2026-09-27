@@ -2,13 +2,15 @@
 
 This guide covers the installed CLI, headless run behavior, interactive commands, keyboard controls, and operator workflows. The command registry and parser are authoritative: [CLI](../../src/cli/index.ts), [run arguments](../../src/cli/args.ts), [slash-command registry](../../src/interactive/slash-commands.ts), and [keybinding manager](../../src/interactive/keybinding-manager.ts). Exit codes and stdout guarantees are in [Exit codes and output](exit-codes-and-output.md).
 
-## Demo guidance
+## Demo presentation and guidance
 
-Demo guidance is on by default before 1.0. After a turn, Clio may show one `[tip]` row that fits what the turn did: a question about Clio's own settings, a side question that `/btw` would keep out of the transcript, a correction that `/tree` could rewind, a long answer that another output style would fold. The harness picks the tip. The model never sees it, and no model call is made. At most four tips appear per session, spaced several turns apart, and a tip retires once you use its feature yourself or it has been shown twice.
+Demo presentation and guidance are on by default before 1.0. The full welcome shows the stacked cyan-to-copper wordmark, workspace and fleet facts, and shortcut hints. It reserves two subscription rows from the first paint, keeping its 17-row height and Fleet placement steady while account data hydrates. Longer summaries show an ellipsis and `/usage` for the complete account details. With `--no-demo` or `interface.demo: false`, both the instant shell and hydrated TUI open with a compact identity header: the same editor and chosen regular/fullscreen layout, without artwork or welcome-only context, subscription, and recipe reads. Optional attention animation and smooth-streaming pacing are disabled; work status and approval text remain visible. Dumb/unknown terminals and screen-reader mode also use the compact welcome.
+
+After a turn, Clio may show one `[tip]` row that fits what the turn did: a question about Clio's own settings, a side question that `/btw` would keep out of the transcript, a correction that `/tree` could rewind, a long answer that another output style would fold. The harness picks the tip. The model never sees it, and no model call is made. At most four tips appear per session, spaced several turns apart, and a tip retires once you use its feature yourself or it has been shown twice.
 
 Guidance keeps a small profile in the state directory (`harness-profile.json`): the tips shown, the Clio features you used, and the topics you asked Clio about. It stays on this machine and never enters a prompt.
 
-Turn it off under Settings → Appearance → Demo guidance (`interface.demo`), or for one invocation with `--no-demo`. Off means no tips, no idle footer tips or rotating key hints, no demo prompt line, and no profile reads or writes. Guidance adds hints only; it does not grant tool authority. Headless runs, ACP sessions and workers do not receive it.
+Turn it off under Settings → Appearance → Demo presentation and guidance (`interface.demo`), or for one invocation with `--no-demo`. Off means no tips, no idle footer tips or rotating key hints, no demo prompt line, and no profile reads or writes. Guidance adds hints only; it does not grant tool authority. Headless runs, ACP sessions and workers do not receive it.
 
 ## CLI Commands
 

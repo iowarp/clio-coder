@@ -50,6 +50,8 @@ export type { ToolTallySnapshot } from "./widgets.js";
 export type FooterDashboardMode = "compact" | "expanded";
 
 export interface FooterDashboardDeps {
+	/** Suppress idle teaching when the welcome already owns it. */
+	getWelcomeVisible?: () => boolean;
 	getQuotaSnapshots?: () => ReadonlyArray<UsageSnapshot>;
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	getExtensionStatus?: () => ReadonlyArray<string>;
@@ -100,6 +102,7 @@ export interface FooterDashboardRenderState {
 	demoHint?: string | null;
 	/** interface.demo. False hides the rotating key hints with the tips; absent reads as on. */
 	demo?: boolean;
+	welcomeVisible?: boolean;
 	resources?: LocalMachineMetrics | null;
 	connections?: { mcp: string[]; plugins: string[] };
 	costCeilingUsd?: number;
@@ -305,8 +308,9 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				localCapacity: dispatch.length > 0 ? (deps.getLocalCapacity?.() ?? null) : null,
 			},
 			demo: settings?.interface.demo !== false,
+			welcomeVisible: deps.getWelcomeVisible?.() === true,
 			demoHint: demoHints({
-				enabled: settings?.interface.demo === true,
+				enabled: settings?.interface.demo === true && deps.getWelcomeVisible?.() !== true,
 				learned: (feature) => (readHarnessProfile().features[feature] ?? 0) > 0,
 				now,
 				quiet:

@@ -339,11 +339,11 @@ const GEOMETRY_CASES: Array<[string, BannerOptions]> = [
 	],
 ];
 
-test("the launchpad is fifteen rows and the session header one, at every width and state", () => {
+test("the launchpad is seventeen rows and the session header one, at every width and state", () => {
 	for (const [label, options] of GEOMETRY_CASES) {
 		for (const width of WIDTHS) {
 			const launchpad = banner(options);
-			strictEqual(rows(launchpad, width).length, 15, `${label}@${width} launchpad rows`);
+			strictEqual(rows(launchpad, width).length, 17, `${label}@${width} launchpad rows`);
 			const session = banner(options);
 			session.collapseToSessionHeader();
 			strictEqual(rows(session, width).length, 1, `${label}@${width} session rows`);
@@ -625,7 +625,7 @@ function headerRows(built: ReturnType<typeof presentation>["presentation"], widt
 
 test("the presentation opens on the launchpad and collapses on first submit", async () => {
 	const { presentation: built } = presentation();
-	strictEqual(headerRows(built).length, 15);
+	strictEqual(headerRows(built).length, 17);
 
 	// Drive the collapse through the real submit controller, the way a typed
 	// prompt reaches it, rather than by calling the banner directly.
@@ -670,7 +670,7 @@ test("a new session restores the launchpad", () => {
 	built.collapseWelcomeDashboard();
 	strictEqual(headerRows(built).length, 1);
 	built.resetForNewSession();
-	strictEqual(headerRows(built).length, 15);
+	strictEqual(headerRows(built).length, 17);
 });
 
 test("a boot-time resume opens collapsed, with no fresh-start onboarding", () => {
@@ -701,7 +701,7 @@ test("disposing the presentation disposes the header", () => {
 	const { presentation: built } = presentation();
 	built.dispose();
 	// A disposed banner schedules nothing further; rendering must still be safe.
-	strictEqual(headerRows(built).length, 15);
+	strictEqual(headerRows(built).length, 17);
 });
 
 for (const width of [40, 44, 60, 92, 120]) {
@@ -818,14 +818,14 @@ test("the instant shell uses the finished welcome footprint without hydration co
 	const boot = createBootWelcome(settings, "Ctrl+S");
 	for (const width of WIDTHS) {
 		const lines = boot.render(width).map(stripTerminalSequences);
-		strictEqual(lines.length, 15);
+		strictEqual(lines.length, 17);
 		for (const line of lines) ok(visibleWidth(line) <= width);
 		ok(!lines.join("\n").includes("Starting Clio"));
 		ok(!lines.join("\n").includes("✓"));
 	}
 	const wide = boot.render(120).map(stripTerminalSequences).join("\n");
-	ok(wide.includes("Permissions  yolo"));
-	ok(wide.includes("Ctrl+S to send"));
+	ok(wide.includes("Session started"));
+	ok(wide.includes("Checking project awareness"));
 	ok(wide.includes("Clio Coder v"));
 });
 
@@ -888,9 +888,9 @@ test("fleet and targets show cached facts, bound names, sanitize text, and refre
 test("the wordmark stacks CLIO over CODER with details beside both words and no separate emblem", () => {
 	for (const width of [80, 100, 120]) {
 		const lines = banner().render(width).map(stripAnsi);
-		for (const index of [1, 2, 3, 4, 5, 7, 8, 9, 10, 11]) ok(lines[index]?.includes("██"));
-		ok(lines[4]?.includes("dynamo"));
-		ok(lines[9]?.includes("configured"));
+		for (const index of [2, 3, 4, 5, 6, 8, 9, 10, 11, 12]) ok(lines[index]?.includes("██"));
+		ok(lines[2]?.includes("Session started"));
+		ok(lines[10]?.includes("AI usage"));
 		ok(!lines.join("\n").includes(">_C"));
 		ok(!lines.slice(1, 12).some((line) => line.includes("…") && line.indexOf("…") < 30));
 	}

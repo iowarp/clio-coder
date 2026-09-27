@@ -117,8 +117,8 @@ interface Terminal {
 	kill(): void;
 }
 
-function launch(env: NodeJS.ProcessEnv, cwd: string): Terminal {
-	const child = spawn(process.execPath, [CLI], { cols: 100, rows: 30, cwd, env, name: "xterm-256color" });
+function launch(env: NodeJS.ProcessEnv, cwd: string, args: readonly string[] = []): Terminal {
+	const child = spawn(process.execPath, [CLI, ...args], { cols: 100, rows: 30, cwd, env, name: "xterm-256color" });
 	let raw = "";
 	let exitCode: number | null = null;
 	child.onData((data) => {
@@ -291,6 +291,23 @@ function committedFrames(tracePath: string): FrameRecord[] {
 }
 
 describe("boot handoff through a real terminal", { concurrency: false, skip: process.platform === "win32" }, () => {
+	it("applies --no-demo before the instant shell and keeps the compact welcome through hydration", async () => {
+		const scratch = fixture({ TERM: "xterm-256color", CLIO_CODER_SCREEN_READER: "0" });
+		const terminal = launch(scratch.env, scratch.project, ["--no-demo"]);
+		try {
+			await terminal.waitFor(EDITOR);
+			ok(!terminal.visible().includes("██"), "Stage 0 must not flash the full wordmark before applying --no-demo");
+			await terminal.waitFor(HYDRATED);
+			ok(!terminal.visible().includes("██"), "hydration must keep the compact welcome");
+			terminal.write("\x03\x03");
+			await terminal.exited();
+			ok(bootTrace(terminal.raw(), "Stage 1 hydration"));
+		} finally {
+			terminal.kill();
+			scratch.cleanup();
+		}
+	});
+
 	it("keeps every keystroke typed across the Stage 0 to Stage 1 handoff, in order", async () => {
 		const scratch = fixture();
 		const terminal = launch(scratch.env, scratch.project);

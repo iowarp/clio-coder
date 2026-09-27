@@ -393,7 +393,8 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 }
 
 export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
-	const initialSmoothStreaming = deps.getSettings?.().interface.smoothStreaming ?? "off";
+	const initialInterface = deps.getSettings?.().interface;
+	const initialSmoothStreaming = initialInterface?.demo === false ? "off" : (initialInterface?.smoothStreaming ?? "off");
 	const initialAutoPacingAllowed = processAutoPacingAllowed(false);
 	const lease = deps.terminalLease;
 	let removeDiagnosticSink = () => {};
@@ -713,7 +714,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			presentation.announceSettingChanges();
 			footer.refresh();
 			tui.requestRender();
-			const mode = settings.interface.smoothStreaming;
+			const mode = settings.interface.demo === false ? "off" : settings.interface.smoothStreaming;
 			const autoAllowed = processAutoPacingAllowed(shell.hasObservedBackpressure());
 			chatRenderer.setSmoothStreamingMode(mode);
 			shell.setStreamPacingActive(mode === "on" || (mode === "auto" && autoAllowed));

@@ -351,9 +351,14 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			? theme.fg(notificationToken(notice.level), `${notificationGlyph(notice.level)} ${clean(notice.text)}`)
 			: feedback
 				? theme.fg("changedValue", clean(feedback.text))
-				: state.demoHint
+				: state.demoHint && !state.welcomeVisible
 					? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
-					: theme.fg("keyboardHint", (state.demo !== false ? footerKeyHint(state.now, narrow) : null) ?? `${key} Dashboard`);
+					: theme.fg(
+							"keyboardHint",
+							state.welcomeVisible
+								? ""
+								: ((state.demo !== false ? footerKeyHint(state.now, narrow) : null) ?? `${key} Dashboard`),
+						);
 	const workers = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
 	const skills = state.session.activeSkills ?? [];
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
