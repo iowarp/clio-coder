@@ -13,11 +13,16 @@ const { values } = parseArgs({
 		port: { type: "string", default: "4173" },
 		host: { type: "string", default: "0.0.0.0" },
 		snapshot: { type: "boolean", default: false },
+		review: { type: "boolean", default: false },
+		dir: { type: "string", default: ".preview" },
 	},
 });
-const out = join(site, ".preview");
-const next = join(site, ".preview-next");
-const previous = join(site, ".preview-previous");
+// A second preview (for example --review beside the normal one) needs its own
+// directory; two servers must never swap the same output.
+if (!/^\.preview[a-z0-9-]*$/.test(values.dir)) throw new Error("--dir must be an ignored .preview directory name.");
+const out = join(site, values.dir);
+const next = join(site, `${values.dir}-next`);
+const previous = join(site, `${values.dir}-previous`);
 const clients = new Set();
 const mime = {
 	".html": "text/html; charset=utf-8",
@@ -50,7 +55,8 @@ async function build() {
 	building = true;
 	try {
 		if (!values.snapshot) await run("python3", [join(site, "sync-docs.py"), "--worktree"]);
-		await run(process.execPath, [join(site, "build.mjs"), "--out", next]);
+		// --review adds the unregistered manuscripts in content/drafts to this preview only.
+		await run(process.execPath, [join(site, "build.mjs"), "--out", next, ...(values.review ? ["--review"] : [])]);
 		await rm(previous, { recursive: true, force: true });
 		try {
 			await rename(out, previous);

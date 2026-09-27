@@ -1,47 +1,103 @@
 Clio Coder lets you choose the model connection around your project. Start with the place your code is allowed to go, then choose a model and runtime that can do the task. A local GPU, a model server, an institutional gateway, and a cloud API are different deployment choices.
 
-This guide describes v0.5.7. Connection support does not establish a model's coding quality or guarantee that every route supports the same tools and images.
+::: note Version scope
+This guide describes v0.5.7. A working connection does not establish a model's coding quality, and routes differ in the tools and images they carry.
+:::
 
-## Start with one useful connection
+::: needs
+- Node.js 22.19 or newer on Linux or macOS.
+- A repository you know, so you can judge the first answer.
+- One model route you are allowed to use for this code: an app on your computer, a model server, an AI subscription, or a provider account.
+:::
 
-Install the released package with Node.js 22.19 or newer on a supported platform, then open a repository:
+## Decide where inference may run
+
+Guided setup offers four kinds of route. Choose by where the model input may go, then by what you already run.
+
+::: compare
+| Route | Where inference runs | What the wizard lists |
+| --- | --- | --- |
+| An app on this computer | Your machine | Ollama, LM Studio, or Lemonade, with a model loaded |
+| A model server | The server you name | llama.cpp, vLLM, SGLang, LiteLLM, or a compatible server |
+| An AI subscription | The provider | ChatGPT Plus or Pro, Claude Pro or Max, or an installed Claude tool |
+| A provider account or API | The provider | Anthropic, OpenAI, Google, OpenRouter, Groq, Mistral, Bedrock, ALCF, or a compatible API |
+:::
+
+The wizard shows these providers after you choose the route. A subscription-backed route has its own authentication and usage conditions; it is not interchangeable with an API account. The [connection guide](/docs/guide/configuration-and-targets.html) covers each route.
+
+::: diagram model-placement
+:::
+
+## Connect one model
+
+::: steps
+### Install the released package
 
 ```sh
 npm install -g @iowarp/clio-coder
 cd /path/to/your/project
+```
+
+### Start guided setup
+
+```sh
 clio-coder configure
 ```
 
-Choose Guided setup. Pick an app on your computer, a model server, an AI subscription, or a provider account. The wizard asks for the information relevant to that route. You can also use Guided setup from the desktop alpha after `clio-coder gui --open`.
+Choose **Guided setup**. The desktop alpha offers the same wizard after `clio-coder gui --open`.
 
-For local and self-hosted inference, supported routes include Ollama, LM Studio, llama.cpp, vLLM, SGLang, and Lemonade. Cloud connections include provider APIs. A subscription-backed route has its own authentication and usage conditions; it is not interchangeable with an API account. Read the [connection guide](/docs/guide/configuration-and-targets.html) for your chosen route.
+### Pick the route and the model
 
-## Check what setup actually established
+Choose the kind of route, then the app or provider. Confirm the endpoint if it has one, then select a model that supports tool calling. For a local server with no models, load one and choose **Check again**.
 
-The connection wizard distinguishes a live model list from a cached or provider catalog. Passive setup checks do not generate an answer or test tool calling. Reachability is useful, but it is not a coding benchmark.
+### Review the connection, then save
 
-Choose a model that supports tool calling, then try a small repository question:
+The review shows what setup established. The first connection supplies the chat and worker defaults.
+:::
 
-> Explain this project's build and test entry points. Do not change files. Identify one check I could run to confirm your explanation.
+::: capture tui-configure-source tui-configure-models tui-configure-review
+Guided setup in the terminal, from the route to the review.
+:::
 
-Read the tool activity and compare the answer with the actual project. If it fails, check the endpoint, loaded model, credentials, and selected runtime before giving it a larger assignment. `clio-coder doctor` provides diagnostics; it does not certify model quality.
+::: result
+The model list says whether it is live, cached, or the provider's catalog. Setup checks reachability and the catalog where supported; it does not send a generation request or test tool calling. Reachability is useful, but it is not a coding benchmark.
+:::
+
+
+## Ask one question you can check
+
+::: prompt
+Explain this project's build and test entry points. Do not change files. Identify one check I could run to confirm your explanation.
+:::
+
+Read the tool activity and compare the answer with the project. If it fails, check the endpoint, the loaded model, the credentials, and the selected runtime before giving it a larger assignment. `clio-coder doctor` provides diagnostics; it does not certify model quality.
 
 ## Separate conversation from worker models
 
-The model answering you need not be the model handling every delegated task. Settings separates Chat from Fleet. You can select a connection and model for conversation, then use worker defaults or profiles for delegated work.
+The model answering you need not handle every delegated task. Settings separates **Chat** from **Fleet**: select a connection and model for conversation, then use worker defaults or profiles for delegated work.
 
-This is useful when a repository exploration task and a code-change task have different requirements. It also lets you keep a workflow while evaluating another model. The benefit depends on the actual task and environment; this guide makes no claim that a particular combination is cheaper or faster.
+::: capture gui-settings-chat gui-settings-fleet
+Settings keep the conversation model and the worker model apart.
+:::
 
-A worker running on your machine against a remote model server is still a local worker. The location of inference and the location of tool execution are separate. If you need the worker process on another machine, use the [fleet configuration](/docs/guide/fleet-dispatch.html).
+This helps when exploring a repository and changing code have different requirements, or when you want to keep a workflow while evaluating another model. The benefit depends on the task and environment; this guide makes no claim that a particular combination is cheaper or faster.
+
+A worker running on your machine against a remote model server is still a local worker: inference and tool execution are separate choices. To run the worker process on another machine, use the [fleet configuration](/docs/guide/fleet-dispatch.html).
 
 ## Choose capabilities deliberately
 
-Clio supports more than one kind of model interaction. Its Inception Mercury runtime supports diffusion-language-model workflows. Optional System One decision models answer closed harness questions. They are not chat-model replacements or a requirement for getting started.
+Clio supports more than one kind of model interaction. Its Inception Mercury runtime supports diffusion-language-model workflows. Optional System One decision models answer closed harness questions. Neither replaces a chat model or is required to get started.
 
-Vision support also depends on the model and route. Selecting a model advertised as multimodal does not guarantee that a CLI bridge will transport images. In v0.5.7, managed Codex, Pi, and OpenCode bridges are text-only. Check the route's supported input before attaching a screenshot or making image interpretation part of a task.
+Vision support depends on the model and the route. A model advertised as multimodal is not enough if the bridge does not carry images: in v0.5.7 the managed Codex, Pi, and OpenCode bridges are text-only. Check what the route accepts before attaching a screenshot.
 
-## Know where information goes
+::: limits Know where information goes
+- Clio runs locally, but a configured cloud model receives the input sent to that provider.
+- Local inference keeps inference on the selected server; tools, peers, plugins, and commands can still make network requests.
+- Clio is Apache 2.0 software. Inference hardware, provider usage, and subscriptions can still cost money.
+:::
 
-Clio runs locally, but a configured cloud model receives the input sent to that provider. Local inference keeps inference on the selected server; external tools, peers, plugins, and commands can still make network requests. Review your complete configuration when the project has data restrictions.
-
-Clio is Apache 2.0 software. Inference hardware, provider usage, and subscriptions can still cost money. Start with the [first-session tutorial](/tutorials/first-session.html), complete one bounded task, and inspect its result before choosing a larger model or a larger fleet.
+::: next
+- [Your first session with Clio](/tutorials/first-session.html)
+- [Connection guide](/docs/guide/configuration-and-targets.html)
+- [Install Clio](/#start)
+:::

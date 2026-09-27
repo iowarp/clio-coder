@@ -18,7 +18,10 @@
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.7",
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.6",
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.5"
-      ]
+      ],
+      "cover": "gui-setup-review",
+      "time": "5 min",
+      "basis": "Documented workflow with v0.5.7 captures"
     },
     {
       "slug": "coordinate-your-coding-agents",
@@ -36,7 +39,10 @@
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.7",
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.6",
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.5"
-      ]
+      ],
+      "cover": "tui-interop",
+      "time": "5 min",
+      "basis": "Documented workflow with v0.5.7 captures"
     },
     {
       "slug": "keep-long-coding-tasks-on-track",
@@ -54,7 +60,10 @@
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.7",
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.6",
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.5"
-      ]
+      ],
+      "cover": "gui-session-context",
+      "time": "5 min",
+      "basis": "Documented workflow with v0.5.7 captures"
     },
     {
       "slug": "check-a-change-against-your-repository",
@@ -72,7 +81,10 @@
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.7",
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.6",
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.5"
-      ]
+      ],
+      "cover": "gui-results-verify",
+      "time": "5 min",
+      "basis": "Documented workflow with v0.5.7 captures"
     },
     {
       "slug": "add-skills-and-plugins-deliberately",
@@ -90,7 +102,10 @@
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.7",
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.6",
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.5"
-      ]
+      ],
+      "cover": "tui-library-installed",
+      "time": "5 min",
+      "basis": "Documented workflow with v0.5.7 captures"
     },
     {
       "slug": "work-from-a-laptop-with-remote-workers",
@@ -108,7 +123,10 @@
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.7",
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.6",
         "https://github.com/iowarp/clio-coder/releases/tag/v0.5.5"
-      ]
+      ],
+      "cover": "gui-settings-fleet",
+      "time": "5 min",
+      "basis": "Documented workflow with v0.5.7 captures"
     }
   ]
 }

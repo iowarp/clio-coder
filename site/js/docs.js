@@ -15,7 +15,8 @@
 	let index = [];
 	let unavailable = false;
 	const requested = new URLSearchParams(location.search).get("d");
-	const ready = fetch("/content/index.json")
+	// Guides reuse the contents tracking below; only pages with search load the index.
+	const ready = (search ? fetch("/content/index.json") : Promise.reject(new Error("No search on this page")))
 		.then((response) => {
 			if (!response.ok) throw new Error("Search index is unavailable");
 			return response.json();

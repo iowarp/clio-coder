@@ -33,6 +33,9 @@ export async function checkPolicy() {
 		"tutorial.html",
 		"404.html",
 		...(await readdir(join(root, "content/tutorials"))).map((name) => `content/tutorials/${name}`),
+		...(await readdir(join(root, "content/drafts")))
+			.filter((name) => name.endsWith(".md"))
+			.map((name) => `content/drafts/${name}`),
 	]) {
 		const text = await readFile(join(root, file), "utf8");
 		if (/\bstyle\s*=|<style\b/i.test(text)) errors.push(`${file}: inline styles are forbidden`);
@@ -44,7 +47,7 @@ export async function checkPolicy() {
 			? text
 					.replace(/```[\s\S]*?```/g, "")
 					.split(/\n\s*\n/)
-					.filter((p) => !/^(?:#|\||!\[|>|\d\.|- )/.test(p))
+					.filter((p) => !/^(?:#|\||!\[|>|\d\.|- |:::)/.test(p))
 			: [...text.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/g)].map((m) => m[1]);
 		for (const p of paragraphs)
 			if (
@@ -68,6 +71,10 @@ export async function checkPolicy() {
 	)
 		errors.push("Primary navigation must be Overview, Docs, Tutorials");
 	if (!partials.includes(rules.copyright)) errors.push("Footer must use the sanctioned public copyright wording");
+	const captures = JSON.parse(await readFile(join(root, "content/captures.json"), "utf8")).captures;
+	for (const [id, item] of Object.entries(captures))
+		for (const key of ["alt", "caption", "interface", "version", "capturedAt", "source"])
+			if (!item[key]) errors.push(`Capture ${id}: missing ${key}`);
 	const tutorials = JSON.parse(await readFile(join(root, "content/tutorials.json"), "utf8"));
 	const slugs = new Set();
 	for (const item of tutorials) {
@@ -77,8 +84,9 @@ export async function checkPolicy() {
 		if (!/^[a-z0-9-]+\.md$/.test(item.source)) errors.push(`Tutorial ${item.slug}: invalid source`);
 		if (item.video && !/^[\w-]{11}$/.test(item.video))
 			errors.push(`Tutorial ${item.slug}: video must have a real 11-character YouTube ID`);
-		for (const key of ["title", "description", "category", "time", "author", "image", "alt"])
+		for (const key of ["title", "description", "category", "time", "author", ...(item.cover ? [] : ["image", "alt"])])
 			if (!item[key]) errors.push(`Tutorial ${item.slug}: missing ${key}`);
+		if (item.cover && !captures[item.cover]) errors.push(`Tutorial ${item.slug}: unknown cover capture`);
 	}
 	if (errors.length) throw new Error(`Site policy failed:\n${errors.join("\n")}`);
 	console.log("Site policy passed: sanctioned tokens, public copy, attribution, navigation, and content boundaries.");

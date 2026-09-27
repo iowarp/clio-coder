@@ -13,6 +13,7 @@ const { default: AxeBuilder } = require("@axe-core/playwright");
 const { values } = parseArgs({
 	options: {
 		url: { type: "string", default: "http://localhost:4173" },
+		review: { type: "boolean", default: false },
 		out: { type: "string", default: "/tmp/clio-site-review" },
 		chrome: {
 			type: "string",
@@ -37,6 +38,12 @@ const primary = [
 	"/tutorials/first-session.html",
 	"/tutorials/desktop-and-terminal.html",
 	"/tutorials/temperature-calibration.html",
+	// --review checks a preview built with --review, which adds the draft guides.
+	...(values.review
+		? JSON.parse(await readFile(join(site, "content/drafts/review-catalog.json"), "utf8")).articles.map(
+				(item) => item.proposedRoute,
+			)
+		: []),
 ];
 const cases = [
 	...["dark", "light"].flatMap((theme) =>

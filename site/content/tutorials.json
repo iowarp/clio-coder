@@ -10,7 +10,9 @@
     "width": 1920,
     "height": 708,
     "alt": "Clio Coder terminal ready for a first request, with model details and keyboard shortcuts",
-    "source": "first-session.md"
+    "source": "first-session.md",
+    "cover": "tui-boot",
+    "basis": "Documented workflow"
   },
   {
     "slug": "desktop-and-terminal",
@@ -23,7 +25,9 @@
     "width": 1600,
     "height": 1000,
     "alt": "Clio Coder desktop overview with project selection and recent conversations",
-    "source": "desktop-and-terminal.md"
+    "source": "desktop-and-terminal.md",
+    "cover": "gui-overview",
+    "basis": "Product tour with release captures"
   },
   {
     "slug": "temperature-calibration",
@@ -36,6 +40,8 @@
     "width": 1600,
     "height": 1000,
     "alt": "Clio Coder showing seven passing temperature-calibration tests beside recorded verification results",
-    "source": "temperature-calibration.md"
+    "source": "temperature-calibration.md",
+    "cover": "gui-artifacts",
+    "basis": "Recorded session"
   }
 ]
