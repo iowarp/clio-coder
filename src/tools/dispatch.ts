@@ -56,12 +56,10 @@ export function createDispatchTool(
 
 	return {
 		name: ToolNames.Dispatch,
-		// The delegation policy (when to delegate, spot-checks, repeats, refusals,
-		// never narrating a worker you did not run) lives once in the Fleet and
-		// Delegation prompt sections. This description says only what the call
-		// shape is; every field below carries one discriminating sentence.
+		// Keep the selection cue beside the schema; detailed coordination and
+		// evidence discipline live in the role prompt.
 		description:
-			"Delegate to a fleet worker: task dispatches one assignment, tasks dispatches a batch, never both. context selects isolated (default), fork (native only), or splice inheritance. briefing adds bounded parent evidence. A call auto-waits for the sealed receipt; detach:true returns run ids to monitor and collect later. Declare intent on every dispatch. list:true shows the roster.",
+			"Delegate work to Clio helpers. For repository tours and broad code discovery, discover Scout with list:true and dispatch before doing the survey yourself. Independent areas use one tasks batch with mode=parallel. Configured profiles select worker models. task dispatches one assignment, tasks a batch, never both. context selects isolated (default), fork (native only), or splice inheritance. briefing adds parent evidence. Auto-waits for receipts; detach:true returns ids to collect with monitor. Declare intent on every dispatch.",
 		// Composed once per session: council, compete, and adaptive-routing fields
 		// are advertised only when the fleet can exercise them (see dispatch-schema.ts).
 		parameters: buildDispatchParameters(deps.getSchemaComposition?.() ?? FULL_DISPATCH_SCHEMA_COMPOSITION),
