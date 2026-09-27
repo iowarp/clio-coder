@@ -5,7 +5,8 @@
  * is never part of CI. Each case/run copies only settings.yaml and credentials.yaml
  * into a fresh scratch home, so OAuth refreshes cannot write to the real home.
  *
- * node --import tsx scripts/harness-probe.ts <fixture.json> --condition <name> [--runs 3] [--out <dir>] [--only <caseId>]
+ * node --import tsx scripts/harness-probe.ts <fixture.json> --condition <name> [--runs 3] [--out <dir>] [--only <caseId>] [--chat-target <id>] [--chat-model <model>] [--bind-turn-control <profile>]
+ * Route and decision-profile overrides rewrite only the scratch settings copy.
  */
 
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
@@ -23,6 +24,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseDocument } from "yaml";
 import { safeResourceWrite } from "../src/core/safe-resource-write.js";
 import { resolveClioDirs } from "../src/core/xdg.js";
 
@@ -39,6 +41,45 @@ export interface ProbeFixture {
 
 function record(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export interface ProbeSettingsOptions {
+	chatTarget?: string;
+	chatModel?: string;
+	bindTurnControl?: string;
+}
+
+export function rewriteProbeSettings(text: string, options: ProbeSettingsOptions) {
+	const document = parseDocument(text);
+	if (document.errors.length > 0) throw document.errors[0];
+	const settings: unknown = document.toJS();
+	if (!record(settings)) throw new Error("probe settings must be a YAML map");
+	const targets = Array.isArray(settings.targets) ? settings.targets.filter(record) : [];
+	if (options.chatTarget !== undefined && !targets.some((target) => target.id === options.chatTarget))
+		throw new Error(`chat target '${options.chatTarget}' is not defined in copied settings.targets`);
+	if (options.bindTurnControl !== undefined) {
+		const profiles = record(settings.fleet) ? settings.fleet.profiles : undefined;
+		if (!record(profiles) || !Object.hasOwn(profiles, options.bindTurnControl))
+			throw new Error(`turn-control profile '${options.bindTurnControl}' is not defined in copied fleet.profiles`);
+		document.setIn(["fleet", "decisionProfiles", "turnControl"], options.bindTurnControl);
+	}
+	if (options.chatTarget !== undefined) document.setIn(["chat", "target"], options.chatTarget);
+	if (options.chatModel !== undefined) document.setIn(["chat", "model"], options.chatModel);
+	const rewritten: unknown = document.toJS();
+	const chat = record(rewritten) ? rewritten.chat : undefined;
+	const chatTarget = record(chat) && typeof chat.target === "string" ? chat.target : null;
+	const target = targets.find((entry) => entry.id === chatTarget);
+	const chatModel =
+		chatTarget === null
+			? null
+			: record(chat) && typeof chat.model === "string"
+				? chat.model
+				: typeof target?.defaultModel === "string"
+					? target.defaultModel
+					: Array.isArray(target?.wireModels) && typeof target.wireModels[0] === "string"
+						? target.wireModels[0]
+						: null;
+	return { settingsYaml: document.toString(), chatTarget, chatModel };
 }
 
 export function loadProbeFixture(text: string): ProbeFixture {
@@ -255,7 +296,7 @@ class AcpClient {
 	}
 }
 
-function scratchHome(configDir: string) {
+function scratchHome(configDir: string, options: ProbeSettingsOptions) {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-harness-probe-"));
 	try {
 		for (const role of ["config", "data", "state", "cache"]) mkdirSync(join(root, role));
@@ -267,8 +308,13 @@ function scratchHome(configDir: string) {
 				chmodSync(target, 0o600);
 			}
 		}
+		const settingsPath = join(root, "config", "settings.yaml");
+		const route = rewriteProbeSettings(readFileSync(settingsPath, "utf8"), options);
+		if (options.chatTarget !== undefined || options.chatModel !== undefined || options.bindTurnControl !== undefined)
+			safeResourceWrite(settingsPath, route.settingsYaml, { mode: 0o600 });
 		return {
 			root,
+			route,
 			state: join(root, "state"),
 			env: {
 				...process.env,
@@ -321,9 +367,16 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 	for (let index = 1; index < args.length; index += 2) {
 		const flag = args[index];
 		const value = args[index + 1];
-		if (!flag || !["--condition", "--runs", "--out", "--only"].includes(flag) || !value || value.startsWith("--"))
+		if (
+			!flag ||
+			!["--condition", "--runs", "--out", "--only", "--chat-target", "--chat-model", "--bind-turn-control"].includes(
+				flag,
+			) ||
+			!value ||
+			value.startsWith("--")
+		)
 			throw new Error(
-				"usage: harness-probe.ts <fixture.json> --condition <name> [--runs 3] [--out <dir>] [--only <caseId>]",
+				"usage: harness-probe.ts <fixture.json> --condition <name> [--runs 3] [--out <dir>] [--only <caseId>] [--chat-target <id>] [--chat-model <model>] [--bind-turn-control <profile>]",
 			);
 		options.set(flag, value);
 	}
@@ -352,7 +405,18 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 	const output = join(out, `${new Date().toISOString().slice(0, 10)}-${condition}-${fixtureName}.jsonl`);
 	let contents = existsSync(output) ? readFileSync(output, "utf8") : "";
 	const configDir = resolveClioDirs().config;
+	const chatTarget = options.get("--chat-target");
+	const chatModel = options.get("--chat-model");
+	const bindTurnControl = options.get("--bind-turn-control");
+	const settingsOptions: ProbeSettingsOptions = {
+		...(chatTarget !== undefined ? { chatTarget } : {}),
+		...(chatModel !== undefined ? { chatModel } : {}),
+		...(bindTurnControl !== undefined ? { bindTurnControl } : {}),
+	};
+	// Refuse unknown routes or profiles before starting any case, not as repeated live-run failures.
+	const effectiveRoute = rewriteProbeSettings(readFileSync(join(configDir, "settings.yaml"), "utf8"), settingsOptions);
 	const summary: string[] = [
+		`chatTarget: ${JSON.stringify(effectiveRoute.chatTarget)} | chatModel: ${JSON.stringify(effectiveRoute.chatModel)}`,
 		"case | runs | turns | mean interventions | mean coordinator tool calls | mean total tokens",
 		"--- | --- | --- | --- | --- | ---",
 	];
@@ -368,7 +432,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 			let error: string | undefined;
 			let ledgerText = "";
 			try {
-				home = scratchHome(configDir);
+				home = scratchHome(configDir, settingsOptions);
 				client = new AcpClient(
 					spawn(process.execPath, [cli, "acp", "--cwd", project], {
 						cwd: root,
@@ -414,6 +478,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 				const observation = observed[turn.turnIndex];
 				const row = {
 					condition,
+					chatTarget: (home?.route ?? effectiveRoute).chatTarget,
+					chatModel: (home?.route ?? effectiveRoute).chatModel,
 					fixture: fixtureName,
 					caseId: entry.id,
 					runIndex,
