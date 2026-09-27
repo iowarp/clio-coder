@@ -12,6 +12,8 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 - Gateway and chain receipts retain capability identity, per-check verification, partial writes and denied operations. Historical skill instructions and continuation hooks remain available when secondary schemas are hidden.
 - Optional `fleet.decisionProfiles.harnessRouting` binds an advisory intent and capability shortlist to the existing pre-turn decision batch. Unbound sessions do no additional catalog preparation or inference. Routing never grants authority or removes capabilities from discovery.
 - Coordinator prompts guide intent understanding, bounded delegation, verification, user steering, and explanations of project state. Educational walkthroughs, reports, and knowledge checks are offered when useful and created when requested.
+- Repository tours, architecture maps, and open-ended exploration go to the read-only Scout recipe before the coordinator surveys directories itself, with independent areas sent as one parallel batch. An undecided user receives two or three next steps grounded in bounded read-only workspace observations.
+- Runtime guidance compiles reachable capability hints and schema-validated examples without enlarging the attached tool surface. Display, traces, ACP, and the browser application name the capability each gateway call ran; worker grounding, tool-call bounds, and the loop guard count each settled chain step once, as a direct call would.
 
 ### Verification and execution evidence
 
@@ -19,6 +21,8 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 - Verification records source, check-declaration, and policy fingerprints. Completion assessment requires fresh evidence for the covered inputs and reports outstanding requirements in interactive and worker runs.
 - Receipts distinguish executed checks, denied checks, result quality, and completion findings. Denied verification calls preserve their admission outcome without acquiring a validation result.
 - Validation grounding recognizes equivalent npm, pnpm, and Yarn test-script invocations.
+- Scout citation repair names the rejected `path:line` and the file's current physical line range. Empty root `find` and `grep` results name the internal directories they exclude and state that a miss does not prove a file is absent.
+- Architect plan workers keep the artifact tool their contracted `PLAN.md` requires when a bound skill narrows the tool surface.
 
 ### Project and session context
 
@@ -48,9 +52,15 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 - Side questions and labelled alternative drafts run beside the main conversation. Draft comparison can use a configured decision model.
 - Session usage, provider quota, extension eligibility and reload, and library updates are available to open browser sessions. ACP hosts also bind sharing, archive operations, advisor and council workflows, and transcript export.
 - Bare `clio-coder gui` reuses the installation's owned background application or starts a private foreground server. Installed Linux background applications refresh launch paths after an upgrade while idle.
+- Streaming Markdown keeps rendered nodes mounted as a response grows, matches deferred highlighting and Mermaid output to its current source, and updates artifacts independently of response text. **Jump to latest** returns immediately, reading history keeps its position, and viewport changes no longer stop stream following.
+- `clio-coder gui --open` on Windows passes the loopback URL to the registered browser through the system `rundll32` handler rather than `cmd.exe`. ACP builds its command catalog once per server instead of on every prompt.
 
 ### Terminal interface
 
+- A semantic presentation system gives the composer, menus, transcript, tool and worker activity, welcome screen, footer, and dashboard one ivory, cyan, and action-orange hierarchy with a distinct YOLO projection. Session and worker prompts prohibit decorative emoji, and displayed answers, worker summaries, side questions, and reasoning follow the authored-prose policy while code, quoted evidence, and scientific notation stay intact.
+- The composer rail shows context occupancy and YOLO state, and the thinking effort indicator carries a brain glyph and accent. The compact footer shows the workspace path, Git branch and dirty marker, counters, notices, and active harness facts; thinking, verbosity, and autonomy changes are confirmed briefly in its value slot, and every footer row stays reachable on short terminals.
+- `Ctrl+G` then `y` toggles the current session between default and YOLO autonomy. The action has no direct key by default.
+- The footer dashboard samples local machine metrics only while its Status page is open.
 - Live fleet activity appears above the composer, and tasks use grouped cards with empty states.
 - `/settings targets` supports adding and editing targets inside the docked configuration wizard; `/config` opens settings.
 - With an empty composer, `?` opens quick help, left arrow opens fleets, and down arrow opens tasks.
@@ -63,6 +73,7 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 - Inception Mercury retains its required instant reasoning setting in chat and tool probes.
 - Doctor distinguishes unavailable probes from failed health checks, repairs managed Yazi profiles, and checks Slurm controller configuration.
 - Relocated Clio homes isolate sibling-CLI credential discovery unless the corresponding product home is explicitly configured. Local-runtime accounting appears when a local target is configured.
+- Stored provider credentials become visible to the running session only after their storage write commits.
 - ACP aside failures return host diagnostics summaries while provider response bodies remain in the diagnostic stream.
 
 ### Documentation and distribution
@@ -70,7 +81,7 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 - The safety model documents unattended analysis at `yolo`, temporary Python scripts, and the remaining damage-control and worker approval limits.
 - Removed `clio-coder docs`, its documentation server, and the browser application’s native Docs reader. Help opens the public documentation and identifies the installed Markdown reference; offline `clio_docs` retrieval and bundled resources remain available.
 - Product documentation describes the current architecture, configuration, context, verification, and delegation interfaces. Generated development wiki pages retain independent **v0.1** versioning.
-- Website documentation is linked to its release source. README and website include terminal and browser captures, and reusable media have checked hashes, dimensions, and delivery copies.
+- Website documentation is linked to its release source. README and website include v0.5.7 terminal and browser captures in dark and light themes from a real temperature-calibration session, whose runnable source is in `examples/temperature-calibration`. Reusable media have checked hashes, dimensions, and delivery copies.
 - The installed package contains authored product documentation and its corpus metadata; generated development wiki pages remain in the repository and GitHub Wiki.
 
 ## 0.5.6 - 2026-09-25
