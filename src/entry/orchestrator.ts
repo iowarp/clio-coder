@@ -2588,6 +2588,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		dispatch,
 		agents,
 		toolRegistry,
+		getInvokeOptions: () => {
+			const sessionId = session?.current()?.id;
+			return sessionId === undefined ? {} : { sessionId };
+		},
 		getTurnConstraints: () => chat.currentTurnConstraints?.(),
 		isContinuation: () => false,
 		readInterpretation: () => turnRelevance.current().get("turnControl")?.value as TurnInterpretation | undefined,

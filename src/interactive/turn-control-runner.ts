@@ -25,12 +25,14 @@ import {
 	decide,
 	decisionHash,
 	factsDigest,
+	renderDirectionBlock,
 	renderOrientationBlock,
 	renderOrientationUnavailable,
 } from "../domains/turn-control/index.js";
 import { loadVerifiedScoutSource, prepareScoutContinuation } from "../tools/dispatch-scout-admission.js";
-import type { ToolRegistry } from "../tools/registry.js";
+import type { ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { receiptHelperResult } from "../tools/worker-evidence.js";
+import { observeWorkspace } from "./direction-observations.js";
 import { workspaceFingerprint } from "./workspace-fingerprint.js";
 
 type OrientationSnapshot = NonNullable<TurnControlRecord["orientation"]>;
@@ -39,6 +41,7 @@ export interface TurnControlInput {
 	previous: string;
 	userTurnId: string;
 	signal: AbortSignal;
+	continuation?: boolean;
 }
 export interface TurnControlRunner {
 	run(input: TurnControlInput): Promise<{ block: string | null; record: TurnControlRecord }>;
@@ -50,7 +53,8 @@ export interface TurnControlRunnerDeps {
 	getAutonomy(): "default" | "yolo";
 	dispatch: DispatchContract | undefined;
 	agents: AgentsContract | undefined;
-	toolRegistry: Pick<ToolRegistry, "get"> | undefined;
+	toolRegistry: Pick<ToolRegistry, "get" | "invoke"> | undefined;
+	getInvokeOptions?: () => ToolInvokeOptions;
 	getTurnConstraints(): TurnConstraints | undefined;
 	isContinuation(): boolean;
 	readInterpretation(): TurnInterpretation | undefined;
@@ -126,7 +130,7 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 			const facts: TurnFacts = {
 				operatorText: Array.from(input.operatorText.replace(/\s+/gu, " ").trim()).slice(0, 300).join(""),
 				turnIndex: deps.facts.turnIndex(),
-				continuation: deps.isContinuation(),
+				continuation: input.continuation ?? deps.isContinuation(),
 				explicitConstraints: constraints !== undefined,
 				taskEstablished: deps.facts.taskEstablished(),
 				clarificationStreak: deps.facts.clarificationStreak(),
@@ -137,7 +141,7 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 						deps.toolRegistry?.get(ToolNames.Dispatch) !== undefined &&
 						turnAllowsTool(constraints, ToolNames.Dispatch),
 					scoutRecipeId,
-					readOnlyGit: deps.toolRegistry?.get(ToolNames.Git) !== undefined,
+					readOnlyGit: deps.toolRegistry?.get(ToolNames.Git) !== undefined && turnAllowsTool(constraints, ToolNames.Git),
 					monitor: deps.toolRegistry?.get(ToolNames.Monitor) !== undefined,
 				},
 				priorOrientation: prior,
@@ -175,6 +179,24 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 				executed: null,
 			};
 			if (input.signal.aborted) return { block: null, record: { ...record, executed: { refused: "canceled" } } };
+			if (decision.kind === "direction" && deps.toolRegistry) {
+				const observations = await observeWorkspace({
+					registry: deps.toolRegistry,
+					cwd: deps.cwd,
+					invokeOptions: { ...deps.getInvokeOptions?.(), signal: input.signal, turnId: input.userTurnId },
+					observations: decision.observations,
+				});
+				if (input.signal.aborted) return { block: null, record: { ...record, executed: { refused: "canceled" } } };
+				const block = renderDirectionBlock(observations);
+				const count =
+					Number(observations.git !== null) + Number(observations.tree !== null) + Number(observations.codemap !== null);
+				deps.emitNotice(`[Direction] observed ${count} read-only facts`);
+				acted = true;
+				return {
+					block,
+					record: { ...record, executed: { runIds: [], blockChars: block.length, durationMs: performance.now() - started } },
+				};
+			}
 			if (decision.kind !== "orientation") return { block: null, record };
 			if (decision.reuse && prior) {
 				acted = true;

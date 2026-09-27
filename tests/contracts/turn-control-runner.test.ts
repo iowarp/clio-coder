@@ -66,6 +66,7 @@ function harness(overrides: Partial<TurnControlRunnerDeps> = {}, receiptData: un
 		dispatch,
 		agents: context.getContract("agents"),
 		toolRegistry: {
+			invoke: async () => ({ kind: "not_visible", reason: "fixture" }),
 			get: (() => ({ name: "dispatch" })) as unknown as NonNullable<TurnControlRunnerDeps["toolRegistry"]>["get"],
 		},
 		getTurnConstraints: () => undefined,
@@ -197,6 +198,43 @@ test("a strict split asking for write authority is refused and only the first Sc
 		assert.equal(h.requests.length, 1);
 		assert.match(result.block ?? "", /Limitations:.*split refused: harness orientation permits read-only subtasks only/);
 		assert.equal(result.record.orientation?.runId, "scout-1");
+	} finally {
+		h.cleanup();
+	}
+});
+
+test("direction provides admitted workspace observations without dispatching a worker", async () => {
+	const h = harness({
+		readInterpretation: () => ({
+			...interpretation,
+			orientation: { wanted: 0, breadth: null, subject: null },
+			direction: { requested: 1 },
+		}),
+		facts: {
+			turnIndex: () => 2,
+			taskEstablished: () => false,
+			clarificationStreak: () => 1,
+			finishedDetachedBatchIds: () => [],
+		},
+	});
+	const calls: string[] = [];
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.turnControl.workflows = ["direction"];
+	h.deps.getSettings = () => settings;
+	assert.ok(h.deps.toolRegistry);
+	h.deps.toolRegistry.invoke = async (call, options) => {
+		assert.equal(options?.origin, "harness");
+		calls.push(call.tool);
+		return { kind: "not_visible", reason: "unavailable fixture observation" };
+	};
+	try {
+		const result = await h.runner.run(input());
+		assert.match(result.block ?? "", /^\[Direction\]/u);
+		assert.equal(h.requests.length, 0);
+		assert.deepEqual(calls, ["git", "git", "ls", "read"]);
+		assert.ok(result.record.executed && "runIds" in result.record.executed);
+		assert.deepEqual(result.record.executed.runIds, []);
+		assert.deepEqual(h.notices, ["[Direction] observed 0 read-only facts"]);
 	} finally {
 		h.cleanup();
 	}

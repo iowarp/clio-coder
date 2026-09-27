@@ -61,7 +61,7 @@ export function renderOrientationUnavailable(runId: string, outcome: string): st
 export interface DirectionBlockInput {
 	cwd: string;
 	git: { branch: string; modified: number; untracked: number; recent: ReadonlyArray<string> } | null;
-	tree: ReadonlyArray<string>;
+	tree: ReadonlyArray<string> | null;
 	codemap: string | null;
 }
 
@@ -75,7 +75,7 @@ export function renderDirectionBlock(input: DirectionBlockInput): string {
 			input.git
 				? `git: branch ${line(input.git.branch)}; ${input.git.modified} modified, ${input.git.untracked} untracked; recent: ${input.git.recent.slice(0, 3).map(line).join("; ")}`
 				: "git: none",
-			`tree: ${input.tree.slice(0, 40).map(line).join(", ")}`,
+			`tree: ${input.tree === null ? "none" : input.tree.slice(0, 40).map(line).join(", ")}`,
 			`codemap: ${input.codemap === null ? "none" : line(input.codemap)}`,
 		],
 		[
