@@ -11,7 +11,7 @@ import {
 import { type DockEntry, dockBodyRows, dockTop } from "./dock.js";
 import { guardPastedEditorOperator } from "./editor-bash.js";
 import { type EditorRailState, renderEditorRail } from "./editor-rails.js";
-import { type ContextOccupancyFacts, contextRailHint } from "./footer/widgets.js";
+import { type ContextOccupancyFacts, contextRailHint } from "./footer/context-rail.js";
 import { centeredWindow, fitHintEntries } from "./overlay-frame.js";
 import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";

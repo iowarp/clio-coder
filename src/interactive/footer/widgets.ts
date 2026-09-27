@@ -8,29 +8,30 @@ import type { ContextLedger, ContextLedgerCategory } from "../../domains/session
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { taskBoardCounts } from "../../domains/session/task-board.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { CONTEXT_BAR_LABEL_WIDTH, finiteNonNegative } from "../context-bar.js";
 import { contextCategorySwatch, contextPercentRole, renderContextMeterBar } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
-import {
-	buildSegmentedContextBar,
-	CONTEXT_BAR_LABEL_WIDTH,
-	finiteNonNegative,
-	fitFooterText,
-	formatFooterTokens,
-} from "../footer-panel.js";
+import { fitFooterText, formatFooterTokens } from "../footer-panel.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { formatReasoningChip, reasoningFromSummary, spinnerFrame } from "../status/index.js";
 import type { ClioTheme, ClioToken } from "../theme/index.js";
 import {
 	clioTheme,
+	FUNCTION_ROLES,
 	formatCompactMs,
 	formatContextPercent,
-	FUNCTION_ROLES,
 	GLYPH,
 	joinChips,
 	padAnsi,
 	sectionTag,
 	toolFunction,
 } from "../theme/index.js";
+import {
+	type ContextOccupancyFacts,
+	contextBreakdownForBar,
+	contextOccupancyBar,
+	contextUsagePercent,
+} from "./context-rail.js";
 
 export interface ToolTallySnapshot {
 	tools: Readonly<Record<string, number>>;
@@ -102,11 +103,6 @@ export interface ContextEngineFacts {
 	/** Full categorized ledger; when present the quadrant renders the richer meter. */
 	ledger?: ContextLedger | null;
 }
-
-export type ContextOccupancyFacts = Pick<
-	ContextEngineFacts,
-	"budget" | "used" | "contextWindow" | "toolSchemaTokens" | "breakdown" | "ledger"
->;
 
 /** Dynamic agent work: the live action quadrant. */
 export interface AgentWorkFacts {
@@ -181,48 +177,6 @@ export function formatUsd(value: number): string {
 	return `$${value.toFixed(2)}`;
 }
 
-function contextBreakdownForBar(context: ContextOccupancyFacts): ContextUsageBreakdown | undefined {
-	const reportedUsed = finiteNonNegative(context.used);
-	const toolTokens = finiteNonNegative(context.toolSchemaTokens);
-	const source = context.breakdown;
-	if (!source) {
-		if (reportedUsed <= 0 && toolTokens <= 0) return undefined;
-		return {
-			systemPromptTokens: 0,
-			toolSchemaTokens: Math.min(toolTokens, reportedUsed),
-			messageTokens: Math.max(0, reportedUsed - toolTokens),
-			pendingUserTokens: 0,
-		};
-	}
-	const system = finiteNonNegative(source.systemPromptTokens);
-	const tools = finiteNonNegative(source.toolSchemaTokens);
-	const conversation = finiteNonNegative(source.messageTokens) + finiteNonNegative(source.pendingUserTokens);
-	const total = system + tools + conversation;
-	if (reportedUsed <= 0 || total <= 0) {
-		return {
-			systemPromptTokens: system,
-			toolSchemaTokens: tools,
-			messageTokens: conversation,
-			pendingUserTokens: 0,
-		};
-	}
-	if (reportedUsed >= total) {
-		return {
-			systemPromptTokens: system,
-			toolSchemaTokens: tools,
-			messageTokens: conversation + (reportedUsed - total),
-			pendingUserTokens: 0,
-		};
-	}
-	const scale = reportedUsed / total;
-	return {
-		systemPromptTokens: system * scale,
-		toolSchemaTokens: tools * scale,
-		messageTokens: conversation * scale,
-		pendingUserTokens: 0,
-	};
-}
-
 function contextComposition(context: ContextEngineFacts): {
 	system: number;
 	tools: number;
@@ -249,13 +203,6 @@ export function contextUsageText(context: ContextEngineFacts): string {
 	return `${source}${used === null ? "?" : formatFooterTokens(used)} / ${window ? formatFooterTokens(window) : "?"}`;
 }
 
-/** The share of the window `contextUsageText` states, in percent; null when either number is unknown. */
-export function contextUsagePercent(context: ContextOccupancyFacts): number | null {
-	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
-	const window = context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow);
-	return used === null || !window ? null : (used / window) * 100;
-}
-
 /** Compact counts and occupancy; source details remain in the expanded dashboard. */
 export function compactContextUsage(context: ContextOccupancyFacts, theme: ClioTheme): string {
 	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
@@ -263,30 +210,6 @@ export function compactContextUsage(context: ContextOccupancyFacts, theme: ClioT
 	const counts = `${used === null ? "?" : formatFooterTokens(used).toUpperCase()}/${window ? formatFooterTokens(window).toUpperCase() : "?"}`;
 	const percent = contextUsagePercent(context);
 	return `${theme.fg("counter", counts)} ${theme.fg(contextPercentRole(percent), `(${formatContextPercent(percent)})`)}`;
-}
-
-/** Reads published numbers only; never refreshes accounting from a renderer. */
-export function contextOccupancyBar(
-	context: ContextOccupancyFacts,
-	cells: number,
-	theme: ClioTheme,
-	includePercent = true,
-): string {
-	if (!context.budget && context.ledger) return renderContextMeterBar(context.ledger, cells, theme);
-	return buildSegmentedContextBar(
-		theme,
-		cells,
-		context.contextWindow ?? 0,
-		context.used === null ? undefined : contextBreakdownForBar(context),
-		includePercent,
-	);
-}
-
-/** Graphic-only composer occupancy, using the same category ink as the dashboard. */
-export function contextRailHint(context: ContextOccupancyFacts, cells: number, room: number, theme: ClioTheme): string {
-	if (contextUsagePercent(context) === null || (!context.ledger && !context.budget)) return "";
-	const fittedCells = Math.max(0, Math.min(cells, Math.floor(room)));
-	return fittedCells > 0 ? contextOccupancyBar(context, fittedCells, theme, false) : "";
 }
 
 type DashboardRow =
