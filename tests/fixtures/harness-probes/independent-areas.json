@@ -1,5 +1,5 @@
 {
-	"description": "Orientation across independent implementation areas.",
+	"description": "Investigations across independent implementation areas: explain or compare specific mechanisms, without requesting orientation or a tour. No controller intervention is expected.",
 	"project": "self",
 	"cases": [
 		{
@@ -8,7 +8,7 @@
 				{
 					"text": "how do the safety classifier and the dispatch scheduler relate?",
 					"expect": {
-						"control": "orientation",
+						"control": "none",
 						"dispatch": null
 					}
 				}
@@ -20,7 +20,7 @@
 				{
 					"text": "explain how tool argument validation and receipt sealing work; they are separate areas",
 					"expect": {
-						"control": "orientation",
+						"control": "none",
 						"dispatch": null
 					}
 				}
@@ -32,7 +32,7 @@
 				{
 					"text": "compare the memory promotion path with the evidence bundle builder",
 					"expect": {
-						"control": "orientation",
+						"control": "none",
 						"dispatch": null
 					}
 				}

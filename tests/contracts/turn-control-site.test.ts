@@ -174,6 +174,14 @@ it("loads the labeled fixture with all S3 probes, verbatim orientation turns and
 	}
 	for (const name of ["orientation", "independent-areas", "focused", "undecided", "capability", "session-facts"]) {
 		for (const scenario of load(`harness-probes/${name}.json`).cases) {
+			if (name === "independent-areas") {
+				const turn = scenario.turns[0];
+				const labeled = fixture.cases.find((entry: { task: string }) => entry.task === turn.text);
+				ok(labeled);
+				strictEqual(turn.expect.control, "none");
+				strictEqual(labeled.expect["turnControl.orientation.wanted"], false);
+				strictEqual(Object.hasOwn(labeled.expect, "turnControl.orientation.breadth"), false);
+			}
 			for (const turn of name === "undecided" ? scenario.turns.slice(2, 4) : scenario.turns.slice(0, 1))
 				ok(
 					fixture.cases.some(

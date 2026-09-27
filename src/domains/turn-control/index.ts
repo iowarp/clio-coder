@@ -4,7 +4,6 @@ export {
 	DIRECTION_REQUESTED_THRESHOLD,
 	decide,
 	decisionHash,
-	INTENT_CERTAINTY_THRESHOLD,
 	ORIENTATION_WANTED_THRESHOLD,
 } from "./decide.js";
 export type { TurnFacts, WorkspaceFingerprint } from "./facts.js";

@@ -15,6 +15,7 @@ import {
 	decisionHash,
 	factsDigest,
 	fingerprintEquals,
+	ORIENTATION_WANTED_THRESHOLD,
 	orientationQuestion,
 	renderCollectedBlock,
 	renderDirectionBlock,
@@ -39,7 +40,7 @@ const interpretation: TurnInterpretation = {
 	version: "turn-interpretation-v1",
 	intent: "inspect",
 	intentCertainty: 0.6,
-	orientation: { wanted: 0.7, breadth: "repository", subject: null },
+	orientation: { wanted: ORIENTATION_WANTED_THRESHOLD, breadth: "repository", subject: null },
 	direction: { requested: 0 },
 	shape: null,
 };
@@ -88,8 +89,8 @@ it("decides twelve workflow cases in the required order, including each reachabl
 			expected: { kind: "none", reason: "no-interpretation" },
 		},
 		{
-			name: "below certainty threshold",
-			interpretation: { ...interpretation, intentCertainty: 0.59 },
+			name: "explicit implementation vetoes orientation even without intent certainty",
+			interpretation: { ...interpretation, intent: "implement", intentCertainty: 0 },
 			facts,
 			settings,
 			expected: { kind: "none", reason: "below-threshold" },
@@ -109,8 +110,8 @@ it("decides twelve workflow cases in the required order, including each reachabl
 			expected: { kind: "none", reason: "task-established" },
 		},
 		{
-			name: "orientation with changed fingerprint",
-			interpretation,
+			name: "orientation with unknown intent and zero certainty, with changed fingerprint",
+			interpretation: { ...interpretation, intent: "unknown", intentCertainty: 0 },
 			facts: { ...facts, priorOrientation: { ...prior, fingerprint: { ...prior.fingerprint, dirtyTreeHash: "old" } } },
 			settings,
 			expected: {
@@ -122,8 +123,13 @@ it("decides twelve workflow cases in the required order, including each reachabl
 			},
 		},
 		{
-			name: "area orientation reuses unchanged fingerprint",
-			interpretation: { ...interpretation, orientation: { ...interpretation.orientation, breadth: "area" } },
+			name: "area orientation with answer intent reuses unchanged fingerprint",
+			interpretation: {
+				...interpretation,
+				intent: "answer",
+				intentCertainty: 0,
+				orientation: { ...interpretation.orientation, breadth: "area" },
+			},
 			facts: { ...facts, priorOrientation: prior },
 			settings,
 			expected: {
@@ -159,6 +165,32 @@ it("decides twelve workflow cases in the required order, including each reachabl
 	strictEqual(cases.length, 12);
 	for (const entry of cases)
 		deepStrictEqual(decide(entry.interpretation, entry.facts, entry.settings), entry.expected, entry.name);
+	for (const intent of ["implement", "continue", "interview"] as const) {
+		for (const intentCertainty of [0, 1]) {
+			deepStrictEqual(
+				decide(
+					{ ...interpretation, intent, intentCertainty, orientation: { ...interpretation.orientation, wanted: 1 } },
+					facts,
+					settings,
+				),
+				{ kind: "none", reason: "below-threshold" },
+				`${intent} veto at certainty ${intentCertainty}`,
+			);
+		}
+	}
+	deepStrictEqual(
+		decide(
+			{
+				...interpretation,
+				intentCertainty: 0,
+				orientation: { ...interpretation.orientation, wanted: ORIENTATION_WANTED_THRESHOLD - 0.01 },
+			},
+			facts,
+			settings,
+		),
+		{ kind: "none", reason: "below-threshold" },
+		"orientation still needs a probability at the measured threshold",
+	);
 	deepStrictEqual(
 		decide(null, { ...facts, finishedDetachedBatchIds: ["batch-1", "batch-2"] }, settings),
 		{ kind: "collect", batchIds: ["batch-1", "batch-2"] },
