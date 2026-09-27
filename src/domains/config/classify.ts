@@ -37,6 +37,8 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 ]);
 
 const NEXT_TURN_FIELDS = new Set<string>([
+	"turnControl",
+	"fleet.decisionProfiles.turnControl",
 	"targets",
 	"chat",
 	"fleet.default",

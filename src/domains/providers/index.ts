@@ -3,6 +3,10 @@ import type { ProvidersContract } from "./contract.js";
 import { createProvidersBundle, type ProvidersBundleOptions } from "./extension.js";
 import { ProvidersManifest } from "./manifest.js";
 
+export type { DispatchShape } from "./sites/dispatch-forecast.js";
+export type { HarnessIntent } from "./sites/harness-routing.js";
+export { HARNESS_INTENTS } from "./sites/harness-routing.js";
+
 export const ProvidersDomainModule: DomainModule<ProvidersContract> = {
 	manifest: ProvidersManifest,
 	createExtension: (context) => createProvidersBundle(context),

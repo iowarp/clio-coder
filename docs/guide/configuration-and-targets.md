@@ -99,6 +99,10 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | Key | Default | When it applies |
 | --- | --- | --- |
 | `version` | `2` | restart |
+| `turnControl.workflows` | `["orientation", "direction", "ledger-facts", "detached-collection"]` | next turn |
+| `turnControl.interpretation.fallback` | `none` | next turn |
+| `turnControl.orientation.maxSplit` | `4` | next turn |
+| `turnControl.orientation.maxCostUsdPerTurn` | `null` | next turn |
 | `targets` | `[]` | next turn for the catalog; next session for saved routing defaults |
 
 ### Chat

@@ -27,6 +27,10 @@ Default chat settings control interactive conversation routing, reasoning effort
 | Key | Default |
 | --- | --- |
 | `version` | `2` |
+| `turnControl.workflows` | `["orientation", "direction", "ledger-facts", "detached-collection"]` |
+| `turnControl.interpretation.fallback` | `"none"` |
+| `turnControl.orientation.maxSplit` | `4` |
+| `turnControl.orientation.maxCostUsdPerTurn` | `null` |
 | `targets` | `[]` |
 | `chat.target` | `null` |
 | `chat.model` | `null` |

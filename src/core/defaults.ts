@@ -9,6 +9,7 @@
 import { DEFAULT_WORKING_SET_SETTINGS } from "../domains/context/working-set/defaults.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import type { TurnControlSettings } from "../domains/turn-control/index.js";
 import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
 
 export type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
@@ -85,6 +86,7 @@ export const DECISION_SITES = [
 	"dispatchForecast",
 	"capabilities",
 	"consult",
+	"turnControl",
 ] as const;
 export type DecisionSite = (typeof DECISION_SITES)[number];
 
@@ -92,7 +94,7 @@ export type DecisionSite = (typeof DECISION_SITES)[number];
  * Map of decision site -> fleet.profiles key. A site with no entry is off, so
  * the whole capability is opt-in by absence and there is no flag to retire once
  * it leaves alpha. Keying by site rather than one global binding means a site
- * that misbehaves can be unbound without giving up the other three.
+ * that misbehaves can be unbound without giving up the other sites.
  */
 export type FleetDecisionProfiles = Partial<Record<DecisionSite, string>>;
 
@@ -541,6 +543,11 @@ export interface IntegrationsSettings {
 
 export const DEFAULT_SETTINGS = {
 	version: 2 as const,
+	turnControl: {
+		workflows: ["orientation", "direction", "ledger-facts", "detached-collection"],
+		interpretation: { fallback: "none" },
+		orientation: { maxSplit: 4, maxCostUsdPerTurn: null },
+	} as TurnControlSettings,
 	targets: [] as TargetDescriptor[],
 	chat: {
 		target: null as string | null,
@@ -683,6 +690,14 @@ export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on fir
 # Docs: https://github.com/iowarp/clio-coder
 
 version: 2
+
+turnControl:
+  workflows: [orientation, direction, ledger-facts, detached-collection]
+  interpretation:
+    fallback: none
+  orientation:
+    maxSplit: 4
+    maxCostUsdPerTurn: null
 
 # Configured inference endpoints. Target descriptor leaves are unchanged in v2.
 targets: []

@@ -17,6 +17,7 @@ import { isAbsolute, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { AUTONOMY_LEVELS } from "../domains/safety/autonomy.js";
+import { TURN_CONTROL_WORKFLOWS } from "../domains/turn-control/settings.js";
 import {
 	ACTIVE_AGENT_AUTOMATION_ROLES,
 	ACTIVE_ROUTING_POSTURES,
@@ -1272,6 +1273,7 @@ function validateKeybindings(issues: Issues, path: string, value: unknown): Reco
 
 const TOP_LEVEL_KEYS = [
 	"version",
+	"turnControl",
 	"targets",
 	"chat",
 	"fleet",
@@ -1305,6 +1307,61 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 	issues.unknownKeys("", raw, TOP_LEVEL_KEYS);
 	if ("version" in raw && raw.version !== 2) {
 		issues.add("version", `expected 2, got ${describe(raw.version)}; run \`clio-coder upgrade\` for version 1`);
+	}
+	if ("turnControl" in raw) {
+		if (!isPlainObject(raw.turnControl)) issues.add("turnControl", `expected a map, got ${describe(raw.turnControl)}`);
+		else {
+			const control = raw.turnControl;
+			issues.unknownKeys("turnControl", control, ["workflows", "interpretation", "orientation"]);
+			if ("workflows" in control) {
+				if (!Array.isArray(control.workflows))
+					issues.add("turnControl.workflows", `expected a list, got ${describe(control.workflows)}`);
+				else {
+					const workflows: ClioSettings["turnControl"]["workflows"] = [];
+					for (const [index, value] of control.workflows.entries()) {
+						const parsed = expectEnum(issues, `turnControl.workflows[${index}]`, value, TURN_CONTROL_WORKFLOWS);
+						if (parsed !== undefined) workflows.push(parsed);
+					}
+					settings.turnControl.workflows = workflows;
+				}
+			}
+			if ("interpretation" in control) {
+				if (!isPlainObject(control.interpretation))
+					issues.add("turnControl.interpretation", `expected a map, got ${describe(control.interpretation)}`);
+				else {
+					issues.unknownKeys("turnControl.interpretation", control.interpretation, ["fallback"]);
+					if ("fallback" in control.interpretation) {
+						const parsed = expectEnum(issues, "turnControl.interpretation.fallback", control.interpretation.fallback, [
+							"none",
+							"main-model",
+						] as const);
+						if (parsed !== undefined) settings.turnControl.interpretation.fallback = parsed;
+					}
+				}
+			}
+			if ("orientation" in control) {
+				if (!isPlainObject(control.orientation))
+					issues.add("turnControl.orientation", `expected a map, got ${describe(control.orientation)}`);
+				else {
+					const orientation = control.orientation;
+					issues.unknownKeys("turnControl.orientation", orientation, ["maxSplit", "maxCostUsdPerTurn"]);
+					if ("maxSplit" in orientation) {
+						const parsed = expectInteger(issues, "turnControl.orientation.maxSplit", orientation.maxSplit, {
+							min: 1,
+							max: 4,
+						});
+						if (parsed !== undefined) settings.turnControl.orientation.maxSplit = parsed as 1 | 2 | 3 | 4;
+					}
+					if ("maxCostUsdPerTurn" in orientation) {
+						if (orientation.maxCostUsdPerTurn === null) settings.turnControl.orientation.maxCostUsdPerTurn = null;
+						else {
+							const parsed = expectNumber(issues, "turnControl.orientation.maxCostUsdPerTurn", orientation.maxCostUsdPerTurn);
+							if (parsed !== undefined) settings.turnControl.orientation.maxCostUsdPerTurn = parsed;
+						}
+					}
+				}
+			}
+		}
 	}
 
 	if ("targets" in raw) {

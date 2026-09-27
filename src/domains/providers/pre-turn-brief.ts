@@ -21,7 +21,7 @@
  */
 
 import type { DecisionSite } from "../../core/defaults.js";
-import type { TokenSplit } from "../turn-control/index.js";
+import type { TokenSplit } from "../../core/token-split.js";
 import { inspectDecisionSite, type ResolveDeciderInput } from "./decision-sites.js";
 import type { Decider } from "./decisions.js";
 import type { DecisionAnswer, DecisionQuestion } from "./types/inference.js";

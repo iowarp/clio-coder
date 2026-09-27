@@ -14,7 +14,7 @@
  */
 
 import type { PrecomputedRanking } from "../../core/precomputed-rank.js";
-import type { TokenSplit } from "../turn-control/index.js";
+import type { TokenSplit } from "../../core/token-split.js";
 import type { ResolveDeciderInput } from "./decision-sites.js";
 import {
 	createPreTurnBriefStore,
