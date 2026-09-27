@@ -22,7 +22,7 @@ function row(
 	} = {},
 ): string[] {
 	const theme = clioTheme();
-	const prefix = `${padAnsi(theme.fg("dim", label), LABEL_WIDTH)} `;
+	const prefix = `${padAnsi(theme.fg("fieldName", label), LABEL_WIDTH)} `;
 	const prefixWidth = visibleWidth(prefix);
 	const available = Math.max(8, width - prefixWidth);
 	const values: string[] = [];
@@ -39,7 +39,7 @@ function row(
 	}
 	if (current.length > 0) values.push(current);
 	if (values.length === 0) return [prefix.trimEnd()];
-	const valueStyle = options.valueStyle ?? ((text: string) => theme.fg("muted", text));
+	const valueStyle = options.valueStyle ?? ((text: string) => theme.fg("fieldValue", text));
 	// The label names the field once. Repeating it on every wrapped line read as
 	// two rows of the same field, which a long description made routine.
 	return values.map((text, index) => {
@@ -55,7 +55,7 @@ export function formatKeybindingDetailBodyLines(entry: KeybindingDetailEntry, co
 	lines.push(...row("Action", entry.action, contentWidth));
 	lines.push(...row("Id", entry.id, contentWidth));
 	lines.push(
-		...row("Keys", entry.keys, contentWidth, { valueStyle: (text) => theme.style("accent", text, { bold: true }) }),
+		...row("Keys", entry.keys, contentWidth, { valueStyle: (text) => theme.style("decisionKey", text, { bold: true }) }),
 	);
 	lines.push(...row("Source", entry.source ?? "static", contentWidth));
 	lines.push("");

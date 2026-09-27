@@ -57,7 +57,7 @@ function quickHelpRows(width: number, bindings: QuickHelpKeys): string[] {
 	const column = (rows: ReadonlyArray<QuickHelpRow>, cells: number): string[] => {
 		const keyWidth = Math.min(16, Math.max(0, ...rows.map((row) => row.key.length)));
 		return rows.map((row) =>
-			fitUnits(theme, `${theme.style("accent", padAnsi(row.key, keyWidth), { bold: true })}  `, [row.verb], cells),
+			fitUnits(theme, `${theme.style("guidance", padAnsi(row.key, keyWidth), { bold: true })}  `, [row.verb], cells),
 		);
 	};
 	if (width < 84) return [...column(COMPOSER_ROWS, width), "", ...column(actionRows, width)];

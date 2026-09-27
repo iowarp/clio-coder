@@ -84,7 +84,7 @@ function buildSelectPresentation(items: ReadonlyArray<SelectItem>): {
 				const spacing = " ".repeat(Math.max(1, labelWidth + 2 - visibleWidth(fittedLabel)));
 				const descWidth = Math.max(1, maxWidth - visibleWidth(fittedLabel) - visibleWidth(spacing));
 				const fittedDescription = truncateToWidth(description, descWidth, GLYPH.ellipsis, true);
-				return `${fittedLabel}${theme.fg("muted", `${spacing}${fittedDescription}`)}`;
+				return `${fittedLabel}${theme.fg("menuDescription", `${spacing}${fittedDescription}`)}`;
 			},
 		},
 	};
@@ -99,7 +99,7 @@ function describedSelect(list: SelectList, choices: ReadonlyArray<SelectItem>): 
 			if (!description) return rows;
 			const indent = "  ";
 			const wrapped = wrapTextWithAnsi(
-				clioTheme().fg("muted", singleLine(description)),
+				clioTheme().fg("menuDescription", singleLine(description)),
 				Math.max(1, width - visibleWidth(indent)),
 			).map((line) => `${indent}${line}`);
 			return [...rows, ...wrapped];

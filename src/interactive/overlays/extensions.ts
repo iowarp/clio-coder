@@ -25,7 +25,7 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 		if (state === "eligible") {
 			meta = clioTheme().fg("success", meta);
 		} else if (state === "disabled") {
-			meta = clioTheme().fg("dim", "disabled");
+			meta = clioTheme().fg("disabledOption", "disabled");
 		} else {
 			meta = clioTheme().fg("warning", state);
 		}

@@ -56,17 +56,17 @@ function formatTaskBoardIslandLines(board: TaskBoardSnapshot): string[] {
 		...(counts.active > 0 ? [`${counts.active} active`] : []),
 		...(counts.blocked > 0 ? [`${counts.blocked} blocked`] : []),
 	].join(" · ");
-	const body = [theme.fg("accent", board.title), theme.fg("dim", chips)];
+	const body = [theme.fg("sectionHeading", board.title), theme.fg("annotation", chips)];
 	if (next) {
-		const glyph = active ? theme.fg("accent", GLYPH.running) : theme.fg("dim", GLYPH.queued);
-		body.push(`${glyph} ${theme.fg("dim", next.id)} ${theme.fg("muted", next.title)}`);
+		const glyph = active ? theme.fg("activity", GLYPH.running) : theme.fg("annotation", GLYPH.queued);
+		body.push(`${glyph} ${theme.fg("annotation", next.id)} ${theme.fg("body", next.title)}`);
 	}
 	return frame(
 		theme,
 		"Tasks",
 		[
 			...body.flatMap((line) => wrapTextWithAnsi(line, TASK_ISLAND_WIDTH)).slice(0, 7),
-			theme.fg("dim", "/tasks · full task board"),
+			theme.fg("commandHint", "/tasks · full task board"),
 		],
 		TASK_ISLAND_WIDTH + 4,
 	);
@@ -158,12 +158,11 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 
 	const startDispatchBoardTicker = (): void => {
 		stopDispatchBoardTicker();
-		// The board component renders statelessly, so keeping spinners and
-		// elapsed times moving only needs a repaint request.
+		// The board renders statelessly; update its elapsed times once a second.
 		dispatchBoardTicker = scheduleInterval(() => {
 			if (deps.getOverlayState() !== "dispatch-board") return;
 			deps.tui.requestRender();
-		}, 250);
+		}, 1_000);
 		// Process liveness belongs to the application controller's keepAlive
 		// interval alone. A repaint ticker that also holds the loop keeps the
 		// process alive for as long as the board is open.
@@ -185,7 +184,7 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 			if (!deps.contextActivityStore.active() && !contextIslandVisible && !fleetActive && !taskNeedsRender) return;
 			renderContextIsland();
 			deps.tui.requestRender();
-		}, 250);
+		}, 1_000);
 		contextIslandTicker.unref?.();
 	};
 

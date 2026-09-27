@@ -59,6 +59,7 @@ export interface FooterDashboardDeps {
 	getAgentStatus?: () => AgentStatus;
 	getTerminalColumns?: () => number;
 	getTerminalRows?: () => number;
+	onHeightChange?: (rows: number) => void;
 	getSessionTokens?: () => UsageBreakdown;
 	getTokenThroughput?: () => TokenThroughputSnapshot | null;
 	getSessionCost?: () => CostAggregate;
@@ -174,16 +175,21 @@ function workspaceFacts(deps: FooterDashboardDeps, branchSlot: string | null): W
  */
 class FooterText extends Text {
 	private composedWidth: number | null = null;
+	private composedRows: number | null = null;
 	private composedText = "";
 	private readonly compose: (width: number) => string;
 
-	constructor(compose: (width: number) => string) {
+	constructor(
+		compose: (width: number) => string,
+		private readonly getRows: () => number,
+	) {
 		super("", 0, 0);
 		this.compose = compose;
 	}
 
 	composeAt(width: number): void {
 		this.composedWidth = width;
+		this.composedRows = this.getRows();
 		const text = this.compose(width);
 		if (text === this.composedText) return;
 		this.composedText = text;
@@ -191,13 +197,14 @@ class FooterText extends Text {
 	}
 
 	override render(width: number): string[] {
-		if (width !== this.composedWidth) this.composeAt(width);
+		if (width !== this.composedWidth || this.getRows() !== this.composedRows) this.composeAt(width);
 		return super.render(width);
 	}
 }
 
 export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboardPanel {
-	const view = new FooterText((width) => composeFooter(width));
+	const terminalRows = () => deps.getTerminalRows?.() ?? process.stdout.rows ?? 40;
+	const view = new FooterText((width) => composeFooter(width), terminalRows);
 	const demoHints = createDemoHints();
 	let branchSlot: string | null = null;
 	let dashboardMode: FooterDashboardMode = "compact";
@@ -244,6 +251,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			workspace: workspaceFacts(deps, branchSlot),
 			session: {
 				target,
+				autonomy: settings?.safety.autonomy ?? "default",
 				targetId: settings?.chat?.target ?? null,
 				modelId: settings?.chat?.model ?? null,
 				leaderArmed: deps.getLeaderArmed?.() ?? false,
@@ -333,37 +341,37 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	function composeFooter(width: number): string {
 		const current = state(width);
 		const lifecycleHint = deps.getLifecycleHint?.();
-		const lifecycleLine = lifecycleHint ? [fitDashboardLine(clioTheme().fg("dim", lifecycleHint), width)] : [];
+		const lifecycleLine = lifecycleHint ? [fitDashboardLine(clioTheme().fg("annotation", lifecycleHint), width)] : [];
 		const notices =
 			dashboardMode === "compact"
 				? []
-				: formatNotificationPanel(
-						current.notices,
-						width,
-						deps.dismissKeyLabel ? { dismissKeyLabel: deps.dismissKeyLabel } : {},
-					);
+				: formatNotificationPanel(current.notices, width, {
+						maxRows: 1,
+						...(deps.dismissKeyLabel ? { dismissKeyLabel: deps.dismissKeyLabel } : {}),
+					}).slice(1);
 		const contributed = deps.getExtensionStatus?.() ?? [];
 		const extensionLine =
 			dashboardMode === "expanded" && contributed.length
 				? [fitDashboardLine(`Extensions: ${contributed.join(" | ")}`, width)]
 				: [];
+		// Keep the highest-priority notice readable in full; the dismiss hint exposes the next.
+		const supplementary = [...extensionLine, ...lifecycleLine, ...notices];
 		const grid =
 			dashboardMode === "expanded"
 				? renderDashboardPage(
 						current,
 						page,
 						width,
-						(deps.getTerminalRows?.() ?? process.stdout.rows ?? 40) -
-							notices.length -
-							extensionLine.length -
-							lifecycleLine.length,
+						terminalRows() - supplementary.length,
 						getKeybindings()
 							.getKeys("clio-coder.status.toggle")
 							.map((key) => formatKeyLabel(key))
 							.join(" / "),
 					)
 				: renderCompactDashboard(current, width);
-		return [...grid, ...extensionLine, ...lifecycleLine, ...notices].join("\n");
+		const lines = [...grid, ...supplementary];
+		deps.onHeightChange?.(Math.max(2, lines.length));
+		return lines.join("\n");
 	}
 	const refresh = (): void => {
 		if (disposed) return;

@@ -82,7 +82,7 @@ function styleLine(line: string, prefix: ParsedDiffLine["prefix"] | null, color:
 	if (!color) return line;
 	if (prefix === "-") return theme.fg("error", line);
 	if (prefix === "+") return theme.fg("success", line);
-	return theme.fg("dim", line);
+	return theme.fg("toolMetadata", line);
 }
 
 /** Narrower than this, a hanging diff row would leave too little room for its content. */

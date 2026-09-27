@@ -8,6 +8,7 @@ export function clioTheme(): ClioTheme {
 }
 
 export * from "./components.js";
+export * from "./functions.js";
 export * from "./glyphs.js";
 export * from "./labels.js";
 export * from "./rules.js";

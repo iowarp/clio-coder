@@ -169,7 +169,7 @@ class BootSubmissionPanel implements Component {
 			const oneLine = record.rawText.replace(/\s+/gu, " ").trim();
 			const room = Math.max(0, width - 11);
 			const preview = oneLine.length > room ? `${oneLine.slice(0, Math.max(0, room - 1))}…` : oneLine;
-			return `${theme.fg("action", `${GLYPH.queued} queued`)} ${theme.fg("muted", preview)}`;
+			return `${theme.fg("attention", `${GLYPH.queued} queued`)} ${theme.fg("body", preview)}`;
 		});
 	}
 
@@ -242,6 +242,9 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 	const editorChromeProxy: Required<Omit<EditorChrome, "getAnimationTime">> = {
 		getModelLabel: () => editorChrome.getModelLabel(),
 		getThinkingLabel: () => editorChrome.getThinkingLabel(),
+		getThinking: () => editorChrome.getThinking?.() ?? { label: editorChrome.getThinkingLabel(), hasLevels: false },
+		getHarnessStatus: (width) => editorChrome.getHarnessStatus?.(width) ?? null,
+		getContextUsage: () => editorChrome.getContextUsage?.(),
 		getOutputStyle: () => editorChrome.getOutputStyle?.() ?? settings.interface.outputDetail,
 		getAutonomy: () => editorChrome.getAutonomy?.() ?? settings.safety.autonomy,
 		isStreaming: () => editorChrome.isStreaming?.() ?? false,

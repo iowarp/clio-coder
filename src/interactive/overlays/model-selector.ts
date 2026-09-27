@@ -101,7 +101,7 @@ function healthToken(status: TargetStatus): ClioToken {
 		case "down":
 			return "error";
 		default:
-			return "dim";
+			return "annotation";
 	}
 }
 
@@ -530,9 +530,9 @@ function fitCell(text: string, width: number, align: "left" | "right" = "left", 
 // default remain words in the selected row's detail instead of run-origin marks.
 function activeMark(row: ModelRow): string {
 	const theme = clioTheme();
-	if (row.active) return theme.fg("accent", GLYPH.ok);
-	if (row.favorite) return theme.fg("dim", GLYPH.favorite);
-	if (row.recent) return theme.fg("dim", GLYPH.recent);
+	if (row.active) return theme.fg("selectedOption", GLYPH.ok);
+	if (row.favorite) return theme.fg("annotation", GLYPH.favorite);
+	if (row.recent) return theme.fg("annotation", GLYPH.recent);
 	return " ";
 }
 
@@ -546,28 +546,28 @@ function formatModelHeader(width: number): string {
 	if (columns.showTarget) line += ` ${fitCell("target", columns.targetWidth)}`;
 	if (columns.showRuntime) line += ` ${fitCell("runtime", columns.runtimeWidth)}`;
 	// Table headers render dim per the design-system table recipe (section 4.6).
-	return clioTheme().fg("dim", fitCell(line, width));
+	return clioTheme().fg("annotation", fitCell(line, width));
 }
 
 function formatModelRow(row: ModelRow, width: number, selected: boolean): string {
 	const theme = clioTheme();
 	const columns = modelColumns(width);
 	// Selection points with the accent cursor and bolds the model id. The target
-	// cell carries health color while the remaining cells stay muted.
+	// identity stays neutral; health text in the detail row carries the state.
 	// The whole line is never recolored, so a cell's own reset can never clip the
 	// selection highlight.
-	const pointer = selected ? theme.fg("accent", GLYPH.cursor) : " ";
+	const pointer = selected ? theme.fg("selectedOption", GLYPH.cursor) : " ";
 	const prefix = `${pointer} ${activeMark(row)} `;
 	const modelLabel = row.model.length > 0 ? row.model : "(no model ids)";
 	const modelCell = fitModelCell(modelLabel, columns.modelWidth);
-	const model = selected ? theme.style("accent", modelCell, { bold: true }) : theme.fg("muted", modelCell);
+	const model = theme.fg("menuOption", modelCell, selected ? "selected" : row.selectable ? "normal" : "disabled");
 	let line =
 		prefix +
 		model +
-		`${theme.fg("muted", fitCell(row.context, CONTEXT_COL_WIDTH, "right"))} ` +
-		theme.fg("muted", fitCell(row.badges, CAPS_COL_WIDTH));
-	if (columns.showTarget) line += ` ${theme.fg(row.healthToken, fitCell(row.target, columns.targetWidth))}`;
-	if (columns.showRuntime) line += ` ${theme.fg("dim", fitCell(row.runtimeShortName, columns.runtimeWidth))}`;
+		`${theme.fg(row.context === "-" || row.context === "?" ? "unknownValue" : "counter", fitCell(row.context, CONTEXT_COL_WIDTH, "right"))} ` +
+		theme.fg("menuDescription", fitCell(row.badges, CAPS_COL_WIDTH));
+	if (columns.showTarget) line += ` ${theme.fg("modelIdentity", fitCell(row.target, columns.targetWidth))}`;
+	if (columns.showRuntime) line += ` ${theme.fg("annotation", fitCell(row.runtimeShortName, columns.runtimeWidth))}`;
 	return fitCell(line, width);
 }
 
@@ -616,10 +616,13 @@ function formatModelDetail(row: ModelRow, width: number): string[] {
 	// The detail block is quiet scaffolding beneath the selected row; only the
 	// diagnostics carry a semantic token, so the two fact lines render dim.
 	return [
-		...wrapTextWithAnsi(theme.fg("dim", `${state} ${ref} · ${availability} · auth ${row.authText}`), width),
+		...wrapTextWithAnsi(
+			`${theme.fg("annotation", `${state} ${ref} · `)}${theme.fg(row.healthToken, availability)}${theme.fg("annotation", ` · auth ${row.authText}`)}`,
+			width,
+		),
 		...wrapTextWithAnsi(
 			theme.fg(
-				"dim",
+				"annotation",
 				`source ${row.sourceNote ?? sourceLabel(row.source)}${loadState} · ${row.runtimeName} · ${row.apiFamily} · max output ${row.maxTokens} · thinking ${row.thinking ?? "-"} · streaming ${row.streaming === false ? "no" : "yes"} · image input ${acceptsImageInput({ vision: row.caps.vision }) ? "yes" : "no"} · ${capabilityNames(row.caps)}`,
 			),
 			width,
@@ -715,7 +718,7 @@ function renderModelOverlayLines(input: {
 	// render dim; only the table rows and status rails carry brighter tokens.
 	const lines = [
 		theme.fg(
-			"dim",
+			"annotation",
 			fitCell(
 				`${modeLabel} · ${selectableFiltered}/${input.summary.totalModels} models · ${input.summary.targets} targets · ${input.summary.localModels} local  ${input.summary.cloudModels} cloud`,
 				width,
@@ -724,20 +727,22 @@ function renderModelOverlayLines(input: {
 			),
 		),
 		...wrapTextWithAnsi(
-			theme.fg("dim", `current ${active} · focus shows current, favorites, recent, and target defaults`),
+			theme.fg("annotation", `current ${active} · focus shows current, favorites, recent, and target defaults`),
 			width,
 		),
 	];
 	const refreshLine = refreshStatusLine(input.refreshing, input.refreshError);
 	if (refreshLine)
-		lines.push(...wrapTextWithAnsi(input.refreshError ? clioError(refreshLine) : theme.fg("dim", refreshLine), width));
+		lines.push(
+			...wrapTextWithAnsi(input.refreshError ? clioError(refreshLine) : theme.fg("annotation", refreshLine), width),
+		);
 	if (input.selectionError) lines.push(...wrapTextWithAnsi(clioError(input.selectionError), width));
 	lines.push(formatModelHeader(width));
 	if (filtered.length === 0) {
 		lines.push(
 			...wrapTextWithAnsi(
 				theme.fg(
-					"muted",
+					"menuDescription",
 					searching ? "  no models match the current filter" : "  no focused models; type to search or press Tab for all",
 				),
 				width,
@@ -751,12 +756,12 @@ function renderModelOverlayLines(input: {
 			lines.push(formatModelRow(row, width, start + i === selectedIndex));
 		}
 		if (filtered.length > VISIBLE_ROWS) {
-			lines.push(theme.fg("dim", fitCell(`  (${selectedIndex + 1}/${filtered.length})`, width)));
+			lines.push(theme.fg("positionCount", fitCell(`  (${selectedIndex + 1}/${filtered.length})`, width)));
 		}
 	}
 	lines.push("");
 	if (selected) lines.push(...formatModelDetail(selected, width));
-	else lines.push(theme.fg("muted", fitCell("no selected model", width)), "");
+	else lines.push(theme.fg("menuDescription", fitCell("no selected model", width)), "");
 	return lines.map((line) => fitCell(line, width));
 }
 

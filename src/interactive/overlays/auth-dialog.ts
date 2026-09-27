@@ -18,7 +18,7 @@ export interface AuthDialogHandle {
 
 function keyCell(label: string): string {
 	const theme = clioTheme();
-	const key = theme.fg("dim", label);
+	const key = theme.fg("fieldName", label);
 	const width = visibleWidth(label);
 	return `${key}${" ".repeat(Math.max(0, KEY_WIDTH - width))}`;
 }
@@ -34,9 +34,10 @@ function formatAuthChoiceLine(line: string): string | null {
 	const markerText = match.groups.marker ?? " ";
 	const indexText = match.groups.index ?? "";
 	const labelText = match.groups.label ?? "";
-	const marker = markerText === "*" ? theme.fg("accent", GLYPH.cursor) : " ";
-	const index = theme.fg("dim", `${indexText}.`);
-	const label = markerText === "*" ? theme.style("accent", labelText, { bold: true }) : theme.fg("muted", labelText);
+	const marker = markerText === "*" ? theme.fg("selectedOption", GLYPH.cursor) : " ";
+	const index = theme.fg("annotation", `${indexText}.`);
+	const label =
+		markerText === "*" ? theme.style("selectedOption", labelText, { bold: true }) : theme.fg("menuOption", labelText);
 	return `${marker} ${index} ${label}`;
 }
 
@@ -60,11 +61,11 @@ function formatAuthBodyLine(line: string): string {
 		const key = normalized.slice(0, colonIndex);
 		const value = normalized.slice(colonIndex + 1).trimStart();
 		if (/^[A-Za-z][A-Za-z ]*$/.test(key)) {
-			return `${keyCell(key)} ${theme.fg("muted", value)}`;
+			return `${keyCell(key)} ${theme.fg("fieldValue", value)}`;
 		}
 	}
 
-	return theme.fg("muted", normalized);
+	return theme.fg("body", normalized);
 }
 
 function renderInputWithDesignCursor(input: Input, width: number): string[] {
@@ -72,7 +73,13 @@ function renderInputWithDesignCursor(input: Input, width: number): string[] {
 	return input
 		.render(width)
 		.map((line) =>
-			fitRow(line.startsWith("> ") ? `${theme.fg("accent", `${GLYPH.cursor} `)}${line.slice(2)}` : line, width),
+			fitRow(
+				theme.base(
+					"inputText",
+					line.startsWith("> ") ? `${theme.fg("selectedOption", `${GLYPH.cursor} `)}${line.slice(2)}` : line,
+				),
+				width,
+			),
 		);
 }
 
@@ -140,7 +147,7 @@ function createAuthDialogController(
 		bodyView.setText(lines.map(formatAuthBodyLine).join("\n"));
 		box.addChild(bodyView);
 		if (promptLabel) {
-			promptView.setText(clioTheme().fg("dim", normalizeAuthLine(promptLabel)));
+			promptView.setText(clioTheme().fg("inputPlaceholder", normalizeAuthLine(promptLabel)));
 			currentHint = buildHint([{ key: "Enter", verb: "submit" }]);
 			box.addChild(promptView);
 			box.addChild(inputView);

@@ -17,18 +17,18 @@ import { clioTheme, GLYPH } from "./theme/index.js";
  * context tokens below.
  */
 export const CONTEXT_CATEGORY_TOKEN: Readonly<Record<ContextLedgerCategory, ClioToken>> = {
-	system: "info",
-	tools: "tool",
-	toolResults: "title",
-	agents: "agent",
-	skills: "reason",
-	memory: "accentDeep",
-	project: "muted",
-	messages: "accent",
-	pending: "accent",
-	reserve: "frame",
-	free: "frame",
-	streaming: "accent",
+	system: "meterSystem",
+	tools: "meterTools",
+	toolResults: "meterResults",
+	agents: "meterAgents",
+	skills: "meterSkills",
+	memory: "meterMemory",
+	project: "meterProject",
+	messages: "meterConversation",
+	pending: "meterConversation",
+	reserve: "meterReserve",
+	free: "meterFree",
+	streaming: "meterConversation",
 };
 
 function contextCategoryGlyph(category: ContextLedgerCategory): string {
@@ -148,7 +148,7 @@ export function renderContextMeterBar(ledger: ContextLedger, cells: number, them
 	const width = Math.max(0, Math.floor(cells));
 	if (width === 0) return "";
 	if (ledger.contextWindow <= 0) {
-		return theme.fg("dim", contextCategoryGlyph("free").repeat(width));
+		return theme.fg("meterFree", contextCategoryGlyph("free").repeat(width));
 	}
 	const allocation = allocateMeterCells(ledger.meter, ledger.contextWindow, width);
 	return paintCells(theme, flattenAllocation(allocation, width));
@@ -164,7 +164,7 @@ export function renderContextMeterGrid(
 	const columns = Math.max(1, Math.floor(cols));
 	const rowCount = Math.max(1, Math.floor(rows));
 	if (ledger.contextWindow <= 0) {
-		return [theme.fg("dim", contextCategoryGlyph("free").repeat(columns))];
+		return [theme.fg("meterFree", contextCategoryGlyph("free").repeat(columns))];
 	}
 	const totalCells = columns * rowCount;
 	const allocation = allocateMeterCells(ledger.meter, ledger.contextWindow, totalCells, { ensureVisible: true });
@@ -183,7 +183,7 @@ export function renderContextMeterGrid(
  */
 export function renderEvictedTokensLine(evictedTokens: number, theme: ClioTheme = clioTheme()): string {
 	const tokens = Math.round(Math.max(0, evictedTokens)).toLocaleString("en-US");
-	return `${theme.fg("dim", GLYPH.contextReserve)} ${theme.fg("muted", "evicted (outside window)")} ${theme.fg("dim", `${tokens} tokens`)}`;
+	return `${theme.fg("annotation", GLYPH.contextReserve)} ${theme.fg("body", "evicted (outside window)")} ${theme.fg("annotation", `${tokens} tokens`)}`;
 }
 
 /** A small colored swatch for a category, for inline legends. */
@@ -216,7 +216,14 @@ function workerContextSeverity(pct: number): WorkerContextSeverity {
 function workerContextToken(severity: WorkerContextSeverity): ClioToken {
 	if (severity === "critical") return "error";
 	if (severity === "warn") return "warning";
-	return "muted";
+	return "counter";
+}
+
+/** Shared percentage semantics; unknown usage remains neutral on every surface. */
+export function contextPercentRole(percent: number | null): ClioToken {
+	return percent === null || !Number.isFinite(percent)
+		? "unknownValue"
+		: workerContextToken(workerContextSeverity(percent));
 }
 
 export interface WorkerContextView {

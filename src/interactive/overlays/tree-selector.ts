@@ -73,8 +73,8 @@ function clampPreview(text: string, max: number): string {
  */
 function bracketNotice(theme: ClioTheme, text: string): string {
 	const close = text.indexOf("] ");
-	if (close < 0) return theme.fg("muted", text);
-	return `${theme.fg("dim", text.slice(0, close + 1))}${theme.fg("muted", text.slice(close + 1))}`;
+	if (close < 0) return theme.fg("menuDescription", text);
+	return `${theme.fg("annotation", text.slice(0, close + 1))}${theme.fg("menuDescription", text.slice(close + 1))}`;
 }
 
 /**
@@ -117,7 +117,7 @@ function forkParentLine(snapshot: TreeSnapshot, theme: ClioTheme): string | null
 	if (typeof parentSessionId !== "string" || parentSessionId.length === 0) return null;
 	const parentTurnId = snapshot.meta.parentTurnId;
 	const at = typeof parentTurnId === "string" && parentTurnId.length > 0 ? ` at ${shortTurnId(parentTurnId)}` : "";
-	return `${theme.fg("dim", "↰ forked from ")}${theme.fg("muted", `${parentSessionId}${at}`)}${theme.fg("dim", " · /resume it to reach the turns left behind")}`;
+	return `${theme.fg("annotation", "↰ forked from ")}${theme.fg("menuDescription", `${parentSessionId}${at}`)}${theme.fg("annotation", " · /resume it to reach the turns left behind")}`;
 }
 
 function isLeaf(node: TreeSnapshotNode): boolean {
@@ -193,18 +193,20 @@ function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; width: num
 	// id and preview are content and render muted; the optional label reads as a
 	// dim key with a muted value. The active tip's glyph renders in accent so it
 	// stands out against every other row.
-	const glyphStyled = row.isActiveTip ? theme.fg("accent", glyph) : theme.fg("dim", glyph);
-	const styledPrefix = `${indent}${glyphStyled}${theme.fg("dim", ` ${row.node.kind.padEnd(12)}`)} ${theme.fg("muted", turnId)}  `;
-	const styledLabel = labelText ? `${theme.fg("dim", " · label:")}${theme.fg("muted", `"${row.node.label}"`)}` : "";
-	const styledInert = inertText ? theme.fg("dim", inertText) : "";
-	const main = `${styledPrefix}${opts.focused ? selectionLabel(true, preview) : theme.fg("muted", preview)}${styledLabel}${styledInert}`;
+	const glyphStyled = row.isActiveTip ? theme.fg("selectedOption", glyph) : theme.fg("annotation", glyph);
+	const styledPrefix = `${indent}${glyphStyled}${theme.fg("annotation", ` ${row.node.kind.padEnd(12)}`)} ${theme.fg("menuDescription", turnId)}  `;
+	const styledLabel = labelText
+		? `${theme.fg("annotation", " · label:")}${theme.fg("menuDescription", `"${row.node.label}"`)}`
+		: "";
+	const styledInert = inertText ? theme.fg("annotation", inertText) : "";
+	const main = `${styledPrefix}${opts.focused ? selectionLabel(true, preview) : theme.fg("menuOption", preview)}${styledLabel}${styledInert}`;
 	if (!opts.showTimestamps) return truncateToWidth(main, opts.width, "", true);
 	const ts = `${dateLocal(row.node.at)} ${clockLocal(row.node.at)}`;
 	if (opts.width < ts.length + 12) return truncateToWidth(main, opts.width, "", true);
 	const budget = Math.max(1, opts.width - ts.length - 2);
 	const primary = truncateToWidth(main, budget, "", true);
 	const pad = " ".repeat(Math.max(1, opts.width - visibleWidth(primary) - ts.length));
-	return `${primary}${pad}${theme.fg("dim", ts)}`;
+	return `${primary}${pad}${theme.fg("annotation", ts)}`;
 }
 
 /** @internal */
@@ -289,7 +291,7 @@ export class TreeOverlayView implements Component {
 			// tree means no turns yet, not a missing session list.
 			lines.push(
 				theme.fg(
-					"muted",
+					"menuDescription",
 					this.currentCwdOnly && this.snapshot && Object.keys(this.snapshot.nodesById).length > 0
 						? "(no turns match the current cwd; press p to show all)"
 						: "(no turns in this session yet)",

@@ -32,7 +32,7 @@ const MARKS: Readonly<Record<NoticeMark, { glyph: string; token: ClioToken }>> =
 	retry: { glyph: GLYPH.phaseRetry, token: "warning" },
 	// An operator cancel is not a warning; the footer settles the same turn as
 	// `⊘ cancelled`, so its closing row matches (BT-013).
-	cancelled: { glyph: GLYPH.cancelled, token: "dim" },
+	cancelled: { glyph: GLYPH.cancelled, token: "toolMetadata" },
 };
 
 /** A leading bracketed tag in `dim`, the message in `muted`; untagged text passes unchanged. */
@@ -41,8 +41,8 @@ function styleTaggedNotice(line: string): string {
 	if (!match) return line;
 	const tag = match[1] ?? "";
 	const body = match[2] ?? "";
-	const styledTag = theme.fg(tag === "[retry]" ? "warning" : "dim", tag);
-	return body.length > 0 ? `${styledTag}${theme.fg("muted", body)}` : styledTag;
+	const styledTag = theme.fg(tag === "[retry]" ? "warning" : "toolMetadata", tag);
+	return body.length > 0 ? `${styledTag}${theme.fg("body", body)}` : styledTag;
 }
 
 /** The notice as the operator reads it: one line, without the product tag. */
@@ -59,7 +59,7 @@ export function renderNoticeRow(text: string, mark: NoticeMark, width: number): 
 	if (body.length === 0) return [];
 	const { glyph, token } = MARKS[mark];
 	const tagged = LEADING_TAG.exec(body);
-	const styled = tagged ? styleTaggedNotice(body) : theme.fg("muted", body);
+	const styled = tagged ? styleTaggedNotice(body) : theme.fg("body", body);
 	const inner = Math.max(1, width - 2);
 	const rows = visibleWidth(styled) <= inner ? [styled] : wrapTextWithAnsi(styled, inner);
 	return rows.map((row, index) => (index === 0 ? `${theme.fg(token, glyph)} ${row}` : `  ${row}`));

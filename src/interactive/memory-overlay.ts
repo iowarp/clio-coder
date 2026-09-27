@@ -33,18 +33,18 @@ function formatMemoryStatusLine(status: TaskMemoryOperatorStatus, contentWidth: 
 	const theme = clioTheme();
 	const width = Math.max(1, Math.floor(contentWidth));
 	const units = [
-		theme.fg(status.enabled ? "success" : "dim", `memory ${status.enabled ? "on" : "off"}`),
-		theme.fg(status.tier === "llm" ? "reason" : "muted", `tier ${status.tier === "llm" ? "LLM" : "rules"}`),
-		theme.fg("muted", `bank ${status.size}`),
-		theme.fg("muted", `last ${status.lastDecision ?? "none"}`),
+		theme.fg(status.enabled ? "success" : "annotation", `memory ${status.enabled ? "on" : "off"}`),
+		theme.fg("fieldValue", `tier ${status.tier === "llm" ? "LLM" : "rules"}`),
+		theme.fg("counter", `bank ${status.size}`),
+		theme.fg("fieldValue", `last ${status.lastDecision ?? "none"}`),
 	];
-	if (status.stepInFlight) units.push(theme.fg("reason", "step running"));
+	if (status.stepInFlight) units.push(theme.fg("activity", "step running"));
 	// Lifetime cost of the background plane, beside the state of the current
 	// session. The tier spent 137,205 tokens over 14 days on the operator's own
 	// machine before any surface said so (#229), and a hit rate is the one figure
 	// that says whether that spend is buying anything.
 	const spend = status.spend === null || status.spend === undefined ? "" : formatTaskMemorySpend(status.spend);
-	if (spend.length > 0) units.push(theme.fg("dim", spend));
+	if (spend.length > 0) units.push(theme.fg("annotation", spend));
 	return fitUnits(theme, "", units, width);
 }
 
@@ -65,7 +65,7 @@ function lessonItems(records: ReadonlyArray<MemoryRecord>, group: string): ListO
 	return records.map((record) => ({
 		id: `lesson:${record.id}`,
 		label: firstLine(record.lesson),
-		meta: theme.fg("dim", `${record.scope}:${record.key}`),
+		meta: theme.fg("annotation", `${record.scope}:${record.key}`),
 		group,
 		detail: () => [
 			`# ${record.id}`,
@@ -88,7 +88,7 @@ function bankItems(entries: ReadonlyArray<TaskMemoryEntry>, group: string): List
 	return entries.map((entry) => ({
 		id: `bank:${entry.id}`,
 		label: firstLine(entry.content),
-		meta: theme.fg("dim", `${entryClassLabel(entry)} · injected ${entry.injectionCount}`),
+		meta: theme.fg("annotation", `${entryClassLabel(entry)} · injected ${entry.injectionCount}`),
 		group,
 		detail: () => [
 			`# ${entry.id}`,
@@ -120,11 +120,11 @@ function activityItems(events: ReadonlyArray<TaskMemoryActivityEvent>, group: st
 	const theme = clioTheme();
 	return events.map((event, index) => ({
 		id: `step:${index}:${event.at}`,
-		label: `${theme.fg("dim", rowClock(event.at))} ${theme.fg(
+		label: `${theme.fg("annotation", rowClock(event.at))} ${theme.fg(
 			decisionToken(event.decision),
 			describeTaskMemoryActivity(event),
 		)}`,
-		meta: theme.fg("dim", `${event.tier} ${Math.round(event.latencyMs)}ms`),
+		meta: theme.fg("annotation", `${event.tier} ${Math.round(event.latencyMs)}ms`),
 		group,
 		detail: () => [
 			`# ${event.at}`,
@@ -158,9 +158,9 @@ function buildMemoryOverlayItems(
 	];
 }
 
-function decisionToken(decision: TaskMemoryTelemetryDecision): "success" | "warning" | "muted" {
+function decisionToken(decision: TaskMemoryTelemetryDecision): "success" | "warning" | "annotation" {
 	if (decision === "injected") return "success";
-	return decision === "silent" ? "muted" : "warning";
+	return decision === "silent" ? "annotation" : "warning";
 }
 
 /**
@@ -200,7 +200,7 @@ export class MemoryOverlayView implements Component {
 	private signature: string | null = null;
 	private renderMemo: { width: number; status: string; listLines: string[]; lines: string[] } | null = null;
 	private pendingGlobalEntryId: string | null = null;
-	private promotionMessage: { token: "muted" | "warning" | "success" | "error"; text: string } | null = null;
+	private promotionMessage: { token: "activity" | "warning" | "success" | "error"; text: string } | null = null;
 	private promotionInFlight = false;
 
 	constructor(
@@ -308,7 +308,7 @@ export class MemoryOverlayView implements Component {
 		}
 		this.pendingGlobalEntryId = null;
 		this.promotionInFlight = true;
-		this.promotionMessage = { token: "muted", text: `proposing ${entry.id} with ${scope} scope` };
+		this.promotionMessage = { token: "activity", text: `proposing ${entry.id} with ${scope} scope` };
 		this.invalidate();
 		onChange();
 		void this.promotion

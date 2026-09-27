@@ -62,7 +62,7 @@ export interface ListOverlayTab {
 
 export interface ListOverlayOptions {
 	title: string;
-	/** Opt-in terminal-sized layout; ordinary list modals retain their compact size. */
+	/** Allow long lists to use the full body budget; the outer frame keeps a fixed height. */
 	fullScreen?: boolean;
 	items: ReadonlyArray<ListOverlayItem>;
 	/**
@@ -273,10 +273,10 @@ export class ListOverlayView implements Component {
 		const parts = tabs.map((tab) => {
 			const text = `${tab.label} ${this.tabCounts.get(tab.id) ?? 0}`;
 			return tab.id === this.activeTabId
-				? theme.style("accent", `${GLYPH.cursor} ${text}`, { bold: true })
-				: theme.fg("dim", `  ${text}`);
+				? theme.style("selectedOption", `${GLYPH.cursor} ${text}`, { bold: true })
+				: theme.fg("menuOption", `  ${text}`);
 		});
-		const full = parts.join(theme.fg("frame", " │ "));
+		const full = parts.join(theme.fg("border", " │ "));
 		if (visibleWidth(full) > width) {
 			const active = this.activeTab();
 			if (active) {
@@ -284,7 +284,7 @@ export class ListOverlayView implements Component {
 				return [
 					this.padLine(
 						theme.fg(
-							"accent",
+							"selectedOption",
 							`${GLYPH.cursor} ${active.label} ${this.tabCounts.get(active.id) ?? 0} · ${position}/${tabs.length} ←→`,
 						),
 						width,
@@ -454,12 +454,7 @@ export class ListOverlayView implements Component {
 		return line + " ".repeat(targetWidth - w);
 	}
 
-	private renderList(
-		width: number,
-		listMaxLines: number,
-		filteredItems: ReadonlyArray<ListOverlayItem>,
-		pad: boolean,
-	): string[] {
+	private renderList(width: number, listMaxLines: number, filteredItems: ReadonlyArray<ListOverlayItem>): string[] {
 		const lines: string[] = [];
 		const allItems = this.items;
 
@@ -511,9 +506,11 @@ export class ListOverlayView implements Component {
 				typeof this.options.emptyMessage === "function" ? this.options.emptyMessage() : this.options.emptyMessage;
 			const text = allItems.length === 0 ? (empty ?? "No matches found") : "No matches found";
 			for (const wrapped of wrapTextWithAnsi(text, Math.max(1, width - 2))) {
-				lines.push(this.padLine(clioTheme().fg("muted", `  ${wrapped}`), width));
+				lines.push(this.padLine(clioTheme().fg("menuDescription", `  ${wrapped}`), width));
 			}
 		} else {
+			const scrollRows = renderedRows.length > listMaxLines && listMaxLines > 1 ? 1 : 0;
+			const itemRows = Math.max(1, listMaxLines - scrollRows);
 			const selectedRowIndex = renderedRows.findIndex(
 				(row) => row.type === "item" && row.itemIndex === this.selectedIndex,
 			);
@@ -521,14 +518,14 @@ export class ListOverlayView implements Component {
 			if (selectedRowIndex !== -1) {
 				if (selectedRowIndex < this.listScrollOffset) {
 					this.listScrollOffset = selectedRowIndex;
-				} else if (selectedRowIndex >= this.listScrollOffset + listMaxLines) {
-					this.listScrollOffset = selectedRowIndex - listMaxLines + 1;
+				} else if (selectedRowIndex >= this.listScrollOffset + itemRows) {
+					this.listScrollOffset = selectedRowIndex - itemRows + 1;
 				}
 			}
 
-			this.listScrollOffset = Math.max(0, Math.min(this.listScrollOffset, renderedRows.length - listMaxLines));
+			this.listScrollOffset = Math.max(0, Math.min(this.listScrollOffset, renderedRows.length - itemRows));
 
-			const visibleRows = renderedRows.slice(this.listScrollOffset, this.listScrollOffset + listMaxLines);
+			const visibleRows = renderedRows.slice(this.listScrollOffset, this.listScrollOffset + itemRows);
 			const theme = selectListTheme(clioTheme());
 
 			for (const row of visibleRows) {
@@ -574,13 +571,15 @@ export class ListOverlayView implements Component {
 					let metaPart = metaStr;
 
 					if (isSelected) {
-						labelPart = theme.selectedText(truncatedLabel);
+						labelPart = truncatedLabel.includes("\u001b") ? truncatedLabel : theme.selectedText(truncatedLabel);
 						if (metaStr) {
-							metaPart = theme.selectedText(metaStr);
+							metaPart = metaStr.includes("\u001b") ? metaStr : clioTheme().fg("annotation", metaStr);
 						}
 					} else {
+						if (!truncatedLabel.includes("\u001b")) labelPart = clioTheme().fg("menuOption", truncatedLabel);
 						if (metaStr) {
-							metaPart = metaStr.includes("\x1b") || metaStr.includes("\x1B") ? metaStr : clioTheme().fg("dim", metaStr);
+							metaPart =
+								metaStr.includes("\x1b") || metaStr.includes("\x1B") ? metaStr : clioTheme().fg("annotation", metaStr);
 						}
 					}
 
@@ -588,23 +587,18 @@ export class ListOverlayView implements Component {
 				}
 			}
 
-			if (renderedRows.length > listMaxLines) {
+			if (scrollRows > 0) {
 				const scrollText = `  (${this.selectedIndex + 1}/${filteredItems.length})`;
 				lines.push(this.padLine(theme.scrollInfo(truncateToWidth(scrollText, width - 2, "")), width));
 			}
 		}
 
-		if (pad) {
-			while (lines.length < listMaxLines) {
-				lines.push(" ".repeat(width));
-			}
-		}
 		return lines;
 	}
 
 	private renderDetail(width: number, height: number, selectedItem: ListOverlayItem | undefined): string[] {
 		if (!selectedItem?.detail) {
-			return Array.from({ length: height }, () => " ".repeat(width));
+			return [];
 		}
 		let mdLines: string[];
 		if (this.detailMemo && this.detailMemo.item === selectedItem && this.detailMemo.width === width) {
@@ -626,10 +620,11 @@ export class ListOverlayView implements Component {
 			return line + " ".repeat(width - w);
 		});
 
-		while (padded.length < height) {
-			padded.push(" ".repeat(width));
-		}
 		return padded;
+	}
+
+	setBodyRows(rows: number): void {
+		if (rows > 0) this.setViewportRows(rows + 2);
 	}
 
 	/** Called by the mounted overlay's visibility callback before each render. */
@@ -648,15 +643,11 @@ export class ListOverlayView implements Component {
 		const selectedItem = filteredItems[this.selectedIndex];
 		const hasDetail = !!selectedItem?.detail;
 		const isSplit = this.options.layout === "split" && width >= 90;
-		// Recorded before the memo returns, so a cached frame still leaves the footer
-		// describing the pane this width draws.
-		this.detailPaneDrawn = isSplit || (this.showDetail && hasDetail);
-
 		// Frame memo: identical inputs return the identical array, which lets the
 		// overlay frame's childLines identity cache short-circuit the whole frame.
 		const memoKey = [
 			width,
-			this.options.fullScreen ? this.viewportRows : 0,
+			this.viewportRows,
 			this.filterText,
 			this.selectedIndex,
 			this.isFilterFocused,
@@ -669,6 +660,8 @@ export class ListOverlayView implements Component {
 			status,
 		].join("|");
 		if (this.renderMemo?.key === memoKey) return this.renderMemo.lines;
+		// A cached frame retains the same detail visibility and keyboard hints.
+		this.detailPaneDrawn = isSplit && hasDetail;
 
 		const lines: string[] = [];
 
@@ -677,48 +670,49 @@ export class ListOverlayView implements Component {
 
 		if (this.options.filterable) {
 			this.input.focused = this.isFilterFocused;
-			const inputLines = this.input.render(width);
+			const inputLines = this.input.render(width).map((line) => clioTheme().base("searchQuery", line));
 			lines.push(...inputLines);
 		}
 
 		const availableRows = Math.max(1, this.viewportRows - 2 - lines.length);
 		if (isSplit) {
-			const listMaxLines = this.options.fullScreen ? availableRows : 14;
+			const listMaxLines = this.options.fullScreen ? availableRows : Math.min(14, availableRows);
 			const detailWidth = Math.max(32, Math.floor(width * 0.45));
 			const listWidth = width - detailWidth - 1;
 
-			const listLines = this.renderList(listWidth, listMaxLines, filteredItems, true);
+			const listLines = this.renderList(listWidth, listMaxLines, filteredItems);
 			const detailLines = this.renderDetail(detailWidth, listMaxLines, selectedItem);
 
-			for (let i = 0; i < listMaxLines; i++) {
+			const bodyRows = Math.min(listMaxLines, Math.max(listLines.length, detailLines.length));
+			for (let i = 0; i < bodyRows; i++) {
 				const left = listLines[i] ?? " ".repeat(listWidth);
 				const right = detailLines[i] ?? " ".repeat(detailWidth);
-				const separator = clioTheme().fg("frame", "│");
+				const separator = clioTheme().fg("border", "│");
 				lines.push(`${left}${separator}${right}`);
 			}
 		} else {
 			const showDetail = this.showDetail && hasDetail;
-			const listMaxLines = this.options.fullScreen
+			const listLimit = this.options.fullScreen
 				? showDetail
 					? Math.max(1, Math.floor((availableRows - 1) / 2))
 					: availableRows
 				: showDetail
 					? 6
 					: 12;
-			const listLines = this.renderList(width, listMaxLines, filteredItems, false);
+			const listMaxLines = Math.min(listLimit, showDetail ? Math.max(1, availableRows - 2) : availableRows);
+			const listLines = this.renderList(width, listMaxLines, filteredItems);
 			lines.push(...listLines);
 
-			if (this.showDetail && hasDetail) {
+			const detailRoom = Math.max(0, availableRows - listLines.length - 1);
+			this.detailPaneDrawn = showDetail && detailRoom > 0;
+			if (this.detailPaneDrawn) {
 				lines.push(rule(clioTheme(), width));
-				const detailRows = this.options.fullScreen ? Math.max(1, availableRows - listMaxLines - 1) : 10;
+				const detailRows = this.options.fullScreen ? detailRoom : Math.min(10, detailRoom);
 				const detailLines = this.renderDetail(width, detailRows, selectedItem);
 				lines.push(...detailLines);
 			}
 		}
 
-		if (this.options.fullScreen) {
-			while (lines.length < this.viewportRows - 2) lines.push(" ".repeat(width));
-		}
 		this.renderMemo = { key: memoKey, lines };
 		return lines;
 	}

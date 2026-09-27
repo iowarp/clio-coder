@@ -89,7 +89,7 @@ function reasoningValue(reasoningTokens: number): readonly [value: string, annot
 
 // A block of key-value rows in the design-system grammar: a dim padded key and
 // a muted value. Primary values are right-aligned inside the block so the
-// numbers line up under one another; an optional annotation renders dim after
+// Numbers line up under one another; an optional annotation uses supporting ink after
 // its value and stays outside the alignment math, so a long aside never drags
 // the whole column right.
 function kvBlock(entries: ReadonlyArray<readonly [string, string, string?]>): string[] {
@@ -97,8 +97,8 @@ function kvBlock(entries: ReadonlyArray<readonly [string, string, string?]>): st
 	const keyWidth = entries.reduce((max, [key]) => Math.max(max, key.length), 0);
 	const valueWidth = entries.reduce((max, [, value]) => Math.max(max, value.length), 0);
 	return entries.map(([key, value, annotation]) => {
-		const row = `${theme.fg("dim", key.padEnd(keyWidth))}  ${theme.fg("muted", value.padStart(valueWidth))}`;
-		return annotation ? `${row} ${theme.fg("dim", annotation)}` : row;
+		const row = `${theme.fg("fieldName", key.padEnd(keyWidth))}  ${theme.fg("counter", value.padStart(valueWidth))}`;
+		return annotation ? `${row} ${theme.fg("annotation", annotation)}` : row;
 	});
 }
 
@@ -199,11 +199,13 @@ function modelDetailLines(rows: ReadonlyArray<CostRow>, contentWidth: number): s
 	const theme = clioTheme();
 	const lines: string[] = [rule(theme, contentWidth)];
 	if (rows.length === 0) {
-		lines.push(theme.fg("muted", "no token usage recorded for this session"));
+		lines.push(theme.fg("menuDescription", "no token usage recorded for this session"));
 	} else {
 		for (const [index, row] of rows.entries()) {
 			if (index > 0) lines.push("");
-			lines.push(theme.style("accent", `${row.providerId} · attributed model ${row.attributedModelId}`, { bold: true }));
+			lines.push(
+				theme.style("modelIdentity", `${row.providerId} · attributed model ${row.attributedModelId}`, { bold: true }),
+			);
 			for (const line of modelBlock(row)) {
 				lines.push(line);
 			}
@@ -273,7 +275,7 @@ function renderActivity(
 	contentWidth: number,
 ): string[] {
 	const theme = clioTheme();
-	const label = (text: string): string => padAnsi(theme.fg("muted", text), 12);
+	const label = (text: string): string => padAnsi(theme.fg("fieldName", text), 12);
 	const lines = [
 		...renderActivityHeatmap(
 			days,
@@ -285,24 +287,24 @@ function renderActivity(
 	];
 	const changesValue =
 		changes === null
-			? theme.fg("dim", "not observed")
-			: `${theme.fg("success", `+${changes.insertions}`)} ${theme.fg("error", `-${changes.deletions}`)} ${theme.fg("dim", `· ${changes.files} file${changes.files === 1 ? "" : "s"}`)}`;
+			? theme.fg("annotation", "not observed")
+			: `${theme.fg("success", `+${changes.insertions}`)} ${theme.fg("error", `-${changes.deletions}`)} ${theme.fg("annotation", `· ${changes.files} file${changes.files === 1 ? "" : "s"}`)}`;
 	lines.push(`${label("Changes")}${changesValue}`);
 	const cost = formatCostAggregate(snapshot.totalCost);
 	const started = startedAt ? Date.parse(startedAt) : Number.NaN;
 	const elapsed = Number.isFinite(started)
-		? ` ${theme.fg("dim", `(${formatCompactMs(Math.max(0, now - started))})`)}`
+		? ` ${theme.fg("annotation", `(${formatCompactMs(Math.max(0, now - started))})`)}`
 		: "";
 	lines.push(
-		`${label("Session")}${cost ? `${cost} · ` : ""}${theme.fg("dim", `${formatTokens(snapshot.totalTokens)} tokens`)}${elapsed}`,
+		`${label("Session")}${cost ? `${cost} · ` : ""}${theme.fg("counter", `${formatTokens(snapshot.totalTokens)} tokens`)}${elapsed}`,
 	);
 	const window = quota.flatMap((entry) => entry.windows.map((item) => ({ entry, item })))[0];
 	if (window) {
 		const pct = Math.max(0, Math.min(100, window.item.usedPct));
 		lines.push(
-			`${label("Plan")}${quotaMeter(pct, Math.min(28, Math.max(8, contentWidth - 30)))} ${pct.toFixed(0)}% used ${theme.fg("dim", `· ${window.entry.displayName} ${window.item.label}`)}`,
+			`${label("Plan")}${quotaMeter(pct, Math.min(28, Math.max(8, contentWidth - 30)))} ${pct.toFixed(0)}% used ${theme.fg("annotation", `· ${window.entry.displayName} ${window.item.label}`)}`,
 		);
-	} else lines.push(`${label("Plan")}${theme.fg("dim", "no subscription window reported")}`);
+	} else lines.push(`${label("Plan")}${theme.fg("annotation", "no subscription window reported")}`);
 	return lines;
 }
 
@@ -362,8 +364,8 @@ class UsageOverlayBody implements Component {
 		const tabs = wrapTextWithAnsi(
 			USAGE_TABS.map((name, index) =>
 				index === this.tab
-					? theme.style("accent", `${index + 1} ${name}`, { bold: true, underline: true })
-					: theme.fg("dim", `${index + 1} ${name}`),
+					? theme.style("selectedOption", `${index + 1} ${name}`, { bold: true, underline: true })
+					: theme.fg("menuOption", `${index + 1} ${name}`),
 			).join("   "),
 			contentWidth,
 		);
@@ -381,25 +383,25 @@ class UsageOverlayBody implements Component {
 			);
 		else if (this.tab === 1)
 			body = [
-				theme.fg("dim", "Account-wide limits · filled = used · shared across sessions and devices"),
+				theme.fg("annotation", "Account-wide limits · filled = used · shared across sessions and devices"),
 				"",
 				...renderQuotaAccounts(quota, contentWidth),
 			];
 		else if (this.tab === 2)
 			body = [
-				theme.style("accent", "Session tokens & cost", { bold: true }),
-				theme.fg("dim", "Recorded calls in this session · estimates are marked in the cost totals"),
+				theme.style("sectionHeading", "Session tokens & cost", { bold: true }),
+				theme.fg("annotation", "Recorded calls in this session · estimates are marked in the cost totals"),
 				"",
 				...summaryBlock(snapshot.totalCost, snapshot.totalTokens, snapshot.rows, snapshot.promptCache),
 				"",
 				rule(theme, contentWidth),
-				theme.fg("dim", "Session tokens cannot be converted to subscription percentages."),
+				theme.fg("annotation", "Session tokens cannot be converted to subscription percentages."),
 				...(snapshot.rows.length ? [] : ["no token usage recorded for this session"]),
 			];
 		else if (this.tab === 3) {
 			body = [
-				theme.style("accent", "Model activity · this session", { bold: true }),
-				theme.fg("dim", "Share of recorded processed tokens, including cache traffic; not account quota."),
+				theme.style("sectionHeading", "Model activity · this session", { bold: true }),
+				theme.fg("annotation", "Share of recorded processed tokens, including cache traffic; not account quota."),
 				"",
 			];
 			for (const row of [...snapshot.rows].sort((a, b) => b.tokens - a.tokens)) {
@@ -419,7 +421,9 @@ class UsageOverlayBody implements Component {
 		this.offsets[this.tab] = offset;
 		const visible = [...tabs, ...lines.slice(offset, offset + this.pageHeight)];
 		if (lines.length > this.pageHeight)
-			visible.push(theme.fg("dim", `${offset + 1}–${Math.min(lines.length, offset + this.pageHeight)} / ${lines.length}`));
+			visible.push(
+				theme.fg("annotation", `${offset + 1}–${Math.min(lines.length, offset + this.pageHeight)} / ${lines.length}`),
+			);
 		return visible;
 	}
 

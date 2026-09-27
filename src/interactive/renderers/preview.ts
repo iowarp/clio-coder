@@ -18,7 +18,7 @@ export function previewRows(
 	if (limit <= 0) return [];
 	const count = Math.max(0, limit - 1);
 	const hint = `${prefix}${clioTheme().fg(
-		"dim",
+		"toolMetadata",
 		truncateToWidth(`… ${rows.length - count} rows · /view`, Math.max(1, width - prefixWidth)),
 	)}`;
 	return tail ? [hint, ...rows.slice(rows.length - count)] : [...rows.slice(0, count), hint];

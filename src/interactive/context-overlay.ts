@@ -8,7 +8,12 @@ import { formatContextWindowSlots } from "../domains/providers/index.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
 import { type OverlayHandle, Text, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { coldReasonText } from "./cold-reasons.js";
-import { contextCategorySwatch, renderContextMeterGrid, renderEvictedTokensLine } from "./context-meter.js";
+import {
+	contextCategorySwatch,
+	contextPercentRole,
+	renderContextMeterGrid,
+	renderEvictedTokensLine,
+} from "./context-meter.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { abbreviateModelId, type ClioToken, clioTheme, formatContextPercent } from "./theme/index.js";
 
@@ -79,10 +84,10 @@ function legendRow(group: ContextLedgerGroup, contentWidth: number): string {
 	const tokens = formatTokens(group.tokens);
 	const percent = formatContextPercent(group.percent);
 	const right = `${tokens.padStart(9)}  ${percent.padStart(6)}`;
-	const labelToken: ClioToken = group.category === "reserve" ? "frame" : group.category === "free" ? "dim" : "muted";
+	const labelToken: ClioToken = "legend";
 	const leftWidth = Math.max(0, contentWidth - visibleWidth(right) - visibleWidth(swatch) - 2);
 	const labelText = truncateToWidth(group.label, leftWidth, "", true);
-	return `${swatch} ${theme.fg(labelToken, labelText)} ${theme.fg("muted", right)}`;
+	return `${swatch} ${theme.fg(labelToken, labelText)} ${theme.fg("menuDescription", right)}`;
 }
 
 function evictedTokens(view: WorkingSetView): number {
@@ -138,8 +143,8 @@ function renderWorkingSetLines(view: WorkingSetView, config: WorkingSetConfigVie
 		`churn ${formatChurn(view)}`,
 	].join(" · ");
 	return [
-		`${theme.fg("muted", "working set")} ${theme.fg("dim", "·")} ${theme.fg("accent", workingSetPolicyLabel(view, config))}`,
-		theme.fg("dim", summary),
+		`${theme.fg("fieldName", "working set")} ${theme.fg("annotation", "·")} ${theme.fg("fieldValue", workingSetPolicyLabel(view, config))}`,
+		theme.fg("annotation", summary),
 	];
 }
 
@@ -155,7 +160,7 @@ function renderContextLedgerLines(
 	const provider = ledger.provider ?? "no target";
 	const model = ledger.model ? abbreviateModelId(ledger.model) : "no model";
 	lines.push(
-		`${theme.fg("muted", "target")} ${theme.fg("accent", provider)} ${theme.fg("dim", "·")} ${theme.fg("title", model)}`,
+		`${theme.fg("fieldName", "target")} ${theme.fg("modelIdentity", provider)} ${theme.fg("annotation", "·")} ${theme.fg("modelIdentity", model)}`,
 	);
 	lines.push("");
 
@@ -172,13 +177,15 @@ function renderContextLedgerLines(
 		const window = ledger.contextWindowSlots
 			? formatContextWindowSlots(ledger.contextWindow, ledger.contextWindowSlots)
 			: formatTokens(ledger.contextWindow);
-		const summary = `${formatTokens(ledger.usedTokens)} / ${window} tokens (${formatContextPercent(ledger.percent)})`;
+		const summary = `${formatTokens(ledger.usedTokens)} / ${window} tokens (${theme.fg(contextPercentRole(ledger.percent), formatContextPercent(ledger.percent))})`;
 		const provenance = contextWindowProvenanceLabel(ledger.contextWindowSource);
 		const trailer = provenance ? `${provenance} window · ${source}` : source;
-		lines.push(`${theme.fg("title", summary)} ${theme.fg("dim", "·")} ${theme.fg("muted", trailer)}`);
+		lines.push(
+			`${theme.base("counter", summary)} ${theme.fg("annotation", "·")} ${theme.fg("menuDescription", trailer)}`,
+		);
 	} else {
 		lines.push(
-			theme.fg("warning", `context window unknown · ${formatTokens(ledger.usedTokens)} tokens estimated in context`),
+			theme.fg("unknownValue", `context window unknown · ${formatTokens(ledger.usedTokens)} tokens estimated in context`),
 		);
 	}
 	lines.push("");
@@ -192,10 +199,10 @@ function renderContextLedgerLines(
 		lines.push("");
 	}
 	if (ledger.projectPreload && ledger.groups.some((group) => group.category === "project")) {
-		lines.push(theme.fg("dim", `project preload: ${ledger.projectPreload}`));
+		lines.push(theme.fg("annotation", `project preload: ${ledger.projectPreload}`));
 	}
 	for (const handbookLine of handbookProvenanceLines(ledger.projectHandbookFiles)) {
-		lines.push(theme.fg("dim", handbookLine));
+		lines.push(theme.fg("annotation", handbookLine));
 	}
 	const compaction =
 		ledger.compactionThreshold !== null
@@ -203,7 +210,7 @@ function renderContextLedgerLines(
 			: "autocompact off";
 	const toolsLabel = ledger.toolCount > 0 ? `${ledger.toolCount} active tool${ledger.toolCount === 1 ? "" : "s"}` : null;
 	const footer = toolsLabel ? `${compaction} · ${toolsLabel}` : compaction;
-	lines.push(theme.fg("dim", footer));
+	lines.push(theme.fg("annotation", footer));
 
 	if (ledger.promptCache) {
 		const cache = ledger.promptCache;
@@ -235,17 +242,17 @@ function renderContextLedgerLines(
 		// it is reported on its own line and not as a warning.
 		const misleading =
 			cache.shellReused && cache.backendVerdict === "cold" && !backendCacheReadsUnknown && coldReasons.length === 0;
-		lines.push(theme.fg(misleading ? "warning" : "dim", line));
+		lines.push(theme.fg(misleading ? "warning" : "annotation", line));
 		if (cache.backend) {
 			const prefill =
 				cache.backend.cachedTokens !== null && cache.uncachedPrefillTokens !== null
 					? `prefill: ${formatTokens(cache.uncachedPrefillTokens)} uncached · ${formatTokens(cache.backend.cachedTokens)} cached · ${formatTokens(cache.backend.promptMs)} ms`
 					: `prefill: ${formatTokens(cache.backend.promptTokens)} prompt · ${formatTokens(cache.backend.promptMs)} ms`;
-			lines.push(theme.fg("dim", prefill));
+			lines.push(theme.fg("annotation", prefill));
 		}
 		if (coldReasons.length > 0) {
 			const reasons = coldReasons.map(coldReasonText).join(", ");
-			lines.push(theme.fg("dim", `last cache-affecting events: ${reasons} (reuse measured separately)`));
+			lines.push(theme.fg("annotation", `last cache-affecting events: ${reasons} (reuse measured separately)`));
 		}
 	}
 
@@ -254,12 +261,12 @@ function renderContextLedgerLines(
 		// typed yet. It survives until the next settled run answers the question.
 		const tokens = ledger.prewarm.tokens !== null ? `${formatTokens(ledger.prewarm.tokens)} tokens` : "prefix";
 		const aborted = ledger.prewarm.aborted ? " (aborted on submit; prefix stays in the slot)" : "";
-		lines.push(theme.fg("dim", `prewarmed: ${tokens} in ${formatTokens(ledger.prewarm.ms)} ms${aborted}`));
+		lines.push(theme.fg("annotation", `prewarmed: ${tokens} in ${formatTokens(ledger.prewarm.ms)} ms${aborted}`));
 	}
 
 	if (ledger.lastCompaction) {
 		const pruneInfo = `last compaction: reclaimed ${formatTokens(ledger.lastCompaction.tokensBefore)} -> ${formatTokens(ledger.lastCompaction.tokensAfter)} tokens (${ledger.lastCompaction.stage})`;
-		lines.push(theme.fg("dim", pruneInfo));
+		lines.push(theme.fg("annotation", pruneInfo));
 	}
 
 	return lines;

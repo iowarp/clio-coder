@@ -172,15 +172,22 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 
 	render(width: number): string[] {
 		if (this.argumentsOpen && this.invocation) {
-			const rows = renderToolArguments(this.invocation(), width);
+			const rows = renderToolArguments(
+				this.invocation(),
+				width,
+				false,
+				Number.POSITIVE_INFINITY,
+				false,
+				this.view.tool === "bash" ? "shell" : undefined,
+			);
 			this.lastLineCount = rows.length;
 			this.scroll = Math.min(this.scroll, Math.max(0, rows.length - MUTATION_PREVIEW_VISIBLE_ROWS));
 			return [
-				...wrapTextWithAnsi(clioTheme().fg("accent", `Exact invocation · ${this.view.tool}`), width),
+				...wrapTextWithAnsi(clioTheme().fg("decisionExplanation", `Exact invocation · ${this.view.tool}`), width),
 				...rows.slice(this.scroll, this.scroll + MUTATION_PREVIEW_VISIBLE_ROWS),
 				...wrapTextWithAnsi(
 					clioTheme().fg(
-						"dim",
+						"annotation",
 						`${this.scroll + 1}–${Math.min(rows.length, this.scroll + MUTATION_PREVIEW_VISIBLE_ROWS)} of ${rows.length} rows · ↑↓ scroll · v back`,
 					),
 					width,
@@ -191,7 +198,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			const { facts, rest } = permissionCardSections(this.view, width, this.terms, this.readAdvisory());
 			const tail =
 				this.invocation && !this.inspect
-					? wrapTextWithAnsi(clioTheme().fg("dim", "v · inspect the complete invocation before deciding"), width)
+					? wrapTextWithAnsi(clioTheme().fg("annotation", "v · inspect the complete invocation before deciding"), width)
 					: [];
 			return this.windowCard(facts, rest, tail, width);
 		}
@@ -219,7 +226,10 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		this.cardScroll = Math.min(this.cardScroll, this.cardMaxScroll);
 		const end = this.cardScroll + room;
 		const back = this.terms ? ` · ${PERMISSION_TERMS_KEY} back` : "";
-		const position = clioTheme().fg("dim", `${this.cardScroll + 1}–${end} of ${rest.length} rows · ↑↓ scroll${back}`);
+		const position = clioTheme().fg(
+			"annotation",
+			`${this.cardScroll + 1}–${end} of ${rest.length} rows · ↑↓ scroll${back}`,
+		);
 		return [...facts, ...rest.slice(this.cardScroll, end), fitRow(position, width), ...tail];
 	}
 
@@ -251,7 +261,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 function field(label: string, value: string, width: number): string[] {
 	const indent = " ".repeat(visibleWidth(label));
 	const rows = wrapSentence(value, Math.max(1, width - visibleWidth(label)));
-	return rows.map((row, index) => `${index === 0 ? clioTheme().fg("dim", label) : indent}${row}`);
+	return rows.map((row, index) => `${index === 0 ? clioTheme().fg("annotation", label) : indent}${row}`);
 }
 
 /**
@@ -298,8 +308,8 @@ export function permissionOverlayTitle(view: ApprovalRequestView): string {
 	return permissionDecisionPresentation(view).title;
 }
 
-export function permissionOverlayTone(view: ApprovalRequestView): ClioToken {
-	return permissionDecisionPresentation(view).semanticToken;
+export function permissionOverlayTone(_view: ApprovalRequestView): ClioToken {
+	return "decisionCue";
 }
 
 /**
@@ -440,7 +450,7 @@ function permissionCardSections(
 		// Dimmed and below the facts, because it is the only line on this card
 		// that no part of the harness acted on. The sentence says so itself; the
 		// styling keeps it from reading as a verdict at a glance.
-		...(advisory.length > 0 ? wrapSentence(clioTheme().fg("dim", advisory), content) : []),
+		...(advisory.length > 0 ? wrapSentence(clioTheme().fg("annotation", advisory), content) : []),
 		...(view.queueDepth !== undefined && view.queueDepth > 1 ? [`1 of ${view.queueDepth} parked`] : []),
 	];
 	const rest = [

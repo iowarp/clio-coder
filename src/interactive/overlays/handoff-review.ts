@@ -61,7 +61,7 @@ function formatHandoffReviewBody(goal: string, document: string, width: number, 
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
 	const lines: string[] = [];
-	for (const line of wrapTextWithAnsi(theme.fg("dim", `goal: ${goal}`), contentWidth)) lines.push(line);
+	for (const line of wrapTextWithAnsi(theme.fg("annotation", `goal: ${goal}`), contentWidth)) lines.push(line);
 	lines.push(rule(theme, contentWidth));
 
 	const wrapped: string[] = [];
@@ -70,14 +70,14 @@ function formatHandoffReviewBody(goal: string, document: string, width: number, 
 			wrapped.push("");
 			continue;
 		}
-		for (const line of wrapTextWithAnsi(theme.fg("muted", raw), contentWidth)) wrapped.push(line);
+		for (const line of wrapTextWithAnsi(theme.fg("decisionExplanation", raw), contentWidth)) wrapped.push(line);
 	}
 	const maxScroll = Math.max(0, wrapped.length - HANDOFF_REVIEW_VISIBLE_ROWS);
 	const start = Math.max(0, Math.min(scroll, maxScroll));
 	const window = wrapped.slice(start, start + HANDOFF_REVIEW_VISIBLE_ROWS);
 	for (const line of window) lines.push(line);
 	if (wrapped.length > HANDOFF_REVIEW_VISIBLE_ROWS) {
-		lines.push(theme.fg("dim", `(${start + 1}-${start + window.length} of ${wrapped.length} lines)`));
+		lines.push(theme.fg("annotation", `(${start + 1}-${start + window.length} of ${wrapped.length} lines)`));
 	}
 	return lines;
 }

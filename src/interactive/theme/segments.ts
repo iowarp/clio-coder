@@ -13,32 +13,26 @@ function present(parts: ReadonlyArray<string | null | undefined>): string[] {
 	return parts.filter((part): part is string => typeof part === "string" && part.length > 0);
 }
 
-/**
- * The Clio logotype: the `>C_` wordmark painted as the logo is, a mint
- * chevron (accent) before the cyan C and cursor bar (title), with the C bold.
- * GLYPH.brand keeps the plain string for width math and ANSI-stripping tests,
- * and the welcome header and dashboard header stay the only surfaces that
- * paint it.
- */
+/** Compact terminal mark: cyan surrounds the copper C of the Clio identity. */
 export function brandMark(theme: ClioTheme): string {
 	const prompt = GLYPH.brand.slice(0, 1);
 	const initial = GLYPH.brand.slice(1, 2);
 	const cursor = GLYPH.brand.slice(2, 3);
-	return `${theme.fg("accent", prompt)}${theme.style("title", initial, { bold: true })}${theme.fg("title", cursor)}`;
+	return `${theme.fg("wordmark", prompt)}${theme.style("brandCopper", initial, { bold: true })}${theme.fg("wordmark", cursor)}`;
 }
 
-/** Dim middot used to separate chips inside a single section. */
+/** Quiet structural middot used to separate chips inside a single section. */
 export function dotSep(theme: ClioTheme): string {
-	return theme.fg("dim", " · ");
+	return theme.fg("divider", " · ");
 }
 
 /** Frame-colored vertical bar used to separate sections on one row. */
 export function barSep(theme: ClioTheme): string {
-	return theme.fg("frame", " │ ");
+	return theme.fg("border", " │ ");
 }
 
 /**
- * A bold, color-tagged section label (PERCEIVE / target / …). Pad to align a
+ * A semantic section label (PERCEIVE / target / …). Pad to align a
  * column of tags; padding inherits the tag color but stays invisible.
  */
 export function sectionTag(theme: ClioTheme, token: ClioToken, label: string, pad = 0): string {
@@ -46,33 +40,28 @@ export function sectionTag(theme: ClioTheme, token: ClioToken, label: string, pa
 	return theme.style(token, text, { bold: true });
 }
 
-/**
- * A screen or overlay title (section 2.4 level 2): bold in the `title` token.
- *
- * The settings lane header, the settings breadcrumb, and the dispatch card
- * title each open-coded `theme.style("title", text, { bold: true })`, so the
- * one rule for what a title looks like lived in as many places as there were
- * titles. `rules.ts:frame` applies the same treatment to an unstyled title it
- * is handed, which is why an island does not call this.
- */
+/** Concise orange title; machine sections use the stronger harness-heading role. */
 export function screenTitle(theme: ClioTheme, label: string): string {
-	return theme.style("title", label, { bold: true });
+	return theme.style("heading", label, { bold: true });
 }
 
 /**
- * A list-group header (section 2.4 level 4): `── running (1)` in dim.
+ * A readable list-group heading: `── running (1)`.
  *
  * The leading double dash is a structural rule literal, not a status glyph.
  * Fleet Runs kept a private copy and the generic list overlay inlined the same
  * string, so a change to the group vocabulary had to be made twice and was not.
  */
 export function listGroupHeader(theme: ClioTheme, label: string): string {
-	return theme.fg("dim", `── ${label}`);
+	return theme.fg("groupHeading", `── ${label}`);
 }
 
-/** A key=value chip: a dim key glued to a colored value (e.g. `git main`). */
-/** Subtle keybinding affordance, e.g. `⌃U dashboard`. */
-/** Join chips within a section with a dim middot, dropping empties. */
+/** Join chips with a quiet structural middot, dropping empties. */
 export function joinChips(theme: ClioTheme, parts: ReadonlyArray<string | null | undefined>): string {
 	return present(parts).join(dotSep(theme));
+}
+
+/** A quantity and its unit remain distinct even when they share a compact row. */
+export function metricText(theme: ClioTheme, value: string, unit: string): string {
+	return `${theme.fg("metricValue", value)} ${theme.fg("metricUnit", unit)}`;
 }

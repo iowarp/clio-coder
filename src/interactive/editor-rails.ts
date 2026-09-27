@@ -14,31 +14,42 @@ export function renderEditorRail(
 	options: RuleOptions,
 	state: EditorRailState,
 ): string {
-	const line = rule(theme, width, { ...options, fillToken: "editor" });
-	return line.replace(/─+/gu, (fill) => {
-		const tokens: ClioToken[] = ["editorAction", "editorAction", "action", "editor", "editor", "accent", "accent"];
-		const center = Math.floor(((state.now % 3600) / 3600) * (fill.length + 14)) - 7;
+	const attention = state.phase === "attention";
+	const base: ClioToken = "composerRail";
+	const paint = (columns: number, token: ClioToken): string => theme.style(token, "━".repeat(columns), { bold: true });
+	if (!attention || !state.animate) {
+		return rule(theme, width, {
+			...options,
+			fillToken: base,
+			rightTail: options.rightTail ?? paint(1, base),
+			renderFill: (columns) => paint(columns, base),
+		});
+	}
+	// Both rails share a viewport coordinate, so labels never put their pulses out of step.
+	const center = Math.floor(((state.now % 3600) / 3600) * (width + 8)) - 4;
+	const renderFill = (columns: number, offset: number): string => {
 		let output = "";
-		let runToken: ClioToken | null = null;
-		let run = "";
-		for (let column = 0; column < fill.length; column += 1) {
-			let token: ClioToken = "editor";
-			if (state.phase === "attention") {
-				const wave = Math.abs(column - center);
-				token = !state.animate || wave >= 9 ? "editorAction" : wave < 3 ? "warning" : wave < 6 ? "editorAction" : "action";
-			} else if (state.phase === "working" && state.animate) {
-				const distance = Math.abs(column - center);
-				if (distance < tokens.length) token = tokens[distance] ?? "editor";
+		let runToken: ClioToken = base;
+		let run = 0;
+		for (let column = 0; column < columns; column += 1) {
+			let token: ClioToken = base;
+			const distance = state.animate ? Math.abs(column + offset - center) : column + offset;
+			if (distance < 4) {
+				token = "attentionRail";
 			}
-			// Fixed endcaps retain the safety signal through every animation phase.
-			if (state.yolo && (column < 3 || column >= fill.length - 3)) token = "editorDanger";
-			if (runToken !== token && runToken !== null) {
-				output += theme.style(runToken, run, { bold: true });
-				run = "";
+			if (run > 0 && runToken !== token) {
+				output += paint(run, runToken);
+				run = 0;
 			}
 			runToken = token;
-			run += "━";
+			run += 1;
 		}
-		return output + (runToken ? theme.style(runToken, run, { bold: true }) : "");
+		return output + (run > 0 ? paint(run, runToken) : "");
+	};
+	return rule(theme, width, {
+		...options,
+		fillToken: base,
+		rightTail: options.rightTail ?? renderFill(1, Math.max(0, width - 1)),
+		renderFill,
 	});
 }

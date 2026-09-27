@@ -39,6 +39,7 @@ export interface InteractiveInputKeyActionDeps {
 	cycleScopedModelBackward: () => void;
 	dismissNotifications: () => void;
 	cycleOutputStyle: () => void;
+	toggleAutonomy?: () => void;
 	recordFeature?: (feature: string) => void;
 	openExternalEditor: () => void;
 	queueFollowUp: () => void;
@@ -63,6 +64,7 @@ export interface InteractiveInputRuntimeDeps {
 	actions: {
 		canExit(): boolean;
 		cycleOutputStyle(): void;
+		toggleAutonomy?(): void;
 		recordFeature?(feature: string): void;
 		availableThinkingLevels(): ReadonlyArray<string>;
 		onCycleThinking(): void;
@@ -191,6 +193,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		},
 		dismissNotifications: () => controller.dismissNotifications(),
 		cycleOutputStyle: deps.actions.cycleOutputStyle,
+		...(deps.actions.toggleAutonomy ? { toggleAutonomy: deps.actions.toggleAutonomy } : {}),
 		...(deps.actions.recordFeature ? { recordFeature: deps.actions.recordFeature } : {}),
 		openExternalEditor: deps.editorSubmit.openExternalEditorForInput,
 		queueFollowUp: deps.editorSubmit.queueFollowUpFromEditor,

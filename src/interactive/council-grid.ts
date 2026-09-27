@@ -90,7 +90,7 @@ export function councilLabelText(theme: ClioTheme, label: string, color?: string
 		const painted = paintHex(label, color);
 		if (painted !== label) return painted;
 	}
-	return theme.style("accent", label, { bold: true });
+	return theme.fg("workerIdentity", label);
 }
 
 /** The answer tail on a rail, wrapped to the column and bounded to {@link COUNCIL_ANSWER_ROWS} rows. */
@@ -103,10 +103,10 @@ function answerRows(theme: ClioTheme, member: CouncilMemberView, width: number, 
 	}
 	const shown = wrapped.slice(Math.max(0, wrapped.length - maxRows));
 	const hidden = wrapped.length - shown.length + member.droppedLines;
-	const rail = theme.fg("dim", `${GLYPH.rail} `);
-	const rows = shown.map((row) => `${rail}${theme.fg("muted", row)}`);
+	const rail = theme.fg("gutter", `${GLYPH.rail} `);
+	const rows = shown.map((row) => `${rail}${theme.fg("assistantProse", row)}`);
 	if (hidden > 0) {
-		rows.push(`${rail}${theme.fg("dim", truncateToWidth(`${hidden} more`, railWidth, "…", false))}`);
+		rows.push(`${rail}${theme.fg("annotation", truncateToWidth(`${hidden} more`, railWidth, "…", false))}`);
 	}
 	return rows;
 }
@@ -123,13 +123,13 @@ function councilMemberLines(
 	options: { selected?: boolean; maxAnswerRows?: number } = {},
 ): string[] {
 	const dot = dotSep(theme);
-	const cursor = options.selected === true ? `${theme.fg("accent", GLYPH.cursor)} ` : "";
+	const cursor = options.selected === true ? `${theme.fg("selectedOption", GLYPH.cursor)} ` : "";
 	const status = `${theme.fg(member.status.glyphToken ?? member.status.token, member.status.glyph)} ${theme.fg(member.status.token, member.status.label)}`;
 	const head = `${cursor}${councilLabelText(theme, member.label, member.color)}`;
 	const lines = [
 		truncateToWidth(head, width, "…", false),
-		truncateToWidth(theme.fg("muted", member.route), width, "…", false),
-		truncateToWidth(`${status}${dot}${theme.fg("dim", `r${member.round}`)}`, width, "…", false),
+		truncateToWidth(theme.fg("footerIdentity", member.route), width, "…", false),
+		truncateToWidth(`${status}${dot}${theme.fg("annotation", `r${member.round}`)}`, width, "…", false),
 		...answerRows(theme, member, width, options.maxAnswerRows ?? COUNCIL_ANSWER_ROWS),
 	];
 	return lines.map((line) => padAnsi(line, width));
@@ -191,12 +191,12 @@ export function councilIslandLines(theme: ClioTheme, group: CouncilGroupView, wi
 	const dot = dotSep(theme);
 	const glyph = theme.fg(group.status.glyphToken ?? group.status.token, group.status.glyph);
 	const status = theme.fg(group.status.token, group.status.label);
-	const title = theme.paint(`council ${group.group}`, { bold: true });
-	const head = `${glyph} ${title}${dot}${status}${dot}${theme.fg("muted", group.elapsed)}`;
+	const title = theme.fg("harnessHeading", `council ${group.group}`);
+	const head = `${glyph} ${title}${dot}${status}${dot}${theme.fg("toolMetadata", group.elapsed)}`;
 	const seats = `${group.members.length} member${group.members.length === 1 ? "" : "s"}`;
 	const facts = [
-		theme.fg("muted", seats),
-		theme.fg("dim", `r${group.round}`),
+		theme.fg("counter", seats),
+		theme.fg("annotation", `r${group.round}`),
 		...(group.synthesis !== null ? [theme.fg("info", COUNCIL_SYNTHESIS_LABEL)] : []),
 	].join(dot);
 	return [padAnsi(truncateToWidth(head, width, "…", false), width), padAnsi(`  ${facts}`, width)];

@@ -1,10 +1,11 @@
+import { sanitizeAssistantProse } from "../../core/assistant-prose.js";
 import { sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { GLYPH } from "../theme/index.js";
 
 /** Sanitize complete source text before splitting, so OSC payloads cannot cross rows. */
 export function safeWorkerAnswerText(text: string): string {
-	const normalized = text
+	const normalized = sanitizeAssistantProse(text)
 		.replaceAll(String.fromCharCode(0x9d), "\u001b]")
 		.replaceAll(String.fromCharCode(0x9b), "\u001b[")
 		.replaceAll(String.fromCharCode(0x9c), "\u001b\\");

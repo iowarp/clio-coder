@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { AssistantProseProjection, sanitizeAssistantProse } from "../core/assistant-prose.js";
 import type { OutputStyle } from "../core/defaults.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
@@ -58,7 +59,6 @@ import {
 	releaseSpaces,
 	SGR_BOLD,
 	SGR_BOLD_OFF,
-	SGR_DIM,
 	SGR_ITALIC,
 	SGR_RESET,
 } from "./theme/index.js";
@@ -81,13 +81,11 @@ const CHAT_MARKDOWN_OPTIONS = {
 // navigation. The sequence is zero-width and stripped before terminal output.
 const OSC133_PROMPT_START = "\x1b]133;A\x07";
 
-// Prefix and rail SGR constants, previously re-exported by the deleted
-// palette.ts. Composing them from fgSequence/GLYPH here yields byte-identical
-// sequences to what palette.js produced, so the transcript renders unchanged.
+// Transcript ownership, reading hierarchy, and outcome sequences share the theme resolver.
 const RESET = SGR_RESET;
-const DIM = SGR_DIM;
-const TEAL = fgSequence("accent");
-const REASON_INK = fgSequence("reason");
+const SECONDARY = fgSequence("annotation");
+const TEAL = fgSequence("guidance");
+const REASON_INK = fgSequence("gutter");
 const RED_CRIT = fgSequence("error");
 const GREEN_OK = fgSequence("success");
 const AMBER_WARN = fgSequence("warning");
@@ -162,6 +160,8 @@ type TextSegment = {
 	kind: "text";
 	text: string;
 	finalized: boolean;
+	/** Cached prose policy for live, replayed and rewritten model output. */
+	prose?: AssistantProseProjection;
 	/**
 	 * The segment's Markdown, block by block. Every top-level block the model
 	 * has finished is a chunk with its own pi-tui Markdown instance, which
@@ -676,21 +676,22 @@ function skillSuggestionSplit(seg: TextSegment): { suggestion: string; answer: T
  * each one rewrites arbitrary positions, so nothing here is cached.
  */
 function renderDiffusionFrameLines(seg: TextSegment, settled: number, width: number): string[] {
-	const head = seg.text.slice(0, settled);
-	const tail = seg.text.slice(settled);
+	const source = sanitizeAssistantProse(seg.text);
+	const head = sanitizeAssistantProse(seg.text.slice(0, settled));
+	const tail = source.slice(head.length);
 	const lines: string[] = [];
 	const headLines = head.split("\n");
 	const tailLines = tail.split("\n");
 	// The line the boundary falls on carries both tones.
-	const joinLine = `${headLines[headLines.length - 1] ?? ""}${tail.length > 0 ? `${DIM}${tailLines[0] ?? ""}${SGR_RESET}` : ""}`;
+	const joinLine = `${headLines[headLines.length - 1] ?? ""}${tail.length > 0 ? `${SECONDARY}${tailLines[0] ?? ""}${SGR_RESET}` : ""}`;
 	for (let i = 0; i < headLines.length - 1; i += 1) {
 		for (const line of wrapTextWithAnsi(headLines[i] ?? "", width)) lines.push(line);
 	}
 	for (const line of wrapTextWithAnsi(joinLine, width)) lines.push(line);
 	for (let i = 1; i < tailLines.length; i += 1) {
-		for (const line of wrapTextWithAnsi(`${DIM}${tailLines[i] ?? ""}${SGR_RESET}`, width)) lines.push(line);
+		for (const line of wrapTextWithAnsi(`${SECONDARY}${tailLines[i] ?? ""}${SGR_RESET}`, width)) lines.push(line);
 	}
-	return lines;
+	return lines.map((line) => clioTheme().base("assistantProse", line));
 }
 
 /**
@@ -765,7 +766,7 @@ function chatMarkdown(text: string): Markdown {
  * unpadded, so the padding is trimmed to keep the two shapes identical.
  */
 function markdownRows(md: Markdown, width: number): string[] {
-	return md.render(width).map((line) => line.replace(/ +$/, ""));
+	return md.render(width).map((line) => clioTheme().base("assistantProse", line.replace(/ +$/, "")));
 }
 
 /**
@@ -785,7 +786,7 @@ function plainTailRows(seg: TextSegment, text: string, start: number, width: num
 	seg.wrapCache = { width, start, completedLines: completedCount, lines: completed };
 	const wrapped = completed.slice();
 	for (const line of wrapTextWithAnsi(source[completedCount] ?? "", width)) wrapped.push(line);
-	return wrapped;
+	return wrapped.map((row) => clioTheme().base("assistantProse", row));
 }
 
 /**
@@ -812,7 +813,9 @@ function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
 	if (!seg.finalized && seg.diffusion) {
 		return renderDiffusionFrameLines(seg, seg.diffusion.settled, width);
 	}
-	const source = seg.text.includes("\t") ? seg.text.replace(/\t/g, "   ") : seg.text;
+	seg.prose ??= new AssistantProseProjection();
+	const prose = seg.prose.project(seg.text, seg.finalized);
+	const source = prose.includes("\t") ? prose.replace(/\t/g, "   ") : prose;
 	let blocks = seg.blocks;
 	if (blocks === undefined || !source.startsWith(blocks.covered)) {
 		blocks = { covered: "", chunks: [] };
@@ -892,7 +895,7 @@ const USER_PREFIX = `${TEAL}${USER_BAR}${RESET} `;
  * to paint an uncommitted prompt exactly like a durable user turn while the
  * ledger still had no entry for it (issue #251).
  */
-const USER_PREFIX_PENDING = `${DIM}${USER_BAR}${RESET} `;
+const USER_PREFIX_PENDING = `${SECONDARY}${USER_BAR}${RESET} `;
 /**
  * The uncommitted-row tails, stored as plain text so their width can be spent
  * against the row's budget before the dim codes go on. Both begin with the
@@ -931,7 +934,7 @@ function appendUserRowTail(rendered: string[], tail: string, width: number): voi
 	const last = rendered.length - 1;
 	const lastLine = rendered[last];
 	if (lastLine !== undefined && visibleWidth(lastLine) + tail.length <= width) {
-		rendered[last] = `${lastLine}${DIM}${tail}${RESET}`;
+		rendered[last] = `${lastLine}${SECONDARY}${tail}${RESET}`;
 		return;
 	}
 	rendered.push(`${USER_PREFIX_PENDING}${dimLine(tail.trimStart(), Math.max(1, width - PROSE_GUTTER_WIDTH))}`);
@@ -954,11 +957,13 @@ function renderUserLines(text: string, width: number, status: UserTurnStatus): s
 	// accent, so an explicit skill invocation reads as one rather than as prose.
 	const invocation = SKILL_INVOCATION.exec(sourceLines[0] ?? "");
 	if (invocation?.[0] !== undefined) {
-		sourceLines[0] = `${clioTheme().style("accent", invocation[0], { bold: committed })}${committed ? SGR_BOLD : ""}${(sourceLines[0] ?? "").slice(invocation[0].length)}`;
+		sourceLines[0] = `${clioTheme().style("guidance", invocation[0], { bold: committed })}${committed ? SGR_BOLD : ""}${(sourceLines[0] ?? "").slice(invocation[0].length)}`;
 	}
 	for (const sourceLine of sourceLines) {
 		for (const row of wrapTextWithAnsi(sourceLine, contentWidth)) {
-			rendered.push(`${prefix}${committed && row.length > 0 ? `${SGR_BOLD}${row}${SGR_BOLD_OFF}` : row}`);
+			rendered.push(
+				`${prefix}${clioTheme().base("userProse", committed && row.length > 0 ? `${SGR_BOLD}${row}${SGR_BOLD_OFF}` : row)}`,
+			);
 		}
 	}
 	if (rendered[0] !== undefined) rendered[0] = `${OSC133_PROMPT_START}${rendered[0]}`;
@@ -972,14 +977,14 @@ function renderUserLines(text: string, width: number, status: UserTurnStatus): s
  */
 const THINKING_HIDDEN_LABEL = "Thinking · /view";
 function dimLine(text: string, width: number): string {
-	return `${DIM}${truncateToWidth(text, Math.max(1, width), GLYPH.ellipsis, false)}${RESET}`;
+	return `${SECONDARY}${truncateToWidth(text, Math.max(1, width), GLYPH.ellipsis, false)}${RESET}`;
 }
 
 /**
- * Supplied reasoning owns the purple rail in the gutter, in every style: a
+ * Supplied reasoning owns a quiet structural rail in the gutter, in every style: a
  * folded marker and an excerpt wear the same mark, and no other block uses a
- * gutter rail, so reasoning never reads as tool output. The excerpt is italic
- * as well as dim because it is the model thinking aloud, not its answer.
+ * gutter rail, so reasoning never reads as tool output. Readable secondary
+ * text and italics distinguish the excerpt from the answer.
  */
 const REASON_RAIL = `${REASON_INK}│${RESET} `;
 
@@ -1004,12 +1009,13 @@ function renderSettledThinkingMarker(view: ReasoningUsageView, width: number): s
 /** Wrap first, then keep the same tail both while streaming and after settlement. */
 function renderThinkingRail(thinking: string, width: number, limit: number, unbounded = false): string[] {
 	// Reasoning often ends on a newline; wrapped, that became an empty rail row.
-	const text = redactSecretString(thinking).replace(/^\s*\n|\s+$/gu, "");
+	// Presentation only: the provider's signed reasoning stays untouched.
+	const text = redactSecretString(sanitizeAssistantProse(thinking)).replace(/^\s*\n|\s+$/gu, "");
 	if (text.length === 0) return [];
 	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them.
 	const wrapped = wrapTextWithAnsi(text, Math.max(1, width - PROSE_GUTTER_WIDTH));
 	const rows = (unbounded ? wrapped : wrapped.filter((row) => row.trim().length > 0)).map(
-		(row) => `${REASON_RAIL}${DIM}${SGR_ITALIC}${row}${RESET}`,
+		(row) => `${REASON_RAIL}${SGR_ITALIC}${clioTheme().fg("reasoningExcerpt", row)}${RESET}`,
 	);
 	return unbounded ? rows : previewRows(rows, limit, width, true, REASON_RAIL, PROSE_GUTTER_WIDTH);
 }
@@ -1061,7 +1067,9 @@ function renderTurnUsageLine(
 		if (prewarm.length > 0) facts.push(`prewarm ${prewarm.join(", ")}`);
 	}
 	return hangProseLines(
-		wrapTextWithAnsi(`${DIM}${joinFacts(facts)}${RESET}`, Math.max(1, width - PROSE_GUTTER_WIDTH)).map(releaseSpaces),
+		wrapTextWithAnsi(`${SECONDARY}${joinFacts(facts)}${RESET}`, Math.max(1, width - PROSE_GUTTER_WIDTH)).map(
+			releaseSpaces,
+		),
 		glyph,
 	);
 }
@@ -1074,7 +1082,7 @@ function renderTurnUsageLine(
 function receiptGlyph(outcome: string): string {
 	if (outcome === "Done") return `${GREEN_OK}${GLYPH.ok}${RESET} `;
 	if (outcome === "Failed") return `${RED_CRIT}${GLYPH.error}${RESET} `;
-	if (outcome === "Cancelled") return `${DIM}${GLYPH.cancelled}${RESET} `;
+	if (outcome === "Cancelled") return `${SECONDARY}${GLYPH.cancelled}${RESET} `;
 	return `${AMBER_WARN}${GLYPH.warn}${RESET} `;
 }
 
@@ -2168,8 +2176,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						if (seg.kind === "error")
 							add("Provider or terminal error", seg.at, () => providerErrorEvidence(seg.text).split("\n"));
 						if (seg.kind === "thinking" && seg.text.trim().length > 0) {
-							const opening = seg.text.trim().split("\n", 1)[0] ?? "";
-							add(`Thinking · ${opening}`, seg.at, () => sanitizeMultilineDisplayText(seg.text).text.split("\n"));
+							const prose = sanitizeAssistantProse(seg.text);
+							const opening = prose.trim().split("\n", 1)[0] ?? "";
+							add(`Thinking · ${opening}`, seg.at, () => sanitizeMultilineDisplayText(prose).text.split("\n"));
 						}
 						if (seg.kind === "tool") {
 							// Titled by its row as the transcript states it; inspected in full,

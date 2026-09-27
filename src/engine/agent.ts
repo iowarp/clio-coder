@@ -29,6 +29,7 @@ import {
 } from "@earendil-works/pi-agent-core";
 import { isDispositionedToolResultError, isRefusalToolResultError } from "../tools/result-disposition.js";
 import { engineStreamSimple } from "./api-registry.js";
+import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 
 export type EngineStreamFn = (...args: Parameters<typeof engineStreamSimple>) => ReturnType<StreamFn>;
 
@@ -137,11 +138,12 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 	} = options;
 	const correlations = new WeakMap<AgentMessage, string>();
 	let activeCorrelationId: string | undefined;
-	const invoke: StreamFn = (model, context, streamOptions) => {
+	const invoke: StreamFn = async (model, context, streamOptions) => {
 		onStreamInvocation?.();
-		return streamFn
+		const source = await (streamFn
 			? streamFn(model, resolvedRequestContext(context), streamOptions)
-			: transcriptStreamFn(model, context, streamOptions);
+			: transcriptStreamFn(model, context, streamOptions));
+		return filterAssistantProseStream(source, model);
 	};
 	const admit: StreamFn = (model, context, streamOptions) => {
 		if (!beforeStreamRequest) return invoke(model, context, streamOptions);

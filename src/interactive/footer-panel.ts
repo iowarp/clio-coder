@@ -2,7 +2,7 @@ import type { TokenThroughputSnapshot, UsageBreakdown } from "../domains/observa
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { Text } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
-import { contextBarGlyphs, largestRemainderCells } from "./context-meter.js";
+import { contextBarGlyphs, contextPercentRole, largestRemainderCells } from "./context-meter.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
 import { formatReasoningChip } from "./status/reasoning.js";
 import type { ClioTheme } from "./theme/index.js";
@@ -145,8 +145,9 @@ export function finiteNonNegative(value: number | null | undefined): number {
 	return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
-function contextPercentLabel(percent: number | null): string {
-	return `  ${formatContextPercent(percent).padEnd(CONTEXT_PERCENT_FIELD_WIDTH, " ")}`;
+function contextPercentLabel(theme: ClioTheme, percent: number | null): string {
+	const role = contextPercentRole(percent);
+	return `  ${theme.fg(role, formatContextPercent(percent).padEnd(CONTEXT_PERCENT_FIELD_WIDTH, " "))}`;
 }
 
 export function buildSegmentedContextBar(
@@ -154,12 +155,13 @@ export function buildSegmentedContextBar(
 	barWidth: number,
 	contextWindow: number,
 	breakdown: SegmentBreakdownInput | undefined,
+	includePercent = true,
 ): string {
 	const cells = Math.max(0, Math.floor(Number.isFinite(barWidth) ? barWidth : 0));
 	const glyphs = contextBarGlyphs();
 
 	if (contextWindow <= 0 || !Number.isFinite(contextWindow) || !breakdown) {
-		return `${theme.style("frame", glyphs.free.repeat(cells), { dim: true })}${contextPercentLabel(null)}`;
+		return `${theme.fg("meterFree", glyphs.free.repeat(cells))}${includePercent ? contextPercentLabel(theme, null) : ""}`;
 	}
 
 	const system = finiteNonNegative(breakdown.systemPromptTokens);
@@ -179,9 +181,10 @@ export function buildSegmentedContextBar(
 		filled,
 	);
 	const freeCells = Math.max(0, cells - filled);
-	const systemPart = systemCells > 0 ? theme.fg("info", glyphs.filled.repeat(systemCells)) : "";
-	const toolPart = toolCells > 0 ? theme.fg("tool", glyphs.filled.repeat(toolCells)) : "";
-	const conversationPart = conversationCells > 0 ? theme.fg("accent", glyphs.filled.repeat(conversationCells)) : "";
-	const freePart = freeCells > 0 ? theme.style("frame", glyphs.free.repeat(freeCells), { dim: true }) : "";
-	return `${systemPart}${toolPart}${conversationPart}${freePart}${contextPercentLabel(percent)}`;
+	const systemPart = systemCells > 0 ? theme.fg("meterSystem", glyphs.filled.repeat(systemCells)) : "";
+	const toolPart = toolCells > 0 ? theme.fg("meterTools", glyphs.filled.repeat(toolCells)) : "";
+	const conversationPart =
+		conversationCells > 0 ? theme.fg("meterConversation", glyphs.filled.repeat(conversationCells)) : "";
+	const freePart = freeCells > 0 ? theme.fg("meterFree", glyphs.free.repeat(freeCells)) : "";
+	return `${systemPart}${toolPart}${conversationPart}${freePart}${includePercent ? contextPercentLabel(theme, percent) : ""}`;
 }

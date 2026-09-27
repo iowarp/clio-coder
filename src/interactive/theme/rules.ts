@@ -34,7 +34,7 @@ export function fitUnits(theme: ClioTheme, prefix: string, units: readonly strin
 		const reserve = index < units.length - 1 ? 2 : 0;
 		if (visibleWidth(candidate) + reserve > maxWidth) {
 			if (index === 0) return truncateToWidth(candidate, Math.max(0, maxWidth), "…", false);
-			return `${line} ${theme.fg("dim", "…")}`;
+			return `${line} ${theme.fg("annotation", "…")}`;
 		}
 		line = candidate;
 	}
@@ -44,11 +44,14 @@ export function fitUnits(theme: ClioTheme, prefix: string, units: readonly strin
 export interface RuleOptions {
 	left?: string;
 	leftToken?: ClioToken;
+	leftRaw?: boolean;
 	right?: string;
 	fillToken?: ClioToken;
 	rightToken?: ClioToken;
 	rightRaw?: boolean;
 	rightTail?: string;
+	/** Render only the rule's fill, with its absolute starting column. */
+	renderFill?: (columns: number, offset: number) => string;
 }
 
 export function rule(theme: ClioTheme, width: number, options: RuleOptions = {}): string {
@@ -56,14 +59,19 @@ export function rule(theme: ClioTheme, width: number, options: RuleOptions = {})
 	if (safeWidth === 0) return "";
 	// A left label starts flush at column 0, with a single trailing space before
 	// the fill. There is no leading space, so labeled rules align with the frame.
-	const left = options.left ? `${theme.style(options.leftToken ?? "accent", options.left, { bold: true })} ` : "";
-	const rightBody = options.rightRaw ? options.right : theme.fg(options.rightToken ?? "muted", options.right ?? "");
+	const leftBody = options.leftRaw
+		? options.left
+		: theme.style(options.leftToken ?? "sectionHeading", options.left ?? "", { bold: true });
+	const left = options.left ? `${leftBody} ` : "";
+	const rightBody = options.rightRaw ? options.right : theme.fg(options.rightToken ?? "annotation", options.right ?? "");
 	const right = options.right ? ` ${rightBody} ${options.rightTail ?? ""}` : "";
 	const labelsWidth = visibleWidth(left) + visibleWidth(right);
 	if (labelsWidth >= safeWidth) return truncateToWidth(`${left}${right}`.trim(), safeWidth, "", true);
-	const fill = theme.style(options.fillToken ?? "frame", "─".repeat(safeWidth - labelsWidth), {
-		bold: options.fillToken === "frameStrong" || options.fillToken === "editor",
-	});
+	const fill = options.renderFill
+		? options.renderFill(safeWidth - labelsWidth, visibleWidth(left))
+		: theme.style(options.fillToken ?? "divider", "─".repeat(safeWidth - labelsWidth), {
+				bold: options.fillToken === "composerRail",
+			});
 	return `${left}${fill}${right}`;
 }
 
@@ -86,7 +94,7 @@ export interface FrameOptions {
  * ```
  *
  * Corners and fills carry the `frame` token. A plain `title` is drawn bold in
- * the `title` token with exactly one space on each side. A title that already
+ * the `heading` role with exactly one space on each side. A title that already
  * carries its own styling, such as the welcome header's composite of a brand
  * glyph and a dim version, is placed verbatim so its escape sequences are never
  * re-wrapped. The optional `rightMeta` renders dim before the closing corner.
@@ -100,13 +108,13 @@ export function frame(
 ): string[] {
 	const safeWidth = Math.max(4, width);
 	const contentWidth = Math.max(0, safeWidth - 4);
-	const frameFg = (text: string): string => theme.fg("frame", text);
+	const frameFg = (text: string): string => theme.fg("border", text);
 
 	const hasTitle = title.length > 0;
 	// A title that already carries escape sequences is a pre-styled composite
 	// (the welcome header's brand glyph and dim version); place it verbatim. A
-	// plain title is styled here as bold in the `title` token.
-	const styledTitle = !hasTitle ? "" : title.includes("\u001b") ? title : theme.style("title", title, { bold: true });
+	// plain title is styled here as bold in the `heading` role.
+	const styledTitle = !hasTitle ? "" : title.includes("\u001b") ? title : theme.style("heading", title, { bold: true });
 	const titleWidth = visibleWidth(title);
 
 	const meta = opts.rightMeta ?? "";
@@ -121,7 +129,7 @@ export function frame(
 	const fillWidth = Math.max(0, safeWidth - leftVisible - rightVisible);
 
 	const leftStr = hasTitle ? `${frameFg("┌─")} ${styledTitle} ` : frameFg("┌─");
-	const rightStr = hasMeta ? ` ${theme.fg("dim", meta)} ${frameFg("─┐")}` : frameFg("┐");
+	const rightStr = hasMeta ? ` ${theme.fg("annotation", meta)} ${frameFg("─┐")}` : frameFg("┐");
 	const composedTop = `${leftStr}${frameFg("─".repeat(fillWidth))}${rightStr}`;
 	// A title or meta wider than the island is clipped before the corner, so the
 	// top border keeps the exact width every body row has.
@@ -130,7 +138,7 @@ export function frame(
 			? `${truncateToWidth(composedTop, safeWidth - 1, GLYPH.ellipsis, false)}${frameFg("┐")}`
 			: composedTop;
 
-	const body = lines.map((line) => `${frameFg("│")} ${padAnsi(line, contentWidth)} ${frameFg("│")}`);
+	const body = lines.map((line) => `${frameFg("│")} ${padAnsi(theme.base("body", line), contentWidth)} ${frameFg("│")}`);
 	const bottom = `${frameFg("└")}${frameFg("─".repeat(safeWidth - 2))}${frameFg("┘")}`;
 	return [top, ...body, bottom];
 }
@@ -140,5 +148,5 @@ export function frame(
  * between rows inside an island. Callers pass the island's inner content width.
  */
 export function innerDivider(theme: ClioTheme, width: number): string {
-	return theme.fg("frame", GLYPH.innerDivider.repeat(Math.max(0, width)));
+	return theme.fg("divider", GLYPH.innerDivider.repeat(Math.max(0, width)));
 }

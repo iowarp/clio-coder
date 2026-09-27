@@ -23,19 +23,19 @@ const REFRESH_MS = 1000;
 export const TASKS_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
 const STATUS_PRESENTATION: Record<TaskBoardTask["status"], { glyph: string; token: ClioToken; label: string }> = {
-	pending: { glyph: GLYPH.queued, token: "dim", label: "pending" },
-	active: { glyph: GLYPH.running, token: "accent", label: "active" },
+	pending: { glyph: GLYPH.queued, token: "annotation", label: "pending" },
+	active: { glyph: GLYPH.running, token: "activity", label: "active" },
 	completed: { glyph: GLYPH.ok, token: "success", label: "done" },
 	blocked: { glyph: GLYPH.phaseBlocked, token: "warning", label: "blocked" },
-	cancelled: { glyph: GLYPH.cancelled, token: "dim", label: "dropped" },
+	cancelled: { glyph: GLYPH.cancelled, token: "annotation", label: "dropped" },
 };
 
 function dim(text: string): string {
-	return clioTheme().fg("dim", text);
+	return clioTheme().fg("annotation", text);
 }
 
 function muted(text: string): string {
-	return clioTheme().fg("muted", text);
+	return clioTheme().fg("menuOption", text);
 }
 
 function firstUsefulToken(values: ReadonlyArray<string>): string | null {
@@ -165,15 +165,18 @@ function formatTasksOverlayBodyLines(
 	const counts = taskBoardCounts(board);
 	const unverifiedCount = board.tasks.filter((task) => unverifiedTaskChecks(task) !== null).length;
 	const chips = [
-		theme.fg(counts.open > 0 || unverifiedCount > 0 ? "muted" : "success", `${counts.completed}/${counts.total} done`),
+		theme.fg(
+			counts.open > 0 || unverifiedCount > 0 ? "menuDescription" : "success",
+			`${counts.completed}/${counts.total} done`,
+		),
 		unverifiedCount > 0 ? theme.fg("warning", `${unverifiedCount} unverified`) : null,
-		counts.active > 0 ? theme.fg("accent", `${counts.active} active`) : null,
+		counts.active > 0 ? theme.fg("activity", `${counts.active} active`) : null,
 		counts.blocked > 0 ? theme.fg("warning", `${counts.blocked} blocked`) : null,
 		counts.cancelled > 0 ? dim(`${counts.cancelled} dropped`) : null,
 	].filter((chip): chip is string => chip !== null);
 	const lines: string[] = [
 		sectionHeading("Agent board", width),
-		fitRow(`${SECTION_GUTTER}${theme.fg("accent", board.title)}${dim(" · ")}${chips.join(dim(" · "))}`, width),
+		fitRow(`${SECTION_GUTTER}${theme.fg("sectionHeading", board.title)}${dim(" · ")}${chips.join(dim(" · "))}`, width),
 		formatTaskProofLine(board, width),
 	];
 	// The in-flight run ids render once, right under the proof anchor: full ids
@@ -244,7 +247,7 @@ function selectableRows(state: CompositeTasksOverlayState): TasksOverlaySelectio
 const SECTION_GUTTER = "  ";
 
 function sectionHeading(label: string, width: number): string {
-	return fitRow(clioTheme().style("muted", label, { bold: true }), width);
+	return fitRow(clioTheme().style("menuDescription", label, { bold: true }), width);
 }
 
 function emptyRows(text: string, width: number): string[] {
@@ -271,11 +274,11 @@ function displayArtifactPath(path: string, workspace: string): string {
 }
 
 const USER_TASK_PRESENTATION: Record<UserTask["status"], { glyph: string; token: ClioToken }> = {
-	open: { glyph: GLYPH.queued, token: "muted" },
-	handed: { glyph: GLYPH.running, token: "accent" },
-	picked: { glyph: GLYPH.running, token: "accent" },
+	open: { glyph: GLYPH.queued, token: "menuDescription" },
+	handed: { glyph: GLYPH.running, token: "activity" },
+	picked: { glyph: GLYPH.running, token: "activity" },
 	done: { glyph: GLYPH.ok, token: "success" },
-	dropped: { glyph: GLYPH.cancelled, token: "dim" },
+	dropped: { glyph: GLYPH.cancelled, token: "annotation" },
 };
 
 /** Pure composite renderer; callers provide already-captured history/artifact/user snapshots. */
@@ -336,7 +339,7 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 		const kind = artifact.artifactKind ? `:${artifact.artifactKind}` : "";
 		pushRow([
 			fitRow(
-				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg("muted", GLYPH.toolHeader)} ${muted(displayArtifactPath(artifact.path, workspace))} ${dim(`· ${artifact.tool}${kind} · ${artifact.timestamp}`)}`,
+				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg("menuDescription", GLYPH.toolHeader)} ${muted(displayArtifactPath(artifact.path, workspace))} ${dim(`· ${artifact.tool}${kind} · ${artifact.timestamp}`)}`,
 				width,
 			),
 		]);
@@ -455,7 +458,7 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 		this.layout = layout;
 		const pinned: string[] = [];
 		if (this.addInput) {
-			pinned.push("", fitRow(clioTheme().fg("accent", "New operator task"), safeWidth));
+			pinned.push("", fitRow(clioTheme().fg("sectionHeading", "New operator task"), safeWidth));
 			pinned.push(...this.addInput.render(safeWidth).map((line) => fitRow(line, safeWidth)));
 		}
 		if (this.status) pinned.push("", ...wrapTextWithAnsi(clioTheme().fg("warning", this.status), safeWidth));

@@ -1,60 +1,62 @@
 import { terminalBackground } from "../../core/terminal-background.js";
-import type { ClioToken, ThemeBackground } from "../../core/theme-token-hex.js";
-import { tokenHex } from "../../core/theme-token-hex.js";
+import { colorDisabled } from "../../core/terminal-preferences.js";
+import {
+	LEGACY_TOKEN_COLOR,
+	type ClioToken as LegacyToken,
+	type ThemeBackground,
+	type PaletteColor,
+	paletteProjection,
+	TERMINAL_PALETTE,
+} from "../../core/theme-token-hex.js";
+import {
+	DEFAULT_THEME_CONTEXT,
+	type SemanticRole,
+	type ThemeContext,
+	type RoleState,
+	isSemanticRole,
+	projectsYolo,
+	resolveRole,
+} from "../../core/theme-roles.js";
 
-export type { ClioToken, ThemeBackground } from "../../core/theme-token-hex.js";
+export type { ThemeBackground } from "../../core/theme-token-hex.js";
+export * from "../../core/theme-roles.js";
+/** Semantic roles plus explicit compatibility names for configured roster colors. */
+export type ClioToken = SemanticRole | LegacyToken;
 
 interface TokenColor {
 	rgb: readonly [number, number, number];
 	xterm: number;
 }
-
-/**
- * xterm-256 fallbacks per background, [unknown, dark, light], beside the hex
- * columns in core/theme-token-hex.ts. The unknown column favors two-sided
- * contrast, with 36 and 37 keeping the logo's mint and cyan apart.
- */
-const XTERM: Record<ClioToken, readonly [number, number, number]> = {
-	editor: [37, 44, 30],
-	editorDanger: [167, 203, 160],
-	editorAction: [166, 208, 130],
-	accent: [36, 79, 29],
-	accentDeep: [29, 36, 23],
-	tool: [66, 73, 66],
-	agent: [130, 173, 94],
-	// Orange means Clio is acting. It fires only for Clio's signature actions
-	// (dispatching, queued and running fleet work, steering) and for the border
-	// of a prompt that has taken the keyboard and is waiting on a decision, never
-	// as decoration, and never a metric, at most one orange element per region of
-	// the screen. warning stays amber for actual warnings.
-	action: [166, 208, 130],
-	success: [28, 42, 28],
-	warning: [136, 220, 136],
-	error: [167, 210, 124],
-	info: [67, 74, 24],
-	reason: [137, 180, 101],
-	dim: [244, 245, 243],
-	muted: [102, 248, 241],
-	title: [37, 44, 30],
-	frame: [243, 24, 250],
-	frameStrong: [37, 44, 30],
-};
-
-const PALETTES = new Map<ThemeBackground | null, Record<ClioToken, TokenColor>>();
-
-function palette(background: ThemeBackground | null): Record<ClioToken, TokenColor> {
+const PALETTES = new Map<ThemeBackground | null, Record<PaletteColor, TokenColor>>();
+function palette(background: ThemeBackground | null): Record<PaletteColor, TokenColor> {
 	let colors = PALETTES.get(background);
 	if (colors === undefined) {
-		const column = background === "dark" ? 1 : background === "light" ? 2 : 0;
-		const entries = (Object.keys(XTERM) as ClioToken[]).map((token): [ClioToken, TokenColor] => {
-			const hex = tokenHex(token, background);
-			const rgb = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)) as [number, number, number];
-			return [token, { rgb, xterm: XTERM[token][column] }];
-		});
-		colors = Object.fromEntries(entries) as Record<ClioToken, TokenColor>;
+		colors = Object.fromEntries(
+			(Object.keys(TERMINAL_PALETTE) as PaletteColor[]).map((name): [PaletteColor, TokenColor] => {
+				const [hex, xterm] = paletteProjection(name, background);
+				const rgb = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)) as [number, number, number];
+				return [name, { rgb, xterm }];
+			}),
+		) as Record<PaletteColor, TokenColor>;
 		PALETTES.set(background, colors);
 	}
 	return colors;
+}
+
+// A synchronous render scope also reaches theme callbacks made when a selector
+// was constructed. It never persists autonomy in the application-wide theme.
+let renderContext: ThemeContext = DEFAULT_THEME_CONTEXT;
+export function withThemeContext<T>(context: ThemeContext, render: () => T): T {
+	const previous = renderContext;
+	renderContext = context;
+	try {
+		return render();
+	} finally {
+		renderContext = previous;
+	}
+}
+function tokenStyle(token: ClioToken, context: ThemeContext, state?: RoleState) {
+	return isSemanticRole(token) ? resolveRole(token, context, state) : { color: LEGACY_TOKEN_COLOR[token], bold: false };
 }
 
 export const SGR_RESET = "\u001b[0m";
@@ -64,8 +66,24 @@ export const SGR_BOLD = "\u001b[1m";
 export const SGR_BOLD_OFF = "\u001b[22m";
 export const SGR_ITALIC = "\u001b[3m";
 
+/** End-of-sequence default foreground, including compound reset SGRs. */
+export function sgrResetsForeground(code: string): boolean {
+	const values = code.slice(2, -1).split(";").map(Number);
+	let reset = false;
+	for (let index = 0; index < values.length; index += 1) {
+		const value = values[index];
+		if (value === 0 || value === 39) reset = true;
+		else if (value === 38 || value === 48 || value === 58) {
+			if (value === 38) reset = false;
+			index += values[index + 1] === 2 ? 4 : values[index + 1] === 5 ? 2 : 0;
+		} else if (value !== undefined && ((value >= 30 && value <= 37) || (value >= 90 && value <= 97))) reset = false;
+	}
+	return reset;
+}
+
 export interface PaintMods {
 	fg?: ClioToken;
+	state?: RoleState;
 	bg?: ClioToken;
 	bold?: boolean;
 	italic?: boolean;
@@ -75,26 +93,14 @@ export interface PaintMods {
 
 export interface ClioTheme {
 	readonly truecolor: boolean;
+	readonly context: ThemeContext;
 	paint(text: string, mods: PaintMods): string;
-	fg(token: ClioToken, text: string): string;
+	fg(token: ClioToken, text: string, state?: RoleState): string;
 	bg(token: ClioToken, text: string): string;
 	style(token: ClioToken, text: string, mods?: Omit<PaintMods, "fg">): string;
 	fgSequence(token: ClioToken): string;
-}
-
-/**
- * The NO_COLOR convention: set and non-empty means emit no color, whatever the
- * value is. Clio was ignoring it entirely. A session launched with NO_COLOR=1
- * still wrote 961 non-reset SGR sequences in its first three seconds, most of
- * them 24-bit foregrounds, which is exactly what the variable exists to stop.
- *
- * Only color is dropped. Bold, dim, italic, and underline carry structure
- * rather than color and are what a monochrome terminal has left to read the
- * interface with, so they stay.
- */
-function colorDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
-	const raw = env.NO_COLOR;
-	return typeof raw === "string" && raw.length > 0;
+	/** Reading foreground resumes after inline resets, preserving syntax and backgrounds. */
+	base(role: SemanticRole, text: string): string;
 }
 
 function detectTruecolor(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -114,39 +120,54 @@ function bgCode(color: TokenColor, truecolor: boolean): string {
 
 export function fgSequence(token: ClioToken, truecolor: boolean = detectTruecolor()): string {
 	if (colorDisabled()) return "";
-	return `\u001b[${fgCode(palette(terminalBackground())[token], truecolor)}m`;
+	return `\u001b[${fgCode(palette(terminalBackground())[tokenStyle(token, DEFAULT_THEME_CONTEXT).color], truecolor)}m`;
 }
 
 export function createClioTheme(
-	options: { truecolor?: boolean; color?: boolean; background?: ThemeBackground | null } = {},
+	options: { truecolor?: boolean; color?: boolean; background?: ThemeBackground | null; context?: ThemeContext } = {},
 ): ClioTheme {
 	const truecolor = options.truecolor ?? detectTruecolor();
 	const color = options.color ?? !colorDisabled();
-	const colors = palette(options.background === undefined ? terminalBackground() : options.background);
+	const background = options.background === undefined ? terminalBackground() : options.background;
+	const colors = palette(background);
+	const surfaceColors = palette(background ?? "dark");
+	const context = () => options.context ?? renderContext;
+	const colorFor = (token: ClioToken, state?: RoleState): TokenColor => {
+		const scope = context();
+		return (projectsYolo(scope) ? surfaceColors : colors)[tokenStyle(token, scope, state).color];
+	};
 	const paint = (text: string, mods: PaintMods): string => {
 		const codes: string[] = [];
-		if (mods.bold) codes.push("1");
+		if (mods.bold ?? (mods.fg ? tokenStyle(mods.fg, context(), mods.state).bold : false)) codes.push("1");
 		if (mods.dim) codes.push("2");
 		if (mods.italic) codes.push("3");
 		if (mods.underline) codes.push("4");
-		if (color && mods.fg) codes.push(fgCode(colors[mods.fg], truecolor));
-		if (color && mods.bg) codes.push(bgCode(colors[mods.bg], truecolor));
+		if (color && mods.fg) codes.push(fgCode(colorFor(mods.fg, mods.state), truecolor));
+		if (color && mods.bg) codes.push(bgCode(colorFor(mods.bg), truecolor));
 		if (codes.length === 0) return text;
 		return `\u001b[${codes.join(";")}m${text}${SGR_RESET}`;
 	};
 	return {
 		truecolor,
+		get context() {
+			return context();
+		},
 		paint,
-		fg: (token, text) => paint(text, { fg: token }),
+		fg: (token, text, state) => paint(text, { fg: token, ...(state === undefined ? {} : { state }) }),
 		bg: (token, text) => paint(text, { bg: token }),
 		style: (token, text, mods = {}) => paint(text, { ...mods, fg: token }),
-		fgSequence: (token) => (color ? `\u001b[${fgCode(colors[token], truecolor)}m` : ""),
+		fgSequence: (token) => (color ? `\u001b[${fgCode(colorFor(token), truecolor)}m` : ""),
+		base: (role, text) => {
+			if (!color || text.length === 0) return text;
+			const foreground = `\u001b[${fgCode(colorFor(role), truecolor)}m`;
+			return `${foreground}${text.replace(/\u001b\[[\d;]*m/gu, (code) => (sgrResetsForeground(code) ? `${code}${foreground}` : code))}${SGR_RESET}`;
+		},
 	};
 }
 
 /** True when `value` names one of the theme's own tokens, so it can be painted as one. */
 export function isClioToken(value: string): value is ClioToken {
-	return Object.hasOwn(XTERM, value);
+	return isSemanticRole(value) || Object.hasOwn(LEGACY_TOKEN_COLOR, value);
 }
 
 const HEX_COLOR = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/u;

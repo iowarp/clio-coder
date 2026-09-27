@@ -342,14 +342,14 @@ function buildArtifactHeaderLines(
 	verification: ViewVerificationState | undefined,
 	width: number,
 ): string[] {
-	if (!artifact) return [padAnsi(clioTheme().fg("muted", "No artifact selected"), width, GLYPH.ellipsis)];
+	if (!artifact) return [padAnsi(clioTheme().fg("emptyState", "No artifact selected"), width, GLYPH.ellipsis)];
 	const theme = clioTheme();
 	// The list may cut a title, especially in a split pane. Give the selected
 	// act its own readable heading before the full body, while bounding a very
 	// long command so it cannot consume the entire preview.
 	const title = redactSecretString(sanitizeCallTargetText(artifact.title));
 	const wrappedTitle = wrapTextWithAnsi(
-		theme.fg("title", truncateToWidth(title, Math.max(1, width * 3), GLYPH.ellipsis, true)),
+		theme.fg("menuOption", truncateToWidth(title, Math.max(1, width * 3), GLYPH.ellipsis, true)),
 		Math.max(1, width),
 	);
 	const titleRows =
@@ -364,7 +364,7 @@ function buildArtifactHeaderLines(
 	const verify = verificationText(verification);
 	const heading = [
 		...titleRows.map((row) => padAnsi(row, width, GLYPH.ellipsis)),
-		padAnsi(theme.fg("dim", metadata), width, GLYPH.ellipsis),
+		padAnsi(theme.fg("annotation", metadata), width, GLYPH.ellipsis),
 	];
 	if (verify.length === 0) return heading;
 	const token =
@@ -531,7 +531,7 @@ export class ViewOverlayView implements Component {
 		const key = artifactKey(artifact);
 		if (this.content?.key === key) return;
 		const token = ++this.loadToken;
-		this.content = { key, status: "loading", lines: [clioTheme().fg("dim", "loading artifact…")], format: "text" };
+		this.content = { key, status: "loading", lines: [clioTheme().fg("annotation", "loading artifact…")], format: "text" };
 		void (async () => {
 			try {
 				const loaded = await Promise.resolve().then(() => artifact.load());
@@ -615,7 +615,7 @@ export class ViewOverlayView implements Component {
 			return content.renderedLines;
 		}
 		this.queueContentRender(content, width);
-		return [clioTheme().fg("dim", "laying out preview…")];
+		return [clioTheme().fg("annotation", "laying out preview…")];
 	}
 
 	private renderList(width: number, height: number): string[] {
@@ -626,11 +626,11 @@ export class ViewOverlayView implements Component {
 		// `filter: (empty)` caption.
 		if (this.filterText.length > 0) {
 			this.filterInput.focused = this.focus === "list";
-			lines.push(...this.filterInput.render(width));
+			lines.push(...this.filterInput.render(width).map((line) => clioTheme().base("searchQuery", line)));
 		}
 
 		if (this.loadingArtifacts) {
-			lines.push(padAnsi(theme.fg("dim", "loading artifacts…"), width, GLYPH.ellipsis));
+			lines.push(padAnsi(theme.fg("annotation", "loading artifacts…"), width, GLYPH.ellipsis));
 			return fitRows(lines, width, height);
 		}
 		if (this.artifactError) {
@@ -644,7 +644,7 @@ export class ViewOverlayView implements Component {
 		lines.push(
 			padAnsi(
 				theme.fg(
-					this.focus === "list" ? "accent" : "dim",
+					this.focus === "list" ? "selectedOption" : "annotation",
 					`List · ${filtered.length}/${this.artifacts.length} · ←→ category`,
 				),
 				width,
@@ -655,9 +655,9 @@ export class ViewOverlayView implements Component {
 			return fitRows(
 				[
 					...lines,
-					theme.fg("dim", "No matching details."),
-					theme.fg("muted", "Ctrl+U clears the filter."),
-					theme.fg("dim", "Try workspace: or receipt:"),
+					theme.fg("annotation", "No matching details."),
+					theme.fg("menuDescription", "Ctrl+U clears the filter."),
+					theme.fg("annotation", "Try workspace: or receipt:"),
 				],
 				width,
 				height,
@@ -674,20 +674,20 @@ export class ViewOverlayView implements Component {
 		for (const row of rows.slice(this.listScrollOffset, this.listScrollOffset + rowHeight)) {
 			if (row.type === "group") {
 				const count = filtered.filter((artifact) => artifact.category === row.category).length;
-				lines.push(padAnsi(theme.fg("dim", `── ${categoryLabel(row.category)} (${count})`), width, GLYPH.ellipsis));
+				lines.push(padAnsi(theme.fg("annotation", `── ${categoryLabel(row.category)} (${count})`), width, GLYPH.ellipsis));
 				continue;
 			}
 			if (row.type === "empty") {
-				lines.push(padAnsi(theme.fg("dim", "  (empty)"), width, GLYPH.ellipsis));
+				lines.push(padAnsi(theme.fg("annotation", "  (empty)"), width, GLYPH.ellipsis));
 				continue;
 			}
 			if (!row.item) continue;
 			const selected = row.itemIndex === this.selectedIndex;
 			const cursor = `${selectionMark(selected)} `;
 			const safeTitle = redactSecretString(sanitizeCallTargetText(row.item.title));
-			const title = selected ? theme.style("accent", safeTitle, { bold: true }) : safeTitle;
+			const title = theme.fg("menuOption", safeTitle, selected ? "selected" : "normal");
 			const metaParts = [formatRelativeTime(row.item.timestamp), formatArtifactSize(row.item.sizeBytes)].filter(Boolean);
-			const meta = metaParts.length > 0 ? theme.fg("dim", metaParts.join(" ")) : "";
+			const meta = metaParts.length > 0 ? theme.fg("annotation", metaParts.join(" ")) : "";
 			const available = Math.max(1, width - visibleWidth(cursor));
 			const metaWidth = visibleWidth(meta);
 			const titleWidth = Math.max(1, available - (metaWidth > 0 ? metaWidth + 1 : 0));
@@ -717,7 +717,11 @@ export class ViewOverlayView implements Component {
 					: `Preview${position} · n/p item · i info · Esc list`
 				: `Preview${position} · Enter/Tab focus`;
 		const header = [
-			padAnsi(clioTheme().fg(this.focus === "content" ? "accent" : "dim", headerLabel), width, GLYPH.ellipsis),
+			padAnsi(
+				clioTheme().fg(this.focus === "content" ? "selectedOption" : "annotation", headerLabel),
+				width,
+				GLYPH.ellipsis,
+			),
 			...buildArtifactHeaderLines(artifact, verification, width),
 		];
 		const bodyHeight = Math.max(0, height - header.length);
@@ -743,7 +747,7 @@ export class ViewOverlayView implements Component {
 		const rightWidth = Math.max(1, width - leftWidth - separatorWidth);
 		const list = this.renderList(leftWidth, bodyHeight);
 		const content = this.renderContent(rightWidth, bodyHeight);
-		const separator = clioTheme().fg("frame", SEPARATOR);
+		const separator = clioTheme().fg("border", SEPARATOR);
 		return Array.from({ length: bodyHeight }, (_, index) => `${list[index] ?? ""}${separator}${content[index] ?? ""}`);
 	}
 

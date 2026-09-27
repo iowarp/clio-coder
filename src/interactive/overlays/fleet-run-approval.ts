@@ -102,23 +102,26 @@ export function formatFleetRunApprovalBody(subject: FleetRunApprovalSubject, wid
 		rows.push(rule(theme, contentWidth));
 		for (const diagnostic of subject.diagnostics) {
 			for (const line of diagnostic.split("\n")) {
-				for (const wrapped of wrapTextWithAnsi(theme.fg("muted", line), contentWidth)) rows.push(wrapped);
+				for (const wrapped of wrapTextWithAnsi(theme.fg("menuDescription", line), contentWidth)) rows.push(wrapped);
 			}
 		}
 	} else {
 		const { preview } = subject;
-		rows.push(theme.fg("dim", `${preview.name} · plan ${preview.planHash.slice(0, 12)}`));
+		rows.push(theme.fg("annotation", `${preview.name} · plan ${preview.planHash.slice(0, 12)}`));
 		rows.push(rule(theme, contentWidth));
 		for (const wave of preview.waves) {
-			rows.push(theme.fg("accent", `wave ${wave.index}`));
+			rows.push(theme.fg("groupHeading", `wave ${wave.index}`));
 			for (const step of wave.steps) {
-				for (const line of wrapTextWithAnsi(theme.fg("muted", `  ${formatFleetRunPreviewStep(step)}`), contentWidth)) {
+				for (const line of wrapTextWithAnsi(
+					theme.fg("menuDescription", `  ${formatFleetRunPreviewStep(step)}`),
+					contentWidth,
+				)) {
 					rows.push(line);
 				}
 				if (step.argv !== undefined) {
 					rows.push(
 						...wrapTextWithAnsi(
-							theme.fg("dim", `    argv ${step.argv.map((arg) => JSON.stringify(arg)).join(" ")}`),
+							theme.fg("annotation", `    argv ${step.argv.map((arg) => JSON.stringify(arg)).join(" ")}`),
 							contentWidth,
 						),
 					);
@@ -133,7 +136,7 @@ export function formatFleetRunApprovalBody(subject: FleetRunApprovalSubject, wid
 	const start = Math.max(0, Math.min(scroll, maxScroll));
 	const shown = rows.slice(start, start + FLEET_RUN_APPROVAL_VISIBLE_ROWS);
 	if (rows.length > FLEET_RUN_APPROVAL_VISIBLE_ROWS) {
-		shown.push(theme.fg("dim", `(${start + 1}-${start + shown.length} of ${rows.length} lines)`));
+		shown.push(theme.fg("annotation", `(${start + 1}-${start + shown.length} of ${rows.length} lines)`));
 	}
 	return shown;
 }

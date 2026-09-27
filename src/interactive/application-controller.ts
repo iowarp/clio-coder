@@ -7,6 +7,7 @@ export const APPLICATION_DOUBLE_TAP_MS = 500;
 
 export const CLOSED_ACTION_ORDER = [
 	"clio-coder.output.cycle",
+	"clio-coder.autonomy.toggle",
 	"clio-coder.notifications.dismiss",
 	"clio-coder.editor.external",
 	"clio-coder.message.followUp",

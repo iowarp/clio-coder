@@ -12,11 +12,11 @@ export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutp
 	sink.appendReplayBlock((width) => {
 		const theme = clioTheme();
 		let glyph = "";
-		let token: ClioToken = "dim";
+		let token: ClioToken = "annotation";
 		switch (level) {
 			case "info":
 				glyph = "·";
-				token = "dim";
+				token = "annotation";
 				break;
 			case "success":
 				glyph = GLYPH.ok;
@@ -33,7 +33,7 @@ export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutp
 		}
 		// The mark holds the gutter and a wrapped reply hangs in the content
 		// column, like every other transcript block.
-		return wrapTextWithAnsi(normalized, Math.max(1, width - 2)).map((row, index) =>
+		return wrapTextWithAnsi(theme.base("notice", normalized), Math.max(1, width - 2)).map((row, index) =>
 			index === 0 ? `${theme.fg(token, glyph)} ${row}` : `  ${row}`,
 		);
 	});
@@ -54,8 +54,8 @@ export function renderOperatorCommandRows(text: string, width: number): string[]
 	const theme = clioTheme();
 	// The operator's own input wears the prompt bar, dimmed: it is theirs, but
 	// it was a command, not a turn the model saw.
-	const bar = `${theme.fg("dim", GLYPH.userBar)} `;
-	return wrapTextWithAnsi(theme.fg("dim", normalized), Math.max(1, width - 2)).map((row) => `${bar}${row}`);
+	const bar = `${theme.fg("annotation", GLYPH.userBar)} `;
+	return wrapTextWithAnsi(theme.fg("annotation", normalized), Math.max(1, width - 2)).map((row) => `${bar}${row}`);
 }
 
 /**
@@ -93,7 +93,7 @@ export function appendOperatorAside(text: string, sink: CommandOutputSink): void
 	if (normalized.length === 0) return;
 	sink.appendReplayBlock((width) => {
 		const theme = clioTheme();
-		return wrapTextWithAnsi(theme.fg("dim", normalized), Math.max(1, width - 2)).map((line) => `  ${line}`);
+		return wrapTextWithAnsi(theme.fg("annotation", normalized), Math.max(1, width - 2)).map((line) => `  ${line}`);
 	});
 	sink.requestRender();
 }
@@ -119,8 +119,8 @@ export function appendInterviewRecord(entries: ReadonlyArray<InterviewRecordEntr
 		const inner = Math.max(1, width - 2);
 		for (const entry of kept) {
 			const label = entry.label.replace(/\s+/gu, " ").trim();
-			lines.push(...wrapTextWithAnsi(`${theme.fg("accent", GLYPH.cursor)} ${theme.fg("dim", label)}`, width));
-			lines.push(...wrapTextWithAnsi(theme.fg("muted", entry.answer.trim()), inner).map((line) => `  ${line}`));
+			lines.push(...wrapTextWithAnsi(`${theme.fg("guidance", GLYPH.cursor)} ${theme.fg("annotation", label)}`, width));
+			lines.push(...wrapTextWithAnsi(theme.fg("body", entry.answer.trim()), inner).map((line) => `  ${line}`));
 		}
 		return lines;
 	});

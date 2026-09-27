@@ -12,7 +12,7 @@ import { clioTheme, padAnsi } from "./theme/index.js";
 export const ACTIVITY_SPAN_DAYS = 182;
 const DAY_MS = 86_400_000;
 const CELL = "■";
-const LEVEL_TOKENS: ReadonlyArray<ClioToken> = ["frame", "accentDeep", "accent", "editor"];
+const LEVEL_TOKENS: ReadonlyArray<ClioToken> = ["meterFree", "activityLow", "activityMedium", "activityHigh"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** `YYYY-MM-DD` in local time. */
@@ -78,7 +78,7 @@ export function renderActivityHeatmap(
 		for (let index = 0; index < label.length && week * 2 + index < months.length; index += 1)
 			months[week * 2 + index] = label[index] ?? " ";
 	}
-	const lines = [`${" ".repeat(gutter)}${theme.fg("muted", months.join("").trimEnd())}`];
+	const lines = [`${" ".repeat(gutter)}${theme.fg("body", months.join("").trimEnd())}`];
 	const rowLabels = ["M", "", "W", "", "F", "", ""];
 	for (let row = 0; row < 7; row += 1) {
 		let cells = "";
@@ -89,12 +89,12 @@ export function renderActivityHeatmap(
 				continue;
 			}
 			const count = days.get(dayKey(time)) ?? 0;
-			cells += `${theme.fg(LEVEL_TOKENS[level(count, max)] ?? "frame", CELL)} `;
+			cells += `${theme.fg(LEVEL_TOKENS[level(count, max)] ?? "border", CELL)} `;
 		}
-		lines.push(`${padAnsi(theme.fg("muted", rowLabels[row] ?? ""), gutter)}${cells.trimEnd()}`);
+		lines.push(`${padAnsi(theme.fg("body", rowLabels[row] ?? ""), gutter)}${cells.trimEnd()}`);
 	}
 	const legend = LEVEL_TOKENS.map((token) => theme.fg(token, CELL)).join(" ");
-	const captionText = caption.length > 0 ? ` ${theme.fg("dim", `· ${caption}`)}` : "";
-	lines.push(`${" ".repeat(gutter)}${theme.fg("muted", "Less")} ${legend} ${theme.fg("muted", "More")}${captionText}`);
+	const captionText = caption.length > 0 ? ` ${theme.fg("annotation", `· ${caption}`)}` : "";
+	lines.push(`${" ".repeat(gutter)}${theme.fg("body", "Less")} ${legend} ${theme.fg("body", "More")}${captionText}`);
 	return lines.map((line) => (visibleWidth(line) > contentWidth ? padAnsi(line, contentWidth) : line));
 }

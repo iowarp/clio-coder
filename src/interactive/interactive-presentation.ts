@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import { motionEnabled } from "../core/terminal-preferences.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { isUserVisibleAgent } from "../domains/agents/spec.js";
 import type { ContextState } from "../domains/context/index.js";
@@ -30,6 +31,7 @@ import { createCommandOutputRunIo } from "./command-output.js";
 import { createContextActivityStore } from "./context-activity.js";
 import type { DispatchBoardView } from "./dispatch-board.js";
 import { createDispatchBoardStore, createDispatchBoardView } from "./dispatch-board.js";
+import { dockTop, setDockFooterRows } from "./dock.js";
 import { parseEditorBashCommand } from "./editor-bash.js";
 import { parseEditorSteerMention, resolveSteerTarget } from "./editor-steer.js";
 import { createFleetDock } from "./fleet-dock.js";
@@ -39,6 +41,7 @@ import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboa
 import { buildFooterDashboard } from "./footer/dashboard.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter } from "./footer/notifications.js";
+import { composerPhasePresentation } from "./footer/widgets.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { ClioKeybindingManager } from "./keybinding-manager.js";
@@ -52,6 +55,7 @@ import type { StatusController, TurnSummary } from "./status/index.js";
 import { createStatusController } from "./status/index.js";
 import type { SmoothStreamingMode } from "./stream-pacer.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
+import { ATTENTION_STEP_MS } from "./theme/glyphs.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 import { readWorkerReceiptFacts } from "./worker-receipts.js";
@@ -170,6 +174,7 @@ export interface InteractivePresentation {
 	io: RunIo;
 	root: Component;
 	changeOutputStyle(mutation: () => void): void;
+	announceSettingChanges(): void;
 	setLocalBashRunning(running: boolean): void;
 	getQuotaSnapshots(): ReadonlyArray<UsageSnapshot>;
 	/** Fold one raw chat event into the ephemeral throughput shown only while this turn is active. */
@@ -416,6 +421,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		getTerminalColumns: () => deps.terminal.columns,
 		getTerminalRows: () => deps.terminal.rows ?? process.stdout.rows ?? 40,
+		onHeightChange: (rows) => {
+			if (setDockFooterRows(deps.tui, rows)) requestRender();
+		},
 		getSessionTokens: () => observabilitySnapshot.session.tokens,
 		getTokenThroughput: () =>
 			liveThroughput === null ? observabilitySnapshot.session.latestThroughput : currentLiveThroughput(),
@@ -471,18 +479,44 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			// Keep raw fields separate through the terminal-lease proxy until render knows its width.
 			return { targetId: current?.chat?.target, modelId: current?.chat?.model };
 		},
-		getThinkingLabel: () => {
+		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
+		getHarnessStatus: (width) => {
+			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
+			return status.phase === "idle" ? null : composerPhasePresentation(status, width, Date.now());
+		},
+		getContextUsage: () => {
+			const usage = deps.chat.contextUsage();
+			return {
+				used: usage.tokens,
+				contextWindow: usage.contextWindow,
+				toolSchemaTokens: usage.breakdown?.toolSchemaTokens ?? null,
+				breakdown: usage.breakdown ?? null,
+				ledger: usage.revision ? null : deps.chat.contextLedger(),
+				...(usage.revision
+					? {
+							budget: {
+								revision: usage.revision,
+								historical: usage.historical ?? true,
+								inputSource: usage.inputSource ?? "unknown",
+							},
+						}
+					: {}),
+			};
+		},
+		getThinking: () => {
 			const current = deps.getSettings?.();
-			return (
-				resolveModelRuntimeCapabilitiesForProviders(
-					deps.providers,
-					current?.chat?.target,
-					current?.chat?.model,
-					current?.chat?.thinkingLevel ?? "off",
-				)?.thinking.display ??
-				current?.chat?.thinkingLevel ??
-				"off"
-			);
+			const thinking = resolveModelRuntimeCapabilitiesForProviders(
+				deps.providers,
+				current?.chat?.target,
+				current?.chat?.model,
+				current?.chat?.thinkingLevel ?? "off",
+			)?.thinking;
+			return {
+				label:
+					thinking?.mechanism === "none" ? "unavailable" : (thinking?.display ?? current?.chat?.thinkingLevel ?? "off"),
+				hasLevels: thinking?.mechanism === "effort-levels" || thinking?.mechanism === "budget-tokens",
+				supportedLevels: thinking?.supportedLevels ?? [],
+			};
 		},
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		isStreaming: () => deps.chat.isStreaming(),
@@ -495,6 +529,32 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getNewlineKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.newLine")[0], "Ctrl+J"),
 	};
 	const editor = deps.editor ?? factories.createEditor(deps.tui, editorChrome);
+	const readSettingState = () => ({
+		thinking: editorChrome.getThinkingLabel(),
+		output: editorChrome.getOutputStyle?.() ?? "standard",
+		autonomy: editorChrome.getAutonomy?.() ?? "default",
+	});
+	let lastSettingState = readSettingState();
+	const announceSettingChanges = (): void => {
+		const next = readSettingState();
+		const previous = lastSettingState;
+		lastSettingState = next;
+		const changes: string[] = [];
+		const title = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+		if (next.thinking !== previous.thinking) changes.push(`Think ${title(next.thinking)}`);
+		if (next.output !== previous.output)
+			changes.push(`Verbose ${{ compact: "Minimal", standard: "Default", detailed: "Detailed" }[next.output]}`);
+		if (next.autonomy !== previous.autonomy)
+			changes.push(`Autonomy ${next.autonomy === "yolo" ? "YOLO" : title(next.autonomy)}`);
+		if (changes.length)
+			notifications.add({
+				level: "info",
+				text: changes.join(" · "),
+				key: "settings:feedback",
+				presentation: "setting",
+				ttlMs: 3_000,
+			});
+	};
 	editor.focused = true;
 	const autocomplete: AutocompleteProvider = factories.createAutocomplete({
 		// Completion runs per keystroke and only names templates, so it reads the
@@ -625,21 +685,39 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const clearScheduledInterval =
 		deps.clearScheduledInterval ??
 		((handle: PresentationTickerHandle): void => clearInterval(handle as ReturnType<typeof setInterval>));
-	// The one presentation ticker. Its frames also advance every counting row in
-	// the transcript: the panel keys its render on a 100 ms tick whenever a
-	// running tool, live reasoning or a pending worker is on screen, so nothing
-	// has to invalidate the panel to move an elapsed counter. A worker that
-	// outlives the turn keeps the ticker running for its live row.
-	const footerTicker = scheduleInterval(() => {
-		const statusActive =
-			statusController.current().phase !== "idle" ||
-			localBashStartedAt !== null ||
-			deps.isAwaitingApproval?.() === true ||
-			dispatchBoardStore.rows().some((row) => row.status === "running");
-		if (!deps.chat.isStreaming() && !statusActive && !footer.isExpanded()) return;
-		footer.refresh();
-		requestRender();
-	}, 120);
+	// Routine progress needs second-resolution counters, not animation frames.
+	// Only a visible unanswered decision temporarily asks for a slow attention cue.
+	const needsAttention = (): boolean =>
+		deps.isAwaitingApproval?.() === true || dockTop(deps.tui)?.frame.dockAwaitingInput?.() === true;
+	const presentationInterval = (): number => (motionEnabled() && needsAttention() ? ATTENTION_STEP_MS : 1_000);
+	let tickerInterval = presentationInterval();
+	let lastActivitySecond = -1;
+	let tickersStopped = false;
+	const tickPresentation = (): void => {
+		if (tickersStopped) return;
+		const nextInterval = presentationInterval();
+		if (nextInterval !== tickerInterval) {
+			clearScheduledInterval(footerTicker);
+			tickerInterval = nextInterval;
+			footerTicker = scheduleInterval(tickPresentation, tickerInterval);
+			footerTicker.unref?.();
+		}
+		let needsRender = tickerInterval === ATTENTION_STEP_MS;
+		const second = Math.floor(performance.now() / 1_000);
+		if (second !== lastActivitySecond) {
+			lastActivitySecond = second;
+			const statusActive =
+				!["idle", "ended"].includes(statusController.current().phase) ||
+				localBashStartedAt !== null ||
+				dispatchBoardStore.rows().some((row) => row.status === "running");
+			if (deps.chat.isStreaming() || statusActive) {
+				footer.refresh();
+				needsRender = true;
+			}
+		}
+		if (needsRender) requestRender();
+	};
+	let footerTicker = scheduleInterval(tickPresentation, tickerInterval);
 	footerTicker.unref?.();
 	const workspaceTicker = scheduleInterval(() => {
 		refreshLiveWorkspaceGit(true);
@@ -648,7 +726,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	}, 5_000);
 	workspaceTicker.unref?.();
 
-	let tickersStopped = false;
 	let beforeStatusDisposed = false;
 	let statusDisposed = false;
 	const stopTickers = (): void => {
@@ -704,6 +781,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		changeOutputStyle: (mutation) =>
 			chatRenderer.mutate(() => preserveTranscriptScroll(transcriptView, deps.terminal.columns, mutation), "output-style"),
+		announceSettingChanges,
 		getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
 		recordChatEvent,
 		recordToolStart: (toolCallId, toolName) => {

@@ -26,15 +26,16 @@ function parseJson(value: unknown): unknown | null {
 	}
 }
 
-function colorJsonLine(line: string): string {
+export function highlightJsonLine(line: string): string {
 	const theme = clioTheme();
 	const token =
 		/("(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:e[+-]?\d+)?|\btrue\b|\bfalse\b|\bnull\b|[{}:,]|\[|\])/giu;
 	return line.replace(token, (part) => {
 		if (/^"(?:\\.|[^"\\])*"$/u.test(part))
-			return theme.fg(part.endsWith('"') && line.includes(`${part}:`) ? "accent" : "success", part);
-		if (/^-?\d/u.test(part) || part === "true" || part === "false" || part === "null") return theme.fg("info", part);
-		return theme.fg("dim", part);
+			return theme.fg(part.endsWith('"') && line.includes(`${part}:`) ? "syntaxKey" : "syntaxString", part);
+		if (/^-?\d/u.test(part) || part === "true" || part === "false" || part === "null")
+			return theme.fg("syntaxLiteral", part);
+		return theme.fg("syntaxComment", part);
 	});
 }
 
@@ -50,7 +51,7 @@ export function tryRenderJson(value: unknown, width: number, options: Structured
 	const limit = Math.max(1, options.lineLimit ?? 80);
 	return collapseLines(pretty.split("\n"), limit).map((line) => {
 		const styled =
-			line.startsWith("... ") && line.endsWith(" hidden") ? clioTheme().fg("dim", line) : colorJsonLine(line);
+			line.startsWith("... ") && line.endsWith(" hidden") ? clioTheme().fg("toolMetadata", line) : highlightJsonLine(line);
 		return fit(styled, width);
 	});
 }
@@ -72,9 +73,9 @@ function prettyXml(text: string): string[] {
 function colorXmlLine(line: string): string {
 	const theme = clioTheme();
 	return line.replace(/(<\/?|>|\/>|[^<>]+)/gu, (part) => {
-		if (part === "<" || part === "</" || part === ">" || part === "/>") return theme.fg("dim", part);
-		if (part.startsWith("<")) return theme.fg("reason", part);
-		return part.includes("=") ? theme.fg("reason", part) : theme.fg("success", part);
+		if (part === "<" || part === "</" || part === ">" || part === "/>") return theme.fg("syntaxComment", part);
+		if (part.startsWith("<")) return theme.fg("syntaxKeyword", part);
+		return part.includes("=") ? theme.fg("syntaxKeyword", part) : theme.fg("syntaxString", part);
 	});
 }
 
@@ -83,7 +84,8 @@ export function tryRenderXml(text: string, width: number, options: StructuredRen
 	if (!trimmed.startsWith("<") || !trimmed.endsWith(">")) return null;
 	const limit = Math.max(1, options.lineLimit ?? 80);
 	return collapseLines(prettyXml(trimmed), limit).map((line) => {
-		const styled = line.startsWith("... ") && line.endsWith(" hidden") ? clioTheme().fg("dim", line) : colorXmlLine(line);
+		const styled =
+			line.startsWith("... ") && line.endsWith(" hidden") ? clioTheme().fg("toolMetadata", line) : colorXmlLine(line);
 		return fit(styled, width);
 	});
 }

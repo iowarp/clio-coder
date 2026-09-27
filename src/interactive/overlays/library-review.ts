@@ -65,14 +65,17 @@ export function formatLibraryPlanReview(
 	const rows: string[] = [];
 	const target = plan.steps.at(-1);
 	rows.push(
-		...wrap(theme.fg("accent", target ? stepHeadline(target) : `${plan.request.operation} ${plan.request.ref}`), width),
+		...wrap(
+			theme.fg("decisionQuestion", target ? stepHeadline(target) : `${plan.request.operation} ${plan.request.ref}`),
+			width,
+		),
 	);
 	if (plan.steps.length > 1)
-		rows.push(...wrap(theme.fg("dim", `${plan.steps.length} steps, requirements first`), width));
+		rows.push(...wrap(theme.fg("annotation", `${plan.steps.length} steps, requirements first`), width));
 	rows.push(rule(theme, width));
 
 	for (const step of plan.steps) {
-		rows.push(...wrap(theme.fg("muted", stepHeadline(step)), width));
+		rows.push(...wrap(theme.fg("menuDescription", stepHeadline(step)), width));
 		if (step.refusal) rows.push(...wrap(theme.fg("error", `refused: ${step.refusal}`), width));
 		if (step.content && !step.content.valid)
 			rows.push(...wrap(theme.fg("warning", `content invalid: ${step.content.diagnostics.join("; ")}`), width));
@@ -80,7 +83,7 @@ export function formatLibraryPlanReview(
 			rows.push(
 				...wrap(
 					theme.fg(
-						"dim",
+						"annotation",
 						`projects ${step.content.resources.map((item) => `${item.kind}:${item.name}${item.valid ? "" : " (invalid)"}`).join(", ")}`,
 					),
 					width,
@@ -100,7 +103,10 @@ export function formatLibraryPlanReview(
 		for (const dependent of step.dependents.preexisting)
 			rows.push(
 				...wrap(
-					theme.fg("dim", `already broken ${dependent.ref} (${dependent.scope}): needs ${dependent.missing.join(", ")}`),
+					theme.fg(
+						"annotation",
+						`already broken ${dependent.ref} (${dependent.scope}): needs ${dependent.missing.join(", ")}`,
+					),
 					width,
 				),
 			);
@@ -114,14 +120,14 @@ export function formatLibraryPlanReview(
 					width,
 				),
 			);
-		rows.push(...wrap(theme.fg("dim", step.fallbackNote), width));
-		rows.push(...wrap(theme.fg("dim", step.recovery), width));
+		rows.push(...wrap(theme.fg("annotation", step.fallbackNote), width));
+		rows.push(...wrap(theme.fg("annotation", step.recovery), width));
 		if (options.detail) {
-			rows.push(...wrap(theme.fg("dim", `destination ${step.destination}`), width));
+			rows.push(...wrap(theme.fg("annotation", `destination ${step.destination}`), width));
 			if (step.source)
 				rows.push(
-					...wrap(theme.fg("dim", `source ${step.source.sourceUrl}`), width),
-					...wrap(theme.fg("dim", `    sha256 ${step.source.sha256}`), width),
+					...wrap(theme.fg("annotation", `source ${step.source.sourceUrl}`), width),
+					...wrap(theme.fg("annotation", `    sha256 ${step.source.sha256}`), width),
 				);
 		}
 	}
@@ -131,7 +137,7 @@ export function formatLibraryPlanReview(
 	rows.push(
 		...wrap(
 			theme.fg(
-				"dim",
+				"annotation",
 				plan.applicable
 					? "Verification after the change reads the copy back from disk and reports which resources the loaders actually admit. Enter applies it; Esc writes nothing and releases the staged source."
 					: "This plan cannot be applied as reviewed. Esc writes nothing and releases the staged source.",
@@ -139,7 +145,9 @@ export function formatLibraryPlanReview(
 			width,
 		),
 	);
-	rows.push(...wrap(theme.fg("dim", options.detail ? "d hides paths and digests" : "d shows paths and digests"), width));
+	rows.push(
+		...wrap(theme.fg("annotation", options.detail ? "d hides paths and digests" : "d shows paths and digests"), width),
+	);
 	return rows;
 }
 
@@ -152,7 +160,7 @@ function refreshLine(refresh: LibraryRefreshResult): string {
 		);
 	if (refresh.status === "failed")
 		return theme.fg("error", `session refresh failed: ${refresh.error}; press R to retry`);
-	return theme.fg("dim", `session refresh not applicable: ${refresh.reason}`);
+	return theme.fg("annotation", `session refresh not applicable: ${refresh.reason}`);
 }
 
 /**
@@ -175,7 +183,8 @@ function evidenceLabel(evidence: "pre-refresh" | "post-refresh", refresh: Librar
 
 function outcomeLines(outcome: LibraryStepOutcome, width: number, refresh: LibraryRefreshResult): string[] {
 	const theme = clioTheme();
-	const token = outcome.status === "committed" ? "success" : outcome.status === "failed" ? "error" : ("dim" as const);
+	const token =
+		outcome.status === "committed" ? "success" : outcome.status === "failed" ? "error" : ("annotation" as const);
 	const rows = wrap(
 		theme.fg(token, `${outcome.status}: ${outcome.operation} ${outcome.identity.ref} (${outcome.identity.scope})`),
 		width,
@@ -186,7 +195,7 @@ function outcomeLines(outcome: LibraryStepOutcome, width: number, refresh: Libra
 			rows.push(
 				...wrap(
 					theme.fg(
-						"dim",
+						"annotation",
 						`changed fact ${outcome.error.changed.fact}: reviewed ${JSON.stringify(outcome.error.changed.expected)}, observed ${JSON.stringify(outcome.error.changed.observed)}`,
 					),
 					width,
@@ -196,11 +205,11 @@ function outcomeLines(outcome: LibraryStepOutcome, width: number, refresh: Libra
 	}
 	const verification = outcome.verification;
 	if (verification) {
-		rows.push(...wrap(theme.fg("dim", `disk: tree ${verification.tree}, record ${verification.record}`), width));
+		rows.push(...wrap(theme.fg("annotation", `disk: tree ${verification.tree}, record ${verification.record}`), width));
 		rows.push(
 			...wrap(
 				theme.fg(
-					"dim",
+					"annotation",
 					`${evidenceLabel(verification.evidence, refresh)}: ${
 						verification.resources.length === 0
 							? "none admitted"
@@ -218,7 +227,7 @@ function outcomeLines(outcome: LibraryStepOutcome, width: number, refresh: Libra
 		rows.push(
 			...wrap(
 				theme.fg(
-					"dim",
+					"annotation",
 					verification.effective
 						? `effective copy: ${verification.effective.scope}, ${verification.effective.loadable ? "loadable" : "not loadable"}`
 						: "effective copy: none remains",
@@ -230,8 +239,8 @@ function outcomeLines(outcome: LibraryStepOutcome, width: number, refresh: Libra
 	if (outcome.recovery?.packageBackup)
 		rows.push(...wrap(theme.fg("info", `recovered content: ${outcome.recovery.packageBackup}`), width));
 	if (outcome.recovery?.stateBackup)
-		rows.push(...wrap(theme.fg("dim", `state backup: ${outcome.recovery.stateBackup}`), width));
-	for (const diagnostic of outcome.diagnostics) rows.push(...wrap(theme.fg("dim", diagnostic), width));
+		rows.push(...wrap(theme.fg("annotation", `state backup: ${outcome.recovery.stateBackup}`), width));
+	for (const diagnostic of outcome.diagnostics) rows.push(...wrap(theme.fg("annotation", diagnostic), width));
 	return rows;
 }
 
@@ -261,14 +270,14 @@ export function formatLibraryOutcome(result: LibraryApplyResult, width: number):
 		rows.push(
 			...wrap(
 				theme.fg(
-					"dim",
+					"annotation",
 					"Unattempted steps were never started; the committed ones stand. Review a fresh plan for the rest.",
 				),
 				width,
 			),
 		);
 	rows.push(
-		...wrap(theme.fg("dim", "R retries the session refresh only; it never repeats a write. Esc closes."), width),
+		...wrap(theme.fg("annotation", "R retries the session refresh only; it never repeats a write. Esc closes."), width),
 	);
 	return rows;
 }
@@ -290,16 +299,16 @@ function formatLibraryImportReview(
 	const theme = clioTheme();
 	const rows = wrap(
 		theme.fg(
-			plan.action === "install" ? "accent" : "error",
+			plan.action === "install" ? "attention" : "error",
 			`${plan.action === "install" ? "import" : "blocked"} ${plan.id ?? plan.source.input} into ${plan.scope} scope`,
 		),
 		width,
 	);
 	rows.push(rule(theme, width));
-	rows.push(...wrap(theme.fg("muted", `source: ${plan.source.input} (${plan.source.transport})`), width));
-	if (plan.format) rows.push(...wrap(theme.fg("dim", `format: ${plan.format}`), width));
-	if (plan.version) rows.push(...wrap(theme.fg("dim", `version: ${plan.version}`), width));
-	if (plan.destination) rows.push(...wrap(theme.fg("dim", `destination: ${plan.destination}`), width));
+	rows.push(...wrap(theme.fg("menuDescription", `source: ${plan.source.input} (${plan.source.transport})`), width));
+	if (plan.format) rows.push(...wrap(theme.fg("annotation", `format: ${plan.format}`), width));
+	if (plan.version) rows.push(...wrap(theme.fg("annotation", `version: ${plan.version}`), width));
+	if (plan.destination) rows.push(...wrap(theme.fg("annotation", `destination: ${plan.destination}`), width));
 	rows.push(
 		...wrap(
 			theme.fg(
@@ -319,26 +328,26 @@ function formatLibraryImportReview(
 	if (plan.requirements.length)
 		rows.push(...wrap(theme.fg("warning", `requires installed packages: ${plan.requirements.join(", ")}`), width));
 	for (const reason of plan.reasons)
-		rows.push(...wrap(theme.fg(plan.action === "install" ? "dim" : "error", reason), width));
+		rows.push(...wrap(theme.fg(plan.action === "install" ? "annotation" : "error", reason), width));
 	rows.push(rule(theme, width));
 	rows.push(
 		...wrap(
 			theme.fg(
-				"dim",
+				"annotation",
 				"Imported content stays foreign: it keeps its original provenance and needs the project-import trust gate before the model may use it. The vendor's own directory is never modified.",
 			),
 			width,
 		),
 	);
 	if (options.detail) {
-		rows.push(...wrap(theme.fg("dim", `review fingerprint ${plan.reviewFingerprint}`), width));
-		if (plan.digest) rows.push(...wrap(theme.fg("dim", `projected digest ${plan.digest}`), width));
-		rows.push(...wrap(theme.fg("dim", `source root ${plan.source.root}`), width));
+		rows.push(...wrap(theme.fg("annotation", `review fingerprint ${plan.reviewFingerprint}`), width));
+		if (plan.digest) rows.push(...wrap(theme.fg("annotation", `projected digest ${plan.digest}`), width));
+		rows.push(...wrap(theme.fg("annotation", `source root ${plan.source.root}`), width));
 	}
 	rows.push(
 		...wrap(
 			theme.fg(
-				"dim",
+				"annotation",
 				plan.action === "install"
 					? "Enter imports exactly this projection; Esc writes nothing."
 					: "This source cannot be imported as reviewed. Esc writes nothing.",
@@ -346,7 +355,9 @@ function formatLibraryImportReview(
 			width,
 		),
 	);
-	rows.push(...wrap(theme.fg("dim", options.detail ? "d hides paths and digests" : "d shows paths and digests"), width));
+	rows.push(
+		...wrap(theme.fg("annotation", options.detail ? "d hides paths and digests" : "d shows paths and digests"), width),
+	);
 	return rows;
 }
 

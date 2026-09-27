@@ -1,3 +1,4 @@
+import { colorDisabled } from "./terminal-preferences.js";
 import type { ThemeBackground } from "./theme-token-hex.js";
 
 /**
@@ -63,8 +64,7 @@ export async function probeTerminalBackground(
 	const env = options.env ?? process.env;
 	const forced = (env.CLIO_CODER_THEME ?? "").trim().toLowerCase();
 	if (forced === "dark" || forced === "light" || forced === "neutral") return terminalBackground(env);
-	const noColor = env.NO_COLOR;
-	if ((typeof noColor === "string" && noColor.length > 0) || !stdin.isTTY || !stdout.isTTY) return null;
+	if (colorDisabled(env) || !stdin.isTTY || !stdout.isTTY) return null;
 	const wasRaw = stdin.isRaw;
 	let buffer = "";
 	const reply = await new Promise<string>((resolve) => {

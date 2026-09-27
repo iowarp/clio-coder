@@ -28,6 +28,8 @@ export interface NotificationInput {
 	key?: string;
 	/** Override the level default. Use 0 to pin (never auto-expire). */
 	ttlMs?: number;
+	/** Brief setting feedback occupies the compact footer's separate value slot. */
+	presentation?: "setting";
 }
 
 export interface Notification {
@@ -38,6 +40,7 @@ export interface Notification {
 	addedAt: number;
 	/** Absolute expiry timestamp, or null when the entry is pinned. */
 	expiresAt: number | null;
+	presentation?: "setting";
 }
 
 export interface NotificationCenter {
@@ -386,6 +389,7 @@ export function createNotificationCenter(options: NotificationCenterOptions = {}
 				key: input.key ?? null,
 				addedAt,
 				expiresAt,
+				...(input.presentation ? { presentation: input.presentation } : {}),
 			};
 			if (entry.key !== null) {
 				const existing = entries.findIndex((candidate) => candidate.key === entry.key);
@@ -449,13 +453,13 @@ export function formatNotificationPanel(
 		const glyph = theme.fg(notificationToken(entry.level), notificationGlyph(entry.level));
 		const prefix = `${glyph} `;
 		const prefixWidth = visibleWidth(prefix);
-		const wrapped = wrapTextWithAnsi(theme.fg("muted", entry.text), Math.max(1, width - prefixWidth));
+		const wrapped = wrapTextWithAnsi(theme.fg("notice", entry.text), Math.max(1, width - prefixWidth));
 		lines.push(
 			...wrapped.map((line, index) => fitFooterText(`${index === 0 ? prefix : " ".repeat(prefixWidth)}${line}`, width)),
 		);
 	}
 	const overflow = entries.length - maxRows;
 	const hint = overflow > 0 ? `+${overflow} more · ${dismiss} dismiss` : `${dismiss} dismiss`;
-	lines.push(fitFooterText(theme.fg("dim", hint), width));
+	lines.push(fitFooterText(theme.fg("keyboardHint", hint), width));
 	return lines;
 }

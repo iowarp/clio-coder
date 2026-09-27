@@ -1,3 +1,5 @@
+import { motionEnabled } from "../../core/terminal-preferences.js";
+
 export const GLYPH = {
 	// Clio wordmark, shown in the welcome and dashboard headers only.
 	brand: ">C_",
@@ -45,11 +47,14 @@ export const GLYPH = {
 	// lost. The medium-shade block is single-width in the same fonts that carry
 	// the barFull/barEmpty fallbacks.
 	contextReserve: "▒",
-	info: "ℹ",
-	warn: "⚠",
+	info: "i",
+	warn: "!",
 	warnInline: "!",
 	phaseWaiting: "◔",
 	phaseThinking: "◐",
+	// Nerd Font nf-fa-brain: a full, symmetric two-hemisphere monochrome glyph.
+	// The composer keeps its textual effort fallback for accessible/narrow layouts.
+	brain: "\uEE9C",
 	phaseWriting: "◑",
 	phaseTool: "⚙",
 	phaseBlocked: "⏸",
@@ -88,20 +93,21 @@ export const GLYPH = {
 
 export const SPINNER_FRAMES = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"] as const;
 
-/**
- * The one clock every live mark steps on. The footer spinner and the composer
- * rail pulse advance at most once per step, whatever the frame rate, so a
- * frame driven by a streamed token repaints only the transcript. Before this,
- * the spinner advanced on every footer refresh and the rail on every frame,
- * and the two were most of the bytes a streamed token cost.
- */
+/** Shared presentation snapshot cadence. Routine progress marks remain static. */
 export const ANIMATION_STEP_MS = 120;
+export const ATTENTION_STEP_MS = 480;
 
 export function animationStep(nowMs: number): number {
 	return Math.floor(nowMs / ANIMATION_STEP_MS);
 }
 
-export function spinnerFrame(tick: number): string {
+/** Routine progress stays steady; only a pending human decision opts into motion. */
+export function spinnerFrame(tick: number, attention = false): string {
+	if (!attention || !motionEnabled()) return GLYPH.running;
 	const index = ((tick % SPINNER_FRAMES.length) + SPINNER_FRAMES.length) % SPINNER_FRAMES.length;
 	return SPINNER_FRAMES[index] ?? SPINNER_FRAMES[0];
+}
+
+export function attentionCue(nowMs: number): string {
+	return spinnerFrame(Math.floor(nowMs / ATTENTION_STEP_MS), true);
 }
