@@ -103,6 +103,7 @@ import {
 } from "../domains/session/prompt-manifest.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { AgentMessage, Usage } from "../engine/types.js";
+import { capabilityStarterArgs } from "../tools/gateway/guidance.js";
 import { resolveToolPromptHint, type ToolRegistry } from "../tools/registry.js";
 import {
 	backendCacheVerdict,
@@ -1897,6 +1898,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				const hint = resolveToolPromptHint(deps.toolRegistry?.get(name as ToolName)?.metadata?.promptHint, "session");
 				return hint ? [{ tool: name, hint }] : [];
 			});
+			const builtinTools = deps.toolRegistry?.listAll().filter((spec) => isBuiltinToolName(spec.name)) ?? [];
+			const toolDiscoveryHints = builtinTools
+				.flatMap((spec) => {
+					const hint = spec.metadata?.discoveryHint;
+					if (!hint) return [];
+					const starterArgs = capabilityStarterArgs(spec);
+					return [{ tool: spec.name, hint, ...(starterArgs ? { starterArgs } : {}) }];
+				})
+				.sort((a, b) => a.tool.localeCompare(b.tool));
 			const sessionInputs: SessionPromptInputs = {
 				...(state.currentTurnConstraints ? { turnConstraints: state.currentTurnConstraints } : {}),
 				...(deps.getReadySkillCount ? { readySkillCount: deps.getReadySkillCount() } : {}),
@@ -1908,12 +1918,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				toolNames,
 				// Builtin presence gates prompt guidance. Learning an MCP schema
 				// mid-turn changes discovery results, not the immutable prefix.
-				coordinatorCapabilities:
-					deps.toolRegistry
-						?.listAll()
-						.map((spec) => spec.name)
-						.filter(isBuiltinToolName)
-						.sort() ?? [],
+				coordinatorCapabilities: builtinTools.map((spec) => spec.name).sort(),
+				...(toolDiscoveryHints.length > 0 ? { toolDiscoveryHints } : {}),
 				...(guidance ? { thinkingGuidance: guidance } : {}),
 				...(toolPromptHints.length > 0 ? { toolPromptHints } : {}),
 				...(deps.toolRegistry?.get(ToolNames.ConfigureClio) ? { canConfigureClio: true } : {}),

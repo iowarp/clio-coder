@@ -64,6 +64,14 @@ export interface ToolPromptHintVariants {
 
 export type ToolPromptHintMetadata = string | ToolPromptHintVariants;
 
+/** Worked examples, never part of the permanently attached tool schema. */
+export interface ToolUsageExample {
+	goal: string;
+	args: Readonly<Record<string, unknown>>;
+	/** Also show this one call in the reachable capability's compact orientation. */
+	startup?: boolean;
+}
+
 /** Resolve one tool's guidance for the exact prompt role being compiled. */
 export function resolveToolPromptHint(
 	hint: ToolPromptHintMetadata | undefined,
@@ -110,6 +118,10 @@ export interface ToolMetadata {
 	 * rules out of ordinary and recipe-bound workers. Most tools need none.
 	 */
 	promptHint?: ToolPromptHintMetadata;
+	/** Compact capability orientation for coordinators, even when its schema is behind gateway. */
+	discoveryHint?: string;
+	/** Small worked calls disclosed by the gateway and checked against parameters. */
+	examples?: ReadonlyArray<ToolUsageExample>;
 	/**
 	 * How transcript surfaces present this tool's block under Standard output style.
 	 * Optional: tools that declare nothing fold like every other tool.

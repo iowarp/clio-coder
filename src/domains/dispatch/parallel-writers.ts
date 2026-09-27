@@ -26,7 +26,7 @@ export function parallelWriterConflict(
 			const left = roots[i] ?? [],
 				right = roots[j] ?? [];
 			if (!left.length || !right.length || left.some((a) => right.some((b) => contains(a, b) || contains(b, a)))) {
-				return `parallel_writer_conflict: ${writers[i]?.agentId} and ${writers[j]?.agentId} have overlapping or undeclared write roots. Use worktree: true, declare disjoint intent.write_roots, or serialize writers with writers: 1.`;
+				return `parallel_writer_conflict: ${writers[i]?.agentId} and ${writers[j]?.agentId} have overlapping or undeclared write roots. For inspection, choose read-only recipes from dispatch(list: true). For authorized writes, use worktree: true, declare disjoint intent.write_roots, or serialize writers with writers: 1.`;
 			}
 		}
 	return null;

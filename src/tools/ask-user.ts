@@ -628,7 +628,7 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.AskUser,
 		description:
-			"Run a host-owned operator interview: action=ask presents questions, action=complete records compact decisions before final prose. If cancelled, proceed with defaults and do not ask again.",
+			"Use for a requested interview or a missing decision that blocks requested work. Greetings, acknowledgements, and no task yet need a plain reply, not an interview. action=ask presents questions; action=complete records compact decisions before final prose. If cancelled, proceed with defaults and do not ask again.",
 		parameters: askUserParameters,
 		baseActionClass: "read",
 		executionMode: "sequential",

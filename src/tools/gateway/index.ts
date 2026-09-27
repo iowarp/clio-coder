@@ -25,6 +25,7 @@ import {
 import { type GatewayCapabilityKind, gatewayCapabilityKind, toolSpecPlacement } from "../surface.js";
 import { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
 import { runGatewayChain } from "./chain.js";
+import { gatewayExamples } from "./guidance.js";
 import type { McpCapabilitySource, McpServerListing } from "./mcp-capabilities.js";
 
 export { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
@@ -68,6 +69,8 @@ export interface GatewayCapabilityEntry {
 	/** The first sentence of the capability's description. */
 	description: string;
 	actionClass: ActionClass;
+	/** Required field names are a compact cue, not a substitute for the full schema. */
+	requiredArgs?: ReadonlyArray<string>;
 }
 
 /** Entries an unfiltered listing must exceed before a ranker is asked to order it. */
@@ -336,23 +339,52 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				// declarations `a` and `a__b` the prefix test hands `a__b`'s
 				// capabilities to a caller that asked for `a`.
 				.filter((spec) => (scoped ? deps.mcp?.ownerIdOf(spec.name) === server : allowed === null || allowed.has(spec.name)))
-				.map((spec) => ({
-					name: spec.name,
-					kind: gatewayCapabilityKind(spec.name),
-					description: firstSentence(spec.description),
-					actionClass: spec.baseActionClass,
-				}));
+				.map((spec) => {
+					const schema: unknown = spec.parameters;
+					const requiredArgs =
+						isRecord(schema) && Array.isArray(schema.required)
+							? schema.required.filter((name): name is string => typeof name === "string")
+							: [];
+					return {
+						name: spec.name,
+						kind: gatewayCapabilityKind(spec.name),
+						description: firstSentence(spec.description),
+						actionClass: spec.baseActionClass,
+						...(requiredArgs.length > 0 ? { requiredArgs } : {}),
+					};
+				});
 			// A registered spec is the live one; a cached descriptor of the same
 			// name is the older snapshot of it and must not displace it.
 			const byName = new Map(registryEntries.map((entry) => [entry.name, entry]));
 			for (const entry of mcpEntries) if (!byName.has(entry.name)) byName.set(entry.name, entry);
 			const catalogEntries = [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
-			const score = (entry: GatewayCapabilityEntry) =>
-				discoveryScore(query, entry.name, registry.get(entry.name as ToolName)?.description ?? entry.description);
 			const exactName = catalogEntries.find((entry) => entry.name.toLowerCase() === query);
-			let entries = exactName ? [exactName] : catalogEntries.filter((entry) => query.length === 0 || score(entry) > 0);
-			if (query.length > 0)
-				entries.sort((left, right) => score(right) - score(left) || left.name.localeCompare(right.name));
+			const discoveryText = (entry: GatewayCapabilityEntry): string => {
+				const spec = registry.get(entry.name as ToolName);
+				return spec
+					? [
+							spec.description,
+							spec.metadata?.objective,
+							spec.metadata?.discoveryHint,
+							...(spec.metadata?.examples ?? []).slice(0, 3).map(({ goal }) => goal),
+						]
+							.filter(Boolean)
+							.join(" ")
+					: entry.description;
+			};
+			// Tokenize each descriptor once, not on every sort comparison for a large catalog.
+			let entries = exactName
+				? [exactName]
+				: query.length === 0
+					? catalogEntries
+					: catalogEntries
+							.map((entry) => ({
+								entry,
+								score: discoveryScore(query, entry.name, discoveryText(entry)),
+							}))
+							.filter(({ score }) => score > 0)
+							.sort((left, right) => right.score - left.score || left.entry.name.localeCompare(right.entry.name))
+							.map(({ entry }) => entry);
 			// A ranking only ever reorders an unfiltered listing or adds related
 			// entries beside a query's own hits. The hits keep their order, nothing
 			// is removed, and a scoped find is the one server the caller named.
@@ -380,10 +412,31 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			const total = entries.length;
 			const shown = entries.slice(offset, offset + limit);
 			const truncated = offset + shown.length < total;
+			// Guidance follows the already-filtered page: it never reveals an excluded capability.
+			const examples =
+				query.length > 0
+					? shown.slice(0, 1).flatMap((entry) => {
+							const spec = registry.get(entry.name as ToolName);
+							return spec ? gatewayExamples(spec, rawQuery, 1) : [];
+						})
+					: [];
 			const payload = {
 				capabilities: shown,
 				count: shown.length,
 				total,
+				...(examples.length > 0
+					? {
+							examples,
+							exampleNote:
+								"Examples are gateway arguments. Substitute task values; describe for other options. This catalog finds capabilities, not workspace content.",
+						}
+					: {}),
+				...(query.length > 0 && total === 0 && !scoped
+					? {
+							note:
+								"No matching capabilities. Search by operation, such as search file contents or inspect structured data; this catalog does not search workspace files.",
+						}
+					: {}),
 				...(truncated ? { nextOffset: offset + shown.length } : {}),
 				...(servers.length > 0 ? { servers } : {}),
 				...(missing.length > 0
@@ -511,17 +564,26 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		}
 		const mcpNote = kind === "mcp" ? deps.mcp?.authorityNote(spec.name) : null;
 		if (mcpNote) authority.push(mcpNote);
+		const examples = gatewayExamples(spec);
 		const payload = {
 			name: spec.name,
 			kind,
 			description: spec.description,
 			parameters: wireParameterSchema(spec.parameters),
+			...(spec.metadata?.discoveryHint ? { orientation: spec.metadata.discoveryHint } : {}),
 			actionClass: spec.baseActionClass,
 			executionMode: spec.executionMode ?? "sequential",
 			// A registered MCP spec came from this session's own listing, so it
 			// carries the same provenance field a cached descriptor does.
 			...(kind === "mcp" ? { catalog: "live" } : {}),
 			authority,
+			...(examples.length > 0
+				? {
+						examples,
+						exampleNote:
+							"Substitute task values in these gateway arguments; examples do not establish that their sample paths exist.",
+					}
+				: {}),
 			...(resolveToolPromptHint(spec.metadata?.promptHint, "session")
 				? {
 						usage: resolveToolPromptHint(spec.metadata?.promptHint, "session"),
@@ -576,9 +638,12 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				{ type: "toolCall", id: options?.toolCallId ?? "", name: spec.name, arguments: rawArgs },
 			) as Record<string, unknown>;
 		} catch (error) {
+			const examples = gatewayExamples(spec, "", 1);
 			return {
 				kind: "error",
-				message: `gateway: ${spec.name} arguments rejected: ${error instanceof Error ? error.message : String(error)}. Use gateway(op="describe", capability="${spec.name}") for the schema.`,
+				message:
+					`gateway: ${spec.name} arguments rejected: ${error instanceof Error ? error.message : String(error)}. Use gateway(op="describe", capability="${spec.name}") for the schema.` +
+					(examples.length > 0 ? ` Example to adapt, not retry verbatim: ${JSON.stringify(examples[0])}` : ""),
 			};
 		}
 		// The nested call keeps the outer options (signal, ids, skill policy,

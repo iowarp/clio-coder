@@ -2,6 +2,10 @@ import { type AgentSpec, isUserVisibleAgent } from "./spec.js";
 
 const DEFAULT_DISPATCH_AGENT_ID = "coder";
 
+/** Shared by the fleet catalog and dispatch results so evidence guidance stays consistent. */
+export const FLEET_EVIDENCE_GUIDANCE =
+	'Use sealed worker results for synthesis, keeping reported findings distinct from independent verification. Spot-check consequential or uncertain claims only within the operator\'s scope. If repeated inspection is forbidden, report worker evidence and limitations without re-reading source or rerunning searches. Repeat a "tests pass" claim only when the named validation evidence supports it.';
+
 /**
  * Shadow recipes an operator command owns, kept out of the prompt roster.
  *
@@ -144,7 +148,7 @@ export function renderAgentCatalogSectionsFromSpecs(input: ReadonlyArray<AgentSp
 		"User-facing agents are base/custom. Shadow agents are internal helpers for context, research, and provenance; do not recommend them as normal `/run` choices.",
 		"Prefer fast read-only agents for orientation, verification agents for gates, and workspace-edit agents only for bounded coding tasks.",
 		"When a task matches a skill named on an agent line (skills=...), prefer the recipe that binds it; its worker is told to load bound skills for the run.",
-		'After a dispatch succeeds, synthesize from the sealed receipt; the worker\'s prose is an advisory claim until its verification state is verified. Spot-check delegated claims before repeating them: re-read any cited file:line location, and re-run or inspect the named validation before repeating a "tests pass" claim.',
+		FLEET_EVIDENCE_GUIDANCE,
 		FLEET_ANTI_CHURN_RULE,
 	];
 

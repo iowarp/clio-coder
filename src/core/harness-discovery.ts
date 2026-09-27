@@ -15,8 +15,18 @@ const ALIASES: Readonly<Record<string, string>> = {
 	file: "file path",
 };
 
+// In a task phrase, the subject carries more information than the request verb.
+// Exact tool names still bypass this weighting entirely.
+const REQUEST_VERBS = new Set("find search get show list inspect locate discover use".split(" "));
+
+function singular(term: string): string {
+	if (term.length > 4 && term.endsWith("ies")) return `${term.slice(0, -3)}y`;
+	if (term.length > 3 && term.endsWith("s") && !/(?:ss|us|is)$/u.test(term)) return term.slice(0, -1);
+	return term;
+}
+
 function terms(text: string): string[] {
-	return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+	return (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).map(singular);
 }
 
 /** Exact names and phrases lead; partial task vocabulary still yields useful candidates. */
@@ -32,11 +42,12 @@ export function discoveryScore(query: string, name: string, description: string)
 	const descriptionTerms = new Set(terms(lowerDescription));
 	let score = phrase ? 1000 : 0;
 	for (const term of queryTerms) {
-		if (nameTerms.has(term)) score += 20;
-		if (descriptionTerms.has(term)) score += 5;
+		const weight = queryTerms.length > 1 && REQUEST_VERBS.has(term) ? 0.1 : 1;
+		if (nameTerms.has(term)) score += 20 * weight;
+		if (descriptionTerms.has(term)) score += 5 * weight;
 		for (const alias of terms(ALIASES[term] ?? "")) {
-			if (nameTerms.has(alias)) score += 3;
-			if (descriptionTerms.has(alias)) score += 1;
+			if (nameTerms.has(alias)) score += 3 * weight;
+			if (descriptionTerms.has(alias)) score += weight;
 		}
 	}
 	return score;

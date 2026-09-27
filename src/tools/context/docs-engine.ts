@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { guidanceForDocs } from "../../domains/prompts/runtime-guidance.js";
 
 // Deterministic, dependency-free retrieval over Clio's bundled human docs,
 // serving the `clio_docs` gateway capability. It intentionally avoids
@@ -575,6 +576,7 @@ function resultPayload(index: DocsIndex, plan: QueryPlan, scored: ReadonlyArray<
 	return {
 		version: 2,
 		query: plan.query,
+		guidance: guidanceForDocs(plan.query),
 		corpus: {
 			docs: index.docCount,
 			sections: index.sections.length,

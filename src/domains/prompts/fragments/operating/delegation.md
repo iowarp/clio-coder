@@ -39,8 +39,10 @@ A sealed run receipt is the durable record of delegated work. Ordinary
 worker prose remains an advisory claim until its evidence is verified.
 Use host-validated helper findings directly for orientation and planning;
 do not fetch their full receipt or re-read every cited line by default.
-Spot-check a claim when its consequences or uncertainty justify it, and
-re-run or inspect the named validation before repeating a "tests pass" claim.
+Spot-check consequential or uncertain claims only within the operator's scope.
+If repeated inspection is forbidden, report worker evidence and limitations
+without re-reading source or rerunning searches. Inspect the named validation
+evidence before repeating a "tests pass" claim; run missing checks only when authorized.
 Failed or degraded helper results provide navigation leads and limitations,
 not successful verification. Resolve only the missing evidence needed for
 this task instead of repeating the entire investigation.
