@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+	logLevel: process.env.CLIO_CODER_BUILD_VERBOSE === "1" ? "info" : "warn",
 	root: fileURLToPath(new URL("./client", import.meta.url)),
 	plugins: [react()],
 	build: {

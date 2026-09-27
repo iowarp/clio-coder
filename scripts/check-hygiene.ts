@@ -609,7 +609,7 @@ function checkSettingsInventory(): void {
 // ---------------------------------------------------------------------------
 // environment-variable-inventory: docs/guide/environment-variables.md claims to
 // list every CLIO_* variable src reads, and every variable it names must still
-// be read by src. Was tests/contracts/environment-variable-inventory.test.ts.
+// be read by runtime source or the build output helper. Was tests/contracts/environment-variable-inventory.test.ts.
 // ---------------------------------------------------------------------------
 const DOCUMENTED_ENV_FAMILIES: ReadonlyArray<RegExp> = [
 	/^CLIO_CODER_WORKER_FAUX(_[A-Z_]+)?$/, // documented as `CLIO_CODER_WORKER_FAUX` (+ suffixes)
@@ -657,7 +657,7 @@ function scanEnvSources(): EnvSourceScan {
 		const line = source.slice(source.lastIndexOf("\n", index) + 1, index).trimStart();
 		return line.startsWith("//") || line.startsWith("*") || line.startsWith("/*");
 	};
-	for (const file of sourceFiles(join(root, "src"))) {
+	for (const file of [...sourceFiles(join(root, "src")), join(root, "scripts/build-output.ts")]) {
 		const source = readFileSync(file, "utf8");
 		const relPath = file.slice(root.length);
 		for (const match of source.matchAll(forward)) {
@@ -710,7 +710,7 @@ function checkEnvironmentVariableInventory(): void {
 	if (unread.length > 0) {
 		fail(
 			"environment-variable-inventory",
-			`docs/guide/environment-variables.md documents variables no src file reads (as env.NAME, "NAME", or $NAME in generated shell); remove the row or restore the read:\n  ${unread.sort().join("\n  ")}`,
+			`docs/guide/environment-variables.md documents variables no scanned source file reads (as env.NAME, "NAME", or $NAME in generated shell); remove the row or restore the read:\n  ${unread.sort().join("\n  ")}`,
 		);
 	}
 

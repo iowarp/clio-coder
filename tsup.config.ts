@@ -2,9 +2,11 @@ import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { defineConfig } from "tsup";
+import { artifactBytes, buildVerbose, reportBuildStage } from "./scripts/build-output.js";
 import { GRAMMAR_ASSETS, type GrammarAssetSource } from "./src/domains/context/codewiki/grammar-assets.js";
 
 const require = createRequire(import.meta.url);
+const buildStartedAt = performance.now();
 
 /** Where each grammar package keeps its wasm files, resolved from the checkout's devDependencies. */
 const GRAMMAR_SOURCE_DIRS: Record<GrammarAssetSource, string> = {
@@ -112,13 +114,22 @@ export default defineConfig({
 		js: 'import { createRequire as __clioCreateRequire } from "node:module"; const require = __clioCreateRequire(import.meta.url);',
 	},
 	async onSuccess() {
+		reportBuildStage(
+			"Node bundles",
+			buildStartedAt,
+			artifactBytes("dist", (file) => file.endsWith(".js")),
+		);
 		const appRequire = createRequire(join(process.cwd(), "apps/clio-coder-gui/package.json"));
 		const { build: buildClient } = await import(appRequire.resolve("vite"));
+		const clientStartedAt = performance.now();
 		await buildClient({
 			configFile: "apps/clio-coder-gui/vite.config.ts",
 			configLoader: "runner",
+			logLevel: buildVerbose() ? "info" : "warn",
 			build: { outDir: join(process.cwd(), "dist/gui/client"), emptyOutDir: true },
 		});
+		reportBuildStage("GUI client", clientStartedAt, artifactBytes("dist/gui/client"));
+		const assetsStartedAt = performance.now();
 		vendorGrammars();
 		vendorTuiNotices();
 		const notices = join("dist", "assets", "gui-notices");
@@ -132,6 +143,7 @@ export default defineConfig({
 			}
 			cpSync(join(directory, "LICENSE"), join(notices, `${name.replace("/", "__")}-LICENSE`));
 		}
+		reportBuildStage("Runtime assets", assetsStartedAt, artifactBytes("dist/assets"));
 	},
 	// tsup already externalizes every package.json `dependencies` entry, so the
 	// runtime deps need no listing here. `optionalDependencies` is not part of

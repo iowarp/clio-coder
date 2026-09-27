@@ -14,22 +14,26 @@
  * the grammars it loads are the vendored ones.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serializeCodewiki } from "../src/domains/context/codewiki/artifact.js";
 import { buildCodewiki } from "../src/domains/context/codewiki/indexer.js";
 import { detectProjectProfile } from "../src/domains/session/workspace/project-type.js";
+import { buildVerbose, reportBuildStage } from "./build-output.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const target = join(root, "dist", "assets", "codemap.json");
+const startedAt = performance.now();
 
 const report = JSON.parse(
-	execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+	// pnpm exports its own npm_config_* keys to scripts, which npm warns about on
+	// every run; errors still reach the terminal.
+	execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts", "--loglevel=error"], {
 		cwd: root,
 		encoding: "utf8",
 		maxBuffer: 64 * 1024 * 1024,
-		stdio: ["ignore", "pipe", "ignore"],
+		stdio: ["ignore", "pipe", "inherit"],
 	}),
 ) as Array<{ files: Array<{ path: string }> }>;
 const packedReport = report[0];
@@ -48,6 +52,9 @@ mkdirSync(dirname(target), { recursive: true });
 writeFileSync(target, serializeCodewiki(codewiki), "utf8");
 // Remove the superseded generated asset when rebuilding an existing dist.
 rmSync(join(root, "dist", "assets", "codewiki.json"), { force: true });
-process.stdout.write(
-	`build-codewiki-asset: ${codewiki.files.length} files, ${codewiki.symbols.length} symbols, ${codewiki.edges.length} edges -> dist/assets/codemap.json\n`,
-);
+if (buildVerbose()) {
+	process.stdout.write(
+		`build-codewiki-asset: ${codewiki.files.length} files, ${codewiki.symbols.length} symbols, ${codewiki.edges.length} edges -> dist/assets/codemap.json\n`,
+	);
+}
+reportBuildStage("Code map", startedAt, statSync(target).size);

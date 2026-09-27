@@ -1,6 +1,6 @@
 # Environment Variables
 
-This page inventories Clio-specific runtime variables and the ambient variables that materially change documented operator behavior. `settings.yaml` is the durable home for operator policy; environment variables support per-process overrides, directory layout, debugging, credentials, terminal integration, and internal plumbing. When prose and source disagree, prefer the cited read site.
+This page inventories Clio-specific runtime and build variables and the ambient variables that materially change documented operator behavior. `settings.yaml` is the durable home for operator policy; environment variables support per-process overrides, directory layout, debugging, credentials, terminal integration, and internal plumbing. When prose and source disagree, prefer the cited read site.
 
 The `environment-variable-inventory` check in [check-hygiene.ts](../../scripts/check-hygiene.ts), run by `pnpm run lint`, enforces coverage for Clio's `CLIO_*` variables and `NO_COLOR`. It intentionally does not treat every operating-system or provider convention as a Clio knob. Examples outside that enforced family include `PATH`, `HOME`, terminal capability variables, and provider API-key names selected dynamically by [env-api-keys.ts](../../src/engine/env-api-keys.ts). The check also runs the other way: every variable this page names in backticks must still be read by Clio's source, so a variable that is removed cannot keep its row.
 
@@ -8,6 +8,7 @@ The `environment-variable-inventory` check in [check-hygiene.ts](../../scripts/c
 
 | Variable | Default | Controls |
 | --- | --- | --- |
+| `CLIO_CODER_BUILD_VERBOSE` | off | `1` prints complete tsup/Vite build logs and code-map statistics instead of concise stage summaries. Warnings and errors remain visible in either mode ([build-output.ts](../../scripts/build-output.ts)). |
 | `NO_COLOR` | unset | Set to any non-empty value to drop every foreground and background color. Bold, dim, italic, and underline stay, because they are what is left to read the interface by ([tokens.ts](../../src/interactive/theme/tokens.ts)). |
 | `CLIO_CODER_THEME` | unset | `dark` or `light` picks the palette drawn for that terminal background and skips the startup OSC 11 query; `neutral` forces the mid-luminance palette that reads on either. Unset detects the background from the terminal's OSC 11 reply, then `COLORFGBG` ([terminal-background.ts](../../src/core/terminal-background.ts)). |
 | `CLIO_CODER_UPDATE_CHECK` | on | `0` disables background update checks, detection of a replaced installation, and upgrade hints. Checks start only in an interactive session, after its first full frame and a five-second delay ([interactive-application.ts](../../src/interactive/interactive-application.ts), [update-check.ts](../../src/domains/lifecycle/update-check.ts)). |
