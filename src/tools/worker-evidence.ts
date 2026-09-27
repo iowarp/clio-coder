@@ -80,13 +80,8 @@ function hasSourceCitation(text: string): boolean {
 	return sourceCitations(text).length > 0;
 }
 
-/**
- * Canonical parent spot-check sentence. Dispatch renders it head-anchored;
- * the operating contract, agent catalog, and docs align to it byte-exact so
- * every surface teaches the same discipline.
- */
-export const SPOT_CHECK_GUIDANCE =
-	'Spot-check delegated claims before repeating them: re-read any cited file:line location, and re-run or inspect the named validation before repeating a "tests pass" claim.';
+/** Dispatch and fleet discovery teach the same scope-aware verification discipline. */
+export { FLEET_EVIDENCE_GUIDANCE as SPOT_CHECK_GUIDANCE } from "../domains/agents/catalog.js";
 
 /**
  * Whether this run was dispatched as work that has to change the tree. Read
