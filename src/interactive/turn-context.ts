@@ -30,7 +30,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
-import { isBuiltinToolName, type ToolName, ToolNames } from "../core/tool-names.js";
+import { isBuiltinToolName, ToolNames } from "../core/tool-names.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import {
 	createLiveBudgetProducer,
@@ -104,7 +104,7 @@ import {
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { AgentMessage, Usage } from "../engine/types.js";
 import { capabilityStarterArgs } from "../tools/gateway/guidance.js";
-import { resolveToolPromptHint, type ToolRegistry } from "../tools/registry.js";
+import type { ToolRegistry } from "../tools/registry.js";
 import {
 	backendCacheVerdict,
 	extractUserText,
@@ -1889,15 +1889,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const contextWindowSource: ContextWindowSource | null =
 				contextWindow === null ? null : windowDetails.contextWindowSource;
 			const guidance = modelState?.clioCoder?.quirks?.thinking?.guidance;
-			// Per-tool prompt hints come from registry metadata, derived once from
-			// the frozen surface per compile. The compiler renders them sorted by
-			// tool name, so the compiled text stays byte-stable for a given surface.
 			const toolNames = toolNamesFromAgentState(agentRuntime.agent.state.tools);
 			const attachedToolSchemas = attachedToolSchemasFromState(agentRuntime.agent.state.tools);
-			const toolPromptHints = toolNames.flatMap((name) => {
-				const hint = resolveToolPromptHint(deps.toolRegistry?.get(name as ToolName)?.metadata?.promptHint, "session");
-				return hint ? [{ tool: name, hint }] : [];
-			});
 			const builtinTools = deps.toolRegistry?.listAll().filter((spec) => isBuiltinToolName(spec.name)) ?? [];
 			const toolDiscoveryHints = builtinTools
 				.flatMap((spec) => {
@@ -1921,7 +1914,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				coordinatorCapabilities: builtinTools.map((spec) => spec.name).sort(),
 				...(toolDiscoveryHints.length > 0 ? { toolDiscoveryHints } : {}),
 				...(guidance ? { thinkingGuidance: guidance } : {}),
-				...(toolPromptHints.length > 0 ? { toolPromptHints } : {}),
 				...(deps.toolRegistry?.get(ToolNames.ConfigureClio) ? { canConfigureClio: true } : {}),
 				...(deps.headless === true ? { headless: true } : {}),
 			};

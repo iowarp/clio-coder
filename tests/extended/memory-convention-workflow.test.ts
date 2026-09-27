@@ -11,7 +11,7 @@ test("convention guidance reaches a session even when no memory record exists", 
 		identity: "identity.clio",
 		operatingContract: "operating.contract",
 		safety: "safety.default",
-		sessionInputs: { providerSupportsTools: true, toolNames: ["read"], memorySection: "" },
+		sessionInputs: { coordinatorCapabilities: [], providerSupportsTools: true, toolNames: ["read"], memorySection: "" },
 	}).systemPrompt;
 	match(prompt, /inspect and cite its sources/u);
 	match(prompt, /If the entry is absent, report that limit/u);

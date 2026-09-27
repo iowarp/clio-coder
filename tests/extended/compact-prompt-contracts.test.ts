@@ -2,9 +2,6 @@ import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict"
 import { describe, it } from "node:test";
 import { ALL_TOOL_NAMES, type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { TurnConstraints } from "../../src/core/turn-constraints.js";
-import { renderFleetPromptSection } from "../../src/domains/agents/catalog.js";
-import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
-import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import {
 	type CompiledSessionPrompt,
 	compile,
@@ -18,8 +15,6 @@ import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import { toolPromptHintsForNames } from "../../src/tools/builtin-tool-catalog.js";
 
 const table = loadFragments();
-const builtinRecipes = discoverAgentRecipes(process.cwd()).filter((recipe) => recipe.source === "builtin");
-const fleetRoster = renderFleetPromptSection(builtinRecipes.map(normalizeAgentSpec));
 const autonomyLevels: ReadonlyArray<AutonomyLevel> = ["default", "yolo"];
 
 function occurrences(text: string, needle: string): number {
@@ -34,11 +29,9 @@ function mainPrompt(input: {
 	skillDiscoveryEnabled?: boolean;
 }): CompiledSessionPrompt {
 	const toolNames = [...(input.toolNames ?? [])];
-	const hints = [...toolPromptHintsForNames(toolNames, "session")];
 	const providerSupportsTools = input.providerSupportsTools === undefined ? true : input.providerSupportsTools;
 	if (input.reverse) {
 		toolNames.reverse();
-		hints.reverse();
 	}
 	return compile(table, {
 		identity: "identity.clio",
@@ -52,8 +45,7 @@ function mainPrompt(input: {
 			thinkingGuidance:
 				"For this local model, reason compactly before tool use and ground final claims in observed evidence.",
 			toolNames,
-			toolPromptHints: hints,
-			fleetRoster,
+			coordinatorCapabilities: ALL_TOOL_NAMES,
 			...(input.skillDiscoveryEnabled !== undefined ? { skillDiscoveryEnabled: input.skillDiscoveryEnabled } : {}),
 		},
 	});
@@ -108,7 +100,6 @@ describe("compact prompt contracts", () => {
 		strictEqual(prompt.includes("# Skills"), false);
 		strictEqual(prompt.includes("Load matching installed skills"), false);
 		match(prompt, /clio_library/u);
-		match(prompt, /shadow agents/u);
 	});
 
 	it("keeps main composition deterministic across autonomy and tool input order", () => {
@@ -135,7 +126,6 @@ describe("compact prompt contracts", () => {
 					"skills",
 					"safety",
 					"tool-contract",
-					"fleet",
 					"retrieval-hints",
 					"harness-awareness",
 					"runtime",
@@ -146,12 +136,12 @@ describe("compact prompt contracts", () => {
 		}
 	});
 
-	it("gates tool, skill, and fleet prose on the attached surface", () => {
+	it("gates tool and skill prose on the attached surface", () => {
 		const unavailable = mainPrompt({
 			providerSupportsTools: false,
 			toolNames: [ToolNames.Context, ToolNames.Dispatch, ToolNames.CodeNav],
 		});
-		for (const absent of ["# Skills", "# Delegation", "# Fleet", "source=clio", 'context(scope="skills")']) {
+		for (const absent of ["# Skills", "# Coordinator", "# Fleet", "source=clio", 'context(scope="skills")']) {
 			strictEqual(unavailable.systemPrompt.includes(absent), false, `${absent} must be absent without tool support`);
 		}
 		match(unavailable.systemPrompt, /Provider tool calls: unavailable\./u);
@@ -161,16 +151,15 @@ describe("compact prompt contracts", () => {
 			toolNames: [ToolNames.Context, ToolNames.Dispatch, ToolNames.CodeNav],
 		});
 		match(unknown.systemPrompt, /# Skills/u);
-		match(unknown.systemPrompt, /# Delegation/u);
-		match(unknown.systemPrompt, /source=clio/u);
+		match(unknown.systemPrompt, /# Coordinator/u);
 
 		const narrow = mainPrompt({ providerSupportsTools: true, toolNames: [ToolNames.Read] });
-		for (const absent of ["# Skills", "# Delegation", "# Fleet", "source=clio", "workers behind dispatch"]) {
+		for (const absent of ["# Skills", "# Coordinator", "# Fleet", "source=clio", "workers behind dispatch"]) {
 			strictEqual(narrow.systemPrompt.includes(absent), false, `${absent} must follow its absent tool`);
 		}
 	});
 
-	it("preserves Clio identity, safety, Fleet, receipt, evidence, and local-runtime anchors", () => {
+	it("preserves Clio identity, safety, coordinator, evidence, and local-runtime anchors", () => {
 		const compiled = mainPrompt({
 			providerSupportsTools: true,
 			toolNames: ALL_TOOL_NAMES.filter((name) => name !== ToolNames.Ledger),
@@ -179,28 +168,17 @@ describe("compact prompt contracts", () => {
 		match(compiled.systemPrompt, /Her documentation and source ship with the package/u);
 		match(compiled.systemPrompt, /Autonomy: default\./u);
 		match(compiled.systemPrompt, /Hard blocks\s+\(destructive git,/u);
-		match(compiled.systemPrompt, /A sealed run receipt is the durable record/u);
-		match(compiled.systemPrompt, /advisory claim until its evidence is verified/u);
-		match(compiled.systemPrompt, /before repeating a "tests pass" claim/u);
-		match(compiled.systemPrompt, /Do not repeat the\s+helper's entire investigation/u);
-		match(compiled.systemPrompt, /detach:true/u);
+		match(compiled.systemPrompt, /Use receipts for synthesis/u);
+		match(compiled.systemPrompt, /spot-check consequential evidence/u);
+		match(compiled.systemPrompt, /Collect detached runs/u);
 		match(compiled.systemPrompt, /clio_library/u);
 		match(compiled.systemPrompt, /Provider: dynamo/u);
 		match(compiled.systemPrompt, /Model: qwen3\.8-27b/u);
 		match(compiled.systemPrompt, /Context window: 262144/u);
 		match(compiled.systemPrompt, /For this local model, reason compactly/u);
-		// The delegation threshold is stated once, at the top of the Delegation
-		// section, as a count taken before the first edit (the Fleet block no
-		// longer carries it); the skills protocol is stated once, in Skills.
-		strictEqual(occurrences(compiled.systemPrompt, "count the independent file-scoped changes"), 1);
-		match(compiled.systemPrompt, /Load matching ready Clio skills with context\(scope="skills", name="<name>"\)/u);
-		match(
-			compiled.systemPrompt,
-			/Install marketplace packages only when the operator requests or approves installation/u,
-		);
-		match(compiled.systemPrompt, /\[Marketplace\] reminder\s+states its\s+own offer options/u);
-		strictEqual(occurrences(compiled.systemPrompt, "harness performs any install"), 0);
-		strictEqual(occurrences(compiled.systemPrompt, "A sealed run receipt is the durable record"), 1);
+		match(compiled.systemPrompt, /Load a matching ready skill through gateway/u);
+		match(compiled.systemPrompt, /Install only when requested or approved/u);
+		match(compiled.systemPrompt, /Honor a \[Marketplace\] reminder's exact/u);
 	});
 
 	it("keeps bound and unbound worker skills mutually exclusive", () => {

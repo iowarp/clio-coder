@@ -9,6 +9,7 @@ test("no-edit convention scope reaches yolo prompts with mutation tools availabl
 		operatingContract: "operating.contract",
 		safety: "safety.yolo",
 		sessionInputs: {
+			coordinatorCapabilities: [],
 			providerSupportsTools: true,
 			toolNames: ["read", "edit", "write", "bash", "dispatch"],
 			memorySection: "",

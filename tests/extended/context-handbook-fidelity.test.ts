@@ -131,7 +131,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 				const compiled = await bundle.contract.compileSessionPrompt({
 					sessionId: `authored-${name}`,
 					cwd,
-					sessionInputs: { providerSupportsTools: true },
+					sessionInputs: { coordinatorCapabilities: [], providerSupportsTools: true },
 				});
 				strictEqual(compiled.projectPreload?.mode, "full", "fixture must fit the unchanged preload budget");
 				deepStrictEqual(compiled.projectHandbookFiles, [path]);
@@ -181,7 +181,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 				const compiled = await bundle.contract.compileSessionPrompt({
 					sessionId: `bounded-${providerSupportsTools}`,
 					cwd,
-					sessionInputs: { providerSupportsTools },
+					sessionInputs: { coordinatorCapabilities: [], providerSupportsTools },
 				});
 				strictEqual(compiled.systemPrompt.includes("EARLY_AUTHORED_SENTINEL"), true);
 				strictEqual(compiled.systemPrompt.includes("OMITTED_TAIL_SENTINEL"), false);
@@ -194,7 +194,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 				const cached = await bundle.contract.compileSessionPrompt({
 					sessionId: `bounded-${providerSupportsTools}`,
 					cwd,
-					sessionInputs: { providerSupportsTools },
+					sessionInputs: { coordinatorCapabilities: [], providerSupportsTools },
 				});
 				deepStrictEqual(cached.projectPreload, compiled.projectPreload);
 				writeFileSync(path, source);
@@ -258,7 +258,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 			const compiled = await bundle.contract.compileSessionPrompt({
 				sessionId: "handbook-fidelity",
 				cwd,
-				sessionInputs: { providerSupportsTools: true },
+				sessionInputs: { coordinatorCapabilities: [], providerSupportsTools: true },
 			});
 			strictEqual(compiled.projectPreload?.mode, "full", "fixture must fit the unchanged preload budget");
 			deepStrictEqual(compiled.projectHandbookFiles, [path]);

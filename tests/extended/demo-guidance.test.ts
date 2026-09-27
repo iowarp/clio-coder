@@ -32,15 +32,18 @@ test("only an explicit interactive prompt input adds guidance; disabling restore
 		identity: "identity.clio",
 		operatingContract: "operating.contract",
 		safety: "safety.default",
-		sessionInputs: {},
+		sessionInputs: { coordinatorCapabilities: [] },
 	};
 	const normal = compile(table, base);
-	const demo = compile(table, { ...base, sessionInputs: { demo: true } });
+	const demo = compile(table, { ...base, sessionInputs: { ...base.sessionInputs, demo: true } });
 	match(demo.systemPrompt, /## Demo guidance/);
 	match(demo.systemPrompt, /do not end answers with feature tips, upsells/);
 	match(demo.systemPrompt, /interface\.demo/);
 	doesNotMatch(normal.systemPrompt, /## Demo guidance/);
-	strictEqual(compile(table, { ...base, sessionInputs: { demo: false } }).systemPrompt, normal.systemPrompt);
+	strictEqual(
+		compile(table, { ...base, sessionInputs: { ...base.sessionInputs, demo: false } }).systemPrompt,
+		normal.systemPrompt,
+	);
 	deepStrictEqual(
 		demo.sections.map((s) => s.id),
 		normal.sections.map((s) => s.id),

@@ -4,7 +4,6 @@ import { detectClioCoderRepo } from "../../core/clio-repo.js";
 import type { ClioSettings } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { renderFleetPromptSection } from "../agents/catalog.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { ConfigContract } from "../config/contract.js";
 import {
@@ -74,16 +73,6 @@ export function createPromptsBundle(
 
 	function agentsDomain(): AgentsContract | undefined {
 		return context.getContract<AgentsContract>("agents");
-	}
-
-	/**
-	 * The roster is compiled into the prompt, so a session that starts before
-	 * the agents domain is available renders no Fleet section rather than a
-	 * partial one that would churn the prompt prefix on the next compile.
-	 */
-	function fleetRoster(): string {
-		const specs = agentsDomain()?.listSpecs() ?? [];
-		return specs.length > 0 ? renderFleetPromptSection(specs) : "";
 	}
 
 	function reload(): void {
@@ -174,12 +163,10 @@ export function createPromptsBundle(
 					projectHandbookFiles = projectContext.handbookFiles;
 				}
 			}
-			const roster = fleetRoster();
 			const sessionInputs = {
 				...input.sessionInputs,
 				...(options.noSkills === true ? { skillDiscoveryEnabled: false } : {}),
 				...(contextFiles.length > 0 ? { contextFiles } : {}),
-				...(roster.length > 0 ? { fleetRoster: roster } : {}),
 			};
 			const compiled = compile(table, {
 				identity: "identity.clio",
@@ -402,14 +389,8 @@ function selfDevelopmentSkillFragments(
 ): RenderedPromptFragment[] {
 	if (!selfRepo || !sessionCanUseSkills(inputs) || inputs.turnConstraints?.mode === "proposal") return [];
 	const activation = isAutonomyLevel(autonomy);
-	const listCall =
-		inputs.coordinatorCapabilities !== undefined
-			? 'gateway(op="call", capability="context", args={scope:"skills"})'
-			: 'context(scope="skills")';
-	const loadCall = (name: string) =>
-		inputs.coordinatorCapabilities !== undefined
-			? `gateway(op="call", capability="context", args={scope:"skills",name:"${name}"})`
-			: `context(scope="skills", name="${name}")`;
+	const listCall = 'gateway(op="call", capability="context", args={scope:"skills"})';
+	const loadCall = (name: string) => `gateway(op="call", capability="context", args={scope:"skills",name:"${name}"})`;
 	const body = [
 		"# Self-development skills",
 		"For a task that changes Clio's source, harness, prompts, or library, use clio-coder-dev before editing and clio-coder-test when choosing validation. Skip this workflow for unrelated or self-contained questions.",

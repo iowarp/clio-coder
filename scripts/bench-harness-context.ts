@@ -1,13 +1,10 @@
 /** Controlled harness-only context footprint; no project, history, provider or model inference. */
 
-import type { ToolName } from "../src/core/tool-names.js";
-import { renderFleetPromptSection } from "../src/domains/agents/catalog.js";
-import type { AgentsContract } from "../src/domains/agents/contract.js";
 import { compile } from "../src/domains/prompts/compiler.js";
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
 import { createWorkerSafety } from "../src/engine/worker-tools.js";
 import { resolveAgentTools } from "../src/tools/agent-tools.js";
-import { registerAllTools, toolPromptHintsForNames } from "../src/tools/bootstrap.js";
+import { registerAllTools } from "../src/tools/bootstrap.js";
 import { createRegistry } from "../src/tools/registry.js";
 import { makeDispatchBundle } from "../tests/harness/dispatch.js";
 import { dispatchStubContext } from "../tests/harness/dispatch-stub-context.js";
@@ -31,14 +28,7 @@ try {
 			contextWindow: 131_072,
 			providerSupportsTools: true,
 			toolNames: tools.map((tool) => tool.name),
-			toolPromptHints: [
-				...toolPromptHintsForNames(
-					tools.map((tool) => tool.name as ToolName),
-					"session",
-				),
-			],
 			coordinatorCapabilities: registry.listAll().map((spec) => spec.name),
-			fleetRoster: renderFleetPromptSection(ctx.getContract<AgentsContract>("agents")?.listSpecs() ?? []),
 		},
 	});
 	const sizes = tools.map((tool) => ({

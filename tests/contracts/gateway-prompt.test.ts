@@ -5,7 +5,7 @@ import { compile } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
-import { registerAllTools, toolPromptHintsForNames } from "../../src/tools/bootstrap.js";
+import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -63,8 +63,7 @@ describe("gateway in the session prompt", () => {
 					contextWindow: 32_768,
 					providerSupportsTools: surface.providerSupportsTools,
 					toolNames: surface.toolNames,
-					// Hints must not make an unattached tool available.
-					toolPromptHints: [...toolPromptHintsForNames([ToolNames.Context, ToolNames.Gateway], "session")],
+					coordinatorCapabilities: [ToolNames.ClioDocs, ToolNames.ClioLibrary],
 				},
 			});
 			const hasGateway = surface.providerSupportsTools && surface.toolNames.includes(ToolNames.Gateway);
@@ -79,18 +78,14 @@ describe("gateway in the session prompt", () => {
 				compiled.sections.some((section) => section.id === "skills"),
 				hasContext,
 			);
-			strictEqual(compiled.systemPrompt.includes('context (scope="skills")'), hasContext);
+			strictEqual(compiled.systemPrompt.includes('args={scope:"skills",query:"<task>"}'), hasContext);
 			strictEqual(compiled.systemPrompt.includes('capability="clio_library"'), hasGateway);
 			if (hasGateway) {
 				match(compiled.systemPrompt, /Catalog reads activate and install nothing/);
-				match(compiled.systemPrompt, /kind:"agent"/);
 			}
 			if (hasContext) {
-				match(compiled.systemPrompt, /Load matching ready Clio skills with context\(scope="skills", name="<name>"\)/);
-				match(
-					compiled.systemPrompt,
-					/Install marketplace packages only when the operator requests or approves installation/,
-				);
+				match(compiled.systemPrompt, /Load a matching ready skill through gateway/);
+				match(compiled.systemPrompt, /Install only when requested or approved/);
 				doesNotMatch(compiled.systemPrompt, /only the operator\s+activates or installs a skill/);
 			}
 			doesNotMatch(compiled.systemPrompt, /\bcontext\s*\(\s*scope\s*=\s*["'](?:docs|library)["']/);
@@ -131,7 +126,6 @@ describe("gateway in the session prompt", () => {
 					providerSupportsTools: true,
 					toolNames: names,
 					coordinatorCapabilities: registry.listAll().map((spec) => spec.name),
-					toolPromptHints: [...toolPromptHintsForNames(names, "session")],
 				},
 			});
 			const lines = compiled.systemPrompt.split("\n");

@@ -2,7 +2,8 @@ import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { ToolNames } from "../../src/core/tool-names.js";
-import { compile, compileWorker, type RenderedPromptFragment } from "../../src/domains/prompts/compiler.js";
+import type { RenderedPromptFragment } from "../../src/domains/prompts/compiler.js";
+import { compileWorker } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { sha256 } from "../../src/domains/prompts/hash.js";
 import { toolPromptHintsForNames } from "../../src/tools/builtin-tool-catalog.js";
@@ -13,19 +14,11 @@ function hintFor(tool: string, role: "session" | "worker" | "bound-worker"): str
 }
 
 function rolePrompt(
-	role: "session" | "worker" | "bound-worker",
+	role: "worker" | "bound-worker",
 	toolNames: ReadonlyArray<never>,
 	toolPromptHints: ReadonlyArray<{ tool: string; hint: string }>,
 ): string {
 	const table = loadFragments();
-	if (role === "session") {
-		return compile(table, {
-			identity: "identity.clio",
-			operatingContract: "operating.contract",
-			safety: "safety.default",
-			sessionInputs: { providerSupportsTools: true, toolNames, toolPromptHints },
-		}).systemPrompt;
-	}
 	const persona: RenderedPromptFragment = {
 		id: "persona.hint-order",
 		relPath: "inline/hint-order",
@@ -72,38 +65,14 @@ describe("role-aware prompt hints", () => {
 		strictEqual(resolveToolPromptHint({ session: "main only" }, "worker"), undefined);
 	});
 
-	it("renders no hint or capability prose for tools absent from the attached names", () => {
-		const table = loadFragments();
-		const compiled = compile(table, {
-			identity: "identity.clio",
-			operatingContract: "operating.contract",
-			safety: "safety.default",
-			sessionInputs: {
-				providerSupportsTools: true,
-				toolNames: [ToolNames.Read],
-				toolPromptHints: [
-					{ tool: ToolNames.Context, hint: "ABSENT_CONTEXT_HINT" },
-					{ tool: ToolNames.Dispatch, hint: "ABSENT_DISPATCH_HINT" },
-				],
-				fleetRoster: "# Fleet\n\nABSENT_FLEET",
-			},
-		});
-
-		strictEqual(compiled.systemPrompt.includes("ABSENT_CONTEXT_HINT"), false);
-		strictEqual(compiled.systemPrompt.includes("ABSENT_DISPATCH_HINT"), false);
-		strictEqual(compiled.systemPrompt.includes("ABSENT_FLEET"), false);
-		strictEqual(compiled.systemPrompt.includes('context(scope="skills")'), false);
-		strictEqual(compiled.systemPrompt.includes("workers behind dispatch"), false);
-	});
-
-	it("keeps reversed and duplicate inputs equivalent for every prompt role", () => {
+	it("keeps reversed and duplicate inputs equivalent for each worker prompt role", () => {
 		const toolNames = [ToolNames.Context, ToolNames.Read, ToolNames.CodeNav, ToolNames.Context] as never[];
 		const hints = [
 			{ tool: ToolNames.Context, hint: "  Shared\n role guidance " },
 			{ tool: ToolNames.CodeNav, hint: "Shared role guidance" },
 			{ tool: ToolNames.Context, hint: "Shared role guidance" },
 		];
-		for (const role of ["session", "worker", "bound-worker"] as const) {
+		for (const role of ["worker", "bound-worker"] as const) {
 			const forwardHints = toolPromptHintsForNames(toolNames, role);
 			const reversedHints = toolPromptHintsForNames([...toolNames].reverse(), role);
 			deepStrictEqual(forwardHints, reversedHints, `${role} registry hints must ignore tool input order and duplicates`);

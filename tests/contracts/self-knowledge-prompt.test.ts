@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { compile, type SessionPromptInputs } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
-import { toolPromptHintsForNames } from "../../src/tools/bootstrap.js";
 import { codeNavToolSurface } from "../../src/tools/codewiki/code-nav-surface.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -22,14 +21,14 @@ function compileSession(safety: string, sessionInputs: Partial<SessionPromptInpu
 			model: "stable-model",
 			contextWindow: 32_768,
 			providerSupportsTools: true,
-			toolPromptHints: [...toolPromptHintsForNames([ToolNames.Context, ToolNames.Gateway], "session")],
+			coordinatorCapabilities: [ToolNames.ClioDocs, ToolNames.ClioLibrary],
 			...sessionInputs,
 			toolNames,
 		},
 	}).systemPrompt;
 }
 
-const SETTINGS_ROUTE = 'context(scope="settings")';
+const SETTINGS_ROUTE = 'gateway(op="call", capability="context", args={scope:"settings"})';
 
 describe("self-knowledge in the session prompt", () => {
 	let env: IsolatedClioEnv;

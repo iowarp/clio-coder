@@ -1,7 +1,6 @@
 import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { renderFleetPromptSection } from "../../src/domains/agents/catalog.js";
 import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
 import { validateResultContract } from "../../src/domains/agents/result-contract.js";
 import { nodeResultContractFilesystem } from "../../src/domains/agents/result-contract-filesystem.js";
@@ -46,7 +45,6 @@ describe("world-knowledge agent contract", () => {
 		ok(world.body.includes("current open-world discovery"));
 		ok(researcher.body.includes("concrete source URLs"));
 		ok(scout.body.includes("codebase"));
-		match(renderFleetPromptSection(recipes.map(normalizeAgentSpec)), /current ecosystems.*world-knowledge/u);
 		equal(
 			classifyAgentTask("Survey the ecosystem landscape and give an advisory second opinion").taskType,
 			"world_knowledge",

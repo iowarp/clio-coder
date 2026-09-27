@@ -189,7 +189,12 @@ it("repo guidance tracks actual skill capability, autonomy and turn restrictions
 	async function prompt(sessionInputs: SessionPromptInputs, autonomy = "default", workspace = cwd) {
 		return bundle.contract.compileSessionPrompt({ sessionId: "self-dev", cwd: workspace, autonomy, sessionInputs });
 	}
-	const inputs = { toolNames: ["context"], providerSupportsTools: true, readySkillCount: 2 };
+	const inputs = {
+		coordinatorCapabilities: ["context"],
+		toolNames: ["context"],
+		providerSupportsTools: true,
+		readySkillCount: 2,
+	};
 	const automatic = await prompt(inputs);
 	match(automatic.systemPrompt, /# Self-development skills/);
 	match(automatic.systemPrompt, /without waiting for a separate skill request/);

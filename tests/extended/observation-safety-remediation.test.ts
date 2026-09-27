@@ -41,6 +41,7 @@ test("S4-02 stable prompt and web fetch hint identify untrusted tool data", asyn
 		operatingContract: "operating.contract",
 		safety: "safety.default",
 		sessionInputs: {
+			coordinatorCapabilities: [],
 			provider: "local",
 			model: "fixture",
 			contextWindow: 32768,

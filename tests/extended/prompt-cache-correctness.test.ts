@@ -47,7 +47,7 @@ function identityInput(): MainPromptCacheIdentityInput {
 			providerSupportsTools: true,
 			thinkingGuidance: "Use the runtime envelope.",
 			toolNames: ["read"],
-			toolPromptHints: [{ tool: "read", hint: "Read narrowly." }],
+			coordinatorCapabilities: ["read"],
 			memorySection: "# Memory\n\n- stable",
 		},
 		attachedToolSchemas: [
@@ -118,16 +118,6 @@ describe("main compiled-prompt cache identity", () => {
 			[
 				"tool names",
 				{ ...identityInput(), sessionInputs: { ...identityInput().sessionInputs, toolNames: ["read", "grep"] } },
-			],
-			[
-				"tool prompt hint",
-				{
-					...identityInput(),
-					sessionInputs: {
-						...identityInput().sessionInputs,
-						toolPromptHints: [{ tool: "read", hint: "Changed." }],
-					},
-				},
 			],
 			[
 				"memory",

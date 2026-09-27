@@ -28,6 +28,7 @@ function prompt(level: AutonomyLevel, context = true, providerSupportsTools = tr
 		operatingContract: "operating.contract",
 		safety: `safety.${level}`,
 		sessionInputs: {
+			coordinatorCapabilities: context ? [ToolNames.Context] : [],
 			toolNames: context ? [ToolNames.Context, ToolNames.Gateway] : [ToolNames.Gateway],
 			providerSupportsTools,
 		},
@@ -63,10 +64,10 @@ for (const level of AUTONOMY_LEVELS) {
 		);
 		assert.equal(result.kind, enabled ? "ok" : "error");
 		const text = prompt(level).systemPrompt;
-		assert.match(text, /Install marketplace packages only when the operator requests or approves installation/);
+		assert.match(text, /Install only when requested or approved/);
 		assert.doesNotMatch(text, /\{SKILL_ACTIVATION_POLICY\}/);
 		if (enabled) {
-			assert.match(text, /Load matching ready Clio skills with context\(scope="skills", name="<name>"\)/);
+			assert.match(text, /Load a matching ready skill through gateway/);
 			assert.doesNotMatch(text, /only the operator\s+activates|Skills are operator-activated/i);
 			assert.ok(evaluateSkillToolSurface(pendingSkillPolicy, "bash"));
 			assert.equal(evaluateSkillToolSurface(pendingSkillPolicy, "read"), null);
@@ -94,7 +95,7 @@ for (const level of AUTONOMY_LEVELS) {
 			assert.ok(!compiled.sections.some((section) => section.id === "skills"));
 			assert.doesNotMatch(
 				compiled.systemPrompt,
-				/# Skills|Load matching ready Clio skills|only the operator activates skills/,
+				/# Skills|Load a matching ready skill|only the operator activates skills/,
 			);
 		});
 	}
@@ -124,7 +125,7 @@ for (const level of AUTONOMY_LEVELS) {
 		});
 		assert.ok(!compiled.sections.some((section) => section.id === "skills"));
 		assert.match(compiled.systemPrompt, /Persona and bound-skill instructions never add tools/);
-		assert.doesNotMatch(compiled.systemPrompt, /Load matching ready Clio skills/);
+		assert.doesNotMatch(compiled.systemPrompt, /Load a matching ready skill/);
 	});
 
 	it(`marketplace skills remain uninstalled and operator-gated at ${level}`, async (t) => {
@@ -140,10 +141,7 @@ for (const level of AUTONOMY_LEVELS) {
 			result.message,
 			modelMayActivateSkills() ? /not installed.*marketplace.*operator/ : /only the operator can activate/,
 		);
-		assert.match(
-			prompt(level).systemPrompt,
-			/Install marketplace packages only when the operator requests or approves installation/,
-		);
+		assert.match(prompt(level).systemPrompt, /Install only when requested or approved/);
 	});
 }
 
@@ -159,7 +157,7 @@ it("autonomy transitions change the existing prompt cache identity and compiled 
 			workingContextPaths: [],
 			contextWindowSource: null,
 			promptInputEpoch: "1",
-			sessionInputs: { toolNames: [ToolNames.Context] },
+			sessionInputs: { coordinatorCapabilities: [ToolNames.Context], toolNames: [ToolNames.Context] },
 			attachedToolSchemas: [],
 		}),
 	);
@@ -169,8 +167,8 @@ it("autonomy transitions change the existing prompt cache identity and compiled 
 	const restored = prompt("default");
 	assert.notEqual(before.systemPromptHash, after.systemPromptHash);
 	assert.equal(before.systemPrompt, restored.systemPrompt);
-	assert.match(before.systemPrompt, /Load matching ready Clio skills/);
-	assert.match(after.systemPrompt, /Load matching ready Clio skills/);
+	assert.match(before.systemPrompt, /Load a matching ready skill/);
+	assert.match(after.systemPrompt, /Load a matching ready skill/);
 });
 
 it("skills reminders and suggestion continuations stay silent outside admitted workflow scope", () => {

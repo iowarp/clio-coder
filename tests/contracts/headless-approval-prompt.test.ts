@@ -28,6 +28,7 @@ function safetySection(level: string, sessionInputs: Partial<SessionPromptInputs
 		operatingContract: "operating.contract",
 		safety: `safety.${level}`,
 		sessionInputs: {
+			coordinatorCapabilities: [],
 			provider: "local",
 			model: "stable-model",
 			providerSupportsTools: true,

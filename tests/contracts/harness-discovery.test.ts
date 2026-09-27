@@ -251,11 +251,9 @@ describe("coordinator discovery and dependency composition", () => {
 				toolNames: ["read", "write", "edit", "dispatch", "gateway"],
 				coordinatorCapabilities: registry.listAll().map((spec) => spec.name),
 				turnConstraints: { mode: "answer", delegation: "forbidden", skills: "disabled" },
-				fleetRoster: "A roster should not be preloaded",
 			},
 		});
 		for (const id of ["delegation", "skills", "fleet"]) ok(!compiled.sections.some((section) => section.id === id));
-		ok(!compiled.systemPrompt.includes("A roster should not be preloaded"));
 		ok(compiled.systemPrompt.includes('capability="context", args={scope:"settings"}'));
 	});
 

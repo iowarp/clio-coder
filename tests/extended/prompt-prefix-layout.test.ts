@@ -50,12 +50,7 @@ function sessionInputs(overrides: Partial<SessionPromptInputs> = {}): SessionPro
 		contextWindow: 32_768,
 		providerSupportsTools: true,
 		toolNames: FULL_TOOL_SURFACE,
-		toolPromptHints: [
-			{ tool: "tasks", hint: "Declare the board before the first edit." },
-			{ tool: "context", hint: "Load a requested skill first." },
-		],
-		fleetRoster:
-			"# Fleet\nDelegate when the task has two or more independent subtasks.\n- coder (workspace-edit, 50 calls)",
+		coordinatorCapabilities: [...FULL_TOOL_SURFACE, "clio_docs", "clio_library", "git"],
 		contextFiles: "<project-type>typescript</project-type>",
 		memorySection: "# Memory\n\n- stable fact",
 		...overrides,
@@ -101,7 +96,7 @@ describe("compiled main prompt: section layout", () => {
 		deepStrictEqual(ids, [...SESSION_PROMPT_SECTION_ORDER, ...tailIds]);
 	});
 
-	it("keeps the volatility rule: identity through fleet ahead of project context, memory, and runtime", () => {
+	it("keeps the volatility rule: identity through tool contract ahead of project context, memory, and runtime", () => {
 		const order = [...SESSION_PROMPT_SECTION_ORDER];
 		const at = (id: string): number => {
 			const index = order.indexOf(id);
@@ -109,17 +104,16 @@ describe("compiled main prompt: section layout", () => {
 			return index;
 		};
 		// Constitutional text first, then role text, then the enforced posture,
-		// then the tool surface and the roster that surface reaches.
+		// then the tool surface those capabilities require.
 		ok(at("identity") < at("operating-contract"));
 		ok(at("operating-contract") < at("delegation"));
 		ok(at("delegation") < at("skills"));
 		ok(at("skills") < at("safety"));
 		ok(at("safety") < at("tool-contract"));
-		ok(at("tool-contract") < at("fleet"));
 		// Everything that reads a mutable store or a probe comes after everything
 		// that does not: project context is session-stable, memory rewrites
 		// mid-session, and the runtime block's context window can move.
-		ok(at("fleet") < at("project-context"));
+		ok(at("tool-contract") < at("project-context"));
 		ok(at("project-context") < at("memory"));
 		ok(at("memory") < at("runtime"));
 		strictEqual(order[order.length - 1], "runtime", "runtime is the last compiled section");
@@ -133,11 +127,10 @@ describe("compiled main prompt: section layout", () => {
 		const markers: Array<[string, string]> = [
 			["identity", firstLine(table.byId.get("identity.clio")?.body)],
 			["operating-contract", firstLine(table.byId.get("operating.contract")?.body)],
-			["delegation", firstLine(table.byId.get("operating.delegation")?.body)],
-			["skills", firstLine(table.byId.get("operating.skills")?.body)],
+			["delegation", firstLine(table.byId.get("operating.coordinator")?.body)],
+			["skills", firstLine(table.byId.get("operating.discovered-skills")?.body)],
 			["safety", "Autonomy: default."],
 			["tool-contract", "Direct tools:"],
-			["fleet", "- coder (workspace-edit, 50 calls)"],
 			["project-context", "<project-type>typescript</project-type>"],
 			["memory", "- stable fact"],
 			["runtime", "Provider: local"],
@@ -188,46 +181,42 @@ describe("compiled main prompt: determinism", () => {
 		strictEqual(projectedLine, "Direct tools: `gateway`, `read`.");
 	});
 
-	it("does not depend on tool-name or hint registration order", () => {
+	it("does not depend on tool-name registration order", () => {
 		const shuffledNames = [...FULL_TOOL_SURFACE].reverse();
-		const shuffledHints = [...(sessionInputs().toolPromptHints ?? [])].reverse();
 		const ordered = compile(table, compileInputs());
-		const shuffled = compile(table, compileInputs({ toolNames: shuffledNames, toolPromptHints: shuffledHints }));
+		const shuffled = compile(table, compileInputs({ toolNames: shuffledNames }));
 		strictEqual(shuffled.systemPrompt, ordered.systemPrompt);
 	});
 });
 
 describe("compiled main prompt: surface-gated sections", () => {
-	it("drops delegation and fleet together when dispatch leaves the surface, keeping the rest in order", () => {
+	it("drops delegation when dispatch leaves the surface, keeping the rest in order", () => {
 		const withoutDispatch = compile(
 			table,
 			compileInputs({ toolNames: FULL_TOOL_SURFACE.filter((name) => name !== "dispatch") }),
 		);
 		const ids = withoutDispatch.sections.map((section) => section.id);
 		ok(!ids.includes("delegation"), "delegation renders only with dispatch");
-		ok(!ids.includes("fleet"), "fleet renders only with dispatch");
-		const expected = SESSION_PROMPT_SECTION_ORDER.filter((id) => id !== "delegation" && id !== "fleet");
+		const expected = SESSION_PROMPT_SECTION_ORDER.filter((id) => id !== "delegation");
 		deepStrictEqual(ids.slice(0, expected.length), [...expected]);
 	});
 
 	it("drops skills when context leaves the surface, and the tool-free contract drops both role sections", () => {
-		// A hint counts as the tool being on the surface, so both go together.
 		const withoutContext = compile(
 			table,
 			compileInputs({
 				toolNames: FULL_TOOL_SURFACE.filter((name) => name !== "context"),
-				toolPromptHints: (sessionInputs().toolPromptHints ?? []).filter((entry) => entry.tool !== "context"),
+				coordinatorCapabilities: sessionInputs().coordinatorCapabilities.filter((name) => name !== "context"),
 			}),
 		);
 		ok(!withoutContext.sections.some((section) => section.id === "skills"), "skills renders only with context");
 
-		const toolFree = compile(table, compileInputs({ providerSupportsTools: false, toolPromptHints: [] }));
+		const toolFree = compile(table, compileInputs({ providerSupportsTools: false }));
 		const ids = toolFree.sections.map((section) => section.id);
 		ok(!ids.includes("delegation"));
 		ok(!ids.includes("skills"));
-		ok(!ids.includes("fleet"));
 		ok(ids.includes("tool-contract"), "a tool-free target still gets a tool contract saying so");
-		const expected = SESSION_PROMPT_SECTION_ORDER.filter((id) => !["delegation", "skills", "fleet"].includes(id));
+		const expected = SESSION_PROMPT_SECTION_ORDER.filter((id) => !["delegation", "skills"].includes(id));
 		deepStrictEqual(ids.slice(0, expected.length), [...expected]);
 	});
 
@@ -244,7 +233,9 @@ describe("compiled main prompt: surface-gated sections", () => {
 
 describe("typed prompt layers", () => {
 	it("keeps the exact constitutional UTF-8 prefix through scope, tool, memory and runtime changes", () => {
-		const baseline = compile(table, compileInputs());
+		// Keep inline guidance selected across tool-support changes so this pins the same constitution (#249).
+		const coordinatorCapabilities = sessionInputs().coordinatorCapabilities.filter((name) => name !== "clio_docs");
+		const baseline = compile(table, compileInputs({ coordinatorCapabilities }));
 		const prefix = baseline.stablePrefix;
 		ok(prefix);
 		const bytes = Buffer.from(baseline.systemPrompt).subarray(0, prefix.bytes);
@@ -256,7 +247,7 @@ describe("typed prompt layers", () => {
 			{ providerSupportsTools: false, toolNames: [] },
 			{ memorySection: "# Memory\n\n- newly approved fact", contextWindow: 65_536 },
 		] satisfies Partial<SessionPromptInputs>[]) {
-			const compiled = compile(table, compileInputs(variant));
+			const compiled = compile(table, compileInputs({ ...variant, coordinatorCapabilities }));
 			deepStrictEqual(compiled.stablePrefix, prefix);
 			deepStrictEqual(Buffer.from(compiled.systemPrompt).subarray(0, prefix.bytes), bytes);
 			ok(compiled.systemPromptHash !== baseline.systemPromptHash);
@@ -271,15 +262,14 @@ describe("typed prompt layers", () => {
 		);
 		const change = compile(table, compileInputs({ turnConstraints: { mode: "change" } }));
 		for (const prompt of [answer, proposal]) {
-			for (const id of ["delegation", "fleet", "skills"]) ok(!prompt.sections.some((s) => s.id === id));
-			ok(!prompt.systemPrompt.includes("validate relevant claims with"));
-			ok(!prompt.systemPrompt.includes("Declare the board before the first edit."));
+			for (const id of ["delegation", "skills"]) ok(!prompt.sections.some((s) => s.id === id));
+			ok(!prompt.systemPrompt.includes("verify consequential worker claims"));
 			strictEqual(prompt.sections.at(-1)?.id, "turn-scope");
 			ok(Buffer.byteLength(prompt.systemPrompt) < Buffer.byteLength(change.systemPrompt));
 		}
 		ok(answer.systemPrompt.endsWith("Use no tools for this turn."));
 		ok(proposal.systemPrompt.includes("Leave implementation blocked pending authorization"));
-		ok(change.systemPrompt.includes("For authorized file changes, validate relevant claims"));
+		ok(change.systemPrompt.includes("Within the operator's scope, verify consequential worker claims"));
 	});
 
 	it("does not advertise denied gateway capabilities or ready skills that do not exist", () => {
@@ -293,8 +283,6 @@ describe("typed prompt layers", () => {
 		ok(!prompt.sections.some((s) => s.id === "skills"));
 		ok(!prompt.systemPrompt.includes('capability="clio_docs"'));
 		ok(!prompt.systemPrompt.includes('capability="clio_library"'));
-		ok(!prompt.systemPrompt.includes("Load a requested skill first."));
-		ok(prompt.systemPrompt.includes('capability="git"'));
 		// Attached inventory is factual even if a caller supplies an older broad schema surface.
 		ok(prompt.systemPrompt.includes("Direct tools: `ask_user`"));
 	});
