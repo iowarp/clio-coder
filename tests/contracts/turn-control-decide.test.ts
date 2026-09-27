@@ -176,7 +176,7 @@ it("decides workflow cases in the required order, including each reachable none 
 			expected: { kind: "none", reason: "below-threshold" },
 		},
 	];
-	strictEqual(cases.length, 12);
+	strictEqual(cases.length, 14);
 	for (const entry of cases)
 		deepStrictEqual(decide(entry.interpretation, entry.facts, entry.settings), entry.expected, entry.name);
 	for (const intent of ["implement", "continue", "interview"] as const) {

@@ -2059,7 +2059,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					state.interruptedAssistantMessage = null;
 					state.interruptedUsage = null;
 				}
-				if (userTurnId !== null && options.requestContinuation !== true && deps.session?.current()) {
+				if (
+					userTurnId !== null &&
+					(options.requestContinuation !== true || turnControlRecord?.decision.kind === "collect") &&
+					deps.session?.current()
+				) {
 					try {
 						const collected = outcomeCollector.take(userTurnId);
 						const finalMessage = [...agentRuntime.agent.state.messages]

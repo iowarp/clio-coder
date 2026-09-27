@@ -117,7 +117,10 @@ describe("template-option advisory presentation", () => {
 			providers,
 			knownTargets: () => new Set(["fleet"]),
 			toolRegistry: createWorkerToolRegistry(),
-			middleware: { runHook: () => ({ effects: [], ruleIds: [] }) } as unknown as MiddlewareContract,
+			middleware: {
+				registerHook() {},
+				runHook: () => ({ effects: [], ruleIds: [] }),
+			} as unknown as MiddlewareContract,
 		});
 		loop.onEvent((event) => {
 			if (event.type === "notice") notices.push(event);
