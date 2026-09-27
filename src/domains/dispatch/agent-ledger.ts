@@ -14,6 +14,7 @@
 
 import { isAbsolute, relative } from "node:path";
 import type { AgentLedgerBody, AgentLedgerEntry } from "../../worker/protocol.js";
+import type { RunEnvelope, RunLedgerProjection, RunOutcome, RunReceipt, RunStatus } from "./types.js";
 
 /**
  * Ceiling on a rendered board wherever one is handed to a model: a worker's
@@ -22,6 +23,91 @@ import type { AgentLedgerBody, AgentLedgerEntry } from "../../worker/protocol.js
  * still starts knowing what its peers staked.
  */
 export const AGENT_LEDGER_PROMPT_MAX_CHARS = 4000;
+
+export interface LedgerAssignment {
+	runId: string;
+	assignmentId: string | null;
+	agentId: string;
+	task: string;
+	readRoots: ReadonlyArray<string>;
+	writeRoots: ReadonlyArray<string>;
+	status: RunStatus;
+	outcome: RunOutcome | null;
+	toolCalls: number | null;
+	grounding: string | null;
+	scopeSource?: RunLedgerProjection["scopeSource"];
+}
+
+export interface LedgerReceiptFindings {
+	runId: string;
+	agentId: string;
+	findings: ReadonlyArray<{ claim: string; path?: string; line?: number }>;
+	ungrounded: ReadonlyArray<string>;
+}
+
+function oneLine(value: string): string {
+	return value.replace(/\s+/gu, " ").trim();
+}
+
+export function projectLedgerAssignments(
+	runs: ReadonlyArray<RunEnvelope>,
+	readReceipt: (run: RunEnvelope) => RunReceipt | null,
+): ReadonlyArray<LedgerAssignment> {
+	return runs.map((run) => {
+		const receipt = readReceipt(run);
+		const scope = run.projection;
+		const legacy = receipt?.pathScope;
+		const intent = receipt?.intent;
+		return {
+			runId: run.id,
+			assignmentId: run.lineage?.rootRunId ?? null,
+			agentId: run.agentId,
+			task: Array.from(oneLine(run.task)).slice(0, 160).join(""),
+			readRoots: scope?.readRoots ?? legacy?.workingContextPaths.map((entry) => entry.path) ?? intent?.readRoots ?? [],
+			writeRoots: scope?.writeRoots ?? legacy?.writeBoundaries.map((entry) => entry.path) ?? intent?.writeRoots ?? [],
+			scopeSource: scope?.scopeSource ?? (legacy !== undefined || intent !== undefined ? "intent" : "none"),
+			status: run.status,
+			outcome: run.outcome ?? null,
+			toolCalls: receipt?.toolCalls ?? null,
+			grounding: receipt?.validationGrounding
+				? `claimed:${receipt.validationGrounding.claimed} grounded:${receipt.validationGrounding.grounded}`
+				: null,
+		};
+	});
+}
+
+/** The reader supplies authenticated receipts; only final passing helper handoffs are projected. */
+export function projectReceiptFindings(
+	runs: ReadonlyArray<RunEnvelope>,
+	readReceipt: (run: RunEnvelope) => RunReceipt | null,
+): ReadonlyArray<LedgerReceiptFindings> {
+	return runs.flatMap((run) => {
+		const receipt = readReceipt(run);
+		const output = receipt?.output;
+		const result = output?.structured;
+		if (
+			!receipt ||
+			receipt.outcome !== "succeeded" ||
+			receipt.exitCode !== 0 ||
+			output?.state !== "final" ||
+			output.truncated ||
+			receipt.quality?.resultContract?.conformance !== "pass" ||
+			result?.kind !== "scout-report"
+		)
+			return [];
+		const findings: Array<{ claim: string; path?: string; line?: number }> = [];
+		const ungrounded: string[] = [];
+		if (Array.isArray(result.data.findings))
+			for (const finding of result.data.findings) {
+				if (!finding || typeof finding !== "object" || typeof finding.claim !== "string") continue;
+				if (typeof finding.path !== "string" || typeof finding.line !== "number") ungrounded.push(finding.claim);
+				else findings.push({ claim: finding.claim, path: finding.path, line: finding.line });
+			}
+		if (Array.isArray(result.data.ungroundedClaims))
+			for (const claim of result.data.ungroundedClaims) if (typeof claim === "string") ungrounded.push(claim);
+		return [{ runId: run.id, agentId: run.agentId, findings, ungrounded }];
+	});
+}
 
 /** Corroboration vocabulary, matching src/domains/agents/builtins/scout.md. */
 export type CorroborationState = "corroborated" | "uncorroborated" | "ungrounded lead";
@@ -138,6 +224,8 @@ export interface RenderAgentLedgerOptions {
 	 * so no entry is ever shown with a truncated body.
 	 */
 	maxChars?: number;
+	assignments?: ReadonlyArray<LedgerAssignment>;
+	receiptFindings?: ReadonlyArray<LedgerReceiptFindings>;
 }
 
 function authorKey(entry: AgentLedgerEntry): string {
@@ -175,17 +263,37 @@ export function renderAgentLedger(
 ): string {
 	const maxChars = opts.maxChars;
 	let visible = [...entries].sort((left, right) => left.sequence - right.sequence);
-	if (visible.length === 0) return "No peer contributions yet.";
-
-	// Drop oldest entries whole until the render fits. Rendering is cheap and
-	// the board is capped at 200 entries, so re-rendering beats estimating. A
-	// ceiling too small for even the newest entry yields an empty board rather
-	// than an entry cut mid-body.
+	const assignments = (opts.assignments ?? []).map((item) => {
+		const scope =
+			item.scopeSource === "none"
+				? "scope undeclared"
+				: `reads ${item.readRoots.map(oneLine).join(", ") || "workspace"}; writes ${item.writeRoots.map(oneLine).join(", ") || "none"}`;
+		const task = Array.from(oneLine(item.task)).slice(0, 160).join("");
+		return `${oneLine(item.agentId)} (run ${oneLine(item.runId)}) ${item.outcome ?? item.status}: "${task}"; ${scope}; tool calls ${item.toolCalls ?? "?"}; grounding ${item.grounding ?? "n/a"}`;
+	});
+	const findings = (opts.receiptFindings ?? []).flatMap((item) => [
+		...item.findings.map(
+			(finding) =>
+				`${oneLine(item.agentId)} run ${oneLine(item.runId)}: ${oneLine(finding.claim)}${finding.path ? ` (${oneLine(finding.path)}${finding.line === undefined ? "" : `:${finding.line}`})` : " [ungrounded lead]"}`,
+		),
+		...item.ungrounded.map(
+			(claim) => `${oneLine(item.agentId)} run ${oneLine(item.runId)}: ${oneLine(claim)} [ungrounded lead]`,
+		),
+	]);
 	for (;;) {
-		const text = renderAll(visible);
+		const text = [
+			...(assignments.length > 0 ? ["Assignments:", ...assignments] : []),
+			...(findings.length > 0 ? ["Findings (from receipt):", ...findings] : []),
+			...(visible.length > 0
+				? [renderAll(visible)]
+				: assignments.length === 0 && findings.length === 0
+					? ["No peer contributions yet."]
+					: []),
+		].join("\n");
 		if (maxChars === undefined || text.length <= maxChars) return text;
-		visible = visible.slice(1);
-		if (visible.length === 0) return "No peer contributions yet.";
+		if (visible.length > 0) visible = visible.slice(1);
+		else if (findings.length > 0) findings.pop();
+		else return text; // S8: known assignments survive even when they alone exceed the budget.
 	}
 }
 

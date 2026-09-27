@@ -7,6 +7,7 @@ import {
 	resolvePathBoundary,
 } from "../../core/path-boundary.js";
 import type { DispatchRequest } from "./contract.js";
+import type { RunLedgerProjection } from "./types.js";
 
 /** Path-like tokens retained for requests that do not carry typed intent. */
 const DISPATCH_PATH_TOKEN_RE = /(?:[\w.-]+\/)+[\w.-]+|\b[\w-]+\.[A-Za-z0-9]{1,8}\b/g;
@@ -516,5 +517,17 @@ export function inferredScopeParentTokenNotice(scope: DispatchPathScope): Inferr
 		message: `[dispatch scope] prose inference resolved path tokens carrying a leading '../' run against the dispatch root: ${renderParentTokens(
 			tokens,
 		)}. An anchored token selects project rules without expanding worker authority; a dropped one took no part in scope.`,
+	};
+}
+
+/** S8: display only admitted declarations, never paths inferred from task prose. */
+export function runLedgerProjection(req: DispatchRequest, scope: DispatchPathScope): RunLedgerProjection {
+	const source = req.intent !== undefined ? "intent" : (req.writeRoots?.length ?? 0) > 0 ? "legacy-write-roots" : "none";
+	return {
+		version: 1,
+		ledgerId: req.ledger?.id ?? null,
+		readRoots: req.intent !== undefined ? [...req.intent.readRoots] : [],
+		writeRoots: source === "none" ? [] : [...scope.writeBoundaries],
+		scopeSource: source,
 	};
 }

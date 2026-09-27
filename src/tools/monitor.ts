@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { sleep } from "../core/timers.js";
+import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
 import {
@@ -773,7 +774,17 @@ async function runCollect(
 	// Every run is terminal here, so the board is what the peers finished with.
 	// It is read before the collect that closes it, and a closed board still
 	// renders, so a repeated collect answers the same way as the first.
-	const board = ledgerId === null ? null : renderAgentLedgerBoard(ledgerId);
+	const ledgerRuns =
+		ledgerId === null ? [] : deps.dispatch.listRuns().filter((run) => run.projection?.ledgerId === ledgerId);
+	const receipts = new Map(ledgerRuns.map((run) => [run.id, durableRunEvidence(run).receipt]));
+	const readReceipt = (run: RunEnvelope) => receipts.get(run.id) ?? null;
+	const board =
+		ledgerId === null
+			? null
+			: renderAgentLedgerBoard(ledgerId, {
+					assignments: projectLedgerAssignments(ledgerRuns, readReceipt),
+					receiptFindings: projectReceiptFindings(ledgerRuns, readReceipt),
+				});
 	// The batch is only reported collected when the durable mark actually
 	// persisted; on failure it stays open for a later collect and the result
 	// says so instead of pretending.
