@@ -124,25 +124,34 @@ Scroll up to read earlier messages; **Jump to latest** returns immediately to th
 newest output and resumes following the stream.
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/tui-boot.webp" alt="Clio Coder terminal boot screen with model and workspace information, fleet, shortcuts, composer and context footer" width="1000" /></a>
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.webp" alt="Clio Coder terminal boot with the model, workspace, fleet, composer, and guidance footer" width="1000" /></a>
 </p>
 <p align="center"><sub>Terminal workspace. Select a capture to open its full-resolution image.</sub></p>
 <p align="center">
-  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-overview.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-overview.webp" alt="Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings" width="1000" /></a>
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-overview.png"><picture>
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-overview-light.webp" />
+    <img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-overview.webp" alt="Clio Coder browser overview with project selection, recent conversations and navigation for traces, fleet, evidence, library and settings" width="1000" />
+  </picture></a>
 </p>
 
 <details>
 <summary><strong>Browser conversation view</strong></summary>
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-conversation.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-conversation.webp" alt="Browser conversation with project-grouped sessions, a compact composer, model selection and harness controls" width="800" /></a>
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-conversation.png"><picture>
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-conversation-light.webp" />
+    <img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-conversation.webp" alt="Browser conversation with project-grouped sessions, a compact composer, model selection and harness controls" width="800" />
+  </picture></a>
 </p>
 <p align="center">
-  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-artifacts.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-artifacts.webp" alt="Conversation with seven passing temperature-calibration tests and recorded verification results in the collapsible right Artifacts panel" width="800" /></a>
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-artifacts.png"><picture>
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-artifacts-light.webp" />
+    <img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-artifacts.webp" alt="Conversation with seven passing temperature-calibration tests and recorded verification results in the collapsible right Artifacts panel" width="800" />
+  </picture></a>
 </p>
 
-[Watch a real calibration verification (33 seconds, MP4)](https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/recordings/gui-calibration.mp4)
-· [GIF preview](https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/recordings/gui-calibration-preview.gif)
+[Watch a real calibration verification (33 seconds, MP4)](https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/recordings/gui-calibration.mp4)
+· [GIF preview](https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/recordings/gui-calibration-preview.gif)
 
 ```bash
 clio-coder gui --open
@@ -252,7 +261,9 @@ reasoning support your workflow requires. See
 The default policy admits workspace reads, edits, and recognized checks, and
 requests permission for unfamiliar commands and outward actions. Permission
 cards show the invocation. **Yolo** removes ordinary approval prompts; protected
-paths, hard blocks, and damage-control rules continue to apply.
+paths, hard blocks, and damage-control rules continue to apply. In the terminal,
+`Ctrl+G` then `y` switches the current session between the default policy and
+Yolo without changing saved settings.
 
 Commands execute with your operating-system permissions. Clio's runtime policy
 controls tool admission, while project tests, numerical references, performance
