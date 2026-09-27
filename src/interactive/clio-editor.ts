@@ -20,7 +20,8 @@ import { modelNickname, type TargetIdentity } from "./theme/labels.js";
 import { createComposerSurfacePainter } from "./theme/yolo-surface.js";
 import type { TurnPreparationPhase } from "./turn-state.js";
 
-const REVERSE_VIDEO_BLANK = `${String.fromCharCode(27)}[7m ${String.fromCharCode(27)}[0m`;
+const REVERSE_VIDEO = `${String.fromCharCode(27)}[7m`;
+const REVERSE_VIDEO_BLANK = `${REVERSE_VIDEO} ${String.fromCharCode(27)}[0m`;
 const EMPTY_PROMPT = "Ask Clio…  / for commands";
 const CONFIRM_PROMPT = "A parked call is waiting for your decision";
 const PREPARING_PROMPT = "Clio has your prompt and is preparing the turn";
@@ -431,7 +432,7 @@ export class ClioEditor extends Editor {
 		const input = lines.slice(1, border);
 		const cursor = Math.max(
 			0,
-			input.findIndex((line) => line.includes("\u001b[7m")),
+			input.findIndex((line) => line.includes(REVERSE_VIDEO)),
 		);
 		const [inputStart, inputEnd] = centeredWindow(input.length, cursor, Math.max(1, bodyRows - 2));
 		const rows = [this.renderTopBorder(width, this.renderedTopHidden + inputStart)];
@@ -554,7 +555,7 @@ export class ClioEditor extends Editor {
 			const input = lines.slice(1, border);
 			const cursor = Math.max(
 				0,
-				input.findIndex((line) => line.includes("\u001b[7m")),
+				input.findIndex((line) => line.includes(REVERSE_VIDEO)),
 			);
 			const [start, end] = centeredWindow(input.length, cursor, Math.max(1, dockBodyRows(this.dockHost) - 3));
 			const composer = [

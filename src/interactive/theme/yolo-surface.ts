@@ -1,6 +1,6 @@
 import { extractAnsiCode } from "../../engine/tui.js";
 import { padAnsi } from "./rules.js";
-import { type ClioTheme, type SemanticRole, projectsYolo, sgrResetsForeground, SGR_RESET } from "./tokens.js";
+import { type ClioTheme, projectsYolo, type SemanticRole, SGR_RESET, sgrResetsForeground } from "./tokens.js";
 
 /** Preserve explicit selection/diff backgrounds and their own text colors. */
 function inlineBackgroundAfter(code: string, previous: boolean): boolean {

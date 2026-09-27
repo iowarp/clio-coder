@@ -20,7 +20,6 @@ import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tu
 import { councilLabelText } from "../council-grid.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import {
-	type SemanticRole,
 	clioTheme,
 	fitUnits,
 	formatCompactMs,
@@ -28,6 +27,7 @@ import {
 	GLYPH,
 	joinFacts,
 	releaseSpaces,
+	type SemanticRole,
 	toolFunction,
 } from "../theme/index.js";
 import { workerPhaseActivity } from "../worker-activity.js";

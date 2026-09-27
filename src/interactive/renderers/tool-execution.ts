@@ -54,8 +54,8 @@ import {
 	releaseSpaces,
 	toolFunction,
 } from "../theme/index.js";
-import { renderDiffLines } from "./diff.js";
 import { shellCommandInk, toolOutputInk } from "./code-ink.js";
+import { renderDiffLines } from "./diff.js";
 import { highlightJsonLine, tryRenderJson, tryRenderXml } from "./structured.js";
 
 // The argument projection lives in the safety domain so the worker tool seam

@@ -1,25 +1,25 @@
 import { terminalBackground } from "../../core/terminal-background.js";
 import { colorDisabled } from "../../core/terminal-preferences.js";
 import {
+	DEFAULT_THEME_CONTEXT,
+	isSemanticRole,
+	projectsYolo,
+	type RoleState,
+	resolveRole,
+	type SemanticRole,
+	type ThemeContext,
+} from "../../core/theme-roles.js";
+import {
 	LEGACY_TOKEN_COLOR,
 	type ClioToken as LegacyToken,
-	type ThemeBackground,
 	type PaletteColor,
 	paletteProjection,
 	TERMINAL_PALETTE,
+	type ThemeBackground,
 } from "../../core/theme-token-hex.js";
-import {
-	DEFAULT_THEME_CONTEXT,
-	type SemanticRole,
-	type ThemeContext,
-	type RoleState,
-	isSemanticRole,
-	projectsYolo,
-	resolveRole,
-} from "../../core/theme-roles.js";
 
-export type { ThemeBackground } from "../../core/theme-token-hex.js";
 export * from "../../core/theme-roles.js";
+export type { ThemeBackground } from "../../core/theme-token-hex.js";
 /** Semantic roles plus explicit compatibility names for configured roster colors. */
 export type ClioToken = SemanticRole | LegacyToken;
 
@@ -28,6 +28,8 @@ interface TokenColor {
 	xterm: number;
 }
 const PALETTES = new Map<ThemeBackground | null, Record<PaletteColor, TokenColor>>();
+/** Any SGR sequence; built from the escape code so the source carries no control character. */
+const SGR_SEQUENCE = new RegExp(`${String.fromCharCode(27)}\\[[\\d;]*m`, "gu");
 function palette(background: ThemeBackground | null): Record<PaletteColor, TokenColor> {
 	let colors = PALETTES.get(background);
 	if (colors === undefined) {
@@ -160,7 +162,7 @@ export function createClioTheme(
 		base: (role, text) => {
 			if (!color || text.length === 0) return text;
 			const foreground = `\u001b[${fgCode(colorFor(role), truecolor)}m`;
-			return `${foreground}${text.replace(/\u001b\[[\d;]*m/gu, (code) => (sgrResetsForeground(code) ? `${code}${foreground}` : code))}${SGR_RESET}`;
+			return `${foreground}${text.replace(SGR_SEQUENCE, (code) => (sgrResetsForeground(code) ? `${code}${foreground}` : code))}${SGR_RESET}`;
 		},
 	};
 }

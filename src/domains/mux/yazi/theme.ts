@@ -1,6 +1,6 @@
 import { terminalBackground } from "../../../core/terminal-background.js";
-import type { ThemeBackground } from "../../../core/theme-token-hex.js";
 import { roleHex, type SemanticRole } from "../../../core/theme-roles.js";
+import type { ThemeBackground } from "../../../core/theme-token-hex.js";
 
 /**
  * Render the Clio overlay on Yazi's pinned preset theme.

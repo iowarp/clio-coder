@@ -115,7 +115,7 @@ export function fitRow(text: string, width: number): string {
 }
 
 /** At most `height` rows of `width` cells, without adding blank rows. */
-export function fitContentRows(lines: ReadonlyArray<string>, width: number, height: number): string[] {
+function fitContentRows(lines: ReadonlyArray<string>, width: number, height: number): string[] {
 	return lines.slice(0, Math.max(0, height)).map((line) => padAnsi(line, width, GLYPH.ellipsis));
 }
 

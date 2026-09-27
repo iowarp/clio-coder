@@ -25,8 +25,8 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import "@earendil-works/pi-ai/providers/images/register-builtins";
 
-import { normalizeContext } from "./context.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
+import { normalizeContext } from "./context.js";
 import { getEngineEnvApiKey } from "./env-api-keys.js";
 import { engineModels } from "./models.js";
 import { instrumentProviderCall } from "./provider-diagnostics.js";

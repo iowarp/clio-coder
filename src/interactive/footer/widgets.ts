@@ -643,7 +643,7 @@ function shortToolLabel(status: AgentStatus, width: number): string {
 	return `Running ${truncateToWidth(name, nameWidth, GLYPH.ellipsis, false)}`;
 }
 
-export function footerPhasePresentation(status: AgentStatus, width: number, now: number): HarnessPhasePresentation {
+function footerPhasePresentation(status: AgentStatus, width: number, now: number): HarnessPhasePresentation {
 	const ultraNarrow = width < 48;
 	switch (status.phase) {
 		case "idle":

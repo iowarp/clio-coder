@@ -59,7 +59,7 @@ export function createAssistantProseFilter(): AssistantProseFilter {
 			arrayCandidate = grapheme === "[";
 			firstContent = false;
 		} else if (arrayCandidate && !/^\s+$/u.test(grapheme)) {
-			structured = /^(?:["{\[\]\d-]|[tfn])$/u.test(grapheme);
+			structured = /^(?:["{[\]\d-]|[tfn])$/u.test(grapheme);
 			arrayCandidate = false;
 		}
 		const atStart = leading && indent <= 3;

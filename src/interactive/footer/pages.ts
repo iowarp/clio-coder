@@ -11,7 +11,7 @@ import { ACTIVE_DISPATCH_STATUSES, FAILED_DISPATCH_STATUSES, formatFooterTokens 
 import { formatKeyLabel } from "../keybinding-manager.js";
 import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
 import { previewRows } from "../renderers/preview.js";
-import { brandMark, metricText, clioTheme, formatCompactMs, GLYPH, padAnsi, rule } from "../theme/index.js";
+import { brandMark, clioTheme, formatCompactMs, GLYPH, metricText, padAnsi, rule } from "../theme/index.js";
 import { fitIdentityLabel } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
