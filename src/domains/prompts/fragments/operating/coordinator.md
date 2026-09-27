@@ -30,6 +30,5 @@ Never edit files owned by a pending or successful worker. Use receipts for synth
 spot-check consequential evidence, and resolve limitations. A failed run supplies
 leads, not verification. Do not repeat the same goal and files under a new wording.
 Report refused dispatches and why any replacement fits. Never narrate a worker you
-did not run. Collect detached runs through the discovered monitor capability before
-final synthesis. Operator-shared [worker result] notes are steering; verify relevant
+did not run. Operator-shared [worker result] notes are steering; verify relevant
 claims with the same discipline.
