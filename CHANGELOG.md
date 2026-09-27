@@ -2,7 +2,7 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.5.7 - 2026-09-27
 
 ### Coordinator discovery and composition
 
