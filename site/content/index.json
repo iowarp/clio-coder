@@ -5,12 +5,12 @@
     "title": "Install Clio Coder",
     "group": "Start",
     "excerpt": "Install, update, and launch Clio Coder on your machine.",
-    "stripDetails": true,
-    "sections": [
-      "Get started"
-    ],
+    "summary": "install.md",
     "headings": [
-      "Get started"
+      "Install and open a project",
+      "Give Clio a useful first task",
+      "Keep going",
+      "When you need more detail"
     ]
   },
   {
@@ -19,26 +19,11 @@
     "title": "Connect a model",
     "group": "Start",
     "excerpt": "Set up local models, institutional endpoints, and cloud connections.",
-    "sections": [
-      "Start here",
-      "First-run flow",
-      "Settings Center",
-      "Configure targets",
-      "Local model settings",
-      "Auth",
-      "Subscription-based Targets and Runtimes",
-      "Troubleshooting checklist"
-    ],
+    "summary": "connect-model.md",
     "headings": [
-      "Start here",
-      "First-run flow",
+      "Connect the way you already work",
       "Settings Center",
-      "Configure targets",
-      "Local model settings",
-      "LM Studio load profile",
-      "Auth",
-      "Subscription-based Targets and Runtimes",
-      "Troubleshooting checklist"
+      "Check the connection"
     ]
   },
   {
@@ -47,35 +32,11 @@
     "title": "Commands and shortcuts",
     "group": "Everyday use",
     "excerpt": "Navigate the terminal, choose models, and control a session.",
-    "sections": [
-      "CLI Commands",
-      "Headless Run Flags",
-      "Interactive Slash Commands",
-      "Keybindings",
-      "Live Steering",
-      "Output styles",
-      "Troubleshooting"
-    ],
+    "summary": "commands.md",
     "headings": [
-      "CLI Commands",
-      "Graphical application",
-      "Project trust",
-      "Headless Run Flags",
-      "Headless Working Directory",
-      "Headless No-op Runs",
-      "Headless Session Continuity",
-      "JSON Event Streaming and Wire Projection Promise",
-      "Turn Constraints",
-      "Interactive Slash Commands",
-      "Subscription quota and session usage",
-      "Notes on individual commands",
-      "Keybindings",
-      "What Ctrl+C does",
-      "Typing before Clio has finished starting",
-      "Live Steering",
-      "The same three modes against a background worker",
-      "Output styles",
-      "Troubleshooting"
+      "Launch and inspect",
+      "Everyday terminal commands",
+      "A few keys to remember"
     ]
   },
   {
@@ -84,32 +45,11 @@
     "title": "Tools and permissions",
     "group": "Everyday use",
     "excerpt": "Read, search, edit, and run commands with Clio's repository tools.",
-    "sections": [
-      "Search scope: read, ls, grep, and find outside the workspace",
-      "read: page through a file with offset, limit, and tail",
-      "edit: exact text replacements in one file",
-      "write: create or overwrite a whole file",
-      "bash: run a shell command",
-      "grep: search file contents with ripgrep",
-      "find: locate files and directories by glob pattern",
-      "ls: list one directory",
-      "verify: run declared verification checks",
-      "git: read-only inspection of git repository state"
-    ],
+    "summary": "permissions.md",
     "headings": [
-      "Search scope: read, ls, grep, and find outside the workspace",
-      "read: page through a file with offset, limit, and tail",
-      "edit: exact text replacements in one file",
-      "write: create or overwrite a whole file",
-      "bash: run a shell command",
-      "grep: search file contents with ripgrep",
-      "find: locate files and directories by glob pattern",
-      "ls: list one directory",
-      "verify: run declared verification checks",
-      "Derived checks",
-      "Project verifier catalog",
-      "Guided catalog authoring",
-      "git: read-only inspection of git repository state"
+      "Ask for a bounded change",
+      "Understand permission requests",
+      "Verify using your project's checks"
     ]
   },
   {
@@ -118,14 +58,11 @@
     "title": "Save and resume work",
     "group": "Everyday use",
     "excerpt": "Resume conversations, manage context, and prepare a handoff.",
-    "sections": [
-      "Choosing a reduction",
-      "Recovering an interrupted handoff"
-    ],
-    "includeIntro": true,
+    "summary": "continuity.md",
     "headings": [
-      "Choosing a reduction",
-      "Recovering an interrupted handoff"
+      "Pick up a conversation",
+      "Keep long work focused",
+      "Recover an interrupted handoff"
     ]
   },
   {
@@ -134,18 +71,10 @@
     "title": "Files and terminal panes",
     "group": "Everyday use",
     "excerpt": "Attach files and open companion terminal panes.",
+    "summary": "panes.md",
     "headings": [
-      "What you get",
-      "Install, from a clean machine",
-      "Turn panes on",
-      "What doctor says",
-      "Commands and keys",
-      "Picking a file",
-      "What closes what",
-      "Settings",
-      "Theme",
-      "Troubleshooting",
-      "Where things live"
+      "Add a file browser or companion shell",
+      "Use the files pane"
     ]
   },
   {
@@ -154,32 +83,11 @@
     "title": "Workers and fleets",
     "group": "Extend Clio",
     "excerpt": "Assign focused tasks and combine workers into a workflow.",
-    "sections": [
-      "Node setup",
-      "Doctor preflight",
-      "Topologies",
-      "Operator visibility"
-    ],
+    "summary": "workers.md",
     "headings": [
-      "Node setup",
-      "Doctor preflight",
-      "Topologies",
-      "Single-writer token",
-      "Declared step scope",
-      "Worktree per task",
-      "Typed intent and host-run verification",
-      "Agent ledger",
-      "Detached fan-out, backgrounding, and collect",
-      "Review gate",
-      "Compete",
-      "Council",
-      "ExecutionPlan and plan approval",
-      "Shipped fleets and contract versions",
-      "Fleet authoring",
-      "Per-step write boundaries (Contract v4)",
-      "Bounded check/repair loops",
-      "Deterministic code steps",
-      "Operator visibility"
+      "Delegate a focused task",
+      "Follow the work",
+      "Compose a fleet when you need one"
     ]
   },
   {
@@ -188,20 +96,11 @@
     "title": "Skills and resources",
     "group": "Extend Clio",
     "excerpt": "Browse and use skills, prompts, agents, fleets, and plugins.",
-    "sections": [
-      "Browse and install",
-      "Scope and workspace state",
-      "Keyboard shortcuts: Alt+L for Library and Alt+M for Model picker",
-      "Interactive library navigation",
-      "Session reload and package disable behavior"
-    ],
-    "includeIntro": true,
+    "summary": "library.md",
     "headings": [
-      "Browse and install",
-      "Scope and workspace state",
-      "Keyboard shortcuts: Alt+L for Library and Alt+M for Model picker",
-      "Interactive library navigation",
-      "Session reload and package disable behavior"
+      "Find a useful skill",
+      "Review before installing",
+      "Refresh a running session"
     ]
   },
   {
@@ -210,14 +109,11 @@
     "title": "Install plugins",
     "group": "Extend Clio",
     "excerpt": "Add reusable resources to your Clio installation.",
-    "includeIntro": true,
-    "sections": [
-      "Plugins and extensions",
-      "Other package kinds"
-    ],
+    "summary": "plugins.md",
     "headings": [
-      "Plugins and extensions",
-      "Other package kinds"
+      "Install a bundle of resources",
+      "Keep the installed copy under control",
+      "Choose the right kind of extension"
     ]
   },
   {
@@ -226,16 +122,11 @@
     "title": "Editors and other agents",
     "group": "Extend Clio",
     "excerpt": "Use supported agent connections and editor integrations.",
+    "summary": "interoperability.md",
     "headings": [
-      "Delegate work to an installed coding agent",
-      "Outbound: Use this library from Claude Code",
-      "Not every library package is published",
-      "Outbound: Use this library from Codex",
-      "Inspect installed hosts",
-      "Inbound: Review and adopt foreign resources",
-      "Reviewing foreign plugin source, trust, and unsupported components",
-      "Inbound: Install or import an explicit foreign package (Claude Code, Codex)",
-      "Terminal flow"
+      "Bring an installed coding agent",
+      "Review resources from another agent",
+      "Connect an ACP frontend"
     ]
   },
   {
@@ -244,11 +135,11 @@
     "title": "Slurm workflows",
     "group": "Extend Clio",
     "excerpt": "Connect Clio to supported Slurm tools for cluster work.",
+    "summary": "slurm.md",
     "headings": [
-      "Set it up",
-      "The five capabilities",
-      "How autonomy treats them",
-      "The skill"
+      "Work with a scheduler",
+      "Use a job workflow",
+      "Choose approvals deliberately"
     ]
   },
   {
@@ -257,16 +148,11 @@
     "title": "Check your installation",
     "group": "Reference",
     "excerpt": "Diagnose installation and connection problems with doctor.",
+    "summary": "doctor.md",
     "headings": [
-      "Running it",
-      "Reading a row",
-      "HPC toolchain rows",
-      "Task worktree rows",
-      "Slurm MCP rows",
-      "Deep checks",
-      "Tool probe: `tools <target>`",
-      "Validation contract dry run: `validator <n>`",
-      "In the session"
+      "Start with the standard check",
+      "Read the findings",
+      "Repair or investigate further"
     ]
   },
   {
@@ -275,46 +161,51 @@
     "title": "Troubleshooting",
     "group": "Reference",
     "excerpt": "Resolve common connection, terminal, and runtime problems.",
+    "summary": "troubleshooting.md",
     "headings": [
-      "Error Catalog & Remediation Matrix",
-      "Reading a cold cache",
-      "A TUI that stops answering the keyboard",
-      "Diagnostic Commands"
+      "A connection is unavailable",
+      "Settings fail to load",
+      "A terminal shortcut does not arrive",
+      "Work stopped or a check failed"
+    ]
+  },
+  {
+    "path": "guide/quality-policy.md",
+    "source": "docs/guide/quality-policy.md",
+    "title": "Require project checks",
+    "group": "Everyday use",
+    "excerpt": "Choose the declared checks a change requires and inspect verification freshness.",
+    "summary": "quality.md",
+    "headings": [
+      "Tell Clio what “checked” means in your project",
+      "Run the declared checks",
+      "Review freshness"
     ]
   },
   {
     "path": "guide/configuration-reference.md",
     "source": "docs/guide/configuration-reference.md",
-    "title": "Configuration reference",
+    "title": "Configuration essentials",
     "group": "Reference",
-    "excerpt": "Look up configuration settings and their supported values.",
+    "excerpt": "Find settings layers, save scopes, and the full configuration reference.",
+    "summary": "configuration.md",
     "headings": [
-      "Settings keys",
-      "Chat settings",
-      "Project files",
-      "Local stdio MCP configuration and trust",
-      "Let Clio propose settings changes",
-      "Exact CLI and tool contracts",
-      "CLI flags",
-      "`context`",
-      "Tool arguments",
-      "`context`"
+      "Prefer the Settings Center",
+      "Know where a change is saved",
+      "Look up an exact key"
     ]
   },
   {
     "path": "guide/environment-variables.md",
     "source": "docs/guide/environment-variables.md",
-    "title": "Environment variables",
+    "title": "Environment essentials",
     "group": "Reference",
-    "excerpt": "Look up environment variables used by Clio Coder.",
+    "excerpt": "Use directory overrides and existing provider credentials when needed.",
+    "summary": "environment.md",
     "headings": [
-      "Behavior knobs without a settings key",
-      "Directory and install layout",
-      "Ambient provider, runtime, and terminal inputs",
-      "Debug and trace toggles",
-      "File-writing traces",
-      "Internal plumbing",
-      "Test-only"
+      "Use settings for ordinary preferences",
+      "Locate or separate installation state",
+      "Credentials and terminal behavior"
     ]
   }
 ]

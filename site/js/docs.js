@@ -121,6 +121,8 @@
 				if (heading.getBoundingClientRect().top > header) break;
 				current = heading;
 			}
+			// Short final sections cannot always scroll above the sticky header.
+			if (scrollY > 0 && innerHeight + scrollY >= document.documentElement.scrollHeight - 2) current = headings.at(-1);
 			if (current.id === active) return;
 			active = current.id;
 			for (const link of toc) {

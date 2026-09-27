@@ -36,7 +36,7 @@ def inputs(ref, worktree, source_ref=None, repository_snapshot=False):
     files, index, entries = {}, [], []
     for item in catalog:
         source, path = item["source"], item["path"]
-        if not (source.startswith("docs/guide/") or source == "README.md") or ".." in Path(source).parts:
+        if not re.fullmatch(r"(?:docs/guide/[^/]+\.md|README\.md)", source) or ".." in Path(source).parts:
             raise ValueError(f"source is not a public user guide: {source}")
         if not path.endswith(".md") or ".." in Path(path).parts or path in files:
             raise ValueError(f"invalid or duplicate public path: {path}")
@@ -62,6 +62,14 @@ def inputs(ref, worktree, source_ref=None, repository_snapshot=False):
             text = f"{intro}\n\n{body}"
         if item.get("stripDetails"):
             text = re.sub(r"<details>[\s\S]*?</details>", "", text)
+        # The website offers short, task-oriented guides. Their upstream source
+        # remains pinned and hashed, while the site's authored summary is checked
+        # alongside the generated HTML input and search index.
+        summary = item.get("summary")
+        if summary:
+            if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*\.md", summary):
+                raise ValueError(f"invalid public summary: {summary}")
+            text = (CONTENT / "doc-summaries" / summary).read_text()
         text = f"# {item['title']}\n\n{item['excerpt']}\n\n{text.strip()}\n"
         files[path] = text.encode()
         index.append({**item, "headings": re.findall(r"^#{2,3}\s+(.+)$", text, re.M)})

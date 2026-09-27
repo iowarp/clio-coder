@@ -174,7 +174,7 @@ function shell(html, path, title, description, type) {
 		.replace("<!-- site-head -->", head(path, title, description, type))
 		.replace("<!-- site-header -->", header)
 		.replace("<!-- site-footer -->", footer)
-		.replace("<!-- version -->", escapeHtml(product.version))
+		.replaceAll("<!-- version -->", escapeHtml(product.version))
 		.replace("<!-- version-source -->", `${repository}/tree/${ref}`)
 		.replace(/<pre>/g, () => `<div class="code-block"><pre tabindex="0" aria-label="Code example ${++number}">`)
 		.replace(/<\/pre>/g, "</pre></div>")
@@ -282,6 +282,13 @@ for (const name of [
 	"gui-overview.png",
 	"gui-conversation.webp",
 	"gui-conversation.png",
+	"gui-overview-light.webp",
+	"gui-overview-light.png",
+	"gui-conversation-light.webp",
+	"gui-conversation-light.png",
+	"gui-artifacts.webp",
+	"gui-artifacts.png",
+	"temperature-calibration.zip",
 	"tui-boot.webp",
 	"tui-boot.png",
 	"social-card.png",
@@ -345,15 +352,26 @@ for (const item of index) {
 		"source-version": escapeHtml(source.version),
 		"source-ref": escapeHtml(source.ref),
 		"source-commit": source.commit,
-		"source-label":
-			source.mode === "release" ? `Documentation · v${escapeHtml(source.version)}` : "From the project documentation",
+		"source-label": item.summary
+			? `Guide to v${escapeHtml(source.version)}`
+			: source.mode === "release"
+				? `Documentation · v${escapeHtml(source.version)}`
+				: "From the project documentation",
 	};
 	let html = template;
 	for (const [name, value] of Object.entries(slots)) html = html.replaceAll(`<!-- ${name} -->`, value);
 	await writePage(docUrl(item.path), html, `${item.title} — Clio Coder docs`, item.excerpt, "TechArticle");
 }
 const search = index.map(
-	({ path, source: _source, sections: _sections, stripDetails: _strip, includeIntro: _intro, ...item }) => ({
+	({
+		path,
+		source: _source,
+		sections: _sections,
+		stripDetails: _strip,
+		includeIntro: _intro,
+		summary: _summary,
+		...item
+	}) => ({
 		path,
 		...item,
 		url: docUrl(path),

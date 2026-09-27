@@ -2,51 +2,39 @@
 
 Add reusable resources to your Clio installation.
 
-A plugin is a complete, versioned bundle of skills and supporting files. The portable root `plugin.json` follows [Agent Plugins 1.0.0](https://agent-plugins.org/). Clio reads native prompts, agent recipes, and fleets from its namespaced manifest extension. Installing a bundle keeps those resources and their references together.
+## Install a bundle of resources
 
-Browse the bundled catalog, preview a complete installation, then install it:
+Plugins keep related skills, prompts, agents, fleets, and supporting files together. Browse the shipped catalog and preview an installation before writing it:
 
-```bash
-clio-coder library search
+```sh
 clio-coder library list --kind plugin
-clio-coder library install plugin:materio --dry-run --json
+clio-coder library install plugin:materio --dry-run
 clio-coder library install plugin:materio
 ```
 
-The catalog is shipped with Clio; it does not install content automatically. A preview reports the destination and full-tree SHA-256. The pin covers the manifest, skills, prompts, scripts, references, names, and directory structure. The installer checks the staged bundle again before committing it. If a source changes after the preview, make a new plan. `--force` never overrides a catalog pin mismatch.
+The catalog ships with Clio, but its content is not installed automatically. Add `--project` to keep a package in the current workspace; otherwise installation uses user scope.
 
-For a bundle you authored locally, install its directory directly:
+A local bundle uses the same review flow:
 
-```bash
+```sh
 clio-coder library install ./my-plugin --project
-clio-coder library inspect my-plugin --project --json
 ```
 
-An existing local directory always wins over a catalog ID with the same spelling. `--project` installs into `.clio-coder/plugins/`; the default user scope installs into Clio's configuration directory. Valid, compatible project installations take precedence, including a disabled project installation that suppresses the user copy. The Plugins tab identifies every installed scope and the copy its actions select.
+## Keep the installed copy under control
 
-Manage installed content through the same lifecycle functions used by the terminal UI:
-
-```bash
-clio-coder library list --all --json
+```sh
+clio-coder library inspect materio --json
+clio-coder library drift materio
 clio-coder library disable materio
 clio-coder library enable materio
-clio-coder library drift materio
-clio-coder library pin materio
-clio-coder library update materio
-clio-coder library remove materio
 ```
 
-Every successful installation records a verified pin. `pin` reports and verifies it; it does not approve edited files. Drifted content is blocked from loading. Update refuses to replace local edits unless `--force` is supplied; the install result reports any recovery copies of edited content. Updating a catalog package uses the current catalog version and pin. Updating a local package uses its recorded source directory, even when the catalog contains the same plugin name. Updates and replacements preserve an existing disabled state; enable the plugin explicitly when ready. Removal preserves edited content and reports its recovery path.
+Installation records a verified pin covering the complete package tree. Drifted content is blocked from loading; `pin` verifies the recorded pin rather than approving edits. Review an update before replacing a modified copy.
 
-In an active session, open `/library` or press Alt+L. Use the Plugins category, `b` for Browse or Installed, and `s` for User or Project scope. Enter opens a package's members; the selected row offers `i` to review installation, `u` to review an update, `e` to enable or disable, and `r` to review removal when those actions apply. Use the CLI `library pin` and `library drift` commands for pin and drift checks. Run `/library reload` to refresh resources in that session after changes. The headless `library reload` command refreshes only its own process.
+In the terminal, open **Library → Plugins** to browse members and review lifecycle actions. Run `/library reload` after changing recipes externally.
 
-## Plugins and extensions
+## Choose the right kind of extension
 
-Recipe plugins and executable harness extensions serve different purposes and have completely distinct lifecycles:
-- **Recipe Plugins**: Managed through `clio-coder library` and `/library`. They package portable declarative components (skills, prompts, agents, fleets, and supporting reference files or explicitly invoked evaluation scripts) using the portable `plugin.json` manifest. While full package trees may carry scripts invoked explicitly by evaluations or workflows, installation, browsing, or loading recipe metadata in the Library never registers executable harness capabilities (such as daemons, background runners, or harness hooks). They install into `.clio-coder/plugins/` (or user `plugins/`). Reloading recipes in an active session is done via `/library reload`.
-- **Harness Extensions**: Managed through `clio-coder extensions` and `/extensions`. They package executable capabilities: an extension operator runtime requires a shipped Node `.mjs` entrypoint (`parseExtensionRuntime` in [runtime-schema.ts](../../src/domains/extensions/runtime-schema.ts)) registering custom slash handlers (`api.handle(...)`), passive lifecycle observations (`events: ["session_open", "turn_end"]`), status indicators, and UI panels. Separately, command tools support `runtime: node` or `python3`, and `hooks.yaml` defines blocking or effect-producing pre-tool/post-tool execution. Extensions install into `.clio-coder/extensions/` (or user `extensions/`). Reloading runtime handlers and hooks at idle is done via `/extensions reload` (subject to integrity checks). However, model-visible command-tool schemas are frozen at session boot and cannot change mid-session; altering tool schemas requires restarting Clio.
-- **Strict Boundary**: The two systems never overlap. An extension manifest attempting to declare domain resources (`skills`, `prompts`, `agents`, `fleets`) is refused and points at `clio-coder library install <path>`. Use `clio-coder extensions list` and `/extensions` to inspect installed extensions. Retired slash commands `/plugins` and `/resources` return an explicit usage error directing operators to `/library` for recipe packages and `/extensions` for harness extensions.
+Library plugins supply portable recipes. Executable harness extensions provide runtime tools, hooks, and interface behavior and use `clio-coder extensions` instead. Adding tool schemas requires a new session; recipe reload does not change those schemas.
 
-## Other package kinds
-
-The same library supports single-resource skill, agent, prompt and fleet packages. See [library usage](resource-library.md) for registration and JSON state, and [architecture](../architecture/library.md) for the shared invariants. `/library` has all five kinds and `s` switches the selected scope.
+See [skills and resources](/docs/guide/resource-library.html) for everyday Library controls. The full plugin guide covers private catalogs and package authoring.

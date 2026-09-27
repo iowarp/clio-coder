@@ -2,131 +2,33 @@
 
 Resolve common connection, terminal, and runtime problems.
 
-This guide provides concrete, actionable remediation procedures for
-operational errors, permission denials, target connection failures, and system
-diagnostics in the current source tree.
+## A connection is unavailable
 
----
+Start with these diagnostics:
 
-## Error Catalog & Remediation Matrix
-
-| User-Facing Error / Notice | Cause | Actionable Remediation |
-| :--- | :--- | :--- |
-| `clio-coder run cannot confirm permission requests; rerun interactively to approve this action.` | A tool call required manual permission confirmation during a non-interactive headless `clio-coder run` execution. | Run interactively in the TUI (`clio-coder`) to review and approve the request, or review the workspace policy in `.clio-coder/safety.yaml`. `--autonomy yolo` removes ordinary confirmation prompts; damage-control rules can still require approval. |
-| `no trace database yet at <path>` | The trace mirror database has not been initialized because no interactive sessions or dispatches have executed yet. | Execute a turn or dispatch a task. In SQLite trace commands, this notice is informational (exit code `0`). |
-| `trace database not found: <path>` | An explicit `--db <path>` flag was provided pointing to a nonexistent database file. | Verify the database path or omit `--db` to use the default state directory database (`<stateDir>/trace.sqlite`); the next line prints that default path. |
-| `no local skill marketplace catalog or index configured` | No catalog directory (`CLIO_CODER_SKILL_CATALOG_DIR`, a `library/skills/` folder in the working tree, or the installed package's own `library/skills/` catalog) and no JSON index (`CLIO_CODER_SKILL_MARKETPLACE_INDEX`, `<configDir>/skill-marketplace.json`, or the package's `library/skills/skill-marketplace.json`) was found. On an npm install this means the package is incomplete; check `clio-coder doctor`. | Point `CLIO_CODER_SKILL_CATALOG_DIR` at a `library/skills/` catalog or `CLIO_CODER_SKILL_MARKETPLACE_INDEX` at a valid `skill-marketplace.json`, or install a skill directly via `clio-coder library install <path\|github-url>`. |
-| `<arg> is a global option and must come before the subcommand: clio-coder <usage> <command> ...` | A global CLI option (such as `--api-key`, `--no-context-files`, or `-nc`) was placed after the subcommand name. Directory roots are configured via `CLIO_CODER_*_DIR` environment variables. | Move the flag before the subcommand name (e.g. `clio-coder --api-key <key> run ...` instead of `clio-coder run --api-key <key> ...`). |
-| `target <id> is not registered` | The designated target ID does not exist in `settings.yaml`. | Run `clio-coder targets` to view available targets, or configure a new target using `clio-coder targets add`. |
-| `budget: ceiling must be >= 0 (got <val>)` | A negative session cost ceiling reached the scheduling budget ([budget.ts](../../src/domains/scheduling/budget.ts)). | Set a non-negative `safety.limits.sessionCostUsd` in `settings.yaml`, or edit Session ceiling (USD) in Settings → Permissions & Limits. |
-| `worker_final_output_missing` | A worker process completed execution with exit code 0 but failed to emit a valid final answer before the stream closed. | Check the worker event log using `clio-coder trace tail <runId>` or inspect the receipt via `monitor(run_id="<id>", mode="receipt")`. |
-| `vram_capacity_fit_failure` | The model could not be scheduled or loaded due to insufficient GPU VRAM capacity on the target node. | Select a smaller quantized model variant, reduce context window size, or route to an alternative fleet node with greater memory capacity. |
-| `loop_guard_tools_disabled_exhausted` | The loop detector identified repeated unproductive tool calls with identical arguments and disabled tool execution. | Inspect model prompts and provide clearer intermediate steering instructions to prevent recursive tool loops. |
-| `Node.js ExperimentalWarning: SQLite is an experimental feature` | Node.js emitted an experimental feature warning for `node:sqlite`. | By default, Clio suppresses this warning via a scoped filter. If visible when running scripts directly, pass `--trace-warnings` to control diagnostics. |
-| `cwd-fallback: no-cwd / missing / not-a-directory` | The session recorded in `meta.json` points to a workspace directory that has been deleted, unmounted, or renamed. | When prompted by the `cwd-fallback` overlay, select a valid existing directory to re-anchor the session. |
-| `LM Studio duplicate model load / peer projection` | Sending a bare model key that already has a loaded instance or an LM Link peer projection. | Clio resolves model IDs to resident instances automatically. Verify loaded instances on the target server with `clio-coder targets --probe`. |
-| `llama.cpp 400 model is already running` | Sending load requests to a router where the model is idle/sleeping. | Sleeping models are treated as resident. Verify router slots and catalog models before initiating eviction. |
-| `OAuth token exchange cancelled` | An in-flight OAuth login or credential refresh was aborted before persistence. | Re-run `clio-coder auth login <target>` to restart the OAuth flow cleanly. Uncommitted tokens are discarded. |
-
----
-
-## Reading a cold cache
-
-Prefix caching can reduce repeated prompt processing. Use `/context` to inspect
-provider cache usage, compiled-prompt reuse, and any backend prefill timing.
-Available fields depend on the serving runtime. A backend that omits cache-read
-telemetry is shown without that observation.
-
-When Clio records a cause for a cold prefix, `/context` names it, for example:
-
-```text
-last cold turn: working-set eviction (expected)
-```
-
-The [context engine](../architecture/context-engine.md#prefix-caching-and-cache-observations)
-describes the eight recorded causes and the prompt layers they affect. Changes
-to thinking settings, tool schemas, selected context, or model residency can
-change the reusable prefix.
-
-For a finished session, inspect the first assistant entry for each run in its
-`current.jsonl`. `clio-coder paths` locates the session store. The
-`promptCache.expectedColdReasons` field records causes;
-`promptCache.backendVerdict` records the backend observation. Available backend
-token counts and timing live under `promptCache.backend`. These commands provide
-summaries:
-
-```bash
+```sh
 clio-coder doctor
-clio-coder usage report
+clio-coder targets --probe
 ```
 
-If the compiled prompt was reused but the backend reports a cold prefix, check:
+Check that the selected endpoint is reachable, required credentials are present, and the model is loaded. A local server with an empty model list usually needs a model loaded before setup can finish. In **Connections**, reopen Guided setup or repair the saved connection.
 
-- **Server lifetime and sleep settings.** A restart, unload, or router sleep can
-  discard resident cache state.
-- **Other traffic on the endpoint.** Workers, another session, or another client
-  can use the same cache slots. `clio-coder targets --probe` reports available
-  slot information; fleet settings show Clio's active endpoint allocations.
-- **Model residency.** Switching a router to another model can replace the
-  previous model's cache state.
-- **Prompt identity.** Compare `promptHash` and `toolSignature` in
-  `context-snapshots.jsonl`. Changes identify prompt or tool-surface updates;
-  record the relevant diagnostics when reporting an unexplained cache miss.
+For slow first responses from a local model, check the server's load state and capacity. Live tool-use behavior can be investigated with `clio-coder doctor --deep`; it makes generation requests.
 
-Hybrid models with recurrent state can require processing from a context
-checkpoint when earlier history changes. Check the serving runtime's checkpoint
-configuration and the model's serving notes.
+## Settings fail to load
 
-A cache hit can still have a long time to first token when the server restores
-slots from host memory or waits for another request. For supported llama.cpp
-router configurations, Doctor and target probes report idle-slot caching.
-`--no-cache-idle-slots` or `cache-idle-slots = false` changes that behavior; choose
-it according to the server's memory capacity and concurrent workload.
+Clio uses a strict version-2 settings schema. Invalid or retired keys produce a diagnostic naming the path. `clio-coder upgrade` applies the registered migration and preserves the original version-1 settings as a backup. Doctor's repair mode is not a settings migration.
 
----
+Use [Configuration essentials](/docs/guide/configuration-reference.html) to find the settings layers and the full reference.
 
-## A TUI that stops answering the keyboard
+## A terminal shortcut does not arrive
 
-When an interactive session stops responding to typing, the question worth
-answering before anything else is which half of the input pipeline stopped: the
-stdin reader that hands bytes to the application, or the renderer that turns
-them into a frame on stdout. Clio keeps that evidence without being asked. Every
-interactive process holds a bounded in-memory ring of the last 256 input-ingress
-records and the last 256 committed frames, and writes it out when the process
-receives `SIGTERM`, which is the signal a `kill` of the stuck pane sends.
+Open **Ctrl+G** and choose the corresponding menu action. A terminal or multiplexer may intercept Alt shortcuts. **Ctrl+J** is the portable newline; `/help` shows your effective bindings.
 
-The dump lands in the state directory `clio-coder paths` reports:
+If a files or companion pane is unavailable, check that Clio is running inside a reachable Herdr session and that the requested tools are installed. See [files and terminal panes](/docs/guide/panes-and-files.html).
 
-```text
-<stateDir>/input-wedge/<ISO timestamp>-<pid>.json
-```
+## Work stopped or a check failed
 
-The five newest dumps are kept and older ones are removed as new ones land.
-Read `classification` first:
+Read the recorded command and output in **Artifacts → Results** or terminal `/view`. A failed test can point to a useful next task; ask Clio to explain the failure before changing the test's acceptance criteria.
 
-| `classification` | What it means |
-| :--- | :--- |
-| `input-not-committed` | Bytes reached the application and no frame carrying them ever reached stdout. The renderer is the stuck half. |
-| `no-input-recorded` | Nothing was delivered at all. If the operator was typing, the stdin reader is the stuck half. |
-| `input-committed` | Both halves were moving. Whatever the session was doing, it was not this pipeline. |
-
-`msSinceLastInputIngress` and `msSinceLastCommittedFrame` say how long each half
-had been quiet when the signal arrived, and the `inputIngress` and `frames`
-arrays carry the records themselves. Frames are kept only when they reached
-stdout, so an empty `frames` array is itself a finding.
-
-For a full session trace rather than the tail, set `CLIO_CODER_RENDER_TRACE` to
-a file path before starting the session. That writes every record, including
-provider deltas and terminal writes, as JSONL. The ring is the always-on subset
-of the same records, for the case where nobody armed the trace first.
-
----
-
-## Diagnostic Commands
-
-When encountering unexpected system behavior:
-
-1. **System Health Check**: Run `clio-coder doctor` (or `clio-coder doctor --fix` to repair directory structure, credential permissions, and record fleet preflight results).
-2. **Target Connectivity Probe**: Run `clio-coder targets --probe` to verify authentication and reachability for all configured LLM providers.
-3. **Trace Store Inspection**: Run `clio-coder trace runs` and `clio-coder trace tail <runId>` to inspect event logs, durations, and tool outputs.
-4. **Receipt Validation**: Run `clio-coder evidence inspect <evidenceId>` or `/view verify <runId>` to check cryptographic integrity and execution telemetry. Build the evidence id first with `clio-coder evidence build --run <runId>`.
+For an interrupted context handoff, inspect `/context` and follow [save and resume work](/docs/guide/context-continuity.html). Include the installed version and relevant doctor findings when reporting a persistent issue; keep credentials and private project content out of public reports.

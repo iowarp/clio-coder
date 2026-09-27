@@ -58,6 +58,8 @@ export async function checkPolicy() {
 	const docs = JSON.parse(await readFile(join(root, "public-docs.json"), "utf8"));
 	if (docs.some((item) => !/^(?:docs\/guide\/[^/]+\.md|README\.md)$/.test(item.source)))
 		errors.push("Public docs must be explicit user guides; internal corpora cannot be published");
+	if (docs.some((item) => item.summary && !/^[a-z0-9]+(?:-[a-z0-9]+)*\.md$/.test(item.summary)))
+		errors.push("Public summaries must be explicit Markdown files in content/doc-summaries");
 	const partials = await readFile(join(root, "partials.html"), "utf8");
 	const primary = partials.match(/<nav class="nav"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
 	if (

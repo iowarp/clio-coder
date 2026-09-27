@@ -17,9 +17,9 @@ clio-coder configure
 
 ## 2. Connect a model
 
-Choose **Quick Connect** for a local model endpoint. LM Studio commonly serves at `http://localhost:1234`; Ollama commonly serves at `http://localhost:11434`. Choose a model that supports tool calling.
+Choose **Guided setup**, then select an app on this computer, a model server, an AI subscription, or a provider account. Clio helps you choose a model and review the connection before saving. Choose a model that supports tool calling.
 
-For cloud APIs and supported subscription sign-in, open **Settings → Connections**. Use your provider's credentials. The [connection guide](/docs/guide/configuration-and-targets.html) covers the available options.
+**Connect by endpoint** is the shortcut when you already know the URL. LM Studio commonly serves at `http://localhost:1234`; Ollama commonly serves at `http://localhost:11434`. The [connection guide](/docs/guide/configuration-and-targets.html) covers setup and credentials.
 
 If a connection fails, run:
 
@@ -41,7 +41,7 @@ Or open the desktop alpha in your browser:
 clio-coder gui --open
 ```
 
-In the desktop, select your project and start a conversation. For this tutorial, either interface gives you a place to enter the first request.
+In the desktop, select your project and start a conversation. If you have not configured a model, **Guided setup** is also available in the browser; terminal configuration is optional. For this tutorial, either interface gives you a place to enter the first request.
 
 ## 4. Ask a focused question
 

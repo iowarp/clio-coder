@@ -11,6 +11,9 @@ MANIFEST = SITE / "image-variants.json"
 INPUTS = {
     "assets/gui-overview.webp": [640, 960, 1280],
     "assets/gui-conversation.webp": [480, 768, 1120],
+    "assets/gui-overview-light.webp": [640, 960, 1280],
+    "assets/gui-conversation-light.webp": [480, 768, 1120],
+    "assets/gui-artifacts.webp": [480, 768, 1120],
     "assets/tui-boot.webp": [640, 960, 1280],
     "assets/brand/clio-mark.webp": [32, 64, 128],
     "assets/brand/iowarp-mark.webp": [128, 256],

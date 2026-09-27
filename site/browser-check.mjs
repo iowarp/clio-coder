@@ -36,6 +36,7 @@ const primary = [
 	"/learn.html",
 	"/tutorials/first-session.html",
 	"/tutorials/desktop-and-terminal.html",
+	"/tutorials/temperature-calibration.html",
 ];
 const cases = [
 	...["dark", "light"].flatMap((theme) =>

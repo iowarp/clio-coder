@@ -2,78 +2,39 @@
 
 Browse and use skills, prompts, agents, fleets, and plugins.
 
-The **library** is Clio's collection of installable **packages**. Each package has one kind: `plugin`, `skill`, `agent`, `prompt`, or `fleet`. Every kind uses a root `plugin.json`, an explicit Semantic Version, a full-tree SHA-256 pin, and the same installation state. A plugin bundles several resources; each other kind exposes one public resource and may include supporting files.
+## Find a useful skill
 
-Bundled packages are available on a fresh installation, but none are installed automatically. Built-in runtime tools and helper recipes remain available independently of optional library packages.
+The Library contains **skills, agents, prompts, fleets, and plugins**. Open `/library` or press **Alt+L**. Switch categories with left/right, search with `/`, and open a package with Enter.
 
-## Browse and install
+Use **Browse** to find available content and **Installed** to manage your copies. Choose **User** for tools shared across projects or **Project** for resources specific to this workspace.
 
-```bash
-clio-coder library list --json
-clio-coder library search research --kind skill
-clio-coder library inspect plugin:materio --json
-clio-coder library install plugin:materio --project --dry-run --json
-clio-coder library install plugin:materio --project --json
+For example, preview and install the test-driven-development skill:
+
+```sh
+clio-coder library install skill:tdd --project --dry-run
+clio-coder library install skill:tdd --project
 ```
 
-`install` is an explicit request to write. `--dry-run` reports every source, destination and digest without installing. The TUI asks for confirmation before writing. `--force` permits replacement of ordinary installed packages and preserves edited files in a reported recovery directory; it cannot override a source pin, identity or version mismatch.
+Then activate it in the terminal:
 
-An existing local directory wins over a library name with the same spelling. `kind:name` checks the package kind; bare names are accepted when unambiguous. Package names share one namespace within each scope. A replacement cannot change a package's kind; remove it explicitly first.
-
-## Scope and workspace state
-
-All kinds install beneath `<configDir>/plugins/<name>/` at user scope or `<cwd>/.clio-coder/plugins/<name>/` at project scope. These existing engine directories hold complete packages, including single-resource packages. The corresponding `plugins/state.json` records kind, source, structured origin, trust, installation time and verified digest. There is no per-kind installation pin file.
-
-Install and registration default to user scope. Other lifecycle actions select the project copy when it exists; `--user` or `--project` selects exactly that copy. A valid, compatible project copy takes precedence over the user copy. Disabling that project copy suppresses the user copy as well. Invalid project content does not hide a valid user installation.
-
-`library list --json` returns `{entries, diagnostics}`. Each entry includes an `installed` array containing every matching installed scope and its `enabled`, `valid`, `compatible`, `effective`, and `loadable` state. An empty array means the package is available but uninstalled. Scope flags filter the installed copies. Broken and disabled packages remain visible for repair or removal.
-
-```bash
-clio-coder library disable plugin:materio --project
-clio-coder library enable plugin:materio --project
-clio-coder library drift plugin:materio --project
-clio-coder library pin plugin:materio --project
-clio-coder library update plugin:materio --project --dry-run
-clio-coder library update plugin:materio --project
-clio-coder library remove plugin:materio --project
+```text
+/skill tdd Add coverage for this parser before changing its behavior.
 ```
 
-The list labels drifted copies `damaged`, not `shadowed`. Inspect changes before running `clio-coder library update kind:name --user --force` (or `--project`) to restore the recorded source; edited files are preserved in a recovery backup. Enabling alone cannot repair drift.
+## Review before installing
 
-Drift prevents resources from loading. `pin` verifies and reports the recorded pin; it never blesses local changes. Updates of registered packages use the current index version and pin. Local installations update from their recorded directory. Update and replacement preserve disabled state. Removal preserves edited content and reports the recovery path. Installed state remains addressable after its index entry disappears.
+The install review shows the destination, dependencies, and verified package pin. In the Library, the selected row offers install, update, enable/disable, and remove actions when applicable. Management actions name the owning package and selected scope.
 
-Interop adoption records `{kind: "interop", host, source}` and `trust: "foreign"`. Foreign skills and prompts require `integrations.projectResources.trustProjectImports`, including foreign project files adopted to user scope. Updates and forced replacement of an interop-origin package are refused: remove it and review a new adoption so omitted host executables cannot reappear. See [interoperability](interop.md).
+Project packages take precedence over matching user packages. A disabled project copy also suppresses the user copy, so a project can explicitly keep a resource unavailable.
 
-## Keyboard shortcuts: Alt+L for Library and Alt+M for Model picker
+## Refresh a running session
 
-Clio provides default top-level keyboard shortcuts from the composer:
-- **Alt+L**: Toggles the Library overlay (`clio-coder.library.toggle`). Pressing **Alt+L** while inside the Library closes it and returns focus to your active composer draft.
-- **Alt+M**: Toggles the Model picker overlay (`clio-coder.model.select`), allowing you to switch models, view token budgets, or configure reasoning effort.
-- **Alt+W**: Toggles the Workers / dispatch board overlay (`clio-coder.dispatchBoard.toggle`).
-- **Ctrl+G**: Opens the contextual leader action menu when focused in the composer, offering single-key actions (such as `l` for Library, `m` for Model picker, `w` for Workers dispatch board, and `s` to background attached dispatch).
+After changing recipes through another process, run:
 
-These are default shortcuts subject to configured keybinding overrides and focused modal ownership (see [Commands and Modes](commands-and-modes.md#keybindings)).
+```text
+/library reload
+```
 
-## Interactive library navigation
+Disabling a package prevents subsequent discovery; it does not stop an in-flight tool or erase instructions already read. `/skill off` clears an active skill's armed tool surface without erasing earlier context.
 
-**Alt+L** or `/library` opens the fullscreen Library; `/skills`, `/agents`, and `/prompts` open its corresponding category. The five tabs cover skills, agents, prompts, fleets, and plugins. `b` switches Browse/Installed, and `s` selects User/Project for management. Mode and scope remain visible on empty tabs. Left/right changes category; `/` focuses search, where letters and left/right edit the query. Enter returns from search to the list; Esc clears search or returns before closing.
-
-Enter opens a package's members. `v` uses an available recipe by preparing its invocation in the composer; a fleet opens its existing approval preview. `i` reviews installation, `u` update, `e` enable/disable, and `r` removal. A member's management action names its whole owning package and the selected scope. Core and loose recipes have no package removal action. `o` opens local-agent discovery and reviewed adoption; `R` rereads the browser inventory. Pin and drift inspection remain available through the CLI.
-
-`/library inspect <ref>`, `/library install <ref>`, `/library remove <ref>`, and `/library import <path-or-url>` open the same browser and review flow; use typed references such as `skill:tdd` and an explicit `--user` or `--project` when needed. Import reviews the supplied source, its supported recipes and omitted features. Origin, vendor format, trust, scope and actual availability are separate facts; an installed foreign package may still have recipes withheld by the trust setting.
-
-Every managed change is reviewed before writing. The review shows dependencies, affected dependents, fallback behavior and recovery, with `d` revealing paths and digests. Esc cancels and releases staged sources. Outcomes report committed, failed and unattempted steps, disk verification, resource admission and session refresh separately. A failed refresh does not undo a committed write; `R` in the outcome retries refresh without repeating the mutation.
-
-## Session reload and package disable behavior
-
-`/library reload` refreshes installed recipes (skills, prompts, agents, fleets) in the active running session. If an external CLI command or file edit changes installed recipes, `/library reload` reloads the inventory without needing a restart. In headless mode, `library reload` refreshes only its own process.
-
-When you disable a package (via `library disable <ref>` or pressing `e` in the Library overlay):
-- The package state in `plugins/state.json` is updated with `enabled: false`. No files are deleted.
-- Resource discovery and admission exclude disabled recipes on subsequent reads (`enabledPluginResourceRoots` in [resources.ts](../../src/domains/plugins/resources.ts) rechecks current installation state on the next read, even before a manual session reload). A CLI disable does not broadcast cancellation into other running processes, stop an in-flight tool, or erase instructions already in model context.
-- If a project-scope copy of a package is disabled, it explicitly suppresses any matching user-scope copy as well, ensuring that the project's intent to disable the capability is honored.
-- Re-enabling the package with `library enable <ref>` restores resource discovery. Adding or replacing recipes requires a session refresh; active UI management actions report their own refresh results, while `/library reload` reloads the inventory for the current session.
-
-Contrast with harness extensions: executable harness extensions carry Node operator runtimes, command tools (Node or Python), and lifecycle hooks. Running `/extensions reload` refreshes extension runtime handlers, hooks, and panels at idle (subject to integrity verification), but command-tool schemas are frozen at session boot and cannot change mid-session.
-
-`/skills` opens the skill tab; `/skill <name>` activates a skill, `/skill off` clears the active skill's armed tool surface (without erasing instructions already loaded in transcript or context), and bare `/skill` returns usage guidance pointing to `/skills`. `library skills --all --json` lists runtime skills, including unmanaged files; `library inventory --json` is the fixed body-free GUI read. `clio-coder library validate <path>` validates an unmanaged draft or a complete package candidate. Installed package lifecycle remains in `library`; retired slash commands `/plugins` and `/resources` return an explicit usage error directing operators to `/library` for recipe packages and `/extensions` for harness extensions.
+For bundles of related resources, see [plugins](/docs/guide/plugins.html). To review resources from other coding agents, see [interoperability](/docs/guide/interop.html).

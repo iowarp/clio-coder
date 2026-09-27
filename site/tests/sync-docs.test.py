@@ -87,6 +87,39 @@ class SnapshotTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "require --source-ref"):
             self.module.sync("main", False)
 
+    def test_public_summary_retains_pinned_source_and_detects_edits(self):
+        commit = self.git("rev-parse", "HEAD")
+        catalog_path = self.site / "public-docs.json"
+        catalog = json.loads(catalog_path.read_text())
+        catalog[0].pop("sections")
+        catalog[0]["summary"] = "start.md"
+        catalog_path.write_text(json.dumps(catalog))
+        summary = self.site / "content/doc-summaries/start.md"
+        summary.parent.mkdir(parents=True)
+        summary.write_text("## Your first task\n\nAsk Clio to inspect the tests.\n")
+        self.module.sync(commit, False, True)
+        generated = (self.module.DEST / "README.md").read_text()
+        self.assertIn("Your first task", generated)
+        self.assertNotIn("Private development detail", generated)
+        self.guide.write_text("# Later source changes\n")
+        self.module.check()
+        summary.write_text("## Different public advice\n")
+        with self.assertRaisesRegex(ValueError, "documentation drift"):
+            self.module.check()
+
+    def test_summary_and_upstream_sources_cannot_escape_public_boundary(self):
+        catalog_path = self.site / "public-docs.json"
+        catalog = json.loads(catalog_path.read_text())
+        catalog[0]["summary"] = "../private.md"
+        catalog_path.write_text(json.dumps(catalog))
+        with self.assertRaisesRegex(ValueError, "invalid public summary"):
+            self.module.sync("HEAD", True)
+        catalog[0].pop("summary")
+        catalog[0]["source"] = "docs/guide/private/notes.md"
+        catalog_path.write_text(json.dumps(catalog))
+        with self.assertRaisesRegex(ValueError, "not a public user guide"):
+            self.module.sync("HEAD", True)
+
 
 if __name__ == "__main__":
     unittest.main()

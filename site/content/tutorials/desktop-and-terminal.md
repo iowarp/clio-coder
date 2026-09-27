@@ -8,9 +8,13 @@ From a terminal, run:
 clio-coder gui --open
 ```
 
-The command opens the local application with its access link. Select a project, start a conversation, and choose a model. You can attach files and inspect session activity from the workspace.
+The command opens the local application with its access link. Select a project, start a conversation, and choose a model. You can attach files, select a model and thinking level, and inspect session activity from the workspace. Sessions groups conversations by project. Open **Artifacts** to review recorded file activity, tool results, and linked evidence beside the conversation.
 
-![Clio Coder desktop conversation with file attachments, session controls, and model selection](/assets/gui-conversation.webp)
+![Clio Coder desktop conversation with seven passing calibration tests, reference temperatures, session controls, and model selection](/assets/gui-conversation.webp)
+
+The theme button in the application header switches between dark and light. Here is the same local workspace in the light theme:
+
+![Clio Coder light desktop overview with the temperature-calibration example ready to resume](/assets/gui-overview-light.webp)
 
 The desktop is in alpha and covers a subset of terminal workflows. Treat it as an optional way to use Clio, and keep the terminal available for commands that the desktop does not yet expose.
 
@@ -20,7 +24,7 @@ On Linux with a systemd user session, you can install the optional background ap
 clio-coder gui background install --open
 ```
 
-See the [installation guide](/docs.html) for background service, launcher, and uninstall options.
+For an optional Linux desktop entry, run `clio-coder gui launcher install`. The background service and launcher each have an `uninstall` command. The [full command guide](https://github.com/iowarp/clio-coder/blob/44147aa09f9c5c7487eb92c4b90b997b44fe2d56/docs/guide/commands-and-modes.md#graphical-application) covers those options.
 
 ## Clio Coder in the terminal
 
@@ -43,4 +47,4 @@ Start on the desktop if you prefer browsing projects and working with attachment
 
 Both launch commands use the installed Clio Coder package. You do not need an account on this website. Your model connections use your own local server, institutional endpoint, or cloud provider.
 
-Follow [your first session](/tutorials/first-session.html) for a concrete task to try in either workspace.
+Try [a temperature-calibration example with recorded checks](/tutorials/temperature-calibration.html), or follow [your first session](/tutorials/first-session.html) for a concrete task to try in either workspace.

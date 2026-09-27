@@ -2,75 +2,150 @@
 	"assets/gui-overview.webp": {
 		"width": 1600,
 		"height": 1000,
-		"sha256": "e1c65f9582f6c16e65754d56983d5dd29063b86a66bca6bf607dad4d03287a88",
+		"sha256": "68e1e421972f6fee1625e939f40b0aa7340fc4aaf0af9a9f9d00eb91884f85b3",
 		"variants": [
 			{
 				"path": "assets/responsive/gui-overview-640.webp",
 				"width": 640,
 				"height": 400,
-				"sha256": "6ba26979ee9509687eb54f27a7790aa29cd9fb15dd5ec561c4a74d36857d0371"
+				"sha256": "db883dae3de0c41680444ae45b9b2f0a13a37247c71a6a4a4a2b2b8ac2f6e046"
 			},
 			{
 				"path": "assets/responsive/gui-overview-960.webp",
 				"width": 960,
 				"height": 600,
-				"sha256": "33e7425c6b6644c6e579f148e17736f48eca6ee3ff73a11187a51fab4095aec2"
+				"sha256": "c4dc8d72ab856633ed2d0fba68a2027ba93f0f270db5d9e22245b19eba04f1e2"
 			},
 			{
 				"path": "assets/responsive/gui-overview-1280.webp",
 				"width": 1280,
 				"height": 800,
-				"sha256": "fa7a4b5776b467674ad199e8cd074e547b5dee67d4d3de2f5c716880905e4844"
+				"sha256": "1d8d04863527cac490aea0a220d047a6acaf9038d624a4798b78898dacf1547e"
 			}
 		]
 	},
 	"assets/gui-conversation.webp": {
 		"width": 1600,
 		"height": 1000,
-		"sha256": "445e64e784e2de085e3cfabeb2f3dac85f81964d4da3ed406f0fd849dbf9060f",
+		"sha256": "be3fc73f31714366b95e3ebfd1b670526b4c6659f2961f209632f13f3c67380e",
 		"variants": [
 			{
 				"path": "assets/responsive/gui-conversation-480.webp",
 				"width": 480,
 				"height": 300,
-				"sha256": "9ae5bed5e3546743ab5fd068a73e7918edf538e5191cda9c30642498ba02d91a"
+				"sha256": "1344950199ab1b8144aa999d2c25669b5a707578121e52077b783e6b1a794119"
 			},
 			{
 				"path": "assets/responsive/gui-conversation-768.webp",
 				"width": 768,
 				"height": 480,
-				"sha256": "07769760a6593edede24d61fd578109b7e45ec0515e9575bd1d3f6d37b6fd3ed"
+				"sha256": "ff87675575e90178bac17d9069122667b6ab05c97c31f6fd4790aea59297483d"
 			},
 			{
 				"path": "assets/responsive/gui-conversation-1120.webp",
 				"width": 1120,
 				"height": 700,
-				"sha256": "85e780ee7fb81fa50ea26fecfc924a5f1555b5f690e90f1e459a72d92b310bc3"
+				"sha256": "201ef6279345faa0a03e06b16e0507043314fe3fcaa9347c07fb5193a6aeea55"
+			}
+		]
+	},
+	"assets/gui-overview-light.webp": {
+		"width": 1600,
+		"height": 1000,
+		"sha256": "58f6fc4dbfad23cc761f769c3f0a540f9fe604579c5b5f354322d8b1e2be356d",
+		"variants": [
+			{
+				"path": "assets/responsive/gui-overview-light-640.webp",
+				"width": 640,
+				"height": 400,
+				"sha256": "06d8da365fb6b5640c5043585de41738390484788c2594ce94d9a81d56d61287"
+			},
+			{
+				"path": "assets/responsive/gui-overview-light-960.webp",
+				"width": 960,
+				"height": 600,
+				"sha256": "82501bd749046d1d6c56bbc10d1330c752c6568953fb32eda9dff3c3a687dc8a"
+			},
+			{
+				"path": "assets/responsive/gui-overview-light-1280.webp",
+				"width": 1280,
+				"height": 800,
+				"sha256": "8187352f0b266a027dd89b4348286e6cf66d07a6c935c63e6c54c8ef688dcf07"
+			}
+		]
+	},
+	"assets/gui-conversation-light.webp": {
+		"width": 1600,
+		"height": 1000,
+		"sha256": "7f825ea4d6c4dae7b1d4a8be594fc86dd39161a7793ab9ad0d7c603860964499",
+		"variants": [
+			{
+				"path": "assets/responsive/gui-conversation-light-480.webp",
+				"width": 480,
+				"height": 300,
+				"sha256": "7b7d69c7d6157668a3e12781aea0b0e5d1e20c2d6954f5ba3c07ce5fdcaaf777"
+			},
+			{
+				"path": "assets/responsive/gui-conversation-light-768.webp",
+				"width": 768,
+				"height": 480,
+				"sha256": "2190ab9e515c93b95888a291ba77ca43da897186663a8bafd60dd12cd8f83f59"
+			},
+			{
+				"path": "assets/responsive/gui-conversation-light-1120.webp",
+				"width": 1120,
+				"height": 700,
+				"sha256": "cb409eb8a543d5ff867c5f14aafe314b17fb0443f3d9c6c0c61ac1239b1e15e8"
+			}
+		]
+	},
+	"assets/gui-artifacts.webp": {
+		"width": 1600,
+		"height": 1000,
+		"sha256": "c2bbb9801aa933e142b83f74781faea1d27c7c6026a2ec8010f6e08de1492fee",
+		"variants": [
+			{
+				"path": "assets/responsive/gui-artifacts-480.webp",
+				"width": 480,
+				"height": 300,
+				"sha256": "42753665d6ada8b903a3d6eb7dd09db97a04d2951f4eee35834205b80bd91813"
+			},
+			{
+				"path": "assets/responsive/gui-artifacts-768.webp",
+				"width": 768,
+				"height": 480,
+				"sha256": "46a76bcd4b0c21f011cc4cdb77faa22481a85ed3c6622ca720993ae56edbc126"
+			},
+			{
+				"path": "assets/responsive/gui-artifacts-1120.webp",
+				"width": 1120,
+				"height": 700,
+				"sha256": "8049853e22062c513b6a1208969d032aa88ac5cce271d2eb820b6773c36bc57a"
 			}
 		]
 	},
 	"assets/tui-boot.webp": {
 		"width": 1920,
-		"height": 1021,
-		"sha256": "f8ffd53ad1ea14eb6d62fa874eab66aeb6e06c3de03b81e931230a92bf6ac976",
+		"height": 708,
+		"sha256": "74794030799bfad96c76b3d90f0ff8834590ce944986b5b604d4c3da98fdfdf3",
 		"variants": [
 			{
 				"path": "assets/responsive/tui-boot-640.webp",
 				"width": 640,
-				"height": 340,
-				"sha256": "60e3a3c94d843cd27fc2e13736a213df1d1f6cbd557bf8296b7451aff7901896"
+				"height": 236,
+				"sha256": "f8b861c6eba3e5e8276c486863dd2325dcbdc92fb93709315273f093ccd5ed4a"
 			},
 			{
 				"path": "assets/responsive/tui-boot-960.webp",
 				"width": 960,
-				"height": 510,
-				"sha256": "ead96e234c7abef5fcd0d5ac4b380d761183fba8e7917ad811246a066bdde139"
+				"height": 354,
+				"sha256": "3f72a978a5f4b3c7a62b16bbac285af69e94e1b8253bec11ae70c94bb66e7d3e"
 			},
 			{
 				"path": "assets/responsive/tui-boot-1280.webp",
 				"width": 1280,
-				"height": 681,
-				"sha256": "0ec270672d4442abf125b90869363e92605c5003bbd6e0771ecfc031d1328f0f"
+				"height": 472,
+				"sha256": "2c252f80f83e9a3c275c124e5fce70576e858306ec840d87cde0ef71ac1ef477"
 			}
 		]
 	},

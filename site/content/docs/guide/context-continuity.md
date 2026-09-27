@@ -2,32 +2,31 @@
 
 Resume conversations, manage context, and prepare a handoff.
 
-Clio can reduce a long native session while preserving the assistant's exact handoff note and the original task. Open `/context` to inspect the next request's input, output reservation, headroom, and pending handoff. The model can read the same accounting with `context(scope="budget")`.
+## Pick up a conversation
 
-## Choosing a reduction
+In the terminal, use `/resume` to choose a previous session. On the desktop, open a saved conversation from **Overview** or **Sessions**. Saved history lets you continue with the context of earlier work.
 
-| Action | Use it for |
-| --- | --- |
-| Automatic compaction | Routine pressure management under your configured threshold. |
-| `/context compact [instructions]` | An operator-directed summary, optionally focused on specific information. |
-| `self_compact({"note_to_self":"…"})` | An assistant-directed handoff followed by continuation of the same task. |
-| `/context recover <handoffId> <reduce\|deliver>` | Explicit recovery of an interrupted handoff. |
+Use `/tree` to inspect terminal conversation branches and `/fork` to branch from an assistant turn. On the desktop, open the conversation's **Context & branches** view. Branches let you explore another direction while preserving the earlier conversation.
 
-`self_compact` is available to the native orchestrator. Dispatched workers do not receive its host callback, and external agents that own their own loop do not receive its schema through the native session tool surface. Skill restrictions and normal tool permission checks still apply.
+## Keep long work focused
 
-The assistant must call `self_compact` alone. A batch containing it and another tool, or two self-compaction calls, is rejected before any valid sibling executes. The note should preserve the objective, decisions, useful evidence, relevant paths, unresolved questions, and next steps. It must be nonblank and no larger than 8,192 UTF-8 bytes. Clio preserves the accepted text exactly and labels it as assistant-authored recall, rather than presenting it as an operator instruction.
+Open `/context` to inspect context usage, output reservation, remaining headroom, and any pending handoff. Clio can compact a long native session automatically under its configured threshold, or you can request a focused summary:
 
-## Recovering an interrupted handoff
+```text
+/context compact Keep the objective, decisions, changed files, test results, and remaining work.
+```
 
-The `/context` overlay shows the pending handoff ID and its phase. Use the exact ID:
+For a fresh session with a stated goal, use `/handoff <goal>`. When moving work between agents, make sure the handoff includes evidence and unresolved questions, then review what the receiving agent does.
+
+## Recover an interrupted handoff
+
+If `/context` shows a pending handoff, use its exact ID:
 
 ```text
 /context recover <handoffId> reduce
 /context recover <handoffId> deliver
 ```
 
-`reduce` is available when the handoff has not committed and an attempt remains. `deliver` is available when a validated commit exists. A restarted process first records the interrupted state as paused; it does not automatically repeat an uncertain delivery. Recovery authority comes from the operator command and its durable control record, never from a tool argument or text found in a note.
+Choose `reduce` when the reduction has not committed and another attempt remains; choose `deliver` when a validated commit exists. If the continuation still cannot fit, compact more history first.
 
-If the continuation still cannot fit, use `/context compact` to reduce more history before trying delivery again. Missing or conflicting storage evidence can prevent recovery. Clio retains uncertainty instead of silently creating a new transaction. A missing commit can be reconstructed only from a validated summary carry, using its original reserved identity and an exact storage check.
-
-Session forks inherit notes as recall only. They do not inherit permission to resume the parent's handoff. Ordinary summaries persist in the session ledger and replay after `/resume`; a separate handoff file remains useful when moving work to another session or another agent.
+A restarted process records an interrupted handoff as paused and waits for your recovery command. A fork receives earlier notes as recall; it does not inherit permission to resume the parent's handoff.

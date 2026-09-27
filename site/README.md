@@ -32,7 +32,7 @@ node site/tokens.mjs
 
 ## Generated documentation
 
-`public-docs.json` explicitly selects user-facing repository sources, short labels, task groups, and optional source sections. `sync-docs.py` produces the Markdown snapshot, search index, and provenance manifest. It never copies the architecture corpus, generated Wiki, audits, or agent work journals. Selected sections must still exist, so upstream heading changes cannot silently empty a guide. Omitted source sections remain accessible through repository links.
+`public-docs.json` explicitly selects user-facing repository sources, short labels, task groups, and optional source sections or authored summaries. The current visitor guides use brief summaries in `content/doc-summaries/`; edit those files, then regenerate the snapshot. `sync-docs.py` checks summary paths and produces the Markdown snapshot, search index, and provenance manifest. The manifest retains a hash of each full upstream guide and its immutable source commit. Each public page links to that full guide. Neither summary Markdown nor the architecture corpus, generated Wiki, audits, or agent work journals enter the public build. When section selection is used, every selected upstream heading must still exist.
 
 ```sh
 python3 site/sync-docs.py --worktree
@@ -61,6 +61,8 @@ Repository snapshots use a full commit as their source reference and validate ag
 ## Tutorials and recordings
 
 Write a useful Markdown article in `content/tutorials/` and register it in `content/tutorials.json`. Supply a slug, title, description, category, reading time, author, image dimensions, alt text, and source filename. The builder creates both its article and listing entry. An optional `video` field accepts a real YouTube ID and uses the privacy-enhanced embed domain. Publish captions with the recording. Empty media entries and fictional product demonstrations are not allowed.
+
+`assets/temperature-calibration.zip` is the standalone runnable example from the recorded local Clio session. It contains only the implementation, seven tests, private package manifest, and README. It is published through the explicit build asset list so the tutorial does not depend on a separate product repository push. Test an extracted archive with `npm test` in its `temperature-calibration/` directory when replacing it.
 
 ## Build and verify
 
