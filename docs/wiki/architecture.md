@@ -125,7 +125,7 @@ Six static import rules are checked by `tests/boundaries/check-boundaries.ts`:
 | 5 | Chat loop turn modules never import `src/entry/**`; composition flows one direction. |
 | 6 | External runtime importers reach `src/interactive/**` and `src/engine/**` only through declared seams in `STAGE0_SEAMS`. |
 
-The Stage 0 closure (owned by `src/interactive/terminal-lease.ts`) is held to 16 chunks, 700,000 total bytes, and 175,000 Clio source bytes by `tests/contracts/instant-shell-import-graph.test.ts`. Rule 6 protects this budget by preventing external importers from dragging the Stage 0 closure into their own module graph.
+The Stage 0 closure (owned by `src/interactive/terminal-lease.ts`) is held to 32 chunks, 1,400,000 total bytes, and 350,000 Clio source bytes by `tests/contracts/instant-shell-import-graph.test.ts`. Rule 6 protects this budget by preventing external importers from dragging the Stage 0 closure into their own module graph.
 
 ## Extension seams
 

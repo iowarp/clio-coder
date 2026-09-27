@@ -226,7 +226,7 @@ The receipt integrity check is performed by `verifyReceiptIntegrity(receipt, env
 | **Rule 5** | The chat loop's turn modules (`chat-loop.ts`, `turn-*.ts`) never import `src/entry/**`. Composition flows one way: the entry point composes the loop, never the reverse. |
 | **Rule 6** | Any value importer outside the computed Stage 0 closure and its `src/interactive/**` and `src/engine/**` trees reaches those protected trees only through a declared seam in `STAGE0_SEAMS`. A seam may not lead back into Stage 0 unless that existing composition-root overlap is explicitly declared. |
 
-Rule 6 has a second half: even when a seam is declared, the seam's own import closure must not reach into the Stage 0 owner's closure. The Stage 0 owner is `src/interactive/terminal-lease.ts`, and its closure is pinned to 16 chunks, 700,000 total bytes, and 175,000 Clio source bytes by `tests/contracts/instant-shell-import-graph.test.ts`.
+Rule 6 has a second half: even when a seam is declared, the seam's own import closure must not reach into the Stage 0 owner's closure. The Stage 0 owner is `src/interactive/terminal-lease.ts`, and its closure is pinned to 32 chunks, 1,400,000 total bytes, and 350,000 Clio source bytes by `tests/contracts/instant-shell-import-graph.test.ts`.
 
 The `STAGE0_SEAMS` array contains 30+ declared edges, each with a written reason explaining why the edge exists. For example: `src/engine/types.ts` is a seam because "the erased engine shapes (AgentMessage, ImageContent) domains and the CLI both take. Type-only at every call site."
 
