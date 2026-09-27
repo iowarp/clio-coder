@@ -16,7 +16,7 @@ function block(opening: string[], findings: string[], closing: string[]): string
 
 export function orientationQuestion(operatorText: string, _breadth: "repository" | "area", maxScouts: number): string {
 	const text = Array.from(line(operatorText)).slice(0, 300).join("");
-	return `Orient a newcomer to this repository for the request: "${text}".\nReport purpose, top-level layout, entry points, build and test commands, key boundaries or\ninvariants, and where the request's subject lives if it names one. Cite paths. If independent\nareas need separate investigation, return a split of at most ${maxScouts} subtasks.`;
+	return `Orient a newcomer to this repository for the request: "${text}".\nReport purpose, top-level layout, entry points, how it is built and checked, key boundaries or\ninvariants, and where the request's subject lives if it names one. Cite paths. If independent\nareas need separate investigation, return a split of at most ${maxScouts} subtasks.`;
 }
 
 export interface OrientationBlockInput {

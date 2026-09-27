@@ -116,6 +116,39 @@ describe("dispatch admission boundary", () => {
 		}
 	});
 
+	it("admits a harness Scout task mentioning test only when empty typed intent is declared", async () => {
+		let starts = 0;
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: () => {
+				starts += 1;
+				throw new Error("fixture: typed harness Scout passed admission");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const request = {
+				agentId: "scout",
+				task: "Report this repository's build and test commands.",
+				executionRole: "researcher" as const,
+				requestOrigin: "harness" as const,
+				readOnly: true,
+			};
+			await rejects(bundle.contract.dispatch(request), /read-only recipe.*task classifies as test/u);
+			strictEqual(starts, 0);
+			const declared = normalizeDispatchIntent(
+				{ read_roots: [], write_roots: [], relevant_paths: [], expected_outputs: [], verification: [] },
+				new Map(),
+			);
+			ok(declared.ok);
+			await rejects(bundle.contract.dispatch({ ...request, intent: declared.intent }), {
+				message: "fixture: typed harness Scout passed admission",
+			});
+			strictEqual(starts, 1);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("refuses a same-endpoint foreground deadlock without spending the queue timeout", () => {
 		const detail = foregroundEndpointBlock({
 			endpointKey: "http://127.0.0.1:1234/v1",

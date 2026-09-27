@@ -11,6 +11,7 @@ import { parseScoutResult } from "../domains/agents/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { requestExecutionRole } from "../domains/dispatch/execution-role.js";
+import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
@@ -221,6 +222,11 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 			};
 			try {
 				if (!dispatch || scoutRecipeId === null) throw new Error("Scout dispatch is unavailable");
+				const declaredIntent = normalizeDispatchIntent(
+					{ read_roots: [], write_roots: [], relevant_paths: [], expected_outputs: [], verification: [] },
+					new Map(),
+				);
+				if (!declaredIntent.ok) throw new Error(declaredIntent.message);
 				const codemap = await readFile(join(deps.cwd, ".clio-coder", "codemap.json"), "utf8").catch(() => null);
 				let briefing: string | undefined;
 				if (codemap !== null) {
@@ -242,6 +248,7 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 								...(deps.getAgentRoleFacts ? { resolveFacts: deps.getAgentRoleFacts } : {}),
 							}),
 							requestOrigin: "harness",
+							intent: declaredIntent.intent,
 							readOnly: true,
 							cwd: deps.cwd,
 							routingIntent: {

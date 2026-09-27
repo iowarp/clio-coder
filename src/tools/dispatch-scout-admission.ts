@@ -10,6 +10,7 @@ import type {
 	DispatchRequest,
 } from "../domains/dispatch/contract.js";
 import { type ExecutionPlan, requireAgentSteps } from "../domains/dispatch/execution-plan.js";
+import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import type { RoutingIntent } from "../domains/dispatch/routing-intent.js";
@@ -126,6 +127,14 @@ export function prepareScoutContinuation(input: {
 	costCeilingUsd: number;
 }): PreparedScoutContinuation {
 	if (!input.source.scout.needsSplit) throw new Error("dispatch: Scout phase is settled and has no continuation plan");
+	const harnessIntent =
+		input.authorization === "harness-read-only"
+			? normalizeDispatchIntent(
+					{ read_roots: [], write_roots: [], relevant_paths: [], expected_outputs: [], verification: [] },
+					new Map(),
+				)
+			: null;
+	if (harnessIntent !== null && !harnessIntent.ok) throw new Error(harnessIntent.message);
 	const proposals: Array<
 		DispatchAgentPlanResolution & { subtask: ScoutResult["proposedSubtasks"][number]; routingIntent: RoutingIntent }
 	> = [];
@@ -154,6 +163,7 @@ export function prepareScoutContinuation(input: {
 			cwd: input.source.envelope.cwd,
 			requestOrigin: input.authorization === "harness-read-only" ? "harness" : "user",
 			...(input.authorization === "harness-read-only" ? { readOnly: true } : {}),
+			...(harnessIntent?.ok ? { intent: harnessIntent.intent } : {}),
 			routingIntent,
 			failover: "approved",
 			...(input.authorization === "yolo-policy" && sourceIntent.posture === "manual"
@@ -226,12 +236,14 @@ export function prepareScoutContinuation(input: {
 			cwd: input.source.envelope.cwd,
 			requestOrigin: input.authorization === "harness-read-only" ? "harness" : "user",
 			...(input.authorization === "harness-read-only" ? { readOnly: true } : {}),
+			...(harnessIntent?.ok ? { intent: harnessIntent.intent } : {}),
 			agentSelection: selection,
 			routingIntent: { ...proposal.routingIntent, maxCostUsd: explicitCostCeiling, deadlineMs, failover: "none" },
 			failover: "none",
 		});
 		resolutions.push(proposal.resolution);
 		return {
+			...(harnessIntent?.ok ? { intent: harnessIntent.intent } : {}),
 			agent: proposal.resolution.agentId,
 			task: step.task,
 			target: proposal.resolution.targetId,

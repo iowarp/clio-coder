@@ -104,6 +104,15 @@ test("orientation dispatches read-only from the harness once, renders findings a
 		assert.equal(h.requests.length, 1);
 		assert.equal(h.requests[0]?.requestOrigin, "harness");
 		assert.equal(h.requests[0]?.readOnly, true);
+		assert.deepEqual(h.requests[0]?.intent, {
+			version: 2,
+			readRoots: [],
+			writeRoots: [],
+			relevantPaths: [],
+			pathProvenance: [],
+			expectedOutputs: [],
+			verification: [],
+		});
 		assert.match(first.block ?? "", /scout-1/);
 		assert.match(first.block ?? "", /Entry point.*src\/cli\/index.ts:1/);
 		assert.equal(first.record.producer, "decision-site");

@@ -242,7 +242,10 @@ it("renders complete cited findings within 4000 characters and bounds the reques
 	const raw = `  ${"😀  ".repeat(350)}tail `;
 	const question = orientationQuestion(raw, "repository", 4);
 	const text = Array.from(raw.replace(/\s+/g, " ").trim()).slice(0, 300).join("");
-	ok(question.startsWith(`Orient a newcomer to this repository for the request: "${text}".`));
+	strictEqual(
+		question,
+		`Orient a newcomer to this repository for the request: "${text}".\nReport purpose, top-level layout, entry points, how it is built and checked, key boundaries or\ninvariants, and where the request's subject lives if it names one. Cite paths. If independent\nareas need separate investigation, return a split of at most 4 subtasks.`,
+	);
 	strictEqual(Array.from(text).length, 300);
 	match(question, /split of at most 4 subtasks\.$/);
 	strictEqual(
