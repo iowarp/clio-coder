@@ -1,7 +1,8 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import type { ClioToken } from "../../src/core/theme-token-hex.js";
-import { tokenHex } from "../../src/core/theme-token-hex.js";
+import { terminalBackground } from "../../src/core/terminal-background.js";
+import type { PaletteColor } from "../../src/core/theme-token-hex.js";
+import { paletteProjection, TERMINAL_PALETTE } from "../../src/core/theme-token-hex.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { type CouncilGroupView, councilGroupBody, councilIslandLines } from "../../src/interactive/council-grid.js";
 import {
@@ -15,33 +16,10 @@ import { buildWelcomeDashboardLines, type WelcomeDashboardStats } from "../../sr
 const WIDTHS = [60, 80, 120, 200] as const;
 const ESC = String.fromCharCode(27);
 
-// A Record forces this list to name every token, so a new token cannot slip
-// past the palette check below.
-const PALETTE: Record<ClioToken, true> = {
-	editor: true,
-	editorDanger: true,
-	editorAction: true,
-	editorYoloBackground: true,
-	editorYoloText: true,
-	accent: true,
-	accentDeep: true,
-	action: true,
-	emphasis: true,
-	tool: true,
-	agent: true,
-	success: true,
-	warning: true,
-	error: true,
-	info: true,
-	reason: true,
-	dim: true,
-	muted: true,
-	title: true,
-	frame: true,
-	frameStrong: true,
-};
-const PALETTE_HEX: ReadonlySet<string> = new Set<string>(
-	Object.keys(PALETTE).map((token) => tokenHex(token as ClioToken)),
+// Semantic roles resolve to the authoritative terminal palette, including colors
+// that no legacy compatibility token names.
+const PALETTE_HEX: ReadonlySet<string> = new Set(
+	(Object.keys(TERMINAL_PALETTE) as PaletteColor[]).map((color) => paletteProjection(color, terminalBackground())[0]),
 );
 
 const hex = (channels: readonly string[]): string =>
