@@ -7,3 +7,8 @@ Keep primary navigation to Overview, Docs, Tutorials. Use real product imagery a
 Use the explicitly sanctioned public footer wording: Copyright 2026 iowarp.ai. Keep root NOTICE and Apache 2.0 links. Use the product name Clio Coder; describe the local interfaces as desktop and terminal, with the desktop alpha qualifier.
 
 Run node site/policy.mjs, python3 site/sync-docs.py --check, node site/build.mjs, python3 site/check.py, python3 site/image-variants.py --check, node site/browser-check.mjs, and node site/performance-check.mjs for material interface changes. Start node site/dev.mjs for a live local preview. Keep screenshots and review output outside published directories.
+
+For new articles, read CONTENT.md. Keep product workflows distinct from Anthony's
+personal essays. Prepare unregistered manuscripts in content/drafts/ with the
+review catalog; registration in content/tutorials.json follows editorial review.
+Historical milestone dates are not publication dates for newly written articles.
