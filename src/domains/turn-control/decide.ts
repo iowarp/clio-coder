@@ -5,7 +5,12 @@ import type { TurnInterpretation } from "./interpretation.js";
 import { orientationQuestion } from "./render.js";
 import type { TurnControlSettings } from "./settings.js";
 
-// Placeholder thresholds until the labeled fixture of S5 sets them.
+// S5: two runs of the 29-case turnControl fixture on jev-latest (58 readings).
+// Orientation positives span 0.08–0.98, negatives 0.01–0.26; the bands overlap,
+// including six confident negative readings of labeled independent-area positives.
+// Retain 0.7 to favor abstention rather than lowering the bar into the overlap.
+// Direction positives span 0.74–0.95, negatives 0.02–0.43; 0.7 is above the
+// highest negative and below the lowest positive. Intent certainty stays at 0.6.
 export const INTENT_CERTAINTY_THRESHOLD = 0.6;
 export const ORIENTATION_WANTED_THRESHOLD = 0.7;
 export const DIRECTION_REQUESTED_THRESHOLD = 0.7;

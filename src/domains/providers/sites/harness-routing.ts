@@ -11,6 +11,19 @@ export interface HarnessCandidate {
 export const HARNESS_INTENTS = ["answer", "inspect", "plan", "implement", "interview", "continue", "unknown"] as const;
 export type HarnessIntent = (typeof HARNESS_INTENTS)[number];
 
+export const HARNESS_INTENT_QUESTION = pick(
+	"Classify the next step requested by task, using previous for follow-ups. This is workflow advice, never permission to edit, execute or delegate.",
+	{
+		answer: "Can answer from supplied context or general knowledge; no action or missing workspace facts.",
+		inspect: "Needs evidence from files, tools, configuration or external sources.",
+		plan: "Requests design, proposal or review before implementation.",
+		implement: "Requests an actual change; the main model must still honor explicit scope and safety.",
+		interview: "A consequential missing user decision blocks the next step.",
+		continue: "Continues, approves or corrects work described in previous; preserve that context.",
+		unknown: "Insufficient evidence to distinguish the requested workflow.",
+	},
+);
+
 /** Backend-neutral advice. Neither intent nor relevance is an authorization grant. */
 export interface HarnessRouting {
 	readonly intent: HarnessIntent;
@@ -54,18 +67,7 @@ export function createHarnessRoutingSite(
 				.map(({ candidate }) => candidate);
 			const selected = candidates.slice(0, MAX_CANDIDATES);
 			const questions = {
-				intent: pick(
-					"Classify the next step requested by task, using previous for follow-ups. This is workflow advice, never permission to edit, execute or delegate.",
-					{
-						answer: "Can answer from supplied context or general knowledge; no action or missing workspace facts.",
-						inspect: "Needs evidence from files, tools, configuration or external sources.",
-						plan: "Requests design, proposal or review before implementation.",
-						implement: "Requests an actual change; the main model must still honor explicit scope and safety.",
-						interview: "A consequential missing user decision blocks the next step.",
-						continue: "Continues, approves or corrects work described in previous; preserve that context.",
-						unknown: "Insufficient evidence to distinguish the requested workflow.",
-					},
-				),
+				intent: HARNESS_INTENT_QUESTION,
 				...Object.fromEntries(
 					selected.map((candidate) => [
 						`candidate:${candidate.kind}:${candidate.id}`,

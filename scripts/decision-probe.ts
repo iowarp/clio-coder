@@ -31,6 +31,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { readSettings } from "../src/core/config.js";
 import type { DecisionSite } from "../src/core/defaults.js";
 import { openAuthStorage, resolveAuthTarget } from "../src/domains/providers/auth/index.js";
@@ -72,7 +73,7 @@ const RELATED_MIN_SCORE = 0.5;
 
 type Grade = "agree" | "abstain" | "wrong" | "confident-wrong" | "missing";
 
-function grade(expected: boolean | string, actual: unknown): Grade {
+export function grade(expected: boolean | string, actual: unknown): Grade {
 	if (actual === undefined) return "missing";
 	if (typeof expected === "string") {
 		if (actual === null) return "abstain";
@@ -83,6 +84,18 @@ function grade(expected: boolean | string, actual: unknown): Grade {
 	if (certainty < DECIDED) return "abstain";
 	if (actual >= 0.5 === expected) return "agree";
 	return certainty >= CONFIDENT ? "confident-wrong" : "wrong";
+}
+
+export function readProbeField(value: unknown, path: string): unknown {
+	return path
+		.split(".")
+		.reduce<unknown>(
+			(current, field) =>
+				current !== null && typeof current === "object" && Object.hasOwn(current, field)
+					? (current as Record<string, unknown>)[field]
+					: undefined,
+			value,
+		);
 }
 
 function argValue(flag: string): string | undefined {
@@ -222,9 +235,8 @@ async function probeTurnSites(
 				);
 			}
 			for (const [key, expected] of Object.entries(turn.expect)) {
-				const [site, field] = key.split(".") as [DecisionSite, string];
-				const value = brief.get(site)?.value as Record<string, unknown> | undefined;
-				const actual = value === undefined ? undefined : value[field];
+				const [site, ...fields] = key.split(".");
+				const actual = readProbeField(brief.get(site as DecisionSite)?.value, fields.join("."));
 				const result = grade(expected, actual);
 				const counts = tally.get(key) ?? { agree: 0, abstain: 0, wrong: 0, "confident-wrong": 0, missing: 0 };
 				counts[result] += 1;
@@ -265,4 +277,4 @@ async function probeTurnSites(
 	for (const miss of misses) process.stdout.write(`  ${miss}\n`);
 }
 
-await main();
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

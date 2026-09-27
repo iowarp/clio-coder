@@ -4,8 +4,19 @@ import { createProvidersBundle, type ProvidersBundleOptions } from "./extension.
 import { ProvidersManifest } from "./manifest.js";
 
 export type { DispatchShape } from "./sites/dispatch-forecast.js";
+export { DISPATCH_SHAPE_QUESTION, SHAPES } from "./sites/dispatch-forecast.js";
 export type { HarnessIntent } from "./sites/harness-routing.js";
-export { HARNESS_INTENTS } from "./sites/harness-routing.js";
+export { HARNESS_INTENT_QUESTION, HARNESS_INTENTS } from "./sites/harness-routing.js";
+export {
+	BREADTH_QUESTION,
+	createTurnControlSite,
+	DIRECTION_REQUESTED_QUESTION,
+	ORIENTATION_WANTED_QUESTION,
+	TURN_CONTROL_QUESTIONS,
+	TURN_CONTROL_VERSION,
+	TURN_INTERPRETATION_SYSTEM_PROMPT,
+	turnControlSite,
+} from "./sites/turn-control.js";
 
 export const ProvidersDomainModule: DomainModule<ProvidersContract> = {
 	manifest: ProvidersManifest,

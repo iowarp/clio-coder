@@ -15,6 +15,7 @@ import {
 	type DispatchForecastSiteOptions,
 	dispatchForecastSite,
 } from "./dispatch-forecast.js";
+import { turnControlSite } from "./turn-control.js";
 import { turnScopeSite } from "./turn-scope.js";
 
 export {
@@ -27,11 +28,13 @@ export {
 	dispatchForecastHint,
 	dispatchForecastSite,
 } from "./dispatch-forecast.js";
+export { createTurnControlSite, turnControlSite } from "./turn-control.js";
 export { TURN_SCOPE_HINT, type TurnScope, turnScopeSite } from "./turn-scope.js";
 
 export const TURN_SITES: ReadonlyArray<PreTurnSite<unknown>> = [
 	turnScopeSite as PreTurnSite<unknown>,
 	dispatchForecastSite as PreTurnSite<unknown>,
+	turnControlSite as PreTurnSite<unknown>,
 ];
 
 /**
@@ -40,5 +43,9 @@ export const TURN_SITES: ReadonlyArray<PreTurnSite<unknown>> = [
  * the same sites `TURN_SITES` holds.
  */
 export function turnSites(options: DispatchForecastSiteOptions = {}): ReadonlyArray<PreTurnSite<unknown>> {
-	return [turnScopeSite as PreTurnSite<unknown>, createDispatchForecastSite(options) as PreTurnSite<unknown>];
+	return [
+		turnScopeSite as PreTurnSite<unknown>,
+		createDispatchForecastSite(options) as PreTurnSite<unknown>,
+		turnControlSite as PreTurnSite<unknown>,
+	];
 }

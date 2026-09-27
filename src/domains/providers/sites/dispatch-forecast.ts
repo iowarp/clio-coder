@@ -34,12 +34,17 @@ const HINT_THRESHOLD = 0.65;
 /** Below this certainty the shape is left out of the hint rather than guessed. */
 const SHAPE_MIN_CONFIDENCE = 0.5;
 
-const SHAPES = {
+export const SHAPES = {
 	single: "One worker handles the whole request",
 	parallel: "Several independent pieces that can run at the same time",
 	sequence: "Ordered steps where each depends on the previous step's result",
 	council: "Several independent opinions on the same question",
 } as const;
+
+export const DISPATCH_SHAPE_QUESTION = pick(
+	"How should the work in `task` that a worker would carry out be split? Ignore anything the assistant itself is asked to do with the workers' results afterwards.",
+	SHAPES,
+);
 
 export type DispatchShape = keyof typeof SHAPES;
 
@@ -136,10 +141,7 @@ export function createDispatchForecastSite(options: DispatchForecastSiteOptions 
 						"Broad exploration of a codebase, several separable pieces of work, or the request explicitly asks for agents, workers, scouts or a council",
 						"A conversational reply, one focused question, or one contained change the assistant can handle itself in a few steps",
 					),
-					shape: pick(
-						"How should the work in `task` that a worker would carry out be split? Ignore anything the assistant itself is asked to do with the workers' results afterwards.",
-						SHAPES,
-					),
+					shape: DISPATCH_SHAPE_QUESTION,
 					...(Object.keys(offered).length >= 2 ? { recipe: pick(RECIPE_INSTRUCTIONS, offered) } : {}),
 				},
 			};
