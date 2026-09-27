@@ -309,8 +309,8 @@ await writeFile(join(out, "content/docs-manifest.json"), `${JSON.stringify(manif
 await writePage(
 	"/",
 	await read("index.html"),
-	"Clio Coder — AI coding for scientific software",
-	"An open-source coding agent for scientific software. Work on your desktop or in your terminal, with local and cloud models you choose.",
+	"Clio Coder — coding with your models and tools",
+	"An open-source AI coding agent for your projects. Choose local or cloud models, coordinate workers, and inspect results in the terminal or desktop alpha.",
 );
 await writePage(
 	"/404.html",

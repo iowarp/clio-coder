@@ -17,7 +17,7 @@ repository = product['repository'].rstrip('/')
 source_tree = f"{repository}/tree/{docs_source['ref']}"
 doc_sources = {item["path"]: item["source"] for item in manifest["files"]}
 errors = []
-for private in ('content/docs', 'content/doc-summaries', 'content/tutorials', 'review', 'vendor', 'cards'):
+for private in ('content/docs', 'content/doc-summaries', 'content/tutorials', 'content/drafts', 'review', 'vendor', 'cards'):
     if (root / private).exists():
         errors.append(f'Private source directory entered the public output: {private}')
 for private in ('assets/brand/provenance.json', 'assets/logo.webp', 'assets/banner.webp'):
