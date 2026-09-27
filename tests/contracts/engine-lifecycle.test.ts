@@ -492,6 +492,8 @@ describe("engine TUI: keybinding table and alternate-screen render seams", () =>
 		// focused, ctrl+g advances the match and the leader chord is unavailable.
 		ok(keysOf(TUI_KEYBINDINGS["tui.altScreen.searchNext"]).includes("ctrl+g"));
 		strictEqual(CLIO_APP_KEYBINDINGS["clio-coder.leader"].defaultKeys, "ctrl+g");
+		deepStrictEqual(CLIO_APP_KEYBINDINGS["clio-coder.autonomy.toggle"].defaultKeys, []);
+		strictEqual(CLIO_APP_KEYBINDINGS["clio-coder.autonomy.toggle"].leader, "y");
 		strictEqual(CLIO_KEYBINDINGS["tui.editor.historyPrevious"].defaultKeys, "ctrl+p");
 		strictEqual(CLIO_KEYBINDINGS["tui.editor.historyNext"].defaultKeys, "ctrl+n");
 	});

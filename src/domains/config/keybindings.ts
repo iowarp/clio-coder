@@ -122,7 +122,7 @@ export const CLIO_APP_KEYBINDINGS = {
 		leader: "t",
 	},
 	"clio-coder.autonomy.toggle": {
-		defaultKeys: "ctrl+alt+shift+y",
+		defaultKeys: [],
 		description: "Toggle default / YOLO autonomy (this session)",
 		scope: "composer",
 		kind: "toggle",
