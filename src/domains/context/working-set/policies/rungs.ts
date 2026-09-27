@@ -45,8 +45,13 @@ export interface RungInput {
 }
 
 export interface RungEmitter {
-	/** Claim a unit. False when it is protected, already out, unknown, claimed, or would free nothing. */
-	(turnId: string, reason: EvictionReason, by?: string): boolean;
+	/**
+	 * Claim a unit. False when it is protected, already out, unknown, claimed, or
+	 * would free nothing. A rung that judged one observation passes it, so the
+	 * composer can tell which member of a chain aggregate earned the reason; a
+	 * rung that judged the whole entry passes its turnId.
+	 */
+	(unit: string | PathObservation, reason: EvictionReason, by?: string): boolean;
 	/** Projected working-set tokens after everything emitted so far. */
 	projected(): number;
 }
@@ -193,7 +198,7 @@ export const staleAfterMutationRung: Rung = {
 		for (const observation of newestFirst) {
 			if (!READ_CLASS.has(observation.op) || observation.path.length === 0) continue;
 			const mutation = firstMutationAfter(observation, index);
-			if (mutation !== null) emit(observation.ref.entry, "stale_after_mutation", mutation.ref.entry);
+			if (mutation !== null) emit(observation, "stale_after_mutation", mutation.ref.entry);
 		}
 	},
 };
@@ -206,7 +211,7 @@ export const supersededReadRung: Rung = {
 		for (const observation of newestFirst) {
 			if (observation.op !== "read" || observation.path.length === 0) continue;
 			const superseding = lastCoveringRead(observation, index);
-			if (superseding !== null) emit(observation.ref.entry, "superseded_read", superseding.ref.entry);
+			if (superseding !== null) emit(observation, "superseded_read", superseding.ref.entry);
 		}
 	},
 };
@@ -219,7 +224,7 @@ export const failureResolvedRung: Rung = {
 		for (const observation of newestFirst) {
 			if (!observation.isError) continue;
 			const success = findLaterSuccess(observation, index);
-			if (success !== null) emit(observation.ref.entry, "failure_resolved", success.ref.entry);
+			if (success !== null) emit(observation, "failure_resolved", success.ref.entry);
 		}
 	},
 };
@@ -233,7 +238,7 @@ export const supersededCallRung: Rung = {
 		for (const observation of newestFirst) {
 			if (!RERUNNABLE.has(observation.op)) continue;
 			const rerun = findLaterRun(observation, index);
-			if (rerun !== null) emit(observation.ref.entry, "superseded_call", rerun.ref.entry);
+			if (rerun !== null) emit(observation, "superseded_call", rerun.ref.entry);
 		}
 	},
 };
@@ -244,7 +249,7 @@ export const listingConsumedRung: Rung = {
 		// One surfaced path still unread and it stays: that is the path the
 		// agent comes back to.
 		for (const observation of newestFirst) {
-			if (isListingConsumed(observation, index)) emit(observation.ref.entry, "listing_consumed");
+			if (isListingConsumed(observation, index)) emit(observation, "listing_consumed");
 		}
 	},
 };
@@ -253,7 +258,7 @@ export const searchNarrowedRung: Rung = {
 	id: "search_narrowed",
 	run({ index, newestFirst }, emit): void {
 		for (const observation of newestFirst) {
-			if (isSearchNarrowed(observation, index)) emit(observation.ref.entry, "search_narrowed");
+			if (isSearchNarrowed(observation, index)) emit(observation, "search_narrowed");
 		}
 	},
 };
@@ -263,7 +268,7 @@ export const diffAppliedRung: Rung = {
 	run({ index, newestFirst }, emit): void {
 		for (const observation of newestFirst) {
 			const by = diffAppliedBy(observation, index);
-			if (by !== null) emit(observation.ref.entry, "diff_applied", by.ref.entry);
+			if (by !== null) emit(observation, "diff_applied", by.ref.entry);
 		}
 	},
 };

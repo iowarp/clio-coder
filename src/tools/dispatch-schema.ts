@@ -47,6 +47,54 @@ export function dispatchSchemaCompositionFor(fleet: FleetShape): DispatchSchemaC
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
+/** Ordinary delegation on the permanent surface. Advanced composition is described on demand. */
+export function coordinatorDispatchParameters() {
+	const intent = Type.Object({
+		read_roots: Type.Optional(Type.Array(Type.String())),
+		write_roots: Type.Optional(
+			Type.Array(Type.String(), {
+				description: "Allowed output paths; confines writes and disables worker bash/verify.",
+			}),
+		),
+		expected_outputs: Type.Optional(Type.Array(Type.String())),
+		verification: Type.Optional(DispatchVerificationSchema),
+	});
+	return Type.Object({
+		list: Type.Optional(Type.Boolean({ description: "Discover available worker recipes and their tools." })),
+		agent: Type.Optional(Type.String({ description: "Recipe id from list; choose a specialist for the task." })),
+		task: Type.Optional(
+			Type.String({ description: "One assignment with outcome and constraints; never combine with tasks." }),
+		),
+		tasks: Type.Optional(
+			Type.Array(
+				Type.Union([
+					Type.String(),
+					Type.Object({
+						agent: Type.Optional(Type.String()),
+						task: Type.String(),
+						briefing: Type.Optional(Type.String()),
+						intent: Type.Optional(intent),
+					}),
+				]),
+			),
+		),
+		intent: Type.Optional(intent),
+		briefing: Type.Optional(Type.String({ description: "Relevant parent evidence, separate from instructions." })),
+		// A plain string: this schema is checked before the canonical one, so an
+		// enum here would refuse the compete and council modes describe teaches.
+		mode: Type.Optional(
+			Type.String({
+				description:
+					"parallel: independent tasks; sequential: ordered tasks; pipeline: tasks consuming the previous result.",
+			}),
+		),
+		worktree: Type.Optional(Type.Literal(true)),
+		detach: Type.Optional(
+			Type.Boolean({ description: "Return ids; discover monitor to collect before final synthesis." }),
+		),
+	});
+}
+
 const CouncilMemberSchema = Type.Object(
 	{
 		label: Type.String({ pattern: "^[a-z][a-z0-9_-]{0,31}$" }),
@@ -85,7 +133,11 @@ const DispatchVerificationSchema = Type.Array(
 		},
 		{ additionalProperties: false },
 	),
-	{ maxItems: 8 },
+	{
+		maxItems: 8,
+		description:
+			'Array of {check:"<declared id>"} entries from verify() discovery; never invent ids such as "test suite" or pass an object or shell command.',
+	},
 );
 
 // Keep nested schemas self-contained. Pi's non-strict Anthropic adapter carries

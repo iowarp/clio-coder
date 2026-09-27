@@ -91,6 +91,7 @@ A policy answers one question: which units should leave. It never writes, never 
 5. A call the safety rails blocked. A refused call is a decision the session made, not an observation it can re-fetch.
 6. A write or edit the turn in flight is still standing on.
 7. A failure nothing later resolved, and any unindexed failure, because without an observation there is no way to ask whether it was resolved.
+8. A gateway chain aggregate with any member that items 5 to 7 would keep as a standalone result of its capability: a refused step, a write or edit the turn in flight stands on, or an unresolved or unindexed failure. A failed step with no member, such as a step whose `$from` binding failed and never ran, is an unindexed failure and keeps the aggregate. The floor, pins and recent window apply to the aggregate, which is the unit a marker replaces. Eviction addresses whole persisted results, so an aggregate otherwise leaves as one unit, and only after every settled member has earned a rung reason. A member with no path observation earns one only from a whole-entry rung such as `age_horizon`. The aggregate carries its weakest member's reason, the latest rung in the policy's order, and its marker and recall address the whole aggregate body.
 
 ### `age-horizon`
 

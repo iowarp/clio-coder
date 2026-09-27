@@ -13,6 +13,7 @@ import type { ContinuityCheckpointPayload } from "../continuity/contract.js";
 
 import { streamSimple } from "../../../engine/ai.js";
 import type { EngineModel, Usage } from "../../../engine/types.js";
+import { effectiveToolCall, expandChainMessages } from "../../../tools/surface.js";
 import type { WorkingSetView } from "../../context/working-set/contract.js";
 import { foldWorkingSet } from "../../context/working-set/fold.js";
 import { projectWorkingSet } from "../../context/working-set/project.js";
@@ -291,6 +292,85 @@ function resultFollowsCallInBatch(
 	return false;
 }
 
+interface HistoricalSkillCall {
+	args: Record<string, unknown>;
+	stepId?: string;
+}
+
+function historicalSkillCall(payload: Record<string, unknown> | null, name: string): HistoricalSkillCall | null {
+	if (!payload || typeof payload.name !== "string") return null;
+	const effective = effectiveToolCall(payload.name, payload.args);
+	if (effective.toolName === "context" && effective.args?.scope === "skills" && effective.args.name === name)
+		return { args: effective.args };
+	const args = payloadObject(payload.args);
+	if (payload.name !== "gateway" || args?.op !== "chain" || !Array.isArray(args.steps)) return null;
+	const steps = args.steps
+		.map(payloadObject)
+		.filter(
+			(step) =>
+				step?.capability === "context" &&
+				payloadObject(step.args)?.scope === "skills" &&
+				payloadObject(step.args)?.name === name,
+		);
+	const step = steps[0];
+	const stepArgs = payloadObject(step?.args);
+	return steps.length === 1 && typeof step?.id === "string" && stepArgs ? { args: stepArgs, stepId: step.id } : null;
+}
+
+/**
+ * Prove the child instructions were actually visible in the complete
+ * aggregate: the step settled untruncated (`details.steps`), the child receipt
+ * pairs with the call, and the aggregate text carries that receipt verbatim.
+ */
+function historicalSkillReceipt(
+	call: HistoricalSkillCall,
+	result: Record<string, unknown> | null,
+	summary: Record<string, unknown> | null,
+): { result: Record<string, unknown> | null; summary: Record<string, unknown> | null } | null {
+	if (call.stepId === undefined) return { result, summary };
+	const details = payloadObject(result?.details);
+	if (
+		details?.op !== "chain" ||
+		details.capability !== "context" ||
+		summary?.truncated !== false ||
+		!Array.isArray(details.chainResults) ||
+		!Array.isArray(details.steps) ||
+		!Array.isArray(result?.content)
+	)
+		return null;
+	const children = details.chainResults.map(payloadObject).filter((child) => child?.id === call.stepId);
+	const child = children[0];
+	const receipt = payloadObject(child?.result);
+	if (
+		children.length !== 1 ||
+		child?.capability !== "context" ||
+		child.isError !== false ||
+		JSON.stringify(child.args) !== JSON.stringify(call.args) ||
+		!Array.isArray(receipt?.content)
+	)
+		return null;
+	const rows = details.steps.map(payloadObject).filter((row) => row?.id === call.stepId);
+	const row = rows[0];
+	if (rows.length !== 1 || row?.capability !== "context" || row.kind !== "ok" || row.truncated !== false) return null;
+	const text = (content: unknown[]) => content.map((block) => payloadObject(block)?.text).join("\n");
+	const aggregate = text(result.content);
+	const body = text(receipt.content);
+	// The model read the body only if it sits whole under its own step header
+	// and runs to the next section or the end. The header spelling mirrors
+	// `chainStepHeader` in src/tools/gateway/chain.ts; the chained-skill
+	// contract in tests/contracts/chain-output-eviction.test.ts fails if they drift.
+	const section = `### step ${call.stepId} (context): ok\n${body}`;
+	const at = aggregate.indexOf(section);
+	const end = at + section.length;
+	if (
+		at < 0 ||
+		(at > 0 && !aggregate.startsWith("\n\n", at - 2)) ||
+		(end !== aggregate.length && !aggregate.startsWith("\n\n", end))
+	)
+		return null;
+	return { result: receipt, summary: { bytes: Buffer.byteLength(body, "utf8"), truncated: false } };
+}
+
 /** Recover only complete, uniquely paired historical main-agent loads. Never consult current disk. */
 export function captureSkillContext(
 	entries: ReadonlyArray<SessionEntry>,
@@ -344,12 +424,13 @@ export function captureSkillContext(
 		const calls = turn.filter((candidate) => {
 			if (candidate.kind !== "message" || candidate.role !== "tool_call") return false;
 			const payload = payloadObject(candidate.payload);
-			const args = payloadObject(payload?.args);
-			return payload?.name === "context" && args?.scope === "skills" && args.name === activation.name;
+			return historicalSkillCall(payload, activation.name) !== null;
 		});
 		if (calls.length !== 1) return undefined;
 		const call = calls[0];
 		if (call?.kind !== "message") return undefined;
+		const selectedCall = historicalSkillCall(payloadObject(call.payload), activation.name);
+		if (!selectedCall) return undefined;
 		const callId = payloadObject(call.payload)?.toolCallId;
 		if (typeof callId !== "string" || !callId) return undefined;
 		const assistant = turn.find((candidate) => candidate.turnId === call.parentTurnId);
@@ -360,7 +441,7 @@ export function captureSkillContext(
 				(block) =>
 					block.type === "toolCall" &&
 					block.id === callId &&
-					block.name === "context" &&
+					block.name === payloadObject(call.payload)?.name &&
 					JSON.stringify(block.arguments) === JSON.stringify(payloadObject(call.payload)?.args),
 			)
 		)
@@ -381,14 +462,21 @@ export function captureSkillContext(
 		)
 			return undefined;
 		const payload = payloadObject(resultEntry.payload);
-		const result = payloadObject(payload?.result);
+		const selectedReceipt = historicalSkillReceipt(
+			selectedCall,
+			payloadObject(payload?.result),
+			payloadObject(payload?.resultSummary),
+		);
+		if (!selectedReceipt) return undefined;
+		const result = selectedReceipt.result;
 		const details = payloadObject(result?.details);
 		const observation = payloadObject(details?.observation);
-		const resultSummary = payloadObject(payload?.resultSummary);
+		const resultSummary = selectedReceipt.summary;
 		const summaryObservation = payloadObject(resultSummary?.observation);
 		const sourceInfo = payloadObject(details?.sourceInfo);
 		if (
-			payload?.toolName !== "context" ||
+			payload === null ||
+			payload.toolName !== payloadObject(call.payload)?.name ||
 			payload.isError !== false ||
 			payload.outcome !== "ok" ||
 			details?.kind !== "ok" ||
@@ -548,7 +636,8 @@ function extractFileOpsFromPriorSummary(summary: string, fileOps: FileOperations
 
 function extractFileOps(entries: ReadonlyArray<SessionEntry>): FileOperations {
 	const fileOps = createFileOps();
-	for (const entry of entries) {
+	// Chained read, write and edit steps touch files the summary must name.
+	for (const entry of expandChainMessages(entries)) {
 		if (entry.kind === "fileEntry") {
 			recordFileOperation(fileOps, entry.operation, entry.path);
 			continue;

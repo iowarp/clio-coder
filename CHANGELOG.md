@@ -4,6 +4,15 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
+### Coordinator discovery and composition
+
+- Main sessions attach `read`, `write`, `edit`, `gateway`, and `dispatch` when wired. Secondary builtin, extension, and MCP capabilities remain discoverable through the gateway; workers retain their recipe tool surfaces. Ordinary dispatch uses a compact schema, with advanced composition described on demand and canonical validation retained.
+- Gateway discovery ranks task vocabulary and returns deterministic pages of 12 by default. The model-facing recipe catalog also accepts task vocabulary without loading workflow bodies or installing packages.
+- `gateway(op="chain")` composes bounded dependency steps and structured result references. Eligible independent reads run in parallel; failures, cancellation, interviews, skill activation, and terminal results stop scheduling. Completed child receipts remain available to completion assessment, artifacts, handoffs, and path indexing after a later failure.
+- Gateway and chain receipts retain capability identity, per-check verification, partial writes and denied operations. Historical skill instructions and continuation hooks remain available when secondary schemas are hidden.
+- Optional `fleet.decisionProfiles.harnessRouting` binds an advisory intent and capability shortlist to the existing pre-turn decision batch. Unbound sessions do no additional catalog preparation or inference. Routing never grants authority or removes capabilities from discovery.
+- Coordinator prompts guide intent understanding, bounded delegation, verification, user steering, and explanations of project state. Educational walkthroughs, reports, and knowledge checks are offered when useful and created when requested.
+
 ### Verification and execution evidence
 
 - Repository quality policies in `.clio-coder/quality.yaml` select required checks by changed path. A valid policy selects high rigor unless overridden.

@@ -306,7 +306,7 @@ describe("main compiled-prompt cache identity", () => {
 			getSettings: () => ({ safety: { autonomy: "default" } }) as never,
 			providers: { getRuntime: () => undefined } as unknown as ProvidersContract,
 			prompts,
-			toolRegistry: { get: () => undefined } as unknown as ToolRegistry,
+			toolRegistry: { get: () => undefined, listAll: () => [] } as unknown as ToolRegistry,
 			middleware: {} as TurnMiddleware,
 			getMemorySection: () => memorySection,
 			getReadySkillCount: () => readySkillCount,

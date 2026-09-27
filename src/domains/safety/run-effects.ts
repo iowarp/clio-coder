@@ -1,5 +1,6 @@
 import path from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
+import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { classify } from "./action-classifier.js";
 import { typedValidationSummary } from "./finish-contract.js";
 import {
@@ -277,4 +278,43 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			};
 		},
 	};
+}
+
+/** The engine tool events a run's effects are folded from, as either process sees them. */
+export interface ToolExecutionEffectEvent {
+	type: string;
+	toolCallId?: unknown;
+	toolName?: unknown;
+	tool?: unknown;
+	args?: unknown;
+	result?: unknown;
+	isError?: unknown;
+}
+
+/**
+ * Fold one engine tool event into a run's effects, identically in the worker
+ * and in the orchestrator's copy of the worker stream. A gateway op=call counts
+ * as the capability it ran. A chain counts as each settled, admitted child under
+ * `<call id>:<step id>`, judged by that child's own admission outcome; planned,
+ * pending and unresolved steps never ran and count for nothing.
+ */
+export function recordToolExecutionEffects(recorder: RunEffectsRecorder, event: ToolExecutionEffectEvent): void {
+	if (typeof event.toolCallId !== "string" || event.toolCallId.length === 0) return;
+	const toolCallId = event.toolCallId;
+	if (event.type === "tool_execution_start") {
+		const toolName =
+			typeof event.toolName === "string" ? event.toolName : typeof event.tool === "string" ? event.tool : null;
+		if (toolName === null) return;
+		const call = effectiveToolCall(toolName, event.args);
+		recorder.start(toolCallId, call.toolName, call.args);
+		return;
+	}
+	if (event.type !== "tool_execution_end") return;
+	for (const child of gatewayChainReceipts(String(event.toolName), event.result)) {
+		const id = `${toolCallId}:${child.id}`;
+		recorder.start(id, child.capability, child.args);
+		recorder.checkOutcome(id, child.admission.outcome);
+		recorder.finish(id, child.admission.outcome !== "ok");
+	}
+	recorder.finish(toolCallId, event.isError === true);
 }

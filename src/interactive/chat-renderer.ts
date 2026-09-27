@@ -680,11 +680,11 @@ function isTextResult(value: unknown): value is { text: string } {
 	return payloadObject(value)?.text !== undefined && typeof (value as { text?: unknown }).text === "string";
 }
 
-function toolResultMessageFromEntry(entry: MessageEntry): AgentMessage {
+function toolResultMessageFromEntry(entry: MessageEntry, unbounded = false): AgentMessage {
 	const result = extractToolResult(entry);
 	return {
 		role: "toolResult",
-		content: toolResultContent(result.result),
+		content: toolResultContent(result.result, unbounded),
 		toolCallId: result.id ?? entry.turnId,
 		toolName: result.name,
 		isError: result.isError,
@@ -1228,6 +1228,12 @@ export function buildReplayAgentMessagesFromTurns(
 	};
 	const evidence = activeEntriesBeforeCompactionCut(options.skillContextEntries ?? turns, options);
 	const verified = captureSkillContext(evidence, skillState);
+	// A selected skill whose load verifies whole replays whole. Its result is
+	// the instructions the session still stands on, and the live model read
+	// them uncut; the replay cap would drop their tail on every rebuild after
+	// eviction, compaction, resume or fork. Unverified, deselected and
+	// ordinary results keep the cap.
+	const wholeSkillResults = new Set(verified?.skills.map((skill) => skill.resultRef) ?? []);
 	const replayEntries = selectReplayEntries(turns, options);
 	const latestOperator = [...replayEntries]
 		.reverse()
@@ -1256,7 +1262,7 @@ export function buildReplayAgentMessagesFromTurns(
 						recordToolCallsFromMessage(message, seenToolCalls);
 					}
 				} else if (entry.role === "tool_result") {
-					out.stageToolResult(toolResultMessageFromEntry(entry));
+					out.stageToolResult(toolResultMessageFromEntry(entry, wholeSkillResults.has(entry.turnId)));
 				} else if (entry.role === "system") {
 					appendContextMessage(out, "user", `System note: ${text}`, entry.timestamp);
 				}

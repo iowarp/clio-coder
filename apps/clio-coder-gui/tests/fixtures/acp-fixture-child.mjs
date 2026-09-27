@@ -773,6 +773,64 @@ async function handle(frame) {
 					update({ sessionUpdate: "future_unknown_kind", anything: true });
 					if (scenario === "malformed-update")
 						update({ sessionUpdate: "agent_message_chunk", content: { type: "image", data: "not-text" } });
+					if (["gateway-chain", "gateway-chain-failed", "unrelated-chain"].includes(scenario)) {
+						const failed = scenario === "gateway-chain-failed";
+						const title = scenario === "unrelated-chain" ? "mcp_fixture__compose" : "gateway chain(grep, read, ls)";
+						const steps = [
+							{ id: "search", capability: "grep", args: { pattern: "TODO", path: "src" } },
+							{ id: "read", capability: "read", args: { path: "src/x.ts" }, after: ["search"] },
+							{ id: "later", capability: "ls", args: { path: "docs" }, after: ["read"] },
+						];
+						// The start, progress and terminal envelopes match ACP server.ts;
+						// progress carries content only, so normalization must retain the input and title.
+						update({
+							sessionUpdate: "tool_call",
+							toolCallId: "chain-1",
+							name: scenario === "unrelated-chain" ? "mcp_fixture__compose" : "gateway",
+							title,
+							kind: "other",
+							status: "in_progress",
+							rawInput: { op: "chain", steps },
+						});
+						update({
+							sessionUpdate: "tool_call_update",
+							toolCallId: "chain-1",
+							status: "in_progress",
+							content: [{ type: "content", content: { type: "text", text: "Searching sources" } }],
+						});
+						const settled = failed ? steps.slice(0, 2) : steps;
+						const body = failed
+							? "Chain failed: 2 of 3 steps settled. Pending: later."
+							: "Chain complete: 3 of 3 steps settled.";
+						update({
+							sessionUpdate: "tool_call_update",
+							toolCallId: "chain-1",
+							title,
+							kind: "other",
+							status: failed ? "failed" : "completed",
+							content: [{ type: "content", content: { type: "text", text: body } }],
+							rawOutput: {
+								result: {
+									content: [{ type: "text", text: body }],
+									details: {
+										op: "chain",
+										pending: failed ? ["later"] : [],
+										chainResults: settled.map((step) => ({
+											id: step.id,
+											capability: step.capability,
+											args: step.args,
+											isError: failed && step.id === "read",
+											result: {
+												content: [{ type: "text", text: failed && step.id === "read" ? "unavailable" : "ok" }],
+												details: { kind: failed && step.id === "read" ? "error" : "ok" },
+											},
+										})),
+									},
+								},
+								isError: failed,
+							},
+						});
+					}
 					if (scenario === "tool" || scenario === "tool-progress-no-content") {
 						update({
 							sessionUpdate: "tool_call",

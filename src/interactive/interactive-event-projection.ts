@@ -11,6 +11,9 @@ import {
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { routingChangeNotices } from "../core/session-routing.js";
+import { ToolNames } from "../core/tool-names.js";
+import { chainStepToolCallId, displayToolCall, gatewayChainSteps } from "../tools/gateway-display.js";
+import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import {
 	budgetAlertNotice,
 	middlewareHookFailedSessionNotice,
@@ -93,11 +96,20 @@ function askUserInterviewClosedByToolResult(event: {
 	isError?: unknown;
 	result?: unknown;
 }): boolean {
-	if (event.toolName !== "ask_user" || event.isError === true) return false;
+	if (event.isError === true) return false;
+	const toolName = typeof event.toolName === "string" ? event.toolName : "";
 	const result = recordObject(event.result);
-	const details = recordObject(result?.details);
-	const interview = recordObject(details?.interview);
-	return interview?.status === "complete" || interview?.status === "cancelled";
+	// The coordinator runs ask_user through gateway op=call or as a chain step.
+	const results =
+		effectiveToolCall(toolName, undefined, result?.details).toolName === ToolNames.AskUser
+			? [result]
+			: gatewayChainReceipts(toolName, event.result)
+					.filter((child) => child.capability === ToolNames.AskUser && child.admission.outcome === "ok")
+					.map((child) => child.result);
+	return results.some((candidate) => {
+		const interview = recordObject(recordObject(candidate?.details)?.interview);
+		return interview?.status === "complete" || interview?.status === "cancelled";
+	});
 }
 
 /**
@@ -149,7 +161,9 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 					deps.applyChatEvent(event);
 					return;
 				}
-				deps.recordToolStart(event.toolName, event.toolCallId);
+				// Footer tallies count the capability that ran, as a direct call of
+				// it counted in v056, not the gateway wrapper the coordinator used.
+				deps.recordToolStart(displayToolCall(event.toolName, event.args).toolName, event.toolCallId);
 				deps.refreshFooter();
 			} else if (event.type === "tool_execution_end") {
 				if (event.toolName.toLowerCase() === "dispatch") {
@@ -161,7 +175,30 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 					deps.resetAskUserCancellation();
 				}
 				const summary = (event as { resultSummary?: { truncated?: unknown } }).resultSummary;
-				deps.recordToolEnd(event.toolName, event.toolCallId, event.isError, summary?.truncated === true);
+				const details = recordObject(recordObject(event.result)?.details);
+				// A chain is one gateway call and one tally; each settled step also
+				// counts as the capability it ran, with its own error and cut. A
+				// chain fails only through a failed step, so its own error counts
+				// only when no step settled (a plan that never parsed).
+				const steps = gatewayChainSteps(event.toolName, event.result);
+				deps.recordToolEnd(
+					displayToolCall(event.toolName, undefined, details).toolName,
+					event.toolCallId,
+					event.isError && steps.length === 0,
+					summary?.truncated === true,
+				);
+				for (const step of steps) {
+					const stepId = chainStepToolCallId(event.toolCallId, step.id);
+					const stepDetails = recordObject(step.result.details);
+					deps.recordToolStart(step.capability, stepId);
+					deps.recordToolEnd(
+						step.capability,
+						stepId,
+						step.isError,
+						recordObject(stepDetails?.resultSize)?.truncated === true ||
+							recordObject(stepDetails?.observation)?.truncated === true,
+					);
+				}
 				deps.refreshFooter();
 			}
 			deps.applyChatEvent(event);

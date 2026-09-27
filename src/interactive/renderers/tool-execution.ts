@@ -16,11 +16,22 @@ import { previewBudget, previewRows } from "./preview.js";
  */
 
 import { isSkillLoadRefusal, type SkillLoadRefusal } from "../../core/skill-activation.js";
+import { ToolNames } from "../../core/tool-names.js";
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { redactSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
 import { formatSize } from "../../engine/truncate.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import {
+	chainStepToolCallId,
+	displayToolCall,
+	type GatewayChainStep,
+	gatewayChainPending,
+	gatewayChainPlan,
+	gatewayChainSteps,
+	isGatewayChain,
+	type PlannedChainStep,
+} from "../../tools/gateway-display.js";
 import {
 	CLASS_NOUNS,
 	classifyResourceRead,
@@ -30,6 +41,7 @@ import {
 	type ToolRowPair,
 } from "../../tools/presentation.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
+import { effectiveToolCall } from "../../tools/surface.js";
 import { mutationFactsLine } from "../mutation-preview.js";
 import type { ApprovalRequestView } from "../permission-overlay.js";
 import {
@@ -96,6 +108,11 @@ export interface ToolExecutionStart {
 	excludeFromContext?: boolean | undefined;
 	/** A worker card sits under this dispatch call and states its task and outcome. */
 	cardAttached?: boolean | undefined;
+	/**
+	 * The renderer unwrapped a gateway op=call to this capability. Callers pass
+	 * the wire call; the renderer sets this itself (see `presentedCall`).
+	 */
+	viaGateway?: boolean | undefined;
 }
 
 export interface ToolExecutionFinished {
@@ -139,6 +156,30 @@ export interface ToolExecutionFinished {
 	 * so the row does not repeat it.
 	 */
 	cardAttached?: boolean | undefined;
+	/**
+	 * The renderer unwrapped a gateway op=call to this capability. Callers pass
+	 * the wire call; the renderer sets this itself (see `presentedCall`).
+	 */
+	viaGateway?: boolean | undefined;
+}
+
+/**
+ * A gateway op=call renders as the capability it ran, marked `via gateway`:
+ * its label, argument preview, streaming output, exit status and diff read as
+ * a direct call of that capability read in v056. Unwrapping once, at every
+ * exported entry point, keeps each helper below keyed on the capability's own
+ * name and arguments. A chain, find and describe stay gateway rows.
+ */
+function presentedCall<T extends ToolExecutionStart | ToolExecutionFinished>(call: T): T {
+	if (call.toolName !== ToolNames.Gateway) return call;
+	const details = "result" in call ? detailsOf(call.result) : null;
+	const effective = displayToolCall(call.toolName, call.args, details ?? undefined);
+	if (!effective.viaGateway) return call;
+	return { ...call, toolName: effective.toolName, args: effective.args, viaGateway: true };
+}
+
+function isChainCall(call: ToolExecutionStart | ToolExecutionFinished): boolean {
+	return isGatewayChain(call.toolName, call.args, "result" in call ? detailsOf(call.result) : undefined);
 }
 
 export interface ToolBodyRenderOptions {
@@ -385,9 +426,15 @@ interface SkillLoadFacts {
 }
 
 function skillLoadFacts(finished: ToolExecutionFinished): SkillLoadFacts | null {
-	if (finished.toolName !== "context" || finished.isError || finished.outcome !== undefined) return null;
-	if (!isPlainObject(finished.args) || finished.args.scope !== "skills") return null;
 	const details = detailsOf(finished.result);
+	const call = effectiveToolCall(finished.toolName, finished.args, details);
+	// A chain that loaded a skill carries the activation on its aggregate
+	// details: a skill-load row, though the chain itself is no context call.
+	const activationChain =
+		isGatewayChain(finished.toolName, finished.args, details) && details?.capability === ToolNames.Context;
+	if ((call.toolName !== ToolNames.Context && !activationChain) || finished.isError || finished.outcome !== undefined)
+		return null;
+	if (call.args?.scope !== "skills" && !activationChain) return null;
 	const name = stringField(details, "name");
 	if (name === null) return null;
 	const declared = (key: string): string[] =>
@@ -711,12 +758,13 @@ const AWAITING_APPROVAL_TAIL = ` ${yellow(GLYPH.phaseBlocked)}${toolMeta(" await
  * finished): the awaiting-approval tail is the segment's whole state.
  */
 export function renderToolAwaitingApproval(
-	call: ToolExecutionStart,
+	wire: ToolExecutionStart,
 	width: number,
 	view?: ApprovalRequestView,
 ): string[] {
+	const call = presentedCall(wire);
 	const parts = sublineParts(
-		{ toolCallId: call.toolCallId, toolName: call.toolName, args: call.args },
+		{ toolCallId: call.toolCallId, toolName: call.toolName, args: call.args, viaGateway: call.viaGateway },
 		undefined,
 		{},
 		width,
@@ -820,11 +868,39 @@ function classMark(toolClass: ToolClass): string {
 /** The row a call reads as, from its redacted arguments and, once settled, its result. */
 function resolveRow(call: ToolExecutionStart | ToolExecutionFinished): ResolvedToolRow {
 	const finished = "result" in call ? call : null;
-	return resolveToolRow(call.toolName, redactToolArgs(call.args), detailsOf(finished?.result), call.actionClass, {
-		cardAttached: call.cardAttached === true,
-		cwd: process.cwd(),
-	});
+	const context = { cardAttached: call.cardAttached === true, cwd: process.cwd() };
+	if (isChainCall(call)) {
+		const args = redactToolArgs(call.args);
+		return {
+			spec: CHAIN_ROW,
+			toolName: call.toolName,
+			args: isPlainObject(args) ? args : {},
+			viaGateway: false,
+			externalLabel: null,
+			context,
+		};
+	}
+	const row = resolveToolRow(
+		call.toolName,
+		redactToolArgs(call.args),
+		detailsOf(finished?.result),
+		call.actionClass,
+		context,
+	);
+	return call.viaGateway === true ? { ...row, viaGateway: true } : row;
 }
+
+/**
+ * A gateway chain is one aggregate action whose steps nest beneath it, one
+ * row each (`chainStepRows`). Its own object is the step count; the steps and
+ * their bindings never repeat as a `steps ›` argument dump.
+ */
+const CHAIN_ROW: ResolvedToolRow["spec"] = {
+	class: "external",
+	verbs: ["chaining", "chained"],
+	consumes: ["op", "steps"],
+	nouns: ["chain", "chains"],
+};
 
 /**
  * Longest object a row states before it cuts with an ellipsis. A wide row
@@ -1016,6 +1092,7 @@ function sublineParts(
 	width?: number,
 ): SublineParts {
 	const finished = "result" in call ? call : null;
+	if (isChainCall(call)) return chainSublineParts(call, finished, status, meta);
 	const row = resolveRow(call);
 	// A refused skill load reads as plainly as a load: what did not load, why,
 	// and the move that changes it.
@@ -1494,7 +1571,8 @@ function sublineStatus(call: ToolExecutionStart | ToolExecutionFinished): Header
 }
 
 /** Stable action identity, outcome, and captured-result metadata. */
-export function renderToolSubline(call: ToolExecutionStart | ToolExecutionFinished, width: number): string[] {
+export function renderToolSubline(wire: ToolExecutionStart | ToolExecutionFinished, width: number): string[] {
+	const call = presentedCall(wire);
 	const status = sublineStatus(call);
 	const meta: StatusMeta =
 		"result" in call
@@ -1511,7 +1589,8 @@ export function renderToolSubline(call: ToolExecutionStart | ToolExecutionFinish
  * without its outcome tail: `$ ran \`npm test\` · exit 1`. `/view` titles the
  * call with it, so the list reads like the transcript.
  */
-export function toolRowTitle(call: ToolExecutionStart | ToolExecutionFinished): string {
+export function toolRowTitle(wire: ToolExecutionStart | ToolExecutionFinished): string {
+	const call = presentedCall(wire);
 	const status = sublineStatus(call);
 	const meta: StatusMeta = "result" in call ? { outcome: call.outcome } : {};
 	return releaseSpaces(stripTerminalSequences(sublineParts(call, status, meta).lead));
@@ -1525,10 +1604,12 @@ export function toolRowTitle(call: ToolExecutionStart | ToolExecutionFinished): 
  * outcomes without reading the body.
  */
 export function renderToolExecution(
-	finished: ToolExecutionFinished,
+	wire: ToolExecutionFinished,
 	width: number,
 	opts: ToolBodyRenderOptions = {},
 ): string[] {
+	const finished = presentedCall(wire);
+	if (isChainCall(finished)) return renderChainExecution(finished, width, opts);
 	const status: HeaderStatus = finished.isError ? "error" : "ok";
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
@@ -1596,11 +1677,13 @@ export function renderToolExecution(
  * Identical to `renderToolExecution` minus the args body.
  */
 export function renderToolResultOnly(
-	finished: Omit<ToolExecutionFinished, "args">,
+	wire: Omit<ToolExecutionFinished, "args">,
 	width: number,
 	opts: ToolBodyRenderOptions = {},
 ): string[] {
-	if (!opts.unbounded && opts.detail) return renderToolPreview(finished, width, opts.detail, opts);
+	if (!opts.unbounded && opts.detail) return renderToolPreview(wire, width, opts.detail, opts);
+	const finished = presentedCall({ ...wire, args: undefined });
+	if (isChainCall(finished)) return renderChainExecution(finished, width, opts);
 	const status: HeaderStatus = finished.isError ? "error" : "ok";
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
@@ -1757,11 +1840,13 @@ function flattenSingleEdit(value: unknown): unknown {
 
 /** Invocation intent stays visible in every style; /view retains the complete arguments and output. */
 export function renderToolPreview(
-	call: ToolExecutionStart | ToolExecutionFinished,
+	wire: ToolExecutionStart | ToolExecutionFinished,
 	width: number,
 	detail: TranscriptDetailPolicy,
 	options: ToolBodyRenderOptions & { terminalRows?: number; partialResult?: unknown; operator?: boolean } = {},
 ): string[] {
+	const call = presentedCall(wire);
+	if (isChainCall(call)) return renderChainPreview(call, width, detail, options);
 	const finished = "result" in call ? call : undefined;
 	const failure = finished?.isError === true || finished?.outcome !== undefined;
 	const row = resolveRow(call);
@@ -1890,6 +1975,200 @@ export function renderToolPreview(
 }
 
 /**
+ * The chain's own row: `◇ chained 3 steps · 1 failed · 1 not run ✗ · 1.2s`.
+ * What each step did is stated on its nested row, never here.
+ */
+function chainSublineParts(
+	call: ToolExecutionStart | ToolExecutionFinished,
+	finished: ToolExecutionFinished | null,
+	status: HeaderStatus,
+	meta: StatusMeta,
+): SublineParts {
+	const settled = status === "ok" || status === "error";
+	const verb = isNonExecutedOutcome(finished?.outcome) ? "blocked" : CHAIN_ROW.verbs[settled ? 1 : 0];
+	const steps = finished === null ? [] : gatewayChainSteps(finished.toolName, finished.result);
+	const pending = finished === null ? [] : gatewayChainPending(finished.result);
+	const planned = gatewayChainPlan(call.toolName, call.args).length;
+	const count = steps.length + pending.length > 0 ? steps.length + pending.length : planned;
+	const facts: string[] = [];
+	const failed = steps.filter((step) => step.isError).length;
+	if (failed > 0) facts.push(`${failed} failed`);
+	if (pending.length > 0) facts.push(`${pending.length} not run`);
+	if (finished?.evictedReason !== undefined) facts.push("evicted", finished.evictedReason);
+	const object = count > 0 ? ` ${count} ${count === 1 ? "step" : "steps"}` : "";
+	const factText =
+		facts.length > 0 ? toolMeta(joinFacts(["", ...facts.map((fact) => sanitizeCallTargetText(fact))])) : "";
+	return {
+		lead: `${classMark(CHAIN_ROW.class)}${styledVerb(verb, resolveRow(call))}${object}${factText}`,
+		tail: statusGlyph(status, meta),
+	};
+}
+
+/** A settled chain step as the call a direct invocation of its capability would have recorded. */
+function chainStepCall(parent: ToolExecutionFinished, step: GatewayChainStep): ToolExecutionFinished {
+	return {
+		toolCallId: chainStepToolCallId(parent.toolCallId, step.id),
+		toolName: step.capability,
+		args: step.args,
+		result: step.result,
+		isError: step.isError,
+		...(step.outcome === "blocked" ? { outcome: "blocked" as const } : {}),
+		...(step.blockReason !== undefined ? { blockReason: step.blockReason } : {}),
+		...(step.actionClass !== undefined ? { actionClass: step.actionClass } : {}),
+		// The chain's own cut, which the step's details cannot know about.
+		...(step.truncated === true ? { resultSummary: { truncated: true } } : {}),
+	};
+}
+
+function settledChainSteps(
+	finished: ToolExecutionFinished,
+): Array<{ id: string; call: ToolExecutionFinished; unresolved: boolean }> {
+	return gatewayChainSteps(finished.toolName, finished.result).map((step) => ({
+		id: step.id,
+		call: chainStepCall(finished, step),
+		unresolved: step.bindingError !== undefined,
+	}));
+}
+
+/** The width a nested step row's object is budgeted against: the body column, not the gutter row. */
+function stepObjectWidth(width: number): number {
+	return Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH + CONTENT_INDENT_WIDTH);
+}
+
+/**
+ * One settled step: its status glyph, the capability, the object a direct call
+ * of it states (a path, a pattern, a command) and its outcome facts.
+ */
+function settledStepLine(step: ToolExecutionFinished, width: number, unresolved = false): string {
+	const row = resolveRow(step);
+	const glyph = step.isError ? red(STATUS_ERROR_GLYPH) : green(STATUS_OK_GLYPH);
+	const name = styledVerb(sanitizeCallTargetText(row.externalLabel ?? step.toolName), row);
+	const object = row.externalLabel === null ? rowObject(row, step, stepObjectWidth(width)) : "";
+	const scopeText = row.spec.scope?.(row.args, row.context) ?? null;
+	const scope = scopeText === null ? "" : ` in ${truncate(sanitizeCallTargetText(scopeText), ARG_PREVIEW_LIMIT)}`;
+	// A step whose `$from` input could not be resolved never ran; its object
+	// is the unresolved request, so say so instead of implying execution.
+	const blocked = unresolved
+		? toolMeta(" · input unresolved, not run")
+		: isNonExecutedOutcome(step.outcome)
+			? toolMeta(" · blocked")
+			: "";
+	return `${glyph} ${name}${object.length > 0 ? ` ${object}` : ""}${scope}${blocked}${unresolved ? "" : ledgerTail(step, row).facts}`;
+}
+
+/** A step that has not run: queued while the chain runs, `not run` once it settled without it. */
+function plannedStepLine(step: PlannedChainStep, note: string | null, width: number): string {
+	const row = resolveToolRow(step.capability, redactToolArgs(step.args), undefined, undefined, { cwd: process.cwd() });
+	const name = toolMeta(sanitizeCallTargetText(row.externalLabel ?? step.capability));
+	const object = row.externalLabel === null ? rowObject(row, null, stepObjectWidth(width)) : "";
+	return `${toolMeta(GLYPH.queued)} ${name}${object.length > 0 ? ` ${object}` : ""}${note === null ? "" : toolMeta(` · ${note}`)}`;
+}
+
+/** One row per step under a chain, settled steps in the order they settled and then the ones it never ran. */
+function chainStepRows(call: ToolExecutionStart | ToolExecutionFinished, width: number, failure: boolean): string[] {
+	const plan = gatewayChainPlan(call.toolName, call.args);
+	const finished = "result" in call ? call : null;
+	const lines =
+		finished === null
+			? plan.map((step) => plannedStepLine(step, null, width))
+			: [
+					...settledChainSteps(finished).map((step) => settledStepLine(step.call, width, step.unresolved)),
+					...gatewayChainPending(finished.result).map((id) => {
+						const planned = plan.find((step) => step.id === id);
+						return planned === undefined
+							? `${toolMeta(GLYPH.queued)} ${toolMeta(sanitizeCallTargetText(id))}${toolMeta(" · not run")}`
+							: plannedStepLine(planned, "not run", width);
+					}),
+				];
+	return lines.flatMap((line) => indentAndWrap(line, width, failure));
+}
+
+/**
+ * A chain's output, step by step, each under a label naming the step. The
+ * aggregate result is the model's JSON digest of the same outputs, so the body
+ * never prints it. A failed chain shows only the steps that failed.
+ */
+function chainOutputRows(finished: ToolExecutionFinished, width: number, failure: boolean): string[] {
+	const rows: string[] = [];
+	for (const { id, call } of settledChainSteps(finished)) {
+		if (failure && !call.isError) continue;
+		const command = resolveRow(call).spec.class === "execute";
+		const shown = call.isError && command ? withoutCommandStatus(call.result) : call.result;
+		const { body } = splitModelNotes(resultText(unwrapResultEnvelope(shown), Number.POSITIVE_INFINITY));
+		if (body.trim().length === 0) continue;
+		rows.push(...indentAndWrap(toolMeta(sanitizeCallTargetText(`${call.toolName} · ${id} ›`)), width, failure));
+		rows.push(...indentAndWrap(redactSecretString(body), width, failure));
+	}
+	return rows;
+}
+
+/** A gateway chain in the transcript: its own row, one row per step, and the outputs the style allows. */
+function renderChainPreview(
+	call: ToolExecutionStart | ToolExecutionFinished,
+	width: number,
+	detail: TranscriptDetailPolicy,
+	options: ToolBodyRenderOptions & { terminalRows?: number; partialResult?: unknown },
+): string[] {
+	const finished = "result" in call ? call : undefined;
+	const failure = finished?.isError === true || finished?.outcome !== undefined;
+	const rail = failure ? RAIL_ERROR : RAIL_NORMAL;
+	const rows = renderToolSubline(call, width);
+	rows.push(...operatorGrantRows(call, width, failure));
+	rows.push(
+		...previewRows(
+			chainStepRows(call, width, failure),
+			previewBudget(detail.invocationRows, options.terminalRows),
+			width,
+			false,
+			rail,
+			BODY_INDENT_VISIBLE_WIDTH,
+		),
+	);
+	const limit = previewBudget(failure ? detail.errorRows : detail.resultRows, options.terminalRows);
+	if (limit <= 0) return rows;
+	let body = finished === undefined ? [] : chainOutputRows(finished, width, failure);
+	// A chain that never parsed, or one still running, has no settled steps;
+	// its own text (the refusal, or the running step's partial output) is the body.
+	if (body.length === 0 && (finished === undefined || settledChainSteps(finished).length === 0)) {
+		const result = finished?.result ?? options.partialResult;
+		const text = result === undefined ? "" : resultText(unwrapResultEnvelope(result), Number.POSITIVE_INFINITY);
+		body = text.trim().length === 0 ? [] : indentAndWrap(redactSecretString(text), width, failure);
+	}
+	rows.push(...previewRows(body, limit, width, finished === undefined, rail, BODY_INDENT_VISIBLE_WIDTH));
+	return rows;
+}
+
+/** A gateway chain, unbounded: its row, one row per step, then each step's full output as its own block. */
+function renderChainExecution(finished: ToolExecutionFinished, width: number, opts: ToolBodyRenderOptions): string[] {
+	const status: HeaderStatus = finished.isError ? "error" : "ok";
+	const statusMeta: StatusMeta = {
+		durationMs: finished.durationMs,
+		outcome: finished.outcome,
+		blockReason: finished.blockReason,
+	};
+	const out = [...wrapHanging(headerLine(finished, status, statusMeta, width), width)];
+	out.push(...operatorGrantRows(finished, width, finished.isError));
+	out.push(...chainStepRows(finished, width, finished.isError));
+	const steps = settledChainSteps(finished);
+	if (steps.length === 0) {
+		out.push(...renderOutputMeta(finished, width, finished.isError));
+		out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
+		return out;
+	}
+	for (const { id, call } of steps) {
+		out.push(...renderOutputMeta(call, width, call.isError, `${call.toolName} · ${id}`));
+		const bashArgs = resolveRow(call).spec.class === "execute" ? asBashArgs(redactToolArgs(call.args)) : null;
+		out.push(
+			...(bashArgs === null
+				? renderResultBlock(call.result, call.isError, width, opts)
+				: renderBashResultBlock(bashArgs, call.result, width, call.isError, opts)),
+		);
+		out.push(...renderOutputFooter(call, width, call.isError));
+	}
+	return out;
+}
+
+/**
  * Whether rendered action rows include a nested body (arguments, output, a
  * diff, approval facts, or a preview hint) rather than only the action row and
  * its wrapped continuation. The transcript stacks body-less actions and puts a
@@ -1909,7 +2188,8 @@ export type ToolFoldFamily = "explore" | "knowledge" | "mutate";
  * call whose result was cut, offloaded or evicted keep their own rows: each
  * has a fact the folded row cannot carry.
  */
-export function toolFoldFamily(call: ToolExecutionFinished): ToolFoldFamily | null {
+export function toolFoldFamily(wire: ToolExecutionFinished): ToolFoldFamily | null {
+	const call = presentedCall(wire);
 	if (call.isError || call.outcome !== undefined || call.evictedReason !== undefined) return null;
 	if (isTruncatedResult(call) || offloadPathOf(call) !== null || skillLoadFacts(call) !== null) return null;
 	const toolClass = resolveRow(call).spec.class;
@@ -1921,8 +2201,9 @@ export function toolFoldFamily(call: ToolExecutionFinished): ToolFoldFamily | nu
 
 function countNouns(calls: readonly ToolExecutionFinished[]): string {
 	const counts = new Map<string, { singular: string; plural: string; count: number }>();
-	for (const call of calls) {
-		const [singular, plural] = resolveRow(call).spec.nouns ?? CLASS_NOUNS[resolveRow(call).spec.class];
+	for (const wire of calls) {
+		const row = resolveRow(presentedCall(wire));
+		const [singular, plural] = row.spec.nouns ?? CLASS_NOUNS[row.spec.class];
 		const entry = counts.get(singular) ?? { singular, plural, count: 0 };
 		entry.count += 1;
 		counts.set(singular, entry);
@@ -1948,7 +2229,8 @@ export function renderFoldedGroup(
 	let added = 0;
 	let removed = 0;
 	let complete = true;
-	for (const call of calls) {
+	for (const wire of calls) {
+		const call = presentedCall(wire);
 		const row = resolveRow(call);
 		const scope = row.spec.scope?.(row.args, row.context) ?? null;
 		const target = `${rowObject(row, call, width)}${scope === null ? "" : ` in ${truncate(sanitizeCallTargetText(scope), ARG_PREVIEW_LIMIT)}`}`;

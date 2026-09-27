@@ -66,9 +66,15 @@ import type { ActionClass, ClassifierCall } from "../domains/safety/action-class
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
-import { createRunEffectsRecorder } from "../domains/safety/run-effects.js";
+import { createRunEffectsRecorder, recordToolExecutionEffects } from "../domains/safety/run-effects.js";
 import { resolveAgentTools, type ToolTelemetry } from "../tools/agent-tools.js";
 import type { ToolProfileName } from "../tools/profiles.js";
+import {
+	CHAIN_OUTPUT_TRUNCATED_MARKER,
+	effectiveToolCall,
+	type GatewayChainReceipt,
+	gatewayChainReceipts,
+} from "../tools/surface.js";
 import { type AgentLedgerPort, canonicalJson } from "../worker/protocol.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
@@ -383,6 +389,60 @@ function assertResponseSchemaRuntime(input: WorkerRunInput): void {
 	);
 }
 
+interface ReadCitationRequest {
+	path: string;
+	offset: number | null;
+	tail: boolean;
+}
+
+/** What a read call asked for, as a citation span is later built from it. */
+function readCitationRequest(args: Record<string, unknown> | undefined): ReadCitationRequest | null {
+	const readPath = typeof args?.path === "string" ? args.path.trim() : "";
+	if (readPath.length === 0) return null;
+	const offset =
+		typeof args?.offset === "number" && Number.isFinite(args.offset) && args.offset > 0 ? Math.floor(args.offset) : null;
+	return { path: readPath, offset, tail: args?.tail !== undefined };
+}
+
+/**
+ * The text of a chain step the model actually saw, when the chain cut it to
+ * the step's share of the aggregate; null when the step reached the model
+ * whole. A cut step grounds only what survived the cut.
+ */
+function chainStepVisibleText(child: GatewayChainReceipt): string | null {
+	if (child.truncated !== true) return null;
+	const content = child.result.content;
+	const first = Array.isArray(content) ? (content[0] as { text?: unknown } | undefined) : undefined;
+	const text = typeof first?.text === "string" ? first.text : "";
+	return text.endsWith(CHAIN_OUTPUT_TRUNCATED_MARKER) ? text.slice(0, -CHAIN_OUTPUT_TRUNCATED_MARKER.length) : text;
+}
+
+/**
+ * Keys `<rendered path>\0<line>` for every grep line the visible text shows in
+ * full. Grep renders a match as `path:line: text` and context as
+ * `path-line- text`; the last line of a cut text may be partial and is dropped.
+ */
+function visibleGrepLineKeys(text: string): Set<string> {
+	const keys = new Set<string>();
+	const lines = text.split("\n");
+	lines.pop();
+	for (const line of lines) {
+		for (const match of line.matchAll(/([:-])(\d+)\1 /gu)) {
+			keys.add(`${line.slice(0, match.index)}\0${match[2]}`);
+		}
+	}
+	return keys;
+}
+
+/** Whether a rendered grep path (relative to the search root, or a basename) names this absolute file. */
+function grepLineVisible(keys: ReadonlySet<string>, file: string, line: number): boolean {
+	const parts = file.split(path.sep).filter((part) => part.length > 0);
+	for (let start = parts.length - 1; start >= 0; start -= 1) {
+		if (keys.has(`${parts.slice(start).join("/")}\0${line}`)) return true;
+	}
+	return keys.has(`${file}\0${line}`);
+}
+
 /** Return the admitted worker specification budget unchanged. */
 function resolveWorkerRuntimeBudget(input: Pick<WorkerRunInput, "budget">): WorkerBudget {
 	return input.budget;
@@ -566,7 +626,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	let helperTerminalPhase = false;
 	let helperTurnFailure: string | null = null;
 	/** Read tool call id -> what was asked for, pending that call's result. */
-	const pendingReadCitations = new Map<string, { path: string; offset: number | null; tail: boolean }>();
+	const pendingReadCitations = new Map<string, ReadCitationRequest>();
+	/** Grep call ids, direct or through gateway op=call, pending their results. */
+	const pendingGrepCalls = new Set<string>();
 	const observedReadRanges = new Map<string, Array<readonly [number, number]>>();
 	/**
 	 * Lines a grep result showed, keyed like the read spans. They ground a
@@ -609,21 +671,27 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	 * end-of-file read returns less than the window that was asked for.
 	 */
 	const recordObservedRead = (
-		request: { path: string; offset: number | null; tail: boolean },
+		request: ReadCitationRequest,
 		result: unknown,
+		visibleText: string | null = null,
 	): void => {
 		const observation = (result as { details?: { observation?: Record<string, unknown> } } | null)?.details?.observation;
 		if (!observation) return;
-		const shown = observation.shownCount;
+		const returned = observation.shownCount;
 		const total = observation.totalCount;
-		if (typeof shown !== "number" || !Number.isFinite(shown) || shown <= 0) return;
+		if (typeof returned !== "number" || !Number.isFinite(returned) || returned <= 0) return;
+		// A chain that cut the step showed the model its first complete lines
+		// only: one output line per file line, so the newlines before the cut
+		// count them, and a partial last line is not seen.
+		const shown = visibleText === null ? returned : Math.min(returned, visibleText.split("\n").length - 1);
+		if (shown <= 0) return;
 		// A tail read lands at the end of the file, so it can only be placed once
 		// the total line count is known; without it the span is dropped rather
 		// than guessed, which costs a citation but never invents grounding.
 		let start: number;
 		if (request.tail) {
 			if (typeof total !== "number" || !Number.isFinite(total)) return;
-			start = Math.max(1, Math.floor(total) - shown + 1);
+			start = Math.max(1, Math.floor(total) - returned + 1);
 		} else {
 			start = request.offset ?? 1;
 		}
@@ -633,11 +701,94 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		observedReadRanges.set(key, spans);
 	};
 
+	/**
+	 * Fold the lines a grep result showed into the grounding set. `visibleText`
+	 * is the part of a chain-cut step the model saw; only lines shown there in
+	 * full count.
+	 */
+	const recordObservedGrep = (details: unknown, visibleText: string | null = null): void => {
+		const shown = (details as { observedLines?: unknown } | null)?.observedLines;
+		if (shown === null || typeof shown !== "object" || Array.isArray(shown)) return;
+		const visible = visibleText === null ? null : visibleGrepLineKeys(visibleText);
+		for (const [file, lines] of Object.entries(shown as Record<string, unknown>)) {
+			if (!Array.isArray(lines) || !path.isAbsolute(file)) continue;
+			const bucket = observedGrepLines.get(file) ?? new Set<number>();
+			for (const line of lines) {
+				if (!Number.isInteger(line) || line <= 0) continue;
+				if (visible !== null && !grepLineVisible(visible, file, line)) continue;
+				bucket.add(line);
+			}
+			if (bucket.size > 0) observedGrepLines.set(file, bucket);
+		}
+	};
+
+	/**
+	 * The settled children of a chain, folded exactly as the direct calls
+	 * would have been. Only a child its own admission ran to success grounds
+	 * anything; a child refused by a run bound seals that bound. Pending and
+	 * unresolved steps never ran and are never in the receipt list.
+	 */
+	const observeChainChildren = (toolName: string, result: unknown): void => {
+		for (const child of gatewayChainReceipts(toolName, result)) {
+			if (child.admission.outcome === "blocked") {
+				if (child.admission.blockReason !== undefined) observeBoundReason(child.admission.blockReason);
+				continue;
+			}
+			if (child.admission.outcome !== "ok") continue;
+			const visibleText = chainStepVisibleText(child);
+			if (child.capability === ToolNames.Read) {
+				const request = readCitationRequest(child.args);
+				if (request !== null) recordObservedRead(request, child.result, visibleText);
+			} else if (child.capability === ToolNames.Grep) {
+				recordObservedGrep(child.result.details, visibleText);
+			}
+		}
+	};
+
 	/** Spans quoted back to the model, as `path:start-end`. */
 	const observedReadAnchors = (): string[] =>
 		[...observedReadRanges.entries()].flatMap(([key, spans]) =>
 			spans.map(([start, end]) => `${path.relative(contractCwd, key) || key}:${start}-${end}`),
 		);
+	/**
+	 * A refusal whose reason is a run bound. Direct calls reach this through
+	 * their blocked finish; a chain child the bound refused reaches it through
+	 * the chain's receipt, because the aggregate settles as an ordinary error
+	 * and its own finish cannot carry the child's verdict.
+	 */
+	const observeBoundReason = (reason: string): void => {
+		// Lifetime-cap lockout: record the bound (the run must not seal as an
+		// ordinary success) but do not abort. The loop guard has flipped the
+		// synthesis tool lock, so the next model round runs text-only and the
+		// synthesized answer still reaches message_end and the receipt.
+		if (isWorkerToolCallCapSynthesisReason(reason)) {
+			emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } });
+			if (workerBoundFailure === null) {
+				workerBoundFailure = reason;
+				process.stderr.write(`[worker] ${reason}\n`);
+			}
+			return;
+		}
+		// Hard bounds: the legacy immediate cap abort (lockout not wired) and
+		// the synthesis backstop for a model that keeps emitting tool calls
+		// after the lock. Both end the run; the first recorded bound wins the
+		// receipt diagnostic.
+		if (isWorkerToolCallCapExceededReason(reason) || isLoopGuardSynthesisBackstopReason(reason)) {
+			emit({
+				type: "clio_coder_run_outcome",
+				payload: {
+					outcomeCode: isLoopGuardSynthesisBackstopReason(reason)
+						? "loop_guard_tools_disabled_exhausted"
+						: "worker_tool_call_cap_exhausted",
+				},
+			});
+			if (workerBoundAborted) return;
+			workerBoundAborted = true;
+			if (workerBoundFailure === null) workerBoundFailure = reason;
+			process.stderr.write(`[worker] ${reason}\n`);
+			abortWorkerForBound?.();
+		}
+	};
 	const telemetry: ToolTelemetry = {
 		onStart(event) {
 			emit({ type: "clio_coder_tool_start", payload: event });
@@ -646,37 +797,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			if (event.toolCallId !== undefined) runEffects.checkOutcome(event.toolCallId, event.outcome);
 			emit({ type: "clio_coder_tool_finish", payload: event });
 			if (event.outcome !== "blocked" || typeof event.reason !== "string") return;
-			// Lifetime-cap lockout: record the bound (the run must not seal as an
-			// ordinary success) but do not abort. The loop guard has flipped the
-			// synthesis tool lock, so the next model round runs text-only and the
-			// synthesized answer still reaches message_end and the receipt.
-			if (isWorkerToolCallCapSynthesisReason(event.reason)) {
-				emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } });
-				if (workerBoundFailure === null) {
-					workerBoundFailure = event.reason;
-					process.stderr.write(`[worker] ${event.reason}\n`);
-				}
-				return;
-			}
-			// Hard bounds: the legacy immediate cap abort (lockout not wired) and
-			// the synthesis backstop for a model that keeps emitting tool calls
-			// after the lock. Both end the run; the first recorded bound wins the
-			// receipt diagnostic.
-			if (isWorkerToolCallCapExceededReason(event.reason) || isLoopGuardSynthesisBackstopReason(event.reason)) {
-				emit({
-					type: "clio_coder_run_outcome",
-					payload: {
-						outcomeCode: isLoopGuardSynthesisBackstopReason(event.reason)
-							? "loop_guard_tools_disabled_exhausted"
-							: "worker_tool_call_cap_exhausted",
-					},
-				});
-				if (workerBoundAborted) return;
-				workerBoundAborted = true;
-				if (workerBoundFailure === null) workerBoundFailure = event.reason;
-				process.stderr.write(`[worker] ${event.reason}\n`);
-				abortWorkerForBound?.();
-			}
+			observeBoundReason(event.reason);
 		},
 	};
 	const tools = resolveAgentTools({
@@ -925,36 +1046,30 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// Read spans this run actually observed. They ground the terminal result
 		// (a cited line has to fall inside one) and they are handed back verbatim
 		// in a repair round, so re-emitting findings never invites invention.
+		// Effects and grounding come from the capability operations that
+		// settled: a gateway op=call as the capability it ran, a chain as each
+		// admitted child, once each. Provider replay keeps the wire records.
+		if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
+			recordToolExecutionEffects(runEffects, event);
+		}
 		if (event.type === "tool_execution_start") {
-			runEffects.start(event.toolCallId, event.toolName, event.args as Record<string, unknown>);
+			const call = effectiveToolCall(event.toolName, event.args);
+			if (call.toolName === ToolNames.Read) {
+				const request = readCitationRequest(call.args);
+				if (request !== null) pendingReadCitations.set(event.toolCallId, request);
+			} else if (call.toolName === ToolNames.Grep) {
+				pendingGrepCalls.add(event.toolCallId);
+			}
 		}
 		if (event.type === "tool_execution_end") {
-			runEffects.finish(event.toolCallId, event.isError === true);
-		}
-		if (event.type === "tool_execution_start" && event.toolName === ToolNames.Read) {
-			const args = event.args as Record<string, unknown>;
-			const readPath = typeof args.path === "string" ? args.path.trim() : "";
-			const offset =
-				typeof args.offset === "number" && Number.isFinite(args.offset) && args.offset > 0 ? Math.floor(args.offset) : null;
-			if (readPath.length > 0) {
-				pendingReadCitations.set(event.toolCallId, { path: readPath, offset, tail: args.tail !== undefined });
-			}
-		}
-		if (event.type === "tool_execution_end" && event.toolName === ToolNames.Read) {
 			const request = pendingReadCitations.get(event.toolCallId);
 			pendingReadCitations.delete(event.toolCallId);
-			if (request !== undefined && event.isError !== true) recordObservedRead(request, event.result);
-		}
-		if (event.type === "tool_execution_end" && event.toolName === ToolNames.Grep && event.isError !== true) {
-			const shown = (event.result as { details?: { observedLines?: unknown } } | null)?.details?.observedLines;
-			if (shown !== null && typeof shown === "object" && !Array.isArray(shown)) {
-				for (const [file, lines] of Object.entries(shown as Record<string, unknown>)) {
-					if (!Array.isArray(lines) || !path.isAbsolute(file)) continue;
-					const bucket = observedGrepLines.get(file) ?? new Set<number>();
-					for (const line of lines) if (Number.isInteger(line) && line > 0) bucket.add(line);
-					observedGrepLines.set(file, bucket);
-				}
+			const grepped = pendingGrepCalls.delete(event.toolCallId);
+			if (event.isError !== true) {
+				if (request !== undefined) recordObservedRead(request, event.result);
+				if (grepped) recordObservedGrep((event.result as { details?: unknown } | null)?.details);
 			}
+			observeChainChildren(event.toolName, event.result);
 		}
 		// Synthesis-locked run: the round ships no tool surface, so a model that
 		// calls a tool anyway lands its chat template's tool-call syntax in the

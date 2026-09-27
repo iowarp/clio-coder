@@ -11,6 +11,7 @@
  * in compaction.ts, adapted to Clio's SessionEntry union.
  */
 
+import { displayToolCall, gatewayChainPlan, isGatewayChain } from "../../../tools/gateway-display.js";
 import type { MessageEntry, SessionEntry } from "../entries.js";
 
 /** Tool-result bodies are truncated to this char count inside summaries. */
@@ -85,9 +86,7 @@ function assistantToolCallsText(entry: MessageEntry): string {
 		.filter((block) => block.type === "toolCall")
 		.map((block) => {
 			const name = typeof block.name === "string" && block.name.length > 0 ? block.name : "tool";
-			const args = block.arguments ?? block.args ?? block.input;
-			const suffix = args === undefined ? "" : `(${stringifyPreview(args)})`;
-			return `${name}${suffix}`;
+			return displayCallText(name, block.arguments ?? block.args ?? block.input);
 		});
 	return calls.join("; ");
 }
@@ -97,8 +96,22 @@ function toolCallText(entry: MessageEntry): string {
 	if (!obj) return messageText(entry);
 	const name = typeof obj.name === "string" ? obj.name : typeof obj.toolName === "string" ? obj.toolName : "tool";
 	const args = obj.args ?? obj.arguments ?? obj.input;
-	if (args !== undefined) return `${name}(${stringifyPreview(args)})`;
+	if (args !== undefined) return displayCallText(name, args);
 	return messageText(entry) || name;
+}
+
+/**
+ * A summary names the capability that ran, as the transcript and /tree do: the
+ * coordinator reaches most capabilities through gateway op=call or a chain.
+ */
+function displayCallText(name: string, args: unknown): string {
+	if (isGatewayChain(name, args)) {
+		const steps = gatewayChainPlan(name, args).map((step) => step.capability);
+		return `gateway chain(${steps.join(", ")})`;
+	}
+	const call = displayToolCall(name, args);
+	if (args === undefined) return call.toolName;
+	return `${call.toolName}(${stringifyPreview(call.viaGateway ? (call.args ?? {}) : args)})${call.viaGateway ? " via gateway" : ""}`;
 }
 
 function toolResultText(entry: MessageEntry): string {

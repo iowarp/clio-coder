@@ -2,6 +2,7 @@ import { BusChannels } from "../core/bus-events.js";
 import type { WorkerRosters } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { getTerminationCoordinator } from "../core/termination.js";
+import { ToolNames } from "../core/tool-names.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
@@ -16,6 +17,7 @@ import { assertRegisteredBuiltinTools, type CoreToolBootstrapDeps, registerCoreT
 import { createDispatchRunEventRegistry, createDispatchTool } from "./dispatch.js";
 import type { DispatchBackgroundRegistry } from "./dispatch-background.js";
 import type { DispatchSchemaComposition } from "./dispatch-schema.js";
+import { coordinatorDispatchParameters } from "./dispatch-schema.js";
 import { createMcpCapabilitySource, type McpCapabilitySource } from "./gateway/index.js";
 import { registerHarnessExtensionTools } from "./harness-extensions.js";
 import { lazyTool } from "./lazy-tool.js";
@@ -24,6 +26,7 @@ import { panesToolSurface } from "./panes-surface.js";
 import type { ToolRegistry } from "./registry.js";
 import { createSelfCompactTool, type RequestSelfCompact } from "./self-compact.js";
 import { steerToolSurface } from "./steer-surface.js";
+import { coordinatorToolPlacement } from "./surface.js";
 
 export { toolPromptHintsForNames };
 
@@ -145,6 +148,15 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	assertRegisteredBuiltinTools(registry, registration, Boolean(deps.dispatch), Boolean(deps.panes));
 	for (const diagnostic of registerHarnessExtensionTools(registry, cwd)) {
 		deps.bus?.emit(BusChannels.ExtensionsLoadIssue, { message: diagnostic.message });
+	}
+	// Placement is presentation, not authority. Apply it to this registry only:
+	// worker registries still attach the execution tools their recipes admit.
+	for (const spec of registry.listAll()) {
+		registry.register({
+			...spec,
+			placement: coordinatorToolPlacement(spec.name),
+			...(spec.name === ToolNames.Dispatch ? { modelParameters: coordinatorDispatchParameters() } : {}),
+		});
 	}
 	// Every MCP client the gateway launched closes with the session: a
 	// detached server must not outlive the process that trusted it.

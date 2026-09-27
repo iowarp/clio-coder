@@ -429,3 +429,35 @@
 		padding-left: 1.5em;
 	}
 }
+
+/* A capability reached through gateway reads as itself; this marker is the only difference. */
+.tool-card__via {
+	color: var(--ink-muted);
+	font-family: var(--font-ui);
+}
+
+/* A gateway chain lists each step on its own line, with the same glyph, verb and headline grammar as a row. */
+.tool-card__steps {
+	display: grid;
+	gap: var(--space-1);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	font-size: var(--text-meta);
+}
+.tool-card__step {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-2);
+	min-width: 0;
+}
+/* A step's glyph follows the step, never the chain card's tone around it. */
+.tool-card .tool-card__step[data-status] .tool-card__glyph {
+	color: var(--ink-muted);
+}
+.tool-card .tool-card__step[data-status="done"] .tool-card__glyph {
+	color: var(--status-success-fg);
+}
+.tool-card .tool-card__step[data-status="failed"] .tool-card__glyph {
+	color: var(--status-fail-fg);
+}

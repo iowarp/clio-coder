@@ -2,6 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { readSettings } from "../../core/config.js";
+import { discoveryScore } from "../../core/harness-discovery.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { listFleetContracts } from "../agents/fleet-contract.js";
@@ -734,8 +735,10 @@ function parseSelection(ref: string | undefined): Selection {
 	return { name: ref };
 }
 
-function matchesQuery(query: string | undefined, ...fields: ReadonlyArray<string | undefined>): boolean {
+function matchesQuery(options: LibraryInventoryOptions, ...fields: ReadonlyArray<string | undefined>): boolean {
+	const query = options.query;
 	if (!query) return true;
+	if (options.audience === "model") return discoveryScore(query, fields[0] ?? "", fields.slice(1).join(" ")) > 0;
 	const needle = query.toLowerCase();
 	return fields.some((field) => field?.toLowerCase().includes(needle));
 }
@@ -754,12 +757,7 @@ function packageMatches(record: LibraryPackageRecord, options: LibraryInventoryO
 		const kinds = options.kinds;
 		if (!kinds.includes(record.kind) && !record.provides?.some((hint) => kinds.includes(hint.kind))) return false;
 	}
-	return matchesQuery(
-		options.query,
-		record.name,
-		record.description,
-		...(record.provides ?? []).map((hint) => hint.name),
-	);
+	return matchesQuery(options, record.name, record.description, ...(record.provides ?? []).map((hint) => hint.name));
 }
 
 function copyMatches(copy: LibraryCopy, options: LibraryInventoryOptions, selection: Selection): boolean {
@@ -779,7 +777,7 @@ function resourceMatches(resource: LibraryResource, options: LibraryInventoryOpt
 	if (selection.resourceKey && !keyMatches(resource.key, selection.resourceKey)) return false;
 	if (options.kinds?.length && !options.kinds.includes(resource.kind)) return false;
 	if (options.sources?.length && !options.sources.includes(resource.source.class)) return false;
-	return matchesQuery(options.query, resource.name, resource.description);
+	return matchesQuery(options, resource.name, resource.description);
 }
 
 function audienceAdmits(resource: LibraryResource, options: LibraryInventoryOptions): boolean {

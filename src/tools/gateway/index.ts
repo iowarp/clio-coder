@@ -1,4 +1,5 @@
 import { Type } from "typebox";
+import { discoveryScore } from "../../core/harness-discovery.js";
 import { rankByPrecomputedScore } from "../../core/precomputed-rank.js";
 import { isMcpToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
@@ -15,6 +16,7 @@ import {
 import {
 	nestedBlockedResult,
 	nestedExecutedResult,
+	resolveToolPromptHint,
 	type ToolInvokeOptions,
 	type ToolRegistry,
 	type ToolResult,
@@ -22,6 +24,7 @@ import {
 } from "../registry.js";
 import { type GatewayCapabilityKind, gatewayCapabilityKind, toolSpecPlacement } from "../surface.js";
 import { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
+import { runGatewayChain } from "./chain.js";
 import type { McpCapabilitySource, McpServerListing } from "./mcp-capabilities.js";
 
 export { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
@@ -53,7 +56,7 @@ export {
  * refused capability refuses the gateway call with the same verdict.
  */
 
-export const GATEWAY_OPS = ["find", "describe", "call"] as const;
+export const GATEWAY_OPS = ["find", "describe", "call", "chain"] as const;
 export type GatewayOp = (typeof GATEWAY_OPS)[number];
 
 /** Entries a find listing returns before it says `truncated` and asks for a narrower query. */
@@ -100,15 +103,17 @@ export interface GatewayToolDeps {
 }
 
 const DESCRIPTION =
-	'Reach secondary capabilities on demand. op="find" lists them as JSON {name, kind: builtin|extension|mcp, description, actionClass} (query filters by name or description); op="describe" returns one capability\'s full description, JSON parameter schema, and authority notes; op="call" runs one with args under the same admission as a direct tool: its own action class, approval, and evidence apply and the result is the capability\'s result. Capabilities: artifact (terminal plan/review/report documents), web_read (GET-only web reading), web_fetch (full HTTP requests), git (read-only status/diff/log), evidence, credential_present, clio_docs, clio_library, data (CSV/TSV, JSON, JSONL inspection), installed extension commands, and trusted local MCP servers.';
+	'Discover and compose harness capabilities. op="find" searches task terms across builtin, extension and MCP catalogs; op="describe" returns one full schema and usage guidance; op="call" executes it with args under its own admission. op="chain" runs dependency steps, parallelizing eligible independent reads. Describe gateway for chain syntax or dispatch for advanced worker composition. Discovery never grants authority.';
 
 export const gatewayToolSurface = {
 	name: ToolNames.Gateway,
 	description: DESCRIPTION,
 	parameters: Type.Object({
-		op: StringEnum(GATEWAY_OPS, { description: "find, describe, or call." }),
+		op: StringEnum(GATEWAY_OPS, { description: "find, describe, call, or chain." }),
 		capability: Type.Optional(Type.String({ description: "describe and call: the capability name from find." })),
-		query: Type.Optional(Type.String({ description: "find: case-insensitive filter over names and descriptions." })),
+		query: Type.Optional(Type.String({ description: "find: task terms, capability name, or desired next step." })),
+		limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 300, description: "find: page size (default 12)." })),
+		offset: Type.Optional(Type.Integer({ minimum: 0, description: "find: follow nextOffset." })),
 		// The find payload names the exact refresh call for a server whose catalog
 		// is missing, so the remedy is taught where it is needed rather than
 		// carried in every turn's attached schema.
@@ -117,6 +122,12 @@ export const gatewayToolSurface = {
 		args: Type.Optional(
 			Type.Record(Type.String(), Type.Unknown(), {
 				description: "call: the capability's arguments, matching its describe schema.",
+			}),
+		),
+		steps: Type.Optional(
+			Type.Array(Type.Unknown(), {
+				maxItems: 16,
+				description: "chain: {id,capability,args,after?:[ids]}; describe gateway for result bindings.",
 			}),
 		),
 	}),
@@ -190,6 +201,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 	const resolveCapability = async (
 		name: string,
 		options: ToolInvokeOptions | undefined,
+		allowDirect = false,
 	): Promise<{ spec: ToolSpec } | { spec: null; message: string }> => {
 		let spec = registry.get(name as ToolName);
 		if (spec === undefined && isMcpToolName(name) && deps.mcp) {
@@ -204,7 +216,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				message: `gateway: unknown capability "${name}"; run gateway(op="find") to list the capabilities this session offers`,
 			};
 		}
-		if (toolSpecPlacement(spec) === "direct") {
+		if (!allowDirect && toolSpecPlacement(spec) === "direct") {
 			return {
 				spec: null,
 				message: `gateway: "${name}" is a direct tool with an attached schema; call it directly, not through the gateway`,
@@ -243,6 +255,9 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		const query = rawQuery.toLowerCase();
 		const server = typeof args.server === "string" ? args.server.trim() : "";
 		const refresh = args.refresh === true;
+		const limit =
+			typeof args.limit === "number" ? Math.max(1, Math.min(GATEWAY_FIND_MAX_ENTRIES, Math.floor(args.limit))) : 12;
+		const offset = typeof args.offset === "number" ? Math.max(0, Math.floor(args.offset)) : 0;
 		const allowed = allowedSet(options);
 		if (refresh && server.length === 0) {
 			return {
@@ -332,10 +347,12 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			const byName = new Map(registryEntries.map((entry) => [entry.name, entry]));
 			for (const entry of mcpEntries) if (!byName.has(entry.name)) byName.set(entry.name, entry);
 			const catalogEntries = [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
-			let entries = catalogEntries.filter(
-				(entry) =>
-					query.length === 0 || entry.name.toLowerCase().includes(query) || entry.description.toLowerCase().includes(query),
-			);
+			const score = (entry: GatewayCapabilityEntry) =>
+				discoveryScore(query, entry.name, registry.get(entry.name as ToolName)?.description ?? entry.description);
+			const exactName = catalogEntries.find((entry) => entry.name.toLowerCase() === query);
+			let entries = exactName ? [exactName] : catalogEntries.filter((entry) => query.length === 0 || score(entry) > 0);
+			if (query.length > 0)
+				entries.sort((left, right) => score(right) - score(left) || left.name.localeCompare(right.name));
 			// A ranking only ever reorders an unfiltered listing or adds related
 			// entries beside a query's own hits. The hits keep their order, nothing
 			// is removed, and a scoped find is the one server the caller named.
@@ -361,12 +378,13 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				}
 			}
 			const total = entries.length;
-			const shown = entries.slice(0, GATEWAY_FIND_MAX_ENTRIES);
-			const truncated = shown.length < total;
+			const shown = entries.slice(offset, offset + limit);
+			const truncated = offset + shown.length < total;
 			const payload = {
 				capabilities: shown,
 				count: shown.length,
 				total,
+				...(truncated ? { nextOffset: offset + shown.length } : {}),
 				...(servers.length > 0 ? { servers } : {}),
 				...(missing.length > 0
 					? {
@@ -377,9 +395,9 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 					: {}),
 				...(refreshNote !== undefined ? { refresh: refreshNote } : {}),
 				...(diagnostics.length > 0 ? { diagnostics } : {}),
-				...(truncated ? { note: "listing truncated; narrow it with query" } : {}),
+				...(truncated ? { note: "more matches; follow nextOffset or narrow query" } : {}),
 				...(rankedBy !== undefined
-					? { order: `ranked by ${rankedBy} against this turn's task; every capability is still listed` }
+					? { order: `ranked by ${rankedBy} against this turn's task; all capabilities remain available across pages` }
 					: {}),
 				...(relatedBy !== undefined
 					? {
@@ -396,7 +414,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				shownCount: shown.length,
 				totalCount: total,
 				truncated,
-				...(truncated ? { next: "query=<narrower terms>" } : {}),
+				...(truncated ? { next: `offset=${offset + shown.length}` } : {}),
 				details: { op: "find", count: shown.length, total, servers: servers.length },
 				reservation,
 				...(options ? { options } : {}),
@@ -459,7 +477,9 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		const name = typeof args.capability === "string" ? args.capability.trim() : "";
 		if (name.length === 0) return { kind: "error", message: 'gateway: op="describe" requires capability' };
 		const allowed = allowedSet(options);
-		if (allowed !== null && !allowed.has(name)) return outsideSurface(name, allowed);
+		// The admitted wrapper can describe its own transport syntax even when
+		// scope named only an inner capability. This grants no child admission.
+		if (allowed !== null && !allowed.has(name) && name !== ToolNames.Gateway) return outsideSurface(name, allowed);
 		const spec = registry.get(name as ToolName);
 		if (spec === undefined) {
 			if (isMcpToolName(name) && deps.mcp) return describeFromCatalog(name);
@@ -468,7 +488,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				message: `gateway: unknown capability "${name}"; run gateway(op="find") to list the capabilities this session offers`,
 			};
 		}
-		if (toolSpecPlacement(spec) === "direct") {
+		if (toolSpecPlacement(spec) === "direct" && name !== ToolNames.Dispatch && name !== ToolNames.Gateway) {
 			return {
 				kind: "error",
 				message: `gateway: "${name}" is a direct tool with an attached schema; call it directly, not through the gateway`,
@@ -502,6 +522,27 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			// carries the same provenance field a cached descriptor does.
 			...(kind === "mcp" ? { catalog: "live" } : {}),
 			authority,
+			...(resolveToolPromptHint(spec.metadata?.promptHint, "session")
+				? {
+						usage: resolveToolPromptHint(spec.metadata?.promptHint, "session"),
+					}
+				: {}),
+			...(name === ToolNames.Gateway
+				? {
+						chain: {
+							steps:
+								"1..16 steps {id,capability,args,after?:[ids]}; unique ids, no cycles or nested gateways. Direct tools may be steps.",
+							binding:
+								"In args, {$from:<step id>,path:[<keys>]} consumes output (text), json (decoded output), or details. References add dependencies. Values remain data, never evaluated code.",
+							scheduling:
+								"Independent read-class tools declaring parallel execution run up to four at once; all other operations serialize. Every step is validated and admitted under its own name, safety, skill policy and task scope.",
+							boundaries:
+								"Failure, cancellation, skill activation, user interview or terminal result stops scheduling. Inspect results and pending ids before continuing; never repeat completed mutations. Read first, then formulate an interview from evidence when the questions are not yet known.",
+							composition:
+								"Use dispatch tasks/mode=parallel or pipeline for worker assignments; load skills through context(scope=skills,name=...) only at their workflow step. Activation and operator answers require reasoning before continuation.",
+						},
+					}
+				: {}),
 		};
 		return {
 			kind: "ok",
@@ -510,12 +551,16 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		};
 	};
 
-	const runCall = async (args: Record<string, unknown>, options: ToolInvokeOptions | undefined): Promise<ToolResult> => {
+	const runCall = async (
+		args: Record<string, unknown>,
+		options: ToolInvokeOptions | undefined,
+		allowDirect = false,
+	): Promise<ToolResult> => {
 		const name = typeof args.capability === "string" ? args.capability.trim() : "";
 		if (name.length === 0) return { kind: "error", message: 'gateway: op="call" requires capability' };
 		const allowed = allowedSet(options);
 		if (allowed !== null && !allowed.has(name)) return outsideSurface(name, allowed);
-		const resolved = await resolveCapability(name, options);
+		const resolved = await resolveCapability(name, options, allowDirect);
 		if (resolved.spec === null) return { kind: "error", message: resolved.message };
 		const spec = resolved.spec;
 		if (args.args !== undefined && !isRecord(args.args)) {
@@ -540,11 +585,37 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		// progress, park accounting) minus any one-shot approval, which was
 		// granted to the gateway call and must not travel to the capability.
 		const { approval: _approval, ...outer } = options ?? {};
-		const verdict = await registry.invoke({ tool: spec.name, args: validated }, { ...outer, nested: true });
+		const verdict = await registry.invoke({ tool: spec.name, args: validated }, { ...outer, nested: !allowDirect });
 		if (verdict.kind === "not_visible") return { kind: "error", message: `gateway: ${verdict.reason}` };
-		if (verdict.kind === "blocked") return nestedBlockedResult(verdict);
+		const admission = allowDirect
+			? {
+					outcome: verdict.kind === "blocked" ? "blocked" : verdict.result.kind === "ok" ? "ok" : "error",
+					actionClass: verdict.decision.classification.actionClass,
+					decision:
+						verdict.kind === "blocked" && verdict.deniedPark === true
+							? "permission_requested"
+							: verdict.decision.kind === "allow"
+								? "allowed"
+								: verdict.decision.kind === "ask"
+									? "permission_requested"
+									: "blocked",
+					...(verdict.decision.policy?.ruleId ? { ruleId: verdict.decision.policy.ruleId } : {}),
+					...(verdict.decision.policy?.reasonCode ? { reasonCode: verdict.decision.policy.reasonCode } : {}),
+					...(verdict.kind === "blocked" ? { blockReason: verdict.reason } : {}),
+					...(verdict.kind === "ok" && verdict.result.kind === "ok" && verdict.result.terminate === true
+						? { terminate: true }
+						: {}),
+				}
+			: undefined;
+		if (verdict.kind === "blocked") {
+			const result = nestedBlockedResult(verdict);
+			return { ...result, details: { ...result.details, ...(admission ? { chainAdmission: admission } : {}) } };
+		}
 		return nestedExecutedResult(
-			{ ...verdict.result, details: { ...verdict.result.details, capability: spec.name } },
+			{
+				...verdict.result,
+				details: { ...verdict.result.details, capability: spec.name, ...(admission ? { chainAdmission: admission } : {}) },
+			},
 			verdict.decision,
 		);
 	};
@@ -564,7 +635,16 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			if (op === "find") return runFind(args, options);
 			if (op === "describe") return runDescribe(args, options);
 			if (op === "call") return runCall(args, options);
-			return { kind: "error", message: `gateway: op must be find, describe, or call; got '${op}'` };
+			if (op === "chain")
+				return runGatewayChain(
+					args.steps,
+					{
+						getSpec: (name) => registry.get(name as ToolName),
+						call: (name, stepArgs, stepOptions) => runCall({ capability: name, args: stepArgs }, stepOptions, true),
+					},
+					options,
+				);
+			return { kind: "error", message: `gateway: op must be find, describe, call, or chain; got '${op}'` };
 		},
 	};
 }

@@ -5,7 +5,7 @@
  * noticing. This pins that the seeded level reaches the running session: the
  * compiled prompt and the sealed main-agent receipt both name it.
  */
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { type HeadlessScratch, headlessScratch, runCli } from "../harness/headless-run.js";
 import {
@@ -43,6 +43,16 @@ describe("tool-orchestrator seed", { concurrency: false }, () => {
 
 			const request = fixture.requests.find((entry) => JSON.stringify(entry.messages).includes(marker));
 			ok(request, `no chat request carried ${marker}`);
+			const tools = request.tools as Array<{ function: { name: string } }>;
+			deepStrictEqual(tools.map((tool) => tool.function.name).sort(), [
+				"bash",
+				"dispatch",
+				"edit",
+				"gateway",
+				"read",
+				"verify",
+				"write",
+			]);
 			const first = (request.messages as Array<{ role?: string; content?: unknown }> | undefined)?.[0];
 			match(typeof first?.content === "string" ? first.content : "", new RegExp(`Autonomy: ${level}\\.`, "u"));
 

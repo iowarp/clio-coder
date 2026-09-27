@@ -333,8 +333,12 @@ test("registered native tool completes three engine-driven handoffs through awai
 							{
 								type: "toolCall",
 								id: `native-${invocation}`,
-								name: "self_compact",
-								arguments: { note_to_self: `Keep exact native cycle ${invocation}.` },
+								name: "gateway",
+								arguments: {
+									op: "call",
+									capability: "self_compact",
+									args: { note_to_self: `Keep exact native cycle ${invocation}.` },
+								},
 							},
 						]
 					: [{ type: "text", text: "Completed the slice." }],
@@ -356,7 +360,12 @@ test("registered native tool completes three engine-driven handoffs through awai
 		if (event.type === "tool_execution_end") {
 			strictEqual(event.isError, false);
 			await Promise.resolve();
-			f.receipt(event.toolCallId);
+			f.append("tool_result", {
+				toolCallId: event.toolCallId,
+				toolName: event.toolName,
+				isError: event.isError,
+				result: event.result,
+			});
 		}
 		if (event.type === "message_end" && event.message.role === "assistant") {
 			const correlationId = handle.requestCorrelationId(event.message);

@@ -2,6 +2,13 @@
 
 Clio Coder keeps the model-facing envelope stable and moves enforcement into the runtime registry and safety policy.
 
+Main sessions attach a small coordinator surface (read, bash, edit, write,
+verify, ask_user, gateway and dispatch) and discover other tools, recipes, and
+workflows progressively through the gateway. Workers keep their recipe execution surfaces. The compiler receives registered
+builtin presence separately from attached schemas so it can teach reachable
+gateway capabilities without claiming those tools are attached. Lazy MCP tool
+registration does not change this builtin presence input or the stable prefix.
+
 Source of truth: [tool-names.ts](../../src/core/tool-names.ts), [agent-tools.ts](../../src/tools/agent-tools.ts), [bootstrap.ts](../../src/tools/bootstrap.ts), [policy.ts](../../src/tools/policy.ts), [observation.ts](../../src/tools/observation.ts), [ignore-policy.ts](../../src/tools/ignore-policy.ts), and the per-tool modules under `src/tools/**`.
 
 ## Typed composition and cache identity
@@ -69,12 +76,19 @@ when the tool is, the same rule the Fleet block follows.
 | --- | --- | --- |
 | `identity.clio` | The default main-session identity; the compiler uses the identity selected by its inputs. | Clio’s identity. Workers instead use `identity.clio-coder-worker`. |
 | `operating.contract` | The default main-session operating contract and the shared contract in worker prompts. | Constitutional operating rules, preceding conditional capability guidance. |
+| `operating.user-control` | Main coordinator compilation; merged into the stable operating contract, including its prefix identity and manifest. | User steering, scientific uncertainty, explanations of outcomes and project state, and optional educational artifacts. |
+| `operating.coordinator` | Main coordinator compilation with admitted dispatch and a non-answer scope. Replaces legacy delegation prose. | Intent understanding, discovery before bounded delegation, dependency composition, receipts and verification. The fleet roster is discovered rather than preloaded. |
+| `operating.discovered-skills` | Main coordinator compilation with admitted gateway/context, skill discovery and a ready workflow. Replaces legacy skills prose. | Task-query discovery, named activation through gateway, dependency order and readiness constraints. |
 | `identity.self-awareness` | The selected identity is `identity.clio` and the fragment is present in the table (`compiler.ts:673`). | Installed paths, code outranks docs, configuration locations. Names no tool. |
 | `operating.delegation` | `sessionCanDispatch` holds, meaning provider tool support is not explicitly false, `dispatch` is on the surface, and `turnAllowsTool` admits it; and the turn mode is not `answer` (`compiler.ts:244`, `compiler.ts:701`). `proposal` mode still renders it. | The delegation threshold as a count taken before the first edit, the dispatch call shape, receipts, spot-checks, and shared `[worker result]` notes. |
 | `operating.skills` | `sessionCanUseSkills` holds: provider tool support is not explicitly false, `context` is on the surface and admitted by `turnAllowsTool`, `skillDiscoveryEnabled` is not false, turn constraints do not disable skills, the mode is not `answer`, and `readySkillCount` is not zero (`compiler.ts:259`). | Skill-shaped tasks and `/skill <name>` suggestions, plus direct `context(scope="skills")` listing and autonomy-aware activation guidance. |
 | `identity.docs-routing` | `identity.self-awareness` rendered, provider tool support is not explicitly false, `gateway` is on the surface, and `turnAllowsTool` admits `clio_docs` (`compiler.ts:676`). | Routes questions about Clio through `gateway(op="call", capability="clio_docs", args={query: ...})` before answering or searching the workspace. |
 | `operating.worker` | The reader is a dispatched worker, which never sees the coordinator fragments. | The assigned-task contract. |
 | `safety.<level>` | Always, selected by the effective autonomy level. | What runs, what is approval-required, and what is blocked, in the safety net's action-class vocabulary (read, write, command, `system_modify`, `git_destructive`) and never by tool name. |
+
+Legacy delegation and skill fragments remain available to compiler callers that
+do not supply coordinator presence. Workers do not receive coordinator or user-control
+fragments. The constitutional and safety contracts remain shared.
 
 `identity.docs-routing` does not depend on `context`, and tool hints cannot
 establish tool availability. The Tool Contract independently describes agent,
@@ -112,7 +126,12 @@ In addition to project root `CLIO-CODER.md` handbooks, Clio supports directory-s
 
 `wiki.page` and `wiki.plan` (`src/domains/prompts/fragments/wiki/*.md`) load through this same loader, with the same id/version/content-hash contract as every other fragment, but they are consumed differently: `context/wiki/prompts.ts` reads them by id, substitutes per-dispatch `{{token}}` placeholders (a page's path, title, and relative path; the plan file's path), and sends the result as a wiki-generation dispatch's `task`, never as a compiled system prompt. `{{token}}` substitution has no home in the fragment loader itself, the same division `identity.self-awareness`'s `{TOKEN}` placeholders use in `compiler.ts`: the loader hands back a raw body, and the one caller that needs live values fills them in. Both files' bodies open and close on a standalone `---` line that predates their frontmatter and was kept unchanged as body text so the substituted prompt stays byte-identical to what the old hand-rolled `readFileSync` produced.
 
-The Tool Contract section of the prompt renders a fixed set of base lines plus
+The coordinator Tool Contract names the actual attached schemas and teaches
+task-shaped discovery, describing one capability, gateway invocation, chaining,
+and capability-gated workflow guidance. It does not preload per-tool hints or
+the fleet roster. Describe and activation deliver those details at their step.
+
+For legacy compiler callers, the Tool Contract renders a fixed set of base lines plus
 one optional guidance sentence per tool, sourced from the tool registry
 (`ToolMetadata.promptHint` in [registry.ts](../../src/tools/registry.ts), assigned in
 [bootstrap.ts](../../src/tools/bootstrap.ts)).
@@ -123,7 +142,7 @@ rule, tool-free answering, the narrow-orientation tool list, validation for
 authorized file changes within scope, and schema correction after argument
 errors. Policy denials do not invite another route.
 
-Six tools carry hints: `ask_user`, `bash`, `code_nav`, `context`, `panes`,
+Six tools carry legacy hints: `ask_user`, `bash`, `code_nav`, `context`, `panes`,
 and `tasks`. A hint carries only a decision-local call shape the tool's own
 description cannot; policy that applies across tools is said once in its prompt
 section, so `dispatch` carries no hint.
@@ -131,7 +150,7 @@ section, so `dispatch` carries no hint.
 <details>
 <summary>Why delegation and fleet routing are not restated here</summary>
 
-Delegation, the tasks board, and skill listing are not restated in the Tool
+In legacy composition, delegation, the tasks board, and skill listing are not restated in the Tool
 Contract. `operating.delegation`, the `tasks` hint, and `operating.skills` each
 say their rule once and render exactly when their tool is on the surface.
 

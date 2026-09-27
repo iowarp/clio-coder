@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
-import { effectiveToolCall } from "../../tools/surface.js";
+import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
 import { type DeclaredCheckSourceRef, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../../tools/verify/catalog.js";
 import { assessQualityPolicy, loadQualityPolicy, type QualityFinding } from "../../tools/verify/quality-policy.js";
 import { validateTrustStatus } from "../evidence/trust-status.js";
@@ -136,7 +136,8 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 				evidence: [...evidence, ...limitations],
 				mutatedPaths,
 			};
-		if (loaded.policy) quality = assessQualityPolicy(input.workspaceRoot, loaded.policy, mutatedPaths, window);
+		if (loaded.policy)
+			quality = assessQualityPolicy(input.workspaceRoot, loaded.policy, mutatedPaths, capabilityEntries(window));
 		const outstanding = quality.filter((finding) => finding.state !== "passed" && finding.state !== "limited");
 		if (outstanding.length)
 			return {
@@ -218,6 +219,25 @@ function acceptanceCheckPassed(
 }
 
 /**
+ * Recent entries as the capabilities that ran. The coordinator reaches verify,
+ * bash and limitation only through gateway op=call or op=chain, so a scan keyed
+ * on the recorded name would never see that evidence and would keep demanding
+ * validation the model already ran. Result entries keep their own ids.
+ */
+function capabilityEntries(recent: ReadonlyArray<unknown>): unknown[] {
+	return expandChainMessages(recent).map((entry) => {
+		const record = asRecord(entry);
+		if (record?.kind !== "message" || record.role !== "tool_call") return entry;
+		const payload = asRecord(record.payload);
+		const recorded = payload === null ? null : stringFromFirst(payload, ["name", "toolName", "tool"]);
+		if (payload === null || recorded === null) return entry;
+		const call = effectiveToolCall(recorded, payload.args ?? payload.arguments ?? payload.input);
+		if (!call.viaGateway) return entry;
+		return { ...record, payload: { ...payload, name: call.toolName, args: call.args ?? {} } };
+	});
+}
+
+/**
  * Successful `limitation` receipts over the recent window. A receipt is a
  * `limitation` tool_call whose tool_result in the same window is not an
  * error, judged by the same `successfulToolResultId` rule the mutation and
@@ -229,7 +249,7 @@ function collectLimitationEvidence(recent: ReadonlyArray<unknown>): FinishContra
 	const calls = new Map<string, ToolCallEvidenceCandidate>();
 	const seen = new Set<string>();
 
-	for (const entry of recent) {
+	for (const entry of capabilityEntries(recent)) {
 		const call = limitationToolCall(entry);
 		if (call !== null) {
 			calls.set(call.toolCallId, call);
@@ -291,7 +311,7 @@ function mutatingReceipts(recent: ReadonlyArray<unknown>): string[] {
 	const paths: string[] = [];
 	const seen = new Set<string>();
 
-	for (const entry of recent) {
+	for (const entry of capabilityEntries(recent)) {
 		// A user-run `!` bash execution is self-contained: it carries its own
 		// success signal, so any mutation targets count without a paired result.
 		const bashMutation = bashExecutionMutationPaths(entry);
@@ -386,7 +406,7 @@ function collectValidationEvidence(
 	const dispatchCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const seen = new Set<string>();
 
-	for (const entry of recent) {
+	for (const entry of capabilityEntries(recent)) {
 		const protectedArtifact = protectedArtifactEvidence(entry);
 		if (protectedArtifact !== null) {
 			pushEvidence(evidence, seen, protectedArtifact);

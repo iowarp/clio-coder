@@ -17,6 +17,13 @@ import { replaceEngineMessages } from "../engine/agent.js";
 import type { ClioTurnRecord } from "../engine/session.js";
 import type { AgentEvent, AgentMessage, Usage } from "../engine/types.js";
 import {
+	chainStepToolCallId,
+	type DisplayToolCall,
+	displayToolCall,
+	gatewayChainSteps,
+	VIA_GATEWAY,
+} from "../tools/gateway-display.js";
+import {
 	type AssistantCallTiming,
 	assistantSessionPayload,
 	estimatedUsageForInterruptedTurn,
@@ -147,6 +154,11 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	let traceEventSeq = 0;
 	let traceUsage: SessionTurnUsage | null = null;
 	const traceToolStarts = new Map<string, string>();
+	// Trace rows and the terminal row name the capability a gateway op=call
+	// ran. Its result may not name it (a refused capability), so the call's own
+	// reading is kept until the call settles.
+	const shownToolCalls = new Map<string, DisplayToolCall>();
+	let terminalToolShown: { toolCallId: string; toolName: string; viaGateway: boolean } | null = null;
 
 	const traceNow = (): string => new Date().toISOString();
 
@@ -161,6 +173,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		traceRunId = null;
 		traceUsage = null;
 		traceToolStarts.clear();
+		shownToolCalls.clear();
 	};
 
 	const startTracedTurn = (userTurnId: string, prompt: string, submitted?: AgentRuntime): void => {
@@ -364,11 +377,18 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			state.lastTurnId = turn.id;
 			const startedAt = traceNow();
 			traceToolStarts.set(event.toolCallId, startedAt);
+			const shown = displayToolCall(event.toolName, event.args);
+			shownToolCalls.set(event.toolCallId, shown);
 			traceEvent({
 				eventId: `tool:${event.toolCallId}`,
 				type: "tool_call",
-				name: event.toolName,
-				payload: { tool: event.toolName, tool_call_id: event.toolCallId, args: event.args },
+				name: shown.toolName,
+				payload: {
+					tool: shown.toolName,
+					tool_call_id: event.toolCallId,
+					args: shown.viaGateway ? (shown.args ?? {}) : event.args,
+					...(shown.viaGateway ? { via: VIA_GATEWAY } : {}),
+				},
 				startedAt,
 			});
 		},
@@ -402,13 +422,17 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			const endedAt = traceNow();
 			const startedAt = traceToolStarts.get(event.toolCallId) ?? endedAt;
 			traceToolStarts.delete(event.toolCallId);
+			const result = event.result as { details?: unknown; terminate?: unknown } | undefined;
+			const shown = shownToolCalls.get(event.toolCallId) ?? displayToolCall(event.toolName, undefined, result?.details);
+			shownToolCalls.delete(event.toolCallId);
 			traceEvent({
 				eventId: `tool:${event.toolCallId}`,
 				type: "tool_call",
-				name: event.toolName,
+				name: shown.toolName,
 				payload: {
-					tool: event.toolName,
+					tool: shown.toolName,
 					tool_call_id: event.toolCallId,
+					...(shown.viaGateway ? { via: VIA_GATEWAY } : {}),
 					ok: event.isError !== true && event.outcome !== "error" && event.outcome !== "blocked",
 					duration_ms: event.durationMs ?? null,
 					result_summary: payload.resultSummary,
@@ -418,10 +442,53 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				startedAt,
 				endedAt,
 			});
+			// A chain's settled steps are spans of their own, named by capability
+			// and linked to the chain call; the ledger keeps the one aggregate.
+			const steps = gatewayChainSteps(event.toolName, event.result);
+			for (const step of steps) {
+				const stepCallId = chainStepToolCallId(event.toolCallId, step.id);
+				traceEvent({
+					eventId: `tool:${stepCallId}`,
+					type: "tool_call",
+					name: step.capability,
+					payload: {
+						tool: step.capability,
+						tool_call_id: stepCallId,
+						parent_tool_call_id: event.toolCallId,
+						via: VIA_GATEWAY,
+						args: step.args,
+						ok: !step.isError && step.outcome !== "blocked",
+						outcome: step.outcome ?? null,
+						block_reason: step.blockReason ?? null,
+					},
+					startedAt,
+					endedAt,
+				});
+			}
+			const terminalStep = steps.find((step) => step.terminate === true);
+			terminalToolShown =
+				result?.terminate === true
+					? {
+							toolCallId: event.toolCallId,
+							toolName: terminalStep?.capability ?? shown.toolName,
+							viaGateway: terminalStep !== undefined || shown.viaGateway,
+						}
+					: null;
 		},
 
 		appendTerminalToolAssistantTurn(terminal): void {
 			if (!deps.session) return;
+			// The synthesized row names the capability that ended the turn. It is
+			// no provider message, so the wire name `gateway` has nothing to replay.
+			const shown =
+				terminalToolShown?.toolCallId === terminal.toolCallId
+					? terminalToolShown
+					: { toolName: terminal.toolName, viaGateway: false };
+			terminalToolShown = null;
+			const named = {
+				toolName: shown.toolName,
+				...(shown.viaGateway ? { via: VIA_GATEWAY } : {}),
+			};
 			const turn = appendTurn(deps.session, {
 				kind: "assistant",
 				payload: {
@@ -429,14 +496,14 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 					stopReason: "stop",
 					terminalToolResult: true,
 					toolCallId: terminal.toolCallId,
-					toolName: terminal.toolName,
+					...named,
 				},
 			});
 			state.lastTurnId = turn.id;
 			traceEvent({
 				type: "message",
 				name: "assistant",
-				payload: { terminalToolResult: true, toolName: terminal.toolName, toolCallId: terminal.toolCallId },
+				payload: { terminalToolResult: true, ...named, toolCallId: terminal.toolCallId },
 			});
 			finishTracedTurn("success", null);
 		},

@@ -23,27 +23,86 @@ Tool registration and argument normalization are owned by [agent-tools.ts](../..
 
 ## gateway: discover and call secondary capabilities
 
-One gateway provides `find`, `describe`, and `call`. Source: [index.ts](../../src/tools/gateway/index.ts).
+Main Clio sessions attach a small basic surface: `read`, `bash`, `edit`,
+`write`, `verify`, `ask_user` and `gateway`, plus `dispatch` when delegation is
+wired. The gateway supplies every other capability on demand. Workers keep their admitted recipe surfaces, including direct
+execution and observation tools. Ordinary dispatch has a compact attached
+schema; `gateway(op="describe", capability="dispatch")` returns its canonical
+schema for advanced composition. The attached schema accepts `tasks` arrays with
+string assignments, task objects, or both; canonical validation still checks every
+call. Clio handles trivial local changes directly when delegation adds no value and
+delegates substantial work or explicit delegation requests.
+
+One gateway provides `find`, `describe`, `call`, and `chain`. Source: [index.ts](../../src/tools/gateway/index.ts).
 
 | Argument | Contract |
 | --- | --- |
-| `op` | Required: `find`, `describe`, or `call`. |
-| `query` | Optional case-insensitive filter for find. |
+| `op` | Required: `find`, `describe`, `call`, or `chain`. |
+| `query` | Optional task vocabulary or exact capability name for find; matches rank by relevance. |
+| `limit`, `offset` | Find pages: default 12 entries, maximum 300; follow `nextOffset`. |
 | `capability` | Required for describe/call; capability name. |
 | `args` | Validated inner-tool arguments for call. |
 | `server` | Find one MCP server. |
 | `refresh` | Find only; explicitly connect and refresh the named server. |
+| `steps` | Chain: 1–16 operations with unique `id`, `capability`, `args`, and optional `after:[ids]`. |
 
-`find` returns up to 300 capabilities within 32 KiB; `describe` returns schema and authority notes; `call` validates against the live schema and runs under the capability's own authority. Direct tools cannot be called through gateway.
+`find` returns bounded pages within 32 KiB; `describe` returns schema, usage, and
+authority notes; `call` validates against the live schema and runs under the
+capability's own authority. Direct tools are called directly, or included as
+steps in a chain. Describing `gateway` returns composition syntax; describing
+`dispatch` returns its full schema even though it is attached.
 
 | Placement | Tools |
 | --- | --- |
-| Direct | read, write, edit, bash, grep, find, ls, context, code_nav, verify, run_script, gateway |
-| Direct when wired | dispatch, monitor, steer, tasks, ledger, panes, limitation, decide, ask_user |
-| Gateway | artifact, web_read, web_fetch, git, evidence, credential_present, clio_docs, clio_library, data |
+| Direct in main sessions | read, bash, edit, write, verify, ask_user, gateway; dispatch when wired |
+| Gateway in main sessions | Other wired builtins, including grep, find, ls, code_nav, context, tasks, monitor, workflow, and supervision capabilities |
+| Direct in workers | Execution and observation tools admitted by the recipe; see its discovered tools rather than assuming the main surface |
 | Gateway when trusted/installed | `extension_<id>__<name>`, `mcp_<id>__<tool>` |
 
-Gateway adds no authority: inner safety, skills, approvals, action class, cancellation, shaping, and evidence still apply. The outer call counts once; `details.capability` identifies the inner tool. See [surface.ts](../../src/tools/surface.ts) for placement. Workers need an admitted `gateway` tool and an allowed capability; worker registries have no MCP source.
+Gateway adds no authority: inner safety, skills, approvals, action class,
+cancellation, shaping, and evidence still apply. An ordinary gateway call counts
+once; a chain counts its wrapper and each child attempt against the call budget.
+`details.capability` identifies an ordinary call's inner tool. See
+[surface.ts](../../src/tools/surface.ts) for placement. Workers need an admitted
+gateway and an allowed capability; worker registries have no MCP source.
+
+Chains form a dependency graph. Inside arguments,
+`{"$from":"inspect","path":["json","value"]}` selects a previous step's
+decoded JSON value and adds a dependency. `output` selects text; `details`
+selects result metadata. References select data without evaluating code.
+Independent read-class tools declaring parallel execution run up to four at
+once; context, mutations, commands, unknown MCP operations, and tools with
+dynamic safety projections serialize. All children pass ordinary admission.
+
+Results are plain text: a `Chain <status>` line (`complete`, `paused`, or
+`failed`) with settled and pending step ids, the boundary that stopped
+scheduling, then each settled step's raw output under
+`### step <id> (<capability>): <kind>`. Failure, cancellation, a loaded skill, an interview, or a terminal
+result stops scheduling new work. In-flight reads finish. Do not repeat completed
+writes when continuing. Skill instructions and operator answers return to the
+model before dependent work. If a read reveals an unforeseen interview need,
+Clio first reasons from the evidence and formulates the interview; the chain
+executor does not invent questions. `self_compact` is a standalone gateway call,
+never a chain step or a sibling in a tool batch.
+
+`details.chainResults` lists each settled step with its executed `args`, its
+result and its own admission verdict. A step whose `$from` reference cannot be
+resolved settles as a failure that never ran: its entry carries `bindingError`
+and the unresolved `requestedArgs` instead of `args`, so receipts, run effects
+and ledger expansion count nothing for it, while displays still show it as a
+failed step. Every settled step is judged as the capability it ran: its reads
+and grep lines ground a worker's citations, its writes and checks count as run
+effects, and a step the tool-call cap refused ends a worker run as cap-exhausted,
+exactly as the direct call would. A step whose output the chain cut to its share
+of the aggregate grounds only the lines the model saw. The loop guard likewise
+judges each step as its capability; the chain wrapper's own completion never
+resets a step's stagnation or repeat history.
+
+Use dispatch `tasks` with `mode="parallel"` or `mode="pipeline"` for agent
+composition. Load each skill at its workflow step through the context capability,
+then apply its instructions and restrictions. The shared composition principle
+is dependency order, with a reasoning boundary wherever the next action requires
+new interpretation.
 
 MCP metadata is read from a recorded catalog; `find`/`describe` do not launch a server. Only `call` or `find(server=..., refresh=true)` connects, and refresh requires one named server; refresh/server filters are refused on restricted tool surfaces. A normal named-server find filters cached metadata. Untrusted project servers are not launched; trust with `clio-coder mcp trust <id>` or `/mcp trust <id>`. Trust is re-read each session and is never inferred from a catalog.
 
@@ -348,7 +407,7 @@ Runs one task or a batch on configured fleet agents. Source: [`src/tools/dispatc
 | `routing` | Hard bounds: positive `maxCostUsd`, positive `deadlineMs`, `requiredCapabilities`. Configured adaptive routing adds `posture` (`manual`, `quality`, `balanced`, `latency`, `economy`), `minimumQuality` (0–1), `locality` (`local-only`, `prefer-local`, `any`), and `failover` (`none`, `approved`). Exact pins require manual posture and do not fail over; model-authored candidate lists are rejected. |
 | `timeout_ms` | Abort the whole dispatch after this duration; remaining sequential tasks are skipped. |
 | `briefing` | Optional parent context, not a task or worker instruction; trimmed, max 12,000 UTF-8 bytes, and recorded as byte/hash provenance. A task-level briefing overrides the batch value. |
-| `intent` | Top-level or task-level `{read_roots, write_roots, relevant_paths, expected_outputs, verification}` scope. Path arrays allow up to 32 entries, verification up to 8 `{check,timeout_ms?}` declared check IDs (never shell commands). Paths normalize repository-relative; task intent can narrow, not widen, the top-level ceiling. Parallel write roots must be disjoint; expected outputs do not confine access. See [typed dispatch intent](../architecture/dispatch-typed-intent.md). |
+| `intent` | Top-level or task-level `{read_roots, write_roots, relevant_paths, expected_outputs, verification}` scope. Path arrays allow up to 32 entries. `verification` is an array of up to 8 `{check,timeout_ms?}` entries using only declared check IDs from `verify()` discovery; a single object, shell command, or invented label such as `test suite` is refused. Paths normalize repository-relative; task intent can narrow, not widen, the top-level ceiling. Parallel write roots must be disjoint; expected outputs do not confine access. See [typed dispatch intent](../architecture/dispatch-typed-intent.md). |
 | `gate` | Shorthand for `intent.verification=[{check: gate}]`; refused when both forms are supplied. |
 | `budget`, `max_output_bytes`, `result_summary_max_bytes` | Budget is advisory `{toolCalls>=1,readReserve>=0,retryRevision?}`; `retryRevision` uses the same two fields and none is a hard stop. Returned preview defaults to 20000 bytes. Inline summary defaults to 16384 bytes; mutation-report workers accept 1–32768, with per-task override. Explicit mutation summary limits on other steps are refused. |
 
@@ -511,7 +570,7 @@ gateway(op="call", capability="git", args={op: "log", limit: 10})
 
 ## context: workspace, skill activation, and recall
 
-Direct OBSERVE retrieval of the working environment. Source: [index.ts](../../src/tools/context/index.ts).
+OBSERVE retrieval of the working environment. Main sessions reach it through the gateway; workers may attach it directly. Source: [index.ts](../../src/tools/context/index.ts).
 
 Arguments are `scope` (`workspace`, `settings`, `skills`, `recall`, or `budget`), `name` and `include_tree` for skills, and `ref`, `path`, `offset`, and `limit` for recall. `query` can narrow recall discovery. In a main session, supply either `ref` or `path`: a path selects the newest evicted read whose marker is still visible, while a ref also retrieves historical results behind a summary. Omit both for bounded discovery. An unchanged successful reread records recall provenance while returning the current read body. Workspace returns the cached session git/project snapshot and requires a bound session. Skills list or activate installed skills in `default` and `yolo`; read-only runs cannot activate them, and recipe-bound workers can load only their declared skills. Recall retrieves evicted observations without changing the eviction marker. Workspace, settings, and skills use a 50KB cap.
 

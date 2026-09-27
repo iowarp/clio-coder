@@ -15,6 +15,7 @@
 import type { TimelineItem } from "../../contracts/sessions.js";
 import type { StatusTone } from "../design/status.js";
 import { type DiffPanel, diffPanel, NOT_APPROVED_NOTE } from "./diff-model.js";
+import { type ChainStepStatus, readGateway } from "./gateway-model.js";
 
 /** Ported from the workbench's clio-host.ts generic-label table. */
 export const SAFE_TOOL_TITLES: Readonly<Record<string, string>> = {
@@ -41,7 +42,16 @@ export const MAX_RENDERED_MATCHES = 200;
 /** supervisor.ts caps `partialOutput` at this many UTF-16 units. */
 export const PARTIAL_OUTPUT_LIMIT = 16_384;
 
-export type ToolBody = "diff" | "terminal" | "matches" | "file" | "fetch" | "dispatch" | "ask" | "json";
+export type ToolBody = "diff" | "terminal" | "matches" | "file" | "fetch" | "dispatch" | "ask" | "json" | "chain";
+
+/** One step of a gateway chain, as its own line under the chain's row. */
+export interface ToolStep {
+	readonly id: string;
+	/** The capability the step ran, named as a direct call of it is. */
+	readonly name: string;
+	readonly headline: string;
+	readonly status: ChainStepStatus;
+}
 
 export interface ToolFact {
 	readonly label: string;
@@ -84,8 +94,12 @@ export interface ToolPresentation {
 	readonly digest: string | null;
 	/** Tone of the digest when it carries a judgement, such as a nonzero exit code. */
 	readonly digestTone: StatusTone | null;
-	/** Canonical tool name, or the kind hint when the name is missing. */
+	/** Canonical tool name, or the kind hint when the name is missing. A gateway op=call names its capability. */
 	readonly name: string;
+	/** The call went through `gateway`; the row still reads as the capability it ran. */
+	readonly viaGateway: boolean;
+	/** Present only for a `chain` body: each step on its own line. */
+	readonly steps: readonly ToolStep[];
 	/** One line, always visible, never JSON. */
 	readonly headline: string;
 	readonly body: ToolBody;
@@ -525,6 +539,9 @@ const KINDS: Readonly<Record<string, Kind>> = {
 	task: { chip: "task", body: "json" },
 };
 
+/** A gateway chain: one row whose steps each read as their own call. */
+const CHAIN_KIND: Kind = { chip: "chain", body: "chain" };
+
 /** What a collapsed row says the call did. Someone who has never used a shell reads these first. */
 const VERBS: Readonly<Record<string, string>> = {
 	read: "Read",
@@ -545,6 +562,7 @@ const VERBS: Readonly<Record<string, string>> = {
 	evidence: "Evidence",
 	ledger: "Ledger",
 	task: "Task",
+	chain: "Chain",
 	search: "Search",
 	think: "Think",
 	delete: "Delete",
@@ -611,6 +629,10 @@ function digestFor(
 		case "fetch": {
 			const status = fact("status");
 			return status === undefined ? { text: null, tone: null } : { text: status.value, tone: status.tone ?? null };
+		}
+		case "chain": {
+			const failed = fact("failed");
+			return failed === undefined ? { text: null, tone: null } : { text: `${failed.value} failed`, tone: "fail" };
 		}
 		// A delegation's headline already names its agent, so the row adds nothing after it.
 		default:
@@ -726,13 +748,41 @@ export interface PresentOptions {
 	readonly startedAtMs?: number;
 }
 
+/** A chain's steps with the headline each would carry as a direct call. */
+function chainStepsFor(item: TimelineItem, options: PresentOptions): ToolStep[] {
+	return (readGateway(item).steps ?? []).map((step) => ({
+		id: step.id,
+		name: step.capability,
+		headline: truncateHeadline(
+			presentable(headlineFor(step.capability, step.args, step.capability), options.workspaceRoot),
+		),
+		status: step.status,
+	}));
+}
+
+/** `3 steps · grep, read, bash`. */
+function chainHeadline(steps: readonly ToolStep[]): string {
+	if (steps.length === 0) return "gateway chain";
+	return `${steps.length} step${steps.length === 1 ? "" : "s"} · ${steps.map((step) => step.name).join(", ")}`;
+}
+
 /** The whole card, derived from one timeline item. Never throws. */
 export function presentTool(item: TimelineItem, options: PresentOptions = {}): ToolPresentation {
-	const wire = readWire(item);
-	const name = item.title ?? item.toolKind ?? "tool";
-	const kind = KINDS[name] ?? KIND_HINT[item.toolKind ?? "other"] ?? { chip: item.toolKind ?? "tool", body: "json" };
+	// A gateway op=call reads as the capability it ran, from that capability's
+	// own arguments; a chain reads as its steps.
+	const gateway = readGateway(item);
+	const wire = { ...readWire(item), input: gateway.input };
+	const name = gateway.name ?? item.title ?? item.toolKind ?? "tool";
+	const steps = gateway.steps === null ? [] : chainStepsFor(item, options);
+	const kind =
+		gateway.steps !== null
+			? CHAIN_KIND
+			: (KINDS[name] ?? KIND_HINT[item.toolKind ?? "other"] ?? { chip: item.toolKind ?? "tool", body: "json" });
 	const fallback = SAFE_TOOL_TITLES[name] ?? SAFE_TOOL_TITLES[item.toolKind ?? "other"] ?? SAFE_TOOL_TITLES.other;
-	const rawHeadline = headlineFor(name, wire.input, item.text.length > 0 ? item.text : (fallback as string));
+	const rawHeadline =
+		gateway.steps !== null
+			? chainHeadline(steps)
+			: headlineFor(name, wire.input, item.text.length > 0 ? item.text : (fallback as string));
 	const headline = truncateHeadline(presentable(rawHeadline, options.workspaceRoot)) || (fallback as string);
 	const settled = isSettledStatus(item.status);
 	const failed = item.status === "failed" || wire.isError;
@@ -777,6 +827,13 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 			facts.push(...fetchFacts(wire.details));
 			if (wire.details?.truncated === true) note = "The fetched body was cut at the byte cap.";
 			break;
+		case "chain": {
+			const failedSteps = steps.filter((step) => step.status === "failed").length;
+			const notRun = steps.filter((step) => step.status === "not run").length;
+			if (failedSteps > 0) facts.push({ label: "failed", value: String(failedSteps), tone: "fail" });
+			if (notRun > 0) facts.push({ label: "not run", value: String(notRun), tone: "warn" });
+			break;
+		}
 		case "dispatch": {
 			const runId = str(wire.details?.runId) ?? str(wire.input.runId);
 			if (runId !== null) facts.push({ label: "run", value: runId });
@@ -803,7 +860,10 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 	// last line of the refusal, which is an instruction to the model ("Do not retry the same call.").
 	const refused = notApproved(item, wire);
 	const stopped = stoppedRun(item, wire);
-	const excerpt = failed && !refused && !stopped ? failureExcerpt(output.text) : null;
+	// A chain's output is the model's JSON digest of its steps; the step that
+	// failed says more than that digest's last line.
+	const excerpt =
+		failed && !refused && !stopped && (kind.body !== "chain" || steps.length === 0) ? failureExcerpt(output.text) : null;
 	const digest =
 		refused || stopped
 			? { text: null, tone: null }
@@ -816,6 +876,8 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 		digest: digest.text,
 		digestTone: digest.tone,
 		name,
+		viaGateway: gateway.viaGateway,
+		steps,
 		headline,
 		body: kind.body,
 		tone: refused || stopped ? "neutral" : toneFor(item.status, wire.isError),

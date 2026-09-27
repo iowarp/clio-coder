@@ -60,9 +60,9 @@ export function createTaskNudgeRegistration(options: CreateTaskNudgeRegistration
 			if (stopReason !== undefined && stopReason !== "stop") return [];
 			const turnToolCalls = input.metadata?.turnToolCalls;
 			if (typeof turnToolCalls !== "number" || turnToolCalls <= 0) return [];
-			// A surface without the tasks tool can never update the board, so
+			// A surface without access to tasks can never update the board, so
 			// nudging it would loop against a wall.
-			const activeToolNames = input.metadata?.activeToolNames;
+			const activeToolNames = input.metadata?.activeCapabilityNames ?? input.metadata?.activeToolNames;
 			if (typeof activeToolNames === "string" && !activeToolNames.split(",").includes(ToolNames.Tasks)) return [];
 			let board: TaskBoardSnapshot | null;
 			try {

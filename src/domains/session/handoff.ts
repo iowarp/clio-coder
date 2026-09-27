@@ -22,7 +22,7 @@
  */
 
 import { isAbsolute, normalize, relative, resolve } from "node:path";
-import { effectiveToolCall } from "../../tools/surface.js";
+import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
 import { decisionRationale } from "./decision-board.js";
 import type { DecisionLedgerEntry, SessionEntry } from "./entries.js";
 import { filterEntriesToActivePath } from "./tree/active-path.js";
@@ -399,7 +399,7 @@ export function buildHandoffReadLedger(
 	const cwd = usableCwd(options.cwd);
 	const active = filterEntriesToActivePath(entries, options.leafTurnId ?? undefined);
 	const paths = new Set<string>();
-	for (const entry of active) {
+	for (const entry of expandChainMessages(active)) {
 		if (entry.kind === "fileEntry") {
 			const normalized = normalizeHandoffPath(entry.path, cwd);
 			if (normalized.length > 0) paths.add(normalized);

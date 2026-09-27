@@ -22,7 +22,7 @@ import type { EvictionReason, SessionEntry } from "../../../session/entries.js";
 import type { EvictionCandidate, PolicyInput, WorkingSetPolicy } from "../contract.js";
 import { tokensFreedByEviction } from "../engine.js";
 import { protectionCutoffIndex } from "../horizon.js";
-import { buildPathIndex, callPathsByToolCallId } from "../path-index.js";
+import { buildPathIndex, type ChainMember, callPathsByToolCallId, type PathObservation } from "../path-index.js";
 import { isProtected } from "../protect.js";
 import { profilePins, resolveWorkingSetProfile, settingsUnderProfile, type WorkingSetProfile } from "./profiles.js";
 import { isRungId, RUNGS, type RungEmitter, type RungId } from "./rungs.js";
@@ -78,6 +78,43 @@ export interface ComposedWorkingSetPolicy extends WorkingSetPolicy {
 	readonly pinRecalledTwice: boolean;
 }
 
+interface EarnedReason {
+	reason: EvictionReason;
+	by?: string;
+}
+
+/**
+ * Record what one emission says about a chain aggregate's members and return
+ * the reason the aggregate leaves for once every member has one, else null.
+ * A rung that judged the whole entry (age, offload) speaks for every member
+ * still unexplained; a path rung explains only the member it judged. Each
+ * member keeps its first reason, as a lone result would.
+ *
+ * The aggregate carries its weakest member's reason, the latest rung in the
+ * policy's order, because that rung is what finally let the whole body go.
+ * A tie goes to the first member in receipt order, so the choice depends on
+ * the ledger alone.
+ */
+function settleChain(
+	members: ReadonlyArray<ChainMember>,
+	earned: Map<string, EarnedReason>,
+	unit: string | PathObservation,
+	reason: EarnedReason,
+	rank: (reason: EvictionReason) => number,
+): EarnedReason | null {
+	for (const member of members) {
+		if (earned.has(member.toolCallId)) continue;
+		if (typeof unit === "string" || member.observation === unit) earned.set(member.toolCallId, reason);
+	}
+	let chosen: EarnedReason | null = null;
+	for (const member of members) {
+		const own = earned.get(member.toolCallId);
+		if (own === undefined) return null;
+		if (chosen === null || rank(own.reason) > rank(chosen.reason)) chosen = own;
+	}
+	return chosen;
+}
+
 export function composePolicy(
 	id: string,
 	rungIds: ReadonlyArray<RungId>,
@@ -112,14 +149,30 @@ export function composePolicy(
 				if (entry !== undefined) entryIndexOf.set(entry.turnId, i);
 			}
 
-			const emit = ((turnId: string, reason: EvictionReason, by?: string): boolean => {
+			const earnedByChain = new Map<string, Map<string, EarnedReason>>();
+			const rank = (reason: EvictionReason): number => (rungIds as ReadonlyArray<string>).indexOf(reason);
+
+			const emit = ((unit: string | PathObservation, reason: EvictionReason, by?: string): boolean => {
+				const turnId = typeof unit === "string" ? unit : unit.ref.entry;
 				if (claimed.has(turnId) || view.evicted.has(turnId)) return false;
 				const entryIndex = entryIndexOf.get(turnId);
 				if (entryIndex === undefined) return false;
 				const entry: SessionEntry | undefined = entries[entryIndex];
 				if (entry === undefined) return false;
 				if (isProtected(entry, { entryIndex, cutoffIndex, input, index, pins, pinRecalledTwice })) return false;
-				const candidate: EvictionCandidate = { ref: { entry: turnId }, reason, ...(by === undefined ? {} : { by }) };
+				let earned: EarnedReason = { reason, ...(by === undefined ? {} : { by }) };
+				const members = index.chainMembers.get(turnId);
+				if (members !== undefined) {
+					let memberReasons = earnedByChain.get(turnId);
+					if (memberReasons === undefined) {
+						memberReasons = new Map();
+						earnedByChain.set(turnId, memberReasons);
+					}
+					const settled = settleChain(members, memberReasons, unit, earned, rank);
+					if (settled === null) return false;
+					earned = settled;
+				}
+				const candidate: EvictionCandidate = { ref: { entry: turnId }, ...earned };
 				const tokens = tokensFreedByEviction(estimateTokens, entry, candidate, callPaths);
 				// Priced here for the same reason `planEviction` refuses it: a unit
 				// whose marker is as long as its body frees nothing, and the age

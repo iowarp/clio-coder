@@ -799,6 +799,24 @@ describe("gateway MCP capabilities", () => {
 		strictEqual(clients.length, 1);
 	});
 
+	it("checks a chain's capability ceiling before connecting an MCP server", async () => {
+		const scene = scenario();
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		const { registry, clients, source } = wire(scene);
+		open.push(source);
+		const result = await registry.invoke(
+			{
+				tool: ToolNames.Gateway,
+				args: { op: "chain", steps: [{ id: "echo", capability: ECHO, args: { message: "outside surface" } }] },
+			},
+			{ allowedTools: [ToolNames.Gateway, ToolNames.Read] },
+		);
+		if (result.kind !== "ok" || result.result.kind !== "error") throw new Error(JSON.stringify(result));
+		ok(result.result.message.includes("not on this run's admitted tool surface"));
+		strictEqual(clients.length, 0);
+		strictEqual(existsSync(scene.markerPath), false);
+	});
+
 	it("takes the capability's action class from trust: unknown asks in default and runs in yolo", async () => {
 		const scene = scenario();
 		ok(

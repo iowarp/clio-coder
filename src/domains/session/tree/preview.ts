@@ -14,6 +14,7 @@
  */
 import type { ClioTurnRecord } from "../../../engine/session.js";
 import { stripTokenizerSentinels } from "../../../engine/strip-tokenizer-sentinels.js";
+import { displayToolCall, gatewayChainPlan } from "../../../tools/gateway-display.js";
 import { operatorTextOfUserPayload } from "../history.js";
 
 /**
@@ -223,20 +224,31 @@ export function buildTurnPreview(turn: TurnPreviewInput, max: number = TURN_PREV
 					(b) => b && typeof b === "object" && (b as { type?: unknown }).type === "toolCall",
 				);
 				if (toolCalls.length > 0) {
+					// A gateway op=call names the capability it ran, as a direct call did.
 					const names = toolCalls
-						.map((b) => (b as { name?: unknown }).name)
-						.filter((n): n is string => typeof n === "string");
+						.map((b) => {
+							const block = b as { name?: unknown; arguments?: unknown };
+							return typeof block.name === "string" ? displayToolCall(block.name, block.arguments).toolName : null;
+						})
+						.filter((n): n is string => n !== null);
 					if (names.length > 0) return clamp(`(tool calls) ${names.join(", ")}`, budget);
 				}
 			}
 			return "(empty)";
 		}
 		case "tool_call": {
-			const call = extractToolCall(turn.payload);
-			if (!call) return "(empty)";
+			const wire = extractToolCall(turn.payload);
+			if (!wire) return "(empty)";
+			// A gateway op=call reads as its capability, marked as reached through
+			// the gateway; a chain lists the capabilities its steps planned.
+			const chain = gatewayChainPlan(wire.toolName, wire.args);
+			if (chain.length > 0) return clamp(`gateway chain(${chain.map((step) => step.capability).join(", ")})`, budget);
+			const shown = displayToolCall(wire.toolName, wire.args);
+			const call = { toolName: shown.toolName, args: shown.viaGateway ? shown.args : wire.args };
+			const via = shown.viaGateway ? " via gateway" : "";
 			const arg = pickToolArg(call.toolName, call.args);
-			const inner = arg.length > 0 ? `"${clamp(arg, Math.max(8, budget - call.toolName.length - 4))}"` : "";
-			const composed = `${call.toolName}(${inner})`;
+			const inner = arg.length > 0 ? `"${clamp(arg, Math.max(8, budget - call.toolName.length - via.length - 4))}"` : "";
+			const composed = `${call.toolName}(${inner})${via}`;
 			return clamp(composed, budget);
 		}
 		case "tool_result": {

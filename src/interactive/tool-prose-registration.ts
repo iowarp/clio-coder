@@ -30,9 +30,14 @@ export function createToolProseRegistration(): MiddlewareHookRegistration {
 				typeof input.metadata?.activeToolNames === "string"
 					? input.metadata.activeToolNames.split(",").filter((name) => name.length > 0)
 					: [];
+			const reachable =
+				typeof input.metadata?.activeCapabilityNames === "string"
+					? input.metadata.activeCapabilityNames.split(",").filter((name) => name.length > 0)
+					: [];
 			const assessment = assessToolProseLoop({
 				text,
 				activeToolNames,
+				gatewayToolNames: reachable.filter((name) => !activeToolNames.includes(name)),
 				hasStructuredToolCall: input.metadata?.hasStructuredToolCall === true,
 			});
 			if (assessment.kind !== "loop") return [];

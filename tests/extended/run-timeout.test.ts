@@ -135,7 +135,14 @@ describe("clio-coder run --timeout", () => {
 		// Hidden shell content asks in default, which makes a headless run a no-op; the
 		// model then stalls, and the timeout is what ends it.
 		const { turn, scratch } = await headlessTurn(
-			[{ kind: "tool", name: "bash", arguments: { command: "python3 -c \"print('hidden')\"" } }, { kind: "stall" }],
+			[
+				{
+					kind: "tool",
+					name: "gateway",
+					arguments: { op: "call", capability: "bash", args: { command: "python3 -c \"print('hidden')\"" } },
+				},
+				{ kind: "stall" },
+			],
 			"default",
 			["--timeout", "2", "--fail-on-noop"],
 		);

@@ -258,7 +258,10 @@ async function provider(options: {
 							id: options.toolCallId ?? "call-write",
 							type: "function",
 							function: next?.tool
-								? { name: next.tool.name, arguments: JSON.stringify(next.tool.args) }
+								? {
+										name: "gateway",
+										arguments: JSON.stringify({ op: "call", capability: next.tool.name, args: next.tool.args }),
+									}
 								: { name: "bash", arguments: '{"command":"printf \'from ACP\' > note.txt"}' },
 						},
 					],

@@ -39,6 +39,7 @@ import {
 	type ToolFact,
 	type ToolLocation,
 	type ToolPresentation,
+	type ToolStep,
 	toolOpensAtMount,
 } from "./tool-presentation.js";
 import "./tool-cards.css";
@@ -149,6 +150,34 @@ function Matches({ groups, dropped }: { groups: readonly MatchGroup[]; dropped: 
 	);
 }
 
+const STEP_GLYPH: Readonly<Record<ToolStep["status"], string>> = {
+	done: "✓",
+	failed: "✕",
+	"not run": "–",
+	planned: "·",
+};
+
+/** A gateway chain's steps, one line each, in the order they settled. The status is written, never colour alone. */
+function ChainSteps({ steps }: { steps: readonly ToolStep[] }) {
+	if (steps.length === 0) return null;
+	return (
+		<ol className="tool-card__steps">
+			{steps.map((step) => (
+				<li className="tool-card__step" data-status={step.status} key={step.id}>
+					<span className="tool-card__glyph" aria-hidden="true">
+						{STEP_GLYPH[step.status]}
+					</span>
+					<span className="tool-card__verb">{step.name}</span>
+					<span className="tool-card__headline" title={step.headline}>
+						{step.headline}
+					</span>
+					<span className={step.status === "done" ? "sr-only" : "tool-card__state"}>{step.status}</span>
+				</li>
+			))}
+		</ol>
+	);
+}
+
 function RawDisclosure({ item }: { item: TimelineItem }) {
 	const [open, setOpen] = useState(false);
 	return (
@@ -196,6 +225,16 @@ function Body({ card }: { card: ToolPresentation }) {
 			return <ResultDisclosure pane={card.output} label={resultLabel(card)} />;
 		case "ask":
 			return card.failed ? <OutputBlock pane={card.output} /> : null;
+		case "chain":
+			// The steps are the body; the aggregate output is the model's digest of
+			// them and stays in the raw disclosure. A chain that never parsed has
+			// no steps, and its refusal is the output.
+			return (
+				<>
+					<ChainSteps steps={card.steps} />
+					{card.output.running || card.steps.length === 0 ? <OutputBlock pane={card.output} /> : null}
+				</>
+			);
 		default:
 			return <OutputBlock pane={card.output} />;
 	}
@@ -232,6 +271,7 @@ export const ToolCard = memo(function ToolCard({ item, options, agent = null, el
 					{card.headline}
 				</span>
 				<span className="tool-card__trail">
+					{card.viaGateway ? <span className="tool-card__via">via gateway</span> : null}
 					{agent === null ? null : <span className="tool-card__agent">agent {agent}</span>}
 					{card.digest === null ? null : (
 						<span className="tool-card__digest" data-tone={card.digestTone ?? undefined}>

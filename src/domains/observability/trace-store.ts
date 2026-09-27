@@ -21,6 +21,7 @@ import type {
 } from "../../core/bus-events.js";
 import { normalizeClioCoderEventType } from "../../core/naming-events.js";
 import { processAlive, processBirthToken } from "../../core/process-identity.js";
+import { chainStepToolCallId, displayToolCall, gatewayChainSteps, VIA_GATEWAY } from "../../tools/gateway-display.js";
 import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 import { normalizeCostProvenance } from "../providers/types/cost-provenance.js";
 
@@ -1554,19 +1555,25 @@ function recordProgress(
 				? new Date(startedAtMs + duration).toISOString()
 				: at;
 		const tool = start?.tool ?? stringValue(toolFacts.toolName) ?? stringValue(toolFacts.tool) ?? "tool";
-		const args = start?.args ?? toolFacts.args ?? null;
+		const wireArgs = start?.args ?? toolFacts.args ?? null;
 		const result = (start !== undefined ? start.result : reported) ?? null;
 		const ok = start !== undefined ? start.ok : finishedOk;
+		// A span names the capability a gateway op=call ran, as a direct call's
+		// span did, and keeps the gateway as an attribute.
+		const shown = displayToolCall(tool, wireArgs, isRecord(result) ? result.details : undefined);
+		const args = shown.viaGateway ? (shown.args ?? {}) : wireArgs;
+		const eventId = `${payload.runId}:tool:${toolCallId}`;
 		store.insertEvent({
-			eventId: `${payload.runId}:tool:${toolCallId}`,
+			eventId,
 			runId: payload.runId,
 			phaseId: payload.runId,
 			parentId: `${payload.runId}:agent_start`,
 			type: "tool_call",
-			name: readableToolName(tool, args),
+			name: readableToolName(shown.toolName, args),
 			payload: {
-				tool,
+				tool: shown.toolName,
 				tool_call_id: toolCallId,
+				...(shown.viaGateway ? { via: VIA_GATEWAY } : {}),
 				args,
 				result_snippet: boundedSnippet(result),
 				ok,
@@ -1576,6 +1583,32 @@ function recordProgress(
 			startedAt,
 			endedAt,
 		});
+		// A chain's settled steps are spans of their own under the chain's span.
+		// They carry no clock of their own, so they share the chain's frame.
+		for (const step of gatewayChainSteps(tool, result)) {
+			const stepCallId = chainStepToolCallId(toolCallId, step.id);
+			store.insertEvent({
+				eventId: `${payload.runId}:tool:${stepCallId}`,
+				runId: payload.runId,
+				phaseId: payload.runId,
+				parentId: eventId,
+				type: "tool_call",
+				name: readableToolName(step.capability, step.args),
+				payload: {
+					tool: step.capability,
+					tool_call_id: stepCallId,
+					parent_tool_call_id: toolCallId,
+					via: VIA_GATEWAY,
+					args: step.args,
+					result_snippet: boundedSnippet(step.result),
+					ok: !step.isError && step.outcome !== "blocked",
+					duration_ms: null,
+					agent: payload.agentId,
+				},
+				startedAt,
+				endedAt,
+			});
+		}
 		if (
 			start === undefined ||
 			((!start.engineStarted || start.engineFinished) && (!start.clioStarted || start.clioFinished))

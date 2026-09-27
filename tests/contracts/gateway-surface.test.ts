@@ -92,14 +92,15 @@ describe("gateway surface placement", () => {
 		deepStrictEqual(withGatewayForCapabilities([ToolNames.Read, ToolNames.Grep]), [ToolNames.Read, ToolNames.Grep]);
 	});
 
-	it("registers run_script direct and data behind the gateway in session and worker registries with the policy assertion green", () => {
+	it("keeps execution tools direct for workers and discoverable for coordinators with the policy assertion green", () => {
 		const session = createRegistry({ safety: createWorkerSafety({ cwd: env.dir }) });
 		registerAllTools(session, { mcpCapabilities: false });
 		const worker = createWorkerToolRegistry();
 		for (const registry of [session, worker]) {
 			const direct = registry.listRegistered();
 			const gateway = registry.listGateway().map((spec) => spec.name);
-			ok(direct.includes(ToolNames.RunScript), "run_script is attached direct");
+			strictEqual(direct.includes(ToolNames.RunScript), registry === worker, "run_script is attached only to workers");
+			strictEqual(gateway.includes(ToolNames.RunScript), registry === session);
 			ok(direct.includes(ToolNames.Gateway), "gateway is attached direct");
 			for (const name of GATEWAY_BUILTINS) {
 				ok(!direct.includes(name), `${name} is not attached`);

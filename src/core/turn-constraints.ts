@@ -1,4 +1,4 @@
-import { toolPlacement } from "../tools/surface.js";
+import { COORDINATOR_DIRECT_TOOLS, toolPlacement } from "../tools/surface.js";
 import { ToolNames } from "./tool-names.js";
 
 /**
@@ -44,7 +44,10 @@ export function turnAllowsTool(constraints: TurnConstraints | undefined, capabil
 	if (allowed === undefined || allowed.includes(capability)) return true;
 	// Naming a secondary capability necessarily admits its transport wrapper;
 	// naming the wrapper alone never admits every capability behind it.
-	return capability === ToolNames.Gateway && allowed.some((name) => toolPlacement(name) === "gateway");
+	return (
+		capability === ToolNames.Gateway &&
+		allowed.some((name) => toolPlacement(name) === "gateway" || !COORDINATOR_DIRECT_TOOLS.has(name))
+	);
 }
 
 export function turnAllowsContinuation(constraints: TurnConstraints | undefined): boolean {

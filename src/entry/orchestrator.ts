@@ -154,6 +154,7 @@ import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { askSite } from "../domains/providers/site-ask.js";
 import { rankCapabilities } from "../domains/providers/sites/capabilities.js";
+import { createHarnessRoutingSite } from "../domains/providers/sites/harness-routing.js";
 import { type DispatchForecast, dispatchForecastConfident, turnSites } from "../domains/providers/sites/index.js";
 import { createTurnRelevanceStore } from "../domains/providers/turn-relevance.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
@@ -2010,15 +2011,33 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Turn-level sites join the same request; each one only asks when bound.
 		// The recipe question joins `dispatchForecast` only with the experimental
 		// speculative dispatch leaf on; off, the request is what it always was.
-		sites: turnSites({
-			recipes: () =>
-				agents !== undefined && getCurrentSettings().fleet.speculativeDispatch
-					? agents
-							.listSpecs()
-							.filter((spec) => spec.audience !== "internal")
-							.map((spec) => ({ id: spec.id, description: spec.description }))
-					: null,
-		}),
+		sites: [
+			...turnSites({
+				recipes: () =>
+					agents !== undefined && getCurrentSettings().fleet.speculativeDispatch
+						? agents
+								.listSpecs()
+								.filter((spec) => spec.audience !== "internal")
+								.map((spec) => ({ id: spec.id, description: spec.description }))
+						: null,
+			}),
+			createHarnessRoutingSite(() => [
+				...(toolBootstrap.mcpCapabilities?.catalog().entries ?? []).map((entry) => ({
+					kind: "tool" as const,
+					id: entry.name,
+					description: entry.description,
+				})),
+				...toolRegistry.listAll().map((spec) => ({ kind: "tool" as const, id: spec.name, description: spec.description })),
+				...(agents?.listSpecs() ?? [])
+					.filter((spec) => spec.audience !== "internal" && spec.id !== "oracle")
+					.map((spec) => ({ kind: "agent" as const, id: spec.id, description: spec.description })),
+				...(resources === undefined ? [] : modelVisibleSkills(resources.skills(process.cwd()).items)).map((skill) => ({
+					kind: "skill" as const,
+					id: skill.name,
+					description: skill.description,
+				})),
+			]),
+		],
 	});
 	const visionSidecar = createVisionSidecar({ getSettings: () => getCurrentSettings(), providers });
 	const toolBootstrap = registerAllTools(toolRegistry, {

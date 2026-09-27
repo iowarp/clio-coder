@@ -1,3 +1,4 @@
+import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
 import { isSessionEntry } from "../session/entries.js";
 import type { TaskBoardSnapshot } from "../session/task-board.js";
 import type { UserTaskAcceptance } from "./acceptance.js";
@@ -12,16 +13,22 @@ export function activeUserTaskAcceptance(
 ): UserTaskAcceptance | undefined {
 	if (!board || !sessionId) return undefined;
 	const touched = new Set<string>();
-	for (const entry of window) {
+	// The coordinator updates the board through gateway op=call or a chain step.
+	for (const entry of expandChainMessages(window)) {
 		if (!isSessionEntry(entry) || entry.kind !== "message" || entry.role !== "tool_call") continue;
 		if (!entry.payload || typeof entry.payload !== "object") continue;
-		const payload = entry.payload as { name?: string; toolName?: string; args?: { action?: string; id?: string } };
+		const payload = entry.payload as { name?: string; toolName?: string; args?: unknown };
+		const call = effectiveToolCall(payload.name ?? payload.toolName ?? "", payload.args);
+		const id = call.args?.id;
+		const action = call.args?.action;
 		if (
-			(payload.name ?? payload.toolName) === "tasks" &&
-			payload.args?.id &&
-			["done", "block", "drop"].includes(payload.args.action ?? "")
+			call.toolName === "tasks" &&
+			typeof id === "string" &&
+			id.length > 0 &&
+			typeof action === "string" &&
+			["done", "block", "drop"].includes(action)
 		)
-			touched.add(payload.args.id);
+			touched.add(id);
 	}
 	const linked = new Set(
 		board.tasks

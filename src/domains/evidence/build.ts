@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { rawDurationMs } from "../../core/timers.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
-import { effectiveToolCall } from "../../tools/surface.js";
+import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
 import type {
 	RunEnvelope,
 	RunKind,
@@ -466,7 +466,12 @@ function validationEvidenceByRun(
 ): Map<string, TrustArtifactReference[]> {
 	const evidence = new Map<string, TrustArtifactReference[]>();
 	const calls = new Map<string, ValidationToolCallCandidate>();
-	for (const linked of entries) {
+	// Settled chain steps are validation the run performed; they share the
+	// aggregate's link, so their credit goes to the same run.
+	const expanded = entries.flatMap((linked) =>
+		expandChainMessages([linked.entry]).map((entry) => (entry === linked.entry ? linked : { ...linked, entry })),
+	);
+	for (const linked of expanded) {
 		const runId = validationRunIdFor(linked, runSources);
 		const entry = linked.entry;
 		if (entry.kind === "bashExecution") {

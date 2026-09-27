@@ -1,3 +1,4 @@
+import { discoveryScore } from "../../core/harness-discovery.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type {
 	LibraryInventory,
@@ -325,7 +326,6 @@ function hintRows(
 			.filter((resource) => resource.owner)
 			.map((resource) => `${resource.owner?.ref}|${resource.kind}|${resource.name}`),
 	);
-	const needle = query.toLowerCase();
 	const rows: Record<string, unknown>[] = [];
 	for (const record of inventory.packages) {
 		if (selection.mode === "owner" && record.ref !== selection.ref) continue;
@@ -333,8 +333,7 @@ function hintRows(
 			if (kind !== undefined && hint.kind !== kind) continue;
 			if (selection.mode === "name" && hint.name !== selection.name) continue;
 			if (actual.has(`${record.ref}|${hint.kind}|${hint.name}`)) continue;
-			if (needle.length > 0 && !`${hint.kind}:${hint.name} ${hint.description ?? ""}`.toLowerCase().includes(needle))
-				continue;
+			if (query.length > 0 && discoveryScore(query, hint.name, hint.description ?? "") === 0) continue;
 			rows.push(projectHint(hint.kind, hint.name, hint.description, record, copiesCapped));
 		}
 	}
@@ -399,10 +398,18 @@ export async function runLibraryScope(
 	// because they are the owner and install evidence behind package and hint
 	// rows: a capped copy list means those rows are incomplete too.
 	const copiesCapped = inventory.truncated.copies;
+	const rank = (rows: Record<string, unknown>[]) =>
+		query.length === 0
+			? rows
+			: rows.sort(
+					(left, right) =>
+						discoveryScore(query, String(right.name ?? ""), String(right.description ?? "")) -
+						discoveryScore(query, String(left.name ?? ""), String(left.description ?? "")),
+				);
 	const rows: Record<string, unknown>[] = [
-		...resources.map((resource) => projectResource(resource, ambiguous.has(`${resource.kind}:${resource.name}`))),
-		...hintRows(inventory, resources, kind, query, ref, copiesCapped),
-		...inventory.packages.map((record) => projectPackage(record, copiesCapped)),
+		...rank(resources.map((resource) => projectResource(resource, ambiguous.has(`${resource.kind}:${resource.name}`)))),
+		...rank(hintRows(inventory, resources, kind, query, ref, copiesCapped)),
+		...rank(inventory.packages.map((record) => projectPackage(record, copiesCapped))),
 	];
 	const total = rows.length;
 	// The inventory caps how many records it returns. When it did, `total` counts

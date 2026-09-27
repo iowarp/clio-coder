@@ -105,10 +105,18 @@ describe("gateway in the session prompt", () => {
 			registerAllTools(registry, { mcpCapabilities: false, dispatch: bundle.contract, includeLedgerTools: true });
 			const tools = resolveAgentTools({ registry });
 			const names = tools.map((tool) => tool.name as ToolName).sort();
-			for (const present of [ToolNames.Gateway, ToolNames.RunScript, ToolNames.Dispatch, ToolNames.Context]) {
+			for (const present of [ToolNames.Gateway, ToolNames.Read, ToolNames.Write, ToolNames.Edit, ToolNames.Dispatch]) {
 				ok(names.includes(present), `${present} is attached`);
 			}
-			for (const absent of [ToolNames.Artifact, ToolNames.WebFetch, ToolNames.WebRead, ToolNames.Git, ToolNames.Data]) {
+			for (const absent of [
+				ToolNames.Artifact,
+				ToolNames.WebFetch,
+				ToolNames.WebRead,
+				ToolNames.Git,
+				ToolNames.Data,
+				ToolNames.RunScript,
+				ToolNames.Context,
+			]) {
 				ok(!names.includes(absent), `${absent} is not attached`);
 			}
 
@@ -122,6 +130,7 @@ describe("gateway in the session prompt", () => {
 					contextWindow: 32_768,
 					providerSupportsTools: true,
 					toolNames: names,
+					coordinatorCapabilities: registry.listAll().map((spec) => spec.name),
 					toolPromptHints: [...toolPromptHintsForNames(names, "session")],
 				},
 			});
@@ -139,15 +148,15 @@ describe("gateway in the session prompt", () => {
 			);
 			const direct = lines.find((line) => line.startsWith("Direct tools:"));
 			ok(direct !== undefined);
-			ok(direct.includes("`gateway`") && direct.includes("`run_script`"), direct);
+			ok(direct.includes("`gateway`") && direct.includes("`dispatch`"), direct);
 			for (const absent of ["`artifact`", "`web_fetch`", "`git`"]) ok(!direct.includes(absent), direct);
 			ok(
 				lines.some((line) => line.includes('gateway(op="call", capability="clio_docs"')),
 				"the usage sentence points at the gateway",
 			);
-			ok(lines.some((line) => line.includes("secondary capabilities are reached through gateway")));
+			ok(lines.some((line) => line.includes("searches builtins, extensions and recorded MCP catalogs")));
 			ok(
-				lines.some((line) => line.includes('op="find" lists them')),
+				lines.some((line) => line.includes('gateway(op="find", query="<next step>")')),
 				"the gateway hint renders",
 			);
 
@@ -167,10 +176,7 @@ describe("gateway in the session prompt", () => {
 			console.log(
 				`attached schema bytes: total ${total}\n${sizes.map((entry) => `  ${entry.name}: ${entry.bytes}`).join("\n")}`,
 			);
-			ok(
-				total <= ATTACHED_BUDGET_BYTES,
-				`attached bytes ${total} must stay within the handoff's ${HANDOFF_TOTAL_BYTES} plus the ${MCP_DISCOVERY_INPUT_BYTES} bytes of MCP discovery inputs`,
-			);
+			ok(total <= 10_000, `seven attached tools must stay within 10,000 bytes, down from ${ATTACHED_BUDGET_BYTES}`);
 			const gateway = sizes.find((entry) => entry.name === ToolNames.Gateway);
 			ok(gateway !== undefined && gateway.bytes < 2_048, `the gateway schema stays small: ${gateway?.bytes}`);
 			doesNotMatch(
