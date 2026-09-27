@@ -801,7 +801,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 							.replace(
 								"{LIBRARY_ROUTING}",
 								session.coordinatorCapabilities?.includes("clio_library") &&
-								turnAllowsTool(session.turnConstraints, "clio_library")
+									turnAllowsTool(session.turnConstraints, "clio_library")
 									? 'For available workflows, skills, specialists, or how to start a task, first call gateway(op="call", capability="clio_library", args={query:"<task>"}). Use its current readiness and exact invocation; catalog lookup does not activate or install anything.'
 									: "",
 							)
