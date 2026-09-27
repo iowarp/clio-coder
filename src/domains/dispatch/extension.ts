@@ -3967,7 +3967,7 @@ export function createDispatchBundle(
 		const notice = declaredScopeReplacementNotice(pathScope);
 		// Harness-owned prompts deliberately use typed scope;
 		// schema fallback retries must not repeat their prose path inventories in the transcript.
-		if (notice !== null && req.requestOrigin !== "internal") {
+		if (notice !== null && req.requestOrigin !== "internal" && req.requestOrigin !== "harness") {
 			context.bus.emit(BusChannels.DispatchScopeNotice, {
 				...notice,
 				agentId: req.agentId,
@@ -4009,6 +4009,11 @@ export function createDispatchBundle(
 		if (req.requestOrigin === "user" && !isUserVisibleAgent(spec)) {
 			throw new Error(
 				`dispatch: agent '${req.agentId}' is a ${spec.audience} agent reserved for Clio internal orchestration`,
+			);
+		}
+		if (req.requestOrigin === "harness" && spec.capabilityClass !== "read-only") {
+			throw new Error(
+				`dispatch: harness-origin runs require a read-only recipe; '${req.agentId}' is ${spec.capabilityClass}`,
 			);
 		}
 		if (hasCallerPersonaOverride(req) && (spec.audience === "shadow" || spec.audience === "internal")) {

@@ -201,6 +201,7 @@ export function createReadOnlyExplorationNudgeRegistration(): MiddlewareHookRegi
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 			const key = turnKey(input);
 			if (input.hook === "before_tool" || input.hook === "after_tool") {
+				if (input.metadata?.origin === "harness") return [];
 				const state = stateForTool(key);
 				if (input.toolName === ToolNames.Dispatch) {
 					if (input.hook === "after_tool" && dispatchTargetsScout(input.toolArgs)) {

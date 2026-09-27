@@ -1185,7 +1185,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// the worker cap and the turn budget twice per gateway call, and its
 			// inner fingerprint would never repeat across a model's retries the
 			// outer one does not already show.
-			if (hookInput.metadata?.nested === true) return [];
+			// Harness work is independent of the model, so it cannot spend its budget or seed repeat history.
+			if (hookInput.metadata?.nested === true || hookInput.metadata?.origin === "harness") return [];
 			// Judge that outer op=call as the capability it runs. The coordinator
 			// reaches monitor, bash and the search tools only this way, and the
 			// collect exemption, size-only stagnation and mutation epochs key on

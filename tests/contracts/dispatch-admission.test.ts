@@ -22,6 +22,11 @@ import {
 	inferredScopeParentTokenNotice,
 	resolveDispatchPathScope,
 } from "../../src/domains/dispatch/path-scope.js";
+import {
+	DISPATCH_BRIEFING_MAX_BYTES,
+	INTERNAL_DISPATCH_BRIEFING_MAX_BYTES,
+	validateJobSpec,
+} from "../../src/domains/dispatch/validation.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
 import {
@@ -59,6 +64,58 @@ function capacityLimit(capacity: ReturnType<typeof endpointCapacityFor>): number
 }
 
 describe("dispatch admission boundary", () => {
+	it("validates harness origin only with an explicit read-only request and the internal briefing ceiling", () => {
+		const request = { agentId: "scout", task: "Inspect the source", requestOrigin: "harness" };
+		for (const candidate of [request, { ...request, readOnly: false }]) {
+			deepStrictEqual(validateJobSpec(candidate), {
+				ok: false,
+				errors: ["requestOrigin harness requires readOnly true"],
+			});
+		}
+		const validated = validateJobSpec({ ...request, readOnly: true });
+		ok(validated.ok);
+		strictEqual(validated.spec.requestOrigin, "harness");
+		strictEqual(validated.spec.readOnly, true);
+		ok(validateJobSpec({ ...request, readOnly: true, briefing: "x".repeat(DISPATCH_BRIEFING_MAX_BYTES + 1) }).ok);
+		deepStrictEqual(
+			validateJobSpec({ ...request, readOnly: true, briefing: "x".repeat(INTERNAL_DISPATCH_BRIEFING_MAX_BYTES + 1) }),
+			{ ok: false, errors: [`briefing must be ${INTERNAL_DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes or fewer`] },
+		);
+		deepStrictEqual(validateJobSpec({ ...request, requestOrigin: "unknown" }), {
+			ok: false,
+			errors: ["requestOrigin must be one of: user|agent|internal|harness"],
+		});
+	});
+
+	it("refuses a harness-origin coder and admits shadow Scout to worker creation", async () => {
+		let starts = 0;
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: () => {
+				starts += 1;
+				throw new Error("fixture: Scout passed harness admission");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const request = {
+				task: "Inspect the source without editing files",
+				executionRole: "builder" as const,
+				requestOrigin: "harness" as const,
+				readOnly: true,
+			};
+			await rejects(bundle.contract.dispatch({ ...request, agentId: "coder" }), {
+				message: "dispatch: harness-origin runs require a read-only recipe; 'coder' is workspace-edit",
+			});
+			strictEqual(starts, 0);
+			await rejects(bundle.contract.dispatch({ ...request, agentId: "scout" }), {
+				message: "fixture: Scout passed harness admission",
+			});
+			strictEqual(starts, 1);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("refuses a same-endpoint foreground deadlock without spending the queue timeout", () => {
 		const detail = foregroundEndpointBlock({
 			endpointKey: "http://127.0.0.1:1234/v1",

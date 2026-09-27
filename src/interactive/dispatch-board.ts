@@ -245,8 +245,9 @@ export interface DispatchOriginPresentation {
  *
  * Returns null for a row whose origin never reached the projection, so an
  * unknown origin renders as nothing rather than claiming to be internal.
+ * Harness runs use the quiet internal dot in the operator's color because Clio acts on their behalf.
  *
- * Only the operator's own run takes a color. The transcript block paints an
+ * Operator and harness runs take the guidance color. The transcript block paints an
  * agent-origin run in action orange because it is the one signal on that
  * surface; a board row sits under the fleet summary, which already owns the
  * quadrant's single orange, so here the filled glyph carries origin by shape.
@@ -255,6 +256,7 @@ function dispatchOriginPresentation(row: Pick<DispatchBoardRow, "requestOrigin">
 	if (row.requestOrigin === "user") return { glyph: GLYPH.workerHuman, token: "guidance" };
 	if (row.requestOrigin === "agent") return { glyph: GLYPH.workerAgent, token: "body" };
 	if (row.requestOrigin === "internal") return { glyph: GLYPH.workerInternal, token: "annotation" };
+	if (row.requestOrigin === "harness") return { glyph: GLYPH.workerInternal, token: "guidance" };
 	return null;
 }
 

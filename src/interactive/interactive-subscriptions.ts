@@ -88,7 +88,8 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		if (
 			payload.agentAudience !== "shadow" &&
 			payload.agentAudience !== "internal" &&
-			payload.requestOrigin !== "internal"
+			payload.requestOrigin !== "internal" &&
+			payload.requestOrigin !== "harness"
 		)
 			return;
 		deps.notify(

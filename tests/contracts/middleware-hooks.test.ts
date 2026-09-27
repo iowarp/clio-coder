@@ -3,6 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { Type } from "typebox";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
 import { installExtension } from "../../src/domains/extensions/state.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
@@ -21,7 +23,10 @@ import {
 	createMiddlewareSnapshot,
 } from "../../src/domains/middleware/snapshot.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareRule } from "../../src/domains/middleware/types.js";
+import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { capturedHookSourcesFor } from "../../src/entry/extension-hook-sources.js";
+import type { ToolInvokeOptions } from "../../src/tools/registry.js";
+import { createRegistry } from "../../src/tools/registry.js";
 
 function registration(
 	id: string,
@@ -42,6 +47,37 @@ function scratch(): string {
 describe("middleware hook boundary", () => {
 	afterEach(() => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
+	it("marks both tool hooks only when the host supplies harness origin", async () => {
+		const seen: MiddlewareHookInput[] = [];
+		const recorder = registration(
+			"origin-recorder",
+			(input) => {
+				seen.push(input);
+				return [];
+			},
+			{ hooks: ["before_tool", "after_tool"] },
+		);
+		const middleware = createMiddlewareBundle({ registrations: [recorder] }).contract;
+		const registry = createRegistry({ safety: createWorkerSafety(), middleware });
+		registry.register({
+			name: ToolNames.Read,
+			description: "Read fixture",
+			parameters: Type.Object({ origin: Type.String() }),
+			baseActionClass: "read",
+			run: async () => ({ kind: "ok", output: "fixture" }),
+		});
+		for (const options of [{ origin: "harness" }, {}] satisfies ToolInvokeOptions[]) {
+			seen.length = 0;
+			const result = await registry.invoke({ tool: ToolNames.Read, args: { origin: "harness" } }, options);
+			strictEqual(result.kind, "ok");
+			deepStrictEqual(
+				seen.map((input) => input.hook),
+				["before_tool", "after_tool"],
+			);
+			for (const input of seen) strictEqual(input.metadata?.origin, options.origin);
+		}
 	});
 
 	it("does not admit hooks from an unverifiable installed extension", () => {

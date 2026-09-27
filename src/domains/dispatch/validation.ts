@@ -224,7 +224,7 @@ const KNOWN_KEYS = new Set([
 ]);
 const VALID_COMPETE_STANCES = new Set<string>(COMPETE_STANCES);
 const VALID_THINKING = new Set<string>(THINKING_LEVELS);
-const VALID_REQUEST_ORIGINS = new Set(["user", "agent", "internal"]);
+const VALID_REQUEST_ORIGINS = new Set(["user", "agent", "internal", "harness"]);
 const VALID_FAILOVER_MODES = new Set(["none", "approved", "automatic"]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -278,7 +278,9 @@ export function validateJobSpec(spec: unknown): Validated {
 			if (normalized.length > 0) {
 				const bytes = Buffer.byteLength(normalized, "utf8");
 				const maxBytes =
-					spec.requestOrigin === "internal" ? INTERNAL_DISPATCH_BRIEFING_MAX_BYTES : DISPATCH_BRIEFING_MAX_BYTES;
+					spec.requestOrigin === "internal" || spec.requestOrigin === "harness"
+						? INTERNAL_DISPATCH_BRIEFING_MAX_BYTES
+						: DISPATCH_BRIEFING_MAX_BYTES;
 				if (bytes > maxBytes) {
 					errors.push(`briefing must be ${maxBytes} UTF-8 bytes or fewer`);
 				} else {
@@ -503,8 +505,12 @@ export function validateJobSpec(spec: unknown): Validated {
 
 	if ("requestOrigin" in spec && spec.requestOrigin !== undefined) {
 		if (typeof spec.requestOrigin !== "string" || !VALID_REQUEST_ORIGINS.has(spec.requestOrigin)) {
-			errors.push("requestOrigin must be one of: user|agent|internal");
+			errors.push("requestOrigin must be one of: user|agent|internal|harness");
 		}
+	}
+
+	if (spec.requestOrigin === "harness" && spec.readOnly !== true) {
+		errors.push("requestOrigin harness requires readOnly true");
 	}
 
 	if ("pipelineInput" in spec && spec.pipelineInput !== undefined) {

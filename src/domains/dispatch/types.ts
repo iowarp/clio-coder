@@ -330,7 +330,8 @@ export type RunKind = "http" | "sdk" | "subprocess" | "acp-delegation";
 export function runKindSupportsLiveSteering(kind: RunKind): boolean {
 	return kind === "http" || kind === "sdk";
 }
-export type DispatchRequestOrigin = "user" | "agent" | "internal";
+/** Harness runs start on the harness's own decision, never a model tool call or operator command; always read-only. */
+export type DispatchRequestOrigin = "user" | "agent" | "internal" | "harness";
 
 /**
  * Durable routing-system phase marks. They live on the ledger envelope, not the

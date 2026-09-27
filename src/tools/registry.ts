@@ -247,6 +247,8 @@ export interface RegistryDeps {
 }
 
 export interface ToolInvokeOptions {
+	/** An invocation the harness runner makes on its own decision; never derived from model arguments. */
+	origin?: "harness";
 	/** Host-owned task scope, preserved on nested gateway calls. */
 	turnConstraints?: TurnConstraints;
 	/** Registry-owned filter bound to the active compiled safety policy. */
@@ -1433,6 +1435,7 @@ function buildToolHookInput(
 	// twice by the hook layer; the loop guard counts and fingerprints only the
 	// outer occurrence. Every other hook still fires under the inner name.
 	if (options?.nested === true) metadata.nested = true;
+	if (options?.origin === "harness") metadata.origin = "harness";
 	const validationCommand = detectedValidationCommand(call);
 	if (validationCommand !== null) {
 		metadata.validationCommand = validationCommand;

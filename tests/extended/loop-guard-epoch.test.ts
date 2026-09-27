@@ -61,6 +61,31 @@ function afterCompleteCollect(turnId: string): MiddlewareHookInput {
 }
 
 describe("loop guard identical-call epoch", () => {
+	it("keeps nested and harness calls out of per-turn counts and repetition history", () => {
+		for (const exempt of [{ nested: true }, { origin: "harness" }]) {
+			const repeated = createLoopGuardRegistration({ safety: createWorkerSafety() });
+			const counted = createLoopGuardRegistration({
+				safety: createWorkerSafety(),
+				turnToolCallBudget: { soft: 2, hard: 3 },
+			});
+			const call = before("exempt", ToolNames.Read, "same");
+			for (let i = 0; i < 8; i += 1) {
+				const skipped = { ...call, metadata: { ...call.metadata, ...exempt } };
+				deepStrictEqual(repeated.evaluate(skipped), []);
+				deepStrictEqual(counted.evaluate(skipped), []);
+			}
+			deepStrictEqual(repeated.evaluate(call), []);
+			deepStrictEqual(repeated.evaluate(call), []);
+			ok(repeated.evaluate(call).some((effect) => effect.kind === "block_tool"));
+			deepStrictEqual(counted.evaluate(before("exempt", ToolNames.Read, "first")), []);
+			ok(
+				counted
+					.evaluate(before("exempt", ToolNames.Read, "second"))
+					.some((effect) => effect.kind === "block_tool" && effect.reason.includes("soft budget 2")),
+			);
+		}
+	});
+
 	it("admits the next identical collect after the observed batch advances from two pending runs to one", () => {
 		const guard = createLoopGuardRegistration({ safety: createWorkerSafety() });
 		const turn = "collect-progress";
@@ -321,9 +346,10 @@ function observedRead(
 }
 
 describe("read coverage stagnation", () => {
-	it("does not double count nested results or record source that final shaping could shorten", () => {
+	it("ignores nested and harness results or source that final shaping could shorten", () => {
 		for (const metadata of [
 			{ resultKind: "ok", resultBytes: 1000, nested: true },
+			{ resultKind: "ok", resultBytes: 1000, origin: "harness" },
 			{ resultKind: "ok", resultBytes: 1024 * 1024 },
 		]) {
 			const f = coverageGuard();
