@@ -1,9 +1,9 @@
-import { deepStrictEqual, doesNotMatch, match, notDeepStrictEqual, ok } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { ListOverlayView } from "../../src/interactive/overlays/list-overlay.js";
 import { SideQuestionOverlayBody } from "../../src/interactive/overlays/side-question.js";
-import { ANIMATION_STEP_MS, GLYPH, SPINNER_FRAMES } from "../../src/interactive/theme/index.js";
+import { ANIMATION_STEP_MS, GLYPH } from "../../src/interactive/theme/index.js";
 
 /**
  * A list row without metadata was padded to the full width and then given one
@@ -35,7 +35,7 @@ test("a list row that fits closes without an ellipsis and a row that does not cl
 	}
 });
 
-test("the side-question spinner steps on the shared clock, not on every render", () => {
+test("routine side-question progress remains static across renders and clock steps", () => {
 	let now = 0;
 	const body = new SideQuestionOverlayBody("why is the sky blue", () => now);
 	for (const width of [60, 80, 120, 200]) {
@@ -44,9 +44,8 @@ test("the side-question spinner steps on the shared clock, not on every render",
 		deepStrictEqual(body.render(width), first);
 		for (const row of first) ok(visibleWidth(row) <= width);
 		const text = first.map(stripTerminalSequences).join("\n");
-		ok(!text.includes(GLYPH.running), "the running glyph is not a spinner frame");
-		ok(SPINNER_FRAMES.some((frame) => text.includes(frame)));
+		ok(text.includes(GLYPH.running), "routine progress uses the static running mark");
 		now += ANIMATION_STEP_MS;
-		notDeepStrictEqual(body.render(width), first);
+		deepStrictEqual(body.render(width), first);
 	}
 });

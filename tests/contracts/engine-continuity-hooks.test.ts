@@ -314,13 +314,16 @@ describe("settled continuation and actual request admission", () => {
 			},
 		});
 		await run.agent.prompt("first");
-		strictEqual(run.requestCorrelationId(failure), "delivery-error");
-		strictEqual(failure.stopReason, "error");
+		const admittedFailure = run.agent.state.messages.at(-1);
+		ok(admittedFailure?.role === "assistant");
+		strictEqual(run.requestCorrelationId(admittedFailure), "delivery-error");
+		strictEqual(admittedFailure.stopReason, "error");
+		strictEqual(admittedFailure.errorMessage, "provider failed");
 		await run.agent.prompt("next operator request");
 		const last = run.agent.state.messages.at(-1);
 		ok(last);
 		strictEqual(run.requestCorrelationId(last), undefined);
-		strictEqual(run.requestCorrelationId(failure), "delivery-error");
+		strictEqual(run.requestCorrelationId(admittedFailure), "delivery-error");
 		strictEqual(run.invocations(), 2);
 	});
 

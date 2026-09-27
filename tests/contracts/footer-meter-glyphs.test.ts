@@ -27,7 +27,7 @@ test("status and quota meters use bounded semantic cells at release widths", () 
 		ok(cpu && ram, `${width}: CPU and RAM remain visible`);
 		match(cpu, new RegExp(`${GLYPH.meterFull}{10}`));
 		match(ram, new RegExp(`${GLYPH.meterFull}{3}${GLYPH.meterEmpty}{7}`));
-		match(plain.join("\n"), new RegExp(`${GLYPH.next} close`));
+		match(plain.join("\n"), /Alt\+PgUp\/PgDn/u);
 		for (const line of lines) {
 			ok(visibleWidth(line) <= width);
 			for (const escapeTail of line.split(String.fromCharCode(27)).slice(1))

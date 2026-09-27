@@ -5,11 +5,13 @@ import type { Notification } from "../../src/interactive/footer/notifications.js
 
 test("unchanged footer refresh preserves rendered rows while changed state and width invalidate them", () => {
 	let now = 10_000;
+	let used = 100;
 	const notices: Notification[] = [];
 	const panel = buildFooterDashboard({
 		providers: { list: () => [] } as never,
 		resolveCurrentBranch: async () => null,
 		getTerminalColumns: () => 120,
+		getContextUsage: () => ({ tokens: used, contextWindow: 1000, percent: used / 10 }),
 		now: () => now,
 		getNotifications: () => notices,
 		getAgentStatus: () => ({
@@ -26,6 +28,9 @@ test("unchanged footer refresh preserves rendered rows while changed state and w
 		panel.refresh();
 		strictEqual(panel.view.render(120), first);
 		now += 1000;
+		panel.refresh();
+		strictEqual(panel.view.render(120), first, "elapsed status is owned by the composer");
+		used = 200;
 		panel.refresh();
 		notStrictEqual(panel.view.render(120), first);
 		const narrow = panel.view.render(60);

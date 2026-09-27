@@ -457,7 +457,7 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 				const row = rows.find((line) => stripTerminalSequences(line).includes("active response cancelled"));
 				ok(row?.includes(`${theme.fg("dim", GLYPH.cancelled)} `), row);
 			} else {
-				match(live, /⚠ loop guard stopped repeated calls\./u);
+				match(live, /! loop guard stopped repeated calls\./u);
 				const row = rows.find((line) => stripTerminalSequences(line).includes("loop guard stopped"));
 				ok(row?.includes(`${theme.fg("warning", GLYPH.warn)} `), row);
 			}

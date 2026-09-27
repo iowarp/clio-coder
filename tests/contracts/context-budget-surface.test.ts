@@ -269,8 +269,8 @@ describe("native budget inspection through the registered context tool", () => {
 		});
 		try {
 			const text = panel.view.render(120).map(stripTerminalSequences).join("\n");
-			match(text, /~15\.1k \/ 32\.8k/);
-			ok(!text.includes("9.1k /"), text);
+			match(text, /15\.1K\/32\.8K \(46\.0%\)/);
+			ok(!text.includes("9.1K/"), text);
 			for (const width of [24, 40, 72, 120]) {
 				terminalWidth = width;
 				panel.refresh();
@@ -300,7 +300,7 @@ describe("native budget inspection through the registered context tool", () => {
 			resolveCurrentBranch: async () => null,
 		});
 		try {
-			match(panel.view.render(120).map(stripTerminalSequences).join("\n"), /saved /);
+			match(panel.view.render(120).map(stripTerminalSequences).join("\n"), /9K\/32\.8K \(27\.5%\)/);
 		} finally {
 			panel.dispose();
 		}
@@ -363,7 +363,7 @@ describe("native budget inspection through the registered context tool", () => {
 			resolveCurrentBranch: async () => null,
 		});
 		try {
-			match(panel.view.render(120).map(stripTerminalSequences).join("\n"), /\? \/ \?/);
+			match(panel.view.render(120).map(stripTerminalSequences).join("\n"), /\?\/\? \(\?%\)/);
 		} finally {
 			panel.dispose();
 		}
@@ -383,7 +383,7 @@ describe("native budget inspection through the registered context tool", () => {
 		});
 		try {
 			const text = panel.view.render(120).map(stripTerminalSequences).join("\n");
-			match(text, /\? \/ 32\.8k/);
+			match(text, /\?\/32\.8K \(\?%\)/);
 			doesNotMatch(text, /free 32\.8k/);
 		} finally {
 			panel.dispose();

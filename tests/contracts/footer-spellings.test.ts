@@ -29,7 +29,10 @@ test("footer status, counts and token units use one vocabulary at release widths
 	for (const width of [60, 80, 120, 200]) {
 		const status = renderDashboardPage(state, "Status", width, 240, "Alt+U");
 		const plain = status.map(stripTerminalSequences).join("\n");
-		match(plain, /No model selected/u);
+		match(
+			renderDashboardPage(state, "Status", width, 240, "Alt+U", 6).map(stripTerminalSequences).join("\n"),
+			/No model selected/u,
+		);
 		match(plain, /1 failed/u);
 		const activity = activityQuadrant(state.agent, { width, status: retrying, throughput, now: state.now });
 		match(activity.map(stripTerminalSequences).join("\n"), /Retrying 2\/3/u);

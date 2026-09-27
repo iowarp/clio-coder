@@ -14,7 +14,7 @@ import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { reduceStatus } from "../../src/interactive/status/state-machine.js";
 import { INITIAL_STATUS } from "../../src/interactive/status/types.js";
 import { resolveFooterVerb } from "../../src/interactive/status/verbs.js";
-import { SGR_DIM } from "../../src/interactive/theme/index.js";
+import { fgSequence } from "../../src/interactive/theme/index.js";
 
 afterEach(() => setDiffusionFramesEnabled(false));
 
@@ -232,13 +232,13 @@ describe("diffusion frames in the chat panel", () => {
 		const text = plain(rendered);
 		ok(!text.includes("def p(x)"), "a frame replaces the previous frame rather than extending it");
 		ok(text.includes("def parse(line):"));
-		ok(rendered.includes(SGR_DIM), "the unsettled remainder renders dim");
+		ok(rendered.includes(fgSequence("annotation")), "the unsettled remainder renders in the secondary tone");
 		const settled = settledPrefixLength(FRAMES[0] ?? "", FRAMES[1] ?? "");
 		strictEqual((FRAMES[1] ?? "").slice(0, settled), "```py\ndef p");
 
 		panel.applyEvent({ type: "text_frame", contentIndex: 0, text: FRAMES[2] ?? "", progress: 1 });
 		rendered = panel.render(80).join("\n");
-		ok(!rendered.includes(SGR_DIM), "a complete frame has nothing left to dim");
+		ok(!rendered.includes(fgSequence("annotation")), "a complete frame has no secondary denoising remainder");
 		ok(plain(rendered).includes("return 1"));
 	});
 

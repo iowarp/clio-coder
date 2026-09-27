@@ -18,7 +18,7 @@ test("retrying and cancelling workers count as active on every footer surface", 
 	for (const width of [60, 80, 120, 200]) {
 		const compact = renderCompactDashboard(state, width);
 		const expanded = renderDashboardPage(state, "Status", width, 240, "Alt+U");
-		match(compact.map(stripTerminalSequences).join("\n"), /2 active/u);
+		match(compact.map(stripTerminalSequences).join("\n"), /2 workers/u);
 		match(expanded.map(stripTerminalSequences).join("\n"), /2 active/u);
 		for (const line of [...compact, ...expanded]) {
 			ok(visibleWidth(line) <= width);

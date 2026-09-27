@@ -527,7 +527,7 @@ test("a middleware reminder reads the same live and on replay, and a skill activ
 			},
 		},
 	] as SessionEntry[]);
-	assert.equal(rows(live)[0], "ℹ This turn used 9+ read-only exploration calls without a");
+	assert.equal(rows(live)[0], "i This turn used 9+ read-only exploration calls without a");
 	assert.deepEqual(rows(replayed), rows(live));
 	assert.doesNotMatch(rows(replayed).join("\n"), /\[skill\]/u);
 });
@@ -576,7 +576,7 @@ test("a replayed act states the age its ledger entry records in /view, not the a
 		.map((artifact) => [artifact.title, new Date(artifact.timestamp).toISOString()]);
 	assert.deepEqual(stamps, [
 		["$ ran `npm test`", "2026-09-17T00:01:00.000Z"],
-		["ℹ [model] blade/dynamo/qwopus", "2026-09-17T00:05:00.000Z"],
+		["i [model] blade/dynamo/qwopus", "2026-09-17T00:05:00.000Z"],
 	]);
 	// Live acts after the resume carry the live clock again.
 	clock += 1_000;

@@ -80,6 +80,16 @@ function seedTarget(target: Home, endpoint: string): void {
 		.replace(/^ {2}model: null$/m, "  model: mock-model");
 	writeFileSync(path, settings);
 }
+function assistantText(updates: ReadonlyArray<Record<string, unknown>>): string {
+	return updates
+		.filter((update) => update.sessionUpdate === "agent_message_chunk")
+		.map((update) => {
+			const content = update.content as { type?: string; text?: string } | undefined;
+			return content?.type === "text" ? (content.text ?? "") : "";
+		})
+		.join("");
+}
+
 class AcpClient {
 	readonly updates: Array<Record<string, unknown>> = [];
 	private nextId = 1;
@@ -349,7 +359,7 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 				prompt: [{ type: "text", text: "hi" }],
 			});
 			strictEqual(turn.stopReason, "end_turn");
-			match(JSON.stringify(client.updates), /SAVED_CREDENTIAL_REPLY/);
+			match(assistantText(client.updates), /SAVED_CREDENTIAL_REPLY/);
 			doesNotMatch(JSON.stringify(client.updates), /synthetic-service-test-key/);
 			strictEqual(fixture.requests.length, 1);
 			await client.close(sessionId);
@@ -378,7 +388,7 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 				prompt: [{ type: "text", text: "say it" }],
 			});
 			strictEqual(turn.stopReason, "end_turn");
-			match(JSON.stringify(textClient.updates), /ACP_TEXT_REPLY/u);
+			match(assistantText(textClient.updates), /ACP_TEXT_REPLY/u);
 			await textClient.close(sessionId);
 
 			await initialize(empty);
@@ -456,7 +466,7 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 					.map((line) => JSON.parse(line));
 			};
 			await prompt(first, "ACP_FIRST_PROMPT");
-			match(JSON.stringify(client.updates), /ACP_FIRST_ANSWER/);
+			match(assistantText(client.updates), /ACP_FIRST_ANSWER/);
 			match(JSON.stringify(fixture.requests.at(-1)), /\[>\] t1 ACP_FIRST_TASK/);
 			await client.request("session/close", { sessionId: first });
 			client.assertRunningChild(childPid);
@@ -472,7 +482,7 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 			const secondStart = fixture.requests.length;
 			client.updates.length = 0;
 			await prompt(second.sessionId, "ACP_SECOND_PROMPT");
-			match(JSON.stringify(client.updates), /ACP_SECOND_ANSWER/);
+			match(assistantText(client.updates), /ACP_SECOND_ANSWER/);
 			const secondRequests = fixture.requests.slice(secondStart);
 			ok(secondRequests.length >= 2, "second turn used the real tasks tool");
 			match(JSON.stringify(secondRequests), /no task board yet/, "the new session has no task board");

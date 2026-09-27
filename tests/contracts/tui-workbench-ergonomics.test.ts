@@ -116,29 +116,31 @@ for (const width of widths) {
 		streaming = true;
 		assert.doesNotMatch(plain(editor.render(width)), /FOLLOW-UP/u);
 		editor.setText("Research 研究 é");
-		assert.doesNotMatch(plain(editor.render(width)), /STEER|q6/u);
+		assert.match(plain(editor.render(width)), /STEER/u);
+		assert.doesNotMatch(plain(editor.render(width)), /q6/u);
 		approval = true;
 		rows = editor.render(width);
 		bounded(rows, width);
-		assert.match(plain(rows), /CONFIRM/u);
+		assert.match(plain(rows), /needs appro(?:val|…)/u);
 		assert.equal(editor.getText(), "Research 研究 é");
 		approval = false;
 		streaming = false;
 		preparation = "preparing";
-		assert.match(plain(editor.render(width)), /PREPARING/u);
+		assert.match(plain(editor.render(width)), /is preparing/u);
 		preparation = "compacting";
-		assert.match(plain(editor.render(width)), /COMPACTING/u);
+		assert.match(plain(editor.render(width)), /is compacti(?:ng|…)/u);
 		assert.equal(editor.getText(), "Research 研究 é");
 	});
 
-	test(`footer keeps the current phase and workspace when space permits at ${width} columns`, () => {
+	test(`footer keeps workspace and context while the composer owns the phase at ${width} columns`, () => {
 		const snapshot = footerState();
 		snapshot.workspace.cwd = `/tmp/${"very-long-parent/".repeat(5)}研究-worktree`;
 		snapshot.agent.statusText = "Needs approval";
 		snapshot.dispatchRows = [];
 		const rows = renderCompactDashboard(snapshot, width);
 		bounded(rows, width);
-		assert.match(plain(rows), /Needs approval/u);
+		assert.match(plain(rows), /v050/u);
+		assert.match(plain(rows), /68\.5K\/262\.1K/u);
 		if (width > 60) assert.match(plain(rows), /tree/u);
 		else assert.equal(rows.length, 1);
 	});
@@ -274,9 +276,9 @@ for (const width of widths) {
 		];
 		const rows = renderCompactDashboard(snapshot, width);
 		bounded(rows, width);
-		assert.match(plain(rows), /2 active/u);
+		assert.match(plain(rows), /2 workers/u);
 		if (width > 60) assert.match(plain(rows), /tree/u);
-		else assert.equal(rows.length, 1);
+		else assert.equal(rows.length, 2);
 	});
 }
 
