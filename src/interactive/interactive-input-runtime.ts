@@ -96,6 +96,7 @@ export interface InteractiveInputRuntimeDeps {
 		openDecisionsOverlayState(): void;
 	};
 	refreshFooter: () => void;
+	scrollFooter?: (delta: number) => boolean;
 	/** Armed/disarmed transitions of the Ctrl+G leader, for the footer indicator. */
 	onLeaderStateChange?: (pending: boolean) => void;
 	/** Armed/disarmed transitions of the Ctrl+C double tap, for the same indicator row. */
@@ -304,6 +305,12 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 	const removeReload = deps.keybindings.onReload?.(() => leaderKeys.reset());
 	controller = createApplicationController({
 		routeComposerKey: (data) => {
+			if (matchesKey(data, "alt+pageUp") || matchesKey(data, "alt+pageDown")) {
+				if (deps.scrollFooter?.(matchesKey(data, "alt+pageUp") ? -4 : 4)) {
+					deps.requestRender();
+					return true;
+				}
+			}
 			if (deps.keybindings.matches(data, "tui.altScreen.search") && !(deps.tui instanceof TuiAltScreen)) {
 				deps.explainSearchUnavailable?.();
 				return true;

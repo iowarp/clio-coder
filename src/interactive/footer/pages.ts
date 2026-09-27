@@ -401,27 +401,25 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	const capacity = state.agent.localCapacity;
 	const memory = state.session.memoryIntervention;
 	const section = (title: string, entries: ReadonlyArray<SectionEntry>, columns: number) => {
-		const labelWidth = Math.min(17, Math.floor(columns * 0.4));
+		const labelWidth = Math.min(17, Math.max(10, Math.floor(columns * 0.4)));
 		return [
 			rule(theme, columns, { left: title, leftToken: "sectionHeading" }),
-			...entries.map(([label, value]) => {
-				const room = Math.max(1, columns - labelWidth - 2);
+			...entries.flatMap(([label, value]) => {
 				let rendered: string;
 				if (typeof value === "string")
 					rendered = theme.fg(
 						/^(unknown|unreported|unavailable|not sampled|sampling|warming up|pending)/u.test(value)
 							? "unknownValue"
 							: "fieldValue",
-						truncateToWidth(clean(value), room, GLYPH.ellipsis, true),
+						clean(value),
 					);
 				else if (value.percent === null) rendered = theme.fg("unknownValue", "warming up");
 				else {
 					const percent = Number.isFinite(value.percent) ? Math.max(0, Math.min(100, value.percent)) : 0;
 					const filled = Math.round(percent / 10);
 					rendered = `${theme.fg("meterFill", GLYPH.meterFull.repeat(filled))}${theme.fg("meterFree", GLYPH.meterEmpty.repeat(10 - filled))} ${theme.fg("metricValue", percent.toFixed(0))}${theme.fg("metricUnit", "%")}${value.suffix ? `  ${theme.fg("fieldValue", clean(value.suffix))}` : ""}`;
-					rendered = truncateToWidth(rendered, room, GLYPH.ellipsis, true);
 				}
-				return `${theme.fg("fieldName", truncateToWidth(label, labelWidth, GLYPH.ellipsis, true))}  ${rendered}`;
+				return wrapTextWithAnsi(`${theme.fg("fieldName", label.padEnd(labelWidth))}  ${rendered}`, columns);
 			}),
 			"",
 		];
@@ -505,11 +503,30 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 				: "unknown",
 		],
 	];
+	const health = right.filter(([label]) => label === "CPU" || label === "RAM");
+	const workers = left.filter(([label]) => label === "Worker cap" || label === "Workers");
+	const sampling = right.filter(([label]) => label === "Sampling");
+	const col = Math.floor((width - 5) / 2);
+	// Health and capacity share the first screen; less urgent fields remain scrollable.
+	const essentials =
+		width < FOOTER_SPLIT_COLUMNS
+			? section("LIVE STATUS", [...health, ...workers, ...sampling], width).slice(1, -1)
+			: zipColumns(
+					section("LIVE STATUS", health, col).slice(1, -1),
+					section("LIVE STATUS", [...workers, ...sampling], width - col - 5).slice(1, -1),
+					col,
+					width - col - 5,
+					`  ${theme.fg("border", GLYPH.rail)}  `,
+				);
+	const intro = [quotaRows[0] ?? "", ...essentials];
+	const connections = left.filter(([label]) => label !== "Worker cap" && label !== "Workers");
+	const machine = right.filter(([label]) => !["CPU", "RAM", "Sampling"].includes(label));
 	if (width < FOOTER_SPLIT_COLUMNS)
 		return [
-			...quotaRows,
-			...section("COST & CONNECTIONS", left, width),
-			...section("LOCAL MACHINE", right, width),
+			...intro,
+			...quotaRows.slice(1),
+			...section("COST & CONNECTIONS", connections, width),
+			...section("LOCAL MACHINE", machine, width),
 			theme.style("sectionHeading", "CONTEXT ENGINE", { bold: true }),
 			...wrapTextWithAnsi(
 				extras
@@ -518,12 +535,12 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 				width,
 			),
 		];
-	const col = Math.floor((width - 5) / 2);
 	return [
-		...quotaRows,
+		...intro,
+		...quotaRows.slice(1),
 		...zipColumns(
-			section("COST & CONNECTIONS", left, col),
-			section("LOCAL MACHINE", right, width - col - 5),
+			section("COST & CONNECTIONS", connections, col),
+			section("LOCAL MACHINE", machine, width - col - 5),
 			col,
 			width - col - 5,
 			`  ${theme.fg("border", GLYPH.rail)}  `,
@@ -538,13 +555,14 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	];
 }
 
-export function renderDashboardPage(
+export function dashboardPageViewport(
 	state: FooterDashboardRenderState,
 	page: DashboardPage,
 	width: number,
 	terminalRows: number,
 	cycleKey: string,
-): string[] {
+	scrollOffset = 0,
+): { rows: string[]; offset: number; maxOffset: number } {
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
 	const gutter = safeWidth >= 20 ? 2 : 0;
@@ -580,7 +598,7 @@ export function renderDashboardPage(
 		),
 	];
 	const next = page === "Status" ? "close" : DASHBOARD_PAGES[DASHBOARD_PAGES.indexOf(page) + 1];
-	const hint = truncateToWidth(
+	let hint = truncateToWidth(
 		theme.fg(
 			"counter",
 			`${cycleKey || "Dashboard"} ${GLYPH.next} ${next}   ·   ${page === "Status" ? "/usage · /mcp · /library" : "composer stays active"}`,
@@ -591,27 +609,39 @@ export function renderDashboardPage(
 	);
 	const available = budget - 4;
 	let content: string[];
-	if (page === "Activity") content = activityPage(state, innerWidth, available);
+	if (page === "Activity") content = activityPage(state, innerWidth, Number.MAX_SAFE_INTEGER);
 	else if (page === "Context") content = contextPage(state, innerWidth, available);
 	else content = statusPage(state, innerWidth);
 	content = content.flatMap((line) => (visibleWidth(line) > innerWidth ? wrapTextWithAnsi(line, innerWidth) : [line]));
-	if (content.length > available) {
-		const detail =
-			page === "Activity"
-				? `${
-						getKeybindings()
-							.getKeys("clio-coder.dispatchBoard.toggle")
-							.map((key) => formatKeyLabel(key))
-							.join("/") || "Fleet Runs"
-					} · /view`
-				: page === "Context"
-					? "/context"
-					: "/usage · /context";
-		content = [
-			...content.slice(0, available - 1),
-			truncateToWidth(theme.fg("annotation", `More detail: ${detail}`), innerWidth, GLYPH.ellipsis, true),
-		];
+	const maxOffset = Math.max(0, content.length - available);
+	const offset = Math.max(0, Math.min(maxOffset, Math.floor(scrollOffset)));
+	if (maxOffset > 0) {
+		hint = truncateToWidth(
+			theme.fg(
+				"keyboardHint",
+				`Alt+PgUp/PgDn ${offset + 1}–${Math.min(content.length, offset + available)}/${content.length} · ${cycleKey || "Dashboard"} ${GLYPH.next} ${next}`,
+			),
+			innerWidth,
+			GLYPH.ellipsis,
+			true,
+		);
 	}
+	content = content.slice(offset, offset + available);
 	while (content.length < available) content.push("");
-	return [...heading.map(inset), rule(theme, safeWidth), ...content.map(inset), rule(theme, safeWidth), inset(hint)];
+	return {
+		rows: [...heading.map(inset), rule(theme, safeWidth), ...content.map(inset), rule(theme, safeWidth), inset(hint)],
+		offset,
+		maxOffset,
+	};
+}
+
+export function renderDashboardPage(
+	state: FooterDashboardRenderState,
+	page: DashboardPage,
+	width: number,
+	terminalRows: number,
+	cycleKey: string,
+	scrollOffset = 0,
+): string[] {
+	return dashboardPageViewport(state, page, width, terminalRows, cycleKey, scrollOffset).rows;
 }

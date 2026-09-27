@@ -25,7 +25,7 @@ import { createDemoHints } from "./demo-hints.js";
 import type { Notification, NotificationCenter } from "./notifications.js";
 import { formatNotificationPanel } from "./notifications.js";
 import type { DashboardPage } from "./pages.js";
-import { DASHBOARD_PAGES, renderCompactDashboard, renderDashboardPage } from "./pages.js";
+import { DASHBOARD_PAGES, dashboardPageViewport, renderCompactDashboard } from "./pages.js";
 import type { LocalMachineMetrics } from "./system-metrics.js";
 import { createLocalMachineSampler } from "./system-metrics.js";
 
@@ -136,6 +136,7 @@ export interface FooterDashboardPanel extends FooterPanel {
 	isExpanded(): boolean;
 	setExpanded(expanded: boolean): void;
 	toggleExpanded(): FooterDashboardMode;
+	scroll(delta: number): boolean;
 	dispose(): void;
 }
 
@@ -209,6 +210,8 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	let branchSlot: string | null = null;
 	let dashboardMode: FooterDashboardMode = "compact";
 	let page: DashboardPage = "Activity";
+	let scrollOffset = 0;
+	let maxScrollOffset = 0;
 	let disposed = false;
 	const state = (width: number): FooterDashboardRenderState => {
 		const now = deps.now?.() ?? Date.now();
@@ -358,7 +361,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const supplementary = [...extensionLine, ...lifecycleLine, ...notices];
 		const grid =
 			dashboardMode === "expanded"
-				? renderDashboardPage(
+				? dashboardPageViewport(
 						current,
 						page,
 						width,
@@ -367,9 +370,14 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 							.getKeys("clio-coder.status.toggle")
 							.map((key) => formatKeyLabel(key))
 							.join(" / "),
+						scrollOffset,
 					)
 				: renderCompactDashboard(current, width);
-		const lines = [...grid, ...supplementary];
+		if (!Array.isArray(grid)) {
+			scrollOffset = grid.offset;
+			maxScrollOffset = grid.maxOffset;
+		}
+		const lines = [...(Array.isArray(grid) ? grid : grid.rows), ...supplementary];
 		deps.onHeightChange?.(Math.max(2, lines.length));
 		return lines.join("\n");
 	}
@@ -380,6 +388,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	const setExpanded = (expanded: boolean): void => {
 		dashboardMode = expanded ? "expanded" : "compact";
 		page = "Activity";
+		scrollOffset = 0;
 		machine.setActive(false);
 		refresh();
 	};
@@ -404,10 +413,17 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			return dashboardMode === "expanded";
 		},
 		setExpanded,
+		scroll(delta) {
+			if (dashboardMode !== "expanded") return false;
+			scrollOffset = Math.max(0, Math.min(maxScrollOffset, scrollOffset + delta));
+			refresh();
+			return true;
+		},
 		toggleExpanded() {
 			if (dashboardMode === "compact") setExpanded(true);
 			else if (page === "Status") setExpanded(false);
 			else {
+				scrollOffset = 0;
 				page = DASHBOARD_PAGES[DASHBOARD_PAGES.indexOf(page) + 1] ?? "Activity";
 				machine.setActive(page === "Status");
 				refresh();

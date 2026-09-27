@@ -18,6 +18,7 @@ import {
 } from "../../src/engine/tui.js";
 import { ClioEditor } from "../../src/interactive/clio-editor.js";
 import { dockBodyRows } from "../../src/interactive/dock.js";
+import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import { dispatchInteractiveAction } from "../../src/interactive/interactive-application.js";
 import { createInteractiveInputRuntime } from "../../src/interactive/interactive-input-runtime.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
@@ -65,7 +66,7 @@ afterEach(async () => {
 	for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 const noop = () => {};
-function fixture(overrides: Record<string, string | string[]> = {}) {
+function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter?: (delta: number) => boolean) {
 	const previousKeys = getKeybindings();
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.interface.keybindings = overrides;
@@ -117,6 +118,7 @@ function fixture(overrides: Record<string, string | string[]> = {}) {
 	};
 	const controller = createInteractiveInputRuntime({
 		tui,
+		...(scrollFooter ? { scrollFooter } : {}),
 		keybindings: keys,
 		dispatchAction: dispatchInteractiveAction,
 		actions: {
@@ -478,7 +480,7 @@ it("honors resume selection overrides and refreshes help while it remains open",
 	f.terminal.input("\x0e");
 	f.terminal.input("\x19");
 	assert.equal(resumed, "second");
-	f.mount("help", () => openHelpOverlay(f.tui, f.keys, f.close, "Library"));
+	f.mount("help", () => openHelpOverlay(f.tui, f.keys, f.close, "Library (composer)"));
 	assert.match(composerText(f.editor, 120), /Alt\+L/);
 	f.keys.reload({ "clio-coder.library.toggle": "alt+p" });
 	assert.equal(f.state(), "help");
@@ -698,4 +700,37 @@ it("closes a real extension panel and cycles Interop kinds with encoded c only i
 	f.terminal.input("/");
 	f.terminal.input("c");
 	assert.equal(notices.length, 1);
+});
+
+it("scrolls the expanded footer with a draft while overlays and search retain keyboard ownership", () => {
+	const footer = buildFooterDashboard({
+		providers: { list: () => [] } as never,
+		getTerminalColumns: () => 40,
+		getTerminalRows: () => 18,
+		resolveCurrentBranch: async () => null,
+	});
+	cleanups.push(() => footer.dispose());
+	const deltas: number[] = [];
+	const f = fixture({}, (delta) => {
+		deltas.push(delta);
+		return footer.scroll(delta);
+	});
+	f.editor.setText("keep this draft");
+	footer.setExpanded(true);
+	footer.toggleExpanded();
+	footer.toggleExpanded();
+	const before = footer.view.render(40);
+	f.terminal.input("\x1b[6;3~");
+	assert.notDeepEqual(footer.view.render(40), before);
+	assert.equal(f.editor.getText(), "keep this draft");
+	f.terminal.input("\x1b[5;3~");
+	assert.deepEqual(footer.view.render(40), before);
+	assert.deepEqual(deltas, [4, -4]);
+	f.open("skills-hub");
+	f.terminal.input("\x1b[6;3~");
+	assert.deepEqual(deltas, [4, -4]);
+	f.close();
+	f.terminal.input("\x12");
+	f.terminal.input("\x1b[6;3~");
+	assert.deepEqual(deltas, [4, -4]);
 });
