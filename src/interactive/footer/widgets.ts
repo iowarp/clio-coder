@@ -256,31 +256,37 @@ export function contextUsagePercent(context: ContextOccupancyFacts): number | nu
 	return used === null || !window ? null : (used / window) * 100;
 }
 
+/** Compact counts and occupancy; source details remain in the expanded dashboard. */
+export function compactContextUsage(context: ContextOccupancyFacts, theme: ClioTheme): string {
+	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
+	const window = context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow);
+	const counts = `${used === null ? "?" : formatFooterTokens(used).toUpperCase()}/${window ? formatFooterTokens(window).toUpperCase() : "?"}`;
+	const percent = contextUsagePercent(context);
+	return `${theme.fg("counter", counts)} ${theme.fg(contextPercentRole(percent), `(${formatContextPercent(percent)})`)}`;
+}
+
 /** Reads published numbers only; never refreshes accounting from a renderer. */
-export function contextOccupancyBar(context: ContextOccupancyFacts, cells: number, theme: ClioTheme): string {
+export function contextOccupancyBar(
+	context: ContextOccupancyFacts,
+	cells: number,
+	theme: ClioTheme,
+	includePercent = true,
+): string {
 	if (!context.budget && context.ledger) return renderContextMeterBar(context.ledger, cells, theme);
 	return buildSegmentedContextBar(
 		theme,
 		cells,
 		context.contextWindow ?? 0,
 		context.used === null ? undefined : contextBreakdownForBar(context),
+		includePercent,
 	);
 }
 
-/** Composer occupancy, with whole percentages and the same category ink as the dashboard. */
+/** Graphic-only composer occupancy, using the same category ink as the dashboard. */
 export function contextRailHint(context: ContextOccupancyFacts, cells: number, room: number, theme: ClioTheme): string {
-	const percent = contextUsagePercent(context);
-	const source =
-		percent === null ? "" : context.budget?.inputSource === "historical" ? "saved " : context.budget ? "~" : "";
-	const label = `${theme.fg("fieldName", "ctx ")}${theme.fg(contextPercentRole(percent), `${source}${formatContextPercent(percent)}`)}`;
-	if (visibleWidth(label) > room) return "";
-	if (percent === null || (!context.ledger && !context.budget)) return label;
-	// The segmented bar already owns its percentage; the ledger bar does not.
-	const bar = contextOccupancyBar(context, cells, theme);
-	const full = context.budget
-		? `${theme.fg("fieldName", `ctx ${source}`)}${bar}`
-		: `${theme.fg("fieldName", "ctx ")}${bar}  ${theme.fg(contextPercentRole(percent), formatContextPercent(percent))}`;
-	return visibleWidth(full) <= room ? full : label;
+	if (contextUsagePercent(context) === null || (!context.ledger && !context.budget)) return "";
+	const fittedCells = Math.max(0, Math.min(cells, Math.floor(room)));
+	return fittedCells > 0 ? contextOccupancyBar(context, fittedCells, theme, false) : "";
 }
 
 type DashboardRow =
@@ -780,6 +786,77 @@ export function footerPhasePresentation(status: AgentStatus, width: number, now:
 			return { glyph: GLYPH.ok, label: "Done", token: "success", live: false };
 		}
 	}
+}
+
+const COMPOSER_TOOL_ACTIVITY: Readonly<Record<string, string>> = {
+	[ToolNames.Write]: "is writing a file",
+	[ToolNames.Edit]: "is editing a file",
+	[ToolNames.Read]: "is reading a file",
+	[ToolNames.Bash]: "is running a command",
+	[ToolNames.RunScript]: "is running a script",
+	[ToolNames.Grep]: "is searching",
+	[ToolNames.Find]: "is finding files",
+	[ToolNames.CodeNav]: "is navigating code",
+	[ToolNames.Dispatch]: "is waiting for a worker",
+	[ToolNames.AskUser]: "needs input",
+};
+
+/** Subject-aware activity phrases for the model named on the composer rail. */
+export function composerPhasePresentation(status: AgentStatus, width: number, now: number): HarnessPhasePresentation {
+	const phase = footerPhasePresentation(status, width, now);
+	let label: string;
+	switch (status.phase) {
+		case "idle":
+			label = "is ready";
+			break;
+		case "preparing":
+			label = "is preparing";
+			break;
+		case "waiting_model":
+			label = "is waiting for a response";
+			break;
+		case "thinking":
+			label = "is thinking";
+			break;
+		case "writing":
+			label = status.preparingToolCall ? "is preparing a tool" : "is writing";
+			break;
+		case "tool_running": {
+			const name = status.tool?.toolName ?? "tool";
+			label = Object.hasOwn(COMPOSER_TOOL_ACTIVITY, name)
+				? COMPOSER_TOOL_ACTIVITY[name]!
+				: `is running ${truncateToWidth(name, width >= 100 ? 18 : 12, GLYPH.ellipsis, false)}`;
+			break;
+		}
+		case "tool_blocked":
+			label = "needs approval";
+			break;
+		case "retrying":
+			label = `is retrying ${status.retry?.attempt ?? 0}/${status.retry?.maxAttempts ?? 0}`;
+			break;
+		case "compacting":
+			label = "is compacting context";
+			break;
+		case "dispatching":
+			label = "is waiting for a worker";
+			break;
+		case "stuck":
+			label = `has no output · ${Math.max(0, Math.floor((now - status.lastMeaningfulAt) / 1000))}s`;
+			break;
+		case "ended": {
+			const stop = status.summary?.stopReason;
+			label =
+				stop === "error"
+					? "failed"
+					: stop === "cancelled" || stop === "aborted"
+						? "was cancelled"
+						: stop === "length"
+							? "reached the output limit"
+							: "finished";
+			break;
+		}
+	}
+	return { ...phase, label };
 }
 
 function buildHarnessStatePill(

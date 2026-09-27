@@ -41,6 +41,7 @@ export const TEXT_ROLES = {
 	thinkingInactive: text("subdued", "ivory"),
 	thinkingActive: text("focal", "action", { bold: true }),
 	thinkingMaximum: text("strong", "action", { bold: true }),
+	activeModelIdentity: text("reading", "action", { bold: true }),
 	harnessAction: text("focal", "action", { bold: true }),
 	yoloLabel: text("strong", "action", { bold: true }),
 	decisionCue: text("focal", "action", { bold: true }),

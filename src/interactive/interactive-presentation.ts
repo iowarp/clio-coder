@@ -41,7 +41,7 @@ import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboa
 import { buildFooterDashboard } from "./footer/dashboard.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter } from "./footer/notifications.js";
-import { footerPhasePresentation } from "./footer/widgets.js";
+import { composerPhasePresentation } from "./footer/widgets.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { ClioKeybindingManager } from "./keybinding-manager.js";
@@ -482,7 +482,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
 		getHarnessStatus: (width) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
-			return status.phase === "idle" ? null : footerPhasePresentation(status, width, Date.now());
+			return status.phase === "idle" ? null : composerPhasePresentation(status, width, Date.now());
 		},
 		getContextUsage: () => {
 			const usage = deps.chat.contextUsage();

@@ -12,11 +12,11 @@ import { formatKeyLabel } from "../keybinding-manager.js";
 import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
 import { previewRows } from "../renderers/preview.js";
 import { brandMark, metricText, clioTheme, formatCompactMs, GLYPH, padAnsi, rule } from "../theme/index.js";
-import { fitIdentityLabel, formatTargetLabel } from "../theme/labels.js";
+import { fitIdentityLabel } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
 import { notificationGlyph, notificationToken, topNotification } from "./notifications.js";
-import { activityQuadrant, contextQuadrant, contextUsageText, zipColumns } from "./widgets.js";
+import { activityQuadrant, compactContextUsage, contextQuadrant, contextUsageText, zipColumns } from "./widgets.js";
 
 export const DASHBOARD_PAGES = ["Activity", "Context", "Status"] as const;
 export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
@@ -284,9 +284,6 @@ function contextPage(state: FooterDashboardRenderState, width: number, budget: n
 	return out;
 }
 
-/** The fewest cells a shortened target and model identity reads in (`blade…q4_k_m`). */
-const IDENTITY_MIN_CELLS = 12;
-
 /**
  * As many whole names as fit `room` after `prefix`, closing on `…` when some
  * did not; the first name is cut only when it alone does not fit.
@@ -299,73 +296,38 @@ function fitNames(prefix: string, names: readonly string[], room: number): strin
 	return truncateToWidth(`${prefix}${names[0] ?? ""}`, Math.max(1, room), GLYPH.ellipsis);
 }
 
-/** At 60 cells and below, workspace and tips yield; only attention needs a second row. */
+/** Workspace and counts above; notices and active harness facts below. */
 export function renderCompactDashboard(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
 	const w = Math.max(1, width);
 	const narrow = w <= 60;
-	const fit = (s: string, n = w) => theme.base("counter", truncateToWidth(s, Math.max(1, n), GLYPH.ellipsis, true));
-	const workers = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
-	const phase = workers ? `${workers} ${workers === 1 ? "worker" : "workers"}` : "Model";
-	const phaseToken = workers ? "activity" : "fieldName";
-	const identity = clean(state.session.target ?? "No model selected");
+	const fit = (text: string, room = w) =>
+		theme.base("counter", truncateToWidth(text, Math.max(1, room), GLYPH.ellipsis, true));
+	const separator = theme.fg("border", " · ");
+	const counter = compactContextUsage(state.context, theme);
+	const rate = state.throughput?.tokensPerSecond;
+	const speed =
+		typeof rate === "number" && Number.isFinite(rate) && rate > 0
+			? metricText(theme, String(rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10), "tps")
+			: "";
+	const metrics = [counter, speed].filter(Boolean).join(theme.fg("border", " | "));
+	const values = visibleWidth(metrics) <= Math.floor(w * 0.4) ? metrics : counter;
+	const valueWidth = Math.min(Math.floor(w * 0.4), visibleWidth(values));
+	const workspaceWidth = Math.max(1, w - valueWidth - 3);
+	const git = clean(state.workspace.branch ?? "no Git branch");
+	const dirtyMarker = state.workspace.dirty ? theme.fg("warning", " *") : "";
+	const gitWidth = Math.min(
+		visibleWidth(git) + visibleWidth(dirtyMarker),
+		Math.max(4, Math.floor(workspaceWidth * 0.3)),
+	);
+	const cwdWidth = Math.max(1, workspaceWidth - gitWidth - 3);
+	const workspace = `${theme.fg("workspacePath", fitIdentityLabel(clean(state.workspace.cwd), cwdWidth))}${separator}${theme.fg("branch", fitIdentityLabel(git, Math.max(1, gitWidth - visibleWidth(dirtyMarker))))}${dirtyMarker}`;
+	const firstRow = fit(`${fit(workspace, workspaceWidth)}   ${fit(values, valueWidth)}`);
+
 	const feedback = topNotification(
 		state.notices.filter((notice) => notice.presentation === "setting"),
 		state.now,
 	);
-	const valueSlot = feedback ? theme.fg("changedValue", clean(feedback.text)) : "";
-	const valueWidth = Math.min(Math.floor(w * 0.4), visibleWidth(valueSlot));
-	const modeBadge = state.session.autonomy === "yolo" ? theme.style("yoloLabel", "YOLO", { bold: true }) : "";
-	const modeRoom = modeBadge ? visibleWidth(modeBadge) + 3 : 0;
-
-	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
-	const leftRoom = Math.max(1, w - valueWidth - (valueSlot ? 3 : 0));
-	// An armed skill narrows the tools every turn uses until `/skill off`, so it
-	// rides next to the activity and outranks the identity and quota badge.
-	// Where `skill <names>` does not fit, the knowledge mark
-	// stands in for the word.
-	const skills = state.session.activeSkills ?? [];
-	const skillBudget = Math.max(5, Math.floor(leftRoom / 3));
-	const skillWords = `skill ${clean(skills.join(", "))}`;
-	const skillLead = visibleWidth(skillWords) <= skillBudget ? "skill" : GLYPH.classKnowledge;
-	const fittedSkill =
-		visibleWidth(skillWords) <= skillBudget
-			? skillWords
-			: fitNames(`${GLYPH.classKnowledge} `, skills.map(clean), skillBudget);
-	const skill =
-		skills.length === 0
-			? ""
-			: `${theme.fg("skillAction", skillLead)}${theme.fg("counter", fittedSkill.slice(skillLead.length))}`;
-	const skillRoom = skill ? visibleWidth(skill) + 3 : 0;
-	// Workers and armed skills take priority over the model identity and quota badge.
-	const activityRoom = Math.max(5, leftRoom - skillRoom - modeRoom);
-	const activity = theme.fg(phaseToken, truncateToWidth(phase, activityRoom, GLYPH.ellipsis, false));
-	const activityWidth = visibleWidth(activity);
-	const badge =
-		weekly && leftRoom - activityWidth - skillRoom - modeRoom - visibleWidth(weekly.label) >= 16
-			? theme.fg(
-					weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "counter" : "warning",
-					weekly.label,
-				)
-			: "";
-	const identitySeparator = narrow ? " · " : "  ·  ";
-	const baseRoom =
-		leftRoom - activityWidth - skillRoom - modeRoom - (badge ? visibleWidth(badge) + 3 : 0) - identitySeparator.length;
-	// Too narrow for a readable identity: drop it rather than cut it to a stub
-	// such as `bl…_m`, which names neither the target nor the model.
-	const identityMin = Math.min(visibleWidth(identity), IDENTITY_MIN_CELLS);
-	const readable = baseRoom >= identityMin;
-	const identityRoom = Math.max(1, baseRoom);
-	const fittedIdentity =
-		state.session.targetId || state.session.modelId
-			? formatTargetLabel(state.session.targetId, state.session.modelId, {
-					width: identityRoom,
-					abbreviate: false,
-				})
-			: fitIdentityLabel(identity, identityRoom);
-	const shownIdentity = readable ? `${identitySeparator}${theme.fg("footerIdentity", fittedIdentity)}` : "";
-	const left = `${activity}${modeBadge ? ` · ${modeBadge}` : ""}${skill ? ` · ${skill}` : ""}${shownIdentity}${badge ? ` · ${badge}` : ""}`;
-	const pair = (l: string, r: string, rw: number) => `${fit(l, w - rw - 3)}   ${fit(r, rw)}`;
 	const notice = topNotification(
 		state.notices.filter((entry) => entry.presentation !== "setting"),
 		state.now,
@@ -383,32 +345,37 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				? `${leaderKey} ${GLYPH.next} choose key`
 				: "Choose key"
 			: null;
-	const foot = urgent
+	const message = urgent
 		? theme.fg("warning", urgent)
 		: notice
 			? theme.fg(notificationToken(notice.level), `${notificationGlyph(notice.level)} ${clean(notice.text)}`)
-			: state.demoHint
-				? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
-				: theme.fg("keyboardHint", (state.demo !== false ? footerKeyHint(state.now, w < 120) : null) ?? `${key} Dashboard`);
-	if (narrow) {
-		const rows = [valueSlot ? fit(pair(left, valueSlot, valueWidth)) : fit(left)];
-		if (urgent || notice) rows.push(fit(foot));
-		return rows;
-	}
-	// An armed escape instruction must keep its whole action at narrow widths;
-	// the workspace label can yield room that an ordinary rotating hint cannot.
-	const hintBudget = urgent ? Math.max(1, w - 3 - 8) : Math.floor(w * 0.48);
-	const hintWidth = Math.min(hintBudget, visibleWidth(foot));
-	const workspaceWidth = Math.max(1, w - hintWidth - 3);
-	const git = clean(state.workspace.branch ?? "no Git branch");
-	const dirtyMarker = state.workspace.dirty ? theme.fg("warning", " *") : "";
-	const gitWidth = Math.min(
-		visibleWidth(git) + visibleWidth(dirtyMarker),
-		Math.max(4, Math.floor(workspaceWidth * 0.45)),
-	);
-	const cwdWidth = Math.max(1, workspaceWidth - gitWidth - 3);
-	const workspace = `${theme.fg("workspacePath", fitIdentityLabel(clean(state.workspace.cwd), cwdWidth))} · ${theme.fg("branch", fitIdentityLabel(git, Math.max(1, gitWidth - visibleWidth(dirtyMarker))))}${dirtyMarker}`;
-	return [valueSlot ? fit(pair(left, valueSlot, valueWidth)) : fit(left), fit(pair(workspace, foot, hintWidth))];
+			: feedback
+				? theme.fg("changedValue", clean(feedback.text))
+				: state.demoHint
+					? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
+					: theme.fg("keyboardHint", (state.demo !== false ? footerKeyHint(state.now, narrow) : null) ?? `${key} Dashboard`);
+	const workers = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
+	const skills = state.session.activeSkills ?? [];
+	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
+	const facts = [
+		workers ? theme.fg("activity", `${workers} ${workers === 1 ? "worker" : "workers"}`) : "",
+		skills.length
+			? `${theme.fg("skillAction", "skill ")}${theme.fg("counter", fitNames("", skills.map(clean), Math.max(8, Math.floor(w / 3))))}`
+			: "",
+		weekly
+			? theme.fg(
+					weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "counter" : "warning",
+					weekly.label,
+				)
+			: "",
+	]
+		.filter(Boolean)
+		.join(separator);
+	const tail = notice && feedback ? theme.fg("changedValue", clean(feedback.text)) : facts;
+	if (narrow && !urgent && !notice && !feedback && !facts) return [firstRow];
+	if (urgent || !tail) return [firstRow, fit(message)];
+	const tailWidth = Math.min(Math.floor(w * 0.4), visibleWidth(tail));
+	return [firstRow, fit(`${fit(message, w - tailWidth - 3)}   ${fit(tail, tailWidth)}`)];
 }
 
 function statusPage(state: FooterDashboardRenderState, width: number): string[] {

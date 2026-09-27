@@ -16,7 +16,7 @@ import { centeredWindow, fitHintEntries } from "./overlay-frame.js";
 import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
 import { attentionCue, clioTheme, editorTheme, GLYPH, padAnsi, rule, withThemeContext } from "./theme/index.js";
-import type { TargetIdentity } from "./theme/labels.js";
+import { modelNickname, type TargetIdentity } from "./theme/labels.js";
 import { createComposerSurfacePainter } from "./theme/yolo-surface.js";
 import type { TurnPreparationPhase } from "./turn-state.js";
 
@@ -268,17 +268,28 @@ export class ClioEditor extends Editor {
 		const rail = this.railState(mode);
 		const status = this.chrome.getHarnessStatus?.(width);
 		const spinner = GLYPH.running;
-		let label = "";
-		if (mode === "CONFIRM")
-			label = `${theme.fg("composerRail", attentionCue(this.railAnimationTime))} ${theme.style("decisionCue", "CONFIRM", { bold: true })}`;
-		else if (mode === "PREPARING" || mode === "COMPACTING")
-			label = theme.fg("harnessAction", `${spinner} ${mode === "PREPARING" ? "Preparing" : "Compacting context"}`);
-		else if (status)
-			label = theme.fg(
-				status.live ? "harnessAction" : status.token,
-				`${status.live ? spinner : status.glyph} ${status.label}`,
-			);
-		else if (mode !== "MESSAGE") label = theme.fg("harnessAction", `${spinner} Working`);
+		let lead = "";
+		let activity = "";
+		if (mode === "CONFIRM") {
+			lead = theme.fg("composerRail", attentionCue(this.railAnimationTime));
+			activity = theme.style("decisionCue", "needs approval", { bold: true });
+		} else if (mode === "PREPARING" || mode === "COMPACTING") {
+			lead = theme.fg("harnessAction", spinner);
+			activity = theme.fg("harnessAction", mode === "PREPARING" ? "is preparing" : "is compacting context");
+		} else if (status) {
+			lead = theme.fg(status.token, status.live ? spinner : status.glyph);
+			activity = theme.fg(status.token, status.label);
+		} else if (mode !== "MESSAGE") {
+			lead = theme.fg("harnessAction", spinner);
+			activity = theme.fg("harnessAction", "is working");
+		}
+		const route = this.chrome.getModelLabel();
+		const nickname = modelNickname(typeof route === "string" ? route.split("·").at(-1) : route.modelId);
+		const identity = theme.fg(
+			"activeModelIdentity",
+			truncateToWidth(nickname, Math.max(4, Math.min(24, Math.floor(width / 3))), GLYPH.ellipsis, false),
+		);
+		const label = [lead, identity, activity].filter(Boolean).join(" ");
 		const suffix = [
 			hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "",
 			mode === "STEER" || (mode === "FOLLOW-UP" && text.length > 0) ? theme.fg("draftState", mode) : "",
@@ -290,28 +301,29 @@ export class ClioEditor extends Editor {
 
 	/** The top rail holds harness activity or the active menu's title. */
 	private topRail(width: number, theme: ClioTheme, rail: EditorRailState, label: string, suffix = ""): string {
-		const room = this.railLabelRoom(width);
+		const left = rail.yolo ? `${theme.fg("composerRail", "━")} ${theme.style("yoloLabel", "YOLO", { bold: true })}` : "";
+		const room = Math.max(0, this.railLabelRoom(width) - (left ? visibleWidth(left) + 1 : 0));
 		const labelRoom = Math.max(0, room - visibleWidth(suffix) - (label && suffix ? 3 : 0));
 		const right = [truncateToWidth(label, labelRoom, GLYPH.ellipsis, false), suffix]
 			.filter(Boolean)
 			.join(theme.fg("border", " · "));
-		return renderEditorRail(theme, width, { right, rightRaw: true }, rail);
+		return renderEditorRail(theme, width, { left, leftRaw: true, right, rightRaw: true }, rail);
 	}
 
 	/** Thinking and context stay together; permission and menu keys have priority. */
 	private bottomRail(width: number, theme: ClioTheme, rail: EditorRailState, right = ""): string {
 		const room = this.railLabelRoom(width);
 		const fittedRight = truncateToWidth(right, room, GLYPH.ellipsis, false);
-		const leftRoom = Math.max(0, room - visibleWidth(fittedRight) - (fittedRight ? 3 : 0) - 2);
+		const groupRoom = Math.max(0, room - visibleWidth(fittedRight) - (fittedRight ? 3 : 0));
 		const thinking =
-			leftRoom > 0
+			groupRoom > 0
 				? truncateToWidth(
 						thinkingRailHint(
 							theme,
 							this.chrome.getThinking?.() ?? { label: this.chrome.getThinkingLabel(), hasLevels: false },
-							leftRoom,
+							groupRoom,
 						),
-						leftRoom,
+						groupRoom,
 						GLYPH.ellipsis,
 						false,
 					)
@@ -320,14 +332,13 @@ export class ClioEditor extends Editor {
 		const usage = context
 			? contextRailHint(
 					context,
-					width >= 100 ? 14 : 8,
-					Math.max(0, leftRoom - visibleWidth(thinking) - (thinking ? 3 : 0)),
+					width >= 100 ? 10 : 6,
+					Math.max(0, groupRoom - visibleWidth(thinking) - (thinking ? 3 : 0)),
 					theme,
 				)
 			: "";
-		const hint = [thinking, usage].filter(Boolean).join(theme.fg("border", " · "));
-		const left = hint ? `${theme.fg("composerRail", "━")} ${hint}` : "";
-		return renderEditorRail(theme, width, { left, leftRaw: true, right: fittedRight, rightRaw: true }, rail);
+		const hint = [fittedRight, usage, thinking].filter(Boolean).join(theme.fg("border", " · "));
+		return renderEditorRail(theme, width, { right: hint, rightRaw: true }, rail);
 	}
 
 	private railLabelRoom(width: number): number {

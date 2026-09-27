@@ -155,12 +155,13 @@ export function buildSegmentedContextBar(
 	barWidth: number,
 	contextWindow: number,
 	breakdown: SegmentBreakdownInput | undefined,
+	includePercent = true,
 ): string {
 	const cells = Math.max(0, Math.floor(Number.isFinite(barWidth) ? barWidth : 0));
 	const glyphs = contextBarGlyphs();
 
 	if (contextWindow <= 0 || !Number.isFinite(contextWindow) || !breakdown) {
-		return `${theme.fg("meterFree", glyphs.free.repeat(cells))}${contextPercentLabel(theme, null)}`;
+		return `${theme.fg("meterFree", glyphs.free.repeat(cells))}${includePercent ? contextPercentLabel(theme, null) : ""}`;
 	}
 
 	const system = finiteNonNegative(breakdown.systemPromptTokens);
@@ -185,5 +186,5 @@ export function buildSegmentedContextBar(
 	const conversationPart =
 		conversationCells > 0 ? theme.fg("meterConversation", glyphs.filled.repeat(conversationCells)) : "";
 	const freePart = freeCells > 0 ? theme.fg("meterFree", glyphs.free.repeat(freeCells)) : "";
-	return `${systemPart}${toolPart}${conversationPart}${freePart}${contextPercentLabel(theme, percent)}`;
+	return `${systemPart}${toolPart}${conversationPart}${freePart}${includePercent ? contextPercentLabel(theme, percent) : ""}`;
 }

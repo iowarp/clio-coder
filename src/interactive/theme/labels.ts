@@ -83,6 +83,21 @@ export interface TargetIdentity {
 	modelId: string | null | undefined;
 }
 
+/** The activity rail names the model family/version; inspection retains the wire id. */
+export function modelNickname(modelId: string | null | undefined): string {
+	const raw = sanitizeCallTargetText(modelId ?? "");
+	if (!raw) return "No model";
+	const leaf = raw.slice(raw.lastIndexOf("/") + 1).split("@")[0] ?? "";
+	const name = leaf
+		.replace(/[-_]\d+(?:\.\d+)?[bm](?:[-_].*)?$/iu, "")
+		.replace(/[-_](?:ud)?(?:i?q\d[a-z\d_-]*|fp\d+|bf\d+|gguf)$/iu, "")
+		.replaceAll("_", "-");
+	const ornith = /^ornith-?(\d+(?:\.\d+)*)$/iu.exec(name);
+	if (ornith) return `Ornith-${ornith[1]}`;
+	if (/^gpt(?:-|\d)/iu.test(name)) return name.replace(/^gpt/iu, "GPT");
+	return name ? name.charAt(0).toUpperCase() + name.slice(1) : "No model";
+}
+
 function fitIdentityPrefix(value: string, width: number): string {
 	return stripTerminalSequences(truncateToWidth(value, Math.max(0, width), "…", false));
 }
