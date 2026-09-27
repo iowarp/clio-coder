@@ -138,7 +138,7 @@ newest output and resumes following the stream.
   <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-conversation.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-conversation.webp" alt="Browser conversation with project-grouped sessions, a compact composer, model selection and harness controls" width="800" /></a>
 </p>
 <p align="center">
-  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-artifacts.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-artifacts.webp" alt="Conversation with eight passing tests and recorded verification results in the collapsible right Artifacts panel" width="800" /></a>
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-artifacts.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/screenshots/gui-artifacts.webp" alt="Conversation with seven passing temperature-calibration tests and recorded verification results in the collapsible right Artifacts panel" width="800" /></a>
 </p>
 
 [Watch a real calibration verification (33 seconds, MP4)](https://raw.githubusercontent.com/iowarp/clio-coder/v057/assets/recordings/gui-calibration.mp4)

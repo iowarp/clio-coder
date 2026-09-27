@@ -215,47 +215,47 @@
 		{
 			"id": "tui-boot-png",
 			"source": "assets/screenshots/tui-boot.png",
-			"sha256": "6b68401004b45ed85cac8fe089f76d8ffa91e06266f86821957132a6e3bbe0ea",
-			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"sha256": "ffe935bbac401140128f72c770df47669c5e950195629f91f9ee5421fa9d90ba",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Live terminal ANSI rendered with xterm.js, an isolated single-model profile, and MesloLGS Nerd Font. Blank bottom margin cropped; no interface content changed.",
 			"dimensions": {
-				"width": 3766,
-				"height": 2003
+				"width": 2680,
+				"height": 988
 			},
-			"role": "Terminal boot screen",
+			"role": "Terminal boot with the model, workspace, fleet, composer, and guidance footer",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Clio Coder terminal boot screen with the model, workspace, fleet, shortcuts, composer and context footer.",
+			"altTextSeed": "Clio Coder terminal boot with the model, workspace, fleet, composer, and guidance footer",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/tui-boot.png"],
-			"capturedVersion": "0.5.6"
+			"capturedVersion": "0.5.7"
 		},
 		{
 			"id": "tui-boot-webp",
 			"source": "assets/screenshots/tui-boot.webp",
-			"sha256": "f8ffd53ad1ea14eb6d62fa874eab66aeb6e06c3de03b81e931230a92bf6ac976",
-			"provenance": "User-provided Clio Coder capture, 2026-09-26.",
+			"sha256": "74794030799bfad96c76b3d90f0ff8834590ce944986b5b604d4c3da98fdfdf3",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Live terminal ANSI rendered with xterm.js, an isolated single-model profile, and MesloLGS Nerd Font. Blank bottom margin cropped; no interface content changed.",
 			"dimensions": {
 				"width": 1920,
-				"height": 1021
+				"height": 708
 			},
-			"role": "Terminal boot screen",
+			"role": "Terminal boot with the model, workspace, fleet, composer, and guidance footer",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Clio Coder terminal boot screen with the model, workspace, fleet, shortcuts, composer and context footer.",
+			"altTextSeed": "Clio Coder terminal boot with the model, workspace, fleet, composer, and guidance footer",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/tui-boot.webp"],
-			"capturedVersion": "0.5.6"
+			"capturedVersion": "0.5.7"
 		},
 		{
 			"id": "gui-conversation-png",
 			"source": "assets/screenshots/gui-conversation.png",
-			"sha256": "0ce1d9a80c00f17e0f07c3a3ba9e3ed9580c3a68e2d197ce83d89479a50be822",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"sha256": "299f7c8dfc91e2f95a9c7fcc23361beb6b0c6539f18e60219ea4bb5a226a6452",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. No fixture mode or invented conversation content.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
 			},
-			"role": "Browser conversation reporting eight passing calibration tests from a real verification call.",
+			"role": "Desktop conversation reporting seven passing calibration tests and a reference-temperature table",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Browser conversation reporting eight passing calibration tests from a real verification call.",
+			"altTextSeed": "Clio Coder desktop conversation reporting seven passing calibration tests and a reference-temperature table",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/gui-conversation.png"],
 			"capturedVersion": "0.5.7",
@@ -264,15 +264,15 @@
 		{
 			"id": "gui-conversation-webp",
 			"source": "assets/screenshots/gui-conversation.webp",
-			"sha256": "445e64e784e2de085e3cfabeb2f3dac85f81964d4da3ed406f0fd849dbf9060f",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"sha256": "be3fc73f31714366b95e3ebfd1b670526b4c6659f2961f209632f13f3c67380e",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. No fixture mode or invented conversation content.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
 			},
-			"role": "Browser conversation reporting eight passing calibration tests from a real verification call.",
+			"role": "Desktop conversation reporting seven passing calibration tests and a reference-temperature table",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Browser conversation reporting eight passing calibration tests from a real verification call.",
+			"altTextSeed": "Clio Coder desktop conversation reporting seven passing calibration tests and a reference-temperature table",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/gui-conversation.webp"],
 			"capturedVersion": "0.5.7",
@@ -281,15 +281,15 @@
 		{
 			"id": "gui-overview-png",
 			"source": "assets/screenshots/gui-overview.png",
-			"sha256": "00de849cbd7f4abed0f2031151e2d489456b3a77473c62bab37d874828a936c6",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"sha256": "ab8f07952441b64c5dfec6eaf781a4893fc68150e7b2eb57a752123b409045c8",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. Recent-project absolute path redacted in the capture. No fixture mode or invented conversation content.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
 			},
-			"role": "Browser overview with project selection and real calibration conversations.",
+			"role": "Desktop overview with a temperature-calibration conversation ready to resume",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Browser overview with project selection and real calibration conversations.",
+			"altTextSeed": "Clio Coder desktop overview with a temperature-calibration conversation ready to resume",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/gui-overview.png"],
 			"capturedVersion": "0.5.7",
@@ -298,15 +298,15 @@
 		{
 			"id": "gui-overview-webp",
 			"source": "assets/screenshots/gui-overview.webp",
-			"sha256": "e1c65f9582f6c16e65754d56983d5dd29063b86a66bca6bf607dad4d03287a88",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"sha256": "68e1e421972f6fee1625e939f40b0aa7340fc4aaf0af9a9f9d00eb91884f85b3",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. Recent-project absolute path redacted in the capture. No fixture mode or invented conversation content.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
 			},
-			"role": "Browser overview with project selection and real calibration conversations.",
+			"role": "Desktop overview with a temperature-calibration conversation ready to resume",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Browser overview with project selection and real calibration conversations.",
+			"altTextSeed": "Clio Coder desktop overview with a temperature-calibration conversation ready to resume",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/gui-overview.webp"],
 			"capturedVersion": "0.5.7",
@@ -413,36 +413,132 @@
 		{
 			"id": "gui-artifacts-png",
 			"source": "assets/screenshots/gui-artifacts.png",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. No fixture mode or invented conversation content.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
 			},
-			"role": "Conversation with project-grouped sessions, modern composer and recorded results in the collapsible artifact inspector.",
+			"role": "Desktop conversation with a successful verify result in the Artifacts inspector",
 			"channels": ["repository"],
-			"altTextSeed": "Clio conversation with eight passing tests, project sessions and recorded verification results in the right sidebar.",
+			"altTextSeed": "Clio Coder desktop conversation with a successful verify result in the Artifacts inspector",
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
 			"capturedRevision": "6d8fbaea2",
-			"copies": [],
-			"sha256": "60aa9d0674aafb59fa87772942206beaa5c4ff42759872df1f87b0a23edf70fc"
+			"copies": ["site/assets/gui-artifacts.png"],
+			"sha256": "617f51d0b2bb102c7b9f10d78243512e39a0b2651326f51f2704cd3f983b2705"
 		},
 		{
 			"id": "gui-artifacts-webp",
 			"source": "assets/screenshots/gui-artifacts.webp",
-			"provenance": "Actual Playwright/Chrome capture, 2026-09-26; isolated Clio profile, authentic model-created calibration project and fresh verify/check test turn with eight passing tests. Contextual navigation preserves the conversation. No fixture mode.",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. No fixture mode or invented conversation content.",
 			"dimensions": {
 				"width": 1600,
 				"height": 1000
 			},
-			"role": "Conversation with project-grouped sessions, modern composer and recorded results in the collapsible artifact inspector.",
+			"role": "Desktop conversation with a successful verify result in the Artifacts inspector",
 			"channels": ["repository"],
-			"altTextSeed": "Clio conversation with eight passing tests, project sessions and recorded verification results in the right sidebar.",
+			"altTextSeed": "Clio Coder desktop conversation with a successful verify result in the Artifacts inspector",
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
 			"capturedRevision": "6d8fbaea2",
+			"copies": ["site/assets/gui-artifacts.webp"],
+			"sha256": "c2bbb9801aa933e142b83f74781faea1d27c7c6026a2ec8010f6e08de1492fee"
+		},
+		{
+			"id": "gui-overview-light-png",
+			"source": "assets/screenshots/gui-overview-light.png",
+			"sha256": "f915877becdecb4f1fb072fcc0d6c47e565678c92c12527f0b64ae4240af1e6d",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Desktop overview with a temperature-calibration conversation ready to resume in the light theme",
+			"channels": ["repository", "website"],
+			"altTextSeed": "Clio Coder desktop overview with a temperature-calibration conversation ready to resume in the light theme",
+			"representation": "real-product-capture",
+			"copies": ["site/assets/gui-overview-light.png"],
+			"capturedVersion": "0.5.7",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. Recent-project absolute path redacted in the capture. No fixture mode or invented conversation content."
+		},
+		{
+			"id": "gui-overview-light-webp",
+			"source": "assets/screenshots/gui-overview-light.webp",
+			"sha256": "58f6fc4dbfad23cc761f769c3f0a540f9fe604579c5b5f354322d8b1e2be356d",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"role": "Desktop overview with a temperature-calibration conversation ready to resume in the light theme",
+			"channels": ["repository", "website"],
+			"altTextSeed": "Clio Coder desktop overview with a temperature-calibration conversation ready to resume in the light theme",
+			"representation": "real-product-capture",
+			"copies": ["site/assets/gui-overview-light.webp"],
+			"capturedVersion": "0.5.7",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. Recent-project absolute path redacted in the capture. No fixture mode or invented conversation content."
+		},
+		{
+			"id": "gui-conversation-light-png",
+			"source": "assets/screenshots/gui-conversation-light.png",
+			"channels": ["repository", "website"],
+			"representation": "real-product-capture",
+			"copies": ["site/assets/gui-conversation-light.png"],
+			"role": "Desktop conversation reporting seven passing calibration tests and a reference-temperature table in the light theme",
+			"altTextSeed": "Clio Coder desktop conversation reporting seven passing calibration tests and a reference-temperature table in the light theme",
+			"capturedVersion": "0.5.7",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"sha256": "2d298350813ebfbd0b8973855aac976c29a60ee21f2e711a102e2009b38a79d9",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. No fixture mode or invented conversation content."
+		},
+		{
+			"id": "gui-conversation-light-webp",
+			"source": "assets/screenshots/gui-conversation-light.webp",
+			"channels": ["repository", "website"],
+			"representation": "real-product-capture",
+			"copies": ["site/assets/gui-conversation-light.webp"],
+			"role": "Desktop conversation reporting seven passing calibration tests and a reference-temperature table in the light theme",
+			"altTextSeed": "Clio Coder desktop conversation reporting seven passing calibration tests and a reference-temperature table in the light theme",
+			"capturedVersion": "0.5.7",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"sha256": "7f825ea4d6c4dae7b1d4a8be594fc86dd39161a7793ab9ad0d7c603860964499",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. No fixture mode or invented conversation content."
+		},
+		{
+			"id": "gui-artifacts-light-png",
+			"source": "assets/screenshots/gui-artifacts-light.png",
+			"channels": ["repository", "website"],
+			"representation": "real-product-capture",
 			"copies": [],
-			"sha256": "ddf4848184a83866e2041673a4bf4c636baf742aab209c5c40d6fb1828f50883"
+			"role": "Desktop conversation with a successful verify result in the Artifacts inspector in the light theme",
+			"altTextSeed": "Clio Coder desktop conversation with a successful verify result in the Artifacts inspector in the light theme",
+			"capturedVersion": "0.5.7",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"sha256": "35cb7cbaf56140e892a83a68470fcb083119b20e256179ba90a4be20fbb0954d",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. No fixture mode or invented conversation content."
+		},
+		{
+			"id": "gui-artifacts-light-webp",
+			"source": "assets/screenshots/gui-artifacts-light.webp",
+			"channels": ["repository", "website"],
+			"representation": "real-product-capture",
+			"copies": [],
+			"role": "Desktop conversation with a successful verify result in the Artifacts inspector in the light theme",
+			"altTextSeed": "Clio Coder desktop conversation with a successful verify result in the Artifacts inspector in the light theme",
+			"capturedVersion": "0.5.7",
+			"dimensions": {
+				"width": 1600,
+				"height": 1000
+			},
+			"sha256": "e73376f0911d3ecf49fba45bf380f1e9116567821ef1891ce9ac74919d537611",
+			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. No fixture mode or invented conversation content."
 		}
 	],
 	"socialExports": [

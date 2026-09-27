@@ -6,9 +6,15 @@ dimensions, descriptions, and delivery copies for the website and browser app.
 
 ## Product captures
 
-The PNG files in `screenshots/` are the supplied terminal boot, browser overview,
-and browser conversation captures. WebP companions are optimized for inline
-reading; links open the full-resolution PNGs. Keep displayed interface content
+The PNG files in `screenshots/` include the current terminal boot and actual
+desktop overview, conversation, and Artifacts captures in dark and light themes.
+The v0.5.7 desktop examples use a real model-created temperature-calibration
+session with seven passing tests recorded by `verify`. Its runnable source is in
+[`examples/temperature-calibration`](../examples/temperature-calibration/README.md).
+The overview captures redact the recent project's absolute path for publication;
+the terminal uses an isolated model profile and crops only blank bottom margin.
+The manifest records this provenance. WebP companions are optimized for inline
+reading; links open the full-resolution PNGs. Keep the remaining interface content
 intact when preparing derivatives.
 
 ## Synchronize and check
