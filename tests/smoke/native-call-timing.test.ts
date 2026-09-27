@@ -34,6 +34,18 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 	});
 }
 
+// `run --json` elides streamed text from message_end, and the prose stream may
+// flush a held-back tail as its own delta, so read the reassembled answer.
+function streamedText(stdout: string): string {
+	return stdout
+		.split("\n")
+		.filter((line) => line.startsWith("{"))
+		.map((line) => JSON.parse(line) as { type?: string; delta?: string })
+		.filter((event) => event.type === "text_delta")
+		.map((event) => event.delta ?? "")
+		.join("");
+}
+
 test("built native timing includes delayed response headers", async () => {
 	const scratch = makeScratchHome("clio-coder-native-call-timing-");
 	// This is controlled HTTP evidence. Output arrives immediately after
@@ -64,7 +76,7 @@ test("built native timing includes delayed response headers", async () => {
 		);
 		strictEqual(direct.code, 0, direct.stderr);
 		strictEqual(readFileSync(join(workspace, "timing-probe.txt"), "utf8"), CONTENT);
-		match(direct.stdout, /TIMING_WRITE_COMPLETE/u);
+		match(streamedText(direct.stdout), /TIMING_WRITE_COMPLETE/u);
 		strictEqual(fixture.requests.filter((request) => request.stream !== false).length, 2);
 		const journal = readRunJournal(join(scratch.dir, "state"));
 		ok(journal);
