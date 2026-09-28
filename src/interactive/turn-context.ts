@@ -1970,12 +1970,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				return sessionPrompt;
 			}
 			try {
+				const sessionStartedAt = deps.session?.current()?.createdAt;
 				const result = await deps.prompts.compileSessionPrompt({
 					sessionId,
 					sessionInputs,
 					autonomy,
 					cwd,
 					workingContextPaths: [...sessionWorkingContextPaths],
+					...(sessionStartedAt ? { sessionStartedAt } : {}),
 				});
 				const previousHash = sessionPromptHash ?? lastRecordedPromptHash();
 				const changed = agentRuntime.agent.state.systemPrompt !== result.systemPrompt;

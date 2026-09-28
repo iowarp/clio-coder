@@ -268,7 +268,7 @@ function sessionCanDispatch(inputs: SessionPromptInputs): boolean {
  * Tool Contract's skills clause follow the same rule as dispatch: text that
  * teaches a call to `context` renders only when `context` is there to be called.
  */
-function sessionHasContext(inputs: SessionPromptInputs): boolean {
+export function sessionHasContext(inputs: SessionPromptInputs): boolean {
 	if (inputs.providerSupportsTools === false) return false;
 	return (
 		(toolSurfaceHasTool(inputs.toolNames, "context") ||
@@ -708,6 +708,7 @@ export const PROMPT_SECTION_LAYER: Readonly<Record<string, PromptSectionLayer>> 
 	"context.workspace-root": "session",
 	"context.clio-repo-awareness": "session",
 	"context.self-development-skills": "session",
+	"context.catalogs": "session",
 	"context.operator-profile": "session",
 	"context.project-rules": "turn",
 	"turn-scope": "turn",
