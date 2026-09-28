@@ -507,7 +507,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 						? "Every question for the operator goes through ask_user, never prose: a decision the request leaves open, approval of a plan, or a plain yes or no. End that turn on the ask_user call instead of a question at the end of a message."
 						: "Every question for the operator goes through ask_user, never prose; discover it through the gateway. End that turn on the ask_user call instead of a question at the end of a message.",
 					'Give each question the context needed to answer it and two to four options, recommended first, each with a one-line description. A yes or no becomes choices such as "Yes, proceed", "Yes, but change ..." and "No, instead ..."; set multi_select when choices combine.',
-					"Ask only what the request, the workspace, and earlier answers leave open, and honor answers already given. A greeting, thanks, or a question you can answer gets a plain reply, not an interview.",
+					"Ask only after using what the request, the workspace and earlier answers settle: a fact a tool can check is not a question for the operator, and a clear request gets the work, not an opening interview. Honor answers already given. A greeting, thanks, or a question you can answer gets a plain reply.",
 				]
 			: []),
 		"",
