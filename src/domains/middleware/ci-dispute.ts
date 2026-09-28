@@ -2,7 +2,7 @@ import type { MiddlewareHookRegistration } from "./runtime.js";
 import type { MiddlewareEffect } from "./types.js";
 
 export const CI_DISPUTE_REMINDER =
-	"[CI evidence] This question is about a reported red CI run. Check whether the alleged earlier assistant claim appears in this conversation; do not own an unseen claim. Inspect the specific CI run through the available CI capability. Local tests cannot establish why CI is red, so do not run them for this answer unless the operator asks for a local comparison. If one targeted CI lookup cannot identify the run, ask_user for its link or ID and state the limit. Do not search unrelated local files or session history for a substitute explanation.";
+	"[CI evidence] This question is about a reported red CI run. Check whether the alleged earlier assistant claim appears in this conversation; do not own an unseen claim. Inspect the specific CI run through the available CI capability. Local tests cannot establish why CI is red, so do not run them for this answer unless the operator asks for a local comparison. If one targeted CI lookup cannot identify the run, state the limit and request its link or ID through ask_user when available. Do not search unrelated local files or session history for a substitute explanation.";
 
 function isCiDispute(text: string): boolean {
 	return (
