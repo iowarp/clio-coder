@@ -42,6 +42,7 @@ import vllm from "./local-native/vllm.js";
 import anthropicCompat from "./protocol/anthropic-compat.js";
 import litellm from "./protocol/litellm.js";
 import openaiCompat from "./protocol/openai-compat.js";
+import systemOne from "./protocol/systemone.js";
 
 const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	alcf,
@@ -69,6 +70,7 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	anthropicCompat,
 	litellm,
 	openaiCompat,
+	systemOne,
 	sglang,
 	vllm,
 	claudeCode,
