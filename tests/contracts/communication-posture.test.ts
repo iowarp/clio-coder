@@ -20,6 +20,7 @@ describe("per-turn communication posture", () => {
 		strictEqual(selectCommunicationPosture({ ...base, highRigor: true, recentToolFailures: 2 }), "recovery");
 		strictEqual(selectCommunicationPosture({ ...base, continuation: true }), null);
 		strictEqual(selectCommunicationPosture({ ...base, operatorText: '{"answer":true}' }), null);
+		strictEqual(selectCommunicationPosture({ ...base, operatorText: "answer only as JSON" }), null);
 	});
 
 	it("injects one source-controlled line after repeated tool failures", () => {

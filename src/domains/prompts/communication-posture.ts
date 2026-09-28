@@ -27,6 +27,12 @@ export function selectCommunicationPosture(snapshot: CommunicationPostureSnapsho
 	const text = snapshot.operatorText.trim();
 	if (text.length === 0 || /^(?:\{|\[|```)/u.test(text)) return null;
 	if (
+		/\b(?:respond|answer|output|return)\s+(?:only\s+)?(?:as|with|in)\s+(?:valid\s+)?(?:json|yaml|xml)\b|\b(?:code|patch)\s+only\b/iu.test(
+			text,
+		)
+	)
+		return null;
+	if (
 		snapshot.recentToolFailures >= 2 ||
 		/\b(?:that's wrong|you were wrong|you missed|incorrect|that failed)\b/iu.test(text)
 	)
