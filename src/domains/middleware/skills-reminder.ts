@@ -103,6 +103,10 @@ export function isSubstantiveUserTurn(text: string | undefined): boolean {
 	// A short all-greeting message is not substantive; anything longer, or with
 	// any non-greeting token, is a real task.
 	if (tokens.length > 4) return true;
+	// A greeting word plus one address term ("sup fool", "hey buddy") is still a
+	// greeting; the open vocabulary of address terms cannot be listed. A real
+	// two-word task led by a greeting only defers the reminder to the next turn.
+	if (tokens.length === 2 && GREETING_WORDS.has(tokens[0] ?? "")) return false;
 	return tokens.some((token) => !GREETING_WORDS.has(token));
 }
 
