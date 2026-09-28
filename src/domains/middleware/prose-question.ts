@@ -83,62 +83,69 @@ export interface ProseQuestionDeps {
  * registration makes the rule hold whatever the model: a substantive turn
  * that ends on a question or an offer without calling ask_user gets one
  * automatic continuation to ask it properly, and a requested plan that ends
- * without a go-ahead question gets one to ask for approval. Greetings,
- * and continuations are left alone, and the runtime's
- * one-continuation-per-prompt cap bounds the cost.
+ * without a go-ahead question gets one to ask for approval.
+ *
+ * One operator submission is one turn_start and one turn_end. An ask_user
+ * round runs inside that run and its answer returns as a tool result, so the
+ * closing text checked here already follows every interview of the turn. The
+ * runtime grants one continuation per operator prompt, so a continuation turn
+ * is never checked: it could only report the spent cap. Greetings are left
+ * alone.
  */
 export function createProseQuestionRegistration(deps: ProseQuestionDeps): MiddlewareHookRegistration {
 	let substantiveTurn = false;
 	let planRequested = false;
 	let wroteThisTurn = false;
 	let planArtifactWritten = false;
-	let awaitingInterviewReply = false;
+	let askedThisTurn = false;
 	return {
 		id: PROSE_QUESTION_REGISTRATION_ID,
 		description: "request one continuation when a substantive turn ends on a prose question instead of ask_user",
 		hooks: ["turn_start", "after_tool", "turn_end"],
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook === "turn_start") {
-				// An answered interview can resume without fresh operator text. Keep
-				// checking its final reply, which may ask a new question in prose.
-				substantiveTurn = isSubstantiveUserTurn(input.text) || awaitingInterviewReply;
-				awaitingInterviewReply = false;
+				substantiveTurn = input.metadata?.requestContinuation !== true && isSubstantiveUserTurn(input.text);
 				planRequested = substantiveTurn && PLAN_REQUEST_PATTERN.test(input.text ?? "");
 				wroteThisTurn = false;
 				planArtifactWritten = false;
+				askedThisTurn = false;
 				return NO_EFFECTS;
 			}
-			// An interview earlier in the turn does not cover a question the closing
-			// text asks afterwards, so only writes are tracked: a plan already carried
-			// out needs no go-ahead.
 			if (input.hook === "after_tool") {
-				if (input.toolName === ToolNames.AskUser) awaitingInterviewReply = true;
+				if (input.toolName === ToolNames.AskUser) askedThisTurn = true;
 				if (input.toolName !== undefined && WRITE_TOOLS.has(input.toolName)) wroteThisTurn = true;
-				// A plan written as a terminal artifact is still a plan awaiting a go-ahead.
+				// A plan written as a terminal artifact is still a plan awaiting a
+				// go-ahead. The terminal call closes the run with empty text.
 				if (input.toolName === ToolNames.Artifact && input.toolArgs?.kind === "plan" && input.metadata?.resultKind === "ok")
 					planArtifactWritten = true;
 				return NO_EFFECTS;
 			}
 			if (input.hook !== "turn_end" || !substantiveTurn) return NO_EFFECTS;
 			substantiveTurn = false;
-			// A terminal artifact ends the turn on its own tool call rather than a stop.
-			const endedOnPlanArtifact = planArtifactWritten && input.metadata?.stopReason === "toolUse";
-			if (!isNormalStopReason(input.metadata?.stopReason) && !endedOnPlanArtifact) return NO_EFFECTS;
+			if (!isNormalStopReason(input.metadata?.stopReason)) return NO_EFFECTS;
 			if (!turnAllowsTool(deps.getTurnConstraints?.(), ToolNames.AskUser)) return NO_EFFECTS;
 			try {
 				if (!deps.askUserAvailable()) return NO_EFFECTS;
 			} catch {
 				return NO_EFFECTS;
 			}
-			// The closing text follows every tool call of the turn; a turn that ended
-			// on an ask_user round has no question left in it.
+			// An interview earlier in the turn does not cover a question the
+			// closing text asks after it.
 			const text = input.text ?? "";
 			if (endsOnProseQuestion(text)) {
 				return [{ kind: "request_continuation", message: PROSE_QUESTION_CONTINUATION_MESSAGE }];
 			}
 			// A planning turn ends on the operator's go-ahead, which is itself a
-			// question even when the plan never phrases one.
-			if (planRequested && !wroteThisTurn && (planArtifactWritten || text.trim().length >= PLAN_MIN_CHARS)) {
+			// question even when the plan never phrases one. A plan already carried
+			// out needs none, and neither does one the operator already answered an
+			// interview about: an approved plan may be implemented by dispatch,
+			// which leaves no write in this run.
+			if (
+				planRequested &&
+				!wroteThisTurn &&
+				!askedThisTurn &&
+				(planArtifactWritten || text.trim().length >= PLAN_MIN_CHARS)
+			) {
 				return [{ kind: "request_continuation", message: PLAN_APPROVAL_CONTINUATION_MESSAGE }];
 			}
 			return NO_EFFECTS;
