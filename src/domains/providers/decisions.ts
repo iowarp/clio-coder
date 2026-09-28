@@ -138,6 +138,12 @@ export interface Decider {
 	): Promise<DecideResult>;
 }
 
+/** Thrown before any request when the state cannot fit the target's decision window. */
+class DecisionStateOverflowError extends Error {}
+
+/** Thrown before any request while a failing target cools down. */
+class DecisionTargetCoolingError extends Error {}
+
 /**
  * Tokens a piece of decision evidence costs, by the chars/4 estimate the
  * harness uses everywhere else. It errs short on dense code, so a target whose
@@ -159,12 +165,30 @@ function decisionStateBudget(runtime: RuntimeDescriptor, target: TargetDescripto
 	return typeof window === "number" && Number.isFinite(window) && window > 0 ? window : null;
 }
 
+/** Consecutive timed-out calls that stop a target being asked. */
+const DECISION_BREAKER_THRESHOLD = 3;
+/** How long a tripped target is left alone before one call probes it again. */
+const DECISION_BREAKER_COOLDOWN_MS = 5 * 60_000;
+
+interface BreakerState {
+	failures: number;
+	openUntil: number;
+}
+
+// A pre-turn site costs every turn its full timeout when its server hangs.
+// Only timeouts trip it: a refused connection or an unusable answer comes back
+// in milliseconds and costs the turn nothing. Keyed by target and model, and
+// module-wide because a decider is rebuilt for every call from the live binding.
+const breakers = new Map<string, BreakerState>();
+
 /**
  * Bind a decision-capable runtime to a target. Throws when the runtime has no
  * `decide()`, so a misconfigured target fails at the binding rather than
  * halfway through whatever the caller was gating.
  *
- * Every call is reported to the decision-call sink whether or not it answered.
+ * Every call is checked against the target's decision window before it is
+ * sent, skipped while the target is cooling down after repeated timeouts, and
+ * reported to the decision-call sink whether or not it answered.
  */
 export function createDecider(
 	runtime: RuntimeDescriptor,
@@ -183,6 +207,7 @@ export function createDecider(
 		const serializedState = typeof state === "string" ? state : (JSON.stringify(state) ?? "");
 		const stateTokens = estimateDecisionTokens(serializedState);
 		const budget = decisionStateBudget(runtime, target);
+		const breakerKey = `${target.id}/${model ?? target.defaultModel ?? "default"}`;
 		const startedAt = performance.now();
 		const at = new Date().toISOString();
 		const sites = options.sites ?? (site === undefined ? [] : [site]);
@@ -210,6 +235,33 @@ export function createDecider(
 				...(detail.result?.tokensUsed !== undefined ? { usage: detail.result.tokensUsed } : {}),
 			});
 		};
+
+		// Laya keeps the head of an oversized state and CLM the tail, both
+		// silently, so a command at the far end of the evidence is simply not
+		// read. Asking nothing is the only answer that cannot mislead.
+		if (budget !== null) {
+			const longestQuestion = Math.max(0, ...Object.values(questions).map((q) => estimateDecisionTokens(q)));
+			if (stateTokens + longestQuestion > budget) {
+				const error = new DecisionStateOverflowError(
+					`decision state needs about ${stateTokens + longestQuestion} tokens; target '${target.id}' allows ${budget}`,
+				);
+				report("overflow", { error });
+				throw error;
+			}
+		}
+
+		const breaker = breakers.get(breakerKey);
+		if (
+			breaker !== undefined &&
+			breaker.failures >= DECISION_BREAKER_THRESHOLD &&
+			performance.now() < breaker.openUntil
+		) {
+			const error = new DecisionTargetCoolingError(
+				`decision target '${breakerKey}' is cooling down after ${breaker.failures} consecutive timeouts`,
+			);
+			report("breaker-open", { error });
+			throw error;
+		}
 
 		// The HTTP timeout starts only after credentials resolve. Own a deadline
 		// around both steps so a slow credential refresh cannot stall the turn.
@@ -245,10 +297,18 @@ export function createDecider(
 				})(),
 				aborted,
 			]);
+			breakers.delete(breakerKey);
 			report("answered", { result });
 			return result;
 		} catch (error) {
 			const canceled = !timedOut && upstream.some((entry) => entry.aborted);
+			if (timedOut) {
+				const failures = (breakers.get(breakerKey)?.failures ?? 0) + 1;
+				breakers.set(breakerKey, { failures, openUntil: performance.now() + DECISION_BREAKER_COOLDOWN_MS });
+			} else if (!canceled) {
+				// The server answered, however badly, so it is not hanging.
+				breakers.delete(breakerKey);
+			}
 			report(canceled ? "canceled" : timedOut ? "timeout" : "failed", { error });
 			throw error;
 		} finally {
