@@ -16,7 +16,8 @@ export const PLAN_APPROVAL_CONTINUATION_MESSAGE =
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
 
 // The operator asked for a plan; the turn's deliverable is a proposal awaiting a go-ahead.
-const PLAN_REQUEST_PATTERN = /\b(?:plan|planning|proposal|propose)\b/iu;
+const PLAN_REQUEST_PATTERN =
+	/^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:plan\b|(?:draft|write|make|create|give me)\s+(?:a\s+|the\s+)?(?:plan|proposal)\b|propose\b|outline\s+(?:a\s+|the\s+)?plan\b)/iu;
 // A plan short enough to be a clarifying reply is not a finished plan.
 const PLAN_MIN_CHARS = 400;
 const WRITE_TOOLS: ReadonlySet<string> = new Set([ToolNames.Edit, ToolNames.Write]);
@@ -59,9 +60,14 @@ function endsOnProseQuestion(text: string): boolean {
 		const line = stripInlineCode(raw).trim();
 		if (line.length > 0) lines.push(line);
 	}
-	let tail = lines.slice(-TAIL_LINES).join("\n").replace(COURTESY_CLOSER_PATTERN, "");
+	let tail = lines.slice(-TAIL_LINES).join("\n").replace(COURTESY_CLOSER_PATTERN, "").trim();
 	if (tail.length > TAIL_CHARS) tail = tail.slice(-TAIL_CHARS);
-	return QUESTION_SENTENCE_PATTERN.test(tail) || OFFER_PATTERN.test(tail);
+	const closingLines = tail.split("\n");
+	const last = closingLines.at(-1) ?? "";
+	const endsWithQuestion = /\?[*_"'’)\]]*$/u.test(last);
+	const endsWithOptions =
+		/^(?:[-*]|\d+[.)])\s/u.test(last) && QUESTION_SENTENCE_PATTERN.test(closingLines.slice(-3, -1).join("\n"));
+	return endsWithQuestion || endsWithOptions || OFFER_PATTERN.test(closingLines.slice(-3).join("\n"));
 }
 
 export interface ProseQuestionDeps {
