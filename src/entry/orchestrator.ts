@@ -94,7 +94,6 @@ import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
 import { loadMemoryRecordsSync } from "../domains/memory/store.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import { TaskMemoryEndpointBusyError } from "../domains/memory/task-memory-policy.js";
-import { createCiDisputeRegistration } from "../domains/middleware/ci-dispute.js";
 import { createDecisionHintsRegistration } from "../domains/middleware/decision-hints.js";
 import {
 	createDetachedDispatchNudgeRegistration,
@@ -1878,7 +1877,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}),
 		);
 	}
-	middleware.registerHook(createCiDisputeRegistration());
 	const middlewareToolChoice = createMiddlewareToolChoiceControl();
 	const toolRegistry = createRegistry({
 		safety,
