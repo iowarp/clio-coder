@@ -26,6 +26,7 @@ export interface ClassifierCall {
 export interface Classification {
 	actionClass: ActionClass;
 	reasons: ReadonlyArray<string>;
+	exposure?: "outward";
 }
 
 interface NamedPattern {
@@ -574,6 +575,13 @@ export function classify(rawCall: ClassifierCall): Classification {
 			if (targetReasons.length > 0) {
 				return { actionClass: "system_modify", reasons: targetReasons };
 			}
+		}
+		if (
+			normalizedGitCommands(commandText).some(
+				(candidate) => /^git push(?:\s|$)/u.test(candidate) && !/(?:^|\s)--dry-run(?:\s|$)/u.test(candidate),
+			)
+		) {
+			return { actionClass: "execute", reasons: ["git-push:outward"], exposure: "outward" };
 		}
 		return { actionClass: "execute", reasons };
 	}

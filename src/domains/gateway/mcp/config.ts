@@ -30,12 +30,13 @@ export const MCP_CONFIG_CAPS = Object.freeze({
 	envValueBytes: 4096,
 	cwdBytes: 512,
 	timeoutMs: 900_000,
+	toolActionClasses: 128,
 });
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 const ENV_KEY_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
 const ROOT_FIELDS = new Set(["version", "servers"]);
-const SERVER_FIELDS = new Set(["id", "command", "args", "cwd", "env", "timeoutMs", "actionClass"]);
+const SERVER_FIELDS = new Set(["id", "command", "args", "cwd", "env", "timeoutMs", "actionClass", "toolActionClasses"]);
 const SHELL_EXECUTABLES = new Set([
 	"bash",
 	"cmd",
@@ -67,6 +68,7 @@ export interface McpServerDeclaration {
 	timeoutMs: number | null;
 	/** Operator-declared effect class; project servers use the separate trust record. */
 	actionClass: "read" | "execute" | "unknown";
+	toolActionClasses: Record<string, "read" | "execute" | "unknown">;
 	/** sha256 of the canonical declaration; a trust record binds to it. */
 	digest: string;
 }
@@ -96,6 +98,7 @@ interface DeclaredServerFields {
 	env: Record<string, string>;
 	timeoutMs: number | null;
 	actionClass: "read" | "execute" | "unknown";
+	toolActionClasses: Record<string, "read" | "execute" | "unknown">;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -120,6 +123,7 @@ export function mcpServerDigest(fields: {
 	cwd: string | null;
 	env: Readonly<Record<string, string>>;
 	timeoutMs: number | null;
+	toolActionClasses?: Readonly<Record<string, "read" | "execute" | "unknown">>;
 }): string {
 	const canonical = JSON.stringify({
 		id: fields.id,
@@ -132,6 +136,15 @@ export function mcpServerDigest(fields: {
 				.map((key) => [key, fields.env[key]]),
 		),
 		timeoutMs: fields.timeoutMs,
+		...(fields.toolActionClasses !== undefined && Object.keys(fields.toolActionClasses).length > 0
+			? {
+					toolActionClasses: Object.fromEntries(
+						Object.keys(fields.toolActionClasses)
+							.sort()
+							.map((name) => [name, fields.toolActionClasses?.[name]]),
+					),
+				}
+			: {}),
 	});
 	return createHash("sha256").update(canonical).digest("hex");
 }
@@ -311,12 +324,32 @@ function validateServer(
 		return new Error(`${location}.actionClass must be read, execute, or unknown`);
 	}
 	const actionClass = (value.actionClass ?? "unknown") as "read" | "execute" | "unknown";
+	const toolActionClasses = Object.create(null) as Record<string, "read" | "execute" | "unknown">;
+	if (value.toolActionClasses !== undefined) {
+		if (!isRecord(value.toolActionClasses)) return new Error(`${location}.toolActionClasses must be a mapping`);
+		const entries = Object.entries(value.toolActionClasses);
+		if (entries.length > MCP_CONFIG_CAPS.toolActionClasses) {
+			return new Error(`${location}.toolActionClasses exceeds the ${MCP_CONFIG_CAPS.toolActionClasses}-entry cap`);
+		}
+		for (const [name, cls] of entries) {
+			if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/u.test(name)) {
+				return new Error(`${location}.toolActionClasses has invalid tool name '${name}'`);
+			}
+			if (cls !== "read" && cls !== "execute" && cls !== "unknown") {
+				return new Error(`${location}.toolActionClasses.${name} must be read, execute, or unknown`);
+			}
+			toolActionClasses[name] = cls;
+		}
+	}
 	let declaredCwd: string | null = null;
 	if (value.cwd !== undefined) {
 		if (typeof value.cwd !== "string") return new Error(`${location}.cwd must be a string`);
 		declaredCwd = value.cwd;
 	}
-	return { fields: { id, command, args, cwd: declaredCwd, env, timeoutMs, actionClass }, declaredCwd };
+	return {
+		fields: { id, command, args, cwd: declaredCwd, env, timeoutMs, actionClass, toolActionClasses },
+		declaredCwd,
+	};
 }
 
 export interface McpConfigTextInput {
@@ -385,6 +418,7 @@ export function parseMcpConfigText(text: string, input: McpConfigTextInput): Mcp
 			env: fields.env,
 			timeoutMs: fields.timeoutMs,
 			actionClass: fields.actionClass,
+			toolActionClasses: fields.toolActionClasses,
 			digest: mcpServerDigest(fields),
 		});
 	}

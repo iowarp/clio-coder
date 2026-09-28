@@ -9,6 +9,7 @@ export type AskAxis = { kind: "autonomy" } | { kind: "net"; ruleId: string };
 
 export function askAxis(decision: SafetyDecision): AskAxis {
 	if (decision.kind === "ask") {
+		if (decision.confirmationRuleId !== undefined) return { kind: "net", ruleId: decision.confirmationRuleId };
 		if (decision.match) return { kind: "net", ruleId: decision.match.ruleId };
 		if (decision.policy?.kind === "ask") {
 			return { kind: "net", ruleId: decision.policy.ruleId ?? decision.policy.reasonCode };

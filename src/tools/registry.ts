@@ -152,6 +152,8 @@ export interface ToolSpec {
 	modelParameters?: TSchema;
 	/** Base action class for this tool when arguments are trivial. */
 	baseActionClass: ActionClass;
+	/** A safety-net confirmation required at every autonomy level. */
+	confirmationRuleId?: string;
 	/** Harness-owned projection of executable effects for the safety engine. Never package-supplied code. */
 	safetyCall?(args: Record<string, unknown>): ClassifierCall;
 	/**
@@ -643,6 +645,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (
 			deps.readOnly === true &&
 			(actionClass !== "read" ||
+				spec.confirmationRuleId !== undefined ||
 				readOutside ||
 				decision.kind === "ask" ||
 				(call.tool === ToolNames.Context && call.args?.scope === "skills" && typeof call.args?.name === "string"))
@@ -693,6 +696,20 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			if (grant?.actionClass === actionClass) return { kind: "execute", spec, decision };
 			return { kind: "park", decision, axis: approvalAxisId(decision, level) };
 		}
+		if (spec.confirmationRuleId !== undefined && grant?.actionClass !== actionClass) {
+			const askDecision: SafetyDecision = {
+				kind: "ask",
+				classification: decision.classification,
+				confirmationRuleId: spec.confirmationRuleId,
+				rejection: {
+					short: `${call.tool} needs operator confirmation`,
+					detail: `${call.tool} changes a Slurm allocation and requires approval before it reaches the scheduler.`,
+					hints: ["Approving resumes only this call."],
+				},
+				...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+			};
+			return { kind: "park", decision: askDecision, axis: approvalAxisId(askDecision, level) };
+		}
 		// One-shot grant: resumeParkedCalls re-admits exactly the parked call
 		// the operator approved, with a confirmed posture. The engine converts
 		// its confirm rail to an allow (including M3 git ask rules), so the
@@ -727,7 +744,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const exposure =
 			call.tool === ToolNames.AskUser
 				? askUserExposure(call.args)
-				: call.tool === ToolNames.WebFetch && webFetchIsOutward(call.args)
+				: decision.classification.exposure === "outward" ||
+						(call.tool === ToolNames.WebFetch && webFetchIsOutward(call.args))
 					? "outward"
 					: DEFAULT_AUTONOMY_EXPOSURE;
 		const disposition = mapAutonomy(level, actionClass, {
@@ -935,7 +953,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
 					...(outcome.dispatchPlan !== undefined ? { dispatchPlan: outcome.dispatchPlan } : {}),
 				};
-				recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", { requestId: meta.requestId });
+				recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", {
+					requestId: meta.requestId,
+					...(outcome.decision.kind === "ask" && outcome.decision.confirmationRuleId !== undefined
+						? { reasonCode: `confirmation:${outcome.decision.confirmationRuleId}` }
+						: {}),
+				});
 				// The park ends when the operator decides, not when the verdict
 				// resolves: an approved call runs its body inside the resume pass,
 				// so measuring to the resolve would fold the tool's own execution
