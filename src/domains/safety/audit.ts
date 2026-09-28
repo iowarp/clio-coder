@@ -50,6 +50,7 @@ export interface ToolCallAuditRecord {
 	requestId?: string;
 	tool: string;
 	actionClass: string;
+	exposure?: "outward";
 	decision: ToolCallAuditDecision;
 	posture?: string;
 	reasons: ReadonlyArray<string>;
@@ -66,7 +67,7 @@ export type ToolCallAuditDecision = "allowed" | "blocked" | "permission_requeste
 
 export interface ToolCallAuditInput {
 	tool: string;
-	classification: { actionClass: string; reasons: ReadonlyArray<string> };
+	classification: { actionClass: string; reasons: ReadonlyArray<string>; exposure?: "outward" };
 	decision: ToolCallAuditDecision;
 	requestId?: string;
 	posture?: string;
@@ -264,6 +265,7 @@ export function buildAuditRecord(input: ToolCallAuditInput): ToolCallAuditRecord
 		decision: input.decision,
 		reasons: input.reasons ?? input.policy?.reasons ?? input.classification.reasons,
 	};
+	if (input.classification.exposure !== undefined) record.exposure = input.classification.exposure;
 	if (input.requestId !== undefined) record.requestId = input.requestId;
 	if (input.posture !== undefined) record.posture = input.posture;
 	if (input.policy?.ruleId !== undefined) record.ruleId = input.policy.ruleId;

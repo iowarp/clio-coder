@@ -727,7 +727,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const exposure =
 			call.tool === ToolNames.AskUser
 				? askUserExposure(call.args)
-				: call.tool === ToolNames.WebFetch && webFetchIsOutward(call.args)
+				: decision.classification.exposure === "outward" ||
+						(call.tool === ToolNames.WebFetch && webFetchIsOutward(call.args))
 					? "outward"
 					: DEFAULT_AUTONOMY_EXPOSURE;
 		const disposition = mapAutonomy(level, actionClass, {

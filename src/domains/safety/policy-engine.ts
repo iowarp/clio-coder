@@ -1116,6 +1116,7 @@ function effectiveClassification(
 	const actionClass = match.actionClass as ActionClass;
 	if (actionClass === classification.actionClass) return classification;
 	return {
+		...classification,
 		actionClass,
 		reasons: [...classification.reasons, `damage-control:${match.ruleId}`],
 	};
