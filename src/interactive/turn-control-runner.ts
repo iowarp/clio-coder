@@ -67,7 +67,7 @@ export interface TurnControlRunnerDeps {
 		task: string;
 		previous: string;
 		signal: AbortSignal;
-	}): Promise<{ interpretation: TurnInterpretation | null }>;
+	}): Promise<{ interpretation: TurnInterpretation | null; shadow?: TurnControlRecord["shadow"] }>;
 	facts: {
 		turnIndex(): number;
 		taskEstablished(): boolean;
@@ -155,6 +155,7 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 			};
 			let interpretation = deps.readInterpretation() ?? null;
 			let producer: TurnControlRecord["producer"] = interpretation === null ? null : "decision-site";
+			let shadow: TurnControlRecord["shadow"];
 			if (
 				interpretation === null &&
 				settings.interpretation.fallback === "main-model" &&
@@ -164,9 +165,13 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 				settings.workflows.length > 0
 			) {
 				try {
-					interpretation = (
-						await deps.fallback({ task: input.operatorText, previous: input.previous, signal: input.signal })
-					).interpretation;
+					const produced = await deps.fallback({
+						task: input.operatorText,
+						previous: input.previous,
+						signal: input.signal,
+					});
+					interpretation = produced.interpretation;
+					shadow = produced.shadow;
 				} catch {
 					/* S6: an unavailable fallback leaves no interpretation. */
 				}
@@ -178,6 +183,7 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 				turnId: input.userTurnId,
 				producer,
 				interpretation,
+				...(shadow !== undefined ? { shadow } : {}),
 				factsDigest: factsDigest(facts),
 				decision,
 				decisionHash: decisionHash(decision),

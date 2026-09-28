@@ -213,6 +213,7 @@ import { reseedSessionUsageFromLedger } from "../domains/session/usage-reseed.js
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import type { TurnControlRecord, TurnInterpretation } from "../domains/turn-control/index.js";
+import { calibrateInterpretation } from "../domains/turn-control/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
@@ -2628,7 +2629,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		getTurnConstraints: () => chat.currentTurnConstraints?.(),
 		isContinuation: () => false,
-		readInterpretation: () => turnRelevance.current().get("turnControl")?.value as TurnInterpretation | undefined,
+		// Both producers are put on the controller's scale here, where the
+		// answering build is known. A build with no fitted cuts yields no
+		// interpretation, so an unmeasured model never starts harness work.
+		readInterpretation: () => {
+			const answer = turnRelevance.current().get("turnControl");
+			if (answer === undefined) return undefined;
+			return (
+				calibrateInterpretation(
+					answer.value as TurnInterpretation,
+					answer.build,
+					getCurrentSettings().turnControl.interpretation.thresholds,
+				) ?? undefined
+			);
+		},
 		fallback: async (input) => {
 			const settings = getCurrentSettings();
 			if (!settings.chat.target || !settings.chat.model) return { interpretation: null };
@@ -2636,12 +2650,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const apiKey = targetRequiresAuth(refined.target, refined.runtime)
 				? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: input.signal })).apiKey
 				: LOCAL_API_KEY_FALLBACK;
-			return interpretTurnWithMainModel({
+			const { interpretation } = await interpretTurnWithMainModel({
 				...input,
 				model,
 				runtimeId: refined.runtime.id,
 				...(apiKey === undefined ? {} : { apiKey }),
 			});
+			if (interpretation === null) return { interpretation: null };
+			const calibrated = calibrateInterpretation(
+				interpretation,
+				settings.chat.model,
+				settings.turnControl.interpretation.thresholds,
+			);
+			return calibrated === null
+				? { interpretation: null, shadow: { build: settings.chat.model, interpretation } }
+				: { interpretation: calibrated };
 		},
 		facts: {
 			turnIndex: () =>
