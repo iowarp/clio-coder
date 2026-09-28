@@ -628,7 +628,7 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.AskUser,
 		description:
-			"Use for a requested interview or a missing decision that blocks requested work. Greetings, acknowledgements, and no task yet need a plain reply, not an interview. action=ask presents questions; action=complete records compact decisions before final prose. If cancelled, proceed with defaults and do not ask again.",
+			"Ask the operator anything you need from them: a decision the request leaves open, approval of a plan, or a yes or no. Questions never go in prose. Each question carries its context and 2-4 options with one-line descriptions, recommended first. Greetings, thanks, and questions you can answer need a plain reply, not an interview. action=ask presents questions; action=complete closes an interview that asked questions, recording the operator's decisions, before final prose. If cancelled, proceed with defaults and do not ask again.",
 		parameters: askUserParameters,
 		baseActionClass: "read",
 		executionMode: "sequential",
