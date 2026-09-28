@@ -85,6 +85,7 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 	let substantiveTurn = false;
 	let planRequested = false;
 	let wroteThisTurn = false;
+	let planArtifactWritten = false;
 	return {
 		id: PROSE_QUESTION_REGISTRATION_ID,
 		description: "request one continuation when a substantive turn ends on a prose question instead of ask_user",
@@ -95,6 +96,7 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 				substantiveTurn = isSubstantiveUserTurn(input.text);
 				planRequested = substantiveTurn && PLAN_REQUEST_PATTERN.test(input.text ?? "");
 				wroteThisTurn = false;
+				planArtifactWritten = false;
 				return NO_EFFECTS;
 			}
 			// An interview earlier in the turn does not cover a question the closing
@@ -102,11 +104,16 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 			// out needs no go-ahead.
 			if (input.hook === "after_tool") {
 				if (input.toolName !== undefined && WRITE_TOOLS.has(input.toolName)) wroteThisTurn = true;
+				// A plan written as a terminal artifact is still a plan awaiting a go-ahead.
+				if (input.toolName === ToolNames.Artifact && input.toolArgs?.kind === "plan" && input.metadata?.resultKind === "ok")
+					planArtifactWritten = true;
 				return NO_EFFECTS;
 			}
 			if (input.hook !== "turn_end" || !substantiveTurn) return NO_EFFECTS;
 			substantiveTurn = false;
-			if (!isNormalStopReason(input.metadata?.stopReason)) return NO_EFFECTS;
+			// A terminal artifact ends the turn on its own tool call rather than a stop.
+			const endedOnPlanArtifact = planArtifactWritten && input.metadata?.stopReason === "toolUse";
+			if (!isNormalStopReason(input.metadata?.stopReason) && !endedOnPlanArtifact) return NO_EFFECTS;
 			if (!turnAllowsTool(deps.getTurnConstraints?.(), ToolNames.AskUser)) return NO_EFFECTS;
 			try {
 				if (!deps.askUserAvailable()) return NO_EFFECTS;
@@ -121,7 +128,7 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 			}
 			// A planning turn ends on the operator's go-ahead, which is itself a
 			// question even when the plan never phrases one.
-			if (planRequested && !wroteThisTurn && text.trim().length >= PLAN_MIN_CHARS) {
+			if (planRequested && !wroteThisTurn && (planArtifactWritten || text.trim().length >= PLAN_MIN_CHARS)) {
 				return [{ kind: "request_continuation", message: PLAN_APPROVAL_CONTINUATION_MESSAGE }];
 			}
 			return NO_EFFECTS;
