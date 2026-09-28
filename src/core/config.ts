@@ -1329,13 +1329,37 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				if (!isPlainObject(control.interpretation))
 					issues.add("turnControl.interpretation", `expected a map, got ${describe(control.interpretation)}`);
 				else {
-					issues.unknownKeys("turnControl.interpretation", control.interpretation, ["fallback"]);
+					issues.unknownKeys("turnControl.interpretation", control.interpretation, ["fallback", "thresholds"]);
 					if ("fallback" in control.interpretation) {
 						const parsed = expectEnum(issues, "turnControl.interpretation.fallback", control.interpretation.fallback, [
 							"none",
 							"main-model",
 						] as const);
 						if (parsed !== undefined) settings.turnControl.interpretation.fallback = parsed;
+					}
+					if ("thresholds" in control.interpretation) {
+						const raw = control.interpretation.thresholds;
+						if (!isPlainObject(raw))
+							issues.add("turnControl.interpretation.thresholds", `expected a map, got ${describe(raw)}`);
+						else {
+							const thresholds: Record<string, { orientation?: number; direction?: number }> = {};
+							for (const [build, cuts] of Object.entries(raw)) {
+								const path = `turnControl.interpretation.thresholds.${build}`;
+								if (!isPlainObject(cuts)) {
+									issues.add(path, `expected a map, got ${describe(cuts)}`);
+									continue;
+								}
+								issues.unknownKeys(path, cuts, ["orientation", "direction"]);
+								const entry: { orientation?: number; direction?: number } = {};
+								for (const field of ["orientation", "direction"] as const) {
+									if (!(field in cuts)) continue;
+									const parsed = expectNumber(issues, `${path}.${field}`, cuts[field], { min: 0.01, max: 0.99 });
+									if (parsed !== undefined) entry[field] = parsed;
+								}
+								thresholds[build] = entry;
+							}
+							settings.turnControl.interpretation.thresholds = thresholds;
+						}
 					}
 				}
 			}

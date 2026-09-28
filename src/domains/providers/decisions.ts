@@ -18,6 +18,9 @@
  *   if (chosen(route) === "scout") ...
  */
 
+import type { DecisionSite } from "../../core/defaults.js";
+import type { DecisionCallOutcome } from "./decision-calls.js";
+import { decisionCallsRecorded, recordDecisionCall, recordedAnswers, stateDigest } from "./decision-calls.js";
 import type { DecideResult, DecisionAnswer, DecisionQuestion } from "./types/inference.js";
 import type { ProbeContext, RuntimeDescriptor } from "./types/runtime-descriptor.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
@@ -102,6 +105,15 @@ export function rating(answer: DecisionAnswer | undefined, opts: ReadThresholds 
 	return answer.score;
 }
 
+export interface AskOptions {
+	model?: string;
+	signal?: AbortSignal;
+	/** Sites whose questions this call carries, when a batch speaks for several. */
+	sites?: ReadonlyArray<DecisionSite>;
+	/** The caller's handle on what is being decided, carried into the call record. */
+	ref?: string;
+}
+
 export interface Decider {
 	/**
 	 * Evaluate every question against one body of state in a single round trip.
@@ -111,20 +123,67 @@ export interface Decider {
 	ask(
 		state: string | object | ReadonlyArray<unknown>,
 		questions: Record<string, DecisionQuestion>,
-		options?: { model?: string; signal?: AbortSignal },
+		options?: AskOptions,
 	): Promise<Record<string, DecisionAnswer>>;
 	/** Same call, keeping the resolved model id and token usage for receipts. */
 	askDetailed(
 		state: string | object | ReadonlyArray<unknown>,
 		questions: Record<string, DecisionQuestion>,
-		options?: { model?: string; signal?: AbortSignal },
+		options?: AskOptions,
 	): Promise<DecideResult>;
 }
+
+/** Thrown before any request when the state cannot fit the target's decision window. */
+class DecisionStateOverflowError extends Error {}
+
+/** Thrown before any request while a failing target cools down. */
+class DecisionTargetCoolingError extends Error {}
+
+/**
+ * Tokens a piece of decision evidence costs, by the chars/4 estimate the
+ * harness uses everywhere else. It errs short on dense code, so a target whose
+ * window is tight declares a `contextWindow` a little under the real one.
+ */
+function estimateDecisionTokens(value: unknown): number {
+	const text = typeof value === "string" ? value : (JSON.stringify(value) ?? "");
+	return Math.ceil(text.length / 4);
+}
+
+/**
+ * The window one decision call must fit: the target's declared
+ * `capabilities.contextWindow`, else the runtime's. Every System One server
+ * answers the state plus one question at a time, so that pair is what is
+ * measured. Null means neither declares one and the server is trusted.
+ */
+function decisionStateBudget(runtime: RuntimeDescriptor, target: TargetDescriptor): number | null {
+	const window = target.capabilities?.contextWindow ?? runtime.defaultCapabilities.contextWindow;
+	return typeof window === "number" && Number.isFinite(window) && window > 0 ? window : null;
+}
+
+/** Consecutive timed-out calls that stop a target being asked. */
+const DECISION_BREAKER_THRESHOLD = 3;
+/** How long a tripped target is left alone before one call probes it again. */
+const DECISION_BREAKER_COOLDOWN_MS = 5 * 60_000;
+
+interface BreakerState {
+	failures: number;
+	openUntil: number;
+}
+
+// A pre-turn site costs every turn its full timeout when its server hangs.
+// Only timeouts trip it: a refused connection or an unusable answer comes back
+// in milliseconds and costs the turn nothing. Keyed by target and model, and
+// module-wide because a decider is rebuilt for every call from the live binding.
+const breakers = new Map<string, BreakerState>();
 
 /**
  * Bind a decision-capable runtime to a target. Throws when the runtime has no
  * `decide()`, so a misconfigured target fails at the binding rather than
  * halfway through whatever the caller was gating.
+ *
+ * Every call is checked against the target's decision window before it is
+ * sent, skipped while the target is cooling down after repeated timeouts, and
+ * reported to the decision-call sink whether or not it answered.
  */
 export function createDecider(
 	runtime: RuntimeDescriptor,
@@ -132,37 +191,101 @@ export function createDecider(
 	ctx: ProbeContext,
 	resolveAuthToken?: (signal?: AbortSignal) => Promise<string | undefined>,
 	boundModel?: string,
+	site?: DecisionSite,
 ): Decider {
 	const decide = runtime.decide;
 	if (!decide) {
 		throw new Error(`runtime '${runtime.id}' does not support decide()`);
 	}
 	const askDetailed: Decider["askDetailed"] = async (state, questions, options = {}) => {
+		const model = options.model ?? boundModel;
+		const serializedState = typeof state === "string" ? state : (JSON.stringify(state) ?? "");
+		const stateTokens = estimateDecisionTokens(serializedState);
+		const budget = decisionStateBudget(runtime, target);
+		const targetLabel = `${target.id}/${model ?? target.defaultModel ?? "default"}`;
+		// Runtime and URL are part of the identity, so repointing a target id at a
+		// healthy server is not held back by the old endpoint's timeouts.
+		const breakerKey = `${runtime.id}|${target.url ?? ""}|${targetLabel}`;
+		const startedAt = performance.now();
+		const at = new Date().toISOString();
+		const sites = options.sites ?? (site === undefined ? [] : [site]);
+		const report = (outcome: DecisionCallOutcome, detail: { result?: DecideResult; error?: unknown } = {}): void => {
+			if (!decisionCallsRecorded()) return;
+			recordDecisionCall({
+				version: 1,
+				at,
+				sites,
+				...(options.ref !== undefined ? { ref: options.ref } : {}),
+				target: target.id,
+				model: model ?? null,
+				build: detail.result?.model ?? null,
+				outcome,
+				...(detail.error !== undefined
+					? { error: detail.error instanceof Error ? detail.error.message : String(detail.error) }
+					: {}),
+				latencyMs: Math.round(performance.now() - startedAt),
+				questions: Object.keys(questions).length,
+				stateChars: serializedState.length,
+				stateTokens,
+				budgetTokens: budget,
+				stateDigest: stateDigest(serializedState),
+				...(detail.result !== undefined ? { answers: recordedAnswers(detail.result.answers) } : {}),
+				...(detail.result?.tokensUsed !== undefined ? { usage: detail.result.tokensUsed } : {}),
+			});
+		};
+
+		// Laya keeps the head of an oversized state and CLM the tail, both
+		// silently, so a command at the far end of the evidence is simply not
+		// read. Asking nothing is the only answer that cannot mislead.
+		if (budget !== null) {
+			const longestQuestion = Math.max(0, ...Object.values(questions).map((q) => estimateDecisionTokens(q)));
+			if (stateTokens + longestQuestion > budget) {
+				const error = new DecisionStateOverflowError(
+					`decision state needs about ${stateTokens + longestQuestion} tokens; target '${target.id}' allows ${budget}`,
+				);
+				report("overflow", { error });
+				throw error;
+			}
+		}
+
+		const breaker = breakers.get(breakerKey);
+		if (
+			breaker !== undefined &&
+			breaker.failures >= DECISION_BREAKER_THRESHOLD &&
+			performance.now() < breaker.openUntil
+		) {
+			const error = new DecisionTargetCoolingError(
+				`decision target '${targetLabel}' is cooling down after ${breaker.failures} consecutive timeouts`,
+			);
+			report("breaker-open", { error });
+			throw error;
+		}
+
 		// The HTTP timeout starts only after credentials resolve. Own a deadline
 		// around both steps so a slow credential refresh cannot stall the turn.
 		const controller = new AbortController();
 		const signal = controller.signal;
+		let timedOut = false;
 		const upstream = [options.signal, ctx.signal].filter((entry): entry is AbortSignal => entry !== undefined);
 		const onUpstreamAbort = () => controller.abort(upstream.find((entry) => entry.aborted)?.reason);
 		for (const entry of upstream) entry.addEventListener("abort", onUpstreamAbort, { once: true });
 		if (upstream.some((entry) => entry.aborted)) onUpstreamAbort();
-		const timer = setTimeout(
-			() => controller.abort(new Error(`decision timed out after ${ctx.httpTimeoutMs}ms`)),
-			ctx.httpTimeoutMs,
-		);
+		const timer = setTimeout(() => {
+			timedOut = true;
+			controller.abort(new Error(`decision timed out after ${ctx.httpTimeoutMs}ms`));
+		}, ctx.httpTimeoutMs);
 		const aborted = new Promise<never>((_resolve, reject) => {
 			if (signal.aborted) reject(signal.reason);
 			else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
 		});
 		try {
-			return await Promise.race([
+			const result = await Promise.race([
 				(async () => {
 					signal.throwIfAborted();
 					// Resolved per call rather than at binding, so a rotated key is
 					// available to the next question without restarting the session.
 					const authToken = ctx.authToken ?? (await resolveAuthToken?.(signal));
 					signal.throwIfAborted();
-					const model = options.model ?? boundModel;
 					return decide.call(
 						runtime,
 						target,
@@ -172,6 +295,20 @@ export function createDecider(
 				})(),
 				aborted,
 			]);
+			breakers.delete(breakerKey);
+			report("answered", { result });
+			return result;
+		} catch (error) {
+			const canceled = !timedOut && upstream.some((entry) => entry.aborted);
+			if (timedOut) {
+				const failures = (breakers.get(breakerKey)?.failures ?? 0) + 1;
+				breakers.set(breakerKey, { failures, openUntil: performance.now() + DECISION_BREAKER_COOLDOWN_MS });
+			} else if (!canceled) {
+				// The server answered, however badly, so it is not hanging.
+				breakers.delete(breakerKey);
+			}
+			report(canceled ? "canceled" : timedOut ? "timeout" : "failed", { error });
+			throw error;
 		} finally {
 			clearTimeout(timer);
 			for (const entry of upstream) entry.removeEventListener("abort", onUpstreamAbort);

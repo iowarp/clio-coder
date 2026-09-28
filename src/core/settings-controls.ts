@@ -416,6 +416,8 @@ export function settingsV2PathForRow(id: string): string {
 	if (id.startsWith("setting.")) return id.slice(8);
 	if (id.startsWith("workers.profiles.")) return `fleet.profiles.${id.slice("workers.profiles.".length)}`;
 	if (id.startsWith("workers.agentBindings.")) return `fleet.agentProfiles.${id.slice("workers.agentBindings.".length)}`;
+	if (id.startsWith("workers.decisionSites."))
+		return `fleet.decisionProfiles.${id.slice("workers.decisionSites.".length)}`;
 	const override = SETTINGS_CENTER_V2_PATH_OVERRIDES[id];
 	if (override !== undefined) return override;
 	for (const [v1Path, v2Path] of SETTINGS_V1_PATH_MOVES) {
@@ -452,6 +454,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"interface.panes.files.mode": ["companion", "chooser"],
 	"interface.panes.files.profile": ["managed", "user"],
 	"context.workingSet.policy": ["structural-v1", "structural-v2", "age-horizon"],
+	"turnControl.interpretation.fallback": ["none", "main-model"],
 	"context.workingSet.profile": ["default", "data-analysis", "web-design"],
 	"integrations.externalAgents.defaults.toolGovernance": ["clio-coder-policy", "agent-managed", "deny-all"],
 };
@@ -459,6 +462,7 @@ const STRUCTURED = new Set([
 	"fleet.profiles",
 	"fleet.rosters",
 	"fleet.agentProfiles",
+	"fleet.decisionProfiles",
 	"fleet.nodes",
 	"fleet.adaptiveRouting.agentRoles",
 	"interface.keybindings",
@@ -493,6 +497,26 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Map native agent names to existing worker profile names. Use Fleet's binding actions or edit this JSON object.",
 	],
 
+	"fleet.decisionProfiles": [
+		"System One decision sites (experimental)",
+		"Map decision sites to a profile whose target answers typed decisions (typesafe-jev or a self-hosted systemone server). An unbound site asks nothing and Clio behaves as if the feature did not exist. A bound site sends its evidence to that target; Fleet lists what each site sends. Research feature: thresholds are fitted per model build.",
+	],
+	"turnControl.workflows": [
+		"Turn control workflows",
+		"Work the harness may start before the model answers: orientation (a read-only Scout tour), direction (git status, log and tree when you are undecided), ledger facts, and collecting finished detached runs. Orientation and direction need an interpretation from a bound turnControl decision site or the main-model fallback.",
+	],
+	"turnControl.interpretation.fallback": [
+		"Turn interpretation fallback",
+		"With no turnControl decision site answering, main-model asks the chat model to classify the turn. Its answers are recorded and acted on only once cuts for that model are set under turnControl.interpretation.thresholds.",
+	],
+	"turnControl.orientation.maxSplit": [
+		"Orientation Scouts per turn",
+		"The most read-only Scouts one orientation may split into.",
+	],
+	"turnControl.orientation.maxCostUsdPerTurn": [
+		"Orientation cost cap per turn",
+		"USD ceiling for the Scouts one orientation starts. Empty uses the dispatch cost ceiling.",
+	],
 	"fleet.rosters": [
 		"Fleet rosters",
 		"Named teams of worker profiles used by council and fleet runs. Edit the JSON object; each roster names its members.",

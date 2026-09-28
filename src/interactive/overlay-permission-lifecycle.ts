@@ -277,6 +277,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			tool: entry.tool,
 			actionClass: entry.actionClass,
 			target: entry.target ?? "",
+			requestId: entry.requestId,
 		});
 		if (!deps.openPermissionOverlay(workerApprovalRequestView(entry), undefined, undefined, advisory)) return false;
 		pendingWorker = entry;
@@ -369,6 +370,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 				tool: call.tool,
 				actionClass: decision.classification.actionClass,
 				target: view.target ?? "",
+				requestId: view.requestId,
 			});
 			if (!deps.openPermissionOverlay(view, mainMutationInspector(call, view), () => call.args, advisory)) {
 				announceParked();

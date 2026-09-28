@@ -46,6 +46,7 @@ export const BUILTIN_RUNTIME_BOOT_MANIFEST: ReadonlyArray<RuntimeBootMetadata> =
 	{ id: "anthropic-compat", kind: "http", tier: "protocol", auth: "api-key" },
 	{ id: "litellm", kind: "http", tier: "protocol", auth: "api-key" },
 	{ id: "openai-compat", kind: "http", tier: "protocol", auth: "api-key" },
+	{ id: "systemone", kind: "http", tier: "protocol", auth: "api-key" },
 	{ id: "sglang", kind: "http", tier: "local-native", auth: "api-key" },
 	{ id: "vllm", kind: "http", tier: "local-native", auth: "api-key" },
 	{ id: "claude-code", kind: "subprocess", tier: "subscription", auth: "claude-cli" },

@@ -127,6 +127,7 @@ import { PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
+import { createDecisionCallBuffer, setDecisionCallSink } from "../domains/providers/decision-calls.js";
 import type { CostProvenance, ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import {
 	AGENT_ROLE_TOOLS_REQUIRED_REASON,
@@ -157,6 +158,7 @@ import { askSite } from "../domains/providers/site-ask.js";
 import { rankCapabilities } from "../domains/providers/sites/capabilities.js";
 import { createHarnessRoutingSite } from "../domains/providers/sites/harness-routing.js";
 import { type DispatchForecast, dispatchForecastConfident, turnSites } from "../domains/providers/sites/index.js";
+import { observeTurnEnd } from "../domains/providers/sites/turn-end.js";
 import { createTurnRelevanceStore } from "../domains/providers/turn-relevance.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
 import {
@@ -212,6 +214,7 @@ import { reseedSessionUsageFromLedger } from "../domains/session/usage-reseed.js
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import type { TurnControlRecord, TurnInterpretation } from "../domains/turn-control/index.js";
+import { calibrateInterpretation } from "../domains/turn-control/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
@@ -390,6 +393,8 @@ const RELEVANCE_DECISION_TIMEOUT_MS = 1_500;
  * an outage.
  */
 const CONSULT_DECISION_TIMEOUT_MS = 3_000;
+/** The turn-end reading runs after the turn settles and delays nothing, so it can wait longer. */
+const TURN_END_DECISION_TIMEOUT_MS = 5_000;
 
 function resolveTarget(providers: ProvidersContract, targetId: string | null | undefined): TargetDescriptor | null {
 	if (!targetId) return null;
@@ -2020,6 +2025,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * awaited at the boundary instead, on a bounded timeout, and every failure
 	 * leaves both sites ranking the way they did before the sites existed.
 	 */
+	// Every System One call lands here and reaches the ledger at the next turn
+	// boundary or settle, so a threshold can be re-fitted from what was asked.
+	const decisionCalls = createDecisionCallBuffer(() => session?.current()?.id ?? null);
+	setDecisionCallSink(decisionCalls.sink);
 	const turnRelevance = createTurnRelevanceStore({
 		resolve: () => ({
 			settings: getCurrentSettings(),
@@ -2623,7 +2632,31 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		getTurnConstraints: () => chat.currentTurnConstraints?.(),
 		isContinuation: () => false,
-		readInterpretation: () => turnRelevance.current().get("turnControl")?.value as TurnInterpretation | undefined,
+		// Both producers are put on the controller's scale here, where the
+		// answering build is known. A build with no fitted cuts yields no
+		// interpretation, so an unmeasured model never starts harness work.
+		readInterpretation: () => {
+			const answer = turnRelevance.current().get("turnControl");
+			if (answer === undefined) return undefined;
+			return (
+				calibrateInterpretation(
+					answer.value as TurnInterpretation,
+					answer.build,
+					getCurrentSettings().turnControl.interpretation.thresholds,
+				) ?? undefined
+			);
+		},
+		readShadow: () => {
+			const answer = turnRelevance.current().get("turnControl");
+			if (answer === undefined) return undefined;
+			const interpretation = answer.value as TurnInterpretation;
+			const calibrated = calibrateInterpretation(
+				interpretation,
+				answer.build,
+				getCurrentSettings().turnControl.interpretation.thresholds,
+			);
+			return calibrated === null ? { build: answer.build, interpretation } : undefined;
+		},
 		fallback: async (input) => {
 			const settings = getCurrentSettings();
 			if (!settings.chat.target || !settings.chat.model) return { interpretation: null };
@@ -2631,12 +2664,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const apiKey = targetRequiresAuth(refined.target, refined.runtime)
 				? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: input.signal })).apiKey
 				: LOCAL_API_KEY_FALLBACK;
-			return interpretTurnWithMainModel({
+			const { interpretation } = await interpretTurnWithMainModel({
 				...input,
 				model,
 				runtimeId: refined.runtime.id,
 				...(apiKey === undefined ? {} : { apiKey }),
 			});
+			if (interpretation === null) return { interpretation: null };
+			const calibrated = calibrateInterpretation(
+				interpretation,
+				settings.chat.model,
+				settings.turnControl.interpretation.thresholds,
+			);
+			return calibrated === null
+				? { interpretation: null, shadow: { build: settings.chat.model, interpretation } }
+				: { interpretation: calibrated };
 		},
 		facts: {
 			turnIndex: () =>
@@ -2821,6 +2863,24 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		// Held processes a turn did not use die with the turn, cancelled or not.
 		onTurnSettled: () => {
+			// Calls made mid-turn (gateway ranking, consult, an approval card) belong
+			// to the turn that made them, not to the next one.
+			const calls = decisionCalls.drain(session?.current()?.id ?? null);
+			if (calls.length > 0) {
+				try {
+					const meta = session?.current();
+					if (meta)
+						session?.appendEntry({
+							kind: "custom",
+							customType: "decisionCalls",
+							parentTurnId: session?.tree(meta.id).leafId ?? null,
+							display: false,
+							data: { calls },
+						});
+				} catch {
+					// Recording decision calls is best effort and cannot change turn settlement.
+				}
+			}
 			cancelQueuedSpeculativeHold?.();
 			cancelQueuedSpeculativeHold = null;
 			dispatch?.releaseSpeculative?.("turn settled");
@@ -2850,6 +2910,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		getMemoryRelevance: () => turnRelevance.memory(),
 		getTurnBriefRecord: () => preTurnRecord(turnRelevance.sites, turnRelevance.current()),
+		drainDecisionCalls: () => decisionCalls.drain(session?.current()?.id ?? null),
+		observeTurnEnd: (turn) => {
+			void observeTurnEnd(
+				{
+					settings: getCurrentSettings(),
+					providers,
+					ctx: () => ({ credentialsPresent: credentialsPresent(), httpTimeoutMs: TURN_END_DECISION_TIMEOUT_MS }),
+				},
+				turn,
+			);
+		},
 		getTaskMemoryHandoffSource: () => {
 			const meta = session?.current();
 			if (!meta) throw new Error("task memory handoff requires an active session");

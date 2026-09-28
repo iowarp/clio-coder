@@ -1,5 +1,5 @@
 import type { HarnessIntent } from "../domains/providers/index.js";
-import { HARNESS_INTENTS, TURN_INTERPRETATION_SYSTEM_PROMPT } from "../domains/providers/index.js";
+import { HARNESS_INTENTS, TURN_INTERPRETATION_SYSTEM_PROMPT, withoutQuotedCode } from "../domains/providers/index.js";
 import type { TurnInterpretation } from "../domains/turn-control/index.js";
 import { TURN_INTERPRETATION_VERSION } from "../domains/turn-control/index.js";
 import { draftTemperature } from "./drafts.js";
@@ -91,7 +91,7 @@ export async function interpretTurnWithMainModel(input: TurnInterpretationFallba
 			model: input.model,
 			messages: [],
 			systemPrompt: TURN_INTERPRETATION_SYSTEM_PROMPT,
-			userText: `task: ${bounded(input.task, 600)}\nprevious: ${bounded(input.previous ?? "", 400, true)}`,
+			userText: `task: ${bounded(input.task, 600)}\nprevious: ${bounded(withoutQuotedCode(input.previous ?? ""), 400, true)}`,
 			responseSchema: RESPONSE_SCHEMA,
 			maxTokens: 200,
 			signal: controller.signal,

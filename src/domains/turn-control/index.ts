@@ -1,4 +1,5 @@
 export type { TokenSplit } from "../../core/token-split.js";
+export { calibrateInterpretation } from "./calibration.js";
 export type { WorkflowDecision } from "./decide.js";
 export {
 	DIRECTION_REQUESTED_THRESHOLD,
