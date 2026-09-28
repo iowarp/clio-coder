@@ -5,7 +5,7 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 ## Unreleased
 
 - The pinned prompt now maps registered capabilities and gives Clio a short, repeatable path to discover their schemas. Installed skills, agents, fleets, and MCP servers are indexed once per session.
-- New conversations include bounded workspace and prior-session facts. Clio distinguishes this conversation from older session records and checks disputed technical claims against available evidence.
+- New conversations include bounded workspace and prior-session facts. Clio distinguishes this conversation from older session records and checks disputed technical claims against available evidence. A turn reminder routes disputed CI claims to the CI run before local tests.
 - Replies follow the operator's register, keep greetings brief, and route decisions through `ask_user`. Requested plans seek approval, and an interactive continuation catches a closing prose question. Per-turn reminders select a brief, rigorous, or recovery posture from the task and observed tool results.
 - The bundled `wtfp` plugin pin tracks its v0.7.4 release.
 
