@@ -715,6 +715,11 @@ export interface CreateChatLoopDeps {
 	 * Empty when no recorded site is bound, which writes nothing.
 	 */
 	getTurnBriefRecord?: () => ReadonlyArray<unknown>;
+	/**
+	 * Every System One call since the last drain, answered or not, written as
+	 * one ledger entry beside the brief. Empty when nothing was asked.
+	 */
+	drainDecisionCalls?: () => ReadonlyArray<unknown>;
 	getReadySkillCount?: () => number;
 	/** Structured, redacted task-bank export supplied only to an explicit context-handoff skill request. */
 	getTaskMemoryHandoffSource?: () => string;
@@ -1861,6 +1866,22 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					...(options.display ? { display: options.display } : {}),
 				});
 			context.logPromptCompileIfPending();
+			if (deps.drainDecisionCalls && deps.session?.current()) {
+				try {
+					const calls = deps.drainDecisionCalls();
+					if (calls.length > 0) {
+						deps.session.appendEntry({
+							kind: "custom",
+							customType: "decisionCalls",
+							parentTurnId: state.lastTurnId,
+							display: false,
+							data: { calls },
+						});
+					}
+				} catch {
+					// Recording decision calls is best effort and never costs the turn.
+				}
+			}
 			if (deps.getTurnBriefRecord && deps.session?.current()) {
 				try {
 					const sites = deps.getTurnBriefRecord();

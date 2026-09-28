@@ -115,6 +115,7 @@ export function inspectDecisionSite(site: DecisionSite, input: ResolveDeciderInp
 			typeof input.ctx === "function" ? input.ctx() : input.ctx,
 			resolveAuthToken,
 			model,
+			site,
 		),
 		targetId: target.id,
 		model: model ?? null,

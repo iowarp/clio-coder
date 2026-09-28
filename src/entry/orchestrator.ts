@@ -127,6 +127,7 @@ import { PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
+import { createDecisionCallBuffer, setDecisionCallSink } from "../domains/providers/decision-calls.js";
 import type { CostProvenance, ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import {
 	AGENT_ROLE_TOOLS_REQUIRED_REASON,
@@ -2020,6 +2021,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * awaited at the boundary instead, on a bounded timeout, and every failure
 	 * leaves both sites ranking the way they did before the sites existed.
 	 */
+	// Every System One call lands here and reaches the ledger at the next turn
+	// boundary or settle, so a threshold can be re-fitted from what was asked.
+	const decisionCalls = createDecisionCallBuffer();
+	setDecisionCallSink(decisionCalls.sink);
 	const turnRelevance = createTurnRelevanceStore({
 		resolve: () => ({
 			settings: getCurrentSettings(),
@@ -2821,6 +2826,24 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		// Held processes a turn did not use die with the turn, cancelled or not.
 		onTurnSettled: () => {
+			// Calls made mid-turn (gateway ranking, consult, an approval card) belong
+			// to the turn that made them, not to the next one.
+			const calls = decisionCalls.drain();
+			if (calls.length > 0) {
+				try {
+					const meta = session?.current();
+					if (meta)
+						session?.appendEntry({
+							kind: "custom",
+							customType: "decisionCalls",
+							parentTurnId: session?.tree(meta.id).leafId ?? null,
+							display: false,
+							data: { calls },
+						});
+				} catch {
+					// Recording decision calls is best effort and cannot change turn settlement.
+				}
+			}
 			cancelQueuedSpeculativeHold?.();
 			cancelQueuedSpeculativeHold = null;
 			dispatch?.releaseSpeculative?.("turn settled");
@@ -2850,6 +2873,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		getMemoryRelevance: () => turnRelevance.memory(),
 		getTurnBriefRecord: () => preTurnRecord(turnRelevance.sites, turnRelevance.current()),
+		drainDecisionCalls: () => decisionCalls.drain(),
 		getTaskMemoryHandoffSource: () => {
 			const meta = session?.current();
 			if (!meta) throw new Error("task memory handoff requires an active session");

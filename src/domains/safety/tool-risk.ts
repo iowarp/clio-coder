@@ -67,6 +67,8 @@ export interface ToolRiskSubject {
 	 * sent, so the pass never sees raw arguments, mutation text or a transcript.
 	 */
 	readonly target: string;
+	/** The permission request the card answers; it joins the recorded call to the operator's answer. */
+	readonly requestId?: string;
 }
 
 export interface ToolRiskAdvisory {
@@ -131,7 +133,10 @@ export async function describeToolRisk(
 		const answers = await decider.ask(
 			{ tool: subject.tool, action: subject.actionClass, target: subject.target },
 			questions(),
-			{ ...(signal !== undefined ? { signal } : {}) },
+			{
+				...(signal !== undefined ? { signal } : {}),
+				...(subject.requestId !== undefined ? { ref: subject.requestId } : {}),
+			},
 		);
 		const score = rating(answers.radius, { minConfidence: MIN_CERTAINTY });
 		// An undecided rating has no rung to name, so the card stays as it was.

@@ -89,6 +89,8 @@ export interface PreTurnAnswer<T> {
 	readonly version: string;
 	/** Target and model, which is both the batching key and the reported source. */
 	readonly source: string;
+	/** The build that answered, e.g. `jev-1.13.0`; what a fitted threshold is pinned to. */
+	readonly build: string;
 	readonly latencyMs: number;
 }
 
@@ -216,6 +218,7 @@ export async function runPreTurnBrief(
 				}
 				const result = await (group[0] as Prepared).decider.askDetailed(stateFor(group, shared), questions, {
 					...(signal !== undefined ? { signal } : {}),
+					sites: group.map((entry) => entry.definition.site),
 				});
 				onUsage?.(result.tokensUsed);
 				const answers = result.answers;
@@ -225,7 +228,10 @@ export async function runPreTurnBrief(
 					try {
 						const value = entry.definition.read(answersFor(entry.definition.site, answers), entry.ask);
 						if (value === null) continue;
-						out.push([entry.definition.site, { value, version: entry.definition.version, source: entry.source, latencyMs }]);
+						out.push([
+							entry.definition.site,
+							{ value, version: entry.definition.version, source: entry.source, build: result.model, latencyMs },
+						]);
 					} catch {
 						// One site misreading its answers leaves the others standing.
 					}
@@ -345,9 +351,22 @@ export function preTurnHints(sites: ReadonlyArray<PreTurnSite<unknown>>, brief: 
 export function preTurnRecord(
 	sites: ReadonlyArray<PreTurnSite<unknown>>,
 	brief: PreTurnBrief,
-): Array<{ site: DecisionSite; version: string; source: string; latencyMs: number; value: PreTurnSummary }> {
-	const rows: Array<{ site: DecisionSite; version: string; source: string; latencyMs: number; value: PreTurnSummary }> =
-		[];
+): Array<{
+	site: DecisionSite;
+	version: string;
+	source: string;
+	build: string;
+	latencyMs: number;
+	value: PreTurnSummary;
+}> {
+	const rows: Array<{
+		site: DecisionSite;
+		version: string;
+		source: string;
+		build: string;
+		latencyMs: number;
+		value: PreTurnSummary;
+	}> = [];
 	for (const definition of sites) {
 		const answer = brief.get(definition.site);
 		if (answer === undefined || definition.summarize === undefined) continue;
@@ -356,6 +375,7 @@ export function preTurnRecord(
 				site: definition.site,
 				version: answer.version,
 				source: answer.source,
+				build: answer.build,
 				latencyMs: answer.latencyMs,
 				value: definition.summarize(answer.value),
 			});
