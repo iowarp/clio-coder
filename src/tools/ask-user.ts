@@ -551,7 +551,7 @@ function renderAskUserState(
 			? "The interview modal remains open. Ask only new necessary follow-up rounds. When enough information is collected, call ask_user with action=complete before final prose."
 			: policy.status === "cancelled"
 				? "The operator cancelled the interview. Proceed with defaults or existing answers; do not ask_user again for this interview."
-				: "The interview is closed. Continue with the compact decisions below; use the transcript path only if the full history is needed later.";
+				: "The interview is closed. Continue with the compact decisions below; use the transcript path only if the full history is needed later. End the reply with the result, without a new question or offer; ask necessary follow-ups before completing an interview.";
 	return [`ask_user result: ${event}`, guidance, "", JSON.stringify({ interview }, null, 2)].join("\n");
 }
 

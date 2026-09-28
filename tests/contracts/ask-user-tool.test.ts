@@ -112,6 +112,8 @@ describe("ask_user tool", () => {
 			decisions: [{ key: "Eviction Policy", value: "LRU" }],
 		});
 		strictEqual(interviewOf(completed).status, "complete");
+		if (completed.kind === "ok")
+			match(completed.output, /End the reply with the result, without a new question or offer/);
 		const transcript = JSON.parse(readFileSync(String(interviewOf(completed).transcript_path), "utf8"));
 		strictEqual(transcript.schema, "clio-coder.ask_user.interview.v1");
 		strictEqual(transcript.sessionId, "session-1");
