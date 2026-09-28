@@ -519,7 +519,7 @@ export function sessionStartFacts(
 		const prior = latestPriorSession(cwd, sessionId, capturedAt);
 		if (prior !== null) {
 			const topic = prior.name ?? prior.firstMessagePreview;
-			priorFact = `- Prior recorded session, ${elapsed(prior.lastActiveAt, capturedAt)}: ${topic ? quotedFact(topic, 40) : prior.id} (/resume).`;
+			priorFact = `- Last recorded session here, ${elapsed(prior.lastActiveAt, capturedAt)}: ${topic ? quotedFact(topic, 40) : prior.id}. Answer "last time" from this record; git log is not session history. /resume opens it.`;
 		}
 	} catch {
 		// Session history is orientation; an unreadable state directory renders no line.

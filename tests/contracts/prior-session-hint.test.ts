@@ -1,9 +1,11 @@
-import { strictEqual } from "node:assert/strict";
+import { match, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
+import { sessionStartFacts } from "../../src/domains/prompts/extension.js";
 import { latestPriorSession } from "../../src/domains/session/history.js";
+import { emptyWorkspaceSnapshot } from "../../src/domains/session/workspace/index.js";
 import { cwdHash } from "../../src/engine/session.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -51,6 +53,10 @@ it("selects a recent closed session with two operator turns, excluding fork ance
 			"a closed session is eligible without a ten-minute wait",
 		);
 		strictEqual(latestPriorSession(cwd, "current", now)?.id, "independent", "neither fork ancestor is prior");
+		match(
+			sessionStartFacts(cwd, "current", now, emptyWorkspaceSnapshot(cwd)).join("\n"),
+			/Answer "last time" from this record; git log is not session history/,
+		);
 	} finally {
 		env.restore();
 	}
