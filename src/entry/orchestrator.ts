@@ -2646,6 +2646,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				) ?? undefined
 			);
 		},
+		readShadow: () => {
+			const answer = turnRelevance.current().get("turnControl");
+			if (answer === undefined) return undefined;
+			const interpretation = answer.value as TurnInterpretation;
+			const calibrated = calibrateInterpretation(
+				interpretation,
+				answer.build,
+				getCurrentSettings().turnControl.interpretation.thresholds,
+			);
+			return calibrated === null ? { build: answer.build, interpretation } : undefined;
+		},
 		fallback: async (input) => {
 			const settings = getCurrentSettings();
 			if (!settings.chat.target || !settings.chat.model) return { interpretation: null };

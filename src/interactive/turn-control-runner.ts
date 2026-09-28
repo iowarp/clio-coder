@@ -63,6 +63,11 @@ export interface TurnControlRunnerDeps {
 	getTurnConstraints(): TurnConstraints | undefined;
 	isContinuation(): boolean;
 	readInterpretation(): TurnInterpretation | undefined;
+	/**
+	 * The decision site's answer when it came from a build with no fitted cuts.
+	 * A shadowed site answer is still an answer: the fallback is not asked.
+	 */
+	readShadow?(): TurnControlRecord["shadow"] | undefined;
 	fallback(input: {
 		task: string;
 		previous: string;
@@ -155,9 +160,10 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 			};
 			let interpretation = deps.readInterpretation() ?? null;
 			let producer: TurnControlRecord["producer"] = interpretation === null ? null : "decision-site";
-			let shadow: TurnControlRecord["shadow"];
+			let shadow: TurnControlRecord["shadow"] = interpretation === null ? deps.readShadow?.() : undefined;
 			if (
 				interpretation === null &&
+				shadow === undefined &&
 				settings.interpretation.fallback === "main-model" &&
 				!input.signal.aborted &&
 				!facts.continuation &&

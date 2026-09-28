@@ -23,15 +23,25 @@ const TURN_CONTROL_CALIBRATION: Readonly<Record<string, TurnControlCuts>> = {
 
 export type TurnControlCutOverrides = Readonly<Record<string, Partial<TurnControlCuts>>>;
 
-function cutsFor(build: string | null, overrides: TurnControlCutOverrides | undefined): TurnControlCuts | null {
+interface BuildCuts {
+	readonly orientation: number | null;
+	readonly direction: number | null;
+}
+
+/**
+ * The build's cut per workflow, or null for a workflow nobody fitted. A fitted
+ * build has both; an override may cover one workflow of an unfitted build, and
+ * the other then stays inactive rather than borrowing the controller's 0.7.
+ */
+function cutsFor(build: string | null, overrides: TurnControlCutOverrides | undefined): BuildCuts | null {
 	if (build === null) return null;
 	const override = Object.hasOwn(overrides ?? {}, build) ? overrides?.[build] : undefined;
 	const fitted = Object.hasOwn(TURN_CONTROL_CALIBRATION, build) ? TURN_CONTROL_CALIBRATION[build] : undefined;
-	if (override === undefined && fitted === undefined) return null;
-	return {
-		orientation: override?.orientation ?? fitted?.orientation ?? ORIENTATION_WANTED_THRESHOLD,
-		direction: override?.direction ?? fitted?.direction ?? DIRECTION_REQUESTED_THRESHOLD,
+	const cuts = {
+		orientation: override?.orientation ?? fitted?.orientation ?? null,
+		direction: override?.direction ?? fitted?.direction ?? null,
 	};
+	return cuts.orientation === null && cuts.direction === null ? null : cuts;
 }
 
 /**
@@ -62,10 +72,16 @@ export function calibrateInterpretation(
 		...interpretation,
 		orientation: {
 			...interpretation.orientation,
-			wanted: rescale(interpretation.orientation.wanted, cuts.orientation, ORIENTATION_WANTED_THRESHOLD),
+			wanted:
+				cuts.orientation === null
+					? 0
+					: rescale(interpretation.orientation.wanted, cuts.orientation, ORIENTATION_WANTED_THRESHOLD),
 		},
 		direction: {
-			requested: rescale(interpretation.direction.requested, cuts.direction, DIRECTION_REQUESTED_THRESHOLD),
+			requested:
+				cuts.direction === null
+					? 0
+					: rescale(interpretation.direction.requested, cuts.direction, DIRECTION_REQUESTED_THRESHOLD),
 		},
 	};
 }
