@@ -32,7 +32,7 @@ const QUESTION_SENTENCE_PATTERN = /\?[*_"'’)\]]*(?:\s|$)/u;
 // Offers and approval waits that hand the operator a decision without a
 // question mark: "let me know", "want me to", "for when you're ready to proceed".
 const OFFER_PATTERN =
-	/\b(?:let me know|would you like|do you want|want me to|shall i|should i|if you(?:'d| would) like|which (?:one|option|approach) (?:do|would|should) you|when you(?:'re| are) ready|ready to proceed|(?:your|the) go-?ahead|(?:say|reply|type) ["'“]?(?:go|yes|proceed)|(?:after|pending|awaiting|upon) (?:your |the operator(?:'s)? )?(?:approval|confirmation|sign-?off)|once (?:you|the operator) (?:confirms?|approves?|agrees?)|if you approve)\b/iu;
+	/\b(?:let me know|would you like|do you want|want me to|shall i|should i|if you(?:'d| would) like|if you can (?:paste|share|send)|(?:please|could you) (?:paste|share|send)|which (?:one|option|approach) (?:do|would|should) you|when you(?:'re| are) ready|ready to proceed|(?:your|the) go-?ahead|(?:say|reply|type) ["'“]?(?:go|yes|proceed)|(?:after|pending|awaiting|upon) (?:your |the operator(?:'s)? )?(?:approval|confirmation|sign-?off)|once (?:you|the operator) (?:confirms?|approves?|agrees?)|if you approve)\b/iu;
 
 // Courtesy closers invite the next request; they ask for no decision, and an
 // interview built from one only adds a turn. Removed before the test below.
@@ -92,14 +92,17 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 	let planRequested = false;
 	let wroteThisTurn = false;
 	let planArtifactWritten = false;
+	let awaitingInterviewReply = false;
 	return {
 		id: PROSE_QUESTION_REGISTRATION_ID,
 		description: "request one continuation when a substantive turn ends on a prose question instead of ask_user",
 		hooks: ["turn_start", "after_tool", "turn_end"],
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook === "turn_start") {
-				// A continuation submits no operator text, so it never re-arms the check.
-				substantiveTurn = isSubstantiveUserTurn(input.text);
+				// An answered interview can resume without fresh operator text. Keep
+				// checking its final reply, which may ask a new question in prose.
+				substantiveTurn = isSubstantiveUserTurn(input.text) || awaitingInterviewReply;
+				awaitingInterviewReply = false;
 				planRequested = substantiveTurn && PLAN_REQUEST_PATTERN.test(input.text ?? "");
 				wroteThisTurn = false;
 				planArtifactWritten = false;
@@ -109,6 +112,7 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 			// text asks afterwards, so only writes are tracked: a plan already carried
 			// out needs no go-ahead.
 			if (input.hook === "after_tool") {
+				if (input.toolName === ToolNames.AskUser) awaitingInterviewReply = true;
 				if (input.toolName !== undefined && WRITE_TOOLS.has(input.toolName)) wroteThisTurn = true;
 				// A plan written as a terminal artifact is still a plan awaiting a go-ahead.
 				if (input.toolName === ToolNames.Artifact && input.toolArgs?.kind === "plan" && input.metadata?.resultKind === "ok")

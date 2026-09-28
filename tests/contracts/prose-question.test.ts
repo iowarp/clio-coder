@@ -1,5 +1,6 @@
 import { deepStrictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { ToolNames } from "../../src/core/tool-names.js";
 import {
 	createProseQuestionRegistration,
 	PLAN_APPROVAL_CONTINUATION_MESSAGE,
@@ -20,6 +21,9 @@ describe("operator questions at turn close", () => {
 		deepStrictEqual(check("inspect this", "I can fix it now. Let me know when you're ready."), [
 			{ kind: "request_continuation", message: PROSE_QUESTION_CONTINUATION_MESSAGE },
 		]);
+		deepStrictEqual(check("why is CI red?", "If you can paste the failing CI job name, I can investigate it."), [
+			{ kind: "request_continuation", message: PROSE_QUESTION_CONTINUATION_MESSAGE },
+		]);
 	});
 
 	it("does not convert an explanation about plans or a answered rhetorical question into an approval", () => {
@@ -38,6 +42,22 @@ describe("operator questions at turn close", () => {
 		deepStrictEqual(
 			registration.evaluate({ hook: "turn_end", text: "Anything else?", metadata: { stopReason: "stop" } }),
 			[],
+		);
+	});
+
+	it("checks a new closing question after an answered interview", () => {
+		const registration = createProseQuestionRegistration({ askUserAvailable: () => true });
+		registration.evaluate({ hook: "turn_start", text: "run the missing benchmark" });
+		registration.evaluate({ hook: "after_tool", toolName: ToolNames.AskUser });
+		registration.evaluate({ hook: "turn_end", text: "", metadata: { stopReason: "toolUse" } });
+		registration.evaluate({ hook: "turn_start", text: "" });
+		deepStrictEqual(
+			registration.evaluate({
+				hook: "turn_end",
+				text: "Would you like me to run a different benchmark?",
+				metadata: { stopReason: "stop" },
+			}),
+			[{ kind: "request_continuation", message: PROSE_QUESTION_CONTINUATION_MESSAGE }],
 		);
 	});
 });
