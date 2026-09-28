@@ -36,7 +36,12 @@ function projection() {
 	const draft = fixtureReceiptDraft(sealed);
 	draft.toolCalls = 7;
 	draft.validationGrounding = { claimed: 2, grounded: 1, ungrounded: ["lint"], basis: "unmatched-command" };
-	draft.quality.resultContract = { sourceId: "scout", validatorDigest: "a".repeat(64), conformance: "pass", quality: "pass" };
+	draft.quality.resultContract = {
+		sourceId: "scout",
+		validatorDigest: "a".repeat(64),
+		conformance: "pass",
+		quality: "pass",
+	};
 	draft.output = {
 		state: "final",
 		text: "{}",
