@@ -11,6 +11,11 @@ export interface CompileSessionPromptInput {
 	 * `paths:` frontmatter are selected from this set.
 	 */
 	workingContextPaths?: ReadonlyArray<string>;
+	/**
+	 * When the bound session was created, from its meta. Absent before the first
+	 * turn creates the session; the snapshot then records its own capture time.
+	 */
+	sessionStartedAt?: string;
 }
 
 export interface CompileWorkerPromptInput extends WorkerPromptInputs {

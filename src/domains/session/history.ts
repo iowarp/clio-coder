@@ -41,6 +41,88 @@ export function listSessionsForCwd(cwd: string): SessionMeta[] {
 	return metas;
 }
 
+/** One earlier recorded session in a workspace, attributed for a session-start fact. */
+export interface PriorSessionSummary {
+	id: string;
+	/** endedAt, else the transcript's mtime, else createdAt. */
+	lastActiveAt: string;
+	name: string | null;
+	firstMessagePreview: string | null;
+	messageCount: number;
+}
+
+/** A session touched this recently may still be open in another window; it is not "prior". */
+const PRIOR_SESSION_QUIET_MS = 10 * 60 * 1000;
+
+/**
+ * The most recent other session recorded for `cwd`, for a one-line fact at
+ * session start. Unlike {@link listSessionsForCwd}, which parses every
+ * transcript to build picker previews, this reads each meta.json and stats
+ * each transcript, then parses only the chosen one, so its cost stays flat as
+ * history grows. Excluded: the current session, its fork parent and children,
+ * sessions active within the last ten minutes (a concurrent window), and
+ * sessions with fewer than two operator messages.
+ */
+export function latestPriorSession(
+	cwd: string,
+	currentSessionId: string,
+	now = Date.now(),
+): PriorSessionSummary | null {
+	const dir = join(clioStateDir(), "sessions", cwdHash(cwd));
+	if (!existsSync(dir)) return null;
+	const deadline = Date.now() + 200;
+	const parents = new Map<string, string>();
+	const candidates: Array<{ meta: SessionMeta; currentPath: string; lastActiveAt: string }> = [];
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		if (Date.now() > deadline) return null;
+		if (!entry.isDirectory()) continue;
+		const sessionDir = join(dir, entry.name);
+		let meta: SessionMeta;
+		try {
+			meta = JSON.parse(readFileSync(join(sessionDir, "meta.json"), "utf8")) as SessionMeta;
+		} catch {
+			// A missing or malformed meta.json is not a recorded session.
+			continue;
+		}
+		if (meta.parentSessionId) parents.set(meta.id, meta.parentSessionId);
+		if (meta.id === currentSessionId) continue;
+		if (meta.parentSessionId === currentSessionId) continue;
+		const currentPath = join(sessionDir, "current.jsonl");
+		const lastActiveAt = meta.endedAt ?? readMtimeIso(currentPath) ?? meta.createdAt ?? null;
+		if (lastActiveAt === null) continue;
+		const quietFor = now - Date.parse(lastActiveAt);
+		if (meta.endedAt == null && (!Number.isFinite(quietFor) || quietFor < PRIOR_SESSION_QUIET_MS)) continue;
+		candidates.push({ meta, currentPath, lastActiveAt });
+	}
+	const ancestors = new Set<string>();
+	let parent = parents.get(currentSessionId);
+	while (parent && !ancestors.has(parent)) {
+		ancestors.add(parent);
+		parent = parents.get(parent);
+	}
+	candidates.sort((a, b) => (a.lastActiveAt === b.lastActiveAt ? 0 : a.lastActiveAt > b.lastActiveAt ? -1 : 1));
+	for (const candidate of candidates) {
+		if (Date.now() > deadline) return null;
+		if (ancestors.has(candidate.meta.id)) continue;
+		const scan = scanCurrentJsonl(candidate.currentPath);
+		if (scan.messageCount < 2) continue;
+		const preview = scan.firstUserMessage ?? scan.firstAssistantMessage;
+		return {
+			id: candidate.meta.id,
+			lastActiveAt: candidate.lastActiveAt,
+			name: scan.name,
+			firstMessagePreview:
+				preview === null
+					? null
+					: preview.length > PREVIEW_MAX_CHARS
+						? `${preview.slice(0, PREVIEW_MAX_CHARS - 1)}…`
+						: preview,
+			messageCount: scan.messageCount,
+		};
+	}
+	return null;
+}
+
 const PREVIEW_MAX_CHARS = 240;
 
 function collapseWhitespace(text: string): string {

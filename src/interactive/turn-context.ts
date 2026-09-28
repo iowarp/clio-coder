@@ -104,6 +104,7 @@ import {
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { AgentMessage, Usage } from "../engine/types.js";
 import { capabilityStarterArgs } from "../tools/gateway/guidance.js";
+import { TOOL_PLANES } from "../tools/policy.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import {
 	backendCacheVerdict,
@@ -1900,6 +1901,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					return [{ tool: spec.name, hint, ...(starterArgs ? { starterArgs } : {}) }];
 				})
 				.sort((a, b) => a.tool.localeCompare(b.tool));
+			// Every builtin's registry objective, grouped by plane in the pinned map.
+			// The compiler filters it to what this surface reaches.
+			const capabilityMap = builtinTools.flatMap((spec) => {
+				const plane = isBuiltinToolName(spec.name) ? TOOL_PLANES[spec.name]?.plane : undefined;
+				return plane === undefined ? [] : [{ tool: spec.name, objective: spec.metadata?.objective ?? "", plane }];
+			});
 			const sessionInputs: SessionPromptInputs = {
 				...(state.currentTurnConstraints ? { turnConstraints: state.currentTurnConstraints } : {}),
 				...(deps.getReadySkillCount ? { readySkillCount: deps.getReadySkillCount() } : {}),
@@ -1913,6 +1920,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				// mid-turn changes discovery results, not the immutable prefix.
 				coordinatorCapabilities: builtinTools.map((spec) => spec.name).sort(),
 				...(toolDiscoveryHints.length > 0 ? { toolDiscoveryHints } : {}),
+				...(capabilityMap.length > 0 ? { capabilityMap } : {}),
 				...(guidance ? { thinkingGuidance: guidance } : {}),
 				...(deps.toolRegistry?.get(ToolNames.ConfigureClio) ? { canConfigureClio: true } : {}),
 				...(deps.headless === true ? { headless: true } : {}),
@@ -1962,12 +1970,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				return sessionPrompt;
 			}
 			try {
+				const sessionStartedAt = deps.session?.current()?.createdAt;
 				const result = await deps.prompts.compileSessionPrompt({
 					sessionId,
 					sessionInputs,
 					autonomy,
 					cwd,
 					workingContextPaths: [...sessionWorkingContextPaths],
+					...(sessionStartedAt ? { sessionStartedAt } : {}),
 				});
 				const previousHash = sessionPromptHash ?? lastRecordedPromptHash();
 				const changed = agentRuntime.agent.state.systemPrompt !== result.systemPrompt;

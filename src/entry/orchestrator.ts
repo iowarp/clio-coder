@@ -43,6 +43,7 @@ import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { yieldToEventLoop } from "../core/timers.js";
+import { ToolNames } from "../core/tool-names.js";
 import { captureProjectSurface, projectSurfaceTrustNotice } from "../core/workspace-trust.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
@@ -114,6 +115,7 @@ import {
 } from "../domains/middleware/index.js";
 import { createMemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { announceMemoryStepEndpoint } from "../domains/middleware/memory-step-endpoint.js";
+import { createProseQuestionRegistration } from "../domains/middleware/prose-question.js";
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
@@ -1893,6 +1895,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					const installed = installSkill({ source: `skill:${entry.name}`, scope, name: entry.name, cwd: process.cwd() });
 					return { path: installed.path, sourceUrl: installed.sourceUrl, installedHash: installed.installedHash };
 				},
+			}),
+		);
+	}
+	// Every operator question goes through ask_user; this closes the gap when a
+	// model leaves one in prose anyway. Only where a UI can answer an interview.
+	if (interactive) {
+		middleware.registerHook(
+			createProseQuestionRegistration({
+				getTurnConstraints: () => chat.currentTurnConstraints?.(),
+				askUserAvailable: () => askUserHandler !== null && toolRegistry.get(ToolNames.AskUser) !== undefined,
 			}),
 		);
 	}

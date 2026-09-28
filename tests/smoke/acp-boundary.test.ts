@@ -486,7 +486,14 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 			const secondRequests = fixture.requests.slice(secondStart);
 			ok(secondRequests.length >= 2, "second turn used the real tasks tool");
 			match(JSON.stringify(secondRequests), /no task board yet/, "the new session has no task board");
-			doesNotMatch(JSON.stringify(secondRequests), /ACP_FIRST_(PROMPT|ANSWER|BOARD|TASK)/);
+			// A system prompt may attribute a prior session here. Its old turns
+			// must not become messages on the new conversation path.
+			const secondConversation = secondRequests.flatMap((request) =>
+				Array.isArray(request.messages)
+					? request.messages.filter((message: { role?: string }) => message.role !== "system")
+					: [],
+			);
+			doesNotMatch(JSON.stringify(secondConversation), /ACP_FIRST_(PROMPT|ANSWER|BOARD|TASK)/);
 			await client.request("session/close", { sessionId: second.sessionId });
 			const secondEntries = ledger(second.sessionId);
 			ok(secondEntries.length > 0, "new-session ancestry assertions inspect a nonempty ledger");
