@@ -98,8 +98,8 @@ import {
 	createDetachedDispatchNudgeRegistration,
 	createReadOnlyExplorationNudgeRegistration,
 	createUnbackedWorkerClaimRegistration,
-	openDetachedBatchViews,
 	finishedDetachedBatchIds,
+	openDetachedBatchViews,
 } from "../domains/middleware/dispatch-nudge.js";
 import { createGuidanceRegistration } from "../domains/middleware/guidance.js";
 import {

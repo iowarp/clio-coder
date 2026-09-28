@@ -11,8 +11,8 @@ import { parseScoutResult } from "../domains/agents/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { requestExecutionRole } from "../domains/dispatch/execution-role.js";
-import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
+import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
@@ -26,14 +26,14 @@ import {
 	decide,
 	decisionHash,
 	factsDigest,
-	renderDirectionBlock,
 	renderCollectedBlock,
+	renderDirectionBlock,
 	renderOrientationBlock,
 	renderOrientationUnavailable,
 } from "../domains/turn-control/index.js";
 import { loadVerifiedScoutSource, prepareScoutContinuation } from "../tools/dispatch-scout-admission.js";
-import { collectDetachedBatch } from "../tools/monitor-collect.js";
 import type { MonitorToolDeps } from "../tools/monitor.js";
+import { collectDetachedBatch } from "../tools/monitor-collect.js";
 import type { ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { receiptHelperResult } from "../tools/worker-evidence.js";
 import { observeWorkspace } from "./direction-observations.js";

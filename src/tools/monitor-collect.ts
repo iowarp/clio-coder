@@ -5,10 +5,10 @@ import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-sto
 import type { DispatchOwnership } from "../domains/dispatch/ownership.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
-import { isTerminalRunEnvelope } from "../domains/dispatch/types.js";
 import type { RunEnvelope, RunReceipt, RunReceiptVerification } from "../domains/dispatch/types.js";
-import { adaptRunReceiptTrustStatus, inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
+import { isTerminalRunEnvelope } from "../domains/dispatch/types.js";
 import type { CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
+import { adaptRunReceiptTrustStatus, inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
 import type { MonitorToolDeps } from "./monitor.js";
 import type { ToolResult } from "./registry.js";
