@@ -23,7 +23,10 @@ Use existing Overview, Docs, and Tutorials navigation. The install section and
 first-session tutorial are useful next actions. More articles are justified by
 more answered user questions, not keyword permutations.
 
-## First draft batch
+## First guide batch
+
+The owner approved these six guides on September 27, 2026. They are published
+from `content/tutorials/` and registered in `content/tutorials.json`.
 
 - Choose a model for your project.
 - Coordinate the coding agents you already use.
@@ -32,8 +35,8 @@ more answered user questions, not keyword permutations.
 - Add skills and plugins deliberately.
 - Work from a laptop with remote workers.
 
-Manuscripts and review metadata are in `content/drafts/`. They are not registered
-in `content/tutorials.json` and do not enter the normal public output. After
+New manuscripts and their review metadata go in `content/drafts/`. They are not
+registered in `content/tutorials.json` and do not enter the normal public output. After
 review, move approved Markdown to `content/tutorials/`, supply actual image
 metadata and reading-time estimates, register it, and run the existing site
 checks. Do not claim a tutorial was tested until its recorded workflow ran.

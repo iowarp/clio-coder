@@ -43,5 +43,77 @@
     "source": "temperature-calibration.md",
     "cover": "gui-artifacts",
     "basis": "Recorded session"
+  },
+  {
+    "slug": "choose-model-for-your-project",
+    "title": "Choose a model for your project",
+    "description": "Connect a local server, a cloud API, or a supported subscription route, then choose models separately for conversation and delegated work.",
+    "category": "Model choice",
+    "time": "5 min",
+    "author": "The Clio team",
+    "source": "choose-model-for-your-project.md",
+    "cover": "gui-setup-review",
+    "basis": "Documented workflow with v0.5.7 captures",
+    "versionScope": "0.5.7"
+  },
+  {
+    "slug": "coordinate-your-coding-agents",
+    "title": "Coordinate the coding agents you already use",
+    "description": "Use supported coding peers for bounded assignments, distinguish managed runs from interactive handoffs, and review the results before combining them.",
+    "category": "Agent coordination",
+    "time": "5 min",
+    "author": "The Clio team",
+    "source": "coordinate-your-coding-agents.md",
+    "cover": "tui-interop",
+    "basis": "Documented workflow with v0.5.7 captures",
+    "versionScope": "0.5.7"
+  },
+  {
+    "slug": "keep-long-coding-tasks-on-track",
+    "title": "Keep a long coding task on track",
+    "description": "Inspect context, preserve decisions through a handoff, and resume the correct branch without turning every past message into a current instruction.",
+    "category": "Context and memory",
+    "time": "5 min",
+    "author": "The Clio team",
+    "source": "keep-long-coding-tasks-on-track.md",
+    "cover": "gui-session-context",
+    "basis": "Documented workflow with v0.5.7 captures",
+    "versionScope": "0.5.7"
+  },
+  {
+    "slug": "check-a-change-against-your-repository",
+    "title": "Check a change against your repository",
+    "description": "Declare which checks matter, run them through verification, and inspect whether passing results still match the files you are reviewing.",
+    "category": "Verification",
+    "time": "5 min",
+    "author": "The Clio team",
+    "source": "check-a-change-against-your-repository.md",
+    "cover": "gui-results-verify",
+    "basis": "Documented workflow with v0.5.7 captures",
+    "versionScope": "0.5.7"
+  },
+  {
+    "slug": "add-skills-and-plugins-deliberately",
+    "title": "Add skills and plugins deliberately",
+    "description": "Preview a project-scoped skill or plugin, inspect its package pin, and load the resources your task needs without treating an installation as a permission grant.",
+    "category": "Skills and plugins",
+    "time": "5 min",
+    "author": "The Clio team",
+    "source": "add-skills-and-plugins-deliberately.md",
+    "cover": "tui-library-installed",
+    "basis": "Documented workflow with v0.5.7 captures",
+    "versionScope": "0.5.7"
+  },
+  {
+    "slug": "work-from-a-laptop-with-remote-workers",
+    "title": "Work from a laptop with remote workers",
+    "description": "Use a local Clio session to coordinate SSH workers when your machines share the required project path, runtime version, and approved access.",
+    "category": "Remote workers",
+    "time": "5 min",
+    "author": "The Clio team",
+    "source": "work-from-a-laptop-with-remote-workers.md",
+    "cover": "gui-settings-fleet",
+    "basis": "Documented workflow with v0.5.7 captures",
+    "versionScope": "0.5.7"
   }
 ]
