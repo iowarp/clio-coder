@@ -36,6 +36,46 @@ type GatewayMcpServer = ResolvedMcpServer | (Omit<ResolvedMcpServer, "scope"> & 
 /** Model-visible bytes of one MCP result before the rest is offloaded. */
 const MCP_RESULT_CONTEXT_BYTES = 16 * 1024;
 
+const SLURM_READ_TOOLS = new Set([
+	"slurm_list",
+	"slurm_describe",
+	"slurm_cluster",
+	"check_job_status",
+	"list_slurm_jobs",
+	"get_slurm_info",
+	"get_job_details",
+	"get_job_output",
+	"get_queue_info",
+	"get_node_info",
+	"get_allocation_status",
+]);
+const SLURM_CONFIRM_TOOLS = new Set([
+	"slurm_submit",
+	"slurm_cancel",
+	"submit_slurm_job",
+	"cancel_slurm_job",
+	"submit_array_job",
+	"allocate_slurm_nodes",
+	"deallocate_slurm_nodes",
+]);
+
+function actionClassFor(declaration: GatewayMcpServer, toolName: string): McpTrustActionClass {
+	if (declaration.scope === "client") return "unknown";
+	const override = Object.hasOwn(declaration.toolActionClasses, toolName)
+		? declaration.toolActionClasses[toolName]
+		: undefined;
+	if (override !== undefined) return override;
+	if (declaration.id === "slurm") {
+		if (SLURM_CONFIRM_TOOLS.has(toolName)) return "execute";
+		if (SLURM_READ_TOOLS.has(toolName)) return "read";
+	}
+	return declaration.trust.actionClass;
+}
+
+function requiresConfirmation(declaration: GatewayMcpServer, toolName: string): boolean {
+	return declaration.id === "slurm" && SLURM_CONFIRM_TOOLS.has(toolName);
+}
+
 /**
  * Local stdio MCP servers as gateway capabilities. The source reads the
  * declared servers once per session, launches a server only when it is
@@ -241,7 +281,7 @@ function describeTool(declaration: GatewayMcpServer, tool: NamedTool): string {
 	if (declaration.scope === "client") {
 		return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id}, supplied by the ACP client for this session. Its calls use the gateway's unknown action class and session autonomy.`;
 	}
-	return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id} (${declaration.scope} scope), trusted with action class ${declaration.trust.actionClass}; launching it does not sandbox it.`;
+	return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id} (${declaration.scope} scope), trusted with action class ${actionClassFor(declaration, tool.name)}; launching it does not sandbox it.`;
 }
 
 /** Remedies name the CLI first: it exists in every session, interactive or not. */
@@ -383,13 +423,14 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 
 	const makeSpec = (state: ServerState, tool: McpToolDescriptor, name: DynamicToolName): ToolSpec => {
 		const { declaration } = state;
-		const trustClass: McpTrustActionClass = declaration.trust.actionClass;
+		const trustClass = actionClassFor(declaration, tool.name);
 		const timeoutMs = declaration.timeoutMs ?? options.requestTimeoutMs;
 		const spec: ToolSpec = {
 			name,
 			description: describeTool(declaration, tool),
 			parameters: tool.inputSchema as TSchema,
 			baseActionClass: trustClass,
+			...(requiresConfirmation(declaration, tool.name) ? { confirmationRuleId: "slurm-allocation" } : {}),
 			executionMode: "sequential",
 			placement: "gateway",
 			sourceInfo: { path: declaration.path, scope: "domain" },
@@ -591,12 +632,13 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	 */
 	const entriesFor = (state: ServerState): McpCatalogEntry[] => {
 		const { declaration } = state;
-		const actionClass = declaration.trust.actionClass;
 		if (declaration.trust.status !== "trusted" || state.failure !== null) return [];
 		if (state.client !== null) {
 			return state.registered.flatMap((name) => {
 				const spec = registry.get(name);
-				return spec === undefined ? [] : [{ name, description: spec.description, actionClass }];
+				return spec === undefined
+					? []
+					: [{ name, description: spec.description, actionClass: spec.baseActionClass as McpTrustActionClass }];
 			});
 		}
 		const catalog = cachedCatalog(state);
@@ -607,7 +649,11 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			// A name the registry already holds is served by that live spec instead;
 			// a cached descriptor must never shadow a connected one.
 			if (name === null || ownerOf(name) !== state || registry.get(name) !== undefined) continue;
-			entries.push({ name, description: describeTool(declaration, tool), actionClass });
+			entries.push({
+				name,
+				description: describeTool(declaration, tool),
+				actionClass: actionClassFor(declaration, tool.name),
+			});
 		}
 		return entries;
 	};
@@ -640,6 +686,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					env: { ...server.env },
 					timeoutMs: null,
 					actionClass: "unknown",
+					toolActionClasses: {},
 					digest: "session-only",
 					trust: { status: "trusted", actionClass: "unknown" },
 				};
@@ -694,7 +741,8 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			const owner = ownerOf(name);
 			if (owner === null) return { metadata: null, reason: `no declared MCP server owns ${name}` };
 			const { declaration } = owner;
-			const actionClass = declaration.trust.actionClass;
+			const toolName = name.slice(`mcp_${declaration.id}__`.length);
+			const actionClass = actionClassFor(declaration, toolName);
 			if (declaration.trust.status !== "trusted") {
 				const remedy = mcpTrustRemedy(declaration.id);
 				return {
@@ -719,7 +767,6 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			if (owner.failure !== null) {
 				return { metadata: null, reason: `mcp server ${declaration.id} failed: ${owner.failure}` };
 			}
-			const toolName = name.slice(`mcp_${declaration.id}__`.length);
 			// A connected server's own listing is the session's answer; its
 			// catalog file describes the same connection and adds nothing.
 			if (owner.client !== null) {

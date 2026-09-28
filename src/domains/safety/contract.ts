@@ -11,6 +11,7 @@ export type SafetyDecision =
 	| {
 			kind: "ask";
 			classification: Classification;
+			confirmationRuleId?: string;
 			match?: DamageControlMatch;
 			rejection: RejectionMessage;
 			policy?: SafetyPolicyDecision;
