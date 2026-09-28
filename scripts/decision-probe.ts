@@ -36,6 +36,7 @@ import { readSettings } from "../src/core/config.js";
 import type { DecisionSite } from "../src/core/defaults.js";
 import { openAuthStorage, resolveAuthTarget } from "../src/domains/providers/auth/index.js";
 import type { ProvidersContract } from "../src/domains/providers/contract.js";
+import { setDecisionCallSink } from "../src/domains/providers/decision-calls.js";
 import { inspectDecisionSite } from "../src/domains/providers/decision-sites.js";
 import { type PreTurnSite, runPreTurnBrief } from "../src/domains/providers/pre-turn-brief.js";
 import { BUILTIN_RUNTIMES } from "../src/domains/providers/runtimes/builtins.js";
@@ -111,6 +112,20 @@ async function main(): Promise<void> {
 	}
 	const parsed = JSON.parse(readFileSync(path, "utf8")) as Fixture | CapabilityFixture;
 	const runs = Number(argValue("--runs") ?? 2);
+	// A "missing" grade is a call that did not answer; the call record says why
+	// (a timeout, an HTTP error, a refused oversized state) and which build did.
+	const unanswered: string[] = [];
+	const builds = new Set<string>();
+	setDecisionCallSink((record) => {
+		if (record.build !== null) builds.add(record.build);
+		if (record.outcome !== "answered")
+			unanswered.push(`${record.outcome} after ${record.latencyMs}ms: ${record.error ?? "no detail"}`);
+	});
+	process.once("beforeExit", () => {
+		if (builds.size > 0) process.stdout.write(`answered by ${[...builds].join(", ")}\n`);
+		for (const line of unanswered) process.stdout.write(`  unanswered: ${line}\n`);
+		setDecisionCallSink(null);
+	});
 	if ("site" in parsed && parsed.site === "capabilities") {
 		await probeCapabilities(parsed, runs);
 		return;
