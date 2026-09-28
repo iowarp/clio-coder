@@ -3,6 +3,7 @@ import type { ProvidersContract } from "./contract.js";
 import { createProvidersBundle, type ProvidersBundleOptions } from "./extension.js";
 import { ProvidersManifest } from "./manifest.js";
 
+export { withoutQuotedCode } from "./pre-turn-brief.js";
 export type { DispatchShape } from "./sites/dispatch-forecast.js";
 export { DISPATCH_SHAPE_QUESTION, SHAPES } from "./sites/dispatch-forecast.js";
 export type { HarnessIntent } from "./sites/harness-routing.js";

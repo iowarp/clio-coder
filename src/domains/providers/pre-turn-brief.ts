@@ -111,6 +111,16 @@ function boundedTail(value: string, maxCodePoints: number): string {
 		: `…${points.slice(points.length - maxCodePoints + 1).join("")}`;
 }
 
+/**
+ * The previous reply with fenced code removed. `previous` is sent to say what
+ * the assistant proposed; a fenced block is file content or command output it
+ * quoted, which is repository text a site that starts harness work must not
+ * read as the operator's intent. A fence left open at the end is cut too.
+ */
+export function withoutQuotedCode(text: string): string {
+	return text.replace(/```[\s\S]*?(```|$)/g, " ");
+}
+
 interface Prepared {
 	readonly definition: PreTurnSite<unknown>;
 	readonly ask: PreTurnAsk;
@@ -186,7 +196,7 @@ export async function runPreTurnBrief(
 ): Promise<PreTurnBrief> {
 	const shared: Required<PreTurnEvidence> = {
 		task: bounded(evidence.task, MAX_TASK_CHARS),
-		previous: boundedTail(evidence.previous ?? "", MAX_PREVIOUS_CHARS),
+		previous: boundedTail(withoutQuotedCode(evidence.previous ?? ""), MAX_PREVIOUS_CHARS),
 	};
 	let prepared: Prepared[];
 	try {
