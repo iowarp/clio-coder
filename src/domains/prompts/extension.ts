@@ -146,11 +146,7 @@ export function createPromptsBundle(
 		return `${sessionId}\0${cwd}`;
 	}
 
-	async function captureSessionSourceSnapshot(
-		sessionId: string,
-		cwd: string,
-		sessionStartedAt: string | undefined,
-	): Promise<SessionPromptSourceSnapshot> {
+	async function captureSessionSourceSnapshot(sessionId: string, cwd: string): Promise<SessionPromptSourceSnapshot> {
 		const capturedAt = Date.now();
 		let projectContext: ProjectPromptContext | null = null;
 		if (!suppressContextFiles) {
@@ -168,10 +164,7 @@ export function createPromptsBundle(
 			capturedAt,
 			projectContext,
 			customization: captureCustomizationSources(cwd),
-			workspaceRoot: workspaceRootFragment(
-				cwd,
-				sessionStartFacts(cwd, sessionId, sessionStartedAt, capturedAt, workspace),
-			),
+			workspaceRoot: workspaceRootFragment(cwd, sessionStartFacts(cwd, sessionId, capturedAt, workspace)),
 			clioRepoAwareness: clioRepoAwarenessFragments(cwd),
 			catalogs: captureCatalogs(cwd),
 		};
@@ -189,7 +182,7 @@ export function createPromptsBundle(
 		// two byte-identical instead of re-probing a tree turn one may have changed.
 		const pendingKey = sessionSourceKey("", cwd);
 		if (sessionId.length === 0) {
-			const captured = await captureSessionSourceSnapshot(sessionId, cwd, sessionStartedAt);
+			const captured = await captureSessionSourceSnapshot(sessionId, cwd);
 			sessionSourceSnapshots.set(pendingKey, captured);
 			return captured;
 		}
@@ -205,7 +198,7 @@ export function createPromptsBundle(
 				return pending;
 			}
 		}
-		const captured = await captureSessionSourceSnapshot(sessionId, cwd, sessionStartedAt);
+		const captured = await captureSessionSourceSnapshot(sessionId, cwd);
 		sessionSourceSnapshots.set(key, captured);
 		return captured;
 	}
@@ -453,6 +446,7 @@ function workspaceRootFragment(cwd: string, startFacts: ReadonlyArray<string> = 
 }
 
 const QUOTED_FACT_MAX_CHARS = 120;
+export const SESSION_START_FACTS_MAX_CHARS = 400;
 
 function quotedFact(text: string): string {
 	const collapsed = text.replace(/\s+/g, " ").trim();
@@ -490,14 +484,16 @@ function elapsed(fromIso: string, to: number): string {
  * narrate another window's `git log` as "what we did last time", or confess
  * to claims made in sessions they cannot see.
  */
-function sessionStartFacts(
+export function sessionStartFacts(
 	cwd: string,
 	sessionId: string,
-	sessionStartedAt: string | undefined,
 	capturedAt: number,
 	workspace: WorkspaceSnapshot | null,
 ): string[] {
-	const facts: string[] = [];
+	const facts: string[] = [`Captured at session start, ${localTime(capturedAt)}:`];
+	if (sessionId.length === 0) {
+		facts.push("- Before this request, this new conversation contained no assistant messages.");
+	}
 	if (workspace?.isGit === true) {
 		const state = [
 			workspace.dirty === true ? "uncommitted changes" : workspace.dirty === false ? "clean tree" : null,
@@ -507,14 +503,14 @@ function sessionStartFacts(
 		].filter((part): part is string => part !== null);
 		const last = workspace.recentCommits[0];
 		facts.push(
-			`- Git: ${workspace.branch === null ? "detached HEAD" : `branch ${quotedFact(workspace.branch)}`}${state.length > 0 ? `, ${state.join(", ")}` : ""}${last ? `; last commit ${quotedFact(last.subject)}` : ""}.`,
+			`- Git: ${workspace.branch === null ? "detached HEAD" : `branch ${quotedFact(workspace.branch)}`}${state.length > 0 ? `, ${state.join(", ")}` : ""}${last ? `; last ${quotedFact(last.subject)}` : ""}.`,
 		);
 	}
 	try {
 		const rigor = rigorResolution({ cwd, override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) });
 		if (rigor.rigor === "high") {
 			facts.push(
-				`- Rigor: high (${rigor.source === "override" ? "CLIO_CODER_RIGOR" : (rigor.contractPath ?? rigor.source)}). A completion claim needs validation evidence or a recorded limitation.`,
+				`- Rigor: high (${rigor.source === "override" ? "override" : "project policy"}); validate completion claims.`,
 			);
 		}
 	} catch {
@@ -525,18 +521,17 @@ function sessionStartFacts(
 		if (prior !== null) {
 			const topic = prior.name ?? prior.firstMessagePreview;
 			facts.push(
-				`- Previous recorded session in this workspace: last active ${elapsed(prior.lastActiveAt, capturedAt)}, ${prior.messageCount} operator message${prior.messageCount === 1 ? "" : "s"}${topic ? `, opened with ${quotedFact(topic)}` : ""}. It is a separate record, not part of this conversation and not a task to continue; the operator can reopen it with /resume.`,
+				`- Prior recorded session here, ${elapsed(prior.lastActiveAt, capturedAt)}: ${topic ? quotedFact(topic.slice(0, 70)) : prior.id}. Separate record; /resume opens it.`,
 			);
 		}
 	} catch {
 		// Session history is orientation; an unreadable state directory renders no line.
 	}
-	const began = sessionStartedAt === undefined ? Number.NaN : Date.parse(sessionStartedAt);
-	const reopened = Number.isFinite(began) && capturedAt - began > 60_000;
-	facts.push(
-		`- ${reopened ? `This session began ${localTime(began)} and was reopened.` : "This conversation is new."} It, including any compaction summary, is the whole record of what was said in this session. When the operator cites something Clio said elsewhere, say it is not in this conversation, then check the evidence the claim is about (the failing run, the check it names) before accepting or denying it.`,
-	);
-	return ["", `Captured at session start, ${localTime(capturedAt)}:`, ...facts];
+	const bounded = [facts[0] ?? ""];
+	for (const fact of facts.slice(1)) {
+		if ([...bounded, fact].join("\n").length <= SESSION_START_FACTS_MAX_CHARS) bounded.push(fact);
+	}
+	return ["", ...bounded];
 }
 
 interface CatalogEntry {

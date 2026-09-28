@@ -61,7 +61,7 @@ const PRIOR_SESSION_QUIET_MS = 10 * 60 * 1000;
  * each transcript, then parses only the chosen one, so its cost stays flat as
  * history grows. Excluded: the current session, its fork parent and children,
  * sessions active within the last ten minutes (a concurrent window), and
- * sessions with no operator message.
+ * sessions with fewer than two operator messages.
  */
 export function latestPriorSession(
 	cwd: string,
@@ -70,9 +70,11 @@ export function latestPriorSession(
 ): PriorSessionSummary | null {
 	const dir = join(clioStateDir(), "sessions", cwdHash(cwd));
 	if (!existsSync(dir)) return null;
-	let currentParent: string | null = null;
+	const deadline = Date.now() + 200;
+	const parents = new Map<string, string>();
 	const candidates: Array<{ meta: SessionMeta; currentPath: string; lastActiveAt: string }> = [];
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		if (Date.now() > deadline) return null;
 		if (!entry.isDirectory()) continue;
 		const sessionDir = join(dir, entry.name);
 		let meta: SessionMeta;
@@ -82,23 +84,28 @@ export function latestPriorSession(
 			// A missing or malformed meta.json is not a recorded session.
 			continue;
 		}
-		if (meta.id === currentSessionId) {
-			currentParent = meta.parentSessionId ?? null;
-			continue;
-		}
+		if (meta.parentSessionId) parents.set(meta.id, meta.parentSessionId);
+		if (meta.id === currentSessionId) continue;
 		if (meta.parentSessionId === currentSessionId) continue;
 		const currentPath = join(sessionDir, "current.jsonl");
 		const lastActiveAt = meta.endedAt ?? readMtimeIso(currentPath) ?? meta.createdAt ?? null;
 		if (lastActiveAt === null) continue;
 		const quietFor = now - Date.parse(lastActiveAt);
-		if (!Number.isFinite(quietFor) || quietFor < PRIOR_SESSION_QUIET_MS) continue;
+		if (meta.endedAt == null && (!Number.isFinite(quietFor) || quietFor < PRIOR_SESSION_QUIET_MS)) continue;
 		candidates.push({ meta, currentPath, lastActiveAt });
+	}
+	const ancestors = new Set<string>();
+	let parent = parents.get(currentSessionId);
+	while (parent && !ancestors.has(parent)) {
+		ancestors.add(parent);
+		parent = parents.get(parent);
 	}
 	candidates.sort((a, b) => (a.lastActiveAt === b.lastActiveAt ? 0 : a.lastActiveAt > b.lastActiveAt ? -1 : 1));
 	for (const candidate of candidates) {
-		if (candidate.meta.id === currentParent) continue;
+		if (Date.now() > deadline) return null;
+		if (ancestors.has(candidate.meta.id)) continue;
 		const scan = scanCurrentJsonl(candidate.currentPath);
-		if (scan.messageCount === 0) continue;
+		if (scan.messageCount < 2) continue;
 		const preview = scan.firstUserMessage ?? scan.firstAssistantMessage;
 		return {
 			id: candidate.meta.id,
