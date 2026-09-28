@@ -20,6 +20,7 @@ describe("session-start facts", () => {
 			const fresh = sessionStartFacts(env.dir, "", Date.now(), workspace).slice(1).join("\n");
 			ok(fresh.length <= SESSION_START_FACTS_MAX_CHARS, `${fresh.length} characters`);
 			match(fresh, /Before this request, this new conversation contained no assistant messages\./);
+			match(fresh, /Git: branch/, "a long commit subject must not evict the branch fact");
 			const resumed = sessionStartFacts(env.dir, "existing-session", Date.now(), workspace).slice(1).join("\n");
 			doesNotMatch(resumed, /this new conversation contained no assistant messages/);
 		} finally {

@@ -445,14 +445,11 @@ function workspaceRootFragment(cwd: string, startFacts: ReadonlyArray<string> = 
 	];
 }
 
-const QUOTED_FACT_MAX_CHARS = 120;
 export const SESSION_START_FACTS_MAX_CHARS = 400;
 
-function quotedFact(text: string): string {
+function quotedFact(text: string, maxChars: number): string {
 	const collapsed = text.replace(/\s+/g, " ").trim();
-	return JSON.stringify(
-		collapsed.length > QUOTED_FACT_MAX_CHARS ? `${collapsed.slice(0, QUOTED_FACT_MAX_CHARS - 1)}…` : collapsed,
-	);
+	return JSON.stringify(collapsed.length > maxChars ? `${collapsed.slice(0, maxChars - 1)}…` : collapsed);
 }
 
 function localTime(at: number): string {
@@ -490,7 +487,10 @@ export function sessionStartFacts(
 	capturedAt: number,
 	workspace: WorkspaceSnapshot | null,
 ): string[] {
-	const facts: string[] = [`Captured at session start, ${localTime(capturedAt)}:`];
+	const facts: string[] = [`Session start, ${localTime(capturedAt)}:`];
+	let commitFact: string | null = null;
+	let priorFact: string | null = null;
+	let rigorFact: string | null = null;
 	if (sessionId.length === 0) {
 		facts.push("- Before this request, this new conversation contained no assistant messages.");
 	}
@@ -501,17 +501,16 @@ export function sessionStartFacts(
 				? `${workspace.ahead} ahead, ${workspace.behind} behind upstream`
 				: null,
 		].filter((part): part is string => part !== null);
-		const last = workspace.recentCommits[0];
 		facts.push(
-			`- Git: ${workspace.branch === null ? "detached HEAD" : `branch ${quotedFact(workspace.branch)}`}${state.length > 0 ? `, ${state.join(", ")}` : ""}${last ? `; last ${quotedFact(last.subject)}` : ""}.`,
+			`- Git: ${workspace.branch === null ? "detached HEAD" : `branch ${quotedFact(workspace.branch, 50)}`}${state.length > 0 ? `, ${state.join(", ")}` : ""}.`,
 		);
+		const last = workspace.recentCommits[0];
+		if (last) commitFact = `- Last commit: ${quotedFact(last.subject, 55)}.`;
 	}
 	try {
 		const rigor = rigorResolution({ cwd, override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) });
 		if (rigor.rigor === "high") {
-			facts.push(
-				`- Rigor: high (${rigor.source === "override" ? "override" : "project policy"}); validate completion claims.`,
-			);
+			rigorFact = `- Rigor: high (${rigor.source === "override" ? "override" : "project policy"}); validate claims.`;
 		}
 	} catch {
 		// Rigor still gates finishing through the finish contract; the fact is orientation only.
@@ -520,15 +519,14 @@ export function sessionStartFacts(
 		const prior = latestPriorSession(cwd, sessionId, capturedAt);
 		if (prior !== null) {
 			const topic = prior.name ?? prior.firstMessagePreview;
-			facts.push(
-				`- Prior recorded session here, ${elapsed(prior.lastActiveAt, capturedAt)}: ${topic ? quotedFact(topic.slice(0, 70)) : prior.id}. Separate record; /resume opens it.`,
-			);
+			priorFact = `- Prior recorded session, ${elapsed(prior.lastActiveAt, capturedAt)}: ${topic ? quotedFact(topic, 40) : prior.id} (/resume).`;
 		}
 	} catch {
 		// Session history is orientation; an unreadable state directory renders no line.
 	}
 	const bounded = [facts[0] ?? ""];
-	for (const fact of facts.slice(1)) {
+	for (const fact of [...facts.slice(1), priorFact, commitFact, rigorFact]) {
+		if (fact === null) continue;
 		if ([...bounded, fact].join("\n").length <= SESSION_START_FACTS_MAX_CHARS) bounded.push(fact);
 	}
 	return ["", ...bounded];
