@@ -37,6 +37,8 @@ function isPermissionResolvedPayload(value: unknown): value is PermissionResolve
 	if (p.reason !== undefined && typeof p.reason !== "string") return false;
 	if (p.requestedBy !== undefined && typeof p.requestedBy !== "string") return false;
 	if (p.requestId !== undefined && typeof p.requestId !== "string") return false;
+	if (p.sessionId !== undefined && typeof p.sessionId !== "string") return false;
+	if (p.turnId !== undefined && typeof p.turnId !== "string") return false;
 	if (p.origin !== undefined && typeof p.origin !== "string") return false;
 	if (p.decidedBy !== undefined && typeof p.decidedBy !== "string") return false;
 	return true;
@@ -49,6 +51,8 @@ function isPermissionRequestedPayload(value: unknown): value is PermissionReques
 	if (typeof p.actionClass !== "string" || p.actionClass.length === 0) return false;
 	if (p.origin !== undefined && typeof p.origin !== "string") return false;
 	if (p.requestId !== undefined && typeof p.requestId !== "string") return false;
+	if (p.sessionId !== undefined && typeof p.sessionId !== "string") return false;
+	if (p.turnId !== undefined && typeof p.turnId !== "string") return false;
 	if (p.requestedBy !== undefined && typeof p.requestedBy !== "string") return false;
 	if (p.summary !== undefined && typeof p.summary !== "string") return false;
 	if (p.rejection !== undefined) {
@@ -117,6 +121,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	let unsubscribeDispatchCompleted: (() => void) | null = null;
 	let unsubscribeDispatchFailed: (() => void) | null = null;
 	const recordedRequestedPermissionIds = new Set<string>();
+	const permissionOrigins = new Map<string, { sessionId?: string; turnId?: string }>();
 
 	function activePolicyEngine(): SafetyPolicyEngine {
 		policyEngine ??= createSafetyPolicyEngine();
@@ -143,6 +148,16 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			writer = openAuditWriter();
 			unsubscribePermissionRequested = context.bus.on(BusChannels.PermissionRequested, (payload) => {
 				if (!isPermissionRequestedPayload(payload)) return;
+				if (payload.requestId !== undefined) {
+					permissionOrigins.set(payload.requestId, {
+						...(payload.sessionId !== undefined ? { sessionId: payload.sessionId } : {}),
+						...(payload.turnId !== undefined ? { turnId: payload.turnId } : {}),
+					});
+					if (permissionOrigins.size > MAX_REQUESTED_PERMISSION_AUDIT_IDS) {
+						const oldest = permissionOrigins.keys().next().value;
+						if (oldest !== undefined) permissionOrigins.delete(oldest);
+					}
+				}
 				if (payload.origin === undefined || payload.origin === "main") return;
 				if (payload.requestId === undefined) return;
 				if (recordedRequestedPermissionIds.has(payload.requestId)) return;
@@ -155,6 +170,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				writeAudit(
 					buildPermissionAuditRecord({
 						status: "requested",
+						...(payload.sessionId !== undefined ? { sessionId: payload.sessionId } : {}),
+						...(payload.turnId !== undefined ? { turnId: payload.turnId } : {}),
 						requestId: payload.requestId,
 						origin: payload.origin,
 						tool: payload.tool,
@@ -166,9 +183,15 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			});
 			unsubscribePermissionResolved = context.bus.on(BusChannels.PermissionResolved, (payload) => {
 				if (!isPermissionResolvedPayload(payload)) return;
+				const origin = payload.requestId !== undefined ? permissionOrigins.get(payload.requestId) : undefined;
+				if (payload.requestId !== undefined) permissionOrigins.delete(payload.requestId);
+				const sessionId = payload.sessionId ?? origin?.sessionId;
+				const turnId = payload.turnId ?? origin?.turnId;
 				writeAudit(
 					buildPermissionAuditRecord({
 						status: payload.status,
+						...(sessionId !== undefined ? { sessionId } : {}),
+						...(turnId !== undefined ? { turnId } : {}),
 						...(payload.requestId !== undefined ? { requestId: payload.requestId } : {}),
 						...(payload.origin !== undefined ? { origin: payload.origin } : {}),
 						...(payload.decidedBy !== undefined ? { decidedBy: payload.decidedBy } : {}),
@@ -269,6 +292,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			unsubscribeDispatchFailed?.();
 			unsubscribeDispatchFailed = null;
 			recordedRequestedPermissionIds.clear();
+			permissionOrigins.clear();
 			await writer?.close();
 			writer = null;
 		},

@@ -1904,6 +1904,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			tool: call.tool,
 			actionClass: decision.classification.actionClass,
 			requestId: meta.requestId,
+			...(meta.sessionId !== undefined ? { sessionId: meta.sessionId } : {}),
+			...(meta.turnId !== undefined ? { turnId: meta.turnId } : {}),
 			origin: mainPermissionOrigin,
 			axis: meta.axis,
 			...(decision.kind === "ask" ? { rejection: decision.rejection } : {}),

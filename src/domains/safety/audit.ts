@@ -89,6 +89,8 @@ export interface PermissionAuditRecord {
 	ts: string;
 	correlationId: string;
 	status: "requested" | "granted" | "denied" | "expired";
+	sessionId: string | null;
+	turnId: string | null;
 	requestId?: string;
 	origin?: string;
 	decidedBy?: string;
@@ -333,6 +335,8 @@ export function buildSessionResumeAuditRecord(input: {
 
 export function buildPermissionAuditRecord(input: {
 	status: PermissionAuditRecord["status"];
+	sessionId?: string;
+	turnId?: string;
 	requestId?: string;
 	origin?: string;
 	decidedBy?: string;
@@ -348,6 +352,8 @@ export function buildPermissionAuditRecord(input: {
 		ts: now.toISOString(),
 		correlationId: newCorrelationId(),
 		status: input.status,
+		sessionId: input.sessionId ?? null,
+		turnId: input.turnId ?? null,
 	};
 	if (input.tool !== undefined) record.tool = input.tool;
 	if (input.requestId !== undefined) record.requestId = input.requestId;

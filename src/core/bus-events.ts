@@ -469,6 +469,8 @@ export interface ConfigReloadFailedPayload {
 export interface PermissionRequestedPayload {
 	tool: string;
 	actionClass: string;
+	sessionId?: string | undefined;
+	turnId?: string | undefined;
 	origin?: string | undefined;
 	axis?: string | undefined;
 	reasons?: ReadonlyArray<string> | undefined;
@@ -504,6 +506,8 @@ export interface PermissionRequestedPayload {
  */
 export interface PermissionResolvedPayload {
 	status: "granted" | "denied" | "expired";
+	sessionId?: string | undefined;
+	turnId?: string | undefined;
 	requestId?: string | undefined;
 	origin?: string | undefined;
 	decidedBy?: string | undefined;

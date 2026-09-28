@@ -396,6 +396,8 @@ export interface OneShotGrant {
 export interface PermissionRequiredMeta {
 	requestId: string;
 	axis: string;
+	sessionId?: string;
+	turnId?: string;
 	/**
 	 * Provider tool-call id carried on the parked call's invoke options, when
 	 * one exists. The interactive layer uses it to correlate the park to its
@@ -950,6 +952,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const meta: PermissionRequiredMeta = {
 					requestId: nextApprovalRequestId(),
 					axis: outcome.axis,
+					...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+					...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
 					...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
 					...(outcome.dispatchPlan !== undefined ? { dispatchPlan: outcome.dispatchPlan } : {}),
 				};
