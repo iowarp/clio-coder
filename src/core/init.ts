@@ -4,11 +4,13 @@
  * defaults when absent. Idempotent.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_SETTINGS_YAML } from "./defaults.js";
 import { readClioVersion } from "./package-root.js";
-import { clioCacheDir, clioConfigDir, clioDataDir, clioStateDir, resolveClioDirs } from "./xdg.js";
+import { safeResourceWrite } from "./safe-resource-write.js";
+import { withStateFileLockSync } from "./state-file-lock.js";
+import { assertClioDirLayout, clioCacheDir, clioConfigDir, clioDataDir, clioStateDir, resolveClioDirs } from "./xdg.js";
 
 export interface InitReport {
 	configDir: string;
@@ -62,6 +64,9 @@ export function initializeClioHome(): InitReport {
 	// checked after it reports a first install on every run. A root that is
 	// already there means whatever this call is about to write is a repair.
 	const resolved = resolveClioDirs();
+	// A role nested in another role turns a scoped reset into an accidental
+	// cross-role wipe. Refuse before any accessor below creates a directory.
+	assertClioDirLayout(resolved);
 	const preexistingHome = existsSync(resolved.state) || existsSync(resolved.config) || existsSync(resolved.data);
 
 	const configDir = clioConfigDir();
@@ -97,63 +102,71 @@ export function initializeClioHome(): InitReport {
 	// rewritten here. Content validation belongs to readSettings/doctor.
 	const settingsPath = join(configDir, "settings.yaml");
 	let touched = false;
-	if (!existsSync(settingsPath)) {
-		writeFileSync(settingsPath, DEFAULT_SETTINGS_YAML, { encoding: "utf8", mode: 0o644 });
+	withStateFileLockSync(settingsPath, () => {
+		if (existsSync(settingsPath)) return;
+		safeResourceWrite(settingsPath, DEFAULT_SETTINGS_YAML, { encoding: "utf8", mode: 0o644 });
 		created.push(settingsPath);
 		touched = true;
-	}
+	});
 
 	const credentialsPath = join(configDir, "credentials.yaml");
-	if (!existsSync(credentialsPath)) {
-		writeFileSync(
+	withStateFileLockSync(credentialsPath, () => {
+		if (existsSync(credentialsPath)) return;
+		safeResourceWrite(
 			credentialsPath,
 			"# Managed via `clio-coder auth`. Do not edit manually unless you know what you are doing.\n{}\n",
-			{
-				encoding: "utf8",
-				mode: 0o600,
-			},
+			{ encoding: "utf8", mode: 0o600 },
 		);
 		chmodSync(credentialsPath, 0o600);
 		created.push(credentialsPath);
-	}
+	});
 
 	// installedAt is written exactly once, at first install. Any later
 	// version/platform/node change preserves it and stamps upgradedAt instead.
+	// Multiple Clio processes can boot together, so the read/compare/write is one
+	// locked transaction and publication is atomic. Otherwise both first boots
+	// can invent different install times, or a stale writer can erase the other
+	// process's noticedVersion after an upgrade.
 	const installPath = join(stateDir, "install.json");
-	const installMetadata = readInstallMetadata(installPath);
 	const currentVersion = readClioVersion();
-	if (!installMetadata) {
-		const payload: InstallMetadata = {
-			version: currentVersion,
-			// A first install knows when it happened. A repair does not, and saying
-			// `installedAt: now` there is a fact this process invented.
-			...(preexistingHome ? { repairedAt: new Date().toISOString() } : { installedAt: new Date().toISOString() }),
-			platform: process.platform,
-			nodeVersion: process.version,
-		};
-		writeFileSync(installPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-		created.push(installPath);
-	} else if (
-		installMetadata.version !== currentVersion ||
-		installMetadata.platform !== process.platform ||
-		installMetadata.nodeVersion !== process.version
-	) {
-		// A version change is the upgrade the record is about; a node or platform
-		// change alone keeps whatever earlier transition was on record.
-		const upgradedFrom =
-			installMetadata.version !== currentVersion ? installMetadata.version : installMetadata.upgradedFrom;
-		const payload: InstallMetadata = {
-			version: currentVersion,
-			...(installMetadata.installedAt !== undefined ? { installedAt: installMetadata.installedAt } : {}),
-			...(installMetadata.repairedAt !== undefined ? { repairedAt: installMetadata.repairedAt } : {}),
-			...(upgradedFrom !== undefined ? { upgradedFrom } : {}),
-			...(installMetadata.noticedVersion !== undefined ? { noticedVersion: installMetadata.noticedVersion } : {}),
-			upgradedAt: new Date().toISOString(),
-			platform: process.platform,
-			nodeVersion: process.version,
-		};
-		writeFileSync(installPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-	}
+	withStateFileLockSync(installPath, () => {
+		const installMetadata = readInstallMetadata(installPath);
+		if (!installMetadata) {
+			const payload: InstallMetadata = {
+				version: currentVersion,
+				// A first install knows when it happened. A repair does not, and saying
+				// `installedAt: now` there is a fact this process invented.
+				...(preexistingHome ? { repairedAt: new Date().toISOString() } : { installedAt: new Date().toISOString() }),
+				platform: process.platform,
+				nodeVersion: process.version,
+			};
+			safeResourceWrite(installPath, `${JSON.stringify(payload, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+			created.push(installPath);
+		} else if (
+			installMetadata.version !== currentVersion ||
+			installMetadata.platform !== process.platform ||
+			installMetadata.nodeVersion !== process.version
+		) {
+			// A version change is the upgrade the record is about; a node or platform
+			// change alone keeps whatever earlier transition was on record.
+			const upgradedFrom =
+				installMetadata.version !== currentVersion ? installMetadata.version : installMetadata.upgradedFrom;
+			const payload: InstallMetadata = {
+				version: currentVersion,
+				...(installMetadata.installedAt !== undefined ? { installedAt: installMetadata.installedAt } : {}),
+				...(installMetadata.repairedAt !== undefined ? { repairedAt: installMetadata.repairedAt } : {}),
+				...(upgradedFrom !== undefined ? { upgradedFrom } : {}),
+				...(installMetadata.noticedVersion !== undefined ? { noticedVersion: installMetadata.noticedVersion } : {}),
+				upgradedAt: new Date().toISOString(),
+				platform: process.platform,
+				nodeVersion: process.version,
+			};
+			safeResourceWrite(installPath, `${JSON.stringify(payload, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+		}
+		// Upgrade metadata written by earlier releases to the lifecycle file's
+		// owner-only contract even when no content changed on this boot.
+		chmodSync(installPath, 0o600);
+	});
 
 	return { configDir, dataDir, stateDir, cacheDir, createdPaths: created, touchedSettings: touched };
 }

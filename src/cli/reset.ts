@@ -2,7 +2,7 @@ import { type Dirent, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { initializeClioHome } from "../core/init.js";
-import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
+import { clioDirLayoutProblems, resetXdgCache, resolveClioDirs } from "../core/xdg.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
 import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
 import { createLifecyclePresenter, type LifecycleItem, measurePath } from "./lifecycle-presenter.js";
@@ -175,6 +175,14 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 	}
 
 	const dirs = resolveClioDirs();
+	const layoutProblems = clioDirLayoutProblems(dirs);
+	if (layoutProblems.length > 0) {
+		printError(
+			`reset refused an unsafe directory layout: ${layoutProblems.join("; ")}. ` +
+				"Run `clio-coder doctor` after setting four absolute, distinct, non-nesting roots.",
+		);
+		return 2;
+	}
 	const settingsPath = join(dirs.config, "settings.yaml");
 	const credentialsPath = join(dirs.config, "credentials.yaml");
 	const presenter = createLifecyclePresenter({ json: args.json });

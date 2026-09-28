@@ -36,6 +36,15 @@ Each row has a level:
 Doctor exits 0 when no row is an error. See
 [Exit Codes and Output](exit-codes-and-output.md).
 
+The lifecycle rows report the detected install method, whether config, data,
+state, and cache are absolute and non-overlapping (including through symlinks),
+and whether `migrations.json` is trustworthy and current. Pending migrations
+are a warning with the post-install command. Invalid JSON, an invalid manifest
+shape, duplicate IDs, or an oversized manifest is an error: doctor does not
+rewrite it or guess that no migration ran. Restore or review the manifest before
+running upgrade. An unknown install method is a warning because Clio cannot
+safely choose a package manager for it; ordinary work remains available.
+
 Standard checks include one `connection <id>` row for every configured target.
 It says whether a credential is available, whether the runtime offers a passive
 check, whether the endpoint answered, and whether a live model list was read.

@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
@@ -142,6 +142,32 @@ describe("contracts/upgrade-lifecycle", () => {
 			strictEqual(code, 0);
 			for (const id of MIGRATION_IDS) match(stdout, new RegExp(`✓ Applied migration ${id}`, "u"));
 			match(stdout, /2 migrations applied/u);
+		} finally {
+			temp.cleanup();
+		}
+	});
+
+	it("refuses overlapping ownership roots before lookup, migration, or package replacement", async () => {
+		const temp = currentHome();
+		let touched = 0;
+		try {
+			temp.env.CLIO_CODER_DATA_DIR = temp.configDir;
+			const { code } = await upgrade(temp, [], {
+				lookUpAvailableVersion: async () => {
+					touched += 1;
+					return { asked: true, version: "999.0.0" };
+				},
+				runPending: async () => {
+					touched += 1;
+					return { applied: [], allApplied: [], available: [] };
+				},
+				runNpmInstall: async () => {
+					touched += 1;
+				},
+			});
+			strictEqual(code, 2);
+			strictEqual(touched, 0);
+			ok(existsSync(join(temp.stateDir, "install.json")));
 		} finally {
 			temp.cleanup();
 		}

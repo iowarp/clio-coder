@@ -29,9 +29,11 @@
  *    already applied one of these is unaffected by where the other sits.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { safeResourceWrite } from "../../../core/safe-resource-write.js";
+import { withStateFileLock } from "../../../core/state-file-lock.js";
 import retirePanesKnobs from "./2026-09-01-retire-panes-knobs.js";
 import settingsV2 from "./2026-09-01-settings-v2.js";
 
@@ -53,6 +55,14 @@ export interface MigrationRunResult {
 	available: string[];
 }
 
+export interface MigrationManifestRead {
+	manifest: MigrationManifest;
+	/** Absent is healthy; a present manifest that cannot be trusted is not. */
+	problem: string | null;
+}
+
+const MIGRATION_MANIFEST_MAX_BYTES = 1024 * 1024;
+
 // Settings v2 owns the complete v1 rewrite, including the already-retired pane
 // keys, and must run before any later migration reaches the strict v2 reader.
 // `retirePanesKnobs` remains registered for homes that already recorded the v2
@@ -68,7 +78,7 @@ export function listMigrations(): ReadonlyArray<Migration> {
 	return REGISTRY;
 }
 
-export function readMigrationManifest(stateDir: string): MigrationManifest {
+export function readMigrationManifestResult(stateDir: string): MigrationManifestRead {
 	return readManifest(manifestPath(stateDir));
 }
 
@@ -76,23 +86,38 @@ function manifestPath(stateDir: string): string {
 	return join(stateDir, "migrations.json");
 }
 
-function readManifest(path: string): MigrationManifest {
-	if (!existsSync(path)) return { applied: [] };
+function readManifest(path: string): MigrationManifestRead {
+	if (!existsSync(path)) return { manifest: { applied: [] }, problem: null };
 	try {
-		const raw = readFileSync(path, "utf8");
-		const parsed = JSON.parse(raw) as unknown;
-		if (parsed && typeof parsed === "object" && Array.isArray((parsed as { applied?: unknown }).applied)) {
-			const ids = (parsed as { applied: unknown[] }).applied.filter((v): v is string => typeof v === "string");
-			return { applied: ids };
+		if (statSync(path).size > MIGRATION_MANIFEST_MAX_BYTES) {
+			return {
+				manifest: { applied: [] },
+				problem: `${path} is larger than ${MIGRATION_MANIFEST_MAX_BYTES} bytes; refusing to replay migrations`,
+			};
 		}
-	} catch {
-		// fall through; treat unreadable manifest as empty
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("root is not an object");
+		const keys = Object.keys(parsed as Record<string, unknown>);
+		if (keys.some((key) => key !== "applied")) throw new Error("contains unknown fields");
+		const applied = (parsed as { applied?: unknown }).applied;
+		if (!Array.isArray(applied) || applied.some((value) => typeof value !== "string" || value.length === 0))
+			throw new Error("applied must be an array of non-empty migration ids");
+		if (new Set(applied).size !== applied.length) throw new Error("applied contains duplicate migration ids");
+		return { manifest: { applied: applied as string[] }, problem: null };
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		return {
+			manifest: { applied: [] },
+			problem:
+				`${path} cannot be trusted: ${detail}. No migration was replayed. ` +
+				"Restore this machine-produced file from backup, or move it aside after reviewing which migrations already changed user data.",
+		};
 	}
-	return { applied: [] };
 }
 
 function writeManifest(path: string, manifest: MigrationManifest): void {
-	writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8", mode: 0o644 });
+	safeResourceWrite(path, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+	chmodSync(path, 0o600);
 }
 
 /**
@@ -106,30 +131,33 @@ export async function runPending(
 	stateDir: string,
 	migrations: ReadonlyArray<Migration> = REGISTRY,
 ): Promise<MigrationRunResult> {
-	mkdirSync(stateDir, { recursive: true });
 	const path = manifestPath(stateDir);
-	const manifest = readManifest(path);
-	const applied = new Set(manifest.applied);
-	const newlyApplied: string[] = [];
-	// The manifest is written after each `up()` rather than once at the end. A
-	// throw from a later migration used to discard the record of the earlier ones
-	// that had already succeeded, so they re-ran on the next upgrade against a
-	// tree they had already changed. That breaks the at-most-once guarantee this
-	// module's contract states.
-	for (const m of migrations) {
-		if (applied.has(m.id)) continue;
-		await m.up(stateDir);
-		applied.add(m.id);
-		newlyApplied.push(m.id);
-		writeManifest(path, { applied: [...applied] });
-	}
-	const allApplied = [...applied];
-	// Nothing pending still rewrites the manifest, so a home whose file was
-	// missing or unparseable gains a well-formed one.
-	writeManifest(path, { applied: allApplied });
-	return {
-		applied: newlyApplied,
-		allApplied,
-		available: migrations.map((m) => m.id),
-	};
+	return withStateFileLock(path, async () => {
+		const read = readManifest(path);
+		if (read.problem !== null) throw new Error(read.problem);
+		const applied = new Set(read.manifest.applied);
+		const newlyApplied: string[] = [];
+		// The manifest is written after each `up()` rather than once at the end. A
+		// throw from a later migration used to discard the record of the earlier ones
+		// that had already succeeded, so they re-ran on the next upgrade against a
+		// tree they had already changed. That breaks the at-most-once guarantee this
+		// module's contract states.
+		for (const migration of migrations) {
+			if (applied.has(migration.id)) continue;
+			await migration.up(stateDir);
+			applied.add(migration.id);
+			newlyApplied.push(migration.id);
+			writeManifest(path, { applied: [...applied] });
+		}
+		const allApplied = [...applied];
+		// Nothing pending still writes a manifest, so a fresh home gains an
+		// explicit record. A malformed present file is refused above and is never
+		// silently replaced with an empty history.
+		writeManifest(path, { applied: allApplied });
+		return {
+			applied: newlyApplied,
+			allApplied,
+			available: migrations.map((migration) => migration.id),
+		};
+	});
 }

@@ -73,6 +73,14 @@ You can redirect Clio Coder's folders using environment variables:
 *   `CLIO_CODER_STATE_DIR`: Overrides the state directory only (takes precedence over `CLIO_CODER_HOME`).
 *   `CLIO_CODER_CACHE_DIR`: Overrides the cache directory only (takes precedence over `CLIO_CODER_HOME`).
 
+The four resolved roots are ownership boundaries. They must be absolute,
+distinct, and non-nesting. Clio resolves existing symlinked parents while
+checking this rule, so two spellings of the same directory are not treated as
+separate roots. Bootstrap and upgrade refuse an unsafe layout before writing;
+reset and uninstall refuse it before previewing or deleting. `clio-coder doctor`
+shows the conflicting roles and paths. Correct the overrides rather than moving
+files with a destructive lifecycle command.
+
 ### The Project `.clio-coder/` Directory
 
 The tables above cover the per-user roots. A repository Clio works in also grows a
@@ -127,8 +135,8 @@ The core files are created automatically during the first run. `credentials.yaml
 | **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and theme preferences. | `0o644` (rw-r--r--) | Removed by uninstall / `reset --config`. |
 | **Config** | `credentials.yaml` | Private keys and tokens managed via `clio-coder auth`. | `0o600` (rw-------) | Removed by uninstall / `reset --auth`. |
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
-| **State** | `install.json` | Install metadata: Clio version, node, platform, `installedAt` (written once at first install) or `repairedAt` (when metadata is reconstructed over a preexisting config, data, or state root), `upgradedAt` and `upgradedFrom` (stamped on a version change), and `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown). | Writer/umask default | Removed by uninstall / `reset --state`. |
-| **State** | `migrations.json` | Log of successfully applied schema/state migrations. | Writer/umask default | Removed by uninstall / `reset --state`. |
+| **State** | `install.json` | Install metadata: Clio version, node, platform, `installedAt` (written once at first install) or `repairedAt` (when metadata is reconstructed over a preexisting config, data, or state root), `upgradedAt` and `upgradedFrom` (stamped on a version change), and `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown). | `0o600` (rw-------) | Removed by uninstall / `reset --state`. |
+| **State** | `migrations.json` | Log of successfully applied schema/state migrations. | `0o600` (rw-------) | Removed by uninstall / `reset --state`. |
 | **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. | Writer/umask default | Removed by uninstall / `reset --data`. |
 | **Data** | `tools/<id>/<version>/` | One pinned external program Clio downloaded on request (`clio-coder tools install <id>`), with its upstream license text and a `clio-coder-install.json` recording url, sha256, platform and install time. Binaries `0o755`, documents `0o644`. Only the pinned version is kept: a successful install prunes the versions it supersedes. | `0o755` dir | `clio-coder tools remove <id>` deletes every version of one tool; removed by uninstall / `reset --data`. |
 | **State** | `audit/YYYY-MM-DD.jsonl` | Daily safety audit logs showing allowed/blocked tool actions. | Writer/umask default | Removed by uninstall / `reset --state`. |
@@ -322,10 +330,15 @@ loads without that metadata. An installed `clio-dev` or `clio-test` skill keeps
 its old name, so lookups of `clio-coder-dev` and `clio-coder-test` miss it
 until it is reinstalled or renamed.
 
-Applied IDs are recorded in `<stateDir>/migrations.json`. An ID already in that
-manifest is skipped, and each successful migration is recorded immediately so a
-later failure does not cause it to run again. `clio-coder upgrade --dry-run`
-lists the migrations not yet recorded as applied. `--skip-migrations` is a recovery override that lets
+Applied IDs are recorded in `<stateDir>/migrations.json`. Migration runners lock
+that file and publish it atomically after each successful migration, so
+concurrent starts cannot replay the same change. An ID already in the manifest
+is skipped. A present manifest with invalid JSON, an invalid shape, duplicate
+IDs, or an excessive size is reported by doctor and causes upgrade to stop; it
+is never silently treated as an empty history. Restore it from backup, or move
+it aside only after reviewing which migrations already changed user data.
+`clio-coder upgrade --dry-run` lists the migrations not yet recorded as applied.
+`--skip-migrations` is a recovery override that lets
 the independent install and metadata work proceed after a migration failure.
 Fix the migration's cause and rerun the ordinary upgrade afterward.
 

@@ -2,7 +2,7 @@ import { accessSync, chmodSync, constants, type Dirent, existsSync, readdirSync,
 import { basename, dirname, join } from "node:path";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
-import { resolveClioDirs } from "../../core/xdg.js";
+import { clioDirLayoutProblems, resolveClioDirs } from "../../core/xdg.js";
 import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
 import { detectInteropAgents, interopAgentKind, resolveOnPath } from "../interop/index.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../providers/auth/index.js";
@@ -13,6 +13,8 @@ import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
 import { loadSkills, type SkillSource } from "../resources/skills/loader.js";
 import { isSessionEntry, type SessionEntry } from "../session/entries.js";
 import { foldPromptCacheTelemetry, hasPromptCacheTelemetry, topExpectedColdReason } from "../session/prompt-cache.js";
+import { inspectInstallation } from "./install-method.js";
+import { listMigrations, readMigrationManifestResult } from "./migrations/index.js";
 import { readStateInfoResult } from "./state.js";
 import { getVersionInfo } from "./version.js";
 
@@ -325,6 +327,15 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	}
 	const version = getVersionInfo();
 	findings.push({ ok: true, name: "Clio Coder version", detail: version.clio });
+	const installation = inspectInstallation();
+	findings.push({
+		ok: true,
+		...(installation.kind === "unknown" ? { level: "warn" as const } : {}),
+		name: "install method",
+		detail: `${installation.kind} (${installation.root})${
+			installation.kind === "unknown" ? "; automatic upgrade is unavailable; use the original package manager" : ""
+		}`,
+	});
 	findings.push({ ok: true, name: "node version", detail: version.node });
 	findings.push({ ok: true, name: "platform", detail: version.platform });
 	const engineReady = Boolean(version.piAgentCore && version.piAi && version.piTui);
@@ -335,6 +346,15 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	});
 
 	const dirs = resolveClioDirs();
+	const layoutProblems = clioDirLayoutProblems(dirs);
+	findings.push({
+		ok: layoutProblems.length === 0,
+		name: "directory layout",
+		detail:
+			layoutProblems.length === 0
+				? "config, data, state, and cache roots are absolute, distinct, and non-nesting"
+				: `${layoutProblems.join("; ")}. Set four absolute, distinct, non-nesting CLIO_CODER_*_DIR paths before reset or uninstall`,
+	});
 	const config = dirs.config;
 	if (!options.fix && isUninitializedHome(dirs)) {
 		// A home Clio has never written to is not a broken one. Seven `!!` rows
@@ -436,6 +456,21 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				: // Every other failing row names the command that repairs it. This one
 					// said only "missing", and `clio-coder doctor --fix` does write it.
 					"missing (run `clio-coder doctor --fix`)",
+	});
+
+	const migrationRead = readMigrationManifestResult(dirs.state);
+	const availableMigrations = listMigrations().map((migration) => migration.id);
+	const appliedMigrations = new Set(migrationRead.manifest.applied);
+	const pendingMigrations = availableMigrations.filter((id) => !appliedMigrations.has(id));
+	findings.push({
+		ok: migrationRead.problem === null,
+		...(migrationRead.problem === null && pendingMigrations.length > 0 ? { level: "warn" as const } : {}),
+		name: "lifecycle migrations",
+		detail:
+			migrationRead.problem ??
+			(pendingMigrations.length === 0
+				? `${availableMigrations.length} registered, all recorded`
+				: `${pendingMigrations.length} pending: ${pendingMigrations.join(", ")} (run \`clio-coder upgrade --post-install\`)`),
 	});
 
 	const sessionStore = sessionStoreFinding(dirs.state, state !== null);

@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { homedir, platform } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 /**
  * Resolve per-platform config/data/state/cache directories for Clio.
@@ -30,6 +30,93 @@ export interface ClioDirs {
 	data: string;
 	state: string;
 	cache: string;
+}
+
+type ClioDirRole = keyof ClioDirs;
+
+const CLIO_DIR_ROLES: ReadonlyArray<ClioDirRole> = ["config", "data", "state", "cache"];
+
+/**
+ * Resolve an existing prefix physically and append any missing suffix.
+ *
+ * A lexical comparison misses aliases through a symlinked parent: `~/clio`
+ * and `/mnt/home/me/clio` can be the same directory even when only the first
+ * spelling exists. Lifecycle deletion needs identity rather than spelling, so
+ * the layout check resolves as much of each path as the filesystem currently
+ * knows without creating anything.
+ */
+function physicalPath(path: string): string {
+	let cursor = resolve(path);
+	const suffix: string[] = [];
+	while (!existsSync(cursor)) {
+		const parent = dirname(cursor);
+		if (parent === cursor) break;
+		suffix.unshift(cursor.slice(parent.length).replace(/^[/\\]+/u, ""));
+		cursor = parent;
+	}
+	try {
+		cursor = realpathSync(cursor);
+	} catch {
+		// The directory finding reports unreadable paths. A lexical identity is
+		// still useful here and never makes an unsafe layout look safer.
+	}
+	const joined = resolve(cursor, ...suffix);
+	return process.platform === "win32" ? joined.toLowerCase() : joined;
+}
+
+function containsPath(parent: string, child: string): boolean {
+	const inside = relative(parent, child);
+	return (
+		inside.length > 0 &&
+		!isAbsolute(inside) &&
+		inside !== ".." &&
+		!inside.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
+	);
+}
+
+/**
+ * Problems that make root-scoped reset/uninstall ambiguous or destructive.
+ *
+ * The four roles are ownership boundaries. They must be absolute, distinct,
+ * and non-nesting even when environment overrides are used. Otherwise a
+ * seemingly scoped `reset --state`, or an uninstall with `--keep-config`, can
+ * erase a root the preview promised to preserve.
+ */
+export function clioDirLayoutProblems(dirs: ClioDirs = resolveClioDirs()): string[] {
+	const problems: string[] = [];
+	for (const role of CLIO_DIR_ROLES) {
+		if (!isAbsolute(dirs[role])) problems.push(`${role} root is relative: ${dirs[role]}`);
+	}
+	const physical = Object.fromEntries(CLIO_DIR_ROLES.map((role) => [role, physicalPath(dirs[role])])) as Record<
+		ClioDirRole,
+		string
+	>;
+	for (let leftIndex = 0; leftIndex < CLIO_DIR_ROLES.length; leftIndex += 1) {
+		const leftRole = CLIO_DIR_ROLES[leftIndex];
+		if (leftRole === undefined) continue;
+		for (const rightRole of CLIO_DIR_ROLES.slice(leftIndex + 1)) {
+			const left = physical[leftRole];
+			const right = physical[rightRole];
+			if (left === right) {
+				problems.push(`${leftRole} and ${rightRole} roots resolve to the same path: ${left}`);
+			} else if (containsPath(left, right)) {
+				problems.push(`${leftRole} root contains ${rightRole} root: ${left} -> ${right}`);
+			} else if (containsPath(right, left)) {
+				problems.push(`${rightRole} root contains ${leftRole} root: ${right} -> ${left}`);
+			}
+		}
+	}
+	return problems;
+}
+
+/** Refuse a layout in every writer, before it creates or removes a root. */
+export function assertClioDirLayout(dirs: ClioDirs = resolveClioDirs()): void {
+	const problems = clioDirLayoutProblems(dirs);
+	if (problems.length === 0) return;
+	throw new Error(
+		`Unsafe Clio directory layout:\n${problems.map((problem) => `  - ${problem}`).join("\n")}\n` +
+			"Set four absolute, distinct, non-nesting CLIO_CODER_*_DIR paths, then run `clio-coder doctor`.",
+	);
 }
 
 let cachedConfigDir: string | undefined;
@@ -121,25 +208,33 @@ export function isClioHomeRelocated(): boolean {
 
 export function clioConfigDir(): string {
 	if (cachedConfigDir) return cachedConfigDir;
-	cachedConfigDir = ensureDir(resolveClioDirs().config);
+	const dirs = resolveClioDirs();
+	assertClioDirLayout(dirs);
+	cachedConfigDir = ensureDir(dirs.config);
 	return cachedConfigDir;
 }
 
 export function clioDataDir(): string {
 	if (cachedDataDir) return cachedDataDir;
-	cachedDataDir = ensureDir(resolveClioDirs().data);
+	const dirs = resolveClioDirs();
+	assertClioDirLayout(dirs);
+	cachedDataDir = ensureDir(dirs.data);
 	return cachedDataDir;
 }
 
 export function clioStateDir(): string {
 	if (cachedStateDir) return cachedStateDir;
-	cachedStateDir = ensureDir(resolveClioDirs().state);
+	const dirs = resolveClioDirs();
+	assertClioDirLayout(dirs);
+	cachedStateDir = ensureDir(dirs.state);
 	return cachedStateDir;
 }
 
 export function clioCacheDir(): string {
 	if (cachedCacheDir) return cachedCacheDir;
-	cachedCacheDir = ensureDir(resolveClioDirs().cache);
+	const dirs = resolveClioDirs();
+	assertClioDirLayout(dirs);
+	cachedCacheDir = ensureDir(dirs.cache);
 	return cachedCacheDir;
 }
 

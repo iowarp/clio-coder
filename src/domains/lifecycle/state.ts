@@ -1,6 +1,8 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { initializeClioHome } from "../../core/init.js";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStatePath } from "../../core/xdg.js";
 
 export interface StateInfo {
@@ -72,22 +74,38 @@ export function ensureClioState(): StateInfo {
  */
 export function takeUpgradeNotice(): UpgradeTransition | null {
 	const path = join(clioStatePath(), "install.json");
-	let raw: Record<string, unknown>;
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-		raw = parsed as Record<string, unknown>;
+		return withStateFileLockSync(
+			path,
+			() => {
+				let raw: Record<string, unknown>;
+				try {
+					const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+					if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+					raw = parsed as Record<string, unknown>;
+				} catch {
+					return null;
+				}
+				const { version, upgradedFrom, noticedVersion } = raw;
+				if (typeof version !== "string" || typeof upgradedFrom !== "string") return null;
+				if (upgradedFrom === version || noticedVersion === version) return null;
+				try {
+					safeResourceWrite(path, `${JSON.stringify({ ...raw, noticedVersion: version }, null, 2)}\n`, {
+						encoding: "utf8",
+						mode: 0o600,
+					});
+					chmodSync(path, 0o600);
+				} catch {
+					// A record that cannot be rewritten still gets its notice; it will
+					// repeat on the next boot, which is the lesser wrong against silence.
+				}
+				return { from: upgradedFrom, to: version };
+			},
+			// A second interactive boot must never stall for a notice. If the
+			// metadata is busy, that other process will claim it.
+			{ timeoutMs: 50 },
+		);
 	} catch {
 		return null;
 	}
-	const { version, upgradedFrom, noticedVersion } = raw;
-	if (typeof version !== "string" || typeof upgradedFrom !== "string") return null;
-	if (upgradedFrom === version || noticedVersion === version) return null;
-	try {
-		writeFileSync(path, `${JSON.stringify({ ...raw, noticedVersion: version }, null, 2)}\n`, "utf8");
-	} catch {
-		// A record that cannot be rewritten still gets its notice; it will repeat
-		// on the next boot, which is the lesser wrong against staying silent.
-	}
-	return { from: upgradedFrom, to: version };
 }

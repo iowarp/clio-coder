@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import { resolvePackageRoot } from "../core/package-root.js";
-import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
+import { clioDirLayoutProblems, resetXdgCache, resolveClioDirs } from "../core/xdg.js";
 import { type Installation, inspectInstallation, installationCommand } from "../domains/lifecycle/install-method.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
 import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
@@ -302,6 +302,14 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	}
 
 	const dirs = resolveClioDirs();
+	const layoutProblems = clioDirLayoutProblems(dirs);
+	if (layoutProblems.length > 0) {
+		printError(
+			`uninstall refused an unsafe directory layout: ${layoutProblems.join("; ")}. ` +
+				"Run `clio-coder doctor` after setting four absolute, distinct, non-nesting roots.",
+		);
+		return 2;
+	}
 	const installation = inspectInstallation();
 	const method = installation.kind;
 	const presenter = createLifecyclePresenter({ json: args.json });

@@ -2,14 +2,14 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { initializeClioHome } from "../core/init.js";
-import { resolveClioDirs } from "../core/xdg.js";
+import { clioDirLayoutProblems, resolveClioDirs } from "../core/xdg.js";
 import {
 	type Installation,
 	inspectInstallation,
 	installationCommand,
 	npmInstallArgs,
 } from "../domains/lifecycle/install-method.js";
-import { listMigrations, readMigrationManifest, runPending } from "../domains/lifecycle/migrations/index.js";
+import { listMigrations, readMigrationManifestResult, runPending } from "../domains/lifecycle/migrations/index.js";
 import { compareReleaseVersions, fetchReleaseVersion } from "../domains/lifecycle/release-version.js";
 import { readStateInfo } from "../domains/lifecycle/state.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
@@ -249,7 +249,18 @@ export async function runUpgradeCommand(
 	presenter.header("Upgrade", "upgrade");
 
 	const before = getVersionInfo().clio;
-	const stateDir = resolveClioDirs().state;
+	const dirs = resolveClioDirs();
+	const layoutProblems = clioDirLayoutProblems(dirs);
+	if (layoutProblems.length > 0) {
+		presenter.fail("unsafe directory layout", layoutProblems.join("; "));
+		presenter.commandAdvice(
+			"Set four absolute, distinct, non-nesting roots, then inspect them with:",
+			"clio-coder paths\nclio-coder doctor",
+		);
+		presenter.finish();
+		return 2;
+	}
+	const stateDir = dirs.state;
 	const installation = deps.inspectInstallation();
 	const method = installation.kind;
 	const methodLabel =
@@ -329,7 +340,17 @@ export async function runUpgradeCommand(
 
 	const migrations = listMigrations();
 	const migrationIds = migrations.map((m) => m.id);
-	const appliedIds = new Set(readMigrationManifest(stateDir).applied);
+	const manifestRead = readMigrationManifestResult(stateDir);
+	if (manifestRead.problem !== null && !opts.skipMigrations) {
+		presenter.fail("migration manifest is unreadable", manifestRead.problem);
+		presenter.commandAdvice(
+			"Review the manifest before retrying; to update only the package and defer migration repair, run:",
+			"clio-coder upgrade --skip-migrations",
+		);
+		presenter.finish();
+		return 1;
+	}
+	const appliedIds = new Set(manifestRead.manifest.applied);
 	const pendingMigrationIds = opts.skipMigrations ? [] : migrationIds.filter((id) => !appliedIds.has(id));
 
 	const recorded = readStateInfo()?.version ?? null;

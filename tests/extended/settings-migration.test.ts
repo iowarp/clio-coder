@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
@@ -8,11 +8,16 @@ import { parse as parseYaml } from "yaml";
 import { namingHistoryFindings } from "../../src/cli/doctor-naming.js";
 import { readSettings, updateSettings, validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
+import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
 import settingsV2, {
 	SETTINGS_V2_MIGRATION_ID,
 	SettingsV2CollisionError,
 } from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
-import { listMigrations, runPending } from "../../src/domains/lifecycle/migrations/index.js";
+import {
+	listMigrations,
+	readMigrationManifestResult,
+	runPending,
+} from "../../src/domains/lifecycle/migrations/index.js";
 import { parseYaziEventLine, renderYaziKeymap } from "../../src/domains/mux/index.js";
 import { parseSessionEntries } from "../../src/domains/session/archive-readers.js";
 import { createShareArchive, planShareImport } from "../../src/domains/share/archive.js";
@@ -288,6 +293,48 @@ targets:
 		ok(first.applied.includes(SETTINGS_V2_MIGRATION_ID));
 		ok(first.applied.includes(retiredPanes));
 		deepStrictEqual((await runPending(stateDir)).applied, []);
+	});
+
+	it("refuses a corrupt migration manifest instead of replaying user-data changes", async () => {
+		const manifest = join(stateDir, "migrations.json");
+		writeFileSync(manifest, '{"applied":["once","once"]}\n', "utf8");
+		let calls = 0;
+		const migrations = [
+			{
+				id: "once",
+				description: "must not replay",
+				up: async () => {
+					calls += 1;
+				},
+			},
+		];
+		ok(readMigrationManifestResult(stateDir).problem?.includes("duplicate"));
+		const doctor = runDoctor().find((finding) => finding.name === "lifecycle migrations");
+		strictEqual(doctor?.ok, false);
+		ok(doctor?.detail.includes("duplicate"));
+		await rejects(() => runPending(stateDir, migrations), /cannot be trusted.*duplicate/u);
+		strictEqual(calls, 0);
+		strictEqual(readFileSync(manifest, "utf8"), '{"applied":["once","once"]}\n');
+	});
+
+	it("serializes concurrent migration runners and records a migration once", async () => {
+		let calls = 0;
+		const migrations = [
+			{
+				id: "serialized",
+				description: "one writer",
+				up: async () => {
+					calls += 1;
+					await new Promise<void>((resolve) => setTimeout(resolve, 20));
+				},
+			},
+		];
+		const [first, second] = await Promise.all([runPending(stateDir, migrations), runPending(stateDir, migrations)]);
+		strictEqual(calls, 1);
+		deepStrictEqual([...first.applied, ...second.applied], ["serialized"]);
+		const manifest = join(stateDir, "migrations.json");
+		deepStrictEqual(JSON.parse(readFileSync(manifest, "utf8")), { applied: ["serialized"] });
+		if (process.platform !== "win32") strictEqual(statSync(manifest).mode & 0o777, 0o600);
 	});
 
 	it("merges independent settings updates against the latest durable state", () => {

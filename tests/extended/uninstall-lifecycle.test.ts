@@ -216,6 +216,20 @@ describe("contracts/uninstall-lifecycle", () => {
 		}
 	});
 
+	it("refuses overlapping ownership roots before previewing or deleting", async () => {
+		const temp = home();
+		try {
+			temp.env.CLIO_CODER_DATA_DIR = temp.configDir;
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			strictEqual(code, 2);
+			strictEqual(stdout, "");
+			ok(existsSync(join(temp.configDir, "settings.yaml")));
+			ok(existsSync(join(temp.stateDir, "install.json")));
+		} finally {
+			temp.cleanup();
+		}
+	});
+
 	it("emits one JSON document naming every root with its status", async () => {
 		const temp = home();
 		try {

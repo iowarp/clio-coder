@@ -4,6 +4,7 @@ export {
 	type Migration,
 	type MigrationManifest,
 	type MigrationRunResult,
+	readMigrationManifestResult,
 	runPending,
 } from "./migrations/index.js";
 export { ensureClioState, readStateInfo, type StateInfo, takeUpgradeNotice, type UpgradeTransition } from "./state.js";

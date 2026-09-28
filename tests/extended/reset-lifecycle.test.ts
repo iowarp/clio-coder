@@ -168,6 +168,20 @@ describe("contracts/reset-lifecycle", () => {
 		}
 	});
 
+	it("refuses overlapping ownership roots before previewing or deleting", async () => {
+		const temp = home();
+		try {
+			temp.env.CLIO_CODER_DATA_DIR = temp.configDir;
+			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--all", "--force"]));
+			strictEqual(code, 2);
+			strictEqual(stdout, "");
+			ok(existsSync(join(temp.configDir, "settings.yaml")));
+			ok(existsSync(join(temp.stateDir, "install.json")));
+		} finally {
+			temp.cleanup();
+		}
+	});
+
 	it("rejects --all combined with a scope, and an unknown flag, without deleting anything", async () => {
 		const temp = home();
 		try {
