@@ -466,7 +466,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	// INTERACT: operator dialogue.
 	[ToolNames.AskUser]: {
-		objective: "Ask the operator every question the work needs, as structured choices with context.",
+		objective: "Put a question to the operator as structured choices with context.",
 		uiLabel: "Ask",
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: {

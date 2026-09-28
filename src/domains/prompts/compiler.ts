@@ -464,6 +464,22 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		new Set(inputs.coordinatorCapabilities.filter(reachable)),
 	);
 	const askUser = reachable("ask_user") && inputs.headless !== true;
+	const discovery = [
+		...(hasGateway
+			? [
+					'If the map or an example already shows the arguments, call it directly. Otherwise gateway(op="describe", capability="<name>") once for its schema, usage and examples, then call. Never guess argument names or pass shell flags as JSON keys.',
+					'For a need the map does not cover, gateway(op="find", query="<next step>") searches builtins, extensions and recorded MCP catalogs, not workspace content. Query with two to four words naming the operation; try one shorter query before deciding nothing exists. Discovery grants no authority.',
+					'Load only what the next step needs. gateway(op="describe", capability="gateway") explains chains: independent reads run in parallel; dependent steps pass results. Return to reasoning when new evidence changes the plan.',
+				]
+			: []),
+		...(reachable("clio_library") &&
+		inputs.turnConstraints?.mode !== "answer" &&
+		inputs.turnConstraints?.delegation !== "forbidden"
+			? [
+					'Find specialists and workflows with gateway(op="call", capability="clio_library", args={query:"<task>"}); catalog rows supply invocation and readiness. Catalog reads activate and install nothing. Never invent recipe or skill names.',
+				]
+			: []),
+	];
 	return [
 		"# Tool Contract",
 		TOOL_RESULT_TRUST_CONTRACT,
@@ -482,32 +498,14 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 					...map,
 				]
 			: []),
-		"",
-		"## Finding the right capability",
-		"Pick by the operation the next step needs: text inside files is grep, paths are find, symbols and importers are code_nav, exact lines are read, repository state is git. Prefer a typed capability over bash when one fits.",
-		...(hasGateway
-			? [
-					'If the map or an example already shows the arguments, call it directly. Otherwise gateway(op="describe", capability="<name>") once for its schema, usage and examples, then call. Never guess argument names or pass shell flags as JSON keys.',
-					'For a need the map does not cover, gateway(op="find", query="<next step>") searches builtins, extensions and recorded MCP catalogs, not workspace content. Query with two to four words naming the operation; try one shorter query before deciding nothing exists. Discovery grants no authority.',
-					'Load only what the next step needs. gateway(op="describe", capability="gateway") explains chains: independent reads run in parallel; dependent steps pass results. Return to reasoning when new evidence changes the plan.',
-				]
-			: []),
-		...(reachable("clio_library") &&
-		inputs.turnConstraints?.mode !== "answer" &&
-		inputs.turnConstraints?.delegation !== "forbidden"
-			? [
-					'Find specialists and workflows with gateway(op="call", capability="clio_library", args={query:"<task>"}); catalog rows supply invocation and readiness. Catalog reads activate and install nothing. Never invent recipe or skill names.',
-				]
-			: []),
+		...(discovery.length > 0 ? ["", "## Finding the right capability", ...discovery] : []),
 		...(askUser
 			? [
 					"",
 					"## Asking the operator",
 					admitted.has("ask_user")
-						? "Every question for the operator goes through ask_user, never prose: a decision the request leaves open, approval of a plan, or a plain yes or no. End that turn on the ask_user call instead of a question at the end of a message."
-						: "Every question for the operator goes through ask_user, never prose; discover it through the gateway. End that turn on the ask_user call instead of a question at the end of a message.",
-					'Give each question the context needed to answer it and two to four options, recommended first, each with a one-line description. A yes or no becomes choices such as "Yes, proceed", "Yes, but change ..." and "No, instead ..."; set multi_select when choices combine.',
-					"Ask only after using what the request, the workspace and earlier answers settle: a fact a tool can check is not a question for the operator, and a clear request gets the work, not an opening interview. Honor answers already given. A greeting, thanks, or a question you can answer gets a plain reply.",
+						? "Every question for the operator goes through ask_user, never prose, including plan approval and a plain yes or no: end that turn on the ask_user call, not on a question at the end of a message. A fact the workspace or a tool can settle is not a question."
+						: "Every question for the operator goes through ask_user, never prose, including plan approval and a plain yes or no: discover it through the gateway and end that turn on the call. A fact the workspace or a tool can settle is not a question.",
 				]
 			: []),
 		"",
