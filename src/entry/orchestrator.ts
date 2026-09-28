@@ -53,7 +53,6 @@ import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule, createConfigDomainModule } from "../domains/config/index.js";
 import { CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextContract } from "../domains/context/contract.js";
-import { loadOperatorProfile } from "../domains/context/index.js";
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
 import { runOperatorRecall } from "../domains/context/working-set/operator-recall.js";
@@ -96,7 +95,6 @@ import { loadMemoryRecordsSync } from "../domains/memory/store.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import { TaskMemoryEndpointBusyError } from "../domains/memory/task-memory-policy.js";
 import { createCiDisputeRegistration } from "../domains/middleware/ci-dispute.js";
-import { createCommunicationPostureRegistration } from "../domains/middleware/communication-posture.js";
 import { createDecisionHintsRegistration } from "../domains/middleware/decision-hints.js";
 import {
 	createDetachedDispatchNudgeRegistration,
@@ -129,7 +127,6 @@ import { aggregateCostEntries } from "../domains/observability/cost-rows.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import { PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
-import { loadCommunicationPostures } from "../domains/prompts/communication-posture.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
@@ -1881,14 +1878,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}),
 		);
 	}
-	middleware.registerHook(
-		createCommunicationPostureRegistration({
-			fragments: loadCommunicationPostures(),
-			highRigor: () =>
-				resolveRigor({ cwd: process.cwd(), override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) }) === "high",
-			testsFirst: () => loadOperatorProfile(process.cwd()).profile.validationPreference === "tests-first",
-		}),
-	);
 	middleware.registerHook(createCiDisputeRegistration());
 	const middlewareToolChoice = createMiddlewareToolChoiceControl();
 	const toolRegistry = createRegistry({
