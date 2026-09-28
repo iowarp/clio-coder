@@ -19,13 +19,8 @@
  */
 
 import type { DecisionSite } from "../../core/defaults.js";
-import {
-	type DecisionCallOutcome,
-	decisionCallsRecorded,
-	recordDecisionCall,
-	recordedAnswers,
-	stateDigest,
-} from "./decision-calls.js";
+import type { DecisionCallOutcome } from "./decision-calls.js";
+import { decisionCallsRecorded, recordDecisionCall, recordedAnswers, stateDigest } from "./decision-calls.js";
 import type { DecideResult, DecisionAnswer, DecisionQuestion } from "./types/inference.js";
 import type { ProbeContext, RuntimeDescriptor } from "./types/runtime-descriptor.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
@@ -207,7 +202,10 @@ export function createDecider(
 		const serializedState = typeof state === "string" ? state : (JSON.stringify(state) ?? "");
 		const stateTokens = estimateDecisionTokens(serializedState);
 		const budget = decisionStateBudget(runtime, target);
-		const breakerKey = `${target.id}/${model ?? target.defaultModel ?? "default"}`;
+		const targetLabel = `${target.id}/${model ?? target.defaultModel ?? "default"}`;
+		// Runtime and URL are part of the identity, so repointing a target id at a
+		// healthy server is not held back by the old endpoint's timeouts.
+		const breakerKey = `${runtime.id}|${target.url ?? ""}|${targetLabel}`;
 		const startedAt = performance.now();
 		const at = new Date().toISOString();
 		const sites = options.sites ?? (site === undefined ? [] : [site]);
@@ -257,7 +255,7 @@ export function createDecider(
 			performance.now() < breaker.openUntil
 		) {
 			const error = new DecisionTargetCoolingError(
-				`decision target '${breakerKey}' is cooling down after ${breaker.failures} consecutive timeouts`,
+				`decision target '${targetLabel}' is cooling down after ${breaker.failures} consecutive timeouts`,
 			);
 			report("breaker-open", { error });
 			throw error;

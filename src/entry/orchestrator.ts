@@ -2027,7 +2027,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 */
 	// Every System One call lands here and reaches the ledger at the next turn
 	// boundary or settle, so a threshold can be re-fitted from what was asked.
-	const decisionCalls = createDecisionCallBuffer();
+	const decisionCalls = createDecisionCallBuffer(() => session?.current()?.id ?? null);
 	setDecisionCallSink(decisionCalls.sink);
 	const turnRelevance = createTurnRelevanceStore({
 		resolve: () => ({
@@ -2865,7 +2865,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		onTurnSettled: () => {
 			// Calls made mid-turn (gateway ranking, consult, an approval card) belong
 			// to the turn that made them, not to the next one.
-			const calls = decisionCalls.drain();
+			const calls = decisionCalls.drain(session?.current()?.id ?? null);
 			if (calls.length > 0) {
 				try {
 					const meta = session?.current();
@@ -2910,7 +2910,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		getMemoryRelevance: () => turnRelevance.memory(),
 		getTurnBriefRecord: () => preTurnRecord(turnRelevance.sites, turnRelevance.current()),
-		drainDecisionCalls: () => decisionCalls.drain(),
+		drainDecisionCalls: () => decisionCalls.drain(session?.current()?.id ?? null),
 		observeTurnEnd: (turn) => {
 			void observeTurnEnd(
 				{

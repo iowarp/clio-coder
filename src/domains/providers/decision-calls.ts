@@ -91,24 +91,29 @@ export function recordedAnswers(
 /**
  * A bounded buffer the host drains into its ledger at turn boundaries. Calls
  * made between turns (an approval card, a `/draft` judgment) wait for the next
- * drain rather than writing into a turn that is not running.
+ * drain rather than writing into a turn that is not running. Each call is
+ * tagged with the session current when it was made, and a drain returns only
+ * that session's calls, so `/new` or `/resume` between a call and the next
+ * turn cannot file it under another session.
  */
 export interface DecisionCallBuffer {
 	readonly sink: DecisionCallSink;
-	drain(): DecisionCallRecord[];
+	drain(session: string | null): DecisionCallRecord[];
 }
 
-export function createDecisionCallBuffer(limit = 256): DecisionCallBuffer {
-	let pending: DecisionCallRecord[] = [];
+export function createDecisionCallBuffer(currentSession: () => string | null, limit = 256): DecisionCallBuffer {
+	let pending: Array<{ session: string | null; record: DecisionCallRecord }> = [];
 	return {
 		sink: (record) => {
-			pending.push(record);
+			pending.push({ session: currentSession(), record });
 			// A session that never reaches a drain must not grow without bound;
 			// the newest calls are the ones a later turn can still be joined to.
 			if (pending.length > limit) pending = pending.slice(pending.length - limit);
 		},
-		drain() {
-			const out = pending;
+		drain(session) {
+			// Calls from a session that is no longer current are dropped: their
+			// ledger is closed to this process until it is resumed.
+			const out = pending.filter((entry) => entry.session === session).map((entry) => entry.record);
 			pending = [];
 			return out;
 		},
