@@ -2,6 +2,13 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- The pinned prompt now maps registered capabilities and gives Clio a short, repeatable path to discover their schemas. Installed skills, agents, fleets, and MCP servers are indexed once per session.
+- New conversations include bounded workspace and prior-session facts. Clio distinguishes this conversation from older session records and checks disputed technical claims against available evidence.
+- Replies follow the operator's register, keep greetings brief, and route decisions through `ask_user`. Requested plans seek approval, and an interactive continuation catches a closing prose question. Per-turn reminders select a brief, rigorous, or recovery posture from the task and observed tool results.
+- The bundled `wtfp` plugin pin tracks its v0.7.4 release.
+
 ## 0.5.7 - 2026-09-27
 
 ### Coordinator discovery and composition
