@@ -149,6 +149,8 @@ export interface OverlayLifecycleController {
 	closeOverlay(): void;
 	finishAuthOverlay(dismiss: boolean): void;
 	openAskUserOverlayState: import("../tools/ask-user.js").AskUserHandler;
+	/** Confirmation UI that is not persisted as an interview decision. */
+	openTransientAskUserOverlayState: import("../tools/ask-user.js").AskUserHandler;
 	closeAskUserSession(): void;
 	isAskUserWaiting(): boolean;
 	resetAskUserCancellation(): void;
@@ -538,6 +540,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		closeOverlay,
 		finishAuthOverlay: overlayAuth.finish,
 		openAskUserOverlayState: overlayAskUser.handler,
+		openTransientAskUserOverlayState: overlayAskUser.transientHandler,
 		closeAskUserSession: overlayAskUser.close,
 		isAskUserWaiting: overlayAskUser.isWaiting,
 		resetAskUserCancellation: overlayAskUser.resetCancellation,

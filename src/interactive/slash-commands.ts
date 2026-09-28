@@ -130,6 +130,7 @@ export interface LibraryBrowseRequest {
 type SlashCommandVariant =
 	| { kind: "mcp"; argv: string[] }
 	| { kind: "doctor"; deep: boolean }
+	| { kind: "upgrade" }
 	| { kind: "quit" }
 	| { kind: "help"; query?: string }
 	| { kind: "init"; options: InitCommandOptions }
@@ -765,6 +766,12 @@ export interface SlashCommandContext {
 		deep: boolean;
 	}) => Promise<{ level: NoticeLevel; text: string; findings?: ReadonlyArray<DoctorFinding> }>;
 	/**
+	 * `/upgrade`: review the available release, ask for explicit approval, and
+	 * run the package lifecycle outside model context. Absent on non-interactive
+	 * hosts, which refuse the command rather than treating it as chat text.
+	 */
+	startUpgrade?: () => void;
+	/**
 	 * `/btw <question>`: one model round beside the session, answered in an
 	 * overlay. Nothing about it enters the transcript, the ledger, or the task
 	 * board, so the workers a fleet run briefs never see the question or its
@@ -1348,6 +1355,21 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				}
 				ctx.render();
 			})();
+		},
+	},
+	{
+		name: "upgrade",
+		description: "Review and approve a Clio Coder update, then restart when it succeeds",
+		group: "Configure",
+		kinds: ["upgrade"],
+		args: {},
+		fromArgs: fromArgsOrUsage("upgrade", { kind: "upgrade" }),
+		handle(_command, ctx) {
+			if (!ctx.startUpgrade) {
+				ctx.notice("error", "in-session upgrade is unavailable; run clio-coder upgrade from a shell");
+				return "rejected";
+			}
+			ctx.startUpgrade();
 		},
 	},
 	{
@@ -2849,6 +2871,7 @@ const COMMAND_ORDER = [
 	"panes",
 	"usage",
 	"doctor",
+	"upgrade",
 	"decisions",
 	"library",
 	"skills",

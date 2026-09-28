@@ -34,6 +34,8 @@ export interface OverlayAskUserLifecycleDeps {
 
 export interface OverlayAskUserLifecycle {
 	handler: AskUserHandler;
+	/** Harness-owned confirmations that must not become interview decisions. */
+	transientHandler: AskUserHandler;
 	close(): void;
 	cancel(): void;
 	cancelPending(): boolean;
@@ -88,14 +90,18 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		close();
 	};
 
-	const handler: AskUserHandler = async (questions, invokeOptions) => {
+	const ask = async (
+		questions: Parameters<AskUserHandler>[0],
+		invokeOptions: Parameters<AskUserHandler>[1],
+		recordAnswer: boolean,
+	): ReturnType<AskUserHandler> => {
 		const toolBacked = Boolean(invokeOptions?.turnId || invokeOptions?.toolCallId);
 		if (toolBacked && cancelledForTurn) return cancelledAskUserResult();
 		const activeSession = ensureSession();
 		if (!activeSession) return cancelledAskUserResult();
 		pendingCancel = cancel;
 		const result = await activeSession.ask(questions, invokeOptions?.decisionPresentation);
-		if (!toolBacked && result.cancelled !== true && result.answers.length > 0)
+		if (recordAnswer && !toolBacked && result.cancelled !== true && result.answers.length > 0)
 			deps.onRoundAnswered?.(questions, result.answers);
 		if (result.cancelled === true || !toolBacked) {
 			if (result.cancelled === true) cancelledForTurn = true;
@@ -105,10 +111,13 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		}
 		return result;
 	};
+	const handler: AskUserHandler = (questions, invokeOptions) => ask(questions, invokeOptions, true);
+	const transientHandler: AskUserHandler = (questions, invokeOptions) => ask(questions, invokeOptions, false);
 
 	unregisterHandler = deps.registerHandler?.(handler) ?? null;
 	return {
 		handler,
+		transientHandler,
 		close,
 		cancel,
 		cancelPending: () => {

@@ -347,6 +347,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/agents` | `/agents` | Open the Library on Agents. |
 | `/usage` | `/usage` | Show workspace activity, subscription quota, credits, and session token and cost totals |
 | `/doctor` | `/doctor [deep]` | Show a diagnostic report with errors and warnings first and full wrapped check details; `deep` adds live tool probes on the session's targets and a validation-contract dry run at the session's autonomy. See [Doctor](doctor.md). |
+| `/upgrade` | `/upgrade` | Recheck the latest release, review an eligible npm-global replacement, and ask before changing the package. User data is preserved; after success Clio asks you to exit and restart. Other installation kinds receive manager-specific instructions. |
 | `/context` | `/context compact [instructions] \| /context recall <ref> \| /context init [--preview] [--heuristic] [--adopt] [--global] [--propose\|--apply\|--rewrite] \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, init, refresh, and reset |
 | `/fleet` | `/fleet [run [--var <key=value>] <name>]` | Open Fleet Runs, or run a fleet contract with an approval preview. Configure fleets with `/settings fleet`. |
 | `/decisions` | `/decisions` | Show settled interview decisions and operator revisions |

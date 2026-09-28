@@ -486,6 +486,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const updateAbort = new AbortController();
 	let updateTimer: ReturnType<typeof setTimeout> | undefined;
 	let updateMonitor: ReturnType<typeof import("./update-monitor.js").startUpdateMonitor> | undefined;
+	let upgradeFlow: ReturnType<typeof import("./interactive-upgrade.js").createInteractiveUpgradeFlow> | undefined;
 	/**
 	 * Assigned after the presentation because it renders into it. The composer
 	 * rail reads it through the optional chain before then as "no prompt".
@@ -807,6 +808,48 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.onContextRefresh ? { onContextRefresh: deps.onContextRefresh } : {}),
 		stateDir: deps.stateDir,
 		shutdown: () => applicationController.shutdown(),
+		startUpgrade: () => {
+			// Keep package-manager and lifecycle code out of boot. The footer does
+			// no more than point at /upgrade; this graph loads only after the operator
+			// explicitly asks to review it.
+			void import("./interactive-upgrade.js")
+				.then(({ createInteractiveUpgradeFlow }) => {
+					upgradeFlow ??= createInteractiveUpgradeFlow({
+						runningVersion: readClioVersion(),
+						openAskUser: (questions, options) => openTransientAskUserOverlayState(questions, options),
+						notify,
+						isIdle: () => {
+							const queue = deps.chat.queuedMessages();
+							return (
+								overlayLifecycle.getState() === "closed" &&
+								editor.getText().length === 0 &&
+								!leaderArmed &&
+								!shutdownArmed &&
+								!operatorExtensions?.busy &&
+								!editorSubmit.hasActiveEditorBash() &&
+								!deps.chat.isStreaming() &&
+								deps.chat.turnPreparation().phase === "idle" &&
+								deps.dispatch.snapshot().running.length === 0 &&
+								queue.steer.length + queue.followUp.length === 0
+							);
+						},
+						dismissUpdateHint: () => updateMonitor?.dismiss(),
+						shutdown: () => {
+							void applicationController.shutdown();
+						},
+						signal: updateAbort.signal,
+						cwd: process.cwd(),
+					});
+					upgradeFlow.start();
+				})
+				.catch((error) =>
+					notify(
+						"error",
+						`Upgrade controls could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+						"lifecycle:upgrade-load-failed",
+					),
+				);
+		},
 		requestRender: () => tui.requestRender(),
 		refreshFooter: () => footer.refresh(),
 		dismissContextBootstrapNotices,
@@ -876,7 +919,22 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	// The lease drains the terminal; operator shell ownership outlives that
 	// surface and must settle before the session domain stops, on every exit.
 	getTerminationCoordinator().onDrain(() => editorSubmit.shutdownEditorBash(), { timeoutMs: EDITOR_BASH_SHUTDOWN_MS });
-	editor.onSubmit = editorSubmit.submitEditorText;
+	editor.onSubmit = (text) => {
+		if (upgradeFlow?.isRunning()) {
+			// Pi clears the composer before invoking onSubmit. Package replacement
+			// must not race a new turn, so restore the draft exactly and leave it for
+			// the restarted (or still-current) process.
+			editor.setText(text);
+			notify(
+				"info",
+				"Finish or cancel the in-session upgrade before submitting another command or turn; your draft was preserved.",
+				"lifecycle:upgrade-submit-blocked",
+			);
+			tui.requestRender();
+			return;
+		}
+		editorSubmit.submitEditorText(text);
+	};
 
 	const interactiveTickers = createInteractiveTickers({
 		getQuotaSnapshots: presentation.getQuotaSnapshots,
@@ -953,6 +1011,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const {
 		closeOverlay,
 		openAskUserOverlayState,
+		openTransientAskUserOverlayState,
 		openUsageOverlayState,
 		openSideQuestionOverlayState,
 		openDraftOverlayState,
@@ -1270,7 +1329,10 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		cancelSelectedDispatch,
 		cancelActiveEditorBash: () => editorSubmit.cancelActiveEditorBash(),
 		isStreaming: () =>
-			deps.chat.isStreaming() || deps.chat.turnPreparation().phase !== "idle" || (operatorExtensions?.busy ?? false),
+			deps.chat.isStreaming() ||
+			deps.chat.turnPreparation().phase !== "idle" ||
+			(operatorExtensions?.busy ?? false) ||
+			(upgradeFlow?.isRunning() ?? false),
 		cancelActiveRun,
 		editor,
 		editorSubmit,
@@ -1508,6 +1570,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 									!leaderArmed &&
 									!shutdownArmed &&
 									!operatorExtensions?.busy &&
+									!(upgradeFlow?.isRunning() ?? false) &&
 									!editorSubmit.hasActiveEditorBash() &&
 									!deps.chat.isStreaming() &&
 									deps.chat.turnPreparation().phase === "idle" &&

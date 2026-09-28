@@ -21,6 +21,7 @@ lifecycle operations.
 | Choose models for each role | `clio-coder configure --settings` | Open Chat, Fleet, or Context & Memory to choose the target and model used for that work. |
 | Change any setting or repair YAML | `clio-coder configure --edit` | Edit a draft, validate, and save with a backup. |
 | Diagnose the installation | `clio-coder doctor` | Read-only diagnosis. `clio-coder doctor --fix` repairs structure and permissions, and records fleet preflight results. |
+| Review an available update in the TUI | `/upgrade` | Recheck the release, show exactly what is preserved, and ask before an eligible npm-global replacement. After success, Clio asks you to exit and restart. |
 | Finish a package-manager update | `clio-coder upgrade --post-install` | Apply local migrations and installation checks. |
 | Start configuration over | `clio-coder reset --config` | Reset settings, preserve credentials and history, then run `clio-coder configure`. |
 | Emulate a fresh user | `clio-coder reset --all` | Remove all four user roots, recreate defaults, then run `clio-coder configure`. |
@@ -245,8 +246,19 @@ migrations before its final doctor repair.
 For npm global installs, `upgrade` derives the prefix from the running package,
 including custom prefixes, and runs post-install checks through the exact installed
 entry. Another launcher on `PATH` cannot take over those checks. An older dist-tag
-does not trigger a downgrade. To update and return to the project, finish the
-turn, leave with `/quit`, and run:
+does not trigger a downgrade.
+
+Inside the TUI, `/upgrade` offers the same npm-global path. It first checks that
+the session is idle, then shows the current and available versions, package
+prefix, preserved user data, and post-install checks. Nothing is replaced until
+you choose **Upgrade now**. On success, a persistent restart-required notice is
+shown and Clio asks whether to exit now; start `clio-coder` again and use
+`/resume`. Choosing **Not now** leaves the quiet update reminder in place.
+pnpm, Bun, source, repository-local, and unknown installations receive their
+owner-specific shell instructions instead of an unsafe in-process replacement.
+
+To update and return to the project from a shell, finish the turn, leave with
+`/quit`, and run:
 
 ```bash
 clio-coder upgrade --restart
@@ -287,13 +299,14 @@ public npm `latest` tag; source, prerelease, local/npx, and unknown installation
 skip registry checks. Installed files are also checked once a minute for a version
 change or a rebuild since this process started.
 
-The result is one muted footer line, visible for up to 30 seconds only when the
-editor is empty and there is no turn, worker, local command, queued message,
-overlay, or other notice. It hides during work and supports the usual notification
-dismiss shortcut. It never opens a prompt, writes a conversation message, sends a
-desktop notification, or starts an upgrade. An update hint appears at most once
-per session and once per day across sessions; the same version is suggested no
-more than once a week. Cache records live under the resolved cache directory.
+The result is one muted footer line, visible only when the editor is empty and
+there is no turn, worker, local command, queued message, overlay, or other
+notice. It hides during work, returns when the session is idle, and persists
+until it is dismissed or `/upgrade` confirms the installation is current or
+updated. It never opens a prompt, writes a conversation message, sends a desktop
+notification, or starts an upgrade by itself. An update hint appears at most
+once per session and once per day across sessions; the same version is suggested
+no more than once a week. Cache records live under the resolved cache directory.
 
 Set `CLIO_CODER_UPDATE_CHECK=0` or `NO_UPDATE_NOTIFIER=1` to disable the monitor.
 CI, headless runs, ACP, and CLI subcommands do not start it. Explicit upgrades

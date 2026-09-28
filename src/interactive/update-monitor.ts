@@ -50,7 +50,11 @@ export function startUpdateMonitor(options: UpdateMonitorOptions) {
 					seen.add(notice.key);
 					if (notice.kind === "available") offeredUpdate = true;
 					displayed = notice;
-					expiresAt = now() + 30_000;
+					// Lifecycle action remains discoverable after the first nudge. It is
+					// still rendered only while the whole application is idle and can be
+					// dismissed with the ordinary notification action, so persistence
+					// does not turn it into a modal or steal space during work.
+					expiresAt = Number.POSITIVE_INFINITY;
 					options.onChange();
 				} else if (options.isIdle()) seen.add(notice.key);
 			}

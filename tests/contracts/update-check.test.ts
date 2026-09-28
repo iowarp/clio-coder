@@ -55,6 +55,7 @@ test("checks once a day across processes, caches failures, and reminds once a we
 	assert.deepEqual(await readdir(f.home.dir), ["package"], "construction does no I/O");
 	const notice = await check.probe(controller.signal);
 	assert.equal(notice?.kind, "available");
+	assert.match(notice?.text ?? "", /\/upgrade to review/u);
 	assert.equal(calls, 1);
 	assert.ok(notice);
 	assert.equal(
@@ -143,7 +144,7 @@ test("development, local and unknown installations never check the registry; bad
 	assert.equal(repaired.available, "0.5.3");
 });
 
-test("a pending notice waits for idle, hides immediately during work, expires, and can be dismissed", async (t) => {
+test("a pending notice waits for idle, hides during work, and persists until dismissed", async (t) => {
 	const controller = new AbortController();
 	t.after(() => controller.abort());
 	let idle = false;
@@ -179,7 +180,7 @@ test("a pending notice waits for idle, hides immediately during work, expires, a
 	assert.equal(monitor.text(), null, "rendering reevaluates busy state without waiting for the next poll");
 	idle = true;
 	time += 30_001;
-	assert.equal(monitor.text(), null);
+	assert.equal(monitor.text(), notice.text, "the footer stays available until the operator acts or dismisses it");
 	await monitor.tick();
 	assert.equal(claims, 1);
 	time += 60_000;

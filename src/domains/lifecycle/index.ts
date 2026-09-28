@@ -7,6 +7,11 @@ export {
 	readMigrationManifestResult,
 	runPending,
 } from "./migrations/index.js";
+export {
+	planSelfUpgrade,
+	runApprovedSelfUpgrade,
+	type SelfUpgradePlan,
+} from "./self-upgrade.js";
 export { ensureClioState, readStateInfo, type StateInfo, takeUpgradeNotice, type UpgradeTransition } from "./state.js";
 export { describeUpgradeNotice } from "./upgrade-notice.js";
 export { getVersionInfo, type VersionInfo } from "./version.js";

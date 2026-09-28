@@ -122,6 +122,8 @@ export interface InteractiveSlashRuntimeDeps {
 	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<void>;
 	onContextClear?: (options: ContextClearCommandOptions, io?: RunIo) => Promise<void>;
 	onContextRefresh?: (io?: RunIo) => Promise<void>;
+	/** Review and run the self-upgrade lifecycle after explicit operator consent. */
+	startUpgrade?: () => void;
 	stateDir: string;
 	shutdown: () => void | Promise<void>;
 	requestRender: () => void;
@@ -460,6 +462,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			});
 			return doctorNotice(findings);
 		},
+		...(deps.startUpgrade ? { startUpgrade: deps.startUpgrade } : {}),
 		listPrompts: () => deps.resources?.prompts(cwd()) ?? { items: [], diagnostics: [] },
 		listPromptsForDisplay: () => deps.resources?.promptsForDisplay(cwd()) ?? { items: [], diagnostics: [] },
 		...(resources ? { expandPromptTemplate: (text: string) => resources.expandPromptTemplate(text, cwd()) } : {}),

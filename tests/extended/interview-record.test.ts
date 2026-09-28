@@ -80,5 +80,9 @@ test("a round a tool call asked leaves no second record; a round no tool row sta
 	// An operator question outside any tool call has no row: the record is its trace.
 	await lifecycle.handler(questions, undefined);
 	strictEqual(recorded.length, 1);
+	// Harness-owned lifecycle confirmations use the same operator UI without
+	// becoming durable task/interview decisions.
+	await lifecycle.transientHandler(questions, undefined);
+	strictEqual(recorded.length, 1);
 	lifecycle.dispose();
 });

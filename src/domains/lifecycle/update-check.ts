@@ -103,7 +103,7 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 			key: `available:${runningVersion}:${cache.available}`,
 			text:
 				installation.kind === "npm"
-					? `v${cache.available} available · /quit, then clio-coder upgrade --restart`
+					? `v${cache.available} available · /upgrade to review`
 					: `v${cache.available} available · clio-coder upgrade for update steps`,
 		};
 	}
