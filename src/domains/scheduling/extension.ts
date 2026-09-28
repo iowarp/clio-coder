@@ -1,16 +1,14 @@
 /**
  * Scheduling domain wire-up. Seeds budget + concurrency state from settings and
- * listens to dispatch.enqueued so it can fire budget.alert events when session
- * spend meets or crosses the ceiling. Dispatch preflight reads this state for
- * accounting. Session-cost alerts are advisory; explicit per-request intent
- * cost ceilings are enforced separately by dispatch route admission.
+ * checks priced spend before paid model requests and dispatches. Interactive
+ * callers wait for an operator ceiling increase; headless callers reject.
  */
 
 import { type BudgetAlertPayload, BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ObservabilityContract } from "../observability/contract.js";
-import { createBudgetState } from "./budget.js";
+import { createBudgetState, SessionCostCeilingError } from "./budget.js";
 import { createFleetRegistry, LOCAL_NODE_ID } from "./cluster.js";
 import type { SchedulingContract } from "./contract.js";
 import {
@@ -85,6 +83,36 @@ export function createSchedulingBundle(
 		preflight: () => {
 			const { verdict, currentUsd } = evaluate();
 			return { verdict, currentUsd, ceilingUsd: budget.ceilingUsd };
+		},
+		admitPaidRequest: async ({ waitForRaise, additionalUsd = 0, getCeilingUsd, signal }) => {
+			let alerted = false;
+			for (;;) {
+				const { currentUsd } = evaluate();
+				const spend = currentUsd + additionalUsd;
+				const ceilingUsd = getCeilingUsd?.() ?? budget.ceilingUsd;
+				if (spend < ceilingUsd) return;
+				if (!waitForRaise) throw new SessionCostCeilingError(spend, ceilingUsd);
+				if (signal?.aborted) throw signal.reason ?? new Error("budget wait aborted");
+				if (!alerted) {
+					alerted = true;
+					context.bus.emit(BusChannels.BudgetAlert, {
+						level: spend > ceilingUsd ? "over" : "at",
+						currentUsd: spend,
+						ceilingUsd,
+					} satisfies BudgetAlertPayload);
+				}
+				await new Promise<void>((resolve, reject) => {
+					const onAbort = (): void => {
+						clearTimeout(timer);
+						reject(signal?.reason ?? new Error("budget wait aborted"));
+					};
+					const timer = setTimeout(() => {
+						signal?.removeEventListener("abort", onAbort);
+						resolve();
+					}, 250);
+					signal?.addEventListener("abort", onAbort, { once: true });
+				});
+			}
 		},
 		maxWorkers: () => resolveGlobalConcurrency(config.get().fleet.concurrency),
 		localCapacity: () => localCapacity.resolve(config.get().fleet.concurrency),

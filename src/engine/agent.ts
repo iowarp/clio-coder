@@ -60,8 +60,8 @@ export type EngineAgentOptions = Omit<AgentOptions, "streamFn"> & {
 		context: EngineToolBatchContext,
 		signal?: AbortSignal,
 	) => EngineToolBatchRejection | undefined | Promise<EngineToolBatchRejection | undefined>;
-	/** Synchronous final admission: no suspension, reduction, request mutation, or model invocation. */
-	beforeStreamRequest?: (request: EngineStreamRequest) => EngineStreamAdmission;
+	/** Final admission before invoking the model; an interactive budget gate may wait for the operator. */
+	beforeStreamRequest?: (request: EngineStreamRequest) => EngineStreamAdmission | Promise<EngineStreamAdmission>;
 };
 
 export interface EngineAgentHandle {
@@ -149,16 +149,20 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 		if (!beforeStreamRequest) return invoke(model, context, streamOptions);
 		activeCorrelationId = undefined;
 		const request: EngineStreamRequest = { model, context, options: streamOptions };
-		let admission: EngineStreamAdmission;
+		const complete = (admission: EngineStreamAdmission): ReturnType<StreamFn> => {
+			if (streamOptions?.signal?.aborted) return refusedStream(request, "Request aborted before invocation", true);
+			if (admission.block) return refusedStream(request, admission.reason);
+			activeCorrelationId = admission.correlationId;
+			return invoke(model, context, streamOptions);
+		};
 		try {
-			admission = beforeStreamRequest(request);
+			const admission = beforeStreamRequest(request);
+			return admission instanceof Promise
+				? admission.then(complete, () => refusedStream(request, "Request admission failed", streamOptions?.signal?.aborted))
+				: complete(admission);
 		} catch {
 			return refusedStream(request, "Request admission failed", streamOptions?.signal?.aborted);
 		}
-		if (streamOptions?.signal?.aborted) return refusedStream(request, "Request aborted before invocation", true);
-		if (admission.block) return refusedStream(request, admission.reason);
-		activeCorrelationId = admission.correlationId;
-		return invoke(model, context, streamOptions);
 	};
 	const agent = new Agent({
 		...agentOptions,

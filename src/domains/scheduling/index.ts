@@ -8,5 +8,6 @@ export const SchedulingDomainModule: DomainModule = {
 };
 
 export type { BudgetVerdict } from "./budget.js";
+export { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON, SessionCostCeilingError } from "./budget.js";
 export type { SchedulingContract } from "./contract.js";
 export { SchedulingManifest } from "./manifest.js";

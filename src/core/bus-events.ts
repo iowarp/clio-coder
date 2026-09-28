@@ -276,10 +276,9 @@ export interface ToolBudgetExceededPayload {
 }
 
 /**
- * Payload published on {@link BusChannels.BudgetAlert} when a dispatch enqueue
- * meets ("at") or crosses ("over") the session cost ceiling. Informational in
- * v0.x: scheduling never rejects the enqueue, so the interactive notice is the
- * operator's only signal.
+ * Payload published on {@link BusChannels.BudgetAlert} when priced session spend
+ * meets ("at") or crosses ("over") the cost ceiling. Paid requests wait for an
+ * operator increase in interactive mode.
  */
 export interface BudgetAlertPayload {
 	level: "at" | "over";

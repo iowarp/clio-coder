@@ -127,7 +127,7 @@ import { PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
-import type { ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
+import type { CostProvenance, ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import {
 	AGENT_ROLE_TOOLS_REQUIRED_REASON,
 	applyModelCapabilityPatch,
@@ -208,6 +208,7 @@ import { resumedSessionRoute } from "../domains/session/resumed-route.js";
 import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { writeTranscriptExport } from "../domains/session/transcript-export.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import { reseedSessionUsageFromLedger } from "../domains/session/usage-reseed.js";
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import type { TurnControlRecord, TurnInterpretation } from "../domains/turn-control/index.js";
@@ -367,6 +368,7 @@ function applyHeadlessSettingsOverlay(
 
 interface CompactionResolution {
 	model: EngineModel;
+	costProvenance: CostProvenance;
 	targetId: string;
 	endpointKey: string | null;
 	wireModelId: string;
@@ -782,6 +784,7 @@ async function resolveCompactionModel(
 	}
 	return {
 		model,
+		costProvenance: route.costProvenance,
 		targetId: route.targetId,
 		wireModelId: route.wireModelId,
 		endpointKey: canonicalEndpointKey(route.target),
@@ -928,6 +931,7 @@ async function runCompactionFlow(
 		| "checkpointForSummary"
 	>,
 	summarize?: CompactInput["summarize"],
+	admission?: { scheduling?: SchedulingContract; headless?: boolean; getCeilingUsd?: () => number },
 ): Promise<CompactResult | null> {
 	const meta = session.current();
 	if (!meta) {
@@ -999,6 +1003,16 @@ async function runCompactionFlow(
 			entries,
 			continuityNote,
 			...budget,
+			beforeSummaryCall: async () => {
+				await budget?.beforeSummaryCall?.();
+				if (resolved.costProvenance === "known" || resolved.costProvenance === "estimated") {
+					await admission?.scheduling?.admitPaidRequest?.({
+						waitForRaise: admission.headless !== true,
+						...(admission.getCeilingUsd ? { getCeilingUsd: admission.getCeilingUsd } : {}),
+						...(budget?.signal ? { signal: budget.signal } : {}),
+					});
+				}
+			},
 			...(summarize ? { summarize } : {}),
 			onCall: (call) => calls.push(call),
 			model: resolved.model,
@@ -1136,6 +1150,7 @@ export function createProductionAutoCompact(
 	providers: ProvidersContract,
 	observability?: BackgroundMemoryUsageSink,
 	summarize?: CompactInput["summarize"],
+	admission?: { scheduling?: SchedulingContract; headless?: boolean; getCeilingUsd?: () => number },
 ): (
 	instructions?: string,
 	trigger?: CompactionTrigger,
@@ -1151,7 +1166,17 @@ export function createProductionAutoCompact(
 	>,
 ) => Promise<CompactResult | null> {
 	return (instructions, trigger, budget) =>
-		runCompactionFlow(session, getSettings(), providers, instructions, trigger, observability, budget, summarize);
+		runCompactionFlow(
+			session,
+			getSettings(),
+			providers,
+			instructions,
+			trigger,
+			observability,
+			budget,
+			summarize,
+			admission,
+		);
 }
 
 function estimateTokensFromSummary(result: CompactResult): number {
@@ -1421,6 +1446,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// settings view once it exists (assigned below, after the config
 			// contract loads); until then it falls back to the shared snapshot.
 			createDispatchDomainModule({
+				budgetWaitForRaise: !options.headless && !options.acp,
 				getSettings: () => effectiveSettingsForDispatch?.(),
 				getProtectedArtifactState: () => protectedArtifactStateForDispatch?.() ?? { artifacts: [] },
 				// Stamps every run with the session that dispatched it, which is what
@@ -2741,6 +2767,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// in between would deliver them to nobody.
 	let cancelQueuedSpeculativeHold: (() => void) | null = null;
 	let previousSpeculativeStats = dispatch?.speculativeStats?.() ?? { held: 0, adopted: 0, discarded: 0, live: 0 };
+	const sessionScheduling = result.getContract<SchedulingContract>("scheduling");
 	const chat = createChatLoop({
 		turnControl,
 		turnOutcomeCollector,
@@ -2768,6 +2795,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		knownTargets: () => new Set(providers.list().map((entry) => entry.target.id)),
 		observability,
+		...(sessionScheduling ? { scheduling: sessionScheduling } : {}),
 		bus,
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
@@ -2846,7 +2874,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session
 			? {
 					readSessionEntries: readCurrentSessionEntries,
-					autoCompact: createProductionAutoCompact(session, getCurrentSettings, providers, observability),
+					autoCompact: createProductionAutoCompact(session, getCurrentSettings, providers, observability, undefined, {
+						...(sessionScheduling ? { scheduling: sessionScheduling } : {}),
+						headless: options.headless !== undefined,
+						getCeilingUsd: () => getCurrentSettings().safety.limits.sessionCostUsd,
+					}),
 				}
 			: {}),
 		toolRegistry,
@@ -2900,6 +2932,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				);
 			}
 			try {
+				const resumedEntries = readCurrentSessionEntries();
+				if (observability) {
+					reseedSessionUsageFromLedger(
+						observability,
+						resumedEntries,
+						{ target: resumedMeta.target, model: resumedMeta.model },
+						leafTurnId,
+					);
+				}
 				// Scoped to the leaf resume landed on for the same reason the /resume
 				// overlay is (issue #107): with a /tree pin persisted, the file still
 				// holds the abandoned branch after the pinned turn, and replaying it
@@ -2907,7 +2948,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// parent onto.
 				chat.resetForSession(
 					leafTurnId,
-					buildModelReplayAgentMessagesFromTurns(readCurrentSessionEntries(), {
+					buildModelReplayAgentMessagesFromTurns(resumedEntries, {
 						...(leafTurnId ? { activeLeafTurnId: leafTurnId } : {}),
 						// The same ownership the interactive /resume overlay supplies.
 						// Without it this reader owns nothing, the fold finds no

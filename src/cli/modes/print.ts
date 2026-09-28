@@ -31,6 +31,7 @@ import type {
 	ToolCallStat,
 } from "../../domains/dispatch/types.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
+import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
@@ -851,7 +852,14 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		terminal = { exitCode: 1, outcome: "canceled", status: "interrupted", failureMessage: result.abortReason };
 		stderrMessage = result.abortReason;
 	} else if (result.error) {
-		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage: result.error };
+		const budgetCeiling = result.error.startsWith(`${SESSION_COST_CEILING_REASON}:`);
+		terminal = {
+			exitCode: budgetCeiling ? SESSION_COST_CEILING_EXIT_CODE : 1,
+			outcome: "failed",
+			status: "failed",
+			failureMessage: result.error,
+			...(budgetCeiling ? { outcomeDetail: SESSION_COST_CEILING_REASON } : {}),
+		};
 		stderrMessage = prefixHeadlessFailure(chat, result.error);
 	} else if (result.outputExhausted && !result.sawTerminatingToolResult) {
 		// The provider returned normally, but generation exhausted its budget.

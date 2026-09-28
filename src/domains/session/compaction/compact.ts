@@ -145,8 +145,8 @@ export interface CompactionCallObservation {
 }
 
 export interface CompactInput {
-	/** Synchronous admission after exact request-fit, before each provider call. */
-	beforeSummaryCall?: (() => void) | undefined;
+	/** Admission after exact request-fit, before each provider call. */
+	beforeSummaryCall?: (() => void | Promise<void>) | undefined;
 	checkpointForSummary?:
 		| ((summaryRef: string, tokensBefore: number, tokensAfter: number) => ContinuityCheckpointPayload)
 		| undefined;
@@ -786,7 +786,7 @@ async function runSummaryStream(
 	options.maxTokens = maxTokens;
 
 	input.signal?.throwIfAborted();
-	input.beforeSummaryCall?.();
+	await input.beforeSummaryCall?.();
 	const timestamp = new Date().toISOString();
 	let usage: unknown;
 	let reported: Record<string, unknown> = {};

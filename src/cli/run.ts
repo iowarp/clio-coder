@@ -30,6 +30,7 @@ import type { ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { loadSkills, ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
+import { SESSION_COST_CEILING_EXIT_CODE, SessionCostCeilingError } from "../domains/scheduling/budget.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import type { ImageContent } from "../engine/types.js";
@@ -698,6 +699,7 @@ async function runDispatch(
 		const msg = err instanceof Error ? err.message : String(err);
 		process.stderr.write(`clio-coder run failed: ${msg}\n`);
 		await loaded.stop();
+		if (err instanceof SessionCostCeilingError) return SESSION_COST_CEILING_EXIT_CODE;
 		if (/target '.+' not found/.test(msg)) return 2;
 		if (
 			msg.includes("unknown agent recipe") ||
@@ -721,5 +723,5 @@ function formatReceipt(r: RunReceipt): string {
 
 function mapExitCode(r: RunReceipt): number {
 	if (r.exitCode === 0) return 0;
-	return r.exitCode === 2 ? 2 : 1;
+	return r.exitCode === 2 || r.exitCode === SESSION_COST_CEILING_EXIT_CODE ? r.exitCode : 1;
 }

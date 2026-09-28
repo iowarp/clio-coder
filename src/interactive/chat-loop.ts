@@ -77,6 +77,7 @@ import {
 import { type VisionSidecar, visionObservationText } from "../domains/providers/vision-sidecar.js";
 import { type AutonomyLevel, modelMayActivateSkills } from "../domains/safety/autonomy.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
+import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
 import type { ContextSnapshot } from "../domains/session/context-accounting.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
@@ -567,6 +568,7 @@ export interface CreateChatLoopDeps {
 	 * approval ask, so the session prompt says so instead of promising a pause.
 	 */
 	headless?: boolean;
+	scheduling?: SchedulingContract;
 	getSettings: () => Readonly<ClioSettings>;
 	/**
 	 * The same effective autonomy level registry admission resolves, so the
@@ -1242,6 +1244,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		providers: deps.providers,
 		knownTargets: deps.knownTargets,
 		observability: deps.observability,
+		scheduling: deps.scheduling,
+		headless: deps.headless,
 		createAgent,
 		continuity,
 		hasQueuedSteering: () => queues.queuedMessages().steer.length > 0,
@@ -1330,6 +1334,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!agentRuntime) return { ok: false, reason: notConfiguredNotice() };
 		const resolution = agentRuntime.runtimeResolution;
 		try {
+			if (resolution.costProvenance === "known" || resolution.costProvenance === "estimated") {
+				await deps.scheduling?.admitPaidRequest?.({
+					waitForRaise: deps.headless !== true,
+					getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
+					...(signal ? { signal } : {}),
+				});
+			}
 			const apiKey = targetRequiresAuth(resolution.target, resolution.runtime)
 				? (
 						await deps.providers.auth.resolveForTarget(resolution.target, resolution.runtime, signal ? { signal } : undefined)

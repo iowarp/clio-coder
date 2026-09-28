@@ -187,7 +187,7 @@ describe("dispatch advisory admission and explicit authority", () => {
 		requestOrigin: "internal" as const,
 		budget: { toolCalls: 1000, readReserve: 10 },
 	};
-	it("admits above session spend but still denies an explicit routing cost bound before launch", async () => {
+	it("denies paid dispatch above session spend and still honors an explicit routing cost bound", async () => {
 		let starts = 0;
 		const bundle = makeDispatchBundle(
 			dispatchStubContext({
@@ -203,8 +203,8 @@ describe("dispatch advisory admission and explicit authority", () => {
 		);
 		await bundle.extension.start();
 		try {
-			await rejects(bundle.contract.dispatch(request), /fixture launch reached/u);
-			equal(starts, 1);
+			await rejects(bundle.contract.dispatch(request), /budget_ceiling/u);
+			equal(starts, 0);
 			await rejects(
 				bundle.contract.dispatch({
 					...request,
@@ -220,7 +220,7 @@ describe("dispatch advisory admission and explicit authority", () => {
 				}),
 				/budget ceiling crossed/u,
 			);
-			equal(starts, 1);
+			equal(starts, 0);
 		} finally {
 			await bundle.extension.stop?.();
 		}

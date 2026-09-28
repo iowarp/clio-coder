@@ -15,9 +15,16 @@ export interface SchedulingContract {
 	 * observability lookup so callers (notably dispatch) don't need to import it.
 	 * Verdict is "under" when spend is below the ceiling, "at" when equal, "over"
 	 * when above. Dispatch records this session budget without denying reservations
-	 * from the verdict; explicit request cost ceilings have a separate route check.
+	 * from the verdict; callers gate paid requests through admitPaidRequest.
 	 */
 	preflight(): BudgetPreflight;
+	/** Park an interactive paid request until the operator raises the ceiling, or reject a headless one. */
+	admitPaidRequest?(options: {
+		waitForRaise: boolean;
+		additionalUsd?: number;
+		getCeilingUsd?: () => number;
+		signal?: AbortSignal;
+	}): Promise<void>;
 	/** Configured global worker capacity; durable leases own active usage. */
 	maxWorkers(): number;
 	/**

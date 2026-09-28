@@ -28,6 +28,8 @@ import {
 	type TargetStatus,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
+import { SessionCostCeilingError } from "../domains/scheduling/budget.js";
+import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { RetrySettings } from "../domains/session/retry.js";
 import type { createEngineAgent } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
@@ -149,6 +151,8 @@ export interface TurnRuntimeDeps {
 	providers: ProvidersContract;
 	knownTargets: () => ReadonlySet<string>;
 	observability?: ObservabilityContract | undefined;
+	scheduling?: SchedulingContract | undefined;
+	headless?: boolean | undefined;
 	createAgent: typeof createEngineAgent;
 	middlewareToolChoice: MiddlewareToolChoiceControl;
 	persistence: TurnPersistence;
@@ -539,6 +543,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// monotonic anchor before that wait, including custom stream delegates.
 		let apiCallStartedAt: number | null = null;
 		let apiCallFirstDeltaAt: number | null = null;
+		let unsettledSpendUsd = 0;
 		const handle = deps.createAgent({
 			transcriptStreamFn: (currentModel, currentContext, options) => {
 				if (!state.synthesisToolLock) return engineStreamSimple(currentModel, currentContext, options);
@@ -568,7 +573,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 				return undefined;
 			},
-			beforeStreamRequest: ({ context: request }) => {
+			beforeStreamRequest: async ({ context: request, options: streamOptions }) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 				if (state.activeInterruptReason !== null || state.runtime !== localRuntime) {
 					return { block: true, reason: "Request ownership changed before invocation." };
@@ -585,12 +590,38 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					: request;
 				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0);
 				const output = resolveTurnOutputReserve(localRuntime, input);
-				return requestFits(input, output, view.effectiveWindow)
-					? (deps.continuity?.admission() ?? { block: false })
-					: {
-							block: true,
-							reason: `Context window exceeded: input ${input} + output ${output}, window ${view.effectiveWindow ?? "unknown"}.`,
-						};
+				if (!requestFits(input, output, view.effectiveWindow))
+					return {
+						block: true,
+						reason: `Context window exceeded: input ${input} + output ${output}, window ${view.effectiveWindow ?? "unknown"}.`,
+					};
+				if (
+					deps.scheduling &&
+					(localRuntime.runtimeResolution.costProvenance === "known" ||
+						localRuntime.runtimeResolution.costProvenance === "estimated")
+				) {
+					try {
+						if (deps.scheduling.admitPaidRequest) {
+							await deps.scheduling.admitPaidRequest({
+								waitForRaise: deps.headless !== true,
+								additionalUsd: unsettledSpendUsd,
+								getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
+								...(streamOptions?.signal ? { signal: streamOptions.signal } : {}),
+							});
+						} else {
+							const { currentUsd, ceilingUsd } = deps.scheduling.preflight();
+							if (currentUsd + unsettledSpendUsd >= ceilingUsd) {
+								throw new SessionCostCeilingError(currentUsd + unsettledSpendUsd, ceilingUsd);
+							}
+						}
+					} catch (error) {
+						return { block: true, reason: error instanceof Error ? error.message : String(error) };
+					}
+				}
+				if (state.activeInterruptReason !== null || state.runtime !== localRuntime) {
+					return { block: true, reason: "Request ownership changed while waiting for budget approval." };
+				}
+				return deps.continuity?.admission() ?? { block: false };
 			},
 			onStreamInvocation: () => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
@@ -916,6 +947,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (enrichedEvent.type === "agent_end") {
 				context.noteRunCacheSummary(enrichedEvent.messages, runFirstCallVerdict);
 			}
+			if (enrichedEvent.type === "message_end" && enrichedEvent.message.role === "assistant") {
+				const completed = sumRunUsage([enrichedEvent.message]);
+				if (completed.hadUsage && Number.isFinite(completed.costUsd) && completed.costUsd > 0) {
+					unsettledSpendUsd += completed.costUsd;
+				}
+			}
 			if (enrichedEvent.type === "agent_end" && deps.observability) {
 				const summary = sumRunUsage(enrichedEvent.messages);
 				if (summary.hadUsage && (summary.tokens > 0 || summary.costUsd > 0)) {
@@ -956,6 +993,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					});
 				}
 			}
+			if (enrichedEvent.type === "agent_end") unsettledSpendUsd = 0;
 			// While a loop-guard interrupt is active its closing message has
 			// already been shown; the aborted follow-up calls the abort leaves
 			// behind carry no content and would render as "[aborted] Request was

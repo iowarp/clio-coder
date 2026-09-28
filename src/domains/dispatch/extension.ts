@@ -131,6 +131,7 @@ import {
 	recordToolExecutionEffects,
 } from "../safety/run-effects.js";
 import type { ScopeSpec } from "../safety/scope.js";
+import { SESSION_COST_CEILING_REASON, SessionCostCeilingError } from "../scheduling/budget.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
 import {
@@ -471,6 +472,8 @@ export interface DispatchBundleOptions {
 	 * project instead.
 	 */
 	getSessionId?: () => string | null;
+	/** Interactive sessions park paid routes until their session ceiling is raised. */
+	budgetWaitForRaise?: boolean;
 	/** Live hard-block state cloned into each mediated worker spec. */
 	getProtectedArtifactState?: () => ProtectedArtifactState;
 	/** Git-backed receipt provenance collector; injectable for deterministic tests. */
@@ -2929,11 +2932,41 @@ export function createDispatchBundle(
 		throw new Error(`dispatch: admission denied: ${reason}`);
 	}
 
-	function assertBudgetAdmitsRoute(req: DispatchRequest, pricing: EffectivePricing, settings: EffectiveSettings): void {
+	async function assertBudgetAdmitsRoute(
+		req: DispatchRequest,
+		pricing: EffectivePricing,
+		settings: EffectiveSettings,
+		signal?: AbortSignal,
+	): Promise<void> {
 		const estimateUsd = conservativeRouteAdmissionEstimateUsd(pricing, admissionMaxOutputTokens(settings));
 		const intentCeiling = req.routingIntent?.maxCostUsd;
 		if (intentCeiling !== null && intentCeiling !== undefined && estimateUsd > intentCeiling)
 			denyDispatchForBudget({ currentUsd: estimateUsd, ceilingUsd: intentCeiling }, req.agentId, estimateUsd);
+		if (pricing.rates === null || Object.values(pricing.rates).every((rate) => rate === 0)) return;
+		try {
+			if (scheduling.admitPaidRequest) {
+				await scheduling.admitPaidRequest({
+					waitForRaise: options?.budgetWaitForRaise === true,
+					getCeilingUsd: () => getEffectiveSettings()?.safety.limits.sessionCostUsd ?? scheduling.ceilingUsd(),
+					...(signal ? { signal } : {}),
+				});
+			} else {
+				const { currentUsd, ceilingUsd } = scheduling.preflight();
+				if (currentUsd >= ceilingUsd) throw new SessionCostCeilingError(currentUsd, ceilingUsd);
+			}
+		} catch (error) {
+			if (error instanceof SessionCostCeilingError) {
+				safety.audit.recordToolCall?.({
+					tool: "dispatch",
+					classification: { actionClass: "dispatch", reasons: ["session cost ceiling"] },
+					decision: "denied",
+					reasons: [error.message],
+					reasonCode: SESSION_COST_CEILING_REASON,
+					args: { agentId: req.agentId },
+				});
+			}
+			throw error;
+		}
 	}
 
 	function configuredGlobalCapacity(settings: EffectiveSettings): number {
@@ -4369,7 +4402,7 @@ export function createDispatchBundle(
 		assertTargetNotCoolingDown(req, targetId, runtimeId, wireModelId, probeClaims);
 
 		if (req.contextSeed) persistWorkerContextSeed(req.contextSeed);
-		assertBudgetAdmitsRoute(req, { rates: null, provenance: "unknown" }, settings);
+		await assertBudgetAdmitsRoute(req, { rates: null, provenance: "unknown" }, settings);
 
 		const queuedIdentity =
 			req.lineage === undefined && req.runIdHint !== undefined
@@ -5303,7 +5336,7 @@ export function createDispatchBundle(
 			probeClaims,
 		);
 
-		assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings);
+		await assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings, preparation?.signal);
 
 		const placement = resolveNode(req) ?? null;
 		assertPlannedNodeIdentity(req, placement?.node ?? { id: "local", kind: "local" });
