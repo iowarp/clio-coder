@@ -60,6 +60,11 @@ export const DECISION_SITE_NOTES: Readonly<Record<DecisionSite, DecisionSiteNote
 		does: "answers typed questions the main agent asks (bound at startup)",
 		sends: "the evidence the main agent writes, at most 2 KB",
 	},
+	turnEnd: {
+		authority: "advises",
+		does: "reads each final message beside the regex turn-end heuristics; shadow, changes nothing",
+		sends: "the last 1,500 characters of the assistant's final message, without code blocks",
+	},
 	turnControl: {
 		authority: "acts",
 		does: "starts read-only orientation or git observations, only on a calibrated build",

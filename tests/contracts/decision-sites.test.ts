@@ -75,6 +75,7 @@ describe("fleet.decisionProfiles validation", () => {
 				"capabilities",
 				"consult",
 				"turnControl",
+				"turnEnd",
 			],
 		);
 	});

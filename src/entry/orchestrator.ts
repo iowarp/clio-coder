@@ -158,6 +158,7 @@ import { askSite } from "../domains/providers/site-ask.js";
 import { rankCapabilities } from "../domains/providers/sites/capabilities.js";
 import { createHarnessRoutingSite } from "../domains/providers/sites/harness-routing.js";
 import { type DispatchForecast, dispatchForecastConfident, turnSites } from "../domains/providers/sites/index.js";
+import { observeTurnEnd } from "../domains/providers/sites/turn-end.js";
 import { createTurnRelevanceStore } from "../domains/providers/turn-relevance.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
 import {
@@ -392,6 +393,8 @@ const RELEVANCE_DECISION_TIMEOUT_MS = 1_500;
  * an outage.
  */
 const CONSULT_DECISION_TIMEOUT_MS = 3_000;
+/** The turn-end reading runs after the turn settles and delays nothing, so it can wait longer. */
+const TURN_END_DECISION_TIMEOUT_MS = 5_000;
 
 function resolveTarget(providers: ProvidersContract, targetId: string | null | undefined): TargetDescriptor | null {
 	if (!targetId) return null;
@@ -2897,6 +2900,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getMemoryRelevance: () => turnRelevance.memory(),
 		getTurnBriefRecord: () => preTurnRecord(turnRelevance.sites, turnRelevance.current()),
 		drainDecisionCalls: () => decisionCalls.drain(),
+		observeTurnEnd: (turn) => {
+			void observeTurnEnd(
+				{
+					settings: getCurrentSettings(),
+					providers,
+					ctx: () => ({ credentialsPresent: credentialsPresent(), httpTimeoutMs: TURN_END_DECISION_TIMEOUT_MS }),
+				},
+				turn,
+			);
+		},
 		getTaskMemoryHandoffSource: () => {
 			const meta = session?.current();
 			if (!meta) throw new Error("task memory handoff requires an active session");

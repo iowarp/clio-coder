@@ -720,6 +720,11 @@ export interface CreateChatLoopDeps {
 	 * one ledger entry beside the brief. Empty when nothing was asked.
 	 */
 	drainDecisionCalls?: () => ReadonlyArray<unknown>;
+	/**
+	 * The settled turn's final message, for the `turnEnd` decision site's
+	 * shadow reading. Fire-and-forget: the loop never waits on it.
+	 */
+	observeTurnEnd?: (turn: { turnId: string; message: string }) => void;
 	getReadySkillCount?: () => number;
 	/** Structured, redacted task-bank export supplied only to an explicit context-handoff skill request. */
 	getTaskMemoryHandoffSource?: () => string;
@@ -2108,12 +2113,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								: undefined;
 						const traced = persistence.lastTracedTurn();
 						const matchesTrace = traced?.runId === `session:${userTurnId}`;
+						const finalAssistantText =
+							typeof finalPayload?.text === "string" ? finalPayload.text : finalMessage ? extractText(finalMessage) : "";
 						const record = reduceTurnOutcome({
 							...collected,
 							turnId: userTurnId,
 							turnIndex,
-							finalAssistantText:
-								typeof finalPayload?.text === "string" ? finalPayload.text : finalMessage ? extractText(finalMessage) : "",
+							finalAssistantText,
 							taskEstablished: deps.getTaskEstablished?.() ?? false,
 							canceled,
 							tokens: {
@@ -2142,6 +2148,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							data: record,
 						});
 						outcomeCollector.seedClarificationStreak(record.conversation.clarificationStreak);
+						if (!canceled) deps.observeTurnEnd?.({ turnId: userTurnId, message: finalAssistantText });
 						if (matchesTrace && traced)
 							persistence.traceEventForRun(traced.runId, { type: "turn_outcome", name: "turn_outcome", payload: record });
 					} catch {

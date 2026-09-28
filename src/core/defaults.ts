@@ -73,8 +73,10 @@ export type FleetAgentProfiles = Record<string, string>;
  * whether it needs the workspace and whether workers fit, `harnessRouting`
  * shortlists next-step tools, skills and agents, `capabilities`
  * ranks what a gateway find lists, and `consult` answers the typed questions
- * the main agent asks through the gateway. The main agent stays responsible
- * for every choice; a site only informs it.
+ * the main agent asks through the gateway. `turnControl` is the exception
+ * that acts: its answer can start read-only harness work, and only on a
+ * build with fitted cuts. `turnEnd` reads the final message in shadow and
+ * changes nothing yet.
  */
 export const DECISION_SITES = [
 	"skills",
@@ -87,6 +89,7 @@ export const DECISION_SITES = [
 	"capabilities",
 	"consult",
 	"turnControl",
+	"turnEnd",
 ] as const;
 export type DecisionSite = (typeof DECISION_SITES)[number];
 
