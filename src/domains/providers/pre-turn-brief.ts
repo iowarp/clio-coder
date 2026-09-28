@@ -65,7 +65,8 @@ export interface PreTurnSite<T> {
 	/**
 	 * This turn's questions, or null to ask nothing. Called only when the site is
 	 * bound, so reading an expensive catalog here costs an unbound operator
-	 * nothing. A throw skips the site for this turn.
+	 * nothing. A throw skips the site for this turn. `previous` is empty here:
+	 * it is read, and put in the state, only for sites that name it in `uses`.
 	 */
 	prepare(evidence: Readonly<Required<PreTurnEvidence>>): PreTurnAsk | null;
 	/**
@@ -115,10 +116,12 @@ function boundedTail(value: string, maxCodePoints: number): string {
  * The previous reply with fenced code removed. `previous` is sent to say what
  * the assistant proposed; a fenced block is file content or command output it
  * quoted, which is repository text a site that starts harness work must not
- * read as the operator's intent. A fence left open at the end is cut too.
+ * read as the operator's intent. Backtick and tilde fences of any length that
+ * open a line are cut through the matching closing line, and a fence left
+ * open runs to the end.
  */
 export function withoutQuotedCode(text: string): string {
-	return text.replace(/```[\s\S]*?(```|$)/g, " ");
+	return text.replace(/(^|\n)[ \t]{0,3}(`{3,}|~{3,})[\s\S]*?(?:\n[ \t]{0,3}\2[`~]*[ \t]*(?=\n|$)|$)/g, "$1");
 }
 
 interface Prepared {
@@ -131,14 +134,14 @@ interface Prepared {
 function prepareBound(
 	input: ResolveDeciderInput,
 	sites: ReadonlyArray<PreTurnSite<unknown>>,
-	evidence: Readonly<Required<PreTurnEvidence>>,
+	evidence: () => Readonly<Required<PreTurnEvidence>>,
 ): Prepared[] {
 	const prepared: Prepared[] = [];
 	for (const definition of sites) {
 		try {
 			const status = inspectDecisionSite(definition.site, input);
 			if (!status.bound) continue;
-			const ask = definition.prepare(evidence);
+			const ask = definition.prepare(evidence());
 			if (ask === null || Object.keys(ask.questions).length === 0) continue;
 			prepared.push({
 				definition,
@@ -194,17 +197,26 @@ export async function runPreTurnBrief(
 	signal?: AbortSignal,
 	onUsage?: (usage: { input: number; output: number } | undefined) => void,
 ): Promise<PreTurnBrief> {
-	const shared: Required<PreTurnEvidence> = {
-		task: bounded(evidence.task, MAX_TASK_CHARS),
-		previous: boundedTail(withoutQuotedCode(evidence.previous ?? ""), MAX_PREVIOUS_CHARS),
+	// Nothing is bounded or scanned until a site turns out to be bound, so an
+	// operator who bound nothing pays for no string work either.
+	let task: string | undefined;
+	const boundedTask = (): string => {
+		task ??= bounded(evidence.task, MAX_TASK_CHARS);
+		return task;
 	};
 	let prepared: Prepared[];
 	try {
-		prepared = prepareBound(input, sites, shared);
+		prepared = prepareBound(input, sites, () => ({ task: boundedTask(), previous: "" }));
 	} catch {
 		return EMPTY_BRIEF;
 	}
 	if (prepared.length === 0) return EMPTY_BRIEF;
+	const shared: Required<PreTurnEvidence> = {
+		task: boundedTask(),
+		previous: prepared.some((entry) => entry.ask.uses?.includes("previous"))
+			? boundedTail(withoutQuotedCode(evidence.previous ?? ""), MAX_PREVIOUS_CHARS)
+			: "",
+	};
 
 	const groups = new Map<string, Prepared[]>();
 	for (const entry of prepared) {
