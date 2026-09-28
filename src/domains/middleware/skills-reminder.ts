@@ -83,6 +83,24 @@ const GREETING_WORDS = new Set([
 	"pong",
 ]);
 
+// Greeting words that open an address, a subset of GREETING_WORDS.
+const SALUTATIONS = new Set([
+	"hi",
+	"hello",
+	"hey",
+	"heya",
+	"hiya",
+	"howdy",
+	"yo",
+	"sup",
+	"hola",
+	"greetings",
+	"gm",
+	"morning",
+	"afternoon",
+	"evening",
+]);
+
 /**
  * True when a user turn carries an actual task, false for a bare greeting or
  * acknowledgement ("hi", "hello there", "thanks"). Used to decide whether the
@@ -103,10 +121,11 @@ export function isSubstantiveUserTurn(text: string | undefined): boolean {
 	// A short all-greeting message is not substantive; anything longer, or with
 	// any non-greeting token, is a real task.
 	if (tokens.length > 4) return true;
-	// A greeting word plus one address term ("sup fool", "hey buddy") is still a
-	// greeting; the open vocabulary of address terms cannot be listed. A real
-	// two-word task led by a greeting only defers the reminder to the next turn.
-	if (tokens.length === 2 && GREETING_WORDS.has(tokens[0] ?? "")) return false;
+	// A salutation plus one address term ("sup fool", "hey buddy") is still a
+	// greeting; the open vocabulary of address terms cannot be listed. An
+	// acknowledgement leads real instructions ("ok proceed"), so it does not
+	// count. A real two-word task led by a salutation only defers the reminder.
+	if (tokens.length === 2 && SALUTATIONS.has(tokens[0] ?? "")) return false;
 	return tokens.some((token) => !GREETING_WORDS.has(token));
 }
 

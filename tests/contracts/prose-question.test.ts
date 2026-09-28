@@ -26,6 +26,13 @@ describe("operator questions at turn close", () => {
 		]);
 	});
 
+	it("leaves greetings alone but treats an acknowledgement-led instruction as a task", () => {
+		deepStrictEqual(check("sup fool", "Hey. What are we working on?"), []);
+		deepStrictEqual(check("ok proceed", "Done. Want me to run the tests too?"), [
+			{ kind: "request_continuation", message: PROSE_QUESTION_CONTINUATION_MESSAGE },
+		]);
+	});
+
 	it("does not convert an explanation about plans or a answered rhetorical question into an approval", () => {
 		const longAnswer = `${"A plan can help organize this work. ".repeat(20)}The current implementation is ready for review.`;
 		deepStrictEqual(check("explain the plan format", longAnswer), []);
