@@ -1,15 +1,19 @@
 /**
  * Controlled harness-only context footprint; no project, history, provider or
  * model inference. Reports the compiled prompt by cache layer (see
- * `PROMPT_SECTION_LAYER`): the attached tool schemas and the pinned sections
- * form the prefix every session on this install shares, and the pinned total
- * is held to `PINNED_BUDGET_TOKENS`. Session and turn sections are measured
- * with placeholder inputs, so their sizes are floors, not a real session's.
- * Reminders, skill bodies and gateway results arrive after the prompt and are
- * outside this report.
+ * `PROMPT_SECTION_LAYER`) for the interactive surface, ask_user included: the
+ * attached tool schemas and the pinned sections form the prefix every session
+ * on this install shares, and the pinned total is held to
+ * `PINNED_BUDGET_TOKENS`. Session and turn sections are measured with
+ * placeholder inputs, so their sizes are floors, not a real session's: the
+ * catalogs and session-start facts are absent here. Reminders, skill bodies
+ * and gateway results arrive after the prompt and are outside this report.
+ *
+ * Tokens are Clio's chars/4 estimate. A provider tokenizer can count the same
+ * bytes well above it, so the budget needs margin; prompt and schema bytes
+ * are reported so a provider's measured ratio can be applied.
  */
-
-import { isBuiltinToolName } from "../src/core/tool-names.js";
+import { isBuiltinToolName, ToolNames } from "../src/core/tool-names.js";
 import { compile, PROMPT_SECTION_LAYER } from "../src/domains/prompts/compiler.js";
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
 import { ceilChars } from "../src/domains/session/context-accounting.js";
@@ -32,7 +36,12 @@ const bundle = makeDispatchBundle(ctx);
 try {
 	await bundle.extension.start();
 	const registry = createRegistry({ safety: createWorkerSafety({ cwd: env.dir }) });
-	registerAllTools(registry, { mcpCapabilities: false, dispatch: bundle.contract });
+	// An interactive session registers ask_user and configure_clio; the handler never runs here.
+	registerAllTools(registry, {
+		mcpCapabilities: false,
+		dispatch: bundle.contract,
+		askUser: async () => ({ answers: [] }),
+	});
 	const tools = resolveAgentTools({ registry });
 	const builtins = registry.listAll().filter((spec) => isBuiltinToolName(spec.name));
 	const compiled = compile(loadFragments(), {
@@ -44,6 +53,8 @@ try {
 			model: "stable-model",
 			contextWindow: 131_072,
 			providerSupportsTools: true,
+			demo: true,
+			...(registry.get(ToolNames.ConfigureClio) ? { canConfigureClio: true } : {}),
 			toolNames: tools.map((tool) => tool.name),
 			coordinatorCapabilities: registry.listAll().map((spec) => spec.name),
 			toolDiscoveryHints: builtins.flatMap((spec) => {
