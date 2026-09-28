@@ -416,6 +416,8 @@ export function settingsV2PathForRow(id: string): string {
 	if (id.startsWith("setting.")) return id.slice(8);
 	if (id.startsWith("workers.profiles.")) return `fleet.profiles.${id.slice("workers.profiles.".length)}`;
 	if (id.startsWith("workers.agentBindings.")) return `fleet.agentProfiles.${id.slice("workers.agentBindings.".length)}`;
+	if (id.startsWith("workers.decisionSites."))
+		return `fleet.decisionProfiles.${id.slice("workers.decisionSites.".length)}`;
 	const override = SETTINGS_CENTER_V2_PATH_OVERRIDES[id];
 	if (override !== undefined) return override;
 	for (const [v1Path, v2Path] of SETTINGS_V1_PATH_MOVES) {
@@ -460,6 +462,7 @@ const STRUCTURED = new Set([
 	"fleet.profiles",
 	"fleet.rosters",
 	"fleet.agentProfiles",
+	"fleet.decisionProfiles",
 	"fleet.nodes",
 	"fleet.adaptiveRouting.agentRoles",
 	"interface.keybindings",
@@ -494,6 +497,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Map native agent names to existing worker profile names. Use Fleet's binding actions or edit this JSON object.",
 	],
 
+	"fleet.decisionProfiles": [
+		"System One decision sites (experimental)",
+		"Map decision sites to a profile whose target answers typed decisions (typesafe-jev or a self-hosted systemone server). An unbound site asks nothing and Clio behaves as if the feature did not exist. A bound site sends its evidence to that target; Fleet lists what each site sends. Research feature: thresholds are fitted per model build.",
+	],
 	"turnControl.workflows": [
 		"Turn control workflows",
 		"Work the harness may start before the model answers: orientation (a read-only Scout tour), direction (git status, log and tree when you are undecided), ledger facts, and collecting finished detached runs. Orientation and direction need an interpretation from a bound turnControl decision site or the main-model fallback.",

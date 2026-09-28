@@ -100,6 +100,7 @@ export function settingsGroupForPath(path: string): string {
 	if (path.startsWith("fleet.default")) return "Default model";
 	if (path.startsWith("fleet.profiles")) return "Profiles";
 	if (path.startsWith("fleet.agentProfiles")) return "Agent routes";
+	if (path.startsWith("fleet.decisionProfiles")) return "System One (experimental)";
 	if (path.startsWith("turnControl")) return "Turn control";
 	if (path.startsWith("fleet.adaptiveRouting")) return "Automatic routing";
 	if (path.startsWith("fleet.nodes") || path.startsWith("fleet.endpoints")) return "Placement & capacity";

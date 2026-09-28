@@ -27,10 +27,17 @@ import {
 	useTargetInSettings,
 	validateSettings,
 } from "../../core/config.js";
-import type { ActiveRoutingPosture, ActiveRoutingRole, WorkerEscalationSettings } from "../../core/defaults.js";
+import { DECISION_SITE_NOTES } from "../../core/decision-site-notes.js";
+import type {
+	ActiveRoutingPosture,
+	ActiveRoutingRole,
+	DecisionSite,
+	WorkerEscalationSettings,
+} from "../../core/defaults.js";
 import {
 	ACTIVE_ROUTING_POSTURES,
 	ACTIVE_ROUTING_ROLES,
+	DECISION_SITES,
 	DEFAULT_SETTINGS,
 	THINKING_LEVELS,
 } from "../../core/defaults.js";
@@ -181,6 +188,7 @@ type EntrySettingId =
 	| `setting.${string}`
 	| `workers.profiles.${string}`
 	| `workers.agentBindings.${string}`
+	| `workers.decisionSites.${string}`
 	| `targets.${string}`
 	| `fleet.nodes.${string}`
 	| `fleet.endpoints.${string}`;
@@ -1384,6 +1392,7 @@ export function buildSettingItems(
 			valueSegments: [],
 		}),
 		...agentBindingRows(settings, live),
+		...decisionSiteRows(settings, live),
 		settingItem("workers.agentBindings", "", {
 			label: "Add agent route",
 			...(profileCount > 0 ? { submenu: addBindingSubmenu } : { readOnly: true }),
@@ -1841,6 +1850,35 @@ function agentBindingRows(settings: Readonly<ClioSettings>, live: () => Readonly
 				]),
 			});
 		});
+}
+
+const SITE_OFF_CHOICE = "(off)";
+
+/**
+ * One row per System One decision site. The description carries what the
+ * site does with an answer and what evidence it sends, because binding a site
+ * to a hosted target is the operator's consent to that evidence leaving.
+ */
+function decisionSiteRows(settings: Readonly<ClioSettings>, live: () => Readonly<ClioSettings>): SettingsCenterItem[] {
+	return DECISION_SITES.map((site) => {
+		const profileName = settings.fleet.decisionProfiles[site];
+		const profile = profileName === undefined ? undefined : settings.fleet.profiles[profileName];
+		const note = DECISION_SITE_NOTES[site];
+		const state =
+			profileName === undefined
+				? "Off: asks nothing."
+				: profile === undefined
+					? `Bound to profile ${profileName}, which does not exist; the site asks nothing until it does.`
+					: `Asks ${profile.target ?? "(no target)"}/${profile.model ?? "default"} through profile ${profileName}.`;
+		return settingItem(`workers.decisionSites.${site}`, profileName ?? SITE_OFF_CHOICE, {
+			label: `${site} · ${note.authority}`,
+			description: `${state} It ${note.does}. Sends ${note.sends}.`,
+			submenu: selectListSubmenu(`System One profile for ${site}`, [
+				{ value: SITE_OFF_CHOICE, label: SITE_OFF_CHOICE },
+				...profileNameChoices(live),
+			]),
+		});
+	});
 }
 
 /** One short phrase for a route's breaker, keyed by the model it serves. */
@@ -2521,6 +2559,13 @@ function applyEntrySettingChange(settings: ClioSettings, id: string, value: stri
 			if (fieldValue === AUTO_PLACEMENT_CHOICE || fieldValue === "") delete profile.node;
 			else profile.node = fieldValue;
 		}
+		return true;
+	}
+	if (id.startsWith("workers.decisionSites.")) {
+		const site = id.slice("workers.decisionSites.".length) as DecisionSite;
+		if (!DECISION_SITES.includes(site)) return true;
+		if (value === SITE_OFF_CHOICE || value === "") delete settings.fleet.decisionProfiles[site];
+		else settings.fleet.decisionProfiles[site] = value;
 		return true;
 	}
 	if (id.startsWith("workers.agentBindings.")) {

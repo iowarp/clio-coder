@@ -38,7 +38,9 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 
 const NEXT_TURN_FIELDS = new Set<string>([
 	"turnControl",
-	"fleet.decisionProfiles.turnControl",
+	// Every site resolves its binding per call; consult alone is registered at
+	// startup and is listed as restart-required.
+	"fleet.decisionProfiles",
 	"targets",
 	"chat",
 	"fleet.default",
@@ -63,6 +65,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 
 const RESTART_REQUIRED_FIELDS = new Set<string>([
 	"fleet.concurrency",
+	"fleet.decisionProfiles.consult",
 	"interface.mode",
 	"interface.fullscreenScrollbar",
 	"interface.panes.enabled",
