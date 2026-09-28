@@ -452,6 +452,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"interface.panes.files.mode": ["companion", "chooser"],
 	"interface.panes.files.profile": ["managed", "user"],
 	"context.workingSet.policy": ["structural-v1", "structural-v2", "age-horizon"],
+	"turnControl.interpretation.fallback": ["none", "main-model"],
 	"context.workingSet.profile": ["default", "data-analysis", "web-design"],
 	"integrations.externalAgents.defaults.toolGovernance": ["clio-coder-policy", "agent-managed", "deny-all"],
 };
@@ -493,6 +494,22 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Map native agent names to existing worker profile names. Use Fleet's binding actions or edit this JSON object.",
 	],
 
+	"turnControl.workflows": [
+		"Turn control workflows",
+		"Work the harness may start before the model answers: orientation (a read-only Scout tour), direction (git status, log and tree when you are undecided), ledger facts, and collecting finished detached runs. Orientation and direction need an interpretation from a bound turnControl decision site or the main-model fallback.",
+	],
+	"turnControl.interpretation.fallback": [
+		"Turn interpretation fallback",
+		"With no turnControl decision site answering, main-model asks the chat model to classify the turn. Its answers are recorded and acted on only once cuts for that model are set under turnControl.interpretation.thresholds.",
+	],
+	"turnControl.orientation.maxSplit": [
+		"Orientation Scouts per turn",
+		"The most read-only Scouts one orientation may split into.",
+	],
+	"turnControl.orientation.maxCostUsdPerTurn": [
+		"Orientation cost cap per turn",
+		"USD ceiling for the Scouts one orientation starts. Empty uses the dispatch cost ceiling.",
+	],
 	"fleet.rosters": [
 		"Fleet rosters",
 		"Named teams of worker profiles used by council and fleet runs. Edit the JSON object; each roster names its members.",

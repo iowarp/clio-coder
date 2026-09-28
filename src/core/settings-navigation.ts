@@ -70,6 +70,8 @@ export function settingsSectionForPath(path: string): SettingsSectionId {
 		path === "integrations.externalAgents.defaults.toolGovernance"
 	)
 		return "safety";
+	// The turn controller starts read-only Scout runs, so it lives with delegated work.
+	if (path === "turnControl" || path.startsWith("turnControl.")) return "fleet";
 	const root = path.split(".")[0];
 	switch (root) {
 		case "targets":
@@ -98,6 +100,7 @@ export function settingsGroupForPath(path: string): string {
 	if (path.startsWith("fleet.default")) return "Default model";
 	if (path.startsWith("fleet.profiles")) return "Profiles";
 	if (path.startsWith("fleet.agentProfiles")) return "Agent routes";
+	if (path.startsWith("turnControl")) return "Turn control";
 	if (path.startsWith("fleet.adaptiveRouting")) return "Automatic routing";
 	if (path.startsWith("fleet.nodes") || path.startsWith("fleet.endpoints")) return "Placement & capacity";
 	if (path.startsWith("fleet.history")) return "Run history";
