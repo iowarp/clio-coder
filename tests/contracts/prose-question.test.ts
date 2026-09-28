@@ -34,6 +34,10 @@ describe("operator questions at turn close", () => {
 		deepStrictEqual(check("why is CI red?", "If you can paste the failing CI job name, I can investigate it."), [
 			{ kind: "request_continuation", message: PROSE_QUESTION_CONTINUATION_MESSAGE },
 		]);
+		deepStrictEqual(check("inspect this", "If you want, I can run the local checks and compare them."), [
+			{ kind: "request_continuation", message: PROSE_QUESTION_CONTINUATION_MESSAGE },
+		]);
+		deepStrictEqual(check("inspect this", "If you want the full log, it is in tmp/run.log."), []);
 	});
 
 	it("leaves greetings alone but treats an acknowledgement-led instruction as a task", () => {
