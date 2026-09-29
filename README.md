@@ -324,9 +324,9 @@ Clio Coder is developed by the [Gnosis Research Center](https://grc.iit.edu) at
 [Illinois Tech](https://www.iit.edu), in collaboration with the
 [University of Utah](https://www.utah.edu), as part of [IOWarp](https://iowarp.ai).
 The IOWarp CLIO architecture is supported by the National Science Foundation
-under [Award #2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318),
-2024–2029. Principal Investigator: Dr. Xian-He Sun. Co-Principal Investigators:
-Dr. Anthony Kougkas, Dr. Jake Hochhalter and Dr. Vivek Srikumar.
+under collaborative awards
+[OAC-2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318) and
+[OAC-2411319](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411319), 2024–2029.
 
 Clio builds on the [Pi agent framework](https://github.com/earendil-works/pi),
 [ACP](https://agentclientprotocol.com), and [MCP](https://modelcontextprotocol.io).
