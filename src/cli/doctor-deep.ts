@@ -15,6 +15,9 @@ export interface DeepToolProbeOptions {
 
 function toolProbeFinding(status: TargetStatus): DoctorFinding {
 	const name = `tools ${status.target.id}`;
+	if (status.runtime?.defaultCapabilities.decisions && !status.runtime.defaultCapabilities.chat) {
+		return { ok: true, name, level: "info", detail: "not applicable: decision-engine targets do not call tools" };
+	}
 	const probe = status.toolProbe;
 	if (!probe) {
 		if (status.available && !status.health.lastError && status.runtime && !status.runtime.probe) {

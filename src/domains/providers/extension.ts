@@ -649,6 +649,9 @@ export function createProvidersBundle(
 			checkedAt: Date.now(),
 			error,
 		});
+		if (desc.defaultCapabilities.decisions && !desc.defaultCapabilities.chat) {
+			return skipped("not applicable: decision-engine targets do not call tools");
+		}
 		if (!modelId) return skipped("no chat or default model is set for this target");
 		// SDK and subprocess runtimes stream through their own worker runners,
 		// not the engine request path this probe exercises.
