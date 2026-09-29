@@ -247,7 +247,6 @@ import {
 import {
 	type DispatchPathScope,
 	declaredScopeReplacementDiagnostic,
-	declaredScopeReplacementNotice,
 	inferredScopeParentTokenDiagnostic,
 	inferredScopeParentTokenNotice,
 	resolveDispatchPathScope,
@@ -4031,32 +4030,16 @@ export function createDispatchBundle(
 		if ((req.lineage?.attempt ?? 0) > 0 || (rootRunId !== undefined && publishedPathScopeRoots.has(rootRunId))) return;
 		if (rootRunId !== undefined) publishedPathScopeRoots.add(rootRunId);
 		const internalOrigin = req.requestOrigin === "internal" || req.requestOrigin === "harness";
-		// An operator dispatch already gets the transcript callout below, so the raw
-		// diagnostic is kept for harness-owned dispatches, which publish no callout.
+		// Harness-generated prompts need a diagnostic when their typed scope omits
+		// prose paths; receipts retain the provenance for every dispatch origin.
 		const replacementDiagnostic = declaredScopeReplacementDiagnostic(pathScope);
 		if (replacementDiagnostic !== null && internalOrigin) {
 			reportDispatchDiagnostic("typed scope replacement", new Error(replacementDiagnostic));
 		}
-		// Only the replacement case reaches the transcript. A dispatch that
-		// declared no intent is the ordinary case rather than an anomaly, and one
-		// receipt in ninety-nine carries an intent key today, so noticing it would
-		// warn on almost every dispatch and teach the operator to skip the channel.
-		// Its provenance is not lost: the receipt seals `pathProvenance`, and the
-		// approval artifact renders every inferred entry in full before a
-		// supervised dispatch runs, which is where an operator can still act on it.
-		const notice = declaredScopeReplacementNotice(pathScope);
-		// Harness-owned prompts deliberately use typed scope;
-		// schema fallback retries must not repeat their prose path inventories in the transcript.
-		if (notice !== null && !internalOrigin) {
-			context.bus.emit(BusChannels.DispatchScopeNotice, {
-				...notice,
-				agentId: req.agentId,
-			});
-		}
 		// A reinterpreted "../" token is the one legacy-mode scope fact that earns
 		// the channel: it fires only where the dispatch used to fail outright, so
-		// it cannot warn on the ordinary intent-less dispatch the comment above
-		// keeps quiet. Anchoring is reported alongside dropping because it is the
+		// it cannot warn on an ordinary intent-less dispatch. Anchoring is reported
+		// alongside dropping because it is the
 		// half that adds to scope, putting a path in working context that the
 		// prose never literally spelled.
 		const parentTokenDiagnostic = inferredScopeParentTokenDiagnostic(pathScope);
