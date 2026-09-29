@@ -105,6 +105,7 @@ export {
 	type TaskMemoryPolicyInput,
 	type TaskMemoryPolicyReason,
 	type TaskMemoryPolicyResult,
+	type TaskMemoryRoute,
 	type TaskMemoryStepUsage,
 	type TaskMemoryTrajectoryStep,
 } from "./task-memory-policy.js";

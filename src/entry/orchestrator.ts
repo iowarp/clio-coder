@@ -210,7 +210,7 @@ import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../do
 import { createSystemOne, type OneShotPort } from "../domains/system-one/index.js";
 import { createFollowUpTracker, observePermissionOutcomes } from "../domains/system-one/outcomes.js";
 import { createRelevanceRanker } from "../domains/system-one/rank.js";
-import { createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
+import { anchorSessionRows, createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
 import type { TurnControlRecord } from "../domains/turn-control/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
@@ -569,6 +569,9 @@ function prepareBackgroundMemoryRoute(
 				modelMaxTokens: refined.capabilityDecisions.maxTokens,
 			}),
 		client: {
+			// The route this client is bound to. The middleware reads it for the
+			// telemetry row, so a fallback client names the target that served the step.
+			route: { targetId, modelId: refined.wireModelId },
 			// Wrapped at the layer that knows a request left the process: the step
 			// holds endpoint capacity while it is out and publishes the cache
 			// disturbance even when a timeout means the usage sink never sees it.
@@ -2220,9 +2223,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		recording: () => getCurrentSettings().systemOne.record,
 	});
 	/**
-	 * Write what System One recorded since the last flush as one ledger entry, under the current leaf.
-	 * The drain empties the buffer, so a second call finds nothing and writes nothing. The settle, park
-	 * and shutdown callers can therefore overlap.
+	 * Write what System One recorded since the last flush as ledger entries. A row goes under the
+	 * turn its ref names when the tree holds that turn and under the current leaf otherwise, so a
+	 * slow answer stays with its own turn after a later turn or a `/tree` switch moved the leaf.
+	 * The drain empties the buffer, so a second call finds nothing and writes nothing. The settle,
+	 * park and shutdown callers can therefore overlap.
 	 */
 	const flushSystemOne = (): void => {
 		const meta = session?.current();
@@ -2230,13 +2235,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const calls = systemOneRecorder.drain(meta.id);
 		if (calls.length === 0) return;
 		try {
-			session?.appendEntry({
-				kind: "custom",
-				customType: SESSION_ROW_CUSTOM_TYPE,
-				parentTurnId: session?.tree(meta.id).leafId ?? null,
-				display: false,
-				data: { calls },
-			});
+			const tree = session?.tree(meta.id);
+			if (!tree) return;
+			for (const group of anchorSessionRows(calls, tree)) {
+				session?.appendEntry({
+					kind: "custom",
+					customType: SESSION_ROW_CUSTOM_TYPE,
+					parentTurnId: group.parentTurnId,
+					display: false,
+					data: { calls: group.calls },
+				});
+			}
 		} catch {
 			// Recording System One is best effort and cannot change the turn.
 		}

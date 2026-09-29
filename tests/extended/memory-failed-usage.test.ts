@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
+import {
+	type AssistantMessage,
+	type AssistantMessageEventStream,
+	createAssistantMessageEventStream,
+} from "@earendil-works/pi-ai";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
@@ -40,6 +45,29 @@ const USAGE = {
 	cost: { input: 0.1, output: 0.2, cacheRead: 0.05, cacheWrite: 0.025, total: 0.375 },
 };
 
+/**
+ * Faux estimates its own usage, so reported cache and cost facts have to be
+ * stamped onto the stream. The engine reads usage from the terminal `done` or
+ * `error` event (its prose filter re-emits the source's events and ends on the
+ * event it pushed, never on the source's `result()`), so that event is where a
+ * real provider's accounting sits and where the fixture has to put it.
+ */
+function reportTerminalMessage(
+	source: AssistantMessageEventStream,
+	patch: (message: AssistantMessage) => AssistantMessage,
+): AssistantMessageEventStream {
+	const output = createAssistantMessageEventStream();
+	void (async () => {
+		for await (const event of source) {
+			if (event.type === "done") output.push({ ...event, message: patch(event.message) });
+			else if (event.type === "error") output.push({ ...event, error: patch(event.error) });
+			else output.push(event);
+		}
+		output.end();
+	})();
+	return output;
+}
+
 for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 	for (const switched of [false, true]) {
 		test(`memory engine usage: ${ending}, ${switched ? "switched origin" : "current origin"}`, async (t) => {
@@ -77,8 +105,8 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 					};
 				},
 			]);
-			// Faux estimates its own usage. Decorate only the provider result with
-			// explicit reported cache/cost facts, before the real engine boundary.
+			// Decorate only the terminal event with explicit reported cache/cost
+			// facts, before the real engine boundary.
 			// Dropping the signal in the stop case exercises an abort-ignoring host.
 			registerEngineApiProvider({
 				...provider,
@@ -86,25 +114,19 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 					const effectiveOptions = { ...options };
 					if (ending === "stop") delete effectiveOptions.signal;
 					const stream = provider.streamSimple(m, context, effectiveOptions);
-					const result = stream.result.bind(stream);
-					stream.result = async () => {
-						const response = await result();
-						return ending === "no-usage"
-							? response
-							: {
-									...response,
-									usage: USAGE,
-									backendTimings: {
-										promptTokens: 12,
-										cachedTokens: 5,
-										predictedTokens: 3,
-										promptMs: 4,
-										predictedMs: 2,
-										source: "llamacpp-timings",
-									},
-								};
-					};
-					return stream;
+					if (ending === "no-usage") return stream;
+					return reportTerminalMessage(stream, (response) => ({
+						...response,
+						usage: USAGE,
+						backendTimings: {
+							promptTokens: 12,
+							cachedTokens: 5,
+							predictedTokens: 3,
+							promptMs: 4,
+							predictedMs: 2,
+							source: "llamacpp-timings",
+						},
+					}));
 				},
 			});
 			const settings = structuredClone(DEFAULT_SETTINGS);
@@ -388,10 +410,10 @@ test("production runtime fallback calls chat once and keeps failed and fallback 
 		...faux,
 		streamSimple: (model, context, options) => {
 			calls.push(model.id);
-			const stream = faux.streamSimple(model, context, options);
-			const result = stream.result.bind(stream);
-			stream.result = async () => ({ ...(await result()), usage: USAGE });
-			return stream;
+			return reportTerminalMessage(faux.streamSimple(model, context, options), (response) => ({
+				...response,
+				usage: USAGE,
+			}));
 		},
 	});
 	const bus = createSafeEventBus();
@@ -407,6 +429,7 @@ test("production runtime fallback calls chat once and keeps failed and fallback 
 	const bank = new TaskMemoryBank();
 	const usage: TaskMemoryStepUsage[] = [];
 	const reasons: string[] = [];
+	const routes: Array<string | undefined> = [];
 	const registration = createMemoryInterventionRegistration({
 		bank,
 		...callbacks,
@@ -414,11 +437,17 @@ test("production runtime fallback calls chat once and keeps failed and fallback 
 			assert.equal(current, true);
 			usage.push(row);
 		},
-		telemetry: { record: (row) => reasons.push(row.reason) },
+		telemetry: {
+			record: (row) => {
+				reasons.push(row.reason);
+				routes.push(row.route === undefined ? undefined : `${row.route.targetId}/${row.route.modelId}`);
+			},
+		},
 	});
 	const result = await registration.runPromptedStep({ deterministicTrigger: true, task: "preserve the origin fact" });
 	assert.equal(result.decision, "injected", JSON.stringify({ result, calls, reasons, notices }));
 	assert.deepEqual(calls, ["memory-model", "chat-model"]);
+	assert.deepEqual(routes, ["memory/memory-model", "chat/chat-model"], "each row names the route that served it");
 	assert.deepEqual(
 		usage.map((row) => [row.targetId, row.attributedModelId, row.totalTokens]),
 		[

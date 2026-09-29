@@ -1304,7 +1304,7 @@ export function createAskUserViewForTesting(deps: {
 	};
 }
 
-/** Keep one full-screen interview mounted across questions and background work. */
+/** Keep one docked interview mounted across questions and background work. */
 export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskUserOverlaySession {
 	let closed = false;
 

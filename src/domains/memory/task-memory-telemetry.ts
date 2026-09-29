@@ -7,7 +7,7 @@ import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
 import type { TaskMemoryEntry, TaskMemorySnapshot } from "./task-bank.js";
-import type { TaskMemoryPolicyDecision, TaskMemoryPolicyReason } from "./task-memory-policy.js";
+import type { TaskMemoryPolicyDecision, TaskMemoryPolicyReason, TaskMemoryRoute } from "./task-memory-policy.js";
 
 /**
  * Version 2 adds `reason`, `bankOperations`, and `droppedOperations`. Version 1
@@ -15,6 +15,11 @@ import type { TaskMemoryPolicyDecision, TaskMemoryPolicyReason } from "./task-me
  * so a session of `silent` steps with an empty bank could not be diagnosed at
  * all. The parser rejects v1 rows rather than defaulting the new fields, because
  * a defaulted reason would assert something about a step nobody measured.
+ *
+ * `targetId` and `modelId` were added to version 2 as an optional pair: the route
+ * a step actually ran on, after any fallback. Rows written before the pair
+ * existed stay readable and parse without it. A rules-tier row never resolved a
+ * route and omits both.
  */
 export const TASK_MEMORY_TELEMETRY_VERSION = 2;
 export const TASK_MEMORY_TELEMETRY_MAX_BYTES = 1024 * 1024;
@@ -74,6 +79,9 @@ export interface TaskMemoryTelemetryRecord {
 	citedEntries: number;
 	tokenCost: TaskMemoryTokenCost;
 	latencyMs: number;
+	/** Route the step ran on. Absent on rules-tier rows and on rows written before the field existed. */
+	targetId?: string;
+	modelId?: string;
 }
 
 export interface TaskMemoryTelemetryStep {
@@ -88,6 +96,8 @@ export interface TaskMemoryTelemetryStep {
 	inputTokens: number;
 	outputTokens: number;
 	latencyMs: number;
+	/** Resolved route of the attempt, present only when a model client was resolved. */
+	route?: TaskMemoryRoute;
 }
 
 export interface TaskMemoryTelemetrySink {
@@ -140,6 +150,7 @@ export function taskMemoryTelemetryRecord(step: TaskMemoryTelemetryStep, at: Dat
 		citedEntries: nonNegativeInteger(step.citedEntries),
 		tokenCost: { input, output, total: input + output },
 		latencyMs: nonNegativeFinite(step.latencyMs),
+		...(step.route === undefined ? {} : { targetId: step.route.targetId, modelId: step.route.modelId }),
 	};
 }
 
@@ -152,7 +163,9 @@ export function taskMemoryBankDelta(before: TaskMemorySnapshot, after: TaskMemor
 }
 
 export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTelemetryRecord | null {
-	if (!isRecord(value) || !hasExactKeys(value, TELEMETRY_KEYS)) return null;
+	if (!isRecord(value) || !hasKeys(value, TELEMETRY_KEYS, ROUTE_KEYS)) return null;
+	const route = parseRoute(value);
+	if (route === null) return null;
 	if (value.version !== TASK_MEMORY_TELEMETRY_VERSION || !validIsoTimestamp(value.at)) return null;
 	if (!validTriggerReasons(value.triggerReasons) || !isTier(value.tier) || !isDecision(value.decision)) return null;
 	if (!isReason(value.reason) || !isNonNegativeInteger(value.citedEntries)) return null;
@@ -173,6 +186,7 @@ export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTeleme
 		citedEntries: value.citedEntries,
 		tokenCost,
 		latencyMs: value.latencyMs,
+		...route,
 	};
 }
 
@@ -190,6 +204,8 @@ const TELEMETRY_KEYS = [
 	"tokenCost",
 	"latencyMs",
 ] as const;
+const ROUTE_KEYS = ["targetId", "modelId"] as const;
+const ROUTE_ID_MAX_LENGTH = 256;
 const DELTA_KEYS = ["status", "knowledge", "procedural"] as const;
 const CLASS_DELTA_KEYS = ["added", "updated", "deleted"] as const;
 const TOKEN_KEYS = ["input", "output", "total"] as const;
@@ -333,6 +349,32 @@ function hasExactKeys(value: Record<string, unknown>, keys: ReadonlyArray<string
 	const actual = Object.keys(value).sort();
 	const expected = [...keys].sort();
 	return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+/** Exact match on the required keys, with the optional keys allowed to be present or absent. */
+function hasKeys(
+	value: Record<string, unknown>,
+	required: ReadonlyArray<string>,
+	optional: ReadonlyArray<string>,
+): boolean {
+	const actual = Object.keys(value);
+	return (
+		required.every((key) => actual.includes(key)) &&
+		actual.every((key) => required.includes(key) || optional.includes(key))
+	);
+}
+
+/** The route pair is written together or not at all; a half pair is a corrupt row, not an old one. */
+function parseRoute(value: Record<string, unknown>): { targetId?: string; modelId?: string } | null {
+	const hasTarget = "targetId" in value;
+	const hasModel = "modelId" in value;
+	if (!hasTarget && !hasModel) return {};
+	if (!isRouteId(value.targetId) || !isRouteId(value.modelId)) return null;
+	return { targetId: value.targetId, modelId: value.modelId };
+}
+
+function isRouteId(value: unknown): value is string {
+	return typeof value === "string" && value.length > 0 && value.length <= ROUTE_ID_MAX_LENGTH;
 }
 
 function isNonNegativeInteger(value: unknown): value is number {

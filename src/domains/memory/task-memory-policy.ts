@@ -78,7 +78,15 @@ export interface TaskMemoryModelResponse {
 	usage?: TaskMemoryStepUsage;
 }
 
+/** The target and wire model a memory client is bound to, as resolved after any fallback. */
+export interface TaskMemoryRoute {
+	targetId: string;
+	modelId: string;
+}
+
 export interface TaskMemoryModelClient {
+	/** Absent on clients that do not know their route. Telemetry only; the policy never reads it. */
+	readonly route?: TaskMemoryRoute;
 	complete(input: TaskMemoryModelRequest): Promise<TaskMemoryModelResponse>;
 }
 

@@ -23,6 +23,7 @@ import {
 	type TaskMemoryModelClient,
 	type TaskMemoryPolicyReason,
 	type TaskMemoryPolicyResult,
+	type TaskMemoryRoute,
 	type TaskMemoryStepUsage,
 	type TaskMemoryTrajectoryStep,
 } from "../memory/task-memory-policy.js";
@@ -544,6 +545,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		}
 		const started = process.hrtime.bigint();
 		let attemptStarted = started;
+		// The route of the attempt the next telemetry row describes. Fallback swaps it
+		// with the client, so a row names the target that actually served the step.
+		let attemptRoute: TaskMemoryRoute | undefined;
 		const triggers = input.triggerReasons?.length ? input.triggerReasons : ["manual" as const];
 		let tier: TaskMemoryTelemetryTier = "rules";
 		promptedStepTier = tier;
@@ -563,13 +567,15 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				} else if (deps.backgroundEndpointBusy?.() === true) {
 					tier = "llm";
 					promptedStepTier = tier;
+					attemptRoute = client.route;
 					promptedResult = silent("endpoint_busy");
 					telemetryDecision = "dropped";
 				} else {
 					tier = "llm";
 					promptedStepTier = tier;
-					const runClient = (selected: TaskMemoryModelClient, timeoutMs: number) =>
-						runTaskMemoryPolicy(deps.bank, selected, {
+					const runClient = (selected: TaskMemoryModelClient, timeoutMs: number) => {
+						attemptRoute = selected.route;
+						return runTaskMemoryPolicy(deps.bank, selected, {
 							isCurrent,
 							signal: generationController.signal,
 							onStepUsage: (usage) => {
@@ -592,6 +598,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 										},
 									}),
 						});
+					};
 					const remainingMs = () => Math.floor(live.timeoutMs - Number(process.hrtime.bigint() - started) / 1_000_000);
 					const initialTimeoutMs = remainingMs();
 					promptedResult =
@@ -621,6 +628,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 								promptedResult.outputTokens,
 								started,
 								{ bankOperations: promptedResult.bankOperations, droppedOperations: promptedResult.droppedOperations },
+								attemptRoute,
 							);
 							attemptStarted = process.hrtime.bigint();
 							promptedResult = await runClient(fallback, fallbackTimeoutMs);
@@ -661,13 +669,14 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			promptedResult.outputTokens,
 			attemptStarted,
 			{ bankOperations: promptedResult.bankOperations, droppedOperations: promptedResult.droppedOperations },
+			attemptRoute,
 		);
 		return {
 			...promptedResult,
 			effects:
 				promptedResult.reminder === null
 					? NO_EFFECTS
-					: [{ kind: "inject_reminder", message: promptedResult.reminder, severity: "advisory" }],
+					: [{ kind: "inject_reminder", message: promptedResult.reminder, severity: "advisory", source: "memory" }],
 		};
 	}
 
@@ -681,6 +690,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		outputTokens: number,
 		started: bigint,
 		operations: { bankOperations: number; droppedOperations: number } = { bankOperations: 0, droppedOperations: 0 },
+		route?: TaskMemoryRoute,
 	): void {
 		const next = deps.bank.snapshot();
 		const bankDelta = taskMemoryBankDelta(telemetryBankSnapshot, next);
@@ -699,6 +709,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				inputTokens,
 				outputTokens,
 				latencyMs,
+				...(route === undefined ? {} : { route }),
 			});
 		} catch {
 			// Observability must never steer or block the memory policy.
@@ -887,7 +898,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				lastDecision = "injected";
 				rulesInjectedSincePromptedStep = true;
 				deps.bank.recordInjection([failure.entryId]);
-				return [{ kind: "inject_reminder", message, severity: "advisory" }];
+				return [{ kind: "inject_reminder", message, severity: "advisory", source: "memory" }];
 			}
 			lastDecision = "silent";
 			return NO_EFFECTS;
@@ -916,7 +927,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		deps.bank.recordInjection(citedIds);
 		lastInjectedMessage = message;
 		lastDecision = "injected";
-		return [{ kind: "inject_reminder", message, severity: "advisory" }];
+		return [{ kind: "inject_reminder", message, severity: "advisory", source: "memory" }];
 	}
 }
 
