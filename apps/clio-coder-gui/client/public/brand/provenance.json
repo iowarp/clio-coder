@@ -3,7 +3,7 @@
 	"assets": [
 		{
 			"name": "clio-mark",
-			"source": "/home/akougkas/iowarp/gact-tui/apps/design/assets/brand/clio-icon-lg.png",
+			"source": "~/iowarp/gact-tui/apps/design/assets/brand/clio-icon-lg.png",
 			"sha256": "b26bf6396d87a6f821add201f19bfb0fbfcf77a2b82278c942453aac19e8b75a",
 			"dimensions": [584, 641]
 		}

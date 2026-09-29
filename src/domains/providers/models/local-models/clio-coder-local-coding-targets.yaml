@@ -192,7 +192,7 @@
     measuredUnder:
       hardware: "mini fleet node, AMD Radeon AI PRO R9700 32 GB, Vulkan backend, 4 request slots"
       runtime: llamacpp
-      build: "worker llama-server from /home/akougkas/src/llama.cpp-b10687/build-vulkan/bin, behind a router reporting build_info b1-c841aee (the string the ornith-1.5 entry below records for this same host on this date)"
+      build: "worker llama-server from ~/src/llama.cpp-b10687/build-vulkan/bin, behind a router reporting build_info b1-c841aee (the string the ornith-1.5 entry below records for this same host on this date)"
       model: "Nemotron-3-Nano-Omni-30B-A3B-Reasoning UD-Q4_K_M with Nemotron-Omni-mmproj-F16 (arch nemotron_h_moe)"
       llamaCpp: >-
         --ctx-size 1032192 --parallel 4 --kv-unified --cache-type-k f16
@@ -291,7 +291,7 @@
     measuredUnder:
       hardware: "mini fleet node, AMD Radeon AI PRO R9700 32 GB, Vulkan backend, 1 request slot"
       runtime: llamacpp
-      build: "worker llama-server from /home/akougkas/src/llama.cpp-b10687/build-vulkan/bin, behind a router reporting build_info b1-c841aee"
+      build: "worker llama-server from ~/src/llama.cpp-b10687/build-vulkan/bin, behind a router reporting build_info b1-c841aee"
       model: "NVIDIA-Nemotron-3.5-Lightning-30B-A3B Q4_K_M (arch nemotron_h_moe)"
       llamaCpp: >-
         --ctx-size 1048576 --parallel 1 --kv-unified --cache-type-k f16
@@ -941,7 +941,7 @@
     measuredUnder:
       hardware: "mini fleet node, AMD Radeon AI PRO R9700 32 GB, ROCm backend, 1 request slot"
       runtime: llamacpp
-      build: "worker llama-server from /home/akougkas/src/llama.cpp-b10687/build-rocm/bin, behind a router reporting build_info b1-c841aee"
+      build: "worker llama-server from ~/src/llama.cpp-b10687/build-rocm/bin, behind a router reporting build_info b1-c841aee"
       model: "Gemma-4-31B-it-qat UD-Q4_K_XL with mtp-gemma-4-31B-it draft and mmproj-F16 (arch gemma4)"
       llamaCpp: >-
         --ctx-size 139264 --parallel 1 --kv-unified --cache-type-k f16
@@ -1208,7 +1208,7 @@
     measuredUnder:
       hardware: "mini fleet node, AMD Radeon AI PRO R9700 32 GB, Vulkan backend, 4 request slots, for the 2026-09-02 run; unknown for both earlier dates"
       runtime: "llamacpp for the 2026-09-02 on-off measurement; lmstudio and its OpenAI-compatible port for the 2026-08-08 reasoning findings; an unrecorded llama.cpp host for the presence-penalty finding"
-      build: "worker llama-server from /home/akougkas/src/llama.cpp-b10687/build-vulkan/bin behind a router reporting build_info b1-c841aee, for the 2026-09-02 run. Unknown for both earlier dates; the Windows LM Studio measurement host's bundled build string was first recorded on 2026-08-29 as llama.cpp-win-x86_64-nvidia-cuda12-avx2, which is three weeks after the reasoning measurement and cannot be backdated to it"
+      build: "worker llama-server from ~/src/llama.cpp-b10687/build-vulkan/bin behind a router reporting build_info b1-c841aee, for the 2026-09-02 run. Unknown for both earlier dates; the Windows LM Studio measurement host's bundled build string was first recorded on 2026-08-29 as llama.cpp-win-x86_64-nvidia-cuda12-avx2, which is three weeks after the reasoning measurement and cannot be backdated to it"
       model: "Qwopus3.6-35B-A3B-Coder-MTP Q4_K_M (arch qwen35moe)"
       llamaCpp: >-
         2026-09-02 only: --ctx-size 786432 --parallel 4 --no-kv-unified
@@ -1469,7 +1469,7 @@
     measuredUnder:
       hardware: "mini fleet node, AMD Radeon AI PRO R9700 32 GB, Vulkan backend, 1 request slot"
       runtime: llamacpp
-      build: "worker llama-server from /home/akougkas/src/llama.cpp-b10687/build-vulkan/bin, behind a router reporting build_info b1-c841aee"
+      build: "worker llama-server from ~/src/llama.cpp-b10687/build-vulkan/bin, behind a router reporting build_info b1-c841aee"
       model: "Gemma-4-26B-A4B-it-qat UD-Q4_K_XL with mmproj-F16, no draft model (arch gemma4)"
       llamaCpp: >-
         --ctx-size 262144 --parallel 1 --kv-unified --cache-type-k f16
@@ -1766,7 +1766,7 @@
     measuredUnder:
       hardware: "mini fleet node, AMD Radeon AI PRO R9700 32 GB, ROCm backend, 1 request slot"
       runtime: llamacpp
-      build: "worker llama-server from /home/akougkas/src/llama.cpp-b10687/build-rocm/bin, behind a router reporting build_info b1-c841aee"
+      build: "worker llama-server from ~/src/llama.cpp-b10687/build-rocm/bin, behind a router reporting build_info b1-c841aee"
       model: "Muse-Glimmer-30B UD-Q4_K_XL with dflash-kquant draft and mmproj-Muse-Glimmer-30B-Q8_0 (arch muse-glimmer)"
       llamaCpp: >-
         --ctx-size 131072 --parallel 1 --kv-unified --cache-type-k q8_0
@@ -1890,7 +1890,7 @@
     measuredUnder:
       hardware: "mini fleet node, AMD Radeon AI PRO R9700 32 GB, ROCm backend, 1 request slot"
       runtime: llamacpp
-      build: "worker llama-server from /home/akougkas/src/llama.cpp-b10687/build-rocm/bin, behind a router reporting build_info b1-c841aee"
+      build: "worker llama-server from ~/src/llama.cpp-b10687/build-rocm/bin, behind a router reporting build_info b1-c841aee"
       model: "ThinkingCap-27B Q4_K_M with the MTP draft head baked into the gguf (arch qwen36)"
       llamaCpp: >-
         --ctx-size 131072 --parallel 1 --kv-unified --cache-type-k f16

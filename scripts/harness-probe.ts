@@ -400,7 +400,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 	if (!existsSync(cli)) throw new Error("build the worktree before running the live probe");
 	const project = fixture.project === "self" ? root : resolve(root, fixture.project);
 	const fixtureName = basename(fixturePath, ".json");
-	const out = options.get("--out") ?? "/home/akougkas/iowarp/clio-coder/.superpowers/v058/measurements";
+	const out = options.get("--out") ?? join(tmpdir(), "clio-coder-harness-probe");
 	const output = join(out, `${new Date().toISOString().slice(0, 10)}-${condition}-${fixtureName}.jsonl`);
 	let contents = existsSync(output) ? readFileSync(output, "utf8") : "";
 	const configDir = resolveClioDirs().config;
