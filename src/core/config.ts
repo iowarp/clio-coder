@@ -200,11 +200,27 @@ function cloneValue<T>(value: T): T {
 	return structuredClone(value);
 }
 
+/**
+ * A YAML 1.1 boolean that {@link expectEnum} read as the on/off level its field
+ * allows. Doctor lists these and `doctor --fix` rewrites them to the string, so
+ * the rule lives in one place and the file is never written on load.
+ */
+export interface SettingsCoercion {
+	path: string;
+	from: boolean;
+	to: "on" | "off";
+}
+
 class Issues {
 	readonly list: SettingsIssue[] = [];
+	readonly coercions: SettingsCoercion[] = [];
 
 	add(path: string, message: string): void {
 		this.list.push({ path, message });
+	}
+
+	coerced(coercion: SettingsCoercion): void {
+		this.coercions.push(coercion);
 	}
 
 	unknownKeys(path: string, raw: Record<string, unknown>, known: ReadonlyArray<string>): void {
@@ -300,6 +316,18 @@ function expectEnum<T extends string>(
 	retired?: Readonly<Record<string, T>>,
 ): T | undefined {
 	if (typeof value === "string" && (allowed as ReadonlyArray<string>).includes(value)) return value as T;
+	// PyYAML and other YAML 1.1 tools write a bare `off` or `on` as a boolean, and
+	// hand edits often say `false`. This covers those two booleans only, and only
+	// where the field really has that level, so `thinkingLevel: true` still fails.
+	// It is not a retired-spelling alias: the no-read-time-alias stance below is
+	// about spellings a release stopped honoring.
+	if (typeof value === "boolean") {
+		const spelled = value ? "on" : "off";
+		if ((allowed as ReadonlyArray<string>).includes(spelled)) {
+			issues.coerced({ path, from: value, to: spelled });
+			return spelled as T;
+		}
+	}
 	// Own keys only: a settings value such as `toString` would otherwise reach
 	// Object.prototype and advise a replacement that is not a spelling at all.
 	const replacement =
@@ -1437,6 +1465,8 @@ const TOP_LEVEL_KEYS = [
 export interface SettingsValidationResult {
 	settings: ClioSettings;
 	issues: SettingsIssue[];
+	/** YAML 1.1 booleans read as on/off levels. Loading still succeeds; doctor reports them. */
+	coercions: SettingsCoercion[];
 }
 
 /**
@@ -1451,7 +1481,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 	const settings = cloneValue(DEFAULT_SETTINGS);
 	if (!isPlainObject(raw)) {
 		issues.add("(root)", `expected a map, got ${describe(raw)}`);
-		return { settings, issues: issues.list };
+		return { settings, issues: issues.list, coercions: issues.coercions };
 	}
 	reportV1Tombstones(issues, raw);
 	issues.unknownKeys("", raw, TOP_LEVEL_KEYS);
@@ -2342,12 +2372,12 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		}
 	}
 
-	return { settings, issues: issues.list };
+	return { settings, issues: issues.list, coercions: issues.coercions };
 }
 
 export function validateSettingsFile(): SettingsValidationResult {
 	const path = join(resolveClioDirs().config, "settings.yaml");
-	if (!existsSync(path)) return { settings: cloneValue(DEFAULT_SETTINGS), issues: [] };
+	if (!existsSync(path)) return { settings: cloneValue(DEFAULT_SETTINGS), issues: [], coercions: [] };
 	// The read and the parse are separate steps because they fail for separate
 	// reasons: folding them into one try reported `chmod 000` as invalid YAML,
 	// which is a false statement about the file and points at the wrong repair.
@@ -2360,6 +2390,7 @@ export function validateSettingsFile(): SettingsValidationResult {
 			issues: [
 				{ path: "(root)", message: `unreadable: ${err instanceof Error ? err.message : String(err)}`, kind: "unreadable" },
 			],
+			coercions: [],
 		};
 	}
 	let parsed: unknown;
@@ -2369,6 +2400,7 @@ export function validateSettingsFile(): SettingsValidationResult {
 		return {
 			settings: cloneValue(DEFAULT_SETTINGS),
 			issues: [{ path: "(root)", message: `invalid YAML: ${yamlErrorSummary(err)}`, kind: "syntax" }],
+			coercions: [],
 		};
 	}
 	return validateSettings(parsed);

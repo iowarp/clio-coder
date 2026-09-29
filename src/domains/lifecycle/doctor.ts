@@ -3,6 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
+import { repairSettingsCoercions, type SettingsRepairResult } from "../../core/settings-repair.js";
 import { clioDirLayoutProblems, resolveClioDirs } from "../../core/xdg.js";
 import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
 import { detectInteropAgents, interopAgentKind, resolveOnPath } from "../interop/index.js";
@@ -308,12 +309,14 @@ export function isUninitializedHome(dirs: ReturnType<typeof resolveClioDirs> = r
 
 export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	let repairFailure: string | null = null;
+	let settingsRepair: SettingsRepairResult | null = null;
 	if (options.fix) {
 		// A repair that throws used to take the whole report with it, so the one
 		// command that explains the damage printed nothing. Record it and carry on;
 		// the rows below are what say which root is wrong.
 		try {
 			initializeClioHome();
+			settingsRepair = repairSettingsCoercions();
 			const credentialsPath = join(resolveClioDirs().config, "credentials.yaml");
 			if (existsSync(credentialsPath)) {
 				chmodSync(credentialsPath, 0o600);
@@ -395,6 +398,27 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 			findings.push({ ok: true, name: "settings.yaml", detail: settings });
 		} else {
 			findings.push({ ok: false, name: "settings.yaml", detail: formatSettingsIssues(validation.issues) });
+		}
+		if (validation.coercions.length > 0) {
+			// Loading works today, so this is a warning and not a failure. The file
+			// keeps its booleans until `--fix` rewrites exactly those values.
+			findings.push({
+				ok: true,
+				level: "warn",
+				name: "settings.yaml booleans",
+				detail: foldDetail(
+					`${validation.coercions.map((entry) => `${entry.path}: ${entry.from}`).join(", ")} read as on/off strings (YAML 1.1 style); run \`clio-coder doctor --fix\` to rewrite them`,
+				),
+			});
+		}
+		if (settingsRepair !== null && settingsRepair.rewritten.length > 0) {
+			findings.push({
+				ok: true,
+				name: "settings.yaml repair",
+				detail: foldDetail(
+					`rewrote ${settingsRepair.rewritten.map((entry) => `${entry.path}: ${entry.from} -> "${entry.to}"`).join(", ")}`,
+				),
+			});
 		}
 	}
 
