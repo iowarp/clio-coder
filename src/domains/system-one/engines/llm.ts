@@ -13,6 +13,7 @@
  * why it is not the readout the operator configured.
  */
 
+import { performance } from "node:perf_hooks";
 import type { SystemOneMode } from "../../../core/defaults.js";
 import type { RuntimeDescriptor } from "../../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../providers/types/target-descriptor.js";
@@ -128,7 +129,7 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 				const verdict = modeVerdicts.get(verdictKey);
 				if (verdict === undefined) return { mode: "logprobs", downgraded: null };
 				const ttl = verdict.mode === "answer" ? ANSWER_VERDICT_TTL_MS : LOGPROBS_VERDICT_TTL_MS;
-				if (Date.now() - verdict.at > ttl) {
+				if (performance.now() - verdict.at > ttl) {
 					modeVerdicts.delete(verdictKey);
 					return { mode: "logprobs", downgraded: null };
 				}
@@ -143,14 +144,14 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 				if (configured !== "auto" || baseUrl === null) return;
 				let verdict = modeVerdicts.get(verdictKey);
 				if (verdict === undefined) {
-					verdict = { mode: "logprobs", at: Date.now(), partialStreak: 0 };
+					verdict = { mode: "logprobs", at: performance.now(), partialStreak: 0 };
 					modeVerdicts.set(verdictKey, verdict);
 				}
 				if (verdict.mode !== "logprobs") return;
 				const total = orders.read + orders.missing;
 				verdict.partialStreak = total > 0 && orders.missing * 2 >= total ? verdict.partialStreak + 1 : 0;
 				if (verdict.partialStreak >= PARTIAL_CALLS_TO_FLIP) {
-					modeVerdicts.set(verdictKey, { mode: "answer", at: Date.now(), reason: "partial-logprobs", partialStreak: 0 });
+					modeVerdicts.set(verdictKey, { mode: "answer", at: performance.now(), reason: "partial-logprobs", partialStreak: 0 });
 				}
 			};
 
@@ -238,7 +239,7 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 							`target '${target.id}' returned no usable logprobs (${errorText(error)}); set the engine mode to auto or answer`,
 						);
 					}
-					modeVerdicts.set(verdictKey, { mode: "answer", at: Date.now(), reason: "no-logprobs", partialStreak: 0 });
+					modeVerdicts.set(verdictKey, { mode: "answer", at: performance.now(), reason: "no-logprobs", partialStreak: 0 });
 					mode = "answer";
 					downgraded = "no-logprobs";
 				}
