@@ -24,7 +24,14 @@ export interface TurnFacts {
 
 export function fingerprintEquals(a: WorkspaceFingerprint, b: WorkspaceFingerprint): boolean {
 	return (
-		a.cwd === b.cwd && a.gitHead === b.gitHead && a.dirtyTreeHash === b.dirtyTreeHash && a.codemapHash === b.codemapHash
+		a.gitHead !== null &&
+		b.gitHead !== null &&
+		a.dirtyTreeHash !== null &&
+		b.dirtyTreeHash !== null &&
+		a.cwd === b.cwd &&
+		a.gitHead === b.gitHead &&
+		a.dirtyTreeHash === b.dirtyTreeHash &&
+		a.codemapHash === b.codemapHash
 	);
 }
 

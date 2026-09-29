@@ -16,7 +16,8 @@ export async function workspaceFingerprint(cwd: string): Promise<WorkspaceFinger
 	return {
 		cwd,
 		gitHead: head?.stdout.trim() ?? null,
-		dirtyTreeHash: status === null ? null : createHash("sha256").update(status.stdout).digest("hex"),
+		dirtyTreeHash:
+			status === null || status.stdout.length > 0 ? null : createHash("sha256").update(status.stdout).digest("hex"),
 		codemapHash: codemap === null ? null : createHash("sha256").update(codemap).digest("hex"),
 	};
 }
