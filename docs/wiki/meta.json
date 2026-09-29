@@ -2774,7 +2774,7 @@
 			"tsup.config.ts": "31fdbfe1a25fff19d94b9a92fa95922712c6ff94243b7f5e058f9af867849229"
 		},
 		"sourceTreeHash": "fdce8447bc9c391010013ebbed0edc3921f51d0433aab4c47933e5a72d169693",
-		"sourceGitHead": "098fc53de1d1ba7941695ae291209cc8eeef9dfe",
+		"sourceGitHead": "9114931ff777bb3a2b9c7ec30ed759d03f0b0c93",
 		"overview": "Clio Coder is a provider-agnostic coding-agent harness for terminal, headless, ACP, and GUI use, built on the Pi SDK. It provides typed tools for reading, editing, searching, and executing code, with a safety net that gates unfamiliar actions behind approval cards and records evidence of every run. The codebase is organized by domain: `src/domains/**` holds the business logic (dispatch, session, context, providers, safety, evidence, memory, etc.), `src/engine/**` isolates the Pi SDK boundary and model APIs, `src/interactive/**` builds the terminal UI, `src/tools/**` defines the typed tool surface, and `src/cli/**` is the command-line entry point. A newcomer should start with the domain pages: dispatch explains how work is delegated to workers, context explains how Clio indexes and adopts a repository, safety explains the autonomy model and protected paths, and the engine pages explain how model calls are routed through provider runtimes. The worker protocol (src/worker) and the composition root (src/entry) tie these domains together into a working harness.",
 		"pages": [
 			{

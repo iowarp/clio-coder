@@ -1,6 +1,6 @@
 # TUI boot presentation measurements
 
-Measured September 27, 2026 on the development machine, Node v24.20.0, Linux x64, with the 0.5.7 package version and uncommitted 0.5.8 development changes. Base commit: `3529ab1b1d1eeb5e6dae6f4c6fd81f7046b2ccbb`.
+Measured September 27, 2026 on the development machine, Node v24.20.0, Linux x64, with the 0.5.7 package version and uncommitted 0.5.8 development changes. Base commit: `f6251b1c96c7d7212553e5f8ce653612ec35b2ac` (v0.5.7). The raw capture files named below stayed outside the repository.
 
 ## Behavior under measurement
 
@@ -47,9 +47,9 @@ The earlier three-run baseline, before demo-off controlled the welcome, recorded
 
 ## Isolated renderer cost
 
-The fixed-height follow-up is recorded separately in [stable-height-render-cost.txt](../../benchmarks/tui-boot/2026-09-27/stable-height-render-cost.txt); it measures the rebuilt 17-row full welcome. The older renderer sample below uses the 15-row initial welcome before reservation.
+The fixed-height follow-up is recorded separately in `stable-height-render-cost.txt`; it measures the rebuilt 17-row full welcome. The older renderer sample below uses the 15-row initial welcome before reservation.
 
-See [render-cost.txt](../../benchmarks/tui-boot/2026-09-27/render-cost.txt). These are warm loops of 2,000 calls, not startup measurements. In this sample, constructing a fresh full Stage 0 header averaged 1.60 ms; the compact header averaged 0.058 ms. Cached Stage 0 calls simply reused the rendered lines. Truecolor wordmark coloring averaged about 8 microseconds per call, much smaller than wrapping, framing, and width accounting for the complete panel. Colors are static; the wordmark does not animate or allocate a timer. Color-disabled painting now bypasses interpolation entirely.
+See `render-cost.txt`. These are warm loops of 2,000 calls, not startup measurements. In this sample, constructing a fresh full Stage 0 header averaged 1.60 ms; the compact header averaged 0.058 ms. Cached Stage 0 calls simply reused the rendered lines. Truecolor wordmark coloring averaged about 8 microseconds per call, much smaller than wrapping, framing, and width accounting for the complete panel. Colors are static; the wordmark does not animate or allocate a timer. Color-disabled painting now bypasses interpolation entirely.
 
 An earlier renderer loop overlapped part of the initial regular-screen timing campaign, so that three-run campaign should be treated as exploratory. The final seven-run fullscreen, three-run uncached, and five-run aligned fullscreen campaigns ran after that earlier loop. The saved render-cost file was regenerated after the final alignment pass, separately from the timing campaigns. They remain local observations, not release latency guarantees.
 
@@ -78,7 +78,7 @@ node --import tsx scripts/bench-welcome.ts
 
 Use `--profile full`, `--profile normal`, or `--profile portable` to isolate one mode, `--cli /path/to/another/dist/cli/index.js` to measure another build, or `--user-plugins /path/to/plugins` to include a realistic plugin inventory. Keep the same workspace and plugin set across builds. `--cpu-profile-dir /tmp/clio-boot-cpu` records Node CPU profiles; keep those observations separate from unprofiled timings.
 
-Raw results: [stable-height fullscreen](../../benchmarks/tui-boot/2026-09-27/stable-height-fullscreen.json), [aligned fullscreen](../../benchmarks/tui-boot/2026-09-27/aligned-fullscreen.json), [fullscreen](../../benchmarks/tui-boot/2026-09-27/fullscreen.json), [regular](../../benchmarks/tui-boot/2026-09-27/regular.json), [uncached](../../benchmarks/tui-boot/2026-09-27/uncached.json). Hardware load, filesystem caches, terminal implementations, fonts, plugin inventories, actual model routes, and SSH bandwidth/latency can change these results. The pseudo-terminal does not prove glyph rendering on Crostini or behavior of every remote terminal.
+Raw results: `stable-height-fullscreen.json`, `aligned-fullscreen.json`, `fullscreen.json`, `regular.json`, `uncached.json`. Hardware load, filesystem caches, terminal implementations, fonts, plugin inventories, actual model routes, and SSH bandwidth/latency can change these results. The pseudo-terminal does not prove glyph rendering on Crostini or behavior of every remote terminal.
 
 ## Session-focused welcome refinement
 
@@ -86,4 +86,4 @@ The session-start time is captured from the process start and shared by Stage 0 
 
 The 17-row envelope remains fixed. Centering the 11-row artwork reserves one body row above and below it. Configuration inventory and recipe reads are no longer needed by the welcome. This pass makes no institutional or funding attribution claims.
 
-Three interleaved runs per profile for this pass are saved in [session-welcome-fullscreen.json](../../benchmarks/tui-boot/2026-09-27/session-welcome-fullscreen.json). Median full/normal hydration was 861/838 ms, with 22,848/7,459 bytes to hydration (about 67% less traffic for normal). The small timing difference does not establish significant startup acceleration, and comparisons against earlier campaigns are affected by machine load. The measured build includes the visual and footer changes; subsequent removal of an unused submit-binding read and cache-signature cleanup do not change the rendered output. Fresh and cached renderer observations are saved in [session-welcome-render-cost.txt](../../benchmarks/tui-boot/2026-09-27/session-welcome-render-cost.txt).
+Three interleaved runs per profile for this pass are saved in `session-welcome-fullscreen.json`. Median full/normal hydration was 861/838 ms, with 22,848/7,459 bytes to hydration (about 67% less traffic for normal). The small timing difference does not establish significant startup acceleration, and comparisons against earlier campaigns are affected by machine load. The measured build includes the visual and footer changes; subsequent removal of an unused submit-binding read and cache-signature cleanup do not change the rendered output. Fresh and cached renderer observations are saved in `session-welcome-render-cost.txt`.
