@@ -201,7 +201,14 @@ for (const continuation of [false, true])
 		},
 	);
 
-it("a cancel during the orientation act before admission still yields one cancelled outcome row", async () => {
+interface CancelledRun {
+	entries: SessionEntry[];
+	recorded: Array<{ ref: string; source: string; facts: Record<string, unknown> }>;
+	reservedId: string;
+}
+
+/** Cancels a turn during the orientation act, before admission, with the Scout's receipt sealing `sealAfterMs` later. */
+async function cancelBeforeAdmission(sealAfterMs: number, check: (run: CancelledRun) => Promise<void>): Promise<void> {
 	const scratch = await isolateClioEnv("clio-coder-turn-outcome-cancel-");
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -211,7 +218,7 @@ it("a cancel during the orientation act before admission still yields one cancel
 	settings.chat.target = target.id;
 	settings.chat.model = target.defaultModel ?? "gpt-4o";
 	const entries: SessionEntry[] = [];
-	const recorded: Array<{ ref: string; source: string; facts: Record<string, unknown> }> = [];
+	const recorded: CancelledRun["recorded"] = [];
 	const session = {
 		current: () => ({ id: "outcome-session", cwd: scratch.dir, cwdHash: "outcome-repo" }),
 		tree: () => ({ leafId: null }),
@@ -226,7 +233,6 @@ it("a cancel during the orientation act before admission still yields one cancel
 		started = resolve;
 	});
 	let reservedId = "";
-	// The aborted Scout seals its receipt shortly after the cancel lands.
 	const receiptPath = join(scratch.dir, "scout-receipt.json");
 	const loop = createChatLoop({
 		outcomeDispatch: { getRun: () => ({ receiptPath }) as unknown as ReturnType<DispatchContract["getRun"]> },
@@ -281,9 +287,21 @@ it("a cancel during the orientation act before admission still yields one cancel
 					receiptPath,
 					JSON.stringify({ runId: "scout-1", inputTokenCount: 40, outputTokenCount: 2, tokenCount: 42 }),
 				),
-			60,
+			sealAfterMs,
 		);
 		await submitted;
+		await check({ entries, recorded, reservedId });
+	} finally {
+		loop.dispose();
+		await loop.whenSettled();
+		scratch.restore();
+	}
+}
+
+const SCOUT_TOKENS = { inputTokens: 40, outputTokens: 2, cacheReadTokens: 0, totalTokens: 42, provenance: "reported" };
+
+it("a cancel during the orientation act before admission still yields one cancelled outcome row", async () => {
+	await cancelBeforeAdmission(60, async ({ entries, recorded, reservedId }) => {
 		const rows = entries.filter((entry) => entry.kind === "custom" && entry.customType === "turnOutcome");
 		strictEqual(rows.length, 1);
 		const row = rows[0];
@@ -292,20 +310,38 @@ it("a cancel during the orientation act before admission still yields one cancel
 		strictEqual(outcome.turnId, reservedId);
 		strictEqual(outcome.operator.canceled, true);
 		strictEqual(outcome.stopReason, "aborted");
-		deepStrictEqual(outcome.tokens.workers, {
-			inputTokens: 40,
-			outputTokens: 2,
-			cacheReadTokens: 0,
-			totalTokens: 42,
-			provenance: "reported",
-		});
+		deepStrictEqual(outcome.tokens.workers, SCOUT_TOKENS);
 		strictEqual(recorded.length, 1);
 		strictEqual(recorded[0]?.ref, reservedId);
 		strictEqual(recorded[0]?.source, "turn");
 		strictEqual(recorded[0]?.facts.canceled, true);
-	} finally {
-		loop.dispose();
-		await loop.whenSettled();
-		scratch.restore();
-	}
+		deepStrictEqual(recorded[0]?.facts.workerTokens, SCOUT_TOKENS);
+	});
+});
+
+// The settle wait gives up after 2 s; the Scout seals at 2.5 s, so the count arrives as an amend.
+it("worker tokens that seal after the settle wait amend the cancelled outcome, in the ledger and the dataset", async () => {
+	await cancelBeforeAdmission(2500, async ({ entries, recorded, reservedId }) => {
+		const outcome = entries.find((entry) => entry.kind === "custom" && entry.customType === "turnOutcome");
+		ok(outcome?.kind === "custom");
+		strictEqual((outcome.data as TurnOutcomeRecord).tokens.workers.provenance, "partial");
+		strictEqual(recorded[0]?.source, "turn");
+		strictEqual((recorded[0]?.facts.workerTokens as { provenance: string }).provenance, "partial");
+		const amended = () => entries.find((entry) => entry.kind === "custom" && entry.customType === "turnOutcomeTokens");
+		for (let waited = 0; amended() === undefined && waited < 5000; waited += 50) {
+			await new Promise<void>((resolve) => setTimeout(resolve, 50));
+		}
+		const amend = amended();
+		ok(amend?.kind === "custom");
+		strictEqual(amend.parentTurnId, outcome.parentTurnId);
+		strictEqual(amend.display, false);
+		const data = amend.data as { turnId: string; ref: string; workers: unknown };
+		strictEqual(data.turnId, reservedId);
+		strictEqual(data.ref, reservedId);
+		deepStrictEqual(data.workers, SCOUT_TOKENS);
+		strictEqual(recorded.length, 2);
+		strictEqual(recorded[1]?.source, "turn-tokens");
+		strictEqual(recorded[1]?.ref, reservedId);
+		deepStrictEqual(recorded[1]?.facts.workerTokens, SCOUT_TOKENS);
+	});
 });

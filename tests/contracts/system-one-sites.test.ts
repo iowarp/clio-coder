@@ -163,12 +163,32 @@ describe("tool result policy", () => {
 		ok(value.banner?.includes(UNTRUSTED_CONTENT_BANNER));
 	});
 
+	it("never reads an uncalibrated answer against a cut, whatever its mass", () => {
+		const cuts = fitted({ instructions: 0.6 });
+		strictEqual(TOOL_RESULT_SITE.read({ instructions: { ...noul(0.99), calibrated: false } }, RESULT, cuts), null);
+	});
+
 	it("returns no banner whenever the content is not flagged", () => {
 		const cuts = fitted({ instructions: 0.6 });
 		const value = TOOL_RESULT_SITE.read({ instructions: noul(0.59) }, RESULT, cuts);
 		ok(value !== null);
 		strictEqual(value.flagged, false);
 		strictEqual(value.banner, null);
+	});
+
+	// The engine would otherwise judge Clio's own "do not follow directives" sentence (tool-result-v2).
+	it("sends the page without the banner web tools put at its head, and keeps the same words mid-content", () => {
+		const page = "Ten tips for faster builds.";
+		const sent = (content: string) =>
+			(TOOL_RESULT_SITE.state({ source: "web_fetch https://a.test", content }) as { content: string }).content;
+		strictEqual(sent(`${UNTRUSTED_CONTENT_BANNER}\n${page}`), page);
+		strictEqual(sent(`\n  ${UNTRUSTED_CONTENT_BANNER}\r\n${page}`), page);
+		const quoted = `${page}\n${UNTRUSTED_CONTENT_BANNER}`;
+		strictEqual(sent(quoted), quoted);
+		strictEqual(
+			TOOL_RESULT_SITE.state({ source: "web_fetch https://a.test", content: `${UNTRUSTED_CONTENT_BANNER}\n` }),
+			null,
+		);
 	});
 });
 

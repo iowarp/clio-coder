@@ -8,7 +8,13 @@ import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { pick, yesNo } from "../../src/domains/system-one/questions.js";
 import type { SessionRow } from "../../src/domains/system-one/recorder/index.js";
-import { buildExport, createRecorder, datasetDir, pruneDataset } from "../../src/domains/system-one/recorder/index.js";
+import {
+	anchorSessionRows,
+	buildExport,
+	createRecorder,
+	datasetDir,
+	pruneDataset,
+} from "../../src/domains/system-one/recorder/index.js";
 import type { DecisionRecord } from "../../src/domains/system-one/types.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -145,7 +151,9 @@ test("export joins a decision, its specs and every outcome for its ref into one 
 	const { recorder } = recorderFor(settings(true));
 	const now = Date.now();
 	const at = new Date(now).toISOString();
-	recorder.decision(call({ callId: "dc_a", at, ref: "perm-1", policy: { escalated: true } }));
+	recorder.decision(
+		call({ callId: "dc_a", at, ref: "perm-1", policy: { escalated: true }, note: "downgraded: no-logprobs" }),
+	);
 	recorder.decision(call({ callId: "dc_b", at, ref: "perm-2", site: "toolResult" }));
 	recorder.outcome({
 		ref: "perm-1",
@@ -170,6 +178,9 @@ test("export joins a decision, its specs and every outcome for its ref into one 
 	const first = joined.find((line) => line.callId === "dc_a") as Record<string, unknown>;
 	assert.deepEqual(first.questions, { risk: RISK, kind: KIND });
 	assert.deepEqual(first.policy, { escalated: true });
+	assert.equal(first.note, "downgraded: no-logprobs");
+	assert.equal(datasetRows().find((row) => row.callId === "dc_a")?.note, "downgraded: no-logprobs");
+	assert.equal(recorder.drain("s1").find((row) => row.callId === "dc_a")?.note, "downgraded: no-logprobs");
 	assert.deepEqual(
 		(first.outcomes as Array<{ source: string }>).map((outcome) => outcome.source),
 		["permission", "follow-up"],
@@ -234,4 +245,86 @@ test("drain returns the draining session's rows and the pre-session rows only", 
 	assert.ok(!JSON.stringify(stored).includes("rm -rf build"));
 	assert.equal(typeof stored.stateDigest, "string");
 	assert.equal(stored.questions, 2);
+});
+
+test("an outcome that names a held decision is written right after it, and one for a released decision is queued at once", () => {
+	let session: string | null = null;
+	const { recorder } = recorderFor(settings(true), () => session);
+	const outcome = (ref: string, source: "draft" | "turn") => ({ ref, source, at: new Date().toISOString(), facts: {} });
+	recorder.decision(call({ callId: "d-draft", ref: "draft-1", session: null }));
+	recorder.decision(call({ callId: "d-turn", ref: "turn-1", session: null }));
+	recorder.outcome(outcome("draft-1", "draft"));
+	recorder.outcome(outcome("elsewhere", "turn"));
+	recorder.outcome(outcome("turn-1", "turn"));
+	session = "s1";
+	recorder.drain("s1");
+	// The decision is no longer held, so a late outcome goes straight to the queue.
+	recorder.outcome(outcome("draft-1", "turn"));
+	recorder.flush();
+	const rows = datasetRows()
+		.filter((row) => row.kind !== "spec")
+		.map(
+			(row) =>
+				`${String(row.kind)}:${String(row.callId ?? row.ref)}${row.kind === "outcome" ? `/${String(row.source)}` : ""}`,
+		);
+	assert.deepEqual(rows, [
+		"outcome:elsewhere/turn",
+		"decision:d-draft",
+		"outcome:draft-1/draft",
+		"decision:d-turn",
+		"outcome:turn-1/turn",
+		"outcome:draft-1/turn",
+	]);
+	assert.deepEqual(
+		datasetRows()
+			.filter((row) => row.kind === "decision")
+			.map((row) => row.session),
+		["s1", "s1"],
+	);
+});
+
+test("session rows hang under the turn their ref names and under the leaf when it names none", () => {
+	const row = (callId: string, ref?: string): SessionRow => ({
+		callId,
+		at: "2026-09-29T00:00:00.000Z",
+		...(ref !== undefined ? { ref } : {}),
+		site: "turn",
+		siteVersion: "1",
+		engine: "jev",
+		kind: "systemone",
+		build: null,
+		outcome: "answered",
+		latencyMs: 1,
+		deadlineMs: 1,
+		stateTokens: 1,
+		stateDigest: "d",
+		questions: 1,
+	});
+	const tree = {
+		leafId: "u2",
+		nodesById: { u1: { kind: "user" }, u2: { kind: "user" }, a1: { kind: "assistant" }, c1: { kind: "compaction" } },
+	};
+	const groups = anchorSessionRows(
+		[
+			row("late", "u1"),
+			row("now", "u2"),
+			row("perm", "req-9"),
+			row("marker", "c1"),
+			row("bare"),
+			row("proto", "constructor"),
+			row("reply", "a1"),
+		],
+		tree,
+	);
+	assert.deepEqual(
+		groups.map((group) => [group.parentTurnId, group.calls.map((entry) => entry.callId)]),
+		[
+			["u1", ["late"]],
+			["u2", ["now", "perm", "marker", "bare", "proto"]],
+			["a1", ["reply"]],
+		],
+	);
+	assert.deepEqual(anchorSessionRows([row("x", "u1")], { leafId: null, nodesById: {} }), [
+		{ parentTurnId: null, calls: [row("x", "u1")] },
+	]);
 });

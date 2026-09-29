@@ -35,12 +35,50 @@ export interface SessionRow {
 	readonly questions: number;
 	readonly answers?: Readonly<Record<string, Answer>>;
 	readonly usage?: { readonly input: number; readonly output: number };
+	/** Why the readout is not the configured one; see `EngineReply.note`. */
+	readonly note?: string;
 	readonly fitted?: boolean;
 	readonly policy?: Readonly<Record<string, string | number | boolean | null>>;
 }
 
 /** The custom-entry type the chat loop writes one drain under. */
 export const SESSION_ROW_CUSTOM_TYPE = "systemOne";
+
+/** The slice of a session tree snapshot that decides where a row hangs. */
+export interface RowAnchorTree {
+	readonly leafId: string | null;
+	readonly nodesById: Readonly<Record<string, { readonly kind: string }>>;
+}
+
+export interface AnchoredRows {
+	readonly parentTurnId: string | null;
+	readonly calls: SessionRow[];
+}
+
+/**
+ * Split a drain into the ledger entries it is written as, each under the turn its rows
+ * describe. A row's `ref` names the user turn a call was asked about, and a slow answer
+ * drains after the leaf has moved on: a later turn, or a `/tree` switch elsewhere. Under the
+ * leaf it would hang off a turn it knows nothing about and drop out of an active-path replay
+ * of the turn it belongs to. A ref that is not a persisted turn (a permission request id, a
+ * tool call id, a compaction or branch marker) has no turn to name and keeps the leaf.
+ */
+export function anchorSessionRows(rows: ReadonlyArray<SessionRow>, tree: RowAnchorTree): AnchoredRows[] {
+	const groups = new Map<string | null, SessionRow[]>();
+	for (const row of rows) {
+		const named = row.ref !== undefined && Object.hasOwn(tree.nodesById, row.ref) ? tree.nodesById[row.ref] : undefined;
+		const anchor = row.ref !== undefined && named !== undefined && isMessageNode(named.kind) ? row.ref : tree.leafId;
+		const group = groups.get(anchor);
+		if (group === undefined) groups.set(anchor, [row]);
+		else group.push(row);
+	}
+	return [...groups].map(([parentTurnId, calls]) => ({ parentTurnId, calls }));
+}
+
+/** Compaction and branch nodes are ledger-derived structure, not turns a sidecar can anchor to. */
+function isMessageNode(kind: string): boolean {
+	return kind !== "compaction" && kind !== "branch";
+}
 
 export function serializeState(state: unknown): string {
 	try {
@@ -103,6 +141,7 @@ export function buildSessionRow(record: DecisionRecord, serialized: string, dige
 		questions: Object.keys(record.questions).length,
 		...(record.answers !== undefined ? { answers: record.answers } : {}),
 		...(record.usage !== undefined ? { usage: record.usage } : {}),
+		...(record.note !== undefined ? { note: record.note } : {}),
 		...(record.fitted !== undefined ? { fitted: record.fitted } : {}),
 		...(record.policy !== undefined ? { policy: scrubPolicy(record.policy) } : {}),
 	};

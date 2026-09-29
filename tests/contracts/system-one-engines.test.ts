@@ -208,6 +208,50 @@ describe("LLM engine over an OpenAI-compatible chat server", () => {
 		strictEqual(reply.build.endsWith("#answer:p1"), true);
 		// One warm request that found no logprobs, then five votes.
 		strictEqual(server.requests.length, 6);
+		strictEqual(reply.note, "downgraded: no-logprobs");
+	});
+
+	it("keeps the option order that arrived as a partial, uncalibrated answer, and flips a chronically partial binding to votes", async () => {
+		const server = await started((body) => {
+			if (body.logprobs !== true) {
+				const truth = options(body).find((option) => option.text.startsWith("true:"))?.letter ?? "A";
+				return { body: { choices: [{ message: { content: truth } }] } };
+			}
+			// Only the forward order, where A is `false`, comes back with logprobs.
+			if (options(body)[0]?.text.startsWith("false:")) return firstToken("B", " A", 0.9);
+			return { body: { choices: [{ message: { content: "A" } }] } };
+		});
+		const engine = createLlmEngine({
+			name: "local",
+			target: llmTarget(server.url),
+			runtime: llamacppRuntime,
+			model: null,
+			mode: "auto",
+			host,
+		});
+		const ask = () =>
+			engine.decide({ state, questions: { urgent: yesNo("Urgent?", "it is", "it is not") }, signal: signal() });
+		for (let call = 0; call < 3; call += 1) {
+			const reply = await ask();
+			const answer = reply.answers.urgent;
+			strictEqual(Math.abs((answer?.noul ?? 0) - 0.9) < 1e-9, true);
+			strictEqual(answer?.calibrated, false);
+			strictEqual(answer?.flags?.includes("partial"), true);
+			strictEqual(reply.note, "partial: 1 of 2 logprob orders unreadable");
+			strictEqual(reply.build.endsWith("#logprobs:p1"), true);
+		}
+		// The missing order was never filled in with votes.
+		strictEqual(server.requests.length, 6);
+		strictEqual(
+			server.requests.every((body) => body.logprobs === true),
+			true,
+		);
+		const flipped = await ask();
+		strictEqual(flipped.build.endsWith("#answer:p1"), true);
+		strictEqual(flipped.note, "downgraded: partial-logprobs");
+		strictEqual(flipped.answers.urgent?.calibrated, false);
+		// Five votes and no warm probe: the verdict already said votes.
+		strictEqual(server.requests.length, 11);
 	});
 
 	it("abstains when fewer than 3 votes are readable", async () => {

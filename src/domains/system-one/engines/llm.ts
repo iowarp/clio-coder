@@ -5,8 +5,12 @@
  * Where the runtime returns logprobs the engine reads the first token's letter
  * alternatives, which is the only way an LLM yields a probability rather than
  * a claim of one. Where it does not, it asks for five votes and says so by
- * marking the answers uncalibrated. The mode is chosen once per target, model
- * and URL by the first real request, so there is no separate probe to pay for.
+ * marking the answers uncalibrated. The mode is decided per target, model and
+ * URL by the warm request of a real call, so there is no separate probe to pay
+ * for, and both verdicts expire so a server that changes is asked again. A
+ * binding whose option orders keep coming back unreadable flips to votes too.
+ * A call never mixes the two readouts, and its reply carries a `note` saying
+ * why it is not the readout the operator configured.
  */
 
 import type { SystemOneMode } from "../../../core/defaults.js";
@@ -24,16 +28,31 @@ import { errorText } from "./shared.js";
 
 /** Concurrent requests when the host cannot say how many the endpoint serves. */
 const DEFAULT_ENDPOINT_CAPACITY = 4;
-/** How long a no-logprobs verdict is trusted before the next call probes again. */
+/** How long a no-logprobs or partial-logprobs verdict is trusted before the next call probes again. */
 const ANSWER_VERDICT_TTL_MS = 10 * 60_000;
+/** How long a logprobs verdict is trusted. Its only state is the partial streak, so it ages out on a slower clock. */
+const LOGPROBS_VERDICT_TTL_MS = 30 * 60_000;
+/** Consecutive calls with half or more of their option orders unreadable that flip an auto binding to votes. */
+const PARTIAL_CALLS_TO_FLIP = 3;
 /** Headroom for the system prompt and framing that the state estimate does not count. */
 const PROMPT_RESERVE_TOKENS = 256;
 
 type ResolvedMode = "logprobs" | "answer";
+type Downgrade = "no-logprobs" | "partial-logprobs";
+
+interface ModeVerdict {
+	readonly mode: ResolvedMode;
+	/** When the verdict was decided. Later calls do not extend it. */
+	readonly at: number;
+	/** Why an answer verdict is not the configured readout. */
+	readonly reason?: Downgrade;
+	/** Consecutive logprob calls with half or more of their option orders unreadable. */
+	partialStreak: number;
+}
 
 // Process-wide: engines are rebuilt on every settings change, and a server's
 // logprob support does not change with them.
-const modeVerdicts = new Map<string, { mode: ResolvedMode; at: number }>();
+const modeVerdicts = new Map<string, ModeVerdict>();
 
 export interface LlmEngineInput {
 	readonly name: string;
@@ -102,20 +121,40 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 			const stateText = renderState(request.state);
 			const capacity = input.endpointCapacity?.(target.id);
 
-			const resolveMode = (): ResolvedMode => {
+			const resolveMode = (): { mode: ResolvedMode; downgraded: Downgrade | null } => {
 				// A port returns text, never logprobs.
-				if (baseUrl === null || configured === "answer") return "answer";
-				if (configured === "logprobs") return "logprobs";
+				if (baseUrl === null || configured === "answer") return { mode: "answer", downgraded: null };
+				if (configured === "logprobs") return { mode: "logprobs", downgraded: null };
 				const verdict = modeVerdicts.get(verdictKey);
-				if (verdict === undefined) return "logprobs";
-				if (verdict.mode === "answer" && Date.now() - verdict.at > ANSWER_VERDICT_TTL_MS) {
+				if (verdict === undefined) return { mode: "logprobs", downgraded: null };
+				const ttl = verdict.mode === "answer" ? ANSWER_VERDICT_TTL_MS : LOGPROBS_VERDICT_TTL_MS;
+				if (Date.now() - verdict.at > ttl) {
 					modeVerdicts.delete(verdictKey);
-					return "logprobs";
+					return { mode: "logprobs", downgraded: null };
 				}
-				return verdict.mode;
+				return { mode: verdict.mode, downgraded: verdict.reason ?? null };
 			};
 
-			const attempt = async (mode: ResolvedMode): Promise<EngineReply> => {
+			/**
+			 * Counts a logprob call toward the binding's partial streak. Only a call whose
+			 * answers were read counts, so a canceled or downgraded one leaves it alone.
+			 */
+			const learnFromOrders = (orders: { read: number; missing: number }): void => {
+				if (configured !== "auto" || baseUrl === null) return;
+				let verdict = modeVerdicts.get(verdictKey);
+				if (verdict === undefined) {
+					verdict = { mode: "logprobs", at: Date.now(), partialStreak: 0 };
+					modeVerdicts.set(verdictKey, verdict);
+				}
+				if (verdict.mode !== "logprobs") return;
+				const total = orders.read + orders.missing;
+				verdict.partialStreak = total > 0 && orders.missing * 2 >= total ? verdict.partialStreak + 1 : 0;
+				if (verdict.partialStreak >= PARTIAL_CALLS_TO_FLIP) {
+					modeVerdicts.set(verdictKey, { mode: "answer", at: Date.now(), reason: "partial-logprobs", partialStreak: 0 });
+				}
+			};
+
+			const attempt = async (mode: ResolvedMode, downgraded: Downgrade | null): Promise<EngineReply> => {
 				// Requests still in flight when a mode fails or the call finishes are
 				// cancelled with the attempt rather than left to run to completion.
 				const controller = new AbortController();
@@ -143,6 +182,7 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 					signal: controller.signal,
 					mayDowngrade: configured === "auto" && mode === "logprobs",
 					usage: { input: 0, output: 0 },
+					orders: { read: 0, missing: 0 },
 				};
 				try {
 					const settled = await Promise.allSettled(
@@ -161,6 +201,7 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 						if (entry.status === "rejected" && entry.reason instanceof LogprobsUnavailable) throw entry.reason;
 					}
 					request.signal.throwIfAborted();
+					if (mode === "logprobs") learnFromOrders(ctx.orders);
 					const answers: Record<string, Answer> = {};
 					for (const entry of settled) {
 						if (entry.status === "fulfilled" && entry.value[1] !== null) answers[entry.value[0]] = entry.value[1];
@@ -172,19 +213,24 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 							: new Error(`llm engine '${name}' returned no usable answer (${mode} readout)`);
 					}
 					const usage = ctx.usage.input + ctx.usage.output > 0 ? { usage: { ...ctx.usage } } : {};
-					return { build, answers, ...usage };
+					const unread = ctx.orders.missing;
+					const note =
+						downgraded !== null
+							? `downgraded: ${downgraded}`
+							: unread > 0
+								? `partial: ${unread} of ${unread + ctx.orders.read} logprob orders unreadable`
+								: undefined;
+					return { build, answers, ...usage, ...(note !== undefined ? { note } : {}) };
 				} finally {
 					request.signal.removeEventListener("abort", onAbort);
 					controller.abort();
 				}
 			};
 
-			let mode = resolveMode();
+			let { mode, downgraded } = resolveMode();
 			for (;;) {
 				try {
-					const reply = await attempt(mode);
-					if (configured === "auto" && baseUrl !== null) modeVerdicts.set(verdictKey, { mode, at: Date.now() });
-					return reply;
+					return await attempt(mode, downgraded);
 				} catch (error) {
 					if (!(error instanceof LogprobsUnavailable)) throw error;
 					if (configured !== "auto" || mode === "answer") {
@@ -192,8 +238,9 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 							`target '${target.id}' returned no usable logprobs (${errorText(error)}); set the engine mode to auto or answer`,
 						);
 					}
-					modeVerdicts.set(verdictKey, { mode: "answer", at: Date.now() });
+					modeVerdicts.set(verdictKey, { mode: "answer", at: Date.now(), reason: "no-logprobs", partialStreak: 0 });
 					mode = "answer";
+					downgraded = "no-logprobs";
 				}
 			}
 		},

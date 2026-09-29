@@ -64,9 +64,14 @@ export function withoutQuotedCode(text: string): string {
 	return text.replace(/(^|\n)[ \t]{0,3}(`{3,}|~{3,})[\s\S]*?(?:\n[ \t]{0,3}\2[`~]*[ \t]*(?=\n|$)|$)/g, "$1");
 }
 
-/** A noul's probability, or null for another type, an abstention or malformed mass. */
+/**
+ * A noul's probability, or null for another type, an abstention, malformed mass,
+ * or mass that is not a calibrated probability. Every hint, gate and act reads a
+ * noul through here, so a vote fraction or a one-order readout never crosses a
+ * fitted cut. The dataset still keeps the raw answer.
+ */
 export function probability(answer: Answer | undefined): number | null {
-	if (answer === undefined || answer.type !== "noul" || answer.noul === undefined) return null;
+	if (answer === undefined || answer.type !== "noul" || answer.noul === undefined || !answer.calibrated) return null;
 	return Number.isFinite(answer.noul) && answer.noul >= 0 && answer.noul <= 1 ? answer.noul : null;
 }
 

@@ -23,7 +23,9 @@
  * stamp, and the deferred write would fix that gap in the file as `session: null`
  * long before one exists. Such a decision is held instead until `adopt` names the
  * session that drains it, the same one that receives its ledger row. A process
- * that ends first writes it as it stands rather than losing it.
+ * that ends first writes it as it stands rather than losing it. An outcome that
+ * names a held decision waits with it and is written right after it, so a reader
+ * scanning the file in order never meets an outcome before the decision it joins.
  */
 
 import { appendFileSync, chmodSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync } from "node:fs";
@@ -73,6 +75,8 @@ export interface DatasetDecisionRow {
 	readonly questions: Readonly<Record<string, string>>;
 	readonly answers?: Readonly<Record<string, Answer>>;
 	readonly usage?: { readonly input: number; readonly output: number };
+	/** Why the readout is not the configured one; see `EngineReply.note`. */
+	readonly note?: string;
 	readonly fitted?: boolean;
 	readonly policy?: Readonly<Record<string, string | number | boolean | null>>;
 }
@@ -103,6 +107,7 @@ export interface PendingDecision {
 export interface DatasetWriter {
 	/** A decision with no session is held until `adopt` or `flush`; any other is queued. */
 	decision(item: PendingDecision): void;
+	/** Queued at once, unless its `ref` names a held decision, which it then follows. */
 	outcome(record: OutcomeRecord): void;
 	/** Stamp the held decisions with `session` and queue them. */
 	adopt(session: string): void;
@@ -192,6 +197,7 @@ function decisionRow(item: PendingDecision, questions: Record<string, string>): 
 		questions,
 		...(answers !== undefined ? { answers } : {}),
 		...(record.usage !== undefined ? { usage: record.usage } : {}),
+		...(record.note !== undefined ? { note: record.note } : {}),
 		...(record.fitted !== undefined ? { fitted: record.fitted } : {}),
 		...(policy !== undefined ? { policy } : {}),
 	};
@@ -240,6 +246,8 @@ export function createDatasetWriter(deps: DatasetWriterDeps): DatasetWriter {
 	let queue: Queued[] = [];
 	/** Decisions whose call ended before any session existed, in the order they ended. */
 	let held: PendingDecision[] = [];
+	/** Outcomes whose `ref` names a decision in `held`, in the order they arrived. */
+	let heldOutcomes: OutcomeRecord[] = [];
 	let scheduled = false;
 	let warned = false;
 	let lastPrune: number | null = null;
@@ -367,16 +375,51 @@ export function createDatasetWriter(deps: DatasetWriterDeps): DatasetWriter {
 			// Queued as it stands: a process that never adopts must not grow without
 			// bound, and dropping the oldest would lose the row.
 			const oldest = held.shift();
-			if (oldest !== undefined) enqueue({ type: "decision", ...oldest });
+			if (oldest !== undefined) {
+				enqueue({ type: "decision", ...oldest });
+				// Its outcomes go with it, unless a younger held decision shares the ref and they still wait for that one.
+				if (!held.some((other) => other.record.ref === oldest.record.ref)) {
+					const own = heldOutcomes.filter((outcome) => outcome.ref === oldest.record.ref);
+					heldOutcomes = heldOutcomes.filter((outcome) => outcome.ref !== oldest.record.ref);
+					for (const record of own) enqueue({ type: "outcome", record });
+				}
+			}
 		}
 		pendingWriters.add(writer);
 		hookExit();
 	};
 
-	const takeHeld = (): PendingDecision[] => {
+	const holdOutcome = (record: OutcomeRecord): void => {
+		heldOutcomes.push(record);
+		if (heldOutcomes.length > MAX_QUEUED) {
+			// Past the bound the oldest is written ahead of its decision, which is a misordering and not a loss.
+			const oldest = heldOutcomes.shift();
+			if (oldest !== undefined) enqueue({ type: "outcome", record: oldest });
+		}
+	};
+
+	/**
+	 * The held rows in write order: each decision, then the outcomes that name its ref, placed
+	 * after the last held decision sharing that ref. Empties both holds. Recording turned off
+	 * drops the lot, outcomes included, since their decision is not going to be written.
+	 */
+	const takeHeld = (): Queued[] => {
 		const waiting = held;
+		const outcomes = heldOutcomes;
 		held = [];
-		return deps.recording() ? waiting : [];
+		heldOutcomes = [];
+		if (!deps.recording()) return [];
+		const lastFor = new Map<string, number>();
+		waiting.forEach((item, index) => {
+			if (item.record.ref !== undefined) lastFor.set(item.record.ref, index);
+		});
+		const rows: Queued[] = [];
+		waiting.forEach((item, index) => {
+			rows.push({ type: "decision", ...item });
+			for (const record of outcomes) if (lastFor.get(record.ref) === index) rows.push({ type: "outcome", record });
+		});
+		for (const record of outcomes) if (!lastFor.has(record.ref)) rows.push({ type: "outcome", record });
+		return rows;
 	};
 
 	// Retention is a promise about files already on disk, and writes are the only
@@ -394,12 +437,13 @@ export function createDatasetWriter(deps: DatasetWriterDeps): DatasetWriter {
 
 	const writer: DatasetWriter = {
 		decision: (item) => (item.session === null ? hold(item) : enqueue({ type: "decision", ...item })),
-		outcome: (record) => enqueue({ type: "outcome", record }),
+		outcome: (record) =>
+			held.some((item) => item.record.ref === record.ref) ? holdOutcome(record) : enqueue({ type: "outcome", record }),
 		adopt(session) {
-			for (const item of takeHeld()) enqueue({ type: "decision", ...item, session });
+			for (const item of takeHeld()) enqueue(item.type === "decision" ? { ...item, session } : item);
 		},
 		flush() {
-			for (const item of takeHeld()) queue.push({ type: "decision", ...item });
+			queue.push(...takeHeld());
 			writeQueued();
 		},
 	};

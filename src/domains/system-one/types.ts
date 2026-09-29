@@ -53,10 +53,13 @@ export interface Answer {
 	 * confidence scales, so this is recomputed from the mass, never copied.
 	 */
 	readonly certainty: number;
-	/** False when the mass is not a calibrated probability: vote counts, or a tournament readout. */
+	/** False when the mass is not a calibrated probability: vote counts, a tournament readout, or a single option order. */
 	readonly calibrated: boolean;
-	/** `flip`: the two option orders disagreed on the winner. `approximate`: a >26-option tournament. */
-	readonly flags?: ReadonlyArray<"flip" | "approximate">;
+	/**
+	 * `flip`: the two option orders disagreed on the winner. `approximate`: a >26-option tournament.
+	 * `partial`: an option order came back unreadable, so the mass has no position-bias averaging.
+	 */
+	readonly flags?: ReadonlyArray<"flip" | "approximate" | "partial">;
 }
 
 export interface EngineRequest {
@@ -75,6 +78,12 @@ export interface EngineReply {
 	/** Answers per question id. A missing id is an abstention on that question alone. */
 	readonly answers: Readonly<Record<string, Answer>>;
 	readonly usage?: { readonly input: number; readonly output: number };
+	/**
+	 * Why the readout is not the one the operator configured, for the ledger and
+	 * the dataset: `downgraded: no-logprobs`, `downgraded: partial-logprobs`, or
+	 * `partial: 1 of 2 logprob orders unread`. Absent for a readout as configured.
+	 */
+	readonly note?: string;
 }
 
 export type EngineKind = "systemone" | "llm";
@@ -204,6 +213,7 @@ export interface DecisionRecord {
 	readonly questions: Readonly<Record<string, Question>>;
 	readonly answers?: Readonly<Record<string, Answer>>;
 	readonly usage?: { readonly input: number; readonly output: number };
+	readonly note?: string;
 	readonly fitted?: boolean;
 	readonly policy?: Readonly<Record<string, string | number | boolean | null>>;
 }
@@ -211,7 +221,11 @@ export interface DecisionRecord {
 /** What followed a decision, joined to it by `ref` when the dataset is exported. */
 export interface OutcomeRecord {
 	readonly ref: string;
-	readonly source: "turn" | "next-operator" | "permission" | "follow-up" | "draft" | "compaction";
+	/**
+	 * `turn-tokens` amends a cancelled turn's `turn` row with the worker tokens
+	 * that sealed after it was written. Readers join it by `ref` like any other.
+	 */
+	readonly source: "turn" | "turn-tokens" | "next-operator" | "permission" | "follow-up" | "draft" | "compaction";
 	/** ISO time the outcome was observed. */
 	readonly at: string;
 	readonly facts: Readonly<Record<string, unknown>>;

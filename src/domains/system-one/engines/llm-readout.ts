@@ -3,10 +3,13 @@
  *
  * Logprob readout reads the first token's letter alternatives in both option
  * orders and averages them, because position bias is the largest measured
- * error in these readouts. Answer mode has no probabilities to read, so it
- * asks for five votes with the order alternating and counts them. Questions
- * are never packed into one request: sequences that share a prompt interfere,
- * and the answer to a question would then depend on its siblings.
+ * error in these readouts. An order that comes back unreadable is dropped and
+ * the answer says so (`partial`, uncalibrated) instead of passing one order off
+ * as the average. It is never filled in with votes: one call answers in one
+ * readout. Answer mode has no probabilities to read, so it asks for five votes
+ * with the order alternating and counts them. Questions are never packed into
+ * one request: sequences that share a prompt interfere, and the answer to a
+ * question would then depend on its siblings.
  */
 
 import { certaintyFromMass } from "../answers.js";
@@ -44,12 +47,16 @@ export interface ReadContext {
 	/** Whether a failure of the warm request may downgrade the call instead of failing it. */
 	readonly mayDowngrade: boolean;
 	readonly usage: { input: number; output: number };
+	/** Logprob order requests that came back readable or unreadable, for the binding's partial streak. */
+	readonly orders: { read: number; missing: number };
 }
 
 interface GroupRead {
 	/** Mass per option id, in declared order, summing to 1. */
 	readonly mass: ReadonlyMap<string, number>;
 	readonly flip: boolean;
+	/** An option order was unreadable, so the mass is one order's read. */
+	readonly partial: boolean;
 }
 
 function addUsage(ctx: ReadContext, usage: ChannelUsage | undefined): void {
@@ -165,7 +172,11 @@ async function readOrder(
 		if (labels.mass < MIN_LABEL_MASS) return null;
 		return softmax(labels.logprobs, temperature);
 	});
-	if (probs === null) return null;
+	if (probs === null) {
+		ctx.orders.missing += 1;
+		return null;
+	}
+	ctx.orders.read += 1;
 	return new Map(ordered.map((item, index) => [item.id, probs[index] as number]));
 }
 
@@ -186,7 +197,7 @@ async function readByLogprobs(
 		mass.set(item.id, valid.reduce((sum, order) => sum + (order.get(item.id) ?? 0), 0) / valid.length);
 	}
 	const flip = forward !== null && reversed !== null && argmaxId(forward) !== argmaxId(reversed);
-	return { mass, flip };
+	return { mass, flip, partial: valid.length < 2 };
 }
 
 async function readByVotes(
@@ -225,7 +236,7 @@ async function readByVotes(
 	const even = cast.filter((vote) => vote.even);
 	const odd = cast.filter((vote) => !vote.even);
 	const flip = even.length > 0 && odd.length > 0 && argmaxId(tally(even)) !== argmaxId(tally(odd));
-	return { mass, flip };
+	return { mass, flip, partial: false };
 }
 
 function readGroup(ctx: ReadContext, question: Question, items: ReadonlyArray<OptionItem>): Promise<GroupRead | null> {
@@ -244,6 +255,7 @@ async function tournament(
 	items: ReadonlyArray<OptionItem>,
 ): Promise<GroupRead | null> {
 	let field = items;
+	let partial = false;
 	while (field.length > MAX_LETTERED_OPTIONS) {
 		const groups: OptionItem[][] = [];
 		for (let start = 0; start < field.length; start += TOURNAMENT_GROUP_SIZE) {
@@ -252,6 +264,7 @@ async function tournament(
 		const reads = await Promise.all(
 			groups.map((group) => (group.length === 1 ? Promise.resolve(null) : readGroup(ctx, question, group))),
 		);
+		partial ||= reads.some((read) => read?.partial === true);
 		const survivors: OptionItem[] = [];
 		for (const [index, group] of groups.entries()) {
 			const read = reads[index];
@@ -269,7 +282,7 @@ async function tournament(
 	const final = await readGroup(ctx, question, field);
 	if (final === null) return null;
 	const mass = new Map(items.map((item) => [item.id, final.mass.get(item.id) ?? 0]));
-	return { mass, flip: final.flip };
+	return { mass, flip: final.flip, partial: partial || final.partial };
 }
 
 function assemble(
@@ -279,9 +292,10 @@ function assemble(
 	calibrated: boolean,
 	approximate: boolean,
 ): Answer | null {
-	const flags: Array<"flip" | "approximate"> = [];
+	const flags: Array<"flip" | "approximate" | "partial"> = [];
 	if (read.flip) flags.push("flip");
 	if (approximate) flags.push("approximate");
+	if (read.partial) flags.push("partial");
 	const withFlags = flags.length > 0 ? { flags } : {};
 	if (question.type === "noul") {
 		const noul = read.mass.get("true");
@@ -315,10 +329,11 @@ export async function answerQuestion(ctx: ReadContext, question: Question): Prom
 	if (question.type === "choice" && items.length === 1) {
 		// Nothing to decide, so no request: the only option has all the mass.
 		const only = items[0] as OptionItem;
-		return assemble(question, items, { mass: new Map([[only.id, 1]]), flip: false }, true, false);
+		return assemble(question, items, { mass: new Map([[only.id, 1]]), flip: false, partial: false }, true, false);
 	}
 	const approximate = items.length > MAX_LETTERED_OPTIONS;
 	const read = approximate ? await tournament(ctx, question, items) : await readGroup(ctx, question, items);
 	if (read === null) return null;
-	return assemble(question, items, read, ctx.mode === "logprobs" && !approximate, approximate);
+	// One order has no position-bias averaging, so it is no more a calibrated probability than a vote fraction is.
+	return assemble(question, items, read, ctx.mode === "logprobs" && !approximate && !read.partial, approximate);
 }

@@ -167,6 +167,7 @@ export function streamExport(options: ExportOptions, emit: (line: string) => voi
 						questions,
 						answers: row.answers ?? {},
 						...(row.usage !== undefined ? { usage: row.usage } : {}),
+						...(row.note !== undefined ? { note: row.note } : {}),
 						policy: row.policy ?? null,
 						latencyMs: row.latencyMs,
 						deadlineMs: row.deadlineMs,

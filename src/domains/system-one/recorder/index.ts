@@ -19,8 +19,8 @@ export { describeBindings } from "./bindings.js";
 export type { DatasetDecisionRow, DatasetOutcomeRow, DatasetSpecRow } from "./dataset.js";
 export type { ExportOptions, ExportResult, ExportSummary } from "./export.js";
 export { buildExport, exportToFile, streamExport } from "./export.js";
-export type { SessionRow } from "./rows.js";
-export { SESSION_ROW_CUSTOM_TYPE } from "./rows.js";
+export type { AnchoredRows, RowAnchorTree, SessionRow } from "./rows.js";
+export { anchorSessionRows, SESSION_ROW_CUSTOM_TYPE } from "./rows.js";
 export type { DatasetFile, DatasetSummary } from "./store.js";
 export {
 	countDatasetRows,
@@ -58,8 +58,8 @@ export interface RecorderDeps {
 export interface SystemOneRecorder extends DecisionRecorder {
 	/**
 	 * The compact rows for `sessionId`, oldest first, and the buffer emptied.
-	 * The orchestrator's `flushSystemOne` writes them as one custom entry of type
-	 * `SESSION_ROW_CUSTOM_TYPE`, at the turn boundaries the chat loop reports and on
+	 * The orchestrator's `flushSystemOne` writes them as custom entries of type
+	 * `SESSION_ROW_CUSTOM_TYPE` (one per turn the rows name, see `anchorSessionRows`), at the turn boundaries the chat loop reports and on
 	 * shutdown. A call is tagged with the session it started in. One that started before any
 	 * session existed belongs to whoever drains, and one tagged with a different session goes to
 	 * `appendSessionRow` under its own id, so a slow answer that outlives a session switch never
