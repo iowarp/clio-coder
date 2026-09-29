@@ -286,11 +286,11 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		strictEqual(refused.accepted, false);
 		ok(refused.refusal.includes("does not expose"));
 		// A queue read has no field to carry a refusal, so an unreadable queue
-		// fails the request rather than reporting two empty lists it never saw.
+		// is refused as method_not_found rather than reporting two empty lists it never saw.
 		for (const method of ["_clio-coder/session/queue", "_clio-coder/session/queue_clear"]) {
 			await rejects(peer.call(method, { sessionId }), (error: unknown) => {
 				ok(error instanceof AcpRequestError);
-				strictEqual(error.detail.code, "internal_error");
+				strictEqual(error.detail.code, "method_not_found");
 				return true;
 			});
 		}

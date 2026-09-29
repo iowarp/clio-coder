@@ -129,7 +129,7 @@ test("a question renders bold spans and hanging list items instead of raw markdo
 	ok(domain >= 0);
 	ok(text[domain + 1]?.startsWith("   "), "the second row of a list item hangs under its marker");
 	ok(
-		rows.some((row) => row.includes("[1m")),
+		rows.some((row) => row.includes("[1;")),
 		"bold span painted bold",
 	);
 	deepStrictEqual(formatAskUserQuestion("a\n\n\n\nb\n", 20), ["a", "", "b"], "blank runs collapse to one row");

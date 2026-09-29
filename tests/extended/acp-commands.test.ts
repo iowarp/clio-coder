@@ -122,6 +122,7 @@ test("a hub command is projected as subcommands only, narrowed to the wire-shape
 		"compact",
 		"init",
 		"recall",
+		"recover",
 		"refresh",
 		"reset",
 	]);

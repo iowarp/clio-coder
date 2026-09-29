@@ -138,8 +138,8 @@ describe("clio-coder run --timeout", () => {
 			[
 				{
 					kind: "tool",
-					name: "gateway",
-					arguments: { op: "call", capability: "bash", args: { command: "python3 -c \"print('hidden')\"" } },
+					name: "bash",
+					arguments: { command: "python3 -c \"print('hidden')\"" },
 				},
 				{ kind: "stall" },
 			],

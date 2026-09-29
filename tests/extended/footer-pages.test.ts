@@ -8,7 +8,12 @@ import { contextCategorySwatch, renderContextMeterGrid } from "../../src/interac
 import type { FooterDashboardRenderState } from "../../src/interactive/footer/dashboard.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
-import { DASHBOARD_PAGES, renderCompactDashboard, renderDashboardPage } from "../../src/interactive/footer/pages.js";
+import {
+	DASHBOARD_PAGES,
+	dashboardPageViewport,
+	renderCompactDashboard,
+	renderDashboardPage,
+} from "../../src/interactive/footer/pages.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import {
 	renderToolExecution,
@@ -92,6 +97,19 @@ function state(): FooterDashboardRenderState {
 	};
 }
 const plain = (rows: string[]) => rows.map(stripTerminalSequences).join("\n");
+/** Expanded pages are a bounded viewport that scrolls, so content checks read every scroll position. */
+function scrolled(
+	snapshot: FooterDashboardRenderState,
+	page: (typeof DASHBOARD_PAGES)[number],
+	width: number,
+	rows: number,
+): string[] {
+	const first = dashboardPageViewport(snapshot, page, width, rows, "alt+u", 0);
+	const all = [...first.rows];
+	for (let offset = 1; offset <= first.maxOffset; offset += 1)
+		all.push(...dashboardPageViewport(snapshot, page, width, rows, "alt+u", offset).rows);
+	return all;
+}
 
 test("dashboard pages devote space to agents, context composition and complete status", () => {
 	for (const width of [40, 80, 120, 172]) {
@@ -113,7 +131,7 @@ test("dashboard pages devote space to agents, context composition and complete s
 	match(activity, /blade\/mini\/qwopus/);
 	const context = plain(renderDashboardPage(state(), "Context", 172, 120, "Alt+U"));
 	match(context, /CONTEXT COMPOSITION/);
-	match(context, /Estimated usage/);
+	match(context, /tokens · 26\.1% occupied/);
 	const status = plain(renderDashboardPage(state(), "Status", 172, 120, "Alt+U"));
 	match(status, /COST & CONNECTIONS/);
 	match(status, /LOCAL MACHINE/);
@@ -136,7 +154,7 @@ test("resolved dashboard shortcut cycles Activity, Context, Status and closed wi
 		for (const page of DASHBOARD_PAGES) {
 			modes.push(footer.toggleExpanded());
 			const text = plain(footer.view.render(120));
-			match(text, new RegExp(page.toUpperCase()));
+			match(text, new RegExp(`❯ \\d ${page}`));
 			match(text, /Ctrl\+U/);
 		}
 		modes.push(footer.toggleExpanded());
@@ -210,7 +228,7 @@ test("Activity retains fast tool actions between calls and shows live worker out
 	const progress = createWorkerProgressFold();
 	const render = () => {
 		snapshot.dispatchRows = snapshot.dispatchRows.map((row) => ({ ...row, progress: progress.snapshot() }));
-		return plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u"));
+		return plain(scrolled(snapshot, "Activity", 160, 120));
 	};
 	progress.observe({
 		type: "clio_coder_tool_start",
@@ -239,20 +257,21 @@ test("Activity retains fast tool actions between calls and shows live worker out
 	match(render(), /Live response · provisional/);
 });
 
-test("compact footer exposes activity, headroom and inference identity in bounded responsive rows", () => {
+test("compact footer exposes workspace, headroom and worker count in bounded responsive rows", () => {
 	for (const width of [40, 80, 160]) {
 		const rows = renderCompactDashboard(state(), width);
-		strictEqual(rows.length, width <= 60 ? 1 : 2);
+		strictEqual(rows.length, 2);
 		ok(rows.every((row) => visibleWidth(row) <= width));
 	}
+	const idle = state();
+	idle.dispatchRows = [];
+	strictEqual(renderCompactDashboard(idle, 40).length, 1, "a narrow idle footer is one row");
 	const text = plain(renderCompactDashboard(state(), 160));
-	match(text, /exploring/);
-	match(text, /1 active/);
-
-	match(text, /262.1k/);
+	match(text, /1 worker/);
+	match(text, /262\.1K/);
 	match(text, /clio-coder.*v050/);
 	doesNotMatch(text, /think/u);
-	doesNotMatch(text, /autonomy|yolo|70k processed|standard/);
+	doesNotMatch(text, /autonomy|yolo|70k processed|standard|exploring/);
 });
 
 test("Status renders live resource telemetry instead of a configuration dump", () => {
@@ -265,7 +284,10 @@ test("Status renders live resource telemetry instead of a configuration dump", (
 	});
 	try {
 		for (let i = 0; i < 3; i++) footer.toggleExpanded();
-		const text = plain(footer.view.render(172));
+		// The expanded page is a bounded viewport, so read every scroll position.
+		const pages = [footer.view.render(172)];
+		for (let step = 0; step < 20 && footer.scroll(8); step += 1) pages.push(footer.view.render(172));
+		const text = plain(pages.flat());
 		match(text, /COST & CONNECTIONS/);
 		match(text, /LOCAL MACHINE/);
 		match(text, /Clio RSS/);
@@ -284,12 +306,14 @@ test("Context dashboard shares the overlay category swatches and filled/free/res
 	const ledger = snapshot.context.ledger;
 	ok(ledger);
 	const theme = clioTheme();
-	const rows = renderDashboardPage(snapshot, "Context", 172, 120, "alt+u");
+	const rows = scrolled(snapshot, "Context", 172, 120);
 	const ansi = rows.join("\n");
-	for (const group of ledger.meter.filter((group) => group.tokens > 0)) {
+	// The legend beside the three-row grid previews the first two categories and a "more" row.
+	for (const group of ledger.meter.filter((group) => group.tokens > 0).slice(0, 2)) {
 		ok(ansi.includes(contextCategorySwatch(group.category, theme)));
 	}
-	for (const row of renderContextMeterGrid(ledger, 64, 8, theme)) ok(ansi.includes(row));
+	// The page re-wraps each grid row, so compare the glyphs rather than the escape sequences.
+	for (const row of renderContextMeterGrid(ledger, 63, 3, theme)) ok(plain(rows).includes(stripTerminalSequences(row)));
 	match(plain(rows), /Filled = context.*empty = available.*shaded = reserve/);
 });
 
@@ -306,14 +330,14 @@ test("finished agents collapse into bounded history while retries retain live ca
 			taskSummary: "Historical verbose task must not render",
 		})),
 	];
-	const text = plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u"));
+	const text = plain(scrolled(snapshot, "Activity", 160, 120));
 	match(text, /Active retry task/);
 	match(text, /INVOCATION HISTORY · 8 finished/);
 	match(text, /Scout · completed.*internal.*1[2]s.*↑ 68k ↓ 2k/);
 	match(text, /4 more finished runs/);
 	doesNotMatch(text, /Historical verbose task/);
 	snapshot.dispatchRows = [{ ...row, status: "failed", outcomeDetail: "result_contract_exhausted" }];
-	const settled = plain(renderDashboardPage(snapshot, "Activity", 86, 75, "alt+u"));
+	const settled = plain(scrolled(snapshot, "Activity", 86, 75));
 	match(settled, /No agents running/);
 	match(settled, /Scout · failed/);
 	match(settled, /result_contract_exhausted.*\/view dispatch:scout-run/);
@@ -326,13 +350,13 @@ test("expanded pages have identical viewport-relative height across widths and l
 			const snapshot = state();
 			for (const page of DASHBOARD_PAGES) {
 				const rows = renderDashboardPage(snapshot, page, width, height, "alt+u");
-				strictEqual(rows.length, Math.max(8, Math.floor(height / 4)));
+				strictEqual(rows.length, Math.max(6, Math.min(12, height - 6)));
 				ok(rows.every((row) => visibleWidth(row) <= width));
 			}
 			snapshot.dispatchRows = [];
 			strictEqual(
 				renderDashboardPage(snapshot, "Activity", width, height, "alt+u").length,
-				Math.max(8, Math.floor(height / 4)),
+				Math.max(6, Math.min(12, height - 6)),
 			);
 		}
 });
@@ -451,10 +475,10 @@ test("compact quota stays beside the selected model while workspace and rotating
 	];
 	for (const width of [80, 120, 160]) {
 		const rows = renderCompactDashboard(snapshot, width).map(stripTerminalSequences);
-		match(rows[0] ?? "", /weekly 91% left/);
-		doesNotMatch(rows[0] ?? "", /Codex|5h/);
-		match(rows[1] ?? "", /clio-coder.*v050 \*/);
-		doesNotMatch(rows[1] ?? "", /weekly|Claude|Codex/);
+		match(rows[1] ?? "", /weekly 91% left/);
+		doesNotMatch(rows[1] ?? "", /Codex|5h/);
+		match(rows[0] ?? "", /clio-coder.*v050 \*/);
+		doesNotMatch(rows[0] ?? "", /weekly|Claude|Codex/);
 		ok(rows.every((line) => visibleWidth(line) <= width));
 	}
 	const initial = plain(renderCompactDashboard(snapshot, 160));
@@ -462,56 +486,44 @@ test("compact quota stays beside the selected model while workspace and rotating
 	ok(plain(renderCompactDashboard(snapshot, 160)) !== initial);
 	for (let page = 0; page < 40; page++) {
 		snapshot.now = page * 12000;
-		match(stripTerminalSequences(renderCompactDashboard(snapshot, 160)[1] ?? ""), /clio-coder.*v050 \*/);
+		match(stripTerminalSequences(renderCompactDashboard(snapshot, 160)[0] ?? ""), /clio-coder.*v050 \*/);
 		ok(footerKeyHint(snapshot.now));
 	}
 	snapshot.session.shutdownArmed = true;
-	match(plain(renderCompactDashboard(snapshot, 100)), /clio-coder.*v050 \*.*Ctrl\+C again/);
+	match(plain(renderCompactDashboard(snapshot, 100)), /clio-coder.*v050 \*[\s\S]*Ctrl\+C again/);
 	match(plain(renderCompactDashboard(snapshot, 40)), /Ctrl\+C again to quit/u);
 	snapshot.quotaRoute = { runtimeId: "litellm", wireModelId: "claude-opus" };
 	doesNotMatch(plain(renderCompactDashboard(snapshot, 160)), /weekly/);
 });
 
-test("the compact footer names an armed skill surface beside the activity, unpadded, until it clears", () => {
+test("the compact footer names an armed skill surface beside the worker count until it clears", () => {
 	const snapshot = state();
-	snapshot.session.target = "blade · dynamo/qwopus3.8-27b-flash@q4_k_m";
-	const line = (width: number) => stripTerminalSequences(renderCompactDashboard(snapshot, width)[0] ?? "");
-	for (const width of [60, 100, 200]) doesNotMatch(line(width), /skill|§/u);
+	const facts = (width: number) => stripTerminalSequences(renderCompactDashboard(snapshot, width)[1] ?? "");
+	for (const width of [60, 100, 200]) doesNotMatch(facts(width), /skill|§/u);
 	snapshot.session.activeSkills = ["tdd"];
-	for (const width of [100, 200]) match(line(width), /^exploring · 1 active · skill tdd {2}· {2}blade/u);
 	for (const width of [60, 100, 200]) {
-		match(line(width), /^exploring · 1 active · skill tdd\b/u);
-		ok(visibleWidth(line(width)) <= width);
+		match(facts(width), /1 worker · skill tdd$/u);
+		ok(visibleWidth(facts(width)) <= width);
 	}
-	// The percentage-only context leaves room for a readable identity at 60 columns.
-	match(line(60), /blade/u);
-	// Narrow: the knowledge mark stands in for the word, and an identity with
-	// no room left is dropped rather than cut to a stub.
+	// The facts take at most 40% of the row; what does not fit ends in one ellipsis.
 	snapshot.session.activeSkills = ["tdd", "perf-review"];
-	for (const width of [40, 60]) {
-		const row = line(width);
-		match(row, /§ tdd/u);
-		doesNotMatch(row, /……|skill t…/u);
+	for (const width of [40, 60, 100]) {
+		const row = facts(width);
+		match(row, /1 worker · skil/u);
+		doesNotMatch(row, /……/u);
 		ok(visibleWidth(row) <= width, row);
 	}
-	match(line(40), /§ tdd… +ctx/u, "no room for the identity at 40 columns, so context follows the badge");
-	// The mark form is never padded out to the badge's budget.
-	snapshot.session.activeSkills = ["tdd-go"];
-	const { statusText, dispatchRows } = { statusText: snapshot.agent.statusText, dispatchRows: snapshot.dispatchRows };
-	snapshot.agent.statusText = "Ready";
 	snapshot.dispatchRows = [];
-	match(line(60), /^Ready · skill tdd-go · blade/u);
-	snapshot.agent.statusText = statusText;
-	snapshot.dispatchRows = dispatchRows;
+	snapshot.session.activeSkills = ["tdd-go"];
+	match(facts(60), /skill tdd-go$/u);
 	snapshot.session.activeSkills = [];
-	doesNotMatch(line(100), /skill|§/u);
+	doesNotMatch(facts(100), /skill|§/u);
 });
 
-test("a narrow compact footer keeps context and activity whole with no identity stub", () => {
+test("a narrow compact footer keeps the context percent whole and never cuts the counts", () => {
 	const snapshot = state();
-	snapshot.agent.statusText = "Writing · 3s";
 	const line = (width: number) => stripTerminalSequences(renderCompactDashboard(snapshot, width)[0] ?? "");
-	// The context engine's budget meter, as the live footer reads it: a segmented bar with its percent.
+	// The context engine's budget meter, as the live footer reads it: counts with a percent.
 	snapshot.context = {
 		...snapshot.context,
 		ledger: undefined,
@@ -525,24 +537,20 @@ test("a narrow compact footer keeps context and activity whole with no identity 
 	for (const width of [40, 60]) {
 		const row = line(width);
 		ok(visibleWidth(row) <= width, row);
-		// Counts that do not fit are dropped; the percent is never cut.
-		match(row, /ctx ~\d+\.\d%$/u, row);
-		doesNotMatch(row, /\d…|\/ /u, row);
-		// The activity is whole; a row too narrow for the worker count drops it rather than cut it.
-		match(row, /^Writing · 3s · 1 active\b/u, row);
-		// An identity is readable or absent, never a stub like `bla…_k_m`.
-		const identity = /1 active · (.+?)(?: {3}|$)/u.exec(row)?.[1];
-		ok(identity === undefined || visibleWidth(identity) >= 12, row);
+		doesNotMatch(row, /\d…/u, row);
 	}
-	match(line(100), /12\.\d% {2}~33\.9k \/ 262\.1k$/u);
-	// The ledger meter states counts alone, so a narrow row states its percent instead.
+	// Counts that do not fit are dropped; the percent is never cut.
+	match(line(40), /ctx ~?\d+\.\d%$/u);
+	match(line(60), /33\.9K\/262\.1K \(~?12\.\d%\)$/u);
+	match(line(100), /33\.9K\/262\.1K \(~?12\.\d%\)$/u);
+	// The ledger meter states counts alone, so the narrow row states its percent instead.
 	const ledgerSnapshot = state();
 	const narrow = stripTerminalSequences(renderCompactDashboard(ledgerSnapshot, 40)[0] ?? "");
 	match(narrow, /ctx \d+\.\d%$/u, narrow);
-	match(stripTerminalSequences(renderCompactDashboard(ledgerSnapshot, 100)[0] ?? ""), /68\.5k \/ 262\.1k$/u);
+	match(stripTerminalSequences(renderCompactDashboard(ledgerSnapshot, 100)[0] ?? ""), /68\.5K\/262\.1K \(26\.1%\)$/u);
 });
 
-test("the footer spinner and live elapsed change once per animation step, not once per refresh", () => {
+test("the compact footer holds still across refreshes and carries no activity spinner", () => {
 	let now = 10_000;
 	const footer = buildFooterDashboard({
 		providers: { list: () => [] } as never,
@@ -560,19 +568,13 @@ test("the footer spinner and live elapsed change once per animation step, not on
 		}),
 	});
 	try {
-		const line = () => footer.view.render(120)[0] ?? "";
 		footer.refresh();
-		const first = line();
-		match(stripTerminalSequences(first), /Writing · 2s/);
-		// The status stream and the ticker both refresh; inside one step neither moves anything.
-		now = 10_050;
-		footer.refresh();
-		footer.refresh();
-		strictEqual(line(), first);
+		const first = footer.view.render(120).join("\n");
+		// The composer rail owns the working spinner and elapsed time; the footer never repaints for them.
+		doesNotMatch(stripTerminalSequences(first), /Writing|\d+s\b/u);
 		now = 10_130;
 		footer.refresh();
-		ok(line() !== first, "the next step advances the spinner");
-		match(stripTerminalSequences(line()), /Writing · 2s/);
+		strictEqual(footer.view.render(120).join("\n"), first);
 	} finally {
 		footer.dispose();
 	}

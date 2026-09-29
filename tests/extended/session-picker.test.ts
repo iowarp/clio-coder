@@ -82,7 +82,7 @@ function picker(t: TestContext, sessions: SessionMeta[], overrides: Record<strin
 		setKeybindings(previous);
 	});
 	const input = (data: string) => box.handleInput?.(data);
-	const lines = (width = 92) => box.render(width).map((line) => stripTerminalSequences(line));
+	const lines = (width = 92) => editor.render(width).map((line) => stripTerminalSequences(line));
 	const selected = (width = 92) => lines(width).find((line) => line.includes("❯")) ?? "";
 	return { box, editor, input, lines, selected, resumed, closed: () => closed };
 }

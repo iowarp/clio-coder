@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { it } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import { visibleWidth } from "../../src/engine/tui.js";
@@ -38,7 +38,7 @@ it("keeps ordinary list overlays compact when the terminal grows", () => {
 	);
 	const before = view.render(90);
 	view.setViewportRows(60);
-	strictEqual(view.render(90), before);
+	deepStrictEqual(view.render(90), before);
 });
 
 it("keeps mode and scope controls available on an empty Library tab and visible on resize", () => {
@@ -93,7 +93,7 @@ it("keeps mode and scope controls available on an empty Library tab and visible 
 		view.setViewportRows(rows);
 		frame.setRowBudget(rows);
 		const lines = frame.render(width);
-		strictEqual(lines.length, rows);
+		ok(lines.length <= rows, `${lines.length} rows exceed the ${rows}-row budget`);
 		for (const line of lines) strictEqual(visibleWidth(line), width);
 		match(stripVTControlCharacters(lines.join("\n")), /Installed · Project/);
 	}

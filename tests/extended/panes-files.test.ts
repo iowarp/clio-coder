@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { terminalBackground } from "../../src/core/terminal-background.js";
+import { roleHex } from "../../src/core/theme-roles.js";
 import { tokenHex } from "../../src/core/theme-token-hex.js";
 import { parseTomlDocument } from "../../src/core/toml.js";
 import { CLIO_APP_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
@@ -529,7 +531,7 @@ describe("contracts/files pane theme", () => {
 		const theme = renderYaziTheme();
 		const parsed = parseTomlDocument(theme);
 		ok(parsed, "the yazi theme must parse as TOML");
-		ok(theme.includes(`cwd = { fg = "${tokenHex("accent")}" }`));
+		ok(theme.includes(`cwd = { fg = "${roleHex("workspacePath", terminalBackground())}" }`));
 		for (const section of ["mgr", "mode", "status", "which", "pick", "input", "notify"]) {
 			ok(theme.includes(`[${section}]`), `theme must cover [${section}]`);
 		}

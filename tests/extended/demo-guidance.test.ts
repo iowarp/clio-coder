@@ -13,7 +13,7 @@ test("demo ships enabled, supports validated settings and last-wins session flag
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	applyControlValue(settings, "interface.demo", "false");
 	strictEqual(settings.interface.demo, false);
-	strictEqual(SETTING_CONTROLS.find((c) => c.path === "interface.demo")?.label, "Demo guidance");
+	strictEqual(SETTING_CONTROLS.find((c) => c.path === "interface.demo")?.label, "Demo presentation and guidance");
 	strictEqual(
 		validateSettings({ ...settings, interface: { ...settings.interface, demo: "yes" } }).issues.some(
 			(issue) => issue.path === "interface.demo",
