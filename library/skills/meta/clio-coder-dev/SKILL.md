@@ -87,7 +87,7 @@ required checks, and report path. Pass skill bindings through the worker recipe
 when available; do not assume the parent model's loaded skills reach the worker.
 An instruction in this skill is not itself authorization to spawn workers.
 
-Ignored `.superpowers/` plans do not appear in a new Git worktree. Supply the
+Ignored `.mine/` plans do not appear in a new Git worktree. Supply the
 absolute packet path or a scoped copy of the necessary briefing. Keep each
 worker's write scope inside its assignment; the orchestrator owns shared seams,
 review, and serialized integration. Preserve authorized uncommitted work and

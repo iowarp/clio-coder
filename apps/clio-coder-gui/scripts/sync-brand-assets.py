@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Project an exported canonical brand kit into bundled GUI assets (requires Pillow).
 
-node site/export-brand.mjs --out .superpowers/brand-kit
-python3 apps/clio-coder-gui/scripts/sync-brand-assets.py --kit .superpowers/brand-kit
+node site/export-brand.mjs --out tmp/brand-kit
+python3 apps/clio-coder-gui/scripts/sync-brand-assets.py --kit tmp/brand-kit
 """
 import argparse
 import hashlib

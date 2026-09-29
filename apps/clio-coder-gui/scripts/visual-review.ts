@@ -49,7 +49,7 @@ const { values } = parseArgs({
 		client: { type: "string" },
 		out: {
 			type: "string",
-			default: fileURLToPath(new URL("../../../.superpowers/gui-validation/visual", import.meta.url)),
+			default: fileURLToPath(new URL("../../../tmp/gui-validation/visual", import.meta.url)),
 		},
 		only: { type: "string", default: "" },
 		views: { type: "string", default: "2000x1040:dark,1440x900:light,390x844:light" },
@@ -69,7 +69,7 @@ const want = (name: string) => only.size === 0 || only.has(name);
 // The workspace is opened through the app before the listening origin is known, so the origin starts
 // as the one its in-process requests carry.
 if (!["populated", "empty", "error"].includes(values.state)) throw new Error("state: populated, empty, error");
-const scratch = fileURLToPath(new URL("../../../.superpowers/gui-validation/", import.meta.url));
+const scratch = fileURLToPath(new URL("../../../tmp/gui-validation/", import.meta.url));
 await mkdir(scratch, { recursive: true });
 process.env.TMPDIR ??= scratch;
 let origin = `http://127.0.0.1:${values.serve ? values.port : "4317"}`;

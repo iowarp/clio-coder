@@ -29,7 +29,7 @@ assert.ok(
 	widths.length > 0 && widths.every((width) => [1600, 1050, 390, 320].includes(width)),
 	"widths: 1600, 1050, 390, 320",
 );
-const scratch = fileURLToPath(new URL("../../../.superpowers/gui-validation/", import.meta.url));
+const scratch = fileURLToPath(new URL("../../../tmp/gui-validation/", import.meta.url));
 await mkdir(scratch, { recursive: true });
 process.env.TMPDIR ??= scratch;
 const output = await mkdtemp(join(scratch, "browser-"));

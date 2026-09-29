@@ -131,6 +131,7 @@ export const WORKSPACE_EXCLUDED_DIRS: ReadonlySet<string> = new Set([
 	"target",
 	"vendor",
 	".superpowers",
+	".mine",
 	".codex",
 	".claude",
 ]);
