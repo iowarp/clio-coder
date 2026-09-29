@@ -411,6 +411,17 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				),
 			});
 		}
+		const retiredValues = validation.issues.flatMap((issue) => (issue.repair !== undefined ? [issue.repair] : []));
+		if (retiredValues.length > 0) {
+			findings.push({
+				ok: true,
+				level: "warn",
+				name: "settings.yaml retired values",
+				detail: foldDetail(
+					`doctor --fix would rewrite ${retiredValues.map((entry) => `${entry.path}: "${entry.from}" -> "${entry.to}"`).join(", ")}`,
+				),
+			});
+		}
 		if (settingsRepair !== null && settingsRepair.rewritten.length > 0) {
 			findings.push({
 				ok: true,
@@ -418,6 +429,14 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				detail: foldDetail(
 					`rewrote ${settingsRepair.rewritten.map((entry) => `${entry.path}: ${entry.from} -> "${entry.to}"`).join(", ")}`,
 				),
+			});
+		}
+		if (settingsRepair !== null && settingsRepair.skipped.length > 0) {
+			findings.push({
+				ok: true,
+				level: "warn",
+				name: "settings.yaml repair skipped",
+				detail: `could not safely rewrite ${settingsRepair.skipped.join(", ")}; replace aliases, anchors, or tags with plain scalar values and run doctor --fix again`,
 			});
 		}
 	}

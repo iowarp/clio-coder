@@ -31,6 +31,8 @@ const HELP = `clio-coder doctor [--fix] [--json] [--deep [--tools-timeout <secon
 Diagnose Clio Coder state without creating files. On a home Clio has never
 written to, doctor says so in one row and exits 0. Use --fix to repair structure:
 missing directories, missing template files, and credential permissions.
+--fix also repairs retired enum values and YAML 1.1 on/off booleans in settings,
+preserving comments and formatting. Plain doctor reports the proposed repairs.
 --fix also records the fleet preflight, which is what admits an SSH node to
 dispatch for the current project root; plain doctor only reports it.
 Settings are validated directly against the current schema.

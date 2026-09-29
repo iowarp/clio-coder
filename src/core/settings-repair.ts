@@ -1,15 +1,12 @@
 /**
- * The one repair `clio-coder doctor --fix` makes to settings.yaml itself: turning
- * the YAML 1.1 booleans that `validateSettings` reads as on/off levels into the
- * strings they stand for. Only those scalars change. The edit splices the
- * parsed node's source range, so comments, key order, blank lines and flow
- * style stay byte for byte what the operator wrote.
+ * Explicit scalar repairs splice parsed source ranges so comments, key order,
+ * blank lines and flow style stay byte for byte what the operator wrote.
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isMap, isScalar, isSeq, parseDocument, parse as parseYaml, type Scalar } from "yaml";
 import {
-	type SettingsCoercion,
+	type SettingsScalarRepair,
 	settingsPath,
 	validateSettings,
 	validateSettingsFile,
@@ -18,8 +15,8 @@ import {
 import { safeResourceWrite } from "./safe-resource-write.js";
 
 export interface SettingsRepairResult {
-	rewritten: SettingsCoercion[];
-	/** Coerced paths whose value the file's text cannot be edited for safely (an alias, an anchor, a tag). */
+	rewritten: SettingsScalarRepair[];
+	/** Paths whose value the file's text cannot be edited for safely (an alias, an anchor, a tag). */
 	skipped: string[];
 }
 
@@ -50,10 +47,10 @@ function findNode(node: unknown, path: string): unknown {
 	return null;
 }
 
-function editableBoolean(
+function editableScalar(
 	node: unknown,
-	expected: boolean,
-): node is Scalar<boolean> & { range: [number, number, number] } {
+	expected: boolean | string,
+): node is Scalar<boolean | string> & { range: [number, number, number] } {
 	return (
 		isScalar(node) &&
 		node.value === expected &&
@@ -64,9 +61,8 @@ function editableBoolean(
 }
 
 /**
- * Rewrite every coerced boolean in the user's settings.yaml to its quoted
- * string, under the settings lock and through `safeResourceWrite`. The
- * quotes keep a YAML 1.1 tool from reading the string back as a boolean.
+ * Quoted replacements keep YAML 1.1 tools from reading on/off strings back
+ * as booleans. The settings lock prevents a repair from replacing newer edits.
  * Nothing is written unless the edited text validates with none of the
  * rewritten paths still coerced.
  */
@@ -74,31 +70,39 @@ export function repairSettingsCoercions(): SettingsRepairResult {
 	const path = settingsPath();
 	if (!existsSync(path)) return { rewritten: [], skipped: [] };
 	return withSettingsLock(() => {
-		const { coercions } = validateSettingsFile();
-		if (coercions.length === 0) return { rewritten: [], skipped: [] };
+		const validation = validateSettingsFile();
+		const repairs = [
+			...validation.coercions,
+			...validation.issues.flatMap((issue) => (issue.repair !== undefined ? [issue.repair] : [])),
+		];
+		if (repairs.length === 0) return { rewritten: [], skipped: [] };
 		const text = readFileSync(path, "utf8");
 		const document = parseDocument(text);
-		const edits: Array<{ start: number; end: number; coercion: SettingsCoercion }> = [];
+		const edits: Array<{ start: number; end: number; repair: SettingsScalarRepair }> = [];
 		const skipped: string[] = [];
-		for (const coercion of coercions) {
-			const node = findNode(document.contents, coercion.path);
-			if (!editableBoolean(node, coercion.from)) {
-				skipped.push(coercion.path);
+		for (const repair of repairs) {
+			const node = findNode(document.contents, repair.path);
+			if (!editableScalar(node, repair.from)) {
+				skipped.push(repair.path);
 				continue;
 			}
-			edits.push({ start: node.range[0], end: node.range[1], coercion });
+			edits.push({ start: node.range[0], end: node.range[1], repair });
 		}
 		// Splice from the end so earlier offsets stay valid.
 		let next = text;
 		for (const edit of [...edits].sort((a, b) => b.start - a.start)) {
-			next = `${next.slice(0, edit.start)}"${edit.coercion.to}"${next.slice(edit.end)}`;
+			next = `${next.slice(0, edit.start)}"${edit.repair.to}"${next.slice(edit.end)}`;
 		}
 		if (edits.length === 0 || next === text) return { rewritten: [], skipped };
-		const remaining = new Set(validateSettings(parseYaml(next)).coercions.map((entry) => entry.path));
-		if (edits.some((edit) => remaining.has(edit.coercion.path))) {
-			return { rewritten: [], skipped: [...skipped, ...edits.map((edit) => edit.coercion.path)] };
+		const checked = validateSettings(parseYaml(next));
+		const remaining = new Set([
+			...checked.coercions.map((entry) => entry.path),
+			...checked.issues.map((issue) => issue.path),
+		]);
+		if (edits.some((edit) => remaining.has(edit.repair.path))) {
+			return { rewritten: [], skipped: [...skipped, ...edits.map((edit) => edit.repair.path)] };
 		}
 		safeResourceWrite(path, next, { encoding: "utf8", mode: statSync(path).mode & 0o777 });
-		return { rewritten: edits.map((edit) => edit.coercion), skipped };
+		return { rewritten: edits.map((edit) => edit.repair), skipped };
 	});
 }

@@ -58,6 +58,7 @@ export interface SettingsIssue {
 	path: string;
 	message: string;
 	kind?: SettingsIssueKind;
+	repair?: SettingsScalarRepair;
 }
 
 /**
@@ -70,12 +71,8 @@ function issuesKind(issues: ReadonlyArray<SettingsIssue>): SettingsIssueKind {
 }
 
 /**
- * The one action that repairs each failure kind, followed by the two commands
- * that are true for all of them. `clio-coder doctor --fix` is deliberately not the
- * first line: `--fix` creates missing structure and repairs credential
- * permissions, and initialization never reads or rewrites an existing
- * settings.yaml, so on its own it leaves every one of these failures exactly
- * as it found them.
+ * Syntax and access failures need an operator edit before scalar repairs can
+ * inspect the document safely.
  */
 function settingsRemedy(kind: SettingsIssueKind, path: string): string {
 	if (kind === "unreadable") return `Restore read access to ${path}, then run \`clio-coder doctor\` to re-check.`;
@@ -111,7 +108,7 @@ export class SettingsValidationError extends Error {
 		super(
 			`${headline}\n${lines.join("\n")}\n\n` +
 				`${settingsRemedy(kind, path)}\n` +
-				"`clio-coder doctor --fix` repairs directories and credential permissions; it never rewrites settings.\n" +
+				"`clio-coder doctor --fix` repairs retired enum values and YAML 1.1 on/off booleans, directories, and credential permissions.\n" +
 				"To discard these settings and start from defaults instead, run `clio-coder reset --config --force`.",
 		);
 		this.name = "SettingsValidationError";
@@ -200,13 +197,15 @@ function cloneValue<T>(value: T): T {
 	return structuredClone(value);
 }
 
-/**
- * A YAML 1.1 boolean that {@link expectEnum} read as the on/off level its field
- * allows. Doctor lists these and `doctor --fix` rewrites them to the string, so
- * the rule lives in one place and the file is never written on load.
- */
-export interface SettingsCoercion {
+/** The validator supplies replacements so doctor repairs cannot drift from its advice. */
+export interface SettingsScalarRepair {
 	path: string;
+	from: boolean | string;
+	to: string;
+}
+
+/** YAML 1.1 boolean repairs remain separate because loading already accepts their on/off meaning. */
+export interface SettingsCoercion extends SettingsScalarRepair {
 	from: boolean;
 	to: "on" | "off";
 }
@@ -215,8 +214,8 @@ class Issues {
 	readonly list: SettingsIssue[] = [];
 	readonly coercions: SettingsCoercion[] = [];
 
-	add(path: string, message: string): void {
-		this.list.push({ path, message });
+	add(path: string, message: string, repair?: SettingsScalarRepair): void {
+		this.list.push({ path, message, ...(repair !== undefined ? { repair } : {}) });
 	}
 
 	coerced(coercion: SettingsCoercion): void {
@@ -333,15 +332,17 @@ function expectEnum<T extends string>(
 	const replacement =
 		typeof value === "string" && retired !== undefined && Object.hasOwn(retired, value) ? retired[value] : undefined;
 	const advice = replacement === undefined ? "" : `; the retired value ${describe(value)} becomes "${replacement}"`;
-	issues.add(path, `expected one of ${allowed.join(" | ")}, got ${describe(value)}${advice}`);
+	issues.add(
+		path,
+		`expected one of ${allowed.join(" | ")}, got ${describe(value)}${advice}`,
+		replacement !== undefined && typeof value === "string" ? { path, from: value, to: replacement } : undefined,
+	);
 	return undefined;
 }
 
 /**
- * 0.5.6 retired these spellings with no migration and no read-time alias, so
- * the refusal is the only place the operator learns what to write instead.
- * Naming the replacement keeps that refusal actionable without accepting the
- * old value anywhere.
+ * Retired spellings remain validation errors until an explicit doctor repair
+ * replaces them, so loading never silently changes the operator's policy.
  */
 const RETIRED_AUTONOMY_VALUES: Readonly<Record<string, AutonomyLevel>> = Object.freeze({
 	"auto-edit": "default",
