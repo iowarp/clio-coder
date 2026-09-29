@@ -35,7 +35,6 @@ symbols:
   - "RunGateProvenance"
 tests:
   - "tests/contracts/dispatch-admission.test.ts"
-  - "tests/contracts/dispatch-routing-deterministic.test.ts"
   - "tests/contracts/route-readiness-reads.test.ts"
   - "tests/extended/route-identity-keying.test.ts"
 invariants:
@@ -165,8 +164,6 @@ The lifecycle is:
 ## Tests
 
 **`tests/contracts/dispatch-admission.test.ts`** demonstrates the admission boundary: `foregroundEndpointBlock` refuses a same-endpoint foreground deadlock without spending the queue timeout, and ordinary worker saturation remains queueable.
-
-**`tests/contracts/dispatch-routing-deterministic.test.ts`** verifies that dispatch routing never waits on a decision model. With a 2.5s-late decision endpoint bound to every `DECISION_SITES`, the worker still starts as it would unbound. The test measures the spawn delay and asserts it stays low.
 
 **`tests/contracts/route-readiness-reads.test.ts`** proves that a dispatch reads only the receipts written since the previous readiness window. It patches `fs.readFileSync` to count reads, then asserts that the first `readinessWindow()` reads 13 files (runs.json + 12 receipts), and subsequent windows on an unchanged ledger cost zero file reads.
 

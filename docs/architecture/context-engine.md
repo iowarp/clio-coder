@@ -26,25 +26,27 @@ The core thesis of Clio's context architecture is that **context management must
 
 ## Context Window Resolution
 
-The effective context window ($W$) defines the strict boundary used by Clio for token budgeting and compaction scheduling. It may differ from a provider's advertised context ceiling, particularly when local model servers (e.g. Ollama, llama.cpp, LM Studio) are configured with constrained hardware slots.
+The effective context window ($W$) is the boundary Clio uses for token budgeting and compaction scheduling. It can be smaller than a provider's advertised ceiling, particularly when a local server (Ollama, llama.cpp, LM Studio) loads a model with a constrained context. `resolveContextWindowDetails` in [runtime-resolution.ts](../../src/domains/providers/runtime-resolution.ts) picks it and records the answering layer as `contextWindowSource`, one of `catalog`, `probe`, `loaded`, `target-override`, `model-hint`, `descriptor-default`, or `unknown`.
 
-Clio resolves the window via a strict four-tier hierarchy:
+Resolution takes the first applicable layer, most authoritative first:
 
-1. **Target Override**: Explicit `targets[].contextWindow` in `settings.yaml`.
-2. **Model Catalog Declaration**: Static `contextWindow` declared in [src/domains/providers/catalog.ts](../../src/domains/providers/catalog.ts).
-3. **Live Provider Probe**: Dynamically detected via `/models`, `/props`, or `/api/ps` during target initialization.
-4. **Engine Default**: Safe fallback of 128,000 tokens.
+1. **Requested window**: a runtime that asks for a window on every request (Ollama `num_ctx`) uses it, still capped by a smaller `targets[].capabilities.contextWindow` override or probed window.
+2. **Loaded window**: the context a backend reports having the model open at, unless the target override is smaller. A larger override never enlarges it.
+3. **Target override**: `targets[].capabilities.contextWindow` in `settings.yaml`, capped by a smaller probed window.
+4. **Live probe**: the window the target reported through its model listing or props endpoints, capped for cold-start runtimes by the runtime's cold cap.
+5. **Model knowledge**: a live model hint, then the knowledge base, then the static entry in [catalog.ts](../../src/domains/providers/catalog.ts).
+6. **Runtime default**: the runtime descriptor's default, or the 131,072-token minimum (`CLIO_MIN_CONTEXT_WINDOW` in `src/core/context-floor.ts`) labelled `unknown`.
+
+`clio-coder run --max-context-tokens` lowers the result for one run and marks the source `target-override`. A target that offers fewer than 131,072 tokens produces a `context-window-low` diagnostic, and a `descriptor-default` or `unknown` source produces `context-window-unverified`. Run `clio-coder targets --probe` to read the real value.
 
 <details>
-<summary>Budget calculation: usable budget, reserved output, and safety headroom</summary>
+<summary>Budget calculation: request fit, output reserve, and compaction reserve</summary>
 
-The usable input budget available for conversation history and tools is computed as:
+A request is admitted only when its estimated input plus its output reservation fits the window ($\text{input} + \text{output} \le W$), which `requestFits` in [request-fit.ts](../../src/domains/context/budget/request-fit.ts) decides. Unknown input, output or window values never admit.
 
-$$	ext{Usable Input Budget} = \min(W, 	ext{Target Cap}) - 	ext{Reserved Output} - 	ext{Safety Headroom}$$
-
-- **Reserved Output**: Dedicated space guaranteed for the model's response. Defaults to the model's advertised maximum output tokens (e.g. 4,096 to 16,384 tokens), preventing output truncation mid-turn.
-- **Safety Headroom**: Bounded buffer (default 1,024 tokens) guarding against prompt compilation variances, tokenizer discrepancies, and unexpected image framing tokens.
-- **Enforcement Boundaries**: Input budgets are strictly checked at user prompt submission, tool continuation, and the final provider wire request.
+- **Output reservation**: `resolveTurnOutputReserve` in `src/interactive/output-reserve.ts` resolves it from the configured output budget, the model's advertised cap, and the remaining-context clamp the transports apply on the wire.
+- **Compaction reserve**: the `reserve` category in `/context` is `window × (1 − threshold)`, clamped to the space still free. It is headroom held back so automatic compaction fires before a request is refused, and it is unrelated to the output reservation.
+- **Enforcement points**: the fit check runs at operator submission and at tool-batch continuation. Pressure thresholds are a separate preference layered on top.
 
 </details>
 
@@ -52,19 +54,20 @@ $$	ext{Usable Input Budget} = \min(W, 	ext{Target Cap}) - 	ext{Reserved Output} 
 
 ## Token Accounting & Ledger Snapshots
 
-Token accounting in Clio is continuous and verifiable. Rather than guessing token usage from rough character approximations, Clio reconciles pre-call estimates with authoritative provider return values.
+Clio estimates prompt size locally, then reconciles the estimate with provider-reported usage when it arrives.
 
-- **Pre-Call Estimation**: Calculated using calibrated tokenizer ratios before sending requests, ensuring prompts do not exceed the provider's hard ceiling.
-- **Post-Call Reconciliation**: When the provider returns actual usage (`usage.prompt_tokens`, `usage.completion_tokens`, and reasoning tokens), Clio reconciles the estimates against the exact reported numbers.
-- **Session Ledger**: Persisted in append-only session format v6 ([src/domains/session/context-ledger.ts](../../src/domains/session/context-ledger.ts)). Each turn records an immutable `contextAccounting` record capturing raw input, output, cache-read, cache-write, and reasoning token totals.
+- **Pre-call estimate**: characters divided by four, with a fixed character allowance per image and JSON length for tool arguments and schemas. `estimatedTokens` on a snapshot keeps this figure.
+- **Post-call reconciliation**: `reconcileSnapshot` in [context-accounting.ts](../../src/domains/session/context-accounting.ts) folds the provider's prompt token count (cached tokens included) into the snapshot, sets `reconciledTokens`, and records `divergenceRatio = reconciledTokens / estimatedTokens`. A ratio above 1 means the estimator under-counted.
+- **Snapshot sources**: each snapshot labels its total and per-category splits `estimated`, `exact`, `reconciled`, or `streaming`.
+- **Snapshot storage**: `appendContextSnapshot` appends one JSON line per snapshot to a per-session snapshots file on a best-effort basis, so accounting telemetry never aborts a turn. A torn trailing line is skipped on read.
 
 <details>
 <summary>How estimates, provider counts, and snapshots fit together</summary>
 
-1. **Pre-turn check**: `admitTurn()` verifies that fixed system prompt components + current working set + reserved output fit within $W$.
-2. **Streaming phase**: Streaming chunks update live token counters in the footer.
-3. **Turn settlement**: Provider-reported usage records are written to the ledger. If the provider does not report token counts, Clio marks the count as `estimated: true` using calibrated local token calculations.
-4. **Ledger integrity**: Snapshots survive session forks, replays, and exports without drifting.
+1. **Capture**: before a request, `captureContextSnapshot` decomposes the prompt into system, tools, tool results, agents, skills, memory, project and message categories, and computes the reserve and free space.
+2. **Streaming phase**: streaming chunks update live token counters in the footer.
+3. **Settlement**: when the provider reports usage, `reconcileSnapshot` replaces the estimate as the total. Without provider counts the total stays `estimated`.
+4. **Ledger view**: `buildContextLedger` in [context-ledger.ts](../../src/domains/session/context-ledger.ts) groups the categories for `/context` and reports whether the total is provider-anchored.
 
 </details>
 
@@ -156,10 +159,10 @@ Settings configured under `context.*` in `settings.yaml`:
 
 | Setting | Default | Purpose |
 | :--- | :--- | :--- |
-| `context.autoCompaction` | `true` | Enable automated multi-tier compaction when budget threshold is crossed. |
-| `context.compaction.threshold` | `0.80` | Context occupancy ratio ($[0.5, 0.95]$) triggering compaction. |
-| `context.compaction.model` | `null` | Optional dedicated route/model used exclusively for summary handoffs. |
-| `context.toolResultMaxBytes` | `65536` | Maximum bytes retained per tool call before scratch offload. |
+| `context.compaction.auto` | `true` | Enable automatic reduction when the threshold is crossed. |
+| `context.compaction.threshold` | `0.8` | Context occupancy ratio from 0 to 1 that triggers compaction. |
+| `context.compaction.model` | unset | Optional model used for summary handoffs. Blank uses the chat model. |
+| `context.toolResultMaxBytes` | `65536` | Maximum bytes of one tool result kept in context before it is offloaded to scratch. |
 | `context.workingSet.enabled` | `true` | Enable reversible working-set observation eviction. |
 | `context.workingSet.policy` | `"structural-v2"` | Composed structural policy; `structural-v1` preserves the previous composition and `age-horizon` the temporal selection. |
 

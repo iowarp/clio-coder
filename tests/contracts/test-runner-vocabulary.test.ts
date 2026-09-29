@@ -140,7 +140,7 @@ describe("test runner vocabulary (#377)", () => {
 		for (const command of [
 			"node --test $(cat f)",
 			"node --test > /etc/x",
-			"ctest; rm -rf x",
+			"ctest; rm -rf ~/x",
 			"python3 -m unittest $(cat f)",
 			"meson test > /etc/x",
 		]) {

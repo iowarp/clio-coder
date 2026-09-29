@@ -3,6 +3,7 @@ import { discoveryScore } from "../../core/harness-discovery.js";
 import { rankByPrecomputedScore } from "../../core/precomputed-rank.js";
 import { isMcpToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
+import type { RelevanceRanker } from "../../domains/system-one/rank.js";
 import { StringEnum, validateEngineToolArguments } from "../../engine/ai.js";
 import { wireParameterSchema } from "../agent-tools.js";
 import type { ToolSurface } from "../lazy-tool.js";
@@ -75,8 +76,6 @@ export interface GatewayCapabilityEntry {
 
 /** Entries an unfiltered listing must exceed before a ranker is asked to order it. */
 export const GATEWAY_RANK_MIN_LISTING = 40;
-/** A query with fewer lexical hits than this asks the ranker for related entries. */
-export const GATEWAY_RELATED_BELOW_HITS = 3;
 /** Related entries a find adds beside a query's own hits. */
 export const GATEWAY_RELATED_MAX = 5;
 /** Probability at or above which a ranked entry counts as related. */
@@ -98,11 +97,32 @@ export type GatewayCapabilityRanker = (
 	signal?: AbortSignal,
 ) => Promise<GatewayCapabilityRanking | null>;
 
+/**
+ * The gateway's ranker over the shared relevance ranker. Only the session has
+ * one; a worker's gateway and an unbound session never rank.
+ */
+export function capabilityRankerFrom(ranker: RelevanceRanker): GatewayCapabilityRanker {
+	return async (request, signal) => {
+		if (!ranker.bound()) return null;
+		const ranked = await ranker(
+			{
+				use: "capabilities",
+				need: request.query,
+				candidates: request.entries.map((entry) => ({ id: entry.name, summary: entry.description })),
+			},
+			signal,
+		);
+		return ranked === null ? null : { scores: ranked.scores, source: ranked.source };
+	};
+}
+
 export interface GatewayToolDeps {
 	registry: ToolRegistry;
 	/** Local MCP servers, present on the session registry only. */
 	mcp?: McpCapabilitySource;
 	rankCapabilities?: GatewayCapabilityRanker;
+	/** A capability the model called through the gateway, so a ranked one can be joined to its ranking as a follow-up. */
+	onCapabilityCalled?: (name: string) => void;
 }
 
 const DESCRIPTION =
@@ -397,7 +417,11 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 					entries = rankByPrecomputedScore(entries, (entry) => entry.name, ranking.scores).map((ranked) => ranked.item);
 					rankedBy = ranking.source;
 				}
-			} else if (!scoped && query.length > 0 && entries.length < GATEWAY_RELATED_BELOW_HITS) {
+			} else if (!scoped && query.length > 0) {
+				// Every queried find asks, not only a thin one: a lexical hit on one
+				// shared word ("status") counted as success, so "slurm batch job
+				// status" returned four unrelated tools and never reached the ranker.
+				// An unbound capabilities site answers null at no cost.
 				const hits = new Set(entries.map((entry) => entry.name));
 				const others = catalogEntries.filter((entry) => !hits.has(entry.name));
 				const ranking = await rank(rawQuery, others, options?.signal);
@@ -625,6 +649,11 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		const resolved = await resolveCapability(name, options, allowDirect);
 		if (resolved.spec === null) return { kind: "error", message: resolved.message };
 		const spec = resolved.spec;
+		try {
+			deps.onCapabilityCalled?.(spec.name);
+		} catch {
+			// Outcome recording never costs the call it observes.
+		}
 		if (args.args !== undefined && !isRecord(args.args)) {
 			return { kind: "error", message: `gateway: args for ${spec.name} must be a JSON object` };
 		}

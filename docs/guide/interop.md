@@ -153,18 +153,11 @@ and keeps a `skills/` directory or root `SKILL.md` for the portable surface.
 ## Outbound: Use this library from Codex
 
 Codex scans `.agents/skills` at the repository root, in the working directory and
-in `$HOME`, recurses into subdirectories, and follows symlinks. The repository's
-own `.agents/skills` links straight at the canonical trees:
-
-```text
-.agents/skills/clio-coder  -> ../../library/skills
-.agents/skills/materio     -> ../../library/plugins/materio/skills
-```
-
-A Codex session started anywhere in a clone therefore sees all 34 curated skills
-and Materio's 6 portable skills under their canonical names, with no install step
-and no copied `SKILL.md`. To get the same catalog in every repository, link the
-canonical directories into your user skills root:
+in `$HOME`, recurses into subdirectories, and follows symlinks. The checkout does
+not ship those links, so create them yourself. Linking the canonical trees into
+your user skills root gives Codex all 34 curated skills and Materio's 6 portable
+skills under their canonical names in every repository, with no install step and
+no copied `SKILL.md`:
 
 ```bash
 mkdir -p ~/.agents/skills
@@ -172,9 +165,8 @@ ln -s /path/to/clio-coder/library/skills ~/.agents/skills/clio-coder
 ln -s /path/to/clio-coder/library/plugins/materio/skills ~/.agents/skills/materio
 ```
 
-The clone convenience requires Git to materialize symbolic links. On Windows,
-enable Git symlink support (`core.symlinks=true`) with the required OS permission,
-or install individual skills using the following route.
+Symbolic links need OS permission on Windows. If you cannot create them, install
+individual skills using the following route.
 
 To install individual skills instead, use Codex's own installer, which accepts a
 GitHub repository path:
@@ -319,7 +311,7 @@ companion that was omitted is reported unsupported rather than claimed working.
 
 Open `/interop` to inspect inventory or connect an external delegation peer.
 Inventory detail folds behind Enter and wraps in the scrolling detail pane.
-Select a host, press `p` for a project destination or `u` for user, and press `k`
+Select a host, press `p` for a project destination or `u` for user, and press `c`
 to cycle the kind filter. Press `i` to review the full adoption plan, then `y`
 to approve it or `b` to return without installing. Escape closes the overlay.
 Connection remains a separate action: `a` connects a proposed peer and `d`

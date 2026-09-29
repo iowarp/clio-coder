@@ -33,7 +33,7 @@ import { readRunJournal } from "../harness/run-journal.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const pivot =
-	"Do not retry this action through another tool unless a hint above names one; pivot or report the blocker.";
+	"Do not retry this action through another tool or a respelled command (other flags, quoting, or a wrapper) unless a hint above names one; pivot or report the blocker.";
 let env: IsolatedClioEnv;
 let previousCwd: string;
 beforeEach(async () => {
@@ -88,8 +88,11 @@ test("interactive denials remain terminal, while actual hard blocks retain hard-
 		strictEqual(error.message, `Operator denied this action.\n${pivot}`);
 		return true;
 	});
-	strictEqual(safety.evaluate({ tool: "bash", args: { command: "rm -f sentinel.txt" } }).kind, "block");
-	await rejects(bash.execute("hard", { command: "rm -f sentinel.txt" }), /hard block; confirmation cannot override/);
+	strictEqual(safety.evaluate({ tool: "bash", args: { command: 'rm -f "$PWD/sentinel.txt"' } }).kind, "block");
+	await rejects(
+		bash.execute("hard", { command: 'rm -f "$PWD/sentinel.txt"' }),
+		/hard block; confirmation cannot override/,
+	);
 	strictEqual(readFileSync("sentinel.txt", "utf8"), "blocked is harmless fixture text\n");
 });
 
@@ -129,7 +132,7 @@ for (const check of ["correlation", "receipt"] as const)
 				["ask-first", inline, "blocked"],
 				["error-second", "ls missing-blocked.txt", "error"],
 				["success", "ls sentinel.txt", "ok"],
-				["hard", "rm -f sentinel.txt", "blocked"],
+				["hard", 'rm -f "$PWD/sentinel.txt"', "blocked"],
 			] as const) {
 				const event = ends.find((entry) => entry.toolCallId === id);
 				ok(event);
@@ -178,7 +181,7 @@ for (const check of ["correlation", "receipt"] as const)
 			const { safety } = tools();
 			deepStrictEqual(
 				receipt.safety?.blockedAttempts.map((attempt) => [attempt.tool, attempt.ruleId]),
-				[inline, "rm -f sentinel.txt"].map((command) => [
+				[inline, 'rm -f "$PWD/sentinel.txt"'].map((command) => [
 					"bash",
 					safety.evaluate({ tool: "bash", args: { command } }).policy?.ruleId,
 				]),

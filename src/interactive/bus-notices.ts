@@ -12,6 +12,7 @@ import type {
 	SafetyBlockedPayload,
 } from "../core/bus-events.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
+import { SYSTEM_ONE_GATE_RULE_ID, systemOneGateText } from "../domains/safety/decision-presentation.js";
 import { askAxis } from "./permission-overlay.js";
 
 export interface BusNotice {
@@ -225,17 +226,25 @@ export function watchdogBlockersNotice(checks: ReadonlyArray<{ name: string; pas
 
 /**
  * A tool call parked for one-shot approval (sd-01 §3.3). The text names the
- * axis that produced the ask: a safety-net rail asks at every level, while an
+ * axis that produced the ask: a safety-net rail asks at every level, the System
+ * One gate asks only about an unrecognized command yolo would have run, and an
  * autonomy ask exists only because of the current level and can be widened in
  * .clio-coder/safety.yaml when it is an execute action.
  */
-export function approvalParkedNotice(tool: string, decision: SafetyDecision, autonomy: string): BusNotice {
+export function approvalParkedNotice(
+	tool: string,
+	decision: SafetyDecision,
+	autonomy: string,
+	gateBuild?: string,
+): BusNotice {
 	const actionClass = decision.classification.actionClass;
 	const axis = askAxis(decision);
 	if (axis.kind === "net") {
+		const asker =
+			axis.ruleId === SYSTEM_ONE_GATE_RULE_ID ? systemOneGateText(gateBuild) : `safety-net rail ${axis.ruleId}`;
 		return {
 			level: "warn",
-			text: `[approval] ${tool} parked (${actionClass}): safety-net rail ${axis.ruleId} asks for confirmation. Approve once, or Esc to deny this call.`,
+			text: `[approval] ${tool} parked (${actionClass}): ${asker} asks for confirmation. Approve once, or Esc to deny this call.`,
 		};
 	}
 	const widen =

@@ -42,7 +42,6 @@ import { workspaceFingerprint } from "./workspace-fingerprint.js";
 type OrientationSnapshot = NonNullable<TurnControlRecord["orientation"]>;
 export interface TurnControlInput {
 	operatorText: string;
-	previous: string;
 	userTurnId: string;
 	signal: AbortSignal;
 	continuation?: boolean;
@@ -62,17 +61,12 @@ export interface TurnControlRunnerDeps {
 	monitorDeps?: MonitorToolDeps;
 	getTurnConstraints(): TurnConstraints | undefined;
 	isContinuation(): boolean;
-	readInterpretation(): TurnInterpretation | undefined;
 	/**
-	 * The decision site's answer when it came from a build with no fitted cuts.
-	 * A shadowed site answer is still an answer: the fallback is not asked.
+	 * The turn site's reading of this request, or undefined when no site is bound
+	 * or it did not answer. Read after the pre-turn call settled, so it is this
+	 * turn's verdict and never the previous one's.
 	 */
-	readShadow?(): TurnControlRecord["shadow"] | undefined;
-	fallback(input: {
-		task: string;
-		previous: string;
-		signal: AbortSignal;
-	}): Promise<{ interpretation: TurnInterpretation | null; shadow?: TurnControlRecord["shadow"] }>;
+	readInterpretation(): TurnInterpretation | undefined;
 	facts: {
 		turnIndex(): number;
 		taskEstablished(): boolean;
@@ -158,38 +152,16 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 				finishedDetachedBatchIds: deps.facts.finishedDetachedBatchIds(),
 				autonomy: deps.getAutonomy(),
 			};
-			let interpretation = deps.readInterpretation() ?? null;
-			let producer: TurnControlRecord["producer"] = interpretation === null ? null : "decision-site";
-			let shadow: TurnControlRecord["shadow"] = interpretation === null ? deps.readShadow?.() : undefined;
-			if (
-				interpretation === null &&
-				shadow === undefined &&
-				settings.interpretation.fallback === "main-model" &&
-				!input.signal.aborted &&
-				!facts.continuation &&
-				!facts.explicitConstraints &&
-				settings.workflows.length > 0
-			) {
-				try {
-					const produced = await deps.fallback({
-						task: input.operatorText,
-						previous: input.previous,
-						signal: input.signal,
-					});
-					interpretation = produced.interpretation;
-					shadow = produced.shadow;
-				} catch {
-					/* S6: an unavailable fallback leaves no interpretation. */
-				}
-				if (interpretation !== null) producer = "main-model";
-			}
+			// A continuation carries the nudge, not the operator's request, so this
+			// turn's verdict is not about it and the record must not claim it was.
+			const interpretation = facts.continuation ? null : (deps.readInterpretation() ?? null);
+			const producer: TurnControlRecord["producer"] = interpretation === null ? null : "system-one";
 			const decision = decide(interpretation, facts, settings);
 			let record: TurnControlRecord = {
 				version: 1,
 				turnId: input.userTurnId,
 				producer,
 				interpretation,
-				...(shadow !== undefined ? { shadow } : {}),
 				factsDigest: factsDigest(facts),
 				decision,
 				decisionHash: decisionHash(decision),
@@ -273,6 +245,8 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 			}
 			const dispatch = deps.dispatch;
 			const inFlight = new Set<string>();
+			// Every run this act admitted, settled or not, so a refusal still reports the tokens they spent.
+			const startedRuns = new Set<string>();
 			const onAbort = () => {
 				for (const id of inFlight) dispatch?.abort(id);
 			};
@@ -288,6 +262,7 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 			input.signal.addEventListener("abort", rejectAbort as () => void, { once: true });
 			const rememberRun = (id: string) => {
 				inFlight.add(id);
+				startedRuns.add(id);
 				if (input.signal.aborted) dispatch?.abort(id);
 			};
 			const progressBus = dispatch?.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus;
@@ -450,7 +425,13 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 			} catch (error) {
 				const message = input.signal.aborted ? "canceled" : error instanceof Error ? error.message : String(error);
 				if (!input.signal.aborted) deps.emitNotice(`[Orientation] not started: ${message}`);
-				return { block: null, record: { ...record, executed: { refused: message } } };
+				return {
+					block: null,
+					record: {
+						...record,
+						executed: { refused: message, ...(startedRuns.size > 0 ? { startedRunIds: [...startedRuns] } : {}) },
+					},
+				};
 			} finally {
 				input.signal.removeEventListener("abort", rejectAbort as () => void);
 			}

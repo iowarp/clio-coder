@@ -2,6 +2,7 @@ import { accessSync, chmodSync, constants, type Dirent, existsSync, readdirSync,
 import { basename, dirname, join } from "node:path";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
+import { readLayeredSettings } from "../../core/settings-layers.js";
 import { clioDirLayoutProblems, resolveClioDirs } from "../../core/xdg.js";
 import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
 import { detectInteropAgents, interopAgentKind, resolveOnPath } from "../interop/index.js";
@@ -982,5 +983,84 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 			];
 		}),
 	);
-	return results.flat();
+	const findings = results.flat();
+	return [...findings, ...(await systemOneFindings(registry, findings))];
+}
+
+const MIB = 1024 * 1024;
+
+/**
+ * Where each System One site is bound, which sites are off, which bindings
+ * cannot resolve, and what the decision dataset holds. A silent site is
+ * otherwise indistinguishable from a broken one. Built from settings and the
+ * connection rows above: doctor never asks a decision, so a failing site here
+ * is a broken binding or an unverified target.
+ */
+async function systemOneFindings(
+	runtimes: { get(id: string): RuntimeDescriptor | null },
+	connections: ReadonlyArray<DoctorFinding>,
+): Promise<DoctorFinding[]> {
+	// A session binds sites from the layered settings, so a site a trusted
+	// project file binds is live there and must not read as unbound here. An
+	// untrusted project layer contributes nothing, exactly as in a session.
+	const settings = readLayeredSettings(process.cwd()).settings;
+	const { describeBindings, formatDatasetBytes, listDatasetFiles } = await import("../system-one/recorder/index.js");
+	const rows: DoctorFinding[] = [];
+	for (const binding of describeBindings(settings, runtimes)) {
+		const name = `system one ${binding.site}`;
+		if (binding.engine === null) {
+			rows.push({ ok: true, level: "info", name, detail: "off; no engine bound" });
+			continue;
+		}
+		if (binding.problem !== undefined) {
+			rows.push({ ok: true, level: "warn", name, detail: `${binding.problem}; the site stays silent` });
+			continue;
+		}
+		const connection = connections.find((finding) => finding.name === `connection ${binding.target}`);
+		const unverified = connection === undefined || !connection.ok || connection.level === "warn";
+		rows.push({
+			ok: true,
+			...(unverified ? { level: "warn" as const } : {}),
+			name,
+			detail:
+				`${binding.engine} (${binding.kind}) → ${binding.target}/${binding.model ?? "target default"}` +
+				(binding.deadlineMs === undefined ? "" : `; deadline ${binding.deadlineMs} ms`) +
+				(unverified ? `; connection ${binding.target} is not verified, so this site may fall back every turn` : ""),
+		});
+	}
+	rows.push(datasetFinding(settings.systemOne, () => listDatasetFiles(), formatDatasetBytes));
+	return rows;
+}
+
+function datasetFinding(
+	systemOne: ReturnType<typeof readSettings>["systemOne"],
+	listDatasetFiles: () => ReadonlyArray<{ day: string; bytes: number }>,
+	formatBytes: (bytes: number) => string,
+): DoctorFinding {
+	const name = "system one dataset";
+	const record = systemOne.record ? "record on" : "record off";
+	let files: ReadonlyArray<{ day: string; bytes: number }>;
+	try {
+		files = listDatasetFiles();
+	} catch (err) {
+		return {
+			ok: true,
+			level: "warn",
+			name,
+			detail: `${record}; the dataset directory cannot be read: ${err instanceof Error ? err.message : String(err)}`,
+		};
+	}
+	const limits = `retention ${systemOne.retentionDays} days, cap ${systemOne.maxMiB} MiB`;
+	if (files.length === 0) return { ok: true, level: "info", name, detail: `${record}; no files; ${limits}` };
+	const bytes = files.reduce((sum, file) => sum + file.bytes, 0);
+	const over = bytes > systemOne.maxMiB * MIB;
+	return {
+		ok: true,
+		level: over ? "warn" : "info",
+		name,
+		detail:
+			`${record}; ${files.length} day${files.length === 1 ? "" : "s"} (${files.length === 1 ? files[0]?.day : `${files[0]?.day} to ${files.at(-1)?.day}`}), ` +
+			`${formatBytes(bytes)}; ${limits}` +
+			(over ? "; over the cap, the next write prunes the oldest days" : ""),
+	};
 }

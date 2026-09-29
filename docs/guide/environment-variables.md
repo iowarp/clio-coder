@@ -9,7 +9,7 @@ The `environment-variable-inventory` check in [check-hygiene.ts](../../scripts/c
 | Variable | Default | Controls |
 | --- | --- | --- |
 | `CLIO_CODER_BUILD_VERBOSE` | off | `1` prints complete tsup/Vite build logs and code-map statistics instead of concise stage summaries. Warnings and errors remain visible in either mode ([build-output.ts](../../scripts/build-output.ts)). |
-| `NO_COLOR` | unset | Set to any non-empty value to drop every foreground and background color. Terminals declaring `TERM=dumb` or `TERM=unknown` also use color-disabled output. Bold, dim, italic, and underline stay, because they are what is left to read the interface by ([tokens.ts](../../src/interactive/theme/tokens.ts)). |
+| `NO_COLOR` | unset | Set to any non-empty value to drop every foreground and background color. Terminals declaring `TERM=dumb` or `TERM=unknown` also use color-disabled output. Bold, dim, italic, and underline stay, because they are what is left to read the interface by ([terminal-preferences.ts](../../src/core/terminal-preferences.ts)). |
 | `CLIO_CODER_THEME` | unset | `dark` or `light` picks the palette drawn for that terminal background and skips the startup OSC 11 query; `neutral` forces the mid-luminance palette that reads on either. Unset detects the background from the terminal's OSC 11 reply, then `COLORFGBG` ([terminal-background.ts](../../src/core/terminal-background.ts)). |
 | `CLIO_CODER_UPDATE_CHECK` | on | `0` disables background update checks, detection of a replaced installation, and upgrade hints. Checks start only in an interactive session, after its first full frame and a five-second delay ([interactive-application.ts](../../src/interactive/interactive-application.ts), [update-check.ts](../../src/domains/lifecycle/update-check.ts)). |
 | `NO_UPDATE_NOTIFIER` | unset | Any non-empty value suppresses the update monitor. A non-empty `CI` also suppresses it. Explicit `clio-coder upgrade` still works. |
@@ -28,7 +28,7 @@ The `environment-variable-inventory` check in [check-hygiene.ts](../../scripts/c
 | `CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT` | 131072 | Largest context length Clio requests when it loads an LM Studio model while another model is resident on the same server. LM Studio reports no VRAM and caps GPU offload instead of refusing an oversized load, so a KV cache that does not fit is served from CPU at a crawl; the ceiling bounds that by evidence. `off` or `0` disables clamping ([lmstudio-residency.ts](../../src/engine/apis/lmstudio-residency.ts)). |
 | `CLIO_CODER_SKILL_CATALOG_DIR` | unset | Local skill-catalog directory override ([marketplace.ts](../../src/domains/resources/skills/marketplace.ts)). |
 | `CLIO_CODER_SKILL_MARKETPLACE_INDEX` | unset | Skill-marketplace index path override (`src/domains/resources/skills/marketplace.ts`). |
-| `CLIO_CODER_MODEL_CATALOG_DIRS` | unset | Extra model-catalog directories ([knowledge-base-path.ts](../../src/domains/providers/knowledge-base-path.ts)). |
+| `CLIO_CODER_MODEL_CATALOG_DIRS` | unset | Extra model-catalog directories, separated by the platform path delimiter (`:` on Linux and macOS) ([knowledge-base-path.ts](../../src/domains/providers/knowledge-base-path.ts)). |
 | `CLIO_CODER_ENDPOINT_SLOTS_TTL_MS` | 86400000 | How long a persisted endpoint slot count answers for an endpoint nothing has probed in this process. A record past the bound is ignored and pruned rather than allowed to over-admit ([endpoint-slots-store.ts](../../src/domains/providers/endpoint-slots-store.ts)). |
 | `CLIO_CODER_DISABLE_RETRIEVE_TOOLS` | off | `1` strips RETRIEVE tools from registries. Bash, hooks, external CLIs, and provider networking remain available; hermetic runs require OS isolation. Legacy `CLIO_CODER_NO_NETWORK_TOOLS=1` is accepted. |
 | `CLIO_CODER_NO_NETWORK_TOOLS` | off | Legacy alias of `CLIO_CODER_DISABLE_RETRIEVE_TOOLS`; disables retrieval tools only, with no shell network isolation. |
@@ -48,7 +48,7 @@ The `environment-variable-inventory` check in [check-hygiene.ts](../../scripts/c
 | `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_DATA_DIR`, `CLIO_CODER_STATE_DIR`, `CLIO_CODER_CACHE_DIR` | XDG platform defaults | Per-role directory overrides (`src/core/xdg.ts`). |
 | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | platform/user defaults | Linux base directories used when the corresponding `CLIO_CODER_*_DIR` and `CLIO_CODER_HOME` variables are unset (`src/core/xdg.ts`). |
 | `APPDATA`, `LOCALAPPDATA` | Windows profile defaults | Windows roaming and local base directories used when Clio-specific directory overrides are unset (`src/core/xdg.ts`). |
-| `CLIO_CODER_BIN_DIR` | `~/.local/bin` | Launcher symlink location ([uninstall.ts](../../src/cli/uninstall.ts)). |
+| `CLIO_CODER_BIN_DIR` | `~/.local/bin` | Directory holding the `clio-coder` launcher symlink. The local install script (`scripts/install-local.sh`) creates it there and `clio-coder uninstall` looks for it there ([uninstall.ts](../../src/cli/uninstall.ts)). |
 | `CLIO_CODER_PACKAGE_ROOT` | auto-detected | Package root for bundled-asset resolution ([package-root.ts](../../src/core/package-root.ts)). |
 
 ## Ambient provider, runtime, and terminal inputs

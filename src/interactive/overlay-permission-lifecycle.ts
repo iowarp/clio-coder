@@ -6,7 +6,6 @@ import type { ActionClass, ClassifierCall } from "../domains/safety/action-class
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { decisionActionClass } from "../domains/safety/decision-presentation.js";
-import type { ToolRiskSubject } from "../domains/safety/tool-risk.js";
 import { askUserExposure } from "../tools/ask-user.js";
 import type { PermissionRequiredMeta, ToolRegistry } from "../tools/registry.js";
 import { approvalParkedNotice, workerEscalationNotice } from "./bus-notices.js";
@@ -20,6 +19,18 @@ import {
 	describeCallTarget,
 	type PermissionAdvisoryReader,
 } from "./permission-overlay.js";
+
+/**
+ * What the card advisory is told about a parked call: the sanitized target the
+ * operator is looking at, never the raw arguments. `requestId` joins the
+ * advisory to the operator's answer.
+ */
+export interface ToolRiskSubject {
+	readonly tool: string;
+	readonly actionClass: string;
+	readonly target: string;
+	readonly requestId?: string;
+}
 
 type PermissionToolRegistry = Pick<
 	ToolRegistry,
@@ -75,12 +86,14 @@ export interface OverlayPermissionLifecycleDeps {
 	onOperatorParked?(): void;
 	/**
 	 * An advisory sentence about one parked call's blast radius, or the empty
-	 * string when there is nothing to say. Absent when the operator has bound no
-	 * decision site to `toolRisk`, which is the default.
+	 * string when there is nothing to say. Absent when no System One engine is
+	 * bound to the `toolCall` site, which is the default.
 	 *
 	 * It is asked after the dialog is already on screen and its result is never
 	 * waited on, so it cannot delay or block an approval. It is also advisory in
-	 * the strict sense: nothing on the admission path reads it.
+	 * the strict sense: nothing on the admission path reads it. A card the
+	 * System One gate raised never asks it: the gate's reason is that card's
+	 * advisory (`PermissionRequiredMeta.gateReason`).
 	 */
 	describeToolRisk?(subject: ToolRiskSubject): Promise<string>;
 }
@@ -176,6 +189,7 @@ function mainApprovalRequestView(
 		...(target.length > 0 ? { target } : {}),
 		...(mutation !== null ? { mutation } : {}),
 		...(queueDepth !== undefined && queueDepth > 1 ? { queueDepth } : {}),
+		...(meta?.gateBuild !== undefined ? { gateBuild: meta.gateBuild } : {}),
 	};
 }
 
@@ -257,6 +271,27 @@ function advisorySlot(deps: OverlayPermissionLifecycleDeps, subject: ToolRiskSub
 		// Same outcome as a rejection: the card renders without the line.
 	}
 	return () => line;
+}
+
+/**
+ * The advisory of a card the System One gate raised: the gate's own reason,
+ * present from the first frame. The gate has already answered and its decision
+ * is on the ledger under this request id, so the card site is not asked. A
+ * second, cheaper reading of the same command adds latency and can contradict
+ * the reason the card exists: a destroys reading of 0.46 sat above a line that
+ * said the command "stays inside the workspace". The reason came from an engine
+ * build, so it passes the same sanitizer as a call target before it is drawn.
+ *
+ * The site ends its reason with the answering build in parentheses and the
+ * Requested-by row already names that build. Only that exact suffix is dropped,
+ * so a reason in any other shape keeps every word it has.
+ */
+function gateAdvisory(reason: string, build: string | undefined): PermissionAdvisoryReader {
+	const line = sanitizeCallTargetText(reason);
+	const buildText = build === undefined ? "" : sanitizeCallTargetText(build);
+	const suffix = buildText === "" ? "" : ` (${buildText})`;
+	const shown = suffix !== "" && line.endsWith(suffix) ? line.slice(0, -suffix.length) : line;
+	return () => shown;
 }
 
 export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycleDeps): OverlayPermissionLifecycle {
@@ -351,7 +386,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			const announceParked = (): void => {
 				if (!markPermissionRequestSurfaced(announcedRequestIds, meta.requestId)) return;
 				deps.onOperatorParked?.();
-				const notice = approvalParkedNotice(call.tool, decision, autonomy);
+				const notice = approvalParkedNotice(call.tool, decision, autonomy, meta.gateBuild);
 				deps.appendNotice(notice.level, notice.text);
 			};
 			if (meta.toolCallId !== undefined) {
@@ -366,12 +401,15 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			// hold mutation text and command strings that have not been through the
 			// call-target allowlist, so the advisory reads the sanitized target the
 			// operator is looking at rather than the raw call.
-			const advisory = advisorySlot(deps, {
-				tool: call.tool,
-				actionClass: decision.classification.actionClass,
-				target: view.target ?? "",
-				requestId: view.requestId,
-			});
+			const advisory =
+				meta.gateReason !== undefined
+					? gateAdvisory(meta.gateReason, meta.gateBuild)
+					: advisorySlot(deps, {
+							tool: call.tool,
+							actionClass: decision.classification.actionClass,
+							target: view.target ?? "",
+							requestId: view.requestId,
+						});
 			if (!deps.openPermissionOverlay(view, mainMutationInspector(call, view), () => call.args, advisory)) {
 				announceParked();
 				return;

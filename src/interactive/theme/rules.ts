@@ -95,8 +95,7 @@ export interface FrameOptions {
  *
  * Corners and fills carry the `frame` token. A plain `title` is drawn bold in
  * the `heading` role with exactly one space on each side. A title that already
- * carries its own styling, such as the welcome header's composite of a brand
- * glyph and a dim version, is placed verbatim so its escape sequences are never
+ * carries its own styling is placed verbatim so its escape sequences are never
  * re-wrapped. The optional `rightMeta` renders dim before the closing corner.
  */
 export function frame(
@@ -111,9 +110,8 @@ export function frame(
 	const frameFg = (text: string): string => theme.fg("border", text);
 
 	const hasTitle = title.length > 0;
-	// A title that already carries escape sequences is a pre-styled composite
-	// (the welcome header's brand glyph and dim version); place it verbatim. A
-	// plain title is styled here as bold in the `heading` role.
+	// A title that already carries escape sequences is a pre-styled composite;
+	// place it verbatim. A plain title uses the bold `heading` role.
 	const styledTitle = !hasTitle ? "" : title.includes("\u001b") ? title : theme.style("heading", title, { bold: true });
 	const titleWidth = visibleWidth(title);
 

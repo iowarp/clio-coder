@@ -35,6 +35,7 @@ import {
 import type { SessionEntryInput } from "../../domains/session/contract.js";
 import type { SessionEntry } from "../../domains/session/entries.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
+import type { RelevanceRanker } from "../../domains/system-one/rank.js";
 import {
 	finalizeObservation,
 	OBSERVE_SELF_CAPS,
@@ -104,12 +105,13 @@ export interface ContextToolDeps {
 	 */
 	skillMarketplace?: boolean;
 	/**
-	 * Per-skill relevance scores this turn's pre-turn decision pass resolved, or
-	 * undefined when the `skills` site is unbound and whenever the pass produced
-	 * nothing usable. This handler is synchronous, so the scores have to already
-	 * exist by the time it runs; they order the listing and never shorten it.
+	 * Ranks the skills listing by meaning through the `relevance` site. Asked
+	 * lazily, only when the model lists skills and the site is bound, and cached
+	 * per turn by the ranker. It orders the listing and never shortens it.
 	 */
-	getSkillRelevance?: () => PrecomputedRanking | undefined;
+	rankRelevance?: RelevanceRanker;
+	/** A skill the model loaded, so one the ranking listed can be joined to it as a follow-up. */
+	onSkillLoaded?: (name: string) => void;
 }
 
 function cwdFromDeps(deps?: ContextToolDeps): string {
@@ -468,11 +470,48 @@ export function runDocsScope(
 	});
 }
 
+/**
+ * scope=skills, with the listing ranked first. The ranking is the one await, so
+ * it happens before the scope reads the catalog inside its discovery pass
+ * rather than in the middle of it. A load (`name` given) is never ranked.
+ */
+async function runRankedSkillsScope(
+	deps: ContextToolDeps,
+	args: Record<string, unknown>,
+	reservation: ObservationReservation,
+	options: ToolInvokeOptions | undefined,
+): Promise<ToolResult> {
+	const listing = (typeof args.name === "string" ? args.name.trim() : "").length === 0;
+	let relevance: PrecomputedRanking | undefined;
+	if (listing && deps.rankRelevance?.bound() === true) {
+		try {
+			const skills = withPluginDiscoveryPass(() =>
+				modelVisibleSkills(loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) }).items),
+			);
+			const ranked = await deps.rankRelevance(
+				{
+					use: "skills",
+					need: typeof args.query === "string" ? args.query.trim() : "",
+					candidates: skills.map((skill) => ({ id: skill.name, summary: skill.description })),
+				},
+				options?.signal,
+			);
+			if (ranked !== null) relevance = { scores: ranked.scores, source: ranked.source };
+		} catch {
+			// A ranking that cannot be read is simply no ranking; the listing is the
+			// model's map of its own capabilities and must render either way.
+			relevance = undefined;
+		}
+	}
+	return withPluginDiscoveryPass(() => runSkillsScope(deps, args, reservation, options, relevance));
+}
+
 function runSkillsScope(
 	deps: ContextToolDeps,
 	args: Record<string, unknown>,
 	reservation: ObservationReservation,
 	options: ToolInvokeOptions | undefined,
+	relevance: PrecomputedRanking | undefined,
 ): ToolResult {
 	const name = typeof args.name === "string" ? args.name.trim() : "";
 	if (name.length === 0) {
@@ -487,14 +526,6 @@ function runSkillsScope(
 						cwdFromDeps(deps),
 						deps.getSkillLoaderOptions?.().trustProjectCompatRoots === true,
 					);
-		// A ranking that cannot be read is simply no ranking; the listing is the
-		// model's map of its own capabilities and must render either way.
-		let relevance: PrecomputedRanking | undefined;
-		try {
-			relevance = deps.getSkillRelevance?.();
-		} catch {
-			relevance = undefined;
-		}
 		// The catalog is bounded but not small, and it has to fit the per-call cap
 		// like any observation. It is cut by whole rows with the reply protocol
 		// reserved first, rather than by head-truncating the finished string:
@@ -642,6 +673,11 @@ function runSkillsScope(
 		...skillExecutionFrame(skill, cwdFromDeps(deps)),
 		renderSkillBody(skill, tree),
 	].join("\n");
+	try {
+		deps.onSkillLoaded?.(skill.name);
+	} catch {
+		// Outcome recording never costs the load it observes.
+	}
 	const pendingPolicy = options?.pendingSkillPolicy;
 	if (pendingPolicy) {
 		pendingPolicy.loadedSkillNames.add(name);
@@ -950,7 +986,7 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 			// times; one discovery pass verifies each plugin tree once for all of it.
 			if (scope === "workspace") return withPluginDiscoveryPass(() => runWorkspaceScope(deps, reservation, options));
 			if (scope === "recall") return runRecallScope(deps, args, reservation, options);
-			return withPluginDiscoveryPass(() => runSkillsScope(deps, args, reservation, options));
+			return runRankedSkillsScope(deps, args, reservation, options);
 		},
 	};
 }

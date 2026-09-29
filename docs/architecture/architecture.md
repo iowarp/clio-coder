@@ -25,9 +25,11 @@ Feature-domain directories include the following. Not every row is a loaded
 `DomainModule`: the orchestrator currently loads config, extensions, plugins,
 interop, resources, share, context, providers, safety, prompts, agents,
 middleware, session, observability, scheduling, and dispatch, plus mux when
-the pane tier is active. The plugins domain publishes no contract; it stays
-loaded so teardown drops cached plugin snapshots. The other rows, lifecycle
-and toolchain included, are libraries or CLI-owned feature areas whose module
+the pane tier is active. System One is not a loaded domain. The orchestrator
+builds it with `createSystemOne` and hands it to the interactive host
+([system-one-host.ts](../../src/entry/system-one-host.ts)). The plugins domain publishes no contract; it stays
+loaded so teardown drops cached plugin snapshots. The other rows, lifecycle,
+toolchain, evolution, and turn-control included, are libraries or CLI-owned feature areas whose module
 functions callers import directly.
 
 | Domain | Primary source | Public surface |
@@ -50,13 +52,16 @@ functions callers import directly.
 | providers | `src/domains/providers/**` | Target-first runtime registry, model probing, credentials. |
 | quota | `src/domains/quota/**` | Read-only subscription and credit readings from connected provider accounts, cached and normalized for the usage surfaces. |
 | resources | `src/domains/resources/**` | Package library, skills loader, prompts loader. |
-| safety | `src/domains/safety/**` | 10-step policy engine, path policy, zero-access rails, audit. |
+| safety | `src/domains/safety/**` | Ordered policy engine, path policy, zero-access rails, audit. |
 | scheduling | `src/domains/scheduling/**` | Budget ceilings, node cluster states, batch capacity checks. |
 | session | `src/domains/session/**` | Append-only JSONL transcripts, tree navigation, compaction. |
 | share | `src/domains/share/**` | Portable workspace and resource archive export/import. |
 | toolchain | `src/domains/toolchain/**` | Pinned external-tool discovery, installation, and resolution. |
 | user-tasks | `src/domains/user-tasks/**` | Library and CLI-owned durable user task list plus board handoff state. |
 | mux | `src/domains/mux/**` | Optional interactive pane-host integration. |
+| system-one | `src/domains/system-one/**` | The decision layer: typed questions about one object, pluggable engines, fitted cuts, and the decision ledger. See [System One](system-one.md). |
+| turn-control | `src/domains/turn-control/**` | Pure turn facts, workflow decisions, turn outcome reduction, and the orientation and direction blocks. |
+| gateway | `src/domains/gateway/mcp/**` | The local stdio MCP client, strict configuration loading, and explicit trust. |
 
 The `interop` domain owns one question: which other coding agents are on this
 machine and in this project. [registry.ts](../../src/domains/interop/registry.ts) is pure data, one
@@ -76,6 +81,12 @@ caller asks and only for a binary that already resolved; a probe that cannot
 answer reports `unknown` and never `absent`. The one durable configuration write
 is an append to `integrations.externalAgents.entries`, and it happens only after an operator
 decision.
+
+---
+
+## The decision layer is System One
+
+System One at `src/domains/system-one/` is the only decision layer. It replaced the earlier provider-side pre-turn brief, decision sites, decision calls, site-ask, relevance pass, and `providers/sites/*` modules, none of which exist any more. The providers domain owns no per-turn decisions. A site names one object, an engine answers a typed question set about it, and the site's policy reads the answers under cuts fitted for the build that answered. Every entry point returns `null` instead of throwing, and `null` means the caller behaves as if System One did not exist. The contract, sites, engines, calibration, and ledger are in [System One](system-one.md).
 
 ---
 
@@ -104,10 +115,13 @@ Source: [workspace-files.ts](../../src/core/workspace-files.ts), [c-header-langu
    - `maxPathBytes`: 64 MiB total path storage
    - `maxDurationMs`: 5,000 ms timeout
 2. **C/C++ Header Classification**:
-   Header files (`.h`, `.hpp`, `.hxx`, `.hh`) are classified deterministically through a 3-tier inspection pipeline:
-   - Tier 1: Sibling source matches (for example matching `.cpp` or `.c` with the same base name).
-   - Tier 2: Distinctive `#include` directives (standard C++ headers vs standard C headers).
-   - Tier 3: Language-exclusive tokens (`template<`, `namespace `, `class `, `nullptr`, `constexpr`).
+   Ambiguous `.h` headers are classified deterministically from content:
+   - Only `.h` is ambiguous. `.hpp`, `.hh`, and `.hxx` are always C++. `classifyCHeaderLanguage` reads only the file content, so full builds and incremental updates agree.
+   - Comments and string literals are blanked first.
+   - C++ include forms win first: a C++-only standard header such as `<vector>`, or an include of a `.hpp`, `.hh`, `.hxx`, or `.cuh` file.
+   - Then a class or struct body with a member function declaration.
+   - Then C++-only syntax such as `namespace`, `template<`, `class`, `::`, access specifiers, C++ casts, `nullptr`, and `constexpr`.
+   - A header matching none of them, including C inside an `extern "C"` wrapper, stays C.
 
 ## Codemap ownership and worker boundary
 
@@ -143,8 +157,8 @@ must go through the coordinator.
 ## Lazy built-in tool boundary
 
 The registry always owns one complete, immutable `ToolSpec` surface before a
-model turn starts. `context`, `code_nav`, `verify`, `web_fetch`, `dispatch`,
-`monitor`, and `steer` keep their
+model turn starts. `context`, `code_nav`, `verify`, `web_fetch`, `web_read`, `run_script`,
+`clio_docs`, `clio_library`, `monitor`, `steer`, and `panes` register through `lazyTool` and keep their
 name, description, TypeBox schema, action class, execution mode, synchronous
 argument hooks, source provenance, and policy metadata in lightweight surface
 modules. `registerAllTools` registers those surfaces in the same order as every
@@ -153,7 +167,7 @@ serialization, safety classification, autonomy and permission admission, and
 `before_tool` middleware therefore run without evaluating the implementation.
 The worker composition root imports `core-bootstrap.ts` directly, so its real
 built entry never evaluates the orchestrator-only dispatch, monitor, or steer
-runners. The orchestrator appends those three tools in their historical order.
+runners. The orchestrator appends `dispatch`, `monitor`, and `steer` (and `panes` when a pane host exists) after the core tools.
 
 Dispatch is the one stateful lazy boundary. Its synchronous admission controller
 owns the exact WeakMap/WeakSet identities for trusted plans, parsed requests,
@@ -193,9 +207,9 @@ These six enforced boundary rules constrain dependency **direction**, never impo
 
 ### Rule 1: `@earendil-works/pi-*` imports stay in `src/engine/**`
 
-Only files under `src/engine/**` may import `@earendil-works/pi-*` packages. Since the 0.83.0 engine-boundary rework, no file outside `src/engine/**` may import those packages at all, value or type-only. Domain modules import erased engine shapes (`EngineModel`, `Api`, `Model`) directly from [types.ts](../../src/engine/types.ts).
+Only files under `src/engine/**` may import `@earendil-works/pi-*` packages. No file outside `src/engine/**` may import those packages at all, value or type-only. Domain modules import erased engine shapes (`EngineModel`, `Api`, `Model`) directly from [types.ts](../../src/engine/types.ts).
 
-Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio contracts rather than vendor or runtime implementations. [api-registry.ts](../../src/engine/api-registry.ts) composes Pi's public lazy API factories in their canonical order, retains provider-owned authentication/header dispatch, and lets Clio's local-runtime adapters override API families without importing the deprecated compatibility aggregate. The only `pi-ai/compat` edge is dynamic: before a configured out-of-tree runtime evaluates, Clio joins Pi's process-global registry and mirrors its overrides so external provider plugins retain the same registry identity and last-writer-wins order. No configured plugin means no compatibility aggregate. OpenAI-compatible sampler fields and vLLM thinking budgets flow through Pi's `samplingParams` and `supportsThinkingTokenBudget` contracts; Clio's adapter retains only catalog selection and runtime-specific payload deltas. Tool head/tail truncation, byte formatting, and grep-line clipping likewise flow through pi-agent-core's `truncateHead`, `truncateTail`, `formatSize`, and `truncateLine`; Clio retains only its 16 KiB per-observation default and its exported line-count helper. Tool string enums come from pi-ai's `StringEnum` ([ai.ts](../../src/engine/ai.ts)), the model-facing text for replayed bash executions and branch or compaction summaries comes from pi-agent-core's `bashExecutionToText` and summary prefixes ([messages.ts](../../src/engine/messages.ts)), and Anthropic thinking payloads are assembled by Pi's narrow lazy stream implementation with no Clio rewrite.
+Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio contracts rather than vendor or runtime implementations. [api-registry.ts](../../src/engine/api-registry.ts) composes Pi's public lazy API factories in their canonical order, retains provider-owned authentication/header dispatch, and lets Clio's local-runtime adapters override API families without importing the deprecated compatibility aggregate. The only `pi-ai/compat` edge is dynamic: before a configured out-of-tree runtime evaluates, Clio joins Pi's process-global registry and mirrors its overrides so external provider plugins retain the same registry identity and last-writer-wins order. No configured plugin means no compatibility aggregate. OpenAI-compatible sampler fields and vLLM thinking budgets flow through Pi's `samplingParams` and `supportsThinkingTokenBudget` contracts; Clio's adapter retains only catalog selection and runtime-specific payload deltas. Tool head/tail truncation, byte formatting, and grep-line clipping likewise flow through pi-agent-core's `truncateHead`, `truncateTail`, `formatSize`, and `truncateLine`; Clio retains only its 64 KiB per-observation default cap (2000 lines) and its exported line-count helper. Tool string enums come from pi-ai's `StringEnum` ([ai.ts](../../src/engine/ai.ts)), the model-facing text for replayed bash executions and branch or compaction summaries comes from pi-agent-core's `bashExecutionToText` and summary prefixes ([messages.ts](../../src/engine/messages.ts)), and Anthropic thinking payloads are assembled by Pi's narrow lazy stream implementation with no Clio rewrite.
 
 ### Rule 2: Workers do not value-import domains except runtime rehydration
 
@@ -319,8 +333,8 @@ subcommands never construct a lease; the established explicit
 
 Tracing is opt-in and content-free. Its bounded asynchronous writer never does
 filesystem append I/O on the render stack, and shutdown awaits a bounded flush.
-See [performance-methodology.md](observability.md) for vocabulary,
-commands, PTY limitations, and baseline evidence.
+See [Observability](observability.md) for vocabulary and commands and
+[TUI boot presentation measurements](tui-boot-performance.md) for baseline evidence.
 
 ## Command spec
 

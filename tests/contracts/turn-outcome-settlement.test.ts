@@ -1,7 +1,9 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
 import { TraceReader, TraceStore } from "../../src/domains/observability/trace-store.js";
@@ -198,3 +200,112 @@ for (const continuation of [false, true])
 			}
 		},
 	);
+
+it("a cancel during the orientation act before admission still yields one cancelled outcome row", async () => {
+	const scratch = await isolateClioEnv("clio-coder-turn-outcome-cancel-");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.prewarm = false;
+	const context = dispatchStubContext({ settings });
+	const target = settings.targets[0];
+	ok(target);
+	settings.chat.target = target.id;
+	settings.chat.model = target.defaultModel ?? "gpt-4o";
+	const entries: SessionEntry[] = [];
+	const recorded: Array<{ ref: string; source: string; facts: Record<string, unknown> }> = [];
+	const session = {
+		current: () => ({ id: "outcome-session", cwd: scratch.dir, cwdHash: "outcome-repo" }),
+		tree: () => ({ leafId: null }),
+		appendEntry(entry: Parameters<SessionContract["appendEntry"]>[0]) {
+			const row = { ...entry, turnId: `entry-${entries.length + 1}`, timestamp: new Date().toISOString() } as SessionEntry;
+			entries.push(row);
+			return row;
+		},
+	} as unknown as SessionContract;
+	let started: () => void = () => {};
+	const runStarted = new Promise<void>((resolve) => {
+		started = resolve;
+	});
+	let reservedId = "";
+	// The aborted Scout seals its receipt shortly after the cancel lands.
+	const receiptPath = join(scratch.dir, "scout-receipt.json");
+	const loop = createChatLoop({
+		outcomeDispatch: { getRun: () => ({ receiptPath }) as unknown as ReturnType<DispatchContract["getRun"]> },
+		getSettings: () => settings,
+		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		knownTargets: () => new Set([target.id]),
+		session,
+		readSessionEntries: () => entries,
+		recordOutcome: (outcome) => recorded.push({ ...outcome, facts: outcome.facts as Record<string, unknown> }),
+		turnControl: {
+			seedOrientation() {},
+			controllerActed: () => false,
+			async run(input: { userTurnId: string; signal: AbortSignal }) {
+				reservedId = input.userTurnId;
+				started();
+				await new Promise<void>((resolve) => input.signal.addEventListener("abort", () => resolve(), { once: true }));
+				return {
+					block: null,
+					record: {
+						version: 1,
+						turnId: input.userTurnId,
+						producer: "system-one",
+						interpretation: null,
+						factsDigest: "fixture",
+						decision: { kind: "none" },
+						decisionHash: "fixture",
+						executed: { refused: "canceled", startedRunIds: ["scout-1"] },
+					},
+				};
+			},
+		} as unknown as NonNullable<CreateChatLoopDeps["turnControl"]>,
+		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
+			requestCorrelationId: () => undefined,
+			agent: {
+				state: { ...options?.initialState, messages: [] as AgentMessage[] },
+				subscribe: () => () => {},
+				abort() {},
+				clearAllQueues() {},
+				async prompt() {
+					throw new Error("a turn cancelled before admission must not reach the model");
+				},
+			},
+		})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+	});
+	try {
+		const submitted = loop.submit("Give me a tour of this codebase.");
+		await runStarted;
+		loop.cancel();
+		setTimeout(
+			() =>
+				writeFileSync(
+					receiptPath,
+					JSON.stringify({ runId: "scout-1", inputTokenCount: 40, outputTokenCount: 2, tokenCount: 42 }),
+				),
+			60,
+		);
+		await submitted;
+		const rows = entries.filter((entry) => entry.kind === "custom" && entry.customType === "turnOutcome");
+		strictEqual(rows.length, 1);
+		const row = rows[0];
+		ok(row?.kind === "custom");
+		const outcome = row.data as TurnOutcomeRecord;
+		strictEqual(outcome.turnId, reservedId);
+		strictEqual(outcome.operator.canceled, true);
+		strictEqual(outcome.stopReason, "aborted");
+		deepStrictEqual(outcome.tokens.workers, {
+			inputTokens: 40,
+			outputTokens: 2,
+			cacheReadTokens: 0,
+			totalTokens: 42,
+			provenance: "reported",
+		});
+		strictEqual(recorded.length, 1);
+		strictEqual(recorded[0]?.ref, reservedId);
+		strictEqual(recorded[0]?.source, "turn");
+		strictEqual(recorded[0]?.facts.canceled, true);
+	} finally {
+		loop.dispose();
+		await loop.whenSettled();
+		scratch.restore();
+	}
+});

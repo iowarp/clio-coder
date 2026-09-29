@@ -180,7 +180,7 @@ Use this shape when testing a subscription model, homelab GPU target, research-l
 
 ## Reasoning Controls and Thinking Replay Semantics
 
-The Context Engine evaluates thinking mechanisms per model target and manages live reasoning streams. Depending on the runtime capabilities, Clio Coder employs specific thinking replay semantics to ensure chain-of-thought data is preserved or replayed correctly in the conversation history:
+Clio evaluates thinking mechanisms per model target and manages live reasoning streams. Depending on the runtime capabilities, Clio Coder employs specific thinking replay semantics to ensure chain-of-thought data is preserved or replayed correctly in the conversation history:
 
 The shipped interactive default is `chat.thinkingLevel: low`. The independent
 fleet worker default remains `fleet.default.thinkingLevel: off`; an explicit

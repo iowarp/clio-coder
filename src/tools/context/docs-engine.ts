@@ -106,6 +106,22 @@ const VOCABULARY_ALIASES: ReadonlyArray<{ triggers: ReadonlyArray<string>; expan
 		expansions: ["skill", "skills", "marketplace", "discovery", "context"],
 	},
 	{
+		triggers: [
+			"systemone",
+			"jev",
+			"laya",
+			"openjev",
+			"shadow",
+			"fitted",
+			"calibration",
+			"calibrated",
+			"cut",
+			"cuts",
+			"decision",
+		],
+		expansions: ["systemone", "engine", "site", "shadow", "cut", "calibration", "dataset", "jev", "laya"],
+	},
+	{
 		triggers: ["docs", "documentation", "manual", "self"],
 		expansions: ["documentation", "docs", "context", "blueprint", "guide"],
 	},

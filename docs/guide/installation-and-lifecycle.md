@@ -270,7 +270,7 @@ resumed from inside the app: type `/resume` there to pick up the last
 conversation. `--restart` requires a terminal and cannot combine with `--json`
 or `--post-install`. A dry run never installs or relaunches.
 
-For pnpm, Bun, Yarn, repository-local, and cached installations, first update
+For pnpm, Bun, other package-manager, repository-local, and cached installations, first update
 with the package manager that owns that installation, then run:
 
 ```bash
@@ -360,7 +360,7 @@ Selective recovery wipes:
 ```bash
 clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force] [--json]
 ```
-Levels are combinable except `--all`. Each level clears exactly the root or file it names and nothing else, then bootstraps the missing structure again unless `--dry-run` is present. `--force` is required only for destructive execution.
+Levels are combinable except `--all`. Each level clears exactly the root or file it names and nothing else, then bootstraps the missing structure again unless `--dry-run` is present. `--force` skips the confirmation prompt and is required when there is no terminal to confirm on; a dry run never needs it.
 
 Before clearing state, reset removes an owned background app service through its
 ownership checks. Independent desktop launchers remain installed. If ownership cannot be verified or a server cannot be

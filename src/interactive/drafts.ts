@@ -12,20 +12,15 @@
  * the candidate texts. Closing the overlay ends the exchange.
  */
 
-import type { ClioSettings } from "../core/config.js";
-import type { ProvidersContract } from "../domains/providers/contract.js";
-import { credentialsPresent } from "../domains/providers/credentials.js";
-import { inspectDecisionSite } from "../domains/providers/decision-sites.js";
-import { type Decider, isTrue, pick, yesNo } from "../domains/providers/decisions.js";
-import type { DecisionAnswer, DecisionQuestion } from "../domains/providers/types/inference.js";
+import { randomUUID } from "node:crypto";
+import type { SystemOne } from "../domains/system-one/index.js";
+import type { DraftLabel } from "../domains/system-one/sites/drafts.js";
+import { DRAFT_LABELS, DRAFT_MIN, DRAFTS_SITE } from "../domains/system-one/sites/drafts.js";
 
-export const DRAFT_MIN = 2;
+export type { DraftLabel };
+export { DRAFT_LABELS, DRAFT_MIN };
 export const DRAFT_MAX = 4;
 export const DRAFT_DEFAULT = 3;
-
-/** Candidate names, in the order the rounds were started. */
-export const DRAFT_LABELS = ["A", "B", "C", "D"] as const;
-export type DraftLabel = (typeof DRAFT_LABELS)[number];
 
 /**
  * One temperature per candidate. The same request at the same temperature
@@ -54,13 +49,88 @@ function rejectsSamplingTemperature(modelId: string): boolean {
 	return major > 4 || (major === 4 && minor >= 7);
 }
 
+/** The fields of a model that decide whether it takes a sampler. Structural so this file stays off the Pi types. */
+export interface DraftModelShape {
+	id: string;
+	api?: string;
+	reasoning?: boolean;
+	/** Pi's per-model compat block; only `supportsTemperature` is read. */
+	compat?: object;
+}
+
+/**
+ * OpenAI's reasoning models and the Codex backend answer an explicit
+ * `temperature` with `Unsupported parameter: temperature` (HTTP 400). pi-ai
+ * forwards the sampler on both Responses transports, so the answer is decided
+ * here from the transport and the catalog's reasoning flag. Anything this
+ * misses is caught by the one-shot retry in {@link runDraftWithSamplerFallback}.
+ */
+function transportRefusesTemperature(model: DraftModelShape): boolean {
+	if ((model.compat as { supportsTemperature?: boolean } | undefined)?.supportsTemperature === false) return true;
+	if (model.api === "openai-codex-responses") return true;
+	return (model.api === "openai-responses" || model.api === "azure-openai-responses") && model.reasoning === true;
+}
+
 /**
  * The temperature a candidate is sent with, or undefined where the model
- * refuses one. Those candidates run at the provider's default and still vary
- * between rounds; a request that fails outright has nothing to vary.
+ * refuses one. Those candidates run at the provider's default and get a
+ * different angle in their system prompt instead ({@link draftSystemPrompt}).
  */
-export function draftTemperature(modelId: string, temperature: number): number | undefined {
-	return rejectsSamplingTemperature(modelId) ? undefined : temperature;
+export function draftTemperature(model: DraftModelShape | string, temperature: number): number | undefined {
+	const shape = typeof model === "string" ? { id: model } : model;
+	return rejectsSamplingTemperature(shape.id) || transportRefusesTemperature(shape) ? undefined : temperature;
+}
+
+/**
+ * How a candidate that cannot be spread by temperature is told to differ. The
+ * first draft stays the plain answer, so the judge always has a baseline; the
+ * rest are asked for a distinct route to the same answer. Prompt variation
+ * moves a model less than temperature does, but a judge choosing between
+ * identical drafts is judging nothing.
+ */
+const DRAFT_ANGLES = [
+	"",
+	"Take a different route to the answer than the most obvious one.",
+	"Favor the most minimal answer that is still correct and complete.",
+	"Favor the most robust answer: handle the edge cases the request implies.",
+] as const;
+
+/** The system prompt for candidate `index`; the angle applies only when its sampler was dropped. */
+export function draftSystemPrompt(index: number, samplerDropped: boolean): string {
+	const angle = samplerDropped ? (DRAFT_ANGLES[index] ?? "") : "";
+	return angle === "" ? DRAFT_SYSTEM_PROMPT : `${DRAFT_SYSTEM_PROMPT} ${angle}`;
+}
+
+/** A provider refusing the `temperature` field, in the spellings the OpenAI, Codex and Anthropic backends use. */
+export function isTemperatureRejection(message: string): boolean {
+	return /unsupported (?:parameter|value)[^\n]{0,40}temperature|temperature[^\n]{0,60}(?:not supported|unsupported|does not support|is deprecated)/iu.test(
+		message,
+	);
+}
+
+/**
+ * Run one draft with its sampler, and once more without it when the provider
+ * refuses `temperature`. The model catalog cannot list every backend that does,
+ * and a candidate that fails outright has nothing to vary, so one retry at the
+ * provider's default (with the candidate's angle) is worth more than a red row.
+ * Any other failure, or an abort, rejects unchanged.
+ */
+export async function runDraftWithSamplerFallback<T>(
+	index: number,
+	temperature: number | undefined,
+	run: (sampling: { temperature?: number; systemPrompt: string }) => Promise<T>,
+	signal?: AbortSignal,
+): Promise<T> {
+	try {
+		return await run({
+			...(temperature !== undefined ? { temperature } : {}),
+			systemPrompt: draftSystemPrompt(index, temperature === undefined),
+		});
+	} catch (error) {
+		if (temperature === undefined || signal?.aborted === true) throw error;
+		if (!isTemperatureRejection(error instanceof Error ? error.message : String(error))) throw error;
+		return run({ systemPrompt: draftSystemPrompt(index, true) });
+	}
 }
 
 export const DRAFT_SYSTEM_PROMPT = [
@@ -71,16 +141,6 @@ export const DRAFT_SYSTEM_PROMPT = [
 
 /** Output budget per candidate. A draft is an answer to compare, not a document. */
 export const DRAFT_MAX_TOKENS = 4096;
-
-/** Code points of the request and of one candidate sent to the judge. */
-const MAX_REQUEST_CHARS = 1500;
-const MAX_CANDIDATE_CHARS = 6000;
-
-/**
- * Soundness is advisory beside the pick, and an undecided reading has no
- * business being shown as one. The same floor the relevance pass uses.
- */
-const MIN_CERTAINTY = 0.2;
 
 export interface DraftRequest {
 	count: number;
@@ -109,37 +169,6 @@ export function parseDraftArgs(rest: string): DraftRequest | { error: string } {
 	return { count: DRAFT_DEFAULT, request: trimmed };
 }
 
-function bounded(value: string, maxCodePoints: number): string {
-	const points = [...value.trim()];
-	return points.length <= maxCodePoints ? points.join("") : `${points.slice(0, maxCodePoints - 1).join("")}…`;
-}
-
-/**
- * The judge's state and questions. Each candidate's text is carried once in
- * state and named by label from the questions, so the request grows with the
- * candidates rather than with candidates times questions.
- */
-export function draftJudgeRequest(
-	request: string,
-	candidates: ReadonlyArray<string>,
-): { state: object; questions: Record<string, DecisionQuestion> } {
-	const labels = DRAFT_LABELS.slice(0, candidates.length);
-	const texts: Record<string, string> = {};
-	const options: Record<string, string> = {};
-	const questions: Record<string, DecisionQuestion> = {};
-	labels.forEach((label, index) => {
-		texts[label] = bounded(candidates[index] ?? "", MAX_CANDIDATE_CHARS);
-		options[label] = `Candidate ${label} in state.candidates`;
-		questions[`sound.${label}`] = yesNo(
-			`Is candidate ${label} a correct and complete answer to state.request?`,
-			"Correct, complete, and directly answers the request",
-			"Wrong, incomplete, or answers something else",
-		);
-	});
-	questions.best = pick("Which candidate best answers state.request?", options);
-	return { state: { request: bounded(request, MAX_REQUEST_CHARS), candidates: texts }, questions };
-}
-
 export interface DraftVerdict {
 	/** The winning label, or null when the judge's pick was not one of the candidates. */
 	picked: DraftLabel | null;
@@ -150,61 +179,12 @@ export interface DraftVerdict {
 	/** Target and model, so the operator knows who judged. */
 	source: string;
 	elapsedMs: number;
-}
-
-/** Read the judge's answers. Pure so the reading is testable against recorded answers. */
-export function readDraftVerdict(
-	answers: Record<string, DecisionAnswer>,
-	count: number,
-	source: string,
-	elapsedMs: number,
-): DraftVerdict {
-	const labels = DRAFT_LABELS.slice(0, count);
-	const best = answers.best;
-	const probabilities: Partial<Record<DraftLabel, number>> = {};
-	const sound: Partial<Record<DraftLabel, boolean | null>> = {};
-	for (const label of labels) {
-		const mass = best?.probabilities?.[label];
-		probabilities[label] = typeof mass === "number" && Number.isFinite(mass) ? mass : 0;
-		sound[label] = isTrue(answers[`sound.${label}`], { minConfidence: MIN_CERTAINTY });
-	}
-	const choice = best?.type === "choice" ? best.choice : undefined;
-	const picked = labels.find((label) => label === choice) ?? null;
-	return { picked, probabilities, sound, source, elapsedMs };
+	/** The judging decision's ref, which a later outcome row (the draft the operator took) joins to. */
+	ref?: string;
 }
 
 /** A verdict, or the sentence the overlay shows in its place. */
 export type DraftJudgment = { verdict: DraftVerdict } | { reason: string };
-
-/**
- * Ask the judge. Every way this can fail to produce an opinion resolves to a
- * reason rather than rejecting: the candidates are still worth reading without
- * one, and the overlay says why the bars are missing rather than failing the
- * whole draft. The reason carries the provider's own error, so a rejected
- * credential reads as one and not as a judge with nothing to say.
- */
-export async function judgeDrafts(
-	decider: Decider,
-	request: string,
-	candidates: ReadonlyArray<string>,
-	source: string,
-	signal?: AbortSignal,
-	now: () => number = () => performance.now(),
-): Promise<DraftJudgment> {
-	if (candidates.length < DRAFT_MIN) return { reason: `not judged: fewer than ${DRAFT_MIN} drafts to compare` };
-	const started = now();
-	let answers: Record<string, DecisionAnswer>;
-	try {
-		const { state, questions } = draftJudgeRequest(request, candidates);
-		answers = await decider.ask(state, questions, signal ? { signal } : {});
-	} catch (error) {
-		if (signal?.aborted === true) return { reason: "not judged: cancelled" };
-		return { reason: `not judged: ${source} failed: ${error instanceof Error ? error.message : String(error)}` };
-	}
-	// The soundness answers alone would draw a judged row of empty bars.
-	if (answers.best?.type !== "choice") return { reason: `not judged: ${source} returned no pick` };
-	return { verdict: readDraftVerdict(answers, candidates.length, source, Math.round(now() - started)) };
-}
 
 /**
  * The texts a judgment compares, or why there is none. The judge runs only
@@ -221,36 +201,33 @@ export function draftsToJudge(
 }
 
 /**
- * Bound on the `/draft` judgment. The operator is watching for it, and a live
- * three-candidate judgment answered in 264ms.
- */
-const DRAFT_JUDGE_TIMEOUT_MS = 5_000;
-
-/**
- * Judge settled drafts with the `drafts` decision site, bound per call so
- * binding or unbinding `fleet.decisionProfiles.drafts` mid-session applies to
- * the next draft. The terminal overlay and the ACP host both judge through
- * this, so an unbound site reads the same sentence on both.
+ * Judge settled drafts through the `drafts` site, resolved per call so binding
+ * or unbinding `systemOne.sites.drafts` mid-session applies to the next draft.
+ * The terminal overlay and the ACP host both judge through this, so an unbound
+ * site reads the same sentence on both. Every way of failing to produce an
+ * opinion resolves to a reason rather than rejecting: the candidates are still
+ * worth reading without one.
  */
 export async function judgeDraftsAtSite(
-	input: { settings: Readonly<ClioSettings> | undefined; providers: ProvidersContract | undefined },
+	input: { systemOne: Pick<SystemOne, "run" | "bound"> | undefined },
 	request: string,
 	candidates: ReadonlyArray<string>,
 	signal?: AbortSignal,
+	callRef?: string,
 ): Promise<DraftJudgment> {
-	if (!input.settings || !input.providers) return { reason: "not judged: settings are not loaded" };
-	const status = inspectDecisionSite("drafts", {
-		settings: input.settings as ClioSettings,
-		providers: input.providers,
-		ctx: () => ({ credentialsPresent: credentialsPresent(), httpTimeoutMs: DRAFT_JUDGE_TIMEOUT_MS }),
-	});
-	if (!status.bound) {
-		return {
-			reason:
-				status.reason === "unbound"
-					? "not judged: bind fleet.decisionProfiles.drafts to a System One profile"
-					: `not judged: ${status.detail}`,
-		};
-	}
-	return judgeDrafts(status.decider, request, candidates, `${status.targetId}/${status.model ?? "default"}`, signal);
+	if (candidates.length < DRAFT_MIN) return { reason: `not judged: fewer than ${DRAFT_MIN} drafts to compare` };
+	const systemOne = input.systemOne;
+	if (systemOne === undefined || !systemOne.bound("drafts")) return { reason: UNBOUND_REASON };
+	const ref = callRef ?? `draft_${randomUUID()}`;
+	const verdict = await systemOne.run(
+		DRAFTS_SITE,
+		{ request, candidates },
+		{ ref, ...(signal !== undefined ? { signal } : {}) },
+	);
+	if (signal?.aborted === true) return { reason: "not judged: cancelled" };
+	if (verdict === null) return { reason: "not judged: the drafts engine gave no usable pick in time" };
+	const { picked, probabilities, sound } = verdict.value;
+	return { verdict: { picked, probabilities, sound, source: verdict.build, elapsedMs: verdict.latencyMs, ref } };
 }
+
+export const UNBOUND_REASON = "not judged: bind systemOne.sites.drafts to an engine declared in systemOne.engines";

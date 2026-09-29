@@ -38,42 +38,44 @@ Toggle styles with **Alt+O** (`Compact` → `Standard` → `Detailed` → `Compa
 
 ## 1. Color System
 
-Tokens are defined in [src/interactive/theme/tokens.ts](../../src/interactive/theme/tokens.ts); canonical hex values in [src/core/theme-token-hex.ts](../../src/core/theme-token-hex.ts). Raw ANSI SGR escapes are forbidden outside the theme module.
+Token resolution lives in [src/interactive/theme/tokens.ts](../../src/interactive/theme/tokens.ts); canonical hex values in [src/core/theme-token-hex.ts](../../src/core/theme-token-hex.ts). Raw ANSI SGR escapes are forbidden outside the theme module.
 
 ### 1.1 Color Tokens
 
-| Token | Hex (unknown background) | Role |
+Renderers ask for semantic roles (`TEXT_ROLES` and related matrices in [theme-roles.ts](../../src/core/theme-roles.ts)), where text intensity (`subdued`, `supporting`, `reading`, `focal`, `strong`) and accent intent (`neutral`, `ivory`, `cyan`, `turquoise`, `action`, `success`, `warning`, `error`) are independent. The legacy token names below remain as the compatibility vocabulary for external profiles and configured roster colors. Each maps to one palette entry in `TERMINAL_PALETTE`.
+
+| Token | Hex (unknown background) and palette entry | Role |
 | :--- | :--- | :--- |
-| `editor` | `#09969f` | Cyan composer rails (active input only). |
-| `editorDanger` | `#e35656` | `yolo` everywhere: composer rail caps, the `YOLO` rail label and the launchpad permission field. |
-| `editorAction` | `#d06d25` | Orange preparation / compacting phase rails. |
-| `accent` | `#319789` | Brand and interactivity in the logo's mint: selections, prompts, the active dashboard tab, the CLIO half of the wordmark, voice glyph (`✦`), active phases. |
-| `accentDeep` | `#188b7b` | Bold CAPS section headers and structural tags. |
-| `tool` | `#408c96` | Action-row verbs in the tool ledger. |
-| `agent` | `#c0601f` | Dispatch verbs and active worker counts. |
-| `action` | `#d06d25` | Active operations: dispatch pills, running fleet badges, steering queue markers. |
-| `success` | `#2a9c5c` | Positive outcomes (`✓`), clean git state, added diff lines (`+`). |
-| `warning` | `#aa8118` | Critical warnings (`⚠`), dirty git trees, retry attempts, blocked tools. |
-| `error` | `#dd5353` | Failures (`✗`), error rails, removed diff lines (`-`). |
-| `info` | `#4a90b4` | Informational messages and notices, links, the system-prompt context category, shell flags and numeric code ink, in the site's steel blue. |
-| `reason` | `#9c8664` | Sand reasoning indicators and thinking meter. |
-| `dim` | `#6e7b85` | Scaffolding: separators, shortcuts, durations, timestamps. |
-| `muted` | `#608096` | Secondary text: paths, previews, telemetry counts. |
-| `title` | `#09969f` | Overlay and frame headers, the CODER half of the wordmark and the `C_` of `>C_`, in the logo's cyan. |
-| `frame` | `#577287` | Borders, dividers, unused context meter space. |
-| `frameStrong` | `#09969f` | Transcript scrollbar thumb. |
+| `editor` | `#15959e` (`cyanFocal`) | Composer rails (active input only). |
+| `editorDanger` | `#dd5353` (`error`) | `yolo` composer rail caps, the `YOLO` rail label and the launchpad permission field. |
+| `editorAction` | `#c7783d` (`orangeFocal`) | Preparation and compacting phase rails. |
+| `accent` | `#15959e` (`cyanFocal`) | Selections, prompts, the active dashboard tab, voice glyph (`✦`), active phases. |
+| `accentDeep` | `#1b929a` (`cyanReading`) | Bold CAPS section headers and structural tags. |
+| `action` | `#c7783d` (`orangeFocal`) | Active operations: dispatch pills, running fleet badges, steering queue markers. |
+| `emphasis` | `#998a73` (`neutralFocal`) | Emphasized neutral text. |
+| `tool` | `#928673` (`neutralReading`) | Action-row verbs in the tool ledger. |
+| `agent` | `#258e87` (`turquoise`) | Dispatch verbs and active worker counts. |
+| `success` | `#2a9c5c` (`success`) | Positive outcomes (`✓`), clean git state, added diff lines (`+`). |
+| `warning` | `#b08000` (`warning`) | Warnings, dirty git trees, retry attempts, blocked tools. |
+| `error` | `#dd5353` (`error`) | Failures (`✗`), error rails, removed diff lines (`-`). |
+| `info` | `#288b91` (`cyanSupporting`) | Informational notices and links. |
+| `reason` | `#898071` (`neutralSupporting`) | Reasoning indicators and thinking meter. |
+| `dim` | `#898071` (`neutralSupporting`) | Scaffolding: separators, shortcuts, durations, timestamps. |
+| `muted` | `#928673` (`neutralReading`) | Secondary text: paths, previews, telemetry counts. |
+| `title` | `#a0917c` (`neutralStrong`) | Overlay and frame headers. |
+| `frame` | `#737a80` (`border`) | Borders, dividers, unused context meter space. |
+| `frameStrong` | `#1b929a` (`cyanReading`) | Transcript scrollbar thumb. |
 
-The palette is derived from the Clio Coder logo and iowarp.ai: mint and cyan carry identity, input and selection, the site's orange accent carries action, its steel blue carries information, and its slate carries frames and secondary text. Success is green, warnings amber, errors and `yolo` coral, and reasoning a sand tone beside the orange.
+The palette follows the website's warm stone and ivory paper tones for text, with cyan and copper from the IOWarp logo as accents. Near-white is reserved for answers and entered text.
 
-Each token has three values in [theme-token-hex.ts](../../src/core/theme-token-hex.ts), one per terminal background. Before the terminal lease starts, interactive startup asks the terminal for its background with an OSC 11 query, followed by DA1 so that a terminal which ignores OSC 11 costs one round trip. `COLORFGBG` is the fallback, and `CLIO_CODER_THEME` overrides both. A dark terminal gets the brand near full brightness, a light terminal gets deeper tones, and every text token holds 4:1 on common themes of its kind (a contract checks this). When the background is unknown, the mid-luminance column keeps about 3:1 on both kinds. `frame` recedes on purpose in every column. State is also spelled by labels, meter fill, and motion, so a monochrome terminal does not have to infer it from hue.
+Each palette entry has three projections in [theme-token-hex.ts](../../src/core/theme-token-hex.ts), one per terminal background, each with a truecolor hex and an indexed xterm color. Before the terminal lease starts, interactive startup asks the terminal for its background with an OSC 11 query, followed by DA1 so that a terminal which ignores OSC 11 costs one round trip. `COLORFGBG` is the fallback, and `CLIO_CODER_THEME` overrides both. A dark terminal gets the brighter projection, a light terminal gets deeper tones, and an unknown background uses the mid-luminance column. State is also spelled by labels, meter fill, and motion, so a monochrome terminal does not have to infer it from hue.
 
 ### 1.2 Placement Invariants
 
 - **State Indication**: Color is strictly functional. Telemetry and neutral numbers use `muted` or `dim`.
-- **Orange Scarcity**: Orange marks live work and amber-orange marks a pending operator decision. Settled rows and idle borders stay cyan, mint or neutral.
+- **Orange Scarcity**: Orange marks live work and amber-orange marks a pending operator decision. Settled rows and idle borders stay cyan or neutral.
 - **Budgeting**: Max one non-neutral token per chip; max one status token per framed card.
 - **Status Colors Mean Status**: `success`, `warning` and `error` mark outcomes and conditions only. Categorical color, such as context meter categories, shell flags and code ink, uses brand, `tool`, `info`, `reason` or `agent`, so a healthy screen never shows amber or red. `yolo` is always `editorDanger`.
-- **No Token Pairs**: Every token sits in the middle luminance band, so two tokens never make a readable foreground and background pair. A badge reverses one token, so the terminal's own background becomes its text.
 
 ### 1.3 Composer Rail States
 
@@ -91,11 +93,11 @@ The top rail carries the effective thinking level: five cells for `off`, `minima
 
 ## 2. Glyph Vocabulary
 
-All symbols are defined in [src/interactive/theme/glyphs.ts](../../src/interactive/theme/glyphs.ts). A glyph means one thing everywhere; a surface that needs a new meaning asks for a new constant rather than borrowing a shape.
+All symbols are defined in the `GLYPH` object in [src/interactive/theme/glyphs.ts](../../src/interactive/theme/glyphs.ts). A glyph means one thing everywhere; a surface that needs a new meaning asks for a new constant rather than borrowing a shape.
 
 | Glyph | `GLYPH` key | Token | Meaning | Used by |
 | :--- | :--- | :--- | :--- | :--- |
-| `>C_` | `brand` | `accent`, `title` | Brand wordmark: mint chevron, cyan `C_` | Launchpad, session header and footer dashboard tabs. |
+| `>C_` | `brand` | `accent`, `title` | Brand wordmark | Launchpad, session header and footer dashboard tabs. |
 | `✦` | `agent` | `accent` | Agent voice | First row of agent prose; `error` on a failed turn. |
 | `▌` | `userBar` | `accent` | Operator input | Gutter of every prompt row. |
 | `›` | `user` | `action` | Quoted operator text | Steering queue, command echoes. |
@@ -118,8 +120,8 @@ All symbols are defined in [src/interactive/theme/glyphs.ts](../../src/interacti
 | `✗` | `error` | `error` | Failed | Outcomes, compromised trust verdicts. |
 | `⊘` | `cancelled` | `dim` | Cancelled | Aborted turns and runs. |
 | `↻` | `phaseRetry` | `warning` | Retry | Provider retries and failover. |
-| `ℹ` | `info` | `info` | Notice | Info notices. |
-| `⚠` | `warn` | `warning` | Warning | Warning notices, quota limits, stale state. |
+| `i` | `info` | `info` | Notice | Info notices. |
+| `!` | `warn` | `warning` | Warning | Warning notices, quota limits, stale state. |
 | `│` | `rail` | `frame` | Rail | Island sides, column separators. |
 | `╌` | `innerDivider` | `frame` | Inner divider | Rows inside an island. |
 | `…` | `ellipsis` | inherits | Cut | Every truncation. |
@@ -203,7 +205,7 @@ The input surface (`ClioEditor`) frames the operator's prompt:
 The footer anchors live system telemetry across two lines:
 - **Line 1 (Activity & Model)**: Active tool or worker status, model identity, weekly quota headroom, throughput metrics, and context occupancy meter.
 - **Line 2 (Environment & Hints)**: Working directory, Git branch / dirty status, and rotating context hints.
-- **Notice Slot**: Line 2 has room for one notice. It shows the head of the notice center's order, most severe first and newest within a level, with the level's glyph and token (`✗`, `⚠`, `✓`, `ℹ`). An armed quit or leader key outranks any notice.
+- **Notice Slot**: Line 2 has room for one notice. It shows the head of the notice center's order, most severe first and newest within a level, with the level's glyph and token. An armed quit or leader key outranks any notice.
 - **Narrow Terminals**: Secondary hints yield space to the context percentage and phase without wrapping; optional counts drop before a number is cut.
 
 ### 4.4 State Choreography Table
@@ -251,8 +253,8 @@ Every transcript row follows a rigid 2-column gutter format:
 
 | Subsystem | Source Location | Key Exports |
 | :--- | :--- | :--- |
-| Theme & Tokens | [tokens.ts](../../src/interactive/theme/tokens.ts) | `tokens`, `ColorToken`, `themeTokenHex` |
-| Glyph Constants | [glyphs.ts](../../src/interactive/theme/glyphs.ts) | `glyphs`, `GlyphName` |
+| Theme & Tokens | [tokens.ts](../../src/interactive/theme/tokens.ts) | `ClioToken`, `createClioTheme`, `withThemeContext` |
+| Glyph Constants | [glyphs.ts](../../src/interactive/theme/glyphs.ts) | `GLYPH`, `SPINNER_FRAMES` |
 | Welcome Dashboard | [welcome-dashboard.ts](../../src/interactive/welcome-dashboard.ts) | `buildWelcomeDashboardLines` |
 | Composer | [clio-editor.ts](../../src/interactive/clio-editor.ts) | `ClioEditor` |
 | Session transcript | [session-transcript.ts](../../src/interactive/session-transcript.ts) | `createSessionTranscript` |

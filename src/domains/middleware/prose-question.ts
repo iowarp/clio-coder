@@ -74,6 +74,30 @@ export interface ProseQuestionDeps {
 	getTurnConstraints?: () => TurnConstraints | undefined;
 	/** True only where an operator can answer an interview (interactive, with ask_user registered). */
 	askUserAvailable: () => boolean;
+	/**
+	 * True when a turn-end reading is bound. Bound, a reply the regex reads as a
+	 * question waits for that reading before it earns a continuation.
+	 */
+	turnEndBound?: () => boolean;
+	/**
+	 * Whether the closing text stops on a decision the operator must make. False
+	 * says it is an invitation or an offer of further help, which needs no
+	 * interview, and the continuation is dropped. Null means unbound, unfitted or
+	 * too slow, and the regex reading stands exactly as it does without System One.
+	 */
+	blocksOnOperator?: (turn: {
+		userTurnId: string;
+		request: string;
+		message: string;
+		toolNames: ReadonlyArray<string>;
+	}) => Promise<boolean | null>;
+}
+
+interface DeferredContinuation {
+	readonly userTurnId: string;
+	readonly request: string;
+	readonly message: string;
+	readonly toolNames: ReadonlyArray<string>;
 }
 
 /**
@@ -91,6 +115,12 @@ export interface ProseQuestionDeps {
  * runtime grants one continuation per operator prompt, so a continuation turn
  * is never checked: it could only report the spent cap. Greetings are left
  * alone.
+ *
+ * A trailing question mark or an offer phrase is only a proxy for a reply that
+ * blocks on the operator, so "What are you looking to do?" after a greeting
+ * reads the same as "Which of these two should I pick?". With a turn-end site
+ * bound, the regex proposes and the site disposes: it reads whether the message
+ * stops on a required decision, and an invitation is left alone.
  */
 export function createProseQuestionRegistration(deps: ProseQuestionDeps): MiddlewareHookRegistration {
 	let substantiveTurn = false;
@@ -98,6 +128,8 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 	let wroteThisTurn = false;
 	let planArtifactWritten = false;
 	let askedThisTurn = false;
+	let requestText = "";
+	let deferred: DeferredContinuation | null = null;
 	return {
 		id: PROSE_QUESTION_REGISTRATION_ID,
 		description: "request one continuation when a substantive turn ends on a prose question instead of ask_user",
@@ -109,6 +141,8 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 				wroteThisTurn = false;
 				planArtifactWritten = false;
 				askedThisTurn = false;
+				requestText = input.text ?? "";
+				deferred = null;
 				return NO_EFFECTS;
 			}
 			if (input.hook === "after_tool") {
@@ -133,6 +167,18 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 			// closing text asks after it.
 			const text = input.text ?? "";
 			if (endsOnProseQuestion(text)) {
+				const userTurnId = input.metadata?.userTurnId;
+				if (deps.blocksOnOperator !== undefined && deps.turnEndBound?.() === true && typeof userTurnId === "string") {
+					// This phase cannot wait for the reading, so the async phase decides.
+					const names = input.metadata?.turnToolNames;
+					deferred = {
+						userTurnId,
+						request: requestText,
+						message: text,
+						toolNames: typeof names === "string" ? names.split(",").filter((name) => name.length > 0) : [],
+					};
+					return NO_EFFECTS;
+				}
 				return [{ kind: "request_continuation", message: PROSE_QUESTION_CONTINUATION_MESSAGE }];
 			}
 			// A planning turn ends on the operator's go-ahead, which is itself a
@@ -149,6 +195,20 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 				return [{ kind: "request_continuation", message: PLAN_APPROVAL_CONTINUATION_MESSAGE }];
 			}
 			return NO_EFFECTS;
+		},
+		async evaluateAsync(): Promise<ReadonlyArray<MiddlewareEffect>> {
+			const pending = deferred;
+			deferred = null;
+			if (pending === null || deps.blocksOnOperator === undefined) return NO_EFFECTS;
+			let blocks: boolean | null = null;
+			try {
+				blocks = await deps.blocksOnOperator(pending);
+			} catch {
+				// An unreadable verdict is no verdict, and the regex reading stands.
+			}
+			return blocks === false
+				? NO_EFFECTS
+				: [{ kind: "request_continuation", message: PROSE_QUESTION_CONTINUATION_MESSAGE }];
 		},
 	};
 }

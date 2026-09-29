@@ -139,12 +139,16 @@ export async function postSystemOne(
 		timeoutMs: ctx.httpTimeoutMs,
 		headers: { ...request.headers, "content-type": "application/json" },
 		body: JSON.stringify(body),
+		readErrorBody: true,
 	};
 	const response = await (signal
 		? probeJson<SystemOneResponse>({ ...http, signal })
 		: probeJson<SystemOneResponse>(http));
 	if (!response.ok || !response.data) {
-		throw new Error(`${request.label} decide failed: ${response.error ?? "unknown"}`);
+		// A 422 or 529 body names the cause (a rejected question, an overloaded
+		// backend); the status line alone does not.
+		const cause = response.errorBody === undefined ? "" : `: ${response.errorBody.replace(/\s+/gu, " ").slice(0, 300)}`;
+		throw new Error(`${request.label} decide failed: ${response.error ?? "unknown"}${cause}`);
 	}
 	const answers: Record<string, DecisionAnswer> = {};
 	for (const [id, raw] of Object.entries(response.data.answers ?? {})) {
@@ -160,7 +164,9 @@ export async function postSystemOne(
 		throw new Error(`${request.label} decide returned no usable answer for: ${questionIds.join(", ")}`);
 	}
 	const result: DecideResult = {
-		model: typeof response.data.model === "string" ? response.data.model : (request.model ?? "unknown"),
+		// Never the requested id: cuts are keyed by the build that answered, and a
+		// server that does not say which build answered must not borrow a fitted one.
+		model: typeof response.data.model === "string" ? response.data.model : "unknown",
 		answers,
 	};
 	const input = numberOrUndefined(response.data.usage?.input_tokens);

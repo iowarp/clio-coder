@@ -3,8 +3,8 @@ import { acceptanceFromTaskFlags } from "../cli/tasks.js";
 import { BusChannels } from "../core/bus-events.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import type { SettingsSectionId } from "../core/settings-navigation.js";
-import { resolveSettingsSection, SETTINGS_SECTIONS } from "../core/settings-navigation.js";
+import type { SettingsAreaId } from "../core/settings-areas.js";
+import { resolveSettingsArea, SETTINGS_AREAS } from "../core/settings-areas.js";
 import { parseCouncilReport, parseOracleResult } from "../domains/agents/index.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { ContextInitOptions } from "../domains/context/init-options.js";
@@ -106,8 +106,8 @@ type ArchiveCommandVariant =
 	| { kind: "archive-import"; path: string; dryRun: boolean; force: boolean }
 	| { kind: "archive-usage"; subcommand?: "export" | "import"; error?: string };
 
-export const SETTINGS_AREA_IDS = SETTINGS_SECTIONS.map((section) => section.id);
-export type SettingsAreaId = SettingsSectionId;
+export const SETTINGS_AREA_IDS = SETTINGS_AREAS.map((area) => area.id);
+export type { SettingsAreaId };
 
 /** What `/library <verb> <ref>` asks the browser to review once it is open. */
 export type LibraryBrowseIntent = "install" | "update" | "enable" | "disable" | "remove";
@@ -1114,7 +1114,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "help",
-		description: "Open the interactive help center showing commands and keys",
+		description: "Open the help center for commands and keys",
 		group: "Inspect",
 		kinds: ["help"],
 		args: {
@@ -1129,7 +1129,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "skill",
-		description: "Invoke a skill, or use `off` to clear its tool surface",
+		description: "Invoke a skill, or use `off` to clear active skill tools",
 		group: "Work",
 		kinds: ["skill-invocation", "skill-surface-clear"],
 		args: {
@@ -1168,7 +1168,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "library",
-		description: "Open the full-screen recipe library, review a package operation, or reload installed recipes",
+		description: "Browse recipes, or review a package install, removal or reload",
 		group: "Inspect",
 		kinds: ["resources"],
 		subcommandDescriptions: {
@@ -1299,7 +1299,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "mcp",
-		description: "List MCP servers or manage explicit trust with trust <id> [class] and untrust <id>",
+		description: "List MCP servers, or trust or untrust one by id",
 		group: "Inspect",
 		kinds: ["mcp"],
 		args: {
@@ -1322,7 +1322,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "doctor",
-		description: "Diagnose this install in-session; /doctor deep adds live tool probes and a contract dry run",
+		description: "Check this install; `deep` adds live tool probes and a contract dry run",
 		group: "Inspect",
 		kinds: ["doctor"],
 		args: { positionals: [{ name: "deep", required: false, values: ["deep"] }] },
@@ -1490,7 +1490,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "run",
-		description: "Run a fleet agent",
+		description: "Run a fleet agent on a task",
 		group: "Work",
 		kinds: ["run", "run-usage"],
 		args: {
@@ -1587,7 +1587,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "delegate",
-		description: "Run an ACP delegation agent",
+		description: "Hand a task to an external ACP agent",
 		group: "Work",
 		kinds: ["delegate", "delegate-usage"],
 		args: {
@@ -1664,7 +1664,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "draft",
-		description: "Draft N answers in parallel (2-4, default 3) and let a decision model pick the strongest",
+		description: "Draft 2-4 answers in parallel and pick the strongest",
 		group: "Work",
 		kinds: ["draft", "draft-usage"],
 		args: {
@@ -1689,7 +1689,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "oracle",
-		description: "Ask a read-only advisor to challenge a question against this session's settled decisions",
+		description: "Have a read-only advisor challenge a question against settled decisions",
 		group: "Work",
 		kinds: ["oracle", "oracle-usage"],
 		args: {
@@ -1716,7 +1716,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "council",
-		description: "Ask a roster of read-only members the same task, with an optional vote or judge synthesis",
+		description: "Ask several read-only agents the same task, then vote or synthesize",
 		group: "Work",
 		kinds: ["council", "council-usage"],
 		args: {
@@ -1816,13 +1816,13 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "context",
-		description: "Context hub: window overlay plus compact, recall, init, refresh, and reset",
+		description: "Show the context window, or manage session and project context",
 		group: "Inspect",
 		kinds: ["context-view", "compact", "context-recover", "context-recall", "init", "context-clear", "context-refresh"],
 		subcommandDescriptions: {
-			compact: "Compact session context",
-			recover: "Recover a paused handoff: ID reduce|deliver",
-			recall: "Recall an evicted result",
+			compact: "Shrink the session context to free room",
+			recover: "Resume a paused handoff by reducing or delivering it",
+			recall: "Bring back a result evicted from context",
 			init: "Initialize project context",
 			refresh: "Refresh project context",
 			reset: "Reset project context",
@@ -1926,7 +1926,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "fleet",
-		description: "Open Fleet Runs or run a fleet contract with an approval preview",
+		description: "Show live fleet runs, or preview and run a fleet contract",
 		group: "Work",
 		kinds: ["fleet", "fleet-run", "fleet-run-usage"],
 		subcommandDescriptions: { run: "Preview and run a repo-owned fleet contract" },
@@ -1989,7 +1989,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "tasks",
-		description: "Show the session board or manage project operator tasks",
+		description: "Show the session task board, or manage project tasks",
 		group: "Inspect",
 		kinds: ["tasks", "tasks-add", "tasks-hand", "tasks-done", "tasks-drop"],
 		subcommandDescriptions: {
@@ -2219,7 +2219,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "panes",
-		description: "Inspect the pane layer, watch a live run in a pane, or open a utility pane",
+		description: "Show pane status, watch a run in a pane, or open a utility pane",
 		group: "Inspect",
 		kinds: ["panes", "panes-show", "panes-open", "panes-zoom", "panes-close", "panes-usage"],
 		args: {
@@ -2233,10 +2233,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			},
 		},
 		subcommandDescriptions: {
-			show: "watch a live run or agent in the watch pane",
-			open: `open a utility pane (${PANES_PRESET_IDS.join(", ")}, \`files --once\` for one pick, or a command)`,
-			zoom: "toggle zoom on a Clio-owned pane (default: the watch pane)",
-			close: "close a Clio-owned pane, or all of them",
+			show: "Watch a live run or agent in the watch pane",
+			open: `Open a utility pane (${PANES_PRESET_IDS.join(", ")}, \`files --once\` for one pick, or a command)`,
+			zoom: "Toggle zoom on a Clio-owned pane (default: the watch pane)",
+			close: "Close a Clio-owned pane, or all of them",
 		},
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "panes-usage", reason: parsed.error };
@@ -2374,9 +2374,9 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		kinds: ["files", "files-usage"],
 		args: { positionals: [{ name: "action", required: false }] },
 		subcommandDescriptions: {
-			open: "open the files pane, or focus it when it is already open",
-			close: "close the files pane",
-			pick: "borrow the files pane for one selection, then close it",
+			open: "Open the files pane, or focus it when it is already open",
+			close: "Close the files pane",
+			pick: "Borrow the files pane for one selection, then close it",
 		},
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "files-usage", reason: parsed.error };
@@ -2454,7 +2454,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "model",
-		description: "Open model selector or set a model",
+		description: "Pick a model, or set one by name",
 		group: "Configure",
 		kinds: ["model", "model-set"],
 		args: {
@@ -2519,7 +2519,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (parsed.error) return { kind: "usage-error", command: "settings", reason: parsed.error };
 			const name = parsed.positionals[0];
 			if (name === undefined) return { kind: "settings" };
-			const area = resolveSettingsSection(name);
+			const area = resolveSettingsArea(name);
 			if (!area) {
 				return {
 					kind: "usage-error",
@@ -2602,7 +2602,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "export",
-		description: "Export a self-contained HTML transcript by default; a .md path writes Markdown",
+		description: "Export the transcript as HTML, or as Markdown for a .md path",
 		group: "Session",
 		kinds: ["export"],
 		args: {

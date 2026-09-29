@@ -15,6 +15,7 @@ opens every writable connection with:
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
 PRAGMA busy_timeout=5000;
+PRAGMA foreign_keys=ON;
 ```
 
 Readers open SQLite in read-only mode and set `busy_timeout=5000`. They verify
@@ -103,7 +104,7 @@ writes before slower evidence builds.
 
 ## CLI Commands
 
-The `clio-coder trace` command surfaces 9 subcommands for inspecting, bounding, and querying the SQLite trace mirror, plus the code-step record files beside it:
+The `clio-coder trace` command surfaces 8 subcommands for inspecting, bounding, and querying the SQLite trace mirror, plus the code-step record files beside it:
 
 ```bash
 clio-coder trace runs [--db PATH] [--limit N] [--json]
@@ -134,7 +135,7 @@ When resolving the SQLite database path:
 3. **`phases`**: Lists sequence phases for a designated `runId`. Displays status, attempt, owner, total tokens, USD cost, and phase name.
 4. **`tail`**: Displays append-ordered event rows for a designated `runId`. When `--follow` is specified, polls for new events every 500 ms until two consecutive idle polls observe a finished run status.
 5. **`procs`**: Lists the worker process executions associated with a `runId`. Displays state (`live` or `ended`), PID, process kind, name, and command string.
-6. **`prune`**: Applies the resolved age and byte retention policy while protecting queued and running runs. Text and JSON results report the policy, removed runs and rows, physical bytes reclaimed, protected runs, and whether `VACUUM` ran.
+6. **`prune`**: Applies the resolved age and byte retention policy (defaults from `DEFAULT_TRACE_RETENTION_POLICY`, overridable with `CLIO_CODER_TRACE_RETENTION_DAYS` and `CLIO_CODER_TRACE_MAX_BYTES`, or per command with `--max-age-days` and `--max-bytes`) while protecting queued and running runs. Text and JSON results report the policy, removed runs and rows, physical bytes reclaimed, protected runs, and whether `VACUUM` ran.
 7. **`sql`**: Executes a single read-only `SELECT` or `WITH` SQL statement against the SQLite trace database. The subcommand enforces read-only access before opening storage: queries containing semicolons or data mutation keywords (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, etc.) are rejected with exit code 2. BigInt numbers in result objects format as JSON strings.
 
 ### Unified Web Trace API

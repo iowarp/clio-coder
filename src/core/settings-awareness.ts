@@ -1,5 +1,6 @@
 import type { ClioSettings } from "./config.js";
 import { getAtPath } from "./session-routing.js";
+import { settingsAreaForPath } from "./settings-areas.js";
 import { SETTING_CONTROLS } from "./settings-controls.js";
 import { resolveSettingsSection, settingsSectionForPath } from "./settings-navigation.js";
 
@@ -70,7 +71,7 @@ export function settingsAwareness(settings: Readonly<ClioSettings>, query = "", 
 				? { value: getAtPath(settings, control.path) ?? null }
 				: { valueOmitted: "Free-form or structured value; inspect through the user settings UI." }),
 			...(control.choices ? { choices: control.choices } : {}),
-			tui: `/settings ${settingsSectionForPath(control.path)}`,
+			tui: `/settings ${settingsAreaForPath(control.path)}`,
 			cli: `clio-coder configure --section ${settingsSectionForPath(control.path)}`,
 		};
 	});

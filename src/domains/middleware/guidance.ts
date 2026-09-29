@@ -322,10 +322,7 @@ export function createGuidanceRegistration(deps: GuidanceDeps): MiddlewareHookRe
 		shown.add(pick.lesson.id);
 		turnsSinceTip = 0;
 		profile.lessonShown(pick.lesson.id);
-		// The transcript styles a leading [tag] as the part of Clio speaking.
-		const message = firstEver
-			? `[tip] ${pick.text} Tips like this come from Demo guidance in /settings, which also turns them off.`
-			: `[tip] ${pick.text}`;
+		const message = firstEver ? `[tip] ${pick.text} Demo guidance in /settings turns tips off.` : `[tip] ${pick.text}`;
 		return [{ kind: "notify_operator", message, key: `guidance.${pick.lesson.id}` }];
 	};
 

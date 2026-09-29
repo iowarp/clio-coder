@@ -1,16 +1,9 @@
 export type { TokenSplit } from "../../core/token-split.js";
-export { calibrateInterpretation } from "./calibration.js";
 export type { WorkflowDecision } from "./decide.js";
-export {
-	DIRECTION_REQUESTED_THRESHOLD,
-	decide,
-	decisionHash,
-	ORIENTATION_WANTED_THRESHOLD,
-} from "./decide.js";
+export { decide, decisionHash } from "./decide.js";
 export type { TurnFacts, WorkspaceFingerprint } from "./facts.js";
 export { factsDigest, fingerprintEquals } from "./facts.js";
-export type { DispatchShape, HarnessIntent, TurnInterpretation } from "./interpretation.js";
-export { TURN_INTERPRETATION_VERSION } from "./interpretation.js";
+export type { HarnessIntent, TurnInterpretation } from "./interpretation.js";
 export type { TurnOutcomeInput, TurnOutcomeRecord } from "./outcome.js";
 export { conversationShape, dispatchKeysFromArgs, nextClarificationStreak, reduceTurnOutcome } from "./outcome.js";
 export type { TurnControlRecord } from "./record.js";

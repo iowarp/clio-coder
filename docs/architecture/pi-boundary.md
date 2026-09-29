@@ -20,7 +20,7 @@ when upgrading Pi.
 | pi-ai `Usage.reasoning` | `src/engine/apis/openai-completions.ts` reasoning estimate | Keep the Clio fallback. | Some self-hosted servers stream thinking but report no reasoning usage. Clio fills only an absent value. |
 | No Pi equivalent | `src/engine/apis/openai-completions.ts` sentinel filters, [harmony-response.ts](../../src/engine/harmony-response.ts), and [gemma-channel-filter.ts](../../src/engine/gemma-channel-filter.ts) | Keep Clio ownership. | Pi has no Harmony or Gemma channel parser and no tokenizer-sentinel stream filter. |
 | pi-ai `clampMaxTokensToContext` | [output-budget.ts](../../src/engine/apis/output-budget.ts) | Keep the Clio outer budget. | Clio adds its default output budget, a llama.cpp tool-turn cap, and the loaded context window. Pi's conservative clamp still runs underneath. |
-| pi-ai Anthropic `streamSimple` request assembly | [provider-payload.ts](../../src/engine/provider-payload.ts) Anthropic thinking patch | Route through Pi. | Pi produces the same adaptive effort and token-budget fields from the active thinking level. |
+| pi-ai Anthropic `streamSimple` request assembly | [provider-payload.ts](../../src/engine/provider-payload.ts) `patchProviderThinkingPayload` | Route through Pi. | Pi maps the active thinking level onto adaptive effort or a bounded `budget_tokens`, so Clio leaves the Anthropic payload untouched. |
 | pi-ai `OpenAIResponsesOptions.reasoningSummary` | `src/engine/provider-payload.ts` OpenAI reasoning-summary patch | Keep the Clio patch. | Pi's `Agent` path calls `streamSimple`, which fixes this field to `auto` and exposes no caller option. |
 | No Pi equivalent | [ollama-native.ts](../../src/engine/apis/ollama-native.ts), [lmstudio.ts](../../src/engine/apis/lmstudio.ts), and [llamacpp-residency.ts](../../src/engine/apis/llamacpp-residency.ts) | Keep Clio ownership. | Pi's Ollama provider uses OpenAI completions and has no target residency manager. |
 | pi-ai `CredentialStore` and `Models.getAuth` | [storage.ts](../../src/domains/providers/auth/storage.ts) | Keep Clio ownership. | Clio's locked YAML store, damage control, target-first registry, and runtime overrides are product boundaries. |
@@ -124,7 +124,7 @@ behavior and should not grow another implementation of an SDK primitive.
 - [api-registry.ts](../../src/engine/api-registry.ts) owns Clio's ordered dispatcher using Pi's public lazy API factories and the provider catalogs selected in [models.ts](../../src/engine/models.ts) for Clio's built-in runtimes. Its dynamic `/compat` bridge exists only for configured out-of-tree runtime plugins that require Pi's process-global registry identity.
 - [env-api-keys.ts](../../src/engine/env-api-keys.ts) pins Pi 0.87.1's synchronous environment-key and ambient-credential discovery behind a parity contract; revisit it on every Pi upgrade until Pi exports that helper directly.
 - [openai-completions.ts](../../src/engine/apis/openai-completions.ts) maps compatibility flags, sampling parameters, and thinking budgets. Its Clio deltas are the local-runtime guards and sentinel, Harmony, and Gemma filters.
-- [provider-payload.ts](../../src/engine/provider-payload.ts) retains only the OpenAI Responses reasoning-summary patch.
+- [provider-payload.ts](../../src/engine/provider-payload.ts) holds the OpenAI Responses reasoning-summary patch and the tool-choice and response-schema payload patches. It does not patch Anthropic thinking.
 - [types.ts](../../src/engine/types.ts) and [ai.ts](../../src/engine/ai.ts) expose erased Pi types and `StringEnum` behind the engine boundary.
 - [retry.ts](../../src/domains/session/retry.ts) wraps `isRetryableAssistantError` and adds the local-model loading rule.
 - [chat-renderer.ts](../../src/interactive/chat-renderer.ts) consumes Pi's compaction, branch, and bash replay wording through [messages.ts](../../src/engine/messages.ts).
@@ -141,7 +141,7 @@ else, `src/interactive/**` included, reaches Pi through engine re-exports such a
 (`EngineModel`, `Api`, `Model`) from [types.ts](../../src/engine/types.ts) and [ai.ts](../../src/engine/ai.ts).
 
 [check-boundaries.ts](../../tests/boundaries/check-boundaries.ts) enforces this statically over the import
-graph, alongside five other isolation rules including the Stage 0 instant-shell
+graph, alongside six other isolation rules including the Stage 0 instant-shell
 closure (`STAGE_0_OWNER`, `STAGE0_SEAMS`). [engine-lifecycle.test.ts](../../tests/contracts/engine-lifecycle.test.ts)
 covers agent-loop ordering, reset, tool-argument normalization, the keybinding
 table and alt-screen render seams; [tool-boundaries.test.ts](../../tests/contracts/tool-boundaries.test.ts)

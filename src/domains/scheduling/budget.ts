@@ -15,7 +15,7 @@ export class SessionCostCeilingError extends Error {
 		readonly ceilingUsd: number,
 	) {
 		super(
-			`${SESSION_COST_CEILING_REASON}: session priced spend $${currentUsd.toFixed(4)} reached the $${ceilingUsd.toFixed(4)} ceiling; raise budget.sessionCeilingUsd`,
+			`${SESSION_COST_CEILING_REASON}: session priced spend $${currentUsd.toFixed(4)} reached the $${ceilingUsd.toFixed(4)} ceiling; raise safety.limits.sessionCostUsd`,
 		);
 	}
 }

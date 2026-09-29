@@ -1,6 +1,5 @@
 import type { ContextRecalledPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
-import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { BudgetProvider } from "../domains/context/budget/inspection.js";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";
@@ -12,6 +11,7 @@ import type { SessionContract } from "../domains/session/contract.js";
 import type { DecisionBoardStore } from "../domains/session/decision-board.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { createTaskBoardStore, type TaskBoardStore } from "../domains/session/task-board.js";
+import type { RelevanceRanker } from "../domains/system-one/rank.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AgentLedgerPort } from "../worker/protocol.js";
@@ -30,7 +30,7 @@ import { evidenceTool } from "./evidence.js";
 import { findTool } from "./find.js";
 import { clioDocsToolSurface, clioLibraryToolSurface } from "./gateway/clio-context-surface.js";
 import { dataToolSurface, prepareDataAdmissionArguments } from "./gateway/data-surface.js";
-import { createGatewayTool, type GatewayCapabilityRanker, type McpCapabilitySource } from "./gateway/index.js";
+import { capabilityRankerFrom, createGatewayTool, type McpCapabilitySource } from "./gateway/index.js";
 import { grepTool } from "./grep.js";
 import { lazyTool } from "./lazy-tool.js";
 import { createLedgerTool } from "./ledger.js";
@@ -87,22 +87,21 @@ export interface CoreToolBootstrapDeps {
 	>;
 	skillMarketplace?: boolean;
 	/**
-	 * This turn's per-skill relevance scores, when a decision site is bound.
-	 * They order the skills listing and never shorten it, so a worker registry
-	 * that carries none simply lists in catalog order.
+	 * Ranks the skills listing by meaning through the `relevance` site. It orders
+	 * the listing and never shortens it, so a worker registry that carries none
+	 * simply lists in catalog order.
 	 */
-	getSkillRelevance?: () => PrecomputedRanking | undefined;
+	rankRelevance?: RelevanceRanker;
+	/** A skill the model loaded, so a ranked one can be joined to its ranking as a follow-up. */
+	onSkillLoaded?: (name: string) => void;
 	/**
 	 * Local MCP servers the gateway may launch. The session bootstrap builds
 	 * one per process; worker registries carry none, so a worker's gateway
 	 * reaches builtin and extension capabilities only.
 	 */
 	mcpCapabilities?: McpCapabilitySource;
-	/**
-	 * Ranks gateway find results from the `capabilities` decision site. Only the
-	 * session binds it; without it find lists exactly as it always has.
-	 */
-	rankCapabilities?: GatewayCapabilityRanker;
+	/** A capability the model called through the gateway, so a ranked one can be joined to its ranking as a follow-up. */
+	onCapabilityCalled?: (name: string) => void;
 	/**
 	 * The `consult` decision site, when it is bound at startup. Only the session
 	 * passes it; without it the tool is not registered and the gateway listing,
@@ -207,7 +206,8 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
 		...(deps.getSkillLoaderOptions ? { getSkillLoaderOptions: deps.getSkillLoaderOptions } : {}),
 		...(deps.skillMarketplace !== undefined ? { skillMarketplace: deps.skillMarketplace } : {}),
-		...(deps.getSkillRelevance ? { getSkillRelevance: deps.getSkillRelevance } : {}),
+		...(deps.rankRelevance ? { rankRelevance: deps.rankRelevance } : {}),
+		...(deps.onSkillLoaded ? { onSkillLoaded: deps.onSkillLoaded } : {}),
 	};
 	if (deps.askUser) {
 		registry.register({
@@ -320,7 +320,8 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		createGatewayTool({
 			registry,
 			...(deps.mcpCapabilities ? { mcp: deps.mcpCapabilities } : {}),
-			...(deps.rankCapabilities ? { rankCapabilities: deps.rankCapabilities } : {}),
+			...(deps.rankRelevance ? { rankCapabilities: capabilityRankerFrom(deps.rankRelevance) } : {}),
+			...(deps.onCapabilityCalled ? { onCapabilityCalled: deps.onCapabilityCalled } : {}),
 		}),
 		{
 			path: "src/tools/gateway/index.ts",

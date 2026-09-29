@@ -11,7 +11,6 @@ sources:
   - "src/domains/providers/runtimes/common/probe-helpers.ts"
   - "src/domains/providers/contract.ts"
   - "src/domains/providers/eligibility.ts"
-  - "src/domains/providers/sites/index.ts"
 symbols:
   - "ProvidersDomainModule"
   - "createProvidersDomainModule"
@@ -83,7 +82,6 @@ than the shared snapshot.
 | Eligibility | `src/domains/providers/eligibility.ts` | `isTargetEligibleRuntime`, `isOrchestratorEligibleRuntime`, `isDispatchEligibleRuntime` |
 | Credential store | `src/domains/providers/auth/storage.ts` | `AuthStorage`, `AuthStorageDamagedError`, `resolveAuthTarget`, `targetRequiresAuth` |
 | HTTP probe helpers | `src/domains/providers/runtimes/common/probe-helpers.ts` | `probeOpenAIModelCatalog`, `probeLlamaCppModelStatus`, `parseLlamaCppServerFlags`, `llamaCppRequestContextWindow` |
-| Pre-turn decision sites | `src/domains/providers/sites/index.ts` | `TURN_SITES`, `turnSites` |
 | Domain manifest | `src/domains/providers/manifest.ts` | `ProvidersManifest` (depends on `config`) |
 
 ## Lifecycle and control flow
@@ -268,7 +266,6 @@ accepts worker-dispatch runtimes.
 | New capability layer | `src/domains/providers/capabilities.ts` `mergeCapabilities` layer list |
 | New thinking mechanism | `inferThinkingMechanism` + `applyThinkingMechanism` switch in `model-runtime-capabilities.ts` |
 | New context-window source | `ContextWindowSource` union in `runtime-resolution.ts` + `resolveContextWindowDetails` priority chain |
-| New pre-turn decision site | `src/domains/providers/sites/index.ts`: add to `TURN_SITES` array |
 | New credential type | `AuthCredential` union in `auth/storage.ts` + `readStorageData` / `toApiKeyCredential` / `toOAuthCredential` |
 
 ## Focused tests

@@ -57,8 +57,10 @@ arguments; those invocations do not receive qualifying quality snapshots.
 
 The parser rejects unknown fields, duplicate YAML keys, aliases, duplicate
 rule IDs, and duplicate strings in a list. Version 1 permits at most 32 rules,
-with 1–32 entries per pattern or check list. IDs are bounded to 64 characters,
-patterns to 512 characters, and the policy to 64 KiB.
+with 1–32 entries per pattern or check list. Rule IDs are lowercase, start with
+a letter, and use `a-z`, `0-9`, `.`, `_` and `-` up to 64 characters. Check IDs
+use letters, digits, `:`, `.`, `_` and `-` up to 64 characters, and `frontend` is
+not allowed. Patterns are bounded to 512 characters and the policy to 64 KiB.
 
 ## Discover, verify and finish
 
@@ -90,7 +92,7 @@ per applicable rule/check:
 | `unavailable` | Clio could not capture or compare the bounded inputs. |
 | `limited` | The rule explicitly permits a check-scoped limitation; the check remains unverified. |
 
-A valid quality policy selects high rigor by default. An explicit rigor
+A valid quality policy selects high rigor by default. An invalid policy does not: rigor stays normal unless a valid validation contract raises it, and the parse error is carried as a diagnostic. An explicit rigor
 override still wins: `CLIO_CODER_RIGOR=normal` makes the completion assessment
 an advisory; high rigor requests continuation for outstanding checks when
 the current turn permits recovery. No reminder grants additional tool or

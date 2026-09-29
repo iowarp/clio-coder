@@ -23,10 +23,13 @@ import {
 	DEFAULT_AUTONOMY_LEVEL,
 	mapAutonomy,
 } from "../domains/safety/autonomy.js";
+import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
+import { SYSTEM_ONE_GATE_RULE_ID } from "../domains/safety/decision-presentation.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
+import { screensToolResult } from "../domains/system-one/sites/tool-result.js";
 import type { ImageContent } from "../engine/types.js";
 import { withApprovalNote } from "./approval-note.js";
 import { askUserExposure } from "./ask-user.js";
@@ -218,6 +221,21 @@ export type ToolResult =
 	  }
 	| { kind: "error"; message: string; details?: ToolResultDetails; modelContext?: string };
 
+/** What the yolo gate is told about a call: the card's own allowlisted, redacted one-line description. */
+export interface ToolCallGateSubject {
+	readonly tool: string;
+	readonly actionClass: string;
+	readonly target: string;
+}
+
+/** The gate's opinion. It can only ask for more friction, never remove any. */
+export interface ToolCallGateVerdict {
+	readonly escalate: boolean;
+	readonly reason: string;
+	/** The build that answered, as its decision record names it. The card and the transcript rows state it. */
+	readonly build?: string;
+}
+
 export interface RegistryDeps {
 	safety: SafetyContract;
 	/**
@@ -246,6 +264,42 @@ export interface RegistryDeps {
 	autonomy?: () => AutonomyLevel;
 	/** Dispatch-owned restriction, fixed for the lifetime of this run. */
 	readOnly?: boolean;
+	/**
+	 * Reads external content (a fetched page, an MCP result, worker text) for
+	 * instructions aimed at an agent, and returns a banner to put in front of the
+	 * result, or null. It only tightens: the deterministic marker scan runs
+	 * regardless, and a null, a failure or a slow answer leaves the result as it
+	 * was. Awaited between the tool body and the `after_tool` hook, so its own
+	 * deadline is the most it can add to a call. Absent in workers.
+	 */
+	screenToolResult?: (
+		source: string,
+		content: string,
+		ref: string | undefined,
+		signal: AbortSignal | undefined,
+	) => Promise<string | null>;
+	/**
+	 * Asked when autonomy is yolo and an execute-class call was admitted as
+	 * unrecognized, before it runs. An escalating verdict parks the call for a
+	 * one-shot confirmation card that shows the reason, but only where
+	 * `gateParks` is set. `ref` is the permission request id the card would
+	 * carry, so the decision joins the operator's answer. Only the interactive
+	 * TUI registry passes it. Headless and ACP pass none: they have no operator
+	 * to answer a card, so asking would cost up to the site deadline per
+	 * unrecognized execute call and record a verdict nobody can label, and
+	 * without it the call runs as it did before the gate existed. Absent in workers.
+	 */
+	gateToolCall?: (
+		subject: ToolCallGateSubject,
+		ref: string | undefined,
+		signal: AbortSignal | undefined,
+	) => Promise<ToolCallGateVerdict | null>;
+	/**
+	 * True only on the interactive session's registry, the one registry given a
+	 * `gateToolCall`. A registry that has a gate but no operator to answer it
+	 * records the verdict and lets the call proceed.
+	 */
+	gateParks?: boolean;
 }
 
 export interface ToolInvokeOptions {
@@ -412,6 +466,16 @@ export interface PermissionRequiredMeta {
 	 * admission judged rather than re-rendering it from the arguments.
 	 */
 	dispatchPlan?: DispatchPlanView;
+	/**
+	 * Set when the System One gate raised this park, to the reason it gave. That
+	 * reason is the card's whole advisory and the card asks no second site: the
+	 * gate's decision is already on the ledger under `requestId`, and a second
+	 * reading of the same command only adds latency and a line that can
+	 * contradict the reason the card exists.
+	 */
+	gateReason?: string;
+	/** The build that gave `gateReason`, so the card and the transcript rows can say whose judgment it was. */
+	gateBuild?: string;
 }
 
 export interface ToolRegistry {
@@ -562,11 +626,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const nestedBlocked = nestedBlockedVerdict(result);
 				if (nestedBlocked !== null) return nestedBlocked;
 				decision = nestedDecisions.get(result) ?? decision;
-				const digest = toolResultDigestFor(spec, result, resultDisposition, options);
-				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result, digest);
+				const screened = await screenExternalResult(spec, call, result, options);
+				const digest = toolResultDigestFor(spec, screened, resultDisposition, options);
+				const afterEffects = runToolHook("after_tool", spec, call, decision, options, screened, digest);
 				const finalResult = shapeToolResult(
 					spec,
-					applyToolResultEffects(result, [...beforeEffects, ...afterEffects]),
+					applyToolResultEffects(screened, [...beforeEffects, ...afterEffects], screened !== result),
 					options,
 					resultDisposition,
 				);
@@ -613,10 +678,50 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		return effects;
 	};
 
+	/**
+	 * Put System One's banner in front of a result that carries someone else's
+	 * text. Placed before the hook so the deterministic marker scan reads the
+	 * same bytes the model will, and tighten-only: any failure returns the
+	 * result untouched.
+	 */
+	const screenExternalResult = async (
+		spec: ToolSpec,
+		call: ClassifierCall,
+		result: ToolResult,
+		options: ToolInvokeOptions | undefined,
+	): Promise<ToolResult> => {
+		const screen = deps.screenToolResult;
+		if (screen === undefined || result.kind !== "ok" || !screensToolResult(spec.name)) return result;
+		if (result.output.trim().length === 0) return result;
+		try {
+			const banner = await screen(
+				`${spec.name} ${describeCallTarget(spec.name, call.args)}`.trim(),
+				result.output,
+				options?.toolCallId,
+				options?.signal,
+			);
+			if (banner === null || banner.trim().length === 0) return result;
+			return { ...result, output: `${banner}\n\n${result.output}` };
+		} catch {
+			// Screening is an addition to the deterministic scan; it never fails a tool call.
+			return result;
+		}
+	};
+
 	type AdmitOutcome =
 		| { kind: "terminal"; verdict: RegistryVerdict }
 		| { kind: "execute"; spec: ToolSpec; decision: SafetyDecision }
-		| { kind: "park"; decision: SafetyDecision; axis: string; dispatchPlan?: DispatchPlanView };
+		| {
+				kind: "park";
+				decision: SafetyDecision;
+				axis: string;
+				dispatchPlan?: DispatchPlanView;
+				/** Pre-allocated so a gate's decision and the card it raises share one id. */
+				requestId?: string;
+				/** The reason a System One gate gave for raising this park; absent for every other park. */
+				gateReason?: string;
+				gateBuild?: string;
+		  };
 
 	const admit = (call: ClassifierCall, grant?: OneShotGrant, options?: ToolInvokeOptions): AdmitOutcome => {
 		const spec = tools.get(call.tool as ToolName);
@@ -880,6 +985,61 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 
 	const nextApprovalRequestId = (): string => `apr-${approvalRequestToken}-${++approvalRequestCounter}`;
 
+	/**
+	 * The yolo gate. Yolo runs an unrecognized command without asking, which is
+	 * the one place where nothing has read the command at all; a System One
+	 * engine that reads it as reaching far or destroying data can turn that
+	 * silence into one confirmation. It never removes friction: a call the
+	 * classifier already parks, blocks or recognizes does not reach it.
+	 */
+	const gateUnrecognizedExecute = async (
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		options: ToolInvokeOptions | undefined,
+	): Promise<Extract<AdmitOutcome, { kind: "park" }> | null> => {
+		const gate = deps.gateToolCall;
+		if (gate === undefined) return null;
+		const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
+		if (
+			level !== "yolo" ||
+			decision.classification.actionClass !== "execute" ||
+			decision.policy?.execRecognition !== "unrecognized"
+		) {
+			return null;
+		}
+		const requestId = nextApprovalRequestId();
+		let verdict: ToolCallGateVerdict | null;
+		try {
+			verdict = await gate(
+				{
+					tool: call.tool,
+					actionClass: decision.classification.actionClass,
+					target: describeCallTarget(call.tool, call.args),
+				},
+				requestId,
+				options?.signal,
+			);
+		} catch {
+			// An unavailable gate leaves yolo exactly as permissive as it was.
+			return null;
+		}
+		if (verdict === null || !verdict.escalate) return null;
+		// The verdict is already on the ledger. Headless and ACP pass no gate and
+		// never reach this line; a call with nobody to answer its card (no
+		// `gateParks`, no permission listener, or an abort while the verdict was
+		// pending) proceeds.
+		if (deps.gateParks !== true || permissionListeners.size === 0 || options?.signal?.aborted === true) return null;
+		const ask = toGateAskDecision(decision, call.tool, verdict.reason);
+		return {
+			kind: "park",
+			decision: ask,
+			axis: approvalAxisId(ask, level),
+			requestId,
+			gateReason: verdict.reason,
+			...(verdict.build !== undefined ? { gateBuild: verdict.build } : {}),
+		};
+	};
+
 	const notifyPermissionRequired = (
 		call: ClassifierCall,
 		decision: SafetyDecision,
@@ -923,12 +1083,16 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		listGateway: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "gateway"),
 		async invoke(call, options) {
 			const admissionCall = prepareAdmissionCall(tools.get(call.tool as ToolName), call);
-			const outcome = admit(admissionCall, undefined, options);
+			let outcome = admit(admissionCall, undefined, options);
 			if (outcome.kind === "terminal") {
 				disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
 				return observeBlockedAttempt(admissionCall, outcome.verdict, options) ?? outcome.verdict;
 			}
-			if (outcome.kind === "execute") return runSpec(outcome.spec, admissionCall, outcome.decision, options);
+			if (outcome.kind === "execute") {
+				const escalated = await gateUnrecognizedExecute(admissionCall, outcome.decision, options);
+				if (escalated === null) return runSpec(outcome.spec, admissionCall, outcome.decision, options);
+				outcome = escalated;
+			}
 			// A park settles only through a listener's answer, so with no listener
 			// the promise would never resolve. Refuse the call instead, fail closed.
 			if (permissionListeners.size === 0) {
@@ -950,12 +1114,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			}
 			return new Promise<RegistryVerdict>((resolve) => {
 				const meta: PermissionRequiredMeta = {
-					requestId: nextApprovalRequestId(),
+					requestId: outcome.requestId ?? nextApprovalRequestId(),
 					axis: outcome.axis,
 					...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
 					...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
 					...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
 					...(outcome.dispatchPlan !== undefined ? { dispatchPlan: outcome.dispatchPlan } : {}),
+					...(outcome.gateReason !== undefined ? { gateReason: outcome.gateReason } : {}),
+					...(outcome.gateBuild !== undefined ? { gateBuild: outcome.gateBuild } : {}),
 				};
 				recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", {
 					requestId: meta.requestId,
@@ -1075,6 +1241,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 									actionClass: grant.actionClass,
 									requestedBy: grant.requestedBy,
 									ruleId: approvalRailOf(entry.decision),
+									gateReason: entry.meta.gateReason,
 								}),
 							}
 						: verdict,
@@ -1414,6 +1581,39 @@ function toAutonomyAskDecision(
 	};
 }
 
+/** Tools whose results carry text somebody else wrote: a page, an MCP server's answer, a worker's report. */
+/**
+ * The card a System One escalation raises: its reason is the whole message.
+ * The rail id is set on the ask and on the policy it carries, because the
+ * approval axis reads the first and the audit row, the bus event and the note
+ * handed back to the model read the second.
+ */
+function toGateAskDecision(decision: SafetyDecision, tool: string, reason: string): SafetyDecision {
+	return {
+		kind: "ask",
+		classification: decision.classification,
+		confirmationRuleId: SYSTEM_ONE_GATE_RULE_ID,
+		rejection: {
+			short: `${tool} needs operator confirmation: System One flagged this command`,
+			detail: reason,
+			hints: [
+				"Approving resumes only this call.",
+				"System One advises and never blocks; deny to have the agent take another route.",
+			],
+		},
+		...(decision.policy !== undefined
+			? {
+					policy: {
+						...decision.policy,
+						ruleId: SYSTEM_ONE_GATE_RULE_ID,
+						reasonCode: SYSTEM_ONE_GATE_RULE_ID,
+						reasons: [reason],
+					},
+				}
+			: {}),
+	};
+}
+
 /**
  * Plan-approval ask for a plan-scale dispatch call. The rejection detail IS
  * the plan artifact (topology, per-task agent/model/node), so the approval
@@ -1524,11 +1724,20 @@ function firstBlockToolEffect(
 	return null;
 }
 
-function applyToolResultEffects(result: ToolResult, effects: ReadonlyArray<MiddlewareEffect>): ToolResult {
+/**
+ * `bannered` means System One already put its own untrusted-content banner in
+ * front of the output. The deterministic marker warning carries the same
+ * header, so it is dropped rather than shown twice.
+ */
+function applyToolResultEffects(
+	result: ToolResult,
+	effects: ReadonlyArray<MiddlewareEffect>,
+	bannered = false,
+): ToolResult {
 	const annotations = annotationMessages(effects);
 	if (annotations.length === 0) return result;
 	const warning = `[middleware:warn] ${INSTRUCTION_SHAPED_WARNING}`;
-	const prefix = annotations.includes(warning) ? `${warning}\n\n` : "";
+	const prefix = !bannered && annotations.includes(warning) ? `${warning}\n\n` : "";
 	const remaining = annotations.filter((annotation) => annotation !== warning);
 	const suffix = remaining.length > 0 ? `\n\n${remaining.join("\n")}` : "";
 	if (result.kind === "ok") {

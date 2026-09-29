@@ -28,7 +28,8 @@ import { clioTheme, GLYPH } from "./theme/index.js";
 import { createBootWelcome } from "./welcome-dashboard.js";
 
 export const INSTANT_SHELL_ENV = "CLIO_CODER_INSTANT_SHELL";
-const DOUBLE_TAP_MS = 500;
+/** Same window as the application's Ctrl+C double tap (APPLICATION_DOUBLE_TAP_MS). */
+const DOUBLE_TAP_MS = 1_200;
 const DIAGNOSTIC_LIMIT_BYTES = 64 * 1024;
 
 export type TerminalLeaseState = "created" | "mounted" | "adopting" | "adopted" | "closing" | "closed";

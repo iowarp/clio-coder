@@ -276,7 +276,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 		mode: Type.Optional(StringEnum(modes, { description: modeDescription })),
 		...(composition.council
 			? {
-					roster: Type.Optional(Type.String({ description: "Configured workers.rosters name (council)." })),
+					roster: Type.Optional(Type.String({ description: "Configured fleet.rosters name (council)." })),
 					members: Type.Optional(
 						Type.Array(CouncilMemberSchema, { minItems: 2, maxItems: 5, description: "Explicit council members, 2 to 5." }),
 					),

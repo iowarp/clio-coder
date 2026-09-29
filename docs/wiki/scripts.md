@@ -233,16 +233,13 @@ latency. `prepareHome` writes a scratch settings.yaml
 with an `lmstudio` runtime target and runs the CLI's `upgrade` command once to
 migrate settings and fill the compile cache; that first boot is not reported.
 
-`scripts/decision-probe.ts` scores a decision site's wording against its
-labeled fixture live. It runs each fixture turn through the production
-pre-turn brief (`runPreTurnBrief` from `src/domains/providers/pre-turn-brief.ts`),
-**calls the configured decision model**, and grades boolean labels against the
-field's probability (abstaining inside the 0.4..0.6 band via `DECIDED = 0.2`
-certainty) and string labels against the field value. `--profile` binds the
-probed sites to an existing `fleet.profiles` entry in memory only. A fixture
-with `site: "capabilities"` instead reports substring-filter recall and
-`rankCapabilities` recall@1/recall@5. The usage comment marks it "never part
-of CI."
+`scripts/decision-probe.ts` scores a System One site's wording against its labeled
+fixture under `tests/fixtures/decision-cases/`, live. It **calls the named engine**
+(from `systemOne.engines`, or built from `--kind`, `--target` and `--model`), runs
+each case through `createSystemOne` as production does, and reports per labeled key
+how many answers agreed, abstained or were wrong, the probability ranges of the two
+classes, and a suggested cut with its margins. It prints the answering build because
+a cut belongs to one build. The usage comment marks it "never part of CI."
 
 ## Focused tests
 

@@ -27,10 +27,6 @@ import {
 	spawnHeldWorkerProcess,
 	type WorkerSpec,
 } from "../../src/domains/dispatch/worker-spawn.js";
-import {
-	createDispatchForecastSite,
-	dispatchForecastSite,
-} from "../../src/domains/providers/sites/dispatch-forecast.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -189,56 +185,6 @@ describe("contracts/speculative dispatch", () => {
 		} finally {
 			await h.bundle.extension.stop?.();
 		}
-	});
-
-	it("asks the forecast exactly what it asked before unless recipes are supplied", () => {
-		const evidence = { task: "explore this repo fully", previous: "" };
-		const plain = dispatchForecastSite.prepare(evidence);
-		deepStrictEqual(createDispatchForecastSite({ recipes: () => null }).prepare(evidence), plain);
-		deepStrictEqual(Object.keys(plain?.questions ?? {}), ["dispatch", "shape"]);
-		const asked = createDispatchForecastSite({
-			recipes: () => [
-				{ id: "scout", description: "Read-only reconnaissance" },
-				{ id: "coder", description: "Makes code changes" },
-			],
-		}).prepare(evidence);
-		deepStrictEqual(Object.keys(asked?.questions ?? {}), ["dispatch", "shape", "recipe"]);
-		deepStrictEqual(asked?.questions.dispatch, plain?.questions.dispatch);
-		deepStrictEqual(asked?.questions.shape, plain?.questions.shape);
-	});
-
-	it("reads the recipe only when asked, and never puts it in the hint", () => {
-		const site = createDispatchForecastSite({
-			recipes: () => [
-				{ id: "scout", description: "Read-only reconnaissance" },
-				{ id: "coder", description: "Makes code changes" },
-			],
-		});
-		const ask = site.prepare({ task: "t", previous: "" });
-		ok(ask);
-		const answers = {
-			dispatch: { type: "noul" as const, noul: 0.9 },
-			shape: { type: "choice" as const, choice: "single", confidence: 1, probabilities: { single: 1 } },
-			recipe: { type: "choice" as const, choice: "scout", confidence: 0.9, probabilities: { scout: 0.95, coder: 0.05 } },
-		};
-		const value = site.read(answers, ask);
-		strictEqual(value?.recipe, "scout");
-		ok(!site.hint?.(value as NonNullable<typeof value>)?.includes("scout"));
-		strictEqual(
-			site.read(
-				{ ...answers, recipe: { ...answers.recipe, confidence: 0.4, probabilities: { scout: 0.7, coder: 0.3 } } },
-				ask,
-			)?.recipe,
-			null,
-			"below the 0.6 bar the recipe abstains",
-		);
-		const plainAsk = dispatchForecastSite.prepare({ task: "t", previous: "" });
-		ok(plainAsk);
-		strictEqual("recipe" in (dispatchForecastSite.read(answers, plainAsk) ?? {}), false);
-		deepStrictEqual(dispatchForecastSite.summarize?.({ dispatch: 0.9, shape: "single" }), {
-			dispatch: 0.9,
-			shape: "single",
-		});
 	});
 });
 

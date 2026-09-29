@@ -58,6 +58,11 @@ function dispatchRuns(details: MiddlewareHookInput["toolResultDetails"]): { agen
 	};
 }
 
+/** `dispatch {list:true}` reads the fleet roster and launches nothing, so it is not a dispatch. */
+function isDispatchListing(args: Readonly<Record<string, unknown>> | undefined): boolean {
+	return args?.list === true;
+}
+
 export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 	let previousClarificationStreak = 0;
 	let active = emptyTurn(0);
@@ -74,7 +79,14 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		clarificationStreak: () => previousClarificationStreak,
 		recordControl(record) {
 			userTurnId = record.turnId;
-			const runIds = record.executed !== null && "runIds" in record.executed ? record.executed.runIds : [];
+			// A refused act may still have started workers (a cancel during orientation
+			// aborts a Scout that already spent tokens); those runs belong to the turn.
+			const runIds =
+				record.executed === null
+					? []
+					: "runIds" in record.executed
+						? record.executed.runIds
+						: (record.executed.startedRunIds ?? []);
 			active = {
 				...active,
 				control: {
@@ -151,15 +163,20 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 			}
 			if (input.hook === "before_tool") {
 				active = { ...active, toolNames: [...active.toolNames, toolName] };
-				if (toolName === ToolNames.Dispatch) dispatched = true;
+				if (toolName === ToolNames.Dispatch) dispatched ||= !isDispatchListing(args);
 				else if (!dispatched && isReadOnlyCall(toolName, args)) {
 					active = { ...active, readOnlyCallsBeforeFirstDispatch: active.readOnlyCallsBeforeFirstDispatch + 1 };
 				}
-			} else if (input.hook === "after_tool" && toolName === ToolNames.Dispatch && input.metadata?.resultKind === "ok") {
-				const keys = dispatchKeysFromArgs(args).map((key) => JSON.stringify([key.agentId, key.task]));
-				const duplicateDispatch = keys.some((key) => succeededKeys.has(key));
-				for (const key of keys) succeededKeys.add(key);
+			} else if (input.hook === "after_tool" && toolName === ToolNames.Dispatch && !isDispatchListing(args)) {
+				// A dispatch whose worker failed or was aborted still launched a run
+				// and spent worker tokens; tokens.workers is built from these run ids.
+				// Only a successful dispatch can make a later identical one a duplicate.
+				const succeeded = input.metadata?.resultKind === "ok";
 				const runs = dispatchRuns(input.toolResultDetails);
+				if (!succeeded && runs.runIds.length === 0) return [];
+				const keys = dispatchKeysFromArgs(args).map((key) => JSON.stringify([key.agentId, key.task]));
+				const duplicateDispatch = succeeded && keys.some((key) => succeededKeys.has(key));
+				if (succeeded) for (const key of keys) succeededKeys.add(key);
 				active = {
 					...active,
 					duplicateDispatch: active.duplicateDispatch || duplicateDispatch,
@@ -174,6 +191,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 										: "pipeline",
 							agentIds: runs.agentIds.length > 0 ? runs.agentIds : dispatchKeysFromArgs(args).map((key) => key.agentId),
 							runIds: runs.runIds,
+							...(succeeded ? {} : { failed: true as const }),
 						},
 					],
 				};

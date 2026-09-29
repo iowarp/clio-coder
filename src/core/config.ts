@@ -17,15 +17,15 @@ import { isAbsolute, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { AUTONOMY_LEVELS } from "../domains/safety/autonomy.js";
+import type { SiteId } from "../domains/system-one/types.js";
+import { SITE_IDS } from "../domains/system-one/types.js";
 import { TURN_CONTROL_WORKFLOWS } from "../domains/turn-control/settings.js";
 import {
 	ACTIVE_AGENT_AUTOMATION_ROLES,
 	ACTIVE_ROUTING_POSTURES,
 	ACTIVE_ROUTING_ROLES,
 	COUNCIL_MEMBER_LABEL_PATTERN,
-	DECISION_SITES,
 	DEFAULT_SETTINGS,
-	type DecisionSite,
 	normalizeOutputStyle,
 	THEME_NAMED_COLORS,
 	THINKING_LEVELS,
@@ -941,7 +941,11 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	// file naming one gets the same targeted removal message.
 	"integrations.externalAgents.entries[].permissionTimeoutMs": EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED,
 	"integrations.externalAgents.entries[].labels": EXTERNAL_AGENT_LABELS_RETIRED,
-	"fleet.decisionProfiles.routing": "dispatch routes every task with its rules and never asks a decision model",
+	// Written as an empty map by `init` from 0.5.3 through 0.5.7, so most upgraded files carry it.
+	"fleet.decisionProfiles":
+		"System One replaced decision profiles; bind an engine under systemOne.engines and systemOne.sites",
+	"turnControl.interpretation":
+		"the turn site (systemOne.sites.turn) reads the request and nothing falls back to the main model",
 } as const);
 
 const V1_ONLY_ROOTS = new Set([
@@ -1010,6 +1014,12 @@ function patternMatches(value: unknown, pattern: string): PatternMatch[] {
 	return out;
 }
 
+function isEmptyPlainObject(parent: unknown, key: string): boolean {
+	if (!isPlainObject(parent)) return false;
+	const value = parent[key];
+	return isPlainObject(value) && Object.keys(value).length === 0;
+}
+
 function reportV1Tombstones(issues: Issues, raw: Record<string, unknown>): void {
 	const reportedRoots = new Set<string>();
 	for (const [from, to] of SETTINGS_V1_PATH_MOVES) {
@@ -1020,6 +1030,9 @@ function reportV1Tombstones(issues: Issues, raw: Record<string, unknown>): void 
 	}
 	for (const [path, reason] of Object.entries(SETTINGS_V1_RETIRED_PATHS)) {
 		for (const match of patternMatches(raw, path)) {
+			// `init` wrote `fleet.decisionProfiles: {}` from 0.5.3 through 0.5.7, so an empty map is
+			// the default shape of every upgraded file and carries no configuration to lose.
+			if (path === "fleet.decisionProfiles" && isEmptyPlainObject(raw.fleet, "decisionProfiles")) continue;
 			issues.add(match.path, `retired without replacement: ${reason}. Remove this key`);
 			reportedRoots.add(match.path.split(/[.[]/u)[0] ?? match.path);
 		}
@@ -1271,6 +1284,142 @@ function validateKeybindings(issues: Issues, path: string, value: unknown): Reco
 	return next;
 }
 
+const SYSTEM_ONE_ENGINE_KINDS = ["systemone", "llm"] as const;
+const SYSTEM_ONE_MODES = ["auto", "logprobs", "answer"] as const;
+
+/**
+ * `systemOne` is a map keyed by operator-chosen names, and assigning a key
+ * called `__proto__` onto a plain object rewrites its prototype instead of
+ * adding an entry, so that one name is refused rather than stored.
+ */
+function acceptedMapKey(issues: Issues, path: string, key: string): boolean {
+	if (key.trim().length === 0) {
+		issues.add(path, "expected a non-empty name");
+		return false;
+	}
+	if (key === "__proto__") {
+		issues.add(`${path}.${key}`, "reserved name");
+		return false;
+	}
+	return true;
+}
+
+function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings): void {
+	if (!isPlainObject(raw)) {
+		issues.add("systemOne", `expected a map, got ${describe(raw)}`);
+		return;
+	}
+	issues.unknownKeys("systemOne", raw, ["engines", "sites", "cuts", "record", "retentionDays", "maxMiB"]);
+	const next = settings.systemOne;
+	if ("engines" in raw) {
+		if (!isPlainObject(raw.engines)) issues.add("systemOne.engines", `expected a map, got ${describe(raw.engines)}`);
+		else {
+			const engines: ClioSettings["systemOne"]["engines"] = {};
+			for (const [name, value] of Object.entries(raw.engines)) {
+				const path = `systemOne.engines.${name}`;
+				if (!acceptedMapKey(issues, "systemOne.engines", name)) continue;
+				if (!isPlainObject(value)) {
+					issues.add(path, `expected a map, got ${describe(value)}`);
+					continue;
+				}
+				issues.unknownKeys(path, value, ["kind", "target", "model", "mode"]);
+				const kind = expectEnum(issues, `${path}.kind`, value.kind, SYSTEM_ONE_ENGINE_KINDS);
+				const target = expectString(issues, `${path}.target`, value.target);
+				if (kind === undefined || target === undefined) continue;
+				// A binding to a target nobody configured would fail at the call site,
+				// where nothing connects the failure back to this line.
+				if (!settings.targets.some((entry) => entry.id === target)) {
+					issues.add(`${path}.target`, `target '${target}' is not defined in targets`);
+					continue;
+				}
+				const engine: ClioSettings["systemOne"]["engines"][string] = { kind, target };
+				if ("model" in value) {
+					const model = expectString(issues, `${path}.model`, value.model);
+					if (model !== undefined) engine.model = model;
+				}
+				if ("mode" in value) {
+					const mode = expectEnum(issues, `${path}.mode`, value.mode, SYSTEM_ONE_MODES);
+					if (mode !== undefined) engine.mode = mode;
+				}
+				if (engine.mode !== undefined && kind !== "llm")
+					issues.add(`${path}.mode`, "only an llm engine has a readout mode");
+				engines[name] = engine;
+			}
+			next.engines = engines;
+		}
+	}
+	if ("sites" in raw) {
+		if (!isPlainObject(raw.sites)) issues.add("systemOne.sites", `expected a map, got ${describe(raw.sites)}`);
+		else {
+			const sites: ClioSettings["systemOne"]["sites"] = {};
+			// Bindings are checked against the engines the file itself declares, so a
+			// partial parse failure above does not cascade into one issue per site.
+			const declared = isPlainObject(raw.engines) ? raw.engines : {};
+			for (const [site, value] of Object.entries(raw.sites)) {
+				const path = `systemOne.sites.${site}`;
+				if (!(SITE_IDS as ReadonlyArray<string>).includes(site)) {
+					issues.add(path, `unknown site, expected one of ${SITE_IDS.join(", ")}`);
+					continue;
+				}
+				let engine: string | undefined;
+				let timeoutMs: number | undefined;
+				if (typeof value === "string") engine = expectString(issues, path, value);
+				else if (isPlainObject(value)) {
+					issues.unknownKeys(path, value, ["engine", "timeoutMs"]);
+					engine = expectString(issues, `${path}.engine`, value.engine);
+					if ("timeoutMs" in value) timeoutMs = expectInteger(issues, `${path}.timeoutMs`, value.timeoutMs, { min: 1 });
+				} else {
+					issues.add(path, `expected an engine name or a map, got ${describe(value)}`);
+					continue;
+				}
+				if (engine === undefined) continue;
+				if (!Object.hasOwn(declared, engine)) {
+					issues.add(path, `engine '${engine}' is not defined in systemOne.engines`);
+					continue;
+				}
+				sites[site as SiteId] = timeoutMs === undefined ? engine : { engine, timeoutMs };
+			}
+			next.sites = sites;
+		}
+	}
+	if ("cuts" in raw) {
+		if (!isPlainObject(raw.cuts)) issues.add("systemOne.cuts", `expected a map, got ${describe(raw.cuts)}`);
+		else {
+			const cuts: ClioSettings["systemOne"]["cuts"] = {};
+			for (const [build, rows] of Object.entries(raw.cuts)) {
+				const path = `systemOne.cuts.${build}`;
+				if (!acceptedMapKey(issues, "systemOne.cuts", build)) continue;
+				if (!isPlainObject(rows)) {
+					issues.add(path, `expected a map, got ${describe(rows)}`);
+					continue;
+				}
+				const entry: Record<string, number> = {};
+				for (const [key, value] of Object.entries(rows)) {
+					const dot = key.indexOf(".");
+					if (!acceptedMapKey(issues, path, key)) continue;
+					if (dot <= 0 || dot === key.length - 1 || !(SITE_IDS as ReadonlyArray<string>).includes(key.slice(0, dot))) {
+						issues.add(`${path}.${key}`, `expected "<site>.<key>" with a site from ${SITE_IDS.join(", ")}`);
+						continue;
+					}
+					const parsed = expectNumber(issues, `${path}.${key}`, value, { min: 0.01, max: 0.99 });
+					if (parsed !== undefined) entry[key] = parsed;
+				}
+				cuts[build] = entry;
+			}
+			next.cuts = cuts;
+		}
+	}
+	if ("record" in raw) {
+		const parsed = expectBoolean(issues, "systemOne.record", raw.record);
+		if (parsed !== undefined) next.record = parsed;
+	}
+	for (const key of ["retentionDays", "maxMiB"] as const) {
+		if (!(key in raw)) continue;
+		const parsed = expectInteger(issues, `systemOne.${key}`, raw[key], { min: 1 });
+		if (parsed !== undefined) next[key] = parsed;
+	}
+}
+
 const TOP_LEVEL_KEYS = [
 	"version",
 	"turnControl",
@@ -1278,6 +1427,7 @@ const TOP_LEVEL_KEYS = [
 	"chat",
 	"fleet",
 	"context",
+	"systemOne",
 	"safety",
 	"interface",
 	"integrations",
@@ -1312,6 +1462,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.turnControl)) issues.add("turnControl", `expected a map, got ${describe(raw.turnControl)}`);
 		else {
 			const control = raw.turnControl;
+			// `interpretation` is retired; listed so its tombstone message is the only one reported.
 			issues.unknownKeys("turnControl", control, ["workflows", "interpretation", "orientation"]);
 			if ("workflows" in control) {
 				if (!Array.isArray(control.workflows))
@@ -1323,44 +1474,6 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						if (parsed !== undefined) workflows.push(parsed);
 					}
 					settings.turnControl.workflows = workflows;
-				}
-			}
-			if ("interpretation" in control) {
-				if (!isPlainObject(control.interpretation))
-					issues.add("turnControl.interpretation", `expected a map, got ${describe(control.interpretation)}`);
-				else {
-					issues.unknownKeys("turnControl.interpretation", control.interpretation, ["fallback", "thresholds"]);
-					if ("fallback" in control.interpretation) {
-						const parsed = expectEnum(issues, "turnControl.interpretation.fallback", control.interpretation.fallback, [
-							"none",
-							"main-model",
-						] as const);
-						if (parsed !== undefined) settings.turnControl.interpretation.fallback = parsed;
-					}
-					if ("thresholds" in control.interpretation) {
-						const raw = control.interpretation.thresholds;
-						if (!isPlainObject(raw))
-							issues.add("turnControl.interpretation.thresholds", `expected a map, got ${describe(raw)}`);
-						else {
-							const thresholds: Record<string, { orientation?: number; direction?: number }> = {};
-							for (const [build, cuts] of Object.entries(raw)) {
-								const path = `turnControl.interpretation.thresholds.${build}`;
-								if (!isPlainObject(cuts)) {
-									issues.add(path, `expected a map, got ${describe(cuts)}`);
-									continue;
-								}
-								issues.unknownKeys(path, cuts, ["orientation", "direction"]);
-								const entry: { orientation?: number; direction?: number } = {};
-								for (const field of ["orientation", "direction"] as const) {
-									if (!(field in cuts)) continue;
-									const parsed = expectNumber(issues, `${path}.${field}`, cuts[field], { min: 0.01, max: 0.99 });
-									if (parsed !== undefined) entry[field] = parsed;
-								}
-								thresholds[build] = entry;
-							}
-							settings.turnControl.interpretation.thresholds = thresholds;
-						}
-					}
 				}
 			}
 			if ("orientation" in control) {
@@ -1492,11 +1605,12 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		else {
 			rawFleet = raw.fleet;
 			issues.unknownKeys("fleet", rawFleet, [
+				// Retired; listed so its tombstone message is the only one reported.
+				"decisionProfiles",
 				"default",
 				"profiles",
 				"rosters",
 				"agentProfiles",
-				"decisionProfiles",
 				"speculativeDispatch",
 				"adaptiveRouting",
 				"nodes",
@@ -1643,36 +1757,6 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					if (profile !== undefined) bindings[agentId] = profile;
 				}
 				settings.fleet.agentProfiles = bindings;
-			}
-		}
-		if ("decisionProfiles" in rawFleet) {
-			if (!isPlainObject(rawFleet.decisionProfiles))
-				issues.add("fleet.decisionProfiles", `expected a map, got ${describe(rawFleet.decisionProfiles)}`);
-			else {
-				const bindings: ClioSettings["fleet"]["decisionProfiles"] = {};
-				for (const [rawSite, rawProfileName] of Object.entries(rawFleet.decisionProfiles)) {
-					const site = rawSite.trim();
-					// A retired site is reported by the tombstone check, once.
-					if (Object.hasOwn(SETTINGS_V1_RETIRED_PATHS, `fleet.decisionProfiles.${site}`)) continue;
-					if (!DECISION_SITES.includes(site as DecisionSite)) {
-						issues.add(
-							"fleet.decisionProfiles",
-							`unknown decision site '${rawSite}', expected one of ${DECISION_SITES.join(", ")}`,
-						);
-						continue;
-					}
-					const profile = expectString(issues, `fleet.decisionProfiles.${site}`, rawProfileName);
-					if (profile === undefined) continue;
-					// A binding that names a profile nobody defined would fail later at
-					// the call site, where the operator has no way to connect the
-					// failure back to this line.
-					if (!(profile in settings.fleet.profiles)) {
-						issues.add("fleet.decisionProfiles", `profile '${profile}' is not defined in fleet.profiles`);
-						continue;
-					}
-					bindings[site as DecisionSite] = profile;
-				}
-				settings.fleet.decisionProfiles = bindings;
 			}
 		}
 		if ("speculativeDispatch" in rawFleet) {
@@ -1981,6 +2065,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		}
 	}
 
+	if ("systemOne" in raw) validateSystemOne(issues, raw.systemOne, settings);
 	if ("safety" in raw) {
 		if (!isPlainObject(raw.safety)) issues.add("safety", `expected a map, got ${describe(raw.safety)}`);
 		else {

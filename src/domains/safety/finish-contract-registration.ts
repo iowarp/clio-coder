@@ -10,8 +10,14 @@
  * model request. Every decision is also written to the audit ledger.
  */
 
+import { createHash } from "node:crypto";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { ToolNames } from "../../core/tool-names.js";
 import { type TurnConstraints, turnAllowsContinuation, turnAllowsTool } from "../../core/turn-constraints.js";
 import { VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
+import { effectiveToolCall } from "../../tools/surface.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
 import type { CompletionContractAuditInput } from "./audit.js";
@@ -19,8 +25,10 @@ import {
 	assessFinishContract,
 	DEFAULT_RECENT_ENTRY_LIMIT,
 	type FinishContractAssessment,
+	mutationPathsForTool,
 	recentEntries,
 } from "./finish-contract.js";
+import { extractCommandPathWalks } from "./protected-artifacts.js";
 import type { Rigor } from "./rigor.js";
 
 export const FINISH_CONTRACT_REGISTRATION_ID = "assessor.finish-contract";
@@ -63,14 +71,85 @@ export interface CreateFinishContractRegistrationOptions {
 	recordDecision?: (input: CompletionContractAuditInput) => void;
 }
 
+/** Files above this are compared by size and mtime; a rewrite then counts as a change. */
+const PATH_STATE_HASH_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * What a mutation target is right now, cheap enough to take before every
+ * mutating call. A directory is its shallow listing, so a tree deleted and
+ * recreated reads as changed through its children's new mtimes.
+ */
+function pathState(abs: string): string {
+	try {
+		const stat = lstatSync(abs);
+		if (stat.isDirectory()) {
+			const listing = readdirSync(abs, { withFileTypes: true })
+				.map((entry) => {
+					const child = lstatSync(join(abs, entry.name));
+					return `${entry.name}:${child.isDirectory() ? "d" : "f"}:${child.size}:${child.mtimeMs}`;
+				})
+				.sort();
+			return `dir:${createHash("sha256").update(listing.join("\n")).digest("hex")}`;
+		}
+		if (stat.isSymbolicLink() || stat.size > PATH_STATE_HASH_MAX_BYTES)
+			return `other:${stat.mode}:${stat.size}:${stat.mtimeMs}`;
+		return `file:${stat.mode}:${createHash("sha256").update(readFileSync(abs)).digest("hex")}`;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : `unreadable:${String(error)}`;
+	}
+}
+
+function resolveTarget(raw: string, base: string): string {
+	if (raw === "~") return homedir();
+	return raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : resolve(base, raw);
+}
+
 export function createFinishContractRegistration(
 	options: CreateFinishContractRegistrationOptions,
 ): MiddlewareHookRegistration {
+	// State of each mutation target before the turn first touched it, keyed by
+	// the raw path the ledger scan reports (#12 in the 0.5.8 probe: a
+	// create-then-delete probe was told its change was unverified). A target
+	// named from two directories is ambiguous and never counts as unchanged.
+	const before = new Map<string, { abs: string; state: string; ambiguous: boolean }>();
+	const recordBefore = (input: MiddlewareHookInput): void => {
+		if (input.metadata?.nested === true) return;
+		const { toolName, args } = effectiveToolCall(input.toolName ?? "", input.toolArgs);
+		const command = toolName === ToolNames.Bash && typeof args?.command === "string" ? args.command : null;
+		// A cd moves where relative targets land; those keep the plain rule.
+		if (command !== null && extractCommandPathWalks(command).some((walk) => walk.some((e) => e.kind === "cd"))) return;
+		const cwd = typeof args?.cwd === "string" && args.cwd.length > 0 ? args.cwd : ".";
+		const base = resolve(process.cwd(), cwd);
+		for (const raw of mutationPathsForTool(toolName, args)) {
+			const abs = resolveTarget(raw, base);
+			const seen = before.get(raw);
+			if (seen === undefined) before.set(raw, { abs, state: pathState(abs), ambiguous: false });
+			else if (seen.abs !== abs) seen.ambiguous = true;
+		}
+	};
+	const unchangedPaths = (): Set<string> =>
+		new Set(
+			[...before.entries()]
+				.filter(([, entry]) => !entry.ambiguous && pathState(entry.abs) === entry.state)
+				.map(([raw]) => raw),
+		);
 	return {
 		id: FINISH_CONTRACT_REGISTRATION_ID,
 		description: "advise when a turn mutated files without validation evidence or a limitation receipt",
-		hooks: ["turn_end"],
+		hooks: ["turn_start", "before_tool", "turn_end"],
 		evaluate(input: MiddlewareHookInput, context): ReadonlyArray<MiddlewareEffect> {
+			if (input.hook === "turn_start") {
+				before.clear();
+				return [];
+			}
+			if (input.hook === "before_tool") {
+				try {
+					recordBefore(input);
+				} catch {
+					// A path that cannot be read keeps the plain mutation rule.
+				}
+				return [];
+			}
 			if (input.hook !== "turn_end") return [];
 			if (context?.priorEffects.some(isHardBlockEffect) === true) return [];
 			// Only settled stop turns make completion claims; aborted and error
@@ -96,6 +175,7 @@ export function createFinishContractRegistration(
 			const assessment = assessFinishContract({
 				sessionEntries: entries,
 				workspaceRoot: process.cwd(),
+				unchangedPaths: unchangedPaths(),
 				rigor,
 				...(activeAcceptance ? { activeAcceptance } : {}),
 				assistantTurnId: input.turnId ?? null,

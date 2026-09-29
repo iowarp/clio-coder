@@ -259,7 +259,7 @@ test("failed side rounds and judgments keep provider bodies off ACP while preser
 		);
 		assert.equal(diagnostics.length, 3);
 		assert.ok(diagnostics.every((line) => line.includes(providerBody)));
-		const unbound = "not judged: bind fleet.decisionProfiles.drafts to a System One profile";
+		const unbound = "not judged: bind systemOne.sites.drafts to an engine declared in systemOne.engines";
 		const known = projectDraftOutcome({
 			status: "drafted",
 			aborted: false,

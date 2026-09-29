@@ -153,6 +153,18 @@ describe("ask_user tool", () => {
 		strictEqual(cancelled.shown.length, 1);
 	});
 
+	it("ends the turn on a cancel and never reads the dismissal as approval", async () => {
+		const f = fixture([{ answers: [], cancelled: true }], "yolo");
+		const first = await f.call({ questions: [{ question: "Which part of the config?" }] });
+		strictEqual(first.kind === "ok" ? first.terminate : undefined, true);
+		const text = first.kind === "ok" ? first.output : "";
+		match(text, /not approval/);
+		ok(!/proceed with defaults/i.test(text), "the cancel text must not tell the model to go ahead");
+		const again = await f.call({ questions: [{ question: "Refactor it anyway?" }] });
+		strictEqual(interviewOf(again).event, "already_cancelled");
+		strictEqual(again.kind === "ok" ? again.terminate : undefined, true);
+	});
+
 	it("refuses a second round while the operator is still answering the first", async () => {
 		let release!: (result: AskUserResult) => void;
 		const f = fixture([() => new Promise<AskUserResult>((resolve) => (release = resolve))]);

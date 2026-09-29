@@ -78,7 +78,7 @@ test("pre-admission harness reads survive turn_start and direction records execu
 	collector.recordControl({
 		version: 1,
 		turnId: "reserved",
-		producer: "decision-site",
+		producer: "system-one",
 		interpretation: null,
 		factsDigest: "fixture",
 		decision: { kind: "direction", observations: [] },
@@ -89,4 +89,38 @@ test("pre-admission harness reads survive turn_start and direction records execu
 	assert.equal(facts.harness.reads, 4);
 	assert.equal(facts.control?.executed, true);
 	assert.deepEqual(facts.toolNames, []);
+});
+
+// A dispatch whose worker failed or was aborted still launched a run that spent
+// worker tokens. Recording only successful dispatches left dispatches and the
+// worker token total empty for an operator-aborted refactor.
+test("a failed dispatch that launched a run is recorded as failed and never counts as a duplicate", async () => {
+	const { createTurnOutcomeCollector } = await import("../../src/interactive/turn-outcome-collector.js");
+	const collector = createTurnOutcomeCollector();
+	collector.evaluate({ hook: "turn_start", sessionId: "s1", turnId: "u1" });
+	const args = { agent: "coder", task: "refactor validateSettings" };
+	for (const [resultKind, runs] of [
+		["error", []],
+		["error", [{ runId: "apc8sdap2qro", agentId: "coder" }]],
+		["ok", [{ runId: "r2", agentId: "coder" }]],
+	] as const) {
+		const call = { sessionId: "s1", turnId: "u1", toolName: "dispatch", toolArgs: args };
+		collector.evaluate({ hook: "before_tool", ...call });
+		collector.evaluate({
+			hook: "after_tool",
+			...call,
+			toolResultDetails: { runs: [...runs] },
+			metadata: { resultKind },
+		});
+	}
+	const facts = collector.take("u1");
+	assert.equal(facts.toolNames.length, 3);
+	assert.deepEqual(
+		facts.dispatches.map((dispatch) => [dispatch.runIds, dispatch.failed === true]),
+		[
+			[["apc8sdap2qro"], true],
+			[["r2"], false],
+		],
+	);
+	assert.equal(facts.duplicateDispatch, false, "a failed attempt never makes its retry a duplicate");
 });

@@ -5,15 +5,6 @@ import type { TurnInterpretation } from "./interpretation.js";
 import { orientationQuestion } from "./render.js";
 import type { TurnControlSettings } from "./settings.js";
 
-// S5 follow-up: one run of the relabeled 29-case fixture on jev-latest.
-// Orientation positives span 0.77–0.98, negatives 0.01–0.26; 0.7 is strictly
-// above every negative and below every positive, including the confident subsets.
-// Intent is only a veto for implement/continue/interview, regardless of certainty.
-// Direction remains at 0.7: the original two-run positives span 0.74–0.95,
-// negatives 0.02–0.43; this follow-up does not change its gate or threshold.
-export const ORIENTATION_WANTED_THRESHOLD = 0.7;
-export const DIRECTION_REQUESTED_THRESHOLD = 0.7;
-
 export type WorkflowDecision =
 	| {
 			kind: "none";
@@ -21,11 +12,13 @@ export type WorkflowDecision =
 				| "off"
 				| "no-interpretation"
 				| "below-threshold"
+				| "streak-too-low"
 				| "constraints"
 				| "continuation"
 				| "capability-missing"
 				| "task-established"
-				| "already-oriented";
+				| "already-oriented"
+				| "model-dispatching";
 	  }
 	| {
 			kind: "orientation";
@@ -49,12 +42,26 @@ export function decide(
 	if (facts.continuation) return { kind: "none", reason: "continuation" };
 	if (interpretation === null) return { kind: "none", reason: "no-interpretation" };
 	const breadth = interpretation.orientation.breadth;
+	// Intent is only a veto for the three workflows that already have a task in
+	// hand. The site applies it too; it is repeated here because this is the last
+	// gate before the harness starts read-only work on the operator's behalf.
+	// The model is about to dispatch on its own, so a harness scout first is redundant
+	// worker spend. That holds only while the request reads at least as much like a
+	// dispatch as like an orientation: "give me a tour" read orientation 0.98 against
+	// dispatch 0.71 and got neither the scout nor a dispatch. A producer that gives
+	// no probabilities keeps the plain expectation.
+	const dispatchP = interpretation.dispatch?.probability;
+	const orientationP = interpretation.orientation.probability;
+	const modelDispatching =
+		interpretation.dispatch?.expected === true &&
+		(dispatchP === undefined || orientationP === undefined || dispatchP >= orientationP);
 	const orientationEligible =
 		settings.workflows.includes("orientation") &&
 		!["implement", "continue", "interview"].includes(interpretation.intent) &&
-		interpretation.orientation.wanted >= ORIENTATION_WANTED_THRESHOLD &&
+		interpretation.orientation.wanted &&
 		(breadth === "repository" || breadth === "area");
 	const orientationCapable = facts.capabilities.dispatch && facts.capabilities.scoutRecipeId !== null;
+	if (orientationEligible && modelDispatching) return { kind: "none", reason: "model-dispatching" };
 	if (orientationEligible && orientationCapable && (breadth === "repository" || breadth === "area")) {
 		const prior = facts.priorOrientation;
 		return {
@@ -69,9 +76,7 @@ export function decide(
 		};
 	}
 	const directionEligible =
-		settings.workflows.includes("direction") &&
-		interpretation.direction.requested >= DIRECTION_REQUESTED_THRESHOLD &&
-		facts.clarificationStreak >= 1;
+		settings.workflows.includes("direction") && interpretation.direction.requested && facts.clarificationStreak >= 1;
 	if (directionEligible && !facts.taskEstablished && facts.capabilities.readOnlyGit)
 		return { kind: "direction", observations: ["git-status", "git-log", "tree", "codemap"] };
 	if (orientationEligible && !orientationCapable) return { kind: "none", reason: "capability-missing" };
@@ -79,6 +84,10 @@ export function decide(
 		return { kind: "none", reason: "capability-missing" };
 	if (directionEligible && facts.taskEstablished && facts.capabilities.readOnlyGit)
 		return { kind: "none", reason: "task-established" };
+	// Direction waits for a turn that already ended on the operator, so a first
+	// "not sure" must not read as a request nobody asked for.
+	if (settings.workflows.includes("direction") && interpretation.direction.requested && facts.clarificationStreak < 1)
+		return { kind: "none", reason: "streak-too-low" };
 	return { kind: "none", reason: "below-threshold" };
 }
 

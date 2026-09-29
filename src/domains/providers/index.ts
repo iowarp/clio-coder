@@ -3,22 +3,6 @@ import type { ProvidersContract } from "./contract.js";
 import { createProvidersBundle, type ProvidersBundleOptions } from "./extension.js";
 import { ProvidersManifest } from "./manifest.js";
 
-export { withoutQuotedCode } from "./pre-turn-brief.js";
-export type { DispatchShape } from "./sites/dispatch-forecast.js";
-export { DISPATCH_SHAPE_QUESTION, SHAPES } from "./sites/dispatch-forecast.js";
-export type { HarnessIntent } from "./sites/harness-routing.js";
-export { HARNESS_INTENT_QUESTION, HARNESS_INTENTS } from "./sites/harness-routing.js";
-export {
-	BREADTH_QUESTION,
-	createTurnControlSite,
-	DIRECTION_REQUESTED_QUESTION,
-	ORIENTATION_WANTED_QUESTION,
-	TURN_CONTROL_QUESTIONS,
-	TURN_CONTROL_VERSION,
-	TURN_INTERPRETATION_SYSTEM_PROMPT,
-	turnControlSite,
-} from "./sites/turn-control.js";
-
 export const ProvidersDomainModule: DomainModule<ProvidersContract> = {
 	manifest: ProvidersManifest,
 	createExtension: (context) => createProvidersBundle(context),
@@ -51,14 +35,6 @@ export { type CacheDeploymentObservation, observeCacheDeployment } from "./cache
 export { AGENT_ROLE_TOOLS_REQUIRED_REASON, mergeCapabilities, supportsAgentRoleTools } from "./capabilities.js";
 export type { ProvidersContract, TargetHealth, TargetStatus } from "./contract.js";
 export { credentialsPresent } from "./credentials.js";
-export {
-	type DecisionSite,
-	type DecisionSiteStatus,
-	inspectDecisionSite,
-	type ResolveDeciderInput,
-	resolveDecider,
-} from "./decision-sites.js";
-export { chosen, createDecider, type Decider, isTrue, pick, rate, rating, yesNo } from "./decisions.js";
 export { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
 export {
 	canonicalEndpointKey,

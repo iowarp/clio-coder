@@ -26,6 +26,11 @@ export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number];
 
 export const DEFAULT_AUTONOMY_LEVEL: AutonomyLevel = "default";
 
+/** Position on the dial: a lower rank asks for more confirmation. */
+export function autonomyRank(level: AutonomyLevel): number {
+	return AUTONOMY_LEVELS.indexOf(level);
+}
+
 export function isAutonomyLevel(value: unknown): value is AutonomyLevel {
 	return typeof value === "string" && (AUTONOMY_LEVELS as ReadonlyArray<string>).includes(value);
 }

@@ -7,19 +7,9 @@ packs:
         pattern: "\\brm\\s+-rf?\\s+/(?![a-z0-9]*tmp/)"
         class: system_modify
         block: true
-      - id: rm-recursive-or-force
-        description: "rm with recursive or force flags"
-        pattern: "\\brm\\s+(-[^\\s]*)*-[rRf]"
-        class: system_modify
-        block: true
-      - id: rm-recursive-long
-        description: "rm with --recursive"
-        pattern: "\\brm\\s+--recursive\\b"
-        class: system_modify
-        block: true
-      - id: rm-force-long
-        description: "rm with --force"
-        pattern: "\\brm\\s+--force\\b"
+      - id: rm-home-or-root
+        description: "rm of /, the home directory, or everything in either, in any flag order"
+        pattern: "\\brm\\s+(?:[^;&|\\n]*\\s)?[\"']?(?:/|~/?|\\$\\{?HOME\\}?/?)\\*?[\"']?(?=\\s|$|[;&|)])"
         class: system_modify
         block: true
       - id: sudo-rm

@@ -121,7 +121,7 @@ export async function runtimeFixture(cwd: string) {
 						registry.cancelParkedCall(pendingRequest, HEADLESS_PERMISSION_DENIED_REASON);
 						await end("ask-first", denied);
 						await end("success", begin("success", "ls sentinel.txt"));
-						await end("hard", begin("hard", "rm -f sentinel.txt"));
+						await end("hard", begin("hard", 'rm -f "$PWD/sentinel.txt"'));
 						// Legacy producer controls have no admission telemetry. Words never classify them.
 						for (const isError of [false, true])
 							listener?.({

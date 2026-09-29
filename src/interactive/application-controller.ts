@@ -3,7 +3,12 @@ import { isKeyRelease, isKeyRepeat, matchesKey } from "../engine/tui.js";
 import type { LeaderKeyController } from "./leader-key.js";
 import { isEscapeKey, type OverlayState, overlayOwnsInput } from "./overlay-lifecycle.js";
 
-export const APPLICATION_DOUBLE_TAP_MS = 500;
+/**
+ * How long a first Ctrl+C keeps the second armed. 500ms expired before an
+ * operator who had typed into the wrong pane could read the "again to quit"
+ * hint and press again, so the TUI looked like it ignored Ctrl+C.
+ */
+export const APPLICATION_DOUBLE_TAP_MS = 1_200;
 
 export const CLOSED_ACTION_ORDER = [
 	"clio-coder.output.cycle",

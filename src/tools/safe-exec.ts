@@ -91,12 +91,16 @@ export async function runVectorTool(
 
 export const gitTool: ToolSpec = {
 	name: ToolNames.Git,
-	description: "Read-only git inspection: op=status (short status), diff, or log (oneline).",
+	description:
+		"Read-only git inspection: op=status (short status), diff, or log (oneline; stat=true adds each commit's changed files).",
 	parameters: Type.Object({
-		op: StringEnum(["status", "diff", "log"], { description: "Inspection to run." }),
+		// `mode` is what code_nav, evidence and monitor call their selector, and a
+		// model reaching for it here spent three calls on "last 3 commits".
+		op: Type.Optional(StringEnum(["status", "diff", "log"], { description: "Inspection to run." })),
+		mode: Type.Optional(StringEnum(["status", "diff", "log"], { description: "Same as op." })),
 		path: Type.Optional(Type.String({ description: "Limit diff/log to one path." })),
 		cached: Type.Optional(Type.Boolean({ description: "diff: staged changes (--cached)." })),
-		stat: Type.Optional(Type.Boolean({ description: "diff: summary only (--stat)." })),
+		stat: Type.Optional(Type.Boolean({ description: "diff: summary only; log: changed files per commit (--stat)." })),
 		name_only: Type.Optional(Type.Boolean({ description: "diff: file names only." })),
 		limit: Type.Optional(Type.Number({ description: "log: commits to show (default 20, max 200)." })),
 		cwd: Type.Optional(Type.String({ description: "Working directory." })),
@@ -106,7 +110,7 @@ export const gitTool: ToolSpec = {
 	baseActionClass: "read",
 	executionMode: "parallel",
 	async run(args, options) {
-		const op = typeof args.op === "string" ? args.op : "";
+		const op = typeof args.op === "string" ? args.op : typeof args.mode === "string" ? args.mode : "";
 		const pathArg = typeof args.path === "string" && args.path.length > 0 ? args.path : null;
 		if (op === "status") {
 			return runVectorTool("git", "git", ["status", "--short", "--branch"], args, options);
@@ -122,6 +126,9 @@ export const gitTool: ToolSpec = {
 		if (op === "log") {
 			const limit = typeof args.limit === "number" && args.limit > 0 ? Math.min(200, Math.floor(args.limit)) : 20;
 			const vector = ["log", "--oneline", "-n", String(limit)];
+			// A merge has no stat by default, and the newest commits of a branch are
+			// often merges; the first-parent diff is what the merge brought in.
+			if (args.stat === true) vector.push("--stat", "--diff-merges=first-parent");
 			if (pathArg) vector.push("--", pathArg);
 			return runVectorTool("git", "git", vector, args, options);
 		}

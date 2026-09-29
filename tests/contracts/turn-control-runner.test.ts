@@ -13,12 +13,9 @@ import { createTurnControlRunner } from "../../src/interactive/turn-control-runn
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 const interpretation: TurnInterpretation = {
-	version: "turn-interpretation-v1",
 	intent: "inspect",
-	intentCertainty: 1,
-	orientation: { wanted: 1, breadth: "repository", subject: null },
-	direction: { requested: 0 },
-	shape: "single",
+	orientation: { wanted: true, breadth: "repository" },
+	direction: { requested: false },
 };
 const report = {
 	findings: [{ claim: "Entry point", path: "src/cli/index.ts", line: 1 }],
@@ -73,7 +70,6 @@ function harness(overrides: Partial<TurnControlRunnerDeps> = {}, receiptData: un
 		getTurnConstraints: () => undefined,
 		isContinuation: () => false,
 		readInterpretation: () => interpretation,
-		fallback: async () => ({ interpretation: null }),
 		facts: {
 			turnIndex: () => 0,
 			taskEstablished: () => false,
@@ -94,7 +90,6 @@ function harness(overrides: Partial<TurnControlRunnerDeps> = {}, receiptData: un
 }
 const input = (signal = new AbortController().signal) => ({
 	operatorText: "explore this repo",
-	previous: "",
 	userTurnId: "u-1",
 	signal,
 });
@@ -117,7 +112,7 @@ test("orientation dispatches read-only from the harness once, renders findings a
 		});
 		assert.match(first.block ?? "", /scout-1/);
 		assert.match(first.block ?? "", /Entry point.*src\/cli\/index.ts:1/);
-		assert.equal(first.record.producer, "decision-site");
+		assert.equal(first.record.producer, "system-one");
 		const second = await h.runner.run({ ...input(), userTurnId: "u-2" });
 		assert.equal(h.requests.length, 1);
 		assert.equal(second.block, first.block);
@@ -172,7 +167,7 @@ test("canceling in-flight orientation aborts its run and leaves no block", async
 		const result = await pending;
 		assert.deepEqual(h.aborted, ["scout-1"]);
 		assert.equal(result.block, null);
-		assert.deepEqual(result.record.executed, { refused: "canceled" });
+		assert.deepEqual(result.record.executed, { refused: "canceled", startedRunIds: ["scout-1"] });
 	} finally {
 		h.cleanup();
 	}
@@ -208,8 +203,8 @@ test("direction provides admitted workspace observations without dispatching a w
 	const h = harness({
 		readInterpretation: () => ({
 			...interpretation,
-			orientation: { wanted: 0, breadth: null, subject: null },
-			direction: { requested: 1 },
+			orientation: { wanted: false, breadth: null },
+			direction: { requested: true },
 		}),
 		facts: {
 			turnIndex: () => 2,

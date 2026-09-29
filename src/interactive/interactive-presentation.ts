@@ -439,6 +439,14 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getContextActivity: () => contextActivityStore.current(),
 		...(deps.getLeaderArmed ? { getLeaderArmed: deps.getLeaderArmed } : {}),
 		...(deps.getShutdownArmed ? { getShutdownArmed: deps.getShutdownArmed } : {}),
+		// Not read until a card is open, which is after `editor` exists.
+		getApproval: () =>
+			deps.isAwaitingApproval?.() === true
+				? {
+						composerHasDraft: editor.getText().length > 0,
+						inspection: deps.getPermissionInspection?.() ?? "none",
+					}
+				: null,
 		getActiveSkillSurface: () => deps.chat.activeSkillSurface(),
 		getToolCounts: () => ({
 			tools: Object.fromEntries(footerToolCounts),

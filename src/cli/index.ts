@@ -67,6 +67,7 @@ Usage:
   clio-coder evidence             build, list, or inspect evidence artifacts
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
+  clio-coder systemone status|export  System One decision dataset: what it holds, and export it as JSONL
   clio-coder trace                query or view the durable dispatch trace mirror
   clio-coder extensions           install, list, enable, disable, or remove extension packages
   clio-coder library              register, install, update, import, inspect, and manage packages of every kind
@@ -283,6 +284,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["evidence", async (subArgs) => (await import("./evidence.js")).runEvidenceCommand(subArgs)],
 	["memory", async (subArgs) => (await import("./memory.js")).runMemoryCommand(subArgs)],
 	["usage", async (subArgs) => (await import("./usage.js")).runUsageCommand(subArgs)],
+	["systemone", async (subArgs) => (await import("./system-one.js")).runSystemOneCommand(subArgs)],
 	["trace", async (subArgs) => (await import("./trace.js")).runTraceCommand(subArgs)],
 	["evolve", async (subArgs) => (await import("./evolve.js")).runEvolveCommand(subArgs)],
 	[

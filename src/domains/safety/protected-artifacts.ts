@@ -377,7 +377,16 @@ export type CommandPathEvent =
 	| { kind: "cd"; target: string; unmodeled: boolean }
 	| { kind: "write"; target: string }
 	| { kind: "link"; symbolic: boolean; sources: string[]; linkDirs: string[]; origin: LinkOrigin }
+	| { kind: "delete"; target: string; scope: DeleteScope }
 	| { kind: "subshell"; open: boolean };
+
+/**
+ * What a delete event names. `path` is the operand itself. `children` is a
+ * directory whose entries go (the roots of `find ... -exec rm`), so the
+ * directory may be the workspace root. `input` is `xargs rm`, whose operands
+ * the scanner never sees.
+ */
+export type DeleteScope = "path" | "children" | "input";
 
 /**
  * How a link event knows its sources. `text` is a link made from the words
@@ -569,6 +578,7 @@ function collectSegmentPathEvents(segment: ReadonlyArray<ShellToken>, depth: num
 	collectInPlaceEditTargets(argv, writes);
 	for (const target of writes.filter(isInterestingWriteTarget)) walk.events.push({ kind: "write", target });
 	collectLinkEvents(argv, walk.events);
+	collectDeleteEvents(argv, walk.events);
 	const cd = cdTarget(argv);
 	if (cd !== null) {
 		walk.events.push({
@@ -604,13 +614,19 @@ const LINK_WRAPPERS: ReadonlySet<string> = new Set([
 /** Commands that can make a link, or recreate one they move or copy. */
 const LINK_COMMANDS: ReadonlySet<string> = new Set(["ln", "link", "cp", "mv"]);
 
+/** Commands that remove the paths they name. */
+const DELETE_COMMANDS: ReadonlySet<string> = new Set(["rm", "rmdir", "unlink"]);
+
 /**
- * The index of the link command a wrapper runs, and whether its operands come
- * from input. A wrapper's own options and arguments are skipped by looking for
- * the next word that names a link command or another wrapper; `find` runs
- * what follows `-exec`, `-execdir`, `-ok`, or `-okdir`.
+ * The index of the command in `commands` that a wrapper runs, and whether its
+ * operands come from input. A wrapper's own options and arguments are skipped
+ * by looking for the next word that names such a command or another wrapper;
+ * `find` runs what follows `-exec`, `-execdir`, `-ok`, or `-okdir`.
  */
-function linkCommandIndex(argv: ReadonlyArray<string>): { index: number; fromInput: boolean } | null {
+function wrappedCommandIndex(
+	argv: ReadonlyArray<string>,
+	commands: ReadonlySet<string>,
+): { index: number; fromInput: boolean } | null {
 	let index = commandTokenIndex(argv);
 	let fromInput = false;
 	while (index !== null && LINK_WRAPPERS.has(basenameToken(argv[index]))) {
@@ -621,11 +637,34 @@ function linkCommandIndex(argv: ReadonlyArray<string>): { index: number; fromInp
 			wrapper === "find"
 				? argv.findIndex((word, at) => at > from && /^-(?:exec|execdir|ok|okdir)$/u.test(word)) + 1
 				: argv.findIndex(
-						(word, at) => at > from && (LINK_COMMANDS.has(basenameToken(word)) || LINK_WRAPPERS.has(basenameToken(word))),
+						(word, at) => at > from && (commands.has(basenameToken(word)) || LINK_WRAPPERS.has(basenameToken(word))),
 					);
 		index = next > from ? next : null;
 	}
 	return index === null ? null : { index, fromInput };
+}
+
+/**
+ * Paths a command removes, whatever flags it spells. Admission judges a delete
+ * by where it lands: a flag pattern let `rm -v -r /` through and blocked
+ * `rm -f` on scratch files, and it taught the model that dropping `-f` was the
+ * way around a block. Behind `find -exec` the roots bound what goes; behind
+ * `xargs` nothing does.
+ */
+function collectDeleteEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[]): void {
+	const found = wrappedCommandIndex(argv, DELETE_COMMANDS);
+	if (found === null || !DELETE_COMMANDS.has(basenameToken(argv[found.index]))) return;
+	if (!found.fromInput) {
+		for (const target of pathArgs(argv, found.index).filter(isInterestingWriteTarget))
+			out.push({ kind: "delete", target, scope: "path" });
+		return;
+	}
+	const outer = commandTokenIndex(argv);
+	if (outer !== null && basenameToken(argv[outer]) === "find") {
+		for (const root of findRoots(argv.slice(outer + 1))) out.push({ kind: "delete", target: root, scope: "children" });
+		return;
+	}
+	out.push({ kind: "delete", target: "<input>", scope: "input" });
 }
 
 /**
@@ -639,7 +678,7 @@ function linkCommandIndex(argv: ReadonlyArray<string>): { index: number; fromInp
  * `-T` says it is never a directory.
  */
 function collectLinkEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[]): void {
-	const found = linkCommandIndex(argv);
+	const found = wrappedCommandIndex(argv, LINK_COMMANDS);
 	if (found === null) return;
 	const cmdIndex = found.index;
 	const executable = basenameToken(argv[cmdIndex]);

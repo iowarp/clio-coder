@@ -2,7 +2,6 @@ import { deepStrictEqual, doesNotThrow, ok, strictEqual } from "node:assert/stri
 import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { buildPathIndex } from "../../src/domains/context/working-set/path-index.js";
-import { createHarnessRoutingSite } from "../../src/domains/providers/sites/harness-routing.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { activeUserTaskAcceptance } from "../../src/domains/user-tasks/active-acceptance.js";
@@ -166,19 +165,5 @@ describe("coordinator surface support", () => {
 		const assessment = assessToolProseLoop({ text, activeToolNames: attached, gatewayToolNames: ["grep", "web_read"] });
 		strictEqual(assessment.kind, "loop");
 		ok(assessment.kind === "loop" && assessment.reason.includes('gateway(op="call", capability="grep"'));
-	});
-
-	it("scores a bounded, task-ranked candidate set per turn", () => {
-		const candidates = Array.from({ length: 200 }, (_, index) => ({
-			kind: "skill" as const,
-			id: `skill-${String(index).padStart(3, "0")}`,
-			description: index === 150 ? "profile slow benchmarks" : "unrelated workflow",
-		}));
-		const site = createHarnessRoutingSite(() => candidates);
-		const ask = site.prepare({ task: "profile the benchmarks", previous: "" } as never);
-		ok(ask);
-		const keys = Object.keys(ask.questions).filter((key) => key.startsWith("candidate:"));
-		ok(keys.length <= 32, `${keys.length} candidates`);
-		strictEqual(keys[0], "candidate:skill:skill-150");
 	});
 });

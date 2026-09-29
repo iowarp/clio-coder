@@ -67,8 +67,8 @@ const ROUND_FAILED = "the model round failed; the agent's diagnostics carry the 
 const JUDGMENT_UNAVAILABLE = "not judged: the model round did not produce a judgment; inspect the agent's diagnostics";
 /** Exact process-authored outcomes; any other judgment reason can contain provider prose. */
 const SAFE_JUDGMENT_REASONS = new Set([
-	"not judged: settings are not loaded",
-	"not judged: bind fleet.decisionProfiles.drafts to a System One profile",
+	"not judged: bind systemOne.sites.drafts to an engine declared in systemOne.engines",
+	"not judged: the drafts engine gave no usable pick in time",
 	"not judged: cancelled",
 	"not judged: a draft failed or came back empty",
 	"not judged: fewer than 2 drafts to compare",

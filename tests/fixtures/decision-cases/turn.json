@@ -1,0 +1,1030 @@
+{
+	"description": "Labeled turns for the turn site. Keys under expect name TurnValue fields: direct, dispatch, orientation and direction are graded as probabilities; shape, intent, breadth and recipe are graded as the winning option, where an unsure engine abstains. Labels say what should happen, not what a past session did. Turns marked verbatim are operator turns from session ledgers; the rest are synthetic controls. A case with recipes true is asked the recipe question over the top-level recipes list, as production does when speculative dispatch is on. Borderline dispatch labels (explore fully, the review-fix-test chain, the three-file comparison) are expected to abstain sometimes. A request that only asks for a plan, or says not to launch anything yet, is dispatch false; a short edit to an earlier plan-only list is intent continue.",
+	"site": "turn",
+	"recipes": [
+		{
+			"id": "architect",
+			"description": "Designs a change across boundaries and slices it into a sprint. Covers contracts, migrations, and validation gates, and turns an existing plan into a dependency-ordered sprint through its bound cut-it skill."
+		},
+		{
+			"id": "coder",
+			"description": "Implements bounded code changes, repairs, and refactors. Behavior-preserving by default."
+		},
+		{
+			"id": "debugger",
+			"description": "Diagnoses failing code, tests, or runs without editing. Reads receipts, logs, and runtime behavior to name the cause."
+		},
+		{
+			"id": "documenter",
+			"description": "Writes docs and examples from source. No shell; verification uses declared checks."
+		},
+		{
+			"id": "git-master",
+			"description": "Runs bounded git operations end to end. Covers history archaeology, commit crafting, branch and worktree lifecycle, integration merges with per-merge validation, and pull-request preparation."
+		},
+		{
+			"id": "oracle",
+			"description": "Shadow advisor that protects consistency with prior decisions and returns the strongest challenge to a question."
+		},
+		{
+			"id": "provenance",
+			"description": "Reads receipts, diffs, and telemetry for evidence. Shadow agent for source-backed handoffs."
+		},
+		{
+			"id": "researcher",
+			"description": "Researches external docs, standards, and papers. Shadow agent for coding decisions, official documentation, release notes, and academic sources."
+		},
+		{
+			"id": "scout",
+			"description": "Broad repository reconnaissance with cited findings. Use for codebase orientation, structure and entry-point mapping, or multi-file symbol hunting; spends no main-context tool calls."
+		},
+		{
+			"id": "tester",
+			"description": "Adds focused deterministic regression and coverage tests."
+		},
+		{
+			"id": "verifier",
+			"description": "Runs test, lint, build, review, and release gates. Reports each gate independently."
+		},
+		{
+			"id": "wiki-writer",
+			"description": "Plans a repository wiki or writes one wiki page. Works against a supplied plan."
+		},
+		{
+			"id": "world-knowledge",
+			"description": "Current open-world discovery, ecosystem comparisons, broad external context, and advisory second opinions. Reports honestly when discovery is unavailable."
+		},
+		{
+			"id": "materio-workflow-planner",
+			"description": "Build a resource-aware dependency plan with researcher assumptions and tagged defaults."
+		},
+		{
+			"id": "wtfp-argument-verifier",
+			"description": "Verify that completed section text actually delivers the claims, evidence, constraints, and connections promised by its plan. Execution summaries are navigation aids, not proof; verdicts must be grounded in the manuscript itself."
+		},
+		{
+			"id": "claude-code",
+			"description": "Claude Code, a peer coding agent reached over the Agent Client Protocol, for handing a whole coding task to it."
+		}
+	],
+	"cases": [
+		{
+			"task": "hhi",
+			"expect": {
+				"direct": true,
+				"dispatch": false,
+				"orientation": false,
+				"direction": false,
+				"intent": "answer"
+			}
+		},
+		{
+			"task": "Hi Clio! Introduce yourself to the world!",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "how are you? who are you? what can you do?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "hey Clio, who are you and what can you do?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "Name the Big-O of binary search. Answer in one token.",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "Reply with exactly: WARM",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "Explain the difference between a mutex and a semaphore.",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "What does the --force flag on git push do?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "thanks, that's all",
+			"expect": {
+				"direct": true,
+				"dispatch": false,
+				"orientation": false,
+				"direction": false,
+				"intent": "answer"
+			}
+		},
+		{
+			"task": "thanks, that's all",
+			"previous": "I found the bug: submitExpanded forces end-of-turn steering when admission is awaited. I can change it to steer at the next tool boundary and add a contract test. Want me to go ahead?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "hi, what is this repo?",
+			"expect": {
+				"direct": false,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "Name the three scripts under scripts/ that matter for cutting a release and say in one sentence each what they do. Use the tools to check; do not guess.",
+			"expect": {
+				"direct": false,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "Run this exact shell command with your bash tool: rm -rf build/",
+			"expect": {
+				"direct": false,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "fix the typo in README.md line 3",
+			"expect": {
+				"direct": false,
+				"dispatch": false,
+				"orientation": false,
+				"direction": false,
+				"intent": "implement",
+				"breadth": "focused"
+			}
+		},
+		{
+			"task": "list all skills",
+			"expect": {
+				"direct": false,
+				"dispatch": false,
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "Check your live settings and briefly tell me the current fleet default model and target. Do not read documentation or change anything.",
+			"expect": {
+				"direct": false,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "Review this real bug before we change it: in src/interactive/interactive-slash-runtime.ts, submitExpanded uses awaitAdmission && willQueue to force steering to end-of-turn. Is that right?",
+			"expect": {
+				"direct": false,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "yes, do it",
+			"previous": "I found the bug: submitExpanded forces end-of-turn steering when admission is awaited. I can change it to steer at the next tool boundary and add a contract test. Want me to go ahead?",
+			"expect": {
+				"direct": false,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "ok go ahead",
+			"previous": "I found the bug: submitExpanded forces end-of-turn steering when admission is awaited. I can change it to steer at the next tool boundary and add a contract test. Want me to go ahead?",
+			"expect": {
+				"direct": false,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "no, use the other approach",
+			"previous": "I found the bug: submitExpanded forces end-of-turn steering when admission is awaited. I can change it to steer at the next tool boundary and add a contract test. Want me to go ahead?",
+			"expect": {
+				"direct": false,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "yes, do it",
+			"expect": {
+				"direct": false,
+				"dispatch": false
+			}
+		},
+		{
+			"task": "explore this repo fully and tell me what you think",
+			"expect": {
+				"direct": false,
+				"dispatch": true,
+				"orientation": true,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "repository",
+				"recipe": "scout"
+			},
+			"source": "verbatim",
+			"recipes": true
+		},
+		{
+			"task": "hi, explore your own repo until you know everything. obviously use your agents",
+			"expect": {
+				"direct": false,
+				"dispatch": true,
+				"shape": "parallel",
+				"orientation": true,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "repository",
+				"recipe": "scout"
+			},
+			"source": "verbatim",
+			"recipes": true
+		},
+		{
+			"task": "Dispatch the scout agent to map how apis/diffusion-frames.ts is used by apis/openai-completions.ts, then summarize its report for me in three bullets.",
+			"expect": {
+				"direct": false,
+				"dispatch": true,
+				"shape": "single",
+				"recipe": "scout"
+			},
+			"source": "verbatim",
+			"recipes": true
+		},
+		{
+			"task": "Compare how src/net/retry.ts, src/db/retry.ts and src/queue/retry.ts each handle backoff, one worker per file, then summarize the differences.",
+			"expect": {
+				"direct": false,
+				"dispatch": true,
+				"shape": "parallel",
+				"recipe": "scout"
+			},
+			"recipes": true
+		},
+		{
+			"task": "Review the auth middleware for timing attacks, then fix anything you find, then add regression tests for each fix.",
+			"expect": {
+				"direct": false,
+				"dispatch": true,
+				"shape": "sequence"
+			}
+		},
+		{
+			"task": "Get three independent opinions from the council on whether we should switch this monorepo from pnpm to bun.",
+			"expect": {
+				"direct": false,
+				"dispatch": true,
+				"shape": "council"
+			}
+		},
+		{
+			"task": "Do not change anything yet. Plan how you would split the migration of all six provider adapters across parallel workers and tell me what each worker would own.",
+			"expect": {
+				"direct": false,
+				"dispatch": false,
+				"shape": "parallel"
+			}
+		},
+		{
+			"task": "explore this repo",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "repository"
+			}
+		},
+		{
+			"task": "give me a tour of this codebase",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "repository"
+			}
+		},
+		{
+			"task": "what is this project and how is it organized?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "repository"
+			}
+		},
+		{
+			"task": "I just cloned this repo. Where do I start?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "repository"
+			}
+		},
+		{
+			"task": "what does this project do and how is it laid out?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "repository"
+			}
+		},
+		{
+			"task": "I'm new to this codebase. Walk me through its main parts and how they fit together before I change anything.",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "repository"
+			}
+		},
+		{
+			"task": "give me the lay of the land in this repository: what lives where and what talks to what",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "repository"
+			}
+		},
+		{
+			"task": "how do the safety classifier and the dispatch scheduler relate?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "explain how tool argument validation and receipt sealing work; they are separate areas",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "compare the memory promotion path with the evidence bundle builder",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "where is the loop guard's block threshold set?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "focused"
+			}
+		},
+		{
+			"task": "which file defines the dispatch request origin type?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "focused"
+			}
+		},
+		{
+			"task": "what does answerCertainty in decisions.ts compute?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "focused"
+			}
+		},
+		{
+			"task": "Name two directories in this repo.",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "list the files in src/tools",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "what scripts are in package.json?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "where is the config loader defined?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "what branch am I on?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "how many test files are under tests/contracts?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "show the README title",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "which file exports createSystemOne?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "what version is package.json at?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "what does the docs directory contain?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "is there a tsconfig.json at the repo root?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "print the first ten lines of src/cli/index.ts",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "which directory holds the prompt fragments?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "does this repo use pnpm or npm?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "find where TOOL_PLACEMENT is defined",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "not sure",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"orientation": false,
+				"direction": true,
+				"intent": "unknown"
+			}
+		},
+		{
+			"task": "help me",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"orientation": false,
+				"direction": true,
+				"intent": "unknown"
+			}
+		},
+		{
+			"task": "no idea",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"orientation": false,
+				"direction": true,
+				"intent": "unknown"
+			}
+		},
+		{
+			"task": "what should I do here?",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"orientation": false,
+				"direction": true,
+				"intent": "unknown"
+			}
+		},
+		{
+			"task": "can't decide",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"orientation": false,
+				"direction": true,
+				"intent": "unknown"
+			}
+		},
+		{
+			"task": "suggest something",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"orientation": false,
+				"direction": true,
+				"intent": "unknown"
+			}
+		},
+		{
+			"task": "does Clio have a built-in way to review a scientific Python package, and how would I start it?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "is there a workflow for planning a research software change before implementing it?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "can you run a literature search on arXiv from here?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "inspect"
+			}
+		},
+		{
+			"task": "what progress and completed checks are recorded in this session?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "answer"
+			}
+		},
+		{
+			"task": "what have you verified so far in this session?",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "answer"
+			}
+		},
+		{
+			"task": "list the tasks and evidence recorded so far",
+			"expect": {
+				"orientation": false,
+				"direction": false,
+				"intent": "answer"
+			}
+		},
+		{
+			"task": "help me understand this repo. what is it and how can i use it locally?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "repository",
+				"recipe": "scout",
+				"dispatch": true
+			},
+			"source": "verbatim",
+			"recipes": true
+		},
+		{
+			"task": "explore this repo and help me understand how clio-agent accepts integrations with other agent frameworks like clio-coder or claude code",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"intent": "inspect",
+				"breadth": "area",
+				"recipe": "scout",
+				"dispatch": true
+			},
+			"source": "verbatim",
+			"recipes": true
+		},
+		{
+			"task": "make a new branch v051 and let's orient in this repo extension system and agent plugin system and the library and marketplace. report ready when oriented",
+			"expect": {
+				"recipe": "scout",
+				"dispatch": true
+			},
+			"source": "verbatim",
+			"recipes": true
+		},
+		{
+			"task": "In the clio-coder repo, report the runtime and credential landscape needed to add quota adapters. List every registered runtime id and where credentials are read, with file:line for each.",
+			"expect": {
+				"recipe": "scout",
+				"dispatch": true
+			},
+			"source": "verbatim",
+			"recipes": true
+		},
+		{
+			"task": "Find every place that reads the session ledger outside the session domain, and hand me the list with file and line.",
+			"expect": {
+				"recipe": "scout",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "The tests in tests/extended/dispatch-worker-signal.test.ts started failing after the last merge with a SIGKILL timeout. Have a worker find out why before we touch anything.",
+			"expect": {
+				"recipe": "debugger",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "Use the coder agent to add a --json flag to clio-coder agents that prints each recipe as one JSON object per line.",
+			"expect": {
+				"recipe": "coder",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "Hand this off to a worker: add a retry with exponential backoff to the webhook sender in src/notify/webhook.ts and keep its behavior identical otherwise.",
+			"expect": {
+				"recipe": "coder",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "Before I tag the release, have a worker run the lint, typecheck, test and build gates and report each one separately.",
+			"expect": {
+				"recipe": "verifier",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "Get a worker to add regression tests covering the three footer notice bugs we fixed today.",
+			"expect": {
+				"recipe": "tester",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "Have a worker check what the official OpenAI Responses API documentation says about parallel tool calls while streaming, with links to the pages.",
+			"expect": {
+				"recipe": "researcher",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "Design the move from our unversioned YAML settings to a versioned schema with a rollback path, and slice it into a sprint of tasks.",
+			"expect": {
+				"recipe": "architect",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "Delegate a user guide page for the new /draft command, with examples taken from the source.",
+			"expect": {
+				"recipe": "documenter",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "Have a worker squash the last five commits on this branch into two logical commits with good messages and prepare the pull request.",
+			"expect": {
+				"recipe": "git-master",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "What is the ecosystem saying right now about bun against pnpm for large monorepos? Get a worker to survey it and bring back sources.",
+			"expect": {
+				"recipe": "world-knowledge",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "Before we commit to dropping the evals tree, have a worker challenge that decision against what we decided in earlier sessions.",
+			"expect": {
+				"recipe": "oracle",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "Pull the receipts and diffs for yesterday's failed scout runs and have a worker lay out the evidence of what went wrong.",
+			"expect": {
+				"recipe": "provenance",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "Have a worker check whether the introduction section of my paper actually delivers the claims its plan promised.",
+			"expect": {
+				"recipe": "wtfp-argument-verifier",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "Plan the whole materials-science workflow for our electrolyte screening study around the instruments and compute we actually have, and send it to a worker.",
+			"expect": {
+				"recipe": "materio-workflow-planner",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "Ask Claude Code over ACP to take a pass at refactoring the settings overlay.",
+			"expect": {
+				"recipe": "claude-code",
+				"dispatch": true
+			},
+			"recipes": true
+		},
+		{
+			"task": "actually drop scripts/decision-probe.ts from that list",
+			"previous": "Files that would need to be touched to rename `GATEWAY_RELATED_MAX`:\n\n- `src/tools/gateway/index.ts` (declaration + internal use)\n- `scripts/decision-probe.ts` (import + use)\n- `tests/contracts/gateway-capability-ranking.test.ts` (import + use)",
+			"previousTask": "Plan only, do not edit anything: list the files you would touch to rename GATEWAY_RELATED_MAX in src/tools/gateway/index.ts. Just the file list.",
+			"expect": {
+				"intent": "continue",
+				"dispatch": false,
+				"direct": false,
+				"orientation": false,
+				"direction": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"task": "add src/interactive/footer/pages.ts to that list too",
+			"previous": "Files that would need to be touched to rename `GATEWAY_RELATED_MAX`:\n\n- `src/tools/gateway/index.ts` (declaration + internal use)\n- `scripts/decision-probe.ts` (import + use)\n- `tests/contracts/gateway-capability-ranking.test.ts` (import + use)",
+			"previousTask": "Plan only, do not edit anything: list the files you would touch to rename GATEWAY_RELATED_MAX in src/tools/gateway/index.ts. Just the file list.",
+			"expect": {
+				"intent": "continue",
+				"dispatch": false,
+				"direct": false,
+				"orientation": false
+			}
+		},
+		{
+			"task": "remove the last bullet",
+			"previous": "Files that would need to be touched to rename `GATEWAY_RELATED_MAX`:\n\n- `src/tools/gateway/index.ts` (declaration + internal use)\n- `scripts/decision-probe.ts` (import + use)\n- `tests/contracts/gateway-capability-ranking.test.ts` (import + use)",
+			"previousTask": "Plan only, do not edit anything: list the files you would touch to rename GATEWAY_RELATED_MAX in src/tools/gateway/index.ts. Just the file list.",
+			"expect": {
+				"intent": "continue",
+				"dispatch": false,
+				"direct": false
+			}
+		},
+		{
+			"task": "skip the test file, only source files",
+			"previous": "Files that would need to be touched to rename `GATEWAY_RELATED_MAX`:\n\n- `src/tools/gateway/index.ts` (declaration + internal use)\n- `scripts/decision-probe.ts` (import + use)\n- `tests/contracts/gateway-capability-ranking.test.ts` (import + use)",
+			"previousTask": "Plan only, do not edit anything: list the files you would touch to rename GATEWAY_RELATED_MAX in src/tools/gateway/index.ts. Just the file list.",
+			"expect": {
+				"intent": "continue",
+				"dispatch": false,
+				"direct": false
+			}
+		},
+		{
+			"task": "sort that list alphabetically",
+			"previous": "Files that would need to be touched to rename `GATEWAY_RELATED_MAX`:\n\n- `src/tools/gateway/index.ts` (declaration + internal use)\n- `scripts/decision-probe.ts` (import + use)\n- `tests/contracts/gateway-capability-ranking.test.ts` (import + use)",
+			"previousTask": "Plan only, do not edit anything: list the files you would touch to rename GATEWAY_RELATED_MAX in src/tools/gateway/index.ts. Just the file list.",
+			"expect": {
+				"intent": "continue",
+				"dispatch": false,
+				"direct": false
+			}
+		},
+		{
+			"task": "Plan how you would explore the whole repository with scouts, but do not launch anything yet.",
+			"expect": {
+				"dispatch": false,
+				"direct": false,
+				"intent": "plan"
+			}
+		},
+		{
+			"task": "Just give me the plan for splitting the provider migration across workers. Do not dispatch anything.",
+			"expect": {
+				"dispatch": false,
+				"direct": false,
+				"intent": "plan"
+			}
+		},
+		{
+			"task": "Before you run anything, outline which agents you would use to audit the safety domain.",
+			"expect": {
+				"dispatch": false,
+				"direct": false
+			}
+		},
+		{
+			"task": "Draft a plan only for reviewing every file under src/domains/safety in parallel, and don't start yet.",
+			"expect": {
+				"dispatch": false,
+				"direct": false,
+				"intent": "plan"
+			}
+		},
+		{
+			"task": "Don't launch any workers yet. First tell me how you would split the six adapter migrations.",
+			"expect": {
+				"dispatch": false,
+				"direct": false
+			}
+		},
+		{
+			"task": "Which agents would you send to explore this repo? Just list them, don't run them.",
+			"expect": {
+				"dispatch": false,
+				"direct": false
+			}
+		},
+		{
+			"task": "Use your dispatch tool to send the scout agent to read package.json and report its version field and then list the first 30 files under src/domains. Do not do it yourself.",
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"shape": "single"
+			},
+			"source": "verbatim"
+		},
+		{
+			"task": "Use your dispatch tool to send the scout agent to read every file under src/domains/safety one by one and summarize each file in detail. Do not do it yourself.",
+			"expect": {
+				"dispatch": true,
+				"direct": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"task": "Dispatch a coder agent to add a --verbose flag to the doctor command.",
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"shape": "single"
+			}
+		},
+		{
+			"task": "Send three scouts, one each for src/tools, src/domains and src/interactive, and report what each one contains.",
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"shape": "parallel"
+			}
+		},
+		{
+			"task": "Use the dispatch tool to have a worker run the typecheck and lint gates and report each one.",
+			"expect": {
+				"dispatch": true,
+				"direct": false
+			}
+		},
+		{
+			"task": "Use your bash tool to run exactly: rm -rf tmp/scratch-rm",
+			"expect": {
+				"dispatch": false,
+				"direct": false,
+				"intent": "implement"
+			},
+			"source": "verbatim"
+		},
+		{
+			"task": "Run it now with your bash tool, do not predict the result: rm /home/user/clio-probe-4b.txt",
+			"expect": {
+				"dispatch": false,
+				"direct": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"task": "show the last 3 commits with their changed files",
+			"expect": {
+				"dispatch": false,
+				"direct": false,
+				"intent": "inspect"
+			},
+			"source": "verbatim"
+		},
+		{
+			"task": "What capability do you have for checking on my HPC batch jobs? Use gateway find, don't run anything.",
+			"expect": {
+				"dispatch": false,
+				"direct": false,
+				"intent": "inspect"
+			},
+			"source": "verbatim"
+		},
+		{
+			"task": "Create tmp/clio-probe.txt containing the word hello, then delete it with rm.",
+			"expect": {
+				"dispatch": false,
+				"direct": false,
+				"intent": "implement"
+			},
+			"source": "verbatim"
+		},
+		{
+			"task": "say hello",
+			"expect": {
+				"direct": true,
+				"dispatch": false,
+				"intent": "answer"
+			},
+			"source": "verbatim"
+		},
+		{
+			"task": "how are you?",
+			"expect": {
+				"direct": true,
+				"dispatch": false,
+				"intent": "answer"
+			},
+			"source": "verbatim"
+		},
+		{
+			"task": "yes, go ahead",
+			"previous": "Here is the plan: one scout maps src/tools, a second maps src/domains, and I merge their reports. Shall I dispatch them?",
+			"previousTask": "map the tools and domains directories",
+			"expect": {
+				"intent": "continue",
+				"direct": false,
+				"orientation": false,
+				"direction": false
+			}
+		}
+	]
+}

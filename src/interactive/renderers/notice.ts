@@ -1,18 +1,19 @@
 /**
- * Transcript notices. Every notice the transcript keeps is one block with a
- * mark in the gutter, like every other block: `ℹ` information, `✓` success,
+ * Transcript notices. Routine notices keep a mark in the gutter:
+ * `i` information, `✓` success,
  * `⚠` a warning, `✗` an error, `↻` a provider retry and `⊘` a turn the
  * operator cancelled. The mark carries the level in shape and color, the text
- * stays `muted`, and a wrapped notice hangs in the content column. The
+ * stays neutral, and a wrapped notice hangs in the content column. The
  * `[Clio Coder]` product tag is dropped because the whole transcript is
  * Clio's; a subsystem tag such as `[/context compact]` or `[model]` stays,
- * dim, because it names which part of Clio is speaking.
+ * dim, because it names which part of Clio is speaking. Operator tips use a
+ * compact frame so they do not read as part of the assistant's answer.
  *
  * Pure: no I/O, no module-level mutable state beyond the shared theme handle.
  */
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import { type ClioToken, clioTheme, GLYPH } from "../theme/index.js";
+import { type ClioToken, clioTheme, frame, GLYPH } from "../theme/index.js";
 
 const theme = clioTheme();
 
@@ -21,6 +22,9 @@ const theme = clioTheme();
 // remainder as the message body.
 const LEADING_TAG = /^(\[[^\]]+\])([\s\S]*)$/u;
 const PRODUCT_TAG = /^\s*\[Clio Coder\]\s*/u;
+const TIP_TAG = /^\[tip\](?:\s+|$)/u;
+const TIP_GUTTER = "  ";
+const TIP_MAX_WIDTH = 88;
 
 export type NoticeMark = "info" | "success" | "warning" | "error" | "retry" | "cancelled";
 
@@ -50,13 +54,23 @@ function noticeText(text: string): string {
 	return sanitizeCallTargetText(text).replace(PRODUCT_TAG, "").trim();
 }
 
+function renderTipCard(text: string, width: number): string[] {
+	if (text.length === 0) return [];
+	if (width < 8) return wrapTextWithAnsi(theme.fg("body", text), Math.max(1, width));
+	const boxWidth = Math.min(TIP_MAX_WIDTH, width - TIP_GUTTER.length);
+	const body = wrapTextWithAnsi(text, boxWidth - 4);
+	const title = theme.style("guidance", `${GLYPH.info} Tip`, { bold: true });
+	return frame(theme, title, body, boxWidth).map((line) => `${TIP_GUTTER}${line}`);
+}
+
 /**
- * One transcript notice: its mark in the gutter and the text in the content
- * column, every wrapped row hanging two cells in. Empty text renders nothing.
+ * One transcript notice. Routine marks stay in the gutter; operator tips sit
+ * in a compact frame. Empty text renders nothing.
  */
 export function renderNoticeRow(text: string, mark: NoticeMark, width: number): string[] {
 	const body = noticeText(text);
 	if (body.length === 0) return [];
+	if (mark === "info" && TIP_TAG.test(body)) return renderTipCard(body.replace(TIP_TAG, ""), width);
 	const { glyph, token } = MARKS[mark];
 	const tagged = LEADING_TAG.exec(body);
 	const styled = tagged ? styleTaggedNotice(body) : theme.fg("body", body);

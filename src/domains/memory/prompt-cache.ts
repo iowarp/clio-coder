@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { canonicalMemoryRepositoryIdentity } from "./operations.js";
-import { buildMemoryPromptSection, type MemoryPromptOptions } from "./prompt-section.js";
+import { canonicalMemoryRepositoryIdentity, eligibleMemoryRecords } from "./operations.js";
+import { buildMemoryPromptSection, type MemoryPromptOptions, selectMemoryForPrompt } from "./prompt-section.js";
 import {
 	MEMORY_PRECOMPUTED_RELEVANCE_VERSION,
 	MEMORY_RELEVANCE_VERSION,
@@ -43,6 +43,13 @@ export interface MemoryPromptReaderOptions {
 	selection?: Pick<MemoryPromptOptions, "scopes" | "tokenBudget" | "maxItems">;
 	/** Source seam for deterministic read-count tests; production reads the real bounded store. */
 	readStore?: typeof readMemoryStoreSnapshot;
+	/**
+	 * Called with the ids of the records a freshly built section admitted, only
+	 * when a model ranking applied to it. It lets a follow-up tracker join a
+	 * selection to the ranking that ordered it. Never called for a cached
+	 * section, and a throw never reaches the prompt.
+	 */
+	onRankedSelection?: (ids: ReadonlyArray<string>) => void;
 }
 
 /**
@@ -53,7 +60,25 @@ export interface MemoryPromptReaderOptions {
  * Calls without a prepared turn (boot/reset prewarm) read each time. Later
  * prewarm can reuse the preceding snapshot; a fresh attempt always rereads.
  */
-export function createMemoryPromptReader(options: MemoryPromptReaderOptions): (request: MemoryPromptRequest) => string {
+/** A memory record offered to a ranker: the lesson is what is being asked about. */
+export interface MemoryRankingCandidate {
+	readonly id: string;
+	readonly summary: string;
+}
+
+export interface MemoryPromptReader {
+	(request: MemoryPromptRequest): string;
+	/**
+	 * The eligible records to rank for this turn, or null when ranking could not
+	 * change the section: it was already built for this turn, a ranking pinned
+	 * earlier in the session still applies, or every eligible record fits the
+	 * section anyway. Asked before the section is built so a ranker is paid for
+	 * only when the order decides what the prompt carries.
+	 */
+	rankingCandidates(request: MemoryPromptRequest): ReadonlyArray<MemoryRankingCandidate> | null;
+}
+
+export function createMemoryPromptReader(options: MemoryPromptReaderOptions): MemoryPromptReader {
 	// Copy options now: mutable caller arrays must not silently change eligibility.
 	const selection = { ...options.selection, scopes: [...(options.selection?.scopes ?? ["global", "repo", "runtime"])] };
 	const experimentalRelevance = options.experimentalRelevance === true;
@@ -61,7 +86,7 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): (r
 	let frame: { key: string; section: string } | null = null;
 	let selected: { key: string; section: string } | null = null;
 	let pinned: PinnedRanking | null = null;
-	return (request) => {
+	const authorityOf = (request: MemoryPromptRequest) => {
 		const dataDir = options.getDataDir();
 		const activeRepository = canonicalMemoryRepositoryIdentity(request.cwd);
 		const authority = JSON.stringify([
@@ -73,7 +98,10 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): (r
 			request.runtimeId,
 			request.modelId,
 		]);
-		const frameKey = JSON.stringify([request.turnId, authority]);
+		return { dataDir, activeRepository, authority, frameKey: JSON.stringify([request.turnId, authority]) };
+	};
+	const read = (request: MemoryPromptRequest): string => {
+		const { dataDir, activeRepository, authority, frameKey } = authorityOf(request);
 		if (request.turnId !== null && frame?.key === frameKey) return frame.section;
 		let section = "";
 		try {
@@ -115,14 +143,22 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): (r
 				.digest("hex");
 			if (selected?.key === key) section = selected.section;
 			else {
-				section = buildMemoryPromptSection(snapshot.records, {
+				const built = buildMemoryPromptSection(snapshot.records, {
 					...selection,
 					activeRepository,
 					activeRuntime: { kind: "runtime", key: request.runtimeId },
 					...(experimentalRelevance ? { relevance } : {}),
 					...(ranking === undefined ? {} : { precomputedRelevance: ranking }),
-				}).section;
+				});
+				section = built.section;
 				selected = Object.freeze({ key, section });
+				if (ranking !== undefined) {
+					try {
+						options.onRankedSelection?.(built.records.map((record) => record.id));
+					} catch {
+						// Observation must not cost the section it describes.
+					}
+				}
 			}
 		} catch {
 			// A failed fresh read revokes old approved content, including its cache.
@@ -131,6 +167,33 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): (r
 		frame = request.turnId === null ? null : Object.freeze({ key: frameKey, section });
 		return section;
 	};
+	const rankingCandidates = (request: MemoryPromptRequest): ReadonlyArray<MemoryRankingCandidate> | null => {
+		try {
+			const { dataDir, activeRepository, authority, frameKey } = authorityOf(request);
+			if (request.turnId !== null && frame?.key === frameKey) return null;
+			const snapshot = readStore(dataDir);
+			const pin = pinRanking(
+				pinned,
+				undefined,
+				{ authority: pinAuthority(authority, request.sessionAuthority), session: request.sessionAuthority },
+				snapshot.revision,
+			);
+			if (pin !== undefined) return null;
+			const eligibility = {
+				scopes: selection.scopes,
+				activeRepository,
+				activeRuntime: { kind: "runtime" as const, key: request.runtimeId },
+				activeAgent: null,
+			};
+			const eligible = eligibleMemoryRecords(snapshot.records, eligibility);
+			const admitted = selectMemoryForPrompt(snapshot.records, { ...selection, ...eligibility }).length;
+			return eligible.length > admitted ? eligible.map((record) => ({ id: record.id, summary: record.lesson })) : null;
+		} catch {
+			// A store that cannot be read has nothing to rank, and the reader itself reports that failure.
+			return null;
+		}
+	};
+	return Object.assign(read, { rankingCandidates });
 }
 
 interface PinnedRanking {

@@ -18,6 +18,7 @@ import type { DispatchBoardRow } from "../dispatch-board.js";
 import type { FooterPanel } from "../footer-panel.js";
 import { dispatchSegment } from "../footer-panel.js";
 import { formatKeyLabel } from "../keybinding-manager.js";
+import type { PermissionInspectionHint } from "../permission-hint.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
 import { animationStep, clioTheme, collapseHomePath, formatTargetLabel } from "../theme/index.js";
@@ -89,6 +90,8 @@ export interface FooterDashboardDeps {
 	getLeaderArmed?: () => boolean;
 	/** Whether a Ctrl+C armed the double tap and its window is still open. */
 	getShutdownArmed?: () => boolean;
+	/** The open permission card's draft and inspection state, or null when no card is open. */
+	getApproval?: () => { composerHasDraft: boolean; inspection: PermissionInspectionHint } | null;
 	/** Skills whose tool surface is armed across turns; the compact line names them. */
 	getActiveSkillSurface?: () => ReadonlyArray<string>;
 	dismissKeyLabel?: string;
@@ -263,6 +266,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				modelId: settings?.chat?.model ?? null,
 				leaderArmed: deps.getLeaderArmed?.() ?? false,
 				shutdownArmed: deps.getShutdownArmed?.() ?? false,
+				approval: deps.getApproval?.() ?? null,
 				activeSkills: deps.getActiveSkillSurface?.() ?? [],
 				memoryIntervention: taskMemory
 					? {

@@ -22,7 +22,7 @@ graph LR
     client[External ACP Client] <-->|JSON-RPC 2.0 / stdio| server[Clio ACP Server]
     server --> mediator[Tool Mediator & Safety Net]
     mediator --> engine[Clio Execution Engine]
-    mediator --> session[Session Ledger v4]
+    mediator --> session[Session Ledger v6]
 ```
 
 ---
@@ -52,7 +52,7 @@ Transport frames are JSON-RPC 2.0 messages serialized over `stdin`/`stdout`. All
 
 ## 3. Supported ACP Methods
 
-These are every method the server answers ([server.ts](../../src/engine/acp/server.ts)). Anything else returns `-32601`.
+These are the methods the server answers ([server.ts](../../src/engine/acp/server.ts)). Anything else returns `-32601`. Each `_clio-coder/*` method beyond the core set is advertised under `agentCapabilities._meta` only when the composition wired its dependency.
 
 | Method | Direction | Description |
 | :--- | :--- | :--- |
@@ -81,6 +81,19 @@ These are every method the server answers ([server.ts](../../src/engine/acp/serv
 | `_clio-coder/dispatch/steer` | Client → Server | Queues guidance on, or aborts, one running worker by `runId`. Acceptance means queued on the worker's stdin, never delivered. |
 | `_clio-coder/commands/list` | Client → Server | Returns the catalog of exposed operator commands with the grammar a palette builds its argument UI from. |
 | `_clio-coder/commands/invoke` | Client → Server | Runs one exposed operator command headlessly and returns its notice level and output lines. |
+| `_clio-coder/session/board` | Client → Server | Reads a bounded projection of the operator task board, decisions, and task-memory status. |
+| `_clio-coder/decisions/supersede` | Client → Server | Marks one recorded decision superseded while idle and returns the correction turn for the client to send. |
+| `_clio-coder/memory/propose` | Client → Server | Proposes a memory candidate for review while idle. Never an approval; global scope needs an explicit acknowledgement. |
+| `_clio-coder/session/tree` | Client → Server | Reads a bounded projection of the session tree, as the terminal's `/tree` navigator shows it. |
+| `_clio-coder/session/switch_turn` | Client → Server | Moves the session's append point to a turn and replays the resulting branch. |
+| `_clio-coder/session/fork` | Client → Server | Starts a new session from a turn and replays it. |
+| `_clio-coder/session/handoff/prepare`, `commit`, `cancel` | Client → Server | The `/handoff` flow. Prepare renders a document for review without writing; commit seeds a successor session; cancel discards the draft. |
+| `_clio-coder/context/ledger` | Client → Server | Reads the `/context` window ledger as one bounded projection. |
+| `_clio-coder/usage/read` | Client → Server | Reads the numbers the `/usage` overlay shows: session cost and tokens per provider and model, plus each provider's cached quota report. |
+| `_clio-coder/aside/ask`, `draft`, `cancel` | Client → Server | The `/btw` and `/draft` rounds beside the session. They never become a turn or a `session/update` and are refused while a turn runs. |
+| `_clio-coder/extensions/list`, `reload` | Client → Server | Lists the running session's extensions and reloads them. |
+| `_clio-coder/library/reload` | Client → Server | Runs the `/library reload` operation. |
+| `_clio-coder/fleet/preview`, `run` | Client → Server | Preview compiles a fleet contract without dispatching. Run starts it only when the fresh plan hash equals the hash the client approved. |
 | `session/request_permission` | Server → Client | Requests permission from the client for a gated tool operation. |
 | `_clio-coder/event` | Server → Client | Sends a versioned extension event only to a client that opted into a recognized kind. The v1 allowlist is `safety.loopBlocked`, `dispatch.enqueued`, `dispatch.started`, `dispatch.progress`, `dispatch.completed`, `dispatch.failed`, `accountability.evidenceReady`, `compaction.end`, `context.warning`, `safety.toolBudgetExceeded`, and `provider.health`. Every kind is the engine's own `BusChannels` value, never a renamed alias, so a captured frame names its producer. |
 

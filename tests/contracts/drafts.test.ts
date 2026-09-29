@@ -2,21 +2,27 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { Model } from "@earendil-works/pi-ai";
 
-import type { Decider } from "../../src/domains/providers/decisions.js";
 import inceptionRuntime from "../../src/domains/providers/runtimes/cloud/inception.js";
-import type { DecisionAnswer } from "../../src/domains/providers/types/inference.js";
+import { draftTakenOutcome } from "../../src/domains/system-one/outcomes.js";
 import { setDiffusionFramesEnabled } from "../../src/engine/apis/diffusion-frames.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 import {
 	DRAFT_DEFAULT,
 	DRAFT_SYSTEM_PROMPT,
-	draftJudgeRequest,
+	draftSystemPrompt,
 	draftTemperature,
-	judgeDrafts,
+	isTemperatureRejection,
 	parseDraftArgs,
-	readDraftVerdict,
+	runDraftWithSamplerFallback,
 } from "../../src/interactive/drafts.js";
-import { type DraftOverlayState, formatDraftOverlayBody } from "../../src/interactive/overlays/draft.js";
+import type { OverlayGeneralOpenersDeps } from "../../src/interactive/overlay-general-openers.js";
+import { createOverlayGeneralOpeners } from "../../src/interactive/overlay-general-openers.js";
+import {
+	type DraftOverlayState,
+	formatDraftOverlayBody,
+	type OpenDraftOverlayOptions,
+	takenDraft,
+} from "../../src/interactive/overlays/draft.js";
 import { runOutOfTurnRound } from "../../src/interactive/side-question.js";
 
 afterEach(() => setDiffusionFramesEnabled(false));
@@ -25,18 +31,6 @@ function plain(text: string): string {
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escapes are the subject under test.
 	return text.replace(/\u001b\[[0-9;]*m/g, "");
 }
-
-/**
- * The judge's answers for three candidates with a planted wrong B, in the
- * shape jev-latest returned live: a `choice` with its distribution, and one
- * `noul` per candidate with no `confidence` field.
- */
-const LIVE_ANSWERS: Record<string, DecisionAnswer> = {
-	best: { type: "choice", choice: "A", probabilities: { A: 0.99, B: 0, C: 0.01 }, confidence: 0.98 },
-	"sound.A": { type: "noul", noul: 0.93 },
-	"sound.B": { type: "noul", noul: 0.03 },
-	"sound.C": { type: "noul", noul: 0.52 },
-};
 
 describe("/draft arguments", () => {
 	it("omits temperature for every Claude model that answers one with HTTP 400, on every transport", () => {
@@ -57,6 +51,40 @@ describe("/draft arguments", () => {
 			strictEqual(draftTemperature(id, 0.7), 0.7, id);
 		}
 	});
+	it("omits temperature where the transport refuses it and varies the drafts by prompt instead", () => {
+		strictEqual(draftTemperature({ id: "gpt-6-luna", api: "openai-codex-responses" }, 0.7), undefined);
+		strictEqual(draftTemperature({ id: "gpt-5", api: "openai-responses", reasoning: true }, 0.7), undefined);
+		strictEqual(
+			draftTemperature({ id: "x", api: "openai-completions", compat: { supportsTemperature: false } }, 0.7),
+			undefined,
+		);
+		strictEqual(draftTemperature({ id: "gpt-4o", api: "openai-responses", reasoning: false }, 0.7), 0.7);
+		strictEqual(draftSystemPrompt(0, true), DRAFT_SYSTEM_PROMPT);
+		ok(draftSystemPrompt(1, true).startsWith(DRAFT_SYSTEM_PROMPT) && draftSystemPrompt(1, true) !== DRAFT_SYSTEM_PROMPT);
+		strictEqual(draftSystemPrompt(1, false), DRAFT_SYSTEM_PROMPT, "a candidate that kept its sampler needs no angle");
+	});
+	it("retries a draft once without the sampler when the provider refuses temperature", async () => {
+		ok(isTemperatureRejection("Codex error: Unsupported parameter: temperature"));
+		ok(!isTemperatureRejection("HTTP 429 rate limited"));
+		const seen: Array<number | undefined> = [];
+		const text = await runDraftWithSamplerFallback(1, 0.7, async (sampling) => {
+			seen.push(sampling.temperature);
+			if (sampling.temperature !== undefined) throw new Error("Codex error: Unsupported parameter: temperature");
+			return "drafted";
+		});
+		strictEqual(text, "drafted");
+		deepStrictEqual(seen, [0.7, undefined]);
+		// Any other failure is not retried.
+		let calls = 0;
+		await runDraftWithSamplerFallback(0, 0.3, async () => {
+			calls += 1;
+			throw new Error("HTTP 500");
+		}).then(
+			() => ok(false, "should reject"),
+			(error: Error) => strictEqual(error.message, "HTTP 500"),
+		);
+		strictEqual(calls, 1);
+	});
 	it("reads a leading count and defaults to three", () => {
 		deepStrictEqual(parseDraftArgs("2 write a retry helper"), { count: 2, request: "write a retry helper" });
 		deepStrictEqual(parseDraftArgs("write a retry helper"), { count: DRAFT_DEFAULT, request: "write a retry helper" });
@@ -72,61 +100,6 @@ describe("/draft arguments", () => {
 	});
 });
 
-describe("/draft judgment", () => {
-	it("carries each candidate once in state and names it from the questions", () => {
-		const { state, questions } = draftJudgeRequest("sum a list", ["sum(xs)", "reduce(add, xs)"]);
-		deepStrictEqual(state, { request: "sum a list", candidates: { A: "sum(xs)", B: "reduce(add, xs)" } });
-		deepStrictEqual(Object.keys(questions).sort(), ["best", "sound.A", "sound.B"]);
-		deepStrictEqual(questions.best?.criteria, {
-			A: "Candidate A in state.candidates",
-			B: "Candidate B in state.candidates",
-		});
-		ok(!JSON.stringify(questions).includes("reduce(add"), "candidate text never repeats inside a question");
-	});
-
-	it("reads the pick, its distribution, and an undecided soundness as null", () => {
-		const verdict = readDraftVerdict(LIVE_ANSWERS, 3, "jev/jev-latest", 263);
-		strictEqual(verdict.picked, "A");
-		deepStrictEqual(verdict.probabilities, { A: 0.99, B: 0, C: 0.01 });
-		deepStrictEqual(verdict.sound, { A: true, B: false, C: null });
-	});
-
-	it("never picks a label outside the candidates it was given", () => {
-		const verdict = readDraftVerdict({ ...LIVE_ANSWERS, best: { type: "choice", choice: "Z" } }, 3, "jev", 1);
-		strictEqual(verdict.picked, null);
-	});
-
-	it("says why a judge failed instead of reporting it as an empty answer", async () => {
-		const rejected = "TypeSafe decide failed: HTTP 401: Unauthorized";
-		const failing: Decider = {
-			ask: async () => {
-				throw new Error(rejected);
-			},
-			askDetailed: async () => {
-				throw new Error(rejected);
-			},
-		};
-		deepStrictEqual(await judgeDrafts(failing, "x", ["a", "b"], "jev/jev-latest"), {
-			reason: `not judged: jev/jev-latest failed: ${rejected}`,
-		});
-		const { best: _dropped, ...soundOnly } = LIVE_ANSWERS;
-		const noPick: Decider = { ask: async () => soundOnly, askDetailed: async () => ({ answers: soundOnly }) as never };
-		deepStrictEqual(await judgeDrafts(noPick, "x", ["a", "b", "c"], "jev"), {
-			reason: "not judged: jev returned no pick",
-		});
-		let asked = false;
-		const counting: Decider = {
-			ask: async () => {
-				asked = true;
-				return LIVE_ANSWERS;
-			},
-			askDetailed: async () => ({ answers: LIVE_ANSWERS }) as never,
-		};
-		ok("reason" in (await judgeDrafts(counting, "x", ["only one"], "jev")));
-		strictEqual(asked, false, "one candidate is nothing to choose between, so the judge is never billed");
-	});
-});
-
 describe("/draft overlay", () => {
 	const base = (): DraftOverlayState => ({
 		request: "fib(n)",
@@ -135,7 +108,16 @@ describe("/draft overlay", () => {
 			{ kind: "drafted", text: "def fib(n): return n * 2" },
 			{ kind: "drafted", text: "memoized fib" },
 		],
-		judge: { kind: "judged", verdict: readDraftVerdict(LIVE_ANSWERS, 3, "jev/jev-latest", 263) },
+		judge: {
+			kind: "judged",
+			verdict: {
+				picked: "A",
+				probabilities: { A: 0.99, B: 0, C: 0.01 },
+				sound: { A: true, B: false, C: null },
+				source: "jev/jev-latest",
+				elapsedMs: 263,
+			},
+		},
 		selected: 0,
 		scroll: 0,
 	});
@@ -151,9 +133,9 @@ describe("/draft overlay", () => {
 
 	it("says why a draft was not judged instead of drawing empty bars", () => {
 		const state = base();
-		state.judge = { kind: "unjudged", reason: "not judged: bind fleet.decisionProfiles.drafts to a System One profile" };
+		state.judge = { kind: "unjudged", reason: "not judged: bind systemOne.sites.drafts to an engine" };
 		const text = plain(formatDraftOverlayBody(state, 90, 10).join("\n"));
-		ok(text.includes("bind fleet.decisionProfiles.drafts"));
+		ok(text.includes("bind systemOne.sites.drafts"));
 		ok(!text.includes("█"));
 	});
 
@@ -164,6 +146,97 @@ describe("/draft overlay", () => {
 		ok(text.includes("line 4"));
 		ok(!text.includes("line 5\n"));
 		ok(text.includes("↓ 25 more lines"));
+	});
+});
+
+describe("/draft use key", () => {
+	const settled = (): DraftOverlayState => ({
+		request: "fib(n)",
+		candidates: [
+			{ kind: "drafted", text: "def fib(n): ..." },
+			{ kind: "drafted", text: "  memoized fib\n" },
+			{ kind: "streaming", text: "half a dra" },
+		],
+		judge: {
+			kind: "judged",
+			verdict: {
+				picked: "A",
+				probabilities: { A: 0.9, B: 0.1 },
+				sound: {},
+				source: "jev/jev-latest",
+				elapsedMs: 263,
+				ref: "draft_1",
+			},
+		},
+		selected: 1,
+		scroll: 0,
+	});
+
+	it("takes only a settled draft, trimmed, with the verdict that judged it", () => {
+		const state = settled();
+		const taken = takenDraft(state);
+		ok(taken !== null);
+		deepStrictEqual([taken.index, taken.label, taken.text], [1, "B", "memoized fib"]);
+		strictEqual(taken.verdict?.ref, "draft_1");
+		state.selected = 2;
+		strictEqual(takenDraft(state), null, "a draft still denoising cannot be taken");
+	});
+
+	it("records the taken label, the judge's pick and whether they agree, keyed by the judging call", () => {
+		deepStrictEqual(draftTakenOutcome({ ref: "draft_1", taken: "B", judgedPick: "A" }), {
+			ref: "draft_1",
+			source: "draft",
+			facts: { taken: "B", judgedPick: "A", agreed: false },
+		});
+		deepStrictEqual(draftTakenOutcome({ ref: "draft_1", taken: "A", judgedPick: "A" }).facts, {
+			taken: "A",
+			judgedPick: "A",
+			agreed: true,
+		});
+		strictEqual(draftTakenOutcome({ ref: "draft_1", taken: "A", judgedPick: null }).facts.agreed, false);
+	});
+
+	it("records a draft taken while the judge still runs under the judging call's ref, with no pick", async () => {
+		let overlay: OpenDraftOverlayOptions | undefined;
+		let judgeRef: string | undefined;
+		let judgeSignal: AbortSignal | undefined;
+		const recorded: Array<{ ref: string; source: string; facts: Readonly<Record<string, unknown>> }> = [];
+		const composed: string[] = [];
+		const deps = {
+			transitions: { state: "closed" },
+			tui: {},
+			terminal: { columns: 100 },
+			requestRender() {},
+			closeOverlay: () => overlay?.onClose(),
+			composer: { getText: () => "", setText: (text: string) => composed.push(text) },
+			recordOutcome: (outcome: (typeof recorded)[number]) => recorded.push(outcome),
+			openDraftOverlay: (_tui: unknown, options: OpenDraftOverlayOptions) => {
+				overlay = options;
+				return { setCandidate() {}, setJudge() {}, refuse() {} };
+			},
+			draftCandidates: async () => ({
+				status: "drafted",
+				aborted: false,
+				candidates: [
+					{ status: "drafted", text: "first" },
+					{ status: "drafted", text: "second" },
+				],
+			}),
+			judgeDrafts: (_request: string, _texts: ReadonlyArray<string>, signal: AbortSignal, ref: string) => {
+				judgeRef = ref;
+				judgeSignal = signal;
+				return new Promise(() => {});
+			},
+		} as unknown as OverlayGeneralOpenersDeps;
+		createOverlayGeneralOpeners(deps).openDraft("write it", 2);
+		while (judgeRef === undefined) await new Promise((resolve) => setImmediate(resolve));
+		ok(overlay?.onUse);
+		overlay.onUse({ index: 1, label: "B", text: "second", verdict: null });
+		deepStrictEqual(composed, ["second"]);
+		strictEqual(judgeSignal?.aborted, true, "taking a draft aborts the judge");
+		deepStrictEqual(recorded, [
+			{ ref: judgeRef, source: "draft", facts: { taken: "B", judgedPick: null, agreed: false } },
+		]);
 	});
 });
 

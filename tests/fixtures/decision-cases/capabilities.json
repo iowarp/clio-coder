@@ -1,6 +1,7 @@
 {
 	"description": "Gateway capability catalog modeled on common MCP servers plus Clio's gateway builtins. Each case is a find query phrased the way a model paraphrases a need, with the turn's task, labeled with the capability that serves it. Descriptions are written for this fixture, not copied from any server.",
-	"site": "capabilities",
+	"site": "relevance",
+	"use": "capabilities",
 	"catalog": [
 		{
 			"name": "mcp_github__create_pull_request",

@@ -8,7 +8,7 @@
  * Orchestrator-only: workers never register the dispatch tool.
  */
 
-import { dispatchTargetsScout } from "../../core/read-only-calls.js";
+import { dispatchTargetsOnlyScouts } from "../../core/read-only-calls.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 
@@ -53,7 +53,8 @@ export function createDispatchDedupRegistration(): {
 			evaluate(input): ReadonlyArray<MiddlewareEffect> {
 				if (input.turnId === undefined || input.metadata?.origin === "harness") return [];
 				const runId = harnessByTurn.get(input.turnId);
-				if (input.hook === "before_tool" && runId && dispatchTargetsScout(input.toolArgs))
+				// A mixed call (scout plus other agents) is the model's own fan-out and runs; only a call made purely of scouts repeats the orientation.
+				if (input.hook === "before_tool" && runId && dispatchTargetsOnlyScouts(input.toolArgs))
 					return [
 						{
 							kind: "block_tool",

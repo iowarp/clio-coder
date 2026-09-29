@@ -27,7 +27,7 @@ import { AGENT_AUTOMATION_AUTHORITIES, type AgentAutomationAuthority } from "../
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { type ExecutionRole, isExecutionRole } from "../domains/dispatch/execution-role.js";
 import { type DispatchIntent, isDispatchIntent } from "../domains/dispatch/intent.js";
-import { resolveDispatchPathScope } from "../domains/dispatch/path-scope.js";
+import { DispatchPathScopeInferenceError, resolveDispatchPathScope } from "../domains/dispatch/path-scope.js";
 import {
 	type ApprovedAssignmentRoute,
 	cloneApprovedAssignmentRoute,
@@ -288,13 +288,22 @@ function safeField(value: string, bindChangedValue = true): string {
  */
 function renderLegacyPathScope(task: DispatchPlanTaskView, cwd: string | undefined): string[] {
 	if (task.intent !== undefined) return [];
-	const scope = resolveDispatchPathScope({
-		agentId: task.agent,
-		executionRole: task.executionRole,
-		task: task.task,
-		...(cwd !== undefined ? { cwd } : {}),
-		...(task.briefing !== undefined ? { briefing: task.briefing } : {}),
-	});
+	let scope: ReturnType<typeof resolveDispatchPathScope>;
+	try {
+		scope = resolveDispatchPathScope({
+			agentId: task.agent,
+			executionRole: task.executionRole,
+			task: task.task,
+			...(cwd !== undefined ? { cwd } : {}),
+			...(task.briefing !== undefined ? { briefing: task.briefing } : {}),
+		});
+	} catch (error) {
+		// Admission renders this plan before any tool hook fires. A throw here
+		// escaped every hook, so the turn record, the loop guard and the audit
+		// never saw the call; the run itself rejects the same scope with its error.
+		if (!(error instanceof DispatchPathScopeInferenceError)) throw error;
+		return [`    scope mode=legacy-inferred unresolved=${error.code}`];
+	}
 	const lines = ["    scope mode=legacy-inferred"];
 	for (const [policy, entries] of [
 		["working_context", scope.provenance.workingContextPaths],

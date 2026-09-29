@@ -55,7 +55,7 @@ export const myCustomRuntime: RuntimeDescriptor = {
 		maxTokens: 4096,
 	},
 
-	// Probes target endpoint health and loaded models.
+	// Optional: probes target endpoint health and loaded models.
 	async probe(target, ctx): Promise<ProbeResult> {
 		// Implementation here (see Section 2)
 	},
@@ -77,8 +77,8 @@ or when `/settings targets` or `/model` is refreshed.
 ### 2.1 Endpoint Probing (`probe`)
 The `probe` method passively validates endpoint reachability and collects metadata. It must not submit inference or use a model-specific endpoint that can start a worker. Keep generating qualification explicit:
 
-* **Inputs:** `TargetDescriptor` (which holds target `url`, optional `auth` metadata, and connection metadata) and `ProbeContext` (which provides timeout signals, credential-presence keys, and an optional resolved `authToken`). Request paths that resolve OAuth through `providers.auth.resolveForTarget` must pass `{ signal }`; Pi 0.84's `AuthOperationOptions` keeps cancellation attached while Clio waits for or mutates its credential store.
-* **Return Value:** A `ProbeResult` indicating:
+* **Inputs:** `TargetDescriptor` (which holds target `url`, optional `auth` metadata, and connection metadata) and `ProbeContext` (which provides timeout signals, credential-presence keys, and an optional resolved `authToken`). Request paths that resolve OAuth through `providers.auth.resolveForTarget` must pass `{ signal }`; Pi's `AuthOperationOptions` keeps cancellation attached while Clio waits for or mutates its credential store.
+* **Return Value:** A `ProbeResult` indicating (among other optional fields such as `latencyMs`, `error`, `authFailed`, `failureKind`, `modelLabels`, `modelCapabilities`, `cacheAdvisories` and `surfaces`):
   * `ok`: True if reachable.
   * `serverVersion`: String identifier of the backend (e.g. `"Ollama/0.1.48"`).
   * `models`: A list of strings representing the currently loaded/selectable models.
@@ -91,6 +91,8 @@ Clio caches this result in the providers domain by exact target and model id for
 the current process. Provider reinitialization, configuration reload, and target
 disconnect paths clear the relevant cache rather than persisting it in a
 session ledger.
+
+Other optional descriptor methods are `probeModels`, `requestedContextWindow`, `complete`, `infill`, `embed`, `rerank` and `decide` (closed-form typed questions answered as a distribution, used by System One engines). A descriptor may set `hidden: true` to stay resolvable by id while a composite descriptor owns the configure slot, and `aliases` for compatibility ids.
 
 ### 2.3 Exact-ID Capability Selection (`probeCapabilitiesForModel`)
 `probeCapabilitiesForModel` is the one exact-id selector during capability resolution. When a router target serves several models, `probeCapabilitiesForModel` matches `probeModelCapabilities` keyed strictly to the requested wire model ID. A router serving multiple models thus answers only from the `/v1/models` row keyed to its own wire model, preventing capability flags or token limits from bleeding across different models on the same target.
@@ -145,11 +147,10 @@ result through Pi's `StreamOptions.samplingParams`; it does not patch sampler fi
 JSON body. Request-level `samplingParams` win per key, matching Pi's merge contract, while an
 explicit request temperature still wins over the catalog temperature.
 
-For a `vllm` target, model synthesis opts into Pi's
-`OpenAICompletionsCompat.supportsThinkingTokenBudget`. Clio supplies the selected family's
-`quirks.thinking.budgetByLevel` as Pi `thinkingBudgets`, and Pi emits the top-level
-`thinking_token_budget` while retaining at least 1,024 tokens beneath `max_tokens` for the final
-answer. llama.cpp and LM Studio do not receive that vLLM-only field. Their remaining payload hooks
+For a `vllm` target, model synthesis sets Pi's
+`OpenAICompletionsCompat.thinkingTokenBudgetField` to `thinking_token_budget`. Clio supplies the
+selected family's `quirks.thinking.budgetByLevel` as Pi `thinkingBudgets`, and Pi emits that
+top-level field. llama.cpp and LM Studio do not receive that vLLM-only field. Their remaining payload hooks
 are limited to runtime deltas such as `chat_template_kwargs`, prompt-cache flags, LM Studio TTL and
 draft-model settings, and the exact reasoning-effort spelling their servers accept.
 
@@ -161,7 +162,7 @@ valid answer into a provider error. Explicit finish reasons remain authoritative
 Anthropic thinking is assembled by Pi, not by Clio. Pi's `streamSimple` maps the agent's thinking
 level onto `thinking.type: "adaptive"` plus `output_config.effort` (read from the model's
 `thinkingLevelMap` and `compat.forceAdaptiveThinking`) or onto a bounded `budget_tokens` for
-budget-based models. Clio's `onPayload` hook no longer rewrites those fields; it only sets the
+budget-based models. Clio's payload hook (`engine/provider-payload.ts`) does not rewrite those fields; it sets the
 OpenAI Responses `reasoning.summary` verbosity, which the agent loop cannot express as an option.
 [thinking-off-wire.test.ts](../../tests/extended/thinking-off-wire.test.ts) locks the local LM Studio and
 llama.cpp controls used when thinking is off. Anthropic request assembly is
@@ -255,11 +256,11 @@ set is a valid value for `quirks.thinking.mechanism`.
 Once your runtime adapter descriptor is implemented:
 
 ### 5.1 Static Built-in Registration
-Add your descriptor to the static array export in [src/domains/providers/runtimes/builtins.ts](../../src/domains/providers/runtimes/builtins.ts):
+Import your descriptor and add it to the `BUILTIN_RUNTIMES` array in [src/domains/providers/runtimes/builtins.ts](../../src/domains/providers/runtimes/builtins.ts). `registerBuiltinRuntimes` registers each entry whose id is not already present:
 ```typescript
 import { myCustomRuntime } from "./custom/my-custom-runtime.js";
 
-export const BUILTIN_RUNTIMES = [
+const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
     // ...
     myCustomRuntime,
 ];
@@ -267,5 +268,7 @@ export const BUILTIN_RUNTIMES = [
 
 ### 5.2 Dynamic Plugin Loading
 Clio's `RuntimeRegistry` can load custom runtimes dynamically at startup:
-* **Directories:** Place compiled Javascript descriptors (`.js`) inside `$CLIO_CODER_CONFIG_DIR/runtimes/` (defaulting to `~/.config/clio-coder/runtimes/`).
+* **Directories:** Place compiled JavaScript files (`.js`) inside the `runtimes/` folder of Clio's config directory (`~/.config/clio-coder/runtimes/` by default; `CLIO_CODER_HOME` and `CLIO_CODER_CONFIG_DIR` move it). Each file's default export must be a valid descriptor.
 * **Package exports:** Publish an npm package that exports a `clioRuntimes` array containing your runtime descriptors, then list the package name under `integrations.runtimePlugins` in your configuration settings.
+
+Invalid descriptors, import failures and id conflicts are written to stderr as `[providers]` diagnostics and never stop startup.

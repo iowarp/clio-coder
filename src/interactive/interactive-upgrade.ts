@@ -8,6 +8,11 @@ export interface InteractiveUpgradeFlowDeps {
 	runningVersion: string;
 	openAskUser: AskUserHandler;
 	notify(level: InteractiveUpgradeNoticeLevel, text: string, key?: string): void;
+	/**
+	 * Scrollback copy of an outcome the operator has to act on. The footer shows
+	 * one line and cut the manager command off; the transcript keeps it whole.
+	 */
+	record?(level: "info" | "warn" | "error", text: string): void;
 	/** True only when no turn, worker, command, queue, draft, or overlay is active. */
 	isIdle(): boolean;
 	dismissUpdateHint(): void;
@@ -74,6 +79,14 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 						`This ${plan.installation.kind} installation must be updated by its owning package manager. Run:\n${plan.command}${postInstall}`,
 						"lifecycle:upgrade-manual",
 					);
+					deps.record?.(
+						"warn",
+						`This ${plan.installation.kind} installation must be updated by its owning package manager. Run:`,
+					);
+					// One transcript row per line: a row holds a single line, and the source
+					// install's command is three, so one row joins `cd` and `git` into one.
+					for (const line of plan.command.split("\n")) deps.record?.("info", line);
+					if (postInstall) deps.record?.("info", "clio-coder upgrade --post-install");
 					return;
 				}
 				if (plan.status === "unavailable") {
@@ -136,11 +149,9 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 				});
 				deps.signal.throwIfAborted();
 				deps.dismissUpdateHint();
-				deps.notify(
-					"warning",
-					`Clio Coder ${result.to} is installed. Restart before the next turn; your current session is saved and available through /resume.`,
-					"lifecycle:restart-required",
-				);
+				const restartNotice = `Clio Coder ${result.to} is installed. Restart before the next turn; your current session is saved and available through /resume.`;
+				deps.notify("warning", restartNotice, "lifecycle:restart-required");
+				deps.record?.("warn", restartNotice);
 				const restart = await deps.openAskUser([
 					{
 						header: "Restart",
@@ -159,11 +170,9 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 					deps.shutdown();
 			} catch (error) {
 				if (deps.signal.aborted) return;
-				deps.notify(
-					"error",
-					`Upgrade failed without removing user data: ${error instanceof Error ? error.message : String(error)}. Run clio-coder upgrade from a shell for full recovery steps.`,
-					"lifecycle:upgrade-failed",
-				);
+				const failure = `Upgrade failed without removing user data: ${error instanceof Error ? error.message : String(error)}. Run clio-coder upgrade from a shell for full recovery steps.`;
+				deps.notify("error", failure, "lifecycle:upgrade-failed");
+				deps.record?.("error", failure);
 			} finally {
 				active = false;
 			}

@@ -7,15 +7,26 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "../engine/tui.js";
-import { type DockEntry, dockBodyRows, dockTop } from "./dock.js";
+import { type DockEntry, dockAdaptiveRows, dockBodyRows, dockGrowthRows, dockTop } from "./dock.js";
 import { guardPastedEditorOperator } from "./editor-bash.js";
 import { type EditorRailState, renderEditorRail } from "./editor-rails.js";
 import { type ContextOccupancyFacts, contextRailHint } from "./footer/context-rail.js";
 import { centeredWindow, fitHintEntries } from "./overlay-frame.js";
 import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
+import type { SlashCompletionItem } from "./slash-autocomplete.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
-import { attentionCue, clioTheme, editorTheme, GLYPH, padAnsi, rule, withThemeContext } from "./theme/index.js";
+import {
+	attentionCue,
+	clioTheme,
+	editorTheme,
+	GLYPH,
+	padAnsi,
+	projectsYolo,
+	rule,
+	withThemeContext,
+} from "./theme/index.js";
 import { modelNickname, type TargetIdentity } from "./theme/labels.js";
 import { createComposerSurfacePainter } from "./theme/yolo-surface.js";
 import type { TurnPreparationPhase } from "./turn-state.js";
@@ -26,6 +37,10 @@ const EMPTY_PROMPT = "Ask Clio…  / for commands";
 const CONFIRM_PROMPT = "A parked call is waiting for your decision";
 const PREPARING_PROMPT = "Clio has your prompt and is preparing the turn";
 const COMPACTING_PROMPT = "Clio is compacting the session context";
+/** Rows the suggestion detail panel may take: breadcrumb, two effect lines, two next-action lines. */
+const SUGGESTION_PANEL_ROWS = 5;
+/** Fewest list rows kept visible when the panel has to share a short dock. */
+const SUGGESTION_MIN_LIST_ROWS = 3;
 
 export interface EditorChrome {
 	/** Raw route fields from presentation; startup/legacy labels remain opaque strings. */
@@ -169,6 +184,14 @@ function renderEmptyPrompt(line: string, width: number, theme: ClioTheme, text =
 	return `${line.slice(0, afterCursorAt)}${prompt}${line.slice(afterCursorAt + consumed)}`;
 }
 
+/** A one-line slash command whose cursor sits after a space, ready for the next argument. */
+function cursorAwaitsSlashArgument(editor: Editor): boolean {
+	const lines = editor.getLines();
+	const cursor = editor.getCursor();
+	const line = lines[0] ?? "";
+	return lines.length === 1 && cursor.line === 0 && cursor.col === line.length && /^\s*\/\S*\s(?:.*\s)?$/u.test(line);
+}
+
 function cursorEndsDirectoryPath(editor: Editor): boolean {
 	const cursor = editor.getCursor();
 	const line = editor.getLines()[cursor.line] ?? "";
@@ -247,8 +270,53 @@ export class ClioEditor extends Editor {
 		tui: TUI,
 		private readonly chrome: EditorChrome,
 	) {
-		super(tui, editorTheme(clioTheme()), { autocompleteMaxVisible: Math.max(3, dockBodyRows(tui) - 3) });
+		super(tui, editorTheme(clioTheme()), { autocompleteMaxVisible: ClioEditor.suggestionListRows(tui) });
 		this.dockHost = tui;
+	}
+
+	/** Rows the suggestion list may show: the dock's growth ceiling less the input, rule and detail panel. */
+	private static suggestionListRows(tui: TUI): number {
+		return Math.max(3, dockGrowthRows(tui) - 3 - SUGGESTION_PANEL_ROWS);
+	}
+
+	/** The row the list has selected. The engine keeps its list private and the dock already reads its rendered rows. */
+	private selectedSuggestion(): SlashCompletionItem | null {
+		const list = (this as unknown as { autocompleteList?: { getSelectedItem(): unknown } }).autocompleteList;
+		const item = list?.getSelectedItem() as SlashCompletionItem | null | undefined;
+		return item?.path ? item : null;
+	}
+
+	/** Ask the provider for the next argument without the forced Tab path, which auto-applies a lone row. */
+	private reopenSuggestions(): void {
+		const request = (this as unknown as { tryTriggerAutocomplete?: () => void }).tryTriggerAutocomplete;
+		request?.call(this);
+	}
+
+	/** Breadcrumb, effect and next action for the selected suggestion, drawn under the list. */
+	private suggestionPanel(item: SlashCompletionItem, width: number, theme: ClioTheme): string[] {
+		const gutter = `${theme.fg("border", "│")} `;
+		const room = Math.max(1, width - 4 - visibleWidth(gutter));
+		const parts = item.path?.split(" › ") ?? [];
+		const crumb = parts
+			.map((part, index) => {
+				const last = index === parts.length - 1;
+				return theme.style(last ? "selectedOption" : "commandHint", part, { bold: last });
+			})
+			.join(theme.fg("border", " › "));
+		const unavailable = item.disabledReason ? theme.fg("emptyState", "  unavailable") : "";
+		const rows = [`${gutter}${truncateToWidth(`${crumb}${unavailable}`, room, GLYPH.ellipsis, false)}`];
+		// A sentence that outgrows its two lines ends in an ellipsis rather than a silent cut.
+		const wrapClamped = (text: string, paint: (line: string) => string): string[] => {
+			const wrapped = wrapTextWithAnsi(text, room);
+			const shown = wrapped.slice(0, 2);
+			if (wrapped.length > 2)
+				shown[1] = truncateToWidth(`${shown[1] ?? ""} ${wrapped[2] ?? ""}`, room, GLYPH.ellipsis, false);
+			return shown.map((line) => `${gutter}${paint(line)}`);
+		};
+		const effect = item.effectDescription ?? item.description ?? "";
+		if (effect) rows.push(...wrapClamped(effect, (line) => theme.base("menuOption", line)));
+		if (item.nextAction) rows.push(...wrapClamped(item.nextAction, (line) => theme.fg("keyboardHint", line)));
+		return rows.slice(0, SUGGESTION_PANEL_ROWS);
 	}
 
 	/** Two-column gutter on each side of a docked body, the autocomplete's own indent. */
@@ -384,8 +452,25 @@ export class ClioEditor extends Editor {
 	): string[] {
 		const gutter = ClioEditor.DOCK_GUTTER;
 		const contentWidth = Math.max(1, width - gutter * 2);
-		const bodyRows = dockBodyRows(this.dockHost) - (entry.keepComposer ? Math.max(0, composerRows - 1) : 0);
-		const body = entry.frame.renderDockBody(contentWidth, Math.max(1, bodyRows));
+		const adaptive = entry.adaptive === true && !entry.keepComposer;
+		const bodyRows =
+			(adaptive ? dockGrowthRows(this.dockHost) : dockBodyRows(this.dockHost)) -
+			(entry.keepComposer ? Math.max(0, composerRows - 1) : 0);
+		let rendered = entry.frame.renderDockBody(contentWidth, Math.max(1, bodyRows));
+		if (adaptive) {
+			// The frame pads to the ceiling; keep only the rows the content used, down to the compact floor.
+			let used = rendered.length;
+			while (used > 1 && stripTerminalSequences(rendered[used - 1] ?? "").trim() === "") used -= 1;
+			rendered = rendered.slice(0, dockAdaptiveRows(this.dockHost, used));
+		}
+		// The dock pads every body to its full budget so a docked menu keeps its
+		// footprint. A card that keeps the composer has the composer's own rows under
+		// it, so the padding only leaves blank rows between the card and the rail
+		// that carries its keys.
+		let bodyEnd = rendered.length;
+		if (entry.keepComposer)
+			while (bodyEnd > 1 && stripTerminalSequences(rendered[bodyEnd - 1] ?? "").trim() === "") bodyEnd -= 1;
+		const body = rendered.slice(0, bodyEnd);
 		const pad = " ".repeat(gutter);
 		const tone = entry.frame.dockTone();
 		const titleText = theme.style(
@@ -431,13 +516,14 @@ export class ClioEditor extends Editor {
 		// The border hook identifies the engine's exact row; labels and glyphs are never guessed.
 		const border = lines.indexOf(this.renderedBottomRail, 1);
 		if (border < 1) return lines;
-		const bodyRows = dockBodyRows(this.dockHost);
+		// The list opens compact and grows with its rows toward the growth ceiling.
+		const ceiling = dockGrowthRows(this.dockHost);
 		const input = lines.slice(1, border);
 		const cursor = Math.max(
 			0,
 			input.findIndex((line) => line.includes(REVERSE_VIDEO)),
 		);
-		const [inputStart, inputEnd] = centeredWindow(input.length, cursor, Math.max(1, bodyRows - 2));
+		const [inputStart, inputEnd] = centeredWindow(input.length, cursor, Math.max(1, ceiling - 2));
 		const rows = [this.renderTopBorder(width, this.renderedTopHidden + inputStart)];
 		const rowMap = [0];
 		for (let index = inputStart; index < inputEnd; index++) {
@@ -451,16 +537,33 @@ export class ClioEditor extends Editor {
 		const last = suggestions.at(-1);
 		const hasCount = last !== undefined && /^\s*\(\d+\/\d+\)\s*$/u.test(stripTerminalSequences(last));
 		const items = hasCount ? suggestions.slice(0, -1) : suggestions;
+		const selectedItem = this.selectedSuggestion();
+		const panel = selectedItem ? this.suggestionPanel(selectedItem, width, theme) : [];
+		const wanted = rows.length + items.length + (hasCount ? 1 : 0) + panel.length;
+		const bodyRows = dockAdaptiveRows(this.dockHost, wanted - 1);
 		const room = Math.max(1, bodyRows + 1 - rows.length);
+		// A short dock keeps a few list rows and gives the panel what is left.
+		const panelRows = Math.min(
+			panel.length,
+			Math.max(0, room - Math.min(items.length + (hasCount ? 1 : 0), SUGGESTION_MIN_LIST_ROWS)),
+		);
+		const listRoom = room - panelRows;
 		const selected = Math.max(
 			0,
 			items.findIndex((line) => stripTerminalSequences(line).trimStart().startsWith(`${GLYPH.cursor} `)),
 		);
-		const [start, end] = centeredWindow(items.length, selected, Math.max(1, room - (hasCount && room > 1 ? 1 : 0)));
+		const [start, end] = centeredWindow(
+			items.length,
+			selected,
+			Math.max(1, listRoom - (hasCount && listRoom > 1 ? 1 : 0)),
+		);
 		const appendSuggestion = (line: string, sourceRow: number): void => {
+			const room = Math.max(1, width - 4);
+			// The engine pads each list row to the full width, so only real content past the room earns an ellipsis.
+			const overflows = visibleWidth(stripTerminalSequences(line).trimEnd()) > room;
 			rows.push(
 				padAnsi(
-					`  ${truncateToWidth(theme.base("menuOption", line), Math.max(1, width - 4), GLYPH.ellipsis, false)}`,
+					`  ${truncateToWidth(theme.base("menuOption", line), room, overflows ? GLYPH.ellipsis : "", false)}`,
 					width,
 				),
 			);
@@ -469,7 +572,11 @@ export class ClioEditor extends Editor {
 		for (let index = start; index < end; index++)
 			appendSuggestion(items[index] ?? "", this.autocompleteSourceStart + index);
 		if (items.length === 0) appendSuggestion(theme.fg("emptyState", "No suggestions to display"), -1);
-		if (hasCount && room > 1 && last !== undefined) appendSuggestion(last, lines.length - 1);
+		if (hasCount && listRoom > 1 && last !== undefined) appendSuggestion(last, lines.length - 1);
+		for (const line of panel.slice(0, panelRows)) {
+			rows.push(padAnsi(`  ${line}`, width));
+			rowMap.push(-1);
+		}
 		while (rows.length < bodyRows + 1) {
 			rows.push(" ".repeat(width));
 			rowMap.push(-1);
@@ -499,7 +606,7 @@ export class ClioEditor extends Editor {
 		return this.autocompleteDockOpen || super.isShowingAutocomplete();
 	}
 
-	/** The whole area inside the rails, including menus and blank padding. */
+	/** The composer surface includes its rails in yolo, including docked menus and blank padding. */
 	private paintComposerBody(
 		lines: string[],
 		width: number,
@@ -514,7 +621,8 @@ export class ClioEditor extends Editor {
 			paint = createComposerSurfacePainter(theme, width, baseRole);
 			this.surfacePainters.set(key, paint);
 		}
-		return lines.map((line, index) => (index === 0 || index >= bodyEnd ? line : paint(line)));
+		const paintRails = projectsYolo(theme.context);
+		return lines.map((line, index) => (paintRails || (index > 0 && index < bodyEnd) ? paint(line) : line));
 	}
 
 	override render(width: number): string[] {
@@ -527,6 +635,7 @@ export class ClioEditor extends Editor {
 	private renderSurface(width: number): string[] {
 		this.autocompleteRowMap = null;
 		this.autocompleteSourceStart = Number.POSITIVE_INFINITY;
+		this.setAutocompleteMaxVisible(ClioEditor.suggestionListRows(this.dockHost));
 		const theme = clioTheme();
 		const safeWidth = Math.max(0, width);
 		const text = this.getText();
@@ -631,12 +740,27 @@ export class ClioEditor extends Editor {
 			this.isShowingAutocomplete() &&
 			(keybindings.matches(data, "tui.input.tab") || keybindings.matches(data, "tui.select.confirm"));
 		const textBeforeCompletion = completingDirectory ? this.getText() : "";
-		super.handleInput(data);
-		if (completingDirectory && this.getText() !== textBeforeCompletion && cursorEndsDirectoryPath(this)) {
-			// Directory rows are submenus on the same provider. Re-open immediately
-			// after acceptance so ↑/↓ continues in the child tree without requiring
-			// a second Tab. Pi's provider request remains the only completion path.
-			super.handleInput("\t");
+		// Enter on a slash suggestion only completes it. Pi's Enter also submits when the completed
+		// token begins with "/", which would run `/export /tmp/x` from a path row before the operator
+		// confirmed it, so the row is accepted through the Tab route and the line waits for Enter.
+		const completesSlashRow =
+			completingDirectory &&
+			keybindings.matches(data, "tui.select.confirm") &&
+			this.getText().trimStart().startsWith("/") &&
+			this.selectedSuggestion() !== null;
+		super.handleInput(completesSlashRow ? "\t" : data);
+		if (completingDirectory && this.getText() !== textBeforeCompletion) {
+			if (cursorEndsDirectoryPath(this)) {
+				// Directory rows are submenus on the same provider. Re-open immediately
+				// after acceptance so ↑/↓ continues in the child tree without requiring
+				// a second Tab. Pi's provider request remains the only completion path.
+				super.handleInput("\t");
+			} else if (cursorAwaitsSlashArgument(this)) {
+				this.reopenSuggestions();
+			}
+		} else if (data === " " && !pasteMutation && !super.isShowingAutocomplete() && cursorAwaitsSlashArgument(this)) {
+			// A space after a command or subcommand asks what comes next.
+			this.reopenSuggestions();
 		}
 		const textAfterInput = this.getText();
 		this.pastedBangOffsets = remapPastedBangOffsets(

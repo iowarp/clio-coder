@@ -549,18 +549,17 @@ export function buildWelcomeDashboardLines(
 	);
 	// The launchpad is an island like every other framed block, so it shares the
 	// one frame recipe and its action row sits under the standard inner divider.
-	return frame(
-		theme,
-		`Clio Coder v${version}`,
-		[
-			...rows,
-			innerDivider(theme, room),
-			fit(
-				`${actionRow(theme, stats, room)} ${theme.fg("divider", GLYPH.rail)} ${theme.fg("body", "Ask Clio how to use or extend her.")}`,
-			),
-		],
-		panelWidth,
-	);
+	const versionTag = theme.fg("brandCopper", `v${version}`);
+	const leftRoom = Math.max(0, room - visibleWidth(versionTag) - 1);
+	const action = actionRow(theme, stats, leftRoom);
+	const helpRoom = leftRoom - visibleWidth(action) - 3;
+	const help =
+		helpRoom >= 18
+			? ` ${theme.fg("divider", GLYPH.rail)} ${theme.fg("body", truncateToWidth("Ask Clio how to use or extend her.", helpRoom, GLYPH.ellipsis, false))}`
+			: "";
+	const left = `${action}${help}`;
+	const gap = " ".repeat(Math.max(1, room - visibleWidth(left) - visibleWidth(versionTag)));
+	return frame(theme, "", [...rows, innerDivider(theme, room), fit(`${left}${gap}${versionTag}`)], panelWidth);
 }
 
 /**

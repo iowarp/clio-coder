@@ -80,10 +80,6 @@ Use `--profile full`, `--profile normal`, or `--profile portable` to isolate one
 
 Raw results: [stable-height fullscreen](../../benchmarks/tui-boot/2026-09-27/stable-height-fullscreen.json), [aligned fullscreen](../../benchmarks/tui-boot/2026-09-27/aligned-fullscreen.json), [fullscreen](../../benchmarks/tui-boot/2026-09-27/fullscreen.json), [regular](../../benchmarks/tui-boot/2026-09-27/regular.json), [uncached](../../benchmarks/tui-boot/2026-09-27/uncached.json). Hardware load, filesystem caches, terminal implementations, fonts, plugin inventories, actual model routes, and SSH bandwidth/latency can change these results. The pseudo-terminal does not prove glyph rendering on Crostini or behavior of every remote terminal.
 
-## Validation
-
-The build, TypeScript check, repository lint, and 20 hygiene checks pass. The presentation-mode, alignment, editor-adoption, guidance, and real-PTY boot-handoff suites pass, including late, absent, wrapped, overflowing, and cleared subscription readings with fixed panel/usage geometry, and a new check that `--no-demo` is applied before Stage 0 and stays compact through hydration. The legacy extended editor-rails file still has four failures; the same four fail with the original editor and glyph files restored from the base commit. Those expectations describe earlier thinking-rail placement and animated rails and are not treated as passing coverage for this change.
-
 ## Session-focused welcome refinement
 
 The session-start time is captured from the process start and shared by Stage 0 and hydration; it is not an animated clock. Workspace facts come from the existing session snapshot, and project awareness uses the existing deferred context reader. Account usage remains the latest cached provider reading, not a frozen or guaranteed simultaneous quota snapshot. `/usage` retains complete limits, reset times, and reading status. The welcome shortens percentage labels under an explicit “used” heading without inventing missing windows or account data.

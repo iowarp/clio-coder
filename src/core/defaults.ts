@@ -9,6 +9,7 @@
 import { DEFAULT_WORKING_SET_SETTINGS } from "../domains/context/working-set/defaults.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import type { SiteId } from "../domains/system-one/types.js";
 import type { TurnControlSettings } from "../domains/turn-control/index.js";
 import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
 
@@ -64,42 +65,37 @@ export type WorkerRosters = Record<string, { members: WorkerRosterMember[] }>;
 export type FleetAgentProfiles = Record<string, string>;
 
 /**
- * Harness decisions a System One model may answer instead of a chat model.
- * Each names a moment in the turn, not an agent: `skills` and `memory` narrow
- * what the prompt carries,
- * `toolRisk` rates a command's blast radius for the approval prompt,
- * `drafts` picks the strongest of the candidates `/draft` generated,
- * `turnScope` and `dispatchForecast` hint the main agent before a turn about
- * whether it needs the workspace and whether workers fit, `harnessRouting`
- * shortlists next-step tools, skills and agents, `capabilities`
- * ranks what a gateway find lists, and `consult` answers the typed questions
- * the main agent asks through the gateway. `turnControl` is the exception
- * that acts: its answer can start read-only harness work, and only on a
- * build with fitted cuts. `turnEnd` reads the final message in shadow and
- * changes nothing yet.
+ * What answers a System One question. `systemone` is any `POST /v1/systemone`
+ * server (TypeSafe Jev, Laya, OpenJev, Kev). `llm` reads an ordinary chat
+ * target through its logprobs, or asks it for a vote when the runtime has none.
+ * `mode` only matters for `llm`: `auto` probes the target once and picks.
  */
-export const DECISION_SITES = [
-	"skills",
-	"memory",
-	"toolRisk",
-	"drafts",
-	"turnScope",
-	"harnessRouting",
-	"dispatchForecast",
-	"capabilities",
-	"consult",
-	"turnControl",
-	"turnEnd",
-] as const;
-export type DecisionSite = (typeof DECISION_SITES)[number];
+export type SystemOneEngineKind = "systemone" | "llm";
+export type SystemOneMode = "auto" | "logprobs" | "answer";
 
-/**
- * Map of decision site -> fleet.profiles key. A site with no entry is off, so
- * the whole capability is opt-in by absence and there is no flag to retire once
- * it leaves alpha. Keying by site rather than one global binding means a site
- * that misbehaves can be unbound without giving up the other sites.
- */
-export type FleetDecisionProfiles = Partial<Record<DecisionSite, string>>;
+export interface SystemOneEngineSettings {
+	kind: SystemOneEngineKind;
+	/** A `targets[].id`. */
+	target: string;
+	/** Wire model id; absent means the target's default model. */
+	model?: string;
+	mode?: SystemOneMode;
+}
+
+/** An engine name, or the engine with a deadline that replaces the site's own. */
+export type SystemOneSiteBinding = string | { engine: string; timeoutMs?: number };
+
+export interface SystemOneSettings {
+	engines: Record<string, SystemOneEngineSettings>;
+	/** Site id to binding. A site with no entry is off, so the capability is opt-in by absence. */
+	sites: Partial<Record<SiteId, SystemOneSiteBinding>>;
+	/** Operator-fitted cuts by answering build, for builds the code table lacks. Keys are `<site>.<key>`. */
+	cuts: Record<string, Record<string, number>>;
+	/** Opt-in: keep every decision and its outcome as a training dataset. */
+	record: boolean;
+	retentionDays: number;
+	maxMiB: number;
+}
 
 /**
  * Non-stall posture for dispatched native workers. A worker tool call that
@@ -146,7 +142,6 @@ export interface FleetRouteSettings {
 	profiles: WorkerProfiles;
 	rosters: WorkerRosters;
 	agentProfiles: FleetAgentProfiles;
-	decisionProfiles: FleetDecisionProfiles;
 }
 
 /**
@@ -458,7 +453,7 @@ export interface FleetWorktreesSettings {
 }
 
 export interface FleetSettings extends FleetRouteSettings {
-	/** Experimental worker prewarm driven by the `dispatchForecast` site; off by default. */
+	/** Experimental worker prewarm. The System One `turn` site (`systemOne.sites.turn`) is asked which recipe a dispatch would name first, and only a fitted build's answer starts a worker; off by default. */
 	speculativeDispatch: boolean;
 	nodes: FleetNodeSettings[];
 	adaptiveRouting: AdaptiveRoutingSettings;
@@ -548,7 +543,6 @@ export const DEFAULT_SETTINGS = {
 	version: 2 as const,
 	turnControl: {
 		workflows: ["orientation", "direction", "ledger-facts", "detached-collection"],
-		interpretation: { fallback: "none" },
 		orientation: { maxSplit: 4, maxCostUsdPerTurn: null },
 	} as TurnControlSettings,
 	targets: [] as TargetDescriptor[],
@@ -581,12 +575,12 @@ export const DEFAULT_SETTINGS = {
 		profiles: {} as WorkerProfiles,
 		rosters: {} as WorkerRosters,
 		agentProfiles: {} as FleetAgentProfiles,
-		decisionProfiles: {} as FleetDecisionProfiles,
 		/**
-		 * Experimental. With `dispatchForecast` bound, a confident forecast of the
-		 * worker the main agent is about to dispatch starts that worker's process
-		 * ahead of the call and holds it until a matching dispatch adopts it or
-		 * the turn settles. Off, no recipe question is asked and nothing is held.
+		 * Experimental. With the `turn` site bound, a confident forecast from its
+		 * recipe question of the worker the main agent is about to dispatch starts
+		 * that worker's process ahead of the call and holds it until a matching
+		 * dispatch adopts it or the turn settles. Off, no recipe question is asked
+		 * and nothing is held.
 		 */
 		speculativeDispatch: false,
 		nodes: [] as FleetNodeSettings[],
@@ -625,6 +619,14 @@ export const DEFAULT_SETTINGS = {
 			timeoutMs: 60_000,
 		} as MemorySettings,
 	} as ContextSettings,
+	systemOne: {
+		engines: {},
+		sites: {},
+		cuts: {},
+		record: false,
+		retentionDays: 30,
+		maxMiB: 64,
+	} as SystemOneSettings,
 	safety: {
 		autonomy: "default" as AutonomyLevel,
 		limits: {
@@ -696,8 +698,6 @@ version: 2
 
 turnControl:
   workflows: [orientation, direction, ledger-facts, detached-collection]
-  interpretation:
-    fallback: none
   orientation:
     maxSplit: 4
     maxCostUsdPerTurn: null
@@ -731,7 +731,6 @@ fleet:
   profiles: {}
   rosters: {}
   agentProfiles: {}
-  decisionProfiles: {}
   speculativeDispatch: false
   adaptiveRouting:
     roles: []
@@ -779,6 +778,14 @@ context:
     trajectorySteps: 8
     maxOutputTokens: 2000
     timeoutMs: 60000
+
+systemOne:
+  engines: {}
+  sites: {}
+  cuts: {}
+  record: false
+  retentionDays: 30
+  maxMiB: 64
 
 safety:
   autonomy: default

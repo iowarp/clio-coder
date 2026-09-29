@@ -2,7 +2,7 @@ import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:as
 import { it } from "node:test";
 import { parse } from "yaml";
 import { validateSettings } from "../../src/core/config.js";
-import { DECISION_SITES, DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
+import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
 import { settingsChangeKind } from "../../src/domains/config/classify.js";
 import type {
 	TurnControlSettings,
@@ -15,7 +15,6 @@ import {
 	decisionHash,
 	factsDigest,
 	fingerprintEquals,
-	ORIENTATION_WANTED_THRESHOLD,
 	orientationQuestion,
 	renderCollectedBlock,
 	renderDirectionBlock,
@@ -37,12 +36,9 @@ const facts: TurnFacts = {
 	autonomy: "default",
 };
 const interpretation: TurnInterpretation = {
-	version: "turn-interpretation-v1",
 	intent: "inspect",
-	intentCertainty: 0.6,
-	orientation: { wanted: ORIENTATION_WANTED_THRESHOLD, breadth: "repository", subject: null },
-	direction: { requested: 0 },
-	shape: null,
+	orientation: { wanted: true, breadth: "repository" },
+	direction: { requested: false },
 };
 const settings = DEFAULT_SETTINGS.turnControl;
 const prior = { runId: "prior-run", receiptDigest: "digest", fingerprint: { ...facts.workspace } };
@@ -50,8 +46,8 @@ const prior = { runId: "prior-run", receiptDigest: "digest", fingerprint: { ...f
 it("decides workflow cases in the required order, including each reachable none reason", () => {
 	const direction = {
 		...interpretation,
-		orientation: { ...interpretation.orientation, wanted: 0 },
-		direction: { requested: 0.7 },
+		orientation: { ...interpretation.orientation, wanted: false },
+		direction: { requested: true },
 	};
 	const cases: Array<{
 		name: string;
@@ -103,8 +99,8 @@ it("decides workflow cases in the required order, including each reachable none 
 			expected: { kind: "none", reason: "no-interpretation" },
 		},
 		{
-			name: "explicit implementation vetoes orientation even without intent certainty",
-			interpretation: { ...interpretation, intent: "implement", intentCertainty: 0 },
+			name: "explicit implementation vetoes orientation",
+			interpretation: { ...interpretation, intent: "implement" },
 			facts,
 			settings,
 			expected: { kind: "none", reason: "below-threshold" },
@@ -124,8 +120,8 @@ it("decides workflow cases in the required order, including each reachable none 
 			expected: { kind: "none", reason: "task-established" },
 		},
 		{
-			name: "orientation with unknown intent and zero certainty, with changed fingerprint",
-			interpretation: { ...interpretation, intent: "unknown", intentCertainty: 0 },
+			name: "orientation with unknown intent, with changed fingerprint",
+			interpretation: { ...interpretation, intent: "unknown" },
 			facts: { ...facts, priorOrientation: { ...prior, fingerprint: { ...prior.fingerprint, dirtyTreeHash: "old" } } },
 			settings,
 			expected: {
@@ -141,7 +137,6 @@ it("decides workflow cases in the required order, including each reachable none 
 			interpretation: {
 				...interpretation,
 				intent: "answer",
-				intentCertainty: 0,
 				orientation: { ...interpretation.orientation, breadth: "area" },
 			},
 			facts: { ...facts, priorOrientation: prior },
@@ -180,36 +175,44 @@ it("decides workflow cases in the required order, including each reachable none 
 	for (const entry of cases)
 		deepStrictEqual(decide(entry.interpretation, entry.facts, entry.settings), entry.expected, entry.name);
 	for (const intent of ["implement", "continue", "interview"] as const) {
-		for (const intentCertainty of [0, 1]) {
-			deepStrictEqual(
-				decide(
-					{ ...interpretation, intent, intentCertainty, orientation: { ...interpretation.orientation, wanted: 1 } },
-					facts,
-					settings,
-				),
-				{ kind: "none", reason: "below-threshold" },
-				`${intent} veto at certainty ${intentCertainty}`,
-			);
-		}
+		deepStrictEqual(
+			decide({ ...interpretation, intent }, facts, settings),
+			{ kind: "none", reason: "below-threshold" },
+			`${intent} veto`,
+		);
 	}
 	deepStrictEqual(
-		decide(
-			{
-				...interpretation,
-				intentCertainty: 0,
-				orientation: { ...interpretation.orientation, wanted: ORIENTATION_WANTED_THRESHOLD - 0.01 },
-			},
-			facts,
-			settings,
-		),
+		decide({ ...interpretation, orientation: { ...interpretation.orientation, wanted: false } }, facts, settings),
 		{ kind: "none", reason: "below-threshold" },
-		"orientation still needs a probability at the measured threshold",
+		"orientation needs the site to have asked for it",
 	);
 	deepStrictEqual(
 		decide(null, { ...facts, finishedDetachedBatchIds: ["batch-1", "batch-2"] }, settings),
 		{ kind: "collect", batchIds: ["batch-1", "batch-2"] },
 		"collect requires no interpretation",
 	);
+});
+
+it("lets an expected dispatch suppress the scout only when it reads at least as strongly as the orientation", () => {
+	const read = (orientation: number, dispatch: number): WorkflowDecision =>
+		decide(
+			{
+				...interpretation,
+				orientation: { wanted: true, breadth: "repository", probability: orientation },
+				dispatch: { expected: true, probability: dispatch },
+			},
+			facts,
+			settings,
+		);
+	// "Give me a tour of this codebase.": the request is an orientation the model then did not dispatch for.
+	strictEqual(read(0.98, 0.71).kind, "orientation");
+	// A request that names the delegation: dispatch outweighs the orientation, so the model's own dispatch stands.
+	deepStrictEqual(read(0.84, 0.97), { kind: "none", reason: "model-dispatching" });
+	// A producer that gives no probabilities keeps the plain expectation.
+	deepStrictEqual(decide({ ...interpretation, dispatch: { expected: true } }, facts, settings), {
+		kind: "none",
+		reason: "model-dispatching",
+	});
 });
 
 it("hashes sorted nested facts and decisions, covers operator text, and compares every fingerprint component", () => {
@@ -277,7 +280,6 @@ it("round-trips turn-control defaults and validates workflows and bounds with ne
 	const defaults = validateSettings(parse(DEFAULT_SETTINGS_YAML));
 	deepStrictEqual(defaults.issues, []);
 	deepStrictEqual(defaults.settings.turnControl, DEFAULT_SETTINGS.turnControl);
-	ok(DECISION_SITES.includes("turnControl"));
 	const unknown = validateSettings({ turnControl: { workflows: ["orientation", "invented"] } });
 	strictEqual(unknown.issues[0]?.path, "turnControl.workflows[1]");
 	match(unknown.issues[0]?.message ?? "", /orientation.*direction.*ledger-facts.*detached-collection/);
@@ -289,23 +291,19 @@ it("round-trips turn-control defaults and validates workflows and bounds with ne
 	const valid = validateSettings({
 		turnControl: {
 			workflows: [],
-			interpretation: { fallback: "main-model" },
 			orientation: { maxSplit: 1, maxCostUsdPerTurn: 0.5 },
 		},
 	});
 	deepStrictEqual(valid.issues, []);
 	deepStrictEqual(valid.settings.turnControl, {
 		workflows: [],
-		interpretation: { fallback: "main-model" },
 		orientation: { maxSplit: 1, maxCostUsdPerTurn: 0.5 },
 	});
 	for (const key of [
 		"turnControl",
 		"turnControl.workflows",
-		"turnControl.interpretation.fallback",
 		"turnControl.orientation.maxSplit",
 		"turnControl.orientation.maxCostUsdPerTurn",
-		"fleet.decisionProfiles.turnControl",
 	])
 		strictEqual(settingsChangeKind(key), "nextTurn", key);
 });

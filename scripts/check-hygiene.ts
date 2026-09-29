@@ -1722,7 +1722,6 @@ const TOOL_CONTRACT_TESTS: Readonly<Record<BuiltinToolName, readonly string[]>> 
 		"tests/contracts/gateway-surface.test.ts",
 		"tests/contracts/gateway-authority.test.ts",
 		"tests/contracts/gateway-mcp.test.ts",
-		"tests/contracts/gateway-capability-ranking.test.ts",
 	],
 };
 
@@ -1759,7 +1758,7 @@ async function registeredToolSources(): Promise<Map<string, string>> {
 			askUser: async () => ({ answers: [] }),
 			requestSelfCompact: async () => "",
 			includeLedgerTools: true,
-			consult: { ask: async () => null },
+			consult: { systemOne: { run: async () => null } },
 			visionSidecar: {
 				configured: () => true,
 				label: () => "fixture",

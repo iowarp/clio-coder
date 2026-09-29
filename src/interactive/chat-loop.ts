@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { TurnControlRecord } from "../domains/turn-control/index.js";
+import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import type { TurnControlRunner } from "./turn-control-runner.js";
 
+export { runOutOfTurnRound } from "./side-question.js";
 export { createTurnControlRunner } from "./turn-control-runner.js";
-export { interpretTurnWithMainModel } from "./turn-interpretation-fallback.js";
 
 import type { PrecomputedRanking } from "../core/precomputed-rank.js";
+import { ToolNames } from "../core/tool-names.js";
 import type { LiveBudgetView } from "../domains/context/budget/live-view.js";
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import { captureWorkerContext } from "../domains/context/worker/snapshot.js";
@@ -89,6 +90,7 @@ import {
 	type SessionEntry,
 	SKILL_CONTEXT_STATE,
 } from "../domains/session/entries.js";
+import { operatorTextOfUserPayload } from "../domains/session/history.js";
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
 import { isRetryableErrorMessage, type RetrySettings } from "../domains/session/retry.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
@@ -118,7 +120,7 @@ import {
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { retireActiveUserContextForNextOperator } from "./chat-renderer.js";
 import { coldReasonText } from "./cold-reasons.js";
-import { DRAFT_MAX_TOKENS, DRAFT_SYSTEM_PROMPT, DRAFT_TEMPERATURES, draftTemperature } from "./drafts.js";
+import { DRAFT_MAX_TOKENS, DRAFT_TEMPERATURES, draftTemperature, runDraftWithSamplerFallback } from "./drafts.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import type { runPrewarmRound } from "./prewarm.js";
@@ -253,8 +255,84 @@ export interface SpeculativeDispatchCounts {
 	discarded: number;
 }
 
+/** The first `limit` code points of `value`, so a slice never lands inside a surrogate pair. */
+function boundedCodePoints(value: string, limit: number): string {
+	// A pasted log can be megabytes; 2 × limit code units always hold `limit` code points.
+	const points = [...value.slice(0, limit * 2 + 1)];
+	return points.length <= limit ? value : points.slice(0, limit).join("");
+}
+
+/** The dataset facts of one turn outcome; the settled turn and the turn cancelled before admission write the same shape. */
+function turnOutcomeFacts(
+	record: TurnOutcomeRecord,
+	extra: { continuation: boolean; interviewDismissed: boolean; skillsLoaded: ReadonlyArray<string> },
+): Record<string, unknown> {
+	return {
+		turnId: record.turnId,
+		continuation: extra.continuation,
+		toolCalls: record.coordinator.toolCalls,
+		tools: record.coordinator.byTool,
+		dispatches: record.coordinator.dispatches,
+		askUserCalls: record.coordinator.byTool[ToolNames.AskUser] ?? 0,
+		skillsLoaded: [...extra.skillsLoaded],
+		harnessAction:
+			record.control === null ? null : { decision: record.control.decision, executed: record.control.executed },
+		endedWithQuestion: record.conversation.endedWithQuestion,
+		asksOperator: record.conversation.asksOperator,
+		clarificationStreak: record.conversation.clarificationStreak,
+		canceled: record.operator.canceled,
+		// Both an Esc that aborts a stream and a dismissed interview set
+		// `canceled`; this tells a label reader which one it was.
+		interviewDismissed: extra.interviewDismissed,
+		completion: record.completion.decision,
+		mutatedPaths: record.completion.mutatedPaths,
+		stopReason: record.stopReason,
+		durationMs: Math.round(record.durationMs),
+	};
+}
+
 function noOutcomeUsage(): TokenSplit {
 	return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0, provenance: "none" };
+}
+
+function readWorkerReceipt(
+	runId: string,
+	dispatch: Pick<DispatchContract, "getRun"> | undefined,
+): Record<string, unknown> | null {
+	try {
+		const envelope = dispatch?.getRun(runId);
+		if (!envelope) return null;
+		const path = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${runId}.json`);
+		const receipt = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+		return receipt.runId === runId ? receipt : null;
+	} catch {
+		// A run without a sealed receipt yet reads as absent; the caller marks it partial.
+		return null;
+	}
+}
+
+const WORKER_RECEIPT_SEAL_WAIT_MS = 2000;
+const WORKER_RECEIPT_SEAL_POLL_MS = 25;
+
+/**
+ * A cancelled turn records its outcome as soon as the abort lands, while an
+ * aborted worker seals its receipt a few tens of milliseconds later. The ledger
+ * knows a run from admission, so only runs it knows are worth waiting for; the
+ * wait is bounded and a receipt still missing afterwards stays partial.
+ */
+async function awaitWorkerReceipts(
+	runIds: ReadonlyArray<string>,
+	dispatch: Pick<DispatchContract, "getRun"> | undefined,
+): Promise<void> {
+	if (!dispatch) return;
+	const pending = new Set(
+		runIds.filter((runId) => dispatch.getRun(runId) !== null && readWorkerReceipt(runId, dispatch) === null),
+	);
+	const deadline = Date.now() + WORKER_RECEIPT_SEAL_WAIT_MS;
+	while (pending.size > 0 && Date.now() < deadline) {
+		await new Promise<void>((resolve) => setTimeout(resolve, WORKER_RECEIPT_SEAL_POLL_MS));
+		for (const runId of [...pending]) if (readWorkerReceipt(runId, dispatch) !== null) pending.delete(runId);
+	}
 }
 
 function workerOutcomeUsage(
@@ -267,37 +345,34 @@ function workerOutcomeUsage(
 	let totalTokens = 0;
 	let reported = 0;
 	let available = 0;
+	let missing = 0;
 	const ids = [...new Set(runIds)];
 	for (const runId of ids) {
-		try {
-			const envelope = dispatch?.getRun(runId);
-			if (!envelope) continue;
-			const path = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${runId}.json`);
-			const receipt = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-			if (receipt.runId !== runId) continue;
-			const count = (key: string) =>
-				typeof receipt[key] === "number" && Number.isFinite(receipt[key]) ? (receipt[key] as number) : 0;
-			inputTokens += count("inputTokenCount");
-			outputTokens += count("outputTokenCount");
-			cacheReadTokens += count("cacheReadTokenCount");
-			totalTokens += count("tokenCount");
-			if (typeof receipt.inputTokenCount === "number" || typeof receipt.outputTokenCount === "number") available += 1;
-			if (
-				typeof receipt.inputTokenCount === "number" &&
-				typeof receipt.outputTokenCount === "number" &&
-				typeof receipt.tokenCount === "number"
-			)
-				reported += 1;
-		} catch {
-			// Detached runs may not have receipts at settlement; missing usage stays visible in provenance.
+		const receipt = readWorkerReceipt(runId, dispatch);
+		if (receipt === null) {
+			missing += 1;
+			continue;
 		}
+		const count = (key: string) =>
+			typeof receipt[key] === "number" && Number.isFinite(receipt[key]) ? (receipt[key] as number) : 0;
+		inputTokens += count("inputTokenCount");
+		outputTokens += count("outputTokenCount");
+		cacheReadTokens += count("cacheReadTokenCount");
+		totalTokens += count("tokenCount");
+		if (typeof receipt.inputTokenCount === "number" || typeof receipt.outputTokenCount === "number") available += 1;
+		if (
+			typeof receipt.inputTokenCount === "number" &&
+			typeof receipt.outputTokenCount === "number" &&
+			typeof receipt.tokenCount === "number"
+		)
+			reported += 1;
 	}
 	return {
 		inputTokens,
 		outputTokens,
 		cacheReadTokens,
 		totalTokens,
-		provenance: available === 0 ? "none" : reported === ids.length ? "reported" : "partial",
+		provenance: available === 0 && missing === 0 ? "none" : reported === ids.length ? "reported" : "partial",
 	};
 }
 
@@ -558,7 +633,8 @@ export interface ChatLoop {
 export interface CreateChatLoopDeps {
 	turnControl?: TurnControlRunner;
 	turnOutcomeCollector?: TurnOutcomeCollector;
-	getTurnBriefUsage?: () => TokenSplit;
+	/** Tokens System One spent on calls joined to this user turn, for the outcome record's `decisionModel` split. */
+	getDecisionUsage?: (userTurnId: string) => TokenSplit;
 	getTaskEstablished?: () => boolean;
 	outcomeDispatch?: Pick<DispatchContract, "getRun">;
 	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
@@ -697,34 +773,59 @@ export interface CreateChatLoopDeps {
 	 */
 	getMemorySection?: (request: MemoryPromptRequest) => string;
 	/**
-	 * Resolve this turn's decision-model relevance scores, once, at the turn
-	 * boundary. Absent when no decision site is bound, which is the default.
-	 *
-	 * It is awaited because both its readers are synchronous: the prompt builder
-	 * wants memory's scores while composing, and the skills listing wants its own
-	 * from inside a tool handler. It always settles, so a provider outage costs
-	 * ordering rather than the turn.
+	 * Read this turn's request through the `turn` site, once, before the prompt is
+	 * built. The interactive host always wires it and asks nothing when the site
+	 * is unbound. The host keeps the verdict: the hint registration, the turn
+	 * controller and the prewarm read it from there. It always settles, so an
+	 * outage costs the deadline and never the turn. `userTurnId` is the id the
+	 * ledger will file the user turn under, so the decision record and the
+	 * outcome that follows it share a join key. `previousTask` reads the ledger
+	 * and may throw, so it is called only by a bound site, inside a catch.
 	 */
-	refreshTurnRelevance?: (taskText: string, previous: string, signal: AbortSignal) => Promise<void>;
+	readTurn?: (input: {
+		userTurnId: string;
+		task: string;
+		/** What the operator typed, as the ledger will show it. */
+		request: string;
+		previous: string;
+		previousTask: () => string;
+		signal: AbortSignal;
+	}) => Promise<void>;
 	/** Called once when a submitted turn settles, whether it completed, failed or was cancelled. */
 	onTurnSettled?: () => SpeculativeDispatchCounts | undefined;
-	getMemoryRelevance?: () => PrecomputedRanking | undefined;
 	/**
-	 * This turn's pre-turn decisions as ledger rows, recorded once after the user
-	 * turn is appended so an answer can later be compared with what the turn did.
-	 * Empty when no recorded site is bound, which writes nothing.
+	 * Memory scores for the section this request builds, or undefined when the
+	 * `relevance` site is unbound or ranking could not change the section. It runs
+	 * while the prompt composes, so it is asked only when the order decides what
+	 * the prompt carries.
 	 */
-	getTurnBriefRecord?: () => ReadonlyArray<unknown>;
+	getMemoryRelevance?: (
+		request: MemoryPromptRequest,
+	) => Promise<PrecomputedRanking | undefined> | PrecomputedRanking | undefined;
 	/**
-	 * Every System One call since the last drain, answered or not, written as
-	 * one ledger entry beside the brief. Empty when nothing was asked.
+	 * Write every System One decision and outcome recorded since the last flush
+	 * as one ledger entry. Called after the user turn is appended so the rows sit
+	 * under the turn they describe; the host also flushes at settle.
 	 */
-	drainDecisionCalls?: () => ReadonlyArray<unknown>;
+	flushSystemOne?: () => void;
 	/**
-	 * The settled turn's final message, for the `turnEnd` decision site's
-	 * shadow reading. Fire-and-forget: the loop never waits on it.
+	 * Read the settled turn's final message through the `turnEnd` site. The loop
+	 * waits for it inside the site's own deadline, because the clarification
+	 * streak the next turn reads is computed from the answer. Null means the site
+	 * did not answer and the regex reading stands.
 	 */
-	observeTurnEnd?: (turn: { turnId: string; message: string }) => void;
+	readTurnEnd?: (input: {
+		userTurnId: string;
+		request: string;
+		message: string;
+		toolNames: ReadonlyArray<string>;
+	}) => Promise<{ asks: boolean | null } | null>;
+	/** What followed a decision, joined to it by `ref` when the dataset is exported. */
+	recordOutcome?: (outcome: {
+		ref: string;
+		source: "turn" | "next-operator";
+		facts: Readonly<Record<string, unknown>>;
+	}) => void;
 	getReadySkillCount?: () => number;
 	/** Structured, redacted task-bank export supplied only to an explicit context-handoff skill request. */
 	getTaskMemoryHandoffSource?: () => string;
@@ -1447,8 +1548,85 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// `streaming`, so it can never be the request the operator's turn queues
 	// behind.
 	let turnActive = false;
-	let pendingDecisionBrief: AbortController | null = null;
+	let pendingPreTurnRead: AbortController | null = null;
 	let pendingVisionSidecar: AbortController | null = null;
+	/**
+	 * The last operator turn that settled and has not yet been followed by another
+	 * operator message. The next submit reports how it was followed, once.
+	 */
+	let previousOperatorTurn: { id: string; settledAt: number } | null = null;
+
+	// Operator turns the session already holds, for the outcome row's `turnIndex`.
+	// Reparsing the whole ledger every turn made the row cost grow with the session,
+	// so it is counted once per session and advanced as turns are appended;
+	// `resetForSession` clears it for /new, /resume, /fork and a park.
+	let operatorTurnsBefore: number | null = null;
+	const operatorTurnIndex = (excludeTurnId?: string): number => {
+		operatorTurnsBefore ??= (deps.readSessionEntries?.() ?? []).filter((entry) => {
+			if (entry.kind !== "message" || entry.role !== "user") return false;
+			return (entry.payload as { synthetic?: unknown } | null)?.synthetic !== true && entry.turnId !== excludeTurnId;
+		}).length;
+		return operatorTurnsBefore;
+	};
+
+	/**
+	 * A turn the operator cancelled before admission (the pre-turn reads, the
+	 * orientation act or pre-submit compaction) leaves no user turn, so the settle
+	 * path never runs for it, yet Esc on a turn is the strongest label there is.
+	 * This writes the one outcome row that path would have, under the reserved
+	 * id every decision about the turn already carries.
+	 */
+	const recordCanceledBeforeAdmission = async (input: {
+		userTurnId: string;
+		continuation: boolean;
+		control: TurnControlRecord | null;
+		submittedAt: number;
+	}): Promise<void> => {
+		if (!deps.session?.current()) return;
+		try {
+			if (input.control) outcomeCollector.recordControl(input.control);
+			const collected = outcomeCollector.take(input.userTurnId);
+			await awaitWorkerReceipts(collected.harness.runIds, deps.outcomeDispatch);
+			const record = reduceTurnOutcome({
+				...collected,
+				turnId: input.userTurnId,
+				turnIndex: operatorTurnIndex(),
+				continuation: input.continuation,
+				finalAssistantText: "",
+				asksOperator: null,
+				taskEstablished: deps.getTaskEstablished?.() ?? false,
+				canceled: true,
+				tokens: {
+					coordinator: noOutcomeUsage(),
+					decisionModel: deps.getDecisionUsage?.(input.userTurnId) ?? noOutcomeUsage(),
+					workers: workerOutcomeUsage(collected.harness.runIds, deps.outcomeDispatch),
+				},
+				stopReason: "aborted",
+				durationMs: Math.max(0, performance.now() - input.submittedAt),
+			});
+			deps.session.appendEntry({
+				kind: "custom",
+				customType: "turnOutcome",
+				parentTurnId: state.lastTurnId,
+				display: false,
+				data: record,
+			});
+			outcomeCollector.seedClarificationStreak(record.conversation.clarificationStreak);
+			const outcomeRef = input.continuation && previousOperatorTurn !== null ? previousOperatorTurn.id : input.userTurnId;
+			deps.recordOutcome?.({
+				ref: outcomeRef,
+				source: "turn",
+				facts: turnOutcomeFacts(record, { continuation: input.continuation, interviewDismissed: false, skillsLoaded: [] }),
+			});
+			if (!input.continuation) previousOperatorTurn = { id: input.userTurnId, settledAt: performance.now() };
+			else if (previousOperatorTurn !== null) previousOperatorTurn.settledAt = performance.now();
+			// The turn decision waits in the buffer for the next admission otherwise, and a
+			// session that ends here would file the decision and its outcome apart.
+			deps.flushSystemOne?.();
+		} catch {
+			// Measurement must not change how a cancelled turn settles.
+		}
+	};
 
 	const prewarm = createTurnPrewarm({
 		state,
@@ -1657,13 +1835,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				continuation: options.requestContinuation === true,
 				images,
 			});
-			// The one place a turn pays for the decision pass. It runs after the
-			// task text is known and before the prompt is built, because both of
-			// its readers are synchronous and cannot fetch their own scores.
-			//
-			// Guarded even though the store never rejects: this is an injected
-			// dependency on the turn's critical path, and no ranking is worth a
-			// turn. Both sites read an empty store as no ranking.
+			// The user turn id is fixed before anything is asked about the turn, so the
+			// pre-turn decision record, the ledger row and every outcome that follows
+			// carry the id the user turn will be filed under. A run that returns
+			// before admission leaves the id unused, which costs nothing.
+			const reservedUserTurnId = randomUUID();
 			let previous = "";
 			const messages = agentRuntime.agent.state.messages;
 			for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -1672,44 +1848,102 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					break;
 				}
 			}
-			if (deps.refreshTurnRelevance) {
-				const briefAbort = new AbortController();
-				pendingDecisionBrief = briefAbort;
+			const operatorTurn = options.requestContinuation !== true;
+			if (operatorTurn && previousOperatorTurn !== null) {
+				// The operator's reply is the strongest signal of how the last turn
+				// landed: a correction, a thanks, a retry or silence all read differently.
+				const followed = previousOperatorTurn;
+				previousOperatorTurn = null;
+				try {
+					deps.recordOutcome?.({
+						ref: followed.id,
+						source: "next-operator",
+						facts: { text: boundedCodePoints(operatorText, 300), gapMs: Math.round(submittedAt - followed.settledAt) },
+					});
+				} catch {
+					// Recording an outcome never costs the turn it describes.
+				}
+			}
+			// The one place a turn pays for System One before the prompt is built. The
+			// hint registration and the controller are synchronous, so the answer is
+			// awaited here, inside the site's own deadline, rather than fetched where it
+			// is read. A continuation turn carries a nudge rather than the operator's
+			// request, so a judgment about it would be a judgment about the nudge.
+			if (operatorTurn && deps.readTurn) {
+				// What the operator asked last turn, as typed. Without it a correction
+				// such as "actually drop X from that list" has nothing to correct, and
+				// it scored unknown at 0.22 on the assistant's reply alone. Read only
+				// when a bound site asks, because it reparses the whole ledger from
+				// disk and an operator without System One must not pay for it.
+				const lastTurnId = state.lastTurnId ?? undefined;
+				const previousTask = (): string => {
+					const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], lastTurnId);
+					for (let index = entries.length - 1; index >= 0; index -= 1) {
+						const entry = entries[index];
+						if (entry?.kind !== "message" || entry.role !== "user") continue;
+						if ((entry.payload as { synthetic?: unknown } | null)?.synthetic === true) continue;
+						return operatorTextOfUserPayload(entry.payload) ?? "";
+					}
+					return "";
+				};
+				const turnReadAbort = new AbortController();
+				pendingPreTurnRead = turnReadAbort;
 				try {
 					// The last assistant message is evidence for a short follow-up: "ok go
 					// ahead" is an action after a proposal and a pleasantry without one.
-					await deps.refreshTurnRelevance(text, previous, briefAbort.signal);
+					await deps.readTurn({
+						userTurnId: reservedUserTurnId,
+						task: text,
+						request: options.display?.text ?? operatorText,
+						previous,
+						previousTask,
+						signal: turnReadAbort.signal,
+					});
 				} catch {
-					// Ranking degrades to the order each site had before the pass.
+					// Every consumer degrades to what it did before the call existed.
 				} finally {
-					if (pendingDecisionBrief === briefAbort) pendingDecisionBrief = null;
+					if (pendingPreTurnRead === turnReadAbort) pendingPreTurnRead = null;
 				}
 				// Cancellation before prompt admission leaves no user turn or model
-				// request behind, even if an injected brief ignored its signal.
-				if (briefAbort.signal.aborted) return;
+				// request behind, even if an injected reader ignored its signal.
+				if (turnReadAbort.signal.aborted) {
+					await recordCanceledBeforeAdmission({
+						userTurnId: reservedUserTurnId,
+						continuation: !operatorTurn,
+						control: null,
+						submittedAt,
+					});
+					return;
+				}
 			}
 
-			const reservedUserTurnId = randomUUID();
 			let orientationBlock: string | null = null;
 			let turnControlRecord: TurnControlRecord | null = null;
 			if (deps.turnControl) {
 				const controllerAbort = new AbortController();
-				pendingDecisionBrief = controllerAbort;
+				pendingPreTurnRead = controllerAbort;
 				setTurnPreparation("preparing");
 				try {
 					const result = await deps.turnControl.run({
 						operatorText: text,
 						continuation: options.requestContinuation === true,
-						previous,
 						userTurnId: reservedUserTurnId,
 						signal: controllerAbort.signal,
 					});
 					orientationBlock = result.block;
 					turnControlRecord = result.record;
 				} finally {
-					if (pendingDecisionBrief === controllerAbort) pendingDecisionBrief = null;
+					if (pendingPreTurnRead === controllerAbort) pendingPreTurnRead = null;
 				}
-				if (controllerAbort.signal.aborted) return;
+				if (controllerAbort.signal.aborted) {
+					await recordCanceledBeforeAdmission({
+						userTurnId: reservedUserTurnId,
+						continuation: options.requestContinuation === true,
+						control: turnControlRecord,
+						submittedAt,
+					});
+					return;
+				}
 			}
 			// A skill the operator activated narrows the tools for the workflow
 			// it started, and that workflow outlives the turn it began in. A
@@ -1784,7 +2018,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				);
 			} catch (err) {
 				emitNotice(`[Clio Coder] auto-compaction failed: ${err instanceof Error ? err.message : String(err)}`);
-				if (err instanceof Error && err.name === "AbortError") return;
+				if (err instanceof Error && err.name === "AbortError") {
+					await recordCanceledBeforeAdmission({
+						userTurnId: reservedUserTurnId,
+						continuation: options.requestContinuation === true,
+						control: turnControlRecord,
+						submittedAt,
+					});
+					return;
+				}
 			} finally {
 				endPreparationCompaction();
 			}
@@ -1853,11 +2095,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				options.display?.text,
 				reservedUserTurnId,
 			);
-			const turnIndex = (deps.readSessionEntries?.() ?? []).filter((entry) => {
-				if (entry.kind !== "message" || entry.role !== "user") return false;
-				const payload = entry.payload as { synthetic?: unknown } | null;
-				return payload?.synthetic !== true && entry.turnId !== userTurnId;
-			}).length;
+			const turnIndex = operatorTurnIndex(userTurnId ?? undefined);
+			// A continuation is a synthetic user turn, which the count skips.
+			if (options.requestContinuation !== true) operatorTurnsBefore = turnIndex + 1;
 			context.installMemoryRestoration(agentRuntime, submittedText);
 			context.commitMemoryTurn(agentRuntime);
 			// An interrupt was submitted while a run was active, so no caller drew
@@ -1871,36 +2111,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					...(options.display ? { display: options.display } : {}),
 				});
 			context.logPromptCompileIfPending();
-			if (deps.drainDecisionCalls && deps.session?.current()) {
+			if (deps.flushSystemOne && deps.session?.current()) {
 				try {
-					const calls = deps.drainDecisionCalls();
-					if (calls.length > 0) {
-						deps.session.appendEntry({
-							kind: "custom",
-							customType: "decisionCalls",
-							parentTurnId: state.lastTurnId,
-							display: false,
-							data: { calls },
-						});
-					}
+					// The pre-turn decision and anything asked since the last turn settled
+					// (an approval card, a /draft judgment) land under the user turn just
+					// appended, so a record and its outcome share a ledger neighborhood.
+					deps.flushSystemOne();
 				} catch {
-					// Recording decision calls is best effort and never costs the turn.
-				}
-			}
-			if (deps.getTurnBriefRecord && deps.session?.current()) {
-				try {
-					const sites = deps.getTurnBriefRecord();
-					if (sites.length > 0) {
-						deps.session.appendEntry({
-							kind: "custom",
-							customType: "decisionBrief",
-							parentTurnId: state.lastTurnId,
-							display: false,
-							data: { sites },
-						});
-					}
-				} catch {
-					// Recording a forecast is best effort and never costs the turn.
+					// Recording System One is best effort and never costs the turn.
 				}
 			}
 			if (turnControlRecord) {
@@ -2053,6 +2271,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflow, images);
 			} finally {
 				const canceled = state.activeInterruptReason !== null && state.activeInterruptByOperator;
+				// Esc on an interview resolves it as cancelled and the tool ends the turn
+				// itself, so no interrupt is raised and `canceled` stays false. The turn
+				// still ended on the operator's say-so, which the outcome has to show.
+				const interviewDismissed = askUserPolicy?.status === "cancelled";
 				releaseForeground();
 				if (askUserPolicy) {
 					try {
@@ -2096,12 +2318,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					state.interruptedAssistantMessage = null;
 					state.interruptedUsage = null;
 				}
-				if (
-					userTurnId !== null &&
-					(options.requestContinuation !== true || turnControlRecord?.decision.kind === "collect") &&
-					deps.session?.current()
-				) {
+				// A continuation writes its outcome too: the streak that gates the next
+				// turn's direction workflow resets on a turn that used a tool, and a
+				// continuation is exactly where an answered interview does. Without its
+				// row the streak stayed at the operator turn's value, in memory and on
+				// resume.
+				if (userTurnId !== null && deps.session?.current()) {
 					try {
+						const continuation = options.requestContinuation === true;
 						const collected = outcomeCollector.take(userTurnId);
 						const finalMessage = [...agentRuntime.agent.state.messages]
 							.reverse()
@@ -2115,16 +2339,41 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						const matchesTrace = traced?.runId === `session:${userTurnId}`;
 						const finalAssistantText =
 							typeof finalPayload?.text === "string" ? finalPayload.text : finalMessage ? extractText(finalMessage) : "";
+						// The turn-end site reads whether the message waits on the operator.
+						// A continuation is not the operator's request, so it is not asked, and a
+						// dismissed interview already says how the turn ended.
+						let asksOperator: boolean | null = null;
+						if (!canceled && !interviewDismissed && !continuation && deps.readTurnEnd) {
+							try {
+								const read = await deps.readTurnEnd({
+									userTurnId,
+									request: operatorText,
+									message: finalAssistantText,
+									toolNames: collected.toolNames,
+								});
+								asksOperator = read?.asks ?? null;
+							} catch {
+								// The regex reading of the closing text stands.
+							}
+						}
+						if (canceled)
+							await awaitWorkerReceipts(
+								[...collected.dispatches.flatMap((item) => item.runIds), ...collected.harness.runIds],
+								deps.outcomeDispatch,
+							);
 						const record = reduceTurnOutcome({
 							...collected,
 							turnId: userTurnId,
 							turnIndex,
+							continuation,
 							finalAssistantText,
+							asksOperator,
 							taskEstablished: deps.getTaskEstablished?.() ?? false,
 							canceled,
+							interviewDismissed,
 							tokens: {
 								coordinator: matchesTrace ? persistence.currentTurnUsage() : noOutcomeUsage(),
-								decisionModel: deps.getTurnBriefUsage?.() ?? noOutcomeUsage(),
+								decisionModel: deps.getDecisionUsage?.(userTurnId) ?? noOutcomeUsage(),
 								workers: workerOutcomeUsage(
 									[...collected.dispatches.flatMap((item) => item.runIds), ...collected.harness.runIds],
 									deps.outcomeDispatch,
@@ -2148,7 +2397,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							data: record,
 						});
 						outcomeCollector.seedClarificationStreak(record.conversation.clarificationStreak);
-						if (!canceled) deps.observeTurnEnd?.({ turnId: userTurnId, message: finalAssistantText });
+						// The turn-end reading asked for a continuation, and every decision about
+						// the request carries the operator turn's id. A row filed under the
+						// continuation's own id would join no decision when the dataset exports.
+						const outcomeRef = continuation && previousOperatorTurn !== null ? previousOperatorTurn.id : userTurnId;
+						try {
+							deps.recordOutcome?.({
+								ref: outcomeRef,
+								source: "turn",
+								facts: turnOutcomeFacts(record, {
+									continuation,
+									interviewDismissed,
+									skillsLoaded: [...(pendingSkillPolicy?.loadedSkillNames ?? [])].filter(
+										(name) => !skillsLoadedBeforeTurn.has(name),
+									),
+								}),
+							});
+						} catch {
+							// Recording an outcome never costs the turn it describes.
+						}
+						// A continuation extends the operator turn it followed, so the gap the
+						// next operator message reports runs from the end of the whole chain.
+						if (!continuation) previousOperatorTurn = { id: userTurnId, settledAt: performance.now() };
+						else if (previousOperatorTurn !== null) previousOperatorTurn.settledAt = performance.now();
 						if (matchesTrace && traced)
 							persistence.traceEventForRun(traced.runId, { type: "turn_outcome", name: "turn_outcome", payload: record });
 					} catch {
@@ -2170,7 +2441,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		cancel(options?: ChatCancelOptions): void {
 			continuity.cancel();
-			pendingDecisionBrief?.abort();
+			pendingPreTurnRead?.abort();
 			pendingVisionSidecar?.abort();
 			const wasStreaming = state.streaming;
 			context.cancelCompaction();
@@ -2252,6 +2523,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		whenPrewarmSettled: () => prewarm.settled(),
 
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
+			operatorTurnsBefore = null;
 			lastHistoricalImageNoticeKey = null;
 			pendingVisionSidecar?.abort();
 			continuity.cancel();
@@ -2358,23 +2630,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
 			const candidates = await Promise.all(
 				DRAFT_TEMPERATURES.slice(0, count).map(async (temperature, index): Promise<DraftCandidate> => {
-					const samplingTemperature = draftTemperature(prepared.runtime.agent.state.model.id, temperature);
+					const samplingTemperature = draftTemperature(prepared.runtime.agent.state.model, temperature);
 					try {
 						// One endpoint slot per round: each is a full request against the
 						// same scheduler, and capacity has to count every one of them.
 						const result = await withEndpointSlot(prepared.runtime, () =>
-							draftRound({
-								model: prepared.runtime.agent.state.model,
-								// Read-only, exactly as the side-question round treats it.
-								messages: prepared.runtime.agent.state.messages,
-								systemPrompt: DRAFT_SYSTEM_PROMPT,
-								userText: text,
-								maxTokens: DRAFT_MAX_TOKENS,
-								...(samplingTemperature === undefined ? {} : { temperature: samplingTemperature }),
-								...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
-								...(options.signal ? { signal: options.signal } : {}),
-								...(options.onCandidate ? { onDelta: (partial: string) => options.onCandidate?.(index, partial) } : {}),
-							}),
+							runDraftWithSamplerFallback(
+								index,
+								samplingTemperature,
+								(sampling) =>
+									draftRound({
+										model: prepared.runtime.agent.state.model,
+										// Read-only, exactly as the side-question round treats it.
+										messages: prepared.runtime.agent.state.messages,
+										systemPrompt: sampling.systemPrompt,
+										userText: text,
+										maxTokens: DRAFT_MAX_TOKENS,
+										...(sampling.temperature === undefined ? {} : { temperature: sampling.temperature }),
+										...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
+										...(options.signal ? { signal: options.signal } : {}),
+										...(options.onCandidate ? { onDelta: (partial: string) => options.onCandidate?.(index, partial) } : {}),
+									}),
+								options.signal,
+							),
 						);
 						recordOutOfTurnUsage(prepared.runtime, result.usage, "side-question");
 						return { status: "drafted", text: result.text };

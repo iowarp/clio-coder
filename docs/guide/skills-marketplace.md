@@ -2,7 +2,7 @@
 
 `loadSkills` in [loader.ts](../../src/domains/resources/skills/loader.ts) selects runtime skills. The [library architecture](../architecture/library.md) explains package integrity.
 
-Skills are one kind of [library package](resource-library.md). `/skills` opens the Library overlay's skill tab directly, while `/library` opens the full overlay (covering skills, plugins, agents, prompts, and fleets). `/skill <name>` invokes a skill, and `/skill off` clears the session's active tool surface; bare `/skill` returns usage guidance pointing to `/skills`. Skill packages use the same manifest, version, full-tree digest, origins, scope and lifecycle as every other package.
+Skills are one kind of [library package](resource-library.md). `/skills` opens the Library overlay's skill tab directly, while `/library` opens the full overlay (covering skills, plugins, agents, prompts, and fleets). `/skill <name>` invokes a skill, and `/skill off` clears the session's active tool surface; bare `/skill` returns a usage error pointing to `/skills`. Skill packages use the same manifest, version, full-tree digest, origins, scope and lifecycle as every other package.
 
 ```bash
 clio-coder library search grill --kind skill
@@ -23,17 +23,22 @@ Draft outside active roots, for example `draft-skills/example/`. The operator ca
 
 | Key | Action |
 | --- | --- |
-| Type | Filter rows |
+| `/` | Focus search, then type to filter rows |
 | Left / Right | Change kind tab |
+| `b` | Switch Browse and Installed |
 | `s` | Switch user/project action scope |
-| `Enter` | Use a selected runtime resource or inspect a plugin |
+| `Enter` | Open a package's members, or show detail for a member |
+| `v` | Use the selected runtime recipe |
 | `i` | Review installation; a second request can include missing requirements |
 | `u` | Review update |
 | `e` | Enable or disable the selected installed copy |
 | `r` | Review removal |
-| `p` | Verify and show the recorded package pin |
-| `d` | Check installed drift |
+| `n` | Open library notices |
+| `o` | Open local-agent discovery and reviewed adoption |
+| `R` | Reread the inventory |
 | `Esc` | Close or cancel |
+
+Pin verification and drift checks are CLI-only: `clio-coder library pin` and `clio-coder library drift`.
 
 `/skill <name> [task]` activates a skill; `/skill off` clears the session's tool-surface narrowing. Loading can narrow allowed tools but cannot grant tools the host disallows. In `default` and `yolo`, the model may activate trusted installed skills. Read-only dispatched runs cannot activate skills. Listing available skills does not load their bodies.
 

@@ -155,8 +155,15 @@ export interface TurnContextDeps {
 	/** Test seam for the eviction planner; production uses `planEviction` from the working-set engine. */
 	planEviction?: typeof planEviction;
 	getMemorySection?: ((request: MemoryPromptRequest) => string) | undefined;
-	/** This turn's memory scores, or undefined when the site is unbound or the pass failed. */
-	getMemoryRelevance?: (() => PrecomputedRanking | undefined) | undefined;
+	/**
+	 * Memory scores for the section this request builds, or undefined when the
+	 * `relevance` site is unbound, ranking could not change the section, or the
+	 * ranking failed. Awaited while the prompt is composed, so it is asked only
+	 * when the order decides what the prompt carries.
+	 */
+	getMemoryRelevance?:
+		| ((request: MemoryPromptRequest) => Promise<PrecomputedRanking | undefined> | PrecomputedRanking | undefined)
+		| undefined;
 	getReadySkillCount?: (() => number) | undefined;
 	/**
 	 * Optional continuity projections carried into the live budget view. They
@@ -1927,14 +1934,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			};
 			if (deps.getMemorySection) {
 				try {
-					// The scores rank the records; they never admit one. Every
-					// eligibility gate still runs inside the selection below.
-					const relevance = deps.getMemoryRelevance?.();
 					if (memoryTurn !== null && memoryTurn.sessionId !== (sessionId || null)) {
 						memoryAuthorityEpoch += 1;
 						memoryTurn = null;
 					}
-					const memorySection = deps.getMemorySection({
+					const memoryRequest: MemoryPromptRequest = {
 						turnId: memoryTurn?.id ?? null,
 						sessionAuthority: memoryTurn?.sessionAuthority ?? JSON.stringify([memoryAuthorityEpoch, sessionId]),
 						cwd,
@@ -1943,6 +1947,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						modelId: agentRuntime.wireModelId,
 						taskText: memoryTurn?.taskText ?? "",
 						activePaths: memoryTurn?.activePaths ?? [],
+					};
+					// The scores rank the records; they never admit one. Every
+					// eligibility gate still runs inside the selection below.
+					let relevance: PrecomputedRanking | undefined;
+					try {
+						relevance = await deps.getMemoryRelevance?.(memoryRequest);
+					} catch {
+						// A ranking that cannot be produced leaves memory in its base order.
+						relevance = undefined;
+					}
+					const memorySection = deps.getMemorySection({
+						...memoryRequest,
 						...(relevance === undefined ? {} : { precomputedRelevance: relevance }),
 					});
 					if (memorySection.length > 0) sessionInputs.memorySection = memorySection;

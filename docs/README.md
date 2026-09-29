@@ -30,6 +30,7 @@ architecture guides and current source for implementation decisions.
 | Understand what Clio may read, change, or execute | [Safety Model](architecture/safety-model.md) |
 | Diagnose a problem by its exact message | [Troubleshooting](guide/troubleshooting.md) |
 | Check an install, its targets, and the HPC toolchain | [Doctor](guide/doctor.md) |
+| Bind a fast decision model (System One) to hints, gates, ranking and consult | [System One](guide/system-one.md) |
 | Submit, poll, and cancel Slurm jobs through the clio-kit MCP server | [Slurm](guide/slurm.md) |
 
 A minimal first run needs Node.js 22.19 or newer and a model to talk to: a
@@ -78,6 +79,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Topic | Guide |
 | --- | --- |
 | Autonomy, default-deny execution, project policy, and damage-control rules | [Safety Model](architecture/safety-model.md) |
+| System One sites that can add a confirmation or an injection banner, calibration, shadow mode, and the opt-in dataset | [System One](guide/system-one.md) |
 | Required checks by changed path, fresh verification snapshots, and completion findings | [Project Quality Policies](guide/quality-policy.md) |
 | Receipts, run inspection, costs, and observability routing | [Observability](architecture/observability.md) |
 | Durable evidence bundles, findings, and reviewed memory | [Evidence and Memory](architecture/evidence-and-memory.md) |
@@ -110,6 +112,7 @@ reference data, and review define the acceptance criteria for a change.
 | Implementing a runtime or inference-server adapter | [Provider Adapter Cookbook](architecture/provider-adapter-cookbook.md) |
 | Delegate to installed coding agents through their supported ACP, headless CLI, or pane modes; inspect and adopt their resources | [Coding Agent Interoperability](guide/interop.md) |
 | Middleware hooks, effects, budgets, and component snapshots | [Middleware and Components](architecture/middleware-and-components.md) |
+| Decision-layer contract: sites, engines, runner, cuts per build, records, and how a build is validated | [System One Architecture](architecture/system-one.md) |
 | Process exit codes, stdout/stderr rules, JSONL, and `--help` contracts | [Exit Codes and Output](guide/exit-codes-and-output.md) |
 | Environment overrides, directory controls, and debug toggles | [Environment Variables](guide/environment-variables.md) |
 
@@ -122,6 +125,8 @@ reference data, and review define the acceptance criteria for a change.
 | Pi framework boundary and Clio-owned policy | [Pi Boundary](architecture/pi-boundary.md) |
 | Clock, duration, timestamp, and ordering conventions | [Time Conventions](architecture/time-conventions.md) |
 | Package qualification, release tags, website documentation, and Wiki updates | [Release Readiness](guide/release-readiness.md) |
+| Export the generated `docs/wiki/` pages to the GitHub Wiki repository | [Publishing the Wiki](guide/publishing-wiki.md) |
+| Startup presentation modes and their measured cost | [TUI Boot Performance](architecture/tui-boot-performance.md) |
 | Core terms mapped to source concepts | [Glossary](guide/glossary.md) |
 
 ## Developer quick start

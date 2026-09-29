@@ -6,7 +6,7 @@ import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/w
 import { invokeRegisteredTool } from "../../src/tools/agent-tools.js";
 
 const PIVOT_LINE =
-	"Do not retry this action through another tool unless a hint above names one; pivot or report the blocker.";
+	"Do not retry this action through another tool or a respelled command (other flags, quoting, or a wrapper) unless a hint above names one; pivot or report the blocker.";
 
 describe("formatModelRejection composes the model-facing blocked text", () => {
 	it("carries reason, detail lines, hints, and the standing pivot instruction", () => {

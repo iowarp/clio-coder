@@ -55,7 +55,7 @@ it("loads a fixture and pairs three operator turns with two ledger outcomes with
 	);
 });
 
-it("purely and idempotently rewrites the scratch chat route and turn-control binding, refusing unknown names", () => {
+it("purely and idempotently rewrites the scratch chat route and turn-site binding, refusing unknown names", () => {
 	const sample = `# operator settings stay untouched
 targets:
   - id: blade
@@ -66,28 +66,29 @@ chat:
   target: blade
   model: local-model
   thinkingLevel: low
-fleet:
-  profiles:
-    system-one:
+systemOne:
+  engines:
+    jev:
+      kind: systemone
       target: blade
       model: decision-model
-  decisionProfiles:
-    capabilities: system-one
+  sites:
+    relevance: jev
 `;
 	const before = parse(sample);
-	const options = { chatTarget: "openai-codex", chatModel: "gpt-6-luna", bindTurnControl: "system-one" };
+	const options = { chatTarget: "openai-codex", chatModel: "gpt-6-luna", bindTurn: "jev" };
 	const rewritten = rewriteProbeSettings(sample, options);
 	deepStrictEqual(rewriteProbeSettings(rewritten.settingsYaml, options), rewritten);
 	deepStrictEqual(parse(sample), before);
 	deepStrictEqual(parse(rewritten.settingsYaml), {
 		...before,
 		chat: { ...before.chat, target: "openai-codex", model: "gpt-6-luna" },
-		fleet: { ...before.fleet, decisionProfiles: { capabilities: "system-one", turnControl: "system-one" } },
+		systemOne: { ...before.systemOne, sites: { relevance: "jev", turn: "jev" } },
 	});
 	strictEqual(rewritten.chatTarget, "openai-codex");
 	strictEqual(rewritten.chatModel, "gpt-6-luna");
 	throws(() => rewriteProbeSettings(sample, { chatTarget: "missing" }), /not defined in copied settings.targets/);
-	throws(() => rewriteProbeSettings(sample, { bindTurnControl: "missing" }), /not defined in copied fleet.profiles/);
+	throws(() => rewriteProbeSettings(sample, { bindTurn: "missing" }), /not defined in copied systemOne.engines/);
 	const defaultModel = rewriteProbeSettings(sample.replace("model: local-model", "model: null"), {});
 	strictEqual(defaultModel.chatTarget, "blade");
 	strictEqual(defaultModel.chatModel, "local-model");

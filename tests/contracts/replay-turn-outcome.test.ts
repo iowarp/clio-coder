@@ -584,6 +584,50 @@ test("a replayed act states the age its ledger entry records in /view, not the a
 	assert.equal(panel.inspectionArtifacts().at(-1)?.timestamp, clock);
 });
 
+test("an aborted worker writes one settled row, from its terminal event", () => {
+	const noop = (): void => undefined;
+	const bus = createSafeEventBus();
+	const settled: WorkerSettledFields[] = [];
+	const subscriptions = createInteractiveSubscriptions({
+		bus,
+		refreshFooter: noop,
+		renderTaskIsland: noop,
+		renderContextIsland: noop,
+		requestRender: noop,
+		notify: noop,
+		recordWorkerSettled: (fields) => settled.push(fields),
+		readWorkerReceipt: () => ({ outcome: "canceled", durationMs: 1, tokenCount: 0, toolCalls: 0, text: "" }),
+	});
+	const identity = {
+		agentId: "scout",
+		requestOrigin: "agent" as const,
+		targetId: "blade",
+		wireModelId: "dynamo/qwopus",
+		runtimeId: "blade",
+		runtimeKind: "http" as const,
+	};
+	bus.emit(BusChannels.DispatchStarted, {
+		...identity,
+		runId: "run-a",
+		pid: null,
+		assignmentId: "run-a",
+		attempt: 0,
+	} as never);
+	bus.emit(BusChannels.DispatchProgress, {
+		...identity,
+		runId: "run-a",
+		event: {
+			type: "message_end",
+			message: { role: "assistant", usage: { input: 900, output: 100, cacheRead: 0, cacheWrite: 0 } },
+		},
+	} as never);
+	bus.emit(BusChannels.RunAborted, { source: "dispatch_abort", runId: "run-a", startedAt: null, elapsedMs: 5 });
+	assert.deepEqual(settled, []);
+	bus.emit(BusChannels.DispatchFailed, { ...identity, runId: "run-a", reason: "canceled" } as never);
+	subscriptions.dispose();
+	assert.deepEqual(settled, [{ runId: "run-a", contextTokens: 1_000 }]);
+});
+
 test("an operator /run resumes with its command above its card, the spend its live card stated and its calls", () => {
 	const noop = (): void => undefined;
 	const receipt: WorkerReceiptFacts = {
@@ -838,7 +882,7 @@ test("orientation is persisted before the first model call while operator text s
 					record: {
 						version: 1,
 						turnId: input.userTurnId,
-						producer: "decision-site",
+						producer: "system-one",
 						interpretation: null,
 						factsDigest: "facts",
 						decision: {
@@ -880,7 +924,7 @@ test("orientation is persisted before the first model call while operator text s
 		const outcome = entries.find((entry) => entry.kind === "custom" && entry.customType === "turnOutcome");
 		assert.ok(outcome?.kind === "custom");
 		assert.deepEqual((outcome.data as { control: unknown }).control, {
-			producer: "decision-site",
+			producer: "system-one",
 			decision: "orientation",
 			decisionHash: "decision",
 			executed: true,

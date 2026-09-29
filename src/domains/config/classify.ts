@@ -40,7 +40,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"turnControl",
 	// Every site resolves its binding per call; consult alone is registered at
 	// startup and is listed as restart-required.
-	"fleet.decisionProfiles",
+	"systemOne",
 	"targets",
 	"chat",
 	"fleet.default",
@@ -65,7 +65,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 
 const RESTART_REQUIRED_FIELDS = new Set<string>([
 	"fleet.concurrency",
-	"fleet.decisionProfiles.consult",
+	"systemOne.sites.consult",
 	"interface.mode",
 	"interface.fullscreenScrollbar",
 	"interface.panes.enabled",

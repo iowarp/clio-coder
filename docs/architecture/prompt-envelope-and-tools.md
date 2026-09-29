@@ -24,9 +24,9 @@ The compiled prompt is reused byte-for-byte when the complete identity is unchan
 
 ## Section order: stable prefix first
 
-The immutable prefix contains identity and the constitutional operating contract. Its `stablePrefix` metadata records the exact UTF-8 byte count and SHA-256, including the following section separator. Machine paths and tool-dependent documentation routing live in a separate harness-awareness section after project context, so changing gateway access or installation paths cannot disturb the constitution. Worker prompts expose the same measurement for their own identity and shared/assigned-task contracts.
+The immutable prefix contains identity and the constitutional operating contract. Its `stablePrefix` metadata records the exact UTF-8 byte count and SHA-256, including the following section separator. Machine paths and tool-dependent documentation routing live in a separate harness-awareness section that precedes captured project context, so changing gateway access or installation paths cannot disturb the constitution. Worker prompts expose the same measurement for their own identity and shared/assigned-task contracts.
 
-The remaining layers contain conditional role guidance, safety, the factual tool inventory and admitted hints, fleet information, retrieval hints, captured project context, harness-awareness, memory, runtime, and customization fragments. Current task scope renders last. Memory and effective-context-window changes preserve the preceding bytes. A changed tool surface or conditional role layer invalidates from its first changed byte; a stable-prefix hash is a reuse candidate, not a claim that the backend actually reused KV state.
+The remaining layers follow `SESSION_PROMPT_SECTION_ORDER` in [compiler.ts](../../src/domains/prompts/compiler.ts): delegation, skills, safety, tool contract, retrieval hints, harness-awareness, project context, memory, and runtime. Additional fragments and the current task scope render last. Everything through harness-awareness depends only on the install, autonomy and tool surface. Memory and effective-context-window changes preserve the preceding bytes. A changed tool surface or conditional role layer invalidates from its first changed byte; a stable-prefix hash is a reuse candidate, not a claim that the backend actually reused KV state.
 
 `TurnConstraints` comes from [turn-constraints.ts](../../src/core/turn-constraints.ts); the compiler shares `turnAllowsTool` with admission. `mode` is an explicit host workflow switch (`answer`, `proposal`, or `change`), never inferred from English and never an authorization grant. Answers omit delegation/fleet workflows and validation pressure. Proposals omit implementation validation and task-board hints and state that implementation remains blocked. Tool allowlists suppress forbidden capability guidance, including secondary gateway calls; the Direct tools line still describes the actual attached schemas. No-delegation and disabled skills remove their associated instructions. Unknown inputs retain the ordinary policy. This is a typed compiler, with a few fragment substitutions, not a general template language.
 
@@ -74,21 +74,20 @@ when the tool is, the same rule the Fleet block follows.
 
 | Fragment | Renders when | Contents |
 | --- | --- | --- |
-| `identity.clio` | The default main-session identity; the compiler uses the identity selected by its inputs. | Clio’s identity. Workers instead use `identity.clio-coder-worker`. |
-| `operating.contract` | The default main-session operating contract and the shared contract in worker prompts. | Constitutional operating rules, preceding conditional capability guidance. |
-| `operating.user-control` | Main coordinator compilation; merged into the stable operating contract, including its prefix identity and manifest. | User steering, scientific uncertainty, explanations of outcomes and project state, and optional educational artifacts. |
-| `operating.coordinator` | Main coordinator compilation with admitted dispatch and a non-answer scope. Replaces legacy delegation prose. | Intent understanding, discovery before bounded delegation, dependency composition, receipts and verification. The fleet roster is discovered rather than preloaded. |
-| `operating.discovered-skills` | Main coordinator compilation with admitted gateway/context, skill discovery and a ready workflow. Replaces legacy skills prose. | Task-query discovery, named activation through gateway, dependency order and readiness constraints. |
-| `identity.self-awareness` | The selected identity is `identity.clio` and the fragment is present in the table (`compiler.ts:673`). | Installed paths, code outranks docs, configuration locations. Names no tool. |
-| `operating.delegation` | `sessionCanDispatch` holds, meaning provider tool support is not explicitly false, `dispatch` is on the surface, and `turnAllowsTool` admits it; and the turn mode is not `answer` (`compiler.ts:244`, `compiler.ts:701`). `proposal` mode still renders it. | The delegation threshold as a count taken before the first edit, the dispatch call shape, receipts, spot-checks, and shared `[worker result]` notes. |
-| `operating.skills` | `sessionCanUseSkills` holds: provider tool support is not explicitly false, `context` is on the surface and admitted by `turnAllowsTool`, `skillDiscoveryEnabled` is not false, turn constraints do not disable skills, the mode is not `answer`, and `readySkillCount` is not zero (`compiler.ts:259`). | Skill-shaped tasks and `/skill <name>` suggestions, plus direct `context(scope="skills")` listing and autonomy-aware activation guidance. |
-| `identity.docs-routing` | `identity.self-awareness` rendered, provider tool support is not explicitly false, `gateway` is on the surface, and `turnAllowsTool` admits `clio_docs` (`compiler.ts:676`). | Routes questions about Clio through `gateway(op="call", capability="clio_docs", args={query: ...})` before answering or searching the workspace. |
+| `identity.clio` | The default main-session identity. | Clio's identity. Workers instead use `identity.clio-coder-worker`. |
+| `operating.contract` | The main-session operating contract and the shared contract in worker prompts. | Constitutional operating rules. |
+| `operating.user-control` | Main sessions; merged into the operating contract section. | User steering, scientific uncertainty, explanations of outcomes and project state, and optional educational artifacts. |
+| `operating.coordinator` | `sessionCanDispatch` holds (provider tool support is not explicitly false, `dispatch` is on the surface and admitted by `turnAllowsTool`) and the turn mode is not `answer`. | Intent understanding, discovery before bounded delegation, dependency composition, receipts and verification. The fleet roster is discovered rather than preloaded. |
+| `operating.discovered-skills` | `sessionCanUseSkills` holds: `context` is reachable directly or through `gateway`, `skillDiscoveryEnabled` is not false, turn constraints do not disable skills, the mode is not `answer`, and `readySkillCount` is not zero. | Task-query discovery, named activation through gateway or `/skill <name>` suggestions by autonomy, dependency order and readiness constraints. |
+| `identity.self-awareness` | The selected identity is `identity.clio`. Renders in the harness-awareness section. | Installed paths, code outranks docs, configuration locations. Names no tool. |
+| `identity.docs-routing` | `identity.self-awareness` rendered, provider tool support is not explicitly false, `gateway` is on the surface, the `clio_docs` capability is present and `turnAllowsTool` admits it. | Routes questions about Clio through `gateway(op="call", capability="clio_docs", args={query: ...})`, plus `clio_library` routing when that capability is admitted. |
+| `identity.settings-routing` | `identity.self-awareness` rendered and `context` is reachable. | Routes questions about Clio's settings to `context(scope="settings")` and states how a setting change is made (`configure_clio` only where registered and autonomy lets it run). |
+| `operating.memory-guidance`, `operating.support-guidance` | Identity `identity.clio` when `identity.docs-routing` did not render, appended to the identity section. Otherwise disclosed on demand through runtime guidance. | Memory procedures, and source verification and command admission guidance for answering questions about Clio. |
 | `operating.worker` | The reader is a dispatched worker, which never sees the coordinator fragments. | The assigned-task contract. |
-| `safety.<level>` | Always, selected by the effective autonomy level. | What runs, what is approval-required, and what is blocked, in the safety net's action-class vocabulary (read, write, command, `system_modify`, `git_destructive`) and never by tool name. |
+| `dispatch.read-only` | A read-only dispatch. | The read-only run restriction. |
+| `safety.<level>` | Always, selected by the effective autonomy level (`safety.default`, `safety.yolo`). | What runs, what is approval-required, and what is blocked, in the safety net's action-class vocabulary and never by tool name. |
 
-Legacy delegation and skill fragments remain available to compiler callers that
-do not supply coordinator presence. Workers do not receive coordinator or user-control
-fragments. The constitutional and safety contracts remain shared.
+Workers do not receive coordinator or user-control fragments. The constitutional and safety contracts remain shared.
 
 `identity.docs-routing` does not depend on `context`, and tool hints cannot
 establish tool availability. The Tool Contract independently describes agent,
@@ -131,58 +130,7 @@ task-shaped discovery, describing one capability, gateway invocation, chaining,
 and capability-gated workflow guidance. It does not preload per-tool hints or
 the fleet roster. Describe and activation deliver those details at their step.
 
-For legacy compiler callers, the Tool Contract renders a fixed set of base lines plus
-one optional guidance sentence per tool, sourced from the tool registry
-(`ToolMetadata.promptHint` in [registry.ts](../../src/tools/registry.ts), assigned in
-[bootstrap.ts](../../src/tools/bootstrap.ts)).
-
-The base lines cover the complete-surface rule, the harness model (direct tools,
-fleet workers, skills as distinct capability sets), the capability-inventory
-rule, tool-free answering, the narrow-orientation tool list, validation for
-authorized file changes within scope, and schema correction after argument
-errors. Policy denials do not invite another route.
-
-Six tools carry legacy hints: `ask_user`, `bash`, `code_nav`, `context`, `panes`,
-and `tasks`. A hint carries only a decision-local call shape the tool's own
-description cannot; policy that applies across tools is said once in its prompt
-section, so `dispatch` carries no hint.
-
-<details>
-<summary>Why delegation and fleet routing are not restated here</summary>
-
-In legacy composition, delegation, the tasks board, and skill listing are not restated in the Tool
-Contract. `operating.delegation`, the `tasks` hint, and `operating.skills` each
-say their rule once and render exactly when their tool is on the surface.
-
-Fleet routing, including the sentence that `agent:"auto"` is a fallback rather
-than a router, lives in the Fleet block next to the roster ids.
-
-The threshold that says when to delegate at all is the opening of
-`operating.delegation` rather than a Fleet line. On the round-2 drive with
-Qwen3.8-27B, the bare threshold placed after the tool contract lost to inertia on
-every run, while the same count stated up front with the call shape next to it
-dispatched both workers on every two-changes run and scout on every
-reconnaissance run once the sentence about repository size was in place.
-
-</details>
-
-<details>
-<summary>How the hint list is frozen, and what changing it requires</summary>
-
-The chat loop derives the hint list once from the session's frozen tool surface
-at compile time, and the compiler renders the hints sorted by tool name, so the
-compiled text depends only on which hinted tools are on the surface.
-
-The frozen name list is the surface. A hint renders only for a tool in that list,
-and the gates that decide whether the Delegation, Skills, and docs-routing
-passages render read the same list, so a stale hint can neither render itself nor
-pull in a passage for a tool the model cannot call.
-
-Removing a tool from the surface removes its hint with no compiler change. Adding
-a hint to a tool is a deliberate prompt-text change that must land with updated
-prompt contract tests and a CHANGELOG note.
-
-</details>
+Worker prompts render the Tool Contract as base lines plus one optional guidance sentence per admitted tool, sourced from the tool registry (`ToolMetadata.promptHint` in [registry.ts](../../src/tools/registry.ts), assigned in [builtin-tool-catalog.ts](../../src/tools/builtin-tool-catalog.ts) and [core-bootstrap.ts](../../src/tools/core-bootstrap.ts)). The base lines state that the attached schemas are the worker's complete tool surface, list the admitted canonical tools, and say that persona and bound-skill instructions never add tools. A hint carries only a decision-local call shape that the tool's own description cannot. Hints are deduplicated, sorted, and render only for tools on the admitted surface, so a hint can never manufacture a tool. Removing a tool from the surface removes its hint with no compiler change. Adding a hint is a deliberate prompt-text change.
 
 ## One tool surface per session
 
@@ -204,7 +152,7 @@ The worker compiler runs after target capability and tool-profile admission. Can
 
 Project context, memory, bounded dispatch briefing, pipeline input, the assigned task, and the per-run safety-posture reminder remain dynamic user messages. A briefing is a separately delimited message labeled as untrusted task context/data; it is never concatenated into the task or stable system prompt. Dynamic ordering is project, safety, memory, briefing, then pipeline input, with pipeline input last. These messages do not affect the stable composition hash. Persona, effective autonomy, target tool capability, or final toolkit changes do affect it.
 
-## Eight planes, thirty-two builtin tools
+## Eight planes, thirty-four builtin tools
 
 The canonical builtin catalog contains 34 tools organized in eight planes. A
 particular session or worker receives the subset whose dependencies and policy
@@ -224,7 +172,7 @@ it on a registry the test builds.
 
 | Plane | Tools | Action class | Concurrency |
 | --- | --- | --- | --- |
-| OBSERVE | `read`, `grep`, `find`, `ls`, `code_nav`, `context`, `credential_present`, `clio_docs`, `clio_library`, `data` | read | parallel |
+| OBSERVE | `read`, `grep`, `find`, `ls`, `code_nav`, `context`, `credential_present`, `clio_docs`, `clio_library`, `data`, `vision` | read | parallel |
 | OBSERVE | `evidence` | read | sequential |
 | MUTATE | `write`, `edit` | write | sequential |
 | EXECUTE | `bash`, `verify`, `run_script` | execute | sequential |
@@ -234,7 +182,7 @@ it on a registry the test builds.
 | ORCHESTRATE | `tasks` | read | sequential |
 | ORCHESTRATE | `ledger` | read | sequential |
 | ORCHESTRATE | `panes` | read | sequential |
-| ORCHESTRATE | `limitation`, `consult`, `vision` | read | parallel |
+| ORCHESTRATE | `limitation`, `consult` | read | parallel |
 | ORCHESTRATE | `decide` | read | sequential |
 | ORCHESTRATE | `self_compact` | read | sequential |
 | RETRIEVE | `web_read`, `web_fetch` | read | parallel |
@@ -254,7 +202,7 @@ Several tools sit in a plane for containment rather than class:
 | `evidence` | OBSERVE plane, sequential | It only reads canonical evidence, trust status, gate decisions, and findings, but `run` mode may materialize a bundle under Clio's data directory. |
 | `limitation` | ORCHESTRATE plane, read class, parallel | It appends one typed receipt to the session ledger and touches nothing else. The call is pure. |
 | `decide` | ORCHESTRATE plane, read class, sequential | It appends one decision-board entry and touches nothing else. Sequential so two decisions in one batch cannot race the supersede lookup. |
-| `consult` | ORCHESTRATE plane, read class, parallel, gateway | It sends the main agent's typed questions and at most 2 KB of evidence to the decision model bound to the `consult` site, and returns the distribution as advice. It changes nothing. Only the session registers it, and only when that site is bound at startup, so an unbound session's registry, gateway listing and prompt are unchanged, and dispatch never admits it for a worker. |
+| `consult` | ORCHESTRATE plane, read class, parallel, gateway | It sends the main agent's typed question, a small state and up to eight workspace files (read under the read tool's containment and redacted) to the System One engine bound to the `consult` site, and returns the distribution as a hint, never a chosen option. It changes nothing. Only the session registers it, and only when that site is bound at startup, so an unbound session's registry, gateway listing and prompt are unchanged, and dispatch never admits it for a worker. |
 | `self_compact` | ORCHESTRATE plane, read class, sequential | It saves the agent's handoff note and asks the host to compact the agent's own context, touching no workspace. Only the native interactive host supplies the continuity port it needs, so bootstrap never requires it and an external agent loop never receives it. |
 
 For `tasks`, board mutations append session task-ledger snapshots, and calls can
@@ -270,7 +218,7 @@ port (the session never does, and without a port the tool could only answer
 "no ledger"), and `panes` registers only when a pane host answered detection and
 the mux is live. Dispatch tool profiles narrow the surface for workers:
 `minimal-local` is `read`, `grep`, `find`, `ls`, `git`, `context`, `code_nav`,
-and `ledger`; `science-local` adds `verify`; `full-agent` keeps everything that
+and `ledger`; `science-local` adds `verify`; `council-read-only` is `read`, `grep`, `find`, `ls`, `code_nav` and `context`; `full-agent` keeps everything that
 the runtime registered and the recipe allows.
 
 `ask_user` keeps its typed `exposure: local | outward` admission fact separate from caller prose. The registry uses exposure only in the enforced autonomy mapping. After admission, the host carries the normalized fact into the shared decision-presentation classifier; question text, headers, options, summaries, and requested color or severity words cannot select a consequence tier. The resulting presentation object contains no admission disposition and cannot grant authority.
@@ -324,7 +272,7 @@ Tool descriptions are tiered by how much a wrong call costs. The hot tools the m
 
 ## Direct placement and the capability gateway
 
-[surface.ts](../../src/tools/surface.ts) owns placement independently of policy planes. Direct tools are `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `context`, `code_nav`, `verify`, `run_script`, and `gateway`, plus all ORCHESTRATE and INTERACT members when their dependencies are bound. Gateway capabilities are `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `clio_docs`, `clio_library`, `data`, extension commands, and trusted local MCP tools. The permanent context schema retains workspace, settings, skills, and recall.
+[surface.ts](../../src/tools/surface.ts) owns placement independently of policy planes. Direct builtins are `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `context`, `code_nav`, `self_compact`, `verify`, `run_script`, `gateway`, `dispatch`, `monitor`, `steer`, `tasks`, `ledger`, `panes`, `limitation`, `decide` and `ask_user`, each when its dependencies are bound. Gateway capabilities are `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `clio_docs`, `clio_library`, `data`, `consult`, `vision`, `configure_clio`, extension commands, and trusted local MCP tools. The main session's attached coordinator surface is narrower (`COORDINATOR_DIRECT_TOOLS` in [surface.ts](../../src/tools/surface.ts)): `read`, `bash`, `edit`, `write`, `gateway`, `dispatch`, `verify` and `ask_user`. The permanent context schema retains workspace, settings, skills, and recall.
 
 `gateway(op="find"|"describe"|"call", capability?, query?, args?)` is read class and sequential. Its inner call runs through canonical registry admission with the capability's own class, skill restrictions, approvals, and cancellation. Nested accounting counts the model call once. `effectiveToolCall` restores capability identity for artifact folding, mutation observers, path indexing, exported evidence, and transcripts. Terminal artifact results, images, and details survive routing. Gateway placement changes schema attachment, not authority or evidence.
 

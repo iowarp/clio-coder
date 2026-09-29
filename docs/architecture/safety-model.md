@@ -25,7 +25,7 @@ Only the operator sets the level, through the user `settings.yaml`, `/settings`,
 | Write outside the workspace, or another `system_modify` action | asks | runs |
 | Recognized command: a built-in test runner or inspection command, a `&&` chain of them, or a command declared in a trusted `.clio-coder/safety.yaml` | runs | runs |
 | Any other command: project build, lint, typecheck and CI scripts, `$(...)`, pipes, redirects | asks | runs |
-| Outward action: `ask_user` with `exposure: outward`, or `web_fetch` other than a bodiless GET or HEAD | asks | runs |
+| Outward action: `ask_user` with `exposure: outward`, a bash `git push` other than `--dry-run`, or `web_fetch` other than a bodiless GET or HEAD | asks | runs |
 | Plan-scale dispatch: several tasks, a compete, a remote node, or applying a compete winner | asks once for the whole plan | runs, and the plan hash is sealed into each receipt |
 | Damage-control confirmation rule | asks | asks |
 | Hard block | blocked | blocked |
@@ -37,7 +37,7 @@ A read-only run is a dispatch restriction, not a level. Reviewer, judge and coun
 The policy engine checks a call in this order, and the first block wins:
 
 1. Write-root confinement. When a run declares `write_roots`, a write outside them is blocked, and so are commands and dispatch, which could write anywhere.
-2. Damage-control blocks from [damage-control-rules.yaml](../../damage-control-rules.yaml), and any `git_destructive` command that no ask rule covers.
+2. Damage-control blocks from [damage-control-rules.yaml](../../damage-control-rules.yaml), any `git_destructive` command that no ask rule covers, and the delete-target rule below.
 3. An approved `.clio-coder/safety.yaml` that is invalid. Execution tools fail closed until it is fixed.
 4. Operator authority. A tool cannot grant workspace trust, change Clio's `settings.yaml` or the workspace trust records, or change installed skills, plugins and extensions outside the operator CLI.
 5. Path policy. Zero-access paths, such as `.env`, `~/.ssh/`, `*.pem`, `credentials.yaml` and `.git/config`, are neither read nor written, and a bash command that names one is blocked. Read-only paths, such as `.clio-coder/safety.yaml`, `.clio-coder/verifiers.yaml`, installed resource directories and system directories, are never written.
@@ -51,7 +51,11 @@ A project `.clio-coder/safety.yaml` can declare commands and path entries, but i
 
 ### Damage-control rules
 
-Hard blocks include recursive or forced `rm`, `sudo rm`, `find -delete`, `rsync --delete`, `shred`, `chmod 777`, `dd` to a device, `mkfs`, fork bombs, forced process kills, clearing shell history, force pushes, `git reset --hard`, forced `git clean`, stash and reflog destruction, `git filter-branch`, `curl` or `wget` piped to a shell, writes to system roots, cloud deletion commands (AWS, gcloud, Firebase, Vercel, Netlify, Wrangler), and SQL `DROP`, `TRUNCATE` and unbounded `DELETE`.
+Hard blocks include `rm` of `/`, the home directory or everything in either, `sudo rm`, `find -delete`, `rsync --delete`, `shred`, `chmod 777`, recursive `chmod` on system roots, recursive `chown` to root, `dd` to a device, `mkfs`, fork bombs, `kill -9 -1`, `killall -9`, `pkill -9`, clearing shell history, force pushes (`--force`, `-f` and `+` refspecs), `git reset --hard`, forced `git clean` without a preview flag, `git stash clear`, `git reflog expire`, `git gc --prune=now`, `git filter-branch`, `curl` or `wget` piped to a shell, writes to system roots through redirects or `tee`, cloud deletion commands (AWS, gcloud, Firebase, Vercel, Netlify, Wrangler), and SQL `DROP`, `TRUNCATE` and `DELETE` without a `WHERE`.
+
+### Delete targets
+
+A shell delete is judged by where it lands, never by its flags. `rm -rf build` inside the workspace is an ordinary command that asks at `default` and runs at `yolo`. A delete is a hard block at both levels, under rule `delete-outside-workspace`, when it targets the workspace root, a path outside the workspace, the workspace's `.git`, or a path the shell names only at run time such as `$VAR` or a command substitution. Scratch roots (`/tmp`, `/var/tmp`, the system temp directory) are exempt, except for a checkout's own root and `.git`. Any spelling of the same delete is refused, and globs and brace expansions are judged by the directory before the first wildcard.
 
 Confirmation rules ask at both levels: `git checkout -- .`, `git restore .`, `git stash drop`, `git branch -d` or `-D`, deleting a remote branch with `git push`, `gcloud iam policies`, SQL `DELETE` by id, `truncate -s 0`, and `:>`. The whole-worktree spellings `./`, `:/` and a pathspec after `--` count as `.` for the two git rules.
 
@@ -94,6 +98,17 @@ the call came from the main agent or a worker. Include the approval's rule or
 reason code when available. These distinguish a safety-net confirmation from
 a worker's `default` autonomy or a main-agent admission defect.
 
+## System One and the safety net
+
+System One is an optional decision model that can add friction to a call and never removes any. It has two roles here, and both are silent when no engine is bound, when the engine is slow or fails, and when the answering build has no fitted cut ([System One guide](../guide/system-one.md)).
+
+- **The yolo gate.** At `yolo`, in an interactive session, an `execute` call that the classifier did not recognize is sent to System One before it runs. If a fitted build reads the call as reaching far or destroying data that version control or a reinstall cannot bring back, the call parks as one confirmation card titled "System One confirmation". Its Requested-by row names the main agent "through System One gate" and the answering build, and its reason line states what System One read. The gate only ever parks. A call the classifier already parks, blocks or recognizes does not reach it, headless runs and ACP sessions have no gate, and a gate that is unavailable leaves `yolo` exactly as permissive as before. A hard block, a damage-control rule and a protected path outrank it at both levels.
+- **Tool-result screening.** Results of `web_fetch`, `web_read` and MCP tools are read for text that directs an AI agent. A flag puts a banner in front of the result naming the build, and it never clears a result that the deterministic marker scan already flagged. Clio's own listings, recipes and worker reports are not screened.
+
+An ordinary approval card can also show one advisory sentence about the call's blast radius when a `toolCall` engine is bound. It says it is advisory, cannot delay the card and does not change what allow, deny or stop do.
+
+The card's keys are `Enter` to allow once, `s` to stop the turn, `Esc` to deny, `v` to inspect a parked `write` or `edit`, `?` to fold the standing approval terms and the arrow keys to scroll a tall card. While the composer holds a draft, `Enter` is inert and the entry becomes `Backspace` to clear the draft, so the habitual send key cannot allow a call.
+
 ## Workers
 
 - Every worker runs at `default`. A read-only dispatch adds the restriction above, and its sealed receipt records it as `safety.readOnly: true`, whether or not the worker ever tried to write.
@@ -118,6 +133,8 @@ a worker's `default` autonomy or a main-agent admission defect.
 | Damage-control rules | [damage-control.ts](../../src/domains/safety/damage-control.ts) | `match` |
 | Read scope checks | [read-scope.ts](../../src/domains/safety/read-scope.ts) | `readScopeEscape`, `readScopeSpellings` |
 | Audit records | [audit.ts](../../src/domains/safety/audit.ts) | `buildAuditRecord`, `openAuditWriter` |
+| System One gate card | [decision-presentation.ts](../../src/domains/safety/decision-presentation.ts) | `SYSTEM_ONE_GATE_RULE_ID`, `systemOneGateText` |
+| System One sites | [factory.ts](../../src/domains/system-one/factory.ts) | see [System One Architecture](system-one.md) |
 | Finish contract and rigor | [finish-contract.ts](../../src/domains/safety/finish-contract.ts) | `assessFinishContract` |
 
 The policy exempts rule matches only when every span is inside an inert quoted argument to echo, printf, git commit/tag messages or grep/rg patterns. Whole-command and segment scans remain active. SQL and operator matches, substitutions, pipelines, heredocs and executable wrapper words prevent the exemption.

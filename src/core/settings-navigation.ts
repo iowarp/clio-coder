@@ -72,6 +72,8 @@ export function settingsSectionForPath(path: string): SettingsSectionId {
 		return "safety";
 	// The turn controller starts read-only Scout runs, so it lives with delegated work.
 	if (path === "turnControl" || path.startsWith("turnControl.")) return "fleet";
+	// System One asks engines about the requests, tool calls and turns that delegated work also serves.
+	if (path === "systemOne" || path.startsWith("systemOne.")) return "fleet";
 	const root = path.split(".")[0];
 	switch (root) {
 		case "targets":
@@ -94,14 +96,14 @@ export function settingsGroupForPath(path: string): string {
 	if (path.startsWith("chat.")) return "Model & responses";
 	if (path.startsWith("context.memory")) return "Proactive memory";
 	if (path.startsWith("context.compaction")) return "Compaction";
-	if (path.startsWith("context.workingSet")) return "Working set";
+	if (path.startsWith("context.workingSet")) return "Context cleanup";
 	if (path.startsWith("context.")) return "Context limits";
 	if (path.startsWith("fleet.permissions")) return "Worker approvals";
 	if (path.startsWith("fleet.default")) return "Default model";
 	if (path.startsWith("fleet.profiles")) return "Profiles";
 	if (path.startsWith("fleet.agentProfiles")) return "Agent routes";
-	if (path.startsWith("fleet.decisionProfiles")) return "System One (experimental)";
-	if (path.startsWith("turnControl")) return "Turn control";
+	if (path === "systemOne" || path.startsWith("systemOne.")) return "Decision engines";
+	if (path.startsWith("turnControl")) return "Turn preparation";
 	if (path.startsWith("fleet.adaptiveRouting")) return "Automatic routing";
 	if (path.startsWith("fleet.nodes") || path.startsWith("fleet.endpoints")) return "Placement & capacity";
 	if (path.startsWith("fleet.history")) return "Run history";

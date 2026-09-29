@@ -48,6 +48,7 @@ export interface FinishContractEvidence extends ValidationExecutionEvidence {
 /** Why the contract settled. Every branch is auditable from the ledger alone. */
 export type FinishContractReason =
 	| "no_mutation"
+	| "no_net_mutation"
 	| "validation_evidence"
 	| "explicit_limitation"
 	| "unvalidated_mutation";
@@ -55,7 +56,7 @@ export type FinishContractReason =
 export type FinishContractAssessment =
 	| {
 			kind: "ok";
-			reason: "no_mutation" | "validation_evidence" | "explicit_limitation";
+			reason: "no_mutation" | "no_net_mutation" | "validation_evidence" | "explicit_limitation";
 			evidence: ReadonlyArray<FinishContractEvidence>;
 			mutatedPaths: ReadonlyArray<string>;
 			quality?: ReadonlyArray<QualityFinding>;
@@ -77,6 +78,11 @@ export interface FinishContractInput {
 	activeAcceptance?: UserTaskAcceptance;
 	/** Owning session workspace, supplied by the finish registration. */
 	workspaceRoot?: string;
+	/**
+	 * Mutation targets whose state at turn end matches what it was before the
+	 * turn first touched them: a create-then-delete probe changed nothing.
+	 */
+	unchangedPaths?: ReadonlySet<string>;
 }
 
 interface ToolCallEvidenceCandidate {
@@ -117,9 +123,14 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 	const assistantTurnId = input.assistantTurnId ?? null;
 	const window = recentEntries(sessionEntries, assistantTurnId, input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT);
 
-	const mutatedPaths = mutatingReceipts(window);
+	const touchedPaths = mutatingReceipts(window);
+	if (touchedPaths.length === 0) {
+		return { kind: "ok", reason: "no_mutation", evidence: [], mutatedPaths: touchedPaths };
+	}
+	const unchanged = input.unchangedPaths;
+	const mutatedPaths = unchanged ? touchedPaths.filter((path) => !unchanged.has(path)) : touchedPaths;
 	if (mutatedPaths.length === 0) {
-		return { kind: "ok", reason: "no_mutation", evidence: [], mutatedPaths };
+		return { kind: "ok", reason: "no_net_mutation", evidence: [], mutatedPaths };
 	}
 
 	const acceptanceChecks = new Set(input.activeAcceptance?.verification.map((item) => item.check) ?? []);
@@ -339,7 +350,7 @@ function mutatingReceipts(recent: ReadonlyArray<unknown>): string[] {
 }
 
 /** Mutation targets for a tool call, empty for read-only/execute-only tools. */
-function mutationPathsForTool(toolName: string, args: Record<string, unknown> | undefined): string[] {
+export function mutationPathsForTool(toolName: string, args: Record<string, unknown> | undefined): string[] {
 	if (toolName === ToolNames.Bash) {
 		const command = typeof args?.command === "string" ? args.command : null;
 		if (command === null) return [];

@@ -140,7 +140,10 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 				return workers.progress(payload);
 			}),
 		),
-		deps.bus.on(BusChannels.RunAborted, folded(workers.aborted, recordSettled)),
+		// An abort settles the block provisionally; the terminal event dispatch
+		// publishes for every finalized run seals it, and that event writes the one
+		// settled row. Recording here as well left two rows per aborted run.
+		deps.bus.on(BusChannels.RunAborted, folded(workers.aborted)),
 		deps.bus.on(BusChannels.DispatchCompleted, (payload) => {
 			helperNotice(payload, "completed");
 			folded(workers.completed, recordSettled)(payload);

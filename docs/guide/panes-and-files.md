@@ -186,7 +186,8 @@ path.
 | `interface.panes.files.followCwd` | `true` | Reopening an open pane pushes the conversation's working directory into it. |
 | `interface.panes.files.ratio` | `0.3` | Share of the terminal height the files dock takes, `0.05` through `0.5`, floored at a usable number of rows. |
 | `interface.panes.layout` | `off` | `workers` opens the watch pane at boot; `cockpit` opens the watch pane and the files pane. Both close on `/quit`. |
-| `interface.panes.notifications` | `failures` | Which finished runs raise a herdr toast. |
+| `interface.panes.notifications` | `failures` | Which finished runs raise a herdr toast: `failures`, `all` or `off`. |
+| `interface.panes.workers.ratio` | `0.34` | Share of the terminal width the workers watch pane takes, `0.05` through `0.5`. |
 | `interface.keybindings."clio-coder.files.toggle"` | `alt+e` | Rebind the files toggle. |
 
 Every key is live through `/settings` under Terminal, files pane, and in the
@@ -209,16 +210,11 @@ as a herdr `[theme.custom]` block to paste into that file; Clio does not edit
 another program's configuration. With `interface.panes.files.profile: user`,
 nothing is themed and the engine runs on your own configuration.
 
-That is the limit of what 0.4.2 can do, and it is herdr's, not Clio's. Checked
-against herdr 0.8.2: `herdr api schema --json` (protocol 21) has no method in
-the pane family that takes a color, accent, or style, and `herdr --help` has
-no theme command; herdr's theme is global and read from `[theme]` in its own
-`config.toml`. So Clio's chrome inside herdr (sidebar, tab bar, borders, agent
-rows) can only follow the block you paste. Writing or merging that block into
-herdr's config on your behalf would cross Clio's rule of writing nothing
-outside its own roots, and is not offered (#273). If a later herdr exposes a
-per-pane accent or a color field on `pane.report_metadata`, Clio can mark its
-own panes without touching the global theme.
+Clio has no per-pane color control over herdr. herdr's theme is global and read
+from `[theme]` in its own `config.toml`, so Clio's chrome inside herdr (sidebar,
+tab bar, borders, agent rows) can only follow the block you paste. Writing or
+merging that block into herdr's config on your behalf would cross Clio's rule of
+writing nothing outside its own roots, so Clio does not offer it (#273).
 
 Clio's generated profile lives under the cache root at `yazi/profile` and
 never touches `~/.config/yazi`. `clio-coder tools status yazi --reset-profile`

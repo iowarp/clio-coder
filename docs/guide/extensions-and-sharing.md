@@ -128,11 +128,11 @@ When asked to review scientific array output:
 Use in the TUI:
 
 ```text
-/skill
+/skills
 /skill hdf5-review review the output validation path
 ```
 
-`/skill` opens the library overlay (`/library skill`) with discovered project skills, user skills, and marketplace entries. `/skill <name> [args]` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. The same pending-request path runs in headless mode, so `clio-coder run "/skill hdf5-review inspect the writer"` matches the interactive behavior.
+Bare `/skill` returns a usage error that points to `/skills`, which opens the Library overlay's skill tab with discovered project skills, user skills, and marketplace entries. `/skill <name> [args]` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. The same pending-request path runs in headless mode, so `clio-coder run "/skill hdf5-review inspect the writer"` matches the interactive behavior.
 
 Every activation records a session ledger entry with the skill name, file path, hash, source, trigger (`slash-command` or `tool`), and turn id when one is available. The same ledger is mirrored into session metadata, prompt diagnostics, and run receipts. Compaction keeps the newest active skill turn in the retained suffix so a loaded skill is not silently summarized away.
 
@@ -164,7 +164,8 @@ clio-coder library search [query] [--kind skill] [--json]
 clio-coder library inspect <path|kind:name|name> [--user|--project] [--json]
 clio-coder library validate <package-path|SKILL.md> [--json]
 clio-coder library install <path|kind:name|name> [--user|--project] [--force] [--with-requirements] [--dry-run] [--json]
-clio-coder library update <kind:name|name> [--user|--project] [--force] [--json]
+clio-coder library import <path|github-tree-url> [--user|--project] [--format claude|codex] [--dry-run] [--json] [--yes]
+clio-coder library update <kind:name|name> [--user|--project] [--force] [--dry-run] [--json]
 clio-coder library sync
 clio-coder library skills [--all] [--json]
 ```
@@ -251,6 +252,7 @@ missed because the task text happened not to spell a path. See
 ```bash
 clio-coder extensions list [--all] [--json] [--user|--project]
 clio-coder extensions discover <path> [--json]
+clio-coder extensions run <id> <command> [--json] -- [arguments]
 clio-coder extensions install <path> [--user|--project] [--force] [--json]
 clio-coder extensions enable <id> [--user|--project] [--json]
 clio-coder extensions disable <id> [--user|--project] [--json]
@@ -350,7 +352,7 @@ Options:
 
 If no include flags are supplied, export includes all supported classes for the selected scope.
 Each share command refuses, with exit 2, a flag it does not use: `export` takes no
-`--force`, `import` takes neither `--both` nor include flags, and `inspect` takes
+`--force`, `import` takes neither `--both`, `--out` nor include flags, and `inspect` takes
 only `--json`.
 
 Settings fragments are version 2 documents containing only
@@ -366,7 +368,7 @@ clio-coder share import project.clio-coder-share.json --dry-run
 clio-coder share import project.clio-coder-share.json --force
 ```
 
-Dry-run imports produce a plan and report conflicts without writing. Without `--force`, conflicting destination files block writes. With `--force`, conflicting files are overwritten and supported settings-fragment keys are merged into the current settings file.
+`share import` also accepts `--user` or `--project` to force every file into one destination scope; otherwise each entry keeps its archived scope. Dry-run imports produce a plan and report conflicts without writing. Without `--force`, conflicting destination files block writes. With `--force`, conflicting files are overwritten and supported settings-fragment keys are merged into the current settings file.
 
 Extension entries are grouped into complete packages, staged, strictly validated, and passed through the canonical extension installer. A successful import therefore records the installed content digest before the package can contribute resources. A destination tree is skipped only when it already matches a verified install record; an unrecorded, drifted, or corrupt destination requires `--force`, which uses the same backup-preserving recovery contract as `extensions install --force`. Invalid archived packages fail preflight before destination writes.
 

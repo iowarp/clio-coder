@@ -536,7 +536,9 @@ function compactInterview(
 		next:
 			policy.status === "active"
 				? "ask a new necessary follow-up round or call ask_user with action=complete before final prose"
-				: "continue the task using the decisions/defaults; do not call ask_user again for this interview",
+				: policy.status === "cancelled"
+					? "the turn has ended; wait for the operator's next message and do not act on a guessed answer"
+					: "continue the task using the decisions/defaults; do not call ask_user again for this interview",
 	};
 }
 
@@ -550,7 +552,7 @@ function renderAskUserState(
 		policy.status === "active"
 			? "The interview modal remains open. Ask only new necessary follow-up rounds. When enough information is collected, call ask_user with action=complete before final prose."
 			: policy.status === "cancelled"
-				? "The operator cancelled the interview. Proceed with defaults or existing answers; do not ask_user again for this interview."
+				? "The operator dismissed the interview without answering. A dismissal is not approval: make no edits, run no commands and dispatch no workers on a guessed answer. The turn ends here; wait for the operator's next message."
 				: "The interview is closed. Continue with the compact decisions below; use the transcript path only if the full history is needed later. End the reply with the result, without a new question or offer; ask necessary follow-ups before completing an interview.";
 	return [`ask_user result: ${event}`, guidance, "", JSON.stringify({ interview }, null, 2)].join("\n");
 }
@@ -570,6 +572,11 @@ function okInterviewResult(
 			decisions: policy.decisions,
 			...(policy.status === "cancelled" ? { cancelled: true } : {}),
 		},
+		// Esc on a clarification means stop, never "go ahead on a guess" (a
+		// cancelled interview once let a YOLO turn dispatch an unrequested
+		// refactor). Ending the loop here takes the decision away from the model;
+		// the guidance text covers a batch where another call keeps the loop alive.
+		...(policy.status === "cancelled" ? { terminate: true } : {}),
 	};
 }
 
@@ -628,7 +635,7 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.AskUser,
 		description:
-			'Ask the operator what only they can answer: a decision the request leaves open, approval of a plan, or a yes or no. Facts a tool can check and answers already given are not questions; greetings, thanks, and questions you can answer get a plain reply. Give each question its context and 2-4 options with one-line descriptions, recommended first; a yes or no becomes options such as "Yes, proceed", "Yes, but change ..." and "No, instead ...", and multi_select suits choices that combine. action=ask presents questions; action=complete closes an interview that asked questions, recording the operator\'s decisions, before final prose. If cancelled, proceed with defaults and do not ask again.',
+			'Ask the operator what only they can answer: a decision the request leaves open, approval of a plan, or a yes or no. Facts a tool can check and answers already given are not questions; greetings, thanks, and questions you can answer get a plain reply. Give each question its context and 2-4 options with one-line descriptions, recommended first; a yes or no becomes options such as "Yes, proceed", "Yes, but change ..." and "No, instead ...", and multi_select suits choices that combine. action=ask presents questions; action=complete closes an interview that asked questions, recording the operator\'s decisions, before final prose. If the operator cancels, the turn ends: a dismissal is never approval to proceed on a guess.',
 		parameters: askUserParameters,
 		baseActionClass: "read",
 		executionMode: "sequential",

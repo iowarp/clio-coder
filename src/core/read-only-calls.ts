@@ -76,6 +76,12 @@ function ordinaryDispatchAgents(args: Readonly<Record<string, unknown>> | undefi
 	return agents;
 }
 
+/** True only when every task of an ordinary dispatch names Scout. A mixed call also carries non-scout work. */
+export function dispatchTargetsOnlyScouts(args: Readonly<Record<string, unknown>> | undefined): boolean {
+	const agents = ordinaryDispatchAgents(args);
+	return agents !== null && agents.length > 0 && agents.every((agent) => agent.toLowerCase() === "scout");
+}
+
 export function dispatchTargetsScout(args: Readonly<Record<string, unknown>> | undefined): boolean {
 	return ordinaryDispatchAgents(args)?.some((agent) => agent.toLowerCase() === "scout") === true;
 }

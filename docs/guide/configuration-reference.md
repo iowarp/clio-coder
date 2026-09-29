@@ -28,7 +28,6 @@ Default chat settings control interactive conversation routing, reasoning effort
 | --- | --- |
 | `version` | `2` |
 | `turnControl.workflows` | `["orientation", "direction", "ledger-facts", "detached-collection"]` |
-| `turnControl.interpretation.fallback` | `"none"` |
 | `turnControl.orientation.maxSplit` | `4` |
 | `turnControl.orientation.maxCostUsdPerTurn` | `null` |
 | `targets` | `[]` |
@@ -52,7 +51,6 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `fleet.profiles` | `{}` |
 | `fleet.rosters` | `{}` |
 | `fleet.agentProfiles` | `{}` |
-| `fleet.decisionProfiles` | `{}` |
 | `fleet.speculativeDispatch` | `false` |
 | `fleet.nodes` | `[]` |
 | `fleet.adaptiveRouting.roles` | `[]` |
@@ -88,6 +86,12 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `context.memory.trajectorySteps` | `8` |
 | `context.memory.maxOutputTokens` | `2000` |
 | `context.memory.timeoutMs` | `60000` |
+| `systemOne.engines` | `{}` |
+| `systemOne.sites` | `{}` |
+| `systemOne.cuts` | `{}` |
+| `systemOne.record` | `false` |
+| `systemOne.retentionDays` | `30` |
+| `systemOne.maxMiB` | `64` |
 | `safety.autonomy` | `"default"` |
 | `safety.limits.sessionCostUsd` | `5` |
 | `safety.limits.chatToolCallsPerTurn` | `60` |

@@ -34,6 +34,12 @@ export interface DockEntry {
 	 * CONFIRM rail exists for.
 	 */
 	keepComposer: boolean;
+	/**
+	 * The surface sizes itself to its content between the compact floor and
+	 * `dockGrowthRows`, instead of always taking `dockBodyRows`. Opt-in, so no
+	 * other menu changes height.
+	 */
+	adaptive?: boolean;
 }
 
 /** Every open menu shares this body height while the terminal has room. */
@@ -56,8 +62,14 @@ function entriesFor(tui: object): DockEntry[] {
 	return entries;
 }
 
-export function dockMount(tui: object, frame: DockFrame, keepComposer: boolean): DockEntry {
-	const entry: DockEntry = { frame, hidden: false, order: ++orderCounter, keepComposer };
+export function dockMount(tui: object, frame: DockFrame, keepComposer: boolean, adaptive = false): DockEntry {
+	const entry: DockEntry = {
+		frame,
+		hidden: false,
+		order: ++orderCounter,
+		keepComposer,
+		...(adaptive ? { adaptive } : {}),
+	};
 	entriesFor(tui).push(entry);
 	return entry;
 }
@@ -95,6 +107,27 @@ export function dockBodyRows(tui: object): number {
 		DOCK_BODY_ROWS_MIN,
 		Math.min(DOCK_BODY_ROWS_MAX, terminalRows(tui) - DOCK_RESERVED_ROWS - (footerHeights.get(tui) ?? 2)),
 	);
+}
+
+/** Rows an adaptive surface keeps when its content is small, so one or two options never leave a tall empty dock. */
+export const DOCK_COMPACT_ROWS = 6;
+
+/**
+ * The most rows an adaptive surface may take: half the terminal when that is
+ * more than the shared budget, never more than the terminal can hold, and never
+ * less than what every other menu already gets.
+ */
+export function dockGrowthRows(tui: object): number {
+	const rows = terminalRows(tui);
+	const shared = dockBodyRows(tui);
+	const available = Math.max(DOCK_BODY_ROWS_MIN, rows - DOCK_RESERVED_ROWS - (footerHeights.get(tui) ?? 2));
+	return Math.max(shared, Math.min(Math.floor(rows / 2), available));
+}
+
+/** An adaptive body's height for `wanted` content rows. */
+export function dockAdaptiveRows(tui: object, wanted: number): number {
+	const ceiling = dockGrowthRows(tui);
+	return Math.max(Math.min(DOCK_COMPACT_ROWS, ceiling), Math.min(ceiling, Math.floor(wanted)));
 }
 
 export function setDockFooterRows(tui: object, rows: number): boolean {

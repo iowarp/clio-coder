@@ -723,7 +723,7 @@ it("blocks remembered harness orientation for Scout but permits coder", () => {
 });
 it("keeps Scope hints after controller execution and suppresses the exploration nudge", () => {
 	const hints = createDecisionHintsRegistration({
-		getHints: () => ["[Plan] plan", "[Harness routing] scout", "[Scope] answer"],
+		getHints: () => ({ scope: "[Scope] answer", plan: "[Plan] plan" }),
 		controllerActed: () => true,
 	});
 	const nudge = createReadOnlyExplorationNudgeRegistration();

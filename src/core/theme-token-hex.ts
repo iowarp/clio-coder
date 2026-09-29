@@ -169,9 +169,9 @@ export const TERMINAL_PALETTE = {
 		["#e3f2f3", 195],
 	],
 	yoloSurface: [
-		["#2c2521", 235],
-		["#2c2521", 235],
-		["#f4e5d9", 223],
+		["#1d2b2a", 235],
+		["#1d2b2a", 235],
+		["#e8f2ef", 255],
 	],
 	onAccent: [
 		["#10191b", 233],

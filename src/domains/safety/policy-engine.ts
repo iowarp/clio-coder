@@ -17,6 +17,7 @@ import { resolveVerifyCall } from "../../tools/verify/resolve.js";
 import { prepareVerifyArguments } from "../../tools/verify/surface.js";
 import {
 	type ActionClass,
+	bashDeleteReasons,
 	type Classification,
 	type ClassifierCall,
 	classify,
@@ -399,6 +400,27 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				if (hit?.match.ruleId !== undefined) blockInput.ruleId = hit.match.ruleId;
 				if (hit?.match !== undefined) blockInput.match = hit.match;
 				return blockDecision(base, blockInput);
+			}
+
+			// A delete is judged by where it lands, at every autonomy level, after the
+			// authored rules so a named catastrophic rule reports itself. The
+			// flag rules this replaces let `rm -v -r /` through, blocked scratch
+			// cleanup, and taught the model that dropping `-f` got around a block.
+			const deleteReasons = command === null ? [] : bashDeleteReasons(command, bashCwdArg(call.args));
+			if (deleteReasons.length > 0) {
+				const match: DamageControlMatch = {
+					ruleId: DELETE_TARGET_RULE_ID,
+					reason: `matched ${DELETE_TARGET_RULE_ID}: ${DELETE_TARGET_RULE_DESCRIPTION}`,
+					actionClass: "system_modify",
+					block: true,
+				};
+				return blockDecision(base, {
+					ruleId: DELETE_TARGET_RULE_ID,
+					reasonCode: `damage-control:${DELETE_TARGET_RULE_ID}`,
+					reasons: [...deleteReasons, match.reason],
+					match,
+					policySource: "damage-control:base",
+				});
 			}
 
 			if (!projectPolicy.valid && EXECUTION_TOOLS.has(call.tool)) {
@@ -1273,6 +1295,15 @@ function isUnderOrSame(child: string, parent: string): boolean {
 function commandArg(args: Record<string, unknown> | undefined): string | null {
 	return typeof args?.command === "string" ? args.command : null;
 }
+
+/** The directory a bash call names for itself; relative deletes resolve from it. */
+function bashCwdArg(args: Record<string, unknown> | undefined): string | undefined {
+	return typeof args?.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined;
+}
+
+const DELETE_TARGET_RULE_ID = "delete-outside-workspace";
+const DELETE_TARGET_RULE_DESCRIPTION =
+	"deletes a path outside the workspace, the workspace root or its .git, or a path named only at run time; any spelling of the same delete is refused";
 
 function pathArg(args: Record<string, unknown> | undefined): string | null {
 	if (!args) return null;

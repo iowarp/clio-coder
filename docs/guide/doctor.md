@@ -51,11 +51,19 @@ check, whether the endpoint answered, and whether a live model list was read.
 A target used by chat, fleet, or memory is an error when its passive check
 fails or required credentials are missing; an unused target is a warning. Successful public metadata does not prove that credentials are ready for inference. Each target’s passive probe has a 2.5-second total budget, including credential resolution and all metadata requests. Expired browser credentials are reported without refreshing or writing them. `model <id>` separately says whether each
 configured role model came from a live list, a cached list from an earlier check, a list recorded in settings by configure, or
-a provider catalog. A catalog match is not presented as live availability, and a model missing from an older catalog or recorded list is a warning, not proof that the endpoint rejects it. ALCF’s passive probe reads its catalog; it does not verify the configured inference URL.
+a provider catalog. A catalog match is not presented as live availability, and a model missing from an older catalog or recorded list is a warning, not proof that the endpoint rejects it. A role model absent from a live list of a target that chat, fleet, or memory uses is an error. An unknown runtime on a target is an error. ALCF’s passive probe reads its catalog; it does not verify the configured inference URL.
 
 The `local worker capacity` row reports usable CPUs, currently available memory,
 any process/cgroup memory bound, and the worker count `auto` resolves to. It
 also states that Clio did not inspect GPU/VRAM or model fit.
+
+## Core install rows
+
+Doctor reports these rows first: `Clio Coder version`, `install method`, `node version`, `platform`, `engine runtime`, `directory layout`, `config dir`, `data dir`, `state dir`, `cache dir`, `settings.yaml`, `credentials`, `state metadata`, `lifecycle migrations`, and the session store and state storage rows. A missing directory, an invalid `settings.yaml`, a `credentials.yaml` whose mode is not `600`, or stale state metadata is an error, and `clio-coder doctor --fix` repairs the directories, template files, credential mode and state metadata.
+
+On a home Clio has never written to, plain `doctor` prints one `installation` warning row (`not set up yet`) and exits 0. It creates nothing. `doctor --fix` creates the directories without choosing a model.
+
+Other rows appear when they apply: `validation contract` (valid, absent, Markdown-only or invalid; an invalid contract is an error and a valid one raises the rigor default to high), `interop <agent>` rows for detected external agents, `fleet node <id>` rows from the SSH preflight, `panes ...` rows, `external tool <id>` rows, and `naming ...` rows that count legacy `clio` history, git refs and worktree markers.
 
 ## HPC toolchain rows
 
@@ -101,6 +109,17 @@ declares `clio-kit mcp-server slurm`, its scope, and its trust. `slurm
 scheduler` reports `sbatch` and `squeue`. An install with none of the three
 gets a single informational `slurm mcp` row. These rows never fail doctor. See
 [Slurm](slurm.md).
+
+## System One rows
+
+Doctor reports how System One is configured and never asks a decision, so a failing row is a broken binding or an unverified target. See the [System One guide](system-one.md).
+
+| Row | Level and meaning |
+| --- | --- |
+| `system one <site>` | One row for each of `turn`, `toolCall`, `toolResult`, `turnEnd`, `relevance`, `consult` and `drafts`. `INFO` says `off; no engine bound`. `WARN` names why a binding cannot answer (an engine `systemOne.engines` does not define, a target `targets` lacks, an unregistered runtime, or a `systemone` engine over a runtime that does not answer typed decisions) and says the site stays silent. `WARN` also appears when the binding resolves but `connection <target>` is not verified, because the site may fall back every turn. Otherwise the row is `OK` and shows the engine, its kind, the target, the model and any `timeoutMs` deadline. |
+| `system one dataset` | Whether `systemOne.record` is on, the number of day files with their date range, their total size, and the retention and size cap. `INFO` with no files, `WARN` when the dataset directory cannot be read or is over the cap (the next write prunes the oldest days). |
+
+A site row that is `OK` says the binding is well formed. Whether a build has fitted cuts, which decides whether a site can act or only records, is shown per call in the session ledger and by `clio-coder systemone status`, not by doctor.
 
 ## Deep checks
 

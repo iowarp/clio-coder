@@ -1,6 +1,6 @@
 # Clio Coder Glossary
 
-This document defines the 50 core architectural concepts and terminology used throughout Clio Coder, mapped to their authoritative TypeScript type definitions in `src/`.
+This document defines the 56 core architectural concepts and terminology used throughout Clio Coder, mapped to their authoritative TypeScript type definitions in `src/`.
 
 ---
 
@@ -52,7 +52,7 @@ This document defines the 50 core architectural concepts and terminology used th
 
 ### 12. Target
 - **Definition**: A configured provider endpoint definition mapping a named identifier to an LLM provider runtime, base URL, authentication method, and default model.
-- **Owning Type**: `TargetDescriptor` in [config.ts](../../src/core/config.ts).
+- **Owning Type**: `TargetDescriptor` in [target-descriptor.ts](../../src/domains/providers/types/target-descriptor.ts).
 
 ### 13. Node
 - **Definition**: An addressable physical or virtual compute host within the fleet capacity pool (`local` or remote SSH host).
@@ -67,7 +67,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `AutonomyLevel` in [autonomy.ts](../../src/domains/safety/autonomy.ts).
 
 ### 16. Capability Class
-- **Definition**: The maximum permitted mutation boundary declared by an agent recipe (`read-only`, `verification`, `artifact-write`, `workspace-edit`).
+- **Definition**: The maximum permitted mutation boundary declared by an agent recipe (`read-only`, `verification`, `artifact-write`, `workspace-edit`, `orchestration`, `internal`).
 - **Owning Type**: `AgentCapabilityClass` in [spec.ts](../../src/domains/agents/spec.ts).
 
 ### 17. Topology
@@ -205,3 +205,27 @@ This document defines the 50 core architectural concepts and terminology used th
 ### 50. Commonly Confused Trust States
 - **Definition**: `sealed` is not `grounded`: a receipt can authenticate perfectly and describe a run that validated nothing. `grounded` is not `independently reviewed`: a host check is Clio observing the run's own declared command, not a second agent judging the result. A `host checks verified` unit on the board is folded into validation grounding and is never independent review. `mediated` and `enforced` are one state under two names, the receipt grade and the canonical id. `not_requested` is not a trust state at all; a run with no host check reads `no validation observed`. `completion unevidenced` (a mutation finished with no validation at the completion boundary) is distinct from `no validation observed` (no validation was linked anywhere in the run): the first is the finish contract's observation, the second the evidence linker's.
 - **Owning Type**: `TRUST_STATE_WORDS` and `trustVerdict` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts); the axis states in `TRUST_STATUS_STATES` in [trust-status.ts](../../src/domains/evidence/trust-status.ts).
+
+### 51. System One
+- **Definition**: An optional fast decision model that answers calibrated, typed questions (`noul`, `choice`, `score`) about one bounded, redacted state at a fixed decision site. Clio's policy reads the probabilities to add a hint, an extra confirmation, a banner, a ranking or a prewarm. It never answers the operator and never removes friction. Jev is the engine Clio's fitted cuts are built for, and Laya is the diffusion-model engine planned for the same wire. Configured under `systemOne`; see [System One](system-one.md).
+- **Owning Type**: `SystemOne` in [types.ts](../../src/domains/system-one/types.ts); built by `createSystemOne` in [factory.ts](../../src/domains/system-one/factory.ts).
+
+### 52. Decision Site
+- **Definition**: A place where System One is asked, named by the object it judges: `turn` (the operator's request), `toolCall` (a proposed call, at the `card` and `gate` moments), `toolResult`, `turnEnd`, `relevance`, `consult` and `drafts`. A site owns its state, its questions, its policy and its default deadline. Bound to an engine by `systemOne.sites`; a site with no binding is off.
+- **Owning Type**: `SiteDefinition` and `SiteId` in [types.ts](../../src/domains/system-one/types.ts).
+
+### 53. Build
+- **Definition**: The identity of what answered a System One question, and the key every cut is fitted against. For a `systemone` engine it is the model the server reports, such as `jev-1.13.0`. For an `llm` engine it is a composite of runtime, host, wire model, readout mode and prompt version. A probability means something only for the build that produced it.
+- **Owning Type**: `EngineReply.build` in [types.ts](../../src/domains/system-one/types.ts).
+
+### 54. Cut
+- **Definition**: A probability threshold at which a site hints, gates or acts, written `<site>.<key>` and fitted for one build from a labeled run. Fitted cuts live in `FITTED_CUTS`, and `systemOne.cuts` overlays operator values between 0.01 and 0.99 on top. A build with no cut for a site is unfitted.
+- **Owning Type**: `SiteCuts` in [types.ts](../../src/domains/system-one/types.ts); `FITTED_CUTS` and `cutsFor` in [calibration.ts](../../src/domains/system-one/calibration.ts).
+
+### 55. Shadow Mode
+- **Definition**: What a site does under an unfitted build. The engine is still asked and the call is recorded in the session ledger, and in the dataset when `systemOne.record` is on, but the site produces no hint, no gate, no act and no ranking. Hot-path callers leave a shadowed call running detached instead of waiting on it.
+- **Owning Type**: `SystemOne.shadowed` and `SiteCuts.fitted` in [types.ts](../../src/domains/system-one/types.ts).
+
+### 56. Laya
+- **Definition**: The diffusion-model System One engine that serves the same `POST /v1/systemone` wire as Jev, through `laya-serve` and the `systemone` runtime. Not yet fitted: a Laya build runs in shadow until cuts are fitted on that exact build with `scripts/decision-probe.ts`. See [System One Architecture](../architecture/system-one.md#validating-a-laya-build).
+- **Owning Type**: `createSystemOneEngine` in [systemone.ts](../../src/domains/system-one/engines/systemone.ts).

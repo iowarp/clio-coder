@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
@@ -21,6 +21,8 @@ import { foldSessionTaskHistory } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { GitChanges } from "../domains/session/workspace/git-probe.js";
 import { probeGitChangesAsync } from "../domains/session/workspace/git-probe.js";
+import type { OutcomeRecord } from "../domains/system-one/index.js";
+import { draftTakenOutcome } from "../domains/system-one/outcomes.js";
 import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { TUI } from "../engine/tui.js";
@@ -38,7 +40,7 @@ import type { OverlayTransitions } from "./overlay-transitions.js";
 import type { ContextResetMutationChoice } from "./overlays/context-reset.js";
 import { contextResetOptions, openContextResetOverlay } from "./overlays/context-reset.js";
 import { formatDecisionCorrectionTurn, openDecisionsOverlay } from "./overlays/decisions.js";
-import { openDraftOverlay } from "./overlays/draft.js";
+import { openDraftOverlay, type TakenDraft } from "./overlays/draft.js";
 import { openFleetRunApprovalOverlay } from "./overlays/fleet-run-approval.js";
 import { openSideQuestionOverlay } from "./overlays/side-question.js";
 import type { ContextClearCommandOptions } from "./slash-commands.js";
@@ -138,8 +140,18 @@ export interface OverlayGeneralOpenersDeps {
 		request: string,
 		candidates: ReadonlyArray<string>,
 		signal: AbortSignal,
+		/** The judging call's ref, minted by the opener so a draft taken mid-judgment can still be keyed to it. */
+		ref: string,
 	) => Promise<{ verdict: DraftVerdict } | { reason: string }>;
 	openDraftOverlay?: typeof openDraftOverlay;
+	/** The composer `/draft` puts a taken draft into. Absent, the overlay offers no use key. */
+	composer?: { getText(): string; setText(text: string): void };
+	/** Records what followed a System One decision; the taken draft joins the judging call by its ref. */
+	recordOutcome?: (outcome: {
+		ref: string;
+		source: OutcomeRecord["source"];
+		facts: Readonly<Record<string, unknown>>;
+	}) => void;
 }
 
 export interface OverlayGeneralOpeners {
@@ -439,7 +451,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			deps.notify("error", "/draft is not wired in this session", "draft:unavailable");
 			return;
 		}
+		const composer = deps.composer;
 		const controller = new AbortController();
+		// Set while the judge runs, so a take before the verdict still has the call to join.
+		let judgingRef: string | null = null;
 		deps.transitions.state = "draft";
 		const session = (deps.openDraftOverlay ?? openDraftOverlay)(deps.tui, {
 			request,
@@ -447,6 +462,23 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			columns: deps.terminal.columns,
 			rows: process.stdout.rows ?? 40,
 			onEscape: () => deps.closeOverlay(),
+			...(composer
+				? {
+						onUse: (taken: TakenDraft) => {
+							// Appended, never replaced: the composer has no confirm-before-replace
+							// path, and a typed message must survive taking a draft.
+							const held = composer.getText().trimEnd();
+							composer.setText(held.length > 0 ? `${held}\n\n${taken.text}` : taken.text);
+							// A take while the judge still runs aborts it, and the preference is
+							// worth keeping without a pick to compare it with.
+							const ref = taken.verdict?.ref ?? judgingRef;
+							if (ref !== null && ref !== undefined) {
+								deps.recordOutcome?.(draftTakenOutcome({ ref, taken: taken.label, judgedPick: taken.verdict?.picked ?? null }));
+							}
+							deps.closeOverlay();
+						},
+					}
+				: {}),
 			onClose: () => controller.abort(),
 		});
 		deps.transitions.handle = session;
@@ -479,7 +511,14 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				return;
 			}
 			session.setJudge({ kind: "judging" });
-			const judged = await deps.judgeDrafts(request, drafted.texts, controller.signal);
+			const ref = `draft_${randomUUID()}`;
+			judgingRef = ref;
+			let judged: Awaited<ReturnType<NonNullable<typeof deps.judgeDrafts>>>;
+			try {
+				judged = await deps.judgeDrafts(request, drafted.texts, controller.signal, ref);
+			} finally {
+				judgingRef = null;
+			}
 			session.setJudge(
 				"verdict" in judged ? { kind: "judged", verdict: judged.verdict } : { kind: "unjudged", reason: judged.reason },
 			);

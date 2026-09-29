@@ -83,6 +83,74 @@ describe("operator questions at turn close", () => {
 });
 
 /**
+ * With a turn-end reading bound, the regex proposes and System One disposes.
+ * Only a definite `false` (an invitation, not a decision) drops the forced
+ * continuation. Every other outcome keeps it, exactly as without System One.
+ */
+describe("operator questions read by System One", () => {
+	const CLOSING = "I found two choices. Which one should I use?";
+	const KEEP = [{ kind: "request_continuation", message: PROSE_QUESTION_CONTINUATION_MESSAGE }];
+
+	interface Case {
+		label: string;
+		blocks: () => Promise<boolean | null>;
+		bound?: boolean;
+		userTurnId?: string;
+		expected: ReadonlyArray<unknown>;
+		reads: number;
+	}
+	const cases: Case[] = [
+		{ label: "blocks false drops the continuation", blocks: async () => false, expected: [], reads: 1 },
+		{ label: "blocks true keeps it", blocks: async () => true, expected: KEEP, reads: 1 },
+		{ label: "null keeps it", blocks: async () => null, expected: KEEP, reads: 1 },
+		{
+			label: "a throwing call keeps it",
+			blocks: async () => {
+				throw new Error("engine down");
+			},
+			expected: KEEP,
+			reads: 1,
+		},
+		{
+			label: "an unbound site keeps it without asking",
+			blocks: async () => false,
+			bound: false,
+			expected: KEEP,
+			reads: 0,
+		},
+		{
+			label: "a turn end with no turn id keeps it without asking",
+			blocks: async () => false,
+			userTurnId: "",
+			expected: KEEP,
+			reads: 0,
+		},
+	];
+
+	for (const entry of cases) {
+		it(entry.label, async () => {
+			let reads = 0;
+			const registration = createProseQuestionRegistration({
+				askUserAvailable: () => true,
+				turnEndBound: () => entry.bound ?? true,
+				blocksOnOperator: async () => {
+					reads += 1;
+					return entry.blocks();
+				},
+			});
+			registration.evaluate({ hook: "turn_start", text: "inspect this" });
+			const metadata: Record<string, string> = { stopReason: "stop" };
+			if (entry.userTurnId !== "") metadata.userTurnId = entry.userTurnId ?? "turn-1";
+			const input = { hook: "turn_end", text: CLOSING, metadata } as const;
+			// The runtime runs the sync phase, then the async phase, and joins their effects.
+			const settled = [...registration.evaluate(input), ...((await registration.evaluateAsync?.(input)) ?? [])];
+			deepStrictEqual(settled, entry.expected);
+			strictEqual(reads, entry.reads);
+		});
+	}
+});
+
+/**
  * The registration's lifecycle through the real chat loop: one turn_start and
  * turn_end per operator submission, ask_user answered inside the run (the
  * registry fires its after_tool through the same middleware contract), and

@@ -11,6 +11,7 @@ import {
 	formatTaskIslandLines,
 } from "../../src/interactive/dispatch-board.js";
 import { clioTheme, frame, GLYPH } from "../../src/interactive/theme/index.js";
+import { WELCOME_WORDMARK } from "../../src/interactive/welcome-art.js";
 import { buildWelcomeDashboardLines, type WelcomeDashboardStats } from "../../src/interactive/welcome-dashboard.js";
 
 const WIDTHS = [60, 80, 120, 200] as const;
@@ -22,20 +23,33 @@ const PALETTE_HEX: ReadonlySet<string> = new Set(
 	(Object.keys(TERMINAL_PALETTE) as PaletteColor[]).map((color) => paletteProjection(color, terminalBackground())[0]),
 );
 
-const hex = (channels: readonly string[]): string =>
+const hex = (channels: readonly (string | number)[]): string =>
 	`#${channels.map((channel) => Number(channel).toString(16).padStart(2, "0")).join("")}`;
+
+const rgb = (color: PaletteColor): number[] => {
+	const projected = paletteProjection(color, terminalBackground())[0];
+	return [1, 3, 5].map((at) => Number.parseInt(projected.slice(at, at + 2), 16));
+};
+const BRAND_RAMP_HEX: ReadonlySet<string> = new Set(
+	Array.from({ length: WELCOME_WORDMARK.length }, (_, row) => {
+		const start = rgb("cyanFocal");
+		const end = rgb("orangeFocal");
+		const t = row / Math.max(1, WELCOME_WORDMARK.length - 1);
+		return hex(start.map((channel, index) => Math.round(channel + ((end[index] ?? channel) - channel) * t)));
+	}),
+);
 
 /**
  * Every escape is an SGR, and every truecolor SGR paints a palette token. A
  * 256-color or NO_COLOR run carries no truecolor codes, so it passes on shape.
  */
-function assertTokensOnly(lines: readonly string[]): void {
+function assertTokensOnly(lines: readonly string[], allowedColors: ReadonlySet<string> = PALETTE_HEX): void {
 	for (const line of lines) {
 		for (const sequence of line.split(ESC).slice(1)) {
 			match(sequence, /^\[[0-9;]*m/u, `non-SGR escape ${JSON.stringify(sequence)}`);
 			for (const color of sequence.matchAll(/[34]8;2;(\d+);(\d+);(\d+)/gu)) {
 				const value = hex(color.slice(1, 4));
-				ok(PALETTE_HEX.has(value), `color ${value} is not a theme token`);
+				ok(allowedColors.has(value), `color ${value} is not in the theme palette`);
 			}
 		}
 	}
@@ -48,14 +62,22 @@ function assertFits(lines: readonly string[], width: number): void {
 }
 
 /** The one island recipe from theme/rules.ts: square corners, side rails, exact width. */
-function assertIsland(lines: readonly string[], width: number, title: string): void {
+function assertIsland(
+	lines: readonly string[],
+	width: number,
+	title: string | null,
+	allowedColors: ReadonlySet<string> = PALETTE_HEX,
+): void {
 	const plain = lines.map(stripTerminalSequences);
 	ok(plain.length >= 3);
-	match(plain[0] ?? "", new RegExp(`^┌─ ${title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")} ─+.*┐$`, "u"));
+	match(
+		plain[0] ?? "",
+		title === null ? /^┌─+┐$/u : new RegExp(`^┌─ ${title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")} ─+.*┐$`, "u"),
+	);
 	match(plain.at(-1) ?? "", /^└─+┘$/u);
 	for (const row of plain.slice(1, -1)) match(row, /^│ .* │$/u);
 	for (const row of plain) strictEqual(visibleWidth(row), width, row);
-	assertTokensOnly(lines);
+	assertTokensOnly(lines, allowedColors);
 }
 
 const stats: WelcomeDashboardStats = {
@@ -73,14 +95,14 @@ const stats: WelcomeDashboardStats = {
 	quota: "Claude 5h 23% used · Codex wk 21% used",
 };
 
-test("the launchpad is a standard island at every width and keeps its action row", () => {
+test("the launchpad is a standard island with a quiet border and version in its action row", () => {
 	for (const width of WIDTHS) {
 		const lines = buildWelcomeDashboardLines(stats, "0.5.6", width, "launchpad");
-		assertIsland(lines, width, "Clio Coder v0.5.6");
+		assertIsland(lines, width, null, new Set([...PALETTE_HEX, ...BRAND_RAMP_HEX]));
 		const plain = lines.map(stripTerminalSequences);
 		// The action row sits under an inner divider, as in every other island.
 		match(plain.at(-3) ?? "", new RegExp(`^│ ${GLYPH.innerDivider}+ │$`, "u"));
-		match(plain.at(-2) ?? "", /Enter/u);
+		match(plain.at(-2) ?? "", /v0\.5\.6 │$/u);
 		ok(!plain.some((row) => /[╭╮╰╯├┤]/u.test(row)), "no bespoke corners or tees");
 	}
 });

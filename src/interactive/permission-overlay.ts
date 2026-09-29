@@ -65,6 +65,12 @@ export interface ApprovalRequestView {
 	 */
 	mutation?: MutationFacts;
 	queueDepth?: number;
+	/**
+	 * The build that answered the System One gate, set only on the card the gate
+	 * raised. The card and the transcript rows name it so an operator can tell
+	 * which build's judgment they overrode.
+	 */
+	gateBuild?: string;
 }
 
 const PERMISSION_OVERLAY_CONTENT_WIDTH = 78;
@@ -300,6 +306,7 @@ function permissionDecisionPresentation(view: ApprovalRequestView): DecisionPres
 					: { kind: "autonomy", level: view.axis.level },
 			origin: view.origin,
 			...(view.exposure !== undefined ? { exposure: view.exposure } : {}),
+			gateBuild: view.gateBuild,
 		}),
 	);
 }

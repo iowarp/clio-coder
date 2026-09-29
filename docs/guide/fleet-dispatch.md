@@ -30,8 +30,8 @@ stdout. A remote worker is exactly the same protocol tunneled through
 with distance. The `local` and `ssh` transports implement the same
 `WorkerTransport` interface ([transport.ts](../../src/domains/dispatch/transport.ts)).
 
-Both local and SSH native workers must emit `worker_announce` as their first
-protocol event over the structured stderr control lane. The transport consumes it,
+Both local and SSH native workers must send an `announce` frame first on the
+structured stderr control lane. The transport consumes it,
 checks the dispatched WorkerSpec version, and accepts ordinary events only after
 that check. The worker then attests protocol version (WORKER_PROTOCOL_VERSION = 1),
 spec version, process ID, process group ID (or null), host, settings fingerprint,
@@ -65,7 +65,7 @@ Design decisions that shape everything else:
   can be activated only for named roles/postures after exact-tuple readiness,
   and hard constraints always eliminate before any score.
 - Environment whitelist. The SSH command carries an explicit environment
-  (`CLIO_CODER_WORKER_PGID=$$` and any configured `CLIO_CODER_WORKER_LABELS`);
+  (`AI_AGENT=clio-coder`, `CLIO_CODER_WORKER_PGID=$$`, and any configured `CLIO_CODER_WORKER_LABELS`);
   the orchestrator's `process.env` never crosses the wire. Node residency is
   projected into the target lifecycle carried by the WorkerSpec.
   `CLIO_CODER_WORKER_PGID` names the remote process group so an abort escalates
@@ -88,7 +88,7 @@ Recipes declare a default with `budget: {toolCalls, readReserve, synthesis}`. Th
 
 `toolCalls` is the admitted-call phase boundary. The final `readReserve` slots accept canonical `read` plus the agent's granted mutation tools, so a writer can still deliver inside its own reserve. Admission requires integers and `0 <= readReserve < toolCalls` for every declared phase. `synthesis: true` forces a text-only final round, while `false` stops after the admitted phase. `fleet.limits.toolCallsPerRun` remains the operator-controlled lifetime ceiling and always wins when lower. A default may be clamped by a lower operator cap so default callers retain their prior behavior; an explicit request outside the operator cap is denied.
 
-Admission computes one immutable envelope with the recipe policy, invocation request, effective worker budget, and every clamp or escalation reason. Native workers and Claude SDK enforce the effective budget. Claude Code, Antigravity, and ACP delegation reject invocation envelopes because their black-box loops cannot provide equivalent per-call mediation. Before launch, every admitted WorkerSpec v3 still contains one concrete effective budget and a settings fingerprint. The envelope provenance is sealed in the run ledger and receipt and appears in monitor, fleet status, and the live fleet card.
+Admission computes one immutable envelope with the recipe policy, invocation request, effective worker budget, and every clamp or escalation reason. Native workers and Claude SDK enforce the effective budget. Claude Code, Antigravity, and ACP delegation reject invocation envelopes because their black-box loops cannot provide equivalent per-call mediation. Before launch, every admitted WorkerSpec (version 5) still contains one concrete effective budget and a settings fingerprint. The envelope provenance is sealed in the run ledger and receipt and appears in monitor, fleet status, and the live fleet card.
 
 ## Node setup
 
@@ -194,7 +194,7 @@ host.
 
 Use `clio-coder fleet drain [--json]` before maintenance to close that shared
 admission authority. Existing workers continue, but new plans and every new
-execution start—including a retry or a previously reserved member—fail closed.
+execution start fail closed, including a retry or a previously reserved member.
 The drain expires after one hour so an abandoned operator process cannot wedge
 future dispatch; repeating the command renews the deadline. `clio-coder fleet
 status [--json]` reports the active deadline, requesting PID, and request time.
@@ -395,8 +395,9 @@ its exit code, bounded output tail, and artifact path. Worker-reported command
 success never populates this status.
 
 Host checks are supported for singular, parallel, sequential, pipeline, and
-detached native runs. Review and compete accept intent paths and outputs but
-refuse verification entries with `verification_unsupported_for_mode`.
+detached native runs. Compete refuses verification entries with
+`verification_unsupported_for_mode` and council with `council_verification_unsupported`;
+both still accept intent paths and outputs.
 Claude Code subprocess routes refuse them with
 `verification_unsupported_runtime`.
 
@@ -522,7 +523,7 @@ operator inspection rather than silently auto-applied after restart.
 
 Council is the read-only sibling of compete. Two to five members run the same
 singular task concurrently on local HTTP or native targets. A request selects
-exactly one configured `fleet.rosters` entry or supplies inline `members`.
+exactly one configured `fleet.rosters` entry or supplies inline `members`. The council fields (`roster`, `members`, `synthesis`, `rounds`) are advertised to the model only when at least one `fleet.rosters` entry exists; admission still honors them when sent.
 Admission gives every member a read-only dispatch restriction and access to the `read`, `grep`,
 `find`, `ls`, `code_nav`, and `context` tool surface. A route that resolves to
 an SSH fleet node is refused before approval. Council never creates a worktree
@@ -571,7 +572,7 @@ majority reports `no_majority`, and a vote whose final members all failed report
 
 ### ExecutionPlan and plan approval
 
-Every orchestration shape compiles to one strict ExecutionPlan v2 DAG with
+Every orchestration shape compiles to one strict ExecutionPlan v4 DAG with
 stable task ids, explicit dependencies, requested and approved authority,
 capacity-bounded waves, stop/continue semantics, and authenticated structured
 handoffs. The scheduler performs whole-plan preflight and reservation before
@@ -820,7 +821,7 @@ retry may repeat the tuple but cannot silently move away from it. `approved`
 failover requires an ordered `allowedCandidates` envelope of exact
 agent/target/model/node tuples and can never leave that set. `automatic`
 failover lets typed infrastructure failures exclude only the failed route
-part—for example, an SSH channel failure can move the node while retaining the
+part. For example, an SSH channel failure can move the node while retaining the
 agent, target, and model. Cancellation, policy rejection, and permission
 refusal neither retry nor penalize infrastructure.
 
@@ -1144,13 +1145,21 @@ hard block.
 - `clio-coder fleet status [--json]` shows the durable ledger view cross-process.
 - A worker permission escalation uses the `Worker escalation` consequence tier in operator presentation. The tier names the worker agent and run and describes where the one-shot answer returns. It does not approve the request, change the worker's default autonomy, or weaken the safety net; the existing worker escalation protocol remains the only resolution path.
 
-## Speculation observer
+## Inspect fleet runs from the CLI
 
-A shadow-mode observer watches every dispatch, computes the plan a rule-based
-pipeline would have chosen (synchronous keyword rules, no model calls), and
-records plan-versus-actual accuracy into a bounded JSONL under
-`<state>/speculation/observations.jsonl`. It never influences dispatch;
-disabling it changes nothing else.
+`clio-coder fleet status [--json] [--all]` shows running, retrying, and total dispatch state from the durable run ledger, so it works from a second terminal. `clio-coder fleet inspect --json [--all]` emits a bounded projection of recent runs and the event journal. `clio-coder fleet decisions --json [--all]` emits a bounded window of sealed review and compete gate verdicts. `clio-coder fleet view <runId> [--follow] [--all]` reads one run's ledger entry, event journal, and receipt. Given the `fleet-<hex>` root id that `fleet run` prints, `fleet view <fleetRootId>` lists that run's steps and the run id to view for each. Inspection defaults to the current project and `--all` widens it to machine-wide state. The `view` transcript comes from the run event journal, which is written while `fleet.history.journal` is on (the default).
+
+## Route observer
+
+The route observer records what the joint route resolver decided against what happened for every dispatch, and it never influences a dispatch. It appends one JSON line per decision or outcome to `<state>/route-decisions/observations.jsonl` and rotates the file to `observations.jsonl.1` at 1 MiB. The records measure route regret, constraint validity, prediction calibration, and outcome. They do not measure whether Clio dispatched the agent the caller asked for, because that is true by construction.
+
+## Speculative worker prewarm
+
+`fleet.speculativeDispatch` (default `false`, experimental) lets Clio start a worker process before the model asks for it. The System One `turn` site predicts which recipe the main agent is about to dispatch. When its fitted prewarm cut fires, Clio spawns that worker and holds it at "waiting for spec" while the main model generates. See [System One](system-one.md) for the `turn` site.
+
+A dispatch adopts a held process only when its agent, target, wire model, runtime, and working directory all match the prediction. Anything else runs on an ordinary cold spawn, and the held process is killed when the turn settles. At most two held processes exist at once. They take no capacity lease, so they never take a slot from a real dispatch.
+
+Nothing is held for a remote node, a non-native runtime, a draining fleet, or an endpoint or fleet already at its limit. The call, admission, spec, and receipt of the adopting dispatch are identical to a cold spawn.
 
 ## Residency
 

@@ -176,7 +176,7 @@ inference path, whose malformed-path errors remain terminal.
 | **`dispatch` review gate, builder** | `src/tools/dispatch-admission.ts` | Inherited unchanged | Legacy inference | All codes |
 | **`dispatch` review gate, reviewer** | `src/tools/dispatch-admission.ts` | None on the request. `expected_outputs` and `verification` reach the reviewer as rendered *requirements*, never as evidence | Legacy inference over the reviewer's own task | Legacy inference errors only |
 | **`dispatch` `apply_winner`** | `src/tools/dispatch-admission.ts` | Not applicable. Branch application runs no worker | Not applicable | Branch-shape refusals only |
-| **`from_scout` continuation** | [dispatch-scout-admission.ts](../../src/tools/dispatch-scout-admission.ts) | **None.** The compiled continuation plan carries no intent | Legacy inference per step | Legacy inference errors only |
+| **`from_scout` continuation** | [dispatch-scout-admission.ts](../../src/tools/dispatch-scout-admission.ts) | None for operator-approved and yolo continuations. A harness read-only orientation continuation declares an empty intent, so it has no scope paths | Legacy inference per step | Legacy inference errors only |
 | **Fleet contract agent step (v4+ `writes:`)** | [fleet-run.ts](../../src/domains/dispatch/fleet-run.ts) | Declared. The contract's `writes:` compiles to `relevant_paths` | Legacy inference for pre-v4 contracts and readonly steps | All codes |
 | **Fleet contract gate / plan step** | `src/domains/dispatch/fleet-run.ts` | Declared, same path (`writes` is the gate path or the plan step's boundary) | Legacy inference when undeclared | All codes |
 | **Fleet delegation-plan spliced step** | `src/domains/dispatch/fleet-run.ts` | Declared from the validated plan task's `writes` | Legacy inference when the task declares none | All codes |
@@ -185,8 +185,8 @@ inference path, whose malformed-path errors remain terminal.
 | **Custom agent recipe** | `src/domains/agents/` | Not a producer. A recipe narrows the tool surface and capability class; it never declares dispatch scope | Not applicable | Not applicable |
 | **Extension-authored `DispatchRequest`** | Any `DispatchContract` consumer | Declared, if the extension builds one through `declaredScopeIntent()` or the normalizer | Legacy inference | All codes |
 | **`clio-coder run --agent`** | [run.ts](../../src/cli/run.ts) | **None** | Legacy inference | Legacy inference errors only |
-| **`clio-coder context wiki`** | [wiki-generate.ts](../../src/cli/wiki-generate.ts) | **None.** Sets legacy `writeRoots` | Legacy inference plus a derived write boundary | Legacy inference errors only |
-| **`clio-coder context init`** | [bootstrap-generate.ts](../../src/cli/bootstrap-generate.ts) | **None** | Legacy inference | Legacy inference errors only |
+| **`clio-coder context wiki`** | [wiki-generate.ts](../../src/cli/wiki-generate.ts) | Declared through `declaredScopeIntent()`: read the repository root, write only the wiki staging directory. It also sets the matching legacy `writeRoots` | Not applicable | All codes |
+| **`clio-coder context init`** | [bootstrap-generate.ts](../../src/cli/bootstrap-generate.ts) | Declared through `declaredScopeIntent()`: read the repository root, no write roots | Not applicable | All codes |
 | **Interactive slash commands, overlays, watchdog** | `src/interactive/` | **None** | Legacy inference | Legacy inference errors only |
 
 "All codes" means every terminal code in section 5 that can apply to the row's
@@ -204,7 +204,7 @@ only malformed or absolute prose-path inference can refuse it.
 | **Run Receipt** | `20` | `intent` inside the integrity digest, plus optional legacy `pathScope` | **Refused, never migrated.** A receipt below v20 is reported as retired: intact, but never read as evidence. |
 | **`ResolvedDispatchPlanArtifact`** | `3` | `intent` and `resolvedVerification` per task | **Refused, never migrated.** `resolvedDispatchPlanFromArgs` returns `null` for any version but 3, and a task whose `intent` fails `isDispatchIntent` invalidates the whole artifact. The call falls back to unresolved admission rather than executing a half-understood plan. |
 | **Dispatch plan approval text and hash** | Rendered, hashed | `intent_sha256` for a declared task; the full inferred scope table for a legacy task | Not persisted across versions. The hash binds the exact rendering an operator approved. |
-| **Worker Spec** | `3` | **No.** Carries the *resolved* `writeRoots`, not the declaration | Fail-closed preflight rejection. Deliberate: a worker receives an enforced boundary, never a statement of intent it could reinterpret. |
+| **Worker Spec** | `5` | **No.** Carries the *resolved* `writeRoots`, not the declaration | Fail-closed preflight rejection. Deliberate: a worker receives an enforced boundary, never a statement of intent it could reinterpret. |
 | **Execution Plan** | `4` | **No.** Carries per-step `writes` | Preflight rejects unsupported plan versions. Intent is built from `writes` at request construction, so the plan hash is unchanged by this. |
 | **Fleet Contract** | `1..5` | **No.** v4+ carries per-step `writes:` | Reader refuses contracts whose version features it does not support. A pre-v4 contract declares nothing and stays on inference. |
 | **Fleet Run Record** | `1` | **No** | Resume refuses a changed plan hash. Adding intent to steps does not change the hash, so existing records stay resumable. |

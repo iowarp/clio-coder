@@ -50,7 +50,7 @@ test("unanchored damage-control ask rules still ask at both levels", () => {
 // Hard blocks are not part of the ask rail and must stay final at yolo, with
 // the extra arguments that defeated the anchors above.
 test("hard blocks stay blocks whatever the call's other arguments are", () => {
-	for (const command of ["rm -rf build", "git reset --hard HEAD~1", "git clean -fd", "sudo rm /etc/hosts"]) {
+	for (const command of ["rm -rf ~/build", "git reset --hard HEAD~1", "git clean -fd", "sudo rm /etc/hosts"]) {
 		for (const extra of EXTRA_ARGS) {
 			const decision = decide({ command, ...extra }, "yolo");
 			strictEqual(decision.kind, "block", `yolo ${command} ${JSON.stringify(extra)}: ${decision.reasonCode}`);
@@ -122,4 +122,30 @@ test("backtick substitutions cannot hide damage-control commands", () => {
 		const decision = decide({ command }, "yolo");
 		strictEqual(decision.kind, "block", `${command}: ${decision.reasonCode}`);
 	}
+});
+
+// A delete is judged by where it lands, never by its flags. The flag rule let
+// `rm -v -r /` through and blocked `rm -f` outside the workspace while a plain
+// `rm` of the same path ran, which the model then offered as the way around.
+test("rm is refused by target at every autonomy level and never by flags", () => {
+	for (const command of [
+		"rm -v -r /",
+		"rm ~/.cache/clio-coder/yazi/profile",
+		"rm -vf ~/.cache/clio-coder/yazi/profile",
+		"rm -i -f /etc/hosts",
+		"cd /etc && rm hosts",
+		"rm -rf .",
+		"rm -rf .git",
+		"git ls-files | xargs rm",
+	]) {
+		for (const posture of ["default", "yolo"] as const) {
+			const decision = decide({ command }, posture);
+			strictEqual(decision.kind, "block", `${posture} ${command}: ${decision.reasonCode}`);
+		}
+	}
+	for (const command of ["rm -rf scratch-out", "rm -f notes.txt", "rm -f /tmp/clio-scratch.txt"]) {
+		strictEqual(decide({ command }, "yolo").kind, "allow", command);
+	}
+	const blocked = decide({ command: "rm ~/notes.txt" }, "yolo");
+	strictEqual(blocked.reasonCode, "damage-control:delete-outside-workspace");
 });

@@ -5,7 +5,8 @@
  * for the probability mass it gave that candidate, so the operator sees how
  * decisive the pick was and not only which candidate won. Below the rows is
  * the selected candidate's text; the arrows and the number keys move the
- * selection. Like `/btw`, nothing here reaches the session.
+ * selection. Enter takes the selected draft into the composer, unsent. Like
+ * `/btw`, nothing here reaches the session.
  */
 
 import {
@@ -18,7 +19,7 @@ import {
 	truncateToWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
-import { DRAFT_LABELS, type DraftVerdict } from "../drafts.js";
+import { DRAFT_LABELS, type DraftLabel, type DraftVerdict } from "../drafts.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { codeInk } from "../renderers/code-ink.js";
 import { clioTheme, GLYPH, markdownTheme, rule } from "../theme/index.js";
@@ -53,6 +54,14 @@ export interface DraftOverlaySession extends OverlayHandle {
 	refuse(reason: string): void;
 }
 
+/** The settled draft Enter would take, with the verdict that judged it when there is one. */
+export interface TakenDraft {
+	index: number;
+	label: DraftLabel;
+	text: string;
+	verdict: DraftVerdict | null;
+}
+
 export interface OpenDraftOverlayOptions {
 	request: string;
 	count: number;
@@ -61,6 +70,11 @@ export interface OpenDraftOverlayOptions {
 	rows: number;
 	/** Esc: ask the host to close the overlay, which hides it through its own transition. */
 	onEscape: () => void;
+	/**
+	 * Enter on a settled draft. The host puts its text in the composer and closes
+	 * the overlay. Absent, Enter does nothing and the legend does not offer it.
+	 */
+	onUse?: (taken: TakenDraft) => void;
 	/** Hidden by any path: abort whatever is still running. */
 	onClose: () => void;
 }
@@ -199,6 +213,19 @@ class DraftOverlayBody implements Component {
 	invalidate(): void {}
 }
 
+/**
+ * The selected draft when it has settled with text. A streaming or failed
+ * candidate is not one the operator can take, and an empty draft is a gap.
+ */
+export function takenDraft(state: DraftOverlayState): TakenDraft | null {
+	const phase = state.candidates[state.selected];
+	if (phase?.kind !== "drafted") return null;
+	const text = phase.text.trim();
+	const label = DRAFT_LABELS[state.selected];
+	if (text.length === 0 || label === undefined) return null;
+	return { index: state.selected, label, text, verdict: state.judge.kind === "judged" ? state.judge.verdict : null };
+}
+
 /** Every candidate has settled one way or the other. */
 function allSettled(state: DraftOverlayState): boolean {
 	return state.candidates.every((phase) => phase.kind !== "streaming");
@@ -231,6 +258,11 @@ export function openDraftOverlay(tui: TUI, options: OpenDraftOverlayOptions): Dr
 			if (isKeyRelease(data)) return;
 			if (matchesKey(data, "escape")) {
 				options.onEscape();
+				return;
+			}
+			if (matchesKey(data, "enter")) {
+				const taken = options.onUse ? takenDraft(state) : null;
+				if (taken) options.onUse?.(taken);
 				return;
 			}
 			if (matchesKey(data, "left")) {
@@ -266,6 +298,7 @@ export function openDraftOverlay(tui: TUI, options: OpenDraftOverlayOptions): Dr
 				[
 					{ key: "←→", verb: "draft" },
 					{ key: "↑↓", verb: "scroll" },
+					...(options.onUse && takenDraft(state) ? [{ key: "Enter", verb: "use" }] : []),
 				],
 				{ key: "Esc", verb: allSettled(state) && state.judge.kind !== "judging" ? "close" : "cancel" },
 			)(innerWidth),

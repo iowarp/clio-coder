@@ -12,6 +12,7 @@ import { CONTEXT_BAR_LABEL_WIDTH, finiteNonNegative } from "../context-bar.js";
 import { contextCategorySwatch, contextPercentRole, renderContextMeterBar } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import { fitFooterText, formatFooterTokens } from "../footer-panel.js";
+import type { PermissionInspectionHint } from "../permission-hint.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { formatReasoningChip, reasoningFromSummary, spinnerFrame } from "../status/index.js";
 import type { ClioTheme, ClioToken } from "../theme/index.js";
@@ -68,6 +69,13 @@ export interface SessionFacts {
 	 * that a second press quits, and no way to tell the first press registered.
 	 */
 	shutdownArmed?: boolean;
+	/**
+	 * A permission card is open. The compact line then shows the card's key
+	 * legend in place of tips and notices, because the operator cannot read
+	 * what Enter does from a footer that talks about something else. The draft
+	 * and inspection state pick the same entries the composer rail shows.
+	 */
+	approval?: { composerHasDraft: boolean; inspection: PermissionInspectionHint } | null;
 	/**
 	 * Skills whose tool surface stays armed across turns. Shown on the compact
 	 * line while it lasts, so a narrowed tool set is never implicit.

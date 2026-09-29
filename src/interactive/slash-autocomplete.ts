@@ -13,7 +13,7 @@ import {
 	createFileReferenceCompletionSource,
 	type FileReferenceCompletionSource,
 } from "./file-reference-completion.js";
-import { commandReference, SETTINGS_AREA_IDS, SLASH_COMMAND_GROUPS } from "./slash-commands.js";
+import { commandReference, parseSlashCommand, SETTINGS_AREA_IDS, SLASH_COMMAND_GROUPS } from "./slash-commands.js";
 import {
 	type ArgCompletion,
 	COMPLETION_SLOT_NAMES,
@@ -26,7 +26,12 @@ import {
 export type SlashAutocompleteCommand = SlashCommand;
 
 const ARGUMENT_HINT_BUDGET = 44;
-const COMPLETION_DESCRIPTION_BUDGET = 80;
+/** A purpose is one line; the detail panel carries the full sentence, so this only guards runaway copy. */
+const COMPLETION_DESCRIPTION_BUDGET = 96;
+/** The list's name column is 32 cells with a 2-cell gap; the label must fit before the list cuts it silently. */
+const ROW_LABEL_BUDGET = 30;
+const PARENT_MARK = "▸";
+const PATH_SEPARATOR = "›";
 
 export interface CompletionValue {
 	/** Stable identity; distinct from the inserted spelling when aliases are displayed. */
@@ -62,6 +67,10 @@ export interface SlashCompletionItem extends AutocompleteItem {
 	quote?: '"' | "'";
 	remainingGrammar?: string;
 	effectDescription?: string;
+	/** Breadcrumb shown in the detail panel, e.g. `/fleet › run`. Absent on file and path rows. */
+	path?: string;
+	/** What the operator does next with this row, as a full sentence. */
+	nextAction?: string;
 	submenu?: { parent: string; back: true };
 	/** Cursor adjustment after insertion; quoted directories keep it before the closing quote. */
 	cursorOffset?: number;
@@ -193,6 +202,61 @@ function completionGrammar(command: string, args: CommandArgsSpec): CommandArgsS
 			: {}),
 	});
 	return clone(args, command);
+}
+
+/**
+ * The list's name cell: the name and as much of its grammar as fits. A cut
+ * lands on the grammar with an ellipsis, never on the purpose beside it.
+ */
+function rowLabel(name: string, tail: string | undefined): string {
+	if (!tail) return name;
+	const whole = `${name} ${tail}`;
+	if (visibleWidth(whole) <= ROW_LABEL_BUDGET) return whole;
+	const room = ROW_LABEL_BUDGET - visibleWidth(name) - 2;
+	if (room < 3) return name;
+	return `${name} ${truncateToWidth(tail, room, "", false).trimEnd()}…`;
+}
+
+/**
+ * The grammar a name cell can afford: positionals, or a plain `[options]` for a
+ * flag-only command. Flags lead the full usage but bury the arguments the
+ * operator must supply, so they wait for the detail panel and the `--` menu.
+ */
+function labelGrammar(spec: CommandArgsSpec | undefined): string | undefined {
+	if (!spec) return undefined;
+	const positionals = renderArgsSpec({ ...(spec.positionals ? { positionals: spec.positionals } : {}) });
+	if (positionals) return positionals;
+	return (spec.flags ?? []).length > 0 ? "[options]" : undefined;
+}
+
+function requiredPositionals(spec: CommandArgsSpec | undefined): string[] {
+	return (spec?.positionals ?? []).filter((pos) => pos.required).map((pos) => `<${pos.name}>`);
+}
+
+/** The next step for a grammar node, phrased from what the parser will demand. */
+function nextForSpec(spec: CommandArgsSpec | undefined, lead: string): string {
+	const subcommands = Object.keys(spec?.subcommands ?? {});
+	if (subcommands.length > 0) return `${lead}, then choose ${subcommands.join(", ")}.`;
+	const required = requiredPositionals(spec);
+	const options = (spec?.flags ?? []).length > 0 ? " Type -- to list its options." : "";
+	if (required.length > 0) return `${lead}, then give ${required.join(" ")}.${options}`;
+	if ((spec?.flags ?? []).length > 0 || (spec?.positionals ?? []).length > 0) {
+		return `${lead}; press Esc, then Enter to run it without arguments.${options}`;
+	}
+	return `${lead}; Enter then runs it.`;
+}
+
+const bareRunCache = new Map<string, boolean>();
+
+/** Whether the command does something useful with no arguments, judged by the real parser. */
+function runsBare(name: string): boolean {
+	let known = bareRunCache.get(name);
+	if (known === undefined) {
+		const kind = parseSlashCommand(`/${name}`).kind;
+		known = kind !== "usage-error" && kind !== "unknown" && kind !== "unknown-command";
+		bareRunCache.set(name, known);
+	}
+	return known;
 }
 
 function compactDescription(description: string | undefined): string | undefined {
@@ -358,17 +422,23 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 				: template.displayOnly
 					? `${REFERENCE_TEMPLATE_MARKER} · ${template.description}`
 					: template.description;
-			const description = compactDescription(`${hint ? `${hint} — ` : ""}${summary}`);
+			const description = compactDescription(summary);
 			const item: SlashCompletionItem = {
 				id: `prompt:${name}`,
 				kind: "command",
 				value: name,
-				label: name,
+				label: rowLabel(name, hint),
 				effectDescription: template.unavailable
 					? `Prompt template unavailable: ${template.unavailable}`
 					: template.displayOnly
 						? `Reference card shown to you; nothing is sent to the model: ${template.description}`
 						: `Prompt template: ${summary}`,
+				path: `/${name}`,
+				nextAction: template.unavailable
+					? "Unavailable until the package reference resolves."
+					: hint
+						? `Tab or Enter completes the name, then give ${hint}.`
+						: "Tab or Enter completes the name; Enter then runs it.",
 				replacement: range,
 				appendSpace: Boolean(hint),
 			};
@@ -463,13 +533,24 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 				.filter((ref) => ref.name.toLowerCase().startsWith(prefix.toLowerCase()) && ref.name !== prefix)
 				.map((ref) => {
 					const remainingGrammar = compactArgumentHint(ref.args);
-					const description = compactDescription(`${remainingGrammar ? `${remainingGrammar} — ` : ""}${ref.description}`);
+					const subcommands = Object.keys(ref.args?.subcommands ?? {});
+					const description = compactDescription(ref.description);
+					const lead = subcommands.length > 0 ? "Tab or Enter completes" : "Tab or Enter completes the name";
+					const nextAction =
+						subcommands.length > 0 && runsBare(ref.name)
+							? `${nextForSpec(ref.args, lead)} Esc, then Enter, runs /${ref.name} on its own.`
+							: nextForSpec(ref.args, lead);
 					const item: SlashCompletionItem = {
 						id: `command:${ref.name}`,
 						kind: "command",
 						value: ref.name,
-						label: ref.name,
+						label:
+							subcommands.length > 0
+								? rowLabel(ref.name, `${PARENT_MARK} ${subcommands.join("|")}`)
+								: rowLabel(ref.name, labelGrammar(ref.args)),
 						effectDescription: ref.description,
+						path: `/${ref.name}`,
+						nextAction,
 						replacement: { start: context.commandStart, end: context.commandEnd },
 						appendSpace: Boolean(ref.args && (ref.args.positionals || ref.args.flags || ref.args.subcommands)),
 					};
@@ -498,8 +579,12 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 					kind: "command",
 					value: row.invocation,
 					label: row.invocation,
-					description: `extension (${row.scope}): ${row.description}`,
-					effectDescription: "Runs installed operator extension code; output is local to you",
+					description: compactDescription(`extension (${row.scope}): ${row.description}`) ?? row.description,
+					effectDescription: `${row.description}. Runs installed operator extension code; output is local to you.`,
+					path: `/${row.invocation}`,
+					nextAction: row.available
+						? "Tab or Enter completes the name; add any arguments it expects."
+						: `Unavailable: ${row.reason ?? "runtime unavailable"}.`,
 					replacement: { start: context.commandStart, end: context.commandEnd },
 					appendSpace: true,
 					...(!row.available ? { disabledReason: row.reason ?? "runtime unavailable" } : {}),
@@ -540,6 +625,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 							completion,
 							context.argsStart + result.tokenStart,
 							context.argsStart + result.tokenEnd,
+							[`/${ref.name}`, ...(selectedSubcommand ? [selectedSubcommand] : [])].join(` ${PATH_SEPARATOR} `),
 							result.quote,
 						),
 					);
@@ -547,16 +633,30 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 				continue;
 			}
 			if (completion.token === beforeCursor && options.force !== true) continue;
-			const description = completion.description ?? ref.subcommandDescriptions?.[completion.token] ?? completion.hint;
 			const effectDescription = completion.description ?? ref.subcommandDescriptions?.[completion.token];
+			const isFlag = completion.token.startsWith("--");
+			const trail = [`/${ref.name}`, ...(selectedSubcommand ? [selectedSubcommand] : [])];
+			const subSpec = result.submenu ? ref.args.subcommands?.[completion.token] : undefined;
 			const item: SlashCompletionItem = {
 				id: `${ref.name}:${completion.token}`,
-				kind: result.submenu ? "submenu" : completion.token.startsWith("--") ? "flag" : "value",
+				kind: result.submenu ? "submenu" : isFlag ? "flag" : "value",
 				value: completion.token,
-				label: completion.token,
+				// The grammar rides in the name cell; the purpose owns the description cell.
+				label: rowLabel(completion.token, result.submenu ? labelGrammar(subSpec) : completion.hint),
+				path: [...trail, ...(result.submenu || isFlag ? [completion.token] : [])].join(` ${PATH_SEPARATOR} `),
+				nextAction: result.submenu
+					? nextForSpec(subSpec, "Tab or Enter completes")
+					: isFlag
+						? completion.hint
+							? `Tab or Enter completes the flag, then give ${completion.hint}.`
+							: "A switch that takes no value."
+						: completion.hasNextSlot
+							? "Tab or Enter completes; the next argument follows."
+							: "Tab or Enter completes; Enter then runs it.",
 				replacement: { start: context.argsStart + result.tokenStart, end: context.argsStart + result.tokenEnd },
 				appendSpace: completion.hasNextSlot,
 			};
+			const description = compactDescription(effectDescription);
 			if (description) item.description = description;
 			if (completion.hint) item.remainingGrammar = completion.hint;
 			if (effectDescription) item.effectDescription = effectDescription;
@@ -572,6 +672,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		grammar: ArgCompletion,
 		start: number,
 		end: number,
+		parentPath: string,
 		quote?: '"' | "'",
 	): SlashCompletionItem {
 		return {
@@ -583,6 +684,12 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			replacement: { start, end },
 			appendSpace: grammar.hasNextSlot,
 			effectDescription: value.description,
+			path: parentPath,
+			nextAction: value.disabledReason
+				? `Unavailable: ${value.disabledReason}.`
+				: grammar.hasNextSlot
+					? "Tab or Enter completes; the next argument follows."
+					: "Tab or Enter completes; Enter then runs it.",
 			...(grammar.completionSlot ? { completionSlot: grammar.completionSlot } : {}),
 			...(quote ? { quote } : {}),
 			...(value.disabledReason ? { disabledReason: value.disabledReason } : {}),

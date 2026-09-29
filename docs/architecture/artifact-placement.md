@@ -34,7 +34,7 @@ Markdown.
 | Session context state | `.clio-coder/state.json` | Agent-to-agent |
 | Task-memory handoffs | `.clio-coder/handoffs/` | Agent-to-agent |
 | Dispatch proposals | `.clio-coder/proposals/` | Agent-to-agent |
-| Compete worktrees | `.clio-coder/worktrees/` | Agent-to-agent |
+| Task and compete worktrees | `.clio-coder/worktrees/` by default; `fleet.worktrees.root` can move the working tree to tmpfs or another directory | Agent-to-agent |
 | Script runs | `.clio-coder/runs/<runId>/` | Human transient and provenance |
 | Tool-result and harness scratch | XDG state `scratch/`, with tool offloads grouped by session | Agent-to-agent |
 | Evidence bundles | XDG data `evidence/` | Human transient (`clio-coder evidence`) |
@@ -106,4 +106,4 @@ Hiding transient output from the working tree must not mean losing it.
 
 Related: [evidence-and-memory.md](evidence-and-memory.md),
 [trace-store.md](trace-store.md), [observability.md](observability.md),
-[development-pipeline.md](../../CONTRIBUTING.md) for where RCAs are committed.
+[CONTRIBUTING.md](../../CONTRIBUTING.md) for contribution rules.

@@ -17,7 +17,7 @@ Use this guide to connect a provider and choose where chat and workers run. Exac
 
 `clio-coder paths --json` prints the resolved config, data, state, and cache directories. `CLIO_CODER_HOME` sets a shared root; `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_DATA_DIR`, `CLIO_CODER_STATE_DIR`, and `CLIO_CODER_CACHE_DIR` override individual roots. See the [environment reference](environment-variables.md) and [directory resolver](../../src/core/xdg.ts).
 
-User settings are stored at `<configDir>/settings.yaml`. Project layers are `.clio-coder/settings.yaml` and `.clio-coder/settings.local.yaml`.
+User settings are stored at `<configDir>/settings.yaml`. Project layers are `.clio-coder/settings.yaml` and `.clio-coder/settings.local.yaml`. Later layers win: built-in defaults, then the user file, then the project file, then the local file, then CLI flags.
 
 ## First-run flow
 
@@ -52,7 +52,7 @@ Settings YAML paths shown in the inventory below are canonical. Use [Configurati
 
 ## Strict validation and lifecycle repair
 
-Settings use one strict version-2 schema. Unknown keys and invalid values stop startup with a path-specific diagnostic. Objects merge by key; arrays and scalars replace the lower layer. Credential-bearing keys from project layers are ignored.
+Settings use one strict version-2 schema. Unknown keys and invalid values stop startup with a path-specific diagnostic. Objects merge by key; arrays and scalars replace the lower layer. Project layers are read only after the workspace's project settings are trusted; until then Clio ignores them and prints a notice, and `clio-coder config trust settings` shows the captured files and how to approve exactly those bytes. Credential-bearing keys (`auth`, `apiKey`, `token`, `secret`, `password`) and `safety.autonomy` in project layers are dropped with a diagnostic.
 
 `clio-coder upgrade` runs the registered version-1 migration and preserves the original as `settings.yaml.v1.bak`. `clio-coder doctor --fix` repairs selected installation state but does not migrate old settings or remove retired keys. See [settings validation and migration](../../src/core/config.ts).
 
@@ -100,7 +100,6 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | --- | --- | --- |
 | `version` | `2` | restart |
 | `turnControl.workflows` | `["orientation", "direction", "ledger-facts", "detached-collection"]` | next turn |
-| `turnControl.interpretation.fallback` | `none` | next turn |
 | `turnControl.orientation.maxSplit` | `4` | next turn |
 | `turnControl.orientation.maxCostUsdPerTurn` | `null` | next turn |
 | `targets` | `[]` | next turn for the catalog; next session for saved routing defaults |
@@ -145,7 +144,6 @@ explains worker route selection.
 | `fleet.profiles` | `{}` | next dispatch |
 | `fleet.rosters` | `{}` | next dispatch |
 | `fleet.agentProfiles` | `{}` | next dispatch |
-| `fleet.decisionProfiles` | `{}` | next turn; `consult` next session |
 | `fleet.speculativeDispatch` | `false` | next turn |
 | `fleet.nodes` | `[]` | next dispatch |
 | `fleet.adaptiveRouting.roles` | `[]` | next dispatch |
@@ -193,6 +191,19 @@ The compaction and memory controls serve different roles. An unset `context.comp
 
 Configure `context.memory.target` and `context.memory.model` to opt into model-based memory; unset roles remain rules-only. Memory prefers its dedicated route and can use active chat when that route is unavailable and request capacity permits. Known dedicated saturation skips the step rather than initiating failover; neither routing choice edits saved settings.
 
+### System One
+
+`systemOne.engines` maps a name you choose to `{ kind, target, model?, mode? }`, where `kind` is `systemone` or `llm` and `target` is a `targets[].id`. `systemOne.sites` binds a site (`turn`, `toolCall`, `toolResult`, `turnEnd`, `relevance`, `consult`, `drafts`) to an engine name, or to `{ engine, timeoutMs }`. A site with no entry is off. `systemOne.cuts` holds per-build overrides keyed by answering build, then `<site>.<key>`, with values from 0.01 to 0.99. The [System One guide](system-one.md) explains each key, and `systemOne.sites.consult` needs a restart because the `consult` tool is registered at startup.
+
+| Key | Default | When it applies |
+| --- | --- | --- |
+| `systemOne.engines` | `{}` | next turn |
+| `systemOne.sites` | `{}` | next turn; `systemOne.sites.consult` on restart |
+| `systemOne.cuts` | `{}` | next turn |
+| `systemOne.record` | `false` | next turn |
+| `systemOne.retentionDays` | `30` | next turn |
+| `systemOne.maxMiB` | `64` | next turn |
+
 ### Safety
 
 The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the current schema. Resolution follows the normal settings stack, from session or project layers where supported through user `settings.yaml`, then the compiled default. `safety.autonomy` is an operator choice: only the user layer and operator session controls can set it.
@@ -227,7 +238,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `interface.panes.files.mode` | `companion` | immediately on the next files-pane open |
 | `interface.panes.files.profile` | `managed` | immediately on the next files-pane open |
 | `interface.panes.files.followCwd` | `true` | immediately on the next files-pane open |
-| `interface.panes.files.ratio` | `0.3` | restart |
+| `interface.panes.files.ratio` | `0.3` | immediately on the next files-pane open |
 | `interface.keybindings` | `{}` | immediately |
 
 ### Integrations
@@ -249,7 +260,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 
 The retired v1-only paths `identity`, `background.thinkingLevel`, `theme`, and `compaction.excludeLastTurns` have no v2 replacement. Fresh v2 files naming them receive targeted removal diagnostics. The v1 migrator drops them with the reason recorded in its migration report; they are tombstones, not executable aliases.
 
-Three version-2 keys are retired the same way. `integrations.externalAgents.entries[].permissionTimeoutMs` did nothing, because a delegated agent's permission ask is decided at once and never waits for the operator; `integrations.externalAgents.defaults.permissionTimeoutMs` still bounds Clio's own ACP server. `integrations.externalAgents.entries[].labels` was never read or displayed. `fleet.decisionProfiles.routing` bound a site dispatch never asks, because dispatch routes every task with its rules. A user `settings.yaml` naming any of them is refused with a targeted removal message, and a project or local layer drops the leaf with the same diagnostic. The v1 migrator drops the two per-agent keys from moved `delegation.agents` entries and records why.
+Four version-2 paths are retired the same way. `integrations.externalAgents.entries[].permissionTimeoutMs` did nothing, because a delegated agent's permission ask is decided at once and never waits for the operator; `integrations.externalAgents.defaults.permissionTimeoutMs` still bounds Clio's own ACP server. `integrations.externalAgents.entries[].labels` was never read or displayed. `fleet.decisionProfiles` and `turnControl.interpretation` belonged to the decision layer that System One replaced: bind an engine under `systemOne.engines` and `systemOne.sites` instead, as the [System One guide](system-one.md#migration-from-057) describes. An empty `fleet.decisionProfiles: {}`, which `init` wrote from 0.5.3 through 0.5.7, is accepted silently, and any other use of these two paths is refused. A user `settings.yaml` naming a retired path is refused with a targeted removal message, and a project or local layer drops the leaf with the same diagnostic. The v1 migrator drops the two per-agent keys from moved `delegation.agents` entries and records why.
 
 ---
 
@@ -280,14 +291,15 @@ Keep credentials in user settings or the credential store. Project settings deli
 
 | Command | Use |
 | --- | --- |
-| `clio-coder targets [--json]` | List configured targets and status. |
-| `clio-coder targets --probe` | Probe configured endpoints and refresh discovery. |
+| `clio-coder targets [--json] [--target <id>]` | List configured targets and status, or only one target. |
+| `clio-coder targets --probe` | Probe configured endpoints and refresh discovery. With `--target <id>` it probes only that target. |
 | `clio-coder targets add` | Run target setup. |
-| `clio-coder targets use <id>` | Set the chat target; help lists model and fleet routing options. |
-| `clio-coder targets profile <subcommand>` | Use `list`, `set`, `remove`, `rename`, `bind`, `unbind`, or `bindings` for worker routes and agent bindings. |
-| `clio-coder targets remove|rename|convert` | Maintain target entries. |
+| `clio-coder targets use <id>` | Set the chat target. Optional `--model`, `--orchestrator-model`, `--background-model`, `--fleet-target` and `--fleet-model` also set those routes. |
+| `clio-coder targets fleet [--json]` | Show the worker (fleet) routing. Alias `workers`. |
+| `clio-coder targets profile <subcommand>` | Use `list`, `set <name> <id> [--model] [--thinking]`, `remove <name> [--force]`, `rename`, `bind <agentId> <profileName>`, `unbind <agentId>`, or `bindings` for worker routes and agent bindings. Alias `worker`. |
+| `clio-coder targets remove <id>`, `rename <old> <new>`, `convert <id> --runtime <runtimeId>` | Maintain target entries. |
 
-`targets --reasoning` and `targets --tools` opt into generating qualification probes; they may load a local model. Use them only when that qualification is intended. Exact accepted flags and restrictions are printed by `clio-coder targets --help`.
+`targets --probe --reasoning` and `targets --probe --tools` (with optional `--tools-timeout <seconds>`) opt into generating qualification probes; they may load a local model. Use them only when that qualification is intended. Exact accepted flags and restrictions are printed by `clio-coder targets --help`.
 
 ## Context-window provenance
 
@@ -307,6 +319,12 @@ Sophia example because the endpoint varies by cluster or resource.
 `gatewayUrlGuidance` in [configure-target.ts](../../src/cli/configure-target.ts)
 provides that prompt. See the [ALCF provider contract](../architecture/alcf-provider.md#configure)
 for the Sophia and Metis URLs and model IDs.
+
+## Target fields
+
+A `targets[]` entry accepts `id` and `runtime` (both required), `url`, `auth`, `defaultModel`, `wireModels`, `capabilities`, `lifecycle`, `gateway`, `pricing`, `cache`, `lmstudio`, `litellm`, `ollama` and `maxConcurrentRequests`. Any other key is rejected. When `defaultModel` is omitted, the first `wireModels` entry is used.
+
+`auth` takes `apiKeyEnvVar` (environment variable read per request), `apiKeyRef`, `oauthProfile` and `headers`. `pricing` takes `input` and `output` (both required) plus `cacheRead` and `cacheWrite`. `cache.retention` is `none`, `short` or `long`. `maxConcurrentRequests` is an explicit request-slot limit for the endpoint and overrides live discovery. `lifecycle` is `user-managed` or `clio-coder-managed`; `user-managed` keeps Clio from loading or unloading models on that server.
 
 ## Local model settings
 
@@ -337,13 +355,17 @@ It applies to a `lmstudio` target and to a `litellm` target. On a LiteLLM gatewa
 
 Clio remembers the LM Studio instances it loads in one state file per server (`lmstudio-ownership/` under the state directory), shared by the orchestrator, its workers and separate runs. Before loading a model under a profile, Clio unloads the instances any Clio process loaded earlier on that server for other models, and prints one `unloading '<model>', which Clio loaded earlier ...` line for each. LM Studio offloads an oversubscribed model to CPU instead of refusing it, so leaving two large models resident degrades both. A model another client loaded is never unloaded. While a Clio process streams on a model it holds a lease on it, so neither another process's load nor a profile reload unloads it mid-request; a lease whose process has exited protects nothing. Back-to-back turns and runs on one model reuse the resident instance. Clio does not unload anything when it exits.
 
+### Per-request options for LM Studio and LiteLLM
+
+`lmstudio.request` accepts `ttlSeconds`, `draftModel` and `reasoning` (`auto`, `off`, `on`, `low`, `medium` or `high`). `litellm.request` accepts `tags` (no commas; Clio always adds `clio-coder`), `sendSessionId` (default true, sent as `x-litellm-session-id`), `timeoutSeconds` and `streamTimeoutSeconds` (0.001 to 86400), and `numRetries` (0 to 100, a router retry count and not a client SDK retry).
+
 Sampling is per request and follows the model catalog; see [model-catalog.md](../architecture/model-catalog.md).
 
 Model-family quirks belong to the local model catalog, not the target descriptor. See [`src/domains/providers/models/local-models/`](../../src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml) for current entries.
 
 ## Model listing and refresh
 
-Use `clio-coder models --target <id>` to inspect configured, discovered, and catalog models. `--json` is available for scripts; `--offline` avoids live refresh. The model-list command is implemented in [`src/cli/models.ts`](../../src/cli/models.ts).
+Use `clio-coder models --target <id>` to inspect configured, discovered, and catalog models. `--json` is available for scripts; `--offline` avoids live refresh; `--target` is the only other flag. The model-list command is implemented in [`src/cli/models.ts`](../../src/cli/models.ts).
 
 ## Built-in runtime categories
 
@@ -358,7 +380,7 @@ Runtime IDs and support groups vary by installed build. Use `clio-coder configur
 | `clio-coder auth login [target-or-runtime]` | Sign in or store an API key. |
 | `clio-coder auth logout [target-or-runtime]` | Remove stored credentials. |
 
-Prefer `--api-key-env <VAR>`: Clio reads it when making a request and stores no key. Stored API keys and OAuth credentials live in `credentials.yaml` with restrictive file permissions, but are plaintext and are not encrypted. The auth CLI and storage are in [`src/cli/auth.ts`](../../src/cli/auth.ts) and [`src/domains/providers/auth/`](../../src/domains/providers/auth/index.ts).
+`auth login` also accepts `--api-key <value>`. Prefer `clio-coder configure --api-key-env <VAR>` (the target's `auth.apiKeyEnvVar`): Clio reads the variable when making a request and stores no key. Stored API keys and OAuth credentials live in `credentials.yaml` in the config directory with mode `0600`, but are plaintext and are not encrypted. The auth CLI and storage are in [`src/cli/auth.ts`](../../src/cli/auth.ts) and [`src/domains/providers/auth/`](../../src/domains/providers/auth/index.ts).
 
 ## Subscription-based Targets and Runtimes
 

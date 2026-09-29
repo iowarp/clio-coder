@@ -35,10 +35,10 @@ it("recognizes questions and at least two option lines", () => {
 });
 
 it("advances clarification streaks only for tool-free questions or options", () => {
-	strictEqual(nextClarificationStreak(2, { toolCalls: 0, endedWithQuestion: true, offeredOptions: false }), 3);
-	strictEqual(nextClarificationStreak(2, { toolCalls: 0, endedWithQuestion: false, offeredOptions: true }), 3);
-	strictEqual(nextClarificationStreak(2, { toolCalls: 1, endedWithQuestion: true, offeredOptions: true }), 0);
-	strictEqual(nextClarificationStreak(2, { toolCalls: 0, endedWithQuestion: false, offeredOptions: false }), 0);
+	strictEqual(nextClarificationStreak(2, { toolCalls: 0, asks: true }), 3);
+	strictEqual(nextClarificationStreak(2, { toolCalls: 0, asks: true }), 3);
+	strictEqual(nextClarificationStreak(2, { toolCalls: 1, asks: true }), 0);
+	strictEqual(nextClarificationStreak(2, { toolCalls: 0, asks: false }), 0);
 });
 
 it("reduces a question, a duplicate dispatch, and a canceled turn without mutating their facts", () => {
@@ -46,6 +46,7 @@ it("reduces a question, a duplicate dispatch, and a canceled turn without mutati
 	const base: TurnOutcomeInput = {
 		turnId: "user-1",
 		turnIndex: 0,
+		continuation: false,
 		toolNames: [],
 		readOnlyCallsBeforeFirstDispatch: 0,
 		dispatches: [],
@@ -61,7 +62,7 @@ it("reduces a question, a duplicate dispatch, and a canceled turn without mutati
 		durationMs: 10,
 	};
 	const control = {
-		producer: "decision-site" as const,
+		producer: "system-one" as const,
 		decision: "orientation" as const,
 		decisionHash: "hash",
 		executed: true,
@@ -73,6 +74,7 @@ it("reduces a question, a duplicate dispatch, and a canceled turn without mutati
 	deepStrictEqual(question.conversation, {
 		endedWithQuestion: true,
 		offeredOptions: false,
+		asksOperator: null,
 		taskEstablished: false,
 		clarificationStreak: 3,
 	});

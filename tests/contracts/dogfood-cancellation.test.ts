@@ -198,7 +198,7 @@ function readFixtureEntries(path: string): SessionEntry[] {
 
 function fixture(
 	initialMode: WireMode,
-	refreshTurnRelevance?: (taskText: string, previous: string, signal?: AbortSignal) => Promise<void>,
+	readTurn?: (input: { signal: AbortSignal }) => Promise<void>,
 	visionSidecar?: VisionSidecar,
 	visionCapable = false,
 ) {
@@ -253,7 +253,7 @@ function fixture(
 	const loop = createChatLoop({
 		getSettings: () => settings,
 		...(visionSidecar ? { visionSidecar } : {}),
-		...(refreshTurnRelevance ? { refreshTurnRelevance } : {}),
+		...(readTurn ? { readTurn } : {}),
 		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
@@ -315,7 +315,7 @@ it("cancel aborts an awaited decision brief before the chat request and leaves t
 	});
 	let seenSignal: AbortSignal | undefined;
 	let briefs = 0;
-	const h = fixture("success", async (_task, _previous, signal) => {
+	const h = fixture("success", async ({ signal }) => {
 		briefs += 1;
 		if (briefs > 1) return;
 		seenSignal = signal;

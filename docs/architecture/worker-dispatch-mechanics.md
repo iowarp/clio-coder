@@ -20,8 +20,8 @@ When the orchestrator dispatches a task to a fleet agent (such as via the `dispa
 
 1. **Child Process Creation:**
    The parent process spawns a Node.js subprocess pointing to `dist/worker/entry.js`.
-2. **Environment Scrubbing:**
-   To ensure clean execution, the child process runs with a sanitized environment. The orchestrator scrubs user-interactive flags (e.g., `CLIO_CODER_INTERACTIVE` is removed from `process.env`) to prevent child workers from attempting to mount TUI elements or intercept standard input signals.
+2. **Environment and Process Group:**
+   The child inherits the orchestrator's environment plus `AI_AGENT=clio-coder`, which marks the process as agent-driven for developer tools. It is spawned detached with piped `stdin`, `stdout`, and `stderr`, and leads its own process group so abort escalation reaches the descendants a runtime spawned. Workers are non-interactive: they never mount TUI elements.
 3. **Spec Injection & Attestation Handshake:**
    The orchestrator serializes a `WorkerSpec` JSON document and writes it as the very first line of `stdin` to the child worker. Before reaching a model, every worker announces its attestation on the structured stderr control lane (`@clio-control/1 ` prefix): protocol version (`WORKER_PROTOCOL_VERSION = 1`), spec version, process ID, process group ID (or null), host, settings fingerprint, worker-computed spec digest (`specDigest`), runtime ID, target ID, endpoint identity hash (`endpointIdentityHash`), wire model ID, effective tool signature, and bounded node resource facts (labels, CPU count, total memory, free memory, GPU count, VRAM, and resident models). The orchestrator compares each field against the approved plan and terminates a drifting peer instead of running it. Bulk NDJSON on `stdout` is accepted only once that attestation verifies.
 
@@ -65,7 +65,11 @@ Clio divides worker output into two isolated streams to protect control signals 
    Emits out-of-band control frames prefixed by `@clio-control/1 `, capped at `WORKER_CONTROL_FRAME_MAX_BYTES` (16 KiB). Because control frames travel over `stderr`, they bypass backpressured bulk stdout streams and reach orchestrator watchdogs immediately. Control frame kinds include:
    * **Announce:** `{"kind": "announce", "attestation": ...}` sent immediately upon startup.
    * **Heartbeat:** `{"kind": "heartbeat"}` emitted every 1000 milliseconds. The frame carries no timestamp; the orchestrator stamps arrival on its own clock.
-   * **Steer / Cancel Acknowledgments:** Confirming reception of stdin control directives.
+   * **Cancel acknowledgment:** `{"kind": "cancel_ack", "at": <ms>}` confirms the worker saw a cancel request.
+   * **Ledger post:** `{"kind": "ledger_post", "body": ...}` carries a `claim`, `finding`, or `review` entry for the shared agent ledger.
+   * **Model loaded:** `{"kind": "model_loaded", "load": ...}` reports a model load the worker observed.
+
+   Steer receipt is not a control frame. It is the bulk-lane `clio_coder_steer_received` event.
 
 ### 2.2 Worker Input (`stdin`)
 The worker entry mounts a custom stdin demultiplexer (`createWorkerStdinDemux`) that parses lines arriving after the initial `WorkerSpec`. It processes two types of JSON messages:
@@ -196,7 +200,7 @@ infrastructure breakers.
 
 ### 5.1 Failure Taxonomy & Route Exclusion
 
-The coordinator classifies failures into 13 explicit categories ([failure-classification.ts](../../src/domains/dispatch/failure-classification.ts)) to determine which route parts (`agent`, `target`, `model`, `node`, `runtime`) are excluded during an assignment retry:
+The coordinator classifies failures into 14 explicit categories ([failure-classification.ts](../../src/domains/dispatch/failure-classification.ts)) to determine which route parts (`agent`, `target`, `model`, `node`, `runtime`) are excluded during an assignment retry:
 
 | Failure Class | Trigger Pattern / Exit Code | Excluded Route Part | Retryable? |
 | --- | --- | --- | --- |
@@ -204,11 +208,12 @@ The coordinator classifies failures into 13 explicit categories ([failure-classi
 | `policy` | Policy denial, `denied_by_policy` | None (Neutral) | No |
 | `permission` | `WORKER_EXIT_PERMISSION_REQUIRED` (code 3) | None (Neutral) | No |
 | `deterministic-task` | `isDeterministicOutcomeCode()` (e.g. `result_contract_exhausted`) | None | No |
+| `provider-refusal` | The provider's content filter answered a `failed` run | None (the endpoint is healthy) | Yes |
 | `model-quality` | Quality gate failure | `agent, model` | Yes |
 | `node-channel` | Stall killed, `spawn_failed`, SSH exit code 255 | `node` | Yes |
 | `node-resource` | VRAM/GPU OOM error pattern | `node` | Yes |
 | `target-auth` | HTTP 401/403, invalid API key | `target` | Yes |
-| `target-rate-limit` | HTTP 429, rate limit error pattern | `target` | Yes (Delayed) |
+| `target-rate-limit` | HTTP 429, rate limit error pattern | `target` | Yes (1 second minimum delay) |
 | `target-transient` | Timeout, HTTP 502/503/504 | `target` | Yes |
 | `capacity` | Queue full / overload pattern | `node` | Yes |
 | `worker-runtime` | `failed` outcome after more-specific classifiers do not match | `runtime` | Yes |

@@ -3,7 +3,7 @@ import {
 	applyControlValue,
 	controlInstructions,
 	formatControlValue,
-	orderSettingsEntries,
+	orderAreaEntries,
 	SETTING_CONTROLS,
 	SETTINGS_DESCRIPTIONS_BY_ID,
 	SETTINGS_HELP_BY_ID,
@@ -27,28 +27,25 @@ import {
 	useTargetInSettings,
 	validateSettings,
 } from "../../core/config.js";
-import { DECISION_SITE_NOTES } from "../../core/decision-site-notes.js";
-import type {
-	ActiveRoutingPosture,
-	ActiveRoutingRole,
-	DecisionSite,
-	WorkerEscalationSettings,
-} from "../../core/defaults.js";
+import type { ActiveRoutingPosture, ActiveRoutingRole, WorkerEscalationSettings } from "../../core/defaults.js";
 import {
 	ACTIVE_ROUTING_POSTURES,
 	ACTIVE_ROUTING_ROLES,
-	DECISION_SITES,
 	DEFAULT_SETTINGS,
 	THINKING_LEVELS,
 } from "../../core/defaults.js";
 import { getAtPath, isRoutingPath } from "../../core/session-routing.js";
-import type { SettingsSectionId, SettingsSectionName } from "../../core/settings-navigation.js";
+import type {
+	SettingsAreaId as SettingsSectionId,
+	SettingsAreaName as SettingsSectionName,
+} from "../../core/settings-areas.js";
 import {
-	resolveSettingsSection,
-	SETTINGS_SECTIONS,
-	settingsGroupForPath,
-	settingsSectionForPath,
-} from "../../core/settings-navigation.js";
+	resolveSettingsArea,
+	SETTINGS_AREAS as SETTINGS_SECTIONS,
+	settingsPlacementForRow,
+} from "../../core/settings-areas.js";
+import type { SettingsShortcuts } from "../../core/settings-shortcuts.js";
+import { listSettingsShortcuts, rememberChangedSetting, setSettingPinned } from "../../core/settings-shortcuts.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { capacityLeaseUsage } from "../../domains/dispatch/capacity-lease.js";
 import type { RouteBreakerView } from "../../domains/dispatch/contract.js";
@@ -66,6 +63,10 @@ import {
 } from "../../domains/providers/index.js";
 import type { FleetNodeSnapshot } from "../../domains/scheduling/cluster.js";
 import { describeLocalCapacity } from "../../domains/scheduling/local-capacity.js";
+import { describeBindings } from "../../domains/system-one/recorder/bindings.js";
+import type { SiteId } from "../../domains/system-one/types.js";
+import { SITE_IDS } from "../../domains/system-one/types.js";
+import { TURN_CONTROL_WORKFLOWS } from "../../domains/turn-control/index.js";
 import type { Component, OverlayHandle, SettingItem, TUI } from "../../engine/tui.js";
 import {
 	getKeybindings,
@@ -116,12 +117,9 @@ const ULTRAWIDE_LAYOUT_MIN_WIDTH = 112;
  * the overlay's own), each costing a border and a pad, so the body is the
  * terminal width less eight: 72 at an 80-column terminal, 68 at a 76-column
  * one. 72 therefore keeps an 80-column terminal two-column (left lane 24 +
- * divider + rows ~47, with the key-path column dropped below
- * DROP_PATH_COLUMN_WIDTH) while anything narrower, where the value column
- * would collapse into the labels, stays stacked.
+ * divider + rows ~47) while anything narrower stays stacked.
  */
 const WIDE_LAYOUT_MIN_WIDTH = 72;
-const DROP_PATH_COLUMN_WIDTH = 52;
 /** Shown when no runtime is resolvable, so it offers the full vocabulary. */
 const FALLBACK_THINKING_VALUES: ReadonlyArray<string> = THINKING_LEVELS;
 const ROW_GAP = "  ";
@@ -172,6 +170,8 @@ const RESTART_REQUIRED_IDS = new Set<string>([
 	// key held then. Changing the rung mid-session would leave the contract on
 	// the rung it resolved to, so the row says restart rather than lying.
 	"panes.enabled",
+	// The consult tool is registered once, at startup, with the engine bound then.
+	"systemOne.sites.consult",
 ]);
 
 export { SETTINGS_SECTIONS, type SettingsSectionId };
@@ -188,7 +188,7 @@ type EntrySettingId =
 	| `setting.${string}`
 	| `workers.profiles.${string}`
 	| `workers.agentBindings.${string}`
-	| `workers.decisionSites.${string}`
+	| `systemOne.sites.${string}`
 	| `targets.${string}`
 	| `fleet.nodes.${string}`
 	| `fleet.endpoints.${string}`;
@@ -1036,11 +1036,11 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 }
 
 function sectionForSetting(id: EditableSettingId): SettingsSectionId {
-	return settingsSectionForPath(settingsV2PathForRow(id));
+	return settingsPlacementForRow(id, settingsV2PathForRow(id)).area;
 }
 
-function cycleAffordance(values: readonly string[]): string {
-	return `cycles: ${values.join(", ")}`;
+function cycleAffordance(): string {
+	return "Enter to choose a value";
 }
 
 function scopeForId(id: EditableSettingId): SettingScope {
@@ -1087,7 +1087,14 @@ function settingItem(
 		description: options.description ?? SETTINGS_DESCRIPTIONS_BY_ID[id as keyof typeof SETTINGS_LABELS_BY_ID],
 		section: sectionForSetting(id),
 		configPath: settingsV2PathForRow(id),
-		affordance: options.affordance ?? (options.values ? cycleAffordance(options.values) : "opens picker"),
+		affordance:
+			options.affordance === "free text"
+				? "Enter to edit"
+				: options.affordance === "opens picker"
+					? "Enter to choose"
+					: options.affordance === "edit settings.yaml"
+						? "Edit in the settings file"
+						: (options.affordance ?? (options.values ? cycleAffordance() : "Enter to edit")),
 		scope: scopeForId(id),
 		readOnly: options.readOnly ?? false,
 		presentationKind: options.presentationKind ?? (options.readOnly ? "read-only-fact" : "setting"),
@@ -1121,7 +1128,7 @@ function groupHeader(
 		label,
 		currentValue: "",
 		description,
-		section: resolveSettingsSection(section) ?? "advanced",
+		section: resolveSettingsArea(section) ?? "advanced",
 		configPath: id,
 		affordance: "group heading",
 		scope: "live",
@@ -1147,6 +1154,51 @@ function targetAddCta(): SettingsCenterItem {
 	};
 }
 
+const TURN_PREPARATION_LABELS: Readonly<Record<(typeof TURN_CONTROL_WORKFLOWS)[number], string>> = {
+	orientation: "Explore the project",
+	direction: "Check recent Git activity",
+	"ledger-facts": "Recall earlier work",
+	"detached-collection": "Collect finished background runs",
+};
+
+const turnPreparationSubmenu: SettingSubmenuBuilder = (currentValue, done) => {
+	const selected = new Set(currentValue.split(",").map((value) => value.trim()));
+	let active: Component;
+	const showChoices = (selectedIndex: number): void => {
+		const choices = [
+			...TURN_CONTROL_WORKFLOWS.map((workflow) => ({
+				value: workflow as string,
+				label: `${selected.has(workflow) ? "✓" : "○"} ${TURN_PREPARATION_LABELS[workflow]}`,
+			})),
+			{ value: "apply", label: "Apply these choices" },
+		];
+		const list = new SettingsSelectList(choices, choices.length, DEFAULT_SELECT_THEME);
+		list.setSelectedIndex(selectedIndex);
+		list.onSelect = (choice) => {
+			if (choice.value === "apply") {
+				done(TURN_CONTROL_WORKFLOWS.filter((workflow) => selected.has(workflow)).join(", "));
+				return;
+			}
+			if (selected.has(choice.value)) selected.delete(choice.value);
+			else selected.add(choice.value);
+			showChoices(choices.findIndex((entry) => entry.value === choice.value));
+		};
+		list.onCancel = () => done();
+		active = new SubmenuWrapper(
+			"Before Clio answers",
+			list,
+			buildHint([{ key: "Enter", verb: "toggle or apply" }], "back"),
+			"Choose which preparation Clio may start before responding.",
+		);
+	};
+	showChoices(0);
+	return {
+		render: (width: number) => active.render(width),
+		handleInput: (data: string) => active.handleInput?.(data),
+		invalidate: () => active.invalidate?.(),
+	};
+};
+
 function thinkingChoices(
 	providers: ProvidersContract | undefined,
 	target: string | null,
@@ -1168,47 +1220,57 @@ function thinkingChoices(
  * read-only pointer rows (maintenance and safety net) name the
  * surface that owns them so the Center has no dead-but-tappable rows.
  */
+function controlTextSubmenu(control: SettingControl, live: () => Readonly<ClioSettings>): SettingSubmenuBuilder {
+	return (current, done) => {
+		const input = new Input();
+		input.setValue(current);
+		input.focused = true;
+		const wrapper = new SubmenuWrapper(
+			control.label,
+			input,
+			buildHint([{ key: "Enter", verb: "review" }], "back"),
+			controlInstructions(control, "settings"),
+		);
+		input.onSubmit = (value) => {
+			try {
+				applyControlValue(structuredClone(live()), control.path, value);
+				done(value);
+			} catch (error) {
+				wrapper.setProblem(error instanceof Error ? error.message : String(error));
+			}
+		};
+		input.onEscape = () => done();
+		return wrapper;
+	};
+}
+
 function commonControlItem(control: SettingControl, live: () => Readonly<ClioSettings>): SettingsCenterItem {
 	const id = `setting.${control.path}` as const;
 	return {
 		id,
 		label: control.label,
 		description: control.description,
-		help: controlInstructions(control),
-		section: settingsSectionForPath(control.path),
+		...(control.help
+			? { help: control.help }
+			: control.kind === "json"
+				? { help: "Edit this collection as JSON." }
+				: control.kind === "number"
+					? { help: "Enter a number. The change is checked before it is saved." }
+					: {}),
+		section: settingsPlacementForRow(id, control.path).area,
 		configPath: control.path,
 		currentValue: "",
-		affordance: control.readOnly ? "managed by its confirmation flow" : "edit with validation",
+		affordance: control.readOnly ? "Managed by its confirmation flow" : "Enter to edit",
 		scope: settingsChangeKind(control.path) === "restartRequired" ? "restart" : "live",
 		defaultValue: formatControlValue(getAtPath(DEFAULT_SETTINGS, control.path)),
 		readOnly: control.readOnly,
 		presentationKind: "setting",
 		valueSegments: [],
-		...(control.choices || control.kind === "boolean"
-			? { values: [...(control.choices ?? ["true", "false"])] }
-			: {
-					submenu: (current, done) => {
-						const input = new Input();
-						input.setValue(current);
-						input.focused = true;
-						const wrapper = new SubmenuWrapper(
-							control.label,
-							input,
-							buildHint([{ key: "Enter", verb: "review" }], "back"),
-							controlInstructions(control),
-						);
-						input.onSubmit = (value) => {
-							try {
-								applyControlValue(structuredClone(live()), control.path, value);
-								done(value);
-							} catch (error) {
-								wrapper.setProblem(error instanceof Error ? error.message : String(error));
-							}
-						};
-						input.onEscape = () => done();
-						return wrapper;
-					},
-				}),
+		...(control.path === "turnControl.workflows"
+			? { submenu: turnPreparationSubmenu }
+			: control.choices || control.kind === "boolean"
+				? { values: [...(control.choices ?? ["true", "false"])] }
+				: { submenu: controlTextSubmenu(control, live) }),
 	};
 }
 
@@ -1392,7 +1454,7 @@ export function buildSettingItems(
 			valueSegments: [],
 		}),
 		...agentBindingRows(settings, live),
-		...decisionSiteRows(settings, live),
+		...systemOneSiteRows(settings, live),
 		settingItem("workers.agentBindings", "", {
 			label: "Add agent route",
 			...(profileCount > 0 ? { submenu: addBindingSubmenu } : { readOnly: true }),
@@ -1667,6 +1729,7 @@ export function buildSettingItems(
 				const value = getAtPath(settings, control.path);
 				Object.assign(item, replacement, {
 					id: item.id,
+					section: item.section,
 					currentValue: formatControlValue(value),
 					editValue:
 						value == null
@@ -1730,7 +1793,7 @@ function fleetProfileRows(
 			return settingItem(`workers.profiles.${name}`, summary, {
 				label: name,
 				description: `Profile ${name}. Enter to edit its target, model, thinking level, placement, or remove it.`,
-				help: ["target", "model", "thinkingLevel", "node"].map((field) => `fleet.profiles.${name}.${field}`).join(" · "),
+				help: "Choose a connection, model, thinking level, and where this worker runs.",
 				submenu: profileWorkbenchSubmenu(name, settings, live, options),
 				affordance: "Enter: drill into profile fields",
 				valueSegments: [
@@ -1822,7 +1885,7 @@ function profileNodeChoices(
 ): Array<{ value: string; label: string }> {
 	const live = new Map(options?.getFleetNodes?.().map((node) => [node.id, node] as const) ?? []);
 	return [
-		{ value: AUTO_PLACEMENT_CHOICE, label: AUTO_PLACEMENT_CHOICE },
+		{ value: AUTO_PLACEMENT_CHOICE, label: "Let Clio choose" },
 		{ value: "local", label: "local (never remote)" },
 		...settings.fleet.nodes.map((node) => {
 			const state = live.get(node.id);
@@ -1846,37 +1909,91 @@ function agentBindingRows(settings: Readonly<ClioSettings>, live: () => Readonly
 					: `Profile agent ${agentId} dispatches with.`,
 				submenu: selectListSubmenu(`Profile for ${agentId}`, [
 					...profileNameChoices(live),
-					{ value: UNBIND_CHOICE, label: UNBIND_CHOICE },
+					{ value: UNBIND_CHOICE, label: "Remove assignment" },
 				]),
 			});
 		});
 }
 
 const SITE_OFF_CHOICE = "(off)";
+const SITE_LABELS: Readonly<Record<SiteId, string>> = {
+	turn: "Before each answer",
+	toolCall: "Before using a tool",
+	toolResult: "After a tool responds",
+	turnEnd: "Before finishing a turn",
+	relevance: "When sorting context",
+	consult: "When an agent asks for advice",
+	drafts: "When comparing drafts",
+};
 
 /**
- * One row per System One decision site. The description carries what the
- * site does with an answer and what evidence it sends, because binding a site
- * to a hosted target is the operator's consent to that evidence leaving.
+ * What each System One site does with an answer and what it sends to get one.
+ * Binding a site to a hosted target is the operator's consent to that evidence
+ * leaving the machine, so the row states it next to the binding.
  */
-function decisionSiteRows(settings: Readonly<ClioSettings>, live: () => Readonly<ClioSettings>): SettingsCenterItem[] {
-	return DECISION_SITES.map((site) => {
-		const profileName = settings.fleet.decisionProfiles[site];
-		const profile = profileName === undefined ? undefined : settings.fleet.profiles[profileName];
-		const note = DECISION_SITE_NOTES[site];
+const SITE_NOTES: Readonly<Record<SiteId, { readonly does: string; readonly sends: string }>> = {
+	turn: {
+		does: "reads what your message asks for before the turn starts; it hints, and acts only under a fitted build",
+		sends: "your request, the tail of the last reply, your previous request and recipe descriptions",
+	},
+	toolCall: {
+		does:
+			"adds a blast-radius line to approval cards and, under a fitted build, escalates far-reaching or destructive calls to you; it never allows more",
+		sends: "the call's redacted one-line target, never raw arguments",
+	},
+	toolResult: {
+		does:
+			"flags tool output that tries to instruct the agent by adding an untrusted-content banner; it never clears a result",
+		sends: "the head of the tool output and its source",
+	},
+	turnEnd: {
+		does:
+			"reads the final message for stalls, unproven claims and questions to you; under an unfitted build it only records",
+		sends: "the tail of the final message, your request, earlier requests and tool names",
+	},
+	relevance: {
+		does: "reorders long skill, capability and memory listings by meaning; it never removes an entry",
+		sends: "the need, the turn's task and entry descriptions",
+	},
+	consult: {
+		does: "answers typed questions the main agent asks (bound at startup)",
+		sends: "the evidence the agent supplies, including the head of files it names",
+	},
+	drafts: {
+		does: "rates /draft candidates in the overlay",
+		sends: "the /draft request and the candidate answers",
+	},
+};
+
+/**
+ * One row per System One site, choosing the engine it asks. The record toggle
+ * and the retention limits are ordinary catalog rows under `systemOne.*`.
+ */
+function systemOneSiteRows(settings: Readonly<ClioSettings>, live: () => Readonly<ClioSettings>): SettingsCenterItem[] {
+	const engineNames = Object.keys(live().systemOne.engines);
+	const bindings = new Map(describeBindings(settings).map((binding) => [binding.site, binding]));
+	return SITE_IDS.map((site) => {
+		const binding = bindings.get(site);
+		const engine = binding?.engine ?? null;
+		const note = SITE_NOTES[site];
 		const state =
-			profileName === undefined
+			binding === undefined || engine === null
 				? "Off: asks nothing."
-				: profile === undefined
-					? `Bound to profile ${profileName}, which does not exist; the site asks nothing until it does.`
-					: `Asks ${profile.target ?? "(no target)"}/${profile.model ?? "default"} through profile ${profileName}.`;
-		return settingItem(`workers.decisionSites.${site}`, profileName ?? SITE_OFF_CHOICE, {
-			label: `${site} · ${note.authority}`,
-			description: `${state} It ${note.does}. Sends ${note.sends}.`,
-			submenu: selectListSubmenu(`System One profile for ${site}`, [
-				{ value: SITE_OFF_CHOICE, label: SITE_OFF_CHOICE },
-				...profileNameChoices(live),
-			]),
+				: binding.problem !== undefined
+					? `Bound to engine ${engine}, which cannot answer: ${binding.problem}. The site asks nothing until it can.`
+					: `Asks ${binding.target}/${binding.model ?? "default"} through engine ${engine}.`;
+		const selectable = engineNames.length > 0;
+		return settingItem(`systemOne.sites.${site}`, engine ?? SITE_OFF_CHOICE, {
+			label: SITE_LABELS[site],
+			description: `${state} It ${note.does}. Sends ${note.sends}.${selectable ? "" : " Add a decision engine in the settings file first."}`,
+			...(selectable
+				? {
+						submenu: selectListSubmenu(`Decision engine: ${SITE_LABELS[site]}`, [
+							{ value: SITE_OFF_CHOICE, label: "Off" },
+							...engineNames.map((name) => ({ value: name, label: name })),
+						]),
+					}
+				: { readOnly: true, affordance: "Add a decision engine in the settings file" }),
 		});
 	});
 }
@@ -1993,7 +2110,7 @@ export function fleetNodeRows(nodes: ReadonlyArray<FleetNodeSnapshot>): Settings
 		return settingItem(`fleet.nodes.${node.id}`, `${node.state} · ${busy}`, {
 			label: `node ${node.id}`,
 			description: `${node.kind} · ${node.host}${node.stateReason ? ` · ${node.stateReason}` : ""}${node.lastSeenAt ? ` · seen ${clockLocal(node.lastSeenAt)}` : ""}`,
-			affordance: "declared as fleet.nodes in settings.yaml; `clio-coder doctor` preflights them",
+			affordance: "Add remote machines in the settings file; Check setup tests their connection",
 			readOnly: true,
 			presentationKind: "status",
 			valueSegments: [
@@ -2036,19 +2153,83 @@ function fleetEndpointRows(providers: ProvidersContract | undefined): SettingsCe
 	});
 }
 
-export function buildSettingsSections(items: readonly SettingsCenterItem[]): SettingsCenterSection[] {
+/** Curated starting points, in order, for people who have not pinned or changed anything yet. */
+const SUGGESTED_SETTING_IDS: readonly string[] = [
+	"orchestrator.model",
+	"orchestrator.thinkingLevel",
+	"defaults.maxTokens",
+	"autonomy",
+	"terminal.outputVerbosity",
+	"terminal.notify",
+	"compaction.auto",
+	"compaction.threshold",
+	"budget.sessionCeilingUsd",
+	"workers.default.model",
+	"budget.concurrency",
+	"watchdog.enabled",
+	"workers.onPermission",
+	"terminal.tuiMode",
+];
+/** The most shortcuts the landing view shows: pins first, then recent, then suggested. */
+const SHORTCUT_SLOTS = 12;
+
+/** Only a real, writable setting can be pinned or enter Recent; actions and status rows cannot. */
+function isShortcutRow(item: SettingsCenterItem | null | undefined): item is SettingsCenterItem {
+	return item !== undefined && item !== null && item.presentationKind === "setting" && !item.readOnly;
+}
+
+/**
+ * The Recent & Pinned view: the same row objects as their home areas, so a
+ * shortcut opens the same editor and review flow. Suggested rows only fill
+ * slots that no pin or real change has taken, and are never called recent.
+ */
+function shortcutRows(items: readonly SettingsCenterItem[], shortcuts: SettingsShortcuts): SettingsCenterItem[] {
+	const available = new Map(items.filter(isShortcutRow).map((item) => [item.id as string, item] as const));
+	const taken = new Set<string>();
+	const pick = (ids: readonly string[], limit: number): SettingsCenterItem[] => {
+		const rows: SettingsCenterItem[] = [];
+		for (const id of ids) {
+			const item = available.get(id);
+			if (!item || taken.has(id) || rows.length >= limit) continue;
+			taken.add(id);
+			rows.push(item);
+		}
+		return rows;
+	};
+	// The landing view shows SHORTCUT_SLOTS rows in all. Pins beyond that stay pinned and marked in their home area.
+	const pinned = pick(shortcuts.pinned, SHORTCUT_SLOTS);
+	const recent = pick(shortcuts.recent, SHORTCUT_SLOTS - pinned.length);
+	const suggested = pick(SUGGESTED_SETTING_IDS, Math.max(0, SHORTCUT_SLOTS - pinned.length - recent.length));
+	const heading = (name: string, description: string): SettingsCenterItem =>
+		groupHeader(`settings.group.recent.${name.toLowerCase()}`, "recent", name, description);
+	return [
+		...(pinned.length > 0
+			? [heading("Pinned", "Settings you pinned. Press p on a row to pin or unpin it."), ...pinned]
+			: []),
+		...(recent.length > 0 ? [heading("Recent", "Settings you changed most recently, newest first."), ...recent] : []),
+		...(suggested.length > 0
+			? [heading("Suggested", "Common settings to start from. Change one and it moves to Recent."), ...suggested]
+			: []),
+	];
+}
+
+export function buildSettingsSections(
+	items: readonly SettingsCenterItem[],
+	shortcuts: SettingsShortcuts = { pinned: [], recent: [] },
+): SettingsCenterSection[] {
 	return SETTINGS_SECTIONS.map((section) => {
-		const rows = orderSettingsEntries(
+		if (section.id === "recent") return { id: section.id, label: section.label, items: shortcutRows(items, shortcuts) };
+		const rows = orderAreaEntries(
 			section.id,
 			items.filter(
 				(item) => item.section === section.id && (item.id === "targets" || item.presentationKind !== "group-header"),
 			),
-			(item) => item.configPath ?? item.id,
+			(item) => ({ id: item.id, path: item.configPath ?? item.id }),
 		);
 		if (section.id === "targets") return { id: section.id, label: section.label, items: rows };
 		const groups = new Map<string, SettingsCenterItem[]>();
 		for (const item of rows) {
-			const group = settingsGroupForPath(item.configPath ?? item.id);
+			const group = settingsPlacementForRow(item.id, item.configPath ?? item.id).group;
 			const entries = groups.get(group) ?? [];
 			entries.push(item);
 			groups.set(group, entries);
@@ -2561,11 +2742,17 @@ function applyEntrySettingChange(settings: ClioSettings, id: string, value: stri
 		}
 		return true;
 	}
-	if (id.startsWith("workers.decisionSites.")) {
-		const site = id.slice("workers.decisionSites.".length) as DecisionSite;
-		if (!DECISION_SITES.includes(site)) return true;
-		if (value === SITE_OFF_CHOICE || value === "") delete settings.fleet.decisionProfiles[site];
-		else settings.fleet.decisionProfiles[site] = value;
+	if (id.startsWith("systemOne.sites.")) {
+		const site = id.slice("systemOne.sites.".length);
+		if (!(SITE_IDS as ReadonlyArray<string>).includes(site)) return true;
+		const key = site as SiteId;
+		if (value === SITE_OFF_CHOICE || value === "") delete settings.systemOne.sites[key];
+		else if (Object.hasOwn(settings.systemOne.engines, value)) {
+			// A deadline the operator set on the binding outlives a change of engine.
+			const current = settings.systemOne.sites[key];
+			const timeoutMs = typeof current === "object" ? current.timeoutMs : undefined;
+			settings.systemOne.sites[key] = timeoutMs === undefined ? value : { engine: value, timeoutMs };
+		}
 		return true;
 	}
 	if (id.startsWith("workers.agentBindings.")) {
@@ -2732,8 +2919,9 @@ function formatScopeConfirmTitle(plan: SettingsChangePlan, width: number): strin
 		return visibleWidth(title) <= width ? title : ellipsizeFromLeft(title, width);
 	}
 	const selectedValue = humanizeChangePlanValue(plan);
+	const originalValue = formatSettingsValue(settingsV2PathForRow(plan.rowId), plan.originalValue);
 	const full = plan.originalValue.trim()
-		? `${plan.label}: ${plan.originalValue} → ${selectedValue}`
+		? `${plan.label}: ${originalValue} → ${selectedValue}`
 		: `${plan.label}: ${selectedValue}`;
 	if (visibleWidth(full) <= width) return full;
 	const destinationFirst = plan.originalValue.trim()
@@ -2751,7 +2939,7 @@ function humanizeChangePlanValue(plan: SettingsChangePlan): string {
 		if (refs) return refs.length > 0 ? refs.join(", ") : "(empty)";
 	}
 	const separatorIndex = plan.selectedValue.indexOf(PROFILE_FIELD_SEPARATOR);
-	if (separatorIndex < 0) return plan.selectedValue;
+	if (separatorIndex < 0) return formatSettingsValue(settingsV2PathForRow(plan.rowId), plan.selectedValue);
 	const head = plan.selectedValue.slice(0, separatorIndex).trim();
 	const tail = plan.selectedValue.slice(separatorIndex + PROFILE_FIELD_SEPARATOR.length).trim();
 	if (plan.rowId === "workers.profiles" || plan.rowId === "workers.agentBindings") return `${head} → ${tail}`;
@@ -2795,7 +2983,137 @@ function ellipsizeFromLeft(text: string, width: number): string {
 
 interface RowColumns {
 	label: number;
-	path: number;
+}
+
+const SETTINGS_CHOICE_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+	"safety.autonomy": { default: "Default", yolo: "YOLO" },
+	"fleet.permissions.mode": { deny: "Deny the tool", fail: "Stop the worker", escalate: "Ask me" },
+	"fleet.permissions.escalation.fallback": { deny: "Deny the tool", fail: "Stop the worker" },
+	"integrations.externalAgents.defaults.toolGovernance": {
+		"clio-coder-policy": "Clio permissions",
+		"agent-managed": "Agent permissions",
+		"deny-all": "Deny all tools",
+	},
+	"context.workingSet.policy": {
+		"structural-v1": "Structure (classic)",
+		"structural-v2": "Structure (current)",
+		"age-horizon": "Age only",
+	},
+	"context.workingSet.profile": {
+		default: "Default",
+		"data-analysis": "Data analysis",
+		"web-design": "Web design",
+	},
+	"interface.outputDetail": { compact: "Compact", standard: "Standard", detailed: "Detailed" },
+	"interface.mode": { regular: "Scrollback", fullscreen: "Full screen" },
+	"interface.fullscreenScrollbar": { hidden: "Hidden", auto: "Automatic", always: "Always" },
+	"interface.smoothStreaming": { off: "Off", auto: "Automatic", on: "On" },
+	"interface.panes.enabled": { off: "Off", auto: "Automatic" },
+	"interface.panes.notifications": { failures: "Failures only", all: "All updates", off: "Off" },
+	"interface.panes.layout": { off: "Off", workers: "Workers", cockpit: "Workers and files" },
+	"interface.panes.files.mode": { companion: "Stay open", chooser: "Choose once" },
+	"interface.panes.files.profile": { managed: "Clio theme", user: "My file manager" },
+	"fleet.worktrees.root": { disk: "Disk", tmpfs: "Memory", auto: "Automatic" },
+};
+
+function formatSettingsValue(path: string, value: string): string {
+	const control = settingControl(path);
+	const named = SETTINGS_CHOICE_LABELS[path]?.[value];
+	if (named) return named;
+	if (control?.kind === "boolean" && value === "true") return "On";
+	if (control?.kind === "boolean" && value === "false") return "Off";
+	if (path === "integrations.git.commitAttribution" && value === "enabled") return "On";
+	if (path === "integrations.git.commitAttribution" && value === "disabled") return "Off";
+	if (path.endsWith("thinkingLevel") && value && value !== "(unset)" && value !== "(automatic)")
+		return value === "xhigh" ? "Extra high" : `${value[0]?.toUpperCase()}${value.slice(1)}`;
+	if (
+		value === "(automatic)" ||
+		(value === "auto" && (control?.choices?.includes("auto") || path === "fleet.concurrency"))
+	)
+		return "Automatic";
+	if (value === "(empty)" || value === "(none)") return "None";
+	if (value === "(off)") return "Off";
+	if (value === "(unset)") return "Not set";
+	if (value === "(connection default)") return "Connection default";
+	if (value === "(session target)") return "Chat connection";
+	if (value === "(orchestrator target)") return "Chat model";
+	if (value === "(config directory)") return "Default location";
+	if (value === "(local only)") return "Local only";
+	if (value === "(unconfirmed)") return "Not confirmed";
+	if (value === "(built-in)") return "Built in";
+	if (value === "(defaults)") return "Default keys";
+	if (value === "(turn end only)") return "At turn end";
+	if (path === "turnControl.workflows" && !value.startsWith("["))
+		return `${value.split(",").filter((entry) => entry.trim().length > 0).length} enabled`;
+	if (path === "chat.maxOutputTokens" && value === "0") return "Model limit";
+	if (path === "context.workingSet.minEvictableTokens" && value === "0") return "Any size";
+	if ((path === "chat.retry.maxRetries" || path === "fleet.retry.maxRetries") && value === "0") return "No retries";
+	if (path === "chat.retry.firstTokenStallMs" && value === "0") return "Wait indefinitely";
+	if (path === "fleet.retry.routeCooldownMs" && value === "0") return "No wait";
+	if ((control?.kind === "list" || control?.kind === "json") && (value.startsWith("[") || value.startsWith("{"))) {
+		try {
+			const collection: unknown = JSON.parse(value);
+			const count = Array.isArray(collection)
+				? collection.length
+				: collection !== null && typeof collection === "object"
+					? Object.keys(collection).length
+					: 0;
+			if (path === "turnControl.workflows") return `${count} enabled`;
+			if (path === "fleet.rosters") return count === 0 ? "No rosters" : `${count} rosters`;
+			if (path === "fleet.nodes") return count === 0 ? "No remote nodes" : `${count} remote nodes`;
+			if (path === "interface.keybindings") return count === 0 ? "Default keys" : `${count} custom keys`;
+			if (path === "integrations.externalAgents.entries")
+				return count === 0 ? "No external agents" : `${count} external agents`;
+			if (path === "fleet.adaptiveRouting.agentRoles") return count === 0 ? "No active routes" : `${count} active routes`;
+			if (path === "chat.modelPicker.favorites") return count === 0 ? "No favorites" : `${count} favorites`;
+			return `${count} ${count === 1 ? "entry" : "entries"}`;
+		} catch {
+			// The editor shows the unparsed value while an invalid draft is being corrected.
+		}
+	}
+	if (control?.kind !== "number" && path !== "fleet.concurrency") return value;
+	const number = Number(value);
+	if (!value.trim() || !Number.isFinite(number)) return value;
+	if (path.endsWith("Ms") || path.endsWith("TimeoutMs") || path.endsWith("DelayMs")) {
+		if (path === "integrations.externalAgents.defaults.turnTimeoutMs" && number === 0) return "No limit";
+		if (number >= 60_000 && number % 60_000 === 0) return `${number / 60_000} min`;
+		if (number >= 1_000 && number % 1_000 === 0) return `${number / 1_000} sec`;
+		return `${number.toLocaleString()} ms`;
+	}
+	if (path.endsWith("Bytes")) return `${(number / 1024).toLocaleString()} KB`;
+	if (path === "safety.limits.sessionCostUsd" || path === "turnControl.orientation.maxCostUsdPerTurn")
+		return `$${number.toLocaleString()}`;
+	if (path === "systemOne.retentionDays") return `${number.toLocaleString()} days`;
+	if (path === "systemOne.maxMiB") return `${number.toLocaleString()} MiB`;
+	if (
+		path === "context.compaction.threshold" ||
+		path === "context.workingSet.target" ||
+		path === "context.workingSet.rearmFraction" ||
+		path.endsWith(".ratio")
+	)
+		return `${Math.round(number * 100)}%`;
+	return number.toLocaleString();
+}
+
+function settingsPathLabel(path: string): string {
+	const control = settingControl(path);
+	if (control) return control.label;
+	if (path === "targets" || path.startsWith("targets.")) return "Connections";
+	if (path.startsWith("fleet.agentProfiles.")) return `Agent ${path.slice("fleet.agentProfiles.".length)} profile`;
+	if (path.startsWith("fleet.profiles.")) {
+		const [, name, field] = path.match(/^fleet\.profiles\.([^.]+)(?:\.(.+))?$/) ?? [];
+		const part =
+			field === "target"
+				? "connection"
+				: field === "thinkingLevel"
+					? "thinking level"
+					: field === "node"
+						? "placement"
+						: field;
+		return `Profile ${name ?? ""}${part ? ` ${part}` : ""}`;
+	}
+	const last = path.split(".").at(-1) ?? path;
+	return last.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (letter) => letter.toUpperCase());
 }
 
 /** When a change reaches the running system, in the vocabulary of the config-change classification. */
@@ -2809,25 +3127,9 @@ function propagationFor(id: string): string | null {
 
 function rowColumns(items: readonly SettingsCenterItem[], width: number, indentWidth: number): RowColumns {
 	const safeWidth = Math.max(1, width);
-	const prefixWidth = indentWidth + 2;
-	// Drop the dotted config-path column entirely on very narrow terminals so the
-	// value never gets squeezed out of view.
-	if (safeWidth < DROP_PATH_COLUMN_WIDTH) {
-		const available = Math.max(1, safeWidth - prefixWidth - visibleWidth(ROW_GAP));
-		const label = Math.min(20, Math.max(6, Math.floor(available * 0.5)));
-		return { label, path: 0 };
-	}
-	const available = Math.max(1, safeWidth - prefixWidth - visibleWidth(ROW_GAP) * 2);
+	const available = Math.max(1, safeWidth - indentWidth - 4 - visibleWidth(ROW_GAP));
 	const labelNatural = Math.max(8, ...items.map((item) => visibleWidth(item.label)));
-	const pathNatural = Math.max(10, ...items.map((item) => visibleWidth(item.configPath)));
-	let label = Math.min(labelNatural, 26, Math.max(8, Math.floor(available * 0.34)));
-	let path = Math.min(pathNatural, 36, Math.max(8, Math.floor(available * 0.42)));
-	while (available - label - path < 8 && path > 8) path -= 1;
-	while (available - label - path < 8 && label > 8) label -= 1;
-	if (available - label - path < 4) {
-		path = Math.max(4, available - label - 4);
-	}
-	return { label, path };
+	return { label: Math.min(labelNatural, 34, Math.max(6, Math.floor(available * 0.62))) };
 }
 
 function formatSettingRow(
@@ -2838,6 +3140,7 @@ function formatSettingRow(
 	indentWidth: number,
 	displayValue: string,
 	pending: boolean,
+	pinned = false,
 ): string {
 	const theme = clioTheme();
 	const indent = " ".repeat(Math.max(0, indentWidth));
@@ -2871,29 +3174,24 @@ function formatSettingRow(
 		: modified
 			? theme.fg("changedValue", `${GLYPH.scoped} `)
 			: "  ";
-	let used = visibleWidth(indent) + 2 + columns.label + visibleWidth(ROW_GAP);
-	let pathSegment = "";
-	// Status rows need enough room for both their role/fact and their semantic
-	// health text. At the ultrawide center-column floor, the dotted config path
-	// is the expendable metadata; keeping it would collapse `chat+fleet` to
-	// `cha…` beside an otherwise readable health state.
-	if (columns.path > 0 && !(item.presentationKind === "status" && width < 64)) {
-		pathSegment = `${theme.fg("configPath", padAnsi(item.configPath, columns.path, GLYPH.ellipsis))}${ROW_GAP}`;
-		used += columns.path + visibleWidth(ROW_GAP);
-	}
+	const used = visibleWidth(indent) + 2 + columns.label + visibleWidth(ROW_GAP);
 	const valueWidth = Math.max(1, width - used - 2);
 	const valueSegments = pending
-		? [{ text: displayValue, tone: "neutral" as const }]
+		? [{ text: formatSettingsValue(item.configPath, displayValue), tone: "neutral" as const }]
 		: item.presentationKind === "read-only-fact"
-			? [{ text: "— ", tone: "neutral" as const }, ...item.valueSegments]
-			: item.valueSegments;
+			? [
+					{ text: "— ", tone: "neutral" as const },
+					...(item.valueSegments.length <= 1
+						? [{ text: formatSettingsValue(item.configPath, displayValue), tone: "neutral" as const }]
+						: item.valueSegments),
+				]
+			: item.presentationKind === "setting" && item.valueSegments.length <= 1
+				? [{ text: formatSettingsValue(item.configPath, displayValue), tone: "neutral" as const }]
+				: item.valueSegments;
 	const value = renderSettingValue(valueSegments, valueWidth, selected, item.readOnly, pending || modified);
-	return truncateToWidth(
-		`${indent}${prefix}${label}${ROW_GAP}${pathSegment}${marker}${value}`,
-		width,
-		GLYPH.ellipsis,
-		true,
-	);
+	// The pin mark takes the second cell of the label gap, so pinning never changes a row's width.
+	const gap = pinned ? ` ${theme.fg("annotation", GLYPH.favorite)}` : ROW_GAP;
+	return truncateToWidth(`${indent}${prefix}${label}${gap}${marker}${value}`, width, GLYPH.ellipsis, true);
 }
 
 function targetConsoleColumns(
@@ -2948,7 +3246,7 @@ function formatTargetConsoleHeader(width: number, indentWidth: number): string {
 	const theme = clioTheme();
 	const indent = " ".repeat(Math.max(0, indentWidth));
 	const available = Math.max(1, width - visibleWidth(indent) - 2);
-	const labels = { health: "HEALTH", id: "TARGET", roles: "ROLES", runtime: "RUNTIME", latency: "LATENCY" } as const;
+	const labels = { health: "HEALTH", id: "CONNECTION", roles: "USED BY", runtime: "TYPE", latency: "LATENCY" } as const;
 	const cells = targetConsoleColumns(available).map((column) =>
 		padAnsi(labels[column.key], column.width, GLYPH.ellipsis),
 	);
@@ -3061,6 +3359,10 @@ export interface SettingsCenterOptions {
 	onCancel: () => void;
 	onAddTarget?: () => void;
 	requestRender?: () => void;
+	/** Pins and recent changes to build the Recent & Pinned view from; absent means none yet. */
+	shortcuts?: SettingsShortcuts;
+	/** Persist a pin or unpin and return the resulting shortcuts; absent keeps the pin in memory only. */
+	pinSetting?: (id: string, pinned: boolean) => SettingsShortcuts;
 }
 
 export class SettingsCenter implements Component {
@@ -3093,10 +3395,37 @@ export class SettingsCenter implements Component {
 	/** Local cycle preview for the selected row; committed on Enter. */
 	private pendingValue: string | null = null;
 
+	private shortcuts: SettingsShortcuts;
+
 	constructor(
 		private readonly items: SettingsCenterItem[],
 		private readonly options: SettingsCenterOptions,
-	) {}
+	) {
+		this.shortcuts = options.shortcuts ?? { pinned: [], recent: [] };
+	}
+
+	/** Adopt shortcuts changed outside the screen, such as a setting that was just saved. */
+	setShortcuts(shortcuts: SettingsShortcuts): void {
+		this.shortcuts = shortcuts;
+		this.normalizeSelection();
+	}
+
+	private isPinned(item: SettingsCenterItem): boolean {
+		return this.shortcuts.pinned.includes(item.id);
+	}
+
+	/** `p` pins or unpins the selected setting. The row keeps its identity, so the cursor follows it between groups. */
+	private togglePin(): void {
+		const item = this.selectedItem();
+		if (!isShortcutRow(item)) return;
+		const pinned = !this.isPinned(item);
+		this.shortcuts = this.options.pinSetting?.(item.id, pinned) ?? {
+			pinned: pinned ? [...this.shortcuts.pinned, item.id] : this.shortcuts.pinned.filter((id) => id !== item.id),
+			recent: this.shortcuts.recent,
+		};
+		this.normalizeSelection();
+		this.options.requestRender?.();
+	}
 
 	getSelection(): SettingsCenterSelection {
 		const section = this.currentSection();
@@ -3114,7 +3443,7 @@ export class SettingsCenter implements Component {
 	}
 
 	setSelection(sectionName: SettingsSectionName, rowIndex: number, lane: SettingsCenterLane = "rows"): void {
-		const sectionId = resolveSettingsSection(sectionName) ?? SETTINGS_SECTIONS[0].id;
+		const sectionId = resolveSettingsArea(sectionName) ?? SETTINGS_SECTIONS[0].id;
 		if (this.sections().some((section) => section.id === sectionId)) this.selectedSectionId = sectionId;
 		const section = this.currentSection();
 		if (section) this.setRowIndex(section, this.selectableRowIndex(section, rowIndex));
@@ -3194,6 +3523,10 @@ export class SettingsCenter implements Component {
 			this.cyclePreview();
 			return;
 		}
+		if (data === "p" && this.level === "rows") {
+			this.togglePin();
+			return;
+		}
 		if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "enter")) {
 			if (this.level === "sections") {
 				this.level = "rows";
@@ -3262,13 +3595,15 @@ export class SettingsCenter implements Component {
 		return (this.filterDraft ?? this.filterQuery).trim();
 	}
 
-	private matchesFilter(item: SettingsCenterItem): boolean {
+	/** The area and group names are searchable too, so "delegation" finds what lives under Agents & Delegation. */
+	private matchesFilter(item: SettingsCenterItem, context: string): boolean {
 		const query = this.effectiveFilterQuery().toLowerCase();
 		if (query.length === 0) return true;
 		return (
 			item.label.toLowerCase().includes(query) ||
 			item.configPath.toLowerCase().includes(query) ||
-			item.description.toLowerCase().includes(query)
+			item.description.toLowerCase().includes(query) ||
+			context.toLowerCase().includes(query)
 		);
 	}
 
@@ -3278,22 +3613,26 @@ export class SettingsCenter implements Component {
 	 * section with no matching row disappears from the list entirely.
 	 */
 	private sections(): SettingsCenterSection[] {
-		const all = buildSettingsSections(this.items);
+		const all = buildSettingsSections(this.items, this.shortcuts);
 		if (this.effectiveFilterQuery().length === 0) return all;
+		// Search reaches every setting at its home; the shortcut view would only repeat those rows.
 		return all
-			.map((section) => ({ ...section, items: this.filterSectionItems(section.items) }))
+			.filter((section) => section.id !== "recent")
+			.map((section) => ({ ...section, items: this.filterSectionItems(section.items, section.label) }))
 			.filter((section) => section.items.some((item) => this.isSelectableRow(item)));
 	}
 
-	private filterSectionItems(items: readonly SettingsCenterItem[]): SettingsCenterItem[] {
+	private filterSectionItems(items: readonly SettingsCenterItem[], sectionLabel: string): SettingsCenterItem[] {
 		const kept: SettingsCenterItem[] = [];
 		let pendingHeader: SettingsCenterItem | null = null;
+		let groupLabel = "";
 		for (const item of items) {
 			if (!this.isSelectableRow(item)) {
 				pendingHeader = item;
+				groupLabel = item.label;
 				continue;
 			}
-			if (!this.matchesFilter(item)) continue;
+			if (!this.matchesFilter(item, `${sectionLabel} ${groupLabel}`)) continue;
 			if (pendingHeader) {
 				kept.push(pendingHeader);
 				pendingHeader = null;
@@ -3430,7 +3769,7 @@ export class SettingsCenter implements Component {
 		}
 		if (item.values && item.values.length > 0) {
 			const selectedValue = this.pendingValue ?? item.currentValue;
-			const choices = item.values.map((value) => ({ value, label: value }));
+			const choices = item.values.map((value) => ({ value, label: formatSettingsValue(item.configPath, value) }));
 			const list = new SettingsSelectList(choices, Math.min(10, choices.length), DEFAULT_SELECT_THEME);
 			list.setSelectedIndex(Math.max(0, item.values.indexOf(selectedValue)));
 			list.onSelect = (choice) => this.prepareScopeConfirm(item, choice.value);
@@ -3538,13 +3877,16 @@ export class SettingsCenter implements Component {
 		const targetRemovalPreflight = (() => {
 			if (!plan.rowId.startsWith("targets.") || plan.selectedValue !== "remove") return "";
 			const paths = (prefix: string): string[] =>
-				plan.leaves.filter((leaf) => leaf.path.startsWith(prefix)).map((leaf) => leaf.path);
-			const profiles = paths("fleet.profiles.").map((path) => path.slice("fleet.profiles.".length));
+				plan.leaves.filter((leaf) => leaf.path.startsWith(prefix)).map((leaf) => settingsPathLabel(leaf.path));
+			const profiles = plan.leaves
+				.filter((leaf) => leaf.path.startsWith("fleet.profiles."))
+				.map((leaf) => leaf.path.slice("fleet.profiles.".length).split(".")[0] ?? "profile");
 			const describe = (label: string, affected: readonly string[]): string =>
 				`Affected ${label}: ${affected.length > 0 ? affected.join(", ") : "none"}`;
 			return `${describe("chat route", paths("chat."))} · ${describe("fleet route", paths("fleet.default."))} · ${describe("memory route", paths("context.memory."))} · ${describe("profiles", profiles)} · `;
 		})();
-		const note = `${bindingPreflight}${targetRemovalPreflight}Affects ${plan.leaves.map((leaf) => leaf.path).join(", ")} · ${plan.impact}`;
+		const affected = [...new Set(plan.leaves.map((leaf) => settingsPathLabel(leaf.path)))];
+		const note = `${bindingPreflight}${targetRemovalPreflight}Affects ${affected.join(", ")} · ${plan.impact}`;
 		this.submenuComponent = new SubmenuWrapper(title, list, buildHint([{ key: "Enter", verb: "choose" }], "back"), note);
 	}
 
@@ -3740,7 +4082,7 @@ export class SettingsCenter implements Component {
 			).length;
 			const badge = filtering
 				? theme.fg("positionCount", ` ${matchCount}`)
-				: modifiedCount > 0
+				: modifiedCount > 0 && section.id !== "recent"
 					? theme.fg("changedValue", ` ${GLYPH.scoped}${modifiedCount}`)
 					: "";
 			const label = selected ? theme.style("selectedOption", section.label, { bold: true }) : section.label;
@@ -3764,7 +4106,7 @@ export class SettingsCenter implements Component {
 		const rows = section.items.slice(start, end).map((item, offset) => {
 			const isSelected = start + offset === selected && this.level === "rows";
 			const display = this.displayValueFor(item, isSelected);
-			return formatSettingRow(item, width, isSelected, columns, 0, display.value, display.pending);
+			return formatSettingRow(item, width, isSelected, columns, 0, display.value, display.pending, this.isPinned(item));
 		});
 		return fitRows([screenTitle(theme, section.label), ...rows], width, height);
 	}
@@ -3846,7 +4188,7 @@ export class SettingsCenter implements Component {
 		const rows = section.items.slice(start, end).map((item, offset) => {
 			const isSelected = start + offset === selected;
 			const display = this.displayValueFor(item, isSelected);
-			return formatSettingRow(item, width, isSelected, columns, 0, display.value, display.pending);
+			return formatSettingRow(item, width, isSelected, columns, 0, display.value, display.pending, this.isPinned(item));
 		});
 		return fitRows(rows, width, height);
 	}
@@ -3922,14 +4264,27 @@ export class SettingsCenter implements Component {
 			const modified = item.currentValue !== item.defaultValue;
 			parts.push(
 				modified
-					? `${theme.fg("changedValue", `${GLYPH.scoped} changed`)} ${theme.fg("defaultValue", `(default: ${item.defaultValue})`)}`
-					: theme.fg("defaultValue", `default: ${item.defaultValue}`),
+					? `${theme.fg("changedValue", `${GLYPH.scoped} changed`)} ${theme.fg("defaultValue", `(default: ${formatSettingsValue(item.configPath, item.defaultValue)})`)}`
+					: theme.fg("defaultValue", `default: ${formatSettingsValue(item.configPath, item.defaultValue)}`),
 			);
 		}
 		const valueMeaning = item.valueHelp?.[item.currentValue];
 		if (!item.readOnly && valueMeaning) parts.push(theme.fg("menuDescription", valueMeaning));
+		if (!item.readOnly && item.values && item.values.length > 0)
+			parts.push(
+				theme.fg(
+					"menuDescription",
+					`Choices: ${item.values.map((value) => formatSettingsValue(item.configPath, value)).join(", ")}`,
+				),
+			);
 		const propagation = propagationFor(item.id);
 		if (propagation) parts.push(theme.fg("annotation", propagation));
+		if (isShortcutRow(item))
+			parts.push(theme.fg("annotation", this.isPinned(item) ? `${GLYPH.favorite} pinned · p to unpin` : "p to pin"));
+		if (this.selectedSectionId === "recent") {
+			const home = SETTINGS_SECTIONS.find((area) => area.id === item.section);
+			if (home) parts.push(theme.fg("annotation", `in ${home.label}`));
+		}
 		return parts.join(theme.fg("border", "  ·  "));
 	}
 
@@ -3941,7 +4296,7 @@ export class SettingsCenter implements Component {
 			return "Enter opens actions · nothing changes until an action is confirmed";
 		if (item.readOnly) return "Read-only here · managed on the surface above";
 		if (item.scope === "restart") return "Saved to settings.yaml · restart Clio to apply";
-		return "Enter chooses a value · then choose session, global, or cancel before anything changes";
+		return "Enter opens this setting · then choose session, global, or cancel before anything changes";
 	}
 
 	/**
@@ -4061,10 +4416,15 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		getBodyHeight: () => settingsBodyHeight(tui),
 		prepareChange: (item, value) =>
 			createSettingsChangePlan(deps.getSettings(), item, value, Boolean(deps.commitSetting)),
+		shortcuts: listSettingsShortcuts(),
+		pinSetting: setSettingPinned,
 		onApply: (plan, scope) => {
 			if (deps.commitSetting) {
 				for (const leaf of plan.leaves) deps.commitSetting(leaf.path, plan.proposed as ClioSettings, scope);
 			} else deps.writeSettings(plan.proposed as ClioSettings);
+			// Only a committed edit counts: a canceled or refused one never reaches this line.
+			if (isShortcutRow(items.find((entry) => entry.id === plan.rowId)))
+				center.setShortcuts(rememberChangedSetting(plan.rowId));
 			deps.notice?.("success", formatSettingChangeNotice(plan.rowId, plan.selectedValue, scope), `settings:${plan.rowId}`);
 			refreshRows();
 		},
@@ -4074,8 +4434,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 	});
 	if (deps.section) {
 		const sectionItems =
-			buildSettingsSections(items).find((section) => section.id === resolveSettingsSection(deps.section ?? ""))?.items ??
-			[];
+			buildSettingsSections(items).find((section) => section.id === resolveSettingsArea(deps.section ?? ""))?.items ?? [];
 		const rowIndex = deps.rowId ? sectionItems.findIndex((item) => item.id === deps.rowId) : -1;
 		center.setSelection(deps.section, rowIndex >= 0 ? rowIndex : 0);
 	}
@@ -4112,6 +4471,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 						[
 							{ key: "Tab", verb: "switch level" },
 							{ key: "Space", verb: "preview" },
+							{ key: "p", verb: "pin" },
 							{ key: "Enter", verb: "open" },
 							{ key: "/", verb: "filter" },
 						],

@@ -14,6 +14,7 @@
  * color lives in `theme/**`; every emitted line is width-clamped.
  */
 
+import { redactSecretString } from "../../domains/safety/redaction.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { fitFooterText } from "../footer-panel.js";
 import type { ClioTheme, ClioToken } from "../theme/index.js";
@@ -79,7 +80,10 @@ export function notificationToken(level: NotificationLevel): ClioToken {
  */
 export function classifyNoticeLevel(text: string): NotificationLevel {
 	if (/malformed|\bfailed\b|\berror\b/i.test(text)) return "error";
-	if (/keybinding|may not fire|invalid|differs|changed|no fingerprint|stale/i.test(text)) return "warning";
+	// An untrusted project layer is ignored until the operator acts, so its
+	// notice must stay until read rather than fade with advisory hints.
+	if (/keybinding|may not fire|invalid|differs|changed|no fingerprint|stale|untrusted|not trusted/i.test(text))
+		return "warning";
 	return "info";
 }
 
@@ -453,7 +457,11 @@ export function formatNotificationPanel(
 		const glyph = theme.fg(notificationToken(entry.level), notificationGlyph(entry.level));
 		const prefix = `${glyph} `;
 		const prefixWidth = visibleWidth(prefix);
-		const wrapped = wrapTextWithAnsi(theme.fg("notice", entry.text), Math.max(1, width - prefixWidth));
+		// Same redaction as the compact line; only the one-line flattening is skipped.
+		const wrapped = wrapTextWithAnsi(
+			theme.fg("notice", redactSecretString(entry.text)),
+			Math.max(1, width - prefixWidth),
+		);
 		lines.push(
 			...wrapped.map((line, index) => fitFooterText(`${index === 0 ? prefix : " ".repeat(prefixWidth)}${line}`, width)),
 		);

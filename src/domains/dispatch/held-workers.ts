@@ -2,9 +2,9 @@
  * Speculative dispatch: worker processes started ahead of the dispatch that
  * would use them.
  *
- * This works like speculative decoding. Before a turn, the `dispatchForecast`
- * site predicts which recipe the main agent is about to dispatch. When the
- * prediction is confident, the harness starts that worker's process and holds
+ * This works like speculative decoding. Before a turn, the System One `turn`
+ * site predicts which recipe the main agent is about to dispatch. When its
+ * fitted prewarm cut fires, the harness starts that worker's process and holds
  * it at "waiting for spec" while the main model generates. A dispatch that
  * resolves to exactly the predicted recipe, target, model, runtime and working
  * directory adopts the held process; anything else runs on an ordinary cold

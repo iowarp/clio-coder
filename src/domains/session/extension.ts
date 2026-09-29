@@ -257,14 +257,18 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			// forkFromState reads and validates the parent's own ancestry chain
 			// and can throw (unknown or broken parent turn) before it ever creates
 			// the child session; it closes `prior.writer` itself, and only once the
-			// child is known good (see tree/fork.ts). Do not null or park `state`
-			// until forkFromState returns, for the same reason as resume() above.
+			// child is known good (see tree/fork.ts). Do not null `state` until
+			// forkFromState returns, for the same reason as resume() above.
+			// The park goes out from inside forkFromState, after the child is known
+			// good and before it closes the parent: park listeners append to the
+			// parent's ledger (System One's pending rows) and a closed writer refuses
+			// them, which is what dropped those rows on a fork.
 			const { next, nodes } = forkFromState({
 				from: prior,
 				parentTurnId,
 				...(input?.cwd !== undefined ? { cwd: input.cwd } : {}),
+				beforeClose: () => emitPark(prior.meta.id, "fork"),
 			});
-			emitPark(prior.meta.id, "fork");
 			state = next;
 			currentTurnId = computeLeafId(nodes);
 			return next.meta;

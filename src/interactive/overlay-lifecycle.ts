@@ -1,7 +1,5 @@
-import { credentialsPresent } from "../domains/providers/credentials.js";
-import { inspectDecisionSite } from "../domains/providers/decision-sites.js";
 import type { LibraryEntryKind } from "../domains/resources/index.js";
-import { describeToolRisk as readToolRisk, toolRiskAdvisoryLine } from "../domains/safety/tool-risk.js";
+import { TOOL_CALL_CARD_SITE } from "../domains/system-one/sites/tool-call.js";
 import { appendInterviewRecord, appendNotice } from "./command-output.js";
 import { judgeDraftsAtSite } from "./drafts.js";
 import type { OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
@@ -23,12 +21,6 @@ import {
 	permissionOverlayTitle,
 	permissionOverlayTone,
 } from "./permission-overlay.js";
-
-/**
- * Bound on the advisory request. Nothing waits on it, so this is only how long
- * a card keeps a request alive before giving up on ever showing the line.
- */
-const TOOL_RISK_DECISION_TIMEOUT_MS = 5_000;
 
 export * from "./overlay-key-routing.js";
 
@@ -54,6 +46,8 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "userTasks"
 	| "getDecisionBoard"
 	| "getTaskMemoryStatus"
+	| "systemOne"
+	| "recordOutcome"
 	| "interop"
 	| "observability"
 	| "onContextClear"
@@ -293,24 +287,21 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		/**
 		 * The blast-radius sentence for one parked call, or nothing at all.
 		 *
-		 * Resolved here rather than in the composition root because the binding is
-		 * read per call: an operator who unbinds the site mid-session stops seeing
-		 * the line on the next approval instead of at the next restart. Every path
-		 * that cannot produce a sentence returns the empty string, and the caller
-		 * never waits on this.
+		 * The `toolCall` binding is read per run: an operator who unbinds the site
+		 * mid-session stops seeing the line on the next approval instead of at the
+		 * next restart. The request id is the join key, so the operator's answer
+		 * lands beside the advisory in the dataset. Every path that cannot produce
+		 * a sentence returns the empty string, and the caller never waits on this.
 		 */
 		describeToolRisk: async (subject) => {
-			const settings = deps.app.getSettings?.();
-			if (!settings || !deps.app.providers) return "";
-			const status = inspectDecisionSite("toolRisk", {
-				settings,
-				providers: deps.app.providers,
-				ctx: () => ({ credentialsPresent: credentialsPresent(), httpTimeoutMs: TOOL_RISK_DECISION_TIMEOUT_MS }),
-			});
-			if (!status.bound) return "";
-			return toolRiskAdvisoryLine(
-				await readToolRisk(status.decider, subject, `${status.targetId}/${status.model ?? "default"}`),
+			const systemOne = deps.app.systemOne;
+			if (!systemOne) return "";
+			const verdict = await systemOne.run(
+				TOOL_CALL_CARD_SITE,
+				{ tool: subject.tool, actionClass: subject.actionClass, target: subject.target, moment: "card" },
+				subject.requestId !== undefined ? { ref: subject.requestId } : {},
 			);
+			return verdict?.value.line ?? "";
 		},
 		getOverlayState: () => overlayTransitions.state,
 		openPermissionOverlay: (view, inspect, invocation, advisory) => {
@@ -502,16 +493,13 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		askSideQuestion: (question, options) => deps.app.chat.askSideQuestion(question, options),
 		draftCandidates: (request, count, options) => deps.app.chat.draftCandidates(request, count, options),
 		/**
-		 * Read per call, like the toolRisk site, so binding or unbinding `drafts`
+		 * Read per call, like the card advisory, so binding or unbinding `drafts`
 		 * mid-session applies to the next draft.
 		 */
-		judgeDrafts: (request, candidates, signal) =>
-			judgeDraftsAtSite(
-				{ settings: deps.app.getSettings?.(), providers: deps.app.providers },
-				request,
-				candidates,
-				signal,
-			),
+		judgeDrafts: (request, candidates, signal, ref) =>
+			judgeDraftsAtSite({ systemOne: deps.app.systemOne }, request, candidates, signal, ref),
+		composer: editor,
+		...(deps.app.recordOutcome ? { recordOutcome: deps.app.recordOutcome } : {}),
 		...(deps.app.agents ? { agents: deps.app.agents } : {}),
 		...(scheduling ? { getBudgetPreflight: () => scheduling.preflight() } : {}),
 		isTurnInFlight: () => deps.app.chat.isStreaming(),

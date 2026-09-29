@@ -4,7 +4,7 @@ This guide covers the installed CLI, headless run behavior, interactive commands
 
 ## Demo presentation and guidance
 
-Demo presentation and guidance are on by default before 1.0. The full welcome shows the stacked cyan-to-copper wordmark, workspace and fleet facts, and shortcut hints. It reserves two subscription rows from the first paint, keeping its 17-row height and Fleet placement steady while account data hydrates. Longer summaries show an ellipsis and `/usage` for the complete account details. With `--no-demo` or `interface.demo: false`, both the instant shell and hydrated TUI open with a compact identity header: the same editor and chosen regular/fullscreen layout, without artwork or welcome-only context, subscription, and recipe reads. Optional attention animation and smooth-streaming pacing are disabled; work status and approval text remain visible. Dumb/unknown terminals and screen-reader mode also use the compact welcome.
+Demo presentation and guidance are on by default before 1.0. The full welcome shows the stacked cyan-to-copper wordmark, workspace and fleet facts, and shortcut hints. It reserves two subscription rows from the first paint, keeping its height and Fleet placement steady while account data hydrates. Longer summaries show an ellipsis and `/usage` for the complete account details. With `--no-demo` or `interface.demo: false`, both the instant shell and hydrated TUI open with a compact identity header: the same editor and chosen regular/fullscreen layout, without artwork or welcome-only context, subscription, and recipe reads. Optional attention animation and smooth-streaming pacing are disabled; work status and approval text remain visible. Dumb/unknown terminals and screen-reader mode also use the compact welcome.
 
 After a turn, Clio may show one `[tip]` row that fits what the turn did: a question about Clio's own settings, a side question that `/btw` would keep out of the transcript, a correction that `/tree` could rewind, a long answer that another output style would fold. The harness picks the tip. The model never sees it, and no model call is made. At most four tips appear per session, spaced several turns apart, and a tip retires once you use its feature yourself or it has been shown twice.
 
@@ -20,11 +20,10 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder run "<task>" [flags]` | Run one headless main-agent turn. Use `--json` for JSONL events. |
 | `clio-coder run "<task>" --agent <id> [flags]` | Dispatch one explicit fleet agent non-interactively and write a receipt. |
 | `clio-coder acp [--cwd PATH] [--permission-timeout MS]` | Serve Clio as an ACP v1 agent over stdio for ACP frontends. |
-| `clio-coder acp [--cwd PATH] auth login` | Open interactive Quick Connect when an ACP client offers terminal authentication. |
-
-Without `--cwd`, ACP binds the first session's absolute workspace path before it loads project settings or tools. `--cwd PATH` binds the workspace when Clio starts.
-| `clio-coder --version` | Print the installed version. `clio-coder version` is the subcommand form. |
-| `clio-coder --help [--all]` | Print the command list. `--all` appends every command under `clio-coder dev`. |
+| `clio-coder acp [--cwd PATH] auth login` | Open interactive Quick Connect when an ACP client offers terminal authentication. `clio-coder --acp` is an alias for `clio-coder acp`. |
+| `clio-coder --version` / `-v` | Print the installed version. `clio-coder version` is the subcommand form. |
+| `clio-coder --help [--all]` / `-h` | Print the command list. `--all` appends every command under `clio-coder dev`. |
+| `clio-coder --demo` / `clio-coder --no-demo` | Start the interactive session with the full welcome and guidance, or with the compact startup. Refused with exit 2 before a subcommand. |
 | `clio-coder --api-key <key>` | Override the active target API key for one invocation. |
 | `clio-coder --no-context-files` / `clio-coder -nc` | Skip `CLIO-CODER.md` project-context injection for one invocation. |
 | `clio-coder --with-panes` | Activate guest pane integration for this invocation when Clio is inside a reachable herdr session. |
@@ -33,16 +32,17 @@ Without `--cwd`, ACP binds the first session's absolute workspace path before it
 | `clio-coder --no-skills` | Disable skill discovery for one invocation and automatic skill/marketplace prompt guidance while still honoring explicit `--skill` paths. |
 | `clio-coder --skill <path>` | Make one explicit skill file or directory available for one invocation (repeatable). Clio loads its instructions when the skill is activated through `context(scope="skills", name=...)`. |
 | `clio-coder configure` | Run the configuration wizard. Ctrl+C reports `configuration cancelled`, writes no target, and exits 130; when first-run onboarding is cancelled, startup stops instead of opening the TUI with no usable target. |
+| `clio-coder configure [--quick\|--settings\|--section <name>\|--json\|--edit]` | `--quick` connects an endpoint with recommended defaults, `--settings` opens the complete settings menu, `--section <name>` opens one of `targets`, `chat`, `fleet`, `context`, `safety`, `interface`, `integrations` or `advanced` (without a terminal it prints that section's values), `--json` prints the effective settings, and `--edit` edits user settings in `VISUAL`/`EDITOR` with validation and review before saving. |
 | `clio-coder configure --interop` | Review other coding agents detected on this machine and connect one as a delegation peer. Without a TTY it prints the proposals and writes nothing. |
 | `clio-coder configure --list` | List user-facing runtime ids. |
 | `clio-coder configure --list --all` | List every registered runtime, including aliases. |
 | `clio-coder config [inspect] [--json]` | Print the effective customization graph across settings, context files, rules, skills, prompts, agents, extensions, safety, memory, hooks, and operator profile. |
 | `clio-coder config trust safety\|hooks\|settings [--json\|--hash <sha256>\|--revoke]` | Review, approve, or revoke one privilege-bearing project surface for this workspace. See [Project trust](#project-trust). |
-| `clio-coder targets [--json] [--probe [--reasoning] [--tools]] [--target <id>]` | List targets and metadata; `--reasoning` and `--tools` explicitly generate qualification requests. |
+| `clio-coder targets [--json] [--probe [--reasoning] [--tools [--tools-timeout <seconds>]]] [--target <id>]` | List targets and metadata; `--reasoning` and `--tools` explicitly generate qualification requests, and `--tools-timeout` bounds each tool probe. |
 | `clio-coder targets add` | Add a target interactively or through configure flags. |
 | `clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]` | Select the named roles only when any role flag is present. `--background-model` selects memory; `--orchestrator-model` selects chat; `--fleet-model` or `--fleet-target` selects fleet. Other roles and thinking levels are preserved. Without role flags, chat and fleet use the target default (or shared `--model`), while memory is preserved. With role flags, `--model` is refused with exit 2 when no selected role falls back to it; pass `--orchestrator-model` to set chat. Confirmation names only roles whose settings changed. Model IDs must match a nonempty discovered or cached inventory exactly; unavailable discovery is reported explicitly. |
 | `clio-coder targets fleet [--json]` | List the configured fleet profiles with their target, runtime, model, and thinking level. `targets workers` is an accepted alias. |
-| `clio-coder targets profile list\|set\|remove\|rename\|bind\|unbind\|bindings` | Manage named fleet profiles and agent bindings. `clio-coder targets profile <name> <id>` is the short form of `profile set`, and `targets worker` is an accepted alias for `targets profile`. |
+| `clio-coder targets profile list\|set\|remove\|rename\|bind\|unbind\|bindings` | Manage named fleet profiles and agent bindings. `set <name> <id>` takes `--model` and `--thinking`; `remove <name>` takes `--force`; `bind <agentId> <profileName>` and `unbind <agentId>` attach and detach an agent. `clio-coder targets profile <name> <id>` is the short form of `profile set`, and `targets worker` is an accepted alias for `targets profile`. |
 | `clio-coder targets convert <id> --runtime <runtimeId>` | Convert older local target definitions to a runtime-specific target. |
 | `clio-coder targets remove <id>` | Remove a target. |
 | `clio-coder targets rename <old> <new>` | Rename a target id. |
@@ -58,23 +58,26 @@ Without `--cwd`, ACP binds the first session's absolute workspace path before it
 | `clio-coder tools status <id> [--json] [--reset-profile]` | Inspect one registered tool. `--reset-profile` applies only to yazi's generated profile. |
 | `clio-coder tools install <id> [--force] [--json]` | Download the platform asset, verify every declared checksum, and atomically vendor it. |
 | `clio-coder tools remove <id>\|--all [--json]` | Remove Clio-vendored copies without touching a program found on `PATH`. |
-| `clio-coder panes install` | Alias for `clio-coder tools install herdr`. |
+| `clio-coder panes install [--force] [--json]` | Alias for `clio-coder tools install herdr`. |
 | `clio-coder panes theme` | Print Clio's theme tokens as a herdr `[theme.custom]` block to paste into herdr's `config.toml`; Clio never edits that file itself. See [Panes and the Files Pane](panes-and-files.md). |
-| `clio-coder tasks [list\|add\|hand\|done\|drop]` | List, add, hand, finish, or drop project operator tasks. |
-| `clio-coder verifiers discover\|inspect\|author\|validate\|edit\|dry-run` | Discover, inspect, author, validate, edit, or dry-run project checks. |
+| `clio-coder systemone status\|export --out <file> [--since <YYYY-MM-DD>] [--site <site>]` | Show whether System One recording is on, what the local dataset holds and where each site is bound, or export the dataset as JSON lines. See [System One](system-one.md#the-training-dataset). |
+| `clio-coder tasks [list\|add\|hand\|done\|drop]` | List, add, hand, finish, or drop project operator tasks. `add` takes `--expect <path>` and `--verify <checkId>[:timeoutMs]`; `hand`, `done` and `drop` take a `uN` id. |
+| `clio-coder verifiers discover\|inspect\|author\|validate\|add\|edit\|rename\|remove\|baseline\|dry-run` | Discover, inspect, author, validate, add, edit, rename, remove, baseline, or dry-run project checks. |
 | `clio-coder reset [--state\|--data\|--cache\|--auth\|--config\|--all] [--dry-run] [--force] [--json]` | Reset selected Clio Coder state. `--state` is the default level. |
 | `clio-coder uninstall [--dry-run] [--remove-binary] [--keep-config] [--keep-data] [--force] [--json]` | Remove Clio Coder state and print uninstall guidance. |
 | `clio-coder upgrade [--dry-run] [--channel=<latest\|beta\|dev>] [--skip-migrations] [--restart] [--json]` | Update an identified npm global installation in its original prefix and apply migrations with that installation's new binary. Other managers receive update instructions. `--post-install` runs local migrations and repairs only. `--restart` relaunches the installed CLI in the project after success, where `/resume` picks up the last session; it requires a terminal and cannot combine with `--json` or `--post-install`. |
 | `clio-coder agents [--json] [--all]` | List discovered agent specs. |
-| `clio-coder fleet list\|run\|status\|drain\|resume` | List fleet contracts, run one, show dispatch state, or control admission. `drain` denies new execution starts for up to one hour and preserves running work; `resume` reopens admission immediately. `run <name>` takes `[--var k=v ...]`, `[--resume <runId>]` and `[--json]` and refuses any other flag with exit 2; `status` takes `[--json] [--all]` and defaults to this project; `drain` and `resume` each take `[--json]`. |
+| `clio-coder fleet list\|new\|validate\|graph\|commands\|run\|status\|drain\|resume` | List fleet contracts, copy a built-in one with `new <name> --from <build-review\|build-test\|sdlc>`, validate or graph one without side effects (`validate <name> [--json]`, `graph <name> [--json]`), draft a command registry with `commands init`, run one, show dispatch state, or control admission. `drain` denies new execution starts for up to one hour and preserves running work; `resume` reopens admission immediately. `run <name>` takes `[--var k=v ...]`, `[--resume <runId>]` and `[--json]` and refuses any other flag with exit 2; `status` takes `[--json] [--all]` and defaults to this project; `drain` and `resume` each take `[--json]`. |
+| `clio-coder fleet verify <runId>` | Re-authenticate one run's sealed receipt now, instead of reading the trust status a snapshot captured earlier. |
 | `clio-coder fleet inspect\|decisions --json [--all]` | Read bounded run, council, and gate decision summaries for this project. `--all` reads machine-wide state. |
 | `clio-coder fleet view <runId\|fleetRootId> [--follow] [--all]` | Read the append-only run journal after verifying receipt trust. A fleet root prints its durable step index. IDs from other projects require `--all`. Without `--follow`, the width-bounded snapshot is plain text with no ANSI control bytes. `--follow` requires an interactive terminal and one run id; `fleet view --help` prints this subcommand's own usage, including `--watch`. |
 | `clio-coder fleet view --watch <selection-file>` | Follow the run id currently named by the selection file and retarget when it changes. This is the operator-pulled watch surface used by the pane integration. |
 | `clio-coder dev components [list] [--json]` | List behavior-affecting harness components. |
 | `clio-coder dev components snapshot --out <path>` | Write a component snapshot JSON file. |
 | `clio-coder dev components diff --from <a> --to <b> [--json]` | Compare component snapshots. |
-| `clio-coder evidence build\|inspect\|list` | Build and inspect deterministic evidence artifacts. |
-| `clio-coder memory list\|propose\|promote\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
+| `clio-coder evidence build\|inspect\|list\|inventory` | Build (`build --run <runId>` or `--session <sessionId>`) and inspect deterministic evidence artifacts. `inventory --json` is the fixed GUI read. |
+| `clio-coder memory list\|propose\|promote\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. `propose --from-evidence <evidenceId>`, `promote --from-handoff <path> --scope <scope>` (with `--entry <id>` to pick entries), `approve <memoryId>`, `reject <memoryId>` and `prune --stale`. Scopes are `repo`, `global`, `runtime` and `agent`. |
+| `clio-coder interop inspect [--json]` | Show the host inventory of detected coding agents and how far each one is wired. Changes no host or project files and starts no agent session. |
 | `clio-coder trace runs [--db PATH] [--limit N] [--json]` | List runs recorded in the durable trace mirror beside the ledger. |
 | `clio-coder trace inspect --json` | Emit the fixed, bounded recent accounting projection used by the graphical application. It accepts no path, identifier, or limit and omits request text, error prose, event payloads, process commands, PIDs, and hosts. |
 | `clio-coder trace phases <runId> [--db PATH]` | Show one run's recorded phases. |
@@ -84,9 +87,9 @@ Without `--cwd`, ACP binds the first session's absolute workspace path before it
 | `clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]` | Apply the trace-retention policy while protecting queued and running runs; JSON reports the resolved policy, rows, runs and bytes removed, protected runs, and whether vacuum ran. |
 | `clio-coder trace sql <SELECT query> [--db PATH]` | Run one read-only query against the mirror. Only a single `SELECT` or read-only `WITH` statement is accepted; anything else exits 2. |
 | `clio-coder dev evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
-| `clio-coder extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. `clio-coder ext` is an accepted alias. |
-| `clio-coder library list\|search\|register\|inspect\|validate\|install\|update\|enable\|disable\|drift\|pin\|remove` | Manage packages of kind plugin, skill, agent, prompt or fleet at user/project scope; `install/update --dry-run` preview. `library skills` lists runtime skills; `library inventory --json` is the fixed GUI read. |
-| `clio-coder gui [--open]`, `clio-coder dev gui` | Start the graphical application, an opt-in alpha for power users listed under `clio-coder --help --all`; the terminal UI stays the primary interface and nothing starts the application unless you run it. `--open` opens the browser. See the [GUI reference](#graphical-application). |
+| `clio-coder extensions list\|discover\|run\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots, or run an extension command with `run <id> <command> -- [arguments]`. `list`, `install`, `enable`, `disable` and `remove` take `--user` or `--project`. `clio-coder ext` is an accepted alias. |
+| `clio-coder library list\|search\|recipes\|register\|inspect\|validate\|install\|import\|update\|enable\|disable\|drift\|pin\|remove\|reload` | Manage packages of kind plugin, skill, agent, prompt or fleet at user/project scope; `install`, `import`, `update`, `enable`, `disable` and `remove` accept `--dry-run` to preview. `import` takes a path or GitHub tree URL. `library skills` lists runtime skills; `library inventory --json` is the fixed GUI read. `library sync`, `library push` and `library remote confirm <url>` manage a remote library. |
+| `clio-coder gui [--path </app/path>] [--open\|--no-open] [--foreground]`, `clio-coder dev gui` | Start the graphical application, an opt-in alpha for power users listed under `clio-coder --help --all`; the terminal UI stays the primary interface and nothing starts the application unless you run it. See the [GUI reference](#graphical-application). |
 | `clio-coder usage report [--repo <path>] [--days <n>] [--json]` | Cross-session usage facts from session/run ledgers and retained out-of-turn calls, including known failed-compaction spending and missing coverage. The window defaults to 30 days and the JSON schema is marked experimental. |
 | `clio-coder dev share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--agents] [--fleets] [--settings] [--extensions] [--all] [--dry-run] [--json]` | Export project context, prompts, skills, agents, fleets, settings fragments, and extension bundles. `--dry-run` lists what the archive would hold and writes nothing. |
 | `clio-coder dev share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
@@ -102,18 +105,25 @@ Without `--cwd`, ACP binds the first session's absolute workspace path before it
 | `clio-coder context replay (--sessions <path>... \| --synthetic <ids>) [--policies <ids>] [--profile <id>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--protect-last-turns <n>] [--protect-last-steps <n>] [--min-evictable-tokens <n>] [--rearm-fraction <ratio>] [--overflow-fraction <ratio>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio session ledgers or the seeded procedural corpora and report retention, precision, token savings, recall cost, cold-prefix cost, saturation, and summary headroom. Non-default profiles include paired default-profile comparisons. |
 | `clio-coder context working-set --session <id\|path>` | Inspect one session's durable working-set fold and path-index summary without modifying the ledger. |
 
+Without `--cwd`, ACP binds the first session's absolute workspace path before it loads project settings or tools. `--cwd PATH` binds the workspace when Clio starts.
+
 ACP frontends can list, load, resume, and delete sessions through the stable session methods. Clio offers `default` and `yolo` as ACP modes. A frontend can change autonomy with `session/set_mode` or the `mode` configuration option. The `model` and `thought_level` options change only the hosted session; saved defaults stay as they were. Mode and option changes wait until the current prompt finishes.
 
 The startup flags `--api-key`, `--no-context-files` (`-nc`), `--no-skills` and `--skill` apply to the interactive session, `clio-coder run` and `clio-coder acp`. `--with-panes` and `--no-panes` apply to the interactive session alone. A startup flag given before any other subcommand is refused with exit 2 and a message naming the flag and the subcommand, because that command would ignore it.
 
 ### Graphical application
 
-Run `clio-coder gui --open` to open the local browser application. It reuses this
+Run `clio-coder gui` to open the local browser application. It reuses this
 installation's owned background application when present; otherwise it starts a
-private foreground server. Use `--foreground` to select a private server explicitly.
-On Linux with a systemd user session, `clio-coder gui background install --open`
-installs the optional login service. `clio-coder gui launcher install` adds a
-desktop entry; each has an `uninstall` command.
+private foreground server that stops with Ctrl+C. A browser opens by itself only from
+an interactive terminal on a desktop; `--open` always opens one and `--no-open` never does.
+`--foreground` selects a private server explicitly, as do `--port`, `--idle-exit <milliseconds>`,
+`--token` and `--log-file`. `--path </app/path>` opens a particular page, and `--reuse-background`
+fails instead of starting a private server when the background application cannot be used.
+On Linux with a systemd user session, `clio-coder gui background install [--open] [--port <1-65535>]`
+installs the optional login service, and `gui background status|start|open|restart [--if-idle]|stop|uninstall`
+manages it. `clio-coder gui launcher install|status|uninstall` manages a desktop entry.
+macOS and Windows run the private server only, and Windows prints the link instead of opening it.
 
 On a fresh installation, the home page offers **Guided setup** before you open a
 project. It presents the same source choices, authentication steps, model
@@ -318,7 +328,7 @@ In prompt generation, turn constraints render as the final `# Current task scope
 
 Slash commands are available inside the TUI. Type `/` at the start of the prompt to open the grouped command palette autocomplete.
 
-The registry table below lists the available interactive slash commands. On a bare `/`, commands are presented in groups (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Each operation has one canonical spelling; autocomplete, help, and parsing all read the same registry. The "Usage" column details expected arguments, with brackets `[]` indicating optional arguments and angle brackets `<>` indicating required arguments.
+The registry table below lists the available interactive slash commands. On a bare `/`, commands are presented in groups (`Work`, `Inspect`, `Configure`, `Session`) with compact argument hints. Each operation has one canonical spelling; autocomplete, help, and parsing all read the same registry. The "Usage" column details expected arguments, with brackets `[]` indicating optional arguments and angle brackets `<>` indicating required arguments.
 
 | Command | Usage | Purpose |
 | --- | --- | --- |
@@ -329,7 +339,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/interrupt` | `/interrupt <text>` | Settle the active run and send text through the interrupt owner; refusals keep its existing next-slot behavior. Missing text is correctable. |
 | `/editor` | `/editor [text]` | Edit explicit text or an empty buffer externally; return to the composer for deliberate submission. Failure preserves the command for correction. |
 | `/notifications` | `/notifications dismiss [all]` | Dismiss the oldest notice once, or explicitly dismiss all; this does not mute future notices. |
-| `/library` | `/library [inspect \| install \| remove <ref>] [import <path-or-url>] [reload]` | Open the full-screen Library with Skills, Agents, Prompts, Fleets and Plugins tabs. A named reference opens the browser on that row; `install`, `remove` and `import` show a reviewed plan first and write nothing until it is accepted. `reload` refreshes installed recipe resources. Alt+L opens the same browser. |
+| `/library` | `/library [inspect \| install \| remove <ref> [--user \| --project]] [import <path-or-url> [--user \| --project]] [reload]` | Open the full-screen Library with Skills, Agents, Prompts, Fleets and Plugins tabs. A named reference opens the browser on that row; `install`, `remove` and `import` show a reviewed plan first and write nothing until it is accepted. `reload` refreshes installed recipe resources. Alt+L opens the same browser. |
 | `/skills` | `/skills` | Open the Library on Skills. |
 | `/prompts` | `/prompts` | Open the Library on Prompts. |
 | `/mcp` | `/mcp [list] \| /mcp trust <id> [class] \| /mcp untrust <id>` | List MCP servers or manage explicit trust for project MCP servers with optional action class |
@@ -341,14 +351,14 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/delegate` | `/delegate [--read-only] [--share] <agent-id> <task>` | Run a configured ACP peer with a managed receipt; `--read-only` denies write permission requests. |
 | `/peer` | `/peer [--cwd <workspace>] <claude-code\|codex\|opencode\|antigravity\|pi> [brief]` | Open an installed coding agent in an owned Herdr pane; no managed receipt. |
 | `/btw` | `/btw <question>` | Ask a side question that never enters the session transcript |
-| `/draft` | `/draft [N] <request>` | Draft N answers in parallel (2-4, default 3) and let a decision model pick the strongest |
+| `/draft` | `/draft [N] <request>` | Draft N answers in parallel (2-4, default 3). With the System One `drafts` site bound, a decision engine says which to read first. `Enter` on a finished draft puts it in the composer, unsent |
 | `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
-| `/council` | `/council [--roster <name>] [--rounds <n>] [--synthesis <judge\|vote\|none>] <task>` | Ask a roster of read-only members the same task, with an optional vote or judge synthesis |
+| `/council` | `/council [--roster <name>] [--rounds <n>] [--synthesis <judge\|vote\|none>] <task>` | Ask a roster of read-only members the same task, with an optional vote or judge synthesis; `--rounds` takes an integer from 1 to 3 |
 | `/agents` | `/agents` | Open the Library on Agents. |
 | `/usage` | `/usage` | Show workspace activity, subscription quota, credits, and session token and cost totals |
 | `/doctor` | `/doctor [deep]` | Show a diagnostic report with errors and warnings first and full wrapped check details; `deep` adds live tool probes on the session's targets and a validation-contract dry run at the session's autonomy. See [Doctor](doctor.md). |
 | `/upgrade` | `/upgrade` | Recheck the latest release, review an eligible npm-global replacement, and ask before changing the package. User data is preserved; after success Clio asks you to exit and restart. Other installation kinds receive manager-specific instructions. |
-| `/context` | `/context compact [instructions] \| /context recall <ref> \| /context init [--preview] [--heuristic] [--adopt] [--global] [--propose\|--apply\|--rewrite] \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, init, refresh, and reset |
+| `/context` | `/context compact [instructions] \| /context recall <ref> \| /context recover <handoffId> <reduce\|deliver> \| /context init [--preview] [--heuristic] [--adopt] [--global] [--propose\|--apply\|--rewrite] \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, recover a paused handoff, init, refresh, and reset. `/context reset` also takes `--yes` and `--all` for hosts without a chooser |
 | `/fleet` | `/fleet [run [--var <key=value>] <name>]` | Open Fleet Runs, or run a fleet contract with an approval preview. Configure fleets with `/settings fleet`. |
 | `/decisions` | `/decisions` | Show settled interview decisions and operator revisions |
 | `/tasks` | `/tasks add [--expect <path>] [--verify <checkId>[:timeoutMs]] <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
@@ -359,11 +369,11 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/thinking` | `/thinking [level]` | Set the chat thinking level; bare `/thinking` opens a picker of the levels this route supports |
 | `/model` | `/model [pattern]` | Open model selector or set a model |
 | `/config` | `/config [area] [group]` | Open settings; alias for `/settings`, including target setup in the dock |
-| `/settings` | `/settings [chat\|fleet\|targets\|context\|safety\|interface\|integrations] [group]` | Open interactive settings, optionally at a durable area and UI group |
+| `/settings` | `/settings [targets\|chat\|fleet\|context\|safety\|interface\|integrations\|advanced] [group]` | Open interactive settings, optionally at a durable area and UI group |
 | `/resume` | `/resume` | Resume a past session on the route it last ran on |
 | `/new` | `/new` | Start a fresh session |
 | `/handoff` | `/handoff <goal>` | Hand this session's working state to a fresh session for a stated goal |
-| `/tree` | `/tree` | Open session tree navigator. Press `p` to filter by current cwd and `s` to cycle tree order or most recent first. |
+| `/tree` | `/tree` | Open session tree navigator. Press `p` to filter by current cwd, `s` to cycle tree order or most recent first, `e` to label the selected entry, and `Shift+T` to toggle timestamps. |
 | `/fork` | `/fork` | Fork from an assistant turn |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
 
@@ -381,12 +391,13 @@ command for folding token and cost facts across past sessions.
 
 | View | What it shows |
 | --- | --- |
+| Activity | A heatmap of this workspace's recent session activity, git changes, session cost and tokens with elapsed time, and the first reported subscription window |
 | Accounts | Subscription and credit meters, every reported model group, remaining capacity, reset countdowns and local reset times with an explicit time zone, and stale or expired readings |
 | Session | Recorded token and cost totals, cache traffic, reasoning, and the background-call categories (side questions, handoffs, pre-warms, memory steps) |
 | Models | Each model's share of recorded processed tokens, including cache traffic, plus its detailed token and cost breakdown |
 | Workers | Active and recent runs, recorded tokens and cost, context usage, and the shared account limit when the local credential owner is known |
 
-Press 1–4, Tab/Shift+Tab, or ←/→ to change views; ↑/↓ or PgUp/PgDn to scroll;
+Press 1–5, Tab/Shift+Tab, or ←/→ to change views; ↑/↓ or PgUp/PgDn to scroll;
 Home/End or Ctrl+Home/Ctrl+End to jump to either end; and Esc to close. Each
 view keeps its own scroll position while the overlay stays open.
 
@@ -462,7 +473,7 @@ show equal percentages are never merged.
 | Workflow | Behavior |
 | --- | --- |
 | `/model` and `/thinking` | Choose a route for this session or save it as a default. Cancel leaves the active route unchanged. See [routing defaults](configuration-and-targets.md#live-routing-vs-saved-defaults). |
-| `/btw` and `/draft` | Run side questions or candidate answers without tools or transcript changes. Calls still count in `/usage`. Use a model-bound draft judge for a scored pick. |
+| `/btw` and `/draft` | Run side questions or candidate answers without tools or transcript changes. Calls still count in `/usage`. Candidates differ by sampling temperature, or by prompt angle for models that refuse a sampler, with one retry without `temperature` on an `Unsupported parameter: temperature` rejection. Bind `systemOne.sites.drafts` for a judged pick. In `/draft`, `Enter` on a finished draft closes the overlay and appends its text to the composer below anything already typed, never sending it, and `Esc` closes without taking anything. |
 | `/council` | Runs a configured roster of two to five read-only members. Approval is shown before work starts; share the synthesis or an individual member explicitly with `/share <runId>`. |
 | `/run` and `/delegate` | Start a worker or ACP peer with a managed receipt. Its answer is separate from main-agent context until shared with `--share` or `/share`. |
 | `/handoff <goal>` | Review a bounded handoff document, then accept it to create a fresh session. The goal must describe a concrete continuation. |
@@ -495,7 +506,7 @@ cancels the underlying owner. The menu does not search as you type.
 | `Ctrl+D` | Delete forward with text; exit only empty and idle with no queued messages | — |
 | `Ctrl+G` | Open or close the contextual action menu | — |
 
-Additional menu entries: `i` interrupts with the draft, `s` backgrounds the newest
+Additional menu entries: `y` toggles default and yolo autonomy for this session, `i` interrupts with the draft, `s` backgrounds the newest
 eligible attached dispatch, `g` edits the expanded draft externally, `x` dismisses
 one notification, `z` undoes the focused editable field, `r` toggles transcript
 search, `p`/`n` page the transcript and Home/End jump to its bounds. Previous/next
@@ -570,9 +581,9 @@ first match wins (`resolveApplicationCtrlCAction`, [application-controller.ts](.
 | Streaming or running a tool | Cancels the in-flight run. The turn seals its partial output in ledger order and the session stays open. |
 | Idle with text in the composer | Clears the draft. The press is consumed as an editor action, so it cannot become the hidden first half of an exit. |
 | Idle with messages queued | Protects the queue and says how to recover it with the bound dequeue key (`Alt+Q` by default). |
-| Idle, empty composer, nothing queued | Arms shutdown. A second `Ctrl+C` within 500 ms (`APPLICATION_DOUBLE_TAP_MS`) exits. |
+| Idle, empty composer, nothing queued | Arms shutdown. A second `Ctrl+C` within 1,200 ms (`APPLICATION_DOUBLE_TAP_MS`) exits. |
 
-Closing a permission card without approving it is a decision, not a dismissal:
+In a permission card, `Esc` answers the one parked call and `s` stops the turn, because denying one call does not stop the model from asking again. Closing a permission card without approving it is a decision, not a dismissal:
 the parked call is cancelled with `User cancelled this tool call from the
 permission confirmation prompt`, and a parked *worker* permission resolves as
 `deny`. The session itself keeps running.
@@ -682,7 +693,7 @@ The read-only `code_nav` tool queries the local index. Its modes and argument sc
 
 ## Output styles
 
-**Alt+O** cycles **Compact → Standard → Detailed → Compact**. Standard is the default, so the first press reveals Detailed. The current style appears in the footer. Cycling applies immediately to the current session, including streaming output and history. Save a preferred startup style through **/settings interface → Output style → Apply and save globally**, or `clio-coder configure --section panes`.
+**Alt+O** cycles **Compact → Standard → Detailed → Compact**. Standard is the default, so the first press reveals Detailed. The current style appears in the footer. Cycling applies immediately to the current session, including streaming output and history. Save a preferred startup style through **/settings interface → Output style → Apply and save globally**, or `clio-coder configure --section interface`.
 
 | Content | Compact | Standard | Detailed |
 | --- | --- | --- | --- |

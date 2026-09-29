@@ -5,8 +5,10 @@ export interface TurnOutcomeRecord {
 	readonly version: 1;
 	readonly turnId: string; // the user turn id that started the turn
 	readonly turnIndex: number; // operator turns before this one in the session
+	/** True for the automatic follow-up a middleware nudge requested, which is not an operator turn. */
+	readonly continuation: boolean;
 	readonly control: {
-		producer: "decision-site" | "main-model" | null;
+		producer: "system-one" | null;
 		decision: WorkflowDecision["kind"];
 		decisionHash: string | null;
 		executed: boolean;
@@ -15,13 +17,22 @@ export interface TurnOutcomeRecord {
 		readonly toolCalls: number;
 		readonly byTool: Readonly<Record<string, number>>;
 		readonly readOnlyCallsBeforeFirstDispatch: number;
-		readonly dispatches: ReadonlyArray<{ mode: string; agentIds: ReadonlyArray<string>; runIds: ReadonlyArray<string> }>;
+		/** Every dispatch that launched runs; `failed` marks one whose result was an error or an abort. */
+		readonly dispatches: ReadonlyArray<{
+			mode: string;
+			agentIds: ReadonlyArray<string>;
+			runIds: ReadonlyArray<string>;
+			failed?: true;
+		}>;
 		readonly duplicateDispatch: boolean;
 	};
 	readonly harness: { readonly runIds: ReadonlyArray<string>; readonly reads: number };
 	readonly conversation: {
+		/** Regex facts about the closing text, kept so the dataset can compare them with the site's reading. */
 		readonly endedWithQuestion: boolean;
 		readonly offeredOptions: boolean;
+		/** The turn-end site's reading of whether the message waits on the operator, or null when it did not answer. */
+		readonly asksOperator: boolean | null;
 		readonly taskEstablished: boolean;
 		readonly clarificationStreak: number;
 	};
@@ -30,7 +41,11 @@ export interface TurnOutcomeRecord {
 		readonly mutatedPaths: number;
 		readonly evidenceKinds: ReadonlyArray<string>;
 	};
-	readonly operator: { readonly canceled: boolean };
+	readonly operator: {
+		readonly canceled: boolean;
+		/** Present with `canceled` when the cancel was a dismissed ask_user interview rather than an aborted stream. */
+		readonly interviewDismissed?: true;
+	};
 	readonly tokens: {
 		readonly coordinator: TokenSplit;
 		readonly decisionModel: TokenSplit;
@@ -44,16 +59,25 @@ export interface TurnOutcomeInput {
 	readonly control?: TurnOutcomeRecord["control"];
 	readonly turnId: string;
 	readonly turnIndex: number;
+	readonly continuation: boolean;
 	readonly toolNames: ReadonlyArray<string>;
 	readonly readOnlyCallsBeforeFirstDispatch: number;
 	readonly dispatches: TurnOutcomeRecord["coordinator"]["dispatches"];
 	readonly duplicateDispatch: boolean;
 	readonly harness: TurnOutcomeRecord["harness"];
 	readonly finalAssistantText: string;
+	/** The turn-end site's verdict on whether the message waits on the operator; null falls back to the regex reading. */
+	readonly asksOperator?: boolean | null;
 	readonly taskEstablished: boolean;
 	readonly previousClarificationStreak: number;
 	readonly completion: TurnOutcomeRecord["completion"];
 	readonly canceled: boolean;
+	/**
+	 * The operator dismissed an ask_user interview, which ends the turn on their
+	 * say-so. It counts toward the clarification streak and is recorded as an
+	 * operator cancel, the same as an Esc that aborts a stream.
+	 */
+	readonly interviewDismissed?: boolean;
 	readonly tokens: TurnOutcomeRecord["tokens"];
 	readonly stopReason: string;
 	readonly durationMs: number;
@@ -97,21 +121,34 @@ export function conversationShape(finalAssistantText: string): { endedWithQuesti
 	};
 }
 
+/**
+ * How many consecutive turns ended waiting on the operator. Two endings count.
+ * One is a closing question or option list with no tool call, where `asks` is
+ * the caller's reading of the text: the turn-end site's verdict when one
+ * answered, otherwise the regex shape. The other is an ask_user interview the
+ * operator dismissed. A clarification that goes through ask_user always has a
+ * tool call, so the first test can never see it; an interview the operator
+ * answered is progress and resets the streak like any other tool turn.
+ */
 export function nextClarificationStreak(
 	previous: number,
-	turn: { toolCalls: number; endedWithQuestion: boolean; offeredOptions: boolean },
+	turn: { toolCalls: number; asks: boolean; interviewDismissed?: boolean },
 ): number {
-	return turn.toolCalls === 0 && (turn.endedWithQuestion || turn.offeredOptions) ? previous + 1 : 0;
+	if (turn.interviewDismissed === true) return previous + 1;
+	return turn.toolCalls === 0 && turn.asks ? previous + 1 : 0;
 }
 
 export function reduceTurnOutcome(input: TurnOutcomeInput): TurnOutcomeRecord {
 	const byTool: Record<string, number> = Object.create(null);
 	for (const tool of input.toolNames) byTool[tool] = (byTool[tool] ?? 0) + 1;
 	const shape = conversationShape(input.finalAssistantText);
+	const asksOperator = input.asksOperator ?? null;
+	const interviewDismissed = input.interviewDismissed === true;
 	return {
 		version: 1,
 		turnId: input.turnId,
 		turnIndex: input.turnIndex,
+		continuation: input.continuation,
 		control: input.control ?? null,
 		coordinator: {
 			toolCalls: input.toolNames.length,
@@ -127,14 +164,16 @@ export function reduceTurnOutcome(input: TurnOutcomeInput): TurnOutcomeRecord {
 		harness: { runIds: [...input.harness.runIds], reads: input.harness.reads },
 		conversation: {
 			...shape,
+			asksOperator,
 			taskEstablished: input.taskEstablished,
 			clarificationStreak: nextClarificationStreak(input.previousClarificationStreak, {
 				toolCalls: input.toolNames.length,
-				...shape,
+				asks: asksOperator ?? (shape.endedWithQuestion || shape.offeredOptions),
+				interviewDismissed,
 			}),
 		},
 		completion: { ...input.completion, evidenceKinds: [...input.completion.evidenceKinds] },
-		operator: { canceled: input.canceled },
+		operator: { canceled: input.canceled || interviewDismissed, ...(interviewDismissed ? { interviewDismissed } : {}) },
 		tokens: {
 			coordinator: { ...input.tokens.coordinator },
 			decisionModel: { ...input.tokens.decisionModel },

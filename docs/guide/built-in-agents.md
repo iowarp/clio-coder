@@ -55,7 +55,7 @@ User-facing agents visible in `clio-coder agents` and `/agents`.
 | `wiki-writer` | read, write, edit, grep, find, ls, code_nav, context, ledger, limitation | Plans a repository wiki or writes one wiki page against a supplied plan. | `workspace-edit` | `balanced` |
 
 ### Shipped Shadow and Internal Agents
-Internal orchestration helpers and internal process agents. They are hidden from default displays but visible via `clio-coder agents --all`. The full on-demand catalog has a separate shadow section and omits internal recipes; the compact session prompt likewise omits internal recipes and also excludes the operator-only `oracle`.
+Internal orchestration helpers and internal process agents. They are hidden from default displays but visible via `clio-coder agents --all`. The full on-demand catalog has a separate shadow section and omits internal recipes; the compact session prompt lists base, custom, and shadow recipes and omits internal ones.
 
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
@@ -142,7 +142,7 @@ resultContract: {kind: mutation-report}  # typed result shape the worker must re
 
 The closed key set is defined in [recipe-schema.ts](../../src/domains/agents/recipe-schema.ts); an
 optional `product` key also exists for product-scoped recipes. There are no
-`model`, `target`, `thinkingLevel`, or `output` frontmatter keys — target and
+`model`, `target`, `thinkingLevel`, or `output` frontmatter keys. Target and
 model selection belong to dispatch, not the recipe.
 
 Every recipe must declare `name`, `description`, `budget`, and every other key in the required set; no display defaults are synthesized. `budget` must be a non-null YAML object containing `toolCalls`, `readReserve`, and `synthesis`, plus an optional `maximum` ceiling object such as architect's `maximum: {toolCalls: 150, readReserve: 16}`. The numeric fields must be safe integers, `toolCalls > 0`, and `0 <= readReserve < toolCalls`; `synthesis` must be a boolean. Unknown, missing, quoted-numeric, floating-point, null, and relationally invalid values reject the recipe with its source path and property. Scout declares `18/4/true`; Coder declares `50/5/true`. The model-visible catalog shows the declared policy, never a mutable effective cap.
@@ -164,7 +164,7 @@ Skills are knowledge attachments declared under `skills: [...]` in the YAML fron
 *   **Visibility**: Normal `clio-coder agents` lists user-visible (base/custom) agents. The `/agents` slash command shows both Clio fleet agents and ACP delegation agents. The command `clio-coder agents --all` includes shadow/internal specs reserved for Clio orchestration.
 *   **Invocation limits**: User-origin `/run` and `clio-coder run --agent` **cannot** invoke shadow/internal agents.
 *   **Orchestrator dispatch**: Internal main-agent dispatch can invoke shadow agents through the `dispatch` tool. The operating contract and Scout's catalog description steer the model to dispatch Scout for broad repository reconnaissance, while narrow file or symbol inspection remains local to the main agent. If a turn reaches 9 or more manual read-only exploration calls without completing Scout dispatch, a threshold nudge advises delegation once, as a transcript notice. It never carries the turn onward into another model round.
-*   **TUI rendering and control**: Shadow dispatch rows are marked with an `sh:` prefix. The Fleet Runs island and board show the bounded task, run ID, live tools, tokens, priced cost, retry state, and terminal outcome. Select an HTTP/SDK run to steer it or cancel any active worker/retry timer.
+*   **TUI rendering and control**: Shadow and internal runs show the `↳` sub-process glyph in a subordinate tone instead of a name prefix, and a hollow `◇` or filled `◆` marks whether the operator or the model started a run. The Fleet Runs island and board show the bounded task, run ID, live tools, tokens, priced cost, retry state, and terminal outcome. Select an HTTP/SDK run to steer it or cancel any active worker/retry timer.
 *   **ACP Delegation**: The `/delegate` command is reserved for ACP delegation only, which is separate from Clio fleet subagents.
 
 ### Measured agent automation
@@ -191,7 +191,7 @@ To ensure security and proper boundary isolation, shadow and internal agents are
 In addition to standard HTTP targets and [Agent Client Protocol (ACP)](https://agentclientprotocol.com) delegation agents, Clio dispatches subagents to supported subscription worker runtimes:
 - **`claude-sdk` (Claude Agent SDK):** Serves as a main worker runtime for driving fleet agents. It integrates with [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) alongside Clio's native subagent workers (like a local [llama.cpp](https://github.com/ggerganov/llama.cpp), [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), or [SGLang](https://github.com/sgl-project/sglang) fleet) to execute tasks under a Claude subscription. Every tool call is mediated by Clio (`canUseTool` plus a `PreToolUse` hook): the safety net and autonomy matrix apply, and the run's admitted tool surface, which is narrowed by any `tool_profile`, is enforced authoritatively. Consequently, an out-of-profile tool (for example `bash` under `minimal-local`) is denied even though the underlying preset offers it. The narrowed surface is also translated into the SDK's `disallowedTools` option as defense in depth. Because it routes tool calls through Clio safety, it behaves as a native worker.
 - **`claude-code` (Claude Subprocess):** Runs `claude -p` as a subprocess worker, mapping autonomy levels to the CLI's permission modes. It is a black box: tool calls run inside the `claude` process and are not routed through Clio's per-tool mediation, so Clio cannot enforce a per-tool profile on it. Dispatching a narrowing `tool_profile` (`minimal-local` or `science-local`) to this runtime is refused; use `full-agent` (or a native / `claude-sdk` worker) instead.
-- **`antigravity-code` (Antigravity CLI — experimental local delegation):** Runs the operator-installed and authenticated official `agy` command as a local external delegation worker. It is useful for a `world-knowledge` pass, a second opinion, or another bounded one-shot subtask; it is never an orchestrator or Gemini chat backend. Clio consumes agy's structured stream and live model catalog but cannot mediate individual tools, so a narrowing `tool_profile` is refused rather than silently ignored. The `world-knowledge` binding is permanently read-only.
+- **`antigravity-code` (Antigravity CLI, experimental local delegation):** Runs the operator-installed and authenticated official `agy` command as a local external delegation worker. It is useful for a `world-knowledge` pass, a second opinion, or another bounded one-shot subtask; it is never an orchestrator or Gemini chat backend. Clio consumes agy's structured stream and live model catalog but cannot mediate individual tools, so a narrowing `tool_profile` is refused rather than silently ignored. The `world-knowledge` binding is permanently read-only.
 
 Agent budgets follow the same mediation boundary. Native workers and `claude-sdk` enforce canonical call counting, the canonical-`read` reserve, and the synthesis transition. An opaque external loop instead receives an `external-one-shot` enforcement classification: Clio enforces one subprocess launch, its deadline, output cap, cancellation, and result-contract validation, while recording recipe per-tool numbers as `unobserved-not-enforced`. Receipts and status never label those internal per-tool limits enforced, and Clio never automatically retries a generating external-agent run. Claude vendor aliases never appear in recipes or prompt authority and cannot reintroduce a canonical tool removed by admission.
 
@@ -270,16 +270,19 @@ Subagent runs that terminate with retryable outcomes are placed in an in-memory 
 - `stalled`: The run exceeded the event-inactivity window without progress or stopped responding to heartbeats.
 - `spawn_failed`: The runtime failed to spawn the subprocess or establish connection. The spawn error's own text, such as `spawn <path> ENOENT`, is sealed in the receipt's `outcomeDetail` and `failureMessage`.
 
-### 2. Backoff and Cooldown
-Scheduled retries use an exponential backoff state to calculate subsequent retry delays. Furthermore, targets that fail are subject to a cooldown period. The retry engine ensures that a retried task waits for the maximum of the exponential backoff delay or the remaining target cooldown duration. Retries are brand-new runs that must re-pass all admission checks. If target policies or budgets deny a retry, the task chain terminates as denied.
+### 2. Retry limits
+`fleet.retry.maxRetries` (default `2`) bounds the retries per assignment. Deterministic failures are never retried, for example `result_contract_exhausted`, `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, and `host_verification_rejected`. A retry is also suppressed when the failed attempt may have changed the workspace: a successful mutating tool call, or incomplete tool telemetry that cannot prove the workspace is unchanged. One-shot external agent loops are never retried automatically.
 
-### 3. Concurrency Limits
+### 3. Backoff and Cooldown
+Scheduled retries use exponential backoff that starts at 500 ms, doubles, and caps at 60 seconds. Furthermore, targets that fail are subject to a cooldown period. The retry engine ensures that a retried task waits for the maximum of the exponential backoff delay or the remaining target cooldown duration. Retries are brand-new runs that must re-pass all admission checks. If target policies or budgets deny a retry, the task chain terminates as denied.
+
+### 4. Concurrency Limits
 The setting `fleet.concurrency` restricts the number of concurrent subagent tasks. `auto` sizes the local node from usable CPUs, available memory, and any cgroup memory limit, up to eight workers; see [Fleet dispatch](fleet-dispatch.md#worker-limits-and-fleetconcurrency-auto).
 
-### 4. Heartbeats and Reconciler
+### 5. Heartbeats and Reconciler
 For native subprocess workers, Clio uses a heartbeat mechanism. The reconciler monitors the active heartbeat timestamp. If a worker stops responding and updates no heartbeats, the reconciler terminates the stalled subprocess automatically.
 
-### 5. Worker Permission Postures
+### 6. Worker Permission Postures
 A dispatched worker has no operator by default, so a tool call that requires interactive permission must resolve within bounded time. The `fleet.permissions.mode` setting picks the posture:
 
 - `deny` (default): the parked call becomes a structured tool denial and the run continues.

@@ -71,7 +71,7 @@ export function formatRejection(ctx: RejectionContext): RejectionMessage {
  * because reason strings interpolate caller data (paths, commands) verbatim.
  */
 const MODEL_REJECTION_PIVOT =
-	"Do not retry this action through another tool unless a hint above names one; pivot or report the blocker.";
+	"Do not retry this action through another tool or a respelled command (other flags, quoting, or a wrapper) unless a hint above names one; pivot or report the blocker.";
 const MODEL_REJECTION_MAX_LINES = 16;
 const MODEL_REJECTION_MAX_LINE_CHARS = 300;
 

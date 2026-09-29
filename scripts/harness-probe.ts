@@ -5,8 +5,8 @@
  * is never part of CI. Each case/run copies only settings.yaml and credentials.yaml
  * into a fresh scratch home, so OAuth refreshes cannot write to the real home.
  *
- * node --import tsx scripts/harness-probe.ts <fixture.json> --condition <name> [--runs 3] [--out <dir>] [--only <caseId>] [--chat-target <id>] [--chat-model <model>] [--bind-turn-control <profile>]
- * Route and decision-profile overrides rewrite only the scratch settings copy.
+ * node --import tsx scripts/harness-probe.ts <fixture.json> --condition <name> [--runs 3] [--out <dir>] [--only <caseId>] [--chat-target <id>] [--chat-model <model>] [--bind-turn <engine>]
+ * Route and System One binding overrides rewrite only the scratch settings copy.
  */
 
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
@@ -46,7 +46,8 @@ function record(value: unknown): value is Record<string, unknown> {
 export interface ProbeSettingsOptions {
 	chatTarget?: string;
 	chatModel?: string;
-	bindTurnControl?: string;
+	/** A `systemOne.engines` name to bind to the `turn` site in the scratch copy. */
+	bindTurn?: string;
 }
 
 export function rewriteProbeSettings(text: string, options: ProbeSettingsOptions) {
@@ -57,11 +58,11 @@ export function rewriteProbeSettings(text: string, options: ProbeSettingsOptions
 	const targets = Array.isArray(settings.targets) ? settings.targets.filter(record) : [];
 	if (options.chatTarget !== undefined && !targets.some((target) => target.id === options.chatTarget))
 		throw new Error(`chat target '${options.chatTarget}' is not defined in copied settings.targets`);
-	if (options.bindTurnControl !== undefined) {
-		const profiles = record(settings.fleet) ? settings.fleet.profiles : undefined;
-		if (!record(profiles) || !Object.hasOwn(profiles, options.bindTurnControl))
-			throw new Error(`turn-control profile '${options.bindTurnControl}' is not defined in copied fleet.profiles`);
-		document.setIn(["fleet", "decisionProfiles", "turnControl"], options.bindTurnControl);
+	if (options.bindTurn !== undefined) {
+		const engines = record(settings.systemOne) ? settings.systemOne.engines : undefined;
+		if (!record(engines) || !Object.hasOwn(engines, options.bindTurn))
+			throw new Error(`turn-site engine '${options.bindTurn}' is not defined in copied systemOne.engines`);
+		document.setIn(["systemOne", "sites", "turn"], options.bindTurn);
 	}
 	if (options.chatTarget !== undefined) document.setIn(["chat", "target"], options.chatTarget);
 	if (options.chatModel !== undefined) document.setIn(["chat", "model"], options.chatModel);
@@ -310,7 +311,7 @@ function scratchHome(configDir: string, options: ProbeSettingsOptions) {
 		}
 		const settingsPath = join(root, "config", "settings.yaml");
 		const route = rewriteProbeSettings(readFileSync(settingsPath, "utf8"), options);
-		if (options.chatTarget !== undefined || options.chatModel !== undefined || options.bindTurnControl !== undefined)
+		if (options.chatTarget !== undefined || options.chatModel !== undefined || options.bindTurn !== undefined)
 			safeResourceWrite(settingsPath, route.settingsYaml, { mode: 0o600 });
 		return {
 			root,
@@ -369,14 +370,12 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 		const value = args[index + 1];
 		if (
 			!flag ||
-			!["--condition", "--runs", "--out", "--only", "--chat-target", "--chat-model", "--bind-turn-control"].includes(
-				flag,
-			) ||
+			!["--condition", "--runs", "--out", "--only", "--chat-target", "--chat-model", "--bind-turn"].includes(flag) ||
 			!value ||
 			value.startsWith("--")
 		)
 			throw new Error(
-				"usage: harness-probe.ts <fixture.json> --condition <name> [--runs 3] [--out <dir>] [--only <caseId>] [--chat-target <id>] [--chat-model <model>] [--bind-turn-control <profile>]",
+				"usage: harness-probe.ts <fixture.json> --condition <name> [--runs 3] [--out <dir>] [--only <caseId>] [--chat-target <id>] [--chat-model <model>] [--bind-turn <engine>]",
 			);
 		options.set(flag, value);
 	}
@@ -407,11 +406,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 	const configDir = resolveClioDirs().config;
 	const chatTarget = options.get("--chat-target");
 	const chatModel = options.get("--chat-model");
-	const bindTurnControl = options.get("--bind-turn-control");
+	const bindTurn = options.get("--bind-turn");
 	const settingsOptions: ProbeSettingsOptions = {
 		...(chatTarget !== undefined ? { chatTarget } : {}),
 		...(chatModel !== undefined ? { chatModel } : {}),
-		...(bindTurnControl !== undefined ? { bindTurnControl } : {}),
+		...(bindTurn !== undefined ? { bindTurn } : {}),
 	};
 	// Refuse unknown routes or profiles before starting any case, not as repeated live-run failures.
 	const effectiveRoute = rewriteProbeSettings(readFileSync(join(configDir, "settings.yaml"), "utf8"), settingsOptions);

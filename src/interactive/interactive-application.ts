@@ -28,6 +28,7 @@ import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
+import type { OutcomeRecord, SystemOne } from "../domains/system-one/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { setDiffusionFramesEnabled } from "../engine/apis/diffusion-frames.js";
 import { createAgentProgress } from "../engine/tui.js";
@@ -110,6 +111,14 @@ export interface InteractiveDeps {
 	agents?: AgentsContract;
 	/** Session budget state `/fleet run` shows as the ceiling a plan is admitted under. */
 	scheduling?: SchedulingContract;
+	/** The session's System One instance: the approval card's advisory and the `/draft` judge read their sites through it. */
+	systemOne?: SystemOne;
+	/** Records what followed a System One decision, joined to it by ref. `/draft` reports the draft the operator took. */
+	recordOutcome?: (outcome: {
+		ref: string;
+		source: OutcomeRecord["source"];
+		facts: Readonly<Record<string, unknown>>;
+	}) => void;
 	observability: ObservabilityContract;
 	chat: ChatLoop;
 	/** Fired once after the first real TUI render transaction issued all of its terminal writes. */
@@ -818,6 +827,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 						runningVersion: readClioVersion(),
 						openAskUser: (questions, options) => openTransientAskUserOverlayState(questions, options),
 						notify,
+						record: (level, text) => appendNotice(level, text, busNoticeSink),
 						isIdle: () => {
 							const queue = deps.chat.queuedMessages();
 							return (
@@ -876,7 +886,9 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openModelScope: (ref) => openModelScopeState(ref),
 		openSettings: (area, group) => {
 			if (!area) return openSettingsOverlayState();
-			if (area === "chat" && group === "model-picker") return openSettingsOverlayState("chat", "scope");
+			// The quick-switch list lives under Models & Inference; `/settings chat model-picker` predates that area.
+			if ((area === "chat" || area === "models") && group === "model-picker")
+				return openSettingsOverlayState("models", "scope");
 			openSettingsOverlayState(area);
 		},
 		openResume: () => openResumeOverlayState(),

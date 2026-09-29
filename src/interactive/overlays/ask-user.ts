@@ -18,7 +18,7 @@ import {
 } from "../../engine/tui.js";
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { cancelledAskUserResult } from "../../tools/ask-user.js";
-import { dockBodyRows } from "../dock.js";
+import { dockGrowthRows } from "../dock.js";
 import {
 	buildHint,
 	DEFAULT_SELECT_THEME,
@@ -1310,8 +1310,8 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 
 	const view = new AskUserOverlayView({
 		...deps,
-		// The dock budget, spelled as the terminal height the body subtracts its frame rows from.
-		getTerminalRows: () => dockBodyRows(tui) + ASK_USER_FRAME_AND_MARGIN_ROWS,
+		// The dock's growth ceiling, spelled as the terminal height the body subtracts its frame rows from.
+		getTerminalRows: () => dockGrowthRows(tui) + ASK_USER_FRAME_AND_MARGIN_ROWS,
 		requestRender: () => tui.requestRender(),
 		tui,
 	});
@@ -1323,6 +1323,8 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 		// Not derived from the title: this modal swaps between a waiting title
 		// and a classified decision title without ever changing hands.
 		markerId: "ask-user",
+		// Option-heavy interviews grow toward half the terminal; a short question stays compact.
+		adaptiveHeight: true,
 		title: () => (view.isDecisionPending() ? `Clio-Coder interview · ${view.decisionTitle()}` : "Clio-Coder interview"),
 		tone: () => (view.isDecisionPending() ? view.decisionTone() : undefined),
 		awaitingInput: () => view.isDecisionPending(),

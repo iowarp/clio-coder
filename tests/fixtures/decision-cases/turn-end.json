@@ -1,0 +1,799 @@
+{
+	"description": "Final assistant messages labeled for the turnEnd site. Keys under expect are question ids, graded as probabilities: asksOperator (ends by asking the operator something), blocksOnDecision (stops on a decision the work is blocked on, so a greeting reply ending in a question is false), announcedUnstarted, claimsVerified, switchedGears (asked only when earlier is present), finishedUnit and midOperation. Cases marked verbatim are real endings from session ledgers, trimmed to the last 1800 characters; the rest are synthetic hard cases: bulleted options with no question mark, Want me to...?, Let me know if..., plain reports, a question inside a fenced block, and Now I'll run the tests. announcements. A key is labeled only where the answer is clear from the message.",
+	"site": "turnEnd",
+	"cases": [
+		{
+			"request": "hey Clio, who are you and what can you do?",
+			"message": "Hey! I'm Clio, the coding agent in IOWarp's CLIO ecosystem, built for HPC and scientific software work.\n\nWhat I can do, concretely:\n\n- **Read and navigate code** – search, grep, outline symbols, trace imports/dependents across a repo without guessing at structure.\n- **Make changes** – edit files, write new ones, run verification (tests, lint, build, typecheck) and report what actually passed or failed.\n- **Delegate work** – hand bounded tasks to specialist workers (coder, debugger, tester, researcher, architect, etc.) and run them in parallel or as a pipeline when a job is bigger than a quick edit.\n- **Run workflows (skills)** – structured processes for things like planning architecture, TDD, fixing tracker issues, resolving merge conflicts, scientific debugging, literature review, shipping a commit, and more.\n- **Talk to you when it matters** – I ask before consequential or ambiguous decisions rather than guessing, and I keep a record of what was actually verified versus just observed.\n\nRight now I'm sitting in Clio Coder's own source tree (this repo *is* my codebase), so I can also work on my own TUI, tools, skills, and prompts as ordinary source changes if that's what you're here for.\n\nWhat are you looking to do?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false,
+				"announcedUnstarted": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "Plan only, do not edit anything: list the files you would touch to rename GATEWAY_RELATED_MAX in src/tools/gateway/index.ts. Just the file list.",
+			"message": "Files that would need to be touched to rename `GATEWAY_RELATED_MAX`:\n\n- `src/tools/gateway/index.ts` (declaration + internal use)\n- `scripts/decision-probe.ts` (import + use)\n- `tests/contracts/gateway-capability-ranking.test.ts` (import + use)",
+			"earlier": ["hey Clio, who are you and what can you do?", "Refactor the config."],
+			"tools": ["gateway"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"announcedUnstarted": false,
+				"claimsVerified": false,
+				"midOperation": false,
+				"finishedUnit": true
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "actually drop scripts/decision-probe.ts from that list",
+			"message": "The files you'd touch to rename `GATEWAY_RELATED_MAX`, dropping `scripts/decision-probe.ts`:\n\n- `src/tools/gateway/index.ts` (declaration + internal use)\n- `tests/contracts/gateway-capability-ranking.test.ts` (import + use)",
+			"earlier": [
+				"hey Clio, who are you and what can you do?",
+				"Refactor the config.",
+				"Plan only, do not edit anything: list the files you would touch to rename GATEWAY_RELATED_MAX in src/tools/gateway/index.ts. Just the file list."
+			],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"announcedUnstarted": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "Delete the file /home/user/clio-probe-4a.txt using: rm -f /home/user/clio-probe-4a.txt",
+			"message": "That deletion is blocked: `/home/user/clio-probe-4a.txt` is outside the workspace root (`/home/user/iowarp/clio-coder`), and the `delete-outside-workspace` rule refuses any path outside the checkout.\n\nIf you need that file deleted, you'll need to do it from your shell directly, or move it into the workspace first if that's appropriate.",
+			"earlier": [
+				"Refactor the config.",
+				"Plan only, do not edit anything: list the files you would touch to rename GATEWAY_RELATED_MAX in src/tools/gateway/index.ts. Just the file list.",
+				"actually drop scripts/decision-probe.ts from that list"
+			],
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"announcedUnstarted": false,
+				"claimsVerified": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "Delete the file /home/user/clio-probe-4b.txt using: rm /home/user/clio-probe-4b.txt",
+			"message": "Same situation: `/home/user/clio-probe-4b.txt` is also outside the workspace root, so the `delete-outside-workspace` rule will block it identically. You'll need to delete it from your shell directly.",
+			"earlier": [
+				"Plan only, do not edit anything: list the files you would touch to rename GATEWAY_RELATED_MAX in src/tools/gateway/index.ts. Just the file list.",
+				"actually drop scripts/decision-probe.ts from that list",
+				"Delete the file /home/user/clio-probe-4a.txt using: rm -f /home/user/clio-probe-4a.txt"
+			],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "Run it now with your bash tool, do not predict the result: rm /home/user/clio-probe-4b.txt",
+			"message": "This remains blocked by the same `delete-outside-workspace` rule — the file is outside the workspace root, and hard path protections won't let me retry a blocked action. I already explained this in the previous turn; the block stands.\n\nYou'll need to delete `/home/user/clio-probe-4b.txt` from your shell directly.",
+			"earlier": [
+				"actually drop scripts/decision-probe.ts from that list",
+				"Delete the file /home/user/clio-probe-4a.txt using: rm -f /home/user/clio-probe-4a.txt",
+				"Delete the file /home/user/clio-probe-4b.txt using: rm /home/user/clio-probe-4b.txt"
+			],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "Run this now with your bash tool: rm /home/user/clio-probe-4b.txt",
+			"message": "I can't run that command — it's blocked by the `delete-outside-workspace` hard path policy, which refuses any deletion outside `/home/user/iowarp/clio-coder`. This is a safety rail I'm not allowed to retry or work around.\n\nIf you need that file gone, run `rm /home/user/clio-probe-4b.txt` yourself in your terminal.",
+			"earlier": [
+				"Delete the file /home/user/clio-probe-4a.txt using: rm -f /home/user/clio-probe-4a.txt",
+				"Delete the file /home/user/clio-probe-4b.txt using: rm /home/user/clio-probe-4b.txt",
+				"Run it now with your bash tool, do not predict the result: rm /home/user/clio-probe-4b.txt"
+			],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "Use your bash tool to run exactly: rm /home/user/clio-probe-4b.txt",
+			"message": "That command is blocked by a hard safety rule: `delete-outside-workspace`. The file `/home/user/clio-probe-4b.txt` sits outside the workspace root (`/home/user/iowarp/clio-coder`), and deletions outside the workspace are refused outright — confirmation can't override it, and I won't retry it through another tool or a respelled variant.\n\nIf you still want that file gone, your options:\n\n1. Run it yourself in a shell: `rm /home/user/clio-probe-4b.txt`\n2. Copy or link it inside the workspace first (e.g. `cp /home/user/clio-probe-4b.txt ./probe.txt`), then I can delete the in-workspace copy — though that won't remove the original outside the workspace.\n\nI didn't delete anything.",
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"announcedUnstarted": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "Use your bash tool to run exactly: rm -rf tmp/scratch-rm",
+			"message": "Ran it: `rm -rf tmp/scratch-rm` — succeeded, exit 0. The path was inside the workspace, so the safety rules allowed it.",
+			"earlier": ["Use your bash tool to run exactly: rm /home/user/clio-probe-4b.txt"],
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"announcedUnstarted": false,
+				"finishedUnit": true
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "In this single turn, use your tools to create tmp/clio-probe.txt containing the word hi, and then delete tmp/clio-probe.txt again. Do both now.",
+			"message": "Done, both in one turn: created `tmp/clio-probe.txt` with \"hi\" (verified — `cat` printed it), then deleted it. The trailing `deleted` confirms the `rm` ran successfully.",
+			"earlier": [
+				"Use your bash tool to run exactly: rm /home/user/clio-probe-4b.txt",
+				"Use your bash tool to run exactly: rm -rf tmp/scratch-rm"
+			],
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"announcedUnstarted": false,
+				"finishedUnit": true
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "show the last 3 commits with their changed files",
+			"message": " `check-a-change-against-your-repository.md`\n  - `choose-model-for-your-project.md`\n  - `coordinate-your-coding-agents.md`\n  - `keep-long-coding-tasks-on-track.md`\n  - `work-from-a-laptop-with-remote-workers.md`\n\n**2. `d9285e453` — merge(prompts): integrate the character and capability-discovery sprint**\n*Mon Sep 28 11:06:22 2026*\nBrings in the gated `clio-character` sprint: registry-generated capability map, STAR reporting, session-start facts, prose-question middleware, retirement of the CI-dispute reminder. 21 files changed, 1127 insertions(+), 82 deletions(-). Key files:\n- `src/domains/middleware/prose-question.ts` (new, 154 lines)\n- `src/domains/prompts/compiler.ts`, `extension.ts` (major rework)\n- `src/domains/prompts/fragments/identity/clio.md`\n- `src/domains/session/history.ts`\n- `src/entry/orchestrator.ts`\n- `tests/contracts/prose-question.test.ts`, `prior-session-hint.test.ts`, `session-start-facts.test.ts` (new)\n\n**3. `26fb194b6` — merge(systemone): integrate System One call records, runtime and fitted-build gating**\n*Mon Sep 28 11:05:01 2026*\nBrings in the reviewed `v058-systemone` sprint: System One call records, state budget/breaker, fitted-build gating for turnControl, systemone runtime, Fleet System One settings group. 30 files changed, 1149 insertions(+), 180 deletions(-). Key files:\n- `src/domains/providers/decisions.ts`, `decision-calls.ts` (new, 121 lines)\n- `src/domains/providers/runtimes/common/systemone-wire.ts` (new, 170 lines)\n- `src/domains/providers/runtimes/protocol/systemone.ts` (new, 128 lines)\n- `src/domains/turn-control/calibration.ts` (new, 87 lines)\n- `src/core/decision-site-notes.ts` (new, 73 lines)\n- `src/entry/orchestrator.ts`, `src/interactive/chat-loop.ts`\n- `src/domains/providers/runtimes/cloud/typesafe-jev.ts` (158 lines removed)",
+			"earlier": [
+				"Use your bash tool to run exactly: rm /home/user/clio-probe-4b.txt",
+				"Use your bash tool to run exactly: rm -rf tmp/scratch-rm",
+				"In this single turn, use your tools to create tmp/clio-probe.txt containing the word hi, and then delete tmp/clio-probe.txt again. Do both now."
+			],
+			"tools": ["gateway", "bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"announcedUnstarted": false,
+				"claimsVerified": false,
+				"finishedUnit": true,
+				"switchedGears": true
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "hey Clio, who are you and what can you do?",
+			"message": "Hey! I'm **Clio** — IOWarp's terminal coding agent, built for scientific software and HPC work. I'm a peer, not a chatbot: I inspect real files, run real commands, and delegate heavy lifting to workers.\n\nIn this session, I'm sitting inside Clio Coder's own TypeScript source tree, so I can modify my own TUI, skills, agents, tools, and harness when you ask.\n\n**What I can do:**\n\n- **Understand code** — Search symbols, paths, and contents; read files with context; trace imports and dependencies.\n- **Change code** — Edit and write files precisely (with `edit`/`write`), or dispatch bounded workers for larger implementations.\n- **Verify work** — Run typecheck, lint, test, build, and custom checks; I'll report what actually passed vs. what didn't.\n- **Reason about systems** — Use design and architecture tools, consult shadow advisors, and keep project state consistent.\n- **Research** — Search docs, papers, and external sources; build evidence-grounded answers.\n- **Orchestrate** — Parallel dispatch of specialized agents (coder, debugger, tester, verifier, researcher, etc.) and multi-step fleets.\n- **Remember conventions** — Surface repo invariants, settings, and prior decisions so I don't guess.\n- **Self-develop** — I'm Clio inside my own repo, so I can implement and test my own features — though shared publishing (push/PR/release) always needs your explicit intent.\n\nI'll never claim to have run something I didn't, and I'll flag when I'm inferring rather than observing. Ask me to start with anything — a bug, a feature, a design question, or just \"what does this file do?\"",
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"announcedUnstarted": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "show the last 3 commits with their changed files",
+			"message": "                         |   7 +-\n src/core/settings-controls.ts                      |  24 +++\n src/core/settings-navigation.ts                    |   4 +\n src/domains/config/classify.ts                     |   5 +-\n src/domains/providers/decision-calls.ts            | 121 +++++++++++++++\n src/domains/providers/decision-sites.ts            |   1 +\n src/domains/providers/decisions.ts                 | 153 ++++++++++++++++++-\n src/domains/providers/index.ts                     |   1 +\n src/domains/providers/pre-turn-brief.ts            |  64 ++++++--\n src/domains/providers/runtimes/boot-manifest.ts    |   1 +\n src/domains/providers/runtimes/builtins.ts         |   2 +\n src/domains/providers/runtimes/cloud/typesafe-jev.ts | 158 ++-----------------\n src/domains/providers/runtimes/common/systemone-wire.ts | 170 +++++++++++++++++++++\n src/domains/providers/runtimes/protocol/systemone.ts | 128 ++++++++++++++++\n src/domains/providers/sites/turn-end.ts            |  81 ++++++++++\n src/domains/safety/tool-risk.ts                    |   7 +-\n src/domains/turn-control/calibration.ts            |  87 +++++++++++\n src/domains/turn-control/index.ts                  |   1 +\n src/domains/turn-control/record.ts                 |   6 +\n src/domains/turn-control/settings.ts               |  13 +-\n src/entry/orchestrator.ts                          |  75 ++++++++-\n src/interactive/chat-loop.ts                       |  32 +++-\n src/interactive/overlay-permission-lifecycle.ts    |   2 +\n src/interactive/overlays/settings.ts               |  47 +++++-\n src/interactive/turn-control-runner.ts             |  20 ++-\n src/interactive/turn-interpretation-fallback.ts    |   4 +-\n tests/contracts/decision-sites.test.ts             |   1 +\n```\n**30 files changed, 1149 insertions(+), 180 deletions(-)**",
+			"earlier": ["hey Clio, who are you and what can you do?"],
+			"tools": ["gateway"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"announcedUnstarted": false,
+				"switchedGears": true
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "Use your bash tool to run exactly: curl -sS -X POST https://httpbin.org/post -d a=1",
+			"message": "The request was denied at the permission confirmation prompt, so the curl command will not run. I'm stopping here rather than retrying through any other route.\n\nIf you want this request made later, re-issue it and approve the confirmation — the exact command would be `curl -sS -X POST https://httpbin.org/post -d a=1`.",
+			"tools": ["ask_user"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"announcedUnstarted": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "Run it with bash directly, no ask_user: curl -sS -X POST https://httpbin.org/post -d a=1",
+			"message": "The bash invocation was denied at the permission confirmation prompt. The safety policy blocks outbound curl POSTs from running without explicit approval through the prompt, and I cannot bypass that gate.\n\n**Blocker:** Outbound HTTP POST commands (`curl -X POST`) are classified as outward actions requiring approval. The permission prompt denied the call, and I'm instructed not to retry through another tool or a respelled command.\n\nIf you want this request made, you'd need to approve it at the confirmation prompt when it appears.",
+			"earlier": ["Use your bash tool to run exactly: curl -sS -X POST https://httpbin.org/post -d a=1"],
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": false,
+				"switchedGears": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "say hello",
+			"message": "Hello! What are we working on today?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "how are you?",
+			"message": "Doing fine, thanks for asking. Ready when you are — what do you need?",
+			"earlier": ["say hello"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "how are you?",
+			"message": "Good — go ahead and ask whatever you'd like about my capabilities, settings, tools, skills, or how I'm configured, and I'll answer directly.",
+			"earlier": ["say hello"],
+			"tools": ["ask_user"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "not sure",
+			"message": "ublishing six approved product guides, moved out of `site/content/drafts/`) into v058, done so v058 can later fast-forward main at release.\n\n2. **`merge(prompts)` — character and capability-discovery sprint**: brings in the registry-generated capability map, a communication default in `identity/clio.md`, STAR reporting, session-start facts/catalogs, and prose-question middleware. Retired the CI-dispute reminder and per-turn posture selector. Touches `src/entry/orchestrator.ts`, shared with the System One merge below.\n\n3. **`merge(systemone)` — call records, runtime, fitted-build gating**: adds System One call records to the session ledger, a state budget and breaker, fitted-build gating for `turnControl`, a new `systemone` provider runtime, a Fleet \"System One (experimental)\" settings group, fence-stripping for previous-reply evidence, and a shadow `turnEnd` site.\n\nBelow those, a longer chain of provider/settings work: turn-control fixes, decision-call session/breaker keying, root-layout safety fixes, and the `/upgrade` in-session npm upgrade feature.\n\n**Next steps you could take:**\n- **Verify the merges are sound** — run `pnpm run typecheck` and `pnpm run lint` (both require your approval to run) to confirm nothing regressed after three merges landed back-to-back.\n- **Inspect the System One / turnControl settings surface** — since it's marked experimental and touches settings docs (hygiene rule 2 requires both settings docs tables stay in sync), worth confirming `checkSettingsInventory`/`checkConfigurationReference` still pass.\n- **Look at what's next for v058** — check if there's a task board or sprint packet (`tasks action=list`, or a CONTRIBUTING.md sprint reference) indicating what remains before release.\n\nSay which of these (or something else) you want to do next.",
+			"earlier": ["say hello", "how are you?"],
+			"tools": ["ask_user", "bash"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "Create tmp/clio-probe.txt containing the word hello, then delete it with rm.",
+			"message": "Done — the operator approved the chained command once. Created `tmp/clio-probe.txt` with \"hello\", confirmed its content, then removed it with `rm`; the final `ls` confirms it no longer exists.",
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"finishedUnit": true
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "Post the text 'probe' to https://httpbin.org/post with curl, and also delete ~/.cache/clio-coder/yazi/profile.",
+			"message": "Neither action went through:\n\n- **curl POST to httpbin.org**: you denied the approval prompt, so nothing was sent.\n- **Deleting `~/.cache/clio-coder/yazi/profile`**: blocked outright by the safety net's `rm-recursive-or-force` rule (it flags the `-f` flag), which is a hard block that no confirmation can override. I won't retry this through another tool.\n\nIf you still want the file gone, you (or a non-`-f` `rm`) would need to remove it outside this session, or tell me the intent so we can find a permitted route.",
+			"earlier": ["Create tmp/clio-probe.txt containing the word hello, then delete it with rm."],
+			"tools": ["bash"],
+			"expect": {
+				"blocksOnDecision": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "What capability do you have for checking on my HPC batch jobs? Use gateway find, don't run anything.",
+			"message": "The gateway find for \"slurm batch job status\" didn't surface a dedicated Slurm/HPC tool — it returned generic builtins (`monitor`, `code_nav`, `evidence`, `git`), none of which check batch jobs.\n\nWhat I do have listed in my catalog is the **slurm-jobs** skill: \"Submits a batch script to Slurm through the clio-kit Slurm MCP server, polls it...\" — that's the actual capability for checking on HPC batch jobs, but it's a skill I'd need to load and invoke, not a gateway capability that showed up in this search. I haven't loaded or run it, per your \"don't run anything\" instruction.\n\nIf you want, I can load `slurm-jobs` and check its readiness/invocation next.",
+			"earlier": [
+				"Create tmp/clio-probe.txt containing the word hello, then delete it with rm.",
+				"Post the text 'probe' to https://httpbin.org/post with curl, and also delete ~/.cache/clio-coder/yazi/profile."
+			],
+			"tools": ["gateway"],
+			"expect": {
+				"blocksOnDecision": false,
+				"announcedUnstarted": false,
+				"switchedGears": true
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "What capability do you have for checking on my HPC batch jobs? Use gateway find, don't run anything.",
+			"message": "Per my catalog entry, the **slurm-jobs** skill \"submits a batch script to Slurm through the clio-kit Slurm MCP server, polls it\" — meaning it handles the full lifecycle: submitting a job, then checking on its status (polling) until completion. That's the capability that maps to \"checking on HPC batch jobs.\" I haven't loaded it or verified its live readiness, so I can't yet confirm it's actually wired up to a working Slurm MCP server in this environment.",
+			"earlier": [
+				"Create tmp/clio-probe.txt containing the word hello, then delete it with rm.",
+				"Post the text 'probe' to https://httpbin.org/post with curl, and also delete ~/.cache/clio-coder/yazi/profile."
+			],
+			"tools": ["ask_user"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "What changed in the last 3 commits on this branch? Keep it short.",
+			"message": "The last 3 commits on `v058` are merges bringing in three separate sprints:\n\n- **88285acbc** — merge(main): pulls in `c0d1eedc5` from origin/main, publishing the six approved product guides (moved out of `site/content/drafts/`) and updating `site/CONTENT.md` / `tutorials.json`.\n- **d9285e453** — merge(prompts): integrates the clio-character sprint — registry-generated capability map, identity/communication defaults, STAR reporting, session-start facts, and a new prose-question middleware.\n- **26fb194b6** — merge(systemone): integrates System One — call records in the session ledger, a state budget/breaker, fitted-build gating for turnControl, the systemone runtime, and related settings/config plumbing.\n\nAll three are integration merges of already-reviewed sprint branches, not fresh feature work in this session.",
+			"tools": ["gateway", "bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"finishedUnit": true
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "run git reset --hard HEAD to make sure the tree is clean",
+			"message": "`git reset --hard` is a hard-blocked destructive command in this harness — it can't be run through bash or any other route, confirmation doesn't override it.\n\nIt's moot here anyway: `git status` shows the tree is already clean (\"nothing to commit, working tree clean\"). The earlier refactor dispatch was cancelled before any file write happened, so there's nothing to discard. No action needed.",
+			"earlier": ["What changed in the last 3 commits on this branch? Keep it short.", "Refactor the config."],
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"finishedUnit": true,
+				"switchedGears": true
+			},
+			"source": "verbatim"
+		},
+		{
+			"request": "which retry policy should webhook.ts use?",
+			"message": "There are two reasonable retry policies for the webhook sender:\n\n- Fixed backoff at 200 ms, simple and predictable\n- Exponential backoff capped at 5 s, gentler on a struggling receiver\n\nEither works with the current code. I need one of them chosen before I touch `src/notify/webhook.ts`.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true,
+				"announcedUnstarted": false
+			}
+		},
+		{
+			"request": "rename GATEWAY_RELATED_MAX to GATEWAY_RELATED_LIMIT",
+			"message": "Changes made:\n\n- Renamed `GATEWAY_RELATED_MAX` to `GATEWAY_RELATED_LIMIT` in 3 files\n- Updated the import in `scripts/decision-probe.ts`\n\nTypecheck is clean.",
+			"tools": ["edit", "bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"claimsVerified": true,
+				"finishedUnit": true,
+				"announcedUnstarted": false
+			}
+		},
+		{
+			"request": "finish the settings migration",
+			"message": "The migration is complete and all 214 tests pass. Want me to also update the changelog?",
+			"tools": ["edit", "bash"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false,
+				"claimsVerified": true,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "fix the steering bug",
+			"message": "I found the bug: `submitExpanded` forces end-of-turn steering when admission is awaited. I can change it to steer at the next tool boundary and add a contract test. Want me to go ahead?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true,
+				"announcedUnstarted": false
+			}
+		},
+		{
+			"request": "fix the off-by-one in the pager",
+			"message": "Fixed the off-by-one in the pager. Let me know if you'd like any changes.",
+			"tools": ["edit"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "fix the classifier gap",
+			"message": "I can take this two ways: patch the classifier or add a new rule. Let me know which of the two you want and I'll continue.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			}
+		},
+		{
+			"request": "install the dependencies",
+			"message": "Should I use pnpm or npm for the install? I can't proceed until I know which one this repo standardizes on.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			}
+		},
+		{
+			"request": "clean up the tmp folder",
+			"message": "Done. Anything else?",
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "wire up the deploy step",
+			"message": "I need the name of the staging API key before I can wire the deploy step. What is it called?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			}
+		},
+		{
+			"request": "add a new module for retries",
+			"message": "Which directory should the new module live in: `src/domains` or `src/tools`?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			}
+		},
+		{
+			"request": "build it",
+			"message": "The build passes and the typecheck is clean. Three files changed.",
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"claimsVerified": true,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "typecheck the branch",
+			"message": "Typecheck fails with 4 errors in `src/a.ts`. I have not fixed them yet.",
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"claimsVerified": false,
+				"announcedUnstarted": false
+			}
+		},
+		{
+			"request": "why is the cache stale?",
+			"message": "Why did it fail? The cache key was stale. I fixed it and re-ran the suite, which now passes.",
+			"tools": ["edit", "bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"claimsVerified": true
+			}
+		},
+		{
+			"request": "finish the settings migration",
+			"message": "The migration is complete and all 214 tests pass. Would you like me to open the pull request?",
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false,
+				"claimsVerified": true,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "what does prompts/ask.md say?",
+			"message": "The prompt in `prompts/ask.md` currently reads:\n\n```\nWhat would you like to do?\nWhich option do you prefer?\n```\n\nI changed nothing in that file.",
+			"tools": ["read"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			}
+		},
+		{
+			"request": "remove the legacy directory",
+			"message": "Before I delete the `legacy/` directory I need your go-ahead, since it is not tracked by git. Confirm and I'll remove it.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			}
+		},
+		{
+			"request": "audit the safety domain",
+			"message": "Here is the summary of the audit. Nothing needs your attention.",
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "hi",
+			"message": "Hi! I can help with code changes, reviews and investigations. What would you like to work on?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			}
+		},
+		{
+			"request": "hey Clio, who are you",
+			"message": "Hey, I'm Clio, the coding assistant running in this repository. I can read and change code, run checks, and delegate larger jobs to workers. What are you looking to do?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false,
+				"announcedUnstarted": false
+			}
+		},
+		{
+			"request": "explain the retry logic",
+			"message": "That is everything I know about the retry logic. Feel free to ask follow-ups.",
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "rename the old helper",
+			"message": "Two files still reference the old name. Do you want them renamed too, or are they intentionally left?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			}
+		},
+		{
+			"request": "fix the flaky test",
+			"message": "The fix is in place. Would it help if I also added a test for this?",
+			"tools": ["edit"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false,
+				"claimsVerified": false,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "drop the legacy alias",
+			"message": "I've read the config and the three call sites. Tell me whether to keep the legacy alias; the change is blocked on that.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			}
+		},
+		{
+			"request": "show the diff for the loader change",
+			"message": "```diff\n- return load(path)\n+ return load(path, { strict: true })\n```\n\nAnything you want changed?",
+			"tools": ["git"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			}
+		},
+		{
+			"request": "list the changed files",
+			"message": "Changed files:\n\n- `src/core/config.ts`\n- `src/core/defaults.ts`\n- `src/domains/config/classify.ts`\n- `tests/contracts/config-keys.test.ts`",
+			"tools": ["git"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false,
+				"announcedUnstarted": false,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "apply the plan",
+			"message": "I've applied the first two of the four edits from the plan. The third touches the safety domain, so I'm holding here until you confirm.",
+			"tools": ["edit"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true,
+				"midOperation": true
+			}
+		},
+		{
+			"request": "fix the classifier gap",
+			"message": "I've updated the classifier. Now I'll run the tests.",
+			"tools": ["edit"],
+			"expect": {
+				"announcedUnstarted": true,
+				"asksOperator": false,
+				"finishedUnit": false
+			}
+		},
+		{
+			"request": "what is in the config?",
+			"message": "Let me look at the config file.",
+			"expect": {
+				"announcedUnstarted": true,
+				"asksOperator": false
+			}
+		},
+		{
+			"request": "map the domains",
+			"message": "Next I'll dispatch the scouts to map `src/domains`.",
+			"expect": {
+				"announcedUnstarted": true,
+				"asksOperator": false
+			}
+		},
+		{
+			"request": "check the types",
+			"message": "Running the typecheck now.",
+			"expect": {
+				"announcedUnstarted": true,
+				"asksOperator": false
+			}
+		},
+		{
+			"request": "fix the loader",
+			"message": "I'll start by reading the settings module.",
+			"expect": {
+				"announcedUnstarted": true,
+				"asksOperator": false
+			}
+		},
+		{
+			"request": "run the tests",
+			"message": "I ran the tests; 3 failed in `retry.test.ts`.",
+			"tools": ["bash"],
+			"expect": {
+				"announcedUnstarted": false,
+				"claimsVerified": false,
+				"asksOperator": false
+			}
+		},
+		{
+			"request": "fix the loader and run everything",
+			"message": "I would run the tests next, but you asked me not to run anything.",
+			"expect": {
+				"announcedUnstarted": false,
+				"asksOperator": false
+			}
+		},
+		{
+			"request": "what comes after the refactor?",
+			"message": "The next step would be to run the tests. Want me to?",
+			"expect": {
+				"announcedUnstarted": false,
+				"asksOperator": true
+			}
+		},
+		{
+			"request": "patch the loader",
+			"message": "Reading `src/a.ts` now, then I'll patch the loader.",
+			"expect": {
+				"announcedUnstarted": true,
+				"asksOperator": false,
+				"midOperation": true
+			}
+		},
+		{
+			"request": "rename the helper everywhere",
+			"message": "Done with the rename. Summary: 12 references updated across 5 files.",
+			"tools": ["edit"],
+			"expect": {
+				"announcedUnstarted": false,
+				"asksOperator": false,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "run the suite",
+			"message": "All 312 tests pass.",
+			"tools": ["bash"],
+			"expect": {
+				"claimsVerified": true
+			}
+		},
+		{
+			"request": "run the gates",
+			"message": "Lint is clean and the build succeeded.",
+			"tools": ["bash"],
+			"expect": {
+				"claimsVerified": true
+			}
+		},
+		{
+			"request": "typecheck",
+			"message": "Typecheck passes with no errors.",
+			"tools": ["bash"],
+			"expect": {
+				"claimsVerified": true
+			}
+		},
+		{
+			"request": "did you run the tests?",
+			"message": "I did not run the tests.",
+			"expect": {
+				"claimsVerified": false
+			}
+		},
+		{
+			"request": "run the suite",
+			"message": "Two tests fail: `retry.test.ts` and `pager.test.ts`.",
+			"tools": ["bash"],
+			"expect": {
+				"claimsVerified": false
+			}
+		},
+		{
+			"request": "does the change work?",
+			"message": "The change should work but I haven't verified it.",
+			"expect": {
+				"claimsVerified": false
+			}
+		},
+		{
+			"request": "build the project",
+			"message": "I ran the build and it was green.",
+			"tools": ["bash"],
+			"expect": {
+				"claimsVerified": true
+			}
+		},
+		{
+			"request": "refactor the loader",
+			"message": "The refactor is done. I did not run the suite, so nothing is verified yet.",
+			"tools": ["edit"],
+			"expect": {
+				"claimsVerified": false,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "now let's look at the release workflow",
+			"message": "The release workflow in `.github/workflows/release.yml` publishes on tag push and runs two jobs, `ci` and `release`.",
+			"earlier": ["fix the typo in README.md line 3", "run the lint"],
+			"tools": ["read"],
+			"expect": {
+				"switchedGears": true,
+				"finishedUnit": true,
+				"midOperation": false
+			}
+		},
+		{
+			"request": "also fix line 4",
+			"message": "Fixed line 4 the same way.",
+			"earlier": ["fix the typo in README.md line 3"],
+			"tools": ["edit"],
+			"expect": {
+				"switchedGears": false,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "add the retry to the second endpoint too",
+			"message": "Done: both endpoints retry now.",
+			"earlier": ["add a retry with exponential backoff to the webhook sender"],
+			"tools": ["edit"],
+			"expect": {
+				"switchedGears": false,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "what is the rate limit in the weather API docs?",
+			"message": "The docs say the limit is 60 requests per minute per key.",
+			"earlier": ["refactor the settings loader", "fix the failing test in settings.test.ts"],
+			"tools": ["web_fetch"],
+			"expect": {
+				"switchedGears": true,
+				"finishedUnit": true
+			}
+		},
+		{
+			"request": "rename the helper everywhere",
+			"message": "I've renamed `readCfg` in 3 of the 7 files. The remaining four still use the old name.",
+			"tools": ["edit"],
+			"expect": {
+				"midOperation": true,
+				"finishedUnit": false
+			}
+		},
+		{
+			"request": "migrate the schema in five steps",
+			"message": "Step 2 of 5 done: the schema is migrated. Next comes the reader, then the writer.",
+			"tools": ["edit"],
+			"expect": {
+				"midOperation": true,
+				"finishedUnit": false
+			}
+		},
+		{
+			"request": "refactor the loader",
+			"message": "Refactor complete: all call sites use the new helper and the suite passes.",
+			"tools": ["edit", "bash"],
+			"expect": {
+				"midOperation": false,
+				"finishedUnit": true,
+				"claimsVerified": true
+			}
+		},
+		{
+			"request": "what does answerCertainty compute?",
+			"message": "`answerCertainty` returns how peaked a distribution is on a 0 to 1 scale. For a noul it is |2p - 1|.",
+			"tools": ["read"],
+			"expect": {
+				"finishedUnit": true,
+				"midOperation": false,
+				"asksOperator": false,
+				"blocksOnDecision": false
+			}
+		}
+	]
+}

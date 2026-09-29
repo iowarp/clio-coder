@@ -119,18 +119,24 @@ function rows(component: ReturnType<typeof banner>, width: number): string[] {
 	return component.render(width).map((line) => stripTerminalSequences(line));
 }
 
+function actionLine(lines: readonly string[]): string {
+	return lines.at(-2)?.trim() ?? "";
+}
+
 // ---------------------------------------------------------------------------
 // Displayed text
 // ---------------------------------------------------------------------------
 
-test("a healthy route shows the route without a latency number", () => {
-	const lines = rows(banner(), 80);
-	strictEqual(lines[4]?.slice(34).trim(), "✓ dynamo · qwen3.8-27b");
+test("the session header shows the active route without a latency number", () => {
+	const component = banner();
+	component.collapseToSessionHeader();
+	const lines = rows(component, 120);
+	ok(lines[0]?.includes("dynamo · qwen3.8-27b"), lines[0]);
 	ok(!lines.join("\n").includes("42ms"), "probe latency must not reach the header");
-	ok(!lines.join("\n").includes("healthy"), "the glyph carries the verdict, not the word");
+	ok(!lines.join("\n").includes("healthy"), "the session header does not claim readiness");
 });
 
-test("a failing route carries its reason, and the action names the repair surface", () => {
+test("a failing route names the repair surface without spilling provider diagnostics into the welcome", () => {
 	const lines = rows(
 		banner({
 			statuses: [
@@ -139,37 +145,39 @@ test("a failing route carries its reason, and the action names the repair surfac
 		}),
 		80,
 	);
-	ok(lines[4]?.includes("ECONNREFUSED 127.0.0.1:1234"), lines[4]);
-	strictEqual(lines[13]?.trim(), "route unavailable · /settings targets");
+	ok(actionLine(lines).includes("route unavailable · /settings targets"), actionLine(lines));
+	ok(!lines.join("\n").includes("ECONNREFUSED"), "raw provider error should not crowd the welcome");
 });
 
-test("the failure reason still fits at 60 columns, shrinking the route rather than vanishing", () => {
+test("the route repair action fits at 60 columns", () => {
 	const lines = rows(
 		banner({
 			statuses: [status({ available: false, reason: "refused", health: health("down", "ECONNREFUSED 127.0.0.1:1234") })],
 		}),
 		60,
 	);
-	ok(lines[4]?.includes("ECONNREFUSED 127.0.0.1:1234"), `reason lost at 60 columns: ${lines[4]}`);
+	ok(actionLine(lines).includes("route unavailable · /settings targets"), actionLine(lines));
 });
 
-test("at 40 columns the route shrinks and the reason is cut rather than dropped", () => {
+test("at 40 columns the route fault remains visible and its cut is marked", () => {
 	const lines = rows(
 		banner({
 			statuses: [status({ available: false, reason: "refused", health: health("down", "ECONNREFUSED 127.0.0.1:1234") })],
 		}),
 		40,
 	);
-	ok(lines[4]?.includes("ECONNREFUSED"), `reason dropped at 40 columns: ${lines[4]}`);
-	ok(lines[4]?.includes("…"), "a cut must be marked");
+	ok(actionLine(lines).includes("route unavailable"), actionLine(lines));
+	ok(actionLine(lines).includes("…"), "a cut must be marked");
 });
 
 test("a configured but unprobed target is neither ready nor unavailable", () => {
-	const lines = rows(banner({ statuses: [status({ health: health("unknown") })] }), 80).join("\n");
-	ok(lines.includes("◌ dynamo · qwen3.8-27b"), lines);
+	const component = banner({ statuses: [status({ health: health("unknown") })] });
+	const lines = rows(component, 80).join("\n");
 	ok(!lines.includes("✓"), "an unprobed target must not claim readiness");
 	ok(!lines.includes("✗"), "an unprobed target must not claim failure");
 	ok(!lines.includes("unavailable"), lines);
+	component.collapseToSessionHeader();
+	ok(rows(component, 120)[0]?.includes("dynamo · qwen3.8-27b"));
 });
 
 test("a target with no model and no default is unset, not ready", () => {
@@ -180,28 +188,27 @@ test("a target with no model and no default is unset, not ready", () => {
 		}),
 		80,
 	);
-	strictEqual(lines[4]?.slice(34).trim(), "dynamo · no model");
-	strictEqual(lines[13]?.trim(), "no model selected · /model");
+	ok(actionLine(lines).includes("no model selected · /model"), actionLine(lines));
 	ok(!lines.join("\n").includes("✓"), "a route with no model must not read as ready");
 });
 
 test("no target and no model names the route, not the context", () => {
 	const lines = rows(banner({ statuses: [], target: undefined, model: undefined, clioMd: "none" }), 80);
-	strictEqual(lines[4]?.slice(34).trim(), "not configured");
-	strictEqual(lines[13]?.trim(), "no route selected · /model");
+	ok(actionLine(lines).includes("no route selected · /model"), actionLine(lines));
+	ok(!actionLine(lines).includes("/context init"), "route faults outrank context guidance");
 });
 
-test("a target id absent from the list is a misconfiguration, not an unprobed route", () => {
+test("a target id absent from the list directs the operator to route settings", () => {
 	const lines = rows(
 		banner({ statuses: [status({ target: { id: "other", defaultModel: "m", runtime: "lmstudio", wireModels: [] } })] }),
 		80,
 	);
-	ok(lines[4]?.includes("no such target in settings"), lines[4]);
+	ok(actionLine(lines).includes("route unavailable · /settings targets"), actionLine(lines));
 });
 
 test("a malformed CLIO-CODER.md points at the read-only view, never at a regenerating command", () => {
 	const lines = rows(banner({ clioMd: "malformed" }), 80);
-	strictEqual(lines[13]?.trim(), "CLIO-CODER.md malformed · /context to inspect");
+	ok(actionLine(lines).includes("CLIO-CODER.md malformed · /context to inspect"), actionLine(lines));
 	const all = lines.join("\n");
 	ok(!all.includes("/context init"), "init would overwrite the file the operator must repair");
 	ok(!all.includes("/context refresh"), "refresh regenerates; it is not a repair for malformed content");
@@ -209,24 +216,20 @@ test("a malformed CLIO-CODER.md points at the read-only view, never at a regener
 
 test("missing project context is guidance that keeps the invitation to work", () => {
 	const lines = rows(banner({ clioMd: "none" }), 80);
-	strictEqual(lines[13]?.trim(), "describe a task · /context init to index this repo");
+	ok(actionLine(lines).includes("/context init to index this repo"), actionLine(lines));
 	ok(lines.join("\n").includes("Ask Clio how to use or extend her."));
 });
 
 test("stale project context offers refresh", () => {
 	const lines = rows(banner({ clioMd: "stale" }), 80);
-	strictEqual(lines[13]?.trim(), "describe a task · /context refresh to update it");
+	ok(actionLine(lines).includes("Stale project awareness: /context refresh to fix."), actionLine(lines));
 });
 
-test("the submit hint prints only a key that works", () => {
-	// The component prints the label it is handed; the presentation owns the
-	// KeyId-to-label spelling (see the effective-binding test below).
-	strictEqual(rows(banner({ submitKey: "Enter" }), 80)[13]?.trim(), "describe a task · Enter to send · / for commands");
-	strictEqual(
-		rows(banner({ submitKey: "Ctrl+S" }), 80)[13]?.trim(),
-		"describe a task · Ctrl+S to send · / for commands",
-	);
-	strictEqual(rows(banner({ submitKey: null }), 80)[13]?.trim(), "describe a task · / for commands");
+test("the welcome action never advertises a submit binding", () => {
+	const actions = ["Enter", "Ctrl+S", null].map((submitKey) => actionLine(rows(banner({ submitKey }), 80)));
+	strictEqual(new Set(actions).size, 1);
+	match(actions[0] ?? "", /v\d+\.\d+\.\d+$/u);
+	ok(!actions[0]?.includes("to send"), actions[0]);
 });
 
 test("route faults outrank project-context guidance", () => {
@@ -237,7 +240,8 @@ test("route faults outrank project-context guidance", () => {
 		}),
 		80,
 	);
-	strictEqual(lines[13]?.trim(), "route unavailable · /settings targets");
+	ok(actionLine(lines).includes("route unavailable · /settings targets"), actionLine(lines));
+	ok(!actionLine(lines).includes("/context init"), actionLine(lines));
 });
 
 // ---------------------------------------------------------------------------
@@ -276,8 +280,8 @@ test("a hostile provider reason cannot style, clear, or retitle the terminal", (
 	ok(!raw.includes("PWNED"), "OSC payload text survived");
 	const visible = lines.map((line) => stripTerminalSequences(line));
 	ok(controlFreeLines(visible), `control byte survived: ${JSON.stringify(visible)}`);
-	ok(visible.join("\n").includes("upstream 502 bad gateway"), visible.join("\n"));
-	ok(visible.join("\n").includes("网关错误"), "wide Unicode in a reason must survive sanitation");
+	ok(actionLine(visible).includes("route unavailable · /settings targets"), actionLine(visible));
+	ok(!visible.join("\n").includes("upstream 502"), "provider diagnostics should stay out of the welcome");
 });
 
 test("escape sequences in the cwd and branch are neutralized too", () => {
@@ -393,8 +397,10 @@ test("the workspace gives up its branch before the path's leaf", () => {
 	const component = banner({
 		workspace: workspace({ cwd: "/tmp/a/b/c/project-leaf", branch: "an-extremely-long-branch-name-that-will-not-fit" }),
 	});
-	const masthead = rows(component, 60)[5] ?? "";
+	component.collapseToSessionHeader();
+	const masthead = rows(component, 60)[0] ?? "";
 	ok(masthead.includes("project-leaf"), `leaf lost while branch kept: ${masthead}`);
+	ok(!masthead.includes("an-extremely-long-branch-name"), masthead);
 });
 
 // ---------------------------------------------------------------------------
@@ -407,7 +413,7 @@ test("render never calls the context reader on its own call stack", () => {
 	const component = banner({ countContextReads: reads, scheduleRefresh: (run) => deferred.push(run) });
 	const first = component.render(80).map(stripTerminalSequences);
 	strictEqual(reads.value, 0, "the reader ran inside render");
-	strictEqual(first[13]?.trim(), "describe a task · Enter to send · / for commands");
+	ok(actionLine(first).includes("Checking project awareness…"), actionLine(first));
 	ok(deferred.length === 1, "a refresh should be scheduled exactly once");
 	for (const run of deferred.splice(0)) run();
 	strictEqual(reads.value, 1);
@@ -427,17 +433,14 @@ test("a scheduled refresh asks for a frame when it lands", () => {
 	strictEqual(frames, 0);
 	for (const run of deferred.splice(0)) run();
 	strictEqual(frames, 1);
-	strictEqual(
-		component.render(80).map(stripTerminalSequences)[13]?.trim(),
-		"describe a task · /context init to index this repo",
-	);
+	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("/context init to index this repo"));
 });
 
 test("a reader that throws never becomes ok or none", () => {
 	const component = banner({ contextThrows: true });
 	const lines = rows(component, 80);
-	strictEqual(lines[13]?.trim(), "describe a task · Enter to send · / for commands");
-	ok(!lines.join("\n").includes("/context"), "a failed read must not suggest a context command");
+	ok(actionLine(lines).includes("Checking project awareness…"), actionLine(lines));
+	ok(!actionLine(lines).includes("/context"), "a failed read must not suggest a context command");
 });
 
 test("a failure never renews the trust window, and a stale value stops being asserted", () => {
@@ -457,25 +460,25 @@ test("a failure never renews the trust window, and a stale value stops being ass
 	});
 	const action = (): string => {
 		component.render(80);
-		return stripTerminalSequences(component.render(80)[13] ?? "").trim();
+		return actionLine(component.render(80).map(stripTerminalSequences));
 	};
-	strictEqual(action(), "describe a task · /context init to index this repo");
+	ok(action().includes("/context init to index this repo"));
 
 	// Reads start failing. The last good value stands in while retries are paced…
 	fail = true;
 	clock += WELCOME_PROJECT_CONTEXT_TTL_MS + 1;
-	strictEqual(action(), "describe a task · /context init to index this repo");
+	ok(action().includes("/context init to index this repo"));
 	clock += WELCOME_PROJECT_CONTEXT_RETRY_MS + 1;
-	strictEqual(action(), "describe a task · /context init to index this repo");
+	ok(action().includes("/context init to index this repo"));
 
 	// …but once the failure streak outlives the trust window it stops being asserted.
 	clock += WELCOME_PROJECT_CONTEXT_TTL_MS + 1;
-	strictEqual(action(), "describe a task · Enter to send · / for commands");
+	ok(action().includes("Checking project awareness…"));
 
 	// A successful read restores a real answer.
 	fail = false;
 	clock += WELCOME_PROJECT_CONTEXT_RETRY_MS + 1;
-	strictEqual(action(), "describe a task · /context init to index this repo");
+	ok(action().includes("/context init to index this repo"));
 });
 
 test("a reading is never served for a different directory", () => {
@@ -492,13 +495,11 @@ test("a reading is never served for a different directory", () => {
 		getSubmitKeyLabel: () => "Enter",
 		scheduleRefresh: (run) => run(),
 	});
-	const action = (): string => {
-		component.render(80);
-		return stripTerminalSequences(component.render(80)[13] ?? "").trim();
-	};
-	strictEqual(action(), "describe a task · /context init to index this repo");
+	component.render(80);
+	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("/context init to index this repo"));
 	cwd = "/tmp/work/second";
-	strictEqual(action(), "describe a task · Enter to send · / for commands");
+	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("Checking project awareness…"));
+	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("/context to inspect project awareness"));
 	deepStrictEqual(seen, ["/tmp/work/first", "/tmp/work/second"]);
 });
 
@@ -585,8 +586,9 @@ function presentation(over: Partial<InteractivePresentationDeps> = {}, realEdito
 			actionLabel: () => "unbound; see /help",
 		},
 		getSettings: () => ({
-			chat: { target: "dynamo", model: "qwen3.8-27b", thinkingLevel: "off" },
-			interface: { mode: "regular", outputDetail: "standard", smoothStreaming: "off" },
+			...DEFAULT_SETTINGS,
+			chat: { ...DEFAULT_SETTINGS.chat, target: "dynamo", model: "qwen3.8-27b", thinkingLevel: "off" },
+			interface: { ...DEFAULT_SETTINGS.interface, mode: "regular", outputDetail: "standard", smoothStreaming: "off" },
 		}),
 		getContextState: () => ({ clioMd: "ok", memoryCount: 0 }),
 		scheduleInterval: () => ({ unref: noop }),
@@ -681,7 +683,7 @@ test("a boot-time resume opens collapsed, with no fresh-start onboarding", () =>
 	ok(lines[0]?.includes("dynamo · qwen3.8-27b"), lines[0]);
 });
 
-test("the presentation's submit hint follows the effective binding", () => {
+test("the presentation's welcome action leaves submit bindings to the composer", () => {
 	const rebound = presentation({
 		keybindings: {
 			getKeys: (id: string) => (id === "tui.input.submit" ? ["ctrl+s"] : []),
@@ -689,12 +691,13 @@ test("the presentation's submit hint follows the effective binding", () => {
 			actionLabel: () => "",
 		},
 	} as unknown as Partial<InteractivePresentationDeps>);
-	ok(headerRows(rebound.presentation)[13]?.includes("Ctrl+S to send"), headerRows(rebound.presentation)[13]);
+	const reboundAction = actionLine(headerRows(rebound.presentation));
+	ok(!reboundAction.includes("Ctrl+S") && !reboundAction.includes("to send"), reboundAction);
 
 	const unbound = presentation({
 		keybindings: { getKeys: () => [], isDisabled: () => true, actionLabel: () => "" },
 	} as unknown as Partial<InteractivePresentationDeps>);
-	ok(!headerRows(unbound.presentation)[13]?.includes("to send"), headerRows(unbound.presentation)[13]);
+	strictEqual(actionLine(headerRows(unbound.presentation)), reboundAction);
 });
 
 test("disposing the presentation disposes the header", () => {
@@ -705,7 +708,7 @@ test("disposing the presentation disposes the header", () => {
 });
 
 for (const width of [40, 44, 60, 92, 120]) {
-	test(`production presentation footer preserves model identity at ${width} columns`, () => {
+	test(`production presentation keeps model identity in the composer and session header at ${width} columns`, () => {
 		let model = "very-long-placement/qwopus3.8-27b-q6";
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		const terminal = { columns: width };
@@ -729,6 +732,7 @@ for (const width of [40, 44, 60, 92, 120]) {
 			return rows;
 		};
 		try {
+			built.banner.collapseToSessionHeader();
 			const identities: string[] = [];
 			for (const placement of ["very-long-placement", "dynamo-long-placement"]) {
 				for (const family of ["qwopus3.8", "llamus3.8", "qwen3", "llama3"]) {
@@ -737,37 +741,31 @@ for (const width of [40, 44, 60, 92, 120]) {
 					const composer = built.editor.render(width);
 					for (const row of composer) ok(visibleWidth(row) <= width);
 					const rail = stripTerminalSequences(composer[0] ?? "");
-					for (const label of [family, placement, "blade-gateway", "q6"]) ok(!rail.includes(label), rail);
+					const nickname = family.charAt(0).toUpperCase() + family.slice(1);
+					ok(rail.includes(nickname), rail);
+					for (const label of [placement, "blade-gateway", "q6"]) ok(!rail.includes(label), rail);
 					const footer = footerRows(width).map(stripTerminalSequences).join("\n");
-					ok(footer.includes("q6"), footer);
-					// Compact footer uses middle truncation: narrow budgets can omit
-					// the family along with placement, but must retain the suffix.
-					if (width < 92) ok(footer.includes("…"), footer);
-					else ok(footer.includes(model), footer);
-					const wide = footerRows(120).map(stripTerminalSequences).join("\n");
-					ok(wide.includes(`blade-gateway · ${model}`), wide);
-					identities.push(wide);
+					ok(footer.includes("clio-coder"), footer);
+					ok(!footer.includes("q6"), "compact footer should leave model identity to the rail");
+					const session = headerRows(built, 120)[0] ?? "";
+					ok(session.includes(`blade-gateway · ${model}`), session);
+					identities.push(session);
 				}
 			}
 			strictEqual(new Set(identities).size, 8, "all families and placements stay distinct with room to show them");
-			// The callback carries raw fields; rendering sanitizes before truncation.
+			// The callback carries raw fields; both visible identity surfaces sanitize them.
 			model = `very-long-placement/\x1b]0;FAKE_MODEL_NAME\x07qwopus3.8-27b-q6`;
 			deepStrictEqual(built.editorChrome.getModelLabel(), { targetId: "blade-gateway", modelId: model });
-			for (const columns of [width, 120]) {
-				const raw = footerRows(columns).join("\n");
-				ok(!raw.includes("FAKE_MODEL_NAME"), raw);
-				ok(!raw.includes("\x1b]"), raw);
-				const clean = stripTerminalSequences(raw);
-				ok(clean.includes("q6"), clean);
-				if (columns >= 92) ok(clean.includes("very-long-placement/qwopus3.8-27b-q6"), clean);
-			}
+			const raw = `${built.editor.render(width).join("\n")}\n${headerRows(built, 120).join("\n")}`;
+			ok(!raw.includes("FAKE_MODEL_NAME") && !raw.includes("\x1b]"), raw);
+			ok(stripTerminalSequences(raw).includes("very-long-placement/qwopus3.8-27b-q6"), raw);
 		} finally {
 			built.dispose();
 		}
 	});
 }
 
-test("compact footer keeps the quantization token whole when placement does not fit", () => {
+test("the composer rail uses a model nickname while the session header retains its wire id", () => {
 	const model = "dynamo/qwopus3.8-27b-flash@q4_k_m";
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	const { presentation: built } = presentation(
@@ -783,27 +781,26 @@ test("compact footer keeps the quantization token whole when placement does not 
 		true,
 	);
 	try {
+		built.banner.collapseToSessionHeader();
+		const rail = stripTerminalSequences(built.editor.render(60)[0] ?? "");
+		ok(rail.includes("Qwopus3.8"), rail);
 		built.footer.refresh();
 		const footer = built.footer.view.render(60).map(stripTerminalSequences).join("\n");
-		ok(footer.includes("@q4_k_m"), footer);
-		const primary = footer.split("\n")[0] ?? "";
-		if (primary.includes("…")) match(primary, /…[/.@_-]/u, primary);
+		ok(footer.includes("clio-coder") && !footer.includes("@q4_k_m"), footer);
+		const session = headerRows(built, 120)[0] ?? "";
+		ok(session.includes(`blade · ${model}`), session);
 	} finally {
 		built.dispose();
 	}
 });
 
-test("the welcome keeps a full model name when space permits and shows the logo, tagline, and permissions", () => {
+test("the welcome keeps a quiet launchpad and the session header names the full model", () => {
 	const model = "dynamo/qwopus3.5-flash@q4_k_m";
 	const component = banner({ model });
 	const wide = rows(component, 120);
-	const tagline = "Systems engineering beats vibes! Built by researchers who love to code.";
-	ok(wide.join("\n").includes(model));
-	ok(wide[1]?.includes(tagline));
-	ok(!wide[0]?.includes(tagline));
-	ok(rows(component, 200)[1]?.includes(tagline));
-	ok(wide.join("\n").includes("Permissions  default"));
-	ok(wide[1]?.includes("████"));
+	ok(wide.join("\n").includes("████"));
+	for (const label of ["Session started", "Project", "AI usage · used"]) ok(wide.join("\n").includes(label));
+	match(actionLine(wide), /v\d+\.\d+\.\d+$/u);
 	component.collapseToSessionHeader();
 	strictEqual(rows(component, 120).length, 1);
 	ok(rows(component, 120)[0]?.includes(model));
@@ -826,7 +823,8 @@ test("the instant shell uses the finished welcome footprint without hydration co
 	const wide = boot.render(120).map(stripTerminalSequences).join("\n");
 	ok(wide.includes("Session started"));
 	ok(wide.includes("Checking project awareness"));
-	ok(wide.includes("Clio Coder v"));
+	match(wide, /v\d+\.\d+\.\d+/u);
+	ok(!boot.render(120).map(stripTerminalSequences)[0]?.includes("Clio Coder"));
 });
 
 test("the welcome box closes at the viewport edge on narrow and wide terminals", () => {
@@ -836,9 +834,8 @@ test("the welcome box closes at the viewport edge on narrow and wide terminals",
 		const edge = width - 1;
 		strictEqual(lines[0]?.[0], "┌");
 		strictEqual(lines[0]?.[edge], "┐");
-		strictEqual(lines[14]?.[edge], "┘");
-		for (const line of lines.slice(1, 12)) strictEqual(line[edge], "│", line);
-		for (const line of lines.slice(13, 14)) strictEqual(line[edge], "│", line);
+		strictEqual(lines.at(-1)?.[edge], "┘");
+		for (const line of lines.slice(1, -1)) strictEqual(line[edge], "│", line);
 		ok(
 			!lines
 				.slice(1, 6)
@@ -849,39 +846,27 @@ test("the welcome box closes at the viewport edge on narrow and wide terminals",
 	}
 });
 
-test("fleet and targets show cached facts, bound names, sanitize text, and refresh counts", () => {
-	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.chat.target = "dynamo";
-	settings.chat.model = "qwen3.8-27b";
-	settings.targets = [
-		{ id: "dynamo", runtime: "lmstudio" },
-		{ id: "cloud", runtime: "openai" },
-	];
-	settings.fleet.rosters = Object.fromEntries(
-		["review", "research", "verify", "more"].map((name) => [name, { members: [] }]),
-	);
-	let agents = 12;
-	let verdict = "unknown";
+test("account usage hydrates without moving the welcome frame or passing through control codes", () => {
+	let quota: string | null = null;
 	const component = createWelcomeDashboard({
-		getSettings: () => settings,
-		getAgentCount: () => agents,
-		providers: {
-			list: () =>
-				[status({ health: health(verdict) }), status({ target: settings.targets[1], health: health("unknown") })] as never,
-		},
+		getSettings: () => DEFAULT_SETTINGS,
+		providers: { list: () => [status()] as never },
+		getWorkspaceSnapshot: () => workspace() as never,
+		getContextState: () => ({ clioMd: "ok", memoryCount: 0 }) as never,
+		getQuotaSummary: () => quota,
+		scheduleRefresh: (run) => run(),
 	});
-	let lines = component.render(120).map(stripAnsi).join("\n");
-	ok(lines.includes("2 configured"));
-	ok(!lines.includes("ready"), "unprobed targets must not claim readiness");
-	ok(lines.includes("12 agent recipes · Rosters: review, research, verify +1"));
-	agents = 14;
-	verdict = "healthy";
-	lines = component.render(120).map(stripAnsi).join("\n");
-	ok(lines.includes("14 agent recipes"));
-	ok(lines.includes("1 ready"));
-	settings.fleet.rosters = { [`review${ESC}[2J${BEL}team`]: { members: [] } };
-	lines = component.render(120).map(stripAnsi).join("\n");
-	ok(!lines.includes(ESC) && !lines.includes(BEL));
+	component.render(120);
+	let lines = component.render(120).map(stripAnsi);
+	strictEqual(lines.length, 17);
+	ok(lines.join("\n").includes("No account reading yet"));
+	quota = "Claude 5h 23% used";
+	lines = component.render(120).map(stripAnsi);
+	strictEqual(lines.length, 17);
+	ok(lines.join("\n").includes("Accounts") && lines.join("\n").includes("Claude 5h 23%"));
+	quota = `Claude ${ESC}]0;PWNED${BEL}5h 23% used`;
+	const raw = component.render(120).join("\n");
+	ok(!raw.includes(`${ESC}]`) && !raw.includes(BEL) && !raw.includes("PWNED"), raw);
 	component.dispose();
 });
 

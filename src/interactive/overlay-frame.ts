@@ -614,13 +614,16 @@ export function showClioOverlayFrame(
 		fullscreen?: boolean;
 		/** Keep the composer's own text beneath the body (the permission card). */
 		keepComposer?: boolean;
+		/** Size the dock to the body between the compact floor and half the terminal (option-heavy lists). */
+		adaptiveHeight?: boolean;
 		/** Only unanswered decisions receive the small attention cue. */
 		awaitingInput?: boolean | (() => boolean);
 	},
 ): OverlayHandle {
-	const { title, footerHint, tone, visible, markerId, keepComposer, awaitingInput, ...overlayOptions } = options;
+	const { title, footerHint, tone, visible, markerId, keepComposer, adaptiveHeight, awaitingInput, ...overlayOptions } =
+		options;
 	const frame = new ClioOverlayFrame(child, title, footerHint, 0, "left", tone, false, awaitingInput);
-	const entry = dockMount(tui, frame, keepComposer === true);
+	const entry = dockMount(tui, frame, keepComposer === true, adaptiveHeight === true);
 	// The engine keeps this overlay for focus and input routing only. It paints
 	// nothing: the composer draws the frame inline, in normal flow, so the
 	// transcript keeps its rows and its mouse selection.

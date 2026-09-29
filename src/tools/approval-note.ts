@@ -18,7 +18,14 @@
  * Every wording states the scope the registry already enforces: the grant
  * covers this call and nothing else, so the model cannot read it as standing
  * permission for a later one.
+ *
+ * A call the System One gate parked also carries the gate's reason. The rail
+ * id says which rail asked, but a gate park is a judgment of this command and
+ * not a rule the model can look up, so without the reason it cannot tell why
+ * it was stopped.
  */
+
+import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 
 /** Prefix for a grant a person gave. */
 export const OPERATOR_APPROVAL_NOTE_PREFIX = "[operator approval]";
@@ -31,12 +38,39 @@ export interface ApprovalNoteInput {
 	requestedBy: string;
 	/** Damage-control rule or policy rail that parked the call, when one named it. */
 	ruleId?: string | undefined;
+	/** `PermissionRequiredMeta.gateReason`: why the System One gate parked the call, set only for a gate park. */
+	gateReason?: string | undefined;
 }
 
 const SCOPE = "The grant covers this call only; another call still needs its own approval.";
 
+/**
+ * The gate's sentences run about 110 characters plus a build id. The bound is
+ * for an engine that says more, because this text lands in the model's context.
+ */
+const GATE_REASON_MAX_CHARS = 200;
+
+/**
+ * The reason came from an engine build, so it takes the sanitizer a call target
+ * takes, is quoted as data and is cut on a code point boundary.
+ */
+function gateReasonText(reason: string | undefined): string {
+	if (reason === undefined) return "";
+	const line = sanitizeCallTargetText(reason).replaceAll('"', "'");
+	const points = Array.from(line);
+	return points.length > GATE_REASON_MAX_CHARS ? `${points.slice(0, GATE_REASON_MAX_CHARS - 1).join("")}…` : line;
+}
+
+/** ` (rail: <id>)`, extended with the gate's reason when there is one, or empty when neither exists. */
+function railClause(input: ApprovalNoteInput): string {
+	const ruleId = input.ruleId?.trim() ?? "";
+	const reason = gateReasonText(input.gateReason);
+	const parts = [...(ruleId !== "" ? [`rail: ${ruleId}`] : []), ...(reason !== "" ? [`reason: "${reason}"`] : [])];
+	return parts.length === 0 ? "" : ` (${parts.join(", ")})`;
+}
+
 export function approvalNote(input: ApprovalNoteInput): string {
-	const rail = input.ruleId !== undefined && input.ruleId.trim() !== "" ? ` (rail: ${input.ruleId.trim()})` : "";
+	const rail = railClause(input);
 	const call = `this ${input.actionClass} call`;
 	switch (input.requestedBy) {
 		case "tool:one_shot":

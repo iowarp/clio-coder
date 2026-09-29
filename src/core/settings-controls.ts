@@ -4,17 +4,23 @@ import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { type ClioSettings, SETTINGS_V1_PATH_MOVES, SettingsValidationError, validateSettings } from "./config.js";
 import { DEFAULT_SETTINGS, THINKING_LEVELS } from "./defaults.js";
 import { getAtPath, setAtPath } from "./session-routing.js";
+import {
+	SETTINGS_AREA_GROUPS,
+	type SettingsAreaId,
+	settingsAreaForPath,
+	settingsPlacementForRow,
+} from "./settings-areas.js";
 import { type SettingsSectionId, settingsGroupForPath, settingsSectionForPath } from "./settings-navigation.js";
 
 export const SETTINGS_LABELS_BY_ID = {
 	autonomy: "Autonomy level",
 	// Legacy row ids stay internal; visible names are shared by every settings surface.
-	"workers.onPermission": "Worker permission mode",
-	"workers.escalation.timeoutMs": "Escalation timeout (ms)",
-	"workers.escalation.fallback": "Escalation fallback",
+	"workers.onPermission": "When a worker asks permission",
+	"workers.escalation.timeoutMs": "Time to answer a worker",
+	"workers.escalation.fallback": "If you do not answer",
 	"delegation.defaults.toolGovernance": "External agent permissions",
 	"skills.trustProjectCompatRoots": "Trust project imports",
-	"attribution.gitCommits": "Git commit attribution",
+	"attribution.gitCommits": "Credit in Git commits",
 	safetyNet: "Safety net",
 	"orchestrator.thinkingLevel": "Thinking level",
 	"orchestrator.target": "Chat connection",
@@ -22,10 +28,10 @@ export const SETTINGS_LABELS_BY_ID = {
 	"background.target": "Memory connection",
 	"background.model": "Memory model",
 	"memory.intervention.enabled": "Proactive memory",
-	"memory.intervention.everyNTools": "Memory cadence (tools)",
-	"memory.intervention.windowSteps": "Memory trajectory steps",
-	"memory.intervention.maxTokens": "Memory reminder tokens",
-	"memory.intervention.timeoutMs": "Memory timeout (ms)",
+	"memory.intervention.everyNTools": "Tools between memory updates",
+	"memory.intervention.windowSteps": "Recent steps to remember",
+	"memory.intervention.maxTokens": "Memory note length",
+	"memory.intervention.timeoutMs": "Memory response time",
 	"prewarm.enabled": "Prompt pre-warm",
 	"workers.default.target": "Default fleet connection",
 	"workers.default.model": "Default fleet model",
@@ -33,11 +39,11 @@ export const SETTINGS_LABELS_BY_ID = {
 	"workers.profiles": "Add profile",
 	"workers.agentBindings": "Bind agent",
 	"workers.maxRetries": "Fleet retries",
-	"workers.resilienceCooldownMs": "Resilience cooldown (ms)",
-	"routing.activeRoles": "Active routing roles",
-	"routing.activePostures": "Active routing postures",
-	"routing.agentAutomation.activeAgentRoles": "Active agent routes",
-	"panes.enabled": "Panes capability",
+	"workers.resilienceCooldownMs": "Wait after a route fails",
+	"routing.activeRoles": "Roles using automatic routing",
+	"routing.activePostures": "Automatic routing priorities",
+	"routing.agentAutomation.activeAgentRoles": "Agents using automatic routing",
+	"panes.enabled": "Open extra panes",
 	"panes.notifications": "Pane notifications",
 	"panes.layout": "Startup layout",
 	"panes.workers.ratio": "Workers dock share",
@@ -45,55 +51,55 @@ export const SETTINGS_LABELS_BY_ID = {
 	"panes.yazi.enabled": "Files pane",
 	"panes.yazi.mode": "Files pane mode",
 	"panes.yazi.profile": "Files pane profile",
-	"panes.yazi.followCwd": "Follow conversation cwd",
+	"panes.yazi.followCwd": "Files follow chat folder",
 	"panes.yazi.ratio": "Files dock share",
-	scope: "Model cycle set",
+	scope: "Models in quick switch",
 	"modelSelector.recentLimit": "Recent models kept",
 	"modelSelector.favorites": "Pinned favorites",
 	"budget.sessionCeilingUsd": "Session cost limit",
-	"defaults.maxTokens": "Output budget (tokens)",
-	"context.toolResultMaxBytes": "Tool result cap (bytes)",
-	"budget.concurrency": "Fleet concurrency",
-	"guardrails.turnToolCallBudget": "Turn tool budget",
-	"guardrails.workerToolCallCap": "Worker tool-call cap",
-	"guardrails.maxDispatchRuns": "Run ledger retention",
-	"guardrails.readMaxBytes": "Read byte cap",
-	"guardrails.observationTurnBudgetBytes": "Observation byte pool",
-	"guardrails.internalDispatchTimeoutMs": "Internal dispatch timeout (ms)",
-	"compaction.auto": "Auto-compact",
-	"compaction.threshold": "Compaction threshold",
-	"context.workingSet.enabled": "Working-set eviction",
-	"context.workingSet.policy": "Eviction policy",
-	"context.workingSet.profile": "Protection profile",
-	"context.workingSet.target": "Eviction target pressure",
-	"context.workingSet.protectLastTurns": "Turns protected from eviction",
-	"context.workingSet.protectLastSteps": "Steps protected from eviction",
-	"context.workingSet.minEvictableTokens": "Minimum evictable tokens",
-	"context.workingSet.rearmFraction": "Eviction rearm band",
+	"defaults.maxTokens": "Maximum answer length",
+	"context.toolResultMaxBytes": "Maximum tool result size",
+	"budget.concurrency": "Workers at once",
+	"guardrails.turnToolCallBudget": "Tools per chat turn",
+	"guardrails.workerToolCallCap": "Tools per worker run",
+	"guardrails.maxDispatchRuns": "Past runs to keep",
+	"guardrails.readMaxBytes": "Maximum file read size",
+	"guardrails.observationTurnBudgetBytes": "Tool output per turn",
+	"guardrails.internalDispatchTimeoutMs": "Maximum internal run time",
+	"compaction.auto": "Summarize automatically",
+	"compaction.threshold": "When to summarize",
+	"context.workingSet.enabled": "Clear old tool output",
+	"context.workingSet.policy": "How old output is chosen",
+	"context.workingSet.profile": "What to keep in context",
+	"context.workingSet.target": "Context level after cleanup",
+	"context.workingSet.protectLastTurns": "Recent turns to keep",
+	"context.workingSet.protectLastSteps": "Recent steps to keep",
+	"context.workingSet.minEvictableTokens": "Smallest output to clear",
+	"context.workingSet.rearmFraction": "Wait before clearing again",
 	"retry.enabled": "Retry transient errors",
 	"retry.maxRetries": "Max retries",
-	"retry.baseDelayMs": "Base delay (ms)",
-	"retry.maxDelayMs": "Max delay (ms)",
-	"retry.streamStallMs": "Stream stall timeout (ms)",
-	"retry.firstTokenStallMs": "First token timeout (ms)",
+	"retry.baseDelayMs": "Wait before first retry",
+	"retry.maxDelayMs": "Longest retry wait",
+	"retry.streamStallMs": "Wait for a stalled reply",
+	"retry.firstTokenStallMs": "Wait for reply to start",
 	"terminal.showTerminalProgress": "Terminal progress indicator",
 	"terminal.outputVerbosity": "Output style",
-	"terminal.tuiMode": "TUI mode",
+	"terminal.tuiMode": "Transcript layout",
 	"terminal.fullscreenScrollbar": "Fullscreen scrollbar",
 	"terminal.smoothStreaming": "Smooth streaming",
 	"terminal.notify": "Desktop notifications",
-	"watchdog.enabled": "Turn-end review watchdog",
+	"watchdog.enabled": "Review changed work",
 	"watchdog.target": "Review connection",
-	"watchdog.cadenceToolCalls": "Review cadence (tools)",
-	runtimePlugins: "Runtime plugins",
+	"watchdog.cadenceToolCalls": "Tools between reviews",
+	runtimePlugins: "Startup plugins",
 	"compaction.model": "Compaction model",
 	"compaction.systemPrompt": "Compaction prompt",
-	"delegation.defaults.connectTimeoutMs": "Delegate connect (ms)",
-	"delegation.defaults.turnTimeoutMs": "Delegate turn (ms)",
-	"delegation.defaults.permissionTimeoutMs": "Delegate permission (ms)",
+	"delegation.defaults.connectTimeoutMs": "Time for agent to connect",
+	"delegation.defaults.turnTimeoutMs": "Maximum agent turn time",
+	"delegation.defaults.permissionTimeoutMs": "Time for agent permission",
 	targets: "Configured connections",
 	keybindings: "Keybinding overrides",
-	"delegation.agents": "External agents",
+	"delegation.agents": "Available agents",
 	"library.catalog": "Library catalog path",
 	"library.remote": "Library remote",
 	"library.confirmedRemote": "Confirmed library remote",
@@ -102,79 +108,77 @@ export const SETTINGS_LABELS_BY_ID = {
 
 export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	autonomy: "How freely Clio acts; the safety net always applies.",
-	"workers.onPermission":
-		"How a worker resolves an approval ask: deny the call, fail the run, or escalate to this session.",
-	"workers.escalation.timeoutMs": "How long an escalated worker approval waits for you before the fallback applies.",
-	"workers.escalation.fallback": "What an escalated approval becomes when nobody answers inside the timeout.",
+	"workers.onPermission": "Choose whether a worker skips the blocked tool, stops, or asks you to approve it.",
+	"workers.escalation.timeoutMs": "How long Clio waits for your answer when a worker asks permission.",
+	"workers.escalation.fallback": "What the worker does if you do not answer in time.",
 	"delegation.defaults.toolGovernance": "Tool policy for delegated external agents.",
 	"skills.trustProjectCompatRoots": "Allow explicitly imported foreign skills and prompts to run.",
 	"attribution.gitCommits":
 		"Add evidence-backed assistance, testing, review, and contributor trailers to commits created through Clio.",
 	safetyNet: "Always-on rails; tuned in .clio-coder/safety.yaml.",
-	"orchestrator.thinkingLevel": "Reasoning budget for the chat loop.",
+	"orchestrator.thinkingLevel": "How much reasoning the chat model uses before answering.",
 	"orchestrator.target": "Connection that answers in chat.",
 	"orchestrator.model": "Chat model override; unset uses the connection default.",
-	"background.target": "Optional target for LLM memory steps; unset keeps rules-only memory.",
-	"background.model": "Small non-reasoning model used only for task memory steps.",
-	"memory.intervention.enabled": "Master switch for rules-only and model-backed task memory.",
-	"memory.intervention.everyNTools": "Maximum tool executions between prompted memory steps.",
-	"memory.intervention.windowSteps": "Recent completed tool steps visible to the memory policy.",
-	"memory.intervention.maxTokens": "Hard cap for one visible memory reminder.",
-	"memory.intervention.timeoutMs": "Hard deadline for one background-model memory call.",
+	"background.target": "Connection for optional model-backed memory. Leave blank to use rules only.",
+	"background.model": "Model used to update task memory when a memory connection is chosen.",
+	"memory.intervention.enabled": "Allow Clio to update task memory as work progresses.",
+	"memory.intervention.everyNTools": "Maximum number of tool uses between memory updates.",
+	"memory.intervention.windowSteps": "How many recent steps Clio considers when updating memory.",
+	"memory.intervention.maxTokens": "Maximum length of one memory reminder, in tokens.",
+	"memory.intervention.timeoutMs": "How long Clio waits for a memory model response.",
 	"prewarm.enabled": "Send the next turn's known prefix ahead of time so a local server has already prefilled it.",
 	"workers.default.target": "Default connection for delegated fleet work.",
 	"workers.default.model": "Default fleet model override; unset uses the connection default.",
 	"workers.default.thinkingLevel": "Reasoning budget for dispatched workers.",
-	"workers.profiles": "Named target/model/thinking choices that native workers can use. Enter adds one.",
-	"workers.agentBindings": "Pins native Clio agents, including shadow agents, to worker profiles. Enter adds one.",
+	"workers.profiles": "Saved connection, model, and reasoning choices for workers. Enter adds one.",
+	"workers.agentBindings": "Choose which saved profile each Clio agent uses. Enter adds one.",
 	"workers.maxRetries": "Automatic retries for a retryable worker outcome.",
 	"workers.resilienceCooldownMs":
 		"How long a failing target, runtime, and model route is skipped before it is tried again.",
-	"routing.activeRoles": "Execution roles whose joint route selection may act instead of only shadowing.",
-	"routing.activePostures": "Route postures whose selection may act instead of only shadowing.",
-	"routing.agentAutomation.activeAgentRoles": "Exact agent and execution-role pairs whose agent choice may act.",
-	"panes.enabled": "Default panes activation for new sessions; `--with-panes` / `--no-panes` beat it.",
-	"panes.notifications": "Which terminal run states raise a pane-host toast.",
-	"panes.layout": "What composes itself at interactive boot: nothing, the workers dock, or workers plus files.",
+	"routing.activeRoles": "Types of worker allowed to use an automatically selected model.",
+	"routing.activePostures": "Priorities that automatic model selection may use for workers.",
+	"routing.agentAutomation.activeAgentRoles": "Specific agents allowed to use automatic model selection.",
+	"panes.enabled": "Allow Clio to open companion panes when a pane host is available.",
+	"panes.notifications": "Choose which worker updates show a pane notification.",
+	"panes.layout": "Choose which companion panes open when Clio starts.",
 	"panes.workers.ratio": "Share of the width the workers dock takes, at most half.",
-	"panes.journal": "Whether every dispatched run's event tail is written to disk for `clio-coder fleet view`.",
+	"panes.journal": "Save worker activity so you can inspect finished runs later.",
 	"panes.yazi.enabled":
 		"Whether `/files`, its key, and `/panes open files` may open the files pane or the one-shot pick.",
 	"panes.yazi.mode": "Keep the files pane beside the conversation, or close it after one selection.",
-	"panes.yazi.profile": "Use Clio's managed, themed engine profile or the operator's own file-manager configuration.",
-	"panes.yazi.followCwd": "Push the conversation directory into an already-open companion pane.",
+	"panes.yazi.profile": "Use Clio's theme or your own file manager settings.",
+	"panes.yazi.followCwd": "Keep an open files pane on the same folder as the conversation.",
 	"panes.yazi.ratio": "Share of the height the files dock takes, at most half.",
-	scope: "Configured model-cycle action set.",
+	scope: "Models the quick-switch key cycles through.",
 	"modelSelector.recentLimit": "How many recently used models /model remembers.",
-	"modelSelector.favorites": "Exact target/model refs pinned in /model.",
+	"modelSelector.favorites": "Connections and models pinned in the model picker.",
 	"budget.sessionCeilingUsd": "Per-session cost cap.",
 	"defaults.maxTokens": "Output tokens requested per turn, applied to every target.",
 	"context.toolResultMaxBytes": "Maximum bytes returned from one tool result before the full text spills to scratch.",
-	"budget.concurrency": "Parallel workers allowed during dispatch.",
-	"guardrails.turnToolCallBudget": "Soft per-turn tool-call budget for this chat loop.",
-	"guardrails.workerToolCallCap": "Lifetime ceiling on tool calls one dispatched worker may execute.",
-	"guardrails.maxDispatchRuns": "How many finished runs the dispatch ledger keeps before the oldest are dropped.",
-	"guardrails.readMaxBytes": "Per-call byte cap for the read tool.",
-	"guardrails.observationTurnBudgetBytes": "Shared per-turn byte pool across every observation-producing tool.",
-	"guardrails.internalDispatchTimeoutMs": "Wall-clock cap for one internal generator dispatch.",
-	"compaction.auto": "Auto-compact before a turn when context crosses the threshold.",
-	"compaction.threshold": "Pressure at which compaction masks stale observations, then summarizes.",
-	"context.workingSet.enabled": "Non-destructive eviction of stale tool results before a summary is ever needed.",
-	"context.workingSet.policy": "Which candidates the eviction pass selects.",
-	"context.workingSet.profile": "What this kind of work never gives up, on top of the absolute protections.",
-	"context.workingSet.target": "Context pressure an applied eviction batch brings the session down to.",
-	"context.workingSet.protectLastTurns": "Recent user turns whose observations are never evicted.",
-	"context.workingSet.protectLastSteps": "Recent assistant steps whose observations and reasoning are never evicted.",
+	"budget.concurrency": "Maximum number of workers running at the same time.",
+	"guardrails.turnToolCallBudget": "Maximum tool uses Clio may make during one chat turn.",
+	"guardrails.workerToolCallCap": "Maximum tool uses one worker may make during its run.",
+	"guardrails.maxDispatchRuns": "How many finished worker runs remain in local history.",
+	"guardrails.readMaxBytes": "Maximum text one file read may return to the model.",
+	"guardrails.observationTurnBudgetBytes": "Combined tool output Clio may read during one turn.",
+	"guardrails.internalDispatchTimeoutMs": "Maximum time for one internal worker run.",
+	"compaction.auto": "Summarize older context automatically before the conversation fills up.",
+	"compaction.threshold": "How full the model's context can get before Clio summarizes older content.",
+	"context.workingSet.enabled": "Free space by setting aside stale tool output before summarizing the conversation.",
+	"context.workingSet.policy": "Choose how Clio finds old tool output to set aside.",
+	"context.workingSet.profile": "Keep extra outputs that matter for the current kind of work.",
+	"context.workingSet.target": "How full the context should be after Clio clears old output.",
+	"context.workingSet.protectLastTurns": "Keep tool output from this many recent user turns.",
+	"context.workingSet.protectLastSteps": "Keep tool output from this many recent assistant steps.",
 	"context.workingSet.minEvictableTokens":
 		"Results below this token estimate stay; the marker would cost more than it saves.",
-	"context.workingSet.rearmFraction":
-		"After an eviction event, wait until the projection has grown by this share of the window before evicting again.",
+	"context.workingSet.rearmFraction": "Wait for context use to grow by this much before clearing old output again.",
 	"retry.enabled": "Retry transient provider errors on the next submit.",
 	"retry.maxRetries": "Retry attempts after the initial failure.",
 	"retry.baseDelayMs": "Initial retry delay in milliseconds.",
 	"retry.maxDelayMs": "Maximum retry delay in milliseconds.",
-	"retry.streamStallMs": "Silence on an in-flight stream past this long is treated as a wedged backend.",
-	"retry.firstTokenStallMs": "Silence allowed before a call's first token, for backends that load the model on demand.",
+	"retry.streamStallMs": "How long Clio waits when a model stops sending text mid-answer.",
+	"retry.firstTokenStallMs": "How long Clio waits for a model to start its answer.",
 	"terminal.showTerminalProgress": "Show running-task progress in terminals that support tab or taskbar badges.",
 	"terminal.outputVerbosity": "How much reasoning, tool input, and live tool output appears in the transcript.",
 	"terminal.tuiMode": "Use regular terminal scrollback or a fullscreen transcript with a sticky composer and footer.",
@@ -182,22 +186,25 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"terminal.smoothStreaming": "Presentation-only pacing for streamed assistant text and thinking.",
 	"terminal.notify":
 		"Content-free desktop notification when a turn ends, a detached batch settles, or an approval parks.",
-	"watchdog.enabled": "When enabled, a turn that changed the tree is reviewed by one read-only verifier run.",
-	"watchdog.target": "Set target to route the run at a cheap local model; blank uses the session's active target.",
-	"watchdog.cadenceToolCalls": "Also fire every N tool calls inside a turn; blank fires at turn end only.",
+	"watchdog.enabled": "After Clio changes files, ask a read-only reviewer to check the work.",
+	"watchdog.target": "Connection used for the review. Leave blank to use the chat connection.",
+	"watchdog.cadenceToolCalls":
+		"Also review during a long turn after this many tool uses; leave blank for an end-of-turn review only.",
 	runtimePlugins:
 		"Additional runtime plugin packages loaded when Clio starts. Install and enable only packages you trust.",
-	"compaction.model": "Dedicated summarization model; blank uses the orchestrator.",
-	"compaction.systemPrompt": "Path to a compaction prompt override; blank uses the built-in.",
+	"compaction.model": "Model used to summarize older conversation. Leave blank to use the chat model.",
+	"compaction.systemPrompt":
+		"Optional file with custom summarizing instructions. Leave blank for Clio's built-in instructions.",
 	"delegation.defaults.connectTimeoutMs": "How long to wait for a delegated agent to connect.",
 	"delegation.defaults.turnTimeoutMs": "How long a single delegated turn may run.",
-	"delegation.defaults.permissionTimeoutMs": "How long Clio's ACP server waits for a permission response.",
+	"delegation.defaults.permissionTimeoutMs":
+		"How long Clio waits for your answer to an external agent's permission request.",
 	targets: "Inference targets available for chat and workers. Add one with `clio-coder targets add`.",
 	keybindings: "Custom key overrides layered on the defaults.",
-	"delegation.agents": "External ACP agents available to /delegate.",
+	"delegation.agents": "Other coding agents you can call through /delegate.",
 	"library.catalog": "Path to the private resource catalog; blank uses the one in your config directory.",
 	"library.remote": "Git remote the catalog syncs with; blank keeps the library entirely local.",
-	"library.confirmedRemote": "The remote you confirmed. Sync refuses until it matches library.remote.",
+	"library.confirmedRemote": "The remote you approved. Syncing waits until it matches the current library remote.",
 	"library.sync": "Whether `clio-coder library sync` and `push` may talk to the remote at all.",
 } as const satisfies Record<keyof typeof SETTINGS_LABELS_BY_ID, string>;
 
@@ -208,85 +215,80 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"defaults.maxTokens":
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
 	"context.toolResultMaxBytes":
-		"The 192KB per-turn observation pool remains authoritative. Three full 64KB results consume it, so a fourth finds it filled. Whole number of at least 4096 bytes · default: 65536 (64KB).",
+		"At least 4 KB. Clio can read up to 192 KB of tool output across a whole turn, even if this per-result limit is higher.",
 	"compaction.threshold":
-		"pressure = estimated tokens ÷ context window. Higher keeps more history but risks overflow before a summary runs.",
+		"Choose how full the model's context may get. A higher percentage keeps more history but leaves less room for the next answer.",
 	"context.workingSet.enabled":
-		"Eviction moves stale tool-result bodies and thinking blocks out of the model's working set and records a ledger entry; history is never rewritten. Off skips eviction and goes straight to summary compaction. Legal values: true, false · default: true.",
+		"Old tool output is set aside without changing chat history. When off, Clio waits until it needs to summarize the conversation.",
 	"context.workingSet.policy":
-		"structural-v1 selects by message structure; structural-v2 adds the offloaded-body rung and pins bodies the model recalled twice; age-horizon is the older age-based rule. Legal values: structural-v1, structural-v2, age-horizon · default: structural-v2.",
+		"Current structure also protects output the model returned to twice. Classic structure uses the older selection rule. Age only clears the oldest eligible output first.",
 	"context.workingSet.profile":
-		"default pins nothing extra; data-analysis keeps the last three bash outputs that printed numbers; web-design keeps the last read of every stylesheet and component under edit and lets bash output leave first. Main agent only. Legal values: default, data-analysis, web-design · default: default.",
+		"Data analysis keeps recent numeric command output. Web design keeps recently read stylesheets and components. Default adds no special protection.",
 	"context.workingSet.target":
-		"An applied eviction batch keeps evicting until pressure reaches this ratio, so it sits below compaction.threshold. Greater than 0 and less than 1 · default: 0.6.",
+		"Choose a percentage below the summarize threshold. Clio keeps clearing eligible output until context use falls to this level.",
 	"context.workingSet.protectLastTurns": "Counted in user turns. Whole number of at least 1 · default: 6.",
 	"context.workingSet.protectLastSteps":
 		"Counted in assistant steps inside the turn window, so a long agentic turn stays evictable. Whole number of at least 1 · default: 8.",
 	"context.workingSet.minEvictableTokens":
-		"The floor sweep put marker break-even near 50 tokens; 200 is the churn guard. Whole number, 0 evicts anything · default: 200.",
+		"Smaller outputs stay in context because replacing them saves little space. Choose 0 to allow every size.",
 	"context.workingSet.rearmFraction":
-		"A pressure checkpoint runs before every model request and each applied event cold-starts the prefix cache, so a second event waits until the projection has grown by this fraction of the context window. Overflow recovery ignores the band. At least 0 and less than 1, 0 disables · default: 0.1.",
+		"Clio waits for context use to grow by this percentage after clearing output. Choose 0 to allow another cleanup immediately.",
 	"guardrails.turnToolCallBudget":
-		"Crossing it blocks further calls in the turn with a stop-and-summarize directive, and the hard interrupt ceiling sits a fixed margin above. A backstop against a model spraying unproductive calls, not a routine ceiling: a repo-wide audit legitimately runs dozens. Whole number of at least 1 · default: 60.",
+		"Clio stops using tools and summarizes the turn when it reaches this limit. Whole number of at least 1.",
 	"guardrails.workerToolCallCap":
-		"Bounds admitted calls, not attempts: a call the harness refuses never ran and never spends the cap. Dispatch takes the smaller of this and the agent recipe's own budget, so the recipe normally binds. Whole number of at least 1 · default: 150.",
+		"Only tools that actually ran count. A worker's own smaller limit still applies. Whole number of at least 1.",
 	"guardrails.maxDispatchRuns":
-		"Runs leaving the ring also lose their event journal directory. Whole number of at least 1 · default: 1000.",
-	"guardrails.readMaxBytes":
-		"Clamped up to a 1KB floor at use. Whole number of bytes, at least 1 · default: 51200 (50KB).",
+		"When history fills, the oldest run and its event log are removed. Whole number of at least 1.",
+	"guardrails.readMaxBytes": "Enter a number of bytes. Clio reads at least 1 KB even if you choose a smaller value.",
 	"guardrails.observationTurnBudgetBytes":
-		"One pool shared by every observation-producing tool in a turn, so a single verbose tool cannot starve the rest. Whole number of bytes, at least 1 · default: 196608 (192KB).",
+		"Shared by every tool in the turn. Enter a whole number of bytes, at least 1.",
 	"guardrails.internalDispatchTimeoutMs":
-		"Covers the wiki documenter and the bootstrap scout. Continuous output satisfies the heartbeat watchdog and a run mid-generation spends no tool calls, so this is the only guard that ends a degenerate generator. Healthy runs finish in minutes. Whole milliseconds of at least 1 · default: 900000 (15 minutes).",
+		"Ends an internal worker run that never finishes, including the wiki writer and first project Scout. Enter at least 1 millisecond.",
 	"retry.streamStallMs":
-		"Measured from the last token received, not from the request, so a slow-but-alive stream is never aborted. The retry then follows the same enabled/maxRetries/delay settings above. Whole milliseconds · default: 180000 (three minutes).",
+		"The timer resets whenever text arrives. If it expires, Clio can retry according to the retry settings above.",
 	"retry.firstTokenStallMs":
-		"Measured from the request until the first token. A local server that slept reloads the model and prefills cold first, so this window is longer than the stream stall timeout; the larger of the two applies. 0 never aborts a call that has not started streaming. Whole milliseconds · default: 600000 (ten minutes).",
+		"Time allowed before the first text arrives. Choose 0 to wait indefinitely; useful for models that need to load first.",
 	"library.catalog":
 		"Absolute path, or blank for the catalog in your config directory. The catalog is the index `clio-coder library` reads; installed resources land in the usual skill and resource roots either way. Default: blank.",
 	"library.remote":
-		"A Git remote URL, or blank to keep the library local. Setting it is not enough to sync: the remote must also be confirmed, and library.sync must be true. Default: blank.",
+		"Enter a Git remote URL, or leave blank to keep the library local. Confirm the remote and turn on syncing before Clio uses it.",
 	"library.confirmedRemote":
-		"Written by the confirm flow, not by hand, because confirming a remote here would be the record confirming itself. Sync refuses with library_remote_unconfirmed until this equals library.remote. Default: blank.",
-	"library.sync":
-		"Off means `clio-coder library sync` and `push` refuse before touching the network, whatever the remote says. Legal values: true, false · default: false.",
+		"Clio records this after you confirm the library remote. It must match the selected remote before syncing is allowed.",
+	"library.sync": "When off, library sync and push stop before contacting the remote, even if one is configured.",
 	"budget.concurrency":
-		"auto sizes local workers from usable CPUs and available memory, up to eight, and is the default. A fixed number caps how many workers run at once.",
+		"Automatic chooses a limit from available CPU and memory, up to eight workers. Choose a number to set a fixed limit.",
 	"skills.trustProjectCompatRoots":
 		"Applies to foreign packages explicitly imported into Clio, at user or project scope. Loose skills/prompts in other agents' folders stay discovery-only; this setting never imports them.",
 	"attribution.gitCommits":
 		"Role trailers are added only when Clio has trusted evidence for that role. Disabling leaves subsequent commit messages entirely unchanged.",
 	"workers.onPermission":
-		"deny turns the ask into a tool denial and the run continues; fail stops the run as permission_required; escalate forwards the ask to you and falls back per fleet.permissions.escalation on timeout.",
+		"Deny the tool lets the worker continue without it. Stop the worker ends the run. Ask me waits for your answer, then uses the fallback choice if time runs out.",
 	"workers.escalation.timeoutMs":
-		"Only the escalate posture reads it, and it is what keeps that posture non-stall: a headless session has no operator to answer, so the fallback always governs there. Whole milliseconds of at least 1; default: 120000 (two minutes).",
-	"workers.escalation.fallback":
-		"deny turns the unanswered ask into a tool denial and the run continues; fail ends the run as permission_required. Legal values: deny, fail · default: deny.",
+		"Used only when workers ask you. In sessions with nobody available to answer, the fallback applies. Enter at least 1 millisecond.",
+	"workers.escalation.fallback": "Deny the tool lets the worker continue without it. Stop the worker ends the run.",
 	"workers.resilienceCooldownMs":
-		"Applied per target, runtime, and wire model after a failure class that trips the breaker; a clean run clears it immediately. Whole milliseconds, 0 disables the cooldown; default: 15000.",
+		"After repeated failures, Clio waits before trying the same connection and model again. A successful run clears the wait. Choose 0 to disable it.",
 	"routing.activeRoles":
-		"Joint route selection stays shadow-only, recording what it would have picked, unless both the execution role and the requested posture are named as active. Legal values: researcher, verifier, reviewer, judge · default: none active.",
+		"Automatic model selection only takes effect when both the worker role and its priority are enabled. Otherwise Clio records its suggestion without using it. Choose researcher, verifier, reviewer, or judge.",
 	"routing.activePostures":
-		"Manual pins are exact rather than adaptive, so manual is never an activated posture. Legal values: quality, balanced, latency, economy · default: none active.",
+		"Choose which priorities may select a model automatically: quality, balanced, speed, or lower cost. Manually chosen models stay fixed.",
 	"routing.agentAutomation.activeAgentRoles":
-		"Exact agentId and executionRole pairs, because independent agent and role lists would authorize their whole cross-product. Execution roles: builder, researcher, verifier, reviewer, judge; the agentId `auto` is reserved. Edit the pairs in settings.yaml; default: none active.",
+		"Each entry names one agent and worker role. Edit these pairs in the settings file. The agent name auto is reserved.",
 	"prewarm.enabled":
-		"Fires at session start, after a resume rebuilds the message array, and after a compaction settles, never while a turn or dispatch is running. Local-native targets and interactive sessions only, whatever this says. Legal values: true, false · default: false.",
+		"For a supported local connection, prepare the next prompt when a session starts, resumes, or finishes summarizing. It does not run during an active turn.",
 	"workers.agentBindings":
 		"Bind base, custom, and shadow native agents such as scout, researcher, and provenance to profiles. ACP delegation agents cannot be bound.",
 	"delegation.defaults.toolGovernance":
-		"clio-coder-policy gates the agent through Clio's safety net; agent-managed trusts the agent; deny-all blocks every tool.",
-	scope:
-		"Choose target-level or exact target/model refs. Explicit model-cycle bindings step the chat target through this list.",
+		"Clio permissions check external agent tools. Agent permissions let that agent decide. Deny all tools blocks every tool request.",
+	scope: "Choose connections or specific models. The model switch shortcut cycles through this list.",
 	runtimePlugins: "Comma-separated package names, loaded at startup. Restart Clio after changing.",
 	"terminal.notify":
-		"OSC 777, or OSC 9 on iTerm2, Windows Terminal, and ConEmu. Interactive TTY runs only; the body never carries prompt text, file paths, or model output.",
+		"Supported terminals show a brief desktop alert. Alerts never include your prompt, file paths, or model output.",
 	"watchdog.enabled":
-		"The verifier run is briefed with the turn's coalesced diff and the task board's current scope; its blockers become one transcript notice and nothing else. Headless and ACP runs never fire it.",
-	"watchdog.target":
-		"A watchdog run costs a worker run per mutating turn, so routing it at a local target keeps the review cheap. Leave blank to reuse whatever the session is already talking to.",
+		"The reviewer reads the files changed during the turn and reports blockers in the transcript. It runs in interactive sessions only.",
+	"watchdog.target": "Choose a connection for the reviewer. Leave blank to use the current chat connection.",
 	"watchdog.cadenceToolCalls":
-		"Mid-turn firing is how scope drift becomes visible before the turn ends. Leave blank and the watchdog fires at turn end only.",
+		"Set a tool count to check work during a long turn. Leave blank to review only when the turn ends.",
 	keybindings:
 		"Alt+O cycles Output style: Compact, Standard, Detailed. Use /view for full reasoning and action details. Shift+Tab changes model thinking effort.",
 };
@@ -300,32 +302,31 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 			"edits, commands, outward confirmations, access outside the workspace and dispatch plans run without asking; hard blocks, damage-control rules and protected paths still apply",
 	},
 	"workers.onPermission": {
-		deny: "a worker permission ask becomes a tool denial; the run continues",
-		fail: "the run ends immediately as permission_required",
-		escalate:
-			"the ask is forwarded to this session's operator; on timeout it falls back to deny or fail per fleet.permissions.escalation",
+		deny: "the worker skips the blocked tool and continues",
+		fail: "the worker stops and reports that permission was needed",
+		escalate: "Clio asks you; if you do not answer in time, it uses the fallback choice below",
 	},
 	"workers.escalation.fallback": {
-		deny: "an unanswered escalation becomes a tool denial and the run continues",
-		fail: "an unanswered escalation ends the run as permission_required",
+		deny: "the worker skips the blocked tool and continues",
+		fail: "the worker stops and reports that permission was needed",
 	},
 	"prewarm.enabled": {
-		true: "prefill the next turn's known prefix on local-native targets",
-		false: "never send a pre-warm request; the first turn pays the whole prefill",
+		true: "prepare the next prompt on supported local connections",
+		false: "wait until you send the next message before preparing it",
 	},
 	"context.workingSet.enabled": {
-		true: "evict stale observations non-destructively before summarizing",
-		false: "skip eviction and go straight to summary compaction",
+		true: "set old tool output aside before summarizing the conversation",
+		false: "keep tool output until the conversation needs a summary",
 	},
 	"context.workingSet.policy": {
-		"structural-v1": "select eviction candidates by message structure",
-		"structural-v2": "the structural rungs plus the offloaded-body rung and the churn pin",
-		"age-horizon": "the older rule: select by age alone",
+		"structural-v1": "choose output based on where it appears in the conversation",
+		"structural-v2": "also keep output that the model returned to more than once",
+		"age-horizon": "choose the oldest eligible output first",
 	},
 	"context.workingSet.profile": {
-		default: "no pins beyond the absolute protections",
-		"data-analysis": "keep the last three bash outputs that printed numbers",
-		"web-design": "keep the last read of each stylesheet and component under edit; bash output leaves first",
+		default: "keep only Clio's essential context",
+		"data-analysis": "also keep three recent command outputs with numbers",
+		"web-design": "also keep recently read stylesheets and components",
 	},
 	"library.sync": {
 		true: "allow `clio-coder library sync` and `push` to reach the confirmed remote",
@@ -360,7 +361,7 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 		disabled: "leave every subsequent commit message byte-for-byte unchanged",
 	},
 	"terminal.showTerminalProgress": {
-		true: "emit OSC 9;4 taskbar/tab progress badges during turns",
+		true: "show progress in a supported terminal tab or taskbar",
 		false: "no terminal progress badges",
 	},
 	"terminal.outputVerbosity": {
@@ -386,9 +387,9 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 		false: "no verifier run; a turn ends without a second opinion",
 	},
 	"terminal.smoothStreaming": {
-		off: "preserve the current immediate 16ms-coalesced streaming behavior",
-		auto: "pace only on a capable local TTY without accessibility or backpressure risk",
-		on: "request grapheme-safe pacing; stdout backpressure still pauses presentation",
+		off: "show each chunk of text as soon as it is ready",
+		auto: "smooth text when the terminal supports it",
+		on: "smooth text as it appears, pausing if the terminal falls behind",
 	},
 };
 
@@ -416,8 +417,6 @@ export function settingsV2PathForRow(id: string): string {
 	if (id.startsWith("setting.")) return id.slice(8);
 	if (id.startsWith("workers.profiles.")) return `fleet.profiles.${id.slice("workers.profiles.".length)}`;
 	if (id.startsWith("workers.agentBindings.")) return `fleet.agentProfiles.${id.slice("workers.agentBindings.".length)}`;
-	if (id.startsWith("workers.decisionSites."))
-		return `fleet.decisionProfiles.${id.slice("workers.decisionSites.".length)}`;
 	const override = SETTINGS_CENTER_V2_PATH_OVERRIDES[id];
 	if (override !== undefined) return override;
 	for (const [v1Path, v2Path] of SETTINGS_V1_PATH_MOVES) {
@@ -454,7 +453,6 @@ const CHOICES: Record<string, readonly string[]> = {
 	"interface.panes.files.mode": ["companion", "chooser"],
 	"interface.panes.files.profile": ["managed", "user"],
 	"context.workingSet.policy": ["structural-v1", "structural-v2", "age-horizon"],
-	"turnControl.interpretation.fallback": ["none", "main-model"],
 	"context.workingSet.profile": ["default", "data-analysis", "web-design"],
 	"integrations.externalAgents.defaults.toolGovernance": ["clio-coder-policy", "agent-managed", "deny-all"],
 };
@@ -462,13 +460,13 @@ const STRUCTURED = new Set([
 	"fleet.profiles",
 	"fleet.rosters",
 	"fleet.agentProfiles",
-	"fleet.decisionProfiles",
 	"fleet.nodes",
 	"fleet.adaptiveRouting.agentRoles",
 	"interface.keybindings",
 	"integrations.externalAgents.entries",
 ]);
 const OPTIONAL_NUMBERS = new Set(["safety.review.cadenceToolCalls"]);
+const NULLABLE_NUMBERS = new Set(["turnControl.orientation.maxCostUsdPerTurn"]);
 const OPTIONAL_STRINGS = new Set([
 	"fleet.default.node",
 	"safety.review.target",
@@ -481,12 +479,12 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"The full welcome artwork, dashboard, and shortcut hints. Off starts with a compact identity header and skips welcome-only reads. Also controls a short tip after some turns, picked from what the turn did, plus idle footer tips and key hints. On by default before 1.0. Off stops every tip and the guidance profile. No automatic demonstrations or permission changes.",
 	],
 	"integrations.externalAgents.entries": [
-		"External agent entries",
-		"Configure custom ACP agents as a JSON array, including their command, arguments, and governance overrides. These commands execute when you connect; only configure agents you trust. Use the guided External agents action for known integrations.",
+		"Custom agent definitions",
+		"Add an external coding agent with its launch command and options as JSON. The command runs when you connect, so choose agents you trust. Use Available agents for guided setup.",
 	],
 	"fleet.default.node": [
-		"Default worker node",
-		"Placement for workers without an explicit node. Enter local or a configured remote node id; clear to let Clio choose placement.",
+		"Default worker location",
+		"Where workers run unless their profile says otherwise. Enter local or a configured remote machine name; clear to let Clio choose.",
 	],
 	"fleet.profiles": [
 		"Worker profiles",
@@ -496,42 +494,45 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Agent profile assignments",
 		"Map native agent names to existing worker profile names. Use Fleet's binding actions or edit this JSON object.",
 	],
-
-	"fleet.decisionProfiles": [
-		"System One decision sites (experimental)",
-		"Map decision sites to a profile whose target answers typed decisions (typesafe-jev or a self-hosted systemone server). An unbound site asks nothing and Clio behaves as if the feature did not exist. A bound site sends its evidence to that target; Fleet lists what each site sends. Research feature: thresholds are fitted per model build.",
+	"systemOne.record": [
+		"Save decision examples",
+		"Keep local examples of what each decision engine chose and what happened next. Secrets are removed before saving. Files stay on this machine until you export them. Off by default; a short session record is kept either way.",
+	],
+	"systemOne.retentionDays": [
+		"Dataset retention",
+		"Days of System One dataset files to keep. Older day files are deleted on the first dataset write of a session and at most hourly after.",
+	],
+	"systemOne.maxMiB": [
+		"Maximum dataset size",
+		"Total MiB the System One dataset directory may hold. When it is over, the oldest day files are deleted first; the file being written is never deleted for size.",
 	],
 	"turnControl.workflows": [
-		"Turn control workflows",
-		"Work the harness may start before the model answers: orientation (a read-only Scout tour), direction (git status, log and tree when you are undecided), ledger facts, and collecting finished detached runs. Orientation and direction need an interpretation from a bound turnControl decision site or the main-model fallback.",
-	],
-	"turnControl.interpretation.fallback": [
-		"Turn interpretation fallback",
-		"With no turnControl decision site answering, main-model asks the chat model to classify the turn. Its answers are recorded and acted on only once cuts for that model are set under turnControl.interpretation.thresholds.",
+		"Before Clio answers",
+		"Choose whether Clio may explore the project, check recent Git activity, recall earlier work, or collect finished background runs before answering. Project exploration and Git checks need a trained decision engine.",
 	],
 	"turnControl.orientation.maxSplit": [
-		"Orientation Scouts per turn",
-		"The most read-only Scouts one orientation may split into.",
+		"Scouts per project tour",
+		"Maximum number of read-only Scouts Clio may start to explore a project before answering.",
 	],
 	"turnControl.orientation.maxCostUsdPerTurn": [
-		"Orientation cost cap per turn",
-		"USD ceiling for the Scouts one orientation starts. Empty uses the dispatch cost ceiling.",
+		"Project tour cost limit",
+		"Maximum cost in USD for Scouts started before one answer. Leave blank to use the worker cost limit.",
 	],
 	"fleet.rosters": [
 		"Fleet rosters",
 		"Named teams of worker profiles used by council and fleet runs. Edit the JSON object; each roster names its members.",
 	],
 	"fleet.nodes": [
-		"Remote worker nodes",
-		"Machines available for worker placement. Edit the JSON array of node records; adding a node does not change the default model.",
+		"Remote worker machines",
+		"Machines where workers may run. Edit the JSON list of machine details; adding one does not change the default model.",
 	],
 	"fleet.worktrees.root": [
-		"Task worktree storage",
-		"Where isolated task worktrees are created. Use disk for the normal location, tmpfs for memory-backed storage, auto to prefer tmpfs when available, or an absolute directory you control.",
+		"Where task copies live",
+		"Choose disk for the normal location, memory for temporary RAM storage, automatic to prefer memory when available, or enter an absolute directory you control.",
 	],
 	"fleet.speculativeDispatch": [
-		"Speculative dispatch (experimental)",
-		"With the dispatchForecast decision site bound, start the worker a confident forecast predicts before the main agent dispatches it, and hold it until a matching dispatch adopts it or the turn ends. The agent's dispatch never changes.",
+		"Start predicted work early",
+		"Experimental. System One's turn site is asked which recipe a dispatch would name first. Only a fitted build's answer starts a worker early, and the result is held. The agent still decides whether to use that work.",
 	],
 	"fleet.retry.breakerThreshold": [
 		"Failures before cooldown",
@@ -563,7 +564,7 @@ export const SETTING_CONTROLS: readonly SettingControl[] = (() => {
 				? "json"
 				: Array.isArray(raw)
 					? "list"
-					: OPTIONAL_NUMBERS.has(path) || typeof raw === "number"
+					: OPTIONAL_NUMBERS.has(path) || NULLABLE_NUMBERS.has(path) || typeof raw === "number"
 						? "number"
 						: typeof raw === "boolean"
 							? "boolean"
@@ -592,6 +593,32 @@ export function orderedSectionControls(section: SettingsSectionId): Array<{ grou
 	return groups.flatMap((group) =>
 		controls.filter((control) => settingsGroupForPath(control.path) === group).map((control) => ({ group, control })),
 	);
+}
+
+/**
+ * Interactive counterpart of `orderSettingsEntries`: rows are ordered by their
+ * area's group sequence, then by the control catalog, so guided actions and live
+ * entries (profiles, agent routes) stay beside the controls they represent.
+ */
+export function orderAreaEntries<T>(
+	area: SettingsAreaId,
+	entries: readonly T[],
+	rowFor: (entry: T) => { id: string; path: string },
+): T[] {
+	const groups = SETTINGS_AREA_GROUPS[area];
+	const rank = (entry: T): [number, number] => {
+		const { id, path } = rowFor(entry);
+		const group = groups.indexOf(settingsPlacementForRow(id, path).group);
+		const control = SETTING_CONTROLS.findIndex(
+			(candidate) => path === candidate.path || path.startsWith(`${candidate.path}.`),
+		);
+		return [group < 0 ? groups.length : group, control < 0 ? SETTING_CONTROLS.length : control];
+	};
+	return [...entries].sort((a, b) => {
+		const left = rank(a);
+		const right = rank(b);
+		return left[0] - right[0] || left[1] - right[1];
+	});
 }
 
 /** Guided actions and live collection entries stay beside the controls they represent. */
@@ -716,15 +743,22 @@ export function applyControlValue(settings: ClioSettings, path: string, text: st
 	if (routeRoot) setAtPath(settings, `${routeRoot}.model`, getAtPath(candidate, `${routeRoot}.model`));
 }
 
-export function controlInstructions(control: SettingControl): string {
-	const entry =
-		control.kind === "json"
-			? "Enter JSON for this collection."
-			: control.kind === "list"
-				? "Enter comma-separated values; clear the field for an empty list."
-				: control.kind === "number"
-					? "Enter a number; invalid values leave the setting unchanged."
-					: "";
+export function controlInstructions(control: SettingControl, surface: "configure" | "settings" = "configure"): string {
+	const fractional =
+		control.path === "context.compaction.threshold" ||
+		control.path === "context.workingSet.target" ||
+		control.path === "context.workingSet.rearmFraction" ||
+		control.path.endsWith(".ratio");
+	let entry = "";
+	if (control.kind === "json") entry = "Enter JSON for this collection.";
+	else if (control.kind === "list") entry = "Enter comma-separated values; clear the field for an empty list.";
+	else if (control.path === "fleet.concurrency") entry = "Enter auto or a positive whole number.";
+	else if (control.path === "fleet.worktrees.root")
+		entry = "Enter disk, tmpfs for memory storage, auto, or an absolute directory.";
+	else if (fractional) entry = "Enter a fraction, such as 0.6 for 60%.";
+	else if (control.path.endsWith("Ms")) entry = "Enter milliseconds; 1000 means one second.";
+	else if (control.path.endsWith("Bytes")) entry = "Enter bytes; 1024 means one KB.";
+	else if (control.kind === "number") entry = "Enter a number; invalid values leave the setting unchanged.";
 	return [
 		control.description,
 		control.help,
@@ -740,7 +774,7 @@ export function controlInstructions(control: SettingControl): string {
 				: "Used by the next relevant request, dispatch, or explicit open.",
 		entry,
 		control.optional ? "Clear the field to use the automatic/default behavior." : "",
-		`Open /settings ${settingsSectionForPath(control.path)} to change this in chat.`,
+		surface === "configure" ? `Open /settings ${settingsAreaForPath(control.path)} to change this in chat.` : "",
 	]
 		.filter(Boolean)
 		.join("\n");

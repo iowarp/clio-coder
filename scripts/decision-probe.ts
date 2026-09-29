@@ -1,102 +1,86 @@
 /**
- * Score a decision site's wording against its labeled fixture, live.
+ * Score a System One site's wording against its labeled fixture, live.
  *
- * Criteria wording is the quality lever for a System One site: jev-latest
- * follows the text literally, so a rung or an option description that reads
- * two ways gets answered the way it reads. Every wording change is therefore
- * reviewed against this probe's before-and-after numbers.
+ *   node --import tsx scripts/decision-probe.ts <fixture> --engine <name> [--runs 3] [--json] [--cases]
+ *        [--kind systemone|llm --target T --model M --mode auto|logprobs|answer] [--site toolCall.gate]
+ *        [--deadline MS] [--split broad] [--limit N] [--recipes]
  *
- *   node --import tsx scripts/decision-probe.ts tests/fixtures/decision-cases/turn-sites.json [--profile system-one] [--runs 2] [--json] [--cases]
+ * It **calls the named engine** and is never part of CI. The engine comes from
+ * `systemOne.engines` in the operator's settings, or from `--kind`, `--target`
+ * and `--model` when the settings lack that name. Settings are read leniently:
+ * keys the schema no longer knows are reported and ignored, so the probe works
+ * mid-migration. Nothing is written back to the settings file.
  *
- * It runs each fixture turn through the production pre-turn brief, with the
- * operator's own settings and the key stored for the bound target, so it
- * measures exactly what a turn would ask. It **calls the configured decision
- * model** and is never part of CI. The sites named by the fixture must be bound
- * in `fleet.decisionProfiles`, or `--profile` binds them to an existing
- * `fleet.profiles` entry for this run only, without touching the settings file.
+ * A fixture names its site (`turn`, `turnEnd`, `toolCall`, `toolResult` or
+ * `relevance`) and every case carries `expect`, a map from a question id or a
+ * value field to a label. Each case goes through `createSystemOne` exactly as
+ * production does, with an in-memory recorder that keeps the raw answers.
  *
- * `--cases` also writes each turn's values to stderr as JSON lines, which is
- * what a threshold is placed against.
- *
- * Fixture keys name `<site>.<field>` of the site's value. A boolean label is
- * graded against the field's probability, abstaining inside 0.4..0.6 as the
- * readers do; a string label is compared with the field, and a null field is an
- * abstention.
- *
- * A fixture whose `site` is `capabilities` instead carries a catalog and find
- * queries labeled with the capability that serves them. It reports how often
- * the gateway's substring filter alone surfaces the label, how often the
- * label is there once related entries are added, and recall at 1 and 5 of the
- * ranking over the whole catalog.
+ * For each labeled key the report gives, per run: how many answers agreed,
+ * abstained (inside the site's certainty band, or an unsure choice), were
+ * wrong, or were confidently wrong; the probability ranges of the positive and
+ * negative classes; and a suggested cut with its margin to each side, which is
+ * null when the classes overlap. The answering build is printed because a cut
+ * belongs to one build. `--cases` writes one JSON line per call to stderr.
  */
 
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { readSettings } from "../src/core/config.js";
-import type { DecisionSite } from "../src/core/defaults.js";
+import { validateSettingsFile } from "../src/core/config.js";
 import { openAuthStorage, resolveAuthTarget } from "../src/domains/providers/auth/index.js";
 import type { ProvidersContract } from "../src/domains/providers/contract.js";
-import { setDecisionCallSink } from "../src/domains/providers/decision-calls.js";
-import { inspectDecisionSite } from "../src/domains/providers/decision-sites.js";
-import { type PreTurnSite, runPreTurnBrief } from "../src/domains/providers/pre-turn-brief.js";
 import { BUILTIN_RUNTIMES } from "../src/domains/providers/runtimes/builtins.js";
-import { rankCapabilities } from "../src/domains/providers/sites/capabilities.js";
-import { TURN_SITES } from "../src/domains/providers/sites/index.js";
-import { GATEWAY_RELATED_BELOW_HITS, GATEWAY_RELATED_MAX } from "../src/tools/gateway/index.js";
+import type {
+	Answer,
+	DecisionRecord,
+	DecisionRecorder,
+	Question,
+	SiteDefinition,
+	SiteId,
+} from "../src/domains/system-one/index.js";
+import { createSystemOne } from "../src/domains/system-one/index.js";
+import { RELEVANCE_SITE, type RelevanceObject } from "../src/domains/system-one/sites/relevance.js";
+import {
+	TOOL_CALL_CARD_SITE,
+	TOOL_CALL_GATE_SITE,
+	TOOL_CALL_RUNGS,
+	type ToolCallObject,
+} from "../src/domains/system-one/sites/tool-call.js";
+import { TOOL_RESULT_SITE, type ToolResultObject } from "../src/domains/system-one/sites/tool-result.js";
+import { TURN_SITE, type TurnObject, type TurnRecipeOption } from "../src/domains/system-one/sites/turn.js";
+import { TURN_END_SITE, type TurnEndObject } from "../src/domains/system-one/sites/turn-end.js";
 
-/** Sites the probe can drive. Relevance sites need a catalog and have their own tests. */
-const PROBE_SITES: ReadonlyMap<string, PreTurnSite<unknown>> = new Map(TURN_SITES.map((site) => [site.site, site]));
-
-/** Decisive certainty for a probability, matching the brief's abstention band. */
+/** A probability this close to the coin-flip is an abstention, the band the sites' readers use. */
 const DECIDED = 0.2;
-/** A wrong answer this far from the coin-flip is the failure hints cannot absorb. */
+/** A wrong answer this far from the coin-flip is the failure a hint or a gate cannot absorb. */
 const CONFIDENT = 0.6;
+/** The gateway's own related-entry rule (`src/tools/gateway/index.ts`), mirrored so the probe reports what a find would surface. */
+const RELATED_MIN_SCORE = 0.5;
+const RELATED_MAX = 5;
+/** Certainty floors the turn site applies to its choices, mirrored here so a grade means what the site did. */
+const CHOICE_FLOOR: Readonly<Record<string, number>> = { shape: 0.5, intent: 0.6, breadth: 0.5, recipe: 0.6 };
+/** The card shows a rung only when the radius answer is this peaked. */
+const RUNG_FLOOR = 0.25;
 
-interface FixtureCase {
-	task: string;
-	previous?: string;
-	expect: Record<string, boolean | string>;
+type Grade = "agree" | "abstain" | "wrong" | "confident-wrong" | "missing";
+type Label = boolean | string;
+
+interface Case {
+	expect: Record<string, Label>;
+	[field: string]: unknown;
 }
 
 interface Fixture {
-	sites: string[];
-	cases: FixtureCase[];
+	description?: string;
+	site: string;
+	cases: Case[];
+	[field: string]: unknown;
 }
 
-interface CapabilityFixture {
-	site: "capabilities";
-	catalog: Array<{ name: string; description: string }>;
-	cases: Array<{ query: string; task: string; expect: string }>;
-}
-
-/** The related-entry floor the gateway applies. */
-const RELATED_MIN_SCORE = 0.5;
-
-type Grade = "agree" | "abstain" | "wrong" | "confident-wrong" | "missing";
-
-export function grade(expected: boolean | string, actual: unknown): Grade {
-	if (actual === undefined) return "missing";
-	if (typeof expected === "string") {
-		if (actual === null) return "abstain";
-		return actual === expected ? "agree" : "wrong";
-	}
-	if (typeof actual !== "number") return "missing";
-	const certainty = Math.abs(actual * 2 - 1);
-	if (certainty < DECIDED) return "abstain";
-	if (actual >= 0.5 === expected) return "agree";
-	return certainty >= CONFIDENT ? "confident-wrong" : "wrong";
-}
-
-export function readProbeField(value: unknown, path: string): unknown {
-	return path
-		.split(".")
-		.reduce<unknown>(
-			(current, field) =>
-				current !== null && typeof current === "object" && Object.hasOwn(current, field)
-					? (current as Record<string, unknown>)[field]
-					: undefined,
-			value,
-		);
+/** What the probe needs to drive one fixture: the site, an object per case, and how to read a label. */
+interface Driver<O, V> {
+	site: SiteDefinition<O, V>;
+	object(fixture: Fixture, testCase: Case): O;
 }
 
 function argValue(flag: string): string | undefined {
@@ -104,192 +88,487 @@ function argValue(flag: string): string | undefined {
 	return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
-async function main(): Promise<void> {
-	const path = process.argv[2];
-	if (path === undefined || path.startsWith("--")) {
-		process.stderr.write("usage: decision-probe.ts <fixture.json> [--profile NAME] [--runs N] [--json] [--cases]\n");
-		process.exit(2);
-	}
-	const parsed = JSON.parse(readFileSync(path, "utf8")) as Fixture | CapabilityFixture;
-	const runs = Number(argValue("--runs") ?? 2);
-	// A "missing" grade is a call that did not answer; the call record says why
-	// (a timeout, an HTTP error, a refused oversized state) and which build did.
-	const unanswered: string[] = [];
-	const builds = new Set<string>();
-	setDecisionCallSink((record) => {
-		if (record.build !== null) builds.add(record.build);
-		if (record.outcome !== "answered")
-			unanswered.push(`${record.outcome} after ${record.latencyMs}ms: ${record.error ?? "no detail"}`);
-	});
-	process.once("beforeExit", () => {
-		if (builds.size > 0) process.stdout.write(`answered by ${[...builds].join(", ")}\n`);
-		for (const line of unanswered) process.stdout.write(`  unanswered: ${line}\n`);
-		setDecisionCallSink(null);
-	});
-	if ("site" in parsed && parsed.site === "capabilities") {
-		await probeCapabilities(parsed, runs);
-		return;
-	}
-	const fixture = parsed as Fixture;
-	const sites = fixture.sites.map((name) => {
-		const site = PROBE_SITES.get(name);
-		if (site === undefined) throw new Error(`fixture names '${name}', which the probe cannot drive`);
-		return site;
-	});
-
-	const input = decisionInput(sites.map((site) => site.site));
-	for (const site of sites) {
-		const status = inspectDecisionSite(site.site as DecisionSite, input);
-		if (!status.bound) throw new Error(`site '${site.site}' is not usable: ${JSON.stringify(status)}`);
-	}
-	await probeTurnSites(fixture, sites, input, runs);
+function fail(message: string): never {
+	process.stderr.write(`decision-probe: ${message}\n`);
+	process.exit(2);
 }
 
-/** The operator's settings and stored keys, with `--profile` binding the probed sites in memory. */
-function decisionInput(probed: ReadonlyArray<DecisionSite>) {
-	const settings = readSettings();
-	const profile = argValue("--profile");
-	if (profile !== undefined) {
-		if (!(profile in settings.fleet.profiles)) throw new Error(`fleet.profiles.${profile} is not defined`);
-		const bindings = { ...settings.fleet.decisionProfiles };
-		for (const site of probed) bindings[site] = profile;
-		settings.fleet.decisionProfiles = bindings;
+function driverFor(fixture: Fixture): Driver<never, unknown> {
+	const asDriver = <O, V>(driver: Driver<O, V>): Driver<never, unknown> => driver as unknown as Driver<never, unknown>;
+	switch (fixture.site) {
+		case "turn":
+			return asDriver<TurnObject, unknown>({
+				site: TURN_SITE,
+				object: (source, testCase) => ({
+					task: String(testCase.task),
+					previous: typeof testCase.previous === "string" ? testCase.previous : "",
+					previousTask: typeof testCase.previousTask === "string" ? testCase.previousTask : "",
+					...((testCase.recipes === true || process.argv.includes("--recipes")) && Array.isArray(source.recipes)
+						? { recipes: source.recipes as TurnRecipeOption[] }
+						: {}),
+				}),
+			});
+		case "turnEnd":
+			return asDriver<TurnEndObject, unknown>({
+				site: TURN_END_SITE,
+				object: (_source, testCase) => ({
+					request: String(testCase.request),
+					message: String(testCase.message),
+					earlier: Array.isArray(testCase.earlier) ? (testCase.earlier as string[]) : [],
+					tools: Array.isArray(testCase.tools) ? (testCase.tools as string[]) : [],
+				}),
+			});
+		case "toolResult":
+			return asDriver<ToolResultObject, unknown>({
+				site: TOOL_RESULT_SITE,
+				object: (_source, testCase) => ({ source: String(testCase.source), content: String(testCase.content) }),
+			});
+		case "toolCall": {
+			const gate = argValue("--site") === "toolCall.gate";
+			return asDriver<ToolCallObject, unknown>({
+				site: gate ? TOOL_CALL_GATE_SITE : TOOL_CALL_CARD_SITE,
+				object: (_source, testCase) => ({
+					tool: String(testCase.tool),
+					actionClass: String(testCase.actionClass),
+					target: String(testCase.target),
+					moment: gate ? "gate" : "card",
+				}),
+			});
+		}
+		default:
+			return fail(`fixture site '${fixture.site}' is not one this probe can drive`);
 	}
+}
+
+/** The operator's settings, read without failing on keys this checkout no longer knows. */
+function lenientSettings() {
+	const { settings, issues } = validateSettingsFile();
+	if (issues.length > 0) {
+		process.stderr.write(
+			`decision-probe: settings has ${issues.length} issue(s), ignored: ${issues
+				.slice(0, 4)
+				.map((issue) => issue.path)
+				.join(", ")}${issues.length > 4 ? ", ..." : ""}\n`,
+		);
+	}
+	return settings;
+}
+
+function buildSystemOne(siteId: SiteId, recorder: DecisionRecorder) {
+	const settings = lenientSettings();
+	const name = argValue("--engine");
+	if (name === undefined) fail("--engine <name> is required");
+	const configured = Object.hasOwn(settings.systemOne.engines, name) ? settings.systemOne.engines[name] : undefined;
+	const kind = argValue("--kind");
+	const target = argValue("--target");
+	if (configured === undefined) {
+		if (kind !== "systemone" && kind !== "llm")
+			fail(`engine '${name}' is not in systemOne.engines; give --kind systemone|llm`);
+		if (target === undefined) fail("--target T is required with --kind");
+	}
+	const model = argValue("--model");
+	const mode = argValue("--mode") as "auto" | "logprobs" | "answer" | undefined;
+	const engine: (typeof settings.systemOne.engines)[string] = configured ?? {
+		kind: kind as "systemone" | "llm",
+		target: target as string,
+		...(model !== undefined ? { model } : {}),
+		...(mode !== undefined && kind === "llm" ? { mode } : {}),
+	};
+	if (!settings.targets.some((entry) => entry.id === engine.target))
+		fail(`target '${engine.target}' is not in settings.targets`);
+	// A probe measures answers, so the binding's deadline is generous by default;
+	// the latency report says how the calls sat against the site's own deadline.
+	const timeoutMs = Number(argValue("--deadline") ?? 60_000);
+	const live = {
+		...settings,
+		systemOne: {
+			...settings.systemOne,
+			engines: { [name]: engine },
+			sites: { [siteId]: { engine: name, timeoutMs } },
+			cuts: {},
+		},
+	};
 	const auth = openAuthStorage();
 	const providers = {
-		getTarget: (id: string) => settings.targets.find((target) => target.id === id) ?? null,
+		getTarget: (id: string) => settings.targets.find((entry) => entry.id === id) ?? null,
 		getRuntime: (id: string) => BUILTIN_RUNTIMES.find((runtime) => runtime.id === id) ?? null,
 		auth: {
 			resolveForTarget: (
-				target: Parameters<typeof resolveAuthTarget>[0],
+				descriptor: Parameters<typeof resolveAuthTarget>[0],
 				runtime: Parameters<typeof resolveAuthTarget>[1],
 				options?: { signal?: AbortSignal },
-			) => auth.resolveForTarget(resolveAuthTarget(target, runtime), options ?? {}),
+			) => auth.resolveForTarget(resolveAuthTarget(descriptor, runtime), options ?? {}),
 		},
 	} as unknown as ProvidersContract;
-	return { settings, providers, ctx: { credentialsPresent: new Set<string>(), httpTimeoutMs: 15_000 } };
+	return {
+		name,
+		engine,
+		system: createSystemOne({
+			settings: () => live,
+			providers,
+			credentialsPresent: () => new Set<string>(),
+			recorder: () => recorder,
+		}),
+	};
 }
 
-async function probeCapabilities(fixture: CapabilityFixture, runs: number): Promise<void> {
-	const input = decisionInput(["capabilities"]);
-	const status = inspectDecisionSite("capabilities", input);
-	if (!status.bound) throw new Error(`site 'capabilities' is not usable: ${JSON.stringify(status)}`);
+// ---- grading ---------------------------------------------------------------
+
+function certaintyOf(p: number): number {
+	return Math.abs(p * 2 - 1);
+}
+
+export function gradeProbability(expected: boolean, p: number | undefined): Grade {
+	if (p === undefined) return "missing";
+	const certainty = certaintyOf(p);
+	if (certainty < DECIDED) return "abstain";
+	if (p >= 0.5 === expected) return "agree";
+	return certainty >= CONFIDENT ? "confident-wrong" : "wrong";
+}
+
+export function gradeChoice(expected: string, answer: Answer | undefined, floor: number): Grade {
+	if (answer === undefined || answer.type !== "choice" || answer.choice === undefined) return "missing";
+	// The site reads an unsure choice as its "unknown" option, so that label is met by either.
+	if (expected === "unknown" && (answer.choice === "unknown" || answer.certainty < floor)) return "agree";
+	if (answer.certainty < floor) return "abstain";
+	if (answer.choice === expected) return "agree";
+	return answer.certainty >= CONFIDENT ? "confident-wrong" : "wrong";
+}
+
+/** The rung a ladder position rounds to, by the card's own rule. */
+function rungIndex(score: number): number {
+	return Math.min(TOOL_CALL_RUNGS.length - 1, Math.max(0, Math.round(score)));
+}
+
+export function gradeRung(expected: string, answer: Answer | undefined): Grade {
+	if (answer === undefined || answer.type !== "score" || answer.score === undefined) return "missing";
+	if (answer.certainty < RUNG_FLOOR) return "abstain";
+	const want = TOOL_CALL_RUNGS.findIndex((rung) => rung.label === expected);
+	if (want < 0) return "missing";
+	if (rungIndex(answer.score) === want) return "agree";
+	return answer.certainty >= CONFIDENT ? "confident-wrong" : "wrong";
+}
+
+/** One number per labeled key per call, for the class ranges and the cut. */
+function scalar(answer: Answer | undefined): number | undefined {
+	if (answer === undefined) return undefined;
+	if (answer.type === "noul") return answer.noul;
+	// The gate's cut sits on the rung position divided by the top rung, so the
+	// probe reports the same scale a `toolCall.gateRadius` cut is written on.
+	if (answer.type === "score" && answer.score !== undefined) return answer.score / (TOOL_CALL_RUNGS.length - 1);
+	return undefined;
+}
+
+interface KeyTally {
+	counts: Record<Grade, number>;
+	/** Per run: the scalar for every positive and negative case. */
+	positives: number[][];
+	negatives: number[][];
+	kind: "noul" | "choice" | "score";
+}
+
+const GRADES: Grade[] = ["agree", "abstain", "wrong", "confident-wrong", "missing"];
+
+function emptyTally(kind: KeyTally["kind"], runs: number): KeyTally {
+	return {
+		counts: { agree: 0, abstain: 0, wrong: 0, "confident-wrong": 0, missing: 0 },
+		positives: Array.from({ length: runs }, () => []),
+		negatives: Array.from({ length: runs }, () => []),
+		kind,
+	};
+}
+
+function range(values: number[]): string {
+	if (values.length === 0) return "none";
+	return `${Math.min(...values).toFixed(2)}..${Math.max(...values).toFixed(2)}`;
+}
+
+/**
+ * A cut between the classes: the midpoint of the gap between the highest
+ * negative and the lowest positive, with the margin to each side. Null when
+ * the classes overlap, because no cut then separates them.
+ */
+export function suggestCut(
+	positives: ReadonlyArray<number>,
+	negatives: ReadonlyArray<number>,
+): { cut: number; abovePositives: number; belowNegatives: number } | null {
+	if (positives.length === 0 || negatives.length === 0) return null;
+	const lowestPositive = Math.min(...positives);
+	const highestNegative = Math.max(...negatives);
+	if (highestNegative >= lowestPositive) return null;
+	const cut = (lowestPositive + highestNegative) / 2;
+	return { cut, abovePositives: lowestPositive - cut, belowNegatives: cut - highestNegative };
+}
+
+function median(values: number[]): number {
+	const sorted = [...values].sort((left, right) => left - right);
+	return sorted[Math.floor(sorted.length / 2)] ?? 0;
+}
+
+// ---- relevance -------------------------------------------------------------
+
+async function probeRelevance(fixture: Fixture, runs: number): Promise<void> {
+	const catalog = fixture.catalog as Array<{ name: string; description: string }>;
+	const cases = fixture.cases as unknown as Array<{ query: string; task: string; expect: string }>;
+	const records: DecisionRecord[] = [];
+	const { system, engine } = buildSystemOne("relevance", {
+		decision: (row) => records.push(row),
+		outcome: () => undefined,
+	});
+	const use = (fixture.use as RelevanceObject["use"] | undefined) ?? "capabilities";
+	const latencies: number[] = [];
 	let lexical = 0;
 	let withRelated = 0;
 	let top1 = 0;
 	let top5 = 0;
 	let unranked = 0;
-	const latencies: number[] = [];
 	const misses: string[] = [];
 	for (let run = 0; run < runs; run += 1) {
-		for (const turn of fixture.cases) {
+		for (const turn of cases) {
 			const needle = turn.query.toLowerCase();
-			const hits = fixture.catalog.filter(
-				(entry) => entry.name.toLowerCase().includes(needle) || entry.description.toLowerCase().includes(needle),
+			const hits = new Set(
+				catalog
+					.filter((entry) => entry.name.toLowerCase().includes(needle) || entry.description.toLowerCase().includes(needle))
+					.map((entry) => entry.name),
 			);
-			const startedAt = performance.now();
-			const ranking = await rankCapabilities(input, { query: turn.query, task: turn.task }, fixture.catalog);
-			latencies.push(performance.now() - startedAt);
-			const scores = ranking?.scores ?? {};
-			if (ranking === null) unranked += 1;
-			const order = fixture.catalog
+			const started = performance.now();
+			const verdict = await system.run(RELEVANCE_SITE, {
+				use,
+				need: turn.query,
+				task: turn.task,
+				candidates: catalog.map((entry) => ({ id: entry.name, summary: entry.description })),
+			});
+			latencies.push(performance.now() - started);
+			const scores = verdict?.value.scores ?? {};
+			if (verdict === null) unranked += 1;
+			const order = catalog
 				.filter((entry) => scores[entry.name] !== undefined)
 				.sort((left, right) => (scores[right.name] ?? 0) - (scores[left.name] ?? 0))
 				.map((entry) => entry.name);
 			const position = order.indexOf(turn.expect);
 			if (position === 0) top1 += 1;
 			if (position >= 0 && position < 5) top5 += 1;
-			const hitNames = new Set(hits.map((entry) => entry.name));
-			const related =
-				hits.length < GATEWAY_RELATED_BELOW_HITS
-					? order
-							.filter((name) => !hitNames.has(name) && (scores[name] ?? 0) >= RELATED_MIN_SCORE)
-							.slice(0, GATEWAY_RELATED_MAX)
-					: [];
-			if (hitNames.has(turn.expect)) lexical += 1;
-			if (hitNames.has(turn.expect) || related.includes(turn.expect)) withRelated += 1;
-			else
-				misses.push(
-					`run ${run} "${turn.query}": want ${turn.expect} (score ${scores[turn.expect]?.toFixed(2) ?? "none"}), got ${[...hitNames, ...related].join(", ") || "nothing"}`,
-				);
+			const related = order
+				.filter((name) => !hits.has(name) && (scores[name] ?? 0) >= RELATED_MIN_SCORE)
+				.slice(0, RELATED_MAX);
+			if (hits.has(turn.expect)) lexical += 1;
+			if (hits.has(turn.expect) || related.includes(turn.expect)) withRelated += 1;
+			else {
+				misses.push(`run ${run} "${turn.query}": want ${turn.expect} (score ${scores[turn.expect]?.toFixed(2) ?? "none"})`);
+			}
 		}
 	}
-	latencies.sort((left, right) => left - right);
-	const total = fixture.cases.length * runs;
+	const total = cases.length * runs;
+	const builds = [...new Set(records.map((row) => row.build).filter((build): build is string => build !== null))];
+	const p50 = Math.round(median(latencies));
+	const max = Math.round(Math.max(0, ...latencies));
+	if (process.argv.includes("--json")) {
+		process.stdout.write(
+			`${JSON.stringify({ fixture: process.argv[2], engine: engine.target, builds, runs, latencyMs: { p50, max }, lexical, withRelated, top1, top5, unranked, total, misses }, null, 2)}\n`,
+		);
+		return;
+	}
 	process.stdout.write(
-		`capabilities ${fixture.catalog.length} entries  p50 ${Math.round(latencies[Math.floor(latencies.length / 2)] ?? 0)}ms  max ${Math.round(latencies.at(-1) ?? 0)}ms\n`,
+		`relevance/${use} ${catalog.length} entries  builds ${builds.join(", ") || "none"}  p50 ${p50}ms  max ${max}ms\n`,
 	);
 	process.stdout.write(`substring filter alone   ${lexical}/${total}\n`);
 	process.stdout.write(`with related entries     ${withRelated}/${total}\n`);
 	process.stdout.write(`ranking recall@1 ${top1}/${total}  recall@5 ${top5}/${total}  no opinion ${unranked}\n`);
 	for (const miss of misses) process.stdout.write(`  ${miss}\n`);
+	for (const row of records.filter((entry) => entry.outcome !== "answered").slice(0, 5)) {
+		process.stdout.write(`  unanswered: ${row.outcome} after ${row.latencyMs}ms: ${row.error ?? "no detail"}\n`);
+	}
 }
 
-async function probeTurnSites(
-	fixture: Fixture,
-	sites: ReadonlyArray<PreTurnSite<unknown>>,
-	input: ReturnType<typeof decisionInput>,
-	runs: number,
-): Promise<void> {
-	const tally = new Map<string, Record<Grade, number>>();
+// ---- labeled sites ---------------------------------------------------------
+
+async function probeLabeled(fixture: Fixture, runs: number): Promise<void> {
+	const driver = driverFor(fixture);
+	const records: DecisionRecord[] = [];
+	const { system, engine } = buildSystemOne(driver.site.id, {
+		decision: (row) => records.push(row),
+		outcome: () => undefined,
+	});
+	const tally = new Map<string, KeyTally>();
 	const misses: string[] = [];
 	const latencies: number[] = [];
+	const builds = new Set<string>();
+	let overDeadline = 0;
+
 	for (let run = 0; run < runs; run += 1) {
-		for (const turn of fixture.cases) {
-			const startedAt = performance.now();
-			const brief = await runPreTurnBrief(input, sites, {
-				task: turn.task,
-				...(turn.previous !== undefined ? { previous: turn.previous } : {}),
-			});
-			latencies.push(performance.now() - startedAt);
-			// Per-turn values, for placing a threshold between the labeled groups.
+		for (const testCase of fixture.cases) {
+			const object = driver.object(fixture, testCase);
+			const before = records.length;
+			await system.run(driver.site as SiteDefinition<never, unknown>, object as never);
+			const record = records.length > before ? (records[records.length - 1] as DecisionRecord) : null;
+			if (record === null) continue;
+			latencies.push(record.latencyMs);
+			if (record.latencyMs > driver.site.deadlineMs) overDeadline += 1;
+			if (record.build !== null) builds.add(record.build);
+			const answers = record.answers ?? {};
 			if (process.argv.includes("--cases")) {
-				const values = Object.fromEntries(sites.map((site) => [site.site, brief.get(site.site)?.value ?? null]));
+				const values = Object.fromEntries(
+					Object.entries(answers).map(([id, answer]) => [
+						id,
+						answer.type === "noul"
+							? round(answer.noul)
+							: answer.type === "choice"
+								? `${answer.choice}@${round(answer.certainty)}`
+								: round(answer.score),
+					]),
+				);
 				process.stderr.write(
-					`${JSON.stringify({ run, expect: turn.expect, values, task: turn.task.slice(0, 80), previous: turn.previous !== undefined })}\n`,
+					`${JSON.stringify({ run, outcome: record.outcome, expect: testCase.expect, values, case: labelOf(testCase) })}\n`,
 				);
 			}
-			for (const [key, expected] of Object.entries(turn.expect)) {
-				const [site, ...fields] = key.split(".");
-				const actual = readProbeField(brief.get(site as DecisionSite)?.value, fields.join("."));
-				const result = grade(expected, actual);
-				const counts = tally.get(key) ?? { agree: 0, abstain: 0, wrong: 0, "confident-wrong": 0, missing: 0 };
-				counts[result] += 1;
-				tally.set(key, counts);
+			for (const [key, expected] of Object.entries(testCase.expect)) {
+				// A label that is neither a boolean nor an option name is no label.
+				if (typeof expected !== "boolean" && typeof expected !== "string") continue;
+				const question = record.questions[key] as Question | undefined;
+				if (question === undefined) continue;
+				const kind = question.type === "noul" ? "noul" : question.type === "choice" ? "choice" : "score";
+				const entry = tally.get(key) ?? emptyTally(kind, runs);
+				tally.set(key, entry);
+				const answer = answers[key];
+				const result = gradeAnswer(key, expected, question, answer);
+				entry.counts[result] += 1;
+				const value = scalar(answer);
+				if (value !== undefined) {
+					const positive = isPositive(expected, question);
+					(positive ? entry.positives : entry.negatives)[run]?.push(value);
+				}
 				if (result !== "agree") {
-					const shown = typeof actual === "number" ? actual.toFixed(2) : String(actual);
 					misses.push(
-						`run ${run} ${key} ${result}: got ${shown}, want ${expected} | ${turn.previous ? "(after previous) " : ""}${turn.task.slice(0, 80)}`,
+						`run ${run} ${key} ${result}: got ${describe(answer)}, want ${String(expected)} | ${labelOf(testCase)}`,
 					);
 				}
 			}
 		}
 	}
-	latencies.sort((left, right) => left - right);
-	const summary = {
-		fixture: process.argv[2],
-		runs,
-		versions: Object.fromEntries(sites.map((site) => [site.site, site.version])),
-		latencyMs: {
-			p50: Math.round(latencies[Math.floor(latencies.length / 2)] ?? 0),
-			max: Math.round(latencies.at(-1) ?? 0),
-		},
-		keys: Object.fromEntries(tally),
-	};
+
+	const buildList = [...builds];
+	const failedCalls = records.filter((row) => row.outcome !== "answered");
 	if (process.argv.includes("--json")) {
-		process.stdout.write(`${JSON.stringify({ ...summary, misses }, null, 2)}\n`);
+		const report = {
+			fixture: process.argv[2],
+			site: driver.site.id,
+			siteVersion: driver.site.version,
+			engine: engine.target,
+			builds: buildList,
+			runs,
+			deadlineMs: driver.site.deadlineMs,
+			latencyMs: { p50: Math.round(median(latencies)), max: Math.round(Math.max(0, ...latencies)), overDeadline },
+			keys: Object.fromEntries([...tally].map(([key, entry]) => [key, keyReport(entry)])),
+			misses,
+			failedCalls: failedCalls.map((row) => ({
+				outcome: row.outcome,
+				latencyMs: row.latencyMs,
+				error: row.error ?? null,
+			})),
+		};
+		process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 		return;
 	}
 	process.stdout.write(
-		`${JSON.stringify(summary.versions)}  p50 ${summary.latencyMs.p50}ms  max ${summary.latencyMs.max}ms\n`,
+		`${driver.site.id} ${driver.site.version}  engine ${engine.target}  build ${buildList.join(", ") || "none"}  ${fixture.cases.length} cases x ${runs} runs\n`,
 	);
-	for (const [key, counts] of tally) {
-		const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+	process.stdout.write(
+		`latency p50 ${Math.round(median(latencies))}ms  max ${Math.round(Math.max(0, ...latencies))}ms  over the ${driver.site.deadlineMs}ms site deadline ${overDeadline}/${latencies.length}\n`,
+	);
+	for (const [key, entry] of tally) printKey(key, entry);
+	for (const miss of misses) process.stdout.write(`  ${miss}\n`);
+	for (const row of failedCalls.slice(0, 5)) {
+		process.stdout.write(`  unanswered: ${row.outcome} after ${row.latencyMs}ms: ${row.error ?? "no detail"}\n`);
+	}
+}
+
+function round(value: number | undefined): number | null {
+	return value === undefined ? null : Math.round(value * 100) / 100;
+}
+
+function labelOf(testCase: Case): string {
+	const text = ["task", "request", "target", "source"]
+		.map((field) => testCase[field])
+		.find((value) => typeof value === "string");
+	return String(text ?? "")
+		.replace(/\s+/g, " ")
+		.slice(0, 80);
+}
+
+function describe(answer: Answer | undefined): string {
+	if (answer === undefined) return "no answer";
+	if (answer.type === "noul") return (answer.noul ?? Number.NaN).toFixed(2);
+	if (answer.type === "choice") return `${answer.choice} (certainty ${answer.certainty.toFixed(2)})`;
+	return `${(answer.score ?? Number.NaN).toFixed(2)} (certainty ${answer.certainty.toFixed(2)})`;
+}
+
+/** The class a label puts a case in, for the cut: true, or a rung at or above the split. */
+function isPositive(expected: Label, question: Question): boolean {
+	if (typeof expected === "boolean") return expected;
+	if (question.type !== "score") return false;
+	const split = TOOL_CALL_RUNGS.findIndex((rung) => rung.label === (argValue("--split") ?? "broad"));
+	return TOOL_CALL_RUNGS.findIndex((rung) => rung.label === expected) >= split;
+}
+
+function gradeAnswer(key: string, expected: Label, question: Question, answer: Answer | undefined): Grade {
+	if (question.type === "noul")
+		return typeof expected === "boolean" ? gradeProbability(expected, answer?.noul) : "missing";
+	if (question.type === "choice") {
+		return typeof expected === "string" ? gradeChoice(expected, answer, CHOICE_FLOOR[key] ?? 0.5) : "missing";
+	}
+	return typeof expected === "string" ? gradeRung(expected, answer) : "missing";
+}
+
+function keyReport(entry: KeyTally) {
+	const positives = entry.positives.flat();
+	const negatives = entry.negatives.flat();
+	const suggestion = suggestCut(positives, negatives);
+	return {
+		counts: entry.counts,
+		perRun: entry.positives.map((run, index) => ({
+			positives: range(run),
+			negatives: range(entry.negatives[index] ?? []),
+		})),
+		suggestedCut: suggestion === null ? null : { ...suggestion },
+	};
+}
+
+function printKey(key: string, entry: KeyTally): void {
+	const total = GRADES.reduce((sum, grade) => sum + entry.counts[grade], 0);
+	const counts = entry.counts;
+	process.stdout.write(
+		`${key.padEnd(20)} ${counts.agree}/${total} agree, ${counts.abstain} abstain, ${counts.wrong} wrong, ${counts["confident-wrong"]} confident-wrong, ${counts.missing} missing\n`,
+	);
+	if (entry.kind === "choice") return;
+	const scale = entry.kind === "score" ? "radius/3 " : "";
+	for (const [run, positives] of entry.positives.entries()) {
 		process.stdout.write(
-			`${key.padEnd(28)} ${counts.agree}/${total} agree, ${counts.abstain} abstain, ${counts.wrong} wrong, ${counts["confident-wrong"]} confident-wrong, ${counts.missing} missing\n`,
+			`  run ${run}  ${scale}positive ${range(positives)}  negative ${range(entry.negatives[run] ?? [])}\n`,
 		);
 	}
-	for (const miss of misses) process.stdout.write(`  ${miss}\n`);
+	const suggestion = suggestCut(entry.positives.flat(), entry.negatives.flat());
+	const bothClasses = entry.positives.flat().length > 0 && entry.negatives.flat().length > 0;
+	process.stdout.write(
+		suggestion === null
+			? `  suggested cut: none, ${bothClasses ? "the classes overlap" : "the labels hold only one class"}\n`
+			: `  suggested cut ${suggestion.cut.toFixed(2)}  margin ${suggestion.belowNegatives.toFixed(2)} above the highest negative, ${suggestion.abovePositives.toFixed(2)} below the lowest positive\n`,
+	);
+}
+
+async function main(): Promise<void> {
+	const path = process.argv[2];
+	if (path === undefined || path.startsWith("--")) {
+		fail(
+			"usage: decision-probe.ts <fixture.json> --engine <name> [--runs N] [--json] [--cases] [--kind K --target T --model M]",
+		);
+	}
+	const fixture = JSON.parse(readFileSync(path, "utf8")) as Fixture;
+	const limit = argValue("--limit");
+	if (limit !== undefined) fixture.cases = fixture.cases.slice(0, Number(limit));
+	const runs = Number(argValue("--runs") ?? 3);
+	if (!Number.isInteger(runs) || runs < 1) fail("--runs must be a positive integer");
+	if (fixture.site === "relevance") await probeRelevance(fixture, runs);
+	else await probeLabeled(fixture, runs);
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

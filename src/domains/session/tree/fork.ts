@@ -24,6 +24,16 @@ export interface ForkInput {
 	parentTurnId: string;
 	/** Optional cwd override; defaults to the parent session's cwd. */
 	cwd?: string;
+	/**
+	 * Runs once the child is created, seeded and stamped, immediately before the
+	 * parent's writer closes. That is the last moment the parent's ledger still
+	 * takes appends, so a caller holding rows pending for the parent has to write
+	 * them here; the System One recorder's flush on park is that caller. It never
+	 * runs for a fork that failed, and it must not throw because the child exists
+	 * by then. The child's entries were read before it runs, so what it appends
+	 * stays in the parent.
+	 */
+	beforeClose?: () => void;
 }
 
 export interface ForkResult {
@@ -140,7 +150,8 @@ function branchEntriesFromParent(
  * Fork the given state into a new session. Closes the prior writer once the
  * child session is known good, so the on-disk endedAt marker on the parent is
  * never written for a fork that failed; the caller is responsible for
- * replacing its own state pointer with `result.next`.
+ * replacing its own state pointer with `result.next`. `beforeClose` runs right
+ * before that close and only on the same condition.
  */
 export function forkFromState(input: ForkInput): ForkResult {
 	const parentMeta = input.from.meta;
@@ -166,7 +177,9 @@ export function forkFromState(input: ForkInput): ForkResult {
 	});
 	enrichForkMeta(next.meta, parentMeta.id, input.parentTurnId);
 	// Only now is the child known good: created, seeded, and stamped with its
-	// parent pointers. Close (and stamp endedAt on) the parent last.
+	// parent pointers. Close (and stamp endedAt on) the parent last, after the
+	// caller's hook, which is the parent's final chance to append.
+	input.beforeClose?.();
 	void input.from.writer.close();
 	return { next, parentMeta, nodes: branch.tree };
 }

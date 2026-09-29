@@ -8,13 +8,14 @@ Source implementations: `src/cli/` and `src/entry/`.
 
 ## 1. Global Exit Codes
 
-Clio Coder follows a deterministic exit code taxonomy across all commands:
+Clio Coder follows one exit code taxonomy across commands. `clio-coder configure` also exits `130` when you cancel with Ctrl+C, and an external SIGTERM ends a headless run with `143`.
 
 | Exit Code | Meaning | Typical Causes & Conditions |
 | :--- | :--- | :--- |
 | **`0`** | **Success** | Successful command execution, clean run settlement, `--version`, `--help` invocation, or missing trace database notice without an explicit `--db` flag. |
 | **`1`** | **Operational Failure** | Execution error, model target unreachable, doctor diagnosis with unresolved issues, or explicit `--db` path not found. |
-| **`2`** | **Syntax / Usage Error** | Unknown subcommand, invalid flag, missing required positional arguments, global flag placed after subcommand, or data mutation SQL keyword passed to `clio-coder trace sql`. |
+| **`2`** | **Syntax / Usage Error** | Unknown subcommand, invalid flag, missing required positional arguments, global flag placed after subcommand, an unknown target, an unknown agent recipe, a refused admission or capability request, or a data mutation SQL keyword passed to `clio-coder trace sql`. |
+| **`4`** | **Session Cost Ceiling** | `clio-coder run`, with or without `--agent`, stopped because session priced spend reached the ceiling in `safety.limits.sessionCostUsd`. |
 | **`124`** | **Run Timeout** | `clio-coder run --timeout <seconds>` elapsed. The run took the coordinated shutdown path a SIGTERM takes: the turn was aborted, a running bash tool's process group was signalled, and the receipt was sealed with outcome `timed_out` and run status `failed`, the status a dispatched worker's `timed_out` receipt seals with. The code matches `timeout(1)`. An external SIGTERM still exits 143 with outcome `canceled`. A timeout that fires during boot, before the turn starts, exits 124 with no receipt. |
 
 ---
@@ -29,10 +30,10 @@ Every subcommand in Clio Coder adheres to the strict `--help` convention:
 
 ### Global vs Subcommand Flag Positioning
 
-Global options (such as `--api-key`, `--no-context-files`, and `-nc`) must precede the subcommand. Directory redirection is configured via the `CLIO_CODER_*_DIR` environment variables (see [docs/guide/environment-variables.md](environment-variables.md)). If a global flag is placed after the subcommand name, Clio prints a remediation guide to `stderr` and exits with code `2`:
+Global options (such as `--api-key`, `--no-context-files`, and `-nc`) must precede the subcommand. `--with-panes`, `--no-panes`, `--demo`, `--no-demo` and a pre-subcommand `--autonomy` apply to the interactive session only and exit `2` when a subcommand follows them. Directory redirection is configured via the `CLIO_CODER_*_DIR` environment variables (see [docs/guide/environment-variables.md](environment-variables.md)). If a global flag is placed after the subcommand name, Clio prints a remediation line to `stderr` and exits with code `2`. For `clio-coder run` the message reads:
 
 ```text
---api-key is a global option and must come before the subcommand: clio-coder --api-key <key> <command> ...
+clio-coder run: --api-key is a global option and must come before the subcommand: clio-coder --api-key <key> run ...
 ```
 
 ---

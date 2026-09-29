@@ -9,7 +9,6 @@ sources:
   - "tests/harness/run-journal.ts"
   - "tests/harness/headless-run.ts"
   - "tests/boundaries/check-boundaries.ts"
-  - "tests/contracts/dispatch-routing-deterministic.test.ts"
   - "tests/contracts/engine-lifecycle.test.ts"
   - "tests/contracts/fleet-dock.test.ts"
   - "tests/contracts/quota-claude-code-provider.test.ts"
@@ -24,7 +23,6 @@ symbols:
   - "readRunJournal"
   - "installTmpGitGuard"
 tests:
-  - "tests/contracts/dispatch-routing-deterministic.test.ts"
   - "tests/contracts/engine-lifecycle.test.ts"
   - "tests/contracts/fleet-dock.test.ts"
   - "tests/contracts/quota-claude-code-provider.test.ts"
@@ -33,7 +31,6 @@ tests:
 invariants:
   - "Tests never write to the operator's real home directory; the tmp-root preload redirects all Clio state into a per-run scratch root."
   - "A `.git` marker at the system temp root or the run's scratch root is refused by the tmp-git guard, preventing ignore-policy contract failures."
-  - "Dispatch routing never awaits a decision model; all decision sites are skipped during admission."
   - "The engine lifecycle ordering after pi 0.84.4 is locked: prepareNextTurn runs only before another assistant turn, never after a final or terminating turn."
   - "Only src/engine/** imports @earendil-works/pi-*; the boundary checker enforces this and five other import rules."
 validate:
@@ -96,18 +93,6 @@ The `package.json` scripts define four test lanes:
 Both `test` and `test:full` preload `tests/harness/tmp-root.ts` via `--import`. The `pretest` and `pretest:full` scripts build `dist/` only when it is missing (`test -f dist/cli/index.js && test -f dist/metafile-esm.json || pnpm run build`).
 
 The `ci` script runs the full handoff gate: `pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:maintenance && pnpm run check:gui && pnpm run test:gui`.
-
-## Dispatch routing: never wait on a decision model
-
-`tests/contracts/dispatch-routing-deterministic.test.ts` proves that dispatch admission never waits on a decision model. The test:
-
-1. Creates a slow JEV (decision model) endpoint that answers every request 2.5 seconds late.
-2. Binds every entry in `DECISION_SITES` (imported from `src/core/defaults.ts`) to a profile using that endpoint.
-3. Calls `bundle.contract.dispatch(REQUEST)` and measures the wall-clock time from the dispatch call to the `spawnWorker` callback.
-4. Asserts that the JEV endpoint received zero requests (`jev.requests() === 0`).
-5. Asserts that the spawn delay is less than 1500 ms (proving it did not wait for the 2.5 s slow endpoint).
-
-The test uses `isolateDispatchState()` and `restoreDispatchState()` from `tests/harness/dispatch.ts` to isolate the dispatch state directory, and `dispatchStubContext` from `tests/harness/dispatch-stub-context.ts` to provide a minimal `DomainContext` with a healthy openai-compat target, the production builtin agent recipes, a permissive safety contract, and an under-budget scheduling gate.
 
 ## Engine lifecycle contracts
 

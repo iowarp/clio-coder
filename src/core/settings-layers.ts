@@ -23,6 +23,12 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
+	type AutonomyLevel,
+	autonomyRank,
+	DEFAULT_AUTONOMY_LEVEL,
+	isAutonomyLevel,
+} from "../domains/safety/autonomy.js";
+import {
 	applySettingsDelta,
 	type ClioSettings,
 	type SettingsIssue,
@@ -158,16 +164,30 @@ function stripCredentials(value: unknown, origin: SettingsOrigin, path: string, 
 	return out;
 }
 
+/** The operator's own level, which a project layer may tighten but never loosen. */
+function userAutonomy(userBlob: Record<string, unknown> | undefined): AutonomyLevel {
+	const safety = userBlob?.safety;
+	return isRecord(safety) && isAutonomyLevel(safety.autonomy) ? safety.autonomy : DEFAULT_AUTONOMY_LEVEL;
+}
+
 function stripProjectAutonomy(
 	blob: Record<string, unknown>,
 	origin: SettingsOrigin,
 	issues: SettingsLayerIssue[],
+	operatorLevel: AutonomyLevel,
 ): Record<string, unknown> {
 	if (!isRecord(blob.safety) || !Object.hasOwn(blob.safety, "autonomy")) return blob;
+	const requested = blob.safety.autonomy;
+	// A repository may ask for more confirmation than the operator's default,
+	// never less. The kept value is a starting point: the session toggle and
+	// --autonomy still belong to the operator.
+	if (isAutonomyLevel(requested) && autonomyRank(requested) <= autonomyRank(operatorLevel)) return blob;
 	issues.push({
 		origin,
 		path: "safety.autonomy",
-		message: "autonomy is set only in user settings or by the operator; project value ignored",
+		message: isAutonomyLevel(requested)
+			? "project autonomy may only tighten the level in user settings; project value ignored"
+			: "autonomy is set only in user settings or by the operator; project value ignored",
 	});
 	const safety = { ...blob.safety };
 	delete safety.autonomy;
@@ -230,7 +250,12 @@ interface PreparedLayers {
 	local: RawLayer;
 }
 
-function prepareProjectLayers(cwd: string, issues: SettingsLayerIssue[]): PreparedLayers {
+function prepareProjectLayers(
+	cwd: string,
+	issues: SettingsLayerIssue[],
+	userBlob: Record<string, unknown> | undefined,
+): PreparedLayers {
+	const operatorLevel = userAutonomy(userBlob);
 	const projectFile = join(cwd, ".clio-coder", "settings.yaml");
 	const localFile = join(cwd, ".clio-coder", "settings.local.yaml");
 	const snapshot = captureProjectSurface(cwd, "settings");
@@ -238,7 +263,7 @@ function prepareProjectLayers(cwd: string, issues: SettingsLayerIssue[]): Prepar
 		if (file?.error !== undefined) issues.push({ origin, path, message: file.error, kind: "unreadable" });
 		if (file?.text === null || file === undefined) return { origin, path, blob: undefined };
 		const raw = readRawLayer(origin, path, issues, file.text);
-		const blob = raw.blob === undefined ? undefined : stripProjectAutonomy(raw.blob, origin, issues);
+		const blob = raw.blob === undefined ? undefined : stripProjectAutonomy(raw.blob, origin, issues, operatorLevel);
 		if (snapshot.verdict !== "trusted") {
 			issues.push({ origin, path, message: projectSurfaceTrustNotice(snapshot, file.path) });
 			return { origin, path, blob: undefined };
@@ -287,7 +312,7 @@ export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOpt
 	const issues: SettingsLayerIssue[] = [];
 	const userFile = options.userPath ?? settingsPath();
 	const user = readRawLayer("user", userFile, issues);
-	const prepared = prepareProjectLayers(cwd, issues);
+	const prepared = prepareProjectLayers(cwd, issues, user.blob);
 	const { settings, sources } = validateLayerStack(user, prepared, issues);
 
 	const strictUserIssues =
@@ -346,7 +371,7 @@ export function updateLayeredSettings(cwd: string, mutate: SettingsMutator): Cli
 		const userValidation = validateSettings(saved);
 		if (userValidation.issues.length > 0) throw new SettingsValidationError(userValidation.issues);
 		const issues: SettingsLayerIssue[] = [];
-		const prepared = prepareProjectLayers(cwd, issues);
+		const prepared = prepareProjectLayers(cwd, issues, isRecord(saved) ? saved : undefined);
 		const user: RawLayer = {
 			origin: "user",
 			path: settingsPath(),
@@ -421,10 +446,12 @@ export function updateProjectLocalSettings(cwd: string, mutate: SettingsMutator)
 		if (credentialIssues.length > 0) {
 			throw new Error(`credentials are not allowed in project settings: ${credentialIssues[0]?.path}`);
 		}
+		const userIssues: SettingsLayerIssue[] = [];
+		const user = readRawLayer("user", settingsPath(), userIssues);
 		const stackIssues: SettingsLayerIssue[] = [];
-		const prepared = prepareProjectLayers(cwd, stackIssues);
+		const prepared = prepareProjectLayers(cwd, stackIssues, user.blob);
 		if (stackIssues.length > 0) throw new Error(`project settings cannot be saved: ${stackIssues[0]?.message}`);
-		const user = readRawLayer("user", settingsPath(), stackIssues);
+		stackIssues.push(...userIssues);
 		const final = validateLayerStack(
 			user,
 			{
