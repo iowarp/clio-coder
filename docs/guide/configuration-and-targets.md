@@ -54,7 +54,7 @@ Settings YAML paths shown in the inventory below are canonical. Use [Configurati
 
 Settings use one strict version-2 schema. Unknown keys and invalid values stop startup with a path-specific diagnostic. Objects merge by key; arrays and scalars replace the lower layer. Project layers are read only after the workspace's project settings are trusted; until then Clio ignores them and prints a notice, and `clio-coder config trust settings` shows the captured files and how to approve exactly those bytes. Credential-bearing keys (`auth`, `apiKey`, `token`, `secret`, `password`) and `safety.autonomy` in project layers are dropped with a diagnostic.
 
-`clio-coder upgrade` runs the registered version-1 migration and preserves the original as `settings.yaml.v1.bak`. `clio-coder doctor --fix` repairs selected installation state but does not migrate old settings or remove retired keys. See [settings validation and migration](../../src/core/config.ts).
+`clio-coder upgrade` runs the registered version-1 migration and preserves the original as `settings.yaml.v1.bak`. `clio-coder doctor --fix` repairs selected installation state. It also rewrites a retired enum value, such as `safety.autonomy: auto-edit`, to the replacement the validation error names, and YAML 1.1 `on`/`off` booleans, preserving comments and formatting. Plain `doctor` lists those repairs without writing them. `doctor --fix` does not run migrations or remove retired keys. See [settings validation and migration](../../src/core/config.ts).
 
 ## Live routing vs saved defaults
 

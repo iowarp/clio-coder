@@ -12,7 +12,7 @@ are, the deep checks, the in-session `/doctor`, and how to read the rows.
 | Command | What it does |
 | --- | --- |
 | `clio-coder doctor` | Every standard check. Read-only. |
-| `clio-coder doctor --fix` | Also repairs missing directories, template files, and credential permissions, and records fleet preflight results. |
+| `clio-coder doctor --fix` | Also repairs missing directories, template files, and credential permissions, rewrites retired enum values and YAML 1.1 `on`/`off` booleans in `settings.yaml` while preserving comments and formatting, and records fleet preflight results. |
 | `clio-coder doctor --json` | The same findings as JSON on stdout: `{ ok, fix, deep, findings: [{ ok, name, level, detail }] }`. |
 | `clio-coder doctor --deep` | The standard checks plus the live tool probe on every configured target and a dry run of the validation contract. |
 | `clio-coder doctor --deep --tools-timeout <seconds>` | Bounds each tool probe's generation. The default is 120 seconds, enough for a cold load of a large local model. |
@@ -138,6 +138,7 @@ through the path a real turn uses.
 | The probe ran and the call was missing or malformed | `WARN`, with the reason |
 | The probe could not run: no model is set, or the runtime does not stream through the engine | `INFO` |
 | An available runtime has no live probe | `INFO`, with the credential source |
+| The target is a decision engine without chat, such as a System One target | `INFO`, not applicable |
 | Credentials are missing or the target did not answer its health probe | `WARN`, with the actual error |
 
 The probe generates tokens and can load a cold model on a local server. It
