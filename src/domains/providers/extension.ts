@@ -722,7 +722,9 @@ export function createProvidersBundle(
 	async function probeAll(): Promise<void> {
 		const settings = readConfig();
 		const profiles = profileKb.profiles();
-		if (profiles) {
+		// The step 3 comparison is a migration aid. Unmatched cloud routes are expected,
+		// so it prints only on request instead of warning on every probe.
+		if (profiles && process.env.CLIO_CODER_PROFILE_COMPARE === "1") {
 			try {
 				const comparison = compareConfiguredModelProfiles(options.getSettings?.() ?? settings, profiles, legacyKb);
 				const signature = JSON.stringify(comparison);
