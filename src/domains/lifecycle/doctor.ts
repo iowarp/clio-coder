@@ -863,12 +863,14 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 		{ loadPluginRuntimes },
 		{ listKnownModelsForRuntime },
 		{ readTargetModelSnapshot },
+		{ runtimeListsModelsLive },
 	] = await Promise.all([
 		import("../providers/registry.js"),
 		import("../providers/runtimes/builtins.js"),
 		import("../providers/plugins.js"),
 		import("../providers/support.js"),
 		import("../providers/target-model-cache.js"),
+		import("../providers/model-discovery.js"),
 	]);
 	const registry = getRuntimeRegistry();
 	// doctor never loads the providers domain, so the registry is empty here
@@ -968,22 +970,27 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 			const live = observation?.probe.ok === true && observation.advertised.length > 0;
 			const snapshot = readTargetModelSnapshot(target, { cacheDir: resolveClioDirs().cache });
 			const cachedModels = snapshot?.models ?? [];
+			const catalogOnly = !runtimeListsModelsLive(runtime) && catalog.length > 0;
 			const advertised = live
 				? observation.advertised
-				: cachedModels.length > 0
-					? cachedModels
-					: (target.wireModels ?? []).length > 0
-						? (target.wireModels ?? [])
-						: catalog;
+				: catalogOnly
+					? catalog
+					: cachedModels.length > 0
+						? cachedModels
+						: (target.wireModels ?? []).length > 0
+							? (target.wireModels ?? [])
+							: catalog;
 			const source = live
 				? `live list from ${runtime.id === "alcf" ? "the ALCF catalog (inference URL not checked)" : where}`
-				: cachedModels.length > 0
-					? `cached list from ${snapshot?.observedAt}, not verified live now`
-					: (target.wireModels ?? []).length > 0
-						? "list recorded by configure, not verified live now"
-						: catalog.length > 0
-							? "provider catalog, not this account's live model list"
-							: "";
+				: catalogOnly
+					? "provider catalog, not this account's live model list"
+					: cachedModels.length > 0
+						? `cached list from ${snapshot?.observedAt}, not verified live now`
+						: (target.wireModels ?? []).length > 0
+							? "list recorded by configure, not verified live now"
+							: catalog.length > 0
+								? "provider catalog, not this account's live model list"
+								: "";
 			if (advertised.length === 0) {
 				return [
 					connection,
