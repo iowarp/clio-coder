@@ -52,7 +52,7 @@ it("operator bootstrap report: internal schema retries keep scope provenance wit
 		ok(resolved.inferredOnlyPaths.includes("CLIO-CODER.md"), "omissions remain recorded without expanding authority");
 		for (const requestOrigin of ["user", "agent"] as const)
 			await rejects(bundle.contract.dispatch({ ...request, agentId: "coder", requestOrigin }), /responseSchema/);
-		strictEqual(notices.length, 2, "ordinary dispatches retain their scope warnings");
+		strictEqual(notices.length, 0, "operator dispatches omit transcript scope warnings");
 		for (const requestOrigin of ["user", "agent"] as const) {
 			await rejects(
 				bundle.contract.dispatch({
@@ -64,11 +64,11 @@ it("operator bootstrap report: internal schema retries keep scope provenance wit
 				/responseSchema/,
 			);
 		}
-		strictEqual(notices.length, 2, "retries never repeat transcript scope warnings");
+		strictEqual(notices.length, 0, "operator retries omit transcript scope warnings");
 		strictEqual(
 			diagnostics.filter((text) => text.includes("typed scope replacement")).length,
 			1,
-			"operator dispatches carry the transcript callout instead of a duplicate diagnostic, and retries never repeat one",
+			"only harness dispatches carry a scope diagnostic, and retries never repeat one",
 		);
 	} finally {
 		unsubscribe();
