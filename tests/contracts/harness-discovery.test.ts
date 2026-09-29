@@ -117,10 +117,10 @@ describe("coordinator discovery and dependency composition", () => {
 			ok(wireDispatch);
 			const wire = wireDispatch.parameters as { properties: Record<string, unknown> };
 			ok(!("candidates" in wire.properties));
-			const full = payloadOf(
+			const described = payloadOf(
 				resultOf(await registry.invoke({ tool: ToolNames.Gateway, args: { op: "describe", capability: "dispatch" } })),
 			);
-			ok(full.parameters && "candidates" in full.parameters.properties);
+			deepStrictEqual(described.parameters, wire, "describe shows the attached direct schema");
 			await rejects(wireDispatch.execute("malformed", { candidates: "many" }), /candidates/u);
 			const worker = resolveAgentTools({ registry: createWorkerToolRegistry() });
 			for (const name of ["bash", "grep", "context", "verify"]) ok(worker.some((tool) => tool.name === name));

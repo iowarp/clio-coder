@@ -221,6 +221,9 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		return new Set((run ?? turn ?? []).filter((name) => turn === undefined || turn.includes(name)));
 	};
 
+	const directCallGuidance = (name: string): string =>
+		`"${name}" is a direct tool with an attached schema; call it directly, not through the gateway`;
+
 	const resolveCapability = async (
 		name: string,
 		options: ToolInvokeOptions | undefined,
@@ -242,7 +245,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		if (!allowDirect && toolSpecPlacement(spec) === "direct") {
 			return {
 				spec: null,
-				message: `gateway: "${name}" is a direct tool with an attached schema; call it directly, not through the gateway`,
+				message: `gateway: ${directCallGuidance(name)}`,
 			};
 		}
 		return { spec };
@@ -568,11 +571,14 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		if (toolSpecPlacement(spec) === "direct" && name !== ToolNames.Dispatch && name !== ToolNames.Gateway) {
 			return {
 				kind: "error",
-				message: `gateway: "${name}" is a direct tool with an attached schema; call it directly, not through the gateway`,
+				message: `gateway: ${directCallGuidance(name)}`,
 			};
 		}
+		const direct = toolSpecPlacement(spec) === "direct";
 		const kind = gatewayCapabilityKind(spec.name);
-		const authority = admissionNotes(spec.name, spec.baseActionClass);
+		const authority = direct
+			? [directCallGuidance(spec.name), autonomyNote(spec.baseActionClass)]
+			: admissionNotes(spec.name, spec.baseActionClass);
 		if (spec.name === ToolNames.WebFetch) {
 			authority.push(
 				"A non-GET method or a body is an outward action and asks in default; use web_read when a plain GET is enough.",
@@ -593,7 +599,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			name: spec.name,
 			kind,
 			description: spec.description,
-			parameters: wireParameterSchema(spec.parameters),
+			parameters: wireParameterSchema(direct ? (spec.modelParameters ?? spec.parameters) : spec.parameters),
 			...(spec.metadata?.discoveryHint ? { orientation: spec.metadata.discoveryHint } : {}),
 			actionClass: spec.baseActionClass,
 			executionMode: spec.executionMode ?? "sequential",

@@ -94,7 +94,7 @@ describe("compact coordinator dispatch contract", () => {
 		}
 	});
 
-	it("rejects malformed advertised forms and preserves advanced discovery", async () => {
+	it("rejects malformed advertised forms and describes the attached direct schema", async () => {
 		const compact = coordinatorDispatchParameters();
 		for (const args of [
 			{ tasks: [3] },
@@ -132,11 +132,25 @@ describe("compact coordinator dispatch contract", () => {
 		registry.register(createGatewayTool({ registry }));
 		const verdict = await registry.invoke({ tool: "gateway", args: { op: "describe", capability: "dispatch" } });
 		ok(verdict.kind === "ok" && verdict.result.kind === "ok");
-		const described = JSON.parse(verdict.result.output) as { parameters: { properties: Record<string, unknown> } };
-		for (const field of ["candidates", "members", "context", "routing"]) {
+		const described = JSON.parse(verdict.result.output) as {
+			parameters: { properties: Record<string, unknown> };
+			authority: string[];
+		};
+		const attached = resolveAgentTools({ registry });
+		deepStrictEqual(described.parameters, attached.find((tool) => tool.name === "dispatch")?.parameters);
+		for (const field of ["model", "candidates", "members", "context", "routing"]) {
 			ok(!(field in compact.properties));
-			ok(field in described.parameters.properties);
+			ok(!(field in described.parameters.properties));
 		}
+		match(described.authority.join(" "), /"dispatch" is a direct tool.*call it directly, not through the gateway/u);
+		const gatewayVerdict = await registry.invoke({ tool: "gateway", args: { op: "describe", capability: "gateway" } });
+		ok(gatewayVerdict.kind === "ok" && gatewayVerdict.result.kind === "ok");
+		const gatewayDescription = JSON.parse(gatewayVerdict.result.output) as { parameters: unknown; authority: string[] };
+		deepStrictEqual(gatewayDescription.parameters, attached.find((tool) => tool.name === "gateway")?.parameters);
+		match(
+			gatewayDescription.authority.join(" "),
+			/"gateway" is a direct tool.*call it directly, not through the gateway/u,
+		);
 	});
 
 	it("teaches the declared-check array contract and still rejects invented check ids", () => {
