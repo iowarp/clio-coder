@@ -32,6 +32,11 @@
 			"semicolons": "always"
 		}
 	},
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true
+	},
 	"files": {
 		"includes": [
 			"**",
@@ -43,8 +48,9 @@
 			"!**/node_modules",
 			"!**/*.log",
 			"!.superpowers",
-			"!benchmarks/community/*/runs",
-			"!benchmarks/internal/runs",
+			"!.mine",
+			"!benchmarks",
+			"!social-campaigns",
 			"!**/*.html",
 			"!tmp"
 		]

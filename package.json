@@ -97,6 +97,7 @@
 		"prepublishOnly": "node scripts/release-candidate.mjs preflight",
 		"skills:pin": "node --import tsx scripts/pin-skills.ts",
 		"skills:check": "node --import tsx scripts/pin-skills.ts --check",
+		"hooks:install": "node scripts/git-guard.mjs install",
 		"library:pin": "node --import tsx scripts/pin-library.ts",
 		"library:check": "node --import tsx scripts/pin-library.ts --check",
 		"pretest:full": "test -f dist/cli/index.js && test -f dist/metafile-esm.json || pnpm run build",

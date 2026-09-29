@@ -1,31 +1,56 @@
+# Paths listed here never belong in the repository. `git add -f` still stages
+# them, so `pnpm run lint` (check-hygiene tracked-ignored) fails when any tracked
+# path matches a rule, and `pnpm run hooks:install` adds pre-commit and pre-push
+# guards that refuse them before a commit or push leaves the machine.
+
+# Dependencies and build output.
 node_modules/
 dist/
-*.log
-.DS_Store
-.env
-.env.local
 coverage/
-.claude/
-.clio-coder/
-.codex
-.codex/
-.antigravitycli
 .tsbuildinfo
 __pycache__/
+*.pyc
+*.log
+# npm pack output. Verifying an installed tarball is routine; committing one is not.
+*.tgz
 
-# Orchestrator-of-orchestrators runtime scripts (not part of the product).
-scripts/orch/
+# Local environment, OS and editor files.
+.env
+.env.local
+.DS_Store
 
-# Dev-time scratch area: planning files, debugging notes, sprint plans, reports. Never shipped.
-.superpowers/
-social-campaigns/
+# Agent and tool state. Handbooks for local agents stay local; site/.gitignore
+# re-includes the site's own AGENTS.md.
+.claude/
+.clio-coder/
+.clio/
+.clio-agent/
+.codex
+.antigravitycli
 CLIO-CODER.md
 CLAUDE.md
 AGENTS.md
 
-# Throwaway scratch: probe scripts, benchmark fixtures, copied repositories.
-tmp/
+# Private development material: plans, prompts, specs, references, audits,
+# handoffs, sprint and release notes, benchmark captures. .mine/ is the home
+# for material worth keeping; .superpowers/ is its retired predecessor.
+.mine/
+.superpowers/
+/benchmarks/
+/social-campaigns/
+/scripts/orch/
+/docs/process/
+/docs/issues/
+/docs/findings/
+/docs/sprints/
+/docs/release-notes/
+/apps/*/notes/
+*HANDOFF*.md
+/CODEX_*.md
+/ROOT-CAUSE.md
+/STATUS.md
+/DEVLOG.md
+/ROADMAP.md
 
-# npm pack output. Verifying an installed tarball is routine; committing one is not.
-*.tgz
-benchmarks/
+# Throwaway scratch: probe scripts, fixtures, copied repositories.
+/tmp/

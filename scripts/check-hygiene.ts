@@ -1547,6 +1547,35 @@ function checkGitignoredReference(): void {
 }
 
 // ---------------------------------------------------------------------------
+// tracked-ignored: .gitignore lists the paths that never belong in the
+// repository, but Git keeps tracking a path committed before its rule or forced
+// past it with `git add -f`. Agent plans under an ignored .superpowers/ reached
+// the public history that way until the 0.5.9 purge. Only the repository's own
+// .gitignore files count, so a contributor's global excludes cannot fail CI.
+// ---------------------------------------------------------------------------
+function checkTrackedIgnored(): void {
+	let listed: string;
+	try {
+		listed = execFileSync(
+			"git",
+			["ls-files", "-z", "--cached", "--ignored", "--exclude-per-directory=.gitignore"],
+			{ cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024 },
+		);
+	} catch {
+		// Outside a Git work tree, such as an unpacked package, there is no index to check.
+		return;
+	}
+	const tracked = listed.split("\0").filter((path) => path.length > 0);
+	if (tracked.length === 0) return;
+	const shown = tracked.slice(0, 20);
+	const more = tracked.length > shown.length ? `\n  ...and ${tracked.length - shown.length} more` : "";
+	fail(
+		"tracked-ignored",
+		`${tracked.length} tracked path(s) match .gitignore; run \`git rm --cached\` on them or narrow the rule:\n  ${shown.join("\n  ")}${more}`,
+	);
+}
+
+// ---------------------------------------------------------------------------
 // prompts: the prompt no longer carries a doc routing table; it names two
 // docs and directs the model to context(scope="docs") for the rest. Prove
 // the two named docs exist, the directive is phrased as a call rather than
@@ -1873,6 +1902,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["readme-shape", checkReadmeShape],
 	["packaging", checkPackaging],
 	["gitignored-reference", checkGitignoredReference],
+	["tracked-ignored", checkTrackedIgnored],
 	["prompts", checkPromptsDocLinks],
 	["docs-source", checkDocsSource],
 	["pi-surface", checkPiSurface],

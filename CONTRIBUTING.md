@@ -15,9 +15,12 @@ git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm install --frozen-lockfile
+pnpm run hooks:install
 pnpm run build
 pnpm run ci
 ```
+
+`hooks:install` adds pre-commit and pre-push guards that refuse any path `.gitignore` excludes, including one staged with `git add -f`. Keep private plans, prompts and notes under the ignored `.mine/`; `pnpm run lint` fails if an ignored path is ever tracked.
 
 ## Validation Reference
 
