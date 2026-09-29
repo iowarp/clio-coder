@@ -201,7 +201,8 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 		label !== "handoff" &&
 		label !== "prewarm" &&
 		label !== "background-memory" &&
-		label !== "failed-compaction"
+		label !== "failed-compaction" &&
+		label !== "system-one"
 	)
 		return null;
 	if (typeof value.timestamp !== "string" || value.timestamp.length === 0) return null;
@@ -217,7 +218,7 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 	// call that cost nothing. Rows written before either field keep reading as
 	// they always did, because a number parses the same either way.
 	const keepsOutcome = label === "failed-compaction" || label === "prewarm";
-	const reading = keepsOutcome ? nullableNumber : numberOr0;
+	const reading = keepsOutcome || label === "system-one" ? nullableNumber : numberOr0;
 	return {
 		label,
 		repoIdentity: typeof value.repoIdentity === "string" ? value.repoIdentity : null,

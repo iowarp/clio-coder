@@ -9,9 +9,31 @@ import type { TargetDescriptor } from "../../providers/types/target-descriptor.j
 
 export type EngineAuth = Partial<Pick<ProvidersContract, "auth">>["auth"];
 
+export interface LlmRequestUsage {
+	readonly input: number;
+	readonly output: number;
+	readonly cacheRead?: number;
+	readonly cacheWrite?: number;
+	readonly cacheWrite1h?: number;
+	readonly reasoning?: number;
+	readonly totalTokens?: number;
+	readonly costUsd?: number;
+}
+
+/** Admission captures the originating session and returns its per-request accounting sink. */
+export type LlmRequestAdmission = (request: {
+	readonly targetId: string;
+	readonly model: string;
+	readonly signal: AbortSignal;
+}) => Promise<(usage: LlmRequestUsage | null) => void>;
+
+/** A refused request invalidates the whole decision, including answers from earlier requests. */
+export class LlmAdmissionRefused extends Error {}
+
 export interface EngineHost {
 	readonly auth: EngineAuth;
 	readonly credentialsPresent: () => ReadonlySet<string>;
+	readonly admitLlmRequest?: LlmRequestAdmission;
 }
 
 /**

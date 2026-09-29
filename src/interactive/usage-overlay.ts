@@ -31,7 +31,7 @@ function sumRows(
 ): Omit<
 	CostRow,
 	"providerId" | "attributedModelId" | "requestedModelIds" | "responseModelIdObservationCounts" | "cost"
-> {
+> & { systemOne: number } {
 	return rows.reduce(
 		(acc, row) => ({
 			runs: acc.runs + row.runs,
@@ -47,6 +47,7 @@ function sumRows(
 			prewarms: acc.prewarms + row.prewarms,
 			backgroundMemory: acc.backgroundMemory + row.backgroundMemory,
 			failedCompaction: acc.failedCompaction + row.failedCompaction,
+			systemOne: acc.systemOne + (row.systemOne ?? 0),
 		}),
 		{
 			runs: 0,
@@ -62,6 +63,7 @@ function sumRows(
 			prewarms: 0,
 			backgroundMemory: 0,
 			failedCompaction: 0,
+			systemOne: 0,
 		},
 	);
 }
@@ -140,7 +142,8 @@ function summaryBlock(
 					totals.handoffs -
 					totals.prewarms -
 					totals.backgroundMemory -
-					totals.failedCompaction,
+					totals.failedCompaction -
+					totals.systemOne,
 			),
 		],
 		["model calls", formatTokens(totals.apiCalls)],
@@ -148,6 +151,7 @@ function summaryBlock(
 		...(totals.handoffs > 0 ? [["handoffs", formatTokens(totals.handoffs)] as const] : []),
 		...(totals.prewarms > 0 ? [["pre-warms", formatTokens(totals.prewarms)] as const] : []),
 		...(totals.backgroundMemory > 0 ? [["memory steps", formatTokens(totals.backgroundMemory)] as const] : []),
+		...(totals.systemOne > 0 ? [["System One calls", formatTokens(totals.systemOne)] as const] : []),
 		...(totals.failedCompaction > 0
 			? [
 					["failed compaction calls", formatTokens(totals.failedCompaction)] as const,
@@ -176,7 +180,13 @@ function modelBlock(row: CostRow): string[] {
 		[
 			"turns",
 			formatTokens(
-				row.runs - row.sideQuestions - row.handoffs - row.prewarms - row.backgroundMemory - row.failedCompaction,
+				row.runs -
+					row.sideQuestions -
+					row.handoffs -
+					row.prewarms -
+					row.backgroundMemory -
+					row.failedCompaction -
+					(row.systemOne ?? 0),
 			),
 		],
 		["model calls", formatTokens(row.apiCalls)],
@@ -184,6 +194,7 @@ function modelBlock(row: CostRow): string[] {
 		...(row.handoffs > 0 ? [["handoffs", formatTokens(row.handoffs)] as const] : []),
 		...(row.prewarms > 0 ? [["pre-warms", formatTokens(row.prewarms)] as const] : []),
 		...(row.backgroundMemory > 0 ? [["memory steps", formatTokens(row.backgroundMemory)] as const] : []),
+		...((row.systemOne ?? 0) > 0 ? [["System One calls", formatTokens(row.systemOne ?? 0)] as const] : []),
 		...(row.failedCompaction > 0 ? [["failed compaction calls", formatTokens(row.failedCompaction)] as const] : []),
 		...(cost === null ? [] : [["cost", cost] as const]),
 		["input", formatTokens(row.input)],

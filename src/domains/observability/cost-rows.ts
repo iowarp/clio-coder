@@ -31,6 +31,7 @@ export interface CostRow {
 	/** Calls in this row that were proactive-memory steps on the background target. */
 	backgroundMemory: number;
 	failedCompaction: number;
+	systemOne?: number;
 	cost: CostAggregate;
 }
 
@@ -61,6 +62,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 			if (entry.label === "prewarm") existing.row.prewarms += 1;
 			if (entry.label === "background-memory") existing.row.backgroundMemory += 1;
 			if (entry.label === "failed-compaction") existing.row.failedCompaction += 1;
+			if (entry.label === "system-one") existing.row.systemOne = (existing.row.systemOne ?? 0) + 1;
 			for (const requestedModelId of entry.requestedModelIds) existing.requestedModelIds.add(requestedModelId);
 			addResponseModelIdObservationCounts(
 				existing.responseModelIdObservationCounts,
@@ -86,6 +88,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 				prewarms: entry.label === "prewarm" ? 1 : 0,
 				backgroundMemory: entry.label === "background-memory" ? 1 : 0,
 				failedCompaction: entry.label === "failed-compaction" ? 1 : 0,
+				...(entry.label === "system-one" ? { systemOne: 1 } : {}),
 			},
 			requestedModelIds: new Set(entry.requestedModelIds),
 			responseModelIdObservationCounts: { ...entry.responseModelIdObservationCounts },

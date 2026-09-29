@@ -42,6 +42,7 @@ export interface AcpUsageRow {
 	handoffs: number;
 	prewarms: number;
 	backgroundMemory: number;
+	systemOne?: number;
 	cost: AcpCostAggregate;
 }
 
@@ -120,6 +121,7 @@ export function projectSessionUsage(session: ReturnType<AcpUsageSource["session"
 				handoffs: count(row.handoffs),
 				prewarms: count(row.prewarms),
 				backgroundMemory: count(row.backgroundMemory),
+				...((row.systemOne ?? 0) > 0 ? { systemOne: count(row.systemOne ?? 0) } : {}),
 			},
 			cost: projectCost(row.cost),
 		})),

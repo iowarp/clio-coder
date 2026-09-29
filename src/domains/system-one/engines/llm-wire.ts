@@ -15,8 +15,8 @@ import type { TargetDescriptor } from "../../providers/types/target-descriptor.j
 import type { OneShotPort } from "../factory.js";
 import type { Prompt } from "./llm-prompt.js";
 import { voteSchema } from "./llm-prompt.js";
-import type { EngineHost } from "./shared.js";
-import { errorText, resolveToken } from "./shared.js";
+import type { EngineHost, LlmRequestUsage } from "./shared.js";
+import { errorText, LlmAdmissionRefused, resolveToken } from "./shared.js";
 
 /** Ceiling for one HTTP request; the runner's deadline arrives as the abort signal and wins. */
 const HTTP_CEILING_MS = 120_000;
@@ -127,13 +127,36 @@ interface ChatCompletion {
 			content?: Array<{ token?: unknown; logprob?: unknown; top_logprobs?: unknown }> | null;
 		} | null;
 	}>;
-	usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
+	usage?: {
+		prompt_tokens?: unknown;
+		completion_tokens?: unknown;
+		total_tokens?: unknown;
+		prompt_tokens_details?: { cached_tokens?: unknown };
+		completion_tokens_details?: { reasoning_tokens?: unknown };
+	};
 }
 
-function usageOf(data: ChatCompletion): ChannelUsage | undefined {
+function usageOf(data: ChatCompletion): LlmRequestUsage | undefined {
 	const input = data.usage?.prompt_tokens;
 	const output = data.usage?.completion_tokens;
-	return typeof input === "number" && typeof output === "number" ? { input, output } : undefined;
+	if (typeof input !== "number" || !Number.isFinite(input) || input < 0) return undefined;
+	if (typeof output !== "number" || !Number.isFinite(output) || output < 0) return undefined;
+	const cached = data.usage?.prompt_tokens_details?.cached_tokens;
+	const cacheRead = typeof cached === "number" && Number.isFinite(cached) ? Math.max(0, Math.min(cached, input)) : 0;
+	const reasoning = data.usage?.completion_tokens_details?.reasoning_tokens;
+	const total = data.usage?.total_tokens;
+	return {
+		input: input - cacheRead,
+		output,
+		cacheRead,
+		reasoning: typeof reasoning === "number" && Number.isFinite(reasoning) ? Math.max(0, reasoning) : 0,
+		totalTokens: typeof total === "number" && Number.isFinite(total) && total >= 0 ? total : input + output,
+	};
+}
+
+function channelUsageOf(data: ChatCompletion): ChannelUsage | undefined {
+	const usage = usageOf(data);
+	return usage === undefined ? undefined : { input: usage.input + (usage.cacheRead ?? 0), output: usage.output };
 }
 
 function tokenEntry(raw: unknown): TokenLogprob | null {
@@ -185,6 +208,7 @@ export interface HttpChannelInput {
 	readonly baseUrl: string;
 	readonly host: EngineHost;
 	readonly signal: AbortSignal;
+	readonly onAdmissionRefused?: (error: LlmAdmissionRefused) => void;
 }
 
 export function createHttpChannel(input: HttpChannelInput): Channel {
@@ -205,6 +229,14 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 			"content-type": "application/json",
 			...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
 		};
+		let recordUsage: ((usage: LlmRequestUsage | null) => void) | undefined;
+		try {
+			recordUsage = await host.admitLlmRequest?.({ targetId: target.id, model, signal });
+		} catch (error) {
+			if (error instanceof LlmAdmissionRefused) input.onAdmissionRefused?.(error);
+			throw error;
+		}
+		signal.throwIfAborted();
 		const response = await probeJson<ChatCompletion>({
 			url: `${baseUrl}/chat/completions`,
 			method: "POST",
@@ -214,6 +246,7 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 			signal,
 			readErrorBody: true,
 		});
+		recordUsage?.(response.data ? (usageOf(response.data) ?? null) : null);
 		if (!response.ok || !response.data) {
 			const cause = response.errorBody === undefined ? "" : `: ${response.errorBody.replace(/\s+/gu, " ").slice(0, 300)}`;
 			throw new ChatHttpError(
@@ -242,7 +275,7 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 				top_logprobs: TOP_LOGPROBS,
 				...extras,
 			});
-			const usage = usageOf(data);
+			const usage = channelUsageOf(data);
 			return { tokens: firstTokenOf(data), ...(usage ? { usage } : {}) };
 		},
 		async vote(prompt, labelCount) {
@@ -274,7 +307,7 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 				schemaRejections.add(rejectionKey);
 				data = await post(base);
 			}
-			const usage = usageOf(data);
+			const usage = channelUsageOf(data);
 			return { text: contentOf(data), ...(usage ? { usage } : {}) };
 		},
 	};
@@ -285,6 +318,7 @@ export interface OneShotChannelInput {
 	readonly model: string | null;
 	readonly port: OneShotPort;
 	readonly signal: AbortSignal;
+	readonly onAdmissionRefused?: (error: LlmAdmissionRefused) => void;
 }
 
 export function createOneShotChannel(input: OneShotChannelInput): Channel {
@@ -308,6 +342,10 @@ export function createOneShotChannel(input: OneShotChannelInput): Channel {
 				});
 				return { text: reply.text, ...(reply.usage ? { usage: reply.usage } : {}) };
 			} catch (error) {
+				if (error instanceof LlmAdmissionRefused) {
+					input.onAdmissionRefused?.(error);
+					throw error;
+				}
 				throw new Error(`one-shot call failed: ${errorText(error)}`);
 			}
 		},

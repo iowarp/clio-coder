@@ -14,7 +14,7 @@ import type { RuntimeDescriptor } from "../providers/types/runtime-descriptor.js
 import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
 import { cutsFor } from "./calibration.js";
 import { createLlmEngine, llmEngineProblem } from "./engines/llm.js";
-import type { EngineHost } from "./engines/shared.js";
+import type { EngineHost, LlmRequestAdmission } from "./engines/shared.js";
 import { createSystemOneEngine } from "./engines/systemone.js";
 import { createRunner } from "./runner.js";
 import type {
@@ -51,6 +51,7 @@ export interface SystemOneDeps {
 	providers: Pick<ProvidersContract, "getTarget" | "getRuntime"> & Partial<Pick<ProvidersContract, "auth">>;
 	credentialsPresent: () => ReadonlySet<string>;
 	oneShot?: OneShotPort;
+	admitLlmRequest?: LlmRequestAdmission;
 	/** Concurrent requests the endpoint behind a target serves; absent means 4. */
 	endpointCapacity?: (targetId: string) => number;
 	recorder?: () => DecisionRecorder | null;
@@ -91,7 +92,11 @@ function kindOf(cfg: EngineSettings): EngineKind {
 }
 
 export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
-	const host: EngineHost = { auth: deps.providers.auth, credentialsPresent: deps.credentialsPresent };
+	const host: EngineHost = {
+		auth: deps.providers.auth,
+		credentialsPresent: deps.credentialsPresent,
+		...(deps.admitLlmRequest ? { admitLlmRequest: deps.admitLlmRequest } : {}),
+	};
 	const runner = createRunner({
 		...(deps.recorder ? { recorder: deps.recorder } : {}),
 		...(deps.currentSession ? { currentSession: deps.currentSession } : {}),

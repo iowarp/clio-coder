@@ -207,7 +207,8 @@ import { filterEntriesToActivePath } from "../domains/session/tree/active-path.j
 import { reseedSessionUsageFromLedger } from "../domains/session/usage-reseed.js";
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
-import { createSystemOne, type OneShotPort } from "../domains/system-one/index.js";
+import type { LlmRequestAdmission, OneShotPort } from "../domains/system-one/index.js";
+import { createSystemOne } from "../domains/system-one/index.js";
 import { createFollowUpTracker, observePermissionOutcomes } from "../domains/system-one/outcomes.js";
 import { createRelevanceRanker } from "../domains/system-one/rank.js";
 import { anchorSessionRows, createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
@@ -260,7 +261,7 @@ import { readCompactionSystemPrompt } from "./compaction-prompt.js";
 import { createExtensionReloadCoordinator } from "./extension-reload.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
 import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
-import { createDecisionUsageTally, createSystemOneHost } from "./system-one-host.js";
+import { createDecisionUsageTally, createSystemOneHost, createSystemOneRequestAdmission } from "./system-one-host.js";
 import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "./task-memory-lifecycle.js";
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
@@ -499,7 +500,7 @@ function prepareBackgroundMemoryModel(providers: ProvidersContract, targetId: st
  * without ever becoming a turn. The answer is text, so an engine behind this
  * port can vote but cannot read logprobs.
  */
-function createSystemOneOneShot(providers: ProvidersContract): OneShotPort {
+function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmRequestAdmission): OneShotPort {
 	return async (request) => {
 		const target = providers.getTarget(request.targetId);
 		const wireModelId = request.model ?? target?.defaultModel ?? null;
@@ -510,6 +511,7 @@ function createSystemOneOneShot(providers: ProvidersContract): OneShotPort {
 		const apiKey = targetRequiresAuth(refined.target, refined.runtime)
 			? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
 			: LOCAL_API_KEY_FALLBACK;
+		let recordUsage: Awaited<ReturnType<LlmRequestAdmission>> | undefined;
 		const result = await runOutOfTurnRound({
 			model,
 			messages: [],
@@ -518,6 +520,10 @@ function createSystemOneOneShot(providers: ProvidersContract): OneShotPort {
 			maxTokens: request.maxTokens,
 			signal: request.signal,
 			runtimeId: refined.runtime.id,
+			beforeRequest: async () => {
+				recordUsage = await admitRequest({ targetId: request.targetId, model: wireModelId, signal: request.signal });
+			},
+			onUsage: (usage) => recordUsage?.(usage),
 			...(apiKey !== undefined ? { apiKey } : {}),
 			...(request.schema !== undefined
 				? { responseSchema: { name: "system_one_vote", schema: request.schema as Record<string, unknown> } }
@@ -2155,11 +2161,25 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		appendSessionRow: () => {},
 	});
 	const decisionUsage = createDecisionUsageTally(systemOneRecorder);
+	const sessionScheduling = result.getContract<SchedulingContract>("scheduling");
+	const admitSystemOneRequest = createSystemOneRequestAdmission({
+		providers,
+		...(sessionScheduling ? { scheduling: sessionScheduling } : {}),
+		...(observability ? { observability } : {}),
+		getCeilingUsd: () => getCurrentSettings().safety.limits.sessionCostUsd,
+		currentSession: currentSessionId,
+		repoIdentity: () => {
+			const meta = session?.current();
+			return meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null;
+		},
+		stateDir: clioStateDir(),
+	});
 	const systemOne = createSystemOne({
 		settings: () => getCurrentSettings(),
 		providers,
 		credentialsPresent,
-		oneShot: createSystemOneOneShot(providers),
+		oneShot: createSystemOneOneShot(providers, admitSystemOneRequest),
+		admitLlmRequest: admitSystemOneRequest,
 		// Each call is bound to the session it starts in. A slow turn-end answer can
 		// settle after /new, /resume or a branch switch, and reading the session when
 		// it settles would file it under the wrong one.
@@ -2848,7 +2868,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// in between would deliver them to nobody.
 	let cancelQueuedSpeculativeHold: (() => void) | null = null;
 	let previousSpeculativeStats = dispatch?.speculativeStats?.() ?? { held: 0, adopted: 0, discarded: 0, live: 0 };
-	const sessionScheduling = result.getContract<SchedulingContract>("scheduling");
 	const chat = createChatLoop({
 		turnControl,
 		turnOutcomeCollector,

@@ -1,5 +1,7 @@
 export { certaintyFromMass, chosen, isTrue, rating } from "./answers.js";
 export { cutsFor, FITTED_CUTS, FITTED_TEMPERATURES, temperatureFor } from "./calibration.js";
+export type { LlmRequestAdmission, LlmRequestUsage } from "./engines/shared.js";
+export { LlmAdmissionRefused } from "./engines/shared.js";
 export type { OneShotPort, SystemOneDeps, SystemOneInstance } from "./factory.js";
 export { createSystemOne } from "./factory.js";
 export { pick, rate, specHash, validateQuestion, yesNo } from "./questions.js";

@@ -89,6 +89,9 @@ export interface OutOfTurnRoundInput extends Omit<SideQuestionInput, "question">
 	runtimeId?: string;
 	/** Sampling temperature; absent leaves the provider's default. `/draft` spreads it across candidates. */
 	temperature?: number;
+	/** Optional host admission and accounting apply to each attempt, including a schema retry. */
+	beforeRequest?: () => Promise<void>;
+	onUsage?: (usage: SideQuestionUsage | null) => void;
 }
 
 export interface SideQuestionResult {
@@ -188,6 +191,8 @@ export async function runOutOfTurnRound(input: OutOfTurnRoundInput): Promise<Sid
 }
 
 async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | null): Promise<SideQuestionResult> {
+	await input.beforeRequest?.();
+	input.signal?.throwIfAborted();
 	const options: Record<string, unknown> = { maxTokens: input.maxTokens ?? SIDE_QUESTION_MAX_TOKENS };
 	if (input.apiKey !== undefined) options.apiKey = input.apiKey;
 	if (input.signal !== undefined) options.signal = input.signal;
@@ -224,12 +229,16 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 		}
 		if (event.type === "done") {
 			const answer = textFromMessage(event.message).trim();
-			return { text: answer, usage: sideQuestionUsage((event.message as { usage?: unknown }).usage), aborted: false };
+			const usage = sideQuestionUsage((event.message as { usage?: unknown }).usage);
+			input.onUsage?.(usage);
+			return { text: answer, usage, aborted: false };
 		}
 		if (event.type === "error") {
 			const failed = event.error as { stopReason?: unknown; usage?: unknown; errorMessage?: unknown };
+			const usage = sideQuestionUsage(failed.usage);
+			input.onUsage?.(usage);
 			if (event.reason === "aborted" || failed.stopReason === "aborted" || input.signal?.aborted === true) {
-				return { text: text.trim(), usage: sideQuestionUsage(failed.usage), aborted: true };
+				return { text: text.trim(), usage, aborted: true };
 			}
 			throw new Error(typeof failed.errorMessage === "string" ? failed.errorMessage : "side question failed");
 		}

@@ -25,7 +25,7 @@ import { answerQuestion, LogprobsUnavailable } from "./llm-readout.js";
 import { createScheduler } from "./llm-schedule.js";
 import { chatBaseUrl, createHttpChannel, createOneShotChannel, hasChatWire } from "./llm-wire.js";
 import type { EngineHost } from "./shared.js";
-import { errorText } from "./shared.js";
+import { errorText, LlmAdmissionRefused } from "./shared.js";
 
 /** Concurrent requests when the host cannot say how many the endpoint serves. */
 const DEFAULT_ENDPOINT_CAPACITY = 4;
@@ -167,14 +167,31 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 				const onAbort = () => controller.abort(request.signal.reason);
 				request.signal.addEventListener("abort", onAbort, { once: true });
 				if (request.signal.aborted) onAbort();
+				let refuse!: (error: LlmAdmissionRefused) => void;
+				const admissionRefused = new Promise<never>((_resolve, reject) => {
+					refuse = reject;
+				});
+				const onAdmissionRefused = (error: LlmAdmissionRefused): void => {
+					refuse(error);
+					controller.abort(error);
+				};
 				const channel =
 					baseUrl !== null
-						? createHttpChannel({ target, runtime, model: wireModel, baseUrl, host, signal: controller.signal })
+						? createHttpChannel({
+								target,
+								runtime,
+								model: wireModel,
+								baseUrl,
+								host,
+								signal: controller.signal,
+								onAdmissionRefused,
+							})
 						: createOneShotChannel({
 								targetId: target.id,
 								model: wireModel,
 								port: input.oneShot as OneShotPort,
 								signal: controller.signal,
+								onAdmissionRefused,
 							});
 				const build = `llm:${runtime.id}@${baseUrl === null ? "oneshot" : hostOf(baseUrl)}/${wireModel}#${mode}:${PROMPT_VERSION}`;
 				const ctx: ReadContext = {
@@ -191,18 +208,24 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 					orders: { read: 0, missing: 0 },
 				};
 				try {
-					const settled = await Promise.allSettled(
-						Object.entries(request.questions).map(async ([id, question]) => {
-							try {
-								return [id, await answerQuestion(ctx, question)] as const;
-							} catch (error) {
-								// One question learned the target has no logprobs: the rest of the
-								// attempt is moot, so requests still queued are dropped, not sent.
-								if (error instanceof LogprobsUnavailable) controller.abort(error);
-								throw error;
-							}
-						}),
-					);
+					const settled = await Promise.race([
+						admissionRefused,
+						Promise.allSettled(
+							Object.entries(request.questions).map(async ([id, question]) => {
+								try {
+									return [id, await answerQuestion(ctx, question)] as const;
+								} catch (error) {
+									// A mode downgrade or admission refusal invalidates the attempt,
+									// so queued requests cannot contribute a usable decision.
+									if (error instanceof LogprobsUnavailable || error instanceof LlmAdmissionRefused) controller.abort(error);
+									throw error;
+								}
+							}),
+						),
+					]);
+					for (const entry of settled) {
+						if (entry.status === "rejected" && entry.reason instanceof LlmAdmissionRefused) throw entry.reason;
+					}
 					for (const entry of settled) {
 						if (entry.status === "rejected" && entry.reason instanceof LogprobsUnavailable) throw entry.reason;
 					}

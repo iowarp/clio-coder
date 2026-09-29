@@ -127,10 +127,11 @@ interface CallOrigins {
 	prewarms: number;
 	backgroundMemory: number;
 	failedCompaction: number;
+	systemOne: number;
 }
 
 function emptyCallOrigins(): CallOrigins {
-	return { rows: 0, sideQuestions: 0, handoffs: 0, prewarms: 0, backgroundMemory: 0, failedCompaction: 0 };
+	return { rows: 0, sideQuestions: 0, handoffs: 0, prewarms: 0, backgroundMemory: 0, failedCompaction: 0, systemOne: 0 };
 }
 
 function turnsOf(origins: CallOrigins): number {
@@ -140,7 +141,8 @@ function turnsOf(origins: CallOrigins): number {
 		origins.handoffs -
 		origins.prewarms -
 		origins.backgroundMemory -
-		origins.failedCompaction
+		origins.failedCompaction -
+		origins.systemOne
 	);
 }
 
@@ -150,7 +152,8 @@ function hasLabelledCall(origins: CallOrigins): boolean {
 		origins.handoffs > 0 ||
 		origins.prewarms > 0 ||
 		origins.backgroundMemory > 0 ||
-		origins.failedCompaction > 0
+		origins.failedCompaction > 0 ||
+		origins.systemOne > 0
 	);
 }
 
@@ -160,6 +163,7 @@ function addOutOfTurnRow(origins: CallOrigins, row: OutOfTurnUsageRow): void {
 	else if (row.label === "prewarm") origins.prewarms += 1;
 	else if (row.label === "background-memory") origins.backgroundMemory += 1;
 	else if (row.label === "failed-compaction") origins.failedCompaction += 1;
+	else if (row.label === "system-one") origins.systemOne += 1;
 	else origins.handoffs += 1;
 }
 
@@ -595,6 +599,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 							prewarms: callOrigins.prewarms,
 							backgroundMemorySteps: callOrigins.backgroundMemory,
 							...(callOrigins.failedCompaction > 0 ? { failedCompactionCalls: callOrigins.failedCompaction } : {}),
+							...(callOrigins.systemOne > 0 ? { systemOneCalls: callOrigins.systemOne } : {}),
 						}
 					: {}),
 			});
@@ -690,6 +695,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			if (callOrigins.backgroundMemory > 0) {
 				out(`  background memory steps in window: ${callOrigins.backgroundMemory}`);
 			}
+			if (callOrigins.systemOne > 0) out(`  System One calls in window: ${callOrigins.systemOne}`);
 		}
 		if (failedCompaction.calls > 0) {
 			out(

@@ -20,6 +20,7 @@ import { letterIndex, MAX_LETTERED_OPTIONS, optionItems, renderPrompt, TOURNAMEN
 import type { Scheduler } from "./llm-schedule.js";
 import type { Channel, ChannelUsage, TokenLogprob } from "./llm-wire.js";
 import { ChatHttpError } from "./llm-wire.js";
+import { LlmAdmissionRefused } from "./shared.js";
 
 /** Votes per group in answer mode: odd, so a two-way split has a winner. */
 export const VOTES = 5;
@@ -219,6 +220,10 @@ async function readByVotes(
 			return { id: ordered[index]?.id ?? null, even: vote % 2 === 0 };
 		}),
 	);
+	const refused = casts.find(
+		(entry): entry is PromiseRejectedResult => entry.status === "rejected" && entry.reason instanceof LlmAdmissionRefused,
+	);
+	if (refused !== undefined) throw refused.reason;
 	const cast = casts.flatMap((entry) => (entry.status === "fulfilled" && entry.value.id !== null ? [entry.value] : []));
 	if (cast.length < MIN_VALID_VOTES) {
 		// Every vote failing is a broken target, not an abstention: keep the cause.

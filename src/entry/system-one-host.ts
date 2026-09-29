@@ -12,10 +12,23 @@
  */
 
 import type { DecisionHintLines } from "../domains/middleware/decision-hints.js";
+import type { ObservabilityContract } from "../domains/observability/contract.js";
+import { appendOutOfTurnUsageRow } from "../domains/observability/out-of-turn-usage.js";
+import { resolveEffectivePricing } from "../domains/providers/catalog.js";
+import type { ProvidersContract } from "../domains/providers/contract.js";
+import { SessionCostCeilingError } from "../domains/scheduling/budget.js";
+import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { operatorTextOfUserPayload } from "../domains/session/history.js";
 import type { SessionEntry } from "../domains/session/index.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
-import type { DecisionRecorder, OutcomeRecord, SystemOne, Verdict } from "../domains/system-one/index.js";
+import type {
+	DecisionRecorder,
+	LlmRequestAdmission,
+	OutcomeRecord,
+	SystemOne,
+	Verdict,
+} from "../domains/system-one/index.js";
+import { LlmAdmissionRefused } from "../domains/system-one/index.js";
 import { TOOL_CALL_GATE_SITE } from "../domains/system-one/sites/tool-call.js";
 import { TOOL_RESULT_SITE } from "../domains/system-one/sites/tool-result.js";
 import { TURN_SITE, type TurnRecipeOption, type TurnValue } from "../domains/system-one/sites/turn.js";
@@ -36,6 +49,95 @@ const EARLIER_REQUESTS = 3;
 
 /** Turns whose System One spend is still being counted. */
 const COUNTED_TURNS = 8;
+
+export function createSystemOneRequestAdmission(deps: {
+	providers: Pick<ProvidersContract, "getTarget">;
+	scheduling?: SchedulingContract;
+	observability?: ObservabilityContract;
+	getCeilingUsd: () => number;
+	currentSession: () => string | null;
+	repoIdentity: () => string | null;
+	stateDir: string;
+}): LlmRequestAdmission {
+	return async ({ targetId, model, signal }) => {
+		const session = deps.currentSession();
+		const repoIdentity = deps.repoIdentity();
+		const target = deps.providers.getTarget(targetId);
+		if (target === null) throw new LlmAdmissionRefused(`target '${targetId}' is no longer configured`);
+		const pricing = resolveEffectivePricing(target, target.runtime, model);
+		try {
+			signal.throwIfAborted();
+			if (pricing.provenance === "known" || pricing.provenance === "estimated") {
+				if (deps.scheduling?.admitPaidRequest) {
+					await deps.scheduling.admitPaidRequest({ waitForRaise: false, getCeilingUsd: deps.getCeilingUsd, signal });
+				} else {
+					const currentUsd = deps.observability?.sessionCost() ?? 0;
+					const ceilingUsd = deps.getCeilingUsd();
+					if (currentUsd >= ceilingUsd) throw new SessionCostCeilingError(currentUsd, ceilingUsd);
+				}
+			}
+			signal.throwIfAborted();
+			if (deps.currentSession() !== session) throw new Error("System One session changed before the request");
+		} catch (error) {
+			throw new LlmAdmissionRefused(error instanceof Error ? error.message : String(error), { cause: error });
+		}
+		return (usage) => {
+			if (usage === null) return;
+			const cacheRead = usage.cacheRead ?? 0;
+			const cacheWrite = usage.cacheWrite ?? 0;
+			const reasoning = usage.reasoning ?? 0;
+			const totalTokens = usage.totalTokens ?? usage.input + usage.output + cacheRead + cacheWrite;
+			const costUsd =
+				usage.costUsd ??
+				(pricing.rates === null
+					? 0
+					: (usage.input * pricing.rates.input +
+							usage.output * pricing.rates.output +
+							cacheRead * pricing.rates.cacheRead +
+							cacheWrite * pricing.rates.cacheWrite) /
+						1_000_000);
+			// Late answers must not charge the session that replaced their origin.
+			if (deps.currentSession() === session) {
+				deps.observability?.recordTokens(
+					targetId,
+					model,
+					totalTokens,
+					costUsd,
+					{
+						input: usage.input,
+						output: usage.output,
+						cacheRead,
+						cacheWrite,
+						...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
+						reasoningTokens: reasoning,
+						totalTokens,
+						apiCalls: 1,
+					},
+					pricing.provenance,
+					undefined,
+					"system-one",
+				);
+			}
+			appendOutOfTurnUsageRow(deps.stateDir, {
+				label: "system-one",
+				repoIdentity,
+				timestamp: new Date().toISOString(),
+				target: targetId,
+				attributedModelId: model,
+				usage: {
+					input: usage.input,
+					output: usage.output,
+					cacheRead,
+					cacheWrite,
+					...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
+					reasoning,
+					totalTokens,
+					costUsd: pricing.provenance === "unknown" ? null : costUsd,
+				},
+			});
+		};
+	};
+}
 
 interface Spend {
 	calls: number;
