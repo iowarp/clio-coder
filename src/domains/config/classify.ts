@@ -51,6 +51,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"fleet.rosters",
 	"fleet.agentProfiles",
 	"fleet.adaptiveRouting",
+	"fleet.speculativeDispatch",
 	"fleet.nodes",
 	"fleet.permissions",
 	"fleet.retry",
