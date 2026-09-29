@@ -206,6 +206,7 @@ function shell(html, path, title, description, type) {
 		.replace("<!-- site-footer -->", footer)
 		.replaceAll("<!-- version -->", escapeHtml(product.version))
 		.replace("<!-- version-source -->", `${repository}/tree/${ref}`)
+		.replaceAll("<!-- source-blob -->", `${repository}/blob/${ref}`)
 		.replace(
 			/<pre(?: data-label="([^"]*)")?>/g,
 			(_, label) =>
