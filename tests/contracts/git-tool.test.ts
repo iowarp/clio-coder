@@ -1,10 +1,12 @@
-import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
+import { applyToolProfile } from "../../src/tools/profiles.js";
 import type { ToolRegistry, ToolResult } from "../../src/tools/registry.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -22,6 +24,14 @@ function git(cwd: string, ...args: string[]): string {
 		{ cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
 	).trim();
 }
+
+it("offers read-only git inspection to researcher, including the council profile", () => {
+	const researcher = discoverAgentRecipes(process.cwd()).find(
+		(recipe) => recipe.id === "researcher" && recipe.source === "builtin",
+	);
+	ok(researcher?.toolRequirements.optional.includes(ToolNames.Git));
+	deepStrictEqual(applyToolProfile([ToolNames.Git], "council-read-only"), [ToolNames.Git]);
+});
 
 describe("git tool", () => {
 	let scratch: IsolatedClioEnv;
@@ -114,7 +124,14 @@ describe("git tool", () => {
 	it("runs from a workspace subdirectory and refuses a cwd outside the workspace or an unknown op", async () => {
 		deepStrictEqual((await call({ op: "status", cwd: "docs" })).details?.cwd, join(repo, "docs"));
 		match(await refusal({ op: "status", cwd: scratch.dir }), /^git: cwd escapes workspace root: /);
-		strictEqual(await refusal({ op: "push" }), "git: op must be status, diff, or log; got 'push'");
+		strictEqual(
+			await refusal({ op: "push" }),
+			'git: expected args.op to be status, diff, or log; got "push". Example: gateway({op:"call",capability:"git",args:{op:"log",limit:20}})',
+		);
+		strictEqual(
+			await refusal({ command: "log -20" }),
+			'git: expected args.op to be status, diff, or log; got ""; unrecognized field "command". Example: gateway({op:"call",capability:"git",args:{op:"log",limit:20}})',
+		);
 		match(await refusal({ op: "log", max_output_bytes: 8 }), /^git: output exceeded 8 bytes/);
 	});
 });

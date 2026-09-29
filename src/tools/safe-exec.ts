@@ -92,11 +92,15 @@ export async function runVectorTool(
 export const gitTool: ToolSpec = {
 	name: ToolNames.Git,
 	description:
-		"Read-only git inspection: op=status (short status), diff, or log (oneline; stat=true adds each commit's changed files).",
+		'Read-only git inspection. Set args.op to status, diff, or log; for 20 commits use args={op:"log",limit:20}. Free-form command strings are not accepted.',
 	parameters: Type.Object({
 		// `mode` is what code_nav, evidence and monitor call their selector, and a
 		// model reaching for it here spent three calls on "last 3 commits".
-		op: Type.Optional(StringEnum(["status", "diff", "log"], { description: "Inspection to run." })),
+		op: Type.Optional(
+			StringEnum(["status", "diff", "log"], {
+				description: "Set this to status, diff, or log; for 20 commits use op=log and limit=20.",
+			}),
+		),
 		mode: Type.Optional(StringEnum(["status", "diff", "log"], { description: "Same as op." })),
 		path: Type.Optional(Type.String({ description: "Limit diff/log to one path." })),
 		cached: Type.Optional(Type.Boolean({ description: "diff: staged changes (--cached)." })),
@@ -132,6 +136,15 @@ export const gitTool: ToolSpec = {
 			if (pathArg) vector.push("--", pathArg);
 			return runVectorTool("git", "git", vector, args, options);
 		}
-		return { kind: "error", message: `git: op must be status, diff, or log; got '${op}'` };
+		const unexpected = Object.keys(args).find(
+			(key) =>
+				!["op", "mode", "path", "cached", "stat", "name_only", "limit", "cwd", "timeout_ms", "max_output_bytes"].includes(
+					key,
+				),
+		);
+		return {
+			kind: "error",
+			message: `git: expected args.op to be status, diff, or log; got ${JSON.stringify(op)}${unexpected ? `; unrecognized field ${JSON.stringify(unexpected)}` : ""}. Example: gateway({op:"call",capability:"git",args:{op:"log",limit:20}})`,
+		};
 	},
 };

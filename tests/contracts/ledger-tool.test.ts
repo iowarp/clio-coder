@@ -126,8 +126,9 @@ describe("ledger tool", () => {
 			],
 			[
 				{ action: "post", kind: "claim", scope: ["src"], intent: "i".repeat(201) },
-				/claim intent must be 1\.\.200 characters/,
+				/claim intent must be 1\.\.200 characters; got 201/,
 			],
+			[{ action: "post", kind: "finding", claim: "c".repeat(401) }, /finding claim must be 1\.\.400 characters; got 401/],
 		];
 		for (const [args, expected] of cases) match(errorMessage(await f.call(args)), expected, JSON.stringify(args));
 		deepStrictEqual(f.frames, []);

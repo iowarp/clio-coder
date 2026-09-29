@@ -624,6 +624,25 @@ async function readImage(
 	});
 }
 
+const LOCATOR_TOOLS = [ToolNames.CodeNav, ToolNames.Find, ToolNames.Ls] as const;
+
+/**
+ * Where to look once a path is missing. A run whose recipe omits the locators
+ * (a researcher reads with `read` alone) must not be sent to tools it cannot
+ * call, so the advice names only the admitted ones.
+ */
+function locateAdvice(options: ToolInvokeOptions | undefined): string {
+	const admitted = options?.allowedTools;
+	const usable = admitted === undefined ? LOCATOR_TOOLS : LOCATOR_TOOLS.filter((tool) => admitted.includes(tool));
+	if (usable.length === 0) {
+		return "The path may be wrong. No listing tool is available on this run, so read only paths the task or an earlier result named.";
+	}
+	const last = usable[usable.length - 1];
+	const named =
+		usable.length === 1 ? last : `${usable.slice(0, -1).join(", ")}${usable.length > 2 ? "," : ""} or ${last}`;
+	return `The path may be wrong. Try: ${named} to locate it.`;
+}
+
 export const readTool: ToolSpec = {
 	name: ToolNames.Read,
 	description: `Read a UTF-8 text file or a PNG, JPEG, GIF, or WebP image when the routed model supports vision. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
@@ -740,7 +759,7 @@ export const readTool: ToolSpec = {
 			if (code === "ENOENT") {
 				return {
 					kind: "error",
-					message: `read: ${msg}. File not found at ${pathArg}. The path may be wrong. Try: code_nav, find, or ls to locate it.`,
+					message: `read: ${msg}. File not found at ${pathArg}. ${locateAdvice(options)}`,
 				};
 			}
 			return { kind: "error", message: `read: ${msg}` };

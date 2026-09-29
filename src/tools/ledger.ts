@@ -3,6 +3,10 @@ import { ToolNames } from "../core/tool-names.js";
 import { renderAgentLedger } from "../domains/dispatch/agent-ledger.js";
 import { StringEnum } from "../engine/ai.js";
 import {
+	AGENT_LEDGER_CLAIM_MAX_CHARS,
+	AGENT_LEDGER_EVIDENCE_MAX_CHARS,
+	AGENT_LEDGER_INTENT_MAX_CHARS,
+	AGENT_LEDGER_PATH_MAX_CHARS,
 	type AgentLedgerBody,
 	type AgentLedgerEntry,
 	type AgentLedgerPort,
@@ -124,13 +128,27 @@ export function createLedgerTool(deps: LedgerToolDeps): ToolSpec {
 			action: StringEnum(LEDGER_ACTIONS, { description: "Board action." }),
 			kind: Type.Optional(StringEnum(LEDGER_KINDS, { description: "Entry kind (post)." })),
 			scope: Type.Optional(Type.Array(Type.String(), { description: "Path prefixes you are taking (claim)." })),
-			intent: Type.Optional(Type.String({ description: "What you will do in that scope (claim)." })),
-			claim: Type.Optional(Type.String({ description: "The observation you confirmed (finding)." })),
-			path: Type.Optional(Type.String({ description: "File that grounds the finding (finding)." })),
+			intent: Type.Optional(
+				Type.String({
+					description: `What you will do in that scope, up to ${AGENT_LEDGER_INTENT_MAX_CHARS} characters (claim).`,
+				}),
+			),
+			claim: Type.Optional(
+				Type.String({
+					description: `The one observation you confirmed, up to ${AGENT_LEDGER_CLAIM_MAX_CHARS} characters; put detail in the final report (finding).`,
+				}),
+			),
+			path: Type.Optional(
+				Type.String({
+					description: `File that grounds the finding, up to ${AGENT_LEDGER_PATH_MAX_CHARS} characters (finding).`,
+				}),
+			),
 			line: Type.Optional(Type.Number({ description: "Line that grounds the finding (finding)." })),
 			target: Type.Optional(Type.String({ description: 'Ledger entry id being reviewed, e.g. "e3" (review).' })),
 			passed: Type.Optional(Type.Boolean({ description: "Whether the target held up (review)." })),
-			evidence: Type.Optional(Type.String({ description: "What you checked (review)." })),
+			evidence: Type.Optional(
+				Type.String({ description: `What you checked, up to ${AGENT_LEDGER_EVIDENCE_MAX_CHARS} characters (review).` }),
+			),
 			kinds: Type.Optional(Type.Array(Type.String(), { description: "Narrow a read to these kinds." })),
 			since: Type.Optional(Type.Number({ description: "Only entries after this sequence (read)." })),
 		}),
