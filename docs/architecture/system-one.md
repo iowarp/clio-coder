@@ -84,7 +84,7 @@ The composition root builds one `SystemOne`, one recorder and one host ([system-
 | `consult` | The `consult` tool, registered at startup when bound | Tool absent |
 | `drafts` | `/draft` overlay. `Enter` on a finished draft appends it to the composer and records a `draft` outcome joined to the judging call by `ref` | Candidates shown unjudged |
 
-Every reader wraps its call so a throw degrades to the same fallback. The `toolResult` screen runs after the deterministic marker scan and never clears a result that scan flagged.
+Every reader wraps its call so a throw degrades to the same fallback. The `toolResult` screen runs before the `after_tool` hooks, so the deterministic marker scan reads the screened result. Screening only adds a banner; it never removes the original result text.
 
 ## Validating a Laya build
 
