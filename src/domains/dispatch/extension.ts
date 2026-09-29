@@ -4030,8 +4030,11 @@ export function createDispatchBundle(
 		// Scope provenance remains in receipts; retries must not repeat a generated path inventory.
 		if ((req.lineage?.attempt ?? 0) > 0 || (rootRunId !== undefined && publishedPathScopeRoots.has(rootRunId))) return;
 		if (rootRunId !== undefined) publishedPathScopeRoots.add(rootRunId);
+		const internalOrigin = req.requestOrigin === "internal" || req.requestOrigin === "harness";
+		// An operator dispatch already gets the transcript callout below, so the raw
+		// diagnostic is kept for harness-owned dispatches, which publish no callout.
 		const replacementDiagnostic = declaredScopeReplacementDiagnostic(pathScope);
-		if (replacementDiagnostic !== null) {
+		if (replacementDiagnostic !== null && internalOrigin) {
 			reportDispatchDiagnostic("typed scope replacement", new Error(replacementDiagnostic));
 		}
 		// Only the replacement case reaches the transcript. A dispatch that
@@ -4044,7 +4047,7 @@ export function createDispatchBundle(
 		const notice = declaredScopeReplacementNotice(pathScope);
 		// Harness-owned prompts deliberately use typed scope;
 		// schema fallback retries must not repeat their prose path inventories in the transcript.
-		if (notice !== null && req.requestOrigin !== "internal" && req.requestOrigin !== "harness") {
+		if (notice !== null && !internalOrigin) {
 			context.bus.emit(BusChannels.DispatchScopeNotice, {
 				...notice,
 				agentId: req.agentId,

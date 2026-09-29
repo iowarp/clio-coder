@@ -67,8 +67,8 @@ it("operator bootstrap report: internal schema retries keep scope provenance wit
 		strictEqual(notices.length, 2, "retries never repeat transcript scope warnings");
 		strictEqual(
 			diagnostics.filter((text) => text.includes("typed scope replacement")).length,
-			3,
-			"retries never repeat diagnostics",
+			1,
+			"operator dispatches carry the transcript callout instead of a duplicate diagnostic, and retries never repeat one",
 		);
 	} finally {
 		unsubscribe();
