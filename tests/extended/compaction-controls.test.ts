@@ -107,6 +107,9 @@ describe("production compaction controls", () => {
 				url: `https://${id}.invalid/v1`,
 				defaultModel: id,
 				auth: { headers: { "x-route": id } },
+				// A descriptor's context window is a placeholder, never a serving limit, so a
+				// route that must trigger compaction declares the window it serves.
+				capabilities: { contextWindow: 131072 },
 			},
 			runtime,
 			available: true,
@@ -170,6 +173,7 @@ describe("production compaction controls", () => {
 			headers: unknown;
 			capacity: Readonly<Record<string, number>>;
 			signal: AbortSignal | undefined;
+			maxTokens: number | undefined;
 		}> = [];
 		const respond: FauxResponseFactory = (context, options, _state, model) => {
 			calls.push({
@@ -181,6 +185,7 @@ describe("production compaction controls", () => {
 				headers: options?.headers,
 				capacity: foregroundStreamUsage(),
 				signal: options?.signal,
+				maxTokens: options?.maxTokens,
 			});
 			response.beforeReturn?.();
 			return {
@@ -361,7 +366,20 @@ describe("production compaction controls", () => {
 				strictEqual(cancellationObserved, true, notices.join("\n"));
 				strictEqual(f.calls.length, 1, notices.join("\n"));
 				deepStrictEqual(submitted, []);
-				deepStrictEqual(f.entries(), before, "canceled compaction does not append a summary or pending user turn");
+				// A submit canceled before admission records one typed `turnOutcome` row for
+				// the reserved turn. It is neither a summary nor a user turn.
+				const isOutcome = (entry: SessionEntry) => entry.kind === "custom" && entry.customType === "turnOutcome";
+				deepStrictEqual(
+					f.entries().filter((entry) => !isOutcome(entry)),
+					before,
+					"canceled compaction does not append a summary or pending user turn",
+				);
+				const outcomes = f.entries().filter(isOutcome);
+				// Only a submit reserves a turn to outcome; a manual compaction has none.
+				strictEqual(outcomes.length, mode === "auto" || mode === "overflow" || mode === "acp" ? 1 : 0);
+				for (const outcome of outcomes) {
+					deepStrictEqual(outcome.kind === "custom" ? (outcome.data as { stopReason: string }).stopReason : null, "aborted");
+				}
 				strictEqual(loop.turnPreparation().phase, "idle");
 				const rows = readOutOfTurnUsageRows(clioStateDir()).rows;
 				strictEqual(rows.length, 1);
@@ -636,7 +654,7 @@ describe("production compaction controls", () => {
 			strictEqual(f.authTargets.length, 0);
 		});
 	}
-	for (const invalid of ["unavailable", "external", "worker-only", "no-chat", "no-output", "auth"] as const) {
+	for (const invalid of ["unavailable", "external", "worker-only", "no-chat", "auth"] as const) {
 		it(`rejects a ${invalid} dedicated route`, async () => {
 			const f = fixture();
 			f.settings.context.compaction.model = "summary-target/summary";
@@ -649,17 +667,32 @@ describe("production compaction controls", () => {
 				f.runtime.kind = "sdk";
 			}
 			if (invalid === "no-chat") status.target.capabilities = { chat: false };
-			if (invalid === "no-output") {
-				status.target.capabilities = { maxTokens: 0 };
-				const synthesize = f.runtime.synthesizeModel;
-				f.runtime.synthesizeModel = (...args) => ({ ...synthesize(...args), maxTokens: 0 });
-			}
 			if (invalid === "auth") f.auth.available = false;
 			await rejects(f.run(), /context.compaction.model/);
 			strictEqual(f.calls.length, 0);
 			strictEqual(f.entries().filter((entry) => entry.kind === "compactionSummary").length, 0);
 		});
 	}
+	it("caps the summary at a known positive output limit", async () => {
+		const f = fixture();
+		f.settings.context.compaction.model = "summary-target/summary";
+		await f.run();
+		ok((f.calls[0]?.maxTokens ?? 0) > 0);
+		ok((f.calls[0]?.maxTokens ?? 0) <= 16384);
+	});
+	it("sends no output cap when the summary route reports no output limit", async () => {
+		const f = fixture();
+		f.settings.context.compaction.model = "summary-target/summary";
+		const status = f.statuses[1];
+		ok(status);
+		status.target.capabilities = { contextWindow: 131072, maxTokens: 0 };
+		const synthesize = f.runtime.synthesizeModel;
+		f.runtime.synthesizeModel = (...args) => ({ ...synthesize(...args), maxTokens: 0 });
+		await f.run();
+		strictEqual(f.calls.length, 1);
+		strictEqual(f.calls[0]?.maxTokens, undefined);
+		strictEqual(f.entries().filter((entry) => entry.kind === "compactionSummary").length, 1);
+	});
 	for (const invalid of ["missing", "empty", "oversized", "directory", "invalid-utf8", "empty-path"] as const) {
 		it(`rejects a ${invalid} prompt override without exposing its contents`, async () => {
 			const f = fixture();

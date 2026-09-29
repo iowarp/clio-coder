@@ -629,14 +629,33 @@ describe("compaction working-set provider boundary", () => {
 		ok(call.inputTokens + call.maxTokens <= 16_000, JSON.stringify(call));
 	});
 
-	it("rejects invalid model and output budgets without a provider call", async () => {
+	it("rejects an invalid reserve budget or context window without a provider call", async () => {
 		const entries = chain([message("old", "user", { text: "Old" }), message("new", "user", { text: "New" })]);
 		for (const invalid of [0, Number.NaN, Number.POSITIVE_INFINITY]) {
-			await rejects(compact({ entries, model: model(invalid) }), /positive finite model context window/);
-			await rejects(compact({ entries, model: model(32768, invalid) }), /positive finite model output token limit/);
 			await rejects(compact({ entries, model: model(), reserveTokens: invalid }), /positive finite reserve token budget/);
 		}
+		for (const invalid of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+			await rejects(compact({ entries, model: model(invalid) }), /non-negative finite model context window/);
+		}
 		strictEqual(calls.length, 0);
+	});
+
+	it("sends no output cap when the model reports no usable output limit", async () => {
+		const entries = chain([message("old", "user", { text: "Old work" }), message("new", "user", { text: "New" })]);
+		for (const unknown of [0, Number.NaN, Number.POSITIVE_INFINITY]) {
+			calls = [];
+			await compact({ entries, model: model(32768, unknown) });
+			strictEqual(calls.length, 1);
+			strictEqual(calls[0]?.maxTokens, undefined);
+		}
+	});
+
+	it("summarizes against an unreported window and lets the server judge the request", async () => {
+		// A route whose serving window is unknown resolves to contextWindow 0. The
+		// reactive overflow retry compacts on such routes, so 0 must not refuse.
+		const entries = chain([message("old", "user", { text: "Old work" }), message("new", "user", { text: "New" })]);
+		await compact({ entries, model: model(0) });
+		strictEqual(calls.length, 1);
 	});
 
 	for (const oversized of ["conversation", "system", "instructions", "previous"] as const) {

@@ -158,7 +158,8 @@ export interface CompactInput {
 	summarize?: (request: {
 		systemPrompt: string;
 		userText: string;
-		maxTokens: number;
+		/** Absent when the model reports no output limit and the server decides. */
+		maxTokens?: number;
 	}) => Promise<{ text: string; usage?: unknown }>;
 
 	/** Resolved orchestrator or compaction-override model. */
@@ -753,9 +754,9 @@ async function runSummaryStream(
 	input: CompactInput,
 	userText: string,
 	systemPrompt: string,
-	maxTokens: number,
+	maxTokens: number | undefined,
 ): Promise<{ text: string; usage: unknown }> {
-	const options: Record<string, unknown> = { maxTokens };
+	const options: Record<string, unknown> = {};
 	if (input.apiKey !== undefined) options.apiKey = input.apiKey;
 	if (input.headers !== undefined) options.headers = input.headers;
 	if (input.signal !== undefined) options.signal = input.signal;
@@ -770,20 +771,26 @@ async function runSummaryStream(
 	// make an oversized projected conversation fit.
 	const estimatedInput = estimateAgentContextTokens(context);
 	const contextWindow = input.model.contextWindow;
-	if (!Number.isFinite(contextWindow) || contextWindow <= 0) {
-		throw new Error("compaction requires a positive finite model context window");
+	if (!Number.isFinite(contextWindow) || contextWindow < 0) {
+		throw new Error("compaction requires a non-negative finite model context window");
 	}
-	// The output budget is a ceiling. A small window keeps whatever the request
-	// leaves it, down to the 1024-token floor compact() sets; a summary that
-	// needs more stops at the length check below and is never saved.
-	const minOutput = Math.min(maxTokens, 1024);
-	if (estimatedInput + minOutput > contextWindow) {
-		throw new Error(
-			`compaction estimated input ${estimatedInput} tokens plus output ${minOutput} tokens exceeds model context window ${contextWindow}; use a larger compaction model or reduce the working set`,
-		);
+	// An unreported serving window is 0, not a zero-token window. The reactive
+	// overflow retry compacts on exactly such routes, so the server judges the
+	// summary request and the fit check applies only to a known window.
+	if (contextWindow > 0) {
+		// The output budget is a ceiling. A small window keeps whatever the request
+		// leaves it, down to the 1024-token floor compact() sets; a summary that
+		// needs more stops at the length check below and is never saved.
+		const minOutput = Math.min(maxTokens ?? 1024, 1024);
+		if (estimatedInput + minOutput > contextWindow) {
+			throw new Error(
+				`compaction estimated input ${estimatedInput} tokens plus output ${minOutput} tokens exceeds model context window ${contextWindow}; use a larger compaction model or reduce the working set`,
+			);
+		}
+		if (maxTokens !== undefined) maxTokens = Math.min(maxTokens, contextWindow - estimatedInput);
 	}
-	maxTokens = Math.min(maxTokens, contextWindow - estimatedInput);
-	options.maxTokens = maxTokens;
+	// An unknown output limit sends no explicit cap; the server decides.
+	if (maxTokens !== undefined) options.maxTokens = maxTokens;
 
 	input.signal?.throwIfAborted();
 	await input.beforeSummaryCall?.();
@@ -793,7 +800,11 @@ async function runSummaryStream(
 	let outcome: CompactionCallObservation["outcome"] = "error";
 	try {
 		if (input.summarize) {
-			const response = await input.summarize({ systemPrompt, userText, maxTokens });
+			const response = await input.summarize({
+				systemPrompt,
+				userText,
+				...(maxTokens !== undefined ? { maxTokens } : {}),
+			});
 			usage = response.usage;
 			reported = retainReportedUsage(reported, usage);
 			input.signal?.throwIfAborted();
@@ -961,10 +972,12 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	if (!Number.isFinite(reserveTokens) || reserveTokens <= 0) {
 		throw new Error("compaction requires a positive finite reserve token budget");
 	}
-	if (!Number.isFinite(input.model.maxTokens) || input.model.maxTokens < 1) {
-		throw new Error("compaction requires a positive finite model output token limit");
-	}
-	const maxTokens = Math.min(Math.floor(input.model.maxTokens), Math.max(1024, Math.floor(reserveTokens * 0.8)));
+	// A route that reports no output limit gets no explicit cap and the server
+	// decides; refusing it would leave a reactive overflow compaction with no way out.
+	const maxTokens =
+		Number.isFinite(input.model.maxTokens) && input.model.maxTokens >= 1
+			? Math.min(Math.floor(input.model.maxTokens), Math.max(1024, Math.floor(reserveTokens * 0.8)))
+			: undefined;
 	const summaryParts: string[] = [];
 	let usage: CompactionUsage | undefined;
 	if (pre.length > 0 || summarizePriorSuffix) {

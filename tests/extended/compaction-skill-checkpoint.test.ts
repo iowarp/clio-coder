@@ -651,7 +651,7 @@ describe("typed historical skill checkpoints (pure source)", () => {
 						ok(userText.includes(prior.summary), "the entire prior canonical checkpoint is input to its replacement");
 						ok(
 							estimateAgentContextTokens({ systemPrompt, messages: [{ role: "user", content: userText, timestamp: 0 }] }) +
-								maxTokens <=
+								(maxTokens ?? 0) <=
 								smallModel.contextWindow,
 						);
 						if (outcome === "error") throw new Error("deterministic summary failure");

@@ -120,7 +120,13 @@ import {
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { retireActiveUserContextForNextOperator } from "./chat-renderer.js";
 import { coldReasonText } from "./cold-reasons.js";
-import { DRAFT_MAX_TOKENS, DRAFT_TEMPERATURES, draftTemperature, runDraftWithSamplerFallback } from "./drafts.js";
+import {
+	DRAFT_MAX_TOKENS,
+	DRAFT_TEMPERATURES,
+	draftCandidateFromText,
+	draftTemperature,
+	runDraftWithSamplerFallback,
+} from "./drafts.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import type { NoticeSource } from "./notice-source.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
@@ -2179,6 +2185,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			) {
 				setTurnPreparation("compacting");
 				let failure: string | undefined;
+				let canceled = false;
 				await context
 					.runAutoCompact(
 						agentRuntime,
@@ -2192,9 +2199,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						options.requestContinuation !== true,
 					)
 					.catch((error: unknown) => {
+						canceled = error instanceof Error && error.name === "AbortError";
 						failure = error instanceof Error ? error.message : String(error);
 					})
 					.finally(endPreparationCompaction);
+				// An operator cancel is not an admission failure: record it like the
+				// pre-admission cancels above and leave no window-exceeded notice.
+				if (canceled) {
+					await recordCanceledBeforeAdmission({
+						userTurnId: reservedUserTurnId,
+						continuation: options.requestContinuation === true,
+						control: turnControlRecord,
+						submittedAt,
+					});
+					return;
+				}
 				submittedText = composeSubmittedText();
 				admission = context.refreshLiveBudget(submittedText);
 				if (
@@ -2788,7 +2807,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							),
 						);
 						recordOutOfTurnUsage(prepared.runtime, result.usage, "side-question");
-						return { status: "drafted", text: result.text };
+						return draftCandidateFromText(result.text);
 					} catch (err) {
 						return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
 					}
