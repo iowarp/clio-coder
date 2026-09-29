@@ -227,10 +227,11 @@ describe("headless no-op contract through the built binary", () => {
 		name: "write",
 		arguments: { path: "c2-proof.txt", content: PROOF },
 	};
+	// bash is a direct tool, so the gateway's call op refuses it; only a chain step may name it.
 	const deniedInline: OpenAICompatToolCallScript = {
 		id: "call-inline",
-		name: "gateway",
-		arguments: { op: "call", capability: "bash", args: { command: inline } },
+		name: "bash",
+		arguments: { command: inline },
 	};
 
 	/** Tool results already in the conversation, which is how far the script has got. */
@@ -374,13 +375,20 @@ describe("headless no-op contract through the built binary", () => {
 	test("repeated denied gateway shell writes preserve permission requests and the guard's hard block", async () => {
 		// The gateway guard sees retries before the nested command can park;
 		// the third attempt is a real guard block, not another unanswered ask.
+		// A direct bash call would park all three times, because safety admission
+		// precedes the guard. The chain wrapper is admitted twice, and those two
+		// admissions are the only allowed decisions.
 		const { receipt } = await headlessTurn({
 			autonomy: "default",
-			steps: [deniedInline, { ...deniedInline, id: "call-inline-2" }, { ...deniedInline, id: "call-inline-3" }],
+			steps: [1, 2, 3].map((attempt) => ({
+				id: `call-inline-${attempt}`,
+				name: "gateway",
+				arguments: { op: "chain", steps: [{ id: "denied", capability: "bash", args: { command: inline } }] },
+			})),
 			failOnNoop: false,
 		});
 		strictEqual(receipt.safety?.blockedAttempts.length, 3);
-		deepStrictEqual(receipt.safety?.decisions, { allowed: 0, blocked: 1, permissionRequested: 2 });
+		deepStrictEqual(receipt.safety?.decisions, { allowed: 2, blocked: 1, permissionRequested: 2 });
 		strictEqual(receipt.noop, true);
 	});
 
@@ -412,14 +420,14 @@ describe("headless no-op contract through the built binary", () => {
 		strictEqual(receipt.noop, false);
 	});
 
-	test("verification through the gateway keeps distinct check identities", async () => {
+	test("verification keeps distinct check identities", async () => {
 		const { receipt } = await headlessTurn({
 			autonomy: "yolo",
 			packageScripts: { "test:fixture": 'node -e "process.exit(0)"', "test:other": 'node -e "process.exit(0)"' },
 			steps: ["test:fixture", "test:other"].map((check, index) => ({
 				id: `call-check-${index}`,
-				name: "gateway",
-				arguments: { op: "call", capability: "verify", args: { check } },
+				name: "verify",
+				arguments: { check },
 			})),
 			failOnNoop: false,
 		});
