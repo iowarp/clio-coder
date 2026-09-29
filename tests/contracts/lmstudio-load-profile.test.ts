@@ -16,6 +16,7 @@ import {
 } from "../../src/engine/apis/lmstudio.js";
 import { clioOwnership, leaseClioModel, recordClioLoad } from "../../src/engine/apis/lmstudio-ownership.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
+import { type ResidencyNotice, setResidencyNoticeSink } from "../../src/engine/apis/residency.js";
 import type { Model } from "../../src/engine/types.js";
 
 // The load profile dynamo is meant to serve: LM Studio's GUI defaults gave 262144 and MTP draft 3.
@@ -49,6 +50,8 @@ async function listen(server: Server): Promise<string> {
 async function startLmStudio(
 	models: Record<string, Array<{ id: string; config: Record<string, unknown> }>>,
 	onChat?: () => Promise<void>,
+	/** Decides a load before it lands: `fail` rejects it, `serve` overrides the config the server actually loads. */
+	onLoad?: (body: Record<string, unknown>) => { fail?: string; serve?: Record<string, unknown> } | undefined,
 ) {
 	const loads: Array<Record<string, unknown>> = [];
 	const unloads: string[] = [];
@@ -73,7 +76,13 @@ async function startLmStudio(
 			const body = await readJson(req);
 			loads.push(body);
 			const key = String(body.model);
-			const { model: _model, echo_load_config: _echo, ...config } = body;
+			const verdict = onLoad?.(body);
+			if (verdict?.fail) {
+				res.writeHead(500);
+				return res.end(JSON.stringify({ error: { message: verdict.fail } }));
+			}
+			const { model: _model, echo_load_config: _echo, ...requested } = body;
+			const config = { ...requested, ...(verdict?.serve ?? {}) };
 			models[key] = [...(models[key] ?? []), { id: key, config }];
 			return res.end(JSON.stringify({ type: "llm", instance_id: key, status: "loaded", load_config: config }));
 		}
@@ -233,6 +242,156 @@ describe("LM Studio load profile", () => {
 			strictEqual(server.loads.length, 1);
 			deepStrictEqual(pick(server.loads[0], WIRE_KEYS), PROFILE_WIRE);
 			strictEqual(model.contextWindow, 131072);
+		} finally {
+			server.close();
+		}
+	});
+
+	// Another model on the server makes the 131072 co-residency ceiling apply to a
+	// context Clio chose, never to one the operator pinned for this model.
+	const NEIGHBOUR = { other: [{ id: "other", config: GUI_DEFAULTS }] };
+
+	it("an explicit per-model context is loaded whole beside a neighbour and names the ceiling", async () => {
+		const server = await startLmStudio({ "qwen3.8-27b": [], ...NEIGHBOUR });
+		const notices: ResidencyNotice[] = [];
+		setResidencyNoticeSink((notice) => notices.push(notice));
+		try {
+			const target: TargetDescriptor = {
+				id: "dynamo",
+				runtime: "lmstudio",
+				url: server.url,
+				lmstudio: { load: PROFILE, models: { "qwen3.8-27b": { load: { contextLength: 262144 } } } },
+			};
+			await turn(lmstudio.synthesizeModel(target, "qwen3.8-27b", null) as Model<"openai-completions">);
+			strictEqual(server.loads[0]?.context_length, 262144);
+			deepStrictEqual(server.unloads, []);
+			ok(
+				notices.some(
+					(notice) => notice.kind === "stress" && /above the 131072-token co-residency ceiling/.test(notice.message),
+				),
+			);
+		} finally {
+			setResidencyNoticeSink(null);
+			server.close();
+		}
+	});
+
+	it("a gateway route reloads a resident instance that sits below the explicit per-model context", async () => {
+		const lm = await startLmStudio({
+			"qwen3.8-27b": [{ id: "qwen3.8-27b", config: { ...GUI_DEFAULTS, context_length: 131072 } }],
+			...NEIGHBOUR,
+		});
+		const alias = "dynamo/qwen3.8-27b";
+		const gateway = await startGateway([
+			{
+				model_name: alias,
+				litellm_params: { model: "openai/qwen3.8-27b", api_base: `${lm.url}/v1` },
+				model_info: { runtime: "lm-studio", mode: "chat" },
+			},
+		]);
+		try {
+			const target: TargetDescriptor = {
+				id: "blade",
+				runtime: "litellm",
+				url: gateway.url,
+				lmstudio: { load: PROFILE, models: { [alias]: { load: { contextLength: 262144 } } } },
+			};
+			const model = litellm.synthesizeModel(target, alias, null) as Model<"openai-completions">;
+			await turn(model);
+			deepStrictEqual(lm.unloads, ["qwen3.8-27b"], "131072 is below the pinned 262144, so it drifted");
+			strictEqual(lm.loads[0]?.context_length, 262144);
+			await turn(model);
+			strictEqual(lm.loads.length, 1, "the pinned instance matches, so it is kept");
+		} finally {
+			lm.close();
+			gateway.close();
+		}
+	});
+
+	it("a failed pinned reload restores the instance, serves the turn on it, warns once, and stops retrying the pin", async () => {
+		const resident = { ...GUI_DEFAULTS, context_length: 131072 };
+		const server = await startLmStudio({ "qwen3.8-27b": [{ id: "qwen3.8-27b", config: resident }] }, undefined, (body) =>
+			body.context_length === 880000 ? { fail: "Insufficient system resources: out of memory" } : undefined,
+		);
+		const notices: ResidencyNotice[] = [];
+		setResidencyNoticeSink((notice) => notices.push(notice));
+		try {
+			const target: TargetDescriptor = {
+				id: "dynamo",
+				runtime: "lmstudio",
+				url: server.url,
+				lmstudio: { load: PROFILE, models: { "qwen3.8-27b": { load: { contextLength: 880000 } } } },
+			};
+			const model = lmstudio.synthesizeModel(target, "qwen3.8-27b", null) as Model<"openai-completions">;
+			await turn(model);
+			await turn(model);
+			deepStrictEqual(server.unloads, ["qwen3.8-27b"], "the second turn does not unload the restored instance again");
+			deepStrictEqual(
+				server.loads.map((body) => body.context_length),
+				[880000, 131072],
+				"the pinned load failed once, then the old config went back",
+			);
+			strictEqual(server.models["qwen3.8-27b"]?.length, 1, "the server is not left empty");
+			strictEqual(server.models["qwen3.8-27b"]?.[0]?.config.context_length, 131072);
+			ok(model.contextWindow <= 131072, "the request model follows the restored window");
+			const failed = notices.filter((notice) => /could not load 'qwen3.8-27b'/.test(notice.message));
+			strictEqual(failed.length, 1);
+			strictEqual(failed[0]?.level, "warning");
+			ok(/out of memory/.test(failed[0]?.message ?? ""), failed[0]?.message);
+			ok(/restored the previous instance, which serves 131072 tokens/.test(failed[0]?.message ?? ""), failed[0]?.message);
+		} finally {
+			setResidencyNoticeSink(null);
+			server.close();
+		}
+	});
+
+	it("a load LM Studio accepts below the pin is kept, reported once, and not reloaded on later turns", async () => {
+		const server = await startLmStudio(
+			{ "qwen3.8-27b": [{ id: "qwen3.8-27b", config: { ...GUI_DEFAULTS, context_length: 131072 } }] },
+			undefined,
+			(body) => (body.context_length === 880000 ? { serve: { context_length: 65536 } } : undefined),
+		);
+		const notices: ResidencyNotice[] = [];
+		setResidencyNoticeSink((notice) => notices.push(notice));
+		try {
+			const target: TargetDescriptor = {
+				id: "dynamo",
+				runtime: "lmstudio",
+				url: server.url,
+				lmstudio: { load: PROFILE, models: { "qwen3.8-27b": { load: { contextLength: 880000 } } } },
+			};
+			const model = lmstudio.synthesizeModel(target, "qwen3.8-27b", null) as Model<"openai-completions">;
+			await turn(model);
+			strictEqual(server.loads.length, 1);
+			strictEqual(model.contextWindow, 65536, "the request model follows the window the server actually serves");
+			await turn(model);
+			await turn(model);
+			strictEqual(server.loads.length, 1, "the same pin and server result are not retried");
+			deepStrictEqual(server.unloads, ["qwen3.8-27b"]);
+			const unmet = notices.filter((notice) => /not as its load profile asks/.test(notice.message));
+			strictEqual(unmet.length, 1);
+			ok(/serving a 65536-token window/.test(unmet[0]?.message ?? ""), unmet[0]?.message);
+		} finally {
+			setResidencyNoticeSink(null);
+			server.close();
+		}
+	});
+
+	it("a context inherited from the target profile is still clamped beside a neighbour", async () => {
+		const server = await startLmStudio({ "qwen3.8-27b": [], ...NEIGHBOUR });
+		try {
+			const target: TargetDescriptor = {
+				id: "dynamo",
+				runtime: "lmstudio",
+				url: server.url,
+				lmstudio: { load: { ...PROFILE, contextLength: 262144 } },
+			};
+			const model = lmstudio.synthesizeModel(target, "qwen3.8-27b", null) as Model<"openai-completions">;
+			await turn(model);
+			strictEqual(server.loads[0]?.context_length, 131072);
+			await turn(model);
+			strictEqual(server.loads.length, 1, "the clamped instance matches what would be asked, so it is kept");
+			deepStrictEqual(server.unloads, []);
 		} finally {
 			server.close();
 		}

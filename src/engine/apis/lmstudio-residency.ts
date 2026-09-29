@@ -6,14 +6,16 @@
  * A successful load can still offload work to CPU, so fit cannot be inferred
  * from load success alone; the context ceiling is an empirical safeguard.
  *
- * The evidence rule: while another model is resident on the same server, an
- * explicit load is capped at {@link CO_RESIDENT_CONTEXT_CEILING} tokens.
+ * The evidence rule: while another model is resident on the same server, a
+ * context Clio chose is capped at {@link CO_RESIDENT_CONTEXT_CEILING} tokens.
  * The KV cache of a long context is what actually overflows the card (measured
  * on an RTX 5090: a 27B Q4 model loaded at its 262,144-token default beside a
  * resident 26B model produced 25 tokens in 2m18s, and the same model at 131,072
- * answered a 9,019-token prompt in 9.7s). Operators who know their card holds
- * more raise the ceiling with CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT; a target
- * serving one model alone is never clamped.
+ * answered a 9,019-token prompt in 9.7s). A context the operator pinned for one
+ * model in `lmstudio.models[id].load.contextLength` is not one Clio chose, so it
+ * is never capped; a value inherited from the target-level `lmstudio.load` is.
+ * The escape hatch for the inherited case is CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT.
+ * A target serving one model alone is never clamped.
  */
 
 /**
@@ -48,6 +50,8 @@ export interface ContextFitInput {
 	/** Requested model's wire id, so its own instances are not counted as neighbours. */
 	keepModelId: string;
 	ceiling?: number | undefined;
+	/** The operator pinned this context for this model, so the ceiling does not lower it. */
+	explicit?: boolean;
 }
 
 export interface ContextFitResult {
@@ -55,6 +59,8 @@ export interface ContextFitResult {
 	contextLength: number;
 	/** Set when the ceiling lowered the request; carries the original value. */
 	clampedFrom?: number;
+	/** Set when an explicit context above the ceiling is kept beside a neighbour; carries the ceiling. */
+	aboveCeiling?: number;
 	/** Model keys resident alongside the requested model. */
 	neighbours: string[];
 }
@@ -70,5 +76,6 @@ export function fitLoadContextLength(input: ContextFitInput): ContextFitResult {
 	if (neighbours.length === 0 || ceiling === undefined || input.requested <= ceiling) {
 		return { contextLength: input.requested, neighbours };
 	}
+	if (input.explicit === true) return { contextLength: input.requested, aboveCeiling: ceiling, neighbours };
 	return { contextLength: ceiling, clampedFrom: input.requested, neighbours };
 }

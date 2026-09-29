@@ -3,6 +3,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { residencyTargetKey } from "../../core/residency-target-key.js";
 import {
 	invalidateLmStudioCatalog,
+	type LmStudioLoadedInstance,
 	listLmStudioModels,
 	lmStudioRootUrl,
 	loadedContextLength,
@@ -91,6 +92,11 @@ export function effectiveLmStudioLoad(
 	return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+/** Whether the operator pinned this model's context in `lmstudio.models[id].load`, rather than inheriting it. */
+function hasExplicitLmStudioContext(settings: TargetDescriptor["lmstudio"] | undefined, modelId: string): boolean {
+	return settings?.models?.[modelId]?.load?.contextLength !== undefined;
+}
+
 function lmStudioLoadBody(modelKey: string, settings: LmStudioLoad): Record<string, unknown> {
 	const body: Record<string, unknown> = { model: modelKey, echo_load_config: true };
 	for (const [field, wire] of LOAD_WIRE_KEYS) {
@@ -165,6 +171,14 @@ async function unloadOwnedInstance(
 	return true;
 }
 
+/** The load config LM Studio echoes for a load, empty when the server version does not echo one. */
+function echoedLoadConfig(data: unknown): Readonly<Record<string, unknown>> {
+	const config = (data as { load_config?: unknown } | null)?.load_config;
+	return config !== null && typeof config === "object" && !Array.isArray(config)
+		? (config as Record<string, unknown>)
+		: {};
+}
+
 async function loadOwnedInstance(
 	target: TargetDescriptor,
 	targetKey: string,
@@ -172,10 +186,10 @@ async function loadOwnedInstance(
 	apiKey: string | undefined,
 	signal: AbortSignal | undefined,
 	requestModel?: Model<"openai-completions">,
-): Promise<string | undefined> {
+): Promise<{ instanceId: string | undefined; config: Readonly<Record<string, unknown>> }> {
 	const data = await post(target, "/api/v1/models/load", body, apiKey, signal);
-	const loadedWindow = (data as { load_config?: { context_length?: unknown } } | null)?.load_config?.context_length;
-	if (requestModel) capToLoadedContext(requestModel, loadedWindow);
+	const config = echoedLoadConfig(data);
+	if (requestModel) capToLoadedContext(requestModel, config.context_length);
 	const instanceId = responseInstanceId(data);
 	if (instanceId) {
 		ownedInstances(targetKey).add(instanceId);
@@ -184,7 +198,76 @@ async function loadOwnedInstance(
 			await recordClioLoad(targetKey, instanceId, body.model);
 		}
 	}
-	return instanceId;
+	return { instanceId, config };
+}
+
+/** A load body that recreates one instance from the load config the server reported for it. */
+function restoreLoadBody(modelKey: string, config: Readonly<Record<string, unknown>>): Record<string, unknown> {
+	const body: Record<string, unknown> = { model: modelKey, echo_load_config: true };
+	for (const [, key] of LOAD_WIRE_KEYS) {
+		if (config[key] !== undefined) body[key] = config[key];
+	}
+	return body;
+}
+
+/** An instance a load-profile reload unloaded, kept so a failed replacement can put it back. */
+interface ReplacedInstance {
+	modelKey: string;
+	instance: LmStudioLoadedInstance;
+	/** Clio loaded it, so the restored copy is Clio-owned too; another client's stays that client's. */
+	owned: boolean;
+}
+
+/**
+ * Put back an instance a profile reload unloaded once the replacement load failed, so a working server
+ * is not left empty. A replacement that landed anyway (a load that outlived its timeout) is kept as is.
+ */
+async function restoreReplacedInstance(
+	target: TargetDescriptor,
+	targetKey: string,
+	replaced: ReplacedInstance,
+	apiKey: string | undefined,
+): Promise<{ window: number | undefined; instanceId?: string; error?: string }> {
+	try {
+		const catalog = await listLmStudioModels(
+			target,
+			{ credentialsPresent: new Set<string>(), httpTimeoutMs: 5_000, ...(apiKey ? { authToken: apiKey } : {}) },
+			0,
+		);
+		const landed = catalog.ok
+			? catalog.models.find((entry) => entry.key === replaced.modelKey)?.loadedInstances[0]
+			: undefined;
+		if (landed) return { window: loadedContextLength(landed), instanceId: landed.id };
+		const body = restoreLoadBody(replaced.modelKey, replaced.instance.config);
+		let config: Readonly<Record<string, unknown>>;
+		let instanceId: string | undefined;
+		if (replaced.owned) {
+			({ config, instanceId } = await loadOwnedInstance(target, targetKey, body, apiKey, undefined));
+		} else {
+			const data = await post(target, "/api/v1/models/load", body, apiKey, undefined);
+			config = echoedLoadConfig(data);
+			instanceId = responseInstanceId(data);
+		}
+		const window = config.context_length ?? replaced.instance.config.context_length;
+		return {
+			window: typeof window === "number" && Number.isFinite(window) ? window : undefined,
+			...(instanceId !== undefined ? { instanceId } : {}),
+		};
+	} catch (error) {
+		return { window: undefined, error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+/**
+ * Pins LM Studio loaded but not as asked, keyed by target, model, and the drift the instance shows
+ * (`context_length 65536 to 880000`). The drift text carries both the pin and the server's result, so
+ * a changed pin or a reloaded instance is a new key. Without this, a server that caps a load below
+ * the pin leaves every later turn drifted and reloads the model each time. Per process is enough.
+ */
+const unmetLoadPins = new Set<string>();
+
+function unmetLoadPinKey(targetKey: string, modelKey: string, drift: readonly string[]): string {
+	return `${targetKey}|${modelKey}|${drift.join(",")}`;
 }
 
 function capToLoadedContext(model: Model<"openai-completions">, window: unknown): void {
@@ -311,7 +394,10 @@ async function ensureLmStudioResidencyUnlocked(
 	);
 	const targetKey = residencyTargetKey("lmstudio", target.url ?? model.baseUrl);
 	const contextLength = load.contextLength;
+	const explicitContext = hasExplicitLmStudioContext(info.lmstudio, model.id);
 	const ownership = await clioOwnership(targetKey);
+	let replaced: ReplacedInstance | undefined;
+	let replacedDrift: string[] = [];
 	// Taken while the residency lock is still held, so no other process releases the model in between.
 	const leased = async (wireModelId: string): Promise<LmStudioResidency> => ({
 		wireModelId,
@@ -327,10 +413,13 @@ async function ensureLmStudioResidencyUnlocked(
 				resident: instances,
 				keepModelId: modelKey,
 				ceiling: coResidentContextCeiling(),
+				explicit: explicitContext,
 			}).contextLength;
 		}
 		const drift = lmStudioLoadDrift(wanted, resolution.instance.config);
 		if (drift.length === 0) return leased(keepLoaded());
+		// The server already answered this pin with this result; another reload would only repeat it.
+		if (unmetLoadPins.has(unmetLoadPinKey(targetKey, modelKey, drift))) return leased(keepLoaded());
 		if (ownership.leased.has(modelKey)) {
 			// Another Clio request is streaming on this instance; reloading would fail it.
 			emitResidencyNoticeOnce(`busy-drift|${info.targetId}|${modelKey}|${drift.join(",")}`, {
@@ -344,7 +433,11 @@ async function ensureLmStudioResidencyUnlocked(
 			return leased(keepLoaded());
 		}
 		const stale = resolution.instance.id;
+		const staleOwned =
+			ownedInstances(targetKey).has(stale) || ownership.loads.some((record) => record.instanceId === stale);
 		await unloadInstance(target, targetKey, stale, options.apiKey, options.signal);
+		replaced = { modelKey, instance: resolution.instance, owned: staleOwned };
+		replacedDrift = drift;
 		instances = instances.filter((entry) => entry.identifier !== stale);
 		emitResidencyMutation({
 			targetKey,
@@ -423,6 +516,7 @@ async function ensureLmStudioResidencyUnlocked(
 			resident: instances,
 			keepModelId: modelKey,
 			ceiling: coResidentContextCeiling(),
+			explicit: explicitContext,
 		});
 		body = { ...body, context_length: fit.contextLength };
 		if (fit.clampedFrom !== undefined) {
@@ -435,10 +529,27 @@ async function ensureLmStudioResidencyUnlocked(
 				message: `loading '${model.id}' alongside ${fit.neighbours.join(", ")}: context clamped ${fit.clampedFrom} to ${fit.contextLength} tokens`,
 				detail: { requestedContext: fit.clampedFrom, loadContext: fit.contextLength },
 			});
+		} else if (fit.aboveCeiling !== undefined) {
+			emitResidencyNotice({
+				kind: "stress",
+				level: "warning",
+				targetId: info.targetId,
+				runtimeId: "lmstudio",
+				model: model.id,
+				message: `loading '${model.id}' alongside ${fit.neighbours.join(", ")}: context ${fit.contextLength} is above the ${fit.aboveCeiling}-token co-residency ceiling and kept because lmstudio.models sets it explicitly`,
+				detail: { requestedContext: fit.contextLength, ceiling: fit.aboveCeiling },
+			});
 		}
 	}
 	const loadAndReport = async (): Promise<string> => {
-		const instanceId = await loadOwnedInstance(target, targetKey, body, options.apiKey, options.signal, model);
+		const { instanceId, config } = await loadOwnedInstance(
+			target,
+			targetKey,
+			body,
+			options.apiKey,
+			options.signal,
+			model,
+		);
 		emitResidencyMutation({
 			targetKey,
 			targetId: info.targetId,
@@ -446,65 +557,132 @@ async function ensureLmStudioResidencyUnlocked(
 			model: modelKey,
 			operation: "load",
 		});
+		// LM Studio may accept a load and serve less than was asked (a context it caps below the pin).
+		const unmet = lmStudioLoadDrift(body, config);
+		if (unmet.length > 0) {
+			unmetLoadPins.add(unmetLoadPinKey(targetKey, modelKey, unmet));
+			const served = typeof config.context_length === "number" ? `, serving a ${config.context_length}-token window` : "";
+			emitResidencyNoticeOnce(`unmet|${targetKey}|${modelKey}|${unmet.join(",")}`, {
+				kind: "stress",
+				level: "warning",
+				targetId: info.targetId,
+				runtimeId: "lmstudio",
+				model: modelKey,
+				message: `LM Studio loaded '${modelKey}' on target '${info.targetId}' but not as its load profile asks (${unmet.join(", ")}). Clio keeps it${served} and will not reload it for this profile.`,
+				detail: { unmet: unmet.join("; ") },
+			});
+		}
 		return instanceId ?? model.id;
 	};
-	try {
-		return await leased(await loadAndReport());
-	} catch (error) {
-		options.signal?.throwIfAborted();
-		const message = error instanceof Error ? error.message : String(error);
-		const capacityError =
-			/insufficient[_ ](?:system[_ ])?(?:resources|memory)|out of (?:device |gpu |system )?memory|not enough (?:free )?(?:vram|memory)/i.test(
-				message,
-			);
-		if (!capacityError || plan.decision !== "reconcile" || plan.fallbackEvict.length === 0) throw error;
-		const evicted: typeof instances = [];
+	const loadWithCapacityFallback = async (): Promise<LmStudioResidency> => {
 		try {
-			for (const candidate of plan.fallbackEvict) {
-				for (const entry of instances.filter((resident) => resident.modelKey === candidate.modelId)) {
-					if (await unloadOwnedInstance(target, targetKey, entry.identifier, options.apiKey, options.signal)) {
-						evicted.push(entry);
+			return await leased(await loadAndReport());
+		} catch (error) {
+			options.signal?.throwIfAborted();
+			const message = error instanceof Error ? error.message : String(error);
+			const capacityError =
+				/insufficient[_ ](?:system[_ ])?(?:resources|memory)|out of (?:device |gpu |system )?memory|not enough (?:free )?(?:vram|memory)/i.test(
+					message,
+				);
+			if (!capacityError || plan.decision !== "reconcile" || plan.fallbackEvict.length === 0) throw error;
+			const evicted: typeof instances = [];
+			try {
+				for (const candidate of plan.fallbackEvict) {
+					for (const entry of instances.filter((resident) => resident.modelKey === candidate.modelId)) {
+						if (await unloadOwnedInstance(target, targetKey, entry.identifier, options.apiKey, options.signal)) {
+							evicted.push(entry);
+							emitResidencyMutation({
+								targetKey,
+								targetId: info.targetId,
+								runtimeId: "lmstudio",
+								model: candidate.modelId,
+								operation: "evict",
+							});
+						}
+					}
+				}
+				if (evicted.length === 0) throw error;
+				return await leased(await loadAndReport());
+			} catch (retryError) {
+				// A rejected replacement must not leave an otherwise working server empty.
+				for (const entry of evicted) {
+					try {
+						await loadOwnedInstance(
+							target,
+							targetKey,
+							restoreLoadBody(entry.modelKey, entry.instance.config),
+							options.apiKey,
+							undefined,
+						);
 						emitResidencyMutation({
 							targetKey,
 							targetId: info.targetId,
 							runtimeId: "lmstudio",
-							model: candidate.modelId,
-							operation: "evict",
+							model: entry.modelKey,
+							operation: "load",
+						});
+					} catch {
+						emitResidencyNotice({
+							kind: "stress",
+							level: "error",
+							targetId: info.targetId,
+							runtimeId: "lmstudio",
+							model: entry.modelKey,
+							message: `LM Studio could not restore '${entry.modelKey}' after the replacement load failed. Reload it on the server.`,
 						});
 					}
 				}
+				throw retryError;
 			}
-			if (evicted.length === 0) throw error;
-			return await leased(await loadAndReport());
-		} catch (retryError) {
-			// A rejected replacement must not leave an otherwise working server empty.
-			for (const entry of evicted) {
-				const restore: Record<string, unknown> = { model: entry.modelKey };
-				for (const [, key] of LOAD_WIRE_KEYS) {
-					if (entry.instance.config[key] !== undefined) restore[key] = entry.instance.config[key];
-				}
-				try {
-					await loadOwnedInstance(target, targetKey, restore, options.apiKey, undefined);
-					emitResidencyMutation({
-						targetKey,
-						targetId: info.targetId,
-						runtimeId: "lmstudio",
-						model: entry.modelKey,
-						operation: "load",
-					});
-				} catch {
-					emitResidencyNotice({
-						kind: "stress",
-						level: "error",
-						targetId: info.targetId,
-						runtimeId: "lmstudio",
-						model: entry.modelKey,
-						message: `LM Studio could not restore '${entry.modelKey}' after the replacement load failed. Reload it on the server.`,
-					});
-				}
-			}
-			throw retryError;
 		}
+	};
+	try {
+		return await loadWithCapacityFallback();
+	} catch (error) {
+		if (!replaced) throw error;
+		const outcome = await restoreReplacedInstance(target, targetKey, replaced, options.apiKey);
+		if (outcome.error === undefined) {
+			emitResidencyMutation({
+				targetKey,
+				targetId: info.targetId,
+				runtimeId: "lmstudio",
+				model: replaced.modelKey,
+				operation: "load",
+			});
+		} else {
+			emitResidencyNotice({
+				kind: "stress",
+				level: "error",
+				targetId: info.targetId,
+				runtimeId: "lmstudio",
+				model: replaced.modelKey,
+				message: `LM Studio could not restore '${replaced.modelKey}' after the replacement load failed. Reload it on the server.`,
+			});
+		}
+		// An abort is the caller's decision, not a load failure to describe.
+		if (options.signal?.aborted) throw error;
+		const reason = error instanceof Error ? error.message : String(error);
+		const pin = replacedDrift.join(", ");
+		if (outcome.error !== undefined) {
+			throw new Error(
+				`LM Studio could not load '${replaced.modelKey}' on target '${info.targetId}' to match its load profile (${pin}): ${reason}. Clio could not restore the previous instance (${outcome.error}).`,
+				{ cause: error },
+			);
+		}
+		// The restored instance answers the turn. Asking again would unload and restore it every turn
+		// to hear the same refusal, so this pin against this instance is remembered for the process.
+		unmetLoadPins.add(unmetLoadPinKey(targetKey, modelKey, replacedDrift));
+		capToLoadedContext(model, outcome.window);
+		emitResidencyNotice({
+			kind: "stress",
+			level: "warning",
+			targetId: info.targetId,
+			runtimeId: "lmstudio",
+			model: modelKey,
+			message: `LM Studio could not load '${modelKey}' on target '${info.targetId}' to match its load profile (${pin}): ${reason}. Clio restored the previous instance${outcome.window !== undefined ? `, which serves ${outcome.window} tokens` : ""}, and will not retry this profile until the instance or the profile changes.`,
+			detail: { unmet: pin },
+		});
+		return leased(outcome.instanceId ?? model.id);
 	}
 }
 
@@ -575,6 +753,9 @@ function gatewayControlModel(
 	load: LmStudioLoad,
 ): Model<"openai-completions"> {
 	const info = metadata(model);
+	// The control model is keyed by LM Studio's own model key, so a context the
+	// operator pinned under the gateway alias is re-keyed for the residency rule.
+	const pinned = hasExplicitLmStudioContext(info?.lmstudio, model.id) && load.contextLength !== undefined;
 	const { headers: _gatewayHeaders, ...rest } = model;
 	// The gateway's credentials stay with the gateway; the LM Studio server gets none.
 	return {
@@ -586,7 +767,10 @@ function gatewayControlModel(
 			targetId: info?.targetId ?? model.provider,
 			runtimeId: "lmstudio",
 			...(info?.lifecycle ? { lifecycle: info.lifecycle } : {}),
-			lmstudio: { load },
+			lmstudio: {
+				load,
+				...(pinned ? { models: { [deployment.modelKey]: { load: { contextLength: load.contextLength } } } } : {}),
+			},
 		},
 	} as Model<"openai-completions">;
 }
