@@ -407,15 +407,17 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 		presenter.completedStep("Nothing to clear; every selected root was already empty");
 
 	resetXdgCache();
-	try {
-		initializeClioHome();
-		presenter.completedStep("Recreated the empty roots");
-	} catch (error) {
-		failures.push({
-			label: "Initialize",
-			path: dirs.state,
-			reason: error instanceof Error ? error.message : String(error),
-		});
+	if (cleared > 0) {
+		try {
+			initializeClioHome();
+			presenter.completedStep("Recreated the empty roots");
+		} catch (error) {
+			failures.push({
+				label: "Initialize",
+				path: dirs.state,
+				reason: error instanceof Error ? error.message : String(error),
+			});
+		}
 	}
 
 	if (failures.length > 0) {
