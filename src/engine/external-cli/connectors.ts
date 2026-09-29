@@ -5,7 +5,7 @@ import { startCodexCliWorkerRun } from "../codex/subprocess-runtime.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput } from "../worker-runtime.js";
 import { startJsonlCliRun } from "./jsonl-runner.js";
 import { OPENCODE_CLI_CONNECTOR } from "./opencode.js";
-import { PI_CLI_CONNECTOR } from "./pi.js";
+import { startPiCliWorkerRun } from "./pi.js";
 
 export interface ExternalCliConnector {
 	runtimeId: string;
@@ -16,7 +16,7 @@ const CONNECTORS: ReadonlyArray<ExternalCliConnector> = [
 	{ runtimeId: "claude-code", start: startClaudeCodeWorkerRun },
 	{ runtimeId: "codex-cli", start: startCodexCliWorkerRun },
 	{ runtimeId: "opencode-cli", start: (input, emit) => startJsonlCliRun(OPENCODE_CLI_CONNECTOR, input, emit) },
-	{ runtimeId: "pi-cli", start: (input, emit) => startJsonlCliRun(PI_CLI_CONNECTOR, input, emit) },
+	{ runtimeId: "pi-cli", start: startPiCliWorkerRun },
 	{ runtimeId: "antigravity-code", start: startAntigravityWorkerRun },
 ];
 
