@@ -37,6 +37,36 @@ function stacked(font: Record<string, readonly string[]>): string[] {
 
 export const WELCOME_WORDMARK = stacked(LETTERS);
 export const WELCOME_WORDMARK_WIDE = stacked(WIDE_LETTERS);
+/** The compact letters on one band, CLIO then CODER, for panels too narrow to set the art beside the details. */
+export const WELCOME_WORDMARK_ROW: readonly string[] = Array.from({ length: 5 }, (_, row) =>
+	["CLIO", "CODER"].map((text) => [...text].map((letter) => LETTERS[letter]?.[row] ?? "").join(" ")).join("   "),
+);
+
+/** The one-band mark runs from cyan CLIO at left to copper CODER at right. */
+export function paintWelcomeRowWordmark(theme: ClioTheme): string[] {
+	if (theme.fgSequence("wordmark") === "") return [...WELCOME_WORDMARK_ROW];
+	const background = terminalBackground();
+	const channels = (hex: string) => [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
+	const start = channels(paletteProjection("cyanFocal", background)[0]);
+	const end = channels(paletteProjection("orangeFocal", background)[0]);
+	const options = { truecolor: theme.truecolor, color: true };
+	return WELCOME_WORDMARK_ROW.map((line) =>
+		[...line]
+			.map((glyph, column) => {
+				if (glyph === " ") return glyph;
+				const t = column / Math.max(1, line.length - 1);
+				const hex = `#${start
+					.map((value, channel) =>
+						Math.round(value + ((end[channel] ?? value) - value) * t)
+							.toString(16)
+							.padStart(2, "0"),
+					)
+					.join("")}`;
+				return paintHex(glyph, hex, options);
+			})
+			.join(""),
+	);
+}
 
 /** One vertical cyan-to-copper ramp: CLIO above, CODER below. */
 export function paintWelcomeWordmark(lines: readonly string[], theme: ClioTheme): string[] {

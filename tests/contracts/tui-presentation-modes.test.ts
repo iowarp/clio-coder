@@ -188,7 +188,7 @@ test("welcome height and usage placement stay fixed from Stage 0 through quota h
 	try {
 		for (const width of [8, 20, 40, 60, 76, 80, 100, 160, 200, 240]) {
 			const initial = boot.render(width);
-			strictEqual(initial.length, 17);
+			strictEqual(initial.length, width >= 57 && width < 76 ? 21 : 17);
 			const usageRow = initial.map(stripTerminalSequences).findIndex((line) => line.includes("AI usage"));
 			for (const reading of [
 				null,

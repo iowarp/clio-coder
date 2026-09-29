@@ -343,11 +343,11 @@ const GEOMETRY_CASES: Array<[string, BannerOptions]> = [
 	],
 ];
 
-test("the launchpad is seventeen rows and the session header one, at every width and state", () => {
+test("the launchpad keeps a bounded footprint and the session header one row", () => {
 	for (const [label, options] of GEOMETRY_CASES) {
 		for (const width of WIDTHS) {
 			const launchpad = banner(options);
-			strictEqual(rows(launchpad, width).length, 17, `${label}@${width} launchpad rows`);
+			strictEqual(rows(launchpad, width).length, width >= 57 && width < 76 ? 21 : 17, `${label}@${width} launchpad rows`);
 			const session = banner(options);
 			session.collapseToSessionHeader();
 			strictEqual(rows(session, width).length, 1, `${label}@${width} session rows`);
@@ -815,7 +815,7 @@ test("the instant shell uses the finished welcome footprint without hydration co
 	const boot = createBootWelcome(settings, "Ctrl+S");
 	for (const width of WIDTHS) {
 		const lines = boot.render(width).map(stripTerminalSequences);
-		strictEqual(lines.length, 17);
+		strictEqual(lines.length, width >= 57 && width < 76 ? 21 : 17);
 		for (const line of lines) ok(visibleWidth(line) <= width);
 		ok(!lines.join("\n").includes("Starting Clio"));
 		ok(!lines.join("\n").includes("✓"));
@@ -878,5 +878,23 @@ test("the wordmark stacks CLIO over CODER with details beside both words and no 
 		ok(lines[10]?.includes("AI usage"));
 		ok(!lines.join("\n").includes(">_C"));
 		ok(!lines.slice(1, 12).some((line) => line.includes("…") && line.indexOf("…") < 30));
+	}
+});
+
+test("the narrow launchpad sets the compact letters on one band, or the brand in the title", () => {
+	for (const width of [36, 40, 48, 56, 57, 60, 70, 75]) {
+		const lines = rows(banner(), width);
+		for (const line of lines) ok(visibleWidth(line) <= width, `${width}: ${line}`);
+		if (width < 57) {
+			ok(lines[0]?.includes("Clio Coder"), `${width}: ${lines[0]}`);
+			ok(lines[0]?.includes("v0.5."));
+			ok(!lines.at(-2)?.includes("v0.5."));
+		} else {
+			// CLIO and CODER share each art row, so the band is five rows, not eleven.
+			ok(lines[1]?.includes(" ████ ██░   ███  ███     ████  ███  ████  █████ ████"), `${width}: ${lines[1]}`);
+			ok(lines[5]?.includes(" ████ █████ ███  ███     ████  ███  ████  █████ ██░██"), `${width}: ${lines[5]}`);
+			ok(lines[7]?.includes("Session started"));
+			ok(lines.at(-2)?.includes("v0.5."));
+		}
 	}
 });

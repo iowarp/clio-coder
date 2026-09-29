@@ -17,7 +17,12 @@ import {
 	innerDivider,
 	padAnsi,
 } from "./theme/index.js";
-import { paintWelcomeWordmark, WELCOME_WORDMARK, WELCOME_WORDMARK_WIDE } from "./welcome-art.js";
+import {
+	paintWelcomeRowWordmark,
+	paintWelcomeWordmark,
+	WELCOME_WORDMARK,
+	WELCOME_WORDMARK_WIDE,
+} from "./welcome-art.js";
 
 /** Reduced terminals and screen readers get the same compact identity as demo-off. */
 function richWelcomeEnabled(demo: boolean | undefined): boolean {
@@ -448,6 +453,11 @@ export function buildWelcomeDashboardLines(
 	const fit = (text: string): string => truncateToWidth(text, room, GLYPH.ellipsis, false);
 	const wordmark = paintWelcomeWordmark(panelWidth >= 100 ? WELCOME_WORDMARK_WIDE : WELCOME_WORDMARK, theme);
 	const sideBySide = panelWidth >= 76;
+	// Too narrow for the art beside the details: the compact letters sit on one
+	// band above them, and below that the brand moves into the frame title.
+	const bandWordmark = sideBySide ? [] : paintWelcomeRowWordmark(theme);
+	const titleBrand = bandWordmark.length > 0 && visibleWidth(bandWordmark[0] ?? "") > room;
+	const band = titleBrand ? [] : bandWordmark;
 	const artWidth = sideBySide ? visibleWidth(wordmark[0] ?? "") : 0;
 	const showHints = panelWidth >= WELCOME_HINT_MIN_WIDTH;
 	const contentWidth = showHints ? Math.max(artWidth + 3 + 42, Math.min(132, Math.floor((room - 3) * 0.66))) : room;
@@ -508,9 +518,10 @@ export function buildWelcomeDashboardLines(
 						...(workspace.behind ? [`${workspace.behind} behind`] : []),
 					].join(" · ");
 	const details = [
-		"",
-		theme.style("sectionHeading", "Session started", { bold: true }),
-		theme.fg("body", SESSION_STARTED_AT),
+		...(band.length > 0 ? [...band, ""] : [""]),
+		...(band.length > 0
+			? [`${theme.style("sectionHeading", "Session started", { bold: true })}  ${theme.fg("body", SESSION_STARTED_AT)}`]
+			: [theme.style("sectionHeading", "Session started", { bold: true }), theme.fg("body", SESSION_STARTED_AT)]),
 		"",
 		theme.style("sectionHeading", "Project", { bold: true }),
 		field(
@@ -549,8 +560,8 @@ export function buildWelcomeDashboardLines(
 	);
 	// The launchpad is an island like every other framed block, so it shares the
 	// one frame recipe and its action row sits under the standard inner divider.
-	const versionTag = theme.fg("brandCopper", `v${version}`);
-	const leftRoom = Math.max(0, room - visibleWidth(versionTag) - 1);
+	const versionTag = titleBrand ? "" : theme.fg("brandCopper", `v${version}`);
+	const leftRoom = Math.max(0, room - visibleWidth(versionTag) - (titleBrand ? 0 : 1));
 	const action = actionRow(theme, stats, leftRoom);
 	const helpRoom = leftRoom - visibleWidth(action) - 3;
 	const help =
@@ -558,8 +569,11 @@ export function buildWelcomeDashboardLines(
 			? ` ${theme.fg("divider", GLYPH.rail)} ${theme.fg("body", truncateToWidth("Ask Clio how to use or extend her.", helpRoom, GLYPH.ellipsis, false))}`
 			: "";
 	const left = `${action}${help}`;
-	const gap = " ".repeat(Math.max(1, room - visibleWidth(left) - visibleWidth(versionTag)));
-	return frame(theme, "", [...rows, innerDivider(theme, room), fit(`${left}${gap}${versionTag}`)], panelWidth);
+	const gap = titleBrand ? "" : " ".repeat(Math.max(1, room - visibleWidth(left) - visibleWidth(versionTag)));
+	const title = titleBrand
+		? `${brandMark(theme)} ${theme.style("wordmark", "Clio Coder", { bold: true })} ${theme.fg("brandCopper", `v${version}`)}`
+		: "";
+	return frame(theme, title, [...rows, innerDivider(theme, room), fit(`${left}${gap}${versionTag}`)], panelWidth);
 }
 
 /**

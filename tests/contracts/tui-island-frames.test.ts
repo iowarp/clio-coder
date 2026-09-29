@@ -11,7 +11,7 @@ import {
 	formatTaskIslandLines,
 } from "../../src/interactive/dispatch-board.js";
 import { clioTheme, frame, GLYPH } from "../../src/interactive/theme/index.js";
-import { WELCOME_WORDMARK } from "../../src/interactive/welcome-art.js";
+import { WELCOME_WORDMARK, WELCOME_WORDMARK_ROW } from "../../src/interactive/welcome-art.js";
 import { buildWelcomeDashboardLines, type WelcomeDashboardStats } from "../../src/interactive/welcome-dashboard.js";
 
 const WIDTHS = [60, 80, 120, 200] as const;
@@ -35,6 +35,14 @@ const BRAND_RAMP_HEX: ReadonlySet<string> = new Set(
 		const start = rgb("cyanFocal");
 		const end = rgb("orangeFocal");
 		const t = row / Math.max(1, WELCOME_WORDMARK.length - 1);
+		return hex(start.map((channel, index) => Math.round(channel + ((end[index] ?? channel) - channel) * t)));
+	}),
+);
+const ROW_RAMP_HEX: ReadonlySet<string> = new Set(
+	Array.from({ length: WELCOME_WORDMARK_ROW[0]?.length ?? 0 }, (_, column) => {
+		const start = rgb("cyanFocal");
+		const end = rgb("orangeFocal");
+		const t = column / Math.max(1, (WELCOME_WORDMARK_ROW[0]?.length ?? 1) - 1);
 		return hex(start.map((channel, index) => Math.round(channel + ((end[index] ?? channel) - channel) * t)));
 	}),
 );
@@ -98,7 +106,7 @@ const stats: WelcomeDashboardStats = {
 test("the launchpad is a standard island with a quiet border and version in its action row", () => {
 	for (const width of WIDTHS) {
 		const lines = buildWelcomeDashboardLines(stats, "0.5.6", width, "launchpad");
-		assertIsland(lines, width, null, new Set([...PALETTE_HEX, ...BRAND_RAMP_HEX]));
+		assertIsland(lines, width, null, new Set([...PALETTE_HEX, ...BRAND_RAMP_HEX, ...ROW_RAMP_HEX]));
 		const plain = lines.map(stripTerminalSequences);
 		// The action row sits under an inner divider, as in every other island.
 		match(plain.at(-3) ?? "", new RegExp(`^│ ${GLYPH.innerDivider}+ │$`, "u"));
