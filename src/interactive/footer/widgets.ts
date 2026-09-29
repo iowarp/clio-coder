@@ -212,14 +212,21 @@ export function contextUsageText(context: ContextEngineFacts): string {
 }
 
 /** Compact counts and occupancy; source details remain in the expanded dashboard. */
-export function compactContextUsage(context: ContextOccupancyFacts, theme: ClioTheme): string {
+export function compactContextUsage(
+	context: ContextOccupancyFacts,
+	theme: ClioTheme,
+	room = Number.POSITIVE_INFINITY,
+): string {
 	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
 	const window = context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow);
 	const counts = `${used === null ? "?" : formatFooterTokens(used).toUpperCase()}/${window ? formatFooterTokens(window).toUpperCase() : "unknown"}`;
 	const percent = contextUsagePercent(context);
-	return !window
-		? theme.fg("counter", counts)
-		: `${theme.fg("counter", counts)} ${theme.fg(contextPercentRole(percent), `(${formatContextPercent(percent)})`)}`;
+	if (!window) return theme.fg("counter", counts);
+	const full = `${theme.fg("counter", counts)} ${theme.fg(contextPercentRole(percent), `(${formatContextPercent(percent)})`)}`;
+	// A narrow row states the percent whole rather than cut the counts mid-figure.
+	return visibleWidth(full) <= room
+		? full
+		: `${theme.fg("counter", "ctx")} ${theme.fg(contextPercentRole(percent), formatContextPercent(percent))}`;
 }
 
 type DashboardRow =

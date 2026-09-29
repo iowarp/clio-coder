@@ -312,7 +312,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const fit = (text: string, room = w) =>
 		theme.base("counter", truncateToWidth(text, Math.max(1, room), GLYPH.ellipsis, true));
 	const separator = theme.fg("border", " · ");
-	const counter = compactContextUsage(state.context, theme);
+	const counter = compactContextUsage(state.context, theme, Math.floor(w * 0.4));
 	const rate = state.throughput?.tokensPerSecond;
 	const speed =
 		typeof rate === "number" && Number.isFinite(rate) && rate > 0

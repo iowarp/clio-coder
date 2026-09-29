@@ -755,6 +755,7 @@ export function controlInstructions(control: SettingControl, surface: "configure
 	else if (control.path === "fleet.concurrency") entry = "Enter auto or a positive whole number.";
 	else if (control.path === "fleet.worktrees.root")
 		entry = "Enter disk, tmpfs for memory storage, auto, or an absolute directory.";
+	else if (control.path.endsWith(".ratio")) entry = "Enter a fraction up to 0.5, such as 0.3 for 30%.";
 	else if (fractional) entry = "Enter a fraction, such as 0.6 for 60%.";
 	else if (control.path.endsWith("Ms")) entry = "Enter milliseconds; 1000 means one second.";
 	else if (control.path.endsWith("Bytes")) entry = "Enter bytes; 1024 means one KB.";
