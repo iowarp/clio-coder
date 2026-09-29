@@ -45,8 +45,12 @@ const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 // integrated artifact measured 10.14MB packed / 50.80MB unpacked. Allow modest
 // growth for this deliberate surface addition; keep maps, fixtures and source
 // applications excluded and continue checking exact required runtime assets.
+// 0.5.8 raises the unpacked ceiling to 60MB by operator decision: 0.5.7
+// shipped at 54.44MB, and 0.5.8 adds about 0.9MB spread over chunks, src/**,
+// the code map and guides with no single leaked artifact. A leaked
+// node_modules or doubled dist still overshoots 60MB several times.
 const MAX_TARBALL_BYTES = 12_000_000;
-const MAX_UNPACKED_BYTES = 55_000_000;
+const MAX_UNPACKED_BYTES = 60_000_000;
 
 const FORBIDDEN = [
 	{
