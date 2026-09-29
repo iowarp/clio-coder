@@ -13,11 +13,17 @@ import type {
 } from "../core/bus-events.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { SYSTEM_ONE_GATE_RULE_ID, systemOneGateText } from "../domains/safety/decision-presentation.js";
+import type { NoticeSource } from "./notice-source.js";
 import { askAxis } from "./permission-overlay.js";
 
 export interface BusNotice {
 	level: "warn" | "error";
 	text: string;
+	/**
+	 * The advisory source of a multi-sentence notice, chosen by the formatter that
+	 * wrote it. A one-line notice has none and keeps its gutter row.
+	 */
+	source?: NoticeSource;
 }
 
 export interface MiddlewareHookFailedNoticeOptions {
@@ -39,12 +45,14 @@ export function budgetAlertNotice(payload: unknown): BusNotice | null {
 	if (payload.level === "over") {
 		return {
 			level: "error",
-			text: `[budget] session priced spend ${spend} exceeded. Paid requests are paused; raise budget.sessionCeilingUsd to resume.`,
+			text: `[budget] Session priced spend ${spend} exceeded. Paid requests are paused; raise budget.sessionCeilingUsd to resume.`,
+			source: "budget",
 		};
 	}
 	return {
 		level: "warn",
-		text: `[budget] session priced spend ${spend} reached. Paid requests are paused; raise budget.sessionCeilingUsd to resume.`,
+		text: `[budget] Session priced spend ${spend} reached. Paid requests are paused; raise budget.sessionCeilingUsd to resume.`,
+		source: "budget",
 	};
 }
 
@@ -157,7 +165,8 @@ function middlewareHookFailedNotice(
 		const detail = payload.message !== undefined && payload.message.length > 0 ? `: ${payload.message}` : "";
 		return {
 			level: "warn",
-			text: `[middleware] hook '${payload.registrationId}' failed on ${payload.hook}${detail}. Its effects were skipped; the turn continued.`,
+			text: `[middleware] Hook '${payload.registrationId}' failed on ${payload.hook}${detail}. Its effects were skipped; the turn continued.`,
+			source: "hooks",
 		};
 	}
 	const elapsed = payload.elapsedMs !== undefined ? `${payload.elapsedMs.toFixed(1)}ms` : "unknown";
@@ -244,7 +253,8 @@ export function approvalParkedNotice(
 			axis.ruleId === SYSTEM_ONE_GATE_RULE_ID ? systemOneGateText(gateBuild) : `safety-net rail ${axis.ruleId}`;
 		return {
 			level: "warn",
-			text: `[approval] ${tool} parked (${actionClass}): ${asker} asks for confirmation. Approve once, or Esc to deny this call.`,
+			text: `[approval] Parked ${tool} (${actionClass}): ${asker} asks for confirmation. Approve once, or Esc to deny this call.`,
+			source: "approval",
 		};
 	}
 	const widen =
@@ -253,7 +263,8 @@ export function approvalParkedNotice(
 			: " Approve once, or Esc to deny this call.";
 	return {
 		level: "warn",
-		text: `[approval] ${tool} parked (${actionClass}): asks at autonomy ${autonomy}.${widen}`,
+		text: `[approval] Parked ${tool} (${actionClass}): asks at autonomy ${autonomy}.${widen}`,
+		source: "approval",
 	};
 }
 
@@ -266,12 +277,14 @@ export function workerEscalationNotice(payload: unknown): BusNotice | null {
 	if (axis.kind === "net") {
 		return {
 			level: "warn",
-			text: `[approval] worker ${agentId} (run ${runId}) asks to run ${payload.tool} (${payload.actionClass}): safety-net rail ${axis.ruleId} asks for confirmation. Approve once, or Esc to deny this call.`,
+			text: `[approval] Worker ${agentId} (run ${runId}) asks to run ${payload.tool} (${payload.actionClass}): safety-net rail ${axis.ruleId} asks for confirmation. Approve once, or Esc to deny this call.`,
+			source: "fleet",
 		};
 	}
 	return {
 		level: "warn",
-		text: `[approval] worker ${agentId} (run ${runId}) asks to run ${payload.tool} (${payload.actionClass}): asks at autonomy ${axis.level}. Approve once, or Esc to deny this call.`,
+		text: `[approval] Worker ${agentId} (run ${runId}) asks to run ${payload.tool} (${payload.actionClass}): asks at autonomy ${axis.level}. Approve once, or Esc to deny this call.`,
+		source: "fleet",
 	};
 }
 
@@ -291,6 +304,7 @@ export function safetyBlockedNotice(payload: unknown): BusNotice | null {
 			: payload.reasonCode;
 	return {
 		level: "warn",
-		text: `[safety-net] blocked ${payload.tool} (${payload.actionClass}): ${rule} via ${payload.policySource}. This gate applies at every autonomy level.`,
+		text: `[safety-net] Blocked ${payload.tool} (${payload.actionClass}): ${rule} via ${payload.policySource}. This gate applies at every autonomy level.`,
+		source: "safety",
 	};
 }

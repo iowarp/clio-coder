@@ -100,7 +100,7 @@ test("S3-01: live hook trust diagnostics reach the footer notice area and unsubs
 	strictEqual(notices[1]?.level, "warning");
 	strictEqual(
 		notices[1]?.text,
-		"[safety-net] blocked bash (system_modify): rule rm-recursive-or-force (damage-control:rm-recursive-or-force) via damage-control:base. This gate applies at every autonomy level.",
+		"[safety-net] Blocked bash (system_modify): rule rm-recursive-or-force (damage-control:rm-recursive-or-force) via damage-control:base. This gate applies at every autonomy level.",
 	);
 	projection.dispose();
 	bus.emit(BusChannels.ExtensionsLoadIssue, { message });

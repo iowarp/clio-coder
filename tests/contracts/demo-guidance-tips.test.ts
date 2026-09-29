@@ -269,6 +269,71 @@ describe("notify_operator delivery", () => {
 	});
 });
 
+describe("advisory sources", () => {
+	const runtime = {
+		wireModelId: "fixture",
+		runtimeId: "fixture",
+		runtimeResolution: {},
+		agent: { state: { tools: [], messages: [] } },
+	} as unknown as AgentRuntime;
+	const done = [
+		{ role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop", timestamp: 1 },
+	] as unknown as AgentMessage[];
+
+	it("names a tip, a generic reminder and a memory note as advisories, and drops the rule's own [tip] label", async () => {
+		const notices: string[] = [];
+		const { contract } = createMiddlewareBundle({
+			registrations: [
+				{
+					id: "fixture.advisories",
+					description: "one of each advisory",
+					hooks: ["turn_end"],
+					evaluate: () => [
+						{ kind: "notify_operator", message: "[tip] try /view", key: "guidance.view" },
+						{ kind: "inject_reminder", message: "Finish the open steps.", severity: "warn" },
+						{ kind: "inject_reminder", message: "Memory: [tm-p-1] it failed.", severity: "advisory", source: "memory" },
+					],
+				},
+			],
+		});
+		const turn = createTurnMiddleware({
+			state: createTurnState("off"),
+			middleware: contract,
+			middlewareToolChoice: createMiddlewareToolChoiceControl(),
+			emitNotice: (text, level, source) => notices.push(`${source}/${level}/${text}`),
+			emitFooterNotice: () => {},
+		});
+		await turn.fireTurnEnd(runtime, done);
+		deepStrictEqual(notices, [
+			"tip/info/try /view",
+			"reminder/warning/Finish the open steps.",
+			"memory/info/Memory: [tm-p-1] it failed.",
+		]);
+		// The model-facing block keeps the prefix and the ref.
+		match(turn.flushPendingReminders(), /Memory: \[tm-p-1\] it failed\./u);
+	});
+
+	it("titles a deferred memory reminder and a deferred watchdog notice by the source that sent them", () => {
+		const notices: string[] = [];
+		const turn = createTurnMiddleware({
+			state: createTurnState("off"),
+			middlewareToolChoice: createMiddlewareToolChoiceControl(),
+			emitNotice: (text, level, source) => notices.push(`${source}/${level}/${text}`),
+			emitFooterNotice: () => {},
+		});
+		turn.injectDeferredReminder("Memory: it failed.", "advisory", undefined, "memory");
+		turn.emitDeferredNotice(
+			"[watchdog] 1 blocker after this turn: tests. Nothing was changed or queued.",
+			"warning",
+			"watchdog",
+		);
+		deepStrictEqual(notices, [
+			"memory/info/Memory: it failed.",
+			"watchdog/warning/[watchdog] 1 blocker after this turn: tests. Nothing was changed or queued.",
+		]);
+	});
+});
+
 describe("harness profile", () => {
 	let env: IsolatedClioEnv;
 	beforeEach(async () => {

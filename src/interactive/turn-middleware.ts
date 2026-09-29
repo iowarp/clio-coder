@@ -23,6 +23,7 @@ import type { CompactionTrigger, EvictionTrigger, RecallTrigger } from "../domai
 import type { AgentMessage } from "../engine/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { extractText, hasStructuredToolCall, toolNamesFromAgentState } from "./chat-loop-messages.js";
+import type { NoticeSource } from "./notice-source.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
 export interface TurnMiddlewareDeps {
@@ -32,7 +33,7 @@ export interface TurnMiddlewareDeps {
 	toolRegistry?: ToolRegistry | undefined;
 	session?: SessionContract | undefined;
 	middlewareToolChoice: MiddlewareToolChoiceControl;
-	emitNotice: (text: string, level?: "info" | "warning" | "error") => void;
+	emitNotice: (text: string, level?: "info" | "warning" | "error", source?: NoticeSource) => void;
 	emitFooterNotice: (level: "info" | "success" | "warning" | "error", text: string, key: string) => void;
 	/**
 	 * Show an operator-only message from a `notify_operator` effect, such as a
@@ -70,7 +71,12 @@ export interface TurnMiddleware {
 	 * value; the reminder joins the same buffer, ledger, and transcript path a
 	 * turn_end reminder takes.
 	 */
-	injectDeferredReminder(message: string, severity?: MiddlewareReminderSeverity, isCurrent?: () => boolean): void;
+	injectDeferredReminder(
+		message: string,
+		severity?: MiddlewareReminderSeverity,
+		isCurrent?: () => boolean,
+		source?: NoticeSource,
+	): void;
 	/**
 	 * Deliver an operator-facing finding produced after its turn boundary closed.
 	 * The watchdog seam: its run settles well after the turn it reviewed, and
@@ -78,7 +84,7 @@ export interface TurnMiddleware {
 	 * reminder, this never joins the pending-reminder buffer and never appends a
 	 * `middlewareReminder` entry, so nothing it says can enter the next request.
 	 */
-	emitDeferredNotice(text: string, level?: "info" | "warning"): void;
+	emitDeferredNotice(text: string, level?: "info" | "warning", source?: NoticeSource): void;
 }
 
 /** The transcript level of a reminder: advice informs, a warning or a hard stop warns. */
@@ -154,7 +160,11 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		}
 	};
 
-	const appendMiddlewareReminderEntry = (message: string, severity: MiddlewareReminderSeverity): void => {
+	const appendMiddlewareReminderEntry = (
+		message: string,
+		severity: MiddlewareReminderSeverity,
+		source: NoticeSource,
+	): void => {
 		if (!deps.session?.current()) return;
 		try {
 			deps.session.appendEntry({
@@ -162,7 +172,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				parentTurnId: state.lastTurnId,
 				customType: "middlewareReminder",
 				display: true,
-				data: { message, severity },
+				// The source rides with the entry so a resumed transcript titles the callout the live one did.
+				data: { message, severity, source },
 			});
 		} catch {
 			// Reminder persistence is best-effort; the live notice still
@@ -174,6 +185,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		agentRuntime: AgentRuntime,
 		message: string,
 		severity: MiddlewareReminderSeverity,
+		source: NoticeSource = "reminder",
 	): void => {
 		if (message === FINISH_CONTRACT_ADVISORY_MESSAGE && severity === "warn") {
 			// The finish decision is already in the evidence ledger. Surface the
@@ -190,17 +202,19 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			if (state.toolProseAbortReason === null) {
 				state.toolProseAbortReason = message;
 				agentRuntime.agent.abort();
-				deps.emitNotice(message, "warning");
+				deps.emitNotice(message, "warning", source);
 			}
 			return;
 		}
-		appendMiddlewareReminderEntry(message, severity);
-		deps.emitNotice(message, reminderNoticeLevel(severity));
+		appendMiddlewareReminderEntry(message, severity, source);
+		deps.emitNotice(message, reminderNoticeLevel(severity), source);
 	};
 
 	const notifyOperator = (message: string, key: string): void => {
 		if (deps.emitOperatorTip) deps.emitOperatorTip(message, key);
-		else deps.emitNotice(message, "info");
+		// `notify_operator` is the operator-only advisory channel, so it is the tip's
+		// source. The rule's own `[tip]` label is redundant under the callout title.
+		else deps.emitNotice(message.replace(/^\[tip\]\s*/u, ""), "info", "tip");
 	};
 
 	const applyRequestContinuation = (message: string): void => {
@@ -354,7 +368,12 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			if (stopReason === "error" || stopReason === "aborted") return;
 			for (const effect of effects) {
 				if (effect.kind === "inject_reminder") {
-					applyTurnEndReminder(agentRuntime, effect.message, effect.severity ?? "info");
+					applyTurnEndReminder(
+						agentRuntime,
+						effect.message,
+						effect.severity ?? "info",
+						effect.source === "memory" ? "memory" : "reminder",
+					);
 					continue;
 				}
 				if (effect.kind === "request_continuation" && turnAllowsContinuation(state.currentTurnConstraints)) {
@@ -406,7 +425,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			pendingReminders.length = 0;
 		},
 
-		injectDeferredReminder(message, severity = "advisory", isCurrent): void {
+		injectDeferredReminder(message, severity = "advisory", isCurrent, source = "reminder"): void {
 			dropStale();
 			if (isCurrent?.() === false) return;
 			const text = message.trim();
@@ -416,14 +435,14 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			const level: MiddlewareReminderSeverity = severity === "hard-block" ? "advisory" : severity;
 			if (pendingReminders.some((entry) => entry.message === text)) return;
 			bufferReminder(text, level, true, isCurrent);
-			appendMiddlewareReminderEntry(text, level);
-			deps.emitNotice(text, reminderNoticeLevel(level));
+			appendMiddlewareReminderEntry(text, level, source);
+			deps.emitNotice(text, reminderNoticeLevel(level), source);
 		},
 
-		emitDeferredNotice(text, level = "warning"): void {
+		emitDeferredNotice(text, level = "warning", source): void {
 			const message = text.trim();
 			if (message.length === 0) return;
-			deps.emitNotice(message, level);
+			deps.emitNotice(message, level, source);
 		},
 	};
 }

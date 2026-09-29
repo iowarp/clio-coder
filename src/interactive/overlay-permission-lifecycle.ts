@@ -12,6 +12,7 @@ import { approvalParkedNotice, workerEscalationNotice } from "./bus-notices.js";
 import type { ToolApprovalStateEvent } from "./chat-loop.js";
 import type { NoticeLevel } from "./command-output.js";
 import { createMutationInspector, type MutationInspector, mutationFacts } from "./mutation-preview.js";
+import type { NoticeSource } from "./notice-source.js";
 import type { OverlayState } from "./overlay-key-routing.js";
 import {
 	type ApprovalRequestView,
@@ -73,7 +74,7 @@ export interface OverlayPermissionLifecycleDeps {
 		advisory?: PermissionAdvisoryReader,
 	): boolean;
 	closeOverlay(): void;
-	appendNotice(level: NoticeLevel, text: string): void;
+	appendNotice(level: NoticeLevel, text: string, source?: NoticeSource): void;
 	applyApprovalState(event: ToolApprovalStateEvent): void;
 	requestRender(): void;
 	/** End the in-flight run, carrying the text the operator will see. */
@@ -387,7 +388,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 				if (!markPermissionRequestSurfaced(announcedRequestIds, meta.requestId)) return;
 				deps.onOperatorParked?.();
 				const notice = approvalParkedNotice(call.tool, decision, autonomy, meta.gateBuild);
-				deps.appendNotice(notice.level, notice.text);
+				deps.appendNotice(notice.level, notice.text, notice.source);
 			};
 			if (meta.toolCallId !== undefined) {
 				deps.applyApprovalState({
@@ -425,7 +426,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		if (!entry) return;
 		if (!markPermissionRequestSurfaced(announcedWorkerRequestIds, entry.requestId)) return;
 		const notice = workerEscalationNotice(payload);
-		if (notice !== null) deps.appendNotice(notice.level, notice.text);
+		if (notice !== null) deps.appendNotice(notice.level, notice.text, notice.source);
 		deps.onOperatorParked?.();
 		workerQueue.push(entry);
 		maybeOpenWorker();

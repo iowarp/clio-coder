@@ -339,7 +339,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			return true;
 		},
 		closeOverlay,
-		appendNotice: (level, text) => appendNotice(level, text, busNoticeSink),
+		appendNotice: (level, text, source) => appendNotice(level, text, busNoticeSink, source),
 		applyApprovalState: (event) => chatRenderer.applyEvent(event),
 		requestRender: () => tui.requestRender(),
 		// An operator cancel, audited as one. The reason distinguishes it from an

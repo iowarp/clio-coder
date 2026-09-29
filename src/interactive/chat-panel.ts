@@ -2291,9 +2291,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				}
 				const text = event.text;
 				const mark = event.operatorCancel === true ? "cancelled" : event.level;
+				const source = event.source;
 				transcript.push({
 					role: "replayBlock",
-					renderBlock: (width) => renderNoticeRow(text, mark, width),
+					renderBlock: (width) => renderNoticeRow(text, mark, width, source),
 					at: stamp(),
 				});
 				markDirty();

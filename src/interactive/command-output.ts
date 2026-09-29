@@ -1,14 +1,30 @@
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
+import type { NoticeSource } from "./notice-source.js";
+import { renderNoticeRow } from "./renderers/notice.js";
 import { renderReferenceCard } from "./renderers/reference-card.js";
 import type { PromptReferenceCard, RunIo } from "./slash-commands.js";
 import { type ClioToken, clioTheme, GLYPH } from "./theme/index.js";
 
 export type NoticeLevel = "info" | "success" | "warn" | "error";
 
-export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutputSink): void {
+const NOTICE_MARKS = { info: "info", success: "success", warn: "warning", error: "error" } as const;
+
+/**
+ * A bus or command notice in the transcript. An event keeps its gutter row. An
+ * advisory, which the emitter names with `source`, renders through the
+ * transcript's own notice renderer as a titled callout, so it reads the same
+ * here as a persisted notice does on replay. The emitter chooses, never the
+ * width.
+ */
+export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutputSink, source?: NoticeSource): void {
 	const normalized = text.replace(/\r/g, "").replace(/\n+/gu, " ").trimEnd();
 	if (normalized.trim().length === 0) return;
+	if (source !== undefined) {
+		sink.appendReplayBlock((width) => renderNoticeRow(normalized, NOTICE_MARKS[level], width, source));
+		sink.requestRender();
+		return;
+	}
 	sink.appendReplayBlock((width) => {
 		const theme = clioTheme();
 		let glyph = "";

@@ -41,7 +41,7 @@ export const FINISH_CONTRACT_REGISTRATION_ID = "assessor.finish-contract";
  * vocabulary `detectValidationCommand` and `isVerificationScriptName` accept.
  */
 export const HIGH_RIGOR_REVALIDATION_MESSAGE =
-	`[Clio Coder] high-rigor finish gate: this completion claim has no validation evidence. ` +
+	`[Clio Coder] High-rigor finish gate: this completion claim has no validation evidence. ` +
 	`Before claiming done, run a verification command (the ${VERIFICATION_SCRIPT_FAMILY_HINT} family, ` +
 	`e.g. "npm run test", "npm run lint", "npm run build") or call the limitation tool with the scope ` +
 	`and reason of what could not be verified. Do not end the turn until you have validated or recorded the limitation.`;
@@ -215,7 +215,7 @@ export function createFinishContractRegistration(
 						? activeAcceptance?.verification.length || assessment.message.includes("quality policy")
 							? assessment.message
 							: HIGH_RIGOR_REVALIDATION_MESSAGE
-						: `[Clio Coder] high-rigor finish gate: validation evidence is missing. ${verificationTools.length > 0 ? `Use an authorized check through ${verificationTools.join(" or ")}; if the operator excluded validation, report the blocker without running it.` : "Record the unavailable validation with limitation."} Do not claim checks passed without evidence.`;
+						: `[Clio Coder] High-rigor finish gate: validation evidence is missing. ${verificationTools.length > 0 ? `Use an authorized check through ${verificationTools.join(" or ")}; if the operator excluded validation, report the blocker without running it.` : "Record the unavailable validation with limitation."} Do not claim checks passed without evidence.`;
 				return [
 					{ kind: "request_continuation", message },
 					{ kind: "inject_reminder", message, severity: "warn" },

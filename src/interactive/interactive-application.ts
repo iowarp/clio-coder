@@ -717,7 +717,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		requestRender: () => tui.requestRender(),
 		notify,
 		dismissNotification: (key) => notifications.dismiss(key),
-		appendTranscriptNotice: (level, text) => appendNotice(level, text, busNoticeSink),
+		appendTranscriptNotice: (level, text, source) => appendNotice(level, text, busNoticeSink, source),
 		refreshSettingsOverlay: () => overlayLifecycle.refreshSettingsOverlay(),
 		onConfigHotReload: (settings) => {
 			keybindings.reload(settings.interface.keybindings ?? {});

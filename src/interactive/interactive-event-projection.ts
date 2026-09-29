@@ -28,6 +28,7 @@ import {
 	toolBudgetAuditReason,
 	toolBudgetStopReason,
 } from "./loop-guard-interrupt.js";
+import type { NoticeSource } from "./notice-source.js";
 import type { AgentStatus, TurnSummary } from "./status/index.js";
 
 export type InteractiveProjectionNoticeLevel = "info" | "success" | "warning" | "error";
@@ -72,7 +73,7 @@ export interface InteractiveEventProjectionDeps {
 	requestRender: () => void;
 	notify: (level: InteractiveProjectionNoticeLevel, text: string, key?: string) => void;
 	dismissNotification: (key: string) => void;
-	appendTranscriptNotice: (level: InteractiveTranscriptNoticeLevel, text: string) => void;
+	appendTranscriptNotice: (level: InteractiveTranscriptNoticeLevel, text: string, source?: NoticeSource) => void;
 	refreshSettingsOverlay: () => void;
 	onConfigHotReload?: (settings: Readonly<ClioSettings>) => void;
 }
@@ -280,7 +281,8 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			) {
 				return;
 			}
-			deps.appendTranscriptNotice("warn", event.message);
+			// Both scope notices are two sentences: what was replaced, then what it does not affect.
+			deps.appendTranscriptNotice("warn", event.message, "fleet");
 			deps.requestRender();
 		}),
 		deps.bus.on(BusChannels.LoopBlocked, (payload) => {
@@ -373,7 +375,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		deps.bus.on(BusChannels.BudgetAlert, (payload) => {
 			const notice = budgetAlertNotice(payload);
 			if (notice === null) return;
-			deps.appendTranscriptNotice(notice.level, notice.text);
+			deps.appendTranscriptNotice(notice.level, notice.text, notice.source);
 			deps.requestRender();
 		}),
 		// The blocked call's row states the refusal and its body the rule that

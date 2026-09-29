@@ -11,7 +11,6 @@ import {
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import type { WorkerRunEntry } from "../../src/domains/session/index.js";
 import {
-	type Component,
 	InstrumentedTuiAltScreen,
 	ScrollView,
 	stripTerminalSequences,
@@ -23,10 +22,18 @@ import {
 	VStack,
 	visibleWidth,
 } from "../../src/engine/tui.js";
+import {
+	approvalParkedNotice,
+	budgetAlertNotice,
+	middlewareHookFailedSessionNotice,
+	safetyBlockedNotice,
+	workerEscalationNotice,
+} from "../../src/interactive/bus-notices.js";
 import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
 import { createCoalescingChatRenderer } from "../../src/interactive/chat-renderer.js";
 import { appendNotice } from "../../src/interactive/command-output.js";
 import { openContextOverlay } from "../../src/interactive/context-overlay.js";
+import { dockTop } from "../../src/interactive/dock.js";
 import { createEditorSubmitController, type EditorSubmitDeps } from "../../src/interactive/editor-submit.js";
 import {
 	createInteractiveSlashRuntime,
@@ -136,9 +143,10 @@ describe("Clio rendering invariants", () => {
 		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
 		const partial = "I checked the tests first.\nSuggested skill: /sk";
 		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: partial, partialText: partial });
-		// A half-streamed line is ordinary prose until it is whole.
+		// A half-streamed line is ordinary prose until it is whole. The prose filter holds the
+		// unfinished last grapheme back, so the streamed row stops one character short.
 		const streaming = plainRender(panel);
-		ok(streaming.indexOf("I checked the tests first.") < streaming.indexOf("Suggested skill: /sk"), streaming);
+		ok(streaming.indexOf("I checked the tests first.") < streaming.indexOf("Suggested skill: /s"), streaming);
 		const full = "I checked the tests first.\nSuggested skill: /skill tdd\nNow the failing test.";
 		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: full.slice(partial.length), partialText: full });
 		panel.applyEvent({
@@ -687,9 +695,14 @@ describe("streamed answers settle in place", () => {
 		const streamed = panel.render(80);
 		settleAnswer(panel, STREAMED_ANSWER);
 		const settled = panel.render(80);
-		// Only the receipt is added below; rows the operator already saw never change.
+		// Only the receipt is added below; rows the operator already saw never change. The one
+		// exception is the open tail row, which gains the last grapheme the prose filter held back.
 		ok(settled.length > streamed.length, "the settled turn gains its receipt");
-		deepStrictEqual(settled.slice(0, streamed.length), streamed);
+		deepStrictEqual(settled.slice(0, streamed.length - 1), streamed.slice(0, -1));
+		const tail = streamed.at(-1) ?? "";
+		const settledTail = settled[streamed.length - 1] ?? "";
+		ok(stripTerminalSequences(settledTail).startsWith(stripTerminalSequences(tail)), settledTail);
+		strictEqual(stripTerminalSequences(settledTail), `${stripTerminalSequences(tail)}.`);
 	});
 
 	it("streams against one settled prefix array and keeps the regular root equal to the frame", () => {
@@ -902,7 +915,6 @@ describe("stream presentation timing", () => {
 
 describe("Pi TUI compatibility", () => {
 	it("keeps context legend percentages on their row through frame resizing and refresh", () => {
-		let frame!: Component;
 		let onEvent!: (event: { type: string }) => void;
 		let messageTokens = 1000;
 		const ledger = () =>
@@ -917,10 +929,7 @@ describe("Pi TUI compatibility", () => {
 				compactionAuto: true,
 			});
 		const tui = {
-			showOverlay: (component: Component) => {
-				frame = component;
-				return { hide() {} };
-			},
+			showOverlay: () => ({ hide() {} }),
 			requestRender() {},
 		} as unknown as TUI;
 		const handle = openContextOverlay(tui, ledger, {
@@ -934,7 +943,10 @@ describe("Pi TUI compatibility", () => {
 		});
 		try {
 			for (const width of [86, 86, 60, 40, 86]) {
-				const rows = frame.render(width);
+				// The overlay paints in the composer's dock. A body row budget tall enough for every row keeps the
+				// dock's windowing from hiding a group at a narrow width.
+				const rows = dockTop(tui)?.frame.renderDockBody(width, 60) ?? [];
+				ok(rows.length > 0, "the ledger renders in the dock");
 				ok(rows.every((row) => visibleWidth(row) <= width));
 				const plain = rows.map(stripTerminalSequences);
 				for (const group of ledger().meter) {
@@ -984,7 +996,7 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
-	it("keeps the interview full-screen across background updates and restores mouse tracking on close", async () => {
+	it("keeps the interview docked across background updates and restores mouse tracking on close", async () => {
 		const terminal = new RenderingTerminal();
 		const tui = new InstrumentedTuiAltScreen(terminal, {
 			beginFrame() {},
@@ -997,19 +1009,24 @@ describe("Pi TUI compatibility", () => {
 		ok(terminal.writes.at(-1)?.includes("?1006l"), "native text selection is enabled");
 		try {
 			tui.renderNow(true);
+			const entry = dockTop(tui);
+			ok(entry, "the interview mounts in the composer's dock");
 			const initial = session.getBounds();
 			ok(initial);
 			const answer = session.ask([{ question: "Continue?", options: [{ label: "Yes" }, { label: "No" }] }]);
-			deepStrictEqual(session.getBounds(), initial, "one frame serves every round; nothing is remounted");
+			strictEqual(dockTop(tui), entry, "one frame serves every round; nothing is remounted");
+			deepStrictEqual(session.getBounds(), initial);
 			tui.renderNow(true);
 			const compact = session.getBounds();
 			ok(compact);
 			strictEqual(compact.width, terminal.columns);
-			strictEqual(compact.height, terminal.rows);
-			strictEqual(compact.row, 0);
+			strictEqual(compact.height, 0, "the engine overlay paints nothing, so the transcript keeps its rows");
+			const body = entry.frame.renderDockBody(terminal.columns - 4, 16);
+			ok(body.some((row) => stripTerminalSequences(row).includes("Continue?")));
 			tui.addChild(new Text("background agent update", 0, 0));
 			tui.renderNow();
 			deepStrictEqual(session.getBounds(), compact, "background work cannot move the interview");
+			strictEqual(dockTop(tui), entry);
 			terminal.columns = 120;
 			tui.renderNow(true);
 			strictEqual(session.getBounds()?.width, 120);
@@ -1018,12 +1035,15 @@ describe("Pi TUI compatibility", () => {
 			session.setHidden(true);
 			ok(terminal.writes.at(-1)?.includes("?1006h"));
 			strictEqual(session.getBounds(), undefined);
+			strictEqual(dockTop(tui), null, "a hidden interview leaves the dock");
 			session.setHidden(false);
 			tui.renderNow(true);
 			deepStrictEqual(session.getBounds(), compact);
+			strictEqual(dockTop(tui), entry);
 			session.close();
 			ok(terminal.writes.at(-1)?.includes("?1006h"), "mouse tracking restored");
 			strictEqual(session.getBounds(), undefined);
+			strictEqual(dockTop(tui), null);
 			await answer;
 		} finally {
 			session.close();
@@ -1397,11 +1417,11 @@ describe("transcript block grammar", () => {
 		const rows = panel.render(40).map(stripTerminalSequences);
 		const plain = rows.join("\n");
 		doesNotMatch(plain, /\[Clio Coder\]|cache may be cold/u);
-		match(plain, /^ℹ interrupt refused: a dispatch is/mu);
-		match(plain, /^⚠ \[\/context compact\] auto-compaction/mu, "a subsystem tag stays");
+		match(plain, /^i interrupt refused: a dispatch is/mu);
+		match(plain, /^! \[\/context compact\] auto-compaction/mu, "a subsystem tag stays");
 		match(plain, /^✗ context overflow persisted after/mu);
 		match(plain, /^✓ session saved$/mu);
-		for (const row of rows.filter((line) => line.length > 0 && !/^[ℹ⚠✗✓] /u.test(line))) {
+		for (const row of rows.filter((line) => line.length > 0 && !/^[i!✗✓] /u.test(line))) {
 			ok(row.startsWith("  "), `a wrapped notice row left the content column: ${row}`);
 		}
 		for (const row of rows) ok(visibleWidth(row) <= 40, row);
@@ -1418,6 +1438,89 @@ describe("transcript block grammar", () => {
 		ok(rows[0]?.startsWith("✓ [/export] wrote 2301 lines"), rows.join("\n"));
 		ok(rows.length > 1, rows.join("\n"));
 		for (const row of rows.slice(1)) ok(row.startsWith("  "), `continuation left the gutter: ${row}`);
+	});
+
+	// The emitter names the source, so a two-sentence bus notice is a titled callout and a
+	// one-line event keeps its gutter row at every width.
+	it("renders multi-sentence bus notices as titled callouts and leaves one-line events in the gutter", () => {
+		const parked = approvalParkedNotice(
+			"bash",
+			{ classification: { actionClass: "execute" }, kind: "ask", ruleId: "rail-7" } as never,
+			"default",
+		);
+		const escalation = workerEscalationNotice({
+			requestId: "req-1",
+			tool: "bash",
+			actionClass: "execute",
+			origin: "worker:run-9",
+			agentId: "scout",
+			axis: "autonomy:default",
+		});
+		const notices = [
+			[parked, "Approval"],
+			[budgetAlertNotice({ level: "over", currentUsd: 5.12, ceilingUsd: 5 }), "Budget"],
+			[
+				safetyBlockedNotice({
+					tool: "bash",
+					actionClass: "execute",
+					ruleId: "R1",
+					policySource: "safety.yaml",
+					reasonCode: "R1",
+				}),
+				"Safety",
+			],
+			[escalation, "Fleet"],
+			[
+				middlewareHookFailedSessionNotice(
+					{ kind: "hook_failed", registrationId: "guard", hook: "turn_end", message: "boom" },
+					new Set(),
+				),
+				"Hooks",
+			],
+		] as const;
+		for (const [notice, title] of notices) {
+			ok(notice?.source !== undefined, `${title} has an explicit source`);
+			const blocks: Array<(width: number) => string[]> = [];
+			appendNotice(
+				notice.level,
+				notice.text,
+				{ appendReplayBlock: (block) => blocks.push(block), requestRender() {} },
+				notice.source,
+			);
+			for (const width of [40, 60, 120]) {
+				const rows = (blocks[0]?.(width) ?? []).map(stripTerminalSequences);
+				match(rows[0] ?? "", new RegExp(`^ {2}┌─ [!✗] ${title} ─+┐$`, "u"), rows.join("\n"));
+				doesNotMatch(rows.join("\n"), /\[(approval|budget|safety-net|middleware)\]/u);
+				for (const row of rows) ok(visibleWidth(row) <= width, row);
+			}
+		}
+		// The formatter writes the capital; display never changes a source's own text.
+		const budget = budgetAlertNotice({ level: "over", currentUsd: 5.12, ceilingUsd: 5 });
+		ok(budget);
+		match(budget.text, /^\[budget\] Session priced spend/u);
+		const budgetBlocks: Array<(width: number) => string[]> = [];
+		appendNotice(
+			budget.level,
+			budget.text,
+			{ appendReplayBlock: (block) => budgetBlocks.push(block), requestRender() {} },
+			budget.source,
+		);
+		match((budgetBlocks[0]?.(80) ?? []).map(stripTerminalSequences).join("\n"), /│ Session priced spend/u);
+		// A reminder that opens with a command keeps it verbatim; only a memory note is capitalized on display.
+		for (const [source, text, shown] of [
+			["reminder", "npm run test before claiming done.", "│ npm run test before"],
+			["memory", "Memory: you already tried the retry.", "│ You already tried"],
+		] as const) {
+			const commandBlocks: Array<(width: number) => string[]> = [];
+			appendNotice("warn", text, { appendReplayBlock: (block) => commandBlocks.push(block), requestRender() {} }, source);
+			ok((commandBlocks[0]?.(80) ?? []).map(stripTerminalSequences).join("\n").includes(shown), source);
+		}
+		const event: Array<(width: number) => string[]> = [];
+		appendNotice("warn", "Worker approval request req-1 for scout (run-9) expired; fallback deny applied.", {
+			appendReplayBlock: (block) => event.push(block),
+			requestRender() {},
+		});
+		doesNotMatch((event[0]?.(60) ?? []).map(stripTerminalSequences).join("\n"), /┌─/u);
 	});
 
 	it("states guidance middleware attached for the model as one note, never as tool output", () => {

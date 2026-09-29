@@ -451,7 +451,7 @@ export function declaredScopeReplacementNotice(scope: DispatchPathScope): Declar
 		code: "typed_scope_replaced_inferred_paths",
 		level: "warning",
 		omittedPaths,
-		message: `[dispatch scope] typed intent replaced prose path inference; omitted paths: ${renderOmittedPaths(
+		message: `[dispatch scope] Typed intent replaced prose path inference; omitted paths: ${renderOmittedPaths(
 			omittedPaths,
 		)}. Those paths did not select project rules or expand worker authority.`,
 	};
@@ -514,7 +514,7 @@ export function inferredScopeParentTokenNotice(scope: DispatchPathScope): Inferr
 			source: entry.source,
 			confidence: "low",
 		})),
-		message: `[dispatch scope] prose inference resolved path tokens carrying a leading '../' run against the dispatch root: ${renderParentTokens(
+		message: `[dispatch scope] Prose inference resolved path tokens carrying a leading '../' run against the dispatch root: ${renderParentTokens(
 			tokens,
 		)}. An anchored token selects project rules without expanding worker authority; a dropped one took no part in scope.`,
 	};

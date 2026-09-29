@@ -308,7 +308,7 @@ test("/view titles each act with what its row states and ages it from when it ha
 	deepStrictEqual(titles, [
 		["$ ran `npm test` · exit 1", 190],
 		["± edited src/net/retry.js · +1 -1", 125],
-		["ℹ interrupt refused: queued", 60],
+		["i interrupt refused: queued", 60],
 	]);
 	// The call id stays searchable though it is no longer the title.
 	const [bash] = panel.inspectionArtifacts();

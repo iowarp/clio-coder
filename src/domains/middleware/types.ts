@@ -33,7 +33,12 @@ export const MIDDLEWARE_ANNOTATION_SEVERITIES = ["info", "warn"] as const;
 export type MiddlewareAnnotationSeverity = (typeof MIDDLEWARE_ANNOTATION_SEVERITIES)[number];
 
 export type MiddlewareEffect =
-	| { kind: "inject_reminder"; message: string; severity?: MiddlewareReminderSeverity }
+	/**
+	 * `source` names the subsystem a transcript callout is titled with when the
+	 * reminder is not a generic one. Only the model sees the message itself; the
+	 * operator's transcript shows it under this source.
+	 */
+	| { kind: "inject_reminder"; message: string; severity?: MiddlewareReminderSeverity; source?: "memory" }
 	| { kind: "annotate_tool_result"; message: string; severity?: MiddlewareAnnotationSeverity }
 	| { kind: "block_tool"; reason: string; severity: "hard-block" }
 	| { kind: "protect_path"; path: string; reason: string }

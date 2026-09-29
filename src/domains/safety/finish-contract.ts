@@ -173,7 +173,7 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 			return {
 				kind: "engage",
 				reason: "unvalidated_mutation",
-				message: `[Clio Coder] high-rigor finish gate: operator acceptance still requires passing validation for: ${missing.join(", ")}. Run each named check or include its exact id in limitation.paths.`,
+				message: `[Clio Coder] High-rigor finish gate: operator acceptance still requires passing validation for: ${missing.join(", ")}. Run each named check or include its exact id in limitation.paths.`,
 				evidence: [...evidence, ...limitations],
 				mutatedPaths,
 				...(quality.length ? { quality } : {}),

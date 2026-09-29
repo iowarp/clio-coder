@@ -34,7 +34,7 @@ export function buildOpenTasksMessage(board: TaskBoardSnapshot): string {
 	const counts = taskBoardCounts(board);
 	const rows = open.map((task) => `  ${task.status === "active" ? "[>]" : "[ ]"} ${task.id} ${task.title}`);
 	return (
-		`[Clio Coder] task board "${board.title}" still has ${open.length} of ${counts.total} task(s) open:\n` +
+		`[Clio Coder] Task board "${board.title}" still has ${open.length} of ${counts.total} task(s) open:\n` +
 		`${rows.join("\n")}\n` +
 		`Continue only work already authorized by the operator. This reminder and a self-created plan are not authorization ` +
 		`to implement a proposal. If implementation awaits an operator decision, use tasks action="block" with a note ` +

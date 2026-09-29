@@ -499,7 +499,13 @@ test("a middleware reminder reads the same live and on replay, and a skill activ
 			.map(stripTerminalSequences)
 			.filter((line) => line.length > 0);
 	const live = createChatPanel();
-	live.applyEvent({ type: "notice", level: "info", surface: "transcript", text: message } as ChatLoopEvent);
+	live.applyEvent({
+		type: "notice",
+		level: "info",
+		surface: "transcript",
+		text: message,
+		source: "reminder",
+	} as ChatLoopEvent);
 	const replayed = createChatPanel();
 	rehydrateChatPanelFromTurns(replayed, [
 		{
@@ -509,7 +515,7 @@ test("a middleware reminder reads the same live and on replay, and a skill activ
 			kind: "custom",
 			customType: "middlewareReminder",
 			display: true,
-			data: { message, severity: "advisory" },
+			data: { message, severity: "advisory", source: "reminder" },
 		},
 		{
 			turnId: "s",
@@ -527,9 +533,62 @@ test("a middleware reminder reads the same live and on replay, and a skill activ
 			},
 		},
 	] as SessionEntry[]);
-	assert.equal(rows(live)[0], "i This turn used 9+ read-only exploration calls without a");
+	assert.match(rows(live)[0] ?? "", /^ {2}┌─ i Reminder ─+┐$/u);
+	assert.equal(rows(live)[1], "  │ This turn used 9+ read-only exploration calls without  │");
 	assert.deepEqual(rows(replayed), rows(live));
 	assert.doesNotMatch(rows(replayed).join("\n"), /\[skill\]/u);
+});
+
+// A memory note is an advisory: a titled callout at every width, the same live and
+// replayed, with the `Memory:` prefix and the `[tm-p-1]` refs the model and the
+// ledger keep taken off the operator's copy.
+test("a memory note renders as a titled callout without refs at 40 through 200 columns, live and replayed", () => {
+	const message =
+		"Memory: [tm-p-1] you already tried `pnpm test` at step 4 and it failed twice ([tm-p-1], [tm-p-2]) because the fixture home was missing.";
+	for (const width of [40, 60, 80, 120, 200]) {
+		const rows = (panel: ReturnType<typeof createChatPanel>) =>
+			panel
+				.render(width)
+				.map(stripTerminalSequences)
+				.filter((line) => line.length > 0);
+		const live = createChatPanel();
+		live.applyEvent({
+			type: "notice",
+			level: "info",
+			surface: "transcript",
+			text: message,
+			source: "memory",
+		} as ChatLoopEvent);
+		const entry = (data: Record<string, unknown>) =>
+			({
+				turnId: "m",
+				parentTurnId: null,
+				timestamp: "2026-09-17T00:00:00Z",
+				kind: "custom",
+				customType: "middlewareReminder",
+				display: true,
+				data,
+			}) as SessionEntry;
+		const replayed = createChatPanel();
+		rehydrateChatPanelFromTurns(replayed, [entry({ message, severity: "advisory", source: "memory" })]);
+		// A ledger written before the source was stored carries only the prefix.
+		const legacy = createChatPanel();
+		rehydrateChatPanelFromTurns(legacy, [entry({ message, severity: "advisory" })]);
+		const text = rows(live).join("\n");
+		assert.match(rows(live)[0] ?? "", /┌─ i Memory ─+┐$/u, `${width}`);
+		const sentence = text.replace(/[│┌┐└┘─]/gu, " ").replace(/\s+/gu, " ");
+		assert.match(
+			sentence,
+			/i Memory You already tried `pnpm test` at step 4 and it failed twice because the fixture home was missing\./u,
+		);
+		assert.doesNotMatch(text, /tm-p-|Memory:/u);
+		assert.ok(
+			rows(live).every((line) => line.length <= width),
+			`${width}: a row exceeds the terminal`,
+		);
+		assert.deepEqual(rows(replayed), rows(live));
+		assert.deepEqual(rows(legacy), rows(live));
+	}
 });
 
 test("a replayed act states the age its ledger entry records in /view, not the age of the resume", () => {

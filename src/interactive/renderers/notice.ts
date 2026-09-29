@@ -6,13 +6,18 @@
  * stays neutral, and a wrapped notice hangs in the content column. The
  * `[Clio Coder]` product tag is dropped because the whole transcript is
  * Clio's; a subsystem tag such as `[/context compact]` or `[model]` stays,
- * dim, because it names which part of Clio is speaking. Operator tips use a
- * compact frame so they do not read as part of the assistant's answer.
+ * dim, because it names which part of Clio is speaking. An advisory, text
+ * addressed to the operator such as a tip, a reminder, a memory note or a
+ * multi-sentence approval, budget or fleet notice, gets a titled frame instead
+ * so it does not read as part of the assistant's answer.
+ * Which of the two a notice gets is decided by its `source`, never by width.
  *
  * Pure: no I/O, no module-level mutable state beyond the shared theme handle.
  */
+import { taskMemoryNoteForDisplay } from "../../domains/memory/task-memory-ref.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import type { NoticeSource } from "../notice-source.js";
 import { type ClioToken, clioTheme, frame, GLYPH } from "../theme/index.js";
 
 const theme = clioTheme();
@@ -22,9 +27,8 @@ const theme = clioTheme();
 // remainder as the message body.
 const LEADING_TAG = /^(\[[^\]]+\])([\s\S]*)$/u;
 const PRODUCT_TAG = /^\s*\[Clio Coder\]\s*/u;
-const TIP_TAG = /^\[tip\](?:\s+|$)/u;
-const TIP_GUTTER = "  ";
-const TIP_MAX_WIDTH = 88;
+const CALLOUT_GUTTER = "  ";
+const CALLOUT_MAX_WIDTH = 88;
 
 export type NoticeMark = "info" | "success" | "warning" | "error" | "retry" | "cancelled";
 
@@ -54,23 +58,56 @@ function noticeText(text: string): string {
 	return sanitizeCallTargetText(text).replace(PRODUCT_TAG, "").trim();
 }
 
-function renderTipCard(text: string, width: number): string[] {
-	if (text.length === 0) return [];
-	if (width < 8) return wrapTextWithAnsi(theme.fg("body", text), Math.max(1, width));
-	const boxWidth = Math.min(TIP_MAX_WIDTH, width - TIP_GUTTER.length);
-	const body = wrapTextWithAnsi(text, boxWidth - 4);
-	const title = theme.style("guidance", `${GLYPH.info} Tip`, { bold: true });
-	return frame(theme, title, body, boxWidth).map((line) => `${TIP_GUTTER}${line}`);
+/** The text without a leading `[tag]` the callout title already says. */
+function withoutTag(...tags: string[]): (text: string) => string {
+	return (text) => {
+		for (const tag of tags) if (text.startsWith(`[${tag}]`)) return text.slice(tag.length + 2).trimStart();
+		return text;
+	};
 }
 
 /**
- * One transcript notice. Routine marks stay in the gutter; operator tips sit
- * in a compact frame. Empty text renders nothing.
+ * What each advisory source is called and how its text reads once the harness plumbing is off it.
+ * Clio's own formatters write sentences that already open with a capital, because a message may open
+ * with a command or identifier (`/context`, `npm run x`) that display must not change. A memory note is
+ * model-written, so its display form (`taskMemoryNoteForDisplay`) is the one place that capitalizes.
  */
-export function renderNoticeRow(text: string, mark: NoticeMark, width: number): string[] {
+const CALLOUTS: Readonly<Record<NoticeSource, { title: string; body(text: string): string }>> = {
+	tip: { title: "Tip", body: (text) => text },
+	reminder: { title: "Reminder", body: (text) => text },
+	memory: { title: "Memory", body: taskMemoryNoteForDisplay },
+	watchdog: { title: "Watchdog", body: withoutTag("watchdog") },
+	images: { title: "Images", body: (text) => text },
+	approval: { title: "Approval", body: withoutTag("approval") },
+	budget: { title: "Budget", body: withoutTag("budget") },
+	safety: { title: "Safety", body: withoutTag("safety-net") },
+	// A worker's escalation reads `[approval] Worker ...` and a scope notice `[dispatch scope] ...`.
+	fleet: { title: "Fleet", body: withoutTag("approval", "dispatch scope") },
+	hooks: { title: "Hooks", body: withoutTag("middleware") },
+};
+
+function renderCallout(source: NoticeSource, text: string, mark: NoticeMark, width: number): string[] {
+	const { title, body: display } = CALLOUTS[source];
+	const shown = display(text);
+	if (shown.length === 0) return [];
+	if (width < 8) return wrapTextWithAnsi(theme.fg("body", shown), Math.max(1, width));
+	const boxWidth = Math.min(CALLOUT_MAX_WIDTH, width - CALLOUT_GUTTER.length);
+	const { glyph, token } = MARKS[mark];
+	const heading = theme.style(token, `${glyph} ${title}`, { bold: true });
+	return frame(theme, heading, wrapTextWithAnsi(shown, boxWidth - 4), boxWidth).map(
+		(line) => `${CALLOUT_GUTTER}${line}`,
+	);
+}
+
+/**
+ * One transcript notice. An event keeps its mark in the gutter; an advisory,
+ * which the emitting source names, sits in a titled frame. Empty text renders
+ * nothing.
+ */
+export function renderNoticeRow(text: string, mark: NoticeMark, width: number, source?: NoticeSource): string[] {
 	const body = noticeText(text);
 	if (body.length === 0) return [];
-	if (mark === "info" && TIP_TAG.test(body)) return renderTipCard(body.replace(TIP_TAG, ""), width);
+	if (source !== undefined) return renderCallout(source, body, mark, width);
 	const { glyph, token } = MARKS[mark];
 	const tagged = LEADING_TAG.exec(body);
 	const styled = tagged ? styleTaggedNotice(body) : theme.fg("body", body);

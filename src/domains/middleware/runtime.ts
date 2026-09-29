@@ -321,6 +321,7 @@ export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffec
 		case "inject_reminder": {
 			const cloned: MiddlewareEffect = { kind: "inject_reminder", message: effect.message };
 			if (effect.severity !== undefined) cloned.severity = effect.severity;
+			if (effect.source !== undefined) cloned.source = effect.source;
 			return cloned;
 		}
 		case "annotate_tool_result": {

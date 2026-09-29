@@ -58,6 +58,7 @@ import type { ChatLoopEvent, RetryStatusPayload, SpeculativeDispatchCounts } fro
 import { hasStructuredToolCall, isSelfExplainingAbort, toolResultSummary } from "./chat-loop-messages.js";
 import type { ChatPanel, ReplayedRunFacts } from "./chat-panel.js";
 import { OPERATOR_COMMAND_ENTRY, renderOperatorCommandRows } from "./command-output.js";
+import { isNoticeSource, type NoticeSource } from "./notice-source.js";
 import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
 import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
 import { type NoticeMark, renderNoticeRow } from "./renderers/notice.js";
@@ -990,7 +991,14 @@ function operatorCommandText(data: unknown): string | null {
 function renderReminderMessageEntry(entry: CustomEntry, width: number): string[] {
 	const data = payloadObject(entry.data);
 	const message = typeof data?.message === "string" && data.message.length > 0 ? data.message : "middleware reminder";
-	return renderNoticeRow(message, reminderMark(data?.severity), width);
+	// A reminder is an advisory. Entries written before the source was stored
+	// have none, and a memory note among them still carries its `Memory:` prefix.
+	const source: NoticeSource = isNoticeSource(data?.source)
+		? data.source
+		: message.startsWith("Memory:")
+			? "memory"
+			: "reminder";
+	return renderNoticeRow(message, reminderMark(data?.severity), width, source);
 }
 
 function renderModelChangeEntry(entry: ModelChangeEntry, width: number): string[] {
