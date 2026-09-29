@@ -1,6 +1,7 @@
 import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, utimesSync, writeSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname } from "node:path";
+import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 import { processAlive, processBirthToken } from "./process-identity.js";
 
@@ -163,10 +164,10 @@ export function withStateFileLockSync<T>(targetPath: string, fn: () => T, option
 	try {
 		options.signal?.throwIfAborted();
 		mkdirSync(dirname(lockPath), { recursive: true });
-		const deadlineMs = Date.now() + timeoutMs;
+		const deadlineMs = performance.now() + timeoutMs;
 		for (let attempt = 1; !tryAcquire(lockPath); attempt += 1) {
 			options.signal?.throwIfAborted();
-			if (Date.now() > deadlineMs) throw timeoutError(lockPath, timeoutMs);
+			if (performance.now() > deadlineMs) throw timeoutError(lockPath, timeoutMs);
 			// Atomics.wait rather than a timer: the callers of this variant are
 			// inside host APIs that cannot yield.
 			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, backoffMs(attempt));
@@ -194,10 +195,10 @@ export async function withStateFileLock<T>(
 	try {
 		options.signal?.throwIfAborted();
 		mkdirSync(dirname(lockPath), { recursive: true });
-		const deadlineMs = Date.now() + timeoutMs;
+		const deadlineMs = performance.now() + timeoutMs;
 		for (let attempt = 1; !tryAcquire(lockPath); attempt += 1) {
 			options.signal?.throwIfAborted();
-			if (Date.now() > deadlineMs) throw timeoutError(lockPath, timeoutMs);
+			if (performance.now() > deadlineMs) throw timeoutError(lockPath, timeoutMs);
 			const base = backoffMs(attempt);
 			const delayMs = base + Math.floor(Math.random() * base);
 			if (options.signal) await sleep(delayMs, undefined, { signal: options.signal });
