@@ -1,4 +1,5 @@
 import { dirname, resolve } from "node:path";
+import { canonicalizePath } from "../core/path-canonical.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
 import {
 	countDatasetRows,
@@ -129,7 +130,13 @@ function runExport(parsed: ParsedArgs): number {
 		return 2;
 	}
 	const destination = resolve(parsed.out);
-	if (dirname(destination) === datasetDir()) {
+	const parent = canonicalizePath(dirname(destination));
+	const dataset = canonicalizePath(datasetDir());
+	if (parent === null || dataset === null) {
+		printError("--out could not be checked against the dataset directory");
+		return 2;
+	}
+	if (parent === dataset) {
 		printError("--out must not point into the dataset directory");
 		return 2;
 	}
