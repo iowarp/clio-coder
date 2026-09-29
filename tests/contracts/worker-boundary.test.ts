@@ -109,12 +109,22 @@ describe("worker boundary", () => {
 		);
 	});
 
-	it("keeps live capability probes and explicit target limits authoritative", () => {
+	it("keeps live capability probes authoritative over metadata and operator values", () => {
 		const defaults = { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: 8_192 };
 		const probed = mergeCapabilities(defaults, { tools: true }, { tools: false, contextWindow: 32_768 }, null);
-		strictEqual(probed.tools, true, "written model metadata may correct the probe");
+		strictEqual(probed.tools, false, "a reported false is a report that written model metadata does not repair");
 		strictEqual(probed.contextWindow, 32_768, "the served window remains live authority");
-		strictEqual(mergeCapabilities(defaults, { tools: true }, { tools: true }, { tools: false }).tools, false);
+		strictEqual(
+			mergeCapabilities(defaults, { tools: true }, { tools: true }, { tools: false }).tools,
+			false,
+			"an operator false may lower a reported true",
+		);
+		strictEqual(
+			mergeCapabilities(defaults, null, { tools: false }, { tools: true }).tools,
+			false,
+			"an operator true never raises a reported false",
+		);
+		strictEqual(mergeCapabilities(defaults, { tools: true }, null, { tools: false }).tools, false);
 	});
 
 	it("round-trips a typed worker result and rejects contradictory reports", () => {

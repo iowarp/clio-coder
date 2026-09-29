@@ -9,7 +9,7 @@ import { registerClioOAuthProviders } from "../../engine/oauth.js";
 import type { ConfigContract } from "../config/contract.js";
 
 import { authNotRequiredStatus, openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "./auth/index.js";
-import { mergeCapabilities } from "./capabilities.js";
+import { hintCapabilities, mergeCapabilities } from "./capabilities.js";
 import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catalog.js";
 import type {
 	ContextWindowProvenance,
@@ -22,9 +22,11 @@ import type {
 import { credentialsPresent } from "./credentials.js";
 import { recordEndpointSlotsFromStatus } from "./endpoint-capacity.js";
 import { resolveProviderKnowledgeBaseRoots } from "./knowledge-base-path.js";
-import { probeCapabilitiesForModel } from "./model-capabilities.js";
+import { probeCapabilitiesForModel, withholdUnreportedServingWindow } from "./model-capabilities.js";
+import { compareConfiguredModelProfiles } from "./model-profiles.js";
 import { loadPluginRuntimes } from "./plugins.js";
 import { probeToolCall } from "./probe/tool-call.js";
+import { createProfileKnowledgeBase } from "./profile-knowledge.js";
 import { getRuntimeRegistry } from "./registry.js";
 import { registerBuiltinRuntimes } from "./runtimes/builtins.js";
 import { readTargetModelSnapshot, recordTargetModelSnapshot } from "./target-model-cache.js";
@@ -107,27 +109,29 @@ function capabilitiesFor(
 	probe: ProbeMerge,
 	kb: KnowledgeBase,
 ): MergedCapabilities {
-	const kbHit = target.defaultModel ? kb.lookup(target.defaultModel) : null;
+	const kbHit = target.defaultModel ? kb.lookup(target.defaultModel, desc.id) : null;
 	const catalogModel = target.defaultModel ? getCatalogModelForRuntime(desc.id, target.defaultModel) : undefined;
 	const base = capabilitiesFromCatalogModel(desc.defaultCapabilities, catalogModel);
 	const probeCaps = probeCapabilitiesForModel({ target, ...probe }, target.defaultModel);
 	const userOverride = target.capabilities ?? null;
-	const capabilities = mergeCapabilities(base, kbHit?.entry.capabilities ?? null, probeCaps, userOverride);
+	const merged = mergeCapabilities(base, hintCapabilities(kbHit?.entry), probeCaps, userOverride);
+	const { capabilities, withheld } = withholdUnreportedServingWindow(desc, merged, probeCaps, userOverride);
 	return {
 		capabilities,
-		contextWindowProvenance: contextWindowProvenanceOf(kbHit, catalogModel, probeCaps, userOverride),
+		// A withheld window has no source to name; `runtime-default` is the label for "nothing answered".
+		contextWindowProvenance: withheld
+			? "runtime-default"
+			: contextWindowProvenanceOf(catalogModel, probeCaps, userOverride),
 	};
 }
 
 function contextWindowProvenanceOf(
-	kbHit: ReturnType<KnowledgeBase["lookup"]> | null,
 	catalogModel: ReturnType<typeof getCatalogModelForRuntime>,
 	probeCaps: Partial<CapabilityFlags> | null,
 	userOverride: Partial<CapabilityFlags> | null,
 ): ContextWindowProvenance {
 	if (positiveWindow(userOverride?.contextWindow) !== undefined) return "configured";
 	if (positiveWindow(probeCaps?.contextWindow) !== undefined) return "discovered";
-	if (positiveWindow(kbHit?.entry.capabilities?.contextWindow) !== undefined) return "catalog";
 	if (positiveWindow(catalogModel?.contextWindow) !== undefined) return "catalog";
 	return "runtime-default";
 }
@@ -312,7 +316,12 @@ export function createProvidersBundle(
 ): DomainBundle<ProvidersContract> {
 	const registry = getRuntimeRegistry();
 	const authStore = openAuthStorage();
-	const kb = loadKnowledgeBase();
+	const legacyKb = loadKnowledgeBase();
+	const profileKb = createProfileKnowledgeBase(legacyKb, (message) =>
+		writeDiagnostic(`[providers:profiles] ${message}`),
+	);
+	const kb: KnowledgeBase = profileKb;
+	let lastProfileComparison: string | null = null;
 	const statuses = new Map<string, TargetStatus>();
 	const reasoningCache = new Map<string, true>();
 	const unsubscribeConfigListeners: Array<() => void> = [];
@@ -475,7 +484,10 @@ export function createProvidersBundle(
 			context.bus.emit(BusChannels.ProviderHealth, { id: target.id, status });
 			return status;
 		}
-		if (!live || typeof desc.probe !== "function") {
+		// A runtime with no probe may still report serving windows. That source is
+		// supplementary, so its failure below never marks the target down.
+		const probeRuntime = desc.probe ?? desc.probeServingWindows;
+		if (!live || typeof probeRuntime !== "function") {
 			const status = buildStatus(target, desc, null, previous);
 			statuses.set(target.id, status);
 			return status;
@@ -500,9 +512,16 @@ export function createProvidersBundle(
 		if (!currentProbeTarget(target)) return null;
 		let probeResult: ProbeResult;
 		try {
-			probeResult = await desc.probe(target, probeCtx);
+			probeResult = await probeRuntime.call(desc, target, probeCtx);
 		} catch (err) {
 			probeResult = { ok: false, error: err instanceof Error ? err.message : String(err) };
+		}
+		if (desc.probe === undefined && !probeResult.ok) {
+			probeResult = {
+				ok: true,
+				...(probeResult.latencyMs !== undefined ? { latencyMs: probeResult.latencyMs } : {}),
+				notes: [`Serving window unknown: ${probeResult.error ?? "the provider reported no window metadata"}.`],
+			};
 		}
 		options?.signal?.throwIfAborted();
 		if (!currentProbeTarget(target)) return null;
@@ -636,7 +655,7 @@ export function createProvidersBundle(
 		if (desc.kind !== "http") return skipped(`runtime kind '${desc.kind}' does not stream through the engine`);
 		let model: ReturnType<RuntimeDescriptor["synthesizeModel"]>;
 		try {
-			model = desc.synthesizeModel(target, modelId, kb.lookup(modelId));
+			model = desc.synthesizeModel(target, modelId, kb.lookup(modelId, desc.id));
 		} catch (err) {
 			return skipped(`model synthesis failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
@@ -702,6 +721,29 @@ export function createProvidersBundle(
 
 	async function probeAll(): Promise<void> {
 		const settings = readConfig();
+		const profiles = profileKb.profiles();
+		if (profiles) {
+			try {
+				const comparison = compareConfiguredModelProfiles(options.getSettings?.() ?? settings, profiles, legacyKb);
+				const signature = JSON.stringify(comparison);
+				if (signature !== lastProfileComparison) {
+					lastProfileComparison = signature;
+					for (const row of comparison) {
+						if (!row.profileId) {
+							writeDiagnostic(
+								`[providers:profiles:compare] unmatched target=${row.targetId} runtime=${row.runtimeId} model=${row.modelId ?? "(unset)"} legacy=${row.legacyFamily ?? "none"}`,
+							);
+						} else if (row.differentFields.length > 0) {
+							writeDiagnostic(
+								`[providers:profiles:compare] differs target=${row.targetId} model=${row.modelId} profile=${row.profileId} fields=${row.differentFields.join(",")}`,
+							);
+						}
+					}
+				}
+			} catch (err) {
+				writeDiagnostic(`[providers:profiles:compare] failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
+		}
 		const next = new Map<string, TargetStatus>();
 		for (const previous of statuses.values()) {
 			const current = settings.targets.find((target) => target.id === previous.target.id);

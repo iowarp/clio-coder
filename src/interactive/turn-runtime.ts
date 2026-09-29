@@ -293,12 +293,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	 * refresh immediately on the next poll or submit. A failed probe is retried
 	 * after the TTL and never extends a prior serving-window claim.
 	 *
-	 * Every tier but `cloud` is probed. Only a hosted provider's window is
-	 * knowable without asking: a self-hosted OpenAI-compatible gateway serves
-	 * whatever context it was launched with, and that number lives on the
+	 * Every tier but `cloud` is probed. A self-hosted OpenAI-compatible gateway
+	 * serves whatever context it was launched with, and that number lives on the
 	 * server. Restricting this to `local-native` meant an `openai-compat`
 	 * target ran the whole session on an assumed window while the server was
-	 * one HTTP GET away from reporting the real one.
+	 * one HTTP GET away from reporting the real one. A hosted provider is asked
+	 * too when its runtime reports windows (`probeServingWindows`); the rest of
+	 * the cloud runtimes keep their labeled catalog fallback.
 	 */
 	const TARGET_PROBE_TTL_MS = 30_000;
 	const TARGET_PROBE_POLL_MS = 5_000;
@@ -314,7 +315,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const target = deps.providers.getTarget(targetId);
 		if (!target) return;
 		const runtimeDesc = deps.providers.getRuntime(target.runtime);
-		if (!runtimeDesc || runtimeDesc.tier === "cloud") return;
+		if (!runtimeDesc || (runtimeDesc.tier === "cloud" && typeof runtimeDesc.probeServingWindows !== "function")) return;
 		const key = JSON.stringify([targetId, wireModelId, target]);
 		const inFlight = targetProbesInFlight.get(key);
 		if (inFlight) {
@@ -373,7 +374,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	};
 
 	const synthesizeModel = (target: ChatLoopTarget): EngineModel => {
-		const kbHit = deps.providers.knowledgeBase?.lookup(target.wireModelId) ?? null;
+		const kbHit = deps.providers.knowledgeBase?.lookup(target.wireModelId, target.runtime.id) ?? null;
 		const synth = target.runtime.synthesizeModel(target.target, target.wireModelId, kbHit);
 		target.runtimeResolution = refineRuntimeTargetWithModelHints(
 			target.runtimeResolution,

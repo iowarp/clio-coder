@@ -1,6 +1,7 @@
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { hintCapabilities, ignoredCapabilityRaises } from "../../src/domains/providers/capabilities.js";
 import { EMPTY_CAPABILITIES, mergeCapabilities } from "../../src/domains/providers/index.js";
 import { capabilitiesFromLiteLLMModelInfo } from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
@@ -29,15 +30,41 @@ describe("capability precedence", () => {
 		strictEqual(mergeCapabilities(EMPTY_CAPABILITIES, { vision: true }, { tools: true }, null).vision, true);
 	});
 
-	it("the knowledge base still corrects a probe that over-claims", () => {
-		strictEqual(mergeCapabilities(EMPTY_CAPABILITIES, { vision: false }, { vision: true }, null).vision, false);
-		strictEqual(mergeCapabilities(EMPTY_CAPABILITIES, { tools: true }, { tools: false }, null).tools, true);
+	it("a reported false is a report and a reported true is not repaired by the profile", () => {
+		strictEqual(mergeCapabilities(EMPTY_CAPABILITIES, { vision: false }, { vision: true }, null).vision, true);
+		strictEqual(mergeCapabilities(EMPTY_CAPABILITIES, { tools: true }, { tools: false }, null).tools, false);
 	});
 
-	it("a target-level override outranks the deployment", () => {
-		strictEqual(
-			mergeCapabilities(EMPTY_CAPABILITIES, { vision: true }, { vision: false }, { vision: true }).vision,
-			true,
-		);
+	it("an operator value fills only what the server left silent", () => {
+		const declared = { vision: true, tools: true, reasoning: true };
+		strictEqual(mergeCapabilities(EMPTY_CAPABILITIES, declared, { vision: false }, { vision: true }).vision, false);
+		strictEqual(mergeCapabilities(EMPTY_CAPABILITIES, declared, { tools: true }, { vision: false }).vision, false);
+		strictEqual(mergeCapabilities(EMPTY_CAPABILITIES, declared, null, { reasoning: false }).reasoning, false);
+	});
+
+	it("an operator false lowers a reported true, and an operator true never raises a reported false", () => {
+		const reported = { tools: true, vision: false, reasoning: true };
+		const merged = mergeCapabilities(EMPTY_CAPABILITIES, null, reported, { tools: false, vision: true, reasoning: true });
+		strictEqual(merged.tools, false);
+		strictEqual(merged.vision, false);
+		strictEqual(merged.reasoning, true);
+		deepStrictEqual(ignoredCapabilityRaises(reported, { tools: false, vision: true, reasoning: true }), ["vision"]);
+		deepStrictEqual(ignoredCapabilityRaises({ vision: true }, { vision: true }), []);
+		deepStrictEqual(ignoredCapabilityRaises(null, { vision: true }), []);
+	});
+
+	it("an operator limit only lowers a live limit, and the profile adds no window", () => {
+		const live = { contextWindow: 131_072, maxTokens: 16_384 };
+		const base = { ...EMPTY_CAPABILITIES, contextWindow: 8_192 };
+		const hint = hintCapabilities({ capabilities: { tools: true, contextWindow: 1_048_576, maxTokens: 65_536 } });
+		strictEqual(mergeCapabilities(base, hint, live, { contextWindow: 262_144 }).contextWindow, 131_072);
+		strictEqual(mergeCapabilities(base, hint, live, { contextWindow: 32_768 }).contextWindow, 32_768);
+		strictEqual(mergeCapabilities(base, hint, null, { contextWindow: 262_144 }).contextWindow, 262_144);
+		strictEqual(mergeCapabilities(base, hint, null, null).contextWindow, 8_192);
+		strictEqual(mergeCapabilities(base, hint, live, { maxTokens: 65_536 }).maxTokens, 16_384);
+		strictEqual(mergeCapabilities(base, hint, null, null).maxTokens, 0);
+		const declaredCap = hintCapabilities({ capabilities: {}, modelMaxOutput: 8_192 });
+		strictEqual(mergeCapabilities(base, declaredCap, null, null).maxTokens, 8_192);
+		strictEqual(mergeCapabilities(base, declaredCap, live, null).maxTokens, 16_384);
 	});
 });

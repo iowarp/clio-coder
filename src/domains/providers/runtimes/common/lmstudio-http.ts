@@ -302,19 +302,42 @@ export function lmStudioReasoningLevels(options: ReadonlyArray<string> | undefin
 	return [...new Set(levels)];
 }
 
+/**
+ * The levels LM Studio itself lists in `allowed_options`, in Clio's vocabulary. `on` is the
+ * binary control's active state, which Clio spells `low`, so `["off", "on"]` is `["off", "low"]`.
+ * Unlike `lmStudioReasoningLevels`, nothing is inferred beyond what the server names.
+ */
+export function lmStudioNativeReasoningLevels(options: ReadonlyArray<string>): ThinkingLevel[] {
+	const named = new Set(options.map((option) => (option === "on" ? "low" : option)));
+	return THINKING_LEVELS.filter((level) => named.has(level));
+}
+
+const LM_STUDIO_EFFORT_RUNGS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+/**
+ * The `reasoning_effort` value for a resolved level. With the model's advertised options the
+ * sent value is the level itself when the model lists it, otherwise the nearest listed level at
+ * or above it, otherwise the highest listed one below. A route that lists `low`, `medium` and
+ * `xhigh` therefore receives `xhigh` for a resolved `xhigh`, never a rounded-down `low`.
+ */
 export function lmStudioReasoningEffort(
 	level: ThinkingLevel,
 	options?: ReadonlyArray<string>,
-): "none" | "low" | "medium" | "high" | undefined {
+): "none" | (typeof LM_STUDIO_EFFORT_RUNGS)[number] | undefined {
 	// `allowed_options` describes the model's binary setting, but LM Studio's
 	// OpenAI-compatible request schema still accepts only effort-level values.
 	// Omit an active override for binary/default-on models; sending `low` works
 	// only through a warning and sending the advertised literal `on` is a 400.
 	if (options?.includes("on") && options.includes("off")) return level === "off" ? "none" : undefined;
 	if (level === "off") return "none";
-	if (level === "medium" && options?.includes("medium") !== false) return "medium";
-	if ((level === "high" || level === "xhigh" || level === "max") && options?.includes("high") !== false) return "high";
-	return "low";
+	const wanted = level === "minimal" ? "low" : level;
+	if (options === undefined) {
+		if (wanted === "medium") return "medium";
+		return wanted === "high" || wanted === "xhigh" || wanted === "max" ? "high" : "low";
+	}
+	const offered = LM_STUDIO_EFFORT_RUNGS.filter((rung) => options.includes(rung));
+	const wantedIndex = LM_STUDIO_EFFORT_RUNGS.indexOf(wanted as (typeof LM_STUDIO_EFFORT_RUNGS)[number]);
+	return offered.find((rung) => LM_STUDIO_EFFORT_RUNGS.indexOf(rung) >= wantedIndex) ?? offered.at(-1) ?? "low";
 }
 
 function v0Models(data: unknown): LmStudioModelInfo[] | null {

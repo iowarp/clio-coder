@@ -215,6 +215,17 @@ export interface RuntimeDescriptor {
 	hidden?: boolean;
 	probe?(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult>;
 	/**
+	 * Per-model windows a hosted provider reports about itself, for a runtime
+	 * that has no `probe`. Configure, doctor and the model lists key on `probe`
+	 * meaning "reachability and a live model list", so a window-only source
+	 * stays apart from it. Its result merges like a probe's (`modelCapabilities`
+	 * carries the serving window, `modelStates[].modelMaxContextLength` the
+	 * model maximum) but is supplementary: a failure leaves the target usable
+	 * with an unknown window instead of marking it down. The selected route
+	 * re-asks on the same TTL as a local runtime's probe.
+	 */
+	probeServingWindows?(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult>;
+	/**
 	 * Window this target asks the server to open the model at on every request,
 	 * when the runtime sends one (Ollama `num_ctx`). The server reloads the
 	 * model at that size, so it outranks whatever window is loaded now.

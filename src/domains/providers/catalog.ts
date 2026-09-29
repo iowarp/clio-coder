@@ -1,6 +1,6 @@
 import { createEngineAi, getEngineSupportedThinkingLevels } from "../../engine/ai.js";
 import type { Api, KnownProvider, Model } from "../../engine/types.js";
-import { mergeCapabilities } from "./capabilities.js";
+import { hintCapabilities, mergeCapabilities } from "./capabilities.js";
 import { acceptsImageInput } from "./image-input.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
 import type { CostProvenance } from "./types/cost-provenance.js";
@@ -142,7 +142,7 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 	const builtin = getCatalogModelForRuntime(input.runtimeId, input.wireModelId);
 	const caps = mergeCapabilities(
 		capabilitiesFromCatalogModel(input.defaultCapabilities, builtin),
-		input.kb?.entry.capabilities ?? null,
+		hintCapabilities(input.kb?.entry),
 		null,
 		input.target.capabilities ?? null,
 	);

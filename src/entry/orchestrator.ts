@@ -484,7 +484,7 @@ function prepareBackgroundMemoryModel(providers: ProvidersContract, targetId: st
 		const detail = firstRuntimeResolutionError(resolved.diagnostics) ?? "background target resolution failed";
 		throw new Error(detail);
 	}
-	const kbHit = providers.knowledgeBase?.lookup(resolved.target.wireModelId) ?? null;
+	const kbHit = providers.knowledgeBase?.lookup(resolved.target.wireModelId, resolved.target.runtime.id) ?? null;
 	const model = resolved.target.runtime.synthesizeModel(resolved.target.target, resolved.target.wireModelId, kbHit);
 	const refined = refineRuntimeTargetWithModelHints(resolved.target, model, providers.knowledgeBase);
 	applyModelCapabilityPatch(model, refined.capabilities);
@@ -722,7 +722,9 @@ function agentRoleToolWarnings(providers: ProvidersContract, settings: Readonly<
 			// the flag is only the runtime's conservative floor. Dispatch admission
 			// probes the route itself before it refuses a worker.
 			const declared =
-				status.target.capabilities?.tools ?? providers.knowledgeBase?.lookup(wireModelId)?.entry.capabilities?.tools;
+				status.target.capabilities?.tools ??
+				providers.knowledgeBase?.lookup(wireModelId, status.runtime?.id ?? status.target.runtime)?.entry.capabilities
+					?.tools;
 			if (
 				declared === undefined &&
 				status.health.lastCheckAt === null &&
@@ -776,14 +778,11 @@ async function resolveCompactionModel(
 		requestedThinkingLevel: "off",
 		requireTools: false,
 		requireStreaming: true,
-		requireOutputBudget: true,
 	});
 	if (!resolved.ok) {
 		// Configured identifiers and provider diagnostics can contain terminal controls.
 		// Keep the failure actionable without echoing arbitrary provider/config text.
-		throw new Error(
-			"context.compaction.model cannot run as a summarizer; select an available HTTP chat model with an output budget",
-		);
+		throw new Error("context.compaction.model cannot run as a summarizer; select an available HTTP chat model");
 	}
 	const route = resolved.target;
 	let model: EngineModel;
@@ -791,15 +790,12 @@ async function resolveCompactionModel(
 		model = route.runtime.synthesizeModel(
 			route.target,
 			route.wireModelId,
-			providers.knowledgeBase?.lookup(route.wireModelId) ?? null,
+			providers.knowledgeBase?.lookup(route.wireModelId, route.runtime.id) ?? null,
 		);
 	} catch {
 		throw new Error("context.compaction.model could not be prepared; check the selected target/model configuration");
 	}
 	const refined = refineRuntimeTargetWithModelHints(route, model, providers.knowledgeBase);
-	if (refined.capabilityDecisions.maxTokens <= 0) {
-		throw new Error("context.compaction.model has no output budget; select a model with a known positive output limit");
-	}
 	applyModelCapabilityPatch(model, refined.capabilities);
 	let apiKey: string | undefined = LOCAL_API_KEY_FALLBACK;
 	if (targetRequiresAuth(route.target, route.runtime)) {

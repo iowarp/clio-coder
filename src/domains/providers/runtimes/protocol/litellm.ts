@@ -42,14 +42,15 @@ import { stripTrailingSlash, synthLocalModel, withV1 } from "../common/local-syn
 const LITELLM_PROVIDER = "litellm";
 
 /**
- * Conservative until the probe answers. A gateway that does not publish
- * `model_info` has told Clio nothing, and claiming tools on a target whose tool
- * surface is unknown produces a worker that fails on its first tool call rather
- * than one that is never admitted.
+ * `tools` is on until a report says otherwise. A gateway that does not publish
+ * `model_info`, or a first probe that failed, has told Clio nothing, and unknown
+ * must never mean "no tools": without the schemas the model prints raw
+ * `<tool_call>` text instead of calling. A live `supports_function_calling:
+ * false`, an operator value or a profile still turns tools off.
  */
 const defaultCapabilities: CapabilityFlags = {
 	chat: true,
-	tools: false,
+	tools: true,
 	reasoning: false,
 	vision: false,
 	audio: false,

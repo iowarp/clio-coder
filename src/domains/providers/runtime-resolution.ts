@@ -1,5 +1,6 @@
 import { runOverrides } from "../../core/run-overrides.js";
 import { targetRequiresAuth } from "./auth/index.js";
+import { ignoredCapabilityRaises } from "./capabilities.js";
 import { getCatalogModelForRuntime, resolveCostProvenance } from "./catalog.js";
 import type { ProvidersContract, TargetStatus } from "./contract.js";
 import { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
@@ -254,8 +255,14 @@ function appendCapabilityDiagnostics(
 		diagnostics.push(diagnostic("error", "streaming-unsupported", `target '${targetId}' cannot stream responses`));
 	}
 	if (input.requireOutputBudget === true && decisions.maxTokens <= 0) {
+		// Unknown is a normal state: no server or profile named a cap, so the configured request
+		// budget applies and the server enforces its own. Info keeps it out of every start-up notice.
 		diagnostics.push(
-			diagnostic("warning", "output-budget-unknown", `target '${targetId}' does not expose a positive output budget`),
+			diagnostic(
+				"info",
+				"output-budget-unknown",
+				`target '${targetId}' does not report an output limit; the request budget applies and the server enforces its own`,
+			),
 		);
 	}
 	for (const capability of input.requiredCapabilities ?? []) {
@@ -498,6 +505,16 @@ export function resolveRuntimeTarget(
 		// the first authority to reject a request that exceeds its limit.
 		diagnostics.push(diagnostic("warning", "context-window-unverified", contextWindowDetails.provenanceNotice));
 	}
+	// The server's report stands over an operator claim; say so where the resolved capabilities are shown.
+	for (const flag of ignoredCapabilityRaises(modelProbe, target.capabilities)) {
+		diagnostics.push(
+			diagnostic(
+				"info",
+				"capability-override-ignored",
+				`target '${targetId}' sets ${flag}: true, but the server reports ${flag} unsupported for '${wireModelId}'; the report stands`,
+			),
+		);
+	}
 
 	const modelRuntime = resolveTargetRuntimeCapabilities(
 		target,
@@ -729,7 +746,7 @@ function resolveMaxOutputTokensField(
 	const live = positiveWindow(probedMaxTokens);
 	const configured = positiveWindow(target.capabilities?.maxTokens);
 	const modelMaximum =
-		positiveWindow(knowledgeBase?.lookup(modelId)?.entry.capabilities?.maxTokens) ??
+		positiveWindow(knowledgeBase?.lookup(modelId, runtime.id)?.entry.modelMaxOutput) ??
 		positiveWindow(getCatalogModelForRuntime(runtime.id, modelId)?.maxTokens);
 	if (live !== undefined) {
 		return configured !== undefined && configured < live
@@ -761,14 +778,15 @@ export function resolveContextWindowDetails(
 	modelMaximumObservedAt: string | null = null,
 ): ContextWindowDetails {
 	const catalogModel = getCatalogModelForRuntime(runtime.id, wireModelId);
-	const kbHit = knowledgeBase?.lookup(wireModelId) ?? null;
+	const kbHit = knowledgeBase?.lookup(wireModelId, runtime.id) ?? null;
 
-	// Model-specific knowledge, most live first.
+	// Model-specific knowledge, most live first. A profile's ceiling and Pi's catalog
+	// row are declared maxima, so neither becomes the window this route serves.
 	let modelDeclared: number | undefined;
 	let modelDeclaredSource: ContextWindowDetails["contextWindowSource"] = "unknown";
 	const hintWindow = positiveWindow(modelHintContextWindow);
 	const reportedMaximum = positiveWindow(reportedModelMaximum);
-	const kbWindow = positiveWindow(kbHit?.entry.capabilities?.contextWindow);
+	const kbWindow = positiveWindow(kbHit?.entry.modelMaxContext);
 	const catalogWindow = positiveWindow(catalogModel?.contextWindow);
 	if (reportedMaximum !== undefined) {
 		modelDeclared = reportedMaximum;
@@ -827,6 +845,17 @@ export function resolveContextWindowDetails(
 		// has said anything about what is serving right now.
 		source = "probe";
 		kind = "serving-limit";
+	} else if (
+		runtime.tier === "cloud" &&
+		typeof runtime.probeServingWindows !== "function" &&
+		modelDeclared !== undefined
+	) {
+		// A hosted provider with no window endpoint keeps working through Pi's catalog row,
+		// labeled an estimate so it is never read as a server report. A provider that does
+		// have a window read stays unknown until it answers, and a local route never gets here.
+		effective = modelDeclared;
+		source = "catalog";
+		kind = "default";
 	}
 
 	// One-run CLI override (clio-coder run --max-context-tokens), delivered over the

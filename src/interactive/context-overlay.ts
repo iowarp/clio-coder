@@ -41,6 +41,7 @@ function contextWindowProvenanceLabel(source: ContextLedger["contextWindowSource
 		case "target-override":
 			return "configured";
 		case "catalog":
+			return "catalog estimate";
 		case "model-hint":
 			return "declared";
 		case "descriptor-default":

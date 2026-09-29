@@ -11,6 +11,7 @@ import {
 	type LmStudioLoadedInstance,
 	type LmStudioModelInfo,
 	listLmStudioModels,
+	lmStudioNativeReasoningLevels,
 	lmStudioReasoningLevels,
 	loadedContextLength,
 	resolveLmStudioInstance,
@@ -81,6 +82,7 @@ function capabilities(model: LmStudioModelInfo, instance?: LmStudioLoadedInstanc
 	if (model.reasoning !== undefined) out.reasoning = model.reasoning;
 	else if (model.reasoningOptions !== undefined)
 		out.reasoning = model.reasoningOptions.some((option) => option !== "off");
+	if (model.reasoningOptions !== undefined) out.reasoningLevels = lmStudioNativeReasoningLevels(model.reasoningOptions);
 	// LM Studio uses a unified KV cache: an instance's context_length is the
 	// per-request ceiling even when parallel > 1. The model maximum is not a
 	// serving limit when no instance is loaded.

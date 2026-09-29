@@ -49,7 +49,11 @@ async function warmWorkerTarget(input: StartupPreparation, status: TargetStatus,
 	}
 	if (signal.aborted || input.isBusy() || JSON.stringify(input.providers.getTarget(target.id)) !== identity) return;
 	if ((endpointCapacityUsage()[deployment.endpoint] ?? 0) > 0) return;
-	const model = runtime.synthesizeModel(target, modelId, input.providers.knowledgeBase?.lookup(modelId) ?? null);
+	const model = runtime.synthesizeModel(
+		target,
+		modelId,
+		input.providers.knowledgeBase?.lookup(modelId, runtime.id) ?? null,
+	);
 	const release = registerForegroundStream(deployment.endpoint);
 	let result: PrewarmRoundResult;
 	try {

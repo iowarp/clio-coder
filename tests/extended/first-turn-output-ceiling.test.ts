@@ -55,7 +55,9 @@ for (const api of ["openai-completions", "ollama-native"]) {
 				id: "local",
 				displayName: "In-process fixture",
 				kind: "http",
-				tier: "cloud",
+				// A hosted route with no window endpoint falls back to its declared window, so the
+				// unknown-window case has to be a local route.
+				tier: unknownWindow ? "local" : "cloud",
 				apiFamily: api,
 				auth: "none",
 				defaultCapabilities: capabilities,

@@ -32,6 +32,17 @@ export function setGlobalDefaultMaxOutputTokens(value: number): void {
 }
 
 /**
+ * The output budget a model's profile suggests, read off the model metadata local synthesis
+ * attaches. It ranks below every value the operator or the request set and above the model's
+ * own cap, and the callers still clamp it to that cap and the remaining window.
+ */
+export function recommendedOutputTokens(model: unknown): number | undefined {
+	const value = (model as { clioCoder?: { quirks?: { outputTokens?: unknown } } } | null | undefined)?.clioCoder?.quirks
+		?.outputTokens;
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
+}
+
+/**
  * Tokens a preflight context check should hold back for the response: the
  * smaller of the model's advertised output limit and the configured output
  * budget, falling back to the product default when no budget is configured.
@@ -43,8 +54,10 @@ export function setGlobalDefaultMaxOutputTokens(value: number): void {
 export function resolveReservedOutputTokens(
 	maxOutputTokens?: number | null,
 	request?: { api: string; contextWindow: number; inputTokens: number },
+	recommendedTokens?: number,
 ): number {
-	const requested = globalDefaultMaxOutputTokens > 0 ? globalDefaultMaxOutputTokens : DEFAULT_MAX_OUTPUT_TOKENS;
+	const requested =
+		globalDefaultMaxOutputTokens > 0 ? globalDefaultMaxOutputTokens : (recommendedTokens ?? DEFAULT_MAX_OUTPUT_TOKENS);
 	const limit =
 		typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens > 0
 			? maxOutputTokens
@@ -76,7 +89,7 @@ export function estimateInputTokensFromContext(input: Context): number {
 }
 
 export function remainingContextMaxTokens(
-	model: Pick<Model<Api>, "contextWindow" | "maxTokens">,
+	model: Pick<Model<Api>, "contextWindow" | "maxTokens"> & { clioCoder?: unknown },
 	context: Context,
 	options: Pick<StreamOptions, "maxTokens"> | undefined,
 	limits?: { contextWindow?: number; maxOutputTokens?: number },
@@ -89,8 +102,9 @@ export function remainingContextMaxTokens(
 	const modelLimit = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
 	// Precedence for the requested ceiling when the caller gave no explicit
 	// maxTokens: a more-specific tool-turn limit, then the global default, then
-	// the model's advertised cap. A model that advertises no cap uses the product
-	// floor instead of requesting its entire remaining context window. Math.min
+	// the profile's recommendation, then the model's advertised cap. A model that
+	// advertises no cap uses the product floor instead of requesting its entire
+	// remaining context window. Math.min
 	// below clamps the result down to every known boundary, so frontier providers
 	// with a known cap never receive a larger max_tokens value.
 	const defaultLimit =
@@ -98,9 +112,7 @@ export function remainingContextMaxTokens(
 			? limits.maxOutputTokens
 			: globalDefaultMaxOutputTokens > 0
 				? globalDefaultMaxOutputTokens
-				: model.maxTokens > 0
-					? modelLimit
-					: DEFAULT_MAX_OUTPUT_TOKENS;
+				: (recommendedOutputTokens(model) ?? (model.maxTokens > 0 ? modelLimit : DEFAULT_MAX_OUTPUT_TOKENS));
 	const requested = options?.maxTokens ?? defaultLimit;
 	const resolved = clampOutputToRemainingContext(Math.min(requested, modelLimit), contextWindow, inputTokens);
 	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;

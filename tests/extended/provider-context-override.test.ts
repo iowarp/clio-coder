@@ -109,7 +109,48 @@ it("does not promote descriptor defaults into resolved serving limits", () => {
 	strictEqual(result.target.capabilities.maxTokens, 0);
 });
 
-it("labels Pi cloud model limits without turning them into a serving window", () => {
+it("resolves a hosted route with no window endpoint to the labeled catalog estimate", () => {
+	const cloud = { ...litellmRuntime, tier: "cloud" as const };
+	const details = resolveContextWindowDetails(
+		{ id: "cloud", runtime: "litellm" },
+		cloud,
+		"m",
+		null,
+		null,
+		null,
+		262_144,
+	);
+	strictEqual(details.effectiveContextWindow, 262_144);
+	strictEqual(details.contextWindowSource, "catalog");
+	strictEqual(details.servingLimit.kind, "default");
+	strictEqual(details.provenanceNotice, null);
+	// A live report still wins, and an operator limit still lowers the estimate.
+	strictEqual(
+		resolveContextWindowDetails({ id: "cloud", runtime: "litellm" }, cloud, "m", null, 131_072, null, 262_144)
+			.contextWindowSource,
+		"probe",
+	);
+	const lowered = resolveContextWindowDetails(
+		{ id: "cloud", runtime: "litellm", capabilities: { contextWindow: 65_536 } },
+		cloud,
+		"m",
+		null,
+		null,
+		null,
+		262_144,
+	);
+	strictEqual(lowered.effectiveContextWindow, 65_536);
+	strictEqual(lowered.contextWindowSource, "target-override");
+	// A hosted provider that has a window read stays unknown until it answers, and a local route never takes a maximum.
+	const windowRead = { ...cloud, probeServingWindows: async () => ({ ok: false, latencyMs: 0 }) };
+	strictEqual(
+		resolveContextWindowDetails({ id: "cloud", runtime: "litellm" }, windowRead as never, "m", null, null, null, 262_144)
+			.effectiveContextWindow,
+		0,
+	);
+});
+
+it("labels Pi cloud model limits as a catalog estimate beside the model maximum", () => {
 	const target = { id: "cloud", runtime: "litellm", defaultModel: "cloud-model" };
 	const providers = {
 		getTarget: () => target,
@@ -122,8 +163,15 @@ it("labels Pi cloud model limits without turning them into a serving window", ()
 	strictEqual(resolved.ok, true);
 	if (!resolved.ok) return;
 	const refined = refineRuntimeTargetWithModelHints(resolved.target, { contextWindow: 262_144, maxTokens: 8192 });
+	strictEqual(
+		resolved.target.contextWindowDetails.effectiveContextWindow,
+		0,
+		"without a catalog row the route is unknown",
+	);
 	const snapshot = runtimeTargetSnapshot(refined);
-	strictEqual(snapshot.contextWindowField.value, null);
+	strictEqual(snapshot.contextWindowField.value, 262_144);
+	strictEqual(snapshot.contextWindowField.source, "catalog");
+	strictEqual(snapshot.contextWindowField.kind, "default");
 	strictEqual(snapshot.modelMaximumField.value, 262_144);
 	strictEqual(snapshot.modelMaximumField.kind, "model-maximum");
 	strictEqual(snapshot.maxOutputTokensField.value, 8192);

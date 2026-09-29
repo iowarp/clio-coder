@@ -522,7 +522,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			)?.thinking;
 			return {
 				label:
-					thinking?.mechanism === "none" ? "unavailable" : (thinking?.display ?? current?.chat?.thinkingLevel ?? "off"),
+					thinking?.mechanism === "none"
+						? "unavailable"
+						: (thinking?.requestedDisplay ?? current?.chat?.thinkingLevel ?? "off"),
 				hasLevels: thinking?.mechanism === "effort-levels" || thinking?.mechanism === "budget-tokens",
 				supportedLevels: thinking?.supportedLevels ?? [],
 			};

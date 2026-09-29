@@ -128,9 +128,11 @@ export function makeOpenAICompatRuntime(spec: OpenAICompatSpec): RuntimeDescript
 	};
 }
 
+// `tools` is on until a report says otherwise: an arbitrary server has told Clio nothing, and
+// unknown must never mean "no tools" (the model then prints raw `<tool_call>` text).
 const defaultCapabilities: CapabilityFlags = {
 	chat: true,
-	tools: false,
+	tools: true,
 	reasoning: false,
 	vision: false,
 	audio: false,

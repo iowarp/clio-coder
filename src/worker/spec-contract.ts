@@ -457,6 +457,10 @@ function validateCapabilityPatch(value: unknown, source: string): void {
 	if (caps.thinkingControlRuntime !== undefined) {
 		readEnum(caps.thinkingControlRuntime, `${source}.thinkingControlRuntime`, ["lmstudio", "llamacpp"]);
 	}
+	if (caps.reasoningLevels !== undefined) {
+		if (!Array.isArray(caps.reasoningLevels)) throw new Error(`${source}.reasoningLevels must be an array`);
+		for (const level of caps.reasoningLevels) readEnum(level, `${source}.reasoningLevels[]`, THINKING_LEVELS);
+	}
 	for (const key of ["toolCallFormat", "thinkingFormat", "structuredOutputs"] as const) {
 		readOptionalString(caps, key, source);
 	}

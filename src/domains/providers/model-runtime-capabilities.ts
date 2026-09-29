@@ -40,6 +40,11 @@ export interface ResolvedThinkingCapability extends AppliedThinking {
 	effectiveLevel: ThinkingLevel;
 	supportedLevels: ReadonlyArray<ThinkingLevel>;
 	display: string;
+	/**
+	 * `display` with the requested level shown when the control cannot carry it, for example
+	 * `low → on` on a model that only switches thinking on or off.
+	 */
+	requestedDisplay: string;
 	budgetEnforcement: ThinkingBudgetEnforcement;
 }
 
@@ -126,6 +131,7 @@ interface ClioRuntimeMetadata {
 		gateway?: boolean;
 		family?: string;
 		thinkingControlRuntime?: CapabilityFlags["thinkingControlRuntime"];
+		reasoningLevels?: CapabilityFlags["reasoningLevels"];
 		quirks?: LocalModelQuirks;
 	};
 	compat?: {
@@ -244,8 +250,9 @@ export function applyThinkingMechanism(
 	quirks: LocalModelQuirks | undefined,
 	level: ThinkingLevel,
 	caps?: CapabilityHints,
+	resolvedMechanism?: ThinkingMechanism,
 ): AppliedThinking {
-	const mechanism = inferThinkingMechanism(quirks, caps);
+	const mechanism = resolvedMechanism ?? inferThinkingMechanism(quirks, caps);
 	const requestedActive = level !== "off";
 
 	switch (mechanism) {
@@ -448,6 +455,35 @@ function resolveQuirks(input: ResolveRuntimeCapabilitiesInput): LocalModelQuirks
 	return input.quirks ?? extractLocalModelQuirks(input.kbHit?.entry.quirks);
 }
 
+function isOnOffLevels(levels: ReadonlyArray<ThinkingLevel>): boolean {
+	return levels.includes("low") && levels.every((level) => level === "off" || level === "low");
+}
+
+/**
+ * Mechanism precedence: what the server reported (no reasoning, or a binary control), then
+ * the profile's mechanism when the server said nothing about it, then what the capability
+ * flags imply. A profile mechanism never overrides a live report: "none" cannot stand
+ * against reasoning the server or operator turned on, and a switchable mechanism cannot
+ * stand against reasoning reported false.
+ */
+function resolveMechanism(
+	input: ResolveRuntimeCapabilitiesInput,
+	quirks: LocalModelQuirks | undefined,
+	hints: CapabilityHints,
+): ThinkingMechanism {
+	if (!input.capabilities.reasoning) return "none";
+	const live = input.capabilities.reasoningLevels;
+	if (live && isOnOffLevels(live)) return "on-off";
+	const declared = quirks?.thinking?.mechanism;
+	if (declared && declared !== "none") return declared;
+	return inferThinkingMechanism(undefined, hints);
+}
+
+function requestedDisplayFor(mechanism: ThinkingMechanism, configured: ThinkingLevel, display: string): string {
+	// The configured level is what the operator asked for; show it beside what the control does.
+	return mechanism === "on-off" && configured !== "off" ? `${configured} → ${display}` : display;
+}
+
 function resolveThinkingCapability(
 	input: ResolveRuntimeCapabilitiesInput,
 	quirks: LocalModelQuirks | undefined,
@@ -463,14 +499,20 @@ function resolveThinkingCapability(
 		adaptiveThinking: input.adaptiveThinking,
 		thinkingLevelMap: input.thinkingLevelMap,
 	});
-	const mechanism = inferThinkingMechanism(quirks, hints);
+	const mechanism = resolveMechanism(input, quirks, hints);
 	const baseLevels = availableThinkingLevels(input.capabilities, {
 		runtimeId: input.runtimeId,
 		modelId: input.modelId,
 	});
-	const supportedLevels = restrictThinkingLevelsByMechanism(baseLevels, mechanism, quirks, { harmony });
+	const liveLevels = input.capabilities.reasoningLevels;
+	// Options the server enumerates are the levels this deployment has. The profile's levels
+	// apply only when the server omits them.
+	const supportedLevels =
+		liveLevels && !harmony && mechanism !== "none" && mechanism !== "always-on"
+			? liveLevels
+			: restrictThinkingLevelsByMechanism(baseLevels, mechanism, quirks, { harmony });
 	const effectiveLevel = effectiveThinkingLevel(configuredLevel, supportedLevels);
-	let applied = applyThinkingMechanism(quirks, effectiveLevel, hints);
+	let applied = applyThinkingMechanism(quirks, effectiveLevel, hints, mechanism);
 
 	if (harmony) {
 		const effort = harmonyReasoningEffort(effectiveLevel);
@@ -508,12 +550,14 @@ function resolveThinkingCapability(
 		);
 	}
 
+	const display = thinkingLevelDisplayWord(applied.mechanism, effectiveLevel);
 	return {
 		...applied,
 		configuredLevel,
 		effectiveLevel,
 		supportedLevels,
-		display: thinkingLevelDisplayWord(applied.mechanism, effectiveLevel),
+		display,
+		requestedDisplay: requestedDisplayFor(applied.mechanism, configuredLevel, display),
 		budgetEnforcement,
 	};
 }
@@ -649,7 +693,7 @@ export function resolveModelRuntimeCapabilitiesForStatus(
 	options?: { detectedReasoning?: boolean | null; configuredThinkingLevel?: ThinkingLevel },
 ): ResolvedModelRuntimeCapabilities {
 	const modelId = wireModelId?.trim() || status.target.defaultModel?.trim() || "";
-	const kbHit = modelId ? (knowledgeBase?.lookup(modelId) ?? null) : null;
+	const kbHit = modelId ? (knowledgeBase?.lookup(modelId, status.runtime?.id ?? status.target.runtime) ?? null) : null;
 	const capabilities = resolveModelCapabilities(status, modelId, knowledgeBase, {
 		detectedReasoning: options?.detectedReasoning ?? null,
 	});
@@ -721,6 +765,7 @@ function thinkingFormatFromModelApi(api: Api): CapabilityFlags["thinkingFormat"]
 function capabilitiesFromModel(model: Model<Api> & ClioRuntimeMetadata): CapabilityFlags {
 	const format = model.compat?.thinkingFormat ?? thinkingFormatFromModelApi(model.api);
 	const controlRuntime = model.clioCoder?.thinkingControlRuntime;
+	const reasoningLevels = model.clioCoder?.reasoningLevels;
 	const caps: CapabilityFlags = {
 		chat: true,
 		tools: true,
@@ -733,6 +778,7 @@ function capabilitiesFromModel(model: Model<Api> & ClioRuntimeMetadata): Capabil
 		contextWindow: model.contextWindow,
 		maxTokens: model.maxTokens,
 		...(controlRuntime ? { thinkingControlRuntime: controlRuntime } : {}),
+		...(reasoningLevels ? { reasoningLevels } : {}),
 	};
 	if (
 		format === "qwen-chat-template" ||
@@ -785,7 +831,7 @@ export function resolveTargetRuntimeCapabilities(
 	knowledgeBase: KnowledgeBase | null,
 	configuredThinkingLevel?: ThinkingLevel,
 ): ResolvedModelRuntimeCapabilities {
-	const kbHit = knowledgeBase?.lookup(wireModelId) ?? null;
+	const kbHit = knowledgeBase?.lookup(wireModelId, runtime.id) ?? null;
 	return resolveModelRuntimeCapabilities({
 		targetId: target.id,
 		runtimeId: runtime.id,

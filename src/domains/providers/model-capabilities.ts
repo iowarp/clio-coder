@@ -1,14 +1,37 @@
-import { mergeCapabilities } from "./capabilities.js";
+import { hintCapabilities, mergeCapabilities } from "./capabilities.js";
 import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catalog.js";
 import type { TargetStatus } from "./contract.js";
 import { acceptsImageInput } from "./image-input.js";
 import { type CapabilityFlags, EMPTY_CAPABILITIES } from "./types/capability-flags.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
 import { extractLocalModelQuirks } from "./types/local-model-quirks.js";
+import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 
 function normalizedModelId(wireModelId: string | null | undefined): string | null {
 	const trimmed = wireModelId?.trim();
 	return trimmed ? trimmed : null;
+}
+
+/**
+ * A runtime that reports its serving windows (`probeServingWindows`) has none
+ * until the server answers. Its descriptor default, the catalog and the
+ * knowledge base describe what the model allows, so none of them may stand in
+ * as a ceiling the server serves. Only a live report or the operator's own
+ * override keeps a window; otherwise the window is 0, which every consumer
+ * reads as unknown. Returns whether the window was withheld.
+ */
+export function withholdUnreportedServingWindow(
+	runtime: Pick<RuntimeDescriptor, "probeServingWindows"> | null | undefined,
+	merged: CapabilityFlags,
+	probe: Partial<CapabilityFlags> | null,
+	userOverride: Partial<CapabilityFlags> | null,
+): { capabilities: CapabilityFlags; withheld: boolean } {
+	if (typeof runtime?.probeServingWindows !== "function") return { capabilities: merged, withheld: false };
+	const reported = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) && value > 0;
+	if (reported(probe?.contextWindow) || reported(userOverride?.contextWindow)) {
+		return { capabilities: merged, withheld: false };
+	}
+	return { capabilities: { ...merged, contextWindow: 0 }, withheld: merged.contextWindow !== 0 };
 }
 
 export interface ModelCapabilityPatchTarget {
@@ -36,12 +59,14 @@ export function applyModelCapabilityPatch<T extends ModelCapabilityPatchTarget>(
 	if (typeof caps.vision === "boolean" && model.input) {
 		model.input = caps.vision ? ["text", "image"] : ["text"];
 	}
-	// Refresh the probe-only control hint together with the capability snapshot.
+	// Refresh the probe-only control hints together with the capability snapshot.
 	// Missing metadata after a later probe must not retain an earlier route claim.
-	if (model.clioCoder || caps.thinkingControlRuntime !== undefined) {
+	if (model.clioCoder || caps.thinkingControlRuntime !== undefined || caps.reasoningLevels !== undefined) {
 		const metadata = { ...model.clioCoder };
 		delete metadata.thinkingControlRuntime;
+		delete metadata.reasoningLevels;
 		if (caps.thinkingControlRuntime !== undefined) metadata.thinkingControlRuntime = caps.thinkingControlRuntime;
+		if (caps.reasoningLevels !== undefined) metadata.reasoningLevels = [...caps.reasoningLevels];
 		model.clioCoder = metadata;
 	}
 	return model;
@@ -57,15 +82,23 @@ export interface ResolveModelCapabilitiesOptions {
 	detectedReasoning?: boolean | null;
 }
 
+/**
+ * Reasoning precedence: an observed generation, then the server's own report, then the
+ * operator's value, then the profile. `mergeCapabilities` already ranked the last three,
+ * so the profile's mechanism only speaks here when neither the server nor the operator did.
+ */
 function applyReasoningResolution(
 	caps: CapabilityFlags,
 	kbHit: ReturnType<KnowledgeBase["lookup"]> | null | undefined,
 	detectedReasoning: boolean | null,
+	answered: boolean,
 ): CapabilityFlags {
+	if (detectedReasoning !== null) return { ...caps, reasoning: detectedReasoning };
+	if (answered) return caps;
 	const mechanism = extractLocalModelQuirks(kbHit?.entry.quirks)?.thinking?.mechanism;
 	if (mechanism === "none") return { ...caps, reasoning: false };
 	if (mechanism === "always-on") return { ...caps, reasoning: true };
-	return detectedReasoning === null ? caps : { ...caps, reasoning: detectedReasoning };
+	return caps;
 }
 
 function applyImageTransportResolution(caps: CapabilityFlags, runtimeId: string): CapabilityFlags {
@@ -77,10 +110,13 @@ function applyImageTransportResolution(caps: CapabilityFlags, runtimeId: string)
  *
  * TargetStatus stores a merged target-level view in `capabilities`, which
  * is adequate for health/readiness, but the model picker and thinking controls
- * need the selected row's own knowledge-base hit. When model-keyed
+ * need the selected row's own profile hit. When model-keyed
  * `probeCapabilities` are present for this same wire model, rebuild the stack as:
  *
- *   runtime defaults + knowledge-base(model) + live probe + target override
+ *   runtime defaults + profile(model) + live probe + target override
+ *
+ * ranked by `mergeCapabilities`: a live yes or no decides tools, vision and
+ * reasoning, and an operator value only fills what the server left silent.
  *
  * When older test doubles do not provide `probeCapabilities`, fall back to the
  * pre-merged `status.capabilities` for the target-default model.
@@ -118,48 +154,50 @@ export function resolveModelCapabilities(
 	options?: ResolveModelCapabilitiesOptions,
 ): CapabilityFlags {
 	const detectedReasoning = options?.detectedReasoning ?? null;
+	const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.target.defaultModel);
+	const runtimeId = status.runtime?.id ?? status.target.runtime;
+	const kbHit = modelId ? (knowledgeBase?.lookup(modelId, runtimeId) ?? null) : null;
+	const override = status.target.capabilities ?? null;
+	const probe = modelId ? probeCapabilitiesForModel(status, modelId) : null;
+	// The server or the operator already answered when either carries a reasoning value.
+	const answered = probe?.reasoning !== undefined || override?.reasoning !== undefined;
 
 	if (!status.runtime) {
-		const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.target.defaultModel);
-		const kbHit = modelId ? (knowledgeBase?.lookup(modelId) ?? null) : null;
 		return applyImageTransportResolution(
-			applyReasoningResolution(status.capabilities, kbHit, detectedReasoning),
+			applyReasoningResolution(status.capabilities, kbHit, detectedReasoning, answered),
 			status.target.runtime,
 		);
 	}
-	const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.target.defaultModel);
 	const baseCapabilities = capabilitiesFromCatalogModel(
 		status.runtime.defaultCapabilities ?? EMPTY_CAPABILITIES,
 		modelId ? getCatalogModelForRuntime(status.runtime.id, modelId) : undefined,
 	);
-	const kbHit = modelId ? (knowledgeBase?.lookup(modelId) ?? null) : null;
 	const hasModernProbeFields = status.probeCapabilities !== undefined || status.probeModelCapabilities !== undefined;
 	if (!hasModernProbeFields) {
 		if (!modelId || modelId === normalizedModelId(status.target.defaultModel)) {
 			return applyImageTransportResolution(
-				applyReasoningResolution(status.capabilities, kbHit, detectedReasoning),
+				applyReasoningResolution(status.capabilities, kbHit, detectedReasoning, answered),
 				status.runtime.id,
 			);
 		}
+		const merged = mergeCapabilities(baseCapabilities, hintCapabilities(kbHit?.entry), null, override);
 		return applyImageTransportResolution(
 			applyReasoningResolution(
-				mergeCapabilities(baseCapabilities, kbHit?.entry.capabilities ?? null, null, status.target.capabilities ?? null),
+				withholdUnreportedServingWindow(status.runtime, merged, null, override).capabilities,
 				kbHit,
 				detectedReasoning,
+				answered,
 			),
 			status.runtime.id,
 		);
 	}
+	const merged = mergeCapabilities(baseCapabilities, hintCapabilities(kbHit?.entry), probe, override);
 	return applyImageTransportResolution(
 		applyReasoningResolution(
-			mergeCapabilities(
-				baseCapabilities,
-				kbHit?.entry.capabilities ?? null,
-				probeCapabilitiesForModel(status, modelId),
-				status.target.capabilities ?? null,
-			),
+			withholdUnreportedServingWindow(status.runtime, merged, probe, override).capabilities,
 			kbHit,
 			detectedReasoning,
+			answered,
 		),
 		status.runtime.id,
 	);

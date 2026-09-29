@@ -105,6 +105,7 @@ import {
 	firstRuntimeResolutionError,
 	isDispatchEligibleRuntime,
 	type ProvidersContract,
+	probeCapabilitiesForModel,
 	type ResolvedRuntimeTarget,
 	type RuntimeApiFamily,
 	type RuntimeDescriptor,
@@ -1533,8 +1534,9 @@ interface ResolvedTarget {
 	modelCapabilities: CapabilityFlags | null;
 	/**
 	 * What actually answered the tool-support question for this wire model: the
-	 * operator's own target override, else the knowledge-base entry, else null
-	 * when nothing named it. The merged `modelCapabilities` cannot express this,
+	 * server's live report (an operator false may lower it), else the operator's
+	 * own target override, else the knowledge-base entry, else null when nothing
+	 * named it. The merged `modelCapabilities` cannot express this,
 	 * because a runtime default of `tools: false` is indistinguishable there
 	 * from a measurement, and a knowledge-base miss on a local model id is
 	 * routine rather than an answer. See {@link targetToolCapability}.
@@ -1828,38 +1830,50 @@ const TOOL_CARRYING_API_FAMILIES: ReadonlySet<RuntimeApiFamily> = new Set([
 /**
  * Whether this run may be offered tools at all.
  *
+ * An answer decides: the server's live report first (an operator false may
+ * lower it, an operator true never raises it), then the operator's own target
+ * override, then a knowledge-base entry that names the model. The chat path
+ * resolves the same order, so a llama.cpp or LM Studio model the server reports
+ * without tool support gets no worker tools even though the runtime default is
+ * `tools: true`. Only when nothing answered does the runtime default apply.
+ *
  * A runtime default of `tools: false` on a protocol runtime is a placeholder,
  * not a measurement: the generic `openai-compat` descriptor cannot know what an
- * arbitrary local server has loaded, so it declares the conservative value and
- * leaves the answer to the knowledge base. A knowledge-base miss on a local
- * model id is routine (a new quant, a renamed GGUF, a model newer than the
- * catalog), so reading that miss as "no tools" denied every dispatch against
- * every unlisted local model while the same target answered tool calls fine on
- * the chat path. Only an explicit `false`, from the operator's target override
- * or from a knowledge-base entry that names the model, denies now; an unanswered
- * question lets a tool-carrying protocol try and surface a real provider error
- * if the server genuinely cannot.
+ * arbitrary local server has loaded. A knowledge-base miss on a local model id
+ * is routine (a new quant, a renamed GGUF, a model newer than the catalog), so
+ * reading that miss as "no tools" denied every dispatch against every unlisted
+ * local model while the same target answered tool calls fine on the chat path.
+ * An unanswered question lets a tool-carrying protocol try and surface a real
+ * provider error if the server genuinely cannot.
  */
-function targetToolCapability(target: ResolvedTarget): boolean {
+export function targetToolCapability(
+	target: Pick<ResolvedTarget, "toolsCapabilityExplicit" | "modelCapabilities"> & {
+		runtime: Pick<RuntimeDescriptor, "defaultCapabilities" | "apiFamily">;
+	},
+): boolean {
+	if (target.toolsCapabilityExplicit !== null) return target.toolsCapabilityExplicit;
 	if (target.modelCapabilities?.tools === true) return true;
 	if (target.runtime.defaultCapabilities.tools === true) return true;
-	if (target.toolsCapabilityExplicit === false) return false;
 	return TOOL_CARRYING_API_FAMILIES.has(target.runtime.apiFamily);
 }
 
 /**
- * The only two sources that can actually answer "does this model take tools":
- * the operator's own target override, which wins, and the knowledge-base entry
- * for the wire model. Null means nothing named it, which is the common case for
- * a local model id the catalog has never seen.
+ * The sources that can actually answer "does this model take tools": the
+ * server's live report for the wire model, the operator's own target override,
+ * and the knowledge-base entry. Null means nothing named it, which is the common
+ * case for a local model id the catalog has never seen.
  */
-function explicitToolCapability(
-	providers: ProvidersContract,
+export function explicitToolCapability(
+	providers: Pick<ProvidersContract, "knowledgeBase">,
 	target: TargetDescriptor,
 	wireModelId: string,
+	status: TargetStatus | undefined,
 ): boolean | null {
-	if (typeof target.capabilities?.tools === "boolean") return target.capabilities.tools;
-	const hit = providers.knowledgeBase?.lookup(wireModelId) ?? null;
+	const operator = typeof target.capabilities?.tools === "boolean" ? target.capabilities.tools : undefined;
+	const live = status ? probeCapabilitiesForModel(status, wireModelId)?.tools : undefined;
+	if (typeof live === "boolean") return live && operator === false ? false : live;
+	if (operator !== undefined) return operator;
+	const hit = providers.knowledgeBase?.lookup(wireModelId, target.runtime) ?? null;
 	const fromKnowledgeBase = hit?.entry.capabilities?.tools;
 	return typeof fromKnowledgeBase === "boolean" ? fromKnowledgeBase : null;
 }
@@ -2529,7 +2543,7 @@ function resolveSelectedDispatchTarget(
 		thinkingLevel: resolved.target.effectiveThinkingLevel,
 		capabilities: capabilityInfoForTarget(providers, target.id),
 		modelCapabilities,
-		toolsCapabilityExplicit: explicitToolCapability(providers, target, wireModelId),
+		toolsCapabilityExplicit: explicitToolCapability(providers, target, wireModelId, status),
 		runtimeResolution: resolved.target,
 		effectivePricing: resolveEffectivePricing(target, runtime.id, wireModelId),
 	};

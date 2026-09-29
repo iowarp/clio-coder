@@ -1,6 +1,6 @@
 import type { AnthropicMessagesCompat, Api, Model, OpenAICompletionsCompat } from "../../../../engine/types.js";
 
-import { mergeCapabilities } from "../../capabilities.js";
+import { hintCapabilities, mergeCapabilities } from "../../capabilities.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import { extractLocalModelQuirks, type LocalModelQuirks } from "../../types/local-model-quirks.js";
@@ -84,7 +84,7 @@ function localAnthropicCompat(): AnthropicMessagesCompat {
 
 export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 	const { target, wireModelId, kb, defaultCapabilities, apiFamily, provider } = input;
-	const caps = mergeCapabilities(defaultCapabilities, kb?.entry.capabilities ?? null, null, target.capabilities ?? null);
+	const caps = mergeCapabilities(defaultCapabilities, hintCapabilities(kb?.entry), null, target.capabilities ?? null);
 	const rawUrl = target.url ?? "";
 	const baseUrl = rawUrl.length > 0 ? input.baseUrlForTarget(rawUrl) : "";
 	const pricing = target.pricing;

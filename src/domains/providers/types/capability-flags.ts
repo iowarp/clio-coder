@@ -1,18 +1,25 @@
 import { catalogThinkingLevelsForRuntime } from "../catalog.js";
 import { isHarmonyModelId } from "../model-family.js";
 
-export type ToolCallFormat = "openai" | "anthropic" | "hermes" | "llama3-json" | "mistral" | "qwen" | "xml";
+export const TOOL_CALL_FORMATS = ["openai", "anthropic", "hermes", "llama3-json", "mistral", "qwen", "xml"] as const;
 
-export type ThinkingFormat =
-	| "qwen-chat-template"
-	| "openrouter"
-	| "zai"
-	| "anthropic-extended"
-	| "deepseek-r1"
-	| "openai-codex"
-	| "harmony";
+export type ToolCallFormat = (typeof TOOL_CALL_FORMATS)[number];
 
-export type StructuredOutputMode = "json-schema" | "gbnf" | "xgrammar" | "none";
+export const THINKING_FORMATS = [
+	"qwen-chat-template",
+	"openrouter",
+	"zai",
+	"anthropic-extended",
+	"deepseek-r1",
+	"openai-codex",
+	"harmony",
+] as const;
+
+export type ThinkingFormat = (typeof THINKING_FORMATS)[number];
+
+export const STRUCTURED_OUTPUT_MODES = ["json-schema", "gbnf", "xgrammar", "none"] as const;
+
+export type StructuredOutputMode = (typeof STRUCTURED_OUTPUT_MODES)[number];
 
 export interface CapabilityFlags {
 	chat: boolean;
@@ -22,6 +29,12 @@ export interface CapabilityFlags {
 	thinkingFormat?: ThinkingFormat;
 	/** Probe-declared upstream control dialect only; never changes gateway routing or residency. */
 	thinkingControlRuntime?: "lmstudio" | "llamacpp";
+	/**
+	 * Levels the server itself enumerates for this model (LM Studio `allowed_options`
+	 * mapped onto Clio's vocabulary). A live report only: no profile or catalog sets it,
+	 * so its presence means the server answered and `["off", "low"]` means on/off.
+	 */
+	reasoningLevels?: ReadonlyArray<ThinkingLevel>;
 	structuredOutputs?: StructuredOutputMode;
 	vision: boolean;
 	audio: boolean;

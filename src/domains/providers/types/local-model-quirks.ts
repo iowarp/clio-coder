@@ -71,6 +71,11 @@ export interface ThinkingQuirks {
 }
 
 export interface LocalModelQuirks {
+	/**
+	 * A profile's suggested output budget. It fills a budget the operator and the request left
+	 * unset, and is clamped to any server cap and the remaining window; it is not a cap itself.
+	 */
+	outputTokens?: number;
 	sampling?: SamplingQuirks;
 	thinking?: ThinkingQuirks;
 	chatTemplateKwargs?: ChatTemplateKwargsQuirks;
@@ -250,6 +255,8 @@ function extractThinkingQuirks(raw: unknown): ThinkingQuirks | undefined {
 export function extractLocalModelQuirks(raw: unknown): LocalModelQuirks | undefined {
 	if (!isRecord(raw)) return undefined;
 	const out: LocalModelQuirks = {};
+	const outputTokens = asInteger(raw.outputTokens);
+	if (outputTokens !== undefined && outputTokens > 0) out.outputTokens = outputTokens;
 	const sampling = extractSampling(raw.sampling);
 	if (sampling) out.sampling = sampling;
 	const thinking = extractThinkingQuirks(raw.thinking);

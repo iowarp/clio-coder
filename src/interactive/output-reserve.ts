@@ -18,7 +18,7 @@
  * refused, and the two figures are unrelated.
  */
 
-import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
+import { recommendedOutputTokens, resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import type { AgentRuntime } from "./turn-state.js";
 
 export function resolveTurnOutputReserve(agentRuntime: AgentRuntime, inputTokens: number): number {
@@ -27,9 +27,13 @@ export function resolveTurnOutputReserve(agentRuntime: AgentRuntime, inputTokens
 	// resolver's own "no advertised limit" case, which falls back to the
 	// configured budget and then the product floor, rather than a crash on a path
 	// that now runs during ordinary accounting.
-	return resolveReservedOutputTokens(agentRuntime.runtimeResolution.capabilityDecisions?.maxTokens, {
-		api: agentRuntime.agent.state.model?.api ?? "",
-		contextWindow: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
-		inputTokens,
-	});
+	return resolveReservedOutputTokens(
+		agentRuntime.runtimeResolution.capabilityDecisions?.maxTokens,
+		{
+			api: agentRuntime.agent.state.model?.api ?? "",
+			contextWindow: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
+			inputTokens,
+		},
+		recommendedOutputTokens(agentRuntime.agent.state.model),
+	);
 }
