@@ -187,6 +187,12 @@ when present, or starts a private foreground server. See the
 - **Inspectable execution.** View tool activity, diffs, traces, token and cost
   accounting, checks, and sealed run records. Review and accept memory proposals
   linked to recorded evidence.
+- **System One decisions (experimental).** Bind a fast decision engine to
+  typed decision sites: the operator's request, a proposed tool call, external
+  tool output, a finished turn, catalog ranking, direct consultation, and
+  `/draft` judging. Answers are calibrated probabilities, and a site changes
+  nothing until a fitted cut exists for the answering build. `clio-coder doctor`
+  shows the bindings. See [System One](docs/guide/system-one.md).
 - **Scientific infrastructure and agent interoperability.** Connect MCP
   servers, including clio-kit Slurm workflows. Delegate through supported
   coding-agent connectors or open companion panes with Herdr and Yazi.
@@ -251,10 +257,13 @@ targets, models, and thinking settings. `/model` changes the current session;
 | Subscription sign-in | ChatGPT through `openai-codex`; Claude through `anthropic-max` |
 | Institutional inference | Argonne ALCF Sophia and Metis through Globus OAuth |
 
-Clio resolves model capabilities from provider metadata, its catalog, and user
-overrides. Configure a model with the tool calling, context window, vision, and
-reasoning support your workflow requires. See
-[connections and targets](docs/guide/configuration-and-targets.md).
+Clio takes serving windows and capabilities from the live inference server
+first, then from its packaged model profiles and an optional
+`model-profiles.yaml` in your config directory, which can lower a reported
+capability but never raise it. `/context` shows where the window came from, and
+an unknown window stays unknown instead of guessed. Configure a model with the
+tool calling, context window, vision, and reasoning support your workflow
+requires. See [connections and targets](docs/guide/configuration-and-targets.md).
 
 ## Execution policy
 

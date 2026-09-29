@@ -4,12 +4,7 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## 0.5.9 - 2026-09-29
 
-### Fixed
-
-- Startup no longer prints a `[providers:profiles:compare]` line for every configured route without a model profile. The comparison was a migration aid and now runs only when `CLIO_CODER_PROFILE_COMPARE=1` is set.
-- An operator dispatch whose typed intent replaces prose path inference shows only its transcript callout, without a duplicate `typed scope replacement` footer diagnostic. Harness-owned dispatches, which publish no callout, keep the diagnostic.
-
-## 0.5.8 - 2026-09-29
+A `v0.5.8` tag was published on 2026-09-29 and withdrawn before the package reached npm. Its changes ship in 0.5.9.
 
 ### Turn control and workspace guidance
 
@@ -23,9 +18,9 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 - Read-only workers can inspect bounded Git history and name refused citations.
 - The agent board shows scheduler-known assignments and receipt findings.
 
-### System One decisions and records
+### System One decisions and records (experimental)
 
-- `systemOne.engines` and `systemOne.sites` bind typed decision calls to hosted Jev, self-hosted `systemone` servers, or configured chat models.
+- `systemOne.engines` and `systemOne.sites` bind typed decision calls to a hosted decision engine, self-hosted `systemone` servers, or configured chat models.
 - An unfitted System One build runs in shadow until cuts are configured for that build; unbound and failed sites leave the normal workflow in place.
 - Fitted decision sites can guide turn scope, orientation, dispatch, approval advisories, external-result warnings, and finished-turn questions.
 - The `relevance`, `consult`, and `drafts` sites rank catalogs, answer typed consultations, and judge `/draft` candidates respectively.
@@ -64,6 +59,11 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 - Settings that take `on` and `off` levels accept the YAML 1.1 booleans an unquoted `on`, `off`, `true` or `false` parses to. `clio-coder doctor` warns about them, and `doctor --fix` rewrites them while preserving comments.
 - Reset, uninstall, upgrade, and migration paths refuse unsafe root layouts and untrusted migration history.
+
+### Fixed
+
+- Startup no longer prints a `[providers:profiles:compare]` line for every configured route without a model profile. The comparison was a migration aid and now runs only when `CLIO_CODER_PROFILE_COMPARE=1` is set.
+- An operator dispatch whose typed intent replaces prose path inference shows only its transcript callout, without a duplicate `typed scope replacement` footer diagnostic. Harness-owned dispatches, which publish no callout, keep the diagnostic.
 
 ## 0.5.7 - 2026-09-27
 

@@ -207,7 +207,7 @@ This document defines the 56 core architectural concepts and terminology used th
 - **Owning Type**: `TRUST_STATE_WORDS` and `trustVerdict` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts); the axis states in `TRUST_STATUS_STATES` in [trust-status.ts](../../src/domains/evidence/trust-status.ts).
 
 ### 51. System One
-- **Definition**: An optional fast decision model that answers calibrated, typed questions (`noul`, `choice`, `score`) about one bounded, redacted state at a fixed decision site. Clio's policy reads the probabilities to add a hint, an extra confirmation, a banner, a ranking or a prewarm. It never answers the operator and never removes friction. Jev is the engine Clio's fitted cuts are built for, and Laya is the diffusion-model engine planned for the same wire. Configured under `systemOne`; see [System One](system-one.md).
+- **Definition**: An optional fast decision model that answers calibrated, typed questions (`noul`, `choice`, `score`) about one bounded, redacted state at a fixed decision site. Clio's policy reads the probabilities to add a hint, an extra confirmation, a banner, a ranking or a prewarm. It never answers the operator and never removes friction. The shipped fitted cuts are built for one hosted engine build, and Laya is the diffusion-model engine planned for the same wire. System One is experimental. Configured under `systemOne`; see [System One](system-one.md).
 - **Owning Type**: `SystemOne` in [types.ts](../../src/domains/system-one/types.ts); built by `createSystemOne` in [factory.ts](../../src/domains/system-one/factory.ts).
 
 ### 52. Decision Site
@@ -227,5 +227,5 @@ This document defines the 56 core architectural concepts and terminology used th
 - **Owning Type**: `SystemOne.shadowed` and `SiteCuts.fitted` in [types.ts](../../src/domains/system-one/types.ts).
 
 ### 56. Laya
-- **Definition**: The diffusion-model System One engine that serves the same `POST /v1/systemone` wire as Jev, through `laya-serve` and the `systemone` runtime. Not yet fitted: a Laya build runs in shadow until cuts are fitted on that exact build with `scripts/decision-probe.ts`. See [System One Architecture](../architecture/system-one.md#validating-a-laya-build).
+- **Definition**: The diffusion-model System One engine that serves the same `POST /v1/systemone` wire as the hosted engine, through `laya-serve` and the `systemone` runtime. Not yet fitted: a Laya build runs in shadow until cuts are fitted on that exact build with `scripts/decision-probe.ts`. See [System One Architecture](../architecture/system-one.md#validating-a-laya-build).
 - **Owning Type**: `createSystemOneEngine` in [systemone.ts](../../src/domains/system-one/engines/systemone.ts).

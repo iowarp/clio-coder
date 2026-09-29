@@ -2,11 +2,13 @@
 
 System One is a fast decision model that Clio asks calibrated questions at fixed decision sites. It reads a bounded, redacted state about one object (the operator's request, a proposed tool call, a tool result, a finished turn, a catalog) and returns probabilities. Clio's policy turns those probabilities into hints, extra confirmations, banners or preparation. System One never answers the operator, never edits anything and never removes friction that Clio's own safety rules impose.
 
+System One is experimental. Its sites, settings keys and shipped cuts may change between releases, and every site stays in shadow until a fitted cut exists for the answering build.
+
 It is off until you bind an engine to a site. With nothing bound Clio behaves exactly as it did before System One existed, and every failure of a bound engine (timeout, refusal, unusable reply) also degrades to that behavior. The design contract is in [System One Architecture](../architecture/system-one.md).
 
 ## Quick start
 
-Use the hosted TypeSafe Jev model. Add a target, declare an engine over it, and bind the sites you want.
+This example binds a hosted decision engine through the `typesafe-jev` runtime. Add a target, declare an engine over it, and bind the sites you want.
 
 ```yaml
 targets:
@@ -29,7 +31,7 @@ systemOne:
 
 Then run `clio-coder doctor` and read the `system one <site>` rows, or `clio-coder systemone status`. A site binding applies from the next turn. Only the `consult` site needs a restart.
 
-A self-hosted server that answers `POST /v1/systemone` (Laya, `laya-serve`, `clm-serve`, OpenJev, Kev) uses runtime `systemone` (experimental) with a `url` on the target. The wire is the same, so the engine block is identical.
+A self-hosted server that answers `POST /v1/systemone` uses runtime `systemone` with a `url` on the target. The wire is the same, so the engine block is identical.
 
 ## What System One is not
 
@@ -71,7 +73,7 @@ An engine answers typed questions for a state. Clio builds one engine per config
 
 ### Engine kind `systemone`
 
-The target's runtime must implement typed decisions: `typesafe-jev` (hosted TypeSafe Jev, default model `jev-latest`, credential `TYPESAFE_API_KEY`) or `systemone` (a self-hosted server). Answers are calibrated probabilities. The answering build is the model name the server reports, for example `jev-1.13.0`, and every cut is keyed by that name. Jev is the engine Clio's fitted cuts are built for. Laya is the diffusion-model engine planned for the same wire, and a Laya build is validated the same way, by fitting cuts on that exact build. Binding a chat-only runtime with `kind: systemone` is reported as a problem by doctor.
+The target's runtime must implement typed decisions: `typesafe-jev` (a hosted decision engine, default model `jev-latest`, credential `TYPESAFE_API_KEY`) or `systemone` (a self-hosted server). Answers are calibrated probabilities. The answering build is the model name the server reports, for example `jev-1.13.0`, and every cut is keyed by that name. Clio's shipped cuts are fitted for the hosted engine's `jev-1.13.0` build. Any other build on the same wire, including a self-hosted one, is validated the same way, by fitting cuts on that exact build. Binding a chat-only runtime with `kind: systemone` is reported as a problem by doctor.
 
 ### Engine kind `llm`
 
@@ -140,7 +142,7 @@ When the `consult` site is bound at startup, the main agent gets a `consult` too
 
 A probability means something only for the build that produced it. Clio therefore keys every cut by the answering build.
 
-- **Fitted cuts** live in `FITTED_CUTS` in `src/domains/system-one/calibration.ts`, each fitted from a labeled run on that exact build. The table ships cuts for the `jev-1.13.0` build only. LLM engines and Laya builds have none until a run fits them.
+- **Fitted cuts** live in `FITTED_CUTS` in `src/domains/system-one/calibration.ts`, each fitted from a labeled run on that exact build. The table ships cuts for the `jev-1.13.0` build only. LLM engines and other builds have none until a run fits them.
 - **`systemOne.cuts` overrides.** Add cuts for a build the table lacks, or replace one. Keys are `<site>.<key>` and values are between 0.01 and 0.99. The operator's value wins over the table.
 
 ```yaml
@@ -157,7 +159,7 @@ Use `scripts/decision-probe.ts` against a labeled fixture under `tests/fixtures/
 
 ## Privacy
 
-State is redacted in the process, before it is built into a request. The runner scrubs every state with Clio's secret filters before any engine sees it, so a hosted engine (Jev, an LLM API) receives redacted text and the records hold the same redacted text. Tool arguments are never sent to the `toolCall` site, only the card's allowlisted one-line target. A hosted engine still receives the operator's request text and bounded tool output, so bind a hosted engine only to targets you would send that text to. A local server keeps everything on the machine.
+State is redacted in the process, before it is built into a request. The runner scrubs every state with Clio's secret filters before any engine sees it, so a hosted decision engine or LLM API receives redacted text and the records hold the same redacted text. Tool arguments are never sent to the `toolCall` site, only the card's allowlisted one-line target. A hosted engine still receives the operator's request text and bounded tool output, so bind a hosted engine only to targets you would send that text to. A local server keeps everything on the machine.
 
 The training dataset applies a second pass on its own copy: a key-name pass for values with no secret-shaped text (`password: hunter2`), and the operator's home directory rewritten to `~`. Redaction is best effort.
 
