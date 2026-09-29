@@ -32,6 +32,7 @@ A `v0.5.8` tag was published on 2026-09-29 and withdrawn before the package reac
 
 ### Model knowledge and context recovery
 
+- The Pi SDK moves to 0.99.1. GPT-6.1 Sol is available through the `openai-codex` subscription and Sonnet 5.5 through `anthropic-max`, and `/draft` runs both without a sampling temperature.
 - The packaged `models/profiles.yaml` supplies model facts and recommendations, with an optional `<config>/model-profiles.yaml` override.
 - Live server capability reports take precedence over profile claims; a user override can lower but not raise a reported capability.
 - A profile's recommended output budget fills an unset budget.
@@ -63,7 +64,16 @@ A `v0.5.8` tag was published on 2026-09-29 and withdrawn before the package reac
 ### Fixed
 
 - Startup no longer prints a `[providers:profiles:compare]` line for every configured route without a model profile. The comparison was a migration aid and now runs only when `CLIO_CODER_PROFILE_COMPARE=1` is set.
-- An operator dispatch whose typed intent replaces prose path inference shows only its transcript callout, without a duplicate `typed scope replacement` footer diagnostic. Harness-owned dispatches, which publish no callout, keep the diagnostic.
+- An operator dispatch whose typed intent replaces prose path inference no longer adds a callout or a footer diagnostic to the transcript. Harness-owned dispatches keep the `typed scope replacement` diagnostic, and receipts keep the record.
+- A settings file from before 0.5.6 that still uses a retired value such as `safety.autonomy: auto-edit` no longer leaves Clio unusable. Plain `clio-coder doctor` previews the rewrite, and `doctor --fix` replaces each retired enum value with the one the validation error names while preserving comments and formatting.
+- A failed gateway or helper tool call is reported as failed. A failed gateway chain could previously appear successful.
+- `clio-coder doctor --deep` reports the tool probe as not applicable for decision-engine targets instead of warning that the probe failed.
+- `clio-coder doctor` builds its configure model list from the current catalog when a runtime has no live model list, so a stale default no longer shapes it.
+- `clio-coder reset` on an absent installation leaves it absent instead of recreating the configuration and state roots.
+- An orientation scout is not reused in a workspace outside Git or with uncommitted changes, where an unchanged fingerprint cannot prove the files are unchanged.
+- A `fleet.speculativeDispatch` change applies on the next turn instead of requiring a restart.
+- `clio-coder systemone export --out` refuses a destination reached through a symbolic link.
+- File-lock acquisition and System One readout-mode rechecks use monotonic deadlines, so a wall-clock change cannot stretch or cut them short.
 
 ## 0.5.7 - 2026-09-27
 
