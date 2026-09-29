@@ -1556,11 +1556,12 @@ function checkGitignoredReference(): void {
 function checkTrackedIgnored(): void {
 	let listed: string;
 	try {
-		listed = execFileSync(
-			"git",
-			["ls-files", "-z", "--cached", "--ignored", "--exclude-per-directory=.gitignore"],
-			{ cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024 },
-		);
+		listed = execFileSync("git", ["ls-files", "-z", "--cached", "--ignored", "--exclude-per-directory=.gitignore"], {
+			cwd: root,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+			maxBuffer: 64 * 1024 * 1024,
+		});
 	} catch {
 		// Outside a Git work tree, such as an unpacked package, there is no index to check.
 		return;
