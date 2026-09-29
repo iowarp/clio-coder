@@ -22,7 +22,7 @@ Criteria describe situations, not degrees. Every answer carries `certainty`, an 
 
 A site declares `id`, a `version`, a hard `deadlineMs`, an optional `moment`, and four pure functions: `state(object)` builds the bounded state or returns `null` to ask nothing, `questions(object)` fans out every question about that state, `read(answers, object, cuts)` applies policy under the build's cuts and returns a typed verdict or `null`, and `summarize(value)` gives the ledger its outcome fields.
 
-One call carries one state and every question about it. Latency is per call, not per question, so a new question costs a wording and a reader, never another round trip. Every state is capped by code points in [bounds.ts](../../src/domains/system-one/sites/bounds.ts) so a fitted cut was measured on evidence of a known size and a small-window engine never truncates the part that matters.
+One call carries one state and every question about it. The `systemone` engine sends those questions in one request. The `llm` engine sends requests per question and option order or vote, with concurrency bounded by the endpoint's capacity. Every state is capped by code points in [bounds.ts](../../src/domains/system-one/sites/bounds.ts) so a fitted cut was measured on evidence of a known size and a small-window engine never truncates the part that matters.
 
 Two definitions can share the id `toolCall` and differ in `moment`: `card` (the advisory on an open approval card) and `gate` (the yolo confirmation). Each moment trips its own breaker, so a slow card never opens the gate's.
 
