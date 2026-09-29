@@ -151,7 +151,12 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 				const total = orders.read + orders.missing;
 				verdict.partialStreak = total > 0 && orders.missing * 2 >= total ? verdict.partialStreak + 1 : 0;
 				if (verdict.partialStreak >= PARTIAL_CALLS_TO_FLIP) {
-					modeVerdicts.set(verdictKey, { mode: "answer", at: performance.now(), reason: "partial-logprobs", partialStreak: 0 });
+					modeVerdicts.set(verdictKey, {
+						mode: "answer",
+						at: performance.now(),
+						reason: "partial-logprobs",
+						partialStreak: 0,
+					});
 				}
 			};
 
