@@ -144,6 +144,14 @@ function boundedString(value: unknown, max: number): value is string {
 }
 
 /**
+ * The length the model sent, so an over-long body says by how much instead of
+ * leaving a weak model to guess how hard to cut. A non-string has no length to report.
+ */
+function sentLength(value: unknown): string {
+	return typeof value === "string" ? `; got ${value.length}` : "";
+}
+
+/**
  * The single shared validator. The worker tool calls it to refuse a model
  * synchronously and the orchestrator calls it again at append, because the
  * control lane is one-way and only the orchestrator's verdict is authoritative.
@@ -166,18 +174,24 @@ export function parseAgentLedgerBody(value: unknown): AgentLedgerBodyParse {
 				if (!boundedString(entry, AGENT_LEDGER_SCOPE_ENTRY_MAX_CHARS)) {
 					return {
 						ok: false,
-						reason: `claim scope entries must be 1..${AGENT_LEDGER_SCOPE_ENTRY_MAX_CHARS} characters`,
+						reason: `claim scope entries must be 1..${AGENT_LEDGER_SCOPE_ENTRY_MAX_CHARS} characters${sentLength(entry)}`,
 					};
 				}
 			}
 			if (!boundedString(record.intent, AGENT_LEDGER_INTENT_MAX_CHARS)) {
-				return { ok: false, reason: `claim intent must be 1..${AGENT_LEDGER_INTENT_MAX_CHARS} characters` };
+				return {
+					ok: false,
+					reason: `claim intent must be 1..${AGENT_LEDGER_INTENT_MAX_CHARS} characters${sentLength(record.intent)}`,
+				};
 			}
 			return { ok: true, body: { kind: "claim", scope: scope.map(String), intent: record.intent } };
 		}
 		case "finding": {
 			if (!boundedString(record.claim, AGENT_LEDGER_CLAIM_MAX_CHARS)) {
-				return { ok: false, reason: `finding claim must be 1..${AGENT_LEDGER_CLAIM_MAX_CHARS} characters` };
+				return {
+					ok: false,
+					reason: `finding claim must be 1..${AGENT_LEDGER_CLAIM_MAX_CHARS} characters${sentLength(record.claim)}`,
+				};
 			}
 			const body: { kind: "finding"; claim: string; path?: string; line?: number } = {
 				kind: "finding",
@@ -185,7 +199,10 @@ export function parseAgentLedgerBody(value: unknown): AgentLedgerBodyParse {
 			};
 			if (record.path !== undefined) {
 				if (!boundedString(record.path, AGENT_LEDGER_PATH_MAX_CHARS)) {
-					return { ok: false, reason: `finding path must be 1..${AGENT_LEDGER_PATH_MAX_CHARS} characters` };
+					return {
+						ok: false,
+						reason: `finding path must be 1..${AGENT_LEDGER_PATH_MAX_CHARS} characters${sentLength(record.path)}`,
+					};
 				}
 				body.path = record.path;
 			}
@@ -206,7 +223,10 @@ export function parseAgentLedgerBody(value: unknown): AgentLedgerBodyParse {
 				return { ok: false, reason: "review passed must be a boolean" };
 			}
 			if (!boundedString(record.evidence, AGENT_LEDGER_EVIDENCE_MAX_CHARS)) {
-				return { ok: false, reason: `review evidence must be 1..${AGENT_LEDGER_EVIDENCE_MAX_CHARS} characters` };
+				return {
+					ok: false,
+					reason: `review evidence must be 1..${AGENT_LEDGER_EVIDENCE_MAX_CHARS} characters${sentLength(record.evidence)}`,
+				};
 			}
 			return {
 				ok: true,

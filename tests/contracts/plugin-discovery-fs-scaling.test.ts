@@ -75,7 +75,7 @@ function agentPlugin(name: string): string {
 	const recipe = readFileSync(resolve("src/domains/agents/builtins/researcher.md"), "utf8")
 		.replace("audience: shadow", "audience: custom")
 		.replace("required: [read]", "required: [read, context]")
-		.replace("optional: [web_fetch, context, ledger]", "optional: [web_fetch, ledger]")
+		.replace("optional: [web_fetch, context, ledger, git]", "optional: [web_fetch, ledger, git]")
 		.replace("skills: []", "skills: [bound-skill]");
 	write(root, "agents/bound-researcher.md", recipe);
 	write(root, "plugin.json", manifest(name, { skills: "skills", agents: "agents" }));

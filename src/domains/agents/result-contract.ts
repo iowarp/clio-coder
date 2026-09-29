@@ -1026,23 +1026,32 @@ function validateScoutCitation(
 	};
 }
 
+/** How many refused citations one repair message names before it counts the rest. */
+const SCOUT_CITATION_REFUSALS_NAMED = 8;
+
 /**
  * Every citation on a strictly conforming result has to ground. One that does
  * not is a fabricated location on a report claiming `pass`, so it fails the
  * whole result; this check is the only thing standing between an invented
- * `path:line` and a quality label the router believes.
+ * `path:line` and a quality label the router believes. The refusal names every
+ * citation that failed, because a report of eighteen findings rejected one
+ * citation per submission cost a live scout three full resubmissions.
  */
 function validateScoutCitations(
 	input: ResultContractValidationInput,
 	citations: ReadonlyArray<ScoutCitation>,
 ): { ok: true; evidence: ReadonlyArray<ScoutCitationEvidence> } | { ok: false; reason: string } {
 	const evidence: ScoutCitationEvidence[] = [];
+	const refusals: string[] = [];
 	for (const citation of citations) {
 		const checked = validateScoutCitation(input, citation);
-		if (!checked.ok) return checked;
-		evidence.push(checked.evidence);
+		if (checked.ok) evidence.push(checked.evidence);
+		else refusals.push(checked.reason);
 	}
-	return { ok: true, evidence };
+	if (refusals.length === 0) return { ok: true, evidence };
+	const named = refusals.slice(0, SCOUT_CITATION_REFUSALS_NAMED).join("; ");
+	const rest = refusals.length - SCOUT_CITATION_REFUSALS_NAMED;
+	return { ok: false, reason: rest > 0 ? `${named}; and ${rest} more citations were refused` : named };
 }
 
 /**

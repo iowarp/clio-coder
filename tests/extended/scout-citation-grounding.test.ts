@@ -139,3 +139,34 @@ test("Scout repair reports current physical bounds after a source snapshot shrin
 		scratch.cleanup();
 	}
 });
+
+// A live scout rejected one citation per submission and needed three submissions to land an
+// eighteen-finding report, so the refusal names every citation that failed.
+test("Scout refusal names every ungrounded citation in one message", () => {
+	const scratch = makeScratchHome("clio-scout-all-refusals-");
+	try {
+		for (const name of ["a.ts", "b.ts", "c.ts"]) writeFileSync(join(scratch.dir, name), "export {};\n// x\n// y\n");
+		const read = (name: string) => join(scratch.dir, name);
+		const validate = (names: string[]) =>
+			validateResultContract({
+				contract: { kind: "scout-report" as const },
+				cwd: scratch.dir,
+				networkAllowed: false,
+				filesystem: nodeResultContractFilesystem(),
+				observedReadRanges: new Map([[read("a.ts"), [[1, 3] as const]]]),
+				output: JSON.stringify({
+					findings: names.map((name) => ({ claim: `Cites ${name}`, path: name, line: 1 })),
+					needsSplit: false,
+					proposedSubtasks: [],
+				}),
+			});
+		const both = validate(["a.ts", "b.ts", "c.ts"]);
+		strictEqual(both.conformance, "fail");
+		match(both.reason ?? "", /b\.ts:1 \(this run never read that file\); .*c\.ts:1 \(this run never read that file\)/u);
+		const many = validate(["a.ts", ...Array.from({ length: 10 }, (_, i) => `missing-${i}.ts`)]);
+		match(many.reason ?? "", /; and 2 more citations were refused$/u);
+		strictEqual(validate(["a.ts"]).conformance, "pass");
+	} finally {
+		scratch.cleanup();
+	}
+});

@@ -34,6 +34,7 @@ const COUNCIL_READ_ONLY_TOOLS: ReadonlyArray<BuiltinToolName> = [
 	ToolNames.Grep,
 	ToolNames.Find,
 	ToolNames.Ls,
+	ToolNames.Git,
 	ToolNames.CodeNav,
 	ToolNames.Context,
 ];
