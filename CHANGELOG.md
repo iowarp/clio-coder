@@ -2,6 +2,62 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## 0.5.8 - 2026-09-29
+
+### Turn control and workspace guidance
+
+- Clio records a typed outcome for each operator turn.
+- The turn controller starts explicit repository tours with read-only orientation and offers grounded next steps for undecided requests.
+- Finished detached worker batches are collected before the main model continues.
+- Session startup supplies bounded workspace facts and installed capability catalogs.
+- Gateway discovery uses a generated capability map to find tools beyond those attached to the main session.
+- Coordinator guidance checks available tools before asking the operator through `ask_user`.
+- Prior-session answers draw on recorded history, and disputed CI claims are checked against available run evidence.
+- Read-only workers can inspect bounded Git history and name refused citations.
+- The agent board shows scheduler-known assignments and receipt findings.
+
+### System One decisions and records
+
+- `systemOne.engines` and `systemOne.sites` bind typed decision calls to hosted Jev, self-hosted `systemone` servers, or configured chat models.
+- An unfitted System One build runs in shadow until cuts are configured for that build; unbound and failed sites leave the normal workflow in place.
+- Fitted decision sites can guide turn scope, orientation, dispatch, approval advisories, external-result warnings, and finished-turn questions.
+- The `relevance`, `consult`, and `drafts` sites rank catalogs, answer typed consultations, and judge `/draft` candidates respectively.
+- Each System One call writes a compact session-ledger record.
+- Optional `systemOne.record` saves redacted decision and outcome rows with retention limits, available through `clio-coder systemone status` and `export`.
+- Fleet settings and `clio-coder doctor` show decision-site bindings and their health.
+- Oversized decision state and repeatedly timed-out endpoints fall back without holding the main turn indefinitely.
+- **Settings migration:** Non-empty `fleet.decisionProfiles` and `turnControl.interpretation` are retired in favor of `systemOne.engines` and `systemOne.sites`. An empty `fleet.decisionProfiles: {}` written by earlier releases is accepted.
+
+### Model knowledge and context recovery
+
+- The packaged `models/profiles.yaml` supplies model facts and recommendations, with an optional `<config>/model-profiles.yaml` override.
+- Live server capability reports take precedence over profile claims; a user override can lower but not raise a reported capability.
+- A profile's recommended output budget fills an unset budget.
+- ThinkingCap-Qwen3.8-27B and Qwopus3.8-27B-Flash-V2 profiles map requested reasoning levels onto the `low`, `medium` and `xhigh` levels their chat templates accept.
+- Inference-server serving windows carry provenance; a YAML or Pi value is labeled as a model maximum, while cloud routes without a window endpoint use a labeled Pi catalog estimate.
+- The openai-codex route reads its serving window from the Codex backend.
+- An unknown serving window displays as unknown and disables threshold compaction.
+- A server overflow can trigger one compact-and-retry, even when the window or output limit is unknown.
+- Workers make one recovery attempt after a server context overflow by evicting reversible observations when possible. Their initial fork remains intact.
+- An explicit per-model LM Studio context setting takes precedence over the co-resident context clamp, with a reload for drift that restores the previous instance if replacement fails.
+
+### Terminal, tools, and execution
+
+- `/draft` marks candidates containing tool-call markup as failed so they cannot be taken as an answer.
+- Gateway `describe` returns the attached direct tool schema, giving callers the actual available arguments.
+- `/upgrade` supports an approved in-session npm upgrade, with installed-package checks and restart guidance.
+- A narrow terminal welcome uses a compact one-band wordmark.
+- Model nicknames shorten by rule, and advisory notices render as titled callouts.
+- Git, read, and ledger errors name a useful correction.
+- Git pushes are classified as outward actions, and MCP Slurm tools are classified individually.
+- Session cost ceilings are enforced before paid requests.
+- Permission decisions gain audit rows in the session ledger, and memory steps record the serving route used.
+
+### Configuration and lifecycle
+
+- Settings that take `on` and `off` levels accept the YAML 1.1 booleans an unquoted `on`, `off`, `true` or `false` parses to. `clio-coder doctor` warns about them, and `doctor --fix` rewrites them while preserving comments.
+- Reset, uninstall, upgrade, and migration paths refuse unsafe root layouts and untrusted migration history.
+
 ## 0.5.7 - 2026-09-27
 
 ### Coordinator discovery and composition

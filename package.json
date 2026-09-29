@@ -1,6 +1,6 @@
 {
 	"name": "@iowarp/clio-coder",
-	"version": "0.5.7",
+	"version": "0.5.8",
 	"description": "An open-source terminal coding agent for scientific software: your models, bounded workers, and inspectable evidence.",
 	"keywords": [
 		"ai",
@@ -55,6 +55,7 @@
 		"!dist/metafile*.json",
 		"assets/clio-coder-logo-128.webp",
 		"src/**",
+		"models/**",
 		"library/**",
 		".claude-plugin/marketplace.json",
 		"docs/**/*.md",
