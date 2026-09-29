@@ -19,7 +19,7 @@ import {
 	truncateToWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
-import { DRAFT_LABELS, type DraftLabel, type DraftVerdict } from "../drafts.js";
+import { DRAFT_LABELS, type DraftLabel, type DraftVerdict, hasDeadDraftToolCallMarkup } from "../drafts.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { codeInk } from "../renderers/code-ink.js";
 import { clioTheme, GLYPH, markdownTheme, rule } from "../theme/index.js";
@@ -222,7 +222,7 @@ export function takenDraft(state: DraftOverlayState): TakenDraft | null {
 	if (phase?.kind !== "drafted") return null;
 	const text = phase.text.trim();
 	const label = DRAFT_LABELS[state.selected];
-	if (text.length === 0 || label === undefined) return null;
+	if (text.length === 0 || label === undefined || hasDeadDraftToolCallMarkup(text)) return null;
 	return { index: state.selected, label, text, verdict: state.judge.kind === "judged" ? state.judge.verdict : null };
 }
 

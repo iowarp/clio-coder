@@ -9,7 +9,10 @@ import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 import {
 	DRAFT_DEFAULT,
 	DRAFT_SYSTEM_PROMPT,
+	DRAFT_TOOL_CALL_REASON,
+	draftCandidateFromText,
 	draftSystemPrompt,
+	draftsToJudge,
 	draftTemperature,
 	isTemperatureRejection,
 	parseDraftArgs,
@@ -180,6 +183,29 @@ describe("/draft use key", () => {
 		strictEqual(taken.verdict?.ref, "draft_1");
 		state.selected = 2;
 		strictEqual(takenDraft(state), null, "a draft still denoising cannot be taken");
+	});
+
+	it("fails a tool-call draft and blocks raw markup even if it reaches the overlay", () => {
+		const markup = "<tool_call><function=bash>echo hi</function></tool_call>";
+		const candidate = draftCandidateFromText(markup);
+		deepStrictEqual(candidate, { status: "failed", reason: DRAFT_TOOL_CALL_REASON });
+		deepStrictEqual(draftCandidateFromText(`Some prose\n${markup}\nMore prose`), candidate);
+		deepStrictEqual(draftsToJudge([candidate, { status: "drafted", text: "a reply" }]), {
+			reason: "not judged: a draft failed or came back empty",
+		});
+		const state = settled();
+		state.candidates[1] = { kind: "failed", reason: DRAFT_TOOL_CALL_REASON };
+		ok(plain(formatDraftOverlayBody(state, 90, 10).join("\n")).includes(DRAFT_TOOL_CALL_REASON));
+		strictEqual(takenDraft(state), null);
+		state.candidates[1] = { kind: "drafted", text: markup };
+		strictEqual(takenDraft(state), null, "the use key must reject unclassified markup");
+	});
+
+	it("keeps a clean draft takeable when the judge marks it unsound", () => {
+		const state = settled();
+		if (state.judge.kind !== "judged") throw new Error("expected a judged draft");
+		state.judge.verdict.sound.B = false;
+		strictEqual(takenDraft(state)?.text, "memoized fib");
 	});
 
 	it("records the taken label, the judge's pick and whether they agree, keyed by the judging call", () => {

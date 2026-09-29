@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import type { SystemOne } from "../domains/system-one/index.js";
 import type { DraftLabel } from "../domains/system-one/sites/drafts.js";
 import { DRAFT_LABELS, DRAFT_MIN, DRAFTS_SITE } from "../domains/system-one/sites/drafts.js";
+import { stripDeadToolCallMarkup } from "../engine/loop-guard.js";
 
 export type { DraftLabel };
 export { DRAFT_LABELS, DRAFT_MIN };
@@ -141,6 +142,21 @@ export const DRAFT_SYSTEM_PROMPT = [
 
 /** Output budget per candidate. A draft is an answer to compare, not a document. */
 export const DRAFT_MAX_TOKENS = 4096;
+
+export const DRAFT_TOOL_CALL_REASON = "drafted a tool call instead of a reply";
+
+export function hasDeadDraftToolCallMarkup(text: string): boolean {
+	return stripDeadToolCallMarkup(text) !== text;
+}
+
+/** A tool-free round can return call syntax as text; it is not a usable draft. */
+export function draftCandidateFromText(
+	text: string,
+): { status: "drafted"; text: string } | { status: "failed"; reason: string } {
+	return hasDeadDraftToolCallMarkup(text)
+		? { status: "failed", reason: DRAFT_TOOL_CALL_REASON }
+		: { status: "drafted", text };
+}
 
 export interface DraftRequest {
 	count: number;
