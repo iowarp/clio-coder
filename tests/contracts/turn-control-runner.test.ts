@@ -114,17 +114,17 @@ test("orientation dispatches read-only from the harness once, renders findings a
 		assert.match(first.block ?? "", /Entry point.*src\/cli\/index.ts:1/);
 		assert.equal(first.record.producer, "system-one");
 		const second = await h.runner.run({ ...input(), userTurnId: "u-2" });
-		assert.equal(h.requests.length, 1);
+		assert.equal(h.requests.length, 2, "a workspace without Git cannot reuse an orientation");
 		assert.equal(second.block, first.block);
 		assert.deepEqual(second.record.orientation, first.record.orientation);
 		const resumed = createTurnControlRunner(h.deps);
 		resumed.seedOrientation(first.record.orientation ?? null);
 		const third = await resumed.run({ ...input(), userTurnId: "u-3" });
 		assert.equal(third.block, first.block);
-		assert.equal(h.requests.length, 1);
+		assert.equal(h.requests.length, 3, "a seeded orientation cannot verify a workspace without Git");
 		resumed.seedOrientation(null);
 		await resumed.run(input());
-		assert.equal(h.requests.length, 2);
+		assert.equal(h.requests.length, 4);
 	} finally {
 		h.cleanup();
 	}
