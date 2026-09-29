@@ -223,9 +223,11 @@ export function compactContextUsage(
 	const percent = contextUsagePercent(context);
 	if (!window) return theme.fg("counter", counts);
 	const full = `${theme.fg("counter", counts)} ${theme.fg(contextPercentRole(percent), `(${formatContextPercent(percent)})`)}`;
-	// A narrow row states the percent whole rather than cut the counts mid-figure.
-	return visibleWidth(full) <= room
-		? full
+	if (visibleWidth(full) <= room) return full;
+	// A narrow row keeps the counts and drops the percent, then states the percent
+	// whole rather than cut either mid-figure.
+	return visibleWidth(counts) <= room
+		? theme.fg("counter", counts)
 		: `${theme.fg("counter", "ctx")} ${theme.fg(contextPercentRole(percent), formatContextPercent(percent))}`;
 }
 

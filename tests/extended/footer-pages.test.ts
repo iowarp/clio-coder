@@ -520,7 +520,7 @@ test("the compact footer names an armed skill surface beside the worker count un
 	doesNotMatch(facts(100), /skill|§/u);
 });
 
-test("a narrow compact footer keeps the context percent whole and never cuts the counts", () => {
+test("a narrow compact footer keeps the counts and never cuts a figure", () => {
 	const snapshot = state();
 	const line = (width: number) => stripTerminalSequences(renderCompactDashboard(snapshot, width)[0] ?? "");
 	// The context engine's budget meter, as the live footer reads it: counts with a percent.
@@ -539,14 +539,14 @@ test("a narrow compact footer keeps the context percent whole and never cuts the
 		ok(visibleWidth(row) <= width, row);
 		doesNotMatch(row, /\d…/u, row);
 	}
-	// Counts that do not fit are dropped; the percent is never cut.
-	match(line(40), /ctx ~?\d+\.\d%$/u);
+	// A percent that does not fit is dropped whole; the counts stay.
+	match(line(40), /33\.9K\/262\.1K$/u);
 	match(line(60), /33\.9K\/262\.1K \(~?12\.\d%\)$/u);
 	match(line(100), /33\.9K\/262\.1K \(~?12\.\d%\)$/u);
-	// The ledger meter states counts alone, so the narrow row states its percent instead.
+	// The ledger meter keeps its counts on a narrow row too.
 	const ledgerSnapshot = state();
 	const narrow = stripTerminalSequences(renderCompactDashboard(ledgerSnapshot, 40)[0] ?? "");
-	match(narrow, /ctx \d+\.\d%$/u, narrow);
+	match(narrow, /68\.5K\/262\.1K$/u, narrow);
 	match(stripTerminalSequences(renderCompactDashboard(ledgerSnapshot, 100)[0] ?? ""), /68\.5K\/262\.1K \(26\.1%\)$/u);
 });
 
