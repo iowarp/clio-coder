@@ -4,10 +4,10 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { isMap, isScalar, isSeq, parseDocument, parse as parseYaml } from "yaml";
 import type { Scalar } from "yaml";
-import { settingsPath, validateSettings, validateSettingsFile, withSettingsLock } from "./config.js";
+import { isMap, isScalar, isSeq, parseDocument, parse as parseYaml } from "yaml";
 import type { SettingsScalarRepair } from "./config.js";
+import { settingsPath, validateSettings, validateSettingsFile, withSettingsLock } from "./config.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 
 export interface SettingsRepairResult {
