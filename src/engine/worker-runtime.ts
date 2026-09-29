@@ -3,8 +3,13 @@ import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domain
 import { createWorkerObservationStore } from "../domains/context/worker/recall.js";
 import { seededWorkerMessages } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
-import { estimateInputTokensFromContext, resolveReservedOutputTokens } from "./apis/output-budget.js";
+import {
+	estimateInputTokensFromContext,
+	recommendedOutputTokens,
+	resolveReservedOutputTokens,
+} from "./apis/output-budget.js";
 import { resolvedRequestContext } from "./context.js";
+import { retryStreamOnceOnOverflow } from "./overflow-retry-stream.js";
 /**
  * Worker-subprocess engine boundary.
  *
@@ -57,6 +62,7 @@ import type {
 } from "../domains/providers/index.js";
 import { applyModelCapabilityPatch, resolveModelRuntimeCapabilitiesForModel } from "../domains/providers/index.js";
 import { resolveProviderKnowledgeBaseRoots } from "../domains/providers/knowledge-base-path.js";
+import { createProfileKnowledgeBase } from "../domains/providers/profile-knowledge.js";
 import {
 	FileKnowledgeBase,
 	type KnowledgeBase,
@@ -323,12 +329,16 @@ let kbSingleton: KnowledgeBase | null = null;
 
 function getKnowledgeBase(): KnowledgeBase {
 	if (kbSingleton) return kbSingleton;
+	let legacy: KnowledgeBase;
 	try {
 		const roots = resolveProviderKnowledgeBaseRoots(import.meta.url);
-		kbSingleton = roots.length > 0 ? new FileKnowledgeBase(roots) : new NullKnowledgeBase();
+		legacy = roots.length > 0 ? new FileKnowledgeBase(roots) : new NullKnowledgeBase();
 	} catch {
-		kbSingleton = new NullKnowledgeBase();
+		legacy = new NullKnowledgeBase();
 	}
+	// Stdout is the NDJSON lane, so a profile file that fails to load is left silent here;
+	// the orchestrator reports it once and the worker resolves from the live server instead.
+	kbSingleton = createProfileKnowledgeBase(legacy);
 	return kbSingleton;
 }
 
@@ -505,7 +515,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const activeWorkerTools = workerProviderSupportsTools(input) ? input.allowedTools : [];
 
 	const kb = getKnowledgeBase();
-	const kbHit = kb.lookup(input.wireModelId);
+	const kbHit = kb.lookup(input.wireModelId, input.runtime.id);
 	const synthesized = input.runtime.synthesizeModel(input.target, input.wireModelId, kbHit);
 	const model = applyModelCapabilityPatch(
 		input.target.runtime === "faux" && fauxModel ? fauxModel : synthesized,
@@ -922,21 +932,26 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							)
 						: currentContext.systemPrompt;
 			const window = input.runtimeResolution?.capabilities.contextWindow ?? currentModel.contextWindow;
-			let messages: AgentMessage[];
-			try {
-				messages = contextGuard({
-					messages: currentContext.messages,
-					systemPrompt: systemPrompt ?? "",
-					tools: currentContext.tools ?? [],
-					contextWindow: window,
-					threshold: workerSettings.context.compaction.threshold,
-					autoEvict: workerSettings.context.compaction.auto && workerSettings.context.workingSet.enabled,
-					outputReserve: resolveReservedOutputTokens(currentModel.maxTokens, {
+			const pressure = {
+				messages: currentContext.messages,
+				systemPrompt: systemPrompt ?? "",
+				tools: currentContext.tools ?? [],
+				contextWindow: window,
+				threshold: workerSettings.context.compaction.threshold,
+				autoEvict: workerSettings.context.compaction.auto && workerSettings.context.workingSet.enabled,
+				outputReserve: resolveReservedOutputTokens(
+					currentModel.maxTokens,
+					{
 						api: currentModel.api,
 						contextWindow: window,
 						inputTokens: estimateInputTokensFromContext(currentContext),
-					}),
-				});
+					},
+					recommendedOutputTokens(currentModel),
+				),
+			};
+			let messages: AgentMessage[];
+			try {
+				messages = contextGuard(pressure);
 			} catch (error) {
 				if (error instanceof WorkerContextExhaustedError) {
 					workerBoundFailure = error.message;
@@ -944,15 +959,25 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				}
 				throw error;
 			}
-			return engineStreamSimple(
-				currentModel,
-				{
-					...currentContext,
-					...(systemPrompt !== undefined ? { systemPrompt } : {}),
-					messages: messages as typeof currentContext.messages,
-				},
-				streamOptions,
-			);
+			const request = (projected: AgentMessage[]) =>
+				engineStreamSimple(
+					currentModel,
+					{
+						...currentContext,
+						...(systemPrompt !== undefined ? { systemPrompt } : {}),
+						messages: projected as typeof currentContext.messages,
+					},
+					streamOptions,
+				);
+			const first = request(messages);
+			// The server is the authority on its own limit. An unreported window, a
+			// window that changed since it was resolved, or a server tokenizer that
+			// counts above Clio's estimate all surface as a server overflow. It earns
+			// one reversible eviction and one retry; a second overflow is final.
+			return retryStreamOnceOnOverflow(first, () => {
+				const projected = contextGuard.recover(pressure);
+				return projected ? request(projected) : null;
+			});
 		},
 		initialState: {
 			systemPrompt: input.systemPrompt,

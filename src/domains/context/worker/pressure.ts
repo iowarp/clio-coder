@@ -15,8 +15,30 @@ interface WorkerPressureInput {
 
 export class WorkerContextExhaustedError extends Error {}
 
+/**
+ * A server overflow reports only that the request was too large, never by how
+ * much. The one retry must shrink the failed request to this share of its own
+ * estimate. The target is relative to the request, so it needs no window and
+ * serves an unreported window and a known one alike.
+ */
+const OVERFLOW_RECOVERY_KEEP = 0.7;
+
+export interface WorkerContextGuard {
+	(input: WorkerPressureInput): AgentMessage[];
+	/**
+	 * Project a smaller request after the server rejected the last one as too
+	 * large, whether Clio's own estimate saw the overflow coming or not. Evicts
+	 * the same reversible observations the ceiling path does, oldest first, and
+	 * returns null unless that brings the request to the recovery target, so the
+	 * caller fails with the server's own error instead of spending the only retry
+	 * on a request that is still far too large. The first request is the caller's
+	 * chosen fork and is never trimmed.
+	 */
+	recover(input: WorkerPressureInput): AgentMessage[] | null;
+}
+
 /** Per-worker reversible projection. Stable markers never rewrite its raw history. */
-export function createWorkerContextGuard(archive: (ref: string, message: AgentMessage) => string) {
+export function createWorkerContextGuard(archive: (ref: string, message: AgentMessage) => string): WorkerContextGuard {
 	const evicted = new Map<string, AgentMessage>();
 	let calls = 0;
 	let firstInputLength = 0;
@@ -24,11 +46,14 @@ export function createWorkerContextGuard(archive: (ref: string, message: AgentMe
 	let anchorKey = "";
 	let anchorUsage = 0;
 	let anchorFootprint = 0;
-	return (input: WorkerPressureInput): AgentMessage[] => {
-		const ceiling = Math.min(
-			Math.floor(input.contextWindow * (input.threshold ?? 0.8)),
-			input.contextWindow - input.outputReserve,
-		);
+	const project = (input: WorkerPressureInput, recovering: boolean): AgentMessage[] | null => {
+		// An unreported serving window resolves to 0. It admits the request: the
+		// server enforces its own limit, and a real overflow fails the run with
+		// the server's error instead of a fabricated "insufficient headroom".
+		const windowKnown = Number.isFinite(input.contextWindow) && input.contextWindow > 0;
+		const ceiling = windowKnown
+			? Math.min(Math.floor(input.contextWindow * (input.threshold ?? 0.8)), input.contextWindow - input.outputReserve)
+			: Number.POSITIVE_INFINITY;
 		const key = (message: AgentMessage) => contextHash(message);
 		const messages = input.messages.map((message) => evicted.get(key(message)) ?? message);
 
@@ -74,18 +99,25 @@ export function createWorkerContextGuard(archive: (ref: string, message: AgentMe
 			structural -= saved;
 		};
 
-		if (count() <= ceiling) return accepted();
-		// The first request must honor the selected fork; never auto-trim it into a splice.
-		if (calls === 0)
-			throw new WorkerContextExhaustedError(
-				"worker context: initial request leaves insufficient context headroom; use a smaller splice",
-			);
-		if (input.autoEvict === false)
-			throw new WorkerContextExhaustedError("worker context: context budget exhausted with automatic eviction disabled");
+		if (recovering) {
+			// The first request is the caller's chosen fork, never auto-trimmed.
+			if (calls <= 1 || input.autoEvict === false) return null;
+		} else {
+			if (count() <= ceiling) return accepted();
+			// The first request must honor the selected fork; never auto-trim it into a splice.
+			if (calls === 0)
+				throw new WorkerContextExhaustedError(
+					"worker context: initial request leaves insufficient context headroom; use a smaller splice",
+				);
+			if (input.autoEvict === false)
+				throw new WorkerContextExhaustedError("worker context: context budget exhausted with automatic eviction disabled");
+		}
+		const recoveryTarget = Math.floor(lastRequestTokens * OVERFLOW_RECOVERY_KEEP);
+		const over = () => (recovering ? structural > recoveryTarget : count() > ceiling);
 		const assistantIndices = input.messages.flatMap((message, index) => (message.role === "assistant" ? [index] : []));
 		const cutoff = assistantIndices[Math.max(0, assistantIndices.length - 2)] ?? 0;
 		const toolCalls = new Map(input.messages.flatMap(messageToolCalls).map((call) => [call.id, call]));
-		for (let index = 0; index < cutoff && count() > ceiling; index++) {
+		for (let index = 0; index < cutoff && over(); index++) {
 			const message = input.messages[index];
 			if (!message || evicted.has(key(message))) continue;
 			if (message.role === "assistant") {
@@ -115,10 +147,14 @@ export function createWorkerContextGuard(archive: (ref: string, message: AgentMe
 				replace(index, message, projected);
 			}
 		}
+		if (recovering) return structural <= recoveryTarget ? accepted() : null;
 		if (count() > ceiling)
 			throw new WorkerContextExhaustedError(
 				"worker context: protected task context exceeds available headroom after reversible eviction",
 			);
 		return accepted();
 	};
+	return Object.assign((input: WorkerPressureInput): AgentMessage[] => project(input, false) as AgentMessage[], {
+		recover: (input: WorkerPressureInput): AgentMessage[] | null => project(input, true),
+	});
 }

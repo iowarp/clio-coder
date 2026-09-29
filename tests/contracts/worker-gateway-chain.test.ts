@@ -33,7 +33,7 @@ const SOURCE = [
 ].join("\n");
 
 type Call = { name: string; arguments: string };
-type Round = Call[] | { text: string };
+type Round = Call[] | { text: string } | { overflow: string };
 
 const grepArgs = { pattern: "openUsageOverlayState", path: "{WORKSPACE}" };
 const grep: Call = { name: "grep", arguments: JSON.stringify(grepArgs) };
@@ -72,6 +72,16 @@ async function runWorker(
 		bodies.push(JSON.parse(await readRequestBody(req)) as Record<string, unknown>);
 		const round = rounds[requests] ?? rounds.at(-1) ?? { text: "done" };
 		requests += 1;
+		if ("overflow" in round) {
+			res.statusCode = 400;
+			res.setHeader("content-type", "application/json");
+			res.end(
+				JSON.stringify({
+					error: { message: round.overflow, type: "invalid_request_error", code: "context_length_exceeded" },
+				}),
+			);
+			return;
+		}
 		res.setHeader("content-type", "text/event-stream");
 		const delta = Array.isArray(round)
 			? {
@@ -149,6 +159,102 @@ test("a grep line grounds a citation whether it came direct or from a chain step
 		strictEqual(requests, 2, `${call.name}: the citation was accepted without a repair round`);
 		deepStrictEqual(acceptedLines(events), [6]);
 	}
+});
+
+test("a worker whose serving window is unreported still sends its first request", { timeout: 20_000 }, async () => {
+	// An unknown window resolves to 0; the guard once read that as no headroom.
+	const { result, events, requests } = await runWorker([[grep], [submit(6)]], {
+		...SCOUT,
+		modelCapabilities: { contextWindow: 0, maxTokens: 8192, tools: true },
+	});
+	strictEqual(result.exitCode, 0, JSON.stringify(outcomes(events)));
+	strictEqual(requests, 2);
+});
+
+const OVERFLOW = "This model's maximum context length is 8192 tokens. However, your messages resulted in 9100 tokens.";
+const BULK = Array.from({ length: 80 }, (_, index) => `bulk line ${index} ${"x".repeat(40)}`).join("\n");
+const overflowRounds = (...tail: Round[]): Round[] => [
+	[read({ path: "bulk.txt" })],
+	[read({ path: "overlays.ts" })],
+	[read({ path: "overlays.ts", offset: 2 })],
+	{ overflow: OVERFLOW },
+	...tail,
+];
+const unreportedWindow: Partial<WorkerRunInput> = {
+	...SCOUT,
+	modelCapabilities: { contextWindow: 0, maxTokens: 8192, tools: true },
+};
+
+test("a server context overflow on an unreported window evicts old observations and retries once", {
+	timeout: 30_000,
+}, async () => {
+	const { result, events, requests, bodies } = await runWorker(overflowRounds([submit(6)]), unreportedWindow, {
+		"overlays.ts": SOURCE,
+		"bulk.txt": BULK,
+	});
+	strictEqual(result.exitCode, 0, JSON.stringify(outcomes(events)));
+	strictEqual(requests, 5, "three work rounds, the rejected request, and exactly one retry");
+	deepStrictEqual(acceptedLines(events), [6]);
+	const rejected = JSON.stringify(bodies[3]);
+	const retried = JSON.stringify(bodies[4]);
+	ok(!rejected.includes("evicted"), "the rejected request carried the full observation");
+	ok(
+		retried.includes("bulk line 0") === false && retried.includes("evicted"),
+		"the retry replaced the old read with its recall marker",
+	);
+	ok(retried.length < rejected.length, `retry ${retried.length} bytes is smaller than the rejected ${rejected.length}`);
+});
+
+test("a server overflow under a known window still earns the one eviction retry", {
+	timeout: 30_000,
+}, async () => {
+	// The window says 131072; the server's own count disagrees. The estimate never
+	// saw this coming, so only the server's error can trigger recovery.
+	const { result, events, requests, bodies } = await runWorker(overflowRounds([submit(6)]), SCOUT, {
+		"overlays.ts": SOURCE,
+		"bulk.txt": BULK,
+	});
+	strictEqual(result.exitCode, 0, JSON.stringify(outcomes(events)));
+	strictEqual(requests, 5, "three work rounds, the rejected request, and exactly one retry");
+	ok(JSON.stringify(bodies[4]).includes("evicted"), "the retry replaced the old read with its recall marker");
+	ok(JSON.stringify(bodies[4]).length < JSON.stringify(bodies[3]).length);
+});
+
+test("an overflow the eviction cannot shrink to the recovery target is not retried", {
+	timeout: 30_000,
+}, async () => {
+	// The evictable read is a sliver of a request dominated by the task itself.
+	// Retrying it would spend the only attempt on a request still over the limit.
+	const { result, events, requests } = await runWorker(
+		overflowRounds([submit(6)]),
+		{
+			...SCOUT,
+			task: `Find where the usage overlay opener is bound. ${"Background detail. ".repeat(2500)}`,
+		},
+		{ "overlays.ts": SOURCE, "bulk.txt": BULK },
+	);
+	strictEqual(requests, 4, "the rejected request is the last one");
+	ok(result.exitCode !== 0, JSON.stringify(outcomes(events)));
+});
+
+test("a second server overflow after the recovery retry ends the run with the server's error", {
+	timeout: 30_000,
+}, async () => {
+	const { result, events, requests } = await runWorker(
+		overflowRounds({ overflow: OVERFLOW }, [submit(6)]),
+		unreportedWindow,
+		{ "overlays.ts": SOURCE, "bulk.txt": BULK },
+	);
+	strictEqual(requests, 5, "no third attempt");
+	ok(result.exitCode !== 0, JSON.stringify(outcomes(events)));
+});
+
+test("a worker overflow with nothing to evict fails on the server's error without a repeated request", {
+	timeout: 30_000,
+}, async () => {
+	const { result, requests } = await runWorker([[grep], { overflow: OVERFLOW }, [submit(6)]], unreportedWindow);
+	strictEqual(requests, 2);
+	ok(result.exitCode !== 0);
 });
 
 test("a chained grep still grounds only the lines it showed", { timeout: 20_000 }, async () => {
