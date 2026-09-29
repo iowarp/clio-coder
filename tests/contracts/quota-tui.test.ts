@@ -102,21 +102,30 @@ test("quota feed shares one lazy read, refreshes detail-only changes, and stops 
 	strictEqual(updates, 2);
 });
 
-test("welcome subscriptions stay in the field list and wrap without dropping accounts or local cost", () => {
+test("welcome accounts stay in the usage field list and wrap without dropping accounts or local cost", () => {
 	let quota = "Claude 5h 6%/wk 9% · Codex wk 76% · Antigravity wk 73% · Local $0.00";
 	const banner = createWelcomeDashboard({ providers: { list: () => [] }, getQuotaSummary: () => quota });
 	try {
-		for (const width of [40, 60, 80, 120, 160, 220]) {
+		for (const width of [48, 60, 80, 120, 160, 220]) {
 			const rendered = banner.render(width);
 			const text = plain(rendered);
 			const fields = text
-				.slice(text.indexOf("Subscriptions"))
+				.slice(text.indexOf("Accounts"))
 				.replace(/[│█\n]/g, " ")
 				.replace(/\s+/g, " ");
 			for (const name of ["Claude", "Codex", "Antigravity", "Local $0.00"])
 				ok(fields.includes(name), `${width}: ${fields}`);
-			ok(text.indexOf("Targets") < text.indexOf("Subscriptions"));
-			ok(text.indexOf("Subscriptions") < text.indexOf("Fleet"));
+			ok(text.indexOf("Project") < text.indexOf("AI usage"));
+			ok(text.indexOf("AI usage") < text.indexOf("Accounts"));
+			ok(rendered.every((line) => visibleWidth(line) <= width));
+		}
+		// The accounts field reserves two rows so quota hydration cannot move the frame.
+		// Below that, the tail is elided and /usage carries the full list.
+		for (const width of [36, 40]) {
+			const rendered = banner.render(width);
+			const text = plain(rendered);
+			match(text, /Accounts {2}Claude/);
+			match(text, /… \/usage/);
 			ok(rendered.every((line) => visibleWidth(line) <= width));
 		}
 		quota = "Codex wk 81% · Local $0.00";

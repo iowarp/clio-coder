@@ -119,11 +119,10 @@ test("numeric editors accept custom values, retain invalid drafts, and recover w
 		onApply: () => {},
 		onCancel: () => {},
 	});
-	const rows = buildSettingsSections(items).find((section) => section.id === "chat")?.items ?? [];
-	center.setSelection(
-		"chat",
-		rows.findIndex((row) => row.configPath === "chat.maxOutputTokens"),
-	);
+	const rows = buildSettingsSections(items).find((section) => section.id === "models")?.items ?? [];
+	const rowIndex = rows.findIndex((row) => row.configPath === "chat.maxOutputTokens");
+	assert.notEqual(rowIndex, -1, "max output tokens lives in Models & Inference");
+	center.setSelection("models", rowIndex);
 	center.handleInput("\r");
 	center.handleInput("\x05");
 	center.handleInput("\x15");

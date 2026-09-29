@@ -1,11 +1,8 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import {
-	resolveSettingsSection,
-	SETTINGS_SECTIONS,
-	settingsSectionForPath,
-} from "../../src/core/settings-navigation.js";
+import { resolveSettingsArea, SETTINGS_AREAS, settingsPlacementForRow } from "../../src/core/settings-areas.js";
+import { resolveSettingsSection, SETTINGS_SECTIONS } from "../../src/core/settings-navigation.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import {
 	buildSettingItems,
@@ -30,47 +27,59 @@ test("every existing settings control has exactly one home and canonical persist
 	const sections = buildSettingsSections(items);
 	deepStrictEqual(
 		sections.map((section) => [section.id, section.label]),
-		SETTINGS_SECTIONS.map((section) => [section.id, section.label]),
+		SETTINGS_AREAS.map((area) => [area.id, area.label]),
 	);
 	deepStrictEqual(Object.values(SETTINGS_SECTION_ROWS).flat().sort(), Object.keys(SETTINGS_LABELS_BY_ID).sort());
+	// Recent & Pinned only repeats rows that live elsewhere, so it is never a home.
+	const homeSections = sections.filter((section) => section.id !== "recent");
 	for (const row of controls) {
-		const homes = sections.filter((section) => section.items.some((item) => item.id === row.id));
+		const homes = homeSections.filter((section) => section.items.some((item) => item.id === row.id));
 		strictEqual(homes.length, 1, row.id);
-		strictEqual(homes[0]?.id, settingsSectionForPath(row.configPath), row.id);
-		if (row.section === "advanced")
-			ok(row.id.startsWith("maintenance."), `${row.id} fell into Advanced without an explicit home`);
+		const placement = settingsPlacementForRow(row.id, row.configPath);
+		strictEqual(homes[0]?.id, placement.area, row.id);
+		notStrictEqual(placement.group, "Other", `${row.id} fell into Advanced without an explicit home`);
 	}
 	const byId = new Map(items.map((item) => [item.id, item]));
 	for (const [id, home] of [
 		["budget.concurrency", "fleet"],
 		["guardrails.workerToolCallCap", "fleet"],
-		["guardrails.internalDispatchTimeoutMs", "fleet"],
+		["guardrails.internalDispatchTimeoutMs", "advanced"],
 		["panes.journal", "fleet"],
 		["panes.enabled", "interface"],
-		["terminal.smoothStreaming", "interface"],
-		["keybindings", "interface"],
-		["attribution.gitCommits", "integrations"],
+		["terminal.smoothStreaming", "chat"],
+		["keybindings", "advanced"],
+		["attribution.gitCommits", "workspace"],
 		["skills.trustProjectCompatRoots", "integrations"],
 		["workers.onPermission", "safety"],
 		["delegation.defaults.toolGovernance", "safety"],
 		["watchdog.enabled", "safety"],
 		["compaction.model", "context"],
 		["background.target", "context"],
-		["defaults.maxTokens", "chat"],
-		["modelSelector.favorites", "chat"],
+		["defaults.maxTokens", "models"],
+		["modelSelector.favorites", "models"],
 	] as const)
 		strictEqual(byId.get(id)?.section, home, id);
 });
 
-test("slash links use the same canonical areas and preserve previous section names as exact aliases", () => {
-	for (const section of SETTINGS_SECTIONS) {
-		for (const name of [section.id, ...section.aliases]) {
-			strictEqual(resolveSettingsSection(name), section.id, name);
-			deepStrictEqual(parseSlashCommand(`/settings ${name}`), { kind: "settings", area: section.id });
+test("slash links use the same canonical areas and keep previous section names resolving", () => {
+	for (const area of SETTINGS_AREAS) {
+		for (const name of [area.id, ...area.aliases]) {
+			strictEqual(resolveSettingsArea(name), area.id, name);
+			deepStrictEqual(parseSlashCommand(`/settings ${name}`), { kind: "settings", area: area.id });
 		}
 	}
 	for (const name of ["", "permanent", "models,chat", "diagnostics-extra"])
-		strictEqual(resolveSettingsSection(name), undefined);
+		strictEqual(resolveSettingsArea(name), undefined);
+	// configure and the GUI still share the eight-section navigation under its own names.
+	for (const section of SETTINGS_SECTIONS) {
+		for (const name of [section.id, ...section.aliases]) {
+			strictEqual(resolveSettingsSection(name), section.id, name);
+			ok(resolveSettingsArea(name) !== undefined, `previous section name '${name}' no longer opens an area`);
+		}
+	}
+	// Model choice moved out of Chat into Models & Inference; only retry stayed in Chat.
+	for (const name of ["orchestrator", "models", "model", "thinking"]) strictEqual(resolveSettingsArea(name), "models");
+	strictEqual(resolveSettingsArea("retry"), "chat");
 	deepStrictEqual(parseSlashCommand("/settings chat model-picker"), {
 		kind: "settings",
 		area: "chat",
@@ -100,14 +109,16 @@ test("every area renders within narrow and wide terminals, and headings are skip
 			);
 		}
 	}
-	center.setSelection("models", 0);
+	center.setSelection("orchestrator", 0);
+	strictEqual(center.getSelection().section, "models");
+	center.setSelection("retry", 0);
 	strictEqual(center.getSelection().section, "chat");
 	center.handleInput("\x1b");
 	strictEqual(center.getSelection().depth, "sections");
 	center.handleInput("/");
 	center.handleInput("interface.smoothStreaming");
 	center.handleInput("\r");
-	strictEqual(center.getSelection().section, "interface");
+	strictEqual(center.getSelection().section, "chat");
 	center.handleInput("\r");
 	strictEqual(center.getSelection().rowId, "terminal.smoothStreaming");
 	match(center.render(112).join("\n"), /Smooth streaming/);

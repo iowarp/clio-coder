@@ -30,6 +30,9 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	// The bridge reads these on every explicit open; no mux re-detection is
 	// needed because the host capability rung remains `panes.enabled`.
 	"interface.panes.files",
+	// The workers dock reads its share through getWorkersRatio each time the
+	// pane opens, so a new ratio applies to the next dock without a restart.
+	"interface.panes.workers",
 	// The watchdog registration reads its settings live on every trigger, so
 	// enabling it, retargeting it, or changing its cadence takes effect on the
 	// next turn boundary without a restart or a session-routing patch.
