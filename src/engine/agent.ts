@@ -1,5 +1,5 @@
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
-	type AssistantMessage,
 	createAssistantMessageEventStream,
 	createInitialSystemMessage,
 	toToolDeclaration,
@@ -7,6 +7,7 @@ import {
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import { resolvedRequestContext } from "./context.js";
 import { omitImageBlocks } from "./image-context.js";
+
 /**
  * Thin wrapper over Clio's engine Agent class.
  *
@@ -20,14 +21,8 @@ import { omitImageBlocks } from "./image-context.js";
  * Pi's resolved prompt/tool request view through streamFn.
  */
 
-import {
-	Agent,
-	type AgentMessage,
-	type AgentOptions,
-	type BeforeToolCallContext,
-	type StreamFn,
-} from "@earendil-works/pi-agent-core";
-import { isDispositionedToolResultError, isRefusalToolResultError } from "../tools/result-disposition.js";
+import type { AgentMessage, AgentOptions, BeforeToolCallContext, StreamFn } from "@earendil-works/pi-agent-core";
+import { Agent } from "@earendil-works/pi-agent-core";
 import { engineStreamSimple } from "./api-registry.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 
@@ -114,19 +109,6 @@ function refusedStream(request: EngineStreamRequest, reason: string, aborted = f
 	return stream;
 }
 
-function dispositionAwareAfterToolCall(
-	delegate: AgentOptions["afterToolCall"],
-): NonNullable<AgentOptions["afterToolCall"]> {
-	return async (context, signal) => {
-		const override = await delegate?.(context, signal);
-		const effectiveResult =
-			override?.details === undefined ? context.result : { ...context.result, details: override.details };
-		if (isDispositionedToolResultError(effectiveResult) || isRefusalToolResultError(effectiveResult))
-			return { ...override, isError: true };
-		return override;
-	};
-}
-
 export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgentHandle {
 	const {
 		streamFn,
@@ -168,7 +150,6 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 		...agentOptions,
 		streamFn: beforeStreamRequest ? admit : invoke,
 		...(beforeToolBatch ? { beforeToolCall: batchAwareBeforeToolCall(beforeToolBatch, options.beforeToolCall) } : {}),
-		afterToolCall: dispositionAwareAfterToolCall(options.afterToolCall),
 	});
 	if (beforeStreamRequest) {
 		agent.subscribe((event) => {

@@ -27,12 +27,12 @@ const DEFAULT_BASE_URL = "https://chatgpt.com/backend-api";
 /**
  * The models endpoint lists only models whose `minimal_client_version` is at
  * most the `client_version` it is given, so this is the Codex protocol level
- * Clio's transport is verified against. Pi's transport declares no version of
- * its own and pi-ai's release number is not a Codex level: checked 2026-09-29,
- * 0.156.0 lists the gpt-6 models with their windows and 0.87.1 lists none.
+ * whose catalog includes GPT-6.1 Sol (verified 2026-09-29). Pi's transport
+ * declares no version of its own, and pi-ai's release number is not a Codex
+ * level; sending the SDK version can filter newly released models out.
  * Re-verify it whenever pi-ai is upgraded.
  */
-export const CODEX_BACKEND_CLIENT_VERSION = "0.156.0";
+export const CODEX_BACKEND_CLIENT_VERSION = "0.159.1";
 
 /**
  * One models response is ~500 KB (each row carries the model's full prompt),

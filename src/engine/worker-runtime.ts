@@ -847,6 +847,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					return {
 						content: [{ type: "text", text: "The terminal result is already sealed." }],
 						details: { kind: "error" },
+						isError: true,
 						terminate: true,
 					};
 				}
@@ -854,7 +855,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				synthesisToolLock = true;
 				helperTurnFailure = acceptHelperResult(args);
 				if (helperTurnFailure !== null) {
-					return { content: [{ type: "text", text: helperTurnFailure }], details: { kind: "error" } };
+					return { content: [{ type: "text", text: helperTurnFailure }], details: { kind: "error" }, isError: true };
 				}
 				return { content: [{ type: "text", text: "Internal result accepted." }], details: { kind: "ok" }, terminate: true };
 			},
@@ -887,10 +888,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			}
 			return undefined;
 		},
-		afterToolCall: async ({ toolCall, result }) =>
-			toolCall.name === INTERNAL_HELPER_RESULT_TOOL && (result.details as { kind?: string } | undefined)?.kind === "error"
-				? { isError: true }
-				: undefined,
 		// Pi decides the turn boundary here, before `turn_end` is emitted, so a
 		// terminal-handoff repair that exhausts its budget must run here too.
 		// Run from a `turn_end` subscriber, the exhausted bound arrived after the

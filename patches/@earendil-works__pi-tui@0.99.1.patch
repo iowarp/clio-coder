@@ -1,5 +1,5 @@
 diff --git a/dist/alt-screen-search.d.ts b/dist/alt-screen-search.d.ts
-index 7bdab98c02b263c26ae44bf70b41772d2c4a26b7..3e9bf40e6048a126918842d1552ea8022fd8f2cf 100644
+index 7bdab98..3e9bf40 100644
 --- a/dist/alt-screen-search.d.ts
 +++ b/dist/alt-screen-search.d.ts
 @@ -39,6 +39,7 @@ export declare class AltScreenSearchComponent implements Component, Focusable {
@@ -11,7 +11,7 @@ index 7bdab98c02b263c26ae44bf70b41772d2c4a26b7..3e9bf40e6048a126918842d1552ea802
      invalidate(): void;
      render(width: number): string[];
 diff --git a/dist/alt-screen-search.js b/dist/alt-screen-search.js
-index 29318b3224bb8346991569caa0fc6277fda4117b..b11f8b3bb5cd369907c625170c89df71d2cff42e 100644
+index 29318b3..b11f8b3 100644
 --- a/dist/alt-screen-search.js
 +++ b/dist/alt-screen-search.js
 @@ -205,6 +205,10 @@ export class AltScreenSearchComponent {
@@ -26,7 +26,7 @@ index 29318b3224bb8346991569caa0fc6277fda4117b..b11f8b3bb5cd369907c625170c89df71
          const previous = this.input.getValue();
          this.input.handleInput(data);
 diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
-index 445c8184eeb734692d9cc036f2a4b195d8769e3e..26569efa2f3d00ddb86e2d3bd1f88fb65dd140fe 100644
+index 445c818..26569ef 100644
 --- a/dist/components/editor.d.ts
 +++ b/dist/components/editor.d.ts
 @@ -98,6 +98,7 @@ export declare class Editor implements Component, Focusable {
@@ -38,10 +38,10 @@ index 445c8184eeb734692d9cc036f2a4b195d8769e3e..26569efa2f3d00ddb86e2d3bd1f88fb6
      private layoutText;
      getText(): string;
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index 7eae102b06d78e10e0ab016f3ab020c66de6865d..611eef452a098528e5e2e21c0380b52473e2da35 100644
+index f02bf7f..c39760f 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
-@@ -543,6 +543,18 @@ export class Editor {
+@@ -545,6 +545,18 @@ export class Editor {
              this.updateAutocomplete();
          return { handled: true, focus: true };
      }
@@ -61,7 +61,7 @@ index 7eae102b06d78e10e0ab016f3ab020c66de6865d..611eef452a098528e5e2e21c0380b524
          const kb = getKeybindings();
          // Handle character jump mode (awaiting next character to jump to)
 diff --git a/dist/components/input.d.ts b/dist/components/input.d.ts
-index 982a3d9888fa79ed008f643beaf9461b068aed9e..4df94e925f63c8d9cfd2a4e40189b0a938d8557f 100644
+index 982a3d9..4df94e9 100644
 --- a/dist/components/input.d.ts
 +++ b/dist/components/input.d.ts
 @@ -26,6 +26,7 @@ export declare class Input implements Component, Focusable {
@@ -73,7 +73,7 @@ index 982a3d9888fa79ed008f643beaf9461b068aed9e..4df94e925f63c8d9cfd2a4e40189b0a9
      handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
      private insertCharacter;
 diff --git a/dist/components/input.js b/dist/components/input.js
-index 5e7fffa205390c2b2ff906a5386275c9197490fa..73428b2ee1c8b555bd3a8eed2dd88e11b1e851f2 100644
+index 5e7fffa..73428b2 100644
 --- a/dist/components/input.js
 +++ b/dist/components/input.js
 @@ -40,6 +40,26 @@ export class Input {
@@ -104,7 +104,7 @@ index 5e7fffa205390c2b2ff906a5386275c9197490fa..73428b2ee1c8b555bd3a8eed2dd88e11
          // Handle bracketed paste mode
          // Start of paste: \x1b[200~
 diff --git a/dist/components/markdown.d.ts b/dist/components/markdown.d.ts
-index acc312382885b1c813d540fafa1df3414545690b..ac4d177c39c35f4ab77ff36d388063a8daa1fecd 100644
+index 7dfee59..acf81ef 100644
 --- a/dist/components/markdown.d.ts
 +++ b/dist/components/markdown.d.ts
 @@ -50,6 +50,11 @@ export interface MarkdownOptions {
@@ -120,7 +120,7 @@ index acc312382885b1c813d540fafa1df3414545690b..ac4d177c39c35f4ab77ff36d388063a8
      private text;
      private paddingX;
 diff --git a/dist/components/markdown.js b/dist/components/markdown.js
-index 5788d755400164552ed09c7d69bdd67083caa5b1..2b7b5239b0b1827795d05799948a137428591d4f 100644
+index 0cb1b0d..6c215f1 100644
 --- a/dist/components/markdown.js
 +++ b/dist/components/markdown.js
 @@ -147,6 +147,16 @@ markdownParser.setOptions({
@@ -141,10 +141,10 @@ index 5788d755400164552ed09c7d69bdd67083caa5b1..2b7b5239b0b1827795d05799948a1374
      text;
      paddingX; // Left/right padding
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 4a0657e57cc77703b2c271616302b7e80cb4ef2c..addc0f3c5a921d08ae09eb5986f42a8b2e8cd4d3 100644
+index 3595809..c6e77b4 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
-@@ -7,7 +7,7 @@ export { HStack } from "./components/h-stack.ts";
+@@ -8,7 +8,7 @@ export { HStack } from "./components/h-stack.ts";
  export { Image, type ImageOptions, type ImageTheme } from "./components/image.ts";
  export { Input } from "./components/input.ts";
  export { Loader, type LoaderIndicatorOptions } from "./components/loader.ts";
@@ -154,10 +154,10 @@ index 4a0657e57cc77703b2c271616302b7e80cb4ef2c..addc0f3c5a921d08ae09eb5986f42a8b
  export { ScrollView, type ScrollViewOptions, type ScrollViewScrollbar, type ScrollViewScrollToOptions, } from "./components/scroll-view.ts";
  export { type SelectItem, SelectList, type SelectListLayoutOptions, type SelectListTheme, type SelectListTruncatePrimaryContext, } from "./components/select-list.ts";
 diff --git a/dist/index.js b/dist/index.js
-index d3c851910daada428705eb52f0b0f55080d4d7e7..434af593b0b9d46087cac28f88313ab372cb4cd2 100644
+index 4e8d552..ccf1c61 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -10,7 +10,7 @@ export { HStack } from "./components/h-stack.js";
+@@ -12,7 +12,7 @@ export { HStack } from "./components/h-stack.js";
  export { Image } from "./components/image.js";
  export { Input } from "./components/input.js";
  export { Loader } from "./components/loader.js";
@@ -167,10 +167,10 @@ index d3c851910daada428705eb52f0b0f55080d4d7e7..434af593b0b9d46087cac28f88313ab3
  export { ScrollView, } from "./components/scroll-view.js";
  export { SelectList, } from "./components/select-list.js";
 diff --git a/dist/tui-alt-screen.d.ts b/dist/tui-alt-screen.d.ts
-index 0e4d31074f4a0ee62a47fc29dd6b7475a4f29cd7..43e1ac4fa22be9ab7263b5e25afc74bc641e749f 100644
+index cedb4ae..707f247 100644
 --- a/dist/tui-alt-screen.d.ts
 +++ b/dist/tui-alt-screen.d.ts
-@@ -98,11 +98,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
+@@ -103,11 +103,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
      scrollBy(lines: number): void;
      scrollToTop(): void;
      scrollToBottom(): void;
@@ -189,10 +189,10 @@ index 0e4d31074f4a0ee62a47fc29dd6b7475a4f29cd7..43e1ac4fa22be9ab7263b5e25afc74bc
      private handleSearchMouseEvent;
      private refreshSearch;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index 13459fd73841c2908bd58012dd885b086eefa35b..60fd7f7d6ad17c00b9d69eda4e15bec11e7641c0 100644
+index 10f9943..ce01e58 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
-@@ -301,6 +301,13 @@ export class TuiAltScreen extends TuiBase {
+@@ -305,6 +305,13 @@ export class TuiAltScreen extends TuiBase {
              return;
          }
      }
@@ -207,7 +207,7 @@ index 13459fd73841c2908bd58012dd885b086eefa35b..60fd7f7d6ad17c00b9d69eda4e15bec1
          if (this.activeSearch) {
              this.closeSearch();
 diff --git a/dist/tui-main-screen.js b/dist/tui-main-screen.js
-index 896bb501fc5d6e7b0bf76faa8d97dcd045e95526..c30b6bbdba3f59dfc532e44b1e7570899b4955df 100644
+index 896bb50..c30b6bb 100644
 --- a/dist/tui-main-screen.js
 +++ b/dist/tui-main-screen.js
 @@ -3,7 +3,8 @@ import * as os from "node:os";
@@ -323,7 +323,7 @@ index 896bb501fc5d6e7b0bf76faa8d97dcd045e95526..c30b6bbdba3f59dfc532e44b1e757089
              const imageReservedRows = isImage ? this.getKittyImageReservedRows(newLines, i, renderEnd) : 1;
              if (imageReservedRows > 1) {
 diff --git a/dist/tui.d.ts b/dist/tui.d.ts
-index 8c770ec6e4125baa138a46999bc576cd60e9bf1e..329ca2951967f20e07ec60abe96916bf48186bb3 100644
+index acc5229..4b1fa8e 100644
 --- a/dist/tui.d.ts
 +++ b/dist/tui.d.ts
 @@ -231,6 +231,8 @@ export interface TUI extends Component {
@@ -335,7 +335,7 @@ index 8c770ec6e4125baa138a46999bc576cd60e9bf1e..329ca2951967f20e07ec60abe96916bf
      addInputListener(listener: TuiInputListener): () => void;
      removeInputListener(listener: TuiInputListener): void;
      onTerminalColorSchemeChange(listener: (scheme: TerminalColorScheme) => void): () => void;
-@@ -328,6 +330,8 @@ export declare abstract class TuiBase extends Container implements TUI {
+@@ -331,6 +333,8 @@ export declare abstract class TuiBase extends Container implements TUI {
      private getTopmostVisibleOverlay;
      invalidate(): void;
      start(): void;
@@ -345,10 +345,10 @@ index 8c770ec6e4125baa138a46999bc576cd60e9bf1e..329ca2951967f20e07ec60abe96916bf
      removeInputListener(listener: TuiInputListener): void;
      onTerminalColorSchemeChange(listener: (scheme: TerminalColorScheme) => void): () => void;
 diff --git a/dist/tui.js b/dist/tui.js
-index 887f5e8bd3c3ba9b467f9f6c6b5eb4af8a63f7f3..57424523f58cd076cda7256e17a4e636dd5316d3 100644
+index 9f8123f..4b63133 100644
 --- a/dist/tui.js
 +++ b/dist/tui.js
-@@ -112,17 +112,19 @@ export class Container {
+@@ -127,17 +127,19 @@ export class Container {
          return undefined;
      }
      render(width) {
@@ -373,7 +373,7 @@ index 887f5e8bd3c3ba9b467f9f6c6b5eb4af8a63f7f3..57424523f58cd076cda7256e17a4e636
      }
  }
  /**
-@@ -160,6 +162,7 @@ export class TuiBase extends Container {
+@@ -175,6 +177,7 @@ export class TuiBase extends Container {
      terminal;
      focusedComponent = null;
      inputListeners = new Set();
@@ -381,7 +381,7 @@ index 887f5e8bd3c3ba9b467f9f6c6b5eb4af8a63f7f3..57424523f58cd076cda7256e17a4e636
      /** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
      onDebug;
      renderRequested = false;
-@@ -546,6 +549,12 @@ export class TuiBase extends Container {
+@@ -569,6 +572,12 @@ export class TuiBase extends Container {
          this.queryCellSize();
          this.requestRender();
      }
@@ -394,7 +394,7 @@ index 887f5e8bd3c3ba9b467f9f6c6b5eb4af8a63f7f3..57424523f58cd076cda7256e17a4e636
      addInputListener(listener) {
          this.inputListeners.add(listener);
          return () => {
-@@ -659,6 +668,14 @@ export class TuiBase extends Container {
+@@ -682,6 +691,14 @@ export class TuiBase extends Container {
          if (this.consumeTerminalColorSchemeReport(data)) {
              return;
          }
@@ -410,10 +410,10 @@ index 887f5e8bd3c3ba9b467f9f6c6b5eb4af8a63f7f3..57424523f58cd076cda7256e17a4e636
              let current = data;
              for (const listener of this.inputListeners) {
 diff --git a/dist/utils.js b/dist/utils.js
-index 31bb2e1105476b28d087c0def4f94862d723edff..1f0ef0c408a1148b1e1745bf14297d0abcc241ed 100644
+index bfc6585..6c2d880 100644
 --- a/dist/utils.js
 +++ b/dist/utils.js
-@@ -803,7 +803,9 @@ function wrapSingleLine(line, width) {
+@@ -847,7 +847,9 @@ function wrapSingleLine(line, width) {
      let currentVisibleLength = 0;
      for (const token of tokens) {
          const tokenVisibleLength = visibleWidth(token);
@@ -424,7 +424,7 @@ index 31bb2e1105476b28d087c0def4f94862d723edff..1f0ef0c408a1148b1e1745bf14297d0a
          // Token itself is too long - break it character by character
          if (tokenVisibleLength > width && !isWhitespace) {
              if (currentLine) {
-@@ -836,9 +838,12 @@ function wrapSingleLine(line, width) {
+@@ -880,9 +882,12 @@ function wrapSingleLine(line, width) {
              }
              wrapped.push(lineToWrap);
              if (isWhitespace) {

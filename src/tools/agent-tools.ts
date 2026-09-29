@@ -130,7 +130,7 @@ type WorkerToolOkDetails = { kind: "ok" } & Record<string, unknown>;
 function projectToolResult(result: ToolResult): WorkerAgentToolResult {
 	const details = { ...(result.details ?? {}), kind: result.kind } as { kind: "ok" } | { kind: "error" };
 	if (result.kind === "error") {
-		return { content: [{ type: "text", text: toolResultContextText(result) }], details };
+		return { content: [{ type: "text", text: toolResultContextText(result) }], details, isError: true };
 	}
 	return {
 		content: [{ type: "text", text: toolResultContextText(result) }, ...(result.images ?? [])],

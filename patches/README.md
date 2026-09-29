@@ -1,24 +1,27 @@
 # Dependency patches
 
-## Pi TUI 0.87.1: why the patch remains
+## Pi TUI 0.99.1: why the patch remains
 
-`@earendil-works__pi-tui@0.87.1.patch` is the sole Pi dependency patch, applied
+`@earendil-works__pi-tui@0.99.1.patch` is the sole Pi dependency patch, applied
 by pnpm's exact `patchedDependencies` entry. **pi-agent-core and pi-ai are
-unpatched.** The patch was checked against the published, unmodified 0.87.1
-package; that release does not provide these public APIs. The 0.86.1 patch
-applies without changes; 0.87.1 changes only the alternate-screen
-scroll-to-end indicator's centering.
+unpatched.** The patch was checked against the published, unmodified 0.99.1
+package; that release still does not provide these public APIs. The 0.87.1
+patch was ported without changing its behavior. Pi 0.99.1 adds terminal color
+APIs and wheel acceleration, which Clio receives through the patched SDK.
+Its editor, search and application-first keyboard seams still need this patch.
+The performance measurements below come from the earlier SDK; they have not
+been rerun on 0.99.1.
 
-| Added API | Required behavior | Why stock 0.87.1 is insufficient |
+| Added API | Required behavior | Why stock 0.99.1 is insufficient |
 | --- | --- | --- |
 | `TuiBase.setApplicationInputPolicy` | Clio's single keyboard owner runs before viewport shortcuts and focused widgets. Key releases are ignored; bracketed-paste contents remain literal data. The returned disposer removes only its own policy. | Public `addInputListener` appends to a listener set. The alternate-screen viewport installs its listener during construction, so later application listeners cannot consume conflicting keys first. There is no public prepend/priority option. |
 | `Editor.applyEdit` and `Input.applyEdit` | Invoke undo and deletion directly after Clio resolves a semantic keyboard action, without passing through submission or a second keybinding lookup. Input clear retains undo and kill-ring behavior. | The underlying edit operations are private and `handleInput` interprets bytes against configurable bindings. `setText` / `setValue` alone do not express the same undo, cursor and kill-ring semantics. |
 | Search focus, query undo, prompt navigation, and search navigation methods | Clio can route Escape, undo, history, and navigation to the current owner, including the native search overlay, and keep overlay focus/rendering correct. | Search focus and these navigation methods are private; the public viewport scroll methods cannot query or manipulate search ownership or its undo history. |
-| `TuiMainScreen.applyLineResets` memo | A regular-screen frame reuses the reset output of every row whose raw string is unchanged, rewriting the memo in place, and records which rows are image rows. The Kitty image scans (`collectKittyImageIds`, `expandChangedRangeForKittyImages`) visit only those rows. | Stock 0.87.1 normalizes, rebuilds and scans all three image passes over every transcript row on every frame. With 22,800 rows that was 8–16 ms per keystroke, 37% of bench CPU in the image scans alone. |
+| `TuiMainScreen.applyLineResets` memo | A regular-screen frame reuses the reset output of every row whose raw string is unchanged, rewriting the memo in place, and records which rows are image rows. The Kitty image scans (`collectKittyImageIds`, `expandChangedRangeForKittyImages`) visit only those rows. | Stock 0.99.1 normalizes, rebuilds and scans all three image passes over every transcript row on every frame. With 22,800 rows that was 8–16 ms per keystroke, 37% of bench CPU in the image scans alone. |
 | Unchanged rows inside the rewritten range | The differential loop steps over a row that is identical to the one on screen instead of clearing and rewriting it. | A streamed token that also changed the footer rewrote every row between them. |
 | `wrapTextWithAnsi` whitespace tokens | A space token that carries the closing codes of the styled word before it is treated as whitespace, and its codes apply before the next row opens. | A styled word that exactly filled a row stranded the following space at the start of the next row. |
 | `lexMarkdownBlocks` | The top-level block tokens `Markdown` renders, from the same lexer and LaTeX extension, tabs expanded. | The block lexer is module-private; the transcript renders streamed answers block by block and must split them exactly where the renderer does. |
-| `Container.render` exact-size copy | A container returns its children's rows as one exact-size copy: one `slice` for a single child, one `concat` for several. | Stock 0.87.1 grows a fresh array one row at a time on every render. Under a 22,800-row transcript that was most of the garbage each streamed frame produced: measured with Clio's split transcript, 1,832 KB per frame on the regular screen and 1,080 KB fullscreen, against 231 KB and 405 KB with the patch. The collector paid for it with a 5–10 ms scavenge about every 55 ms of streaming. |
+| `Container.render` exact-size copy | A container returns its children's rows as one exact-size copy: one `slice` for a single child, one `concat` for several. | Stock 0.99.1 grows a fresh array one row at a time on every render. Under a 22,800-row transcript that was most of the garbage each streamed frame produced: measured with Clio's split transcript, 1,832 KB per frame on the regular screen and 1,080 KB fullscreen, against 231 KB and 405 KB with the patch. The collector paid for it with a 5–10 ms scavenge about every 55 ms of streaming. |
 
 The semantic operations call Pi's existing editing and search implementation;
 they do not replace it. Consumers are the terminal lease, input router,
