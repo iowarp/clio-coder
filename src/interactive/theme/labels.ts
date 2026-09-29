@@ -91,10 +91,16 @@ export function modelNickname(modelId: string | null | undefined): string {
 	const name = leaf
 		.replace(/[-_]\d+(?:\.\d+)?[bm](?:[-_].*)?$/iu, "")
 		.replace(/[-_](?:ud)?(?:i?q\d[a-z\d_-]*|fp\d+|bf\d+|gguf)$/iu, "")
-		.replaceAll("_", "-");
+		.replaceAll("_", "-")
+		// Publisher names in a wire id are redundant in the narrow activity rail.
+		.replace(/^(?:nvidia|openai|google|meta)-/iu, "");
 	const ornith = /^ornith-?(\d+(?:\.\d+)*)$/iu.exec(name);
 	if (ornith) return `Ornith-${ornith[1]}`;
 	if (/^gpt(?:-|\d)/iu.test(name)) return name.replace(/^gpt/iu, "GPT");
+	if (name !== leaf && /^[a-z]+-\d+(?:\.\d+)?(?:-[a-z]+)+$/iu.test(name))
+		return name
+			.replaceAll("-", " ")
+			.replace(/(^| )([a-z])/gu, (_match, gap: string, first: string) => gap + first.toUpperCase());
 	return name ? name.charAt(0).toUpperCase() + name.slice(1) : "No model";
 }
 
