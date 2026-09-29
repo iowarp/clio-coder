@@ -25,6 +25,7 @@ A `v0.5.8` tag was published on 2026-09-29 and withdrawn before the package reac
 - Fitted decision sites can guide turn scope, orientation, dispatch, approval advisories, external-result warnings, and finished-turn questions.
 - The `relevance`, `consult`, and `drafts` sites rank catalogs, answer typed consultations, and judge `/draft` candidates respectively.
 - Each System One call writes a compact session-ledger record.
+- Requests from an `llm` System One engine pass the same paid-request admission as other calls, count toward session cost ceilings and token totals, and appear as System One calls in `/usage` and `clio-coder usage report`. A refused request fails that decision, and the site behaves as if System One were absent.
 - Optional `systemOne.record` saves redacted decision and outcome rows with retention limits, available through `clio-coder systemone status` and `export`.
 - Fleet settings and `clio-coder doctor` show decision-site bindings and their health.
 - Oversized decision state and repeatedly timed-out endpoints fall back without holding the main turn indefinitely.
@@ -73,6 +74,7 @@ A `v0.5.8` tag was published on 2026-09-29 and withdrawn before the package reac
 - An orientation scout is not reused in a workspace outside Git or with uncommitted changes, where an unchanged fingerprint cannot prove the files are unchanged.
 - A `fleet.speculativeDispatch` change applies on the next turn instead of requiring a restart.
 - `clio-coder systemone export --out` refuses a destination reached through a symbolic link.
+- External Pi workers keep Pi's built-in llama.cpp provider on Pi 0.99 and later, where `--no-extensions` also disables built-in providers.
 - File-lock acquisition and System One readout-mode rechecks use monotonic deadlines, so a wall-clock change cannot stretch or cut them short.
 
 ## 0.5.7 - 2026-09-27

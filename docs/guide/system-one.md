@@ -81,6 +81,8 @@ Any chat target Clio already knows can act as an engine. The target needs a chat
 
 The build key of an LLM engine is `llm:<runtime>@<host>/<model>#<mode>:<prompt version>`. No LLM build has fitted cuts, so an LLM engine runs in shadow until you supply cuts for its exact build string. Its state can be large relative to its window, and a call whose state does not fit the target's window is not sent.
 
+Every request an `llm` engine sends, including schema retries, passes the same paid-request admission as the main session. It counts toward the session's cost ceiling and token totals and is recorded under `system-one`, which `/usage` and `clio-coder usage report` show as System One calls without counting them as turns. Admission never waits for a ceiling raise: a refused request fails the whole decision, and the site behaves as if System One were absent.
+
 ## Decision sites
 
 A site is named by the object it judges. One call to a site carries one bounded state and every question about that state. The deadline is the default for the site and `timeoutMs` on the binding replaces it.

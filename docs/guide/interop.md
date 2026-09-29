@@ -31,6 +31,8 @@ are selected explicitly; Clio does not silently switch agents or modes.
 Antigravity CLI and Pi have no built-in ACP connection. An operator-configured
 ACP peer entry can use a compatible adapter.
 
+Clio starts an external `pi` with `--no-extensions`. Pi 0.99 and later also disable their built-in providers under that flag, so for those versions Clio adds `-e builtin:llama.cpp`, detected once per binary from `pi --version`. Older or unrecognized versions keep the earlier flags.
+
 When Clio itself serves an ACP frontend, it advertises stable session listing, deletion, resume, modes, and configuration options. Loading a session streams its full active history; resuming restores it without replay. The `default` and `yolo` modes control the hosted session's autonomy. Model and thinking options change the hosted session's route without saving a new default. See [ACP architecture](../architecture/acp.md) for the wire contract.
 
 With `clio-coder acp`, the first session request can select a workspace different from the directory where the frontend launched Clio. Clio loads that workspace's settings, trust, context, hooks, and tools before answering the request. A frontend can pass stdio MCP servers with a session; Clio makes their tools available through its gateway and closes them with that session. `acp --cwd PATH` binds the root at launch when the frontend already knows it.
