@@ -174,6 +174,7 @@ export interface TurnRuntimeDeps {
 export interface TurnRuntime {
 	ensureRuntime(options?: { silent?: boolean }): AgentRuntime | null;
 	ensureLiveCapabilitiesForSelectedModel(options?: { silent?: boolean }): Promise<void>;
+	dispose(): void;
 	cleanupSessionResources(sessionId: string | undefined): void;
 	/**
 	 * Install on the session tool surface so admission verdicts reach the panel.
@@ -248,10 +249,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			use: "orchestrator",
 			requireTools: false,
 			requireOutputBudget: true,
-			// A resumed session already knows what this backend had open; without
-			// it the first turn budgets against the probed server-wide figure and
-			// corrects only once discovery reports a loaded window (issue #227).
-			knownLoadedContextWindow: context.rememberedLoadedContextWindow(targetId, wireModelId),
 		});
 		if (!resolved.ok) {
 			const failure = resolved.diagnostics.find((entry) => entry.severity === "error") ?? resolved.diagnostics[0];
@@ -291,11 +288,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	};
 
 	/**
-	 * Probe a self-hosted target once per target+model selection, not on
-	 * every submit (T3.1). The probe re-runs when the selection key changes
-	 * (which is also when the runtime is rebuilt or hot-swapped) or after a
-	 * generous TTL. Failures keep the last known target state; the TTL
-	 * retries later.
+	 * Refresh the selected route's server report on a short TTL. The key
+	 * includes target settings and wire model, so selection and endpoint edits
+	 * refresh immediately on the next poll or submit. A failed probe is retried
+	 * after the TTL and never extends a prior serving-window claim.
 	 *
 	 * Every tier but `cloud` is probed. Only a hosted provider's window is
 	 * knowable without asking: a self-hosted OpenAI-compatible gateway serves
@@ -304,10 +300,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	 * target ran the whole session on an assumed window while the server was
 	 * one HTTP GET away from reporting the real one.
 	 */
-	const TARGET_PROBE_TTL_MS = 5 * 60 * 1000;
+	const TARGET_PROBE_TTL_MS = 30_000;
+	const TARGET_PROBE_POLL_MS = 5_000;
 	let lastTargetProbe: { key: string; at: number } | null = null;
+	let disposed = false;
 	const targetProbesInFlight = new Map<string, Promise<void>>();
 	const ensureLiveCapabilitiesForSelectedModel = async (options?: { silent?: boolean }): Promise<void> => {
+		if (disposed) return;
 		const settings = deps.getSettings();
 		const targetId = settings.chat.target?.trim();
 		const wireModelId = settings.chat.model?.trim();
@@ -316,7 +315,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		if (!target) return;
 		const runtimeDesc = deps.providers.getRuntime(target.runtime);
 		if (!runtimeDesc || runtimeDesc.tier === "cloud") return;
-		const key = `${targetId}|${wireModelId}`;
+		const key = JSON.stringify([targetId, wireModelId, target]);
 		const inFlight = targetProbesInFlight.get(key);
 		if (inFlight) {
 			await inFlight;
@@ -330,9 +329,21 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			try {
 				status = await deps.providers.probeTarget(targetId);
 			} catch {
-				// Fall back to the last known target state.
+				// Unexpected provider-contract failures retry after the TTL.
 			}
+			if (disposed) return;
 			if (!options?.silent) announceColdModel(status, targetId, wireModelId);
+			// A passive refresh must update the attached model and footer budget too;
+			// the provider status alone is otherwise invisible until the next submit.
+			if (
+				state.runtime &&
+				!state.streaming &&
+				deps.getSettings().chat.target === targetId &&
+				deps.getSettings().chat.model === wireModelId
+			) {
+				ensureRuntime({ silent: true });
+			}
+			context.refreshLiveBudget();
 		})();
 		targetProbesInFlight.set(key, probe);
 		try {
@@ -341,6 +352,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (targetProbesInFlight.get(key) === probe) targetProbesInFlight.delete(key);
 		}
 	};
+	const selectedRoutePoll = setInterval(() => {
+		if (state.streaming) return;
+		void ensureLiveCapabilitiesForSelectedModel({ silent: true }).catch(() => {});
+	}, TARGET_PROBE_POLL_MS);
+	selectedRoutePoll.unref();
 
 	/** One notice per target+model+state, so a repeated probe stays quiet. */
 	const announcedColdModels = new Set<string>();
@@ -386,7 +402,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						use: "orchestrator",
 						requireTools: false,
 						requireOutputBudget: true,
-						knownLoadedContextWindow: context.rememberedLoadedContextWindow(target.target.id, target.wireModelId),
 					});
 					if (!refreshed.ok) return;
 					const liveModel = state.runtime.agent.state.model;
@@ -590,7 +605,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					: request;
 				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0);
 				const output = resolveTurnOutputReserve(localRuntime, input);
-				if (!requestFits(input, output, view.effectiveWindow))
+				if (view.effectiveWindow !== null && !requestFits(input, output, view.effectiveWindow))
 					return {
 						block: true,
 						reason: `Context window exceeded: input ${input} + output ${output}, window ${view.effectiveWindow ?? "unknown"}.`,
@@ -1134,6 +1149,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	return {
 		ensureRuntime,
 		ensureLiveCapabilitiesForSelectedModel,
+		dispose: () => {
+			disposed = true;
+			clearInterval(selectedRoutePoll);
+		},
 		cleanupSessionResources,
 		toolTelemetry,
 	};

@@ -81,7 +81,10 @@ function capabilities(model: LmStudioModelInfo, instance?: LmStudioLoadedInstanc
 	if (model.reasoning !== undefined) out.reasoning = model.reasoning;
 	else if (model.reasoningOptions !== undefined)
 		out.reasoning = model.reasoningOptions.some((option) => option !== "off");
-	const contextWindow = loadedContextLength(instance) ?? model.maxContextLength;
+	// LM Studio uses a unified KV cache: an instance's context_length is the
+	// per-request ceiling even when parallel > 1. The model maximum is not a
+	// serving limit when no instance is loaded.
+	const contextWindow = loadedContextLength(instance);
 	if (contextWindow !== undefined) out.contextWindow = contextWindow;
 	const parallel = instance?.config.parallel;
 	if (typeof parallel === "number" && Number.isInteger(parallel) && parallel > 0) out.parallelSlots = parallel;
@@ -98,6 +101,7 @@ function statusFor(
 		key: model.key,
 		reasoningLevels,
 	};
+	if (model.maxContextLength !== undefined) status.modelMaxContextLength = model.maxContextLength;
 	if (instance) {
 		status.instanceId = instance.id;
 		status.loadConfig = instance.config;

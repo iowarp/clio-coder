@@ -97,22 +97,35 @@ export async function probeOpenAIModelCatalog(
 			...(detailRow ? capabilitiesFromOpenAIModelEntry(detailRow) : {}),
 			...capabilitiesFromOpenAIModelEntry(row),
 		};
+		const contextSlots = contextSlotsFromEntry(row) ?? (detailRow ? contextSlotsFromEntry(detailRow) : undefined);
+		const rawLoadedContext = loadedContextFromEntry(row) ?? (detailRow ? loadedContextFromEntry(detailRow) : undefined);
+		const splitContext = contextSlots ? Math.floor(contextSlots.totalContextSize / contextSlots.slots) : undefined;
+		const loadedContext =
+			rawLoadedContext === undefined ? undefined : Math.min(rawLoadedContext, splitContext ?? rawLoadedContext);
+		// Lemonade and LM Studio may put the loaded instance in the detail row
+		// while the listing carries a larger model catalog maximum. The instance
+		// is the limit the next request actually faces.
+		if (loadedContext !== undefined) caps.contextWindow = loadedContext;
 		if (Object.keys(caps).length > 0) modelCapabilities[row.id] = caps;
-		const loadedContext = loadedContextFromEntry(row) ?? (detailRow ? loadedContextFromEntry(detailRow) : undefined);
+		const modelMaximum = modelMaximumFromEntry(row) ?? (detailRow ? modelMaximumFromEntry(detailRow) : undefined);
 		const state =
 			modelStateFromOpenAIModelEntry(row) ??
 			(detailRow ? modelStateFromOpenAIModelEntry(detailRow) : undefined) ??
 			// A reported loaded context is itself the residency answer: nothing
 			// serves a window for a model it has not loaded.
-			(loadedContext !== undefined ? { state: "loaded" as const } : undefined);
+			(loadedContext !== undefined ? { state: "loaded" as const } : undefined) ??
+			(modelMaximum !== undefined ? { state: "unknown" as const } : undefined);
 		// The slot split rides on the load-state record because it is the same
 		// kind of fact: how this server is serving this model. A row with no
 		// recognized state still gets one, as `unknown`, so the split is kept
 		// without claiming residency the server did not report.
-		const contextSlots = contextSlotsFromEntry(row) ?? (detailRow ? contextSlotsFromEntry(detailRow) : undefined);
 		const withSlots = contextSlots ? { ...(state ?? { state: "unknown" as const }), contextSlots } : state;
 		if (withSlots) {
-			modelStates[row.id] = loadedContext === undefined ? withSlots : { ...withSlots, contextLength: loadedContext };
+			modelStates[row.id] = {
+				...withSlots,
+				...(loadedContext === undefined ? {} : { contextLength: loadedContext }),
+				...(modelMaximum === undefined ? {} : { modelMaxContextLength: modelMaximum }),
+			};
 		}
 	}
 	return { models, modelCapabilities, modelStates };
@@ -227,7 +240,30 @@ function modelStateFromOpenAIModelEntry(row: Record<string, unknown>): ProbeMode
  * a fact about the weights, not about what is serving.
  */
 function loadedContextFromEntry(row: Record<string, unknown>): number | undefined {
-	const reported = firstPositiveNumber(row, ["loaded_context_length", "loadedContextLength"]);
+	const instance =
+		nestedRecord(row, "loaded_instance") ??
+		(Array.isArray(row.loaded_instances) && isRecord(row.loaded_instances[0]) ? row.loaded_instances[0] : null);
+	const reported =
+		firstPositiveNumber(row, ["loaded_context_length", "loadedContextLength"]) ??
+		(instance
+			? firstPositiveNumber(instance, ["loaded_context_length", "context_length", "contextLength"])
+			: undefined) ??
+		(instance
+			? firstPositiveNumber(nestedRecord(instance, "config") ?? {}, ["context_length", "contextLength"])
+			: undefined);
+	return reported === undefined ? undefined : Math.floor(reported);
+}
+
+function modelMaximumFromEntry(row: Record<string, unknown>): number | undefined {
+	const meta = nestedRecord(row, "meta");
+	const reported =
+		firstPositiveNumber(row, [
+			"max_context_length",
+			"max_context_window",
+			"maxContextLength",
+			"context_length",
+			"contextLength",
+		]) ?? (meta ? firstPositiveNumber(meta, ["n_ctx_train", "max_context_length", "context_length"]) : undefined);
 	return reported === undefined ? undefined : Math.floor(reported);
 }
 
@@ -245,23 +281,10 @@ function capabilitiesFromOpenAIModelEntry(row: Record<string, unknown>): Partial
 	const meta = nestedRecord(row, "meta");
 	const flags = parseLlamaCppServerFlags(statusArgsFromEntry(row));
 	const contextWindow =
+		loadedContextFromEntry(row) ??
 		llamaCppRequestContextWindow(flags)?.contextWindow ??
-		firstPositiveNumber(row, [
-			// What is actually loaded outranks what the model could support: a
-			// model served at 8k out of a possible 262k has an 8k window today,
-			// and the run has to be planned against the real one.
-			"loaded_context_length",
-			"loadedContextLength",
-			"context_window",
-			"contextWindow",
-			"context_length",
-			"contextLength",
-			"max_context_length",
-			"max_context_window",
-			"maxContextLength",
-			"n_ctx",
-		]) ??
-		(meta ? firstPositiveNumber(meta, ["n_ctx", "n_ctx_train", "context_length", "contextWindow"]) : undefined);
+		firstPositiveNumber(row, ["context_window", "contextWindow", "n_ctx"]) ??
+		(meta ? firstPositiveNumber(meta, ["n_ctx", "contextWindow"]) : undefined);
 	if (contextWindow !== undefined) caps.contextWindow = Math.floor(contextWindow);
 	const maxTokens =
 		positiveNumber(flags.maxTokens) ??

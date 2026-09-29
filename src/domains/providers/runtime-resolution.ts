@@ -1,4 +1,3 @@
-import { CLIO_CONTEXT_WINDOW_WARN_BELOW, CLIO_MIN_CONTEXT_WINDOW } from "../../core/context-floor.js";
 import { runOverrides } from "../../core/run-overrides.js";
 import { targetRequiresAuth } from "./auth/index.js";
 import { getCatalogModelForRuntime, resolveCostProvenance } from "./catalog.js";
@@ -29,7 +28,8 @@ import type { TargetDescriptor } from "./types/target-descriptor.js";
 /**
  * The layer that answered `effectiveContextWindow`, most authoritative first.
  * `loaded` is the window a backend reports having this model open at; `probe` is
- * a window the target reported without saying it is what is serving.
+ * a route or model limit the target reported without resident instance state.
+ * `descriptor-default` remains for historical snapshots.
  */
 export type ContextWindowSource =
 	| "catalog"
@@ -40,16 +40,28 @@ export type ContextWindowSource =
 	| "descriptor-default"
 	| "unknown";
 
+export type ResolvedFieldKind = "serving-limit" | "model-maximum" | "default" | "request-choice" | "unknown";
+
+/** A positive serving limit is distinct from a model's declared maximum. */
+export interface ResolvedNumericField {
+	value: number | null;
+	source: ContextWindowSource;
+	kind: ResolvedFieldKind;
+	observedAt: string | null;
+}
+
 export interface ContextWindowDetails {
-	/** Best static knowledge of the model's window (hint > KB > catalog > runtime default). */
+	/** Best static knowledge of the model's maximum; zero when none is known. */
 	declaredContextWindow: number;
+	modelMaximum: ResolvedNumericField;
+	servingLimit: ResolvedNumericField;
 	/** Raw probe result, when the target was probed. */
 	probedContextWindow: number | null;
 	/** Context the backend reports this model loaded at; only some runtimes report it. */
 	loadedContextWindow: number | null;
-	/** What Clio would like for coding; advisory only and never displayed as provider truth. */
+	/** The serving limit for new snapshots; zero means unknown. */
 	desiredContextWindow: number;
-	/** What the target actually offers; live probe/config/model knowledge only. */
+	/** What the target actually offers; zero means unknown. */
 	effectiveContextWindow: number;
 	/** Where `effectiveContextWindow` came from. */
 	contextWindowSource: ContextWindowSource;
@@ -59,9 +71,9 @@ export interface ContextWindowDetails {
 	 * operator surfaces can render `196,608 (786,432 / 4 slots)`.
 	 */
 	contextWindowSlots: ContextWindowSlots | null;
-	/** The window is below what this kind of work wants. An actionable degradation. */
+	/** Legacy diagnostic slot; no minimum size warning is emitted. */
 	warning: string | null;
-	/** The window is a placeholder rather than something the target reported. */
+	/** Actionable guidance when the serving window is unknown. */
 	provenanceNotice: string | null;
 }
 
@@ -105,6 +117,7 @@ export interface ResolvedRuntimeTarget {
 	diagnostics: RuntimeResolutionDiagnostic[];
 	runtimeTier?: RuntimeTier;
 	contextWindowDetails: ContextWindowDetails;
+	maxOutputTokensField: ResolvedNumericField;
 	/**
 	 * Provenance of the `tools` decision when a live tool-call probe ran against
 	 * this exact model. Absent when `tools` is a declared or default capability.
@@ -131,6 +144,9 @@ export interface RuntimeTargetSnapshot {
 	requestedThinkingLevel: ThinkingLevel;
 	effectiveThinkingLevel: ThinkingLevel;
 	capabilities: RuntimeCapabilityDecision;
+	contextWindowField: ResolvedNumericField;
+	modelMaximumField: ResolvedNumericField;
+	maxOutputTokensField: ResolvedNumericField;
 	thinking: {
 		mechanism: ResolvedModelRuntimeCapabilities["thinking"]["mechanism"];
 		/** Derived reasoning class: never | switchable | always. */
@@ -161,13 +177,6 @@ export interface ResolveRuntimeTargetInput {
 	requireTools?: boolean;
 	requireStreaming?: boolean;
 	requireOutputBudget?: boolean;
-	/**
-	 * A loaded window this target and model were already observed serving, from
-	 * a caller that remembers across processes. Used only when live discovery
-	 * reports no loaded window, so a resumed session stops budgeting against a
-	 * probed server-wide figure for its first turn (issue #227).
-	 */
-	knownLoadedContextWindow?: number | null;
 }
 
 function diagnostic(severity: RuntimeResolutionSeverity, code: string, message: string): RuntimeResolutionDiagnostic {
@@ -450,11 +459,13 @@ export function resolveRuntimeTarget(
 	const requestedThinkingLevel = input.requestedThinkingLevel ?? "off";
 	const capabilityResolution = modelCapabilitiesFor(providers, status, wireModelId);
 	const capabilities: CapabilityFlags = { ...capabilityResolution.capabilities };
-	const probedContextWindow = probeCapabilitiesForModel(status, wireModelId)?.contextWindow ?? null;
+	const modelProbe = probeCapabilitiesForModel(status, wireModelId);
+	const probedContextWindow = modelProbe?.contextWindow ?? null;
 	// Discovery's per-model loaded window, which the probe capabilities cannot
 	// carry: `probeCapabilitiesForModel` answers for the target's default model
 	// and reports a window without saying whether it is the one being served.
-	const loadedContextWindow = loadedContextWindowForModel(status, wireModelId) ?? input.knownLoadedContextWindow ?? null;
+	const observedLoadedContextWindow = loadedContextWindowForModel(status, wireModelId);
+	const loadedContextWindow = observedLoadedContextWindow;
 	const contextWindowDetails = resolveContextWindowDetails(
 		target,
 		runtime,
@@ -464,17 +475,27 @@ export function resolveRuntimeTarget(
 		loadedContextWindow,
 		undefined,
 		contextSlotsForModel(status, wireModelId),
+		modelProbe?.contextWindow !== undefined ? (status.health?.lastCheckAt ?? null) : null,
+		observedLoadedContextWindow !== null ? (status.health?.lastCheckAt ?? null) : null,
+		status.discoveredModelStates?.[wireModelId]?.modelMaxContextLength ?? null,
+		status.health?.lastCheckAt ?? null,
 	);
 	capabilities.contextWindow = contextWindowDetails.effectiveContextWindow;
+	const maxOutputTokensField = resolveMaxOutputTokensField(
+		target,
+		runtime,
+		wireModelId,
+		providers.knowledgeBase,
+		modelProbe?.maxTokens,
+		status.health?.lastCheckAt ?? null,
+	);
+	capabilities.maxTokens = maxOutputTokensField.value ?? 0;
 	if (contextWindowDetails.warning) {
 		diagnostics.push(diagnostic("warning", "context-window-low", contextWindowDetails.warning));
 	}
 	if (contextWindowDetails.provenanceNotice) {
-		// A warning, not info. Clio now assumes its own minimum when a target
-		// reports nothing, so an unverified window is a number that could be
-		// larger than the truth, and overrunning it fails the request rather
-		// than merely wasting capacity. As info this reached only the dispatch
-		// receipt JSON, which nobody reads during the run it describes.
+		// Keep the unknown state visible during execution: the server will be
+		// the first authority to reject a request that exceeds its limit.
 		diagnostics.push(diagnostic("warning", "context-window-unverified", contextWindowDetails.provenanceNotice));
 	}
 
@@ -522,6 +543,7 @@ export function resolveRuntimeTarget(
 		modelReasoningAuthoritative: capabilityResolution.reasoningAuthoritative,
 		diagnostics,
 		contextWindowDetails,
+		maxOutputTokensField,
 	};
 	if (runtime.tier !== undefined) resolved.runtimeTier = runtime.tier;
 	if (toolsVerification) resolved.toolsVerification = toolsVerification;
@@ -542,10 +564,6 @@ function modelHintPatch(target: ResolvedRuntimeTarget, model: unknown): Partial<
 	const record = model as Record<string, unknown>;
 	const patch: Partial<CapabilityFlags> = {};
 	if (!target.modelReasoningAuthoritative && typeof record.reasoning === "boolean") patch.reasoning = record.reasoning;
-	const contextWindow = nonNegativeFiniteNumber(record.contextWindow);
-	if (contextWindow !== undefined && target.capabilities.contextWindow <= 0) patch.contextWindow = contextWindow;
-	const maxTokens = nonNegativeFiniteNumber(record.maxTokens);
-	if (maxTokens !== undefined && target.capabilities.maxTokens <= 0) patch.maxTokens = maxTokens;
 	// No vision patch: a synthesized model's input list comes from the runtime defaults, catalog and
 	// knowledge base without the live probe, so it can only discard what the resolution already knows.
 	return patch;
@@ -571,18 +589,23 @@ export function refineRuntimeTargetWithModelHints(
 ): ResolvedRuntimeTarget {
 	const patch = modelHintPatch(target, model);
 	const hintRecord = model && typeof model === "object" ? (model as Record<string, unknown>) : undefined;
-	const modelHintContextWindow = nonNegativeFiniteNumber(hintRecord?.contextWindow);
-	// The capability patch ignores the hint window once a target carries any
-	// effective window (it always does now), so the hint must independently
-	// force a re-resolution: a live model reporting a smaller loaded window
-	// than the local-native floor would otherwise be silently ignored and
-	// compaction would trigger too late.
+	// Pi's cloud catalog is a labeled model maximum. A synthesized local model
+	// repeats runtime defaults and cannot establish a serving window.
+	const modelHintContextWindow =
+		target.runtime.tier === "cloud" ? nonNegativeFiniteNumber(hintRecord?.contextWindow) : undefined;
+	const modelHintMaxOutputTokens =
+		target.runtime.tier === "cloud" ? positiveWindow(nonNegativeFiniteNumber(hintRecord?.maxTokens)) : undefined;
 	const windowHintDiffers =
 		modelHintContextWindow !== undefined &&
 		modelHintContextWindow > 0 &&
-		modelHintContextWindow !== target.contextWindowDetails.effectiveContextWindow;
-	if (Object.keys(patch).length === 0 && !windowHintDiffers) return target;
+		modelHintContextWindow !== target.contextWindowDetails.modelMaximum.value;
+	const maxOutputHintFillsUnknown = target.maxOutputTokensField.value === null && modelHintMaxOutputTokens !== undefined;
+	if (Object.keys(patch).length === 0 && !windowHintDiffers && !maxOutputHintFillsUnknown) return target;
 	const capabilities: CapabilityFlags = { ...target.capabilities, ...patch };
+	const maxOutputTokensField: ResolvedNumericField = maxOutputHintFillsUnknown
+		? { value: modelHintMaxOutputTokens, source: "model-hint", kind: "model-maximum", observedAt: null }
+		: target.maxOutputTokensField;
+	capabilities.maxTokens = maxOutputTokensField.value ?? 0;
 	const contextWindowDetails = resolveContextWindowDetails(
 		target.target,
 		target.runtime,
@@ -595,6 +618,12 @@ export function refineRuntimeTargetWithModelHints(
 		target.contextWindowDetails.loadedContextWindow,
 		modelHintContextWindow,
 		target.contextWindowDetails.contextWindowSlots,
+		target.contextWindowDetails.servingLimit.observedAt,
+		target.contextWindowDetails.contextWindowSource === "loaded"
+			? target.contextWindowDetails.servingLimit.observedAt
+			: null,
+		target.contextWindowDetails.modelMaximum.source === "probe" ? target.contextWindowDetails.modelMaximum.value : null,
+		target.contextWindowDetails.modelMaximum.observedAt,
 	);
 	capabilities.contextWindow = contextWindowDetails.effectiveContextWindow;
 
@@ -619,6 +648,7 @@ export function refineRuntimeTargetWithModelHints(
 		effectiveThinkingLevel: modelRuntime.thinking.effectiveLevel,
 		diagnostics,
 		contextWindowDetails,
+		maxOutputTokensField,
 	};
 }
 
@@ -634,6 +664,9 @@ export function runtimeTargetSnapshot(target: ResolvedRuntimeTarget): RuntimeTar
 		requestedThinkingLevel: target.requestedThinkingLevel,
 		effectiveThinkingLevel: target.effectiveThinkingLevel,
 		capabilities: { ...target.capabilityDecisions },
+		contextWindowField: { ...target.contextWindowDetails.servingLimit },
+		modelMaximumField: { ...target.contextWindowDetails.modelMaximum },
+		maxOutputTokensField: { ...target.maxOutputTokensField },
 		thinking: {
 			mechanism: target.modelRuntime.thinking.mechanism,
 			class: reasoningClassForMechanism(target.modelRuntime.thinking.mechanism),
@@ -681,41 +714,38 @@ export function runtimeResolutionWarningsBesideThinkingNotice(
 	return runtimeResolutionWarnings(diagnostics.filter((entry) => !entry.code.startsWith("thinking-")));
 }
 
-/**
- * Minimum context Clio is built for, applied to every tier rather than only to
- * local-native. A hosted target that reports less than this is as unable to
- * hold a repository's worth of tool results as a local one.
- */
-const DESIRED_CONTEXT_WINDOW = CLIO_MIN_CONTEXT_WINDOW;
-/** Last-resort window when nothing declares one. */
-const FALLBACK_CONTEXT_WINDOW = CLIO_MIN_CONTEXT_WINDOW;
-
 function positiveWindow(value: number | null | undefined): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-/**
- * Resolve the three context-window figures a target carries:
- *
- *  - `declared`: best static knowledge of the model's window
- *    (live model hint > knowledge base > catalog > runtime default > 8192).
- *  - `desired`: what Clio wants for coding. Local-native tiers still get a
- *    128k recommendation, but this is advisory only.
- *  - `effective`: the configured target limit, capped by a known loaded window;
- *    otherwise loaded > probe > model-specific knowledge > runtime descriptor
- *    default. Clio no longer invents a 128k effective
- *    window for unknown local models; providers must probe it or users must
- *    configure an explicit override.
- *
- * A loaded window prevents configuration from overstating what the backend can
- * serve this turn. An operator can also configure a smaller limit, including
- * when a gateway advertises training capacity instead of serving capacity.
- * A model whose weights
- * allow 262k but which is open at 100k fails at 100k, so planning against the
- * declared number means autocompact never fires in time.
- *
- * Warns when a local-native target's effective window is below the 128k recommendation.
- */
+function resolveMaxOutputTokensField(
+	target: TargetDescriptor,
+	runtime: RuntimeDescriptor,
+	modelId: string,
+	knowledgeBase: KnowledgeBase | null,
+	probedMaxTokens: number | undefined,
+	observedAt: string | null,
+): ResolvedNumericField {
+	const live = positiveWindow(probedMaxTokens);
+	const configured = positiveWindow(target.capabilities?.maxTokens);
+	const modelMaximum =
+		positiveWindow(knowledgeBase?.lookup(modelId)?.entry.capabilities?.maxTokens) ??
+		positiveWindow(getCatalogModelForRuntime(runtime.id, modelId)?.maxTokens);
+	if (live !== undefined) {
+		return configured !== undefined && configured < live
+			? { value: configured, source: "target-override", kind: "request-choice", observedAt: null }
+			: { value: live, source: "probe", kind: "serving-limit", observedAt };
+	}
+	if (configured !== undefined) {
+		return { value: configured, source: "target-override", kind: "request-choice", observedAt: null };
+	}
+	if (modelMaximum !== undefined) {
+		return { value: modelMaximum, source: "catalog", kind: "model-maximum", observedAt: null };
+	}
+	return { value: null, source: "unknown", kind: "unknown", observedAt: null };
+}
+
+/** Keep a declared model maximum apart from the window this route serves. */
 export function resolveContextWindowDetails(
 	target: TargetDescriptor,
 	runtime: RuntimeDescriptor,
@@ -725,6 +755,10 @@ export function resolveContextWindowDetails(
 	loadedContextWindow: number | null = null,
 	modelHintContextWindow?: number,
 	probedContextSlots: ContextWindowSlots | null = null,
+	probeObservedAt: string | null = null,
+	loadedObservedAt: string | null = null,
+	reportedModelMaximum: number | null = null,
+	modelMaximumObservedAt: string | null = null,
 ): ContextWindowDetails {
 	const catalogModel = getCatalogModelForRuntime(runtime.id, wireModelId);
 	const kbHit = knowledgeBase?.lookup(wireModelId) ?? null;
@@ -733,9 +767,13 @@ export function resolveContextWindowDetails(
 	let modelDeclared: number | undefined;
 	let modelDeclaredSource: ContextWindowDetails["contextWindowSource"] = "unknown";
 	const hintWindow = positiveWindow(modelHintContextWindow);
+	const reportedMaximum = positiveWindow(reportedModelMaximum);
 	const kbWindow = positiveWindow(kbHit?.entry.capabilities?.contextWindow);
 	const catalogWindow = positiveWindow(catalogModel?.contextWindow);
-	if (hintWindow !== undefined) {
+	if (reportedMaximum !== undefined) {
+		modelDeclared = reportedMaximum;
+		modelDeclaredSource = "probe";
+	} else if (hintWindow !== undefined) {
 		modelDeclared = hintWindow;
 		modelDeclaredSource = "model-hint";
 	} else if (kbWindow !== undefined) {
@@ -746,10 +784,13 @@ export function resolveContextWindowDetails(
 		modelDeclaredSource = "catalog";
 	}
 
-	const runtimeDefault = positiveWindow(runtime.defaultCapabilities?.contextWindow);
-	const declaredContextWindow = modelDeclared ?? runtimeDefault ?? FALLBACK_CONTEXT_WINDOW;
-
-	const desired = Math.max(declaredContextWindow, DESIRED_CONTEXT_WINDOW);
+	const declaredContextWindow = modelDeclared ?? 0;
+	const modelMaximum: ResolvedNumericField = {
+		value: modelDeclared ?? null,
+		source: modelDeclaredSource,
+		kind: modelDeclared === undefined ? "unknown" : "model-maximum",
+		observedAt: modelDeclaredSource === "probe" ? modelMaximumObservedAt : null,
+	};
 
 	const loadedWindow = positiveWindow(loadedContextWindow);
 	const probeWindow = positiveWindow(probedContextWindow);
@@ -759,68 +800,55 @@ export function resolveContextWindowDetails(
 	// requested window each name what the server serves, and none of them is cold.
 	const coldCap = (maximum: number): number =>
 		Math.min(maximum, positiveWindow(runtime.coldContextWindowCap) ?? maximum);
-	let effective: number;
-	let source: ContextWindowSource;
+	let effective = 0;
+	let source: ContextWindowSource = "unknown";
+	let kind: ResolvedFieldKind = "unknown";
 	if (requestedWindow !== undefined) {
 		// The window every request asks for (Ollama `num_ctx`) is the one the
 		// server will reload the model at, so a smaller loaded window is about to
 		// stop being true. A smaller override or model maximum still caps it.
 		effective = Math.min(requestedWindow, overrideWindow ?? requestedWindow, probeWindow ?? requestedWindow);
 		source = probeWindow === effective && effective < requestedWindow ? "probe" : "target-override";
+		kind = source === "probe" ? "serving-limit" : "request-choice";
 	} else if (loadedWindow !== undefined && (overrideWindow === undefined || loadedWindow <= overrideWindow)) {
 		effective = loadedWindow;
 		source = "loaded";
+		kind = "serving-limit";
 	} else if (overrideWindow !== undefined) {
 		// A declaration cannot enlarge an observed server limit, including a
 		// conservative limit retained after resident-state discovery failed.
 		effective = Math.min(overrideWindow, probeWindow ?? overrideWindow);
 		source = probeWindow !== undefined && probeWindow < overrideWindow ? "probe" : "target-override";
+		kind = source === "probe" ? "serving-limit" : "request-choice";
 	} else if (probeWindow !== undefined) {
 		effective = coldCap(probeWindow);
 		// Not "loaded": a probed window is what the target reported for the
 		// model, and only a runtime that names its resident instance's window
 		// has said anything about what is serving right now.
 		source = "probe";
-	} else if (modelDeclared !== undefined) {
-		effective = coldCap(modelDeclared);
-		source = modelDeclaredSource;
-	} else {
-		effective = declaredContextWindow;
-		// `descriptor-default` is a claim that the runtime descriptor supplied
-		// this number. When it did not, the number is FALLBACK_CONTEXT_WINDOW and
-		// the honest label is `unknown`; attributing a hardcoded guess to the
-		// descriptor makes a value nobody declared read like a declared one.
-		source = runtimeDefault !== undefined ? "descriptor-default" : "unknown";
+		kind = "serving-limit";
 	}
 
 	// One-run CLI override (clio-coder run --max-context-tokens), delivered over the
 	// run-overrides transport; see core/run-overrides.ts.
 	const targetContextWindow = effective;
 	const overrideMaxContextTokens = runOverrides().maxContextTokens;
-	if (overrideMaxContextTokens !== undefined && overrideMaxContextTokens < effective) {
+	if (overrideMaxContextTokens !== undefined && (effective === 0 || overrideMaxContextTokens < effective)) {
 		effective = overrideMaxContextTokens;
 		source = "target-override";
+		kind = "request-choice";
 	}
-
-	// Warn about target capacity, not a deliberately smaller per-run budget.
-	// The latter does not mean that reloading the server would help.
-	let warning: string | null = null;
-	if (targetContextWindow < CLIO_CONTEXT_WINDOW_WARN_BELOW) {
-		warning =
-			`Target offers ${targetContextWindow} context tokens, below Clio's recommended ${CLIO_CONTEXT_WINDOW_WARN_BELOW}. ` +
-			`Load the model with a larger context; capabilities.contextWindow only declares an existing server limit.`;
-	}
-
-	// Deliberately not folded into `warning`. That field means the window is
-	// smaller than the work needs, which is a degradation an operator can act
-	// on. Provenance is the separate question of whether the number is real:
-	// Clio assumes the floor rather than a number nobody declared, and says so.
-	let provenanceNotice: string | null = null;
-	if (source === "descriptor-default" || source === "unknown") {
-		provenanceNotice =
-			`Context window ${effective} is Clio's assumed minimum, not a figure this target reported. ` +
-			`Run 'clio-coder targets --probe' to read the real one.`;
-	}
+	const warning: string | null = null;
+	const provenanceNotice =
+		effective === 0
+			? "Serving context window is unknown. Probe the target or configure its deployment limit; threshold compaction is disabled until a limit is known."
+			: null;
+	const servingLimit: ResolvedNumericField = {
+		value: effective > 0 ? effective : null,
+		source,
+		kind,
+		observedAt: source === "probe" ? probeObservedAt : source === "loaded" ? loadedObservedAt : null,
+	};
 
 	// The split explains the probed number and nothing else: once an override
 	// or a loaded window decides the figure, `786,432 / 4 slots` no longer
@@ -834,9 +862,11 @@ export function resolveContextWindowDetails(
 
 	return {
 		declaredContextWindow,
+		modelMaximum,
+		servingLimit,
 		probedContextWindow,
 		loadedContextWindow: loadedWindow ?? null,
-		desiredContextWindow: desired,
+		desiredContextWindow: targetContextWindow,
 		effectiveContextWindow: effective,
 		contextWindowSource: source,
 		contextWindowSlots,

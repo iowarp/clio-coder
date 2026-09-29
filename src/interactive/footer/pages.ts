@@ -195,6 +195,12 @@ function contextPage(state: FooterDashboardRenderState, width: number, budget: n
 			"",
 			theme.fg("annotation", "Detailed context accounting appears after the prompt is compiled."),
 		];
+	const compactionDescription =
+		ledger.contextWindow <= 0
+			? "on server overflow"
+			: ledger.compactionAuto
+				? `auto${ledger.compactionThreshold === null ? "" : ` @${Math.round(ledger.compactionThreshold * 100)}%`}`
+				: "manual";
 	const out = [
 		...wrapTextWithAnsi(
 			`${metricText(
@@ -207,7 +213,7 @@ function contextPage(state: FooterDashboardRenderState, width: number, budget: n
 			width,
 		),
 		...wrapTextWithAnsi(
-			`${state.context.budget ? "Capture diagnostics: " : ""}Free ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.freeTokens) : "unknown"} · reserved ${formatFooterTokens(ledger.reserveTokens)} · ${ledger.toolCount} tool definitions · compaction ${ledger.compactionAuto ? `auto${ledger.compactionThreshold === null ? "" : ` @${Math.round(ledger.compactionThreshold * 100)}%`}` : "manual"}`,
+			`${state.context.budget ? "Capture diagnostics: " : ""}Free ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.freeTokens) : "unknown"} · reserved ${formatFooterTokens(ledger.reserveTokens)} · ${ledger.toolCount} tool definitions · compaction ${compactionDescription}`,
 			width,
 		),
 	];

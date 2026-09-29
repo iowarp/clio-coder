@@ -494,6 +494,36 @@ describe("mandatory request-fit compaction", () => {
 		strictEqual(f.results[0]?.skillContext?.skills[0]?.content[0]?.text, f.body);
 		deepStrictEqual(f.requests, [task]);
 	});
+
+	it("compacts and retries once when the serving window is unknown", async () => {
+		const f = overflowFixture(true);
+		f.runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow = 0;
+		const notices: string[] = [];
+		const recovery = createTurnRecovery({
+			state: f.state,
+			context: f.context,
+			persistence: {} as TurnPersistence,
+			retrySettings: () => ({
+				enabled: false,
+				maxRetries: 0,
+				baseDelayMs: 1,
+				maxDelayMs: 1,
+				streamStallMs: 1,
+				firstTokenStallMs: 1,
+			}),
+			markPersistedUserEcho: async (_text, prompt) => prompt(),
+			emitRetryStatus: () => {},
+			emitFailureMessage: () => {},
+			emitNotice: (message) => notices.push(message),
+		});
+		await recovery.runCompactAndRetry(f.runtime, "Keep this task", {
+			kind: "context-overflow",
+			message: "context window exceeded",
+		} as Parameters<typeof recovery.runCompactAndRetry>[2]);
+		strictEqual(f.budgets[0]?.budget?.keepRecentTokens, undefined);
+		deepStrictEqual(f.requests, ["Keep this task"]);
+		ok(notices.some((notice) => notice.includes("serving limit is unknown")));
+	});
 });
 
 describe("typed historical skill checkpoints (pure source)", () => {

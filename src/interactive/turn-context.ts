@@ -83,7 +83,6 @@ import {
 	estimateAgentContextTokens,
 	estimateAgentMessageTokens,
 	getLatestContextSnapshot,
-	lastLoadedContextWindow,
 	reconcileSnapshot,
 	snapshotInputTokens,
 } from "../domains/session/context-accounting.js";
@@ -281,12 +280,6 @@ export interface TurnContext {
 	liveBudget(): LiveBudgetView;
 	/** Inspect only when the native engine owns the request; never initialize it. */
 	inspectLiveBudget(): BudgetInspection;
-	/**
-	 * The loaded context window this session already recorded for a target and
-	 * model, so a resume budgets against it instead of re-probing. Null when the
-	 * ledger has no such measurement.
-	 */
-	rememberedLoadedContextWindow(targetId: string, modelId: string): number | null;
 	refreshAgentMessagesFromSession(agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry>;
 	runAutoCompact(
 		agentRuntime: AgentRuntime,
@@ -675,12 +668,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * (issue #189). Null when no target is configured or it does not resolve,
 	 * and the overlay's "unknown" is then true.
 	 */
-	const rememberedLoadedContextWindow = (targetId: string, modelId: string): number | null => {
-		const session = deps.session?.current();
-		if (!session) return null;
-		return lastLoadedContextWindow(session, targetId, modelId);
-	};
-
 	/**
 	 * The prompt hash this session last recorded, for the first compile of a
 	 * resumed process. Without it a resume reports `previousHash: null`, which
@@ -702,7 +689,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		return resumedPromptHash;
 	};
 
-	const resolveWindowWithoutRuntime = (allowLedgerRead = true): ContextWindowDetails | null => {
+	const resolveWindowWithoutRuntime = (): ContextWindowDetails | null => {
 		const settings = deps.getSettings();
 		const targetId = settings.chat?.target?.trim();
 		const wireModelId = settings.chat?.model?.trim();
@@ -714,13 +701,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			use: "orchestrator",
 			requireTools: false,
 			requireOutputBudget: true,
-			knownLoadedContextWindow: allowLedgerRead
-				? rememberedLoadedContextWindow(targetId, wireModelId)
-				: currentContextSnapshot?.contextWindowSource === "loaded" &&
-						currentContextSnapshot.providerId === targetId &&
-						currentContextSnapshot.modelId === wireModelId
-					? currentContextSnapshot.effectiveContextWindow
-					: null,
 		});
 		return resolved.ok ? resolved.target.contextWindowDetails : null;
 	};
@@ -742,31 +722,21 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			: null;
 
 	/**
-	 * Window facts while no runtime exists: the live resolution first, then the
-	 * resumed snapshot's recorded window, which is what the previous process
-	 * measured the same messages against.
+	 * Window facts while no runtime exists come only from the current route's
+	 * provider status. A resumed snapshot retains historical accounting, but
+	 * cannot claim its old loaded window is still serving.
 	 */
-	const windowWithoutRuntime = (
-		allowLedgerRead = true,
-	): {
+	const windowWithoutRuntime = (): {
 		contextWindow: number;
 		contextWindowSource: ContextWindowSource | null;
 		contextWindowSlots: ContextWindowDetails["contextWindowSlots"];
 	} => {
-		const details = resolveWindowWithoutRuntime(allowLedgerRead);
+		const details = resolveWindowWithoutRuntime();
 		if (details) {
 			return {
 				contextWindow: details.effectiveContextWindow,
 				contextWindowSource: details.contextWindowSource,
 				contextWindowSlots: details.contextWindowSlots,
-			};
-		}
-		const snapshot = currentContextSnapshot;
-		if (snapshot && snapshot.effectiveContextWindow > 0) {
-			return {
-				contextWindow: snapshot.effectiveContextWindow,
-				contextWindowSource: snapshotWindowSource(snapshot),
-				contextWindowSlots: null,
 			};
 		}
 		return { contextWindow: 0, contextWindowSource: null, contextWindowSlots: null };
@@ -883,7 +853,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				snapshot?.snapshotId ?? null,
 				snapshot ? snapshotInputTokens(snapshot) : null,
 				snapshot?.sources.total ?? null,
-				windowWithoutRuntime(false).contextWindow,
+				windowWithoutRuntime().contextWindow,
 				promptFingerprint,
 				toolSignature,
 				eligibility,
@@ -980,7 +950,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						contextWindow: snapshot.effectiveContextWindow,
 						contextWindowSource: snapshotWindowSource(snapshot),
 					}
-				: windowWithoutRuntime(false);
+				: windowWithoutRuntime();
 		const pendingTokens = pendingUserInputTokens();
 		return {
 			targetId: snapshot?.providerId ?? settings.chat?.target ?? null,
@@ -1195,9 +1165,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (!deps.readSessionEntries) return false;
 		const originSession = deps.session?.current()?.id;
 		const originNavigation = navigationEpoch;
-		// Overflow forces a fit attempt even below the automatic threshold, but
-		// still needs the request budget and active task. Manual force keeps its defaults.
-		const useRequestBudget = !force || triggerOverride === "overflow" || handoff !== undefined;
+		// A known window lets overflow recovery force a fit attempt. With an
+		// unknown window, summarize directly and let the server judge the retry.
+		const knownWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow > 0;
+		const requiredFit = triggerOverride === "overflow" && knownWindow;
+		const useRequestBudget = !force || requiredFit || handoff !== undefined;
 		const activeAutoTurnId = useRequestBudget ? state.activeUserTurnId : null;
 		const skillContextState = mainSkillContextState(
 			filterEntriesToActivePath(deps.readSessionEntries(), state.lastTurnId ?? undefined),
@@ -1208,7 +1180,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const autoEnabled = cfg?.auto !== false;
 		if (!force && !autoEnabled) return false;
 		const compactionThreshold = cfg?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
-		const requiredFit = triggerOverride === "overflow";
 		const pressureEstimate = force && !requiredFit ? null : liveContextEstimate(agentRuntime, pendingUserText);
 		if (
 			pressureEstimate &&
@@ -1766,7 +1737,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		persistContextSnapshot,
 		liveContextEstimate,
 		refreshLiveBudget,
-		rememberedLoadedContextWindow,
 		refreshAgentMessagesFromSession,
 		runAutoCompact,
 		navigationRevision: () => navigationEpoch,
@@ -2083,13 +2053,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// after it.
 			const beforeView = refreshLiveBudget();
 			const before = liveContextEstimate(agentRuntime);
-			if (before.contextWindow <= 0) throw new Error("Context window is unavailable; continuation refused.");
-
 			const settings = deps.getSettings();
 			const threshold = settings.context.compaction?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
-			const verdict = shouldCompact(before.tokens, threshold, before.contextWindow);
+			const knownWindow = before.contextWindow > 0;
+			const verdict = knownWindow
+				? shouldCompact(before.tokens, threshold, before.contextWindow)
+				: { shouldCompact: false };
 			let compacted = false;
-			const mustFit = !requestFits(beforeView.inputTokens, beforeView.outputReserveTokens, beforeView.effectiveWindow);
+			const mustFit =
+				knownWindow && !requestFits(beforeView.inputTokens, beforeView.outputReserveTokens, beforeView.effectiveWindow);
 			if (mustFit || verdict.shouldCompact) {
 				try {
 					compacted = await runAutoCompact(
@@ -2114,7 +2086,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// The mid-run settled tool-batch boundary: whatever the guard did or
 			// declined to do, this is the context the continuation will send.
 			const afterView = refreshLiveBudget();
-			if (!requestFits(afterView.inputTokens, afterView.outputReserveTokens, afterView.effectiveWindow)) {
+			if (knownWindow && !requestFits(afterView.inputTokens, afterView.outputReserveTokens, afterView.effectiveWindow)) {
 				throw new Error(
 					`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated input ${afterView.inputTokens} plus reserved output ${afterView.outputReserveTokens} tokens does not fit context window ${afterView.effectiveWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
 				);
@@ -2137,8 +2109,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		contextLedger(): ContextLedger {
 			const settings = deps.getSettings();
-			const compactionThreshold = settings.context.compaction?.threshold ?? null;
-			const compactionAuto = settings.context.compaction?.auto !== false;
 			// Without a runtime (before the first turn of this process, /resume
 			// included) the window comes from the live resolution or the resumed
 			// snapshot, and the token facts from the snapshot: the resumed
@@ -2149,7 +2119,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						contextWindowSource: state.runtime.runtimeResolution.contextWindowDetails.contextWindowSource,
 						contextWindowSlots: state.runtime.runtimeResolution.contextWindowDetails.contextWindowSlots,
 					}
-				: windowWithoutRuntime(false);
+				: windowWithoutRuntime();
+			const compactionThreshold = window.contextWindow > 0 ? (settings.context.compaction?.threshold ?? null) : null;
+			const compactionAuto = settings.context.compaction?.auto !== false && window.contextWindow > 0;
 			const provider = state.runtime?.targetId ?? settings.chat?.target ?? null;
 			const model = state.runtime?.wireModelId ?? settings.chat?.model ?? null;
 			const liveToolCount = state.runtime?.agent.state.tools.length ?? 0;

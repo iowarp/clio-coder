@@ -208,16 +208,18 @@ export function contextUsageText(context: ContextEngineFacts): string {
 	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
 	const window = context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow);
 	const source = context.budget?.inputSource === "historical" ? "saved " : context.budget && used !== null ? "~" : "";
-	return `${source}${used === null ? "?" : formatFooterTokens(used)} / ${window ? formatFooterTokens(window) : "?"}`;
+	return `${source}${used === null ? "?" : formatFooterTokens(used)} / ${window ? formatFooterTokens(window) : "unknown"}`;
 }
 
 /** Compact counts and occupancy; source details remain in the expanded dashboard. */
 export function compactContextUsage(context: ContextOccupancyFacts, theme: ClioTheme): string {
 	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
 	const window = context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow);
-	const counts = `${used === null ? "?" : formatFooterTokens(used).toUpperCase()}/${window ? formatFooterTokens(window).toUpperCase() : "?"}`;
+	const counts = `${used === null ? "?" : formatFooterTokens(used).toUpperCase()}/${window ? formatFooterTokens(window).toUpperCase() : "unknown"}`;
 	const percent = contextUsagePercent(context);
-	return `${theme.fg("counter", counts)} ${theme.fg(contextPercentRole(percent), `(${formatContextPercent(percent)})`)}`;
+	return !window
+		? theme.fg("counter", counts)
+		: `${theme.fg("counter", counts)} ${theme.fg(contextPercentRole(percent), `(${formatContextPercent(percent)})`)}`;
 }
 
 type DashboardRow =
@@ -290,6 +292,7 @@ function formatUsedWindow(used: number | null, contextWindow: number | null): st
 }
 
 function formatCompaction(facts: ContextEngineFacts): string | null {
+	if (!facts.contextWindow) return "on server overflow";
 	if (facts.compactionThreshold === null) return null;
 	const mode = facts.compactionAuto ? "auto" : "manual";
 	const threshold = Math.round(facts.compactionThreshold * 100);
@@ -375,8 +378,10 @@ function ledgerLegendRows(theme: ClioTheme, ledger: ContextLedger, width: number
 }
 
 function ledgerBar(theme: ClioTheme, ledger: ContextLedger, cells: number): string {
-	const percent = theme.fg(contextPercentRole(ledger.percent), formatContextPercent(ledger.percent));
-	return `${renderContextMeterBar(ledger, cells, theme)}  ${percent}`;
+	const bar = renderContextMeterBar(ledger, cells, theme);
+	return ledger.percent === null
+		? bar
+		: `${bar}  ${theme.fg(contextPercentRole(ledger.percent), formatContextPercent(ledger.percent))}`;
 }
 
 export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuadrantOptions = {}): string[] {
@@ -404,7 +409,7 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 			composition.chat > 0 ? theme.fg("counter", formatFooterTokens(composition.chat)) : null,
 			composition.free !== null ? theme.fg("annotation", `free ${formatFooterTokens(composition.free)}`) : null,
 		]);
-		bar = contextOccupancyBar(facts, barCells, theme);
+		bar = facts.contextWindow ? contextOccupancyBar(facts, barCells, theme) : theme.fg("unknownValue", "window unknown");
 		const filledChar = visibleWidth(GLYPH.contextFull) === 1 ? GLYPH.contextFull : GLYPH.barFull;
 		const freeChar = visibleWidth(GLYPH.contextFree) === 1 ? GLYPH.contextFree : GLYPH.barEmpty;
 		legendRows = [
@@ -754,9 +759,8 @@ export function composerPhasePresentation(status: AgentStatus, width: number, no
 			break;
 		case "tool_running": {
 			const name = status.tool?.toolName ?? "tool";
-			label = Object.hasOwn(COMPOSER_TOOL_ACTIVITY, name)
-				? COMPOSER_TOOL_ACTIVITY[name]!
-				: `is running ${truncateToWidth(name, width >= 100 ? 18 : 12, GLYPH.ellipsis, false)}`;
+			const activity = Object.hasOwn(COMPOSER_TOOL_ACTIVITY, name) ? COMPOSER_TOOL_ACTIVITY[name] : undefined;
+			label = activity ?? `is running ${truncateToWidth(name, width >= 100 ? 18 : 12, GLYPH.ellipsis, false)}`;
 			break;
 		}
 		case "tool_blocked":

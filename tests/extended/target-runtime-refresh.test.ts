@@ -54,6 +54,7 @@ test("editing a selected target refreshes the next request and retains portable 
 	const loop = createChatLoop({
 		toolRegistry: createWorkerToolRegistry(),
 		middleware: {
+			registerHook: () => {},
 			runHook: (input: Parameters<MiddlewareContract["runHook"]>[0]) => ({
 				effects:
 					input.hook === "turn_end" && input.metadata?.turnMode === "proposal"

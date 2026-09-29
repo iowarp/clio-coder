@@ -205,7 +205,7 @@ function mergeProbeResult(
 	// Several catalog adapters return [] when metadata cannot be read. It is
 	// not sufficient evidence to erase the last useful catalog.
 	const catalogProbe = probeSucceeded && probe?.models && probe.models.length > 0 ? probe : null;
-	const probeCapabilities =
+	let probeCapabilities =
 		probe?.discoveredCapabilities ?? (preservePrevious ? previous.probeCapabilities : null) ?? null;
 	let probeModelCapabilities =
 		probe?.modelCapabilities ?? (preservePrevious ? previous.probeModelCapabilities : null) ?? null;
@@ -229,22 +229,25 @@ function mergeProbeResult(
 			: probe.ok
 				? (probe.modelStates ?? null)
 				: null;
-	if (probe?.ok === false && preservePrevious && previous.discoveredModelStates) {
-		// Keep only conservative context bounds from the last observation, not
-		// a claim that its model, instance, load config or slots are still live.
-		for (const [modelId, state] of Object.entries(previous.discoveredModelStates)) {
-			const window = positiveWindow(state.contextLength);
-			if (window === undefined) continue;
-			const caps = probeModelCapabilities?.[modelId] ?? probeCapabilitiesForModel(previous, modelId);
-			probeModelCapabilities = {
-				...probeModelCapabilities,
-				[modelId]: { ...caps, contextWindow: Math.min(window, positiveWindow(caps?.contextWindow) ?? window) },
-			};
+	if (probe?.ok === false) {
+		// A failed refresh cannot renew a serving-window observation. Keep
+		// selectable models and non-window hints, then let the next TTL retry.
+		if (probeCapabilities) {
+			const { contextWindow: _staleWindow, ...rest } = probeCapabilities;
+			probeCapabilities = rest;
+		}
+		if (probeModelCapabilities) {
+			probeModelCapabilities = Object.fromEntries(
+				Object.entries(probeModelCapabilities).map(([modelId, caps]) => {
+					const { contextWindow: _staleWindow, ...rest } = caps;
+					return [modelId, rest];
+				}),
+			);
 		}
 		probeNotes = [
 			...new Set([
 				...(probeNotes ?? []),
-				"Current model residency is unknown after the failed probe; last observed context limits are retained conservatively.",
+				"Current model residency and serving context window are unknown after the failed probe.",
 			]),
 		];
 	}
@@ -477,7 +480,22 @@ export function createProvidersBundle(
 			statuses.set(target.id, status);
 			return status;
 		}
-		const probeCtx = await buildProbeContextForTarget(target, desc, options?.signal);
+		let probeCtx: ProbeContext;
+		try {
+			probeCtx = await buildProbeContextForTarget(target, desc, options?.signal);
+		} catch (err) {
+			options?.signal?.throwIfAborted();
+			if (!currentProbeTarget(target)) return null;
+			const status = buildStatus(
+				target,
+				desc,
+				{ ok: false, error: err instanceof Error ? err.message : String(err) },
+				previous,
+			);
+			statuses.set(target.id, status);
+			context.bus.emit(BusChannels.ProviderHealth, { id: target.id, status });
+			return status;
+		}
 		options?.signal?.throwIfAborted();
 		if (!currentProbeTarget(target)) return null;
 		let probeResult: ProbeResult;

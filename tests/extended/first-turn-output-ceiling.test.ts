@@ -8,8 +8,12 @@ import { setGlobalDefaultMaxOutputTokens } from "../../src/engine/apis/output-bu
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
 
 for (const api of ["openai-completions", "ollama-native"]) {
-	for (const oversizedInput of [false, true]) {
-		test(`${api}: a first turn ${oversizedInput ? "refuses oversized input explicitly" : "fits with a full-window output maximum"}`, async () => {
+	for (const { oversizedInput, unknownWindow } of [
+		{ oversizedInput: false, unknownWindow: false },
+		{ oversizedInput: true, unknownWindow: false },
+		{ oversizedInput: true, unknownWindow: true },
+	]) {
+		test(`${api}: a first turn ${unknownWindow ? "reaches the server with an unknown window" : oversizedInput ? "refuses oversized input explicitly" : "fits with a full-window output maximum"}`, async () => {
 			const settings = structuredClone(DEFAULT_SETTINGS);
 			settings.chat.target = "local";
 			settings.chat.model = "local";
@@ -33,7 +37,7 @@ for (const api of ["openai-completions", "ollama-native"]) {
 				runtime: "local",
 				url: "https://fixture.invalid",
 				defaultModel: "local",
-				capabilities,
+				capabilities: unknownWindow ? { maxTokens: 131072 } : capabilities,
 			};
 			const model = {
 				id: "local",
@@ -110,7 +114,8 @@ for (const api of ["openai-completions", "ollama-native"]) {
 				// No session is supplied: this is the operator's first "hi".
 				await loop.submit("hi");
 				strictEqual(settings.chat.maxOutputTokens, 131072);
-				if (oversizedInput) {
+				if (unknownWindow) strictEqual(loop.liveBudget().effectiveWindow, null);
+				if (oversizedInput && !unknownWindow) {
 					deepStrictEqual(submitted, []);
 					ok(refusals.includes("context-window-exceeded"));
 				} else {

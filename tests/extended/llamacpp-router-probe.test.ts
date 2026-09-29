@@ -34,7 +34,15 @@ describe("llama.cpp router probe", () => {
 			if (path === "/v1/models") {
 				return json({
 					object: "list",
-					data: [{ id: "ornith", object: "model", status: { value: state, args } }],
+					data: [
+						{
+							id: "ornith",
+							object: "model",
+							status: { value: state, args },
+							max_context_length: 1_048_576,
+							...(state === "loaded" ? { loaded_context_length: 786_432 } : {}),
+						},
+					],
 				});
 			}
 			if (path === "/props") return json({ build_info: "router-b1", max_instances: 1 });
@@ -66,6 +74,8 @@ describe("llama.cpp router probe", () => {
 		const loaded = await llamacppRuntime.probe?.(target, ctx);
 		strictEqual(loaded?.ok, true);
 		strictEqual(loaded?.ok === true ? loaded.discoveredCapabilities?.parallelSlots : undefined, 4);
+		strictEqual(loaded?.modelStates?.ornith?.contextLength, 196_608, "a split KV pool limits each request");
+		strictEqual(loaded?.modelStates?.ornith?.modelMaxContextLength, 1_048_576);
 		strictEqual(workerPropsHits, 1, "a resident model's worker props are still read");
 	});
 
@@ -132,18 +142,22 @@ describe("llama.cpp router probe", () => {
 			args = UNIFIED_ARGS;
 			const flagged = await runDoctorModelChecks();
 			deepStrictEqual(
-				flagged.map((finding) => [finding.name, finding.ok, finding.level ?? "ok"]),
+				flagged
+					.filter((finding) => finding.name === "model mini" || finding.name === "cache mini")
+					.map((finding) => [finding.name, finding.ok, finding.level ?? "ok"]),
 				[
 					["model mini", true, "ok"],
 					["cache mini", true, "warn"],
 				],
 			);
-			match(flagged[1]?.detail ?? "", /start it with --no-cache-idle-slots/);
+			match(flagged.find((finding) => finding.name === "cache mini")?.detail ?? "", /start it with --no-cache-idle-slots/);
 
 			args = [...UNIFIED_ARGS, "--no-cache-idle-slots"];
 			const fixed = await runDoctorModelChecks();
 			deepStrictEqual(
-				fixed.map((finding) => finding.name),
+				fixed
+					.filter((finding) => finding.name === "model mini" || finding.name === "cache mini")
+					.map((finding) => finding.name),
 				["model mini"],
 			);
 		} finally {

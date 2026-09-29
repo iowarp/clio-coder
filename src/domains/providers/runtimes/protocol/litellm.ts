@@ -112,7 +112,9 @@ export function capabilitiesFromLiteLLMModelInfo(info: Record<string, unknown>):
 	// This is a deployment declaration, never inferred from a URL, port or alias.
 	if (info.runtime === "lm-studio") caps.thinkingControlRuntime = "lmstudio";
 	else if (info.runtime === "llama.cpp") caps.thinkingControlRuntime = "llamacpp";
-	const contextWindow = positiveInteger(info.max_input_tokens) ?? positiveInteger(info.max_tokens);
+	// max_tokens may be catalog training metadata. The gateway's route-specific
+	// max_input_tokens is the serving limit Clio can admit a request against.
+	const contextWindow = positiveInteger(info.max_input_tokens);
 	if (contextWindow !== undefined) caps.contextWindow = contextWindow;
 	const maxTokens = positiveInteger(info.max_output_tokens);
 	if (maxTokens !== undefined) caps.maxTokens = maxTokens;

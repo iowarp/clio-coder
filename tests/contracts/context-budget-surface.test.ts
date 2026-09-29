@@ -128,7 +128,7 @@ describe("native budget inspection through the registered context tool", () => {
 		state.lastTurnId = "leaf";
 		const providers = {
 			list: () => [],
-			getTarget: () => ({ id: "fixture", runtime: "fixture" }),
+			getTarget: () => ({ id: "fixture", runtime: "fixture", capabilities: { contextWindow: WINDOW } }),
 			getDetectedReasoning: () => false,
 			knowledgeBase: null,
 			getRuntime: () => descriptor,
@@ -363,7 +363,7 @@ describe("native budget inspection through the registered context tool", () => {
 			resolveCurrentBranch: async () => null,
 		});
 		try {
-			match(panel.view.render(120).map(stripTerminalSequences).join("\n"), /\?\/\? \(\?%\)/);
+			match(panel.view.render(120).map(stripTerminalSequences).join("\n"), /\?\/unknown/u);
 		} finally {
 			panel.dispose();
 		}

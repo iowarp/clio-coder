@@ -545,6 +545,14 @@ describe("provider transport boundary", () => {
 		strictEqual(litellmRuntime.defaultCapabilities.structuredOutputs, "none");
 	});
 
+	it("uses only a gateway route's max_input_tokens as its serving window", () => {
+		strictEqual(capabilitiesFromLiteLLMModelInfo({ max_tokens: 1_048_576 }).contextWindow, undefined);
+		strictEqual(
+			capabilitiesFromLiteLLMModelInfo({ max_tokens: 1_048_576, max_input_tokens: 880_128 }).contextWindow,
+			880_128,
+		);
+	});
+
 	it("aggregates a LiteLLM alias to capabilities guaranteed by every deployment", () => {
 		const strong = capabilitiesFromLiteLLMModelInfo({
 			mode: "chat",

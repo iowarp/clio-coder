@@ -1,10 +1,10 @@
 /**
- * A server that shares one KV budget across request slots serves each request
- * a quotient of it. llama.cpp splits `--ctx-size` evenly across `--parallel`
- * slots unless `--kv-unified`, so a router started with `--ctx-size 786432
+ * llama.cpp with separate KV slots splits `--ctx-size` evenly across
+ * `--parallel` slots unless `--kv-unified`. A router started with `--ctx-size 786432
  * --parallel 4 --no-kv-unified` admits 196,608 tokens per request. The total
  * and the slot count are kept beside the quotient so the operator surfaces can
- * say where the number came from.
+ * say where the number came from. LM Studio's unified cache reports a single
+ * per-request `context_length`, so its `parallel` value is never divided here.
  */
 export interface ContextWindowSlots {
 	totalContextSize: number;

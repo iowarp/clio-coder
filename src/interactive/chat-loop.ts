@@ -122,6 +122,7 @@ import { retireActiveUserContextForNextOperator } from "./chat-renderer.js";
 import { coldReasonText } from "./cold-reasons.js";
 import { DRAFT_MAX_TOKENS, DRAFT_TEMPERATURES, draftTemperature, runDraftWithSamplerFallback } from "./drafts.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
+import type { NoticeSource } from "./notice-source.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult, sideQuestionUsage } from "./side-question.js";
@@ -218,6 +219,12 @@ export interface ChatNoticeEvent {
 	 * the TUI transcript marks it cancelled, as the footer verb does (BT-013).
 	 */
 	operatorCancel?: true;
+	/**
+	 * Present only on an advisory, text addressed to the operator. The TUI
+	 * transcript frames it under the source's title; every other surface renders
+	 * the text. A notice without a source is an event and keeps its gutter row.
+	 */
+	source?: NoticeSource;
 }
 
 /**
@@ -288,6 +295,9 @@ function turnOutcomeFacts(
 		mutatedPaths: record.completion.mutatedPaths,
 		stopReason: record.stopReason,
 		durationMs: Math.round(record.durationMs),
+		// A cancelled turn settles before its workers seal their receipts, so `provenance` says
+		// whether this count is final. A `turn-tokens` row carries the count that arrived late.
+		workerTokens: { ...record.tokens.workers },
 	};
 }
 
@@ -313,18 +323,24 @@ function readWorkerReceipt(
 
 const WORKER_RECEIPT_SEAL_WAIT_MS = 2000;
 const WORKER_RECEIPT_SEAL_POLL_MS = 25;
+/** How long the detached watcher keeps looking for a receipt the settle wait gave up on. */
+const WORKER_RECEIPT_LATE_WATCH_MS = 30_000;
+const WORKER_RECEIPT_LATE_POLL_MS = 250;
+/** Session ledger entry that amends a cancelled turn's outcome with worker tokens that sealed after it. */
+const TURN_OUTCOME_TOKENS_CUSTOM_TYPE = "turnOutcomeTokens";
 
 /**
  * A cancelled turn records its outcome as soon as the abort lands, while an
  * aborted worker seals its receipt a few tens of milliseconds later. The ledger
  * knows a run from admission, so only runs it knows are worth waiting for; the
- * wait is bounded and a receipt still missing afterwards stays partial.
+ * wait is bounded. Returns the runs still unsealed, whose tokens the outcome
+ * then reports as partial.
  */
 async function awaitWorkerReceipts(
 	runIds: ReadonlyArray<string>,
 	dispatch: Pick<DispatchContract, "getRun"> | undefined,
-): Promise<void> {
-	if (!dispatch) return;
+): Promise<string[]> {
+	if (!dispatch) return [];
 	const pending = new Set(
 		runIds.filter((runId) => dispatch.getRun(runId) !== null && readWorkerReceipt(runId, dispatch) === null),
 	);
@@ -333,6 +349,37 @@ async function awaitWorkerReceipts(
 		await new Promise<void>((resolve) => setTimeout(resolve, WORKER_RECEIPT_SEAL_POLL_MS));
 		for (const runId of [...pending]) if (readWorkerReceipt(runId, dispatch) !== null) pending.delete(runId);
 	}
+	return [...pending];
+}
+
+/**
+ * Follows receipts the settle wait gave up on. Detached and unref'd: it must not
+ * hold the process open, and a process that exits first loses the amend, which
+ * is only a better count of tokens the outcome already reported as partial.
+ * `onDone` runs once: with the elapsed milliseconds when every watched run has
+ * sealed, or null when the cap passed first, and the runs still open stay
+ * partial. Returns a stop function for dispose.
+ */
+function watchLateWorkerReceipts(input: {
+	missing: ReadonlyArray<string>;
+	dispatch: Pick<DispatchContract, "getRun"> | undefined;
+	onDone: (sealedAfterMs: number | null) => void;
+}): () => void {
+	const pending = new Set(input.missing);
+	const started = performance.now();
+	const timer = setInterval(() => {
+		for (const runId of [...pending]) if (readWorkerReceipt(runId, input.dispatch) !== null) pending.delete(runId);
+		const elapsed = performance.now() - started;
+		if (pending.size > 0 && elapsed < WORKER_RECEIPT_LATE_WATCH_MS) return;
+		clearInterval(timer);
+		try {
+			input.onDone(pending.size === 0 ? Math.round(elapsed) : null);
+		} catch {
+			// Measurement must not surface as an error from a timer.
+		}
+	}, WORKER_RECEIPT_LATE_POLL_MS);
+	timer.unref();
+	return () => clearInterval(timer);
 }
 
 function workerOutcomeUsage(
@@ -823,7 +870,7 @@ export interface CreateChatLoopDeps {
 	/** What followed a decision, joined to it by `ref` when the dataset is exported. */
 	recordOutcome?: (outcome: {
 		ref: string;
-		source: "turn" | "next-operator";
+		source: "turn" | "turn-tokens" | "next-operator";
 		facts: Readonly<Record<string, unknown>>;
 	}) => void;
 	getReadySkillCount?: () => number;
@@ -982,6 +1029,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		level: ChatNoticeEvent["level"] = "info",
 		key?: string,
 		skillSurface?: SkillSurfaceChange,
+		source?: NoticeSource,
 	): void => {
 		emit({
 			type: "notice",
@@ -990,6 +1038,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			text,
 			...(key === undefined ? {} : { key }),
 			...(skillSurface === undefined ? {} : { skillSurface }),
+			...(source === undefined ? {} : { source }),
 		});
 	};
 
@@ -1149,15 +1198,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		toolRegistry: deps.toolRegistry,
 		session: deps.session,
 		middlewareToolChoice,
-		emitNotice,
+		emitNotice: (text, level, source) => emitNotice(text, level, undefined, undefined, source),
 		emitFooterNotice,
 	});
 
 	try {
+		// The one deferred reminder producer is task memory, and the one deferred notice producer is the watchdog.
 		deps.registerDeferredReminderSink?.((message, isCurrent) =>
-			middleware.injectDeferredReminder(message, "advisory", isCurrent),
+			middleware.injectDeferredReminder(message, "advisory", isCurrent, "memory"),
 		);
-		deps.registerDeferredNoticeSink?.((text) => middleware.emitDeferredNotice(text));
+		deps.registerDeferredNoticeSink?.((text) => middleware.emitDeferredNotice(text, "warning", "watchdog"));
 	} catch {
 		// A background observer losing its delivery path must not stop the loop
 		// from starting; it simply stays silent.
@@ -1285,11 +1335,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				(operator ? estimateAgentMessageTokens(operator) : 0) +
 				estimateAgentMessageTokens({ role: "assistant", content: [{ type: "text", text: note }] }) +
 				512;
-			return requestFits(floor, view.outputReserveTokens, view.effectiveWindow);
+			return view.effectiveWindow === null || requestFits(floor, view.outputReserveTokens, view.effectiveWindow);
 		},
 		fits: () => {
 			const view = context.refreshLiveBudget();
-			return requestFits(view.inputTokens, view.outputReserveTokens, view.effectiveWindow);
+			return (
+				view.effectiveWindow === null || requestFits(view.inputTokens, view.outputReserveTokens, view.effectiveWindow)
+			);
 		},
 		inputTokens: () => context.refreshLiveBudget().inputTokens ?? 0,
 		reduce: async (hooks, signal) => {
@@ -1387,6 +1439,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const unsubscribeConfigReload =
 		deps.bus?.on(BusChannels.ConfigHotReload, () => {
 			context.invalidateSessionPromptCache();
+			void turnRuntime.ensureLiveCapabilitiesForSelectedModel({ silent: true }).catch(() => {});
+		}) ?? null;
+	const unsubscribeConfigNextTurn =
+		deps.bus?.on(BusChannels.ConfigNextTurn, (payload) => {
+			if (
+				!payload.diff.nextTurn.some(
+					(path) => path === "chat" || path.startsWith("chat.") || path === "targets" || path.startsWith("targets."),
+				)
+			)
+				return;
+			void turnRuntime.ensureLiveCapabilitiesForSelectedModel({ silent: true }).catch(() => {});
 		}) ?? null;
 	const unsubscribePluginsReload =
 		deps.bus?.on(BusChannels.PluginsReloaded, () => {
@@ -1569,6 +1632,52 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return operatorTurnsBefore;
 	};
 
+	const lateReceiptWatchers = new Set<() => void>();
+	/**
+	 * A cancelled turn's outcome was written with worker receipts still unsealed. When
+	 * they seal, a `turnOutcomeTokens` entry amends the ledger and a `turn-tokens` row
+	 * the dataset, both keyed by turn id and ref. The ledger entry needs the session
+	 * that owns the turn, so after /new or /resume only the dataset row is written.
+	 */
+	const amendLateWorkerTokens = (input: {
+		turnId: string;
+		ref: string;
+		parentTurnId: string | null;
+		runIds: ReadonlyArray<string>;
+		missing: ReadonlyArray<string>;
+	}): void => {
+		if (input.missing.length === 0 || !deps.outcomeDispatch) return;
+		const sessionId = deps.session?.current()?.id ?? null;
+		const stop = watchLateWorkerReceipts({
+			missing: input.missing,
+			dispatch: deps.outcomeDispatch,
+			onDone: (afterMs) => {
+				lateReceiptWatchers.delete(stop);
+				if (afterMs === null) return;
+				const workers = workerOutcomeUsage(input.runIds, deps.outcomeDispatch);
+				if (sessionId !== null && deps.session?.current()?.id === sessionId) {
+					try {
+						deps.session.appendEntry({
+							kind: "custom",
+							customType: TURN_OUTCOME_TOKENS_CUSTOM_TYPE,
+							parentTurnId: input.parentTurnId,
+							display: false,
+							data: { turnId: input.turnId, ref: input.ref, workers, sealedAfterMs: afterMs },
+						});
+					} catch {
+						// The ledger closed under the watcher; the dataset row below still records the count.
+					}
+				}
+				deps.recordOutcome?.({
+					ref: input.ref,
+					source: "turn-tokens",
+					facts: { turnId: input.turnId, workerTokens: { ...workers }, sealedAfterMs: afterMs },
+				});
+			},
+		});
+		lateReceiptWatchers.add(stop);
+	};
+
 	/**
 	 * A turn the operator cancelled before admission (the pre-turn reads, the
 	 * orientation act or pre-submit compaction) leaves no user turn, so the settle
@@ -1586,7 +1695,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		try {
 			if (input.control) outcomeCollector.recordControl(input.control);
 			const collected = outcomeCollector.take(input.userTurnId);
-			await awaitWorkerReceipts(collected.harness.runIds, deps.outcomeDispatch);
+			const missingReceipts = await awaitWorkerReceipts(collected.harness.runIds, deps.outcomeDispatch);
 			const record = reduceTurnOutcome({
 				...collected,
 				turnId: input.userTurnId,
@@ -1604,10 +1713,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				stopReason: "aborted",
 				durationMs: Math.max(0, performance.now() - input.submittedAt),
 			});
+			const outcomeParent = state.lastTurnId;
 			deps.session.appendEntry({
 				kind: "custom",
 				customType: "turnOutcome",
-				parentTurnId: state.lastTurnId,
+				parentTurnId: outcomeParent,
 				display: false,
 				data: record,
 			});
@@ -1617,6 +1727,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				ref: outcomeRef,
 				source: "turn",
 				facts: turnOutcomeFacts(record, { continuation: input.continuation, interviewDismissed: false, skillsLoaded: [] }),
+			});
+			amendLateWorkerTokens({
+				turnId: input.userTurnId,
+				ref: outcomeRef,
+				parentTurnId: outcomeParent,
+				runIds: collected.harness.runIds,
+				missing: missingReceipts,
 			});
 			if (!input.continuation) previousOperatorTurn = { id: input.userTurnId, settledAt: performance.now() };
 			else if (previousOperatorTurn !== null) previousOperatorTurn.settledAt = performance.now();
@@ -1800,6 +1917,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						surface: "transcript",
 						text: `IMAGE_INPUT_UNSUPPORTED: ${route.targetId}/${route.wireModelId} cannot accept image input.${alternatives}`,
 						admission: { reason: "image-input-unsupported" },
+						source: "images",
 					});
 					return;
 				}
@@ -1813,6 +1931,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					emitNotice(
 						`[Clio Coder] ${historicalImages} earlier image${historicalImages === 1 ? "" : "s"} omitted from requests to text-only ${route.targetId}/${route.wireModelId}. The original images remain in session history for a vision-capable model.`,
 						"warning",
+						undefined,
+						undefined,
+						"images",
 					);
 				}
 			} else {
@@ -2052,7 +2173,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			let turnSnapshot = captureTurnSnapshot("pending");
 			let admission = context.refreshLiveBudget(submittedText);
-			if (!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)) {
+			if (
+				admission.effectiveWindow !== null &&
+				!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)
+			) {
 				setTurnPreparation("compacting");
 				let failure: string | undefined;
 				await context
@@ -2073,7 +2197,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					.finally(endPreparationCompaction);
 				submittedText = composeSubmittedText();
 				admission = context.refreshLiveBudget(submittedText);
-				if (!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)) {
+				if (
+					admission.effectiveWindow !== null &&
+					!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)
+				) {
 					emitAdmissionNotice(
 						`[Clio Coder] Request exceeds the available context window (input ${admission.inputTokens ?? "unknown"} + output ${admission.outputReserveTokens ?? "unknown"}, window ${admission.effectiveWindow ?? "unknown"}).${failure ? ` ${failure}` : ""} Trim the prompt or reduce active tools.`,
 						"context-window-exceeded",
@@ -2356,11 +2483,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								// The regex reading of the closing text stands.
 							}
 						}
-						if (canceled)
-							await awaitWorkerReceipts(
-								[...collected.dispatches.flatMap((item) => item.runIds), ...collected.harness.runIds],
-								deps.outcomeDispatch,
-							);
+						const workerRunIds = [...collected.dispatches.flatMap((item) => item.runIds), ...collected.harness.runIds];
+						const missingReceipts = canceled ? await awaitWorkerReceipts(workerRunIds, deps.outcomeDispatch) : [];
 						const record = reduceTurnOutcome({
 							...collected,
 							turnId: userTurnId,
@@ -2374,10 +2498,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							tokens: {
 								coordinator: matchesTrace ? persistence.currentTurnUsage() : noOutcomeUsage(),
 								decisionModel: deps.getDecisionUsage?.(userTurnId) ?? noOutcomeUsage(),
-								workers: workerOutcomeUsage(
-									[...collected.dispatches.flatMap((item) => item.runIds), ...collected.harness.runIds],
-									deps.outcomeDispatch,
-								),
+								workers: workerOutcomeUsage(workerRunIds, deps.outcomeDispatch),
 							},
 							stopReason:
 								typeof finalPayload?.stopReason === "string"
@@ -2389,10 +2510,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 											: "error",
 							durationMs: Math.max(0, performance.now() - submittedAt),
 						});
+						const outcomeParent = state.lastTurnId;
 						deps.session.appendEntry({
 							kind: "custom",
 							customType: "turnOutcome",
-							parentTurnId: state.lastTurnId,
+							parentTurnId: outcomeParent,
 							display: false,
 							data: record,
 						});
@@ -2416,6 +2538,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						} catch {
 							// Recording an outcome never costs the turn it describes.
 						}
+						amendLateWorkerTokens({
+							turnId: userTurnId,
+							ref: outcomeRef,
+							parentTurnId: outcomeParent,
+							runIds: workerRunIds,
+							missing: missingReceipts,
+						});
 						// A continuation extends the operator turn it followed, so the gap the
 						// next operator message reports runs from the end of the whole chain.
 						if (!continuation) previousOperatorTurn = { id: userTurnId, settledAt: performance.now() };
@@ -2565,7 +2694,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		dispose(): void {
 			pendingVisionSidecar?.abort();
+			turnRuntime.dispose();
+			for (const stop of lateReceiptWatchers) stop();
+			lateReceiptWatchers.clear();
 			unsubscribeConfigReload?.();
+			unsubscribeConfigNextTurn?.();
 			unsubscribePluginsReload?.();
 			unsubscribeSynthesisLock?.();
 			unsubscribePrewarmCompaction();

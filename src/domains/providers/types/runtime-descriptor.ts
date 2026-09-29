@@ -80,6 +80,8 @@ export interface ProbeModelStatus {
 	 * model is not resident or the runtime does not report it.
 	 */
 	contextLength?: number;
+	/** The model's supported maximum, separate from the resident instance's window. */
+	modelMaxContextLength?: number;
 	/**
 	 * Resident footprint reported by the runtime when a model is loaded. Ollama
 	 * exposes both via `/api/ps` (`size_vram` is the GPU-resident portion,

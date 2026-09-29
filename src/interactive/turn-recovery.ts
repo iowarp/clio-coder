@@ -185,6 +185,12 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		overflow: NonNullable<ReturnType<typeof toContextOverflowError>>,
 		images?: ReadonlyArray<ImageContent>,
 	): Promise<void> => {
+		const windowUnknown = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow <= 0;
+		deps.emitNotice(
+			windowUnknown
+				? "[Clio Coder] Server rejected this request for exceeding its context window. The serving limit is unknown; compacting and retrying once. Probe the target or configure its deployment limit to enable proactive compaction."
+				: "[Clio Coder] Server rejected this request for exceeding its context window; compacting and retrying once.",
+		);
 		let compacted = false;
 		try {
 			pruneFailedAssistantFromContext(agentRuntime.agent);
@@ -197,7 +203,9 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			);
 		}
 		if (!compacted) {
-			deps.emitNotice(`[Clio Coder] context overflow: ${overflow.message}`);
+			deps.emitNotice(
+				`[Clio Coder] context overflow could not be compacted: ${overflow.message}. Use /context compact or reduce the request.`,
+			);
 			return;
 		}
 		try {
