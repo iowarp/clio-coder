@@ -34,10 +34,10 @@ Resolution takes the first applicable layer, most authoritative first:
 2. **Loaded window**: the context a backend reports having the model open at, unless the target override is smaller. A larger override never enlarges it.
 3. **Target override**: `targets[].capabilities.contextWindow` in `settings.yaml`, capped by a smaller probed window.
 4. **Live probe**: the window the target reported through its model listing or props endpoints, capped for cold-start runtimes by the runtime's cold cap.
-5. **Model knowledge**: a live model hint, then the knowledge base, then the static entry in [catalog.ts](../../src/domains/providers/catalog.ts).
-6. **Runtime default**: the runtime descriptor's default, or the 131,072-token minimum (`CLIO_MIN_CONTEXT_WINDOW` in `src/core/context-floor.ts`) labelled `unknown`.
+5. **Cloud catalog estimate**: a cloud route whose runtime has no serving-window endpoint plans against the model maximum, most live first: a maximum the server reported, a live model hint, the model profile's `modelMaxContext`, then Pi's catalog row. The source is `catalog`, an estimate and never a server report. A route with a window endpoint, and every local route, skips this layer.
+6. **Unknown**: otherwise the window is `unknown` and the effective window is 0. Threshold compaction stays off until a limit is known, and a server overflow triggers one compact-and-retry.
 
-`clio-coder run --max-context-tokens` lowers the result for one run and marks the source `target-override`. A target that offers fewer than 131,072 tokens produces a `context-window-low` diagnostic, and a `descriptor-default` or `unknown` source produces `context-window-unverified`. Run `clio-coder targets --probe` to read the real value.
+`clio-coder run --max-context-tokens` lowers the result for one run, or supplies it when the window is unknown, and marks the source `target-override`. An unknown window produces a `context-window-unverified` diagnostic. No minimum-size warning is emitted, and `descriptor-default` survives only in older snapshots. Run `clio-coder targets --probe` to read the real value. Resolution is implemented in [runtime-resolution.ts](../../src/domains/providers/runtime-resolution.ts).
 
 <details>
 <summary>Budget calculation: request fit, output reserve, and compaction reserve</summary>

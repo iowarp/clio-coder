@@ -287,6 +287,12 @@ A target binds an id to a registered runtime, endpoint/auth, model defaults, and
 
 Keep credentials in user settings or the credential store. Project settings deliberately discard credential-bearing keys.
 
+For ALCF, the `configure` wizard asks for a gateway URL and shows a
+Sophia example because the endpoint varies by cluster or resource.
+`gatewayUrlGuidance` in [configure-target.ts](../../src/cli/configure-target.ts)
+provides that prompt. See the [ALCF provider contract](../architecture/alcf-provider.md#configure)
+for the Sophia and Metis URLs and model IDs.
+
 ## Target management
 
 | Command | Use |
@@ -303,22 +309,88 @@ Keep credentials in user settings or the credential store. Project settings deli
 
 ## Context-window provenance
 
-`targets --json` reports the origin of a target's context window:
+Clio keeps the window a route serves apart from the maximum a model declares. The serving window bounds a session. A profile's `claims.modelMaxContext` and a row in Pi's model catalog are model maxima, and neither becomes an inference server's serving window. When a resident model's serving window differs from the target's model maximum, `clio-coder targets` names both, as in `ctx <serving> (serving; model max <maximum>)`.
+
+`targets --json` reports `contextWindowProvenance` for the window of the target's default model, as defined in [`contract.ts`](../../src/domains/providers/contract.ts):
 
 | Value | Meaning |
 | --- | --- |
-| `configured` | Explicit target capability override. |
-| `discovered` | Reported by the live endpoint. |
-| `catalog` | Supplied by the model catalog. |
-| `runtime-default` | Runtime fallback; treat it as an unverified estimate. |
+| `configured` | Set by `targets[].capabilities.contextWindow`. |
+| `discovered` | Reported by the live endpoint for that exact model id. For `openai-codex` it is the window the Codex backend lists for the model. |
+| `catalog` | Taken from Pi's catalog row for the model. It is an estimate, not a server report. |
+| `runtime-default` | Nothing answered, so the number is the runtime's placeholder, which the text listing marks `unverified runtime default`. `openai-codex` reports `0` instead until its backend answers. |
 
-A loaded model's serving window can be lower than its advertised maximum. Check target status and model state before planning against a catalog maximum. Provenance and target status are defined in [`src/domains/providers/contract.ts`](../../src/domains/providers/contract.ts) and the runtime descriptors.
+A session plans against the serving window resolved on each turn by [`runtime-resolution.ts`](../../src/domains/providers/runtime-resolution.ts). `/context` labels its source as follows ([`context-overlay.ts`](../../src/interactive/context-overlay.ts)), and the footer's context page prints the raw source value:
 
-For ALCF, the `configure` wizard asks for a gateway URL and shows a
-Sophia example because the endpoint varies by cluster or resource.
-`gatewayUrlGuidance` in [configure-target.ts](../../src/cli/configure-target.ts)
-provides that prompt. See the [ALCF provider contract](../architecture/alcf-provider.md#configure)
-for the Sophia and Metis URLs and model IDs.
+| `/context` label | Source | Meaning |
+| --- | --- | --- |
+| `loaded window` | `loaded` | The backend reports the model open at this window. |
+| `probed window` | `probe` | The target reported a route or model limit without resident instance state. A llama.cpp slot share shows as `<share> (<total> / <n> slots)`. |
+| `configured window` | `target-override` | `targets[].capabilities.contextWindow`, a window sent with every request such as `ollama.numCtx`, or `clio-coder run --max-context-tokens`. A setting can lower a live limit but never raise it. |
+| `catalog estimate window` | `catalog` | A cloud route whose runtime has no window endpoint. The window is the model maximum from its profile or Pi's catalog, labeled an estimate. |
+| `context window unknown` | `unknown` | No live report or setting answered. |
+
+Older session snapshots can carry `descriptor-default`, which `/context` shows as `assumed`.
+
+Only a cloud route without a window endpoint plans a session against an estimate. Local servers, protocol endpoints such as `openai-compat` and `litellm`, and `openai-codex` before its backend answers have no fallback number. When no probe, loaded state or setting reports their window, it is unknown: `/context` shows `context window unknown` beside the estimated token count, threshold compaction is disabled, and the transcript prints once per target and model `Serving context window is unknown. Probe the target or configure its deployment limit; threshold compaction is disabled until a limit is known.` Run `clio-coder targets --probe`, load the model, or set `targets[].capabilities.contextWindow` to the deployment's limit.
+
+The server stays the authority on its own limit. When it rejects a chat request for exceeding its context window, Clio compacts once and retries the request, whether or not the window or output limit is known ([`turn-recovery.ts`](../../src/interactive/turn-recovery.ts)). A second overflow is reported instead of retried. A worker makes one recovery attempt after a server overflow: it evicts reversible observations from its projected request and retries once when that shrinks the request enough ([`pressure.ts`](../../src/domains/context/worker/pressure.ts)). The worker's initial fork is never trimmed, and the attempt needs `context.compaction.auto` and `context.workingSet.enabled`; otherwise the server's error ends the run.
+
+## Model profiles
+
+The package ships [`models/profiles.yaml`](../../models/profiles.yaml), which describes what each known model is: capability flags, a declared context and output maximum, its thinking mechanism, and a recommended output budget. A profile describes the model, not a deployment, so it cannot set `contextWindow`, `maxTokens`, `reasoningLevels`, `thinkingControlRuntime` or `parallelSlots`; only a live server report supplies those. Loading, matching and validation are in [`model-profiles.ts`](../../src/domains/providers/model-profiles.ts).
+
+A profile's `match` block selects models by id, ignoring case:
+
+- `exactIds` compares the full model id, including a route prefix such as `mini/`.
+- `familyPrefixes` compares the model name after its last `/`. A prefix matches that name exactly or when followed by `-`, `_`, `.` or `@`. Prefixes are literal, so `/` and regular-expression characters are rejected.
+- `runtimeIds` limits the profile to those runtime ids. A profile without it applies on every runtime.
+
+An exact match beats a prefix match, a longer match beats a shorter one, and a runtime-qualified profile beats an unqualified one. Two profiles still tied after those rules are an error.
+
+Profile claims merge under live reports and target settings ([`capabilities.ts`](../../src/domains/providers/capabilities.ts)):
+
+| Field | Precedence |
+| --- | --- |
+| `tools`, `vision`, `reasoning` | A live server report decides. A target's `capabilities` value of `false` can lower a reported `true`, but `true` never raises a reported `false`, and Clio notes that the report stands. The profile fills the flag only when the server and the target are both silent. |
+| Serving window and output cap | A live limit is the ceiling. `targets[].capabilities.contextWindow` and `maxTokens` can lower it, or stand alone when the server reports none. `claims.modelMaxContext` is never a serving window, and `claims.modelMaxOutput` ranks below server and target limits. |
+| Other flags, such as `toolCallFormat`, `thinkingFormat` and `structuredOutputs` | The profile outranks the server's flag list, and a target's `capabilities` outranks the profile. A live report of no audio input still wins. |
+
+When `chat.maxOutputTokens` is `0` and the request sets no limit, the profile's `recommendations.outputTokens` becomes the output budget, clamped to the model's output cap and the remaining window ([`output-budget.ts`](../../src/engine/apis/output-budget.ts)). Sampling presets still come from the [local model catalog](../../src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml), so a profile's `recommendations.sampling` is not applied.
+
+`behavior.thinking` names the mechanism (`effort-levels`, `budget-tokens`, `on-off`, `always-on` or `none`) and, for `effort-levels`, the effort string each Clio level sends in `effortByLevel`. Beyond `off`, the thinking picker offers only the mapped levels. The ThinkingCap-Qwen3.8-27B (`thinkingcap-qwen3.8-27b`) and Qwopus3.8-27B-Flash-V2 (`qwopus3.8v2-27b-dense`) profiles map levels onto `low`, `medium` and `xhigh`, the only efforts their chat templates accept. A requested `high` or `max` is sent as `xhigh`.
+
+### User override file
+
+`<configDir>/model-profiles.yaml` layers the operator's profiles over the packaged ones. It uses the packaged shape:
+
+    version: 1
+    models:
+      - id: qwen3.8-27b
+        claims:
+          capabilities:
+            vision: false
+      - id: lab-coder
+        match:
+          familyPrefixes:
+            - lab-coder
+        claims:
+          capabilities:
+            tools: true
+            toolCallFormat: openai
+
+The first entry adjusts a packaged profile and the second adds one. An entry whose `id` names a packaged profile, ignoring case, merges onto it field by field: nested maps merge, while lists and scalar values replace the packaged value. An entry with a new `id` adds a profile and needs its own `match` with `exactIds` or `familyPrefixes`. An entry may set `id`, `match`, `claims` (`modelMaxContext`, `modelMaxOutput` and `capabilities`), `behavior`, `recommendations` and `provenance`. Capability fields are the booleans `chat`, `tools`, `reasoning`, `vision`, `audio`, `embeddings`, `rerank`, `fim` and `decisions`, and the enums `toolCallFormat`, `thinkingFormat` and `structuredOutputs`. Profile claims still rank below live reports as the table above describes.
+
+A mistake in the override costs the smallest unit, and each is reported as a `[providers:profiles]` diagnostic naming the file and entry:
+
+| Diagnostic | Effect |
+| --- | --- |
+| `<file> entry '<id>': <field> ignored, <problem>` | An unknown field, a live-only capability, or a wrong value type is dropped. The rest of the entry loads. |
+| `<file> entry '<id>' skipped: <reason>` | The entry lacks a trimmed nonempty `id`, repeats an earlier override `id`, or fails validation after merging, for example a new profile without `match` or a prefix that is not literal. |
+| `<file> ignored: <reason>` | The file does not parse, lacks `version: 1` and a `models` list, or has another top-level key. The packaged profiles still load. |
+| `model profiles disabled: <reason>` | Two profiles claim the same exact id or prefix for the same runtime scope. Every profile is disabled, and Clio runs as if no profile matched. |
+
+Clio reads both files at startup and rereads them whenever the `/model` overlay refreshes targets: when it opens, and on `r` or `R`.
 
 ## Target fields
 
@@ -350,6 +422,8 @@ Target-specific options are typed in [`target-descriptor.ts`](../../src/domains/
                 contextLength: 65536
 
 Before a request, Clio loads the model with the profile when it is not resident. When it is resident with a different value for a field the profile sets, for example because another client's just-in-time load took the GUI defaults, Clio unloads that instance and loads it again, then prints one `reloading '<model>' ... to match its load profile` line. A field the loaded instance does not report is never treated as drifted. The profile applies on the next turn after the setting changes.
+
+While another model is resident on the same server, Clio caps a context length it chose, including one inherited from the target-level `lmstudio.load`, at the co-residency ceiling that `CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT` sets ([environment reference](environment-variables.md)), and prints `loading '<model>' alongside <models>: context clamped <requested> to <ceiling> tokens`. A `contextLength` set for that model under `lmstudio.models.<model id>.load` is never clamped; Clio loads it and warns that it is above the ceiling. When a drift reload fails, Clio restores the previous instance, plans against the window that instance serves, and does not retry the profile until the instance or the profile changes. If the restore also fails, the error names both failures and the model must be reloaded on the server ([`lmstudio.ts`](../../src/engine/apis/lmstudio.ts)).
 
 It applies to a `lmstudio` target and to a `litellm` target. On a LiteLLM gateway, Clio reads `/v1/model/info` and acts only on a route with exactly one deployment that declares `model_info.runtime: lm-studio`; it loads on that deployment's `api_base` under the upstream model key and still sends the request to the gateway alias. Routes on other runtimes, gateways that hide detail metadata from the key, and targets without a profile stay observe-only, and `lifecycle: user-managed` disables every load and unload. The gateway credential is never sent to the LM Studio server. Loads and reloads are serialized across the orchestrator and its workers by the residency lock.
 
