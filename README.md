@@ -94,7 +94,7 @@ npm install -g @iowarp/clio-coder --omit=optional
 From source, build the release tag:
 
 ```bash
-git clone --branch v0.5.8 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.5.9 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm run install:local

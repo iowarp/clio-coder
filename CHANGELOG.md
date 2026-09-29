@@ -2,6 +2,13 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## 0.5.9 - 2026-09-29
+
+### Fixed
+
+- Startup no longer prints a `[providers:profiles:compare]` line for every configured route without a model profile. The comparison was a migration aid and now runs only when `CLIO_CODER_PROFILE_COMPARE=1` is set.
+- An operator dispatch whose typed intent replaces prose path inference shows only its transcript callout, without a duplicate `typed scope replacement` footer diagnostic. Harness-owned dispatches, which publish no callout, keep the diagnostic.
+
 ## 0.5.8 - 2026-09-29
 
 ### Turn control and workspace guidance
