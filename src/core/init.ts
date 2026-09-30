@@ -6,6 +6,7 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { REGISTERED_MIGRATION_IDS } from "../domains/lifecycle/migrations/registry-ids.js";
 import { DEFAULT_SETTINGS_YAML } from "./defaults.js";
 import { readClioVersion } from "./package-root.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
@@ -108,6 +109,23 @@ export function initializeClioHome(): InitReport {
 		created.push(settingsPath);
 		touched = true;
 	});
+
+	// A fresh home is written in the current shape, so every registered
+	// migration is already satisfied. Without this record doctor reports them
+	// pending until an upgrade replays no-op migrations over it. A home that
+	// existed before this call may predate them and is left to runPending.
+	const migrationsPath = join(stateDir, "migrations.json");
+	if (!preexistingHome) {
+		withStateFileLockSync(migrationsPath, () => {
+			if (existsSync(migrationsPath)) return;
+			safeResourceWrite(migrationsPath, `${JSON.stringify({ applied: [...REGISTERED_MIGRATION_IDS] }, null, 2)}\n`, {
+				encoding: "utf8",
+				mode: 0o600,
+			});
+			chmodSync(migrationsPath, 0o600);
+			created.push(migrationsPath);
+		});
+	}
 
 	const credentialsPath = join(configDir, "credentials.yaml");
 	withStateFileLockSync(credentialsPath, () => {

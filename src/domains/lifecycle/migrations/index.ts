@@ -36,6 +36,7 @@ import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../../core/state-file-lock.js";
 import retirePanesKnobs from "./2026-09-01-retire-panes-knobs.js";
 import settingsV2 from "./2026-09-01-settings-v2.js";
+import { REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
 
 export interface Migration {
 	id: string;
@@ -73,6 +74,16 @@ const MIGRATION_MANIFEST_MAX_BYTES = 1024 * 1024;
 // were retired with the legacy naming layer. Homes that recorded their ids keep
 // them in the manifest; an id with no registered migration is inert.
 const REGISTRY: ReadonlyArray<Migration> = Object.freeze([settingsV2, retirePanesKnobs]);
+
+// A fresh home records REGISTERED_MIGRATION_IDS as already applied. An id
+// registered here but missing there would be recorded for no home, and one
+// listed there but not here would be recorded as run when it never can be.
+if (
+	REGISTRY.length !== REGISTERED_MIGRATION_IDS.length ||
+	REGISTRY.some((migration, index) => migration.id !== REGISTERED_MIGRATION_IDS[index])
+) {
+	throw new Error("lifecycle migrations: registry-ids.ts does not match the migration registry");
+}
 
 export function listMigrations(): ReadonlyArray<Migration> {
 	return REGISTRY;
