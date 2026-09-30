@@ -119,8 +119,3 @@ export function sandboxAvailability(
 	cached ??= detect(platform, env);
 	return cached;
 }
-
-/** Test and diagnostics seam: forget the cached probe. */
-export function resetSandboxAvailabilityCache(): void {
-	cached = null;
-}

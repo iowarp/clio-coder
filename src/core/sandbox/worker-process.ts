@@ -27,10 +27,6 @@ export function configureWorkerProcessSandbox(spec: WorkerSandboxSpec | undefine
 	unavailableReported = false;
 }
 
-export function activeWorkerProcessSandbox(): WorkerSandboxSpec | null {
-	return active;
-}
-
 /**
  * Sockets and runtime directories reachable through the read-only root that
  * would let a sandboxed command act outside it: the session bus, agent
@@ -42,7 +38,7 @@ function runtimeEscapePaths(): string[] {
 }
 
 /** Existing secret and escape paths, each with the mount kind that hides it. */
-export function workerSandboxMaskedPaths(candidates?: ReadonlyArray<string>): SandboxMaskedPath[] {
+function workerSandboxMaskedPaths(candidates?: ReadonlyArray<string>): SandboxMaskedPath[] {
 	const masks: SandboxMaskedPath[] = [];
 	for (const entry of candidates ?? [...workerSecretPaths(), ...runtimeEscapePaths()]) {
 		try {

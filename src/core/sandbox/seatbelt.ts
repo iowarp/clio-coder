@@ -41,7 +41,7 @@ function literalRule(prefix: string, count: number): string {
 	return Array.from({ length: count }, (_, index) => `(literal (param "${prefix}_${index}"))`).join(" ");
 }
 
-export function buildSeatbeltProfile(spec: SandboxInvocationSpec): { profile: string; params: string[] } {
+function buildSeatbeltProfile(spec: SandboxInvocationSpec): { profile: string; params: string[] } {
 	const params: string[] = [];
 	const define = (prefix: string, values: ReadonlyArray<string>): number => {
 		values.forEach((value, index) => {

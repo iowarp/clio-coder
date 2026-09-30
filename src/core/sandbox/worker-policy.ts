@@ -28,7 +28,7 @@ export interface WorkerSandboxPolicyInput {
  * would protect nothing while breaking package installs; a worker without it
  * gets an empty network namespace unless the operator opted in.
  */
-export function workerSandboxNetwork(allowedTools: ReadonlyArray<string>, networkSetting: boolean): boolean {
+function workerSandboxNetwork(allowedTools: ReadonlyArray<string>, networkSetting: boolean): boolean {
 	return networkSetting || allowedTools.includes(ToolNames.WebFetch);
 }
 
