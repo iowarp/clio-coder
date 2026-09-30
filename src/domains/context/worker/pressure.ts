@@ -117,6 +117,24 @@ export function createWorkerContextGuard(archive: (ref: string, message: AgentMe
 		const assistantIndices = input.messages.flatMap((message, index) => (message.role === "assistant" ? [index] : []));
 		const cutoff = assistantIndices[Math.max(0, assistantIndices.length - 2)] ?? 0;
 		const toolCalls = new Map(input.messages.flatMap(messageToolCalls).map((call) => [call.id, call]));
+		const evictableObservation = (message: AgentMessage | undefined): message is AgentMessage & { role: "toolResult" } => {
+			if (!message || message.role !== "toolResult" || message.isError || evicted.has(key(message))) return false;
+			const call = toolCalls.get(message.toolCallId);
+			// A gateway call carries its capability's read semantics: a page
+			// fetched through the gateway is as evictable as a direct fetch.
+			const name = call ? effectiveToolCall(call.name, call.arguments).toolName : undefined;
+			// Only observations with known read semantics. Preserve mutations and opaque tools.
+			if (!name || !["read", "grep", "find", "ls", "code_nav", "web_read", "web_fetch"].includes(name)) return false;
+			return JSON.stringify(message.content).length >= 1000;
+		};
+		const evictObservation = (index: number, message: AgentMessage, note: string) => {
+			const ref = key(message);
+			const file = archive(ref, structuredClone(message));
+			replace(index, message, {
+				...message,
+				content: [{ type: "text" as const, text: note.replaceAll("{ref}", ref).replaceAll("{file}", file) }],
+			} as AgentMessage);
+		};
 		for (let index = 0; index < cutoff && over(); index++) {
 			const message = input.messages[index];
 			if (!message || evicted.has(key(message))) continue;
@@ -125,26 +143,31 @@ export function createWorkerContextGuard(archive: (ref: string, message: AgentMe
 				if (content.length === 0 || content.length === message.content.length) continue;
 				const projected = { ...message, content };
 				replace(index, message, projected);
-			} else if (message.role === "toolResult" && !message.isError) {
-				const call = toolCalls.get(message.toolCallId);
-				// A gateway call carries its capability's read semantics: a page
-				// fetched through the gateway is as evictable as a direct fetch.
-				const name = call ? effectiveToolCall(call.name, call.arguments).toolName : undefined;
-				// Only observations with known read semantics. Preserve mutations and opaque tools.
-				if (!name || !["read", "grep", "find", "ls", "code_nav", "web_read", "web_fetch"].includes(name)) continue;
-				if (JSON.stringify(message.content).length < 1000) continue;
-				const ref = key(message);
-				const file = archive(ref, structuredClone(message));
-				const projected = {
-					...message,
-					content: [
-						{
-							type: "text" as const,
-							text: `[Worker context observation worker:${ref} evicted. Recover with context(scope="recall", ref="worker:${ref}"). Exact historical result: ${file}. Read that file if needed; reread the source for current contents.]`,
-						},
-					],
-				};
-				replace(index, message, projected);
+			} else if (evictableObservation(message)) {
+				evictObservation(
+					index,
+					message,
+					'[Worker context observation worker:{ref} evicted. Recover with context(scope="recall", ref="worker:{ref}"). Exact historical result: {file}. Read that file if needed; reread the source for current contents.]',
+				);
+			}
+		}
+		// One step's own results can outgrow the window: a 64K-token worker that
+		// reads eight large files in parallel protects all of them as its latest
+		// round, and the run used to die as context exhausted. Before failing,
+		// evict the protected read results too, largest first, and say why so
+		// the next step reads narrower instead of recalling the same bytes.
+		if (over()) {
+			const recent = input.messages
+				.map((message, index) => ({ message, index }))
+				.filter(({ message, index }) => index >= cutoff && evictableObservation(message))
+				.sort((a, b) => estimateAgentMessageTokens(b.message) - estimateAgentMessageTokens(a.message));
+			for (const { message, index } of recent) {
+				if (!over()) break;
+				evictObservation(
+					index,
+					message,
+					"[Worker context observation worker:{ref} evicted: this step's results did not fit the model's context window. Read only the part you need, with offset and limit, one large source per step. Exact historical result: {file}.]",
+				);
 			}
 		}
 		if (recovering) return structural <= recoveryTarget ? accepted() : null;
