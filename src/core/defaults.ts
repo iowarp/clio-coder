@@ -105,9 +105,13 @@ export interface SystemOneSettings {
  * parks the call and hands it to the interactive operator, applying the
  * escalation fallback on timeout so the run still cannot hang. Escalate is
  * only meaningful with an interactive operator attached; headless sessions
- * have no subscriber, so the timeout fallback governs.
+ * have no subscriber, so the timeout fallback governs. In permit terms
+ * escalate is asks main with operator approval authority: the main agent's
+ * card, always decided by a person. "main" is the explicit opt-in for the
+ * main agent to grant ordinary worker asks itself; until the grant broker
+ * ships, every such ask is denied with a reason saying so.
  */
-export type WorkerPermissionMode = "deny" | "fail" | "escalate";
+export type WorkerPermissionMode = "deny" | "fail" | "escalate" | "main";
 
 /** Bounds for the escalate posture; the timeout fallback keeps runs non-stall. */
 export interface WorkerEscalationSettings {

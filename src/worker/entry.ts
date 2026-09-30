@@ -209,6 +209,7 @@ async function main(): Promise<number> {
 		...(spec.agentSkills !== undefined ? { agentSkills: [...spec.agentSkills] } : {}),
 		...(spec.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: spec.trustProjectCompatRoots } : {}),
 		...(spec.onPermission !== undefined ? { onPermission: spec.onPermission } : {}),
+		permitAllowance: { ...spec.permit.allowance },
 		...(spec.escalation !== undefined ? { escalation: spec.escalation } : {}),
 		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 		...(spec.readOnly !== undefined ? { readOnly: spec.readOnly } : {}),

@@ -7,6 +7,7 @@ import { evaluateAdmission } from "../../domains/safety/admission.js";
 import { describeCallAction } from "../../domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../../domains/safety/contract.js";
 import type { RejectionMessage } from "../../domains/safety/rejection-feedback.js";
+import { MAIN_GRANTS_UNAVAILABLE_REASON } from "../../domains/safety/worker-permit.js";
 import type { ToolFinishEvent, ToolStartEvent } from "../../tools/agent-tools.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
 
@@ -67,6 +68,8 @@ export interface EvaluateClaudeToolPermissionInput {
 export interface EmitClaudeToolPermissionInput extends EvaluateClaudeToolPermissionInput {
 	emit(event: ClioWorkerEvent): void;
 	onPermission?: "deny" | "fail";
+	/** The permit routes asks to a main agent that cannot grant yet. */
+	mainGrantsUnavailable?: boolean;
 	/** SDK tool-use id shared by the start and finish telemetry events. */
 	toolCallId?: string;
 }
@@ -411,7 +414,9 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 				reason:
 					mode === "fail"
 						? `permission required for ${decision.mapped.clioToolName}; fleet.permissions.mode=fail ends this run`
-						: `permission denied by policy: Claude SDK workers run non-interactively; ${decision.reason}`,
+						: input.mainGrantsUnavailable === true
+							? `permission denied by policy: ${MAIN_GRANTS_UNAVAILABLE_REASON}; ${decision.reason}`
+							: `permission denied by policy: Claude SDK workers run non-interactively; ${decision.reason}`,
 			},
 		});
 	}

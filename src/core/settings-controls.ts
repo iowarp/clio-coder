@@ -441,7 +441,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"safety.autonomy": ["default", "yolo"],
 	"chat.thinkingLevel": THINKING_LEVELS,
 	"fleet.default.thinkingLevel": THINKING_LEVELS,
-	"fleet.permissions.mode": ["deny", "escalate", "fail"],
+	"fleet.permissions.mode": ["deny", "escalate", "fail", "main"],
 	"fleet.permissions.escalation.fallback": ["deny", "fail"],
 	"interface.mode": ["regular", "fullscreen"],
 	"interface.outputDetail": ["compact", "standard", "detailed"],

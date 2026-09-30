@@ -15,9 +15,11 @@ function describeSettingsPosture(settings: Readonly<ClioSettings>): string {
 	const worker =
 		settings.fleet.permissions.mode === "escalate"
 			? "Workers ask you when a call needs approval; unanswered requests follow the configured timeout and fallback."
-			: settings.fleet.permissions.mode === "fail"
-				? "Workers stop their run when a call needs approval."
-				: "Workers follow their allowed tool and safety policy; a call needing approval is denied and the worker can continue with allowed work.";
+			: settings.fleet.permissions.mode === "main"
+				? "Worker asks are routed for the main agent to decide; main-agent grants are not available yet, so each such call is denied and the worker can continue with allowed work."
+				: settings.fleet.permissions.mode === "fail"
+					? "Workers stop their run when a call needs approval."
+					: "Workers follow their allowed tool and safety policy; a call needing approval is denied and the worker can continue with allowed work.";
 	const budget =
 		settings.safety.limits.sessionCostUsd === 0
 			? "Tracked spending has no session ceiling."

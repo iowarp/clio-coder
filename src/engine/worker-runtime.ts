@@ -69,6 +69,11 @@ import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import { createRunEffectsRecorder, recordToolExecutionEffects } from "../domains/safety/run-effects.js";
+import {
+	MAIN_GRANTS_UNAVAILABLE_REASON,
+	mainGrantsUnavailable,
+	type WorkerPermitAllowance,
+} from "../domains/safety/worker-permit.js";
 import { resolveAgentTools, type ToolTelemetry } from "../tools/agent-tools.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import {
@@ -181,6 +186,8 @@ export interface WorkerRunInput {
 	trustProjectCompatRoots?: boolean;
 	/** Non-stall posture for permission-requiring tool calls; default "deny". */
 	onPermission?: "deny" | "fail" | "escalate";
+	/** The permit allowance behind onPermission, so a denial can say why it was not routed. */
+	permitAllowance?: WorkerPermitAllowance;
 	/** Escalation bounds, honored only when onPermission="escalate". */
 	escalation?: WorkerEscalationConfig;
 	/** Dispatch-owned restriction on tool admission for this run. */
@@ -1242,10 +1249,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 
 	// Exact, byte-stable denial reasons for the deny/fail postures. Escalate
 	// timeouts and operator denials use their own wording below.
+	const mainGrantDenial = input.permitAllowance !== undefined && mainGrantsUnavailable(input.permitAllowance);
 	const denyReason = (tool: string, actionClass: string): string =>
 		unattendedEscalation
 			? `permission denied by policy: no operator can answer worker escalations for this dispatch (fleet.permissions.mode=escalate, fallback=deny); ${tool} requires ${actionClass} confirmation`
-			: `permission denied by policy: dispatched workers run non-interactively (fleet.permissions.mode=deny); ${tool} requires ${actionClass} confirmation`;
+			: mainGrantDenial
+				? `permission denied by policy: ${MAIN_GRANTS_UNAVAILABLE_REASON}; ${tool} requires ${actionClass} confirmation`
+				: `permission denied by policy: dispatched workers run non-interactively (fleet.permissions.mode=deny); ${tool} requires ${actionClass} confirmation`;
 	const failReason = (tool: string, actionClass: string): string =>
 		unattendedEscalation
 			? `permission required for ${tool} (${actionClass}); no operator can answer worker escalations for this dispatch and fallback=fail ends this run`

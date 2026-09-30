@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { parseAgentRecipeSchema } from "../../src/domains/agents/recipe-schema.js";
 import {
+	mainGrantsUnavailable,
 	parseWorkerPermissionDeclaration,
 	resolveWorkerPermit,
 	type WorkerPermitInput,
@@ -75,6 +76,22 @@ describe("worker permit", () => {
 		deepStrictEqual(escalate.allowance, { git: "inspect", asks: "main", approvalAuthority: "operator" });
 		strictEqual(workerPermissionModeForPermit(escalate.allowance), "escalate");
 		strictEqual(resolveWorkerPermit(input({ mode: "fail" })).allowance.asks, "fail");
+	});
+
+	it("records the explicit main opt-in with main authority but refuses to route it before grants exist", () => {
+		const main = resolveWorkerPermit(input({ mode: "main" }));
+		deepStrictEqual(main.allowance, { git: "inspect", asks: "main", approvalAuthority: "main" });
+		strictEqual(workerPermissionModeForPermit(main.allowance), "deny");
+		strictEqual(mainGrantsUnavailable(main.allowance), true);
+		// A recipe routing asks to main never raises who decides them.
+		const declared = resolveWorkerPermit(input({ mode: "deny", declared: { asks: "main" } }));
+		deepStrictEqual(declared.allowance, { git: "inspect", asks: "main", approvalAuthority: "operator" });
+		strictEqual(workerPermissionModeForPermit(declared.allowance), "escalate");
+		// A retry of an operator-decided attempt stays operator-decided after the setting changes.
+		const retried = resolveWorkerPermit(
+			input({ mode: "main", inherited: { git: "inspect", asks: "main", approvalAuthority: "operator" } }),
+		);
+		strictEqual(retried.allowance.approvalAuthority, "operator");
 	});
 
 	it("narrows per task and refuses a widening request instead of ignoring it", () => {

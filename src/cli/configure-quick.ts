@@ -240,7 +240,9 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 							? "deny requests needing approval; continue allowed work"
 							: settings.fleet.permissions.mode === "fail"
 								? "stop a worker when approval is needed"
-								: "ask you; unanswered requests follow the configured fallback",
+								: settings.fleet.permissions.mode === "main"
+									? "main agent decides; not available yet, so requests are denied"
+									: "ask you; unanswered requests follow the configured fallback",
 					],
 					[
 						"Tracked spending",

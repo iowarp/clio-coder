@@ -15,6 +15,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { readClioVersion } from "../../core/package-root.js";
+import { mainGrantsUnavailable } from "../../domains/safety/worker-permit.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerBudget } from "../../worker/spec-contract.js";
 import { isReserveAdmittedTool, resolveDeliveryTools } from "../loop-guard.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
@@ -287,6 +288,8 @@ interface PermissionGateInput {
 	safety: ReturnType<typeof createWorkerSafety>;
 	cwd: string;
 	onPermission: "deny" | "fail";
+	/** The permit routes asks to a main agent that cannot grant yet; the denial says so. */
+	mainGrantsUnavailable?: boolean;
 	emit: WorkerEventEmit;
 	onPermissionFailure(): void;
 	handledToolDecisions: Map<string, ClaudeToolPermissionDecision>;
@@ -422,6 +425,7 @@ function decideToolUse(
 		cwd: input.cwd,
 		...(input.readOnly === true ? { readOnly: true } : {}),
 		onPermission: input.onPermission,
+		...(input.mainGrantsUnavailable === true ? { mainGrantsUnavailable: true } : {}),
 		emit: input.emit,
 		allowedTools: input.allowedTools,
 		...(input.budgetGate ? { budgetGate: input.budgetGate } : {}),
@@ -538,6 +542,9 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		cwd: process.cwd(),
 		...(input.readOnly === true ? { readOnly: true } : {}),
 		onPermission,
+		...(input.permitAllowance !== undefined && mainGrantsUnavailable(input.permitAllowance)
+			? { mainGrantsUnavailable: true }
+			: {}),
 		emit,
 		handledToolDecisions: new Map<string, ClaudeToolPermissionDecision>(),
 		onPermissionFailure() {

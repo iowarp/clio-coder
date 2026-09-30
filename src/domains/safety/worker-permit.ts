@@ -116,14 +116,29 @@ export function askRouteForMode(mode: WorkerPermissionMode): {
 } {
 	// escalate always meant an operator decision; it keeps that meaning (Q7 revised).
 	if (mode === "escalate") return { asks: "main", approvalAuthority: "operator" };
+	// The explicit opt-in for the main agent to decide ordinary worker asks.
+	if (mode === "main") return { asks: "main", approvalAuthority: "main" };
 	return { asks: mode, approvalAuthority: "operator" };
 }
 
-/** The worker-side resolution the permit's allowance runs as today. */
-export function workerPermissionModeForPermit(allowance: WorkerPermitAllowance): WorkerPermissionMode {
+/**
+ * The worker-side resolution the permit's allowance runs as today. Main
+ * authority resolves as a denial until the Phase D grant broker exists: it is
+ * refused, never silently allowed and never quietly sent to the operator.
+ */
+export function workerPermissionModeForPermit(allowance: WorkerPermitAllowance): "deny" | "fail" | "escalate" {
 	if (allowance.asks === "main") return allowance.approvalAuthority === "operator" ? "escalate" : "deny";
 	return allowance.asks;
 }
+
+/** True when asks go to the main agent with main authority, which Phase B cannot honor yet. */
+export function mainGrantsUnavailable(allowance: Pick<WorkerPermitAllowance, "asks" | "approvalAuthority">): boolean {
+	return allowance.asks === "main" && allowance.approvalAuthority === "main";
+}
+
+/** Denial reason for an ask a main-authority permit cannot route yet. */
+export const MAIN_GRANTS_UNAVAILABLE_REASON =
+	"main-agent grants are not available yet (fleet.permissions.mode=main); the ask is denied, not sent to the operator";
 
 /** Why a tool list exceeds a capability class's direct ceiling, per the review's class table. */
 function capabilityClassCeilingErrors(capabilityClass: AgentCapabilityClass, tools: ReadonlyArray<string>): string[] {
@@ -273,7 +288,12 @@ export function workerPermitPromptLine(view: {
 	asks: WorkerAskRoute;
 	approvalAuthority: ApprovalAuthority;
 }): string {
-	const asks = view.asks === "main" ? `main (${view.approvalAuthority} decides)` : view.asks;
+	const asks =
+		view.asks === "main"
+			? view.approvalAuthority === "main"
+				? "main (main-agent grants are not available yet, so they are denied)"
+				: "main (operator decides)"
+			: view.asks;
 	const scope = view.capabilityClass !== undefined ? `${view.capabilityClass}, ` : "";
 	return `Permit: ${scope}git ${view.git}, asks ${asks}.`;
 }

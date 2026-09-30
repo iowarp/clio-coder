@@ -1367,7 +1367,7 @@ export function buildSettingItems(
 			values: ["default", "yolo"],
 		}),
 		settingItem("workers.onPermission", settings.fleet.permissions.mode ?? "deny", {
-			values: ["deny", "fail", "escalate"],
+			values: ["deny", "fail", "escalate", "main"],
 		}),
 		settingItem("workers.escalation.timeoutMs", String(escalation.timeoutMs), {
 			submenu: editNumberSubmenu("Edit escalation timeout (ms)", "workers.escalation.timeoutMs"),
@@ -2335,7 +2335,8 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 			else if (value === "yolo") settings.safety.autonomy = "yolo";
 			return;
 		case "workers.onPermission":
-			if (value === "deny" || value === "fail" || value === "escalate") settings.fleet.permissions.mode = value;
+			if (value === "deny" || value === "fail" || value === "escalate" || value === "main")
+				settings.fleet.permissions.mode = value;
 			return;
 		case "delegation.defaults.toolGovernance":
 			if (value === "clio-coder-policy" || value === "agent-managed" || value === "deny-all")

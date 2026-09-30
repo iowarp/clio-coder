@@ -1859,6 +1859,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"deny",
 						"fail",
 						"escalate",
+						"main",
 					] as const);
 					if (parsed !== undefined) settings.fleet.permissions.mode = parsed;
 				}
