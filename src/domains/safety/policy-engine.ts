@@ -257,6 +257,11 @@ function writeRootTargetPath(call: ClassifierCall): string | null {
  * project scripts or a shell; dispatch spawns a worker not bound to these roots.
  */
 function isWriteConfinementEscape(call: ClassifierCall, actionClass: string): boolean {
+	// The typed git tool's add or commit runs a fixed argv that writes only Git
+	// metadata, and the task-worktree allowance and hooks guard decide it later.
+	// Blocking it as arbitrary bash made typed task commits impossible in any
+	// run that also declared write roots.
+	if (call.projection === "typed-git") return false;
 	if (WRITE_ROOT_REFUSED_TOOLS.has(call.tool)) return true;
 	return actionClass === "execute" || actionClass === "dispatch";
 }

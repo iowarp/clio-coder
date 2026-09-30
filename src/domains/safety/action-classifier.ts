@@ -21,6 +21,11 @@ export type ActionClass = "read" | "write" | "execute" | "dispatch" | "system_mo
 export interface ClassifierCall {
 	tool: string;
 	args?: Record<string, unknown>;
+	/**
+	 * Set only by a trusted tool's own `safetyCall` projection, never from
+	 * model arguments: the effect is that tool's fixed argv spelled as bash.
+	 */
+	projection?: "typed-git";
 }
 
 export interface Classification {

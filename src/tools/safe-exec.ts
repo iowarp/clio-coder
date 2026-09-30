@@ -220,7 +220,11 @@ export const gitTool: ToolSpec = {
 		const built = typedGitMutationArgv(gitOp(args), args);
 		if (built === null || !built.ok) return undefined;
 		const cwd = cwdArg(args);
-		return { tool: ToolNames.Bash, args: { command: gitArgvCommand(built.argv), ...(cwd !== undefined ? { cwd } : {}) } };
+		return {
+			tool: ToolNames.Bash,
+			projection: "typed-git",
+			args: { command: gitArgvCommand(built.argv), ...(cwd !== undefined ? { cwd } : {}) },
+		};
 	},
 	async run(args, options) {
 		const op = gitOp(args);
