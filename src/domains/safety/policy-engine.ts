@@ -1720,6 +1720,10 @@ function recognizeCommandChain(
 			if (segment.length !== 2) return null;
 			const target = segment[1]?.value ?? "";
 			if (target.startsWith("~")) return null;
+			// `cd li?` resolves lexically here but the shell expands the glob, which can
+			// land in a symlink target outside the workspace.
+			const targetWord = segment[1];
+			if (targetWord !== undefined && hasUnquotedExpansion(command.slice(targetWord.start, targetWord.end))) return null;
 			const reached: string[] = [];
 			for (const from of cwds) {
 				const nextCwd = path.resolve(from, target);
