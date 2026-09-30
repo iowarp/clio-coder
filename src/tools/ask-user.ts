@@ -635,7 +635,7 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.AskUser,
 		description:
-			'Ask the operator what only they can answer: a decision the request leaves open, approval of a plan, or a yes or no. Facts a tool can check and answers already given are not questions; greetings, thanks, and questions you can answer get a plain reply. Give each question its context and 2-4 options with one-line descriptions, recommended first; a yes or no becomes options such as "Yes, proceed", "Yes, but change ..." and "No, instead ...", and multi_select suits choices that combine. action=ask presents questions; action=complete closes an interview that asked questions, recording the operator\'s decisions, before final prose. If the operator cancels, the turn ends: a dismissal is never approval to proceed on a guess.',
+			'Ask the operator what only they can answer: a decision the request leaves open, approval of a plan, a yes or no, or whether to go further. Facts a tool can check and answers already given are not questions; greetings, thanks, and questions you can answer get a plain reply. Give each question its context and 2-4 options with one-line descriptions, recommended first; a yes or no becomes options such as "Yes, proceed", "Yes, but change ..." and "No, instead ...", and multi_select suits choices that combine. action=ask presents questions; action=complete closes an interview that asked questions, recording the operator\'s decisions, before final prose. If the operator cancels, the turn ends: a dismissal is never approval to proceed on a guess.',
 		parameters: askUserParameters,
 		baseActionClass: "read",
 		executionMode: "sequential",

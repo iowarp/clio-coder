@@ -476,7 +476,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "local_slow",
 		promptHint:
-			'Use ask_user for every question to the operator: an open decision, plan approval, or a yes or no; a greeting or a question you can answer gets a plain reply. Do not ask about something the operator already stated: one question per round in interviews, up to four related questions otherwise, recommended option first with a one-line description per option, then action="complete" with the decisions before final prose.',
+			'Put the context the operator needs in the question itself. Do not ask about something the operator already stated: one question per round in interviews, up to four related questions otherwise, recommended option first with a one-line description per option, then action="complete" with the decisions before final prose.',
 	},
 	[ToolNames.ConfigureClio]: {
 		objective: "Preview one Clio settings change and apply it only after direct operator approval.",

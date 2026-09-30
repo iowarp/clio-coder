@@ -1901,6 +1901,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				...(guidance ? { thinkingGuidance: guidance } : {}),
 				...(deps.toolRegistry?.get(ToolNames.ConfigureClio) ? { canConfigureClio: true } : {}),
 				...(deps.headless === true ? { headless: true } : {}),
+				...(deps.interactiveGuidance === true ? { operatorInterviews: true } : {}),
 			};
 			if (deps.getMemorySection) {
 				try {

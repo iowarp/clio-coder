@@ -68,6 +68,12 @@ export interface SessionPromptInputs {
 	 * levels, and the safety section must say that instead of promising a pause.
 	 */
 	headless?: boolean;
+	/**
+	 * True where an operator can answer an ask_user interview: the terminal UI.
+	 * Headless runs and ACP clients (the GUI included) cancel every interview,
+	 * so the turn-ending contract there keeps only its no-offer half.
+	 */
+	operatorInterviews?: boolean;
 	/** Registry-owned capability concepts; only reachable, permitted tools are rendered. */
 	toolDiscoveryHints?: ReadonlyArray<ToolDiscoveryHint>;
 	/**
@@ -419,6 +425,26 @@ function renderCapabilityMap(
 	return { lines, mapped };
 }
 
+/**
+ * The turn-ending contract where an operator can answer an interview. The
+ * examples pair the endings models write most with the ending the operator
+ * wants; the no-offer half also lives in identity.clio for every surface.
+ */
+function renderTurnEndingContract(direct: boolean): string[] {
+	return [
+		"## Ending a turn",
+		"Every turn ends in one of two states:",
+		'1. Done: the deliverable is complete and the reply stops there, without an offer, a courtesy question, "let me know", or a menu of next steps in prose.',
+		`2. Waiting on the operator: the turn's last act is an ask_user call${direct ? "" : ' through gateway(op="call", capability="ask_user", args={...})'} with a clear question, the context needed to answer it, and 2 to 4 options with one-line descriptions, recommended first. The operator selects instead of typing.`,
+		"Clarifying questions, plan approval, a plain yes or no, and an offer to go deeper all go through ask_user. A question inside an explanation is fine; a reply that stops to wait for a typed answer is not. A fact the workspace or a tool can settle is not a question. After an answer, act on it; if the operator declines or says it is enough, end in a sentence without re-summarizing.",
+		"Wrong ending, then right ending:",
+		'- An explanation closing "Want me to dive deeper into refresh?": stop after the explanation, or ask_user "Go deeper on refresh?" [Trace the refresh path | That covers it].',
+		'- A finished change closing "Let me know if you want tests.": stop after the change.',
+		'- A plan closing "Shall I proceed?": ask_user "Carry out this plan?" [Proceed as planned | Proceed with changes | Revise the plan first].',
+		'- "Clean up the config" with two configs in play: ask_user "Which config?" before any work, one option per candidate saying what cleaning it changes.',
+	];
+}
+
 function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	if (inputs.providerSupportsTools === false) {
 		return [
@@ -471,7 +497,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		}),
 		new Set(inputs.coordinatorCapabilities.filter(reachable)),
 	);
-	const askUser = reachable("ask_user") && inputs.headless !== true;
+	const askUser = reachable("ask_user") && inputs.headless !== true && inputs.operatorInterviews === true;
 	const discovery = [
 		...(hasGateway
 			? [
@@ -507,15 +533,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 				]
 			: []),
 		...(discovery.length > 0 ? ["", "## Finding the right capability", ...discovery] : []),
-		...(askUser
-			? [
-					"",
-					"## Asking the operator",
-					admitted.has("ask_user")
-						? "Every question for the operator goes through ask_user, never prose, including plan approval and a plain yes or no: end that turn on the ask_user call, not on a question at the end of a message. A fact the workspace or a tool can settle is not a question."
-						: "Every question for the operator goes through ask_user, never prose, including plan approval and a plain yes or no: discover it through the gateway and end that turn on the call. A fact the workspace or a tool can settle is not a question.",
-				]
-			: []),
+		...(askUser ? ["", ...renderTurnEndingContract(admitted.has("ask_user"))] : []),
 		"",
 		...(reachable("verify") && inputs.turnConstraints?.mode !== "answer" && inputs.turnConstraints?.mode !== "proposal"
 			? [
