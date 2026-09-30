@@ -318,6 +318,8 @@ export function workerPermitPromptLine(view: {
 	git: WorkerGitAllowance;
 	asks: WorkerAskRoute;
 	approvalAuthority: ApprovalAuthority;
+	/** True when the host created a task worktree this run owns. */
+	taskWorktree?: boolean;
 }): string {
 	const asks =
 		view.asks === "main"
@@ -326,5 +328,10 @@ export function workerPermitPromptLine(view: {
 				: "main (operator decides)"
 			: view.asks;
 	const scope = view.capabilityClass !== undefined ? `${view.capabilityClass}, ` : "";
-	return `Permit: ${scope}git ${view.git}, asks ${asks}.`;
+	const line = `Permit: ${scope}git ${view.git}, asks ${asks}.`;
+	if (view.git !== "worktree") return line;
+	// Phase C: the allowance is effective only inside the run's own task worktree.
+	return view.taskWorktree === true
+		? `${line} On your task branch you may stage and commit without asking, only through the git tool: op add with literal paths, op commit with a message. Every other Git mutation (switch, stash, rebase, merge, reset, branch, tag, config, push) needs approval, and HEAD must stay on your task branch.`
+		: `${line} This run has no task worktree, so every Git mutation needs approval.`;
 }

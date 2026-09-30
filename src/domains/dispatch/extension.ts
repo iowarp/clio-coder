@@ -1336,6 +1336,8 @@ export interface WorkerDynamicContext {
 	onPermission?: WorkerPermissionMode | null;
 	/** The permit a mediated worker runs under; the safety line names it instead of an autonomy level. */
 	permit?: Pick<WorkerPermit, "ceiling" | "allowance">;
+	/** True when the host created a task worktree this run owns. */
+	taskWorktree?: boolean;
 	/** Captured authored handbooks; preferred over the legacy structured projection. */
 	projectPrompt?: ProjectPromptContext | null;
 	/** Admitted native read capability; null for an unknown external inventory. */
@@ -1482,7 +1484,9 @@ export function buildDynamicPromptMessages(
 	if (autonomy) {
 		const permission = dynamicContext.onPermission ?? "deny";
 		const posture =
-			dynamicContext.permit !== undefined ? workerPermitLine(dynamicContext.permit, permission) : `autonomy ${autonomy}.`;
+			dynamicContext.permit !== undefined
+				? workerPermitLine(dynamicContext.permit, permission, dynamicContext.taskWorktree === true)
+				: `autonomy ${autonomy}.`;
 		const sandbox = dynamicContext.sandboxLine === undefined ? "" : ` ${dynamicContext.sandboxLine}`;
 		const body = `Safety posture: ${posture} ${workerSafetyOneLiner(permission)} Worker permission routing: ${permission}.${sandbox}`;
 		messages.push({ id: "dispatch-safety-posture", body, contentHash: sha256(body) });
@@ -2515,6 +2519,20 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		settings,
 	}).spec;
 	if (sandbox !== undefined) spec.sandbox = sandbox;
+	// The worker re-attests this identity before every Git mutation; only in it
+	// does a git: worktree permit admit add and commit (Phase C).
+	const taskWorktree = input.req.taskWorktree;
+	if (taskWorktree !== undefined) {
+		spec.taskWorktree = {
+			root: taskWorktree.root,
+			runId: taskWorktree.runId,
+			path: taskWorktree.path,
+			...(taskWorktree.parent !== undefined ? { parent: taskWorktree.parent } : {}),
+			branch: taskWorktree.branch,
+			base: taskWorktree.base,
+			ownerToken: taskWorktree.ownerToken,
+		};
+	}
 	// Carry the tool profile so external CLI runtimes that cannot mediate
 	// per-tool calls can refuse a narrowing profile they would otherwise ignore.
 	if (input.admission.toolProfile !== undefined) spec.toolProfile = input.admission.toolProfile;
@@ -4358,6 +4376,7 @@ export function createDispatchBundle(
 			hasBoundSkills,
 			onPermission: workerPermissionMode,
 			permit,
+			...(req.taskWorktree !== undefined ? { taskWorktree: true } : {}),
 			persona: {
 				id: `persona.${recipe.id}`,
 				relPath: recipe.filepath,
@@ -4402,6 +4421,7 @@ export function createDispatchBundle(
 			}),
 			onPermission: workerPermissionMode,
 			permit,
+			...(req.taskWorktree !== undefined ? { taskWorktree: true } : {}),
 			projectPrompt,
 			projectReadTools:
 				target.runtime.kind === "subprocess"

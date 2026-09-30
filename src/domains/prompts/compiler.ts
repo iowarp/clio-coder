@@ -114,6 +114,8 @@ export interface WorkerPromptInputs {
 	 * compiler callers, which get the default permit their routing implies.
 	 */
 	permit?: Pick<WorkerPermit, "ceiling" | "allowance">;
+	/** True when the host created a task worktree this run owns; a git worktree permit is effective only then. */
+	taskWorktree?: boolean;
 	/** One stable persona: the recipe body or bounded override, including bound-skill mechanics. */
 	persona: RenderedPromptFragment;
 	/**
@@ -618,15 +620,16 @@ export function workerSafetyOneLiner(mode: WorkerPromptInputs["onPermission"]): 
 export function workerPermitLine(
 	permit: WorkerPromptInputs["permit"],
 	onPermission: WorkerPromptInputs["onPermission"],
+	taskWorktree = false,
 ): string {
 	if (permit !== undefined) {
-		return workerPermitPromptLine({ capabilityClass: permit.ceiling.capabilityClass, ...permit.allowance });
+		return workerPermitPromptLine({ capabilityClass: permit.ceiling.capabilityClass, ...permit.allowance, taskWorktree });
 	}
 	return workerPermitPromptLine({ git: "inspect", ...askRouteForMode(onPermission) });
 }
 
 function renderWorkerSafetySection(safetyFragment: LoadedFragment, inputs: WorkerPromptInputs): string {
-	const oneLine = `${workerPermitLine(inputs.permit, inputs.onPermission)} ${workerSafetyOneLiner(inputs.onPermission)}`;
+	const oneLine = `${workerPermitLine(inputs.permit, inputs.onPermission, inputs.taskWorktree === true)} ${workerSafetyOneLiner(inputs.onPermission)}`;
 	const body = safetyFragment.body.trim();
 	return body.length > 0 ? `${oneLine}\n\n${body}` : oneLine;
 }
