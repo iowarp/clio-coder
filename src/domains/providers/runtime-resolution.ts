@@ -289,11 +289,14 @@ function appendThinkingDiagnostics(
 		// A profile that lacks the requested rung and carries a higher one maps up to it (the
 		// Qwopus route rejects `high` and serves `xhigh`). The operator cannot act on that, so it
 		// stays info and out of start-up notices; a mapping down or to a switch still warns.
+		// `off` mapped to an always-on level is the operator's request being overridden, so it
+		// warns even though the level moved up.
 		const order: ReadonlyArray<ThinkingLevel> = VALID_THINKING_LEVELS;
 		const mappedUp = order.indexOf(thinking.effectiveLevel) > order.indexOf(requested);
+		const informational = mappedUp && requested !== "off";
 		diagnostics.push(
 			diagnostic(
-				mappedUp ? "info" : "warning",
+				informational ? "info" : "warning",
 				"thinking-coerced",
 				`thinking ${requested} resolved to ${thinking.display} for ${resolved.runtimeId}/${resolved.modelId}` +
 					(mappedUp ? `; the model profile supports ${thinking.supportedLevels.join(", ")}` : ""),
