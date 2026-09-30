@@ -7,7 +7,11 @@ import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
-import { setGlobalDefaultMaxOutputTokens } from "../../src/engine/apis/output-budget.js";
+import {
+	recommendedOutputTokens,
+	resolvePressureOutputReserve,
+	setGlobalDefaultMaxOutputTokens,
+} from "../../src/engine/apis/output-budget.js";
 import { startWorkerRun, type WorkerRunHandle } from "../../src/engine/worker-runtime.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -92,3 +96,24 @@ for (const scenario of scenarios) {
 		}
 	});
 }
+
+test("worker pressure reserve leaves input room under a window-sized recommendation (D5)", () => {
+	// A profile recommending the whole serving window must not collapse the pressure ceiling.
+	setGlobalDefaultMaxOutputTokens(0);
+	try {
+		const window = 131072;
+		const model = { clioCoder: { quirks: { outputTokens: window } } };
+		const recommended = recommendedOutputTokens(model, window);
+		strictEqual(recommended, 65536);
+		const reserve = resolvePressureOutputReserve(
+			undefined,
+			{ api: "openai-completions", contextWindow: window },
+			recommended,
+		);
+		strictEqual(reserve, 32768);
+		const ceiling = Math.min(Math.floor(window * 0.8), window - reserve);
+		ok(ceiling > 10_000, `pressure ceiling ${ceiling} leaves no room for 10K input`);
+	} finally {
+		setGlobalDefaultMaxOutputTokens(DEFAULT_SETTINGS.chat.maxOutputTokens);
+	}
+});
