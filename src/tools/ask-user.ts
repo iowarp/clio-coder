@@ -553,7 +553,7 @@ function renderAskUserState(
 			? "The interview modal remains open. Ask only new necessary follow-up rounds. When enough information is collected, call ask_user with action=complete before final prose."
 			: policy.status === "cancelled"
 				? "The operator dismissed the interview without answering. A dismissal is not approval: make no edits, run no commands and dispatch no workers on a guessed answer. The turn ends here; wait for the operator's next message."
-				: "The interview is closed. Continue with the compact decisions below; use the transcript path only if the full history is needed later. End the reply with the result, without a new question or offer; ask necessary follow-ups before completing an interview.";
+				: "The interview is closed. Act on the answers now: approval means do the work. If the operator declines or says the work is enough, end in one sentence without restating earlier output. Use the compact decisions below; open the transcript only if its history is needed. End with the result, without a new question or offer.";
 	return [`ask_user result: ${event}`, guidance, "", JSON.stringify({ interview }, null, 2)].join("\n");
 }
 
