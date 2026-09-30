@@ -180,9 +180,9 @@ interface SourcedRule {
 
 const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:pwd", re: /^pwd$/ },
-	// No symlink-dereferencing flag (-L, -H, --dereference*) and no long option:
-	// those go through readOnlyInspectionRule, which refuses them.
-	{ id: "builtin:ls", re: /^ls(?:\s+(-(?![A-Za-z0-9]*[LH])[A-Za-z0-9]+|\.[/\w.-]*|(?!-)[/\w.-]+))*$/ },
+	// ls is not here: its operands must pass the workspace scope check (`ls /etc`,
+	// `ls ..`, `ls link/` through a symlink) and -R walks without bound, so it is
+	// recognized only through readOnlyInspectionRule.
 	{ id: "builtin:git-status", re: /^git\s+status(?:\s+--short|\s+--branch|\s+-sb)*$/ },
 	{ id: "builtin:git-diff", re: /^git\s+diff(?:\s+--cached|\s+--stat|\s+--name-only|\s+--\s+[\w./-]+)*$/ },
 	{ id: "builtin:git-log", re: /^git\s+log\s+--oneline(?:\s+-n\s+[1-9]\d{0,2})?(?:\s+--\s+[\w./-]+)?$/ },
