@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
+import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../../src/domains/safety/contract.js";
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
@@ -31,7 +32,7 @@ import { emitClaudeToolPermissionDecision } from "../../src/engine/claude/tool-s
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { readTool } from "../../src/tools/read.js";
-import { createRegistry } from "../../src/tools/registry.js";
+import { createRegistry, type PermissionRequiredMeta } from "../../src/tools/registry.js";
 import { writeTool } from "../../src/tools/write.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -460,6 +461,63 @@ describe("safety gate boundary", () => {
 		} finally {
 			rmSync(outside, { recursive: true, force: true });
 		}
+	});
+
+	it("keeps a safety-net confirmation rail operator-only so a main-issued grant cannot clear it", async () => {
+		const safety = createWorkerSafety({ cwd: scratch });
+		const registry = createRegistry({ safety, principal: "worker", autonomy: () => "default" });
+		let executed = 0;
+		registry.register({
+			...bashTool,
+			run: async () => {
+				executed += 1;
+				return { kind: "ok", output: "stub" };
+			},
+		});
+		const parks: Array<{ decision: SafetyDecision; meta: PermissionRequiredMeta }> = [];
+		registry.onPermissionRequired((_call, decision, meta) => {
+			parks.push({ decision, meta });
+		});
+		// Evaluated as data by a stub body; the command never runs.
+		const rail = { tool: ToolNames.Bash, args: { command: "gcloud iam policies list" } };
+		const pending = registry.invoke(rail);
+		const [park] = parks;
+		strictEqual(park?.meta.approvalAuthority, "operator");
+		const actionClass = park.decision.classification.actionClass;
+		await registry.resumeParkedCalls({
+			actionClass,
+			requestId: park.meta.requestId,
+			requestedBy: "grant:main:contract",
+			issuer: "main",
+		});
+		strictEqual(registry.parkedCount(), 1);
+		strictEqual(executed, 0);
+		const underMainGrant = evaluateAdmission({
+			principal: "worker",
+			effects: [rail],
+			safety,
+			authorization: { issuer: "main", actionClass },
+		});
+		strictEqual(underMainGrant.kind, "ask");
+		strictEqual(underMainGrant.kind === "ask" && underMainGrant.approvalAuthority, "operator");
+
+		// An ordinary worker autonomy ask is the only one a main grant discharges.
+		const ordinary = { tool: ToolNames.Bash, args: { command: "frobnicate --all" } };
+		const workerAsk = evaluateAdmission({ principal: "worker", effects: [ordinary], safety });
+		strictEqual(workerAsk.kind === "ask" && `${workerAsk.source}:${workerAsk.approvalAuthority}`, "autonomy:main");
+		const granted = evaluateAdmission({
+			principal: "worker",
+			effects: [ordinary],
+			safety,
+			authorization: { issuer: "main", actionClass: "execute" },
+		});
+		strictEqual(granted.kind, "allow");
+		const mainAsk = evaluateAdmission({ principal: "main", effects: [ordinary], safety });
+		strictEqual(mainAsk.kind === "ask" && mainAsk.approvalAuthority, "operator");
+
+		await registry.resumeParkedCalls({ actionClass, requestId: park.meta.requestId, requestedBy: "tool:one_shot" });
+		strictEqual((await pending).kind, "ok");
+		strictEqual(executed, 1);
 	});
 
 	it("yolo clears ordinary confirmation rails while damage control still decides", () => {

@@ -6,6 +6,21 @@ import type { SafetyPolicyDecision, SafetyPolicyMetadata } from "./policy-engine
 import type { RejectionMessage } from "./rejection-feedback.js";
 import type { ScopeSpec } from "./scope.js";
 
+/**
+ * Posture of a re-admission the operator approved. The policy engine converts
+ * its confirmation rails (damage-control ask rules, library and system-modify
+ * confirmations, project confirmations) to an allow under it.
+ */
+export const CONFIRMED_POSTURE = "confirmed";
+
+/**
+ * Posture of a re-admission a main-agent grant approved. Distinct from
+ * {@link CONFIRMED_POSTURE} on purpose: the engine clears nothing under it, so
+ * every operator rail still asks and only the ordinary worker autonomy ask can
+ * be discharged, by the admission evaluator (Codex review F8 and Phase B).
+ */
+export const MAIN_GRANT_POSTURE = "main-granted";
+
 export type SafetyDecision =
 	| { kind: "allow"; classification: Classification; policy?: SafetyPolicyDecision }
 	| {

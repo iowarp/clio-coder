@@ -9,6 +9,7 @@ import type { AutonomyExposure, AutonomyLevel } from "./autonomy.js";
 import { autonomyAskRejection, DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "./autonomy.js";
 import { autonomyCallInputs } from "./autonomy-inputs.js";
 import type { SafetyContract, SafetyDecision } from "./contract.js";
+import { CONFIRMED_POSTURE, MAIN_GRANT_POSTURE } from "./contract.js";
 
 /**
  * The one admission evaluator (Codex review, "One shared admission
@@ -39,8 +40,22 @@ export interface AdmissionConstraints {
 	pendingSkillPolicy?: PendingSkillToolPolicy;
 }
 
-/** A structured one-shot authorization for exactly one parked call. */
+/**
+ * Who may discharge an ask. Every safety-net rail and tool confirmation is
+ * `operator`: only a person clears it. Only a worker's autonomy ask is `main`,
+ * which means the main agent may answer it once the grant broker exists
+ * (Phase D); the operator can always answer it too.
+ */
+export type ApprovalAuthority = "main" | "operator";
+
+/**
+ * A structured one-shot authorization for exactly one parked call. The issuer
+ * is checked here, never inferred from free-form provenance text: a `main`
+ * authorization evaluates the net without the operator `confirmed` posture, so
+ * it cannot clear an operator rail.
+ */
 export interface AdmissionAuthorization {
+	issuer: ApprovalAuthority;
 	/** Action class the approver saw; a different class is not covered. */
 	actionClass: ActionClass;
 }
@@ -110,6 +125,7 @@ export type AdmissionDisposition =
 	| {
 			kind: "ask";
 			source: AdmissionAskSource;
+			approvalAuthority: ApprovalAuthority;
 			reason: string;
 			/** The parked decision: the net rail, or an autonomy ask naming the level. */
 			decision: SafetyDecision;
@@ -144,8 +160,10 @@ function withCwd(call: ClassifierCall, cwd: string | undefined): ClassifierCall 
 	return { ...call, args: { ...args, cwd } };
 }
 
+/** Same list semantics as a turn's allowed tools: naming a gateway capability admits its wrapper. */
 function toolInScope(allowed: ReadonlyArray<string> | ReadonlySet<string>, tool: string): boolean {
-	return Array.isArray(allowed) ? allowed.includes(tool) : (allowed as ReadonlySet<string>).has(tool);
+	const allowedTools = [...allowed] as NonNullable<TurnConstraints["allowedTools"]>;
+	return turnAllowsTool({ allowedTools }, tool);
 }
 
 function activatesSkill(call: ClassifierCall): boolean {
@@ -157,7 +175,15 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 	const principal = input.principal;
 	const level: AutonomyLevel =
 		principal === "main" ? (input.autonomy ?? DEFAULT_AUTONOMY_LEVEL) : DEFAULT_AUTONOMY_LEVEL;
-	const posture = input.authorization !== undefined ? "confirmed" : level === "yolo" ? "yolo" : undefined;
+	const issuer = input.authorization?.issuer;
+	const posture =
+		issuer === "operator"
+			? CONFIRMED_POSTURE
+			: issuer === "main"
+				? MAIN_GRANT_POSTURE
+				: level === "yolo"
+					? "yolo"
+					: undefined;
 	const normalize = input.normalize ?? ((decision: SafetyDecision) => decision);
 	const evaluate = (call: ClassifierCall): SafetyDecision =>
 		normalize(input.safety.evaluate(withCwd(call, input.cwd), posture));
@@ -220,7 +246,9 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 		});
 	}
 
-	const authorized = input.authorization !== undefined && input.authorization.actionClass === actionClass;
+	const covers = input.authorization !== undefined && input.authorization.actionClass === actionClass;
+	const authorized = covers && issuer === "operator";
+	const mainAuthorized = covers && issuer === "main";
 
 	// Step 3: confirmation obligations raised by the net or by the tool itself.
 	if (netAsk !== undefined) {
@@ -228,6 +256,7 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 		return {
 			kind: "ask",
 			source: "safety-net",
+			approvalAuthority: "operator",
 			reason: netAsk.kind === "ask" ? netAsk.rejection.short : "confirmation required",
 			decision: netAsk,
 			netDecision: netAsk,
@@ -251,6 +280,7 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 		return {
 			kind: "ask",
 			source: "tool-confirmation",
+			approvalAuthority: "operator",
 			reason: ask.rejection.short,
 			decision: ask,
 			netDecision: decision,
@@ -271,13 +301,17 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 	}
 
 	// Step 4: autonomy for the main agent, the default standing allowance for a
-	// worker. Every effect must be admitted; the first that is not decides.
+	// worker. Every effect must be admitted; the first that is not decides. A
+	// main agent's own ask goes to the operator; a worker's may go to the main.
+	const autonomyAuthority: ApprovalAuthority = principal === "worker" ? "main" : "operator";
 	for (let index = 0; index < effectDecisions.length; index += 1) {
 		const effectDecision = effectDecisions[index] as SafetyDecision;
 		const effect = input.effects[index] as ClassifierCall;
 		const inputs = autonomyCallInputs(effect, effectDecision, input.autonomyExtra ?? {});
 		const disposition = mapAutonomy(level, effectDecision.classification.actionClass, inputs.options);
 		if (disposition === "allow") continue;
+		// Step 5 for a main grant: it discharges only the ordinary worker ask.
+		if (disposition === "ask" && mainAuthorized && autonomyAuthority === "main") continue;
 		const ask: SafetyDecision = {
 			kind: "ask",
 			classification: effectDecision.classification,
@@ -293,6 +327,7 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 		return {
 			kind: "ask",
 			source: "autonomy",
+			approvalAuthority: autonomyAuthority,
 			reason: ask.rejection.short,
 			decision: ask,
 			netDecision: effectDecision,
@@ -301,5 +336,5 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 			readOutsideWorkspace: inputs.readOutsideWorkspace,
 		};
 	}
-	return { kind: "allow", decision: primary, authorized: false };
+	return { kind: "allow", decision: primary, authorized: mainAuthorized };
 }

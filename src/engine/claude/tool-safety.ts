@@ -2,7 +2,7 @@ import nodePath from "node:path";
 import { performance } from "node:perf_hooks";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
-import type { AdmissionDisposition } from "../../domains/safety/admission.js";
+import type { AdmissionDisposition, ApprovalAuthority } from "../../domains/safety/admission.js";
 import { evaluateAdmission } from "../../domains/safety/admission.js";
 import { describeCallAction } from "../../domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../../domains/safety/contract.js";
@@ -39,6 +39,8 @@ export type ClaudeToolPermissionDecision =
 			 */
 			reasonCode?: string;
 			permissionRequired: boolean;
+			/** Who could answer the ask behind a permission-required denial. */
+			approvalAuthority?: ApprovalAuthority;
 	  };
 
 export interface EvaluateClaudeToolPermissionInput {
@@ -274,6 +276,7 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 			reason: rejectionText(admission.decision),
 			...(admission.source === "autonomy" ? { reasonCode: `autonomy:${admission.level}` } : {}),
 			permissionRequired: true,
+			approvalAuthority: admission.approvalAuthority,
 		};
 	}
 	return deniedDecision(input, mapped, call, admission);

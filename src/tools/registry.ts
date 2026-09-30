@@ -10,7 +10,12 @@ import { containsInstructionMarkers, INSTRUCTION_SHAPED_WARNING } from "../core/
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
-import { type AdmissionDisposition, type AdmissionPrincipal, evaluateAdmission } from "../domains/safety/admission.js";
+import {
+	type AdmissionDisposition,
+	type AdmissionPrincipal,
+	type ApprovalAuthority,
+	evaluateAdmission,
+} from "../domains/safety/admission.js";
 import { approvalAxisId } from "../domains/safety/approval-axis.js";
 import { type AutonomyExposure, type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
@@ -449,13 +454,25 @@ export interface OneShotGrant {
 	 * Surface that released the call: `tool:one_shot` (TUI card), `acp-client`,
 	 * `escalation:operator` or `escalation:remembered`. It is carried into audit
 	 * and decides the wording of the note the model reads (`approval-note.ts`).
+	 * It is audit text, never authority: the issuer below decides what clears.
 	 */
 	requestedBy: string;
+	/**
+	 * Who issued the grant. Absent means the operator, which every current
+	 * surface is. A `main` grant can discharge only an ask whose approval
+	 * authority is `main`; an operator rail stays parked under it.
+	 */
+	issuer?: ApprovalAuthority;
 }
 
 export interface PermissionRequiredMeta {
 	requestId: string;
 	axis: string;
+	/**
+	 * Who may answer this park. Every safety-net rail and tool confirmation is
+	 * `operator`; only a worker's autonomy ask is `main`.
+	 */
+	approvalAuthority: ApprovalAuthority;
 	sessionId?: string;
 	turnId?: string;
 	/**
@@ -734,6 +751,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				kind: "park";
 				decision: SafetyDecision;
 				axis: string;
+				approvalAuthority: ApprovalAuthority;
 				dispatchPlan?: DispatchPlanView;
 				/** Pre-allocated so a gate's decision and the card it raises share one id. */
 				requestId?: string;
@@ -772,7 +790,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				...(options?.pendingSkillPolicy !== undefined ? { pendingSkillPolicy: options.pendingSkillPolicy } : {}),
 			},
 			...(spec.confirmationRuleId !== undefined ? { confirmationRuleId: spec.confirmationRuleId } : {}),
-			...(grant !== undefined ? { authorization: { actionClass: grant.actionClass } } : {}),
+			...(grant !== undefined
+				? { authorization: { actionClass: grant.actionClass, issuer: grant.issuer ?? "operator" } }
+				: {}),
 			normalize: (decision) => applyRegisteredToolClassification(decision, spec),
 			autonomyExtra: {
 				...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
@@ -798,6 +818,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			kind: "park",
 			decision: askDecision,
 			axis: approvalAxisId(askDecision, level),
+			approvalAuthority: admission.approvalAuthority,
 			...(admission.source === "autonomy" && dispatchPlan !== null ? { dispatchPlan } : {}),
 		};
 	};
@@ -1073,6 +1094,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			kind: "park",
 			decision: ask,
 			axis: approvalAxisId(ask, level),
+			// The System One gate speaks to the operator; no agent may answer it.
+			approvalAuthority: "operator",
 			requestId,
 			gateReason: verdict.reason,
 			...(verdict.build !== undefined ? { gateBuild: verdict.build } : {}),
@@ -1155,6 +1178,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const meta: PermissionRequiredMeta = {
 					requestId: outcome.requestId ?? nextApprovalRequestId(),
 					axis: outcome.axis,
+					approvalAuthority: outcome.approvalAuthority,
 					...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
 					...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
 					...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
