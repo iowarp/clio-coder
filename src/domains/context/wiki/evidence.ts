@@ -2,6 +2,7 @@
 import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { parse } from "yaml";
+import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
 import { readWikiPage, resolveSourcePath, stripFrontmatter } from "./frontmatter.js";
 
 export interface WikiPageEvidenceInput {
@@ -134,6 +135,29 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		return text;
 	};
 	const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	// Repository files by basename, listed once and only when a bare name in the
+	// body matches no declared file. Small writer models cite `grader.py` for
+	// `src/clio_researcher/grader.py`; exactly one match is the file, and zero
+	// or several keep failing so a guess never becomes evidence.
+	let filesByName: Map<string, string[]> | null = null;
+	const repositoryFileNamed = (name: string): string | null => {
+		if (filesByName === null) {
+			filesByName = new Map();
+			try {
+				for (const file of enumerateWorkspaceFiles(root)) {
+					const key = basename(file);
+					const files = filesByName.get(key) ?? [];
+					files.push(file);
+					filesByName.set(key, files);
+				}
+			} catch {
+				// An incomplete listing resolves nothing; the reference fails as before.
+				filesByName.clear();
+			}
+		}
+		const files = filesByName.get(name);
+		return files?.length === 1 ? resolveSourcePath(root, files[0] ?? "") : null;
+	};
 	const importedSource = (specifier: string): string | null => {
 		if (!/^\.\.?\//.test(specifier)) return null;
 		const importPattern = new RegExp(
@@ -198,6 +222,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 			if (source === null && !declaredReferences.has(reference) && !/[\\/]/.test(cited)) {
 				const declared = declaredFilesByName.get(cited);
 				if (declared?.size === 1) source = [...declared][0] ?? null;
+				else if (declared === undefined) source = repositoryFileNamed(cited);
 			}
 			if (source === null) {
 				fail(`Replace or remove unresolved repository reference ${label}; inspect the current file path.`);
