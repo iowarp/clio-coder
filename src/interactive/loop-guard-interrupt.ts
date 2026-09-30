@@ -43,13 +43,17 @@ function isToolBudgetInterrupt(payload: unknown): payload is ToolBudgetExceededP
 	);
 }
 
-/** Operator-facing closing message for an identical-call loop interrupt. */
+/**
+ * Operator-facing closing message for an identical-call loop interrupt. The
+ * harness stopped the turn, so the notice speaks as the harness: the fact and
+ * the operator's options, never a claim in Clio's voice about what she knows.
+ */
 export function loopBlockedStopReason(evt: LoopBlockedPayload): string {
 	const blockWord = evt.blocksThisTurn === 1 ? "block" : "blocks";
 	return (
 		`[Clio Coder] loop guard stopped this turn: ${evt.tool} was called with identical arguments ` +
-		`${evt.repeatCount} times without new results (${evt.blocksThisTurn} loop ${blockWord}). I likely ` +
-		`already have enough to answer. Ask me to continue with a different approach, or narrow the request.`
+		`${evt.repeatCount} times without new results (${evt.blocksThisTurn} loop ${blockWord}). Send a new message ` +
+		`to continue with a different approach, or narrow the request.`
 	);
 }
 
@@ -57,7 +61,7 @@ export function loopBlockedStopReason(evt: LoopBlockedPayload): string {
 export function toolBudgetStopReason(evt: ToolBudgetExceededPayload): string {
 	return (
 		`[Clio Coder] loop guard stopped this turn: ${evt.callsThisTurn} tool calls reached the per-turn ceiling ` +
-		`(${evt.hardCeiling}) without converging. Tell me a single concrete next step, or narrow the request.`
+		`(${evt.hardCeiling}) without converging. Send one concrete next step, or narrow the request.`
 	);
 }
 
