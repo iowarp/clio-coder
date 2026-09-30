@@ -29,13 +29,21 @@ describe("tool-orchestrator seed", { concurrency: false }, () => {
 		for (const scratch of scratches) scratch.cleanup();
 	});
 
-	for (const level of ["default", "yolo"] as const) {
-		it(`runs a headless turn at the seeded ${level} level`, async () => {
-			const scratch = headlessScratch(`clio-coder-seed-${level}-`);
+	// A headless run takes yolo only from its own command line; a seeded
+	// settings.yaml yolo runs at default (D1).
+	const cases = [
+		{ seeded: "default", flag: undefined, level: "default" },
+		{ seeded: "yolo", flag: undefined, level: "default" },
+		{ seeded: "yolo", flag: "yolo", level: "yolo" },
+	] as const;
+	for (const { seeded, flag, level } of cases) {
+		it(`runs a headless turn seeded ${seeded}${flag ? ` with --autonomy ${flag}` : ""} at ${level}`, async () => {
+			const scratch = headlessScratch(`clio-coder-seed-${seeded}-${flag ?? "none"}-`);
 			scratches.push(scratch);
-			seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, level);
-			const marker = `SEEDED_AUTONOMY_${level.toUpperCase()}`;
-			const result = await runCli(["--no-context-files", "--no-skills", "run", "--json", marker], {
+			seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, seeded);
+			const marker = `SEEDED_AUTONOMY_${seeded.toUpperCase()}_${(flag ?? "none").toUpperCase()}`;
+			const autonomyArgs = flag ? ["--autonomy", flag] : [];
+			const result = await runCli(["--no-context-files", "--no-skills", "run", ...autonomyArgs, "--json", marker], {
 				env: scratch.env,
 				cwd: scratch.root,
 			});
