@@ -56,6 +56,7 @@ import {
 import { isReadScopeTool, readScopeEscape, readScopeExemptRoots, readScopeSpellings } from "./read-scope.js";
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
 import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
+import { clioCredentialStorePaths } from "./secret-paths.js";
 import { activeClioSkillRoots, mutationCandidates, skillMutationReason } from "./skill-authority.js";
 
 import { gateProjectSafetyPolicy, workspaceTrustDirectory } from "./workspace-trust.js";
@@ -712,15 +713,6 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			};
 		},
 	};
-}
-
-/** Absolute path of Clio's provider secret store, when resolvable. */
-function clioCredentialStorePaths(): string[] {
-	try {
-		return [path.join(clioConfigDir(), "credentials.yaml")];
-	} catch {
-		return [];
-	}
 }
 
 /** Absolute path of Clio's user skills, when resolvable. */
