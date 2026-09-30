@@ -57,6 +57,22 @@ export const limitationTool: ToolSpec = {
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
+	// Small models write the reason as prose ("safety posture restricts git"),
+	// fail validation, repeat it, and then invent a report file in the task
+	// worktree instead. Keep the prose in scope and file it under the closest
+	// category so the one call that records the limitation lands.
+	prepareArguments(args) {
+		const reason = args.reason;
+		if (typeof reason !== "string" || isLimitationReason(reason)) return args;
+		const text = reason.trim();
+		if (isLimitationReason(text)) return { ...args, reason: text };
+		const scope = trimString(args.scope);
+		return {
+			...args,
+			scope: scope === null ? text : text.length > 0 ? `${scope} (${text})` : scope,
+			reason: /\b(block|den(y|ied)|permission|policy|safety|approval)/iu.test(text) ? "blocked" : "other",
+		};
+	},
 	async run(args): Promise<ToolResult> {
 		const scope = trimString(args.scope);
 		if (scope === null) return { kind: "error", message: "limitation: scope is required" };
