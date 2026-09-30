@@ -48,7 +48,7 @@ import type {
 	DispatchToolDeps,
 } from "./dispatch-types.js";
 import type { ToolSpec } from "./registry.js";
-import { gitCheckoutRoot } from "./task-worktree.js";
+import { gitCheckoutRoot, gitHeadIsUnborn, WORKTREE_UNBORN_HEAD_MESSAGE } from "./task-worktree.js";
 import { discoverDeclaredChecks } from "./verify/scripts.js";
 
 /**
@@ -567,6 +567,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			if (request.worktree !== true) continue;
 			if (mode === "compete") return shapeRejection(args, "worktree_compete_incompatible");
 			if (parentCheckout === null) return shapeRejection(args, "worktree_non_git_checkout");
+			if (gitHeadIsUnborn(parentCheckout)) return shapeRejection(args, WORKTREE_UNBORN_HEAD_MESSAGE);
 			const spec = deps.getAgentSpecs().find((candidate) => candidate.id === request.agentId);
 			if (spec?.capabilityClass === "read-only") return shapeRejection(args, "worktree_read_only_agent");
 			if (request.cwd !== undefined) {

@@ -223,6 +223,25 @@ export function gitCheckoutRoot(cwd: string): string | null {
 	}
 }
 
+/**
+ * Refusal for a task worktree requested in a repository with no commits. A
+ * worktree branches from a commit, and an unborn HEAD has none, so the request
+ * is refused before any mode split rather than failing inside `git worktree add`
+ * with a raw rev-parse error on one path and not another (D4).
+ */
+export const WORKTREE_UNBORN_HEAD_MESSAGE =
+	"worktree_unborn_head: the repository has no commits, so a task worktree has nothing to branch from. Make an initial commit, or dispatch without worktree.";
+
+/** Whether a checkout's HEAD names no commit yet (`git init` with nothing committed). */
+export function gitHeadIsUnborn(root: string): boolean {
+	try {
+		git(root, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]);
+		return false;
+	} catch {
+		return true;
+	}
+}
+
 /** The claim always lives on disk with the repository, wherever the working tree is. */
 function claimPathFor(root: string, runId: string): string {
 	return join(diskWorktreeParent(root), `${runId}${OWNER_FILE_SUFFIX}`);
@@ -238,6 +257,7 @@ export function createTaskWorktree(
 ): TaskWorktree {
 	validateRunId(runId);
 	const canonical = realpathSync(root);
+	if (base === undefined && gitHeadIsUnborn(canonical)) throw new Error(WORKTREE_UNBORN_HEAD_MESSAGE);
 	const resolvedBase = base ?? git(canonical, ["rev-parse", "HEAD"]);
 	const claimParent = diskWorktreeParent(canonical);
 	const parent = worktreeParent ?? claimParent;

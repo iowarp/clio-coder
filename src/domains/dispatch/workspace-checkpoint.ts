@@ -38,17 +38,24 @@ export function captureWorkspaceCheckpoint(cwd: string, ref: string, message: st
 		} catch {
 			/* First capture owns this immutable reference. */
 		}
-		const head = git(["rev-parse", "HEAD"]);
+		// A repository with no commits checkpoints as a parentless commit from an
+		// empty index rather than failing on rev-parse (D4).
+		let head: string | null;
+		try {
+			head = git(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]);
+		} catch {
+			head = null;
+		}
 		// Automatic preservation must not run repository-configured filter commands.
 		// Names stay argv values; Git's ordinary text normalization still applies.
 		const filterKeys = git(["config", "--null", "--name-only", "--list"])
 			.split("\0")
 			.filter((key) => /^filter\..*\.(?:clean|process|required)$/.test(key));
 		for (const key of filterKeys) config.push("-c", `${key}=${key.endsWith(".required") ? "false" : ""}`);
-		git(["read-tree", head]);
+		git(head === null ? ["read-tree", "--empty"] : ["read-tree", head]);
 		git(["add", "-A", "--", "."]);
 		const tree = git(["write-tree"]);
-		const commit = git(["commit-tree", tree, "-p", head, "-m", message]);
+		const commit = git(["commit-tree", tree, ...(head === null ? [] : ["-p", head]), "-m", message]);
 		git(["update-ref", ref, commit, ""]);
 		return ref;
 	} finally {

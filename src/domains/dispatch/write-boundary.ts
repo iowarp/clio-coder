@@ -184,6 +184,22 @@ export interface WorkspaceSnapshot {
 	capturedAt: string;
 }
 
+/** Git's well-known empty tree, readable in every repository without being stored. */
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/**
+ * The baseline to pin comparisons to. A repository with no commits compares
+ * against the empty tree, where every path reads as absent and rollback removes
+ * it, so a writer in a fresh `git init` keeps boundary enforcement (D4).
+ */
+function unbornSafeHead(root: string): string {
+	try {
+		return git(root, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]).trim();
+	} catch {
+		return EMPTY_TREE;
+	}
+}
+
 export function captureWorkspaceSnapshot(root: string): WorkspaceSnapshot {
 	const absolute = resolve(root);
 	if (!isGitRepository(absolute)) {
@@ -191,7 +207,7 @@ export function captureWorkspaceSnapshot(root: string): WorkspaceSnapshot {
 			`write boundary: ${absolute} is not a git repository, so a declared boundary cannot be verified (enforcement fails closed)`,
 		);
 	}
-	const head = git(absolute, ["rev-parse", "HEAD"]).trim();
+	const head = unbornSafeHead(absolute);
 	const paths = dirtyPaths(absolute);
 	return { root: absolute, head, entries: contentTokens(absolute, paths), capturedAt: new Date().toISOString() };
 }
