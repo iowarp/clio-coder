@@ -31,6 +31,19 @@ import { modelNickname, type TargetIdentity } from "./theme/labels.js";
 import { createComposerSurfacePainter } from "./theme/yolo-surface.js";
 import type { TurnPreparationPhase } from "./turn-state.js";
 
+/**
+ * The slice of Pi's Editor the suggestion list needs and keeps private. Pi
+ * requests suggestions asynchronously and leaves the previous list in place
+ * until the new one lands, so Clio reads the list to tell whether it still
+ * describes the line.
+ */
+interface SuggestionEngine {
+	autocompleteList?: { getSelectedItem(): unknown };
+	autocompleteState: unknown;
+	tryTriggerAutocomplete?(): void;
+	cancelAutocomplete?(): void;
+}
+
 const REVERSE_VIDEO = `${String.fromCharCode(27)}[7m`;
 const REVERSE_VIDEO_BLANK = `${REVERSE_VIDEO} ${String.fromCharCode(27)}[0m`;
 const EMPTY_PROMPT = "Ask Clio…  / for commands";
@@ -244,6 +257,8 @@ export class ClioEditor extends Editor {
 	private autocompleteDockOpen = false;
 	private autocompleteRowMap: number[] | null = null;
 	private autocompleteSourceStart = 0;
+	/** The line a suggestion list was built for, stamped when the list first shows. */
+	private suggestionStamp: { list: unknown; text: string; line: number; col: number } | null = null;
 	private pastedOperatorTokens = new Set<string>();
 
 	get draftRevision(): number {
@@ -258,6 +273,7 @@ export class ClioEditor extends Editor {
 
 	override applyEdit(operation: Parameters<Editor["applyEdit"]>[0]): void {
 		const before = this.getText();
+		this.suggestionsAreStale();
 		super.applyEdit(operation);
 		this.revision += 1;
 		this.pastedBangOffsets = remapPastedBangOffsets(before, this.getText(), this.pastedBangOffsets, operation === "undo");
@@ -284,6 +300,35 @@ export class ClioEditor extends Editor {
 		const list = (this as unknown as { autocompleteList?: { getSelectedItem(): unknown } }).autocompleteList;
 		const item = list?.getSelectedItem() as SlashCompletionItem | null | undefined;
 		return item?.path ? item : null;
+	}
+
+	private suggestionEngine(): SuggestionEngine {
+		return this as unknown as SuggestionEngine;
+	}
+
+	/**
+	 * Whether the open list was built for a line that has since changed. The
+	 * list is replaced only when the provider answers, which is after the input
+	 * that changed the line. Enter or Tab in that window would apply a row
+	 * against the old token range: `/context refresh` typed in one burst became
+	 * `/context compact refresh`. Every entry point calls this before it edits,
+	 * so a list that appeared since the last call was built for the current line.
+	 */
+	private suggestionsAreStale(): boolean {
+		const engine = this.suggestionEngine();
+		const list = engine.autocompleteList;
+		if (list === undefined || engine.autocompleteState === null) {
+			this.suggestionStamp = null;
+			return false;
+		}
+		const { line, col } = this.getCursor();
+		const text = this.getText();
+		const stamp = this.suggestionStamp;
+		if (stamp === null || stamp.list !== list) {
+			this.suggestionStamp = { list, text, line, col };
+			return false;
+		}
+		return stamp.text !== text || stamp.line !== line || stamp.col !== col;
 	}
 
 	/** Ask the provider for the next argument without the forced Tab path, which auto-applies a lone row. */
@@ -588,6 +633,7 @@ export class ClioEditor extends Editor {
 	}
 
 	override handleMouse(event: Parameters<Editor["handleMouse"]>[0]): ReturnType<Editor["handleMouse"]> {
+		this.suggestionsAreStale();
 		const rowMap = this.autocompleteRowMap;
 		if (rowMap === null) return super.handleMouse(event);
 		const sourceRow = rowMap[event.y] ?? -1;
@@ -719,6 +765,17 @@ export class ClioEditor extends Editor {
 		const pasteMutation = this.bracketedPasteActive || openedPaste;
 		const textBeforeInput = this.getText();
 		const keybindings = getKeybindings();
+		const acceptsSuggestion =
+			keybindings.matches(data, "tui.input.tab") || keybindings.matches(data, "tui.select.confirm");
+		if (acceptsSuggestion && this.suggestionsAreStale()) {
+			// Enter then submits the line as typed and Tab asks again, instead of applying a row to text it was not built for.
+			this.suggestionEngine().cancelAutocomplete?.();
+			this.autocompleteDockOpen = false;
+			if (keybindings.matches(data, "tui.input.tab") && this.getText().trimStart().startsWith("/")) {
+				this.reopenSuggestions();
+				return;
+			}
+		} else this.suggestionsAreStale();
 		const closesSuggestions =
 			keybindings.matches(data, "tui.select.cancel") ||
 			keybindings.matches(data, "tui.input.tab") ||
