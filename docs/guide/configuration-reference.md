@@ -97,6 +97,8 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `safety.limits.chatToolCallsPerTurn` | `60` |
 | `safety.limits.readBytesPerCall` | `51200` |
 | `safety.limits.observationBytesPerTurn` | `196608` |
+| `safety.sandbox` | `"auto"` |
+| `safety.sandboxNetwork` | `false` |
 | `safety.review.enabled` | `false` |
 | `interface.demo` | `true` |
 | `interface.terminalProgress` | `false` |
