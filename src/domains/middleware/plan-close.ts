@@ -50,7 +50,7 @@ export function createPlanCloseRegistration(deps: {
 				{
 					kind: "request_continuation",
 					message:
-						'Close this plan with ask_user "Carry out this plan?". Put any open choices in the options, with one-line descriptions and the recommended option first. Do not restate the plan.',
+						'Close this plan with ask_user "Carry out this plan?". Put any open choices in the options, with one-line descriptions and the recommended option first, and end with "Revise the plan first" so the operator can decline. Do not restate the plan.',
 				},
 			];
 		},
