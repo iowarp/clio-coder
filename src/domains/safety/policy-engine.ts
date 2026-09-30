@@ -1365,7 +1365,7 @@ function hasUnquotedExpansion(raw: string): boolean {
  * every prefix (with or without `=value`) safe: it costs an ask at worst.
  */
 function abbreviatesLongOption(arg: string, option: string): boolean {
-	if (!arg.startsWith("--") || arg === "--") return false;
+	if (!arg.startsWith("--") || arg === "--" || !option.startsWith("--")) return false;
 	const name = (arg.split("=", 1)[0] ?? "").slice(2);
 	return name.length > 0 && option.slice(2).startsWith(name);
 }
@@ -1401,6 +1401,9 @@ function recursesDirectories(args: ReadonlyArray<string>): boolean {
 
 function refusedOption(arg: string, refused: ReadonlyArray<string>): boolean {
 	return refused.some((option) => {
+		// GNU tools take any unambiguous prefix of a long option: `sort --out=x`
+		// writes x, `tail --fo` follows forever. find's single-dash words do not abbreviate.
+		if (abbreviatesLongOption(arg, option)) return true;
 		if (arg === option || arg.startsWith(`${option}=`)) return true;
 		// A short option can sit anywhere in a cluster (`sort -ro out`); a false
 		// match only costs an ask.
