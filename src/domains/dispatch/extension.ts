@@ -7228,11 +7228,23 @@ export function createDispatchBundle(
 					finalDetail = hostRejection.detail;
 					failureMessage = finalDetail;
 				}
+				// A worker whose own report lists a failing check does not land on the
+				// operator's branch unless host verification passed. With no declared
+				// check the merge used to rest on the exit status alone, and a Git
+				// Master's `npm test: exit 1` commit merged onto main (flywheel s5r2).
+				// The tree is still committed to its preserved branch, so a failure the
+				// operator knows was already there costs one merge command.
+				const mergeWithheld =
+					req.taskWorktree !== undefined &&
+					(req.apply ?? "merge") === "merge" &&
+					finalOutcome === "succeeded" &&
+					sealedResultContractFact?.quality === "fail" &&
+					hostVerification?.status !== "verified";
 				let worktreeReceipt: RunReceiptDraft["worktree"];
 				if (req.taskWorktree !== undefined && finalOutcome === "succeeded") {
 					worktreeReceipt = applyTaskWorktree({
 						worktree: req.taskWorktree,
-						apply: req.apply ?? "merge",
+						apply: mergeWithheld ? "preserve" : (req.apply ?? "merge"),
 						protectedPaths: getProtectedArtifactState().artifacts.map((artifact) => artifact.path),
 						commitMessage:
 							appliedResultContract !== null && resultValidation?.conformance === "pass"
@@ -7245,6 +7257,10 @@ export function createDispatchBundle(
 					if (worktreeReceipt.reason !== undefined) {
 						finalOutcome = "failed";
 						finalDetail = worktreeReceipt.detail ?? worktreeReceipt.reason;
+						failureMessage = finalDetail;
+					} else if (mergeWithheld) {
+						finalOutcome = "failed";
+						finalDetail = `merge withheld: the worker's own report lists a failing validation; its work is committed on the preserved branch ${req.taskWorktree.branch}, and \`git merge ${req.taskWorktree.branch}\` applies it if that failure was already there`;
 						failureMessage = finalDetail;
 					}
 				}

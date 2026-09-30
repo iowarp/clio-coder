@@ -299,7 +299,10 @@ parent checkout as the merge destination.
 After a successful worker and successful host verification, merge application
 commits the task branch, rechecks protected paths, and uses the same guarded
 merge path as compete. A conflict fails closed with
-`worktree_merge_conflict` and preserves the branch and worktree. Preserve
+`worktree_merge_conflict` and preserves the branch and worktree. A worker whose
+own report lists a failing validation is not merged unless host verification
+passed: the run fails, its work is committed on the preserved branch, and the
+detail names the `git merge` that applies it. Preserve
 application never merges and reports the branch. A detached task applies when its run finalizes, so `monitor(mode="collect")` returns the sealed application receipt.
 Admission refuses a non-git checkout, a read-only agent, compete mode, or an
 explicit cwd outside the parent checkout with a named reason.
