@@ -280,7 +280,16 @@ export function createTaskWorktree(
 	mkdirSync(parent, { recursive: true, mode: 0o700 });
 	if (!isCanonicalWorktreePathInside(parent, path))
 		throw new Error(`task worktree path escapes its parent for run ${runId}`);
-	git(canonical, ["worktree", "add", "-b", branch, path, resolvedBase]);
+	// Bound checkout parallelism for off-disk tasks: fleet workers already compete for CPUs.
+	git(canonical, [
+		...(parent !== claimParent ? ["-c", "checkout.workers=4"] : []),
+		"worktree",
+		"add",
+		"-b",
+		branch,
+		path,
+		resolvedBase,
+	]);
 	const ownerToken = randomBytes(16).toString("hex");
 	writeFileSync(
 		claimPathFor(canonical, runId),
