@@ -135,9 +135,17 @@ function createContextStateReader(): { read(cwd?: string): ContextState; invalid
 
 export interface ContextBundleOptions {
 	noContextFiles?: boolean;
+	/**
+	 * Headless runs have no slash commands, so the bootstrap hint names the CLI
+	 * subcommand. `json` keeps stderr free of suggestions a machine consumer
+	 * cannot act on; malformed-file and contract warnings still print.
+	 */
+	headless?: "text" | "json";
 }
 
 function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): string[] {
+	const initCommand = options.headless === undefined ? "/context init" : "clio-coder context init";
+	const suggest = options.headless !== "json";
 	const hints: string[] = [];
 	// Runs at session start with the TUI mounting. Use a root-only hint; an
 	// indexed project answers from the type its state
@@ -154,9 +162,10 @@ function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): s
 		clio.files.length === 0 &&
 		clio.errors.length === 0 &&
 		projectType !== "unknown" &&
-		options.noContextFiles !== true
+		options.noContextFiles !== true &&
+		suggest
 	) {
-		hints.push("clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo and bootstrap context.");
+		hints.push(`clio-coder: No CLIO-CODER.md detected. Run ${initCommand} to explore the repo and bootstrap context.`);
 	}
 	for (const issue of clio.errors) {
 		hints.push(`clio-coder: malformed ${issue.path} ignored: ${issue.error}`);
@@ -168,8 +177,8 @@ function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): s
 		hints.push(`clio-coder: validation contract ignored, rigor stays normal: ${describeValidationContract(contract)}`);
 	}
 	if (!state) return hints;
-	if (state.contextSources !== undefined && adoptionSourcesChanged(state.contextSources, { cwd })) {
-		hints.push("clio-coder: Imported agent context changed. Run /context init --adopt to refresh.");
+	if (suggest && state.contextSources !== undefined && adoptionSourcesChanged(state.contextSources, { cwd })) {
+		hints.push(`clio-coder: Imported agent context changed. Run ${initCommand} --adopt to refresh.`);
 	}
 	return hints;
 }

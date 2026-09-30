@@ -1448,7 +1448,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}),
 			}),
 			ShareDomainModule,
-			createContextDomainModule({ noContextFiles: options.noContextFiles === true }),
+			createContextDomainModule({
+				noContextFiles: options.noContextFiles === true,
+				...(options.headless ? { headless: options.headless.mode === "json" ? ("json" as const) : ("text" as const) } : {}),
+			}),
 			// Live probes exercise this session's chat model once the effective view
 			// exists (assigned below with dispatch's); until then, the shared snapshot.
 			createProvidersDomainModule({ getSettings: () => effectiveSettingsForDispatch?.() }),

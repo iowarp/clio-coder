@@ -504,7 +504,10 @@ async function runDispatch(
 	const loaded = await loadDomains([
 		ConfigDomainModule,
 		ResourcesDomainModule,
-		createContextDomainModule({ noContextFiles: options.noContextFiles === true }),
+		createContextDomainModule({
+			noContextFiles: options.noContextFiles === true,
+			headless: parsed.json ? "json" : "text",
+		}),
 		ProvidersDomainModule,
 		SafetyDomainModule,
 		createPromptsDomainModule({ noContextFiles: options.noContextFiles === true }),
