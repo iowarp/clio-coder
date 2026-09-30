@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
@@ -192,7 +192,10 @@ describe("monitor tool", () => {
 			strictEqual(waited.details?.timedOut, true);
 			match(waited.output, /keeps running normally/);
 
-			const pending = okResult(await f.call(ToolNames.Monitor, { mode: "collect", run_ids: [handle.runId] }));
+			const pending = okResult(
+				await f.call(ToolNames.Monitor, { mode: "collect", run_ids: [handle.runId], timeout_ms: 20 }),
+			);
+			strictEqual(pending.details?.timedOut, true);
 			strictEqual(pending.details?.complete, false);
 			deepStrictEqual(pending.details?.pendingRunIds, [handle.runId]);
 
@@ -216,12 +219,38 @@ describe("monitor tool", () => {
 			strictEqual(row?.runId, handle.runId);
 			strictEqual(row?.state, "succeeded");
 			strictEqual(row?.receiptIntegrity.ok, true, "collect reads the sealed receipt back through its integrity check");
-			match(collected.output, /collect never blocks; timeout_ms is ignored/);
 
 			const receipt = okResult(await f.call(ToolNames.Monitor, { mode: "receipt", run_id: handle.runId }));
 			match(receipt.output, new RegExp(handle.runId));
 			okResult(await f.call(ToolNames.Monitor, { mode: "tools", run_id: handle.runId }));
 			okResult(await f.call(ToolNames.Monitor, { mode: "peek", run_id: handle.runId }));
+		} finally {
+			await f.stop();
+		}
+	});
+
+	it("blocks collect until its runs finish or its timeout elapses (D3)", async () => {
+		const f = await fixture(scratch);
+		try {
+			const finishing = await f.contract.dispatch(f.request);
+			const timer = setTimeout(() => f.workers[0]?.finish(), 1500);
+			try {
+				const complete = okResult(
+					await f.call(ToolNames.Monitor, { mode: "collect", run_ids: [finishing.runId], timeout_ms: 10_000 }),
+				);
+				strictEqual(complete.details?.complete, true);
+				strictEqual(complete.details?.timedOut, false);
+			} finally {
+				clearTimeout(timer);
+			}
+
+			const running = await f.contract.dispatch(f.request);
+			const timedOut = okResult(
+				await f.call(ToolNames.Monitor, { mode: "collect", run_ids: [running.runId], timeout_ms: 1200 }),
+			);
+			strictEqual(timedOut.details?.timedOut, true);
+			strictEqual(timedOut.details?.complete, false);
+			ok((timedOut.details?.waitedMs as number) >= 1200, `waitedMs ${String(timedOut.details?.waitedMs)}`);
 		} finally {
 			await f.stop();
 		}
