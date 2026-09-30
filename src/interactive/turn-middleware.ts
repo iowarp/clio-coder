@@ -45,6 +45,7 @@ export interface TurnMiddlewareDeps {
 	emitOperatorTip?: (message: string, key: string) => void;
 	/** The prose-question gate; absent where no operator can answer an interview. */
 	holdFinalReply?: ((input: FinalReplyGateInput) => Promise<FinalReplyHold | null>) | undefined;
+	finalReplyHoldArmed?: (() => boolean) | undefined;
 }
 
 export interface TurnMiddleware {
@@ -72,6 +73,8 @@ export interface TurnMiddleware {
 		stopReason: string | undefined,
 		terminalTool: boolean,
 	): Promise<string | null>;
+	/** Whether a reply streaming now could still be held on its closing question. */
+	finalReplyHoldArmed(): boolean;
 	/** Move an armed final-reply steer into model context. True when context changed. */
 	deliverFinalReplySteer(agentRuntime: AgentRuntime): boolean;
 	fireCompactionHook(
@@ -446,6 +449,15 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// Recorded for /view and receipts, never rendered in the transcript.
 			appendMiddlewareReminderEntry(hold.steer, "info", "reminder", false);
 			return hold.visibleText;
+		},
+
+		finalReplyHoldArmed(): boolean {
+			if (!deps.holdFinalReply || state.pendingFinalReplySteer !== null) return false;
+			try {
+				return deps.finalReplyHoldArmed?.() === true;
+			} catch {
+				return false;
+			}
 		},
 
 		deliverFinalReplySteer(agentRuntime): boolean {

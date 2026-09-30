@@ -875,6 +875,8 @@ export interface CreateChatLoopDeps {
 	 * and steers the model to ask it through ask_user within the same run.
 	 */
 	holdFinalReply?: (input: FinalReplyGateInput) => Promise<FinalReplyHold | null>;
+	/** Whether the gate could still hold the reply streaming now; see holdFinalReply. */
+	finalReplyHoldArmed?: () => boolean;
 	readTurnEnd?: (input: {
 		userTurnId: string;
 		request: string;
@@ -1215,6 +1217,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitNotice: (text, level, source) => emitNotice(text, level, undefined, undefined, source),
 		emitFooterNotice,
 		holdFinalReply: deps.holdFinalReply,
+		finalReplyHoldArmed: deps.finalReplyHoldArmed,
 	});
 
 	try {

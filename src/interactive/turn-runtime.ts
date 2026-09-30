@@ -143,6 +143,9 @@ export type AssistantDeltaEvent =
 			partialThinking: string;
 	  };
 
+/** Where a streaming reply's finished text ends: after a sentence stop and its space, or a line break. */
+const SENTENCE_RELEASE_BOUNDARY = /[.!?][*_"'’)\]]*[ \t]+|\n/gu;
+
 export interface TurnRuntimeDeps {
 	state: ChatTurnState;
 	/** Capabilities behind the attached gateway, for the streaming tool-prose cutoff. */
@@ -877,6 +880,42 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			return true;
 		};
 
+		// The live transcript lags a streaming reply by its unfinished last
+		// sentence while the prose-question gate could still hold the reply, so
+		// a closing question it withholds at message_end is never drawn first.
+		let tailHold: { text: string; released: number; armed: boolean } | null = null;
+		const emitReleasedText = (delta: string): void => {
+			if (tailHold === null || delta.length === 0) return;
+			deps.emit({
+				type: "text_delta",
+				contentIndex: 0,
+				delta,
+				partialText: tailHold.text.slice(0, tailHold.released),
+			});
+		};
+		const releaseHeldTail = (disarm: boolean): void => {
+			if (tailHold === null) return;
+			const held = tailHold.text.slice(tailHold.released);
+			tailHold.released = tailHold.text.length;
+			if (disarm) tailHold.armed = false;
+			emitReleasedText(held);
+		};
+		/** The part of a delta the transcript may draw now; null draws nothing yet. */
+		const holdTail = (delta: string): string | null => {
+			if (tailHold === null) return delta;
+			tailHold.text += delta;
+			const from = tailHold.released;
+			let end = tailHold.armed ? from : tailHold.text.length;
+			if (tailHold.armed) {
+				for (const match of tailHold.text.slice(from).matchAll(SENTENCE_RELEASE_BOUNDARY)) {
+					end = from + match.index + match[0].length;
+				}
+			}
+			if (end <= from) return null;
+			tailHold.released = end;
+			return tailHold.text.slice(from, end);
+		};
+
 		const generationTiming = createAssistantGenerationTiming();
 		// First call of the run is the one whose verdict says whether the
 		// backend reused the session prefix; later calls in a tool loop are
@@ -1153,6 +1192,24 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (estimate !== undefined) state.interruptedUsage = estimate;
 				return;
 			}
+			if (publicEvent?.type === "message_start" && publicEvent.message?.role === "assistant") {
+				tailHold = {
+					text: "",
+					released: 0,
+					armed: !state.synthesisToolLock && middleware.finalReplyHoldArmed(),
+				};
+			} else if (publicEvent?.type === "message_update") {
+				// Reasoning or a tool call after the text means the held sentence is
+				// not a closing one; a tool-call turn is never held at all.
+				const inner = (publicEvent.assistantMessageEvent as { type?: unknown }).type;
+				if (typeof inner === "string" && inner.startsWith("toolcall")) releaseHeldTail(true);
+				else if (typeof inner === "string" && inner.startsWith("thinking")) releaseHeldTail(false);
+			} else if (publicEvent?.type === "message_end" && publicEvent.message?.role === "assistant") {
+				// A held reply's message_end replaces the streamed text itself; any
+				// other reply gets its last sentence before it settles.
+				if ((publicEvent as { finalReplyHeld?: unknown }).finalReplyHeld !== true) releaseHeldTail(true);
+				tailHold = null;
+			}
 			if (publicEvent) deps.emit(publicEvent);
 			if (publicEvent?.type === "message_update") {
 				const assistantEvent = publicEvent.assistantMessageEvent as {
@@ -1165,6 +1222,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					const partialText = extractText(assistantEvent.partial);
 					const frame = readDiffusionFrame(assistantEvent);
 					if (frame) {
+						releaseHeldTail(true);
 						deps.emit({
 							type: "text_frame",
 							contentIndex: assistantEvent.contentIndex ?? 0,
@@ -1172,12 +1230,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							progress: frame.progress,
 						});
 					} else {
-						deps.emit({
-							type: "text_delta",
-							contentIndex: assistantEvent.contentIndex ?? 0,
-							delta: assistantEvent.delta ?? "",
-							partialText,
-						});
+						const delta = holdTail(assistantEvent.delta ?? "");
+						if (delta !== null) {
+							deps.emit({
+								type: "text_delta",
+								contentIndex: assistantEvent.contentIndex ?? 0,
+								delta,
+								partialText: tailHold === null ? partialText : tailHold.text.slice(0, tailHold.released),
+							});
+						}
 					}
 					const localToolRuntime = runtimeNarratesToolCalls(localRuntime.runtimeResolution.runtimeTier);
 					if (

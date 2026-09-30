@@ -2974,7 +2974,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		flushSystemOne,
 		readTurnEnd: (turn) => systemOneHost.readTurnEnd(turn),
-		...(proseQuestion !== null ? { holdFinalReply: proseQuestion.holdFinalReply } : {}),
+		...(proseQuestion !== null
+			? { holdFinalReply: proseQuestion.holdFinalReply, finalReplyHoldArmed: proseQuestion.mayHoldFinalReply }
+			: {}),
 		recordOutcome: (outcome) => systemOneHost.recordOutcome(outcome),
 		getTaskMemoryHandoffSource: () => {
 			const meta = session?.current();

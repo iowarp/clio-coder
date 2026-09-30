@@ -138,6 +138,12 @@ export interface ProseQuestionRegistration extends MiddlewareHookRegistration {
 	 * Once consulted, the turn_end fallback stays silent for that reply.
 	 */
 	holdFinalReply(input: FinalReplyGateInput): Promise<FinalReplyHold | null>;
+	/**
+	 * Whether a reply streaming now could still be held. The chat loop keeps a
+	 * streaming reply's unfinished last sentence off the transcript only then,
+	 * so a question it may withhold never flashes on screen.
+	 */
+	mayHoldFinalReply(): boolean;
 }
 
 export interface ProseQuestionDeps {
@@ -276,6 +282,9 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): ProseQ
 				return [{ kind: "request_continuation", message: PLAN_APPROVAL_CONTINUATION_MESSAGE }];
 			}
 			return NO_EFFECTS;
+		},
+		mayHoldFinalReply(): boolean {
+			return substantiveTurn && !steered && gateOpen("stop");
 		},
 		async holdFinalReply(input): Promise<FinalReplyHold | null> {
 			if (!substantiveTurn || steered) return null;
