@@ -1,5 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
@@ -7,10 +8,13 @@ import {
 	createProseQuestionRegistration,
 	PLAN_APPROVAL_CONTINUATION_MESSAGE,
 	PROSE_QUESTION_CONTINUATION_MESSAGE,
+	PROSE_QUESTION_STEER_MESSAGE,
 } from "../../src/domains/middleware/prose-question.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import { createEngineAgent } from "../../src/engine/agent.js";
+import { engineStreamSimple, registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
-import { type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { type ChatLoopEvent, type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -262,6 +266,80 @@ describe("operator questions through the chat loop", () => {
 			unsubscribe();
 			loop.dispose();
 			await loop.whenSettled();
+			scratch.restore();
+		}
+	});
+});
+
+describe("operator questions held inside the run", () => {
+	it("holds the closing question, steers ask_user in the same run, and settles once", async () => {
+		const scratch = await isolateClioEnv("clio-coder-prose-hold-");
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.chat.prewarm = false;
+		const context = dispatchStubContext({ settings });
+		const target = settings.targets[0];
+		ok(target);
+		settings.chat.target = target.id;
+		settings.chat.model = target.defaultModel ?? "gpt-4o";
+		const provider = registerEngineFauxProvider({ api: "prose-question-hold", models: [{ id: "fixture" }] });
+		const requests: string[] = [];
+		const lastUserText = (messages: ReadonlyArray<{ role: string; content: unknown }>): string => {
+			const content = [...messages].reverse().find((message) => message.role === "user")?.content;
+			return typeof content === "string" ? content : JSON.stringify(content);
+		};
+		provider.setResponses([
+			(request) => {
+				requests.push(lastUserText(request.messages));
+				return fauxAssistantMessage("The index is built on init.\n\nWant me to dive deeper into refresh?");
+			},
+			(request) => {
+				requests.push(lastUserText(request.messages));
+				return fauxAssistantMessage(
+					{ type: "toolCall", id: "ask-1", name: ToolNames.AskUser, arguments: { question: "Dive deeper?" } },
+					{ stopReason: "toolUse" },
+				);
+			},
+			(request) => {
+				requests.push(lastUserText(request.messages));
+				return fauxAssistantMessage("");
+			},
+		]);
+		const middleware = createMiddlewareBundle().contract;
+		const registration = createProseQuestionRegistration({ askUserAvailable: () => true });
+		middleware.registerHook(registration);
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+			knownTargets: () => new Set([target.id]),
+			middleware,
+			holdFinalReply: registration.holdFinalReply,
+			createAgent: (options) => {
+				const handle = createEngineAgent(options);
+				handle.agent.streamFunction = (_model, request, streamOptions) =>
+					engineStreamSimple(provider.getModel(), request, streamOptions);
+				return handle;
+			},
+		});
+		const events: ChatLoopEvent[] = [];
+		const unsubscribe = loop.onEvent((event) => events.push(event));
+		try {
+			await loop.submit("check how the context engine works on init");
+			strictEqual(events.filter((event) => event.type === "agent_end").length, 1);
+			const held = events.find(
+				(event) => event.type === "message_end" && (event as { finalReplyHeld?: boolean }).finalReplyHeld === true,
+			);
+			ok(held?.type === "message_end");
+			const heldText = (held.message.content as Array<{ type: string; text?: string }>)
+				.filter((block) => block.type === "text")
+				.map((block) => block.text)
+				.join("");
+			strictEqual(heldText, "The index is built on init.");
+			ok(requests[1]?.includes(PROSE_QUESTION_STEER_MESSAGE));
+		} finally {
+			unsubscribe();
+			loop.dispose();
+			await loop.whenSettled();
+			provider.unregister();
 			scratch.restore();
 		}
 	});
