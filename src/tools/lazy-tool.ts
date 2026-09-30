@@ -15,6 +15,7 @@ function surfaceSnapshot(spec: ToolSurface | ToolSpec): string {
 		prepareAdmissionArguments: Boolean(spec.prepareAdmissionArguments),
 		disposeAdmissionArguments: Boolean(spec.disposeAdmissionArguments),
 		describeDispatchPlan: Boolean(spec.describeDispatchPlan),
+		hostEffectCalls: Boolean(spec.hostEffectCalls),
 	});
 }
 

@@ -62,18 +62,24 @@ function repositoryRoot(cwd: string): string {
 	}).trim();
 }
 
-export function workspaceFingerprint(cwd: string): string | null {
+/** The checkout a check judged: its root, HEAD, and a digest of HEAD plus working-tree content. */
+function checkedTree(cwd: string): { root: string; head: string; fingerprint: string } | null {
 	try {
 		const snapshot = captureWorkspaceSnapshot(repositoryRoot(cwd));
-		return sha256(
+		const fingerprint = sha256(
 			JSON.stringify({
 				head: snapshot.head,
 				entries: [...snapshot.entries.entries()].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
 			}),
 		);
+		return { root: snapshot.root, head: snapshot.head, fingerprint };
 	} catch {
 		return null;
 	}
+}
+
+export function workspaceFingerprint(cwd: string): string | null {
+	return checkedTree(cwd)?.fingerprint ?? null;
 }
 
 function memoPath(stateDir: string): string {
@@ -201,7 +207,8 @@ async function runResolvedCheck(input: {
 		description: `Host verification check ${resolvedCheck.check}.`,
 	};
 	const judgmentKey = checkDedupeKey(resolvedCheck);
-	const fingerprint = workspaceFingerprint(resolvedCheck.cwd);
+	const tree = checkedTree(resolvedCheck.cwd) ?? undefined;
+	const fingerprint = tree?.fingerprint ?? null;
 	const key = fingerprint === null ? null : memoKey(command, judgmentKey, fingerprint, input.env);
 	const hit =
 		key === null
@@ -210,8 +217,16 @@ async function runResolvedCheck(input: {
 	// A memo hit is always a pass, so no caller ever needs its output for
 	// attribution; the empty excerpt says the fresh output does not exist.
 	if (hit !== undefined) {
+		// The tree is stamped fresh on a hit: the memo matched this tree's content,
+		// but its stored entry names whichever checkout first produced the pass (F6).
 		return {
-			check: { ...hit.check, argv: [...hit.check.argv], memo: true, evidenceRunId: hit.runId },
+			check: {
+				...hit.check,
+				argv: [...hit.check.argv],
+				memo: true,
+				evidenceRunId: hit.runId,
+				...(tree !== undefined ? { tree } : {}),
+			},
 			outputExcerpt: "",
 		};
 	}
@@ -244,6 +259,7 @@ async function runResolvedCheck(input: {
 		outputTail: judgement.outputTail ?? outputTail(outcome.report.outputExcerpt),
 		...(artifactPath !== undefined ? { artifactPath } : {}),
 		...(judgement.report !== undefined ? { report: judgement.report } : {}),
+		...(tree !== undefined ? { tree } : {}),
 	};
 	if (check.exitCode === 0 && key !== null && checkDedupeKey(resolvedCheck) === judgmentKey) {
 		try {
@@ -399,11 +415,9 @@ function memberBoundary(participant: BatchVerificationParticipant): string[] {
  * strongest, so `write_roots` on a receipt means every charged run has a named
  * path inside its own declared boundary.
  *
- * A `worktree: true` member's write roots resolve against its own checkout
- * (`request.cwd`) while the shared check ran in the parent frame, so none of
- * its roots can cover a path the check named: attribution cannot exculpate
- * anyone on its account and every declarer is charged, the conservative
- * fallback those receipts sealed before batch settlement existed.
+ * A `worktree: true` member's checks run inside its own task worktree (F6),
+ * so their batch identity differs from every sibling's and a failure there is
+ * judged against that member's own checkout and write roots.
  */
 function attributeFailure(input: {
 	implicated: ReadonlyArray<string>;

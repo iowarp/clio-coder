@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve } from "node:path";
+import { ToolNames } from "../core/tool-names.js";
 import { selectWorkerContext } from "../domains/context/worker/select.js";
 import type { DispatchPlanTaskResolution, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
@@ -47,9 +48,9 @@ import type {
 	DispatchReviewSettings,
 	DispatchToolDeps,
 } from "./dispatch-types.js";
-import type { ToolSpec } from "./registry.js";
+import type { HostEffectCall, ToolSpec } from "./registry.js";
 import { gitCheckoutRoot, gitHeadIsUnborn, WORKTREE_UNBORN_HEAD_MESSAGE } from "./task-worktree.js";
-import { discoverDeclaredChecks } from "./verify/scripts.js";
+import { discoverDeclaredChecksAtRoot } from "./verify/discovery.js";
 
 /**
  * The six identity-sensitive stores which bind synchronous admission to the
@@ -71,6 +72,7 @@ export interface DispatchAdmissionController {
 	disposeAdmissionArguments(args: Record<string, unknown>): void;
 	prepareArguments(args: Record<string, unknown>): Record<string, unknown>;
 	describeDispatchPlan(args: Record<string, unknown>): DispatchPlanView;
+	hostEffectCalls(args: Record<string, unknown>): ReadonlyArray<HostEffectCall>;
 }
 
 type ResolvedPlanTask = ResolvedDispatchPlanArtifact["tasks"][number];
@@ -232,7 +234,10 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				authorityBasis: deps.getAutonomy?.() === "yolo" ? "yolo-policy" : "operator-plan-approval",
 			},
 			resolveIntent(rawIntent, cwd) {
-				const discovery = discoverDeclaredChecks(cwd);
+				// One root for discovery and for every sealed path, read once, so the
+				// check the host later runs is the check the catalog declared there (F6).
+				const workspaceRoot = process.cwd();
+				const discovery = discoverDeclaredChecksAtRoot(workspaceRoot, cwd);
 				if (!discovery.ok) return { ok: false, message: `verification_catalog_invalid: ${discovery.reason}` };
 				const declared = discovery.sources.flatMap((source) => source.checks);
 				const byId = new Map(declared.map((check) => [check.id, check]));
@@ -247,7 +252,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 						return {
 							check: entry.check,
 							argv: [...check.command],
-							cwd: resolve(process.cwd(), check.cwd),
+							cwd: resolve(workspaceRoot, check.cwd),
 							timeoutMs: entry.timeoutMs,
 							// A judged check seals its kind and absolute file paths here, so
 							// host verification judges against what the catalog declared at
@@ -256,7 +261,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 							...(check.numeric !== undefined
 								? {
 										numeric: {
-											reference: resolve(process.cwd(), check.numeric.reference),
+											reference: resolve(workspaceRoot, check.numeric.reference),
 											tolerance: { ...check.numeric.tolerance },
 										},
 									}
@@ -265,7 +270,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 								? {
 										perf: {
 											...(check.perf.budget !== undefined ? { budget: structuredClone(check.perf.budget) } : {}),
-											...(check.perf.baseline !== undefined ? { baseline: resolve(process.cwd(), check.perf.baseline) } : {}),
+											...(check.perf.baseline !== undefined ? { baseline: resolve(workspaceRoot, check.perf.baseline) } : {}),
 											...(check.perf.tolerance !== undefined ? { tolerance: { ...check.perf.tolerance } } : {}),
 										},
 									}
@@ -826,10 +831,40 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			const trusted = state.trustedResolvedPlans.get(args);
 			return describeDispatchPlan(trusted === undefined ? args : { ...args, [RESOLVED_DISPATCH_PLAN_ARGUMENT]: trusted });
 		},
+		hostEffectCalls(args) {
+			// Host verification runs each sealed check as the dispatching agent, so
+			// each is admitted as the direct verify call that agent would make (F6).
+			// Read from the trusted snapshot only: model-supplied plan fields were
+			// stripped during preparation and can neither add nor hide a check.
+			const snapshot = state.trustedExecutionSnapshots.get(args);
+			if (snapshot?.kind !== "dispatch") return [];
+			const calls: HostEffectCall[] = [];
+			const seen = new Set<string>();
+			for (const request of snapshot.requests) {
+				for (const check of request.resolvedVerification ?? []) {
+					const verifyArgs: Record<string, unknown> = {
+						check: check.check,
+						...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
+					};
+					const key = JSON.stringify(verifyArgs);
+					if (seen.has(key)) continue;
+					seen.add(key);
+					calls.push({
+						label: `host verification check '${check.check}'`,
+						call: { tool: ToolNames.Verify, args: verifyArgs },
+					});
+				}
+			}
+			return calls;
+		},
 	};
 }
 
 export type DispatchAdmissionToolHooks = Pick<
 	ToolSpec,
-	"prepareAdmissionArguments" | "disposeAdmissionArguments" | "prepareArguments" | "describeDispatchPlan"
+	| "prepareAdmissionArguments"
+	| "disposeAdmissionArguments"
+	| "prepareArguments"
+	| "describeDispatchPlan"
+	| "hostEffectCalls"
 >;

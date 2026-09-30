@@ -783,6 +783,13 @@ export interface RunHostVerificationCheck {
 	report?: DeclaredCheckReport;
 	/** Run that owns the evidence when it did not come from this run: a memo hit, or the batch member the shared check ran under. */
 	evidenceRunId?: string;
+	/**
+	 * The checkout this verdict judged: the task worktree for a `worktree: true`
+	 * run, else the source checkout. `fingerprint` digests HEAD plus the
+	 * working-tree content the check saw. Absent outside a Git checkout and on
+	 * receipts sealed before it existed (F6).
+	 */
+	tree?: { root: string; head: string; fingerprint: string };
 }
 
 /**

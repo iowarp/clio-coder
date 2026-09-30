@@ -69,6 +69,7 @@ export function createDispatchTool(
 		disposeAdmissionArguments: admission.disposeAdmissionArguments,
 		prepareArguments: admission.prepareArguments,
 		describeDispatchPlan: admission.describeDispatchPlan,
+		hostEffectCalls: admission.hostEffectCalls,
 		async run(rawArgs, options) {
 			const args = admission.prepareArguments(rawArgs);
 			const preparationError = args[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT];

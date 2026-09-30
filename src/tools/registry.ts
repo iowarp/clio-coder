@@ -196,6 +196,14 @@ export interface ToolSpec {
 	disposeAdmissionArguments?(args: Record<string, unknown>): void;
 	/** Trusted admission artifact renderer used by policy after preparation. */
 	describeDispatchPlan?(args: Record<string, unknown>): DispatchPlanView;
+	/**
+	 * Host commands this call will run as its caller outside its own body, read
+	 * from prepared admission arguments. Each is admitted as the direct call it
+	 * stands for, at the caller's autonomy and never under a one-shot grant for
+	 * this call. Any that would park or be blocked refuses this call outright,
+	 * with a hard block reported first (F6).
+	 */
+	hostEffectCalls?(args: Record<string, unknown>): ReadonlyArray<HostEffectCall>;
 	/** Execute the tool. Only called after admission. */
 	run(args: Record<string, unknown>, options?: ToolInvokeOptions): Promise<ToolResult>;
 }
@@ -481,6 +489,13 @@ export interface PermissionRequiredMeta {
 	gateBuild?: string;
 }
 
+/** One host command a tool runs on its caller's behalf, as the direct call it stands for. */
+export interface HostEffectCall {
+	/** Operator-facing name for the effect, used in the refusal text. */
+	label: string;
+	call: ClassifierCall;
+}
+
 export interface ToolRegistry {
 	register(spec: ToolSpec): void;
 	/** Remove a session scoped dynamic capability after its owner closes. */
@@ -756,6 +771,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (decision.kind === "block") {
 			return { kind: "terminal", verdict: { kind: "blocked", reason: decision.rejection.short, decision } };
 		}
+		const effectRefusal = admitHostEffects(call, spec, decision, level);
+		if (effectRefusal !== null) return effectRefusal;
 		const actionClass = decision.classification.actionClass;
 		const readOutside = decision.policy?.readScope === "outside-workspace";
 		if (
@@ -877,6 +894,77 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		}
 		recordRegistryDisposition(call, decision, "allowed");
 		return { kind: "execute", spec, decision };
+	};
+
+	/**
+	 * Admit the host commands a call runs on its caller's behalf (F6). Dispatch
+	 * host verification executes declared checks as the dispatching agent, so a
+	 * check must pass the same safety net and autonomy mapping as the direct
+	 * verify call would. A check that would park is refused rather than parked:
+	 * the operator is asked about the dispatch plan, not about each command it
+	 * implies, and a headless run has nobody to ask. Every effect is evaluated
+	 * so a hard block anywhere wins over an earlier ask.
+	 */
+	const admitHostEffects = (
+		call: ClassifierCall,
+		spec: ToolSpec,
+		decision: SafetyDecision,
+		level: AutonomyLevel,
+	): Extract<AdmitOutcome, { kind: "terminal" }> | null => {
+		const effects = spec.hostEffectCalls?.(call.args ?? {}) ?? [];
+		if (effects.length === 0) return null;
+		const posture = level === "yolo" ? "yolo" : undefined;
+		let hard: { label: string; cause: string } | null = null;
+		let soft: { label: string; cause: string } | null = null;
+		for (const effect of effects) {
+			const effectSpec = tools.get(effect.call.tool as ToolName);
+			const raw = deps.safety.evaluate(effect.call, posture);
+			const effectDecision = effectSpec ? applyRegisteredToolClassification(raw, effectSpec) : raw;
+			const actionClass = effectDecision.classification.actionClass;
+			if (effectDecision.kind === "block" || actionClass === "git_destructive") {
+				const cause =
+					effectDecision.kind === "block" ? effectDecision.rejection.short : `action ${actionClass} is hard-blocked`;
+				hard = { label: effect.label, cause };
+				break;
+			}
+			if (soft !== null) continue;
+			if (effectDecision.kind === "ask") {
+				soft = { label: effect.label, cause: effectDecision.rejection.short };
+				continue;
+			}
+			const exposure = effectDecision.classification.exposure === "outward" ? "outward" : DEFAULT_AUTONOMY_EXPOSURE;
+			const readOutside = effectDecision.policy?.readScope === "outside-workspace";
+			const disposition = mapAutonomy(level, actionClass, {
+				executeRecognized: effectDecision.policy?.execRecognition !== "unrecognized",
+				...(readOutside ? { readOutsideWorkspace: true } : {}),
+				...(exposure === "outward" ? { exposure } : {}),
+			});
+			if (disposition !== "allow") {
+				const ask = autonomyAskRejection(level, effect.call.tool, actionClass, exposure, readOutside);
+				soft = { label: effect.label, cause: ask.short };
+			}
+		}
+		const refused = hard ?? soft;
+		if (refused === null) return null;
+		const reason = `${call.tool} refused: ${refused.label} would not be admitted as a direct call (${refused.cause})`;
+		const blocked: SafetyDecision = {
+			kind: "block",
+			classification: decision.classification,
+			rejection: {
+				short: reason,
+				detail: `${reason}. Host verification runs each declared check as the dispatching agent, so each check must pass the admission its direct call would.`,
+				hints: [
+					"Run the check yourself with verify after the receipt, or declare a check the policy recognizes.",
+					"Approving the dispatch does not approve the commands its verification runs.",
+				],
+			},
+			...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+		};
+		recordRegistryDisposition(call, blocked, "blocked", {
+			reasonCode: hard !== null ? "host_effect_blocked" : "host_effect_not_admitted",
+			reasons: [reason],
+		});
+		return { kind: "terminal", verdict: { kind: "blocked", reason, decision: blocked } };
 	};
 
 	const recordRegistryDisposition = (

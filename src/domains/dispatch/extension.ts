@@ -6885,6 +6885,18 @@ export function createDispatchBundle(
 				writerLease?.release();
 				throw new Error("dispatch: worktree merge destination differs from the approved execution snapshot");
 			}
+			// Admission sealed each check's cwd in the source checkout, before any
+			// worktree existed. Verifying there judges the operator's tree, not the
+			// candidate the worker produced (F6), so each check moves with the
+			// worker. Sealed reference and baseline files stay where admission read them.
+			const verificationRelatives = (req.resolvedVerification ?? []).map((check) => {
+				const rel = relative(root, resolvePath(root, check.cwd));
+				if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+					writerLease?.release();
+					throw new Error(`dispatch: host verification check '${check.check}' runs outside the task worktree's checkout`);
+				}
+				return rel;
+			});
 			const runId = newRunId();
 			let taskWorktree: NonNullable<DispatchRequest["taskWorktree"]>;
 			try {
@@ -6923,6 +6935,11 @@ export function createDispatchBundle(
 				const remapped = resolvePath(taskWorktree.path, rel);
 				return entry.endsWith("/") ? asDirectoryPathBoundary(remapped) : remapped;
 			});
+			const resolvedVerification = req.resolvedVerification?.map((check, index) => ({
+				...check,
+				argv: [...check.argv],
+				cwd: resolvePath(taskWorktree.path, verificationRelatives[index] ?? "."),
+			}));
 			prepared = {
 				...prepared,
 				runIdHint: runId,
@@ -6930,6 +6947,7 @@ export function createDispatchBundle(
 				cwd: workerCwd,
 				protectedArtifactRemap: { sourceRoot: root, workerRoot: taskWorktree.path },
 				...(writeRoots === undefined ? {} : { writeRoots }),
+				...(resolvedVerification === undefined ? {} : { resolvedVerification }),
 			};
 		}
 		let handle: Awaited<ReturnType<typeof dispatchAttempt>>;
