@@ -88,6 +88,19 @@ function commandWordIndex(words: ReadonlyArray<string>): number {
 	return index;
 }
 
+/**
+ * The argv Git reads after its executable in one shell segment's words, or
+ * null when the segment does not run Git. `bare` is true only when the segment
+ * is exactly `git ...`: no assignment, no wrapper, and no path spelling, so the
+ * executable is whatever PATH names `git` rather than a file the command chose.
+ */
+export function gitCommandArgv(words: ReadonlyArray<string>): { argv: string[]; bare: boolean } | null {
+	const start = commandWordIndex(words);
+	const executable = words[start] ?? "";
+	if (!isGitExecutable(executable)) return null;
+	return { argv: words.slice(start + 1), bare: start === 0 && executable === "git" };
+}
+
 /** Canonical Git scans cover alternate spellings while retaining the original conservative candidates. */
 export function normalizedGitCommands(command: string): string[] {
 	const candidates: string[] = [];
