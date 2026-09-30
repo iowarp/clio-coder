@@ -113,6 +113,8 @@ const NO_TURN_BUCKET = "no-turn";
  */
 const SIZE_ONLY_ARG_KEYS = new Set(["limit", "offset", "max_bytes", "context"]);
 
+/** Minimum time a pending collect must have blocked to earn another repeat epoch. */
+const COLLECT_BLOCKED_EPOCH_MS = 5_000;
 /**
  * Same-shape calls with byte-identical results tolerated before the next one
  * is blocked. Two identical results already prove the size knobs are not
@@ -120,9 +122,7 @@ const SIZE_ONLY_ARG_KEYS = new Set(["limit", "offset", "max_bytes", "context"]);
  * trip the identical-call detector first; this catches the escalation cycle
  * (limit: 10000 -> 20000 -> 50000 -> ...) that varies args enough to evade it.
  */
-export /** Minimum time a pending collect must have blocked to earn another repeat epoch. */
-const COLLECT_BLOCKED_EPOCH_MS = 5_000;
-const RESULT_STAGNATION_THRESHOLD = 3;
+export const RESULT_STAGNATION_THRESHOLD = 3;
 const CROSS_ARGUMENT_RESULT_MIN_BYTES = 64;
 
 function stagnationFingerprint(tool: string, args: Record<string, unknown> | undefined): string {
