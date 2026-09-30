@@ -394,9 +394,9 @@ Clio reads both files at startup and rereads them whenever the `/model` overlay 
 
 ## Target fields
 
-A `targets[]` entry accepts `id` and `runtime` (both required), `url`, `auth`, `defaultModel`, `wireModels`, `capabilities`, `lifecycle`, `gateway`, `pricing`, `cache`, `lmstudio`, `litellm`, `ollama` and `maxConcurrentRequests`. Any other key is rejected. When `defaultModel` is omitted, the first `wireModels` entry is used.
+A `targets[]` entry accepts `id` and `runtime` (both required), `url`, `auth`, `defaultModel`, `wireModels`, `capabilities`, `lifecycle`, `gateway`, `pricing`, `cache`, `lmstudio`, `litellm`, `ollama`, `maxConcurrentRequests` and `trustedUnmediated`. Any other key is rejected. When `defaultModel` is omitted, the first `wireModels` entry is used.
 
-`auth` takes `apiKeyEnvVar` (environment variable read per request), `apiKeyRef`, `oauthProfile` and `headers`. `pricing` takes `input` and `output` (both required) plus `cacheRead` and `cacheWrite`. `cache.retention` is `none`, `short` or `long`. `maxConcurrentRequests` is an explicit request-slot limit for the endpoint and overrides live discovery. `lifecycle` is `user-managed` or `clio-coder-managed`; `user-managed` keeps Clio from loading or unloading models on that server.
+`auth` takes `apiKeyEnvVar` (environment variable read per request), `apiKeyRef`, `oauthProfile` and `headers`. `pricing` takes `input` and `output` (both required) plus `cacheRead` and `cacheWrite`. `cache.retention` is `none`, `short` or `long`. `maxConcurrentRequests` is an explicit request-slot limit for the endpoint and overrides live discovery. `lifecycle` is `user-managed` or `clio-coder-managed`; `user-managed` keeps Clio from loading or unloading models on that server. `trustedUnmediated: true` lets a runtime that runs its own tool loop (claude-code, codex-cli, pi-cli, opencode-cli, antigravity) take write-capable dispatch work under its own authority; without it such work is refused, and the opt-in is recorded on the run receipt. Only user settings may set it; a project layer's value is ignored.
 
 ## Local model settings
 
