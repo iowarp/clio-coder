@@ -4,7 +4,7 @@ import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmS
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { releaseVersionErrors } from "./release-version-policy.mjs";
+import { publishTagErrors, releaseVersionErrors } from "./release-version-policy.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -74,6 +74,12 @@ try {
 		if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `artifact=${artifact}\n`);
 		console.log(`Qualified ${commit}\nArtifact: ${artifact}\nSHA-256: ${sha256}`);
 	} else if (mode === "preflight") {
+		// Checked first: requalifying never fixes a wrong dist-tag.
+		const tagErrors = publishTagErrors({
+			version: JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version,
+			tag: process.env.npm_config_tag,
+		});
+		if (tagErrors.length) throw new Error(tagErrors.join("\n"));
 		const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
 		const age = Date.now() - receipt.qualifiedAt;
 		if (

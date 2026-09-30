@@ -53,3 +53,18 @@ export function readmeInstallVersion({ version, changelog }) {
 	}
 	throw new Error("local development install instructions need a dated stable release in CHANGELOG.md");
 }
+
+/**
+ * Pre-releases ship under the `beta` dist-tag only. A bare `npm publish` of an
+ * rc would move `latest`, and every stable install would be offered the rc.
+ * npm exports `--tag` to lifecycle scripts as `npm_config_tag`.
+ * @param {{ version: unknown, tag: unknown }} input
+ * @returns {string[]}
+ */
+export function publishTagErrors({ version, tag }) {
+	if (typeof version !== "string" || !/^\d+\.\d+\.\d+-/.test(version) || tag === "beta") return [];
+	const seen = typeof tag === "string" && tag.length > 0 ? `'${tag}'` : "unset";
+	return [
+		`package.json version ${version} is a pre-release; publish it with 'npm publish --tag beta' (npm_config_tag is ${seen})`,
+	];
+}
