@@ -72,7 +72,7 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
 
 ## Submitting Changes
 
-1. Work on a focused branch (`fix/session-resume` or `feat/cli-inspect`) cut from the current version branch, such as `v054` for 0.5.4. Open the pull request against that branch. `main` moves only when a release ships.
+1. Work on a focused branch (`fix/session-resume` or `feat/cli-inspect`) cut from the current version branch, such as `v060` for 0.6.0. Open the pull request against that branch. `main` moves only when a release ships.
 2. Add focused contract tests exercising the changed behavior.
 3. Keep commit subjects concise conventional commits (max 72 characters):
    ```text
@@ -81,6 +81,14 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
    feat(cli): add target inspection option
    ```
 4. Verify `pnpm run ci` passes before requesting review.
+
+## Branches and Releases
+
+- `main` is always the latest stable release and moves only by fast-forward.
+- Development happens on the version branch, currently `v060`. The next patch line follows the same naming (`v061` for 0.6.1). Pull requests target that branch.
+- Tags are immutable. A published tag is never moved or recreated.
+- Release candidates are tagged `vX.Y.Z-rc.N` and published with `npm publish --tag beta`; the publish preflight refuses a pre-release under any other dist-tag. Users opt in with `clio-coder upgrade --channel=beta`.
+- Patch releases (`0.6.1`, `0.6.2`) ship fixes after `0.6.0`.
 
 ## README contract
 
