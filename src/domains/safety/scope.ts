@@ -1,5 +1,5 @@
 import path from "node:path";
-import { asDirectoryPathBoundary, pathBoundaryEntryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
+import { asDirectoryPathBoundary, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import type { ActionClass } from "./action-classifier.js";
 
 /**
@@ -23,9 +23,7 @@ export function isSubset(worker: ScopeSpec, orchestrator: ScopeSpec): boolean {
 		if (!orchestrator.allowedActions.has(action)) return false;
 	}
 	for (const root of worker.allowedWriteRoots) {
-		const covered = orchestrator.allowedWriteRoots.some((outer) =>
-			pathBoundaryEntryCovers(normalizeRoot(outer), normalizeRoot(root)),
-		);
+		const covered = writeRootsCover(orchestrator.allowedWriteRoots.map(normalizeRoot), normalizeRoot(root));
 		if (!covered) return false;
 	}
 	if (worker.allowNetwork && !orchestrator.allowNetwork) return false;

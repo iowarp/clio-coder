@@ -30,7 +30,7 @@
  * which is what makes the version rules verifiable rather than environmental.
  */
 
-import { pathBoundaryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
+import { pathBoundaryCovers, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import { type DispatchIntent, isDispatchIntent } from "./intent.js";
 
 /** The intent shape this build speaks. Bump with the `DispatchIntent` interface. */
@@ -150,7 +150,7 @@ function writeRootsContradiction(
 
 function outputsOutsideWriteRoots(intent: DispatchIntent): DispatchIntentCompatibilityFinding | null {
 	if (intent.writeRoots.length === 0 || intent.expectedOutputs.length === 0) return null;
-	const outside = intent.expectedOutputs.filter((output) => !pathBoundaryCovers(intent.writeRoots, output));
+	const outside = intent.expectedOutputs.filter((output) => !writeRootsCover(intent.writeRoots, output));
 	if (outside.length === 0) return null;
 	return finding(
 		"intent_outputs_outside_write_roots",
@@ -263,7 +263,9 @@ export function dispatchIntentScopeWidening(
 		relevantPaths: [...ceiling.readRoots, ...ceiling.writeRoots, ...ceiling.relevantPaths],
 	} as const;
 	for (const field of ["readRoots", "writeRoots", "relevantPaths"] as const) {
-		const outside = narrowed[field].find((candidate) => !pathBoundaryCovers(ceilings[field], candidate));
+		const outside = narrowed[field].find(
+			(candidate) => !pathBoundaryCovers(ceilings[field], candidate) && !writeRootsCover(ceiling.writeRoots, candidate),
+		);
 		if (outside === undefined) continue;
 		return finding(
 			"intent_scope_widening",

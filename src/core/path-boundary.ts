@@ -92,6 +92,20 @@ export function pathBoundaryCovers(boundary: PathBoundary, candidate: string): b
 	return boundary.some((entry) => pathBoundaryEntryCovers(entry, candidate));
 }
 
+/**
+ * Whether any write root contains the candidate. A write root names a directory
+ * whether or not it carries the trailing slash, so an entry without one covers
+ * both itself (an exact file root still admits that file) and its subtree. The
+ * generic boundary grammar keeps exact-file meaning; write roots never did, and
+ * three of the four resolvers already treated them as directories (D2).
+ */
+export function writeRootsCover(roots: PathBoundary, candidate: string): boolean {
+	return roots.some(
+		(root) =>
+			pathBoundaryEntryCovers(root, candidate) || pathBoundaryEntryCovers(asDirectoryPathBoundary(root), candidate),
+	);
+}
+
 /** Whether two boundary declarations share any possible path. */
 export function pathBoundariesOverlap(left: PathBoundary, right: PathBoundary): boolean {
 	return left.some((entry) =>

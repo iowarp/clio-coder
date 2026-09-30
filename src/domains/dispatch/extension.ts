@@ -26,6 +26,7 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import { gatewayRoutingObservationFromRecord } from "../../core/gateway-routing.js";
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../../core/guardrails.js";
 import { readClioVersion } from "../../core/package-root.js";
+import { asDirectoryPathBoundary } from "../../core/path-boundary.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { protectedResidencyModels } from "../../core/residency-protection.js";
 import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
@@ -6842,7 +6843,10 @@ export function createDispatchBundle(
 			const workerCwd = resolvePath(taskWorktree.path, cwdRelative);
 			const writeRoots = req.writeRoots?.map((entry) => {
 				const rel = relative(root, entry);
-				return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel) ? entry : resolvePath(taskWorktree.path, rel);
+				if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return entry;
+				// resolvePath drops the trailing slash that marks a directory root (D2).
+				const remapped = resolvePath(taskWorktree.path, rel);
+				return entry.endsWith("/") ? asDirectoryPathBoundary(remapped) : remapped;
 			});
 			prepared = {
 				...prepared,

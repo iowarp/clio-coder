@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { PATH_BOUNDARY_MAX_ENTRIES, pathBoundaryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
+import { PATH_BOUNDARY_MAX_ENTRIES, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { JUDGED_CHECK_MAX_OUTPUT_BYTES, judgeNumericTexts, judgePerfTexts } from "../../tools/verify/scripts.js";
@@ -420,7 +420,7 @@ function attributeFailure(input: {
 			unconfined.add(member.runId);
 			continue;
 		}
-		const hits = input.implicated.filter((path) => pathBoundaryCovers(boundary, path));
+		const hits = input.implicated.filter((path) => writeRootsCover(boundary, path));
 		if (hits.length === 0) continue;
 		implicatedDeclarers.add(member.runId);
 		for (const hit of hits) decisive.add(hit);
@@ -428,7 +428,7 @@ function attributeFailure(input: {
 	const others = input.wave.filter((member) => !declared.has(member.runId));
 	const ownedElsewhere =
 		input.implicated.length > 0 &&
-		input.implicated.every((path) => others.some((member) => pathBoundaryCovers(memberBoundary(member), path)));
+		input.implicated.every((path) => others.some((member) => writeRootsCover(memberBoundary(member), path)));
 	const localized = implicatedDeclarers.size > 0 || ownedElsewhere;
 	const charged = localized ? new Set(implicatedDeclarers) : new Set(declared);
 	for (const runId of unconfined) charged.add(runId);

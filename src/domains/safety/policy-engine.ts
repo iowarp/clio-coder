@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
-import { pathBoundaryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
+import { resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import {
 	canonicalizeExistingPath,
 	canonicalizePath,
@@ -263,7 +263,7 @@ function evaluateWriteRoots(roots: ReadonlyArray<string>, writeRootCwd: string, 
 	const target = writeRootTargetPath(call);
 	if (target === null) return null;
 	const resolved = path.resolve(writeRootCwd, target);
-	if (pathBoundaryCovers(roots, resolved)) return null;
+	if (writeRootsCover(roots, resolved)) return null;
 	return `write target '${target}' resolves to '${resolved}', which is outside the permitted write roots for this run: ${roots.join(", ")}`;
 }
 
