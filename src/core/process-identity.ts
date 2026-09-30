@@ -29,6 +29,28 @@ export function processBirthToken(pid = process.pid): string | null {
 	if (started !== null) return started;
 	return BIRTH_TOKEN_SOURCE_AVAILABLE ? null : `pid-${pid}`;
 }
+
+/**
+ * Wall-clock start of `pid` in epoch milliseconds, or null where /proc is not
+ * available. Lets a caller that recorded only a pid and a timestamp tell a
+ * process that existed at that time from one that reused the pid later.
+ * Resolution is one clock tick plus the whole-second boot time, so callers
+ * compare with a tolerance of about a second.
+ */
+export function processStartedAtMs(pid: number): number | null {
+	const ticks = readProcStartTime(pid);
+	if (ticks === null) return null;
+	try {
+		const btime = /^btime (\d+)$/m.exec(readFileSync("/proc/stat", "utf8"))?.[1];
+		if (btime === undefined) return null;
+		// USER_HZ is 100 on every Linux ABI Node supports; /proc exposes no portable way to read it.
+		return Number(btime) * 1000 + (Number(ticks) * 1000) / 100;
+	} catch {
+		// /proc/stat unreadable means the start time is unknown, which callers treat as unverifiable.
+		return null;
+	}
+}
+
 export function processAlive(pid: number): boolean {
 	if (!Number.isFinite(pid) || pid <= 0) return false;
 	try {

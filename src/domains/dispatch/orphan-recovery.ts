@@ -163,6 +163,25 @@ function sealedEnvelopeFor(runId: string): RunEnvelope | null {
 }
 
 /**
+ * Settle `runId`'s row from its own sealed receipt when one verifies. Returns
+ * false, leaving the row alone, when there is no receipt or it does not verify.
+ */
+export function sealRowFromVerifiedReceipt(ledger: Ledger, runId: string): boolean {
+	const envelope = sealedEnvelopeFor(runId);
+	if (envelope === null) return false;
+	// Patch rather than replace: the row carries phase timings and lineage
+	// the receipt does not, and pid/heartbeatAt are this row's own history.
+	const { id: _id, pid: _pid, heartbeatAt: _heartbeatAt, ...settled } = envelope;
+	ledger.update(runId, settled);
+	return true;
+}
+
+/** Row states that still claim a live run. */
+export function isOpenRunRow(row: RunEnvelope): boolean {
+	return row.endedAt === null && NON_TERMINAL_STATUSES.has(row.status);
+}
+
+/**
  * Close abandoned ledger rows: a non-terminal row whose recorded worker pid
  * no longer exists belongs to an orchestrator that died mid-run.
  *
@@ -192,7 +211,7 @@ function closeAbandonedRows(ledger: Ledger): { closed: number; sealed: number } 
 	let sealed = 0;
 	const localHost = hostname();
 	for (const row of ledger.list()) {
-		if (row.endedAt !== null || !NON_TERMINAL_STATUSES.has(row.status)) continue;
+		if (!isOpenRunRow(row)) continue;
 		// Transport-scoped liveness: the recorded pid is always a process on
 		// the orchestrator host that created the row (for ssh runs it is the
 		// local ssh client, i.e. the channel itself). On a shared filesystem
@@ -201,12 +220,7 @@ function closeAbandonedRows(ledger: Ledger): { closed: number; sealed: number } 
 		// for that host's own recovery pass.
 		if (row.identity !== undefined && row.identity.host !== localHost) continue;
 		if (isProcessAlive(row.pid)) continue;
-		const envelope = sealedEnvelopeFor(row.id);
-		if (envelope !== null) {
-			// Patch rather than replace: the row carries phase timings and lineage
-			// the receipt does not, and pid/heartbeatAt are this row's own history.
-			const { id: _id, pid: _pid, heartbeatAt: _heartbeatAt, ...settled } = envelope;
-			ledger.update(row.id, settled);
+		if (sealRowFromVerifiedReceipt(ledger, row.id)) {
 			sealed += 1;
 			continue;
 		}

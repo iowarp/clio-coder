@@ -179,6 +179,7 @@ import {
 } from "./batch-store.js";
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
 import { type RunToolBudgetEnvelope, resolveToolBudgetEnvelope } from "./budget-envelope.js";
+import { cancelDetail, FLEET_CANCEL_DETAIL, takeRunCancelRequest } from "./cancel-requests.js";
 import { assessCapabilityMismatch, type CapabilityMismatch } from "./capability-match.js";
 import {
 	capacityLeaseUsage,
@@ -3710,6 +3711,7 @@ export function createDispatchBundle(
 	 */
 	function checkActiveHeartbeats(): void {
 		if (!ledger) return;
+		consumeOperatorCancelRequests();
 		const tickMonotonic = monotonicNow();
 		for (const run of active.values()) {
 			if (run.aborted || run.stallKilled || !run.heartbeatAt) continue;
@@ -3753,6 +3755,26 @@ export function createDispatchBundle(
 			} catch {
 				// child may have exited between classification and reap attempt
 			}
+		}
+	}
+
+	/**
+	 * `fleet cancel` runs in another process and cannot reach this process's
+	 * abort handles, so it leaves a request file per run. Only the process
+	 * holding the run acts on it, through the same abort an in-process cancel
+	 * uses, so the run seals `canceled` with a complete receipt.
+	 */
+	function consumeOperatorCancelRequests(): void {
+		for (const run of [...active.values()]) {
+			let request: ReturnType<typeof takeRunCancelRequest>;
+			try {
+				request = takeRunCancelRequest(run.runId);
+			} catch (error) {
+				reportDispatchDiagnostic(`read cancel request for run ${run.runId}`, error);
+				continue;
+			}
+			if (request === null || run.aborted || run.stallKilled) continue;
+			contract.abort(run.runId, { cause: "operator", detail: cancelDetail(FLEET_CANCEL_DETAIL, request.reason) });
 		}
 	}
 

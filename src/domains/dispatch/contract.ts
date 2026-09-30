@@ -234,9 +234,11 @@ export interface DispatchSnapshot {
  * Why a run is being aborted. Absent means an operator/user cancel. A caller
  * that time-boxes a run (dispatch `timeout_ms`) passes the timeout cause so the
  * receipt names the timeout instead of laundering it into "operator abort".
+ * An operator cancel that arrives from another process (`fleet cancel`) passes
+ * the operator cause so the receipt names where the cancel came from.
  */
 export interface AbortReason {
-	cause: "timeout";
+	cause: "timeout" | "operator";
 	detail: string;
 }
 

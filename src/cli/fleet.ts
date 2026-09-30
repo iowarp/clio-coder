@@ -11,6 +11,7 @@
  *   clio-coder fleet decisions --json [--all]  bounded sealed review and compete gate verdicts
  *   clio-coder fleet view <runId|fleetRootId>  one run's transcript, or a root's step index
  *   clio-coder fleet drain|resume [--json]      close or reopen durable dispatch admission
+ *   clio-coder fleet cancel <runId>             cancel one run from any terminal
  *
  * Fleet contracts are repo-owned policy (.clio-coder/fleets/<name>.md). Preflight
  * fails with zero side effects: nothing is dispatched until the contract
@@ -111,6 +112,8 @@ Subcommands:
   view <fleetRootId> [--all]    list a fleet run's steps and the run id to view for each
   drain [--json]                deny new execution starts for up to one hour
   resume [--json]               reopen dispatch admission immediately
+  cancel <runId> [--json] [--reason <text>]
+                                cancel one running run from any terminal
 
 Notes:
   Inspection defaults to this project. Pass --all to inspect machine-wide state.
@@ -123,6 +126,10 @@ Notes:
   fleet-<hex> root id that run prints, it lists that run's steps instead.
   drain preserves running work. Repeat it to renew the one-hour expiry; resume
   clears it early. The expiry prevents an abandoned drain from wedging Clio.
+  cancel asks the process that owns the run to abort it and waits up to 15s
+  for the run to seal canceled; it exits 1 while the request is still pending.
+  When the owning process is gone it terminates the orphaned worker's process
+  group and settles the ledger row itself.
 `;
 
 function fail(message: string): number {
@@ -871,6 +878,8 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 			return runAdmissionControl("drain", args.slice(1));
 		case "resume":
 			return runAdmissionControl("resume", args.slice(1));
+		case "cancel":
+			return (await import("./fleet-cancel.js")).runFleetCancel(args.slice(1));
 		default:
 			process.stderr.write(`clio-coder fleet: unknown subcommand '${sub}'\n`);
 			process.stderr.write(HELP);
