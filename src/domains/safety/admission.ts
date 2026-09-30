@@ -425,8 +425,8 @@ type WorkerGitObligation =
  * The worker's standing Git allowance for one command effect (Codex review,
  * "Task-worktree Git contract"). Null when the effect runs no Git or only
  * inspects, so ordinary recognition decides it. Every Git mutation asks main
- * unless it is a task mutation (add of literal paths, commit -m) under `git:
- * worktree` in the run's own task worktree, re-attested now. A mutation that
+ * unless the typed Git tool projects a task mutation (add of literal paths,
+ * commit -m) under `git: worktree` in the run's own task worktree, re-attested now. A mutation that
  * would run hooks the worker can author, by a worker with no execute
  * capability, asks the operator (operator decision Q5).
  */
@@ -457,6 +457,9 @@ function workerGitObligation(effect: ClassifierCall, input: AdmissionInput): Wor
 		);
 	}
 	if (verdict.class !== "task-mutation") return ask(verdict.reason);
+	if (input.capability?.tool !== ToolNames.Git) {
+		return ask(`git ${subcommand} is allowed without approval only through the typed git tool`);
+	}
 	if (context?.allowance !== "worktree")
 		return ask(`git ${subcommand} needs git worktree; this permit grants git inspect`);
 	if (context.taskWorktree === undefined || cwd === undefined) {
