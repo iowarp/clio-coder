@@ -16,7 +16,7 @@ test("the narrow footer gives workspace and branch a readable row with context a
 		strictEqual(rows.length, width <= 60 ? 1 : 2);
 		for (const row of rows) ok(visibleWidth(row) <= width);
 		match(rows[0] ?? "", /v050/);
-		match(rows[0] ?? "", /\?\/262\.1K \(\?%\)$/);
+		match(rows[0] ?? "", /262\.1K ctx$/);
 		strictEqual(visibleWidth(rows[0] ?? ""), width);
 		doesNotMatch(rows[0] ?? "", /Ready|blade|▰|▱/);
 	}
@@ -36,7 +36,7 @@ test("narrow context reports unknown, estimated and saved occupancy without inve
 	match(stripTerminalSequences(renderCompactDashboard(state, 60)[0] ?? ""), /50K\/100K \(50\.0%\)$/);
 	state.context.used = null;
 	state.context.budget = { revision: "3", historical: false, inputSource: "unknown" };
-	match(stripTerminalSequences(renderCompactDashboard(state, 60)[0] ?? ""), /\?\/100K \(\?%\)$/);
+	match(stripTerminalSequences(renderCompactDashboard(state, 60)[0] ?? ""), /100K ctx$/);
 	state.context.used = 0;
 	state.context.budget = { revision: "4", historical: false, inputSource: "estimated" };
 	match(stripTerminalSequences(renderCompactDashboard(state, 60)[0] ?? ""), /0\/100K \(0\.0%\)$/);

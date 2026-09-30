@@ -799,7 +799,7 @@ test("the welcome keeps a quiet launchpad and the session header names the full 
 	const component = banner({ model });
 	const wide = rows(component, 120);
 	ok(wide.join("\n").includes("████"));
-	for (const label of ["Session started", "Project", "AI usage · used"]) ok(wide.join("\n").includes(label));
+	for (const label of ["Session started", "Project", "AI usage"]) ok(wide.join("\n").includes(label));
 	match(actionLine(wide), /v\d+\.\d+\.\d+$/u);
 	component.collapseToSessionHeader();
 	strictEqual(rows(component, 120).length, 1);
@@ -859,7 +859,7 @@ test("account usage hydrates without moving the welcome frame or passing through
 	component.render(120);
 	let lines = component.render(120).map(stripAnsi);
 	strictEqual(lines.length, 17);
-	ok(lines.join("\n").includes("No account reading yet"));
+	ok(lines.join("\n").includes("No usage data"));
 	quota = "Claude 5h 23% used";
 	lines = component.render(120).map(stripAnsi);
 	strictEqual(lines.length, 17);

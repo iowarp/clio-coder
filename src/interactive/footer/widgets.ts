@@ -219,6 +219,9 @@ export function compactContextUsage(
 ): string {
 	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
 	const window = context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow);
+	// Before the first measured turn only the window is known; question marks
+	// read as a fault, so the row names the window alone.
+	if (used === null && window) return theme.fg("counter", `${formatFooterTokens(window).toUpperCase()} ctx`);
 	const counts = `${used === null ? "?" : formatFooterTokens(used).toUpperCase()}/${window ? formatFooterTokens(window).toUpperCase() : "unknown"}`;
 	const percent = contextUsagePercent(context);
 	if (!window) return theme.fg("counter", counts);

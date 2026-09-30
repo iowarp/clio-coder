@@ -537,8 +537,9 @@ export function buildWelcomeDashboardLines(
 			theme.fg(stats.projectContext === "stale" || stats.projectContext === "malformed" ? "warning" : "body", awareness),
 		),
 		"",
-		theme.style("sectionHeading", "AI usage · used", { bold: true }),
-		...subscriptionRows.map((row, index) => row || (index === 0 ? theme.fg("annotation", "No account reading yet") : "")),
+		// "· used" labels the percentages; with no reading there is nothing to label.
+		theme.style("sectionHeading", subscriptionRows.some(Boolean) ? "AI usage · used" : "AI usage", { bold: true }),
+		...subscriptionRows.map((row, index) => row || (index === 0 ? theme.fg("annotation", "No usage data") : "")),
 		showHints
 			? theme.fg("annotation", "/usage for limits and reset times")
 			: theme.fg("guidance", "/help  Commands and shortcuts · /usage  Limits"),
