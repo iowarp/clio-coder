@@ -2625,6 +2625,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// Safety net for thrown paths where agent_end never delivered;
 				// no-op when the agent_end flush already ran.
 				context.flushReconciledSnapshot();
+				persistence.deferTraceClose(false);
 				// Runs on every exit path (normal settle, catch-arm returns) so
 				// a steer the engine never drained still reaches the model.
 				if (!(await queues.resubmitStrandedSteers())) await queues.resubmitRequestContinuation();

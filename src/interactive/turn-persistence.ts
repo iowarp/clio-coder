@@ -73,6 +73,15 @@ export interface TurnPersistenceDeps {
 export interface TurnPersistence {
 	currentTurnUsage(): TokenSplit;
 	lastTracedTurn(): { runId: string; usage: SessionTurnUsage | null } | null;
+	/**
+	 * While an engine run is active, a final assistant row only schedules the
+	 * trace close: the run may still carry a held reply's steer or a middleware
+	 * continuation, whose calls belong to the same operator turn. Turning the
+	 * deferral off flushes a scheduled close.
+	 */
+	deferTraceClose(active: boolean): void;
+	/** The run continues past the row that scheduled the close; keep the trace open. */
+	continueTracedTurn(): void;
 	traceEventForRun(runId: string, input: TurnTraceEventInput): void;
 	/** True when this exact assistant message object was already persisted. */
 	wasPersisted(message: unknown): boolean;
@@ -185,7 +194,15 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		deps.observability?.recordSessionTurn(record);
 	};
 
+	let traceCloseDeferred = false;
+	let scheduledTraceClose: { status: "success" | "fail"; error: string | null } | null = null;
+	const closeTracedTurnAtFinalRow = (status: "success" | "fail", error: string | null): void => {
+		if (traceCloseDeferred) scheduledTraceClose = { status, error };
+		else finishTracedTurn(status, error);
+	};
+
 	const finishTracedTurn = (status: "success" | "fail", error: string | null): void => {
+		scheduledTraceClose = null;
 		if (traceRunId === null) return;
 		mirror({ kind: "finish", runId: traceRunId, status, error, usage: traceUsage, at: traceNow() });
 		// Settlement runs after the assessor; keep the facts even though the trace is already closed.
@@ -312,7 +329,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		// the same signal either way rather than on persistence.
 		const turnContinues = hasStructuredToolCall(message);
 		if (!deps.session || !hasPersistableAssistantContent(payload, failure)) {
-			if (!turnContinues) finishTracedTurn(failure ? "fail" : "success", failure?.errorMessage ?? null);
+			if (!turnContinues) closeTracedTurnAtFinalRow(failure ? "fail" : "success", failure?.errorMessage ?? null);
 			return;
 		}
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
@@ -332,7 +349,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			},
 			tokens: traceUsage?.totalTokens ?? null,
 		});
-		if (!turnContinues) finishTracedTurn(failure ? "fail" : "success", failure?.errorMessage ?? null);
+		if (!turnContinues) closeTracedTurnAtFinalRow(failure ? "fail" : "success", failure?.errorMessage ?? null);
 		return turn.id;
 	};
 
@@ -342,6 +359,14 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				? null
 				: { runId: lastTracedTurn.runId, usage: lastTracedTurn.usage === null ? null : { ...lastTracedTurn.usage } },
 		traceEventForRun,
+		deferTraceClose(active) {
+			traceCloseDeferred = active;
+			const scheduled = scheduledTraceClose;
+			if (!active && scheduled !== null) finishTracedTurn(scheduled.status, scheduled.error);
+		},
+		continueTracedTurn() {
+			scheduledTraceClose = null;
+		},
 		currentTurnUsage() {
 			const usage = traceUsage ?? lastTracedTurn?.usage;
 			return {
