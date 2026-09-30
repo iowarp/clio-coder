@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { type BuiltinToolName, isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import { type ActionClass, classify } from "../safety/action-classifier.js";
+import { type WorkerPermissionDeclaration, workerPermissionDeclarationErrors } from "../safety/worker-permit.js";
 import type { AgentBudget, AgentRecipe, AgentToolRequirement } from "./recipe.js";
 import type { ResultContract } from "./result-contract.js";
 
@@ -105,6 +106,7 @@ export interface AgentSpec {
 	skills: ReadonlyArray<string>;
 	resultContract: ResultContract;
 	product?: AgentProduct;
+	permissions?: WorkerPermissionDeclaration;
 	budget: AgentBudget;
 	body: string;
 }
@@ -242,6 +244,7 @@ export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 		skills: recipe.skills,
 		resultContract: recipe.resultContract,
 		...(recipe.product !== undefined ? { product: recipe.product } : {}),
+		...(recipe.permissions !== undefined ? { permissions: recipe.permissions } : {}),
 		budget: recipe.budget,
 		body: recipe.body,
 	};
@@ -272,6 +275,11 @@ export function agentSpecFingerprint(spec: AgentSpec): string {
 		skills: [...spec.skills].sort(),
 		resultContract: spec.resultContract,
 		budget: spec.budget,
+		// Declared permissions change what a route may do. Absent keeps every
+		// existing fingerprint, and the measured history behind it, unchanged.
+		...(spec.permissions !== undefined
+			? { permissions: { git: spec.permissions.git, asks: spec.permissions.asks } }
+			: {}),
 		body: createHash("sha256").update(spec.body, "utf8").digest("hex"),
 	});
 	return createHash("sha256").update(payload, "utf8").digest("hex");
@@ -350,6 +358,9 @@ export function agentSpecPolicyErrors(spec: AgentSpec): string[] {
 	}
 	if (spec.skills.length > 0 && !spec.tools.includes(ToolNames.Context)) {
 		errors.push(`agent '${spec.id}' declares skills but does not expose context`);
+	}
+	for (const error of workerPermissionDeclarationErrors(spec.capabilityClass, spec.permissions)) {
+		errors.push(`agent '${spec.id}' ${error}`);
 	}
 	return errors;
 }

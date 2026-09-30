@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { WorkerPermissionDeclaration } from "../safety/worker-permit.js";
 import type { ResultContract } from "./result-contract.js";
 import type {
 	AgentAudience,
@@ -130,6 +131,8 @@ export interface AgentRecipe {
 	budget: AgentBudget;
 	resultContract: ResultContract;
 	product?: AgentProduct;
+	/** Standing allowance for the worker permit: `git` and `asks`. Absent keeps git inspect and settings routing. */
+	permissions?: WorkerPermissionDeclaration;
 	tags: ReadonlyArray<string>;
 	source: "builtin" | "plugin" | "user" | "project";
 	filepath: string;

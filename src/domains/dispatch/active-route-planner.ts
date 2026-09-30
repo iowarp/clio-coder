@@ -55,6 +55,10 @@ export function routeValidationProjection(
 		taskWorktree,
 		runIdHint,
 		taskWorktreeDestination,
+		// Host-owned permit narrowing and a retry's inherited cap; a model
+		// must not be able to author either.
+		permitNarrowing,
+		inheritedPermitAllowance,
 		...raw
 	} = request;
 	const awaitingEnvelope =
@@ -85,6 +89,8 @@ export function routeValidationProjection(
 			...(taskWorktree !== undefined ? { taskWorktree } : {}),
 			...(runIdHint !== undefined ? { runIdHint } : {}),
 			...(taskWorktreeDestination !== undefined ? { taskWorktreeDestination } : {}),
+			...(permitNarrowing !== undefined ? { permitNarrowing: { ...permitNarrowing } } : {}),
+			...(inheritedPermitAllowance !== undefined ? { inheritedPermitAllowance: { ...inheritedPermitAllowance } } : {}),
 			...(awaitingEnvelope ? { failover: "approved" as const } : {}),
 		}),
 	};

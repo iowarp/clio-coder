@@ -233,7 +233,7 @@ const requiredRecipeKeys = new Set([
 	"resultContract",
 	"tags",
 ]);
-const optionalRecipeKeys = new Set(["product"]);
+const optionalRecipeKeys = new Set(["product", "permissions"]);
 const allowedRecipeKeys = new Set([...requiredRecipeKeys, ...optionalRecipeKeys]);
 // Builtin recipes ship from their one canonical location, src/domains/agents/
 // builtins/, which is what src/domains/agents/extension.ts reads at runtime.

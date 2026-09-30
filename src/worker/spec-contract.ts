@@ -18,12 +18,17 @@ import type {
 	ThinkingLevel,
 } from "../domains/providers/index.js";
 import type { ProtectedArtifact } from "../domains/safety/protected-artifacts.js";
+import type { WorkerPermit } from "../domains/safety/worker-permit.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import { parseWorkerContextSeed } from "./context-seed.js";
 import { INTERNAL_HELPER_RESULT_KINDS } from "./protocol.js";
 
-/** Current attested, budget-bearing dispatch document emitted by this release. */
-export const WORKER_SPEC_VERSION = 5;
+/**
+ * Current attested, budget-bearing dispatch document emitted by this release.
+ * Version 6 carries the immutable worker permit; a version 5 worker would
+ * ignore it, so the older document is refused rather than half-honored.
+ */
+export const WORKER_SPEC_VERSION = 6;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 2;
 export const WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1;
 
@@ -163,6 +168,11 @@ interface WorkerSpecFields {
 	 * deny/fail on timeout). Default "deny".
 	 */
 	onPermission?: "deny" | "fail" | "escalate";
+	/**
+	 * The host's immutable permit for this attempt: hard ceiling and standing
+	 * allowance. `onPermission`, `readOnly` and `writeRoots` must agree with it.
+	 */
+	permit: WorkerPermit;
 	/**
 	 * Escalation bounds, honored only when onPermission="escalate". A parked
 	 * call that receives no operator decision within timeoutMs applies fallback.
@@ -653,6 +663,61 @@ function validateProtectedArtifactState(value: unknown): void {
 	}
 }
 
+const PERMIT_CAPABILITY_CLASSES = [
+	"read-only",
+	"artifact-write",
+	"workspace-edit",
+	"verification",
+	"orchestration",
+	"internal",
+] as const;
+
+function exactKeys(record: Record<string, unknown>, keys: ReadonlyArray<string>, source: string): void {
+	for (const key of Object.keys(record)) {
+		if (!keys.includes(key)) throw new Error(`${source}.${key} is unknown`);
+	}
+}
+
+/**
+ * Strict shape of the permit plus its agreement with the routing and
+ * restriction fields the worker enforces, so a document cannot carry one
+ * authority in its permit and another in the fields that act on it.
+ */
+function validateWorkerPermit(spec: Record<string, unknown>): void {
+	const permit = readRecord(spec.permit, "WorkerSpec.permit");
+	exactKeys(permit, ["version", "ceiling", "allowance", "digest"], "WorkerSpec.permit");
+	if (permit.version !== 1) throw new Error("WorkerSpec.permit.version must be 1");
+	const digest = readString(permit.digest, "WorkerSpec.permit.digest");
+	if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error("WorkerSpec.permit.digest must be a sha256 hex digest");
+	const ceiling = readRecord(permit.ceiling, "WorkerSpec.permit.ceiling");
+	exactKeys(ceiling, ["capabilityClass", "tools", "readOnly", "writeRoots"], "WorkerSpec.permit.ceiling");
+	readEnum(ceiling.capabilityClass, "WorkerSpec.permit.ceiling.capabilityClass", PERMIT_CAPABILITY_CLASSES);
+	readStringArray(ceiling.tools, "WorkerSpec.permit.ceiling.tools");
+	if (typeof ceiling.readOnly !== "boolean") throw new Error("WorkerSpec.permit.ceiling.readOnly must be a boolean");
+	const roots = readStringArray(ceiling.writeRoots, "WorkerSpec.permit.ceiling.writeRoots");
+	const allowance = readRecord(permit.allowance, "WorkerSpec.permit.allowance");
+	exactKeys(allowance, ["git", "asks", "approvalAuthority"], "WorkerSpec.permit.allowance");
+	readEnum(allowance.git, "WorkerSpec.permit.allowance.git", ["inspect", "worktree"] as const);
+	const asks = readEnum(allowance.asks, "WorkerSpec.permit.allowance.asks", ["deny", "fail", "main"] as const);
+	const authority = readEnum(allowance.approvalAuthority, "WorkerSpec.permit.allowance.approvalAuthority", [
+		"main",
+		"operator",
+	] as const);
+	const expectedMode = asks === "main" ? (authority === "operator" ? "escalate" : "deny") : asks;
+	if ((spec.onPermission ?? "deny") !== expectedMode) {
+		throw new Error(
+			`WorkerSpec.onPermission ${String(spec.onPermission ?? "deny")} disagrees with the permit allowance (expected ${expectedMode})`,
+		);
+	}
+	if ((spec.readOnly === true) !== ceiling.readOnly) {
+		throw new Error("WorkerSpec.readOnly disagrees with the permit ceiling");
+	}
+	const specRoots = spec.writeRoots === undefined ? [] : readStringArray(spec.writeRoots, "WorkerSpec.writeRoots");
+	if (specRoots.length !== roots.length || specRoots.some((root, index) => root !== roots[index])) {
+		throw new Error("WorkerSpec.writeRoots disagree with the permit ceiling");
+	}
+}
+
 export function parseWorkerSpec(value: unknown): WorkerSpec {
 	const spec = readRecord(value, "WorkerSpec");
 	if (spec.specVersion !== WORKER_SPEC_VERSION) {
@@ -770,6 +835,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	if (spec.readOnly !== undefined && typeof spec.readOnly !== "boolean") {
 		throw new Error("WorkerSpec.readOnly must be a boolean");
 	}
+	validateWorkerPermit(spec);
 	if (spec.ledger !== undefined) {
 		const ledger = readRecord(spec.ledger, "WorkerSpec.ledger");
 		readString(ledger.id, "WorkerSpec.ledger.id");

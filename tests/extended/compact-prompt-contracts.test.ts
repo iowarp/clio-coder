@@ -224,7 +224,7 @@ describe("compact prompt contracts", () => {
 			match(compiled.systemPrompt, /The assigned task is authoritative/u);
 			strictEqual(occurrences(compiled.systemPrompt, WORKER_CLAIM_GUIDANCE), 1);
 			match(compiled.systemPrompt, /"mutatedPaths":\[\],"validations"/u);
-			match(compiled.systemPrompt, /Autonomy: default\./u);
+			match(compiled.systemPrompt, /Permit: git inspect, asks fail\./u);
 		}
 
 		match(

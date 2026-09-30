@@ -8,6 +8,7 @@ import { TOOL_RESULT_TRUST_CONTRACT } from "../../core/untrusted-content.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { directSurfaceNames } from "../../tools/surface.js";
 import { isAutonomyLevel, modelMayActivateSkills } from "../safety/autonomy.js";
+import { askRouteForMode, type WorkerPermit, workerPermitPromptLine } from "../safety/worker-permit.js";
 import { ceilChars } from "../session/context-accounting.js";
 import { DEMO_GUIDANCE } from "./demo-guidance.js";
 import type { FragmentTable, LoadedFragment } from "./fragment-loader.js";
@@ -108,6 +109,11 @@ export interface WorkerPromptInputs {
 	hasBoundSkills: boolean;
 	/** Effective approval routing for this worker run. */
 	onPermission: "deny" | "fail" | "escalate";
+	/**
+	 * The immutable permit this run was admitted under. Absent for direct
+	 * compiler callers, which get the default permit their routing implies.
+	 */
+	permit?: Pick<WorkerPermit, "ceiling" | "allowance">;
 	/** One stable persona: the recipe body or bounded override, including bound-skill mechanics. */
 	persona: RenderedPromptFragment;
 	/**
@@ -605,8 +611,22 @@ export function workerSafetyOneLiner(mode: WorkerPromptInputs["onPermission"]): 
 	return `workspace edits and recognized commands run; other commands require approval. ${workerPermissionSentence(mode)}`;
 }
 
+/**
+ * The worker's own authority line. A worker never runs at an autonomy level;
+ * it runs under a permit, so the prompt names the permit (Phase B).
+ */
+export function workerPermitLine(
+	permit: WorkerPromptInputs["permit"],
+	onPermission: WorkerPromptInputs["onPermission"],
+): string {
+	if (permit !== undefined) {
+		return workerPermitPromptLine({ capabilityClass: permit.ceiling.capabilityClass, ...permit.allowance });
+	}
+	return workerPermitPromptLine({ git: "inspect", ...askRouteForMode(onPermission) });
+}
+
 function renderWorkerSafetySection(safetyFragment: LoadedFragment, inputs: WorkerPromptInputs): string {
-	const oneLine = `Autonomy: default. ${workerSafetyOneLiner(inputs.onPermission)}`;
+	const oneLine = `${workerPermitLine(inputs.permit, inputs.onPermission)} ${workerSafetyOneLiner(inputs.onPermission)}`;
 	const body = safetyFragment.body.trim();
 	return body.length > 0 ? `${oneLine}\n\n${body}` : oneLine;
 }

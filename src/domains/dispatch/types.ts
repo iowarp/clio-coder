@@ -696,6 +696,15 @@ export interface RunReceiptSafetySummary {
 	};
 	/** Worker runtime limitations. Worker receipts always carry it; main-agent receipts omit it. */
 	runtimeLimitations?: ReadonlyArray<string>;
+	/** The immutable permit a native, SDK or subprocess worker ran under. Main-agent and ACP receipts omit it. */
+	permit?: {
+		version: number;
+		digest: string;
+		capabilityClass: string;
+		git: "inspect" | "worktree";
+		asks: "deny" | "fail" | "main";
+		approvalAuthority: "main" | "operator";
+	};
 }
 
 export interface RunReceiptReproducibility {

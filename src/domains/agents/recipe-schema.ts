@@ -1,3 +1,4 @@
+import { parseWorkerPermissionDeclaration } from "../safety/worker-permit.js";
 import { type AgentRecipe, type AgentToolRequirement, parseAgentBudget } from "./recipe.js";
 import { parseResultContract } from "./result-contract.js";
 import {
@@ -38,7 +39,7 @@ export const RECIPE_KEYS = [
 	"tags",
 ] as const;
 
-export const OPTIONAL_RECIPE_KEYS = ["product"] as const;
+export const OPTIONAL_RECIPE_KEYS = ["product", "permissions"] as const;
 const ALL_RECIPE_KEYS = [...RECIPE_KEYS, ...OPTIONAL_RECIPE_KEYS] as const;
 
 export interface ParseRecipeSchemaInput {
@@ -156,6 +157,22 @@ export function parseAgentRecipeSchema(input: ParseRecipeSchemaInput): AgentReci
 	const parsedTools = parseTools(frontmatter.tools, filepath);
 	const budget = parseAgentBudget(frontmatter.budget, filepath);
 	if (budget === undefined) throw new Error(`agent recipe: ${filepath}: budget is required`);
+	const capabilityClass = enumValue<AgentCapabilityClass>(
+		frontmatter.capabilityClass,
+		`${filepath}: capabilityClass`,
+		isAgentCapabilityClass,
+	);
+	// The worker permit's standing allowance. Strict like every other key, and
+	// `git: worktree` only means something for a workspace-edit worker.
+	const permissions =
+		frontmatter.permissions === undefined
+			? undefined
+			: parseWorkerPermissionDeclaration(frontmatter.permissions, `agent recipe: ${filepath}: permissions`);
+	if (permissions?.git === "worktree" && capabilityClass !== "workspace-edit") {
+		throw new Error(
+			`agent recipe: ${filepath}: permissions.git worktree requires capabilityClass workspace-edit, not ${capabilityClass}`,
+		);
+	}
 	return {
 		version: 1,
 		id: input.id,
@@ -167,11 +184,7 @@ export function parseAgentRecipeSchema(input: ParseRecipeSchemaInput): AgentReci
 		boundSkillPaths: [],
 		audience: parseAudience(frontmatter.audience, input.source, filepath),
 		category: enumValue<AgentCategory>(frontmatter.category, `${filepath}: category`, isAgentCategory),
-		capabilityClass: enumValue<AgentCapabilityClass>(
-			frontmatter.capabilityClass,
-			`${filepath}: capabilityClass`,
-			isAgentCapabilityClass,
-		),
+		capabilityClass,
 		latencyClass: enumValue<AgentLatencyClass>(
 			frontmatter.latencyClass,
 			`${filepath}: latencyClass`,
@@ -190,6 +203,7 @@ export function parseAgentRecipeSchema(input: ParseRecipeSchemaInput): AgentReci
 		...(frontmatter.product === undefined
 			? {}
 			: { product: enumValue<AgentProduct>(frontmatter.product, `${filepath}: product`, isAgentProduct) }),
+		...(permissions === undefined ? {} : { permissions }),
 		tags: requiredStringArray(frontmatter.tags, `${filepath}: tags`),
 		source: input.source,
 		filepath,

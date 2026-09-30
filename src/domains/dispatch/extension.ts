@@ -99,7 +99,7 @@ import type { ContextContract, ProjectPromptContext, ProjectStructuredContext } 
 import { compileHandbook, selectWorkerHandbook, workerHandbookAudience } from "../context/handbook-units.js";
 import { enabledHarnessExtensionToolNames } from "../extensions/command-tools.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
-import { workerSafetyOneLiner } from "../prompts/compiler.js";
+import { workerPermitLine, workerSafetyOneLiner } from "../prompts/compiler.js";
 import type { PromptsContract } from "../prompts/contract.js";
 import { selectProjectPreload } from "../prompts/preload.js";
 import { type EffectivePricing, resolveEffectivePricing } from "../providers/catalog.js";
@@ -140,6 +140,7 @@ import {
 	recordToolExecutionEffects,
 } from "../safety/run-effects.js";
 import type { ScopeSpec } from "../safety/scope.js";
+import { resolveWorkerPermit, type WorkerPermit, workerPermissionModeForPermit } from "../safety/worker-permit.js";
 import { SESSION_COST_CEILING_REASON, SessionCostCeilingError } from "../scheduling/budget.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
@@ -400,6 +401,8 @@ interface ActiveRun {
 	resolvePermission?: (requestId: string, decision: "approve" | "deny") => boolean;
 	promise: Promise<void>;
 	recipe: AgentRecipe | null;
+	/** The permit this attempt ran under; a retry inherits it as a cap. Absent for ACP delegation. */
+	permit?: WorkerPermit;
 	startedAt: string;
 	timing: RunPhaseMarks;
 	targetId: string;
@@ -1325,6 +1328,8 @@ export interface WorkerDynamicContext {
 	readOnly?: boolean;
 	/** Effective approval routing; defaults to deny for legacy direct callers. */
 	onPermission?: WorkerPermissionMode | null;
+	/** The permit a mediated worker runs under; the safety line names it instead of an autonomy level. */
+	permit?: Pick<WorkerPermit, "ceiling" | "allowance">;
 	/** Captured authored handbooks; preferred over the legacy structured projection. */
 	projectPrompt?: ProjectPromptContext | null;
 	/** Admitted native read capability; null for an unknown external inventory. */
@@ -1470,7 +1475,9 @@ export function buildDynamicPromptMessages(
 	const autonomy = dynamicContext.autonomy;
 	if (autonomy) {
 		const permission = dynamicContext.onPermission ?? "deny";
-		const body = `Safety posture: autonomy ${autonomy}. ${workerSafetyOneLiner(permission)} Worker permission routing: ${permission}.`;
+		const posture =
+			dynamicContext.permit !== undefined ? workerPermitLine(dynamicContext.permit, permission) : `autonomy ${autonomy}.`;
+		const body = `Safety posture: ${posture} ${workerSafetyOneLiner(permission)} Worker permission routing: ${permission}.`;
 		messages.push({ id: "dispatch-safety-posture", body, contentHash: sha256(body) });
 	}
 	if (dynamicContext.readOnly === true) {
@@ -1649,6 +1656,8 @@ interface DispatchWorkerSpecInput {
 	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
 	/** True when this process routes worker escalations to an operator; see DispatchBundleOptions. */
 	workerPermissionResponder: boolean;
+	/** The immutable permit this attempt was admitted under. */
+	permit: WorkerPermit;
 }
 
 interface DispatchLifecycleStage {
@@ -1684,6 +1693,8 @@ interface DispatchLifecycleStage {
 	/** Read-only recipe admitted against a mutating task; null when the pairing was sound. */
 	capabilityMismatch: CapabilityMismatch | null;
 	readOnly: boolean;
+	/** The immutable permit this attempt was admitted under. */
+	permit: WorkerPermit;
 	budget: WorkerBudget;
 	budgetEnvelope: RunToolBudgetEnvelope;
 	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
@@ -1798,6 +1809,48 @@ function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 }
 
 type WorkerPermissionMode = NonNullable<WorkerSpec["onPermission"]>;
+
+/** The attempt's immutable permit from recipe, settings, task narrowing and any inherited cap. */
+function resolveDispatchPermit(
+	req: DispatchRequest,
+	recipe: AgentRecipe,
+	spec: ReturnType<typeof normalizeAgentSpec>,
+	tools: ReadonlyArray<ToolName>,
+	readOnly: boolean,
+	pathScope: DispatchPathScope,
+	settings: EffectiveSettings,
+): WorkerPermit {
+	const contract = dispatchResultContract(req, recipe);
+	const hostHelper =
+		(spec.audience === "shadow" || spec.audience === "internal") &&
+		contract !== undefined &&
+		contract !== null &&
+		(INTERNAL_HELPER_RESULT_KINDS as readonly string[]).includes(contract.kind);
+	return resolveWorkerPermit({
+		agentId: spec.id,
+		capabilityClass: spec.capabilityClass,
+		tools,
+		...(req.turnConstraints !== undefined ? { turnConstraints: req.turnConstraints } : {}),
+		readOnly,
+		writeRoots: pathScope.writeBoundaries,
+		...(spec.permissions !== undefined ? { declared: spec.permissions } : {}),
+		...(req.permitNarrowing !== undefined ? { narrowing: req.permitNarrowing } : {}),
+		...(req.inheritedPermitAllowance !== undefined ? { inherited: req.inheritedPermitAllowance } : {}),
+		mode: settings?.fleet.permissions.mode ?? "deny",
+		hostHelper,
+	});
+}
+
+function receiptPermitSummary(permit: WorkerPermit): NonNullable<NonNullable<RunReceiptDraft["safety"]>["permit"]> {
+	return {
+		version: permit.version,
+		digest: permit.digest,
+		capabilityClass: permit.ceiling.capabilityClass,
+		git: permit.allowance.git,
+		asks: permit.allowance.asks,
+		approvalAuthority: permit.allowance.approvalAuthority,
+	};
+}
 
 function assertRuntimeCanHonorWorkerPermissionMode(
 	runtime: RuntimeDescriptor,
@@ -2293,6 +2346,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		...(input.req.ledger !== undefined ? { ledger: input.req.ledger } : {}),
 		budget: input.budget,
 		middlewareSnapshot: input.middlewareSnapshot,
+		permit: input.permit,
 	};
 	const protectedArtifactState = frozenProtectedArtifactState(input.protectedArtifactState);
 	assertProtectedArtifactsEnforceable(
@@ -2373,7 +2427,9 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	// with the spec and the worker enforces it within bounded time. Under the
 	// escalate posture the configured timeout/fallback bounds ride along so the
 	// worker still cannot hang when no operator resolves the ask.
-	spec.onPermission = settings?.fleet.permissions.mode ?? "deny";
+	// The permit decides the routing: fleet.permissions.mode is only its
+	// default when the recipe declares no asks route.
+	spec.onPermission = workerPermissionModeForPermit(input.permit.allowance);
 	if (spec.onPermission === "escalate") {
 		const escalation = settings?.fleet.permissions.escalation;
 		// With nobody to answer, an escalation could only ever time out, so the
@@ -3508,6 +3564,8 @@ export function createDispatchBundle(
 			// as an operator pin and freeze every later retry in the chain.
 			failover: failoverModeFor(run.req),
 			requestOrigin: "internal",
+			// A retry starts with no grants and runs no wider than this attempt.
+			...(run.permit !== undefined ? { inheritedPermitAllowance: { ...run.permit.allowance } } : {}),
 			lineage: {
 				parentRunId: run.runId,
 				rootRunId: run.lineage.rootRunId,
@@ -4195,7 +4253,6 @@ export function createDispatchBundle(
 			throw new Error("dispatch: worker route changed during model metadata preparation; request a fresh admission");
 		}
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
-		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.fleet.permissions.mode ?? "deny");
 		const cwd = req.cwd ?? process.cwd();
 		const readOnly = req.readOnly === true || spec.capabilityClass === "read-only";
 		if (target.runtime.kind === "subprocess" && req.denyTools && req.denyTools.length > 0) {
@@ -4213,6 +4270,9 @@ export function createDispatchBundle(
 		);
 		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target, pathScope.writeBoundaries.length > 0);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
+		const permit = resolveDispatchPermit(req, recipe, spec, effectiveTools, readOnly, pathScope, settings);
+		const workerPermissionMode = workerPermissionModeForPermit(permit.allowance);
+		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, workerPermissionMode);
 		const effectiveAdmission: DispatchAdmissionStage = {
 			...admission,
 			allowedTools: effectiveTools,
@@ -4229,7 +4289,8 @@ export function createDispatchBundle(
 			toolPromptHints: toolPromptHintsForNames(effectiveTools, hasBoundSkills ? "bound-worker" : "worker"),
 			hasCanonicalContext,
 			hasBoundSkills,
-			onPermission: settings?.fleet.permissions.mode ?? "deny",
+			onPermission: workerPermissionMode,
+			permit,
 			persona: {
 				id: `persona.${recipe.id}`,
 				relPath: recipe.filepath,
@@ -4264,7 +4325,8 @@ export function createDispatchBundle(
 			cwd,
 			projectContextTier: tier,
 			autonomy: "default",
-			onPermission: settings?.fleet.permissions.mode ?? "deny",
+			onPermission: workerPermissionMode,
+			permit,
 			projectPrompt,
 			projectReadTools:
 				target.runtime.kind === "subprocess"
@@ -4329,6 +4391,7 @@ export function createDispatchBundle(
 			operatorProfileApplied: compiledWorkerPrompt.operatorProfileApplied ?? false,
 			capabilityMismatch,
 			readOnly,
+			permit,
 			budget: workerBudgetFromEnvelope(budgetEnvelope),
 			budgetEnvelope,
 			...(settings ? { settings } : {}),
@@ -5533,6 +5596,7 @@ export function createDispatchBundle(
 					budget: lifecycle.budget,
 					...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
 					workerPermissionResponder: options?.workerPermissionResponder === true,
+					permit: lifecycle.permit,
 				},
 				config ?? undefined,
 			);
@@ -6184,6 +6248,7 @@ export function createDispatchBundle(
 				() => undefined,
 			),
 			recipe: lifecycle.recipe,
+			permit: lifecycle.permit,
 			startedAt,
 			timing,
 			targetId: lifecycle.target.target.id,
@@ -6370,6 +6435,7 @@ export function createDispatchBundle(
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
 					...(lifecycle.readOnly ? { readOnly: true as const } : {}),
+					permit: receiptPermitSummary(lifecycle.permit),
 					toolTelemetry: {
 						coverage: toolTelemetryCoverage,
 						ingestionErrors: telemetryIngestionErrors,
@@ -7114,7 +7180,18 @@ export function createDispatchBundle(
 			pathScope.writeBoundaries.length > 0,
 		);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
-		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.fleet.permissions.mode ?? "deny");
+		// Preview refuses exactly what dispatch would: a widening narrowing, an
+		// orchestration worker, or a route the runtime cannot honor.
+		const previewPermit = resolveDispatchPermit(
+			req,
+			recipe,
+			agentSpec,
+			effectiveTools,
+			req.readOnly === true || agentSpec.capabilityClass === "read-only",
+			pathScope,
+			settings,
+		);
+		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, workerPermissionModeForPermit(previewPermit.allowance));
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema, effectiveTools.length);
 		assertWriteRootsEnforceable(target.runtime, pathScope.writeBoundaries);
 		assertProtectedArtifactsEnforceable(

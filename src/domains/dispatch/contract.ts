@@ -8,6 +8,7 @@ import type { AgentAutomationAuthority, AgentSpec } from "../agents/spec.js";
 import type { WorkerContextSeed } from "../context/worker/contract.js";
 import type { CostProvenance } from "../providers/index.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
+import type { WorkerPermissionDeclaration, WorkerPermitAllowance } from "../safety/worker-permit.js";
 import type { AgentTaskFeatures } from "./agent-candidates.js";
 import type { AssignmentId, DispatchAssignment } from "./assignment.js";
 import type { DurableAssignmentRecord } from "./assignment-store.js";
@@ -62,6 +63,14 @@ export interface DispatchRequest extends JobSpec {
 	};
 	/** Run identity allocated before task worktree creation. Model arguments cannot author it. */
 	runIdHint?: string;
+	/**
+	 * Host-requested per-task permit narrowing (worktree to inspect, main to
+	 * deny or fail). A request wider than the recipe and settings allow is an
+	 * admission error. Never model-authored.
+	 */
+	permitNarrowing?: WorkerPermissionDeclaration;
+	/** The retried attempt's permit allowance, which caps this attempt. Set by retry scheduling only. */
+	inheritedPermitAllowance?: WorkerPermitAllowance;
 	/** Parent checkout frozen by plan approval for task worktree application. */
 	taskWorktreeDestination?: string;
 	/**
