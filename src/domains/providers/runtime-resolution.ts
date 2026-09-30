@@ -14,6 +14,7 @@ import {
 	resolveTargetRuntimeCapabilities,
 } from "./model-runtime-capabilities.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
+import { VALID_THINKING_LEVELS } from "./types/capability-flags.js";
 import type { ContextWindowSlots } from "./types/context-window-slots.js";
 import type { CostProvenance } from "./types/cost-provenance.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
@@ -285,11 +286,17 @@ function appendThinkingDiagnostics(
 ): void {
 	const thinking = resolved.thinking;
 	if (thinking.effectiveLevel !== requested) {
+		// A profile that lacks the requested rung and carries a higher one maps up to it (the
+		// Qwopus route rejects `high` and serves `xhigh`). The operator cannot act on that, so it
+		// stays info and out of start-up notices; a mapping down or to a switch still warns.
+		const order: ReadonlyArray<ThinkingLevel> = VALID_THINKING_LEVELS;
+		const mappedUp = order.indexOf(thinking.effectiveLevel) > order.indexOf(requested);
 		diagnostics.push(
 			diagnostic(
-				"warning",
+				mappedUp ? "info" : "warning",
 				"thinking-coerced",
-				`thinking ${requested} resolved to ${thinking.display} for ${resolved.runtimeId}/${resolved.modelId}`,
+				`thinking ${requested} resolved to ${thinking.display} for ${resolved.runtimeId}/${resolved.modelId}` +
+					(mappedUp ? `; the model profile supports ${thinking.supportedLevels.join(", ")}` : ""),
 			),
 		);
 	}
