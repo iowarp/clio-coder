@@ -532,7 +532,10 @@ async function runDispatch(
 	// throw site.
 	configureRunEventJournal(baseSettings.fleet.history.journal);
 	effectiveSettings = structuredClone(baseSettings);
-	if (parsed.autonomy !== undefined) effectiveSettings.safety.autonomy = parsed.autonomy;
+	// D1: headless takes yolo only from --autonomy on the command line, and the
+	// parser rejects --autonomy with --agent, so this path never takes it. Pin
+	// the clone to default so a settings-file yolo cannot reach it either.
+	effectiveSettings.safety.autonomy = "default";
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");
 	if (!dispatch) {
 		process.stderr.write("dispatch domain unavailable\n");
