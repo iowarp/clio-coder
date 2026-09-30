@@ -1430,7 +1430,7 @@ const RG_VALUE_LONG = new Set([
  * knows are accepted; any other option, `-f`, or a stdin `-` operand is
  * ambiguous and refused.
  */
-function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string): boolean {
+function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string, piped: boolean): boolean {
 	const positionals: string[] = [];
 	let explicitPattern = false;
 	let optionsEnded = false;
@@ -1477,7 +1477,9 @@ function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string): boolean 
 		return false;
 	}
 	const operands = explicitPattern ? positionals : positionals.slice(1);
-	if (operands.length === 0) return false;
+	if (!explicitPattern && positionals.length === 0) return false;
+	// Fed by a pipe and naming no file, rg reads stdin and opens nothing.
+	if (operands.length === 0) return piped;
 	return operands.every((operand) => {
 		try {
 			return statSync(path.resolve(cwd, operand)).isFile();
@@ -1543,6 +1545,8 @@ function readOnlyInspectionRule(
 	cwd: string,
 	workspaceRoot: string,
 	readScope: ReadScopeInputs,
+	/** The join in front of this segment is `|`, so its stdin is the previous command's output. */
+	piped = false,
 ): string | null {
 	const [command, ...args] = words.map((word) => word.value);
 	if (command === undefined) return null;
@@ -1551,7 +1555,7 @@ function readOnlyInspectionRule(
 	// real path, so a word carrying one is never recognized.
 	if (words.some((word) => hasUnquotedExpansion(source.slice(word.start, word.end)))) return null;
 	if (GREP_FAMILY.has(command) && recursesDirectories(args)) return null;
-	if (command === "rg" && !rgSearchesOnlyFiles(args, cwd)) return null;
+	if (command === "rg" && !rgSearchesOnlyFiles(args, cwd, piped)) return null;
 	if (command === "sed") {
 		if (!args.includes("-n")) return null;
 		let sawScript = false;
@@ -1722,7 +1726,9 @@ function recognizeCommandChain(
 		}
 		// Quoted words stay whole here (`find . -name "*.ts"`), which the
 		// re-rendered allowlist string above cannot express.
-		const inspections = cwds.map((from) => readOnlyInspectionRule(segment, command, from, workspaceRoot, readScope));
+		const inspections = cwds.map((from) =>
+			readOnlyInspectionRule(segment, command, from, workspaceRoot, readScope, joins[index] === "|"),
+		);
 		const inspection = inspections.every((rule) => rule !== null) ? inspections[0] : null;
 		if (inspection !== null && inspection !== undefined) {
 			ruleIds.push(inspection);
