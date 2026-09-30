@@ -17,6 +17,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { stripAuthoredTrailers } from "../core/commit-message.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { currentProcessLease, ownerIsAlive, type ProcessLease, validProcessLease } from "./process-lease.js";
 import { diskWorktreeParent } from "./worktree-root.js";
@@ -618,7 +619,12 @@ export function applyTaskWorktree(input: {
 	const before = checkTaskWorktreeHead(worktree);
 	if (!before.ok) return headMovedReceipt(worktree, input.apply, before.detail);
 	const taskLine = `Clio Coder task ${worktree.runId}`;
-	const authored = input.commitMessage?.trim();
+	// The validated message is already stripped; this is the sink, and only
+	// Clio's managed hook may write trailers onto the operator's branch.
+	const authored =
+		input.commitMessage === undefined || input.commitMessage === null
+			? undefined
+			: stripAuthoredTrailers(input.commitMessage);
 	commitWorktreePath(
 		worktree.path,
 		COMMIT_IDENTITY,

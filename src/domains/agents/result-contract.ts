@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { stripAuthoredTrailers } from "../../core/commit-message.js";
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import { INTERNAL_HELPER_RESULT_KINDS } from "../../worker/protocol.js";
 import { AGENT_AUTOMATION_AUTHORITIES, type AgentAutomationAuthority } from "./spec.js";
@@ -1406,7 +1407,10 @@ export function resultContractAuthorship(contract: ResultContract, output: strin
 		const raw = parsed.value[field];
 		if (typeof raw !== "string") return null;
 		const normalized = normalizeAuthored(raw);
-		return normalized.length === 0 ? null : normalized;
+		// Only Clio's managed prepare-commit-msg hook writes trailers. A worker
+		// typing `Clio-Evidence:` or `Co-authored-by:` must not reach the log.
+		const authored = field === "commitMessage" ? stripAuthoredTrailers(normalized) : normalized;
+		return authored.length === 0 ? null : authored;
 	};
 	return { commitMessage: read("commitMessage"), summary: read("summary") };
 }
