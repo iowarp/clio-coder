@@ -34,6 +34,9 @@ export function resolveTurnOutputReserve(agentRuntime: AgentRuntime, inputTokens
 			contextWindow: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
 			inputTokens,
 		},
-		recommendedOutputTokens(agentRuntime.agent.state.model),
+		recommendedOutputTokens(
+			agentRuntime.agent.state.model,
+			agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
+		),
 	);
 }

@@ -3,11 +3,7 @@ import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domain
 import { createWorkerObservationStore } from "../domains/context/worker/recall.js";
 import { seededWorkerMessages } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
-import {
-	estimateInputTokensFromContext,
-	recommendedOutputTokens,
-	resolveReservedOutputTokens,
-} from "./apis/output-budget.js";
+import { recommendedOutputTokens, resolvePressureOutputReserve } from "./apis/output-budget.js";
 import { resolvedRequestContext } from "./context.js";
 import { retryStreamOnceOnOverflow } from "./overflow-retry-stream.js";
 /**
@@ -936,14 +932,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				contextWindow: window,
 				threshold: workerSettings.context.compaction.threshold,
 				autoEvict: workerSettings.context.compaction.auto && workerSettings.context.workingSet.enabled,
-				outputReserve: resolveReservedOutputTokens(
+				outputReserve: resolvePressureOutputReserve(
 					currentModel.maxTokens,
-					{
-						api: currentModel.api,
-						contextWindow: window,
-						inputTokens: estimateInputTokensFromContext(currentContext),
-					},
-					recommendedOutputTokens(currentModel),
+					{ api: currentModel.api, contextWindow: window },
+					recommendedOutputTokens(currentModel, window),
 				),
 			};
 			let messages: AgentMessage[];
