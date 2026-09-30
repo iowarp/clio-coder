@@ -1,5 +1,6 @@
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { steerToolSurface } from "./steer-surface.js";
 
@@ -7,7 +8,11 @@ import { steerToolSurface } from "./steer-surface.js";
  * The steer tool: control a running dispatched worker. action=guide injects a
  * steering message the worker sees at its next turn boundary (native workers
  * only; the dispatch contract's stdin channel). action=cancel terminates the
- * run cleanly; the receipt records the cancellation.
+ * run cleanly; the receipt records the cancellation. action=approve and
+ * action=deny answer one worker permission request routed to the main agent
+ * (Phase D): the request id is looked up in the dispatch domain's grant
+ * broker, never trusted from the arguments, and approval is admitted there as
+ * the main agent's own call.
  *
  * Both act only on runs this session dispatched. The run ledger and the
  * assignment store are machine-wide, and a cancel aimed at another process's
@@ -19,6 +24,8 @@ const TERMINAL_STATUSES = new Set(["completed", "failed", "interrupted", "stale"
 
 export interface SteerToolDeps {
 	dispatch: DispatchContract;
+	/** The main agent's effective autonomy; approval below yolo goes to the operator or is denied. */
+	getAutonomy?: () => AutonomyLevel;
 }
 
 /** The refusal for a run or assignment this session did not dispatch, or null when it did. */
@@ -90,6 +97,50 @@ function cancel(deps: SteerToolDeps, runId: string): ToolResult {
 	};
 }
 
+async function decideGrant(
+	deps: SteerToolDeps,
+	runId: string,
+	action: "approve" | "deny",
+	requestId: string,
+	options: ToolInvokeOptions | undefined,
+): Promise<ToolResult> {
+	const grants = deps.dispatch.grants;
+	if (grants === undefined) {
+		return { kind: "error", message: "steer: worker permission requests are not available in this context" };
+	}
+	if (requestId.length === 0) {
+		return { kind: "error", message: `steer: action=${action} requires request_id from the dispatch or monitor output` };
+	}
+	const outcome = await grants.decideAsMain({
+		requestId,
+		runId,
+		decision: action,
+		sessionId: options?.sessionId ?? null,
+		autonomy: deps.getAutonomy?.() ?? "default",
+		...(options?.turnConstraints !== undefined ? { turnConstraints: options.turnConstraints } : {}),
+		...(options?.signal !== undefined ? { signal: options.signal } : {}),
+	});
+	if (!outcome.ok) {
+		return {
+			kind: "error",
+			message: `steer: ${outcome.message}`,
+			details: { action, runId, requestId, ...(outcome.view !== undefined ? { request: { ...outcome.view } } : {}) },
+		};
+	}
+	return {
+		kind: "ok",
+		output: `${outcome.message}. Follow the run with monitor(mode="wait", run_id="${runId}").`,
+		details: {
+			action,
+			runId,
+			requestId,
+			decision: outcome.decision,
+			decidedBy: outcome.decidedBy,
+			request: { ...outcome.view },
+		},
+	};
+}
+
 export function createSteerTool(deps: SteerToolDeps): ToolSpec {
 	return {
 		...steerToolSurface,
@@ -97,11 +148,17 @@ export function createSteerTool(deps: SteerToolDeps): ToolSpec {
 			const runId = typeof args.run_id === "string" ? args.run_id.trim() : "";
 			if (runId.length === 0) return { kind: "error", message: "steer: missing run_id argument" };
 			const action = typeof args.action === "string" ? args.action : "";
-			if (action !== "guide" && action !== "cancel") {
-				return { kind: "error", message: `steer: action must be guide or cancel; got '${action}'` };
+			if (action !== "guide" && action !== "cancel" && action !== "approve" && action !== "deny") {
+				return {
+					kind: "error",
+					message: `steer: action must be guide or cancel; got '${action}' (approve and deny answer a worker permission request with request_id)`,
+				};
 			}
 			const foreign = foreignRunError(deps, runId, options);
 			if (foreign !== null) return foreign;
+			if (action === "approve" || action === "deny") {
+				return decideGrant(deps, runId, action, typeof args.request_id === "string" ? args.request_id.trim() : "", options);
+			}
 			if (action === "guide") {
 				return guide(deps, runId, typeof args.message === "string" ? args.message.trim() : "");
 			}

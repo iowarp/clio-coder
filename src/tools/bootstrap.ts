@@ -128,7 +128,12 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		});
 		registry.register({
 			...builtin(
-				lazyTool(steerToolSurface, async () => (await import("./steer.js")).createSteerTool({ dispatch })),
+				lazyTool(steerToolSurface, async () =>
+					(await import("./steer.js")).createSteerTool({
+						dispatch,
+						...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}),
+					}),
+				),
 				{
 					path: "src/tools/steer.ts",
 					scope: "core",
