@@ -958,7 +958,9 @@ include:
   `worker_final_output_missing` when an otherwise successful worker exits
   without a nonempty receipt-sealed final answer and
   `host_verification_rejected` when a declared host check rejects the settled
-  tree. Both suppress automatic retry.
+  tree. `merge_withheld` marks a run whose task worktree was preserved instead
+  of merged because the worker's own report lists a failing validation. All
+  three suppress automatic retry.
 - `routingIntent`, `routeDecision`, and `quality`: the normalized hard bounds,
   complete current-policy decision, exact execution role, route estimate and
   readiness evidence, and authenticated quality sources.

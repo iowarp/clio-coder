@@ -6296,7 +6296,8 @@ export function createDispatchBundle(
 				event.type === "clio_coder_run_outcome" &&
 				isRunOutcomeCode(event.payload?.outcomeCode) &&
 				event.payload.outcomeCode !== "worker_final_output_missing" &&
-				event.payload.outcomeCode !== "host_verification_rejected"
+				event.payload.outcomeCode !== "host_verification_rejected" &&
+				event.payload.outcomeCode !== "merge_withheld"
 			) {
 				if (acceptsOutcomeCodeEvents) {
 					trustedOutcomeCodes.add(event.payload.outcomeCode);
@@ -7260,6 +7261,7 @@ export function createDispatchBundle(
 						failureMessage = finalDetail;
 					} else if (mergeWithheld) {
 						finalOutcome = "failed";
+						outcomeCode = "merge_withheld";
 						finalDetail = `merge withheld: the worker's own report lists a failing validation; its work is committed on the preserved branch ${req.taskWorktree.branch}, and \`git merge ${req.taskWorktree.branch}\` applies it if that failure was already there`;
 						failureMessage = finalDetail;
 					}
