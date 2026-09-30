@@ -51,10 +51,17 @@ import {
 	extractCommandWriteTargets,
 	inlineShellScript,
 	invokesClioSkillMutation,
+	type ShellToken,
 	scanShellLike,
 	scanShellLikeDeep,
 } from "./protected-artifacts.js";
-import { isReadScopeTool, readScopeEscape, readScopeExemptRoots, readScopeSpellings } from "./read-scope.js";
+import {
+	isReadScopeTool,
+	type ReadScopeExemptRoot,
+	readScopeEscape,
+	readScopeExemptRoots,
+	readScopeSpellings,
+} from "./read-scope.js";
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
 import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
 import { clioCredentialStorePaths } from "./secret-paths.js";
@@ -225,7 +232,7 @@ function matchesRepositoryCommand(command: string): boolean {
  * denial sentence, which does not carry these reasons.
  */
 const BASH_RECOGNIZED_FORM_HINT =
-	"Recognized forms run without asking: one command per bash call, or a && chain whose every step is recognized, with cwd passed as the cwd argument instead of a leading cd.";
+	"Recognized forms run without asking: read-only inspection (cat, head, tail, grep, rg, find, ls, wc, sed -n, git log and the like) on workspace paths, joined by &&, ||, ; or | and redirected only to /dev/null, and && chains of recognized steps, with cwd passed as the cwd argument instead of a leading cd.";
 
 const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.Verify]);
 
@@ -670,6 +677,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					cwd,
 					posture,
 					projectPolicy,
+					{ exemptRoots: readExemptRoots, memo: walkMemo },
 				);
 				// A typed verifier still runs through the same command safety scan.
 				// Unrecognized checks are left to the autonomy mapping: default asks,
@@ -878,6 +886,7 @@ function evaluateBashPolicy(
 	workspaceRoot: string,
 	posture: string | undefined,
 	policy: LoadedProjectSafetyPolicy,
+	readScope: ReadScopeInputs,
 ): Omit<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"> {
 	// Catalog commands execute as argv, never as shell source. Only bare words
 	// have an unambiguous representation in the canonical command matcher.
@@ -1008,10 +1017,10 @@ function evaluateBashPolicy(
 			execRecognition: "recognized",
 		};
 	}
-	const chain = recognizeCommandChain(recognitionCommand, callCwd, workspaceRoot, policy);
+	const chain = recognizeCommandChain(recognitionCommand, callCwd, workspaceRoot, policy, readScope);
 	if (chain !== null) {
 		const chainReasons = [
-			`every step of the && chain is recognized: ${chain.ruleIds.join(", ")}`,
+			`every step of the command is recognized: ${chain.ruleIds.join(", ")}`,
 			...chain.scriptPreviews,
 		];
 		if (chain.requiresConfirmation && posture !== "confirmed" && posture !== "yolo") {
@@ -1226,8 +1235,14 @@ function matchingProjectCommand(
 	return null;
 }
 
-/** Chain length ceiling. Real compound calls are two or three steps. */
-const CHAIN_MAX_SEGMENTS = 6;
+/** Segment ceiling. Real compound calls are two to four steps. */
+const CHAIN_MAX_SEGMENTS = 8;
+
+/** What read-only recognition needs to hold a path operand to the workspace, as the read tools are. */
+interface ReadScopeInputs {
+	exemptRoots: ReadonlyArray<ReadScopeExemptRoot>;
+	memo: PathWalkMemo;
+}
 
 interface ChainRecognition {
 	ruleIds: ReadonlyArray<string>;
@@ -1238,43 +1253,187 @@ interface ChainRecognition {
 	scriptPreviews: ReadonlyArray<string>;
 }
 
+/** Operators that join two commands the recognizer checks one by one. `&`, subshells and here-strings stay out. */
+const CHAIN_OPERATORS: ReadonlySet<string> = new Set(["&&", "||", ";", "|"]);
+
 /**
- * Recognition for `cd <workspace dir> && <recognized command>` and the longer
- * `&&` chains built from the same parts. Every member is checked on its own and
- * the chain takes its most restrictive member's verdict, so the chain can never
- * admit something its members would not.
+ * A redirection that only discards output or merges descriptors: `2>/dev/null`,
+ * `&>/dev/null`, `2>&1`, `>&2`. Anything that names a file is a write.
+ */
+function isDiscardRedirection(operator: string, target: string | undefined): boolean {
+	if (target === undefined) return false;
+	if ((operator === ">" || operator === ">>" || operator === "&>" || operator === "&>>") && target === "/dev/null")
+		return true;
+	return operator === ">&" && /^[12]$/u.test(target);
+}
+
+/**
+ * Commands that only read files or transform their input, each with the options
+ * that would make it write, execute, or never return. A command outside this
+ * table, or one carrying a refused option, leaves the whole compound
+ * unrecognized, so the autonomy level decides it as before. awk, xargs, env and
+ * the shells stay out because their arguments are programs.
+ */
+const READ_ONLY_INSPECTORS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
+	["cat", []],
+	["head", []],
+	["tail", ["-f", "-F", "--follow", "--retry"]],
+	["wc", []],
+	["nl", []],
+	["ls", []],
+	["pwd", []],
+	["stat", []],
+	["du", []],
+	["file", ["-C", "--compile"]],
+	["tree", ["-o", "-R"]],
+	["basename", []],
+	["dirname", []],
+	["realpath", []],
+	["readlink", []],
+	["echo", []],
+	["printf", []],
+	["true", []],
+	["which", []],
+	["diff", []],
+	["cmp", []],
+	["cut", []],
+	["tr", []],
+	["column", []],
+	["sort", ["-o", "--output", "--compress-program", "-T", "--temporary-directory"]],
+	["grep", []],
+	["egrep", []],
+	["fgrep", []],
+	["rg", ["--pre", "--pre-glob", "-z", "--search-zip", "--hostname-bin"]],
+	["jq", []],
+	["find", ["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"]],
+]);
+
+/** `sed -n` with a print-only line script (`1,80p`, `5p`, `10,$p`); every other sed program can write or execute. */
+const SED_PRINT_SCRIPT = /^(?:\d+|\$)(?:,(?:\d+|\$))?p$/u;
+
+function refusedOption(arg: string, refused: ReadonlyArray<string>): boolean {
+	return refused.some((option) => {
+		if (arg === option || arg.startsWith(`${option}=`)) return true;
+		// A short option can sit anywhere in a cluster (`sort -ro out`); a false
+		// match only costs an ask.
+		return /^-[A-Za-z]$/u.test(option) && /^-[^-]/u.test(arg) && arg.slice(1).includes(option.slice(1));
+	});
+}
+
+/**
+ * The rule id for a read-only inspection segment, or null. Every operand is
+ * held to the workspace the way `read` holds its path (readScopeEscape), so
+ * `cat ../x` or `grep -r key ~/` asks exactly where `read` would. A grep
+ * pattern is checked as if it were a path; one that looks like an outside
+ * path only costs an ask. Zero-access paths were already refused for the
+ * whole command string before recognition.
+ */
+function readOnlyInspectionRule(
+	argv: ReadonlyArray<string>,
+	cwd: string,
+	workspaceRoot: string,
+	readScope: ReadScopeInputs,
+): string | null {
+	const [command, ...args] = argv;
+	if (command === undefined) return null;
+	if (command === "sed") {
+		if (!args.includes("-n")) return null;
+		let sawScript = false;
+		for (const arg of args) {
+			if (arg === "-n") continue;
+			if (!sawScript) {
+				if (!SED_PRINT_SCRIPT.test(arg)) return null;
+				sawScript = true;
+				continue;
+			}
+			if (arg.startsWith("-") || !operandStaysInWorkspace(arg, cwd, workspaceRoot, readScope)) return null;
+		}
+		return sawScript ? "builtin:read-only:sed" : null;
+	}
+	const refused = READ_ONLY_INSPECTORS.get(command);
+	if (refused === undefined) return null;
+	for (const arg of args) {
+		if (arg === "-" || arg === "--") continue;
+		if (arg.startsWith("-")) {
+			if (refusedOption(arg, refused)) return null;
+			// An option that embeds a path (--file=/x, -f/x) is refused rather than parsed per command.
+			if (arg.includes("/") || arg.includes("~")) return null;
+			continue;
+		}
+		if (!operandStaysInWorkspace(arg, cwd, workspaceRoot, readScope)) return null;
+	}
+	return `builtin:read-only:${command}`;
+}
+
+function operandStaysInWorkspace(arg: string, cwd: string, workspaceRoot: string, readScope: ReadScopeInputs): boolean {
+	return readScopeEscape(arg, cwd, workspaceRoot, readScope.exemptRoots, readScope.memo) === null;
+}
+
+/**
+ * Recognition for compound commands built from recognized parts: `cd <workspace
+ * dir> && <recognized command>`, test runners and project scripts, and
+ * read-only inspection joined by `&&`, `||`, `;` or `|` (`ls -la && cat
+ * package.json`, `npm test 2>&1 | tail -30`, `find src -name '*.ts' | head`).
+ * Every member is checked on its own and the chain takes its most restrictive
+ * member's verdict, so the chain can never admit something its members would
+ * not. Redirection is admitted only to /dev/null or between descriptors.
  *
  * This exists because the compound form is what a model reaches for first and
  * the flat rule cost more than it bought: in a recorded live drive 34 of 75
  * calls were blocked, nearly all of them `cd x && y`, since an unrecognized
  * execute asks in default mode and a headless run answers every ask with a
- * denial (REPORT-dispatch-drive-1.md S2). Meanwhile `sh -c '<anything>'` sailed
- * past the same rail, so the rail was mostly taxing the honest spelling. The
- * `sh -c` half is closed at both ends now: this function recognizes such a
- * command by its inner script, and the shared write-target scanner reads inside
- * the script too.
+ * denial (REPORT-dispatch-drive-1.md S2). The v0.6.0 flywheel showed the same
+ * tax on read-only openers (`ls src/ && cat package.json`, `find . -name
+ * "*.test.js" | head -5`) parked behind approval cards during a plan-only turn.
+ * Meanwhile `sh -c '<anything>'` sailed past the same rail, so the rail was
+ * mostly taxing the honest spelling. The `sh -c` half is closed at both ends
+ * now: this function recognizes such a command by its inner script, and the
+ * shared write-target scanner reads inside the script too.
  */
 function recognizeCommandChain(
 	command: string,
 	callCwd: string,
 	workspaceRoot: string,
 	policy: LoadedProjectSafetyPolicy,
+	readScope: ReadScopeInputs,
 ): ChainRecognition | null {
+	const tokens = scanShellLike(command);
 	const segments: string[][] = [];
-	let current: string[] = [];
-	for (const token of scanShellLike(command)) {
-		if (token.operator && token.value === "&&") {
-			segments.push(current);
-			current = [];
+	let current: ShellToken[] = [];
+	// Only && makes a later step conditional on a cd having taken effect.
+	let onlyAnd = true;
+	for (let index = 0; index < tokens.length; index += 1) {
+		const token = tokens[index];
+		if (token === undefined) continue;
+		if (!token.operator) {
+			current.push(token);
 			continue;
 		}
-		// Only an actual && operator joins recognizable commands. Quoted words
-		// remain argv and every other real operator makes this chain unrecognized.
-		if (token.operator) return null;
-		current.push(token.value);
+		if (CHAIN_OPERATORS.has(token.value)) {
+			segments.push(current.map((word) => word.value));
+			current = [];
+			if (token.value !== "&&") onlyAnd = false;
+			continue;
+		}
+		const target = tokens[index + 1];
+		if (target === undefined || target.operator || !isDiscardRedirection(token.value, target.value)) return null;
+		// An adjacent unquoted number is the redirection's descriptor, not an argument.
+		const previous = current.at(-1);
+		if (previous !== undefined && previous.end === token.start && !previous.quoted && /^\d+$/u.test(previous.value))
+			current.pop();
+		index += 1;
 	}
-	segments.push(current);
-	if (segments.length < 2 || segments.length > CHAIN_MAX_SEGMENTS) return null;
+	segments.push(current.map((word) => word.value));
+	if (segments.length > CHAIN_MAX_SEGMENTS) return null;
+	// A lone command keeps its standalone rules; this path adds only what the
+	// compound or a discard redirection needs, plus read-only inspection.
+	if (segments.length < 2 && tokens.every((token) => !token.operator)) {
+		const [only] = segments;
+		const rule = only === undefined ? null : readOnlyInspectionRule(only, callCwd, workspaceRoot, readScope);
+		return rule === null
+			? null
+			: { ruleIds: [rule], requiresConfirmation: false, requiresAutonomyApproval: false, scriptPreviews: [] };
+	}
 	const ruleIds: string[] = [];
 	let requiresConfirmation = false;
 	let requiresAutonomyApproval = false;
@@ -1283,6 +1442,9 @@ function recognizeCommandChain(
 	for (const segment of segments) {
 		if (segment.length === 0) return null;
 		if (segment[0] === "cd") {
+			// After `||`, `;` or inside a pipeline a cd may not have taken effect,
+			// and later relative paths would resolve from the wrong directory.
+			if (!onlyAnd) return null;
 			// Each later command runs in this directory, including project-policy
 			// cwd matching and script previews. Keep both logical and physical
 			// readings inside the workspace before recognizing the transition.
@@ -1326,6 +1488,13 @@ function recognizeCommandChain(
 		}
 		if (!hasSequencingOperators(rendered) && isGitInspection(rendered)) {
 			ruleIds.push(GIT_INSPECT_RULE_ID);
+			continue;
+		}
+		// Quoted words stay whole here (`find . -name "*.ts"`), which the
+		// re-rendered allowlist string above cannot express.
+		const inspection = readOnlyInspectionRule(segment, chainCwd, workspaceRoot, readScope);
+		if (inspection !== null) {
+			ruleIds.push(inspection);
 			continue;
 		}
 		return null;

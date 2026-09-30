@@ -156,11 +156,16 @@ describe("safety gate boundary", () => {
 			policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd /etc && ls" } }).actionClass,
 			"system_modify",
 		);
-		for (const command of ["npm run build 2>&1 | tail -30", "npm run lint > output.txt", "npm test 2>&1 | tail -30"]) {
+		for (const command of ["npm run build 2>&1 | tail -30", "npm run lint > output.txt"]) {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
 			strictEqual(executionDisposition(policy, ToolNames.Bash, { command }, "default"), "ask", command);
 			strictEqual(executionDisposition(policy, ToolNames.Bash, { command }, "yolo"), "allow", command);
 		}
+		// A recognized runner piped into read-only inspection stays recognized.
+		strictEqual(
+			policy.evaluate({ tool: ToolNames.Bash, args: { command: "npm test 2>&1 | tail -30" } }).execRecognition,
+			"recognized",
+		);
 	});
 
 	it("tracks chain directories for scoped command admission and approval previews", () => {
