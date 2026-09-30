@@ -759,6 +759,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		const delegatedWrite =
 			input.toolName === ToolNames.Dispatch && dispatchMutatedParentWorkspace(input.toolResultDetails);
 		if (!directWrite && !delegatedWrite) return false;
+		// A write that republished identical bytes changed nothing. Counting it
+		// as a mutation re-keys every later repeat, so a worker that rewrites a
+		// committed file and re-runs `git commit` between each attempt never
+		// reaches a third identical call and burns the whole tool-call cap.
+		if (directWrite && input.toolResultDetails?.unchanged === true) return false;
 		bumpBoundedCounter(mutationEpochByTurn, input.turnId ?? NO_TURN_BUCKET);
 		readCoverage.clear();
 		redundantReadsByTurn.clear();
@@ -1249,6 +1254,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				if (
 					blocked !== undefined &&
 					(workspaceMutated || (input.metadata?.resultKind === "ok" && resultCarriesEvidence(input.toolResultDetails))) &&
+					input.toolResultDetails?.unchanged !== true &&
 					input.toolName !== undefined &&
 					input.toolName !== ToolNames.Read &&
 					hashToolCall(input.toolName, input.toolArgs ?? {}) !== blocked

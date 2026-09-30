@@ -25,7 +25,7 @@ export const writeTool: ToolSpec = {
 		const { path: filePath, physical } = resolveMutationTarget(pathArg);
 		try {
 			const bytes = Buffer.byteLength(content, "utf8");
-			const { file, diff, previousEndedWithNewline, skipDiff } = await withFileMutationQueue(
+			const { file, diff, previousEndedWithNewline, skipDiff, unchanged } = await withFileMutationQueue(
 				filePath,
 				async () => {
 					const previous = await stat(filePath).catch((error: NodeJS.ErrnoException) => {
@@ -57,7 +57,14 @@ export const writeTool: ToolSpec = {
 					const file = await publishFileAtomically(filePath, content, {
 						...(options?.writeTargetViolation ? { admitTarget: options.writeTargetViolation } : {}),
 					});
-					return { file, diff, previousEndedWithNewline: previousContent.endsWith("\n"), skipDiff };
+					return {
+						file,
+						diff,
+						previousEndedWithNewline: previousContent.endsWith("\n"),
+						skipDiff,
+						// Only a diffed overwrite can prove the bytes did not change.
+						unchanged: previous !== null && !skipDiff && previousContent === content,
+					};
 				},
 				physical,
 			);
@@ -78,6 +85,7 @@ export const writeTool: ToolSpec = {
 					file: { before: file.before, after: file.after },
 					diff,
 					paths: [filePath],
+					...(unchanged ? { unchanged: true } : {}),
 					observation: { shownBytes: bytes },
 				},
 			};
