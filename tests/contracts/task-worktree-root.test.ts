@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { taskWorktreeFindings } from "../../src/cli/doctor-task-worktrees.js";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { captureWorkspaceSnapshot } from "../../src/domains/dispatch/write-boundary.js";
 import {
 	applyTaskWorktree,
 	cleanupTaskWorktree,
@@ -262,6 +263,14 @@ describe("task worktree root", () => {
 			"clio-coder/task/run-kept",
 		);
 		strictEqual(git(root, "worktree", "list", "--porcelain").includes("run-lost"), false, "stale git metadata is pruned");
+	});
+
+	it("refuses a task worktree in a repository with no commits and baselines it on the empty tree (D4)", () => {
+		const unborn = join(scratch, "unborn");
+		mkdirSync(unborn);
+		git(unborn, "init", "-q", "-b", "main");
+		throws(() => createTaskWorktree(unborn, "run-unborn"), /^Error: worktree_unborn_head/u);
+		strictEqual(captureWorkspaceSnapshot(unborn).head, "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
 	});
 
 	it("never believes a claim that points outside the allowed parents", () => {
