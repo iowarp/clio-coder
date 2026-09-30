@@ -35,6 +35,9 @@ import {
 	runtimeSpeaksResponseSchemaDialect,
 	UnsupportedResponseSchemaError,
 } from "../../core/response-schema.js";
+import { sandboxAvailability } from "../../core/sandbox/availability.js";
+import type { WorkerSandboxSpec } from "../../core/sandbox/types.js";
+import { resolveWorkerSandboxSpec, workerSandboxLine, workerSandboxReceipt } from "../../core/sandbox/worker-policy.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import { rawDurationMs } from "../../core/timers.js";
 import { isBuiltinToolName, isHarnessExtensionToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
@@ -1325,6 +1328,8 @@ export interface WorkerDynamicContext {
 	projectContextTier?: AgentProjectContextTier | null;
 	/** Worker autonomy posture rendered in the dynamic safety line. */
 	autonomy?: AutonomyLevel | null;
+	/** Native worker shell sandbox sentence appended to the safety line. */
+	sandboxLine?: string;
 	/** Render the read-only restriction for peer workers that bypass the native prompt compiler. */
 	readOnly?: boolean;
 	/** Effective approval routing; defaults to deny for legacy direct callers. */
@@ -1478,7 +1483,8 @@ export function buildDynamicPromptMessages(
 		const permission = dynamicContext.onPermission ?? "deny";
 		const posture =
 			dynamicContext.permit !== undefined ? workerPermitLine(dynamicContext.permit, permission) : `autonomy ${autonomy}.`;
-		const body = `Safety posture: ${posture} ${workerSafetyOneLiner(permission)} Worker permission routing: ${permission}.`;
+		const sandbox = dynamicContext.sandboxLine === undefined ? "" : ` ${dynamicContext.sandboxLine}`;
+		const body = `Safety posture: ${posture} ${workerSafetyOneLiner(permission)} Worker permission routing: ${permission}.${sandbox}`;
 		messages.push({ id: "dispatch-safety-posture", body, contentHash: sha256(body) });
 	}
 	if (dynamicContext.readOnly === true) {
@@ -2330,6 +2336,44 @@ function withLedgerToolNarrowing(tools: ReadonlyArray<ToolName>, req: DispatchRe
 	return tools.filter((tool) => tool !== ToolNames.Ledger);
 }
 
+/**
+ * OS sandbox policy for a native worker's own commands (decision Q8). Only
+ * the native HTTP runtime executes Clio's bash, run_script and verify tools in
+ * the worker process; SDK and subprocess runtimes run their own tools, so a
+ * policy there would claim an enforcement that does not happen. The prompt
+ * line, the WorkerSpec and the receipt all derive from this one function.
+ */
+function workerSandboxFor(input: {
+	runtimeKind: RuntimeDescriptor["kind"];
+	req: DispatchRequest;
+	pathScope: DispatchPathScope;
+	readOnly: boolean;
+	allowedTools: ReadonlyArray<ToolName>;
+	settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined;
+}): { applies: boolean; spec: WorkerSandboxSpec | undefined } {
+	if (input.runtimeKind !== "http") return { applies: false, spec: undefined };
+	return {
+		applies: true,
+		spec: resolveWorkerSandboxSpec({
+			mode: input.settings?.safety.sandbox ?? "auto",
+			readOnly: input.readOnly,
+			cwd: input.req.cwd ?? process.cwd(),
+			writeBoundaries: input.pathScope.writeBoundaries,
+			...(input.req.taskWorktree !== undefined
+				? { taskWorktree: { path: input.req.taskWorktree.path, branch: input.req.taskWorktree.branch } }
+				: {}),
+			allowedTools: input.allowedTools,
+			networkSetting: input.settings?.safety.sandboxNetwork === true,
+		}),
+	};
+}
+
+/** The sandbox sentence for the worker's safety line, probed on this host. */
+function workerSandboxPromptLine(input: Parameters<typeof workerSandboxFor>[0]): { sandboxLine?: string } {
+	const sandbox = workerSandboxFor(input);
+	return sandbox.applies ? { sandboxLine: workerSandboxLine(sandbox.spec, sandboxAvailability()) } : {};
+}
+
 function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: ConfigContract): WorkerSpec {
 	assertResponseSchemaEnforceable(
 		input.target.runtime,
@@ -2462,6 +2506,15 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	// remain exact and trailing-slash entries remain subtrees after resolution.
 	if (input.pathScope.writeBoundaries.length > 0) spec.writeRoots = [...input.pathScope.writeBoundaries];
 	assertWriteRootsEnforceable(input.target.runtime, spec.writeRoots);
+	const sandbox = workerSandboxFor({
+		runtimeKind: input.target.runtime.kind,
+		req: input.req,
+		pathScope: input.pathScope,
+		readOnly: input.readOnly,
+		allowedTools: input.admission.allowedTools,
+		settings,
+	}).spec;
+	if (sandbox !== undefined) spec.sandbox = sandbox;
 	// Carry the tool profile so external CLI runtimes that cannot mediate
 	// per-tool calls can refuse a narrowing profile they would otherwise ignore.
 	if (input.admission.toolProfile !== undefined) spec.toolProfile = input.admission.toolProfile;
@@ -4339,6 +4392,14 @@ export function createDispatchBundle(
 			cwd,
 			projectContextTier: tier,
 			autonomy: "default",
+			...workerSandboxPromptLine({
+				runtimeKind: target.runtime.kind,
+				req,
+				pathScope,
+				readOnly,
+				allowedTools: effectiveTools,
+				settings,
+			}),
 			onPermission: workerPermissionMode,
 			permit,
 			projectPrompt,
@@ -6469,6 +6530,17 @@ export function createDispatchBundle(
 					},
 					...(protectedArtifacts !== undefined ? { protectedArtifacts } : {}),
 					runtimeLimitations: lifecycle.runtimeLimitations,
+					// A remote node probes its own backend; this host's answer would
+					// be a claim about the wrong machine.
+					...(lifecycle.target.runtime.kind === "http"
+						? {
+								sandbox: workerSandboxReceipt(
+									lifecycle.settings?.safety.sandbox ?? "auto",
+									spec.sandbox,
+									placement !== null && placement.node.kind !== "local" ? null : sandboxAvailability(),
+								),
+							}
+						: {}),
 				},
 				reproducibility: collectReproducibility(lifecycle.cwd, safetyMetadata),
 				runtimeResolution: runtimeTargetSnapshot(lifecycle.target.runtimeResolution),

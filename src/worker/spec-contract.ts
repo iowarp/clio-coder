@@ -1,6 +1,7 @@
 import { THINKING_LEVELS } from "../core/defaults.js";
 import type { ProtectedModelRef, ResidencyRole } from "../core/residency-protection.js";
 import { assertValidResponseSchema, runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
+import { WORKER_SANDBOX_SPEC_VERSION, type WorkerSandboxSpec } from "../core/sandbox/types.js";
 import type { ToolName } from "../core/tool-names.js";
 import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-constraints.js";
 import type { ResultContract } from "../domains/agents/result-contract.js";
@@ -189,6 +190,12 @@ interface WorkerSpecFields {
 	 * calls (native, claude-sdk); dispatch refuses it on subprocess runtimes.
 	 */
 	writeRoots?: ReadonlyArray<string>;
+	/**
+	 * OS sandbox policy for this worker's own child processes. Absent means
+	 * unsandboxed (`safety.sandbox: off`, or a runtime whose tools Clio does not
+	 * execute). The worker applies it through the shared exec seams.
+	 */
+	sandbox?: WorkerSandboxSpec;
 }
 
 /** Current wire shape. Every document carries its concrete admitted budget. */
@@ -734,6 +741,40 @@ function validateWorkerPermit(spec: Record<string, unknown>): void {
 	}
 }
 
+const WORKER_SANDBOX_KEYS = new Set([
+	"version",
+	"mode",
+	"writableRoots",
+	"readOnlyPaths",
+	"gitWritablePaths",
+	"readableRoots",
+	"network",
+]);
+
+function readAbsolutePaths(value: unknown, source: string): void {
+	for (const [index, entry] of readStringArray(value, source).entries()) {
+		if (!entry.startsWith("/") || entry.includes("\0")) {
+			throw new Error(`${source}[${index}] must be an absolute path`);
+		}
+	}
+}
+
+/** Strict: an unknown key could be a policy an older worker would silently ignore. */
+function validateWorkerSandbox(value: unknown): void {
+	const sandbox = readRecord(value, "WorkerSpec.sandbox");
+	for (const key of Object.keys(sandbox)) {
+		if (!WORKER_SANDBOX_KEYS.has(key)) throw new Error(`WorkerSpec.sandbox.${key} is not a recognized field`);
+	}
+	if (sandbox.version !== WORKER_SANDBOX_SPEC_VERSION) {
+		throw new Error(`WorkerSpec.sandbox.version must be ${WORKER_SANDBOX_SPEC_VERSION}`);
+	}
+	readEnum(sandbox.mode, "WorkerSpec.sandbox.mode", ["auto", "required"] as const);
+	for (const key of ["writableRoots", "readOnlyPaths", "gitWritablePaths", "readableRoots"] as const) {
+		readAbsolutePaths(sandbox[key], `WorkerSpec.sandbox.${key}`);
+	}
+	if (typeof sandbox.network !== "boolean") throw new Error("WorkerSpec.sandbox.network must be a boolean");
+}
+
 export function parseWorkerSpec(value: unknown): WorkerSpec {
 	const spec = readRecord(value, "WorkerSpec");
 	if (spec.specVersion !== WORKER_SPEC_VERSION) {
@@ -866,6 +907,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 			if (root.trim().length === 0) throw new Error("WorkerSpec.writeRoots entries must be non-empty strings");
 		}
 	}
+	if (spec.sandbox !== undefined) validateWorkerSandbox(spec.sandbox);
 	return spec as unknown as WorkerSpec;
 }
 

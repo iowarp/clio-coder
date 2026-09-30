@@ -9,6 +9,7 @@ import type { WorkerContextProvenance } from "../context/worker/contract.js";
 
 import type { GatewayRoutingObservation } from "../../core/gateway-routing.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
+import type { WorkerSandboxReceipt } from "../../core/sandbox/worker-policy.js";
 import type { SkillActivation } from "../../core/skill-activation.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
 import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
@@ -709,6 +710,12 @@ export interface RunReceiptSafetySummary {
 		/** The operator's trustedUnmediated opt-in let an unmediated runtime take write-capable work. */
 		trustedUnmediated?: true;
 	};
+	/**
+	 * Effective OS sandbox for the worker's own commands. Present only on
+	 * native HTTP worker receipts, the one runtime whose bash, run_script and
+	 * verify execute in the Clio worker process.
+	 */
+	sandbox?: WorkerSandboxReceipt;
 }
 
 export interface RunReceiptReproducibility {

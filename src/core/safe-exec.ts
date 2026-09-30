@@ -7,6 +7,7 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "./git-commit-attribution.js";
+import { planSandboxedSpawn } from "./sandbox/worker-process.js";
 import { clampTimerDelayMs } from "./timers.js";
 
 export const SAFE_EXEC_DEFAULT_TIMEOUT_MS = 120_000;
@@ -478,12 +479,40 @@ export function runCommandVector(
 		let pipeDrainIncomplete = false;
 		let drainTimer: ReturnType<typeof setTimeout> | null = null;
 
-		const child = spawn(file, [...args], {
-			cwd,
-			env: attribution.env,
-			detached: process.platform !== "win32",
-			stdio: ["ignore", "pipe", "pipe"],
-		});
+		// Inside a dispatched worker the vector runs under the worker's OS
+		// sandbox (decision Q8). The result keeps the requested file and argv so
+		// receipts and verification evidence describe the command, not bwrap.
+		const sandbox = planSandboxedSpawn({ argv: [file, ...args] }, cwd);
+		if (sandbox.kind === "refused") {
+			settled = true;
+			resolve({
+				file,
+				args: [...args],
+				cwd,
+				stdout: "",
+				stderr: sandbox.message,
+				exitCode: 126,
+				leaderExit: null,
+				signal: null,
+				aborted: false,
+				timedOut: false,
+				outputCapped: false,
+				durationMs: 0,
+				startedAt,
+				failure: sandbox.message,
+			});
+			return;
+		}
+		const child = spawn(
+			sandbox.kind === "sandboxed" ? sandbox.file : file,
+			sandbox.kind === "sandboxed" ? sandbox.args : [...args],
+			{
+				cwd,
+				env: attribution.env,
+				detached: process.platform !== "win32",
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		);
 
 		const onAbort = (): void => {
 			aborted = true;

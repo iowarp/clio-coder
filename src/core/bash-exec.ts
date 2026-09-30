@@ -7,6 +7,7 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "./git-commit-attribution.js";
+import { planSandboxedSpawn } from "./sandbox/worker-process.js";
 import { clampTimerDelayMs } from "./timers.js";
 
 export { clampTimerDelayMs as clampTimeoutMs } from "./timers.js";
@@ -283,6 +284,21 @@ export function combineBashOutput(result: Pick<BashCommandResult, "stdout" | "st
 	return stderr.length > 0 ? `${stdout}${stdout.endsWith("\n") || stdout.length === 0 ? "" : "\n"}${stderr}` : stdout;
 }
 
+/** A `required` sandbox with no backend: the command never spawned. */
+function sandboxRefusedResult(message: string): BashCommandResult {
+	return {
+		error: { name: "Error", message, code: 126 } as unknown as NodeJS.ErrnoException,
+		stdout: "",
+		stderr: message,
+		exitCode: 126,
+		signal: null,
+		aborted: false,
+		timedOut: false,
+		outputCapped: false,
+		outputBytes: Buffer.byteLength(message, "utf8"),
+	};
+}
+
 export async function runBashCommand(command: string, options: RunBashCommandOptions = {}): Promise<BashCommandResult> {
 	const plan = await bashSpawnPlan();
 	const attribution = withManagedGitCommitAttributionEnvironment(plan.env, {
@@ -290,6 +306,16 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		enabled: gitCommitAttributionEnabled(process.env),
 	});
 	reportCommitAttributionDiagnostic(attribution.diagnostic);
+	// Preserve an upstream failure through output filters such as tail, so
+	// verification receipts cannot report success merely because the filter
+	// succeeded. A caller can explicitly opt out with `set +o pipefail`.
+	const shellArgv = ["/bin/bash", "-o", "pipefail", plan.mode, command];
+	// Inside a dispatched worker the command runs under the worker's OS
+	// sandbox (decision Q8); everywhere else the plan is a direct spawn.
+	const sandbox = planSandboxedSpawn({ argv: shellArgv }, options.cwd ?? process.cwd());
+	if (sandbox.kind === "refused") return sandboxRefusedResult(sandbox.message);
+	const spawnFile = sandbox.kind === "sandboxed" ? sandbox.file : "/bin/bash";
+	const spawnArgs = sandbox.kind === "sandboxed" ? sandbox.args : shellArgv.slice(1);
 	return new Promise<BashCommandResult>((resolve) => {
 		const timeout = clampTimerDelayMs(options.timeoutMs ?? 300_000);
 		let aborted = false;
@@ -301,10 +327,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		let pendingClose: (() => void) | null = null;
 		const output = createBashOutputProgressController(options.onUpdate);
 
-		// Preserve an upstream failure through output filters such as tail, so
-		// verification receipts cannot report success merely because the filter
-		// succeeded. A caller can explicitly opt out with `set +o pipefail`.
-		const child = spawn("/bin/bash", ["-o", "pipefail", plan.mode, command], {
+		const child = spawn(spawnFile, spawnArgs, {
 			...(options.cwd === undefined ? {} : { cwd: options.cwd }),
 			env: attribution.env,
 			detached: process.platform !== "win32",

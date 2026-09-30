@@ -20,6 +20,7 @@ import {
 	setGitCommitAttributionEnabled,
 	withManagedGitCommitAttributionEnvironment,
 } from "../core/git-commit-attribution.js";
+import { configureWorkerProcessSandbox } from "../core/sandbox/worker-process.js";
 
 process.env.AI_AGENT = AI_AGENT_NAME;
 
@@ -151,6 +152,9 @@ async function main(): Promise<number> {
 	process.title = `clio-coder-worker:${spec.agentId}`;
 	const attributionEnabled = spec.gitCommitAttribution ?? true;
 	setGitCommitAttributionEnabled(attributionEnabled);
+	// Every child this worker spawns through bash-exec or safe-exec runs under
+	// the dispatch-chosen OS sandbox from here on (decision Q8).
+	configureWorkerProcessSandbox(spec.sandbox);
 	const attribution = withManagedGitCommitAttributionEnvironment(process.env, {
 		cwd: process.cwd(),
 		enabled: attributionEnabled,
