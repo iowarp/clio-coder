@@ -13,6 +13,7 @@ import {
 } from "../core/config.js";
 import { THINKING_LEVELS, type ThinkingLevel } from "../core/defaults.js";
 import { loadDomains } from "../core/domain-loader.js";
+import { readLayeredSettings, settingsSourceFor } from "../core/settings-layers.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
@@ -692,7 +693,10 @@ function runProfileBindings(args: ReadonlyArray<string>): number {
 		return 2;
 	}
 	ensureClioState();
-	const settings = readSettings();
+	// Dispatch routes from the merged trusted layers, so a binding kept in
+	// .clio-coder/settings.local.yaml must list here too. Mutations stay on the
+	// user layer.
+	const { settings, sources } = readLayeredSettings(process.cwd());
 	const rows = Object.entries(settings.fleet.agentProfiles)
 		.sort(([a], [b]) => a.localeCompare(b))
 		.map(([agentId, profileName]) => {
@@ -702,6 +706,7 @@ function runProfileBindings(args: ReadonlyArray<string>): number {
 				profile: profileName,
 				target: profile?.target ?? null,
 				model: profile?.model ?? null,
+				source: settingsSourceFor(sources, `fleet.agentProfiles.${agentId}`),
 				warning: profile ? null : "missing profile",
 			};
 		});
@@ -716,11 +721,11 @@ function runProfileBindings(args: ReadonlyArray<string>): number {
 		return 0;
 	}
 	process.stdout.write(
-		`${column("agent", 18)}${column("profile", 20)}${column("target", 16)}${column("model", 30)}warning\n`,
+		`${column("agent", 18)}${column("profile", 20)}${column("target", 16)}${column("model", 30)}${column("source", 15)}warning\n`,
 	);
 	for (const row of rows) {
 		process.stdout.write(
-			`${column(row.agentId, 18)}${column(row.profile, 20)}${column(row.target ?? "-", 16)}${column(row.model ?? "-", 30)}${row.warning ?? "-"}\n`,
+			`${column(row.agentId, 18)}${column(row.profile, 20)}${column(row.target ?? "-", 16)}${column(row.model ?? "-", 30)}${column(row.source, 15)}${row.warning ?? "-"}\n`,
 		);
 	}
 	return 0;
@@ -769,7 +774,8 @@ function runFleet(args: ReadonlyArray<string>, usage = "clio-coder targets fleet
 		return 2;
 	}
 	ensureClioState();
-	const settings = readSettings();
+	// Same merged trusted view dispatch resolves profiles from; see runProfileBindings.
+	const { settings, sources } = readLayeredSettings(process.cwd());
 	const byId = new Map(settings.targets.map((target) => [target.id, target] as const));
 	const rows = Object.entries(settings.fleet.profiles).map(([name, profile]) => {
 		const target = profile.target ? byId.get(profile.target) : undefined;
@@ -779,6 +785,7 @@ function runFleet(args: ReadonlyArray<string>, usage = "clio-coder targets fleet
 			runtime: target?.runtime ?? null,
 			model: profile.model,
 			thinkingLevel: profile.thinkingLevel,
+			source: settingsSourceFor(sources, `fleet.profiles.${name}`),
 		};
 	});
 	if (json) {
@@ -790,11 +797,11 @@ function runFleet(args: ReadonlyArray<string>, usage = "clio-coder targets fleet
 		return 0;
 	}
 	process.stdout.write(
-		`${column("profile", 18)}${column("target", 16)}${column("runtime", 20)}${column("model", 30)}thinking\n`,
+		`${column("profile", 18)}${column("target", 16)}${column("runtime", 20)}${column("model", 30)}${column("thinking", 10)}source\n`,
 	);
 	for (const row of rows) {
 		process.stdout.write(
-			`${column(row.name, 18)}${column(row.target ?? "-", 16)}${column(row.runtime ?? "-", 20)}${column(row.model ?? "-", 30)}${row.thinkingLevel}\n`,
+			`${column(row.name, 18)}${column(row.target ?? "-", 16)}${column(row.runtime ?? "-", 20)}${column(row.model ?? "-", 30)}${column(row.thinkingLevel, 10)}${row.source}\n`,
 		);
 	}
 	return 0;
