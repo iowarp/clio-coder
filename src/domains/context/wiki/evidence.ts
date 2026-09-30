@@ -135,28 +135,45 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		return text;
 	};
 	const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	// Repository files by basename, listed once and only when a bare name in the
-	// body matches no declared file. Small writer models cite `grader.py` for
-	// `src/clio_researcher/grader.py`; exactly one match is the file, and zero
+	// Repository files, listed once and only when a body citation matches no
+	// declared file. Small writer models cite `grader.py` for
+	// `src/clio_researcher/grader.py` and `contracts/campaign.py` for
+	// `src/clio_researcher/contracts/campaign.py`. Exactly one file whose name, or
+	// whose path ending on whole segments, equals the citation is that file; zero
 	// or several keep failing so a guess never becomes evidence.
+	let workspaceFiles: string[] | null = null;
 	let filesByName: Map<string, string[]> | null = null;
+	const listedFiles = (): string[] => {
+		if (workspaceFiles === null) {
+			try {
+				workspaceFiles = enumerateWorkspaceFiles(root);
+			} catch {
+				// An incomplete listing resolves nothing; the reference fails as before.
+				workspaceFiles = [];
+			}
+		}
+		return workspaceFiles;
+	};
 	const repositoryFileNamed = (name: string): string | null => {
 		if (filesByName === null) {
 			filesByName = new Map();
-			try {
-				for (const file of enumerateWorkspaceFiles(root)) {
-					const key = basename(file);
-					const files = filesByName.get(key) ?? [];
-					files.push(file);
-					filesByName.set(key, files);
-				}
-			} catch {
-				// An incomplete listing resolves nothing; the reference fails as before.
-				filesByName.clear();
+			for (const file of listedFiles()) {
+				const key = basename(file);
+				const files = filesByName.get(key) ?? [];
+				files.push(file);
+				filesByName.set(key, files);
 			}
 		}
 		const files = filesByName.get(name);
 		return files?.length === 1 ? resolveSourcePath(root, files[0] ?? "") : null;
+	};
+	const repositoryFileEndingWith = (cited: string): string | null => {
+		const segments = cited.split("/");
+		if (segments.some((segment) => segment === "" || segment === "." || segment === "..") || /[*?{}<>[\]\\]/.test(cited))
+			return null;
+		const suffix = `/${cited}`;
+		const matches = listedFiles().filter((file) => file.split("\\").join("/").endsWith(suffix));
+		return matches.length === 1 ? resolveSourcePath(root, matches[0] ?? "") : null;
 	};
 	const importedSource = (specifier: string): string | null => {
 		if (!/^\.\.?\//.test(specifier)) return null;
@@ -223,6 +240,8 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 				const declared = declaredFilesByName.get(cited);
 				if (declared?.size === 1) source = [...declared][0] ?? null;
 				else if (declared === undefined) source = repositoryFileNamed(cited);
+			} else if (source === null && !declaredReferences.has(reference)) {
+				source = repositoryFileEndingWith(cited);
 			}
 			if (source === null) {
 				fail(`Replace or remove unresolved repository reference ${label}; inspect the current file path.`);
