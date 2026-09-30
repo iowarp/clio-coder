@@ -6,8 +6,10 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
+import { createWorkerGitContext } from "../../src/tools/git-exec.js";
 import { applyToolProfile } from "../../src/tools/profiles.js";
 import type { ToolRegistry, ToolResult } from "../../src/tools/registry.js";
+import { createTaskWorktree } from "../../src/tools/task-worktree.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /**
@@ -101,6 +103,8 @@ describe("git tool", () => {
 		deepStrictEqual((await call({ op: "diff", cached: true, stat: true, path: "docs" })).details?.argv, [
 			"git",
 			"diff",
+			"--no-ext-diff",
+			"--no-textconv",
 			"--cached",
 			"--stat",
 			"--",
@@ -116,8 +120,24 @@ describe("git tool", () => {
 				.map((line) => line.replace(/^[0-9a-f]+ /, ""));
 		deepStrictEqual(subjects((await call({ op: "log" })).output), ["second touches docs", "first"]);
 		deepStrictEqual(subjects((await call({ op: "log", limit: 1 })).output), ["second touches docs"]);
-		deepStrictEqual((await call({ op: "log", limit: 5000 })).details?.argv, ["git", "log", "--oneline", "-n", "200"]);
-		deepStrictEqual((await call({ op: "log", limit: -3 })).details?.argv, ["git", "log", "--oneline", "-n", "20"]);
+		deepStrictEqual((await call({ op: "log", limit: 5000 })).details?.argv, [
+			"git",
+			"log",
+			"--no-ext-diff",
+			"--no-textconv",
+			"--oneline",
+			"-n",
+			"200",
+		]);
+		deepStrictEqual((await call({ op: "log", limit: -3 })).details?.argv, [
+			"git",
+			"log",
+			"--no-ext-diff",
+			"--no-textconv",
+			"--oneline",
+			"-n",
+			"20",
+		]);
 		deepStrictEqual(subjects((await call({ op: "log", path: "a.txt" })).output), ["first"]);
 	});
 
@@ -126,12 +146,81 @@ describe("git tool", () => {
 		match(await refusal({ op: "status", cwd: scratch.dir }), /^git: cwd escapes workspace root: /);
 		strictEqual(
 			await refusal({ op: "push" }),
-			'git: expected args.op to be status, diff, or log; got "push". Example: gateway({op:"call",capability:"git",args:{op:"log",limit:20}})',
+			'git: expected args.op to be status, diff, log, add, or commit; got "push". Example: gateway({op:"call",capability:"git",args:{op:"log",limit:20}})',
 		);
 		strictEqual(
 			await refusal({ command: "log -20" }),
-			'git: expected args.op to be status, diff, or log; got ""; unrecognized field "command". Example: gateway({op:"call",capability:"git",args:{op:"log",limit:20}})',
+			'git: expected args.op to be status, diff, log, add, or commit; got ""; unrecognized field "command". Example: gateway({op:"call",capability:"git",args:{op:"log",limit:20}})',
 		);
 		match(await refusal({ op: "log", max_output_bytes: 8 }), /^git: output exceeded 8 bytes/);
 	});
+});
+
+it("admits typed add and commit only on the attested task branch, and asks the operator for in-tree hooks without execute", async () => {
+	const scratch = await isolateClioEnv("clio-coder-git-task-");
+	const previousCwd = process.cwd();
+	try {
+		// Git in the tool reads HOME's configuration, so it points at the scratch home.
+		process.env.HOME = scratch.dir;
+		process.env.GIT_CONFIG_NOSYSTEM = "1";
+		const repo = join(scratch.dir, "repo");
+		mkdirSync(repo);
+		git(repo, "init", "-q", "-b", "main");
+		writeFileSync(join(repo, "a.txt"), "one\n");
+		git(repo, "add", ".");
+		git(repo, "commit", "-qm", "base");
+		const worktree = createTaskWorktree(repo, "run-typed");
+		process.chdir(worktree.path);
+		const parks: string[] = [];
+		const registry = createWorkerToolRegistry(
+			undefined,
+			createWorkerSafety({ cwd: worktree.path }),
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			// workspace-edit, git: worktree, and no bash or run_script in the permit.
+			createWorkerGitContext({
+				allowance: "worktree",
+				executePermitted: false,
+				cwd: worktree.path,
+				taskWorktree: worktree,
+			}),
+		);
+		// Headless: nobody answers, so every ask is denied.
+		registry.onPermissionRequired((_call, _decision, meta) => {
+			parks.push(meta.approvalAuthority ?? "none");
+			registry.cancelParkedCall(meta.requestId, "headless deny");
+		});
+
+		writeFileSync(join(worktree.path, "a.txt"), "two\n");
+		const add = await registry.invoke({ tool: ToolNames.Git, args: { op: "add", paths: ["a.txt"] } });
+		strictEqual(add.kind === "ok" && add.result.kind, "ok");
+		const commit = await registry.invoke({ tool: ToolNames.Git, args: { op: "commit", message: "worker change" } });
+		strictEqual(commit.kind === "ok" && commit.result.kind, "ok");
+		strictEqual(git(repo, "log", "-1", "--format=%s", worktree.branch), "worker change");
+		deepStrictEqual(parks, []);
+
+		// The same commit with HEAD moved off the task branch asks main and commits nothing.
+		git(worktree.path, "switch", "-q", "-c", "elsewhere");
+		writeFileSync(join(worktree.path, "b.txt"), "b\n");
+		git(worktree.path, "add", "b.txt");
+		const moved = await registry.invoke({ tool: ToolNames.Git, args: { op: "commit", message: "worker change" } });
+		strictEqual(moved.kind, "blocked");
+		deepStrictEqual(parks, ["main"]);
+		strictEqual(git(repo, "rev-parse", "elsewhere"), git(repo, "rev-parse", worktree.branch));
+
+		// Back on the task branch, hooks the worker could author need the operator.
+		git(worktree.path, "switch", "-q", worktree.branch);
+		git(repo, "config", "core.hooksPath", ".husky");
+		const hooked = await registry.invoke({ tool: ToolNames.Git, args: { op: "commit", message: "worker change" } });
+		strictEqual(hooked.kind, "blocked");
+		deepStrictEqual(parks, ["main", "operator"]);
+		strictEqual(git(repo, "rev-list", "--count", worktree.branch), "2");
+	} finally {
+		process.chdir(previousCwd);
+		scratch.restore();
+	}
 });

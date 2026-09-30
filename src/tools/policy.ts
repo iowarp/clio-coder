@@ -48,9 +48,11 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	[ToolNames.Write]: { plane: "mutate", actionClass: "write", executionMode: "sequential" },
 	[ToolNames.Edit]: { plane: "mutate", actionClass: "write", executionMode: "sequential" },
 	[ToolNames.Bash]: { plane: "execute", actionClass: "execute", executionMode: "sequential" },
-	// git is read-only inspection on the safe-exec spine: EXECUTE plane for
-	// its containment posture, read class for its safety disposition.
-	[ToolNames.Git]: { plane: "execute", actionClass: "read", executionMode: "parallel" },
+	// git runs fixed argv on the safe-exec spine: EXECUTE plane for its
+	// containment posture, read class for inspection. Its add and commit ops
+	// project their exact argv to a bash effect, so the safety net and the Git
+	// classifier judge them as mutations; sequential so two never race the index.
+	[ToolNames.Git]: { plane: "execute", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.Verify]: { plane: "execute", actionClass: "execute", executionMode: "sequential" },
 	// run_script runs one interpreter over one workspace script and projects
 	// itself to a bash command for the policy engine; execute class, sequential.
