@@ -5096,13 +5096,19 @@ export function createDispatchBundle(
 					});
 					if (worktreeReceipt.reason !== undefined) {
 						finalOutcome = "failed";
-						finalDetail = worktreeReceipt.reason;
+						finalDetail = worktreeReceipt.detail ?? worktreeReceipt.reason;
 						failureMessage = finalDetail;
 					}
 				}
 				if (req.taskWorktree !== undefined && worktreeReceipt === undefined) {
 					try {
 						worktreeReceipt = snapshotTaskWorktree(req.taskWorktree, req.apply ?? "merge");
+						// An already failed run whose HEAD also moved says so, so the
+						// operator knows the preserved branch lacks the work (F5).
+						if (worktreeReceipt.detail !== undefined) {
+							finalDetail = [finalDetail, worktreeReceipt.detail].filter(Boolean).join("; ");
+							failureMessage = finalDetail;
+						}
 					} catch (snapshotError) {
 						reportDispatchDiagnostic(`snapshot failed task worktree ${req.taskWorktree.runId}`, snapshotError);
 						worktreeReceipt = {
@@ -6613,13 +6619,19 @@ export function createDispatchBundle(
 					});
 					if (worktreeReceipt.reason !== undefined) {
 						finalOutcome = "failed";
-						finalDetail = worktreeReceipt.reason;
+						finalDetail = worktreeReceipt.detail ?? worktreeReceipt.reason;
 						failureMessage = finalDetail;
 					}
 				}
 				if (req.taskWorktree !== undefined && worktreeReceipt === undefined) {
 					try {
 						worktreeReceipt = snapshotTaskWorktree(req.taskWorktree, req.apply ?? "merge");
+						// An already failed run whose HEAD also moved says so, so the
+						// operator knows the preserved branch lacks the work (F5).
+						if (worktreeReceipt.detail !== undefined) {
+							finalDetail = [finalDetail, worktreeReceipt.detail].filter(Boolean).join("; ");
+							failureMessage = finalDetail;
+						}
 					} catch (snapshotError) {
 						reportDispatchDiagnostic(`snapshot failed task worktree ${req.taskWorktree.runId}`, snapshotError);
 						worktreeReceipt = {

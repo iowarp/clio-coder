@@ -115,6 +115,22 @@ describe("task worktree restart recovery", () => {
 		deepStrictEqual(branches(), ["clio-coder/task/run-committed"]);
 	});
 
+	it("preserves a worktree whose HEAD left the task branch without committing onto the other branch (F5)", () => {
+		for (const apply of ["preserve", "merge"] as const) {
+			const task = createTaskWorktree(root, `run-moved-${apply}`, undefined, apply);
+			git(task.path, "switch", "-q", "-c", `other-${apply}`);
+			writeFileSync(join(task.path, "worker.txt"), "w\n");
+			const receipt = applyTaskWorktree({ worktree: task, apply });
+			strictEqual(receipt.reason, "worktree_head_moved");
+			strictEqual(receipt.applied, false);
+			match(receipt.detail ?? "", new RegExp(`refs/heads/other-${apply}`, "u"));
+			strictEqual(git(root, "rev-parse", `other-${apply}`), task.base);
+			strictEqual(git(root, "rev-parse", task.branch), task.base);
+			strictEqual(git(root, "rev-parse", "main"), task.base);
+			ok(existsSync(join(task.path, "worker.txt")));
+		}
+	});
+
 	it("never touches a live owner", () => {
 		const task = createTaskWorktree(root, "run-live");
 		deepStrictEqual(recoverTaskWorktrees(root), { removed: [], preserved: [], failed: [] });

@@ -70,15 +70,22 @@ export interface TaskWorktreeRecoveryResult {
 export interface TaskWorktreeReceipt {
 	path: string;
 	branch: string;
-	/** Null only when a failed run's working-tree snapshot could not be read. */
+	/** Null when no trustworthy diff exists: an unreadable snapshot, or a worktree whose HEAD moved. */
 	diffHash: string | null;
 	changedPaths?: string[];
 	/** Absent means the diff is committed on the task branch. */
 	snapshot?: "working-tree" | "unavailable";
+	/** The task commit pinned at snapshot time; application merges this id, never the mutable branch name (F5). */
+	commit?: string;
 	apply: TaskWorktreeApply;
 	applied: boolean;
 	reason?: string;
+	/** Human-readable explanation of `reason` when the code alone does not carry it. */
+	detail?: string;
 }
+
+/** Receipt reason for a task worktree whose HEAD no longer names its own task branch (F5). */
+export const WORKTREE_HEAD_MOVED = "worktree_head_moved";
 
 const SAFE_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const OWNER_FILE_SUFFIX = ".task-owner.json";
@@ -184,6 +191,8 @@ export function mergeWorktreeBranch(
 	root: string,
 	branch: string,
 	identity: string,
+	/** Merge commit message; git's default names `branch`, which reads badly when it is a commit id. */
+	message?: string,
 ): { ok: true } | { ok: false; reason: string } {
 	try {
 		git(root, [
@@ -194,6 +203,7 @@ export function mergeWorktreeBranch(
 			"merge",
 			"--no-edit",
 			"--no-verify",
+			...(message !== undefined ? ["-m", message] : []),
 			branch,
 		]);
 		return { ok: true };
@@ -328,13 +338,76 @@ function assertOwnership(worktree: TaskWorktree): void {
 	}
 }
 
-function commitTaskWorktree(worktree: TaskWorktree, message = `Clio Coder task ${worktree.runId}`): boolean {
-	assertOwnership(worktree);
-	return commitWorktreePath(worktree.path, COMMIT_IDENTITY, message);
+function canonicalOrResolved(path: string): string {
+	try {
+		return realpathSync(path);
+	} catch {
+		return resolve(path);
+	}
 }
 
-function taskWorktreeDiffHash(worktree: Pick<TaskWorktree, "root" | "base" | "branch">): string {
-	const bytes = gitBytes(worktree.root, ["diff", `${worktree.base}..${worktree.branch}`]);
+type TaskHeadCheck = { ok: true; commit: string } | { ok: false; detail: string };
+
+function headMovedDetail(worktree: TaskWorktree, actual: string, candidate: string | null): string {
+	return `${WORKTREE_HEAD_MOVED}: task worktree ${worktree.runId} expected HEAD refs/heads/${worktree.branch}, found ${actual}; candidate commit ${candidate ?? "none"}. Nothing was committed or merged; the worktree and its branch are preserved.`;
+}
+
+/**
+ * Whether the working tree at `worktree.path` is still this run's task
+ * worktree with HEAD on its own branch. A worker can switch branches or detach
+ * HEAD; committing there put its work on another branch while the receipt
+ * reported the untouched task branch as an empty, successful diff (F5). Every
+ * git fact is read from the working tree itself, not assumed from the claim.
+ */
+function checkTaskWorktreeHead(worktree: TaskWorktree): TaskHeadCheck {
+	assertOwnership(worktree);
+	let headCommit: string | null = null;
+	try {
+		headCommit = git(worktree.path, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]);
+	} catch {
+		// An unreadable HEAD is reported as a mismatch below rather than thrown.
+	}
+	const candidate = headCommit !== null && headCommit !== worktree.base ? headCommit : null;
+	const moved = (actual: string): TaskHeadCheck => ({ ok: false, detail: headMovedDetail(worktree, actual, candidate) });
+	try {
+		const top = git(worktree.path, ["rev-parse", "--show-toplevel"]);
+		if (canonicalOrResolved(top) !== canonicalOrResolved(worktree.path)) return moved(`a working tree rooted at ${top}`);
+		const common = git(worktree.path, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+		const rootCommon = git(worktree.root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+		if (canonicalOrResolved(common) !== canonicalOrResolved(rootCommon))
+			return moved(`a checkout of another repository (${common})`);
+	} catch (error) {
+		return moved(
+			`no readable git checkout (${error instanceof Error ? (error.message.split("\n")[0] ?? "git failed") : String(error)})`,
+		);
+	}
+	let symbolic = "";
+	try {
+		symbolic = git(worktree.path, ["symbolic-ref", "-q", "HEAD"]);
+	} catch {
+		// symbolic-ref exits nonzero on a detached HEAD, reported below.
+	}
+	if (symbolic.length === 0) return moved(`detached HEAD at ${headCommit ?? "unknown"}`);
+	if (symbolic !== `refs/heads/${worktree.branch}`) return moved(symbolic);
+	if (headCommit === null) return moved(`${symbolic} with no commit`);
+	return { ok: true, commit: headCommit };
+}
+
+function headMovedReceipt(worktree: TaskWorktree, apply: TaskWorktreeApply, detail: string): TaskWorktreeReceipt {
+	return {
+		path: worktree.path,
+		branch: worktree.branch,
+		diffHash: null,
+		snapshot: "unavailable",
+		apply,
+		applied: false,
+		reason: WORKTREE_HEAD_MOVED,
+		detail,
+	};
+}
+
+function taskWorktreeDiffHash(worktree: Pick<TaskWorktree, "root" | "base">, commit: string): string {
+	const bytes = gitBytes(worktree.root, ["diff", `${worktree.base}..${commit}`]);
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
@@ -344,7 +417,9 @@ function nullDelimitedPaths(bytes: Buffer): string[] {
 
 /** Preserve failure evidence without committing a peer's incomplete edits. */
 export function snapshotTaskWorktree(worktree: TaskWorktree, apply: TaskWorktreeApply): TaskWorktreeReceipt {
-	assertOwnership(worktree);
+	// A diff against a foreign HEAD would describe another branch's state (F5).
+	const head = checkTaskWorktreeHead(worktree);
+	if (!head.ok) return headMovedReceipt(worktree, apply, head.detail);
 	const tracked = gitBytes(worktree.path, ["diff", "--binary", "HEAD"]);
 	const untracked = nullDelimitedPaths(gitBytes(worktree.path, ["ls-files", "--others", "--exclude-standard", "-z"]));
 	const changedPaths = [
@@ -381,34 +456,49 @@ export function snapshotTaskWorktree(worktree: TaskWorktree, apply: TaskWorktree
 	};
 }
 
-function protectedPathsChangedByTaskBranch(
-	worktree: Pick<TaskWorktree, "root" | "branch">,
-	protectedPaths: ReadonlyArray<string>,
-): string[] {
-	return protectedPathsChangedByWorktreeBranch(worktree.root, worktree.branch, protectedPaths);
-}
-
 export function applyTaskWorktree(input: {
 	worktree: TaskWorktree;
 	apply: TaskWorktreeApply;
 	protectedPaths?: ReadonlyArray<string>;
 }): TaskWorktreeReceipt {
-	assertOwnership(input.worktree);
-	commitTaskWorktree(input.worktree);
+	const { worktree } = input;
+	const before = checkTaskWorktreeHead(worktree);
+	if (!before.ok) return headMovedReceipt(worktree, input.apply, before.detail);
+	commitWorktreePath(worktree.path, COMMIT_IDENTITY, `Clio Coder task ${worktree.runId}`);
+	// Pin the commit the snapshot produced. Everything after this reads and
+	// merges that immutable id, so a branch moved later cannot swap it (F5).
+	const pinned = checkTaskWorktreeHead(worktree);
+	if (!pinned.ok) return headMovedReceipt(worktree, input.apply, pinned.detail);
+	const commit = pinned.commit;
 	const receipt: TaskWorktreeReceipt = {
-		path: input.worktree.path,
-		branch: input.worktree.branch,
-		diffHash: taskWorktreeDiffHash(input.worktree),
+		path: worktree.path,
+		branch: worktree.branch,
+		diffHash: taskWorktreeDiffHash(worktree, commit),
 		changedPaths: nullDelimitedPaths(
-			gitBytes(input.worktree.root, ["diff", "--name-only", "-z", `${input.worktree.base}..${input.worktree.branch}`]),
+			gitBytes(worktree.root, ["diff", "--name-only", "-z", `${worktree.base}..${commit}`]),
 		),
+		commit,
 		apply: input.apply,
 		applied: false,
 	};
 	if (input.apply === "preserve") return receipt;
-	const protectedChanges = protectedPathsChangedByTaskBranch(input.worktree, input.protectedPaths ?? []);
+	const protectedChanges = protectedPathsChangedByWorktreeBranch(worktree.root, commit, input.protectedPaths ?? []);
 	if (protectedChanges.length > 0) return { ...receipt, reason: "protected_artifact_changed" };
-	const merged = mergeWorktreeBranch(input.worktree.root, input.worktree.branch, COMMIT_IDENTITY);
+	// Right before mutating the source checkout, the branch and HEAD must still
+	// name the pinned commit; otherwise the merge would apply what nobody hashed.
+	const beforeMerge = checkTaskWorktreeHead(worktree);
+	if (!beforeMerge.ok) return { ...headMovedReceipt(worktree, input.apply, beforeMerge.detail), commit };
+	let branchTip: string | null = null;
+	try {
+		branchTip = git(worktree.root, ["rev-parse", "--verify", "--quiet", `refs/heads/${worktree.branch}^{commit}`]);
+	} catch {
+		// A deleted branch is reported as the mismatch below.
+	}
+	if (branchTip !== commit || beforeMerge.commit !== commit) {
+		const detail = `${WORKTREE_HEAD_MOVED}: task branch refs/heads/${worktree.branch} moved from pinned commit ${commit} to ${branchTip ?? "nothing"} before merge; candidate commit ${commit}. Nothing was merged; the worktree and its branch are preserved.`;
+		return { ...headMovedReceipt(worktree, input.apply, detail), commit };
+	}
+	const merged = mergeWorktreeBranch(worktree.root, commit, COMMIT_IDENTITY, `Merge branch '${worktree.branch}'`);
 	if (!merged.ok) return { ...receipt, reason: "worktree_merge_conflict" };
 	return { ...receipt, applied: true };
 }

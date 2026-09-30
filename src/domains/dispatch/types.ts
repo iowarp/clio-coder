@@ -981,9 +981,12 @@ export interface RunReceipt {
 		diffHash: string | null;
 		changedPaths?: string[];
 		snapshot?: "working-tree" | "unavailable";
+		/** Pinned task commit that application merged or preserved (F5). */
+		commit?: string;
 		apply: "merge" | "preserve";
 		applied: boolean;
 		reason?: string;
+		detail?: string;
 	};
 	/** Required normalized routing request, sealed without task or prompt data. */
 	routingIntent: RoutingIntent;
