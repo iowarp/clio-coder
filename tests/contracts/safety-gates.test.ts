@@ -1140,6 +1140,21 @@ describe("safety gate boundary", () => {
 			"ls ..",
 			"ls -R",
 			"ls --recursive",
+			"git grep --open-f=x x",
+			"git grep SECRET",
+			"git blame -S /proc/self/environ a.txt",
+			"git blame --ignore-revs-file=/proc/self/environ a.txt",
+			"git blame --cont /etc/hosts a.txt",
+			"git cat-file --batch-all-objects --batch",
+			"git diff --outp=o.txt",
+			"git ls-files -X /etc/passwd",
+			"git ls-files --exclude-f=/etc/passwd",
+			"git log -- /etc/passwd",
+			'cat "a b/../.env"',
+			"cat a\\ b/../.env",
+			'sed -n 1p "a b/../.env"',
+			"printf -v PATH bin && cat a.txt",
+			"printf -nv PATH bin && cat a.txt",
 		]) {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
 			strictEqual(decision.execRecognition !== "recognized", true, command);
