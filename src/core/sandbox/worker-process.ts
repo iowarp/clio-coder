@@ -45,6 +45,17 @@ export function workerReadOnlyTargetViolation(target: string): string | null {
 }
 
 /**
+ * The roots this worker's sandboxed commands may read beyond its workspace: the
+ * parent checkout and the dependency trees a RAM task worktree links to. The
+ * typed read tools take them as read-exempt so `read node_modules/ms/index.js`
+ * reaches what `cat` in the sandbox already can (flywheel s5r2). Empty without
+ * a configured sandbox, where no dependency links exist.
+ */
+export function workerSandboxReadableRoots(): string[] {
+	return active === null ? [] : [...active.readableRoots];
+}
+
+/**
  * True when every command this worker spawns runs under bubblewrap bound to
  * the spec's writable roots, the same test dispatch applies before it offers
  * shell and verify to a write-confined worker.

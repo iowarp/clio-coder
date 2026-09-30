@@ -53,6 +53,8 @@ export interface WorkerSafetyOptions {
 	writeRoots?: ReadonlyArray<string>;
 	/** The worker's OS sandbox confines its commands to `writeRoots`. */
 	writeRootsOsConfined?: boolean;
+	/** Trees the worker's sandbox lets it read outside its workspace. */
+	readExemptRoots?: ReadonlyArray<string>;
 	protectedArtifactState?: ProtectedArtifactState;
 }
 
@@ -62,6 +64,7 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
 		...(options.writeRoots !== undefined ? { writeRoots: options.writeRoots } : {}),
 		...(options.writeRootsOsConfined === true ? { writeRootsOsConfined: true } : {}),
+		...(options.readExemptRoots !== undefined ? { readExemptRoots: options.readExemptRoots } : {}),
 	});
 	const protectedArtifactState: ProtectedArtifactState = {
 		artifacts: structuredClone(options.protectedArtifactState?.artifacts ?? []),

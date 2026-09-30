@@ -165,6 +165,12 @@ export interface SafetyPolicyEngineOptions {
 	 * tools then stay admissible under write roots; dispatch still escapes.
 	 */
 	writeRootsOsConfined?: boolean;
+	/**
+	 * Extra trees read-class tools may read outside the workspace, judged by
+	 * real path like the built-in exempt roots. A sandboxed worker passes its
+	 * sandbox's readable roots, which its own shell can already read.
+	 */
+	readExemptRoots?: ReadonlyArray<string>;
 }
 
 interface SourcedRule {
@@ -333,7 +339,10 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	const writeRoots = (options.writeRoots ?? []).map((root) => resolvePathBoundary(writeRootCwd, root));
 	const writeRootsOsConfined = options.writeRootsOsConfined === true;
 	const skillRoots = activeClioSkillRoots(cwd);
-	const readExemptRoots = readScopeExemptRoots();
+	const readExemptRoots = [
+		...readScopeExemptRoots(),
+		...(options.readExemptRoots ?? []).map((root) => ({ path: root, operatorOwned: false })),
+	];
 	const packs = options.rulePacks ?? getCachedDefaultRulePacks();
 	const projectPolicy = options.projectPolicy ?? gateProjectSafetyPolicy(cwd, loadProjectSafetyPolicy(cwd));
 	const projectPolicyRoot =
