@@ -331,9 +331,16 @@ export function workerPermitPromptLine(view: {
 			: view.asks;
 	const scope = view.capabilityClass !== undefined ? `${view.capabilityClass}, ` : "";
 	const line = `Permit: ${scope}git ${view.git}, asks ${asks}.`;
-	if (view.git !== "worktree") return line;
+	// The host commits whatever the task worktree holds when the run settles.
+	// Without this a worker told to commit burns calls on denied `git commit`
+	// attempts and writes stray report files as a substitute.
+	const hostCommit =
+		"Clio commits everything left in your task worktree when you finish, so every file you create there ships.";
+	if (view.git !== "worktree") {
+		return view.taskWorktree === true ? `${line} ${hostCommit} Git mutations need approval.` : line;
+	}
 	// Phase C: the allowance is effective only inside the run's own task worktree.
 	return view.taskWorktree === true
-		? `${line} On your task branch you may stage and commit without asking, only through the git tool: op add with literal paths, op commit with a message. Every other Git mutation (switch, stash, rebase, merge, reset, branch, tag, config, push) needs approval, and HEAD must stay on your task branch.`
+		? `${line} On your task branch you may stage and commit without asking, only through the git tool: op add with literal paths, op commit with a message. Every other Git mutation (switch, stash, rebase, merge, reset, branch, tag, config, push) needs approval, and HEAD must stay on your task branch. ${hostCommit}`
 		: `${line} This run has no task worktree, so every Git mutation needs approval.`;
 }
