@@ -1330,7 +1330,9 @@ const READ_ONLY_INSPECTORS: ReadonlyMap<string, ReadonlyArray<string>> = new Map
 	["realpath", []],
 	["readlink", []],
 	["echo", []],
-	["printf", []],
+	// printf -v assigns a shell variable, so `printf -v PATH bin && cat a.txt` would run a workspace
+	// binary as cat. No other entry here assigns one.
+	["printf", ["-v"]],
 	["true", []],
 	["which", []],
 	["cut", []],
