@@ -383,7 +383,7 @@ describe("native budget inspection through the registered context tool", () => {
 		});
 		try {
 			const text = panel.view.render(120).map(stripTerminalSequences).join("\n");
-			match(text, /\?\/32\.8K \(\?%\)/);
+			match(text, /32\.8K ctx/);
 			doesNotMatch(text, /free 32\.8k/);
 		} finally {
 			panel.dispose();
