@@ -285,6 +285,9 @@ function summarizeUnlistedTargetValue(value: unknown): string {
 	return `<${typeof value} 1 value>`;
 }
 
+/** Harness-injected argument keys (`__clio_resolved_dispatch_plan`) carry no operator decision and stay off display text. */
+const HARNESS_ARG_PREFIX = "__clio_";
+
 function targetFieldName(value: string): string {
 	return sanitizeCallTargetText(value).slice(0, 32) || "field";
 }
@@ -315,7 +318,7 @@ export function describeCallTarget(tool: string, args: Record<string, unknown> |
 		parts.push(parts.length === 0 ? rendered : `${targetFieldName(field)}=${rendered}`);
 	}
 	for (const [field, value] of Object.entries(args)) {
-		if (allowed.has(field)) continue;
+		if (allowed.has(field) || field.startsWith(HARNESS_ARG_PREFIX)) continue;
 		parts.push(`${targetFieldName(field)}=${summarizeUnlistedTargetValue(value)}`);
 	}
 	const target = sanitizeCallTargetText(parts.join(" · "));
