@@ -64,7 +64,8 @@ export type RunOutcomeCode =
 	| "loop_guard_tools_disabled_exhausted"
 	| "result_contract_exhausted"
 	| "worker_final_output_missing"
-	| "host_verification_rejected";
+	| "host_verification_rejected"
+	| "worker_mutation_blocked";
 
 export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
 	return (
@@ -74,7 +75,8 @@ export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
 		value === "loop_guard_tools_disabled_exhausted" ||
 		value === "result_contract_exhausted" ||
 		value === "worker_final_output_missing" ||
-		value === "host_verification_rejected"
+		value === "host_verification_rejected" ||
+		value === "worker_mutation_blocked"
 	);
 }
 

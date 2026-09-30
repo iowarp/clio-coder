@@ -25,6 +25,7 @@ export function attributeEvidenceFailure(facts: EvidenceFailureFacts): EvidenceT
 	) {
 		return "tool-loop";
 	}
+	if (facts.outcomeCode === "worker_mutation_blocked") return "blocked-tool";
 	if (facts.outcome === "timed_out" || facts.outcome === "stalled") return "timeout";
 
 	const diagnostic = [facts.outcomeDetail, facts.failureMessage]

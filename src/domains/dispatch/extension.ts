@@ -295,6 +295,8 @@ import { detectRunIdentity } from "./run-identity.js";
 import { type Ledger, newRunId, openLedger } from "./state.js";
 import { createTargetBreaker, type TargetBreakerBlock } from "./target-breaker.js";
 import {
+	blockedWriteAttempts,
+	blockedWriteDetail,
 	countToolCalls,
 	hasPotentiallyMutatingAttempt,
 	recordToolCompletion,
@@ -959,6 +961,14 @@ function pickWorkerScope(
 	if (requestedActions.every((action) => action === "read")) return safety.scopes.readonly;
 	if (pathScope.writeBoundaries.length === 0) return safety.scopes.workspace;
 	return { ...safety.scopes.workspace, allowedWriteRoots: pathScope.writeBoundaries };
+}
+
+/** Action class for an ACP tool kind, the only tool identity an external agent reports. */
+function acpToolActionClass(tool: string): ActionClass {
+	if (tool === "edit" || tool === "delete" || tool === "move") return "write";
+	if (tool === "execute") return "execute";
+	if (tool === "read" || tool === "search" || tool === "think" || tool === "fetch") return "read";
+	return "unknown";
 }
 
 function deriveRequestedActions(tools: ReadonlyArray<ToolName>, safety: SafetyContract): ReadonlyArray<ActionClass> {
@@ -4865,12 +4875,7 @@ export function createDispatchBundle(
 				toolStats: finalToolStats,
 				// Clio-observed telemetry only: an external ACP agent executes its
 				// own tools, so no zero-activity note is derived from this record.
-				toolActivity: summarizeToolActivity(toolStats, (tool) => {
-					if (tool === "edit" || tool === "delete" || tool === "move") return "write";
-					if (tool === "execute") return "execute";
-					if (tool === "read" || tool === "search" || tool === "think" || tool === "fetch") return "read";
-					return "unknown";
-				}),
+				toolActivity: summarizeToolActivity(toolStats, acpToolActionClass),
 				verification: deriveReceiptVerification({ toolStats: finalToolStats }, { acpDelegation: true }),
 				routingIntent: req.routingIntent ?? defaultRoutingIntent(req),
 				effectiveFailover: failoverModeFor(req),
@@ -5029,6 +5034,19 @@ export function createDispatchBundle(
 					finalOutcome = "failed";
 					finalDetail = "high-rigor finish gate: unvalidated mutation";
 					failureMessage = finalDetail;
+				}
+				// Same all-writes-refused rule as native dispatch, judged from the
+				// ACP tool kinds Clio observed and admitted. ACP delegation carries
+				// no recipe capability class, so any run not pinned read-only is an
+				// edit assignment here.
+				if (finalOutcome === "succeeded" && outcomeCode === null && req.readOnly !== true) {
+					const blockedWrites = blockedWriteAttempts(toolStats, acpToolActionClass);
+					if (blockedWrites !== null) {
+						finalOutcome = "failed";
+						outcomeCode = "worker_mutation_blocked";
+						finalDetail = blockedWriteDetail(blockedWrites);
+						failureMessage = finalDetail;
+					}
 				}
 				const capturedOutput = outputCapture.snapshot();
 				if (finalOutcome === "succeeded" && !hasDurableFinalOutput(capturedOutput)) {
@@ -6449,6 +6467,19 @@ export function createDispatchBundle(
 					finalOutcome = "failed";
 					finalDetail = [finalDetail, `deterministic worker failure: ${outcomeCode}`].filter(Boolean).join("; ");
 					failureMessage = finalDetail;
+				}
+				// The finish contract reads a turn whose writes were all refused as
+				// "no mutation" and passes it. For an edit worker that is the whole
+				// assignment failing, and rerunning under the same policy is refused
+				// the same way, so it carries a deterministic code.
+				if (finalOutcome === "succeeded" && outcomeCode === null && lifecycle.capabilityClass === "workspace-edit") {
+					const blockedWrites = blockedWriteAttempts(toolStats, (tool) => safety.classify({ tool }).actionClass);
+					if (blockedWrites !== null) {
+						finalOutcome = "failed";
+						outcomeCode = "worker_mutation_blocked";
+						finalDetail = blockedWriteDetail(blockedWrites);
+						failureMessage = finalDetail;
+					}
 				}
 				// Close steering provenance before taking receipt snapshots. A late
 				// acknowledgement after the bounded drain cannot race the sealed facts.

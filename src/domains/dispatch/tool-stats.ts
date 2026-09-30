@@ -130,3 +130,31 @@ export function zeroSuccessfulToolNote(activity: ToolActivitySummary): string | 
 	if (activity.calls === 0) return "completed without executing any tools";
 	return `completed without a successful tool call (${activity.calls} attempted: ${activity.failed} failed, ${activity.blocked} blocked)`;
 }
+
+/**
+ * Attempted write-class calls when every one of them was blocked by policy and
+ * no state-changing call of any class succeeded. A workspace-edit worker in
+ * that state produced no mutation, yet its finish contract reads "no
+ * mutation" as success, so the caller seals it failed instead. Null whenever
+ * no write was attempted, one write got past admission, or any mutating call
+ * landed.
+ */
+export function blockedWriteAttempts(
+	stats: ReadonlyMap<string, ToolCallStat>,
+	classify: (tool: string) => ActionClass,
+): number | null {
+	let attempted = 0;
+	let blocked = 0;
+	for (const stat of stats.values()) {
+		const actionClass = classify(stat.tool);
+		if (stat.ok > 0 && MUTATING_ACTION_CLASSES.has(actionClass)) return null;
+		if (actionClass !== "write") continue;
+		attempted += stat.count;
+		blocked += stat.blocked;
+	}
+	return attempted > 0 && blocked === attempted ? attempted : null;
+}
+
+export function blockedWriteDetail(attempted: number): string {
+	return `all ${attempted} attempted write(s) were blocked by policy; no workspace mutation landed`;
+}
