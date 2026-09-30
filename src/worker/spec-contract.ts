@@ -201,6 +201,13 @@ export interface WorkerEscalationConfig {
 	timeoutMs: number;
 	/** Posture applied when the operator does not decide within timeoutMs. */
 	fallback: "deny" | "fail";
+	/**
+	 * "none" when the dispatching process has no operator who can answer a
+	 * worker escalation (headless run, ACP, the fleet CLI). The worker then
+	 * applies the fallback at once with a reason saying so, instead of parking
+	 * the call for the full timeout (F9).
+	 */
+	responder?: "none";
 }
 
 /** Default escalation bounds when onPermission="escalate" but no override is given. */
@@ -755,6 +762,9 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 		}
 		if (escalation.fallback !== "deny" && escalation.fallback !== "fail") {
 			throw new Error('WorkerSpec.escalation.fallback must be "deny" or "fail"');
+		}
+		if (escalation.responder !== undefined && escalation.responder !== "none") {
+			throw new Error('WorkerSpec.escalation.responder must be "none" when present');
 		}
 	}
 	if (spec.readOnly !== undefined && typeof spec.readOnly !== "boolean") {

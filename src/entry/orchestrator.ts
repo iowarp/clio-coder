@@ -1478,6 +1478,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// contract loads); until then it falls back to the shared snapshot.
 			createDispatchDomainModule({
 				budgetWaitForRaise: !options.headless && !options.acp,
+				// Only the interactive overlay answers worker escalations (F9).
+				workerPermissionResponder: !options.headless && !options.acp,
 				getSettings: () => effectiveSettingsForDispatch?.(),
 				getProtectedArtifactState: () => protectedArtifactStateForDispatch?.() ?? { artifacts: [] },
 				// Stamps every run with the session that dispatched it, which is what

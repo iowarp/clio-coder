@@ -67,6 +67,8 @@ import {
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import { diskWorktreeParent, prepareWorktreeParent, resolveWorktreeRoot } from "../../tools/worktree-root.js";
 import {
+	DEFAULT_ESCALATION_FALLBACK,
+	DEFAULT_ESCALATION_TIMEOUT_MS,
 	serializeWorkerRuntimeDescriptor,
 	WORKER_PROTECTED_ARTIFACT_STATE_VERSION,
 	WORKER_SPEC_VERSION,
@@ -483,6 +485,13 @@ export interface DispatchBundleOptions {
 	getSessionId?: () => string | null;
 	/** Interactive sessions park paid routes until their session ceiling is raised. */
 	budgetWaitForRaise?: boolean;
+	/**
+	 * True only when this process shows worker permission escalations to an
+	 * operator and answers them through resolveWorkerPermission (the interactive
+	 * TUI). Absent or false makes an escalating worker apply its configured
+	 * fallback at once instead of waiting out the timeout (F9).
+	 */
+	workerPermissionResponder?: boolean;
 	/** Live hard-block state cloned into each mediated worker spec. */
 	getProtectedArtifactState?: () => ProtectedArtifactState;
 	/** Git-backed receipt provenance collector; injectable for deterministic tests. */
@@ -1638,6 +1647,8 @@ interface DispatchWorkerSpecInput {
 	budget: WorkerBudget;
 	/** Effective settings snapshot for this run; falls back to config.get(). */
 	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
+	/** True when this process routes worker escalations to an operator; see DispatchBundleOptions. */
+	workerPermissionResponder: boolean;
 }
 
 interface DispatchLifecycleStage {
@@ -2365,7 +2376,16 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	spec.onPermission = settings?.fleet.permissions.mode ?? "deny";
 	if (spec.onPermission === "escalate") {
 		const escalation = settings?.fleet.permissions.escalation;
-		if (escalation) spec.escalation = { timeoutMs: escalation.timeoutMs, fallback: escalation.fallback };
+		// With nobody to answer, an escalation could only ever time out, so the
+		// worker applies the fallback at once and says why (F9).
+		const unattended = !input.workerPermissionResponder;
+		if (escalation || unattended) {
+			spec.escalation = {
+				timeoutMs: escalation?.timeoutMs ?? DEFAULT_ESCALATION_TIMEOUT_MS,
+				fallback: escalation?.fallback ?? DEFAULT_ESCALATION_FALLBACK,
+				...(unattended ? { responder: "none" as const } : {}),
+			};
+		}
 	}
 	assertRuntimeCanHonorWorkerPermissionMode(input.target.runtime, spec.onPermission);
 	// Carry canonical write boundaries to the worker safety seam. Exact files
@@ -5512,6 +5532,7 @@ export function createDispatchBundle(
 					readOnly: lifecycle.readOnly,
 					budget: lifecycle.budget,
 					...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
+					workerPermissionResponder: options?.workerPermissionResponder === true,
 				},
 				config ?? undefined,
 			);

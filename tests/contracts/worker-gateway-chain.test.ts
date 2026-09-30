@@ -458,3 +458,24 @@ test("a chain inside the cap charges the wrapper and each step once and succeeds
 		"children are accounted from the chain receipt, never as extra finish events",
 	);
 });
+
+test("an escalation with no responder applies its fallback at once instead of waiting out the timeout", {
+	timeout: 20_000,
+}, async () => {
+	// F9: a headless dispatch has nobody to answer a worker escalation. The
+	// command is policy data; the parked call is denied and never runs.
+	const bash: Call = { name: "bash", arguments: JSON.stringify({ command: "frobnicate --now" }) };
+	const run = await runWorker([[bash], { text: "done" }], {
+		allowedTools: ["bash"],
+		onPermission: "escalate",
+		escalation: { timeoutMs: 600_000, fallback: "deny", responder: "none" },
+	});
+	ok(!run.events.some((event) => event.type === "clio_coder_permission_escalated"));
+	const resolved = run.events.flatMap((event) =>
+		event.type === "clio_coder_permission_resolved" ? [event.payload] : [],
+	);
+	strictEqual(resolved.length, 1, JSON.stringify(resolved));
+	strictEqual(resolved[0]?.source, "policy");
+	strictEqual(resolved[0]?.mode, "deny");
+	ok(/no operator can answer worker escalations/u.test(resolved[0]?.reason ?? ""), resolved[0]?.reason);
+});

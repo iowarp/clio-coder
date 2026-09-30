@@ -1224,7 +1224,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// stream; "escalate" parks the call, hands the decision up to the operator
 	// over the event/stdin channels, and applies the configured deny/fail
 	// fallback on timeout so the run still cannot hang forever.
-	const onPermission = input.onPermission ?? "deny";
+	// An escalation nobody can answer only waits out its timeout and then
+	// applies the fallback. When the dispatching process says it has no
+	// responder, the worker applies that fallback at once (F9).
+	const unattendedEscalation = input.onPermission === "escalate" && input.escalation?.responder === "none";
+	const onPermission = unattendedEscalation
+		? (input.escalation?.fallback ?? DEFAULT_ESCALATION_FALLBACK)
+		: (input.onPermission ?? "deny");
 	const escalationConfig: WorkerEscalationConfig | null =
 		onPermission === "escalate"
 			? {
@@ -1237,9 +1243,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// Exact, byte-stable denial reasons for the deny/fail postures. Escalate
 	// timeouts and operator denials use their own wording below.
 	const denyReason = (tool: string, actionClass: string): string =>
-		`permission denied by policy: dispatched workers run non-interactively (fleet.permissions.mode=deny); ${tool} requires ${actionClass} confirmation`;
+		unattendedEscalation
+			? `permission denied by policy: no operator can answer worker escalations for this dispatch (fleet.permissions.mode=escalate, fallback=deny); ${tool} requires ${actionClass} confirmation`
+			: `permission denied by policy: dispatched workers run non-interactively (fleet.permissions.mode=deny); ${tool} requires ${actionClass} confirmation`;
 	const failReason = (tool: string, actionClass: string): string =>
-		`permission required for ${tool} (${actionClass}); fleet.permissions.mode=fail ends this run`;
+		unattendedEscalation
+			? `permission required for ${tool} (${actionClass}); no operator can answer worker escalations for this dispatch and fallback=fail ends this run`
+			: `permission required for ${tool} (${actionClass}); fleet.permissions.mode=fail ends this run`;
 
 	interface ActiveEscalation {
 		requestId: string;
