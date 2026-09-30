@@ -6,7 +6,7 @@ import type { ToolSurface } from "./lazy-tool.js";
 export const monitorToolSurface = {
 	name: ToolNames.Monitor,
 	description:
-		"Inspect dispatched runs: list enumerates them; status, peek, receipt, and tools observe one run; wait blocks on one run without collecting; collect is the terminal operation for a detached batch or run list, required before final synthesis.",
+		"Inspect dispatched runs: list enumerates them; status, peek, receipt, and tools observe one run; wait blocks on one run without collecting; collect is the terminal operation for a detached batch or run list, blocks while its runs are in flight, and is required before final synthesis.",
 	parameters: Type.Object({
 		run_id: Type.Optional(
 			Type.String({ description: "Run id from dispatch output or monitor list; omit with mode=list." }),
@@ -20,7 +20,9 @@ export const monitorToolSurface = {
 		batch_id: Type.Optional(Type.String({ description: "Detached batch id (mode=collect)." })),
 		run_ids: Type.Optional(Type.Array(Type.String(), { description: "Run ids to collect (mode=collect)." })),
 		timeout_ms: Type.Optional(
-			Type.Number({ description: "mode=wait: max ms to block (default 60000, max 600000); collect never blocks." }),
+			Type.Number({
+				description: "Max ms to block: mode=wait default 60000, mode=collect default 30000, max 600000 for both.",
+			}),
 		),
 	}),
 	baseActionClass: "read",

@@ -120,7 +120,9 @@ const SIZE_ONLY_ARG_KEYS = new Set(["limit", "offset", "max_bytes", "context"]);
  * trip the identical-call detector first; this catches the escalation cycle
  * (limit: 10000 -> 20000 -> 50000 -> ...) that varies args enough to evade it.
  */
-export const RESULT_STAGNATION_THRESHOLD = 3;
+export /** Minimum time a pending collect must have blocked to earn another repeat epoch. */
+const COLLECT_BLOCKED_EPOCH_MS = 5_000;
+const RESULT_STAGNATION_THRESHOLD = 3;
 const CROSS_ARGUMENT_RESULT_MIN_BYTES = 64;
 
 function stagnationFingerprint(tool: string, args: Record<string, unknown> | undefined): string {
@@ -708,6 +710,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		return pendingCount;
 	};
 
+	const collectBlockedLongEnough = (input: MiddlewareHookInput): boolean => {
+		const details = input.toolResultDetails;
+		return (
+			details?.timedOut === true && typeof details.waitedMs === "number" && details.waitedMs >= COLLECT_BLOCKED_EPOCH_MS
+		);
+	};
+
 	const recordMonitorCollectProgress = (input: MiddlewareHookInput): void => {
 		const pendingCount = observedCollectPendingCount(input);
 		if (pendingCount === null) return;
@@ -715,7 +724,10 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		const previous = monitorCollectProgress.get(key);
 		// Ignore unchanged or older snapshots. Only a strict decrease can grant
 		// another repeat epoch, so one batch permits at most runCount advances.
-		if (previous !== undefined && pendingCount >= previous.pendingCount) return;
+		// A collect that genuinely blocked for a while also advances: each such
+		// poll spends real time rather than tokens, and without it a coordinator
+		// waiting on one slow worker loses its tools on the third poll (D3).
+		if (previous !== undefined && pendingCount >= previous.pendingCount && !collectBlockedLongEnough(input)) return;
 		if (previous === undefined) {
 			while (monitorCollectProgress.size >= SUCCEEDED_FINGERPRINT_LIMIT) {
 				const oldest = monitorCollectProgress.keys().next().value;
@@ -775,6 +787,12 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			input.metadata?.resultKind !== "ok" ||
 			typeof resultFingerprint !== "string"
 		) {
+			stagnationByTurn.delete(turnKey);
+			return;
+		}
+		// A pending collect that blocked is waiting on workers, not re-reading an
+		// unchanged answer, so it never extends a stagnation streak (D3).
+		if (collectBlockedLongEnough(input)) {
 			stagnationByTurn.delete(turnKey);
 			return;
 		}

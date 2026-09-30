@@ -270,7 +270,7 @@ export async function collectRuns(
 				return `- ${row.assignmentId ?? row.runId} agent=${row.agentId} state=${row.assignmentStatus ?? state}`;
 			}),
 			"",
-			'Collect again later, or block on a single run with mode="wait".',
+			'Collect again to keep waiting, or block on a single run with mode="wait".',
 		];
 		return {
 			kind: "ok",

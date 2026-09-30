@@ -53,7 +53,14 @@ const RECEIPT_MAX_BYTES = 14 * 1024;
 const WAIT_POLL_MS = 250;
 const WAIT_DEFAULT_TIMEOUT_MS = 60_000;
 const WAIT_MAX_TIMEOUT_MS = 10 * 60_000;
-const COLLECT_TIMEOUT_NOTICE = 'collect never blocks; timeout_ms is ignored — block on one run with mode="wait".';
+/**
+ * Collect blocks while its runs are in flight. A non-blocking collect answered
+ * "collect again later" instantly, so a coordinator polling it tripped the
+ * identical-call loop guard on the third call and lost its tools for the turn
+ * (D3). Blocking turns each poll into real elapsed time.
+ */
+const COLLECT_DEFAULT_TIMEOUT_MS = 30_000;
+const COLLECT_POLL_MS = 1_000;
 
 export interface MonitorToolDeps {
 	dispatch: DispatchContract;
@@ -494,20 +501,42 @@ async function runWait(
 	};
 }
 
+function boundedTimeout(raw: unknown, fallback: number): number {
+	return typeof raw === "number" && Number.isFinite(raw) && raw > 0
+		? Math.min(Math.floor(raw), WAIT_MAX_TIMEOUT_MS)
+		: fallback;
+}
+
 async function runCollect(
 	deps: MonitorToolDeps,
 	batchId: string,
 	runIds: ReadonlyArray<string>,
-	timeoutWasPassed: boolean,
+	timeoutMs: number,
+	signal: AbortSignal | undefined,
 	ownership: DispatchOwnership,
 ): Promise<ToolResult> {
-	const result =
-		batchId.length > 0
-			? await collectDetachedBatch(deps, batchId, ownership)
-			: await collectRuns(deps, batchId, runIds, ownership);
-	return timeoutWasPassed && result.kind === "ok"
-		? { ...result, output: `${result.output}\n\n${COLLECT_TIMEOUT_NOTICE}` }
-		: result;
+	const startedAt = performance.now();
+	const collectOnce = () =>
+		batchId.length > 0 ? collectDetachedBatch(deps, batchId, ownership) : collectRuns(deps, batchId, runIds, ownership);
+	let result = await collectOnce();
+	while (result.kind === "ok" && result.details?.complete === false) {
+		if (signal?.aborted) return { kind: "error", message: "monitor: collect aborted" };
+		const elapsed = Math.round(performance.now() - startedAt);
+		if (elapsed >= timeoutMs) {
+			return {
+				...result,
+				output: `${result.output}\n\ncollect waited ${elapsed}ms; the runs keep running normally.`,
+				details: { ...result.details, timedOut: true, waitedMs: elapsed },
+			};
+		}
+		await sleep(Math.min(COLLECT_POLL_MS, timeoutMs - elapsed));
+		result = await collectOnce();
+	}
+	if (result.kind !== "ok") return result;
+	return {
+		...result,
+		details: { ...result.details, timedOut: false, waitedMs: Math.round(performance.now() - startedAt) },
+	};
 }
 
 export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
@@ -542,7 +571,14 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 				if (batchId.length === 0 && runIds.length === 0) {
 					return { kind: "error", message: "monitor: mode=collect requires batch_id or a non-empty run_ids array" };
 				}
-				return runCollect(deps, batchId, runIds, Object.hasOwn(args, "timeout_ms"), ownershipFor(deps, options));
+				return runCollect(
+					deps,
+					batchId,
+					runIds,
+					boundedTimeout(args.timeout_ms, COLLECT_DEFAULT_TIMEOUT_MS),
+					options?.signal,
+					ownershipFor(deps, options),
+				);
 			}
 			if (runId.length === 0) {
 				if (rawRunIds !== null) {
@@ -558,12 +594,13 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 				};
 			}
 			if (mode === "wait") {
-				const rawTimeout = typeof args.timeout_ms === "number" && Number.isFinite(args.timeout_ms) ? args.timeout_ms : NaN;
-				const timeoutMs =
-					Number.isFinite(rawTimeout) && rawTimeout > 0
-						? Math.min(Math.floor(rawTimeout), WAIT_MAX_TIMEOUT_MS)
-						: WAIT_DEFAULT_TIMEOUT_MS;
-				return runWait(deps, runId, timeoutMs, options?.signal, ownershipFor(deps, options));
+				return runWait(
+					deps,
+					runId,
+					boundedTimeout(args.timeout_ms, WAIT_DEFAULT_TIMEOUT_MS),
+					options?.signal,
+					ownershipFor(deps, options),
+				);
 			}
 			const ownership = ownershipFor(deps, options);
 			if (mode === "status") return runStatus(deps, runId, ownership);
