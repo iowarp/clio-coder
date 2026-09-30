@@ -1,4 +1,5 @@
 import { ToolNames } from "../../core/tool-names.js";
+import { dispatchMutatedParentWorkspace } from "../dispatch/workspace-mutation.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 
 /**
@@ -39,7 +40,15 @@ export function createPlanCloseRegistration(deps: {
 			}
 			if (!armed) return [];
 			if (input.hook === "after_tool") {
-				if (input.toolName === ToolNames.AskUser || input.toolName === ToolNames.Edit || input.toolName === ToolNames.Write)
+				// A plan request carried out through dispatch is already done. The same receipt
+				// reading the loop guard uses separates a worker that moved the parent's files
+				// from a read-only scout, which leaves the plan still to be approved.
+				if (
+					input.toolName === ToolNames.AskUser ||
+					input.toolName === ToolNames.Edit ||
+					input.toolName === ToolNames.Write ||
+					(input.toolName === ToolNames.Dispatch && dispatchMutatedParentWorkspace(input.toolResultDetails))
+				)
 					askedOrChanged = true;
 				return [];
 			}
