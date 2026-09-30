@@ -6,8 +6,7 @@ import type { DelegationToolGovernance } from "../../core/defaults.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { DelegationToolCallLogEntry } from "../../domains/dispatch/types.js";
-import { DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "../../domains/safety/autonomy.js";
-import { autonomyCallInputs } from "../../domains/safety/autonomy-inputs.js";
+import { evaluateAdmission } from "../../domains/safety/admission.js";
 import type { SafetyContract, SafetyDecision } from "../../domains/safety/contract.js";
 import type {
 	AcpPermissionOption,
@@ -22,6 +21,8 @@ interface MediatorInput {
 	cwd: string;
 	toolGovernance: DelegationToolGovernance;
 	readOnly?: boolean;
+	/** Canonical tools this delegation may use; absent leaves the peer's surface to the safety net. */
+	allowedTools?: ReadonlyArray<string>;
 	onPermissionResolved?(event: AcpMediatorPermissionResolvedEvent): void;
 }
 
@@ -609,61 +610,47 @@ export class AcpToolMediator {
 			decision = "denied";
 			reason = `unknown ACP tool: ${mapped.displayTool}`;
 		} else {
-			const safetyDecisions = mapped.evaluations.map((evaluation) =>
-				this.input.safety.evaluate({ tool: evaluation.tool, args: evaluation.args }),
-			);
-			const blocking = safetyDecisions.find((candidate) => candidate.kind === "block");
-			const asking = safetyDecisions.find((candidate) => candidate.kind === "ask");
-			safetyDecision = blocking ?? asking ?? safetyDecisions[0];
-			if (blocking !== undefined) {
-				decision = "denied";
-				reason = blocking.policy?.reasonCode ?? blocking.kind;
-			} else if (
-				this.input.readOnly === true &&
-				(asking !== undefined ||
-					safetyDecisions.some(
-						(candidate) =>
-							candidate.classification.actionClass !== "read" || candidate.policy?.readScope === "outside-workspace",
-					))
-			) {
-				decision = "denied";
-				reason = `${mapped.tool} denied: this run is read-only`;
-			} else if (asking !== undefined) {
-				decision = "denied";
-				reason = "permission_required: denied by non-stall policy (no interactive operator in delegation context)";
-			} else if (safetyDecisions.length > 0) {
-				// The net passed; the autonomy mapping decides (sd-01 §2.2). An
-				// "ask" disposition resolves as a non-stall denial, exactly like a
-				// net confirm rail below: a delegation has no operator to answer.
-				// Native admission's inputs, outward exposure included, so a
-				// recognized outward command is not approved here (F4).
-				const dispositions = mapped.evaluations.map((evaluation, index) => {
-					const candidate = safetyDecisions[index] as SafetyDecision;
-					const inputs = autonomyCallInputs({ tool: evaluation.tool, args: evaluation.args }, candidate);
-					return {
-						candidate,
-						inputs,
-						disposition: mapAutonomy(DEFAULT_AUTONOMY_LEVEL, candidate.classification.actionClass, inputs.options),
-					};
-				});
-				// A deny disposition fails closed like an ask; neither may approve.
-				const askDisposition = dispositions.find((candidate) => candidate.disposition !== "allow");
-				if (askDisposition !== undefined) {
-					safetyDecision = askDisposition.candidate;
-					decision = "denied";
-					const asked = askDisposition.inputs.readOutsideWorkspace
+			// The shared evaluator decides, as it does for native and SDK workers
+			// (F4). Any ask resolves as a non-stall denial: a delegation has no
+			// operator to answer it.
+			const admission = evaluateAdmission({
+				principal: "worker",
+				effects: mapped.evaluations.map((evaluation) => ({ tool: evaluation.tool, args: evaluation.args })),
+				cwd: this.input.cwd,
+				safety: this.input.safety,
+				constraints: {
+					...(this.input.readOnly === true ? { readOnly: true } : {}),
+					...(this.input.allowedTools !== undefined ? { allowedTools: this.input.allowedTools } : {}),
+				},
+			});
+			decision = admission.kind === "allow" ? "approved" : "denied";
+			if (admission.kind === "deny") {
+				if (admission.code !== "no_effects") safetyDecision = admission.decision;
+				reason =
+					admission.code === "safety_net"
+						? (admission.decision.policy?.reasonCode ?? admission.decision.kind)
+						: admission.code === "no_effects"
+							? "ACP tool produced no policy-evaluable arguments"
+							: admission.code === "read_only"
+								? `${mapped.tool} denied: this run is read-only`
+								: admission.code === "tool_scope"
+									? `${mapped.tool} is outside this run's admitted tool scope`
+									: admission.reason;
+			} else if (admission.kind === "ask") {
+				safetyDecision = admission.netDecision;
+				if (admission.source === "autonomy") {
+					const asked = admission.readOutsideWorkspace
 						? "a path outside the workspace"
-						: askDisposition.inputs.exposure === "outward"
-							? `outward ${askDisposition.candidate.classification.actionClass}`
-							: askDisposition.candidate.classification.actionClass;
-					reason = `permission_required: autonomy ${DEFAULT_AUTONOMY_LEVEL} requires approval for ${asked}; denied by non-stall policy (no interactive operator in delegation context)`;
+						: admission.exposure === "outward"
+							? `outward ${admission.netDecision.classification.actionClass}`
+							: admission.netDecision.classification.actionClass;
+					reason = `permission_required: autonomy ${admission.level} requires approval for ${asked}; denied by non-stall policy (no interactive operator in delegation context)`;
 				} else {
-					decision = "approved";
-					reason = safetyDecision?.policy?.reasonCode ?? "allowed";
+					reason = "permission_required: denied by non-stall policy (no interactive operator in delegation context)";
 				}
 			} else {
-				decision = "denied";
-				reason = "ACP tool produced no policy-evaluable arguments";
+				safetyDecision = admission.decision;
+				reason = admission.decision.policy?.reasonCode ?? "allowed";
 			}
 		}
 

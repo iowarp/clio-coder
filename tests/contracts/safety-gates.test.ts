@@ -30,6 +30,7 @@ import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { emitClaudeToolPermissionDecision } from "../../src/engine/claude/tool-safety.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
+import { readTool } from "../../src/tools/read.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { writeTool } from "../../src/tools/write.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -315,6 +316,150 @@ describe("safety gate boundary", () => {
 		const [entry] = mediator.snapshot().toolCallLog;
 		strictEqual(entry?.decision, "denied");
 		strictEqual(entry?.reason?.startsWith("permission_required: autonomy default"), true, entry?.reason);
+	});
+
+	it("gives native, Claude SDK and ACP workers one disposition per call through the shared admission evaluator", async () => {
+		const outside = mkdtempSync(join(tmpdir(), "clio-coder-parity-outside-"));
+		try {
+			writeFileSync(join(outside, "notes.txt"), "outside\n");
+			const outsidePath = join(outside, "notes.txt");
+			// In-memory project policy recognizing an outward push; nothing is written or run.
+			const outwardPolicy = createSafetyPolicyEngine({
+				cwd: scratch,
+				projectPolicy: {
+					trustVerdict: "trusted",
+					path: join(scratch, ".clio-coder", "safety.yaml"),
+					hash: null,
+					valid: true,
+					errors: [],
+					commands: [
+						{
+							id: "push-main",
+							command: "git push origin main",
+							actionClass: "execute",
+							shellOperators: "deny",
+							env: { mode: "none", allow: [] },
+							requireConfirmation: false,
+						},
+					],
+					pathPolicy: {},
+					disableDefaultPathPolicy: false,
+				},
+			});
+			const outwardSafety: SafetyContract = {
+				...createWorkerSafety({ cwd: scratch }),
+				evaluate(call, posture): SafetyDecision {
+					const decision = outwardPolicy.evaluate(call, posture);
+					if (decision.kind === "allow") return { kind: "allow", classification: decision.classification, policy: decision };
+					const rejection = decision.rejection ?? { short: decision.reasonCode, detail: decision.reasonCode, hints: [] };
+					return { kind: decision.kind, classification: decision.classification, rejection, policy: decision };
+				},
+			};
+			type Disposition = "allow" | "ask" | "deny";
+			interface ParityCase {
+				name: string;
+				safety: SafetyContract;
+				allowedTools?: ReadonlyArray<string>;
+				native: { tool: string; args: Record<string, unknown> };
+				sdk: { toolName: string; input: Record<string, unknown> };
+				acp: { kind: string; rawInput: Record<string, unknown> };
+				expected: Disposition;
+			}
+			const rooted = createWorkerSafety({ cwd: scratch, writeRoots: [join(scratch, "pkg/")] });
+			const cases: ParityCase[] = [
+				{
+					name: "read outside the workspace",
+					safety: createWorkerSafety({ cwd: scratch }),
+					native: { tool: ToolNames.Read, args: { path: outsidePath } },
+					sdk: { toolName: "Read", input: { file_path: outsidePath } },
+					acp: { kind: "read", rawInput: { path: outsidePath } },
+					expected: "ask",
+				},
+				{
+					name: "policy-recognized outward command",
+					safety: outwardSafety,
+					native: { tool: ToolNames.Bash, args: { command: "git push origin main" } },
+					sdk: { toolName: "Bash", input: { command: "git push origin main" } },
+					acp: { kind: "execute", rawInput: { command: "git push origin main" } },
+					expected: "ask",
+				},
+				{
+					name: "write-root escape",
+					safety: rooted,
+					native: { tool: ToolNames.Write, args: { path: join(scratch, "escape.txt"), content: "x" } },
+					sdk: { toolName: "Write", input: { file_path: join(scratch, "escape.txt"), content: "x" } },
+					acp: { kind: "edit", rawInput: { path: join(scratch, "escape.txt"), content: "x" } },
+					expected: "deny",
+				},
+				{
+					name: "tool outside the admitted surface",
+					safety: createWorkerSafety({ cwd: scratch }),
+					allowedTools: [ToolNames.Read],
+					native: { tool: ToolNames.Bash, args: { command: "ls" } },
+					sdk: { toolName: "Bash", input: { command: "ls" } },
+					acp: { kind: "execute", rawInput: { command: "ls" } },
+					expected: "deny",
+				},
+				{
+					name: "damage-control operator rail",
+					safety: createWorkerSafety({ cwd: scratch }),
+					native: { tool: ToolNames.Bash, args: { command: "gcloud iam policies list" } },
+					sdk: { toolName: "Bash", input: { command: "gcloud iam policies list" } },
+					acp: { kind: "execute", rawInput: { command: "gcloud iam policies list" } },
+					expected: "ask",
+				},
+			];
+			for (const entry of cases) {
+				const registry = createRegistry({ safety: entry.safety, principal: "worker", autonomy: () => "default" });
+				for (const spec of [readTool, writeTool, bashTool]) {
+					registry.register({ ...spec, run: async () => ({ kind: "ok", output: "stub" }) });
+				}
+				let parked = false;
+				registry.onPermissionRequired((_call, _decision, meta) => {
+					parked = true;
+					registry.cancelParkedCall(meta.requestId, "contract: denied");
+				});
+				const verdict = await registry.invoke(
+					entry.native,
+					entry.allowedTools !== undefined ? { allowedTools: entry.allowedTools as never } : undefined,
+				);
+				const native: Disposition = parked ? "ask" : verdict.kind === "ok" ? "allow" : "deny";
+
+				const sdkDecision = emitClaudeToolPermissionDecision({
+					...entry.sdk,
+					safety: entry.safety,
+					cwd: scratch,
+					emit: () => {},
+					...(entry.allowedTools !== undefined ? { allowedTools: new Set(entry.allowedTools) } : {}),
+				});
+				const sdk: Disposition = sdkDecision.kind === "allow" ? "allow" : sdkDecision.permissionRequired ? "ask" : "deny";
+
+				const mediator = new AcpToolMediator({
+					safety: entry.safety,
+					cwd: scratch,
+					toolGovernance: "clio-coder-policy",
+					...(entry.allowedTools !== undefined ? { allowedTools: entry.allowedTools } : {}),
+				});
+				await mediator.handle({
+					toolCall: entry.acp,
+					options: [{ optionId: "allow", kind: "allow_once", name: "Allow" }],
+				});
+				const [logged] = mediator.snapshot().toolCallLog;
+				const acp: Disposition =
+					logged?.decision === "approved"
+						? "allow"
+						: logged?.reason?.startsWith("permission_required:") === true
+							? "ask"
+							: "deny";
+				deepStrictEqual(
+					{ native, sdk, acp },
+					{ native: entry.expected, sdk: entry.expected, acp: entry.expected },
+					entry.name,
+				);
+			}
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+		}
 	});
 
 	it("yolo clears ordinary confirmation rails while damage control still decides", () => {

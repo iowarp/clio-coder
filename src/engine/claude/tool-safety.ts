@@ -2,9 +2,8 @@ import nodePath from "node:path";
 import { performance } from "node:perf_hooks";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
-import type { AutonomyExposure, AutonomyLevel } from "../../domains/safety/autonomy.js";
-import { autonomyAskRejection, DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "../../domains/safety/autonomy.js";
-import { autonomyCallInputs } from "../../domains/safety/autonomy-inputs.js";
+import type { AdmissionDisposition } from "../../domains/safety/admission.js";
+import { evaluateAdmission } from "../../domains/safety/admission.js";
 import { describeCallAction } from "../../domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../../domains/safety/contract.js";
 import type { RejectionMessage } from "../../domains/safety/rejection-feedback.js";
@@ -191,10 +190,6 @@ function mapClaudeToolCall(toolName: string, input: Record<string, unknown>, cwd
 	}
 }
 
-function readsOutsideWorkspace(decision: SafetyDecision): boolean {
-	return decision.policy?.readScope === "outside-workspace";
-}
-
 function toReadOnlyBlock(decision: SafetyDecision, tool: string): SafetyDecision {
 	return {
 		kind: "block",
@@ -207,21 +202,6 @@ function toReadOnlyBlock(decision: SafetyDecision, tool: string): SafetyDecision
 				"Inspection tools remain available inside the workspace.",
 			],
 		},
-		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
-	};
-}
-
-function toAutonomyAsk(
-	decision: SafetyDecision,
-	level: AutonomyLevel,
-	call: ClassifierCall,
-	exposure: AutonomyExposure,
-): SafetyDecision {
-	const actionClass = decision.classification.actionClass;
-	return {
-		kind: "ask",
-		classification: decision.classification,
-		rejection: autonomyAskRejection(level, call.tool, actionClass, exposure, readsOutsideWorkspace(decision)),
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};
 }
@@ -263,45 +243,53 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 	const call: ClassifierCall = { tool: mapped.clioToolName, args: mapped.args };
 	const attempt = input.budgetGate?.attempt(mapped.clioToolName);
 	if (attempt?.kind === "deny") return budgetDenial(input, mapped, call, attempt.reason);
-	// Tool-profile / admitted-surface gate. This is the authoritative narrowing
-	// enforcement for SDK workers: it runs before the safety net so an
-	// out-of-profile tool (e.g. bash under minimal-local) is denied regardless
-	// of the autonomy verdict, and it does not depend on the external CLI
-	// honoring the allow/disallow options. Only mapped (known) Claude tools are
-	// gated; unmapped Claude-internal tools defer to the safety net as before.
-	if (input.allowedTools !== undefined && mapped.known && !input.allowedTools.has(mapped.clioToolName)) {
-		const classification = input.safety.classify(call);
-		const rejection: RejectionMessage = {
-			short: `${mapped.clioToolName} is not in this worker's tool profile`,
-			detail: `Tool '${mapped.clioToolName}' is outside the dispatched worker's admitted tool surface, so the request is denied. Use only the tools granted to this run.`,
-			hints: [],
-		};
-		const blocked: SafetyDecision = { kind: "block", classification, rejection };
-		input.safety.audit.recordToolCall?.({
-			tool: mapped.clioToolName,
-			classification,
-			decision: "denied",
-			args: mapped.args,
-			reasons: [rejection.detail],
-			reasonCode: "tool-profile",
-		});
+	// The shared evaluator decides (native and ACP call the same function). The
+	// admitted-surface gate inside it is the authoritative narrowing enforcement
+	// for SDK workers: it does not depend on the external CLI honoring the
+	// allow/disallow options. Only mapped (known) Claude tools are gated;
+	// unmapped Claude-internal tools defer to the safety net as before.
+	const admission = evaluateAdmission({
+		principal: "worker",
+		effects: [call],
+		cwd: input.cwd,
+		safety: input.safety,
+		constraints: {
+			...(input.readOnly === true ? { readOnly: true } : {}),
+			...(input.allowedTools !== undefined && mapped.known ? { allowedTools: input.allowedTools } : {}),
+		},
+	});
+	if (admission.kind === "allow") {
+		const decision = admission.decision;
+		const budget = input.budgetGate?.admit(mapped.clioToolName);
+		if (budget?.kind === "deny") return budgetDenial(input, mapped, call, budget.reason);
+		return { kind: "allow", mapped, decision, reason: decision.policy?.reasonCode ?? "allowed" };
+	}
+	if (admission.kind === "ask") {
+		// Nobody can answer a Claude SDK worker's ask; it resolves through
+		// fleet.permissions.mode as a permission-required denial.
 		return {
 			kind: "deny",
 			mapped,
-			decision: blocked,
-			reason: rejection.short,
-			reasonCode: "tool-profile",
-			permissionRequired: false,
+			decision: admission.decision,
+			reason: rejectionText(admission.decision),
+			...(admission.source === "autonomy" ? { reasonCode: `autonomy:${admission.level}` } : {}),
+			permissionRequired: true,
 		};
 	}
-	const decision = input.safety.evaluate(call);
-	if (decision.kind === "block") {
+	return deniedDecision(input, mapped, call, admission);
+}
+
+function deniedDecision(
+	input: EvaluateClaudeToolPermissionInput,
+	mapped: MappedClaudeToolCall,
+	call: ClassifierCall,
+	admission: Extract<AdmissionDisposition, { kind: "deny" }>,
+): ClaudeToolPermissionDecision {
+	const decision = admission.decision;
+	if (admission.code === "safety_net") {
 		return { kind: "deny", mapped, decision, reason: rejectionText(decision), permissionRequired: false };
 	}
-	if (
-		input.readOnly === true &&
-		(decision.classification.actionClass !== "read" || readsOutsideWorkspace(decision) || decision.kind === "ask")
-	) {
+	if (admission.code === "read_only") {
 		const blocked = toReadOnlyBlock(decision, call.tool);
 		return {
 			kind: "deny",
@@ -312,28 +300,34 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 			permissionRequired: false,
 		};
 	}
-	if (decision.kind === "ask") {
-		return { kind: "deny", mapped, decision, reason: rejectionText(decision), permissionRequired: true };
-	}
-	const actionClass = decision.classification.actionClass;
-	// Native admission's inputs, outward exposure included, so a recognized
-	// outward command asks here exactly as it does natively (F4).
-	const autonomyInputs = autonomyCallInputs(call, decision);
-	const disposition = mapAutonomy(DEFAULT_AUTONOMY_LEVEL, actionClass, autonomyInputs.options);
-	if (disposition === "allow") {
-		const admission = input.budgetGate?.admit(mapped.clioToolName);
-		if (admission?.kind === "deny") return budgetDenial(input, mapped, call, admission.reason);
-		return { kind: "allow", mapped, decision, reason: decision.policy?.reasonCode ?? "allowed" };
-	}
-	const ask = toAutonomyAsk(decision, DEFAULT_AUTONOMY_LEVEL, call, autonomyInputs.exposure);
-	return {
-		kind: "deny",
-		mapped,
-		decision: ask,
-		reason: rejectionText(ask),
-		reasonCode: `autonomy:${DEFAULT_AUTONOMY_LEVEL}`,
-		permissionRequired: true,
+	const profile = admission.code === "tool_scope";
+	const rejection: RejectionMessage = profile
+		? {
+				short: `${mapped.clioToolName} is not in this worker's tool profile`,
+				detail: `Tool '${mapped.clioToolName}' is outside the dispatched worker's admitted tool surface, so the request is denied. Use only the tools granted to this run.`,
+				hints: [],
+			}
+		: { short: admission.reason, detail: admission.reason, hints: [] };
+	const reasonCode = profile
+		? "tool-profile"
+		: admission.code === "git_destructive"
+			? "classification:git_destructive"
+			: `admission:${admission.code}`;
+	const blocked: SafetyDecision = {
+		kind: "block",
+		classification: decision.classification,
+		rejection,
+		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};
+	input.safety.audit.recordToolCall?.({
+		tool: mapped.clioToolName,
+		classification: decision.classification,
+		decision: "denied",
+		args: mapped.args,
+		reasons: [rejection.detail],
+		reasonCode,
+	});
+	return { kind: "deny", mapped, decision: blocked, reason: rejection.short, reasonCode, permissionRequired: false };
 }
 
 function finishDecision(decision: SafetyDecision): NonNullable<ToolFinishEvent["decision"]> {

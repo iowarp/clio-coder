@@ -159,6 +159,7 @@ export function createWorkerToolRegistry(
 	const registry = createRegistry({
 		safety,
 		middleware,
+		principal: "worker",
 		autonomy: () => DEFAULT_AUTONOMY_LEVEL,
 		...(readOnly === true ? { readOnly: true } : {}),
 		...(onMiddlewareEffects ? { onMiddlewareEffects } : {}),

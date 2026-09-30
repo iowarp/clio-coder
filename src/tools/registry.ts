@@ -3,27 +3,16 @@ import type { TSchema } from "typebox";
 import { isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.js";
 import { normalizePromptHint } from "../core/prompt-hint.js";
-import {
-	evaluateSkillToolSurface,
-	type PendingSkillToolPolicy,
-	type SkillToolSurfaceViolation,
-} from "../core/skill-activation.js";
+import type { PendingSkillToolPolicy, SkillToolSurfaceViolation } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
-import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
+import type { TurnConstraints } from "../core/turn-constraints.js";
 import { containsInstructionMarkers, INSTRUCTION_SHAPED_WARNING } from "../core/untrusted-content.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
+import { type AdmissionDisposition, type AdmissionPrincipal, evaluateAdmission } from "../domains/safety/admission.js";
 import { approvalAxisId } from "../domains/safety/approval-axis.js";
-import {
-	type AutonomyExposure,
-	type AutonomyLevel,
-	autonomyAskRejection,
-	DEFAULT_AUTONOMY_EXPOSURE,
-	DEFAULT_AUTONOMY_LEVEL,
-	mapAutonomy,
-} from "../domains/safety/autonomy.js";
-import { autonomyCallInputs } from "../domains/safety/autonomy-inputs.js";
+import { type AutonomyExposure, type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
@@ -271,6 +260,12 @@ export interface RegistryDeps {
 	 * Absent means the default operator mode.
 	 */
 	autonomy?: () => AutonomyLevel;
+	/**
+	 * Whose calls this registry admits. A worker never reads autonomy: its
+	 * standing allowance is the default mapping, and only its autonomy asks may
+	 * later be answered by the main agent. Absent means the main agent.
+	 */
+	principal?: AdmissionPrincipal;
 	/** Dispatch-owned restriction, fixed for the lifetime of this run. */
 	readOnly?: boolean;
 	/**
@@ -753,49 +748,81 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return { kind: "terminal", verdict: { kind: "not_visible", reason: `tool not registered: ${call.tool}` } };
 		}
 		const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
-		const posture = grant ? "confirmed" : level === "yolo" ? "yolo" : undefined;
-		const directDecision = applyRegisteredToolClassification(deps.safety.evaluate(call, posture), spec);
 		const projectedCall = spec.safetyCall?.(call.args ?? {});
-		const projectedDecision =
-			projectedCall && directDecision.kind !== "block"
-				? applyRegisteredToolClassification(deps.safety.evaluate(projectedCall, posture), spec)
-				: undefined;
-		// Both the public capability and its underlying effects must pass. A trusted
-		// projection cannot bypass a rule targeting the capability's own name.
-		const decision =
-			directDecision.kind === "block" || (directDecision.kind === "ask" && projectedDecision?.kind !== "block")
-				? directDecision
-				: (projectedDecision ?? directDecision);
-		// Stage 1, the safety net (level-independent): engine blocks are final;
-		// engine asks are confirm rails that park at every autonomy level.
-		if (decision.kind === "block") {
-			return { kind: "terminal", verdict: { kind: "blocked", reason: decision.rejection.short, decision } };
+		// Plan-scale dispatch calls (multi-task, compete, remote node) carry the
+		// plan flag so default routes them through one plan approval.
+		const dispatchPlan =
+			call.tool === ToolNames.Dispatch
+				? (spec.describeDispatchPlan?.(call.args ?? {}) ?? describeDispatchPlan(call.args))
+				: null;
+		const planScale = dispatchPlan?.planScale === true;
+		// The shared evaluator decides; this adapter only parks, audits and runs.
+		// The SDK bridge and the ACP mediator call the same function.
+		const admission = evaluateAdmission({
+			principal: deps.principal ?? "main",
+			// Both the public capability and its underlying effects must pass. A
+			// trusted projection cannot bypass a rule targeting the capability's own name.
+			...(projectedCall !== undefined ? { capability: call, effects: [projectedCall] } : { effects: [call] }),
+			safety: deps.safety,
+			autonomy: level,
+			constraints: {
+				...(deps.readOnly === true ? { readOnly: true } : {}),
+				...(options?.turnConstraints !== undefined ? { turnConstraints: options.turnConstraints } : {}),
+				...(options?.allowedTools !== undefined ? { allowedTools: options.allowedTools } : {}),
+				...(options?.pendingSkillPolicy !== undefined ? { pendingSkillPolicy: options.pendingSkillPolicy } : {}),
+			},
+			...(spec.confirmationRuleId !== undefined ? { confirmationRuleId: spec.confirmationRuleId } : {}),
+			...(grant !== undefined ? { authorization: { actionClass: grant.actionClass } } : {}),
+			normalize: (decision) => applyRegisteredToolClassification(decision, spec),
+			autonomyExtra: {
+				...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
+				...(planScale ? { dispatchPlanScale: true } : {}),
+			},
+		});
+		if (admission.kind === "deny" && admission.code === "safety_net") {
+			return { kind: "terminal", verdict: { kind: "blocked", reason: admission.reason, decision: admission.decision } };
 		}
-		const effectRefusal = admitHostEffects(call, spec, decision, level);
+		const effectRefusal = admitHostEffects(call, spec, admission.decision, level);
 		if (effectRefusal !== null) return effectRefusal;
-		const actionClass = decision.classification.actionClass;
-		const readOutside = decision.policy?.readScope === "outside-workspace";
-		if (
-			deps.readOnly === true &&
-			(actionClass !== "read" ||
-				spec.confirmationRuleId !== undefined ||
-				readOutside ||
-				decision.kind === "ask" ||
-				(call.tool === ToolNames.Context && call.args?.scope === "skills" && typeof call.args?.name === "string"))
-		) {
+		if (admission.kind === "deny") return { kind: "terminal", verdict: deniedVerdict(call, admission) };
+		if (admission.kind === "allow") {
+			// A confirmed re-admission keeps the `allowed` row safety.evaluate wrote.
+			if (!admission.authorized) recordRegistryDisposition(call, admission.decision, "allowed");
+			return { kind: "execute", spec, decision: admission.decision };
+		}
+		const askDecision =
+			admission.source === "autonomy" && planScale && dispatchPlan !== null
+				? toDispatchPlanAskDecision(admission.netDecision, level, dispatchPlan)
+				: admission.decision;
+		return {
+			kind: "park",
+			decision: askDecision,
+			axis: approvalAxisId(askDecision, level),
+			...(admission.source === "autonomy" && dispatchPlan !== null ? { dispatchPlan } : {}),
+		};
+	};
+
+	/** Registry verdict and audit row for a hard denial past the safety net. */
+	const deniedVerdict = (
+		call: ClassifierCall,
+		admission: Extract<AdmissionDisposition, { kind: "deny" }>,
+	): Extract<RegistryVerdict, { kind: "blocked" }> => {
+		const decision = admission.decision;
+		if (admission.code === "read_only") {
 			const verdict = readOnlyDeniedVerdict(decision, call.tool);
 			recordRegistryDisposition(call, verdict.decision, "denied", { reasonCode: "dispatch:read_only" });
-			return { kind: "terminal", verdict };
+			return verdict;
 		}
-		const outsideTurn = !turnAllowsTool(options?.turnConstraints, call.tool);
-		const outsideRun =
-			options?.allowedTools !== undefined && !turnAllowsTool({ allowedTools: options.allowedTools }, call.tool);
-		const disabledSkills =
-			options?.turnConstraints?.skills === "disabled" && call.tool === ToolNames.Context && call.args?.scope === "skills";
-		if (outsideTurn || outsideRun || disabledSkills) {
-			const reason = disabledSkills
-				? "Skills are disabled for this task."
-				: `${call.tool} is outside this task's admitted tool scope.`;
+		if (admission.code === "skill_surface" && admission.skillViolation !== undefined) {
+			const verdict = skillSurfaceBlockedVerdict(decision, call.tool, admission.skillViolation);
+			recordRegistryDisposition(call, verdict.decision, "blocked", {
+				reasonCode: "skill_surface",
+				reasons: [verdict.reason],
+			});
+			return verdict;
+		}
+		if (admission.code === "tool_scope" || admission.code === "skills_disabled") {
+			const reason = admission.reason;
 			const blocked: SafetyDecision = {
 				kind: "block",
 				classification: decision.classification,
@@ -806,94 +833,23 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				},
 			};
 			recordRegistryDisposition(call, blocked, "blocked", { reasonCode: "turn_constraint", reasons: [reason] });
-			return { kind: "terminal", verdict: { kind: "blocked", reason, decision: blocked } };
+			return { kind: "blocked", reason, decision: blocked };
 		}
-		// Stage 1.5, the skill tool surface: a loaded SKILL.md that declares
-		// allowed-tools or disallowed-tools narrows the surface until the
-		// policy's lifetime ends. Interactively that is the session: the
-		// narrowing stays armed across the operator's later turns until a
-		// different skill replaces it, `/skill off` clears it, or the session
-		// ends. A worker keeps the run-scoped lifetime. Narrowing only blocks;
-		// it never grants, and an out-of-surface call blocks terminally
-		// instead of parking for confirmation.
-		const surfaceViolation = evaluateSkillToolSurface(options?.pendingSkillPolicy, call.tool);
-		if (surfaceViolation) {
-			const verdict = skillSurfaceBlockedVerdict(decision, call.tool, surfaceViolation);
-			recordRegistryDisposition(call, verdict.decision, "blocked", {
-				reasonCode: "skill_surface",
-				reasons: [verdict.reason],
-			});
-			return { kind: "terminal", verdict };
-		}
-		if (decision.kind === "ask") {
-			if (grant?.actionClass === actionClass) return { kind: "execute", spec, decision };
-			return { kind: "park", decision, axis: approvalAxisId(decision, level) };
-		}
-		if (spec.confirmationRuleId !== undefined && grant?.actionClass !== actionClass) {
-			const askDecision: SafetyDecision = {
-				kind: "ask",
-				classification: decision.classification,
-				confirmationRuleId: spec.confirmationRuleId,
-				rejection: {
-					short: `${call.tool} needs operator confirmation`,
-					detail: `${call.tool} changes a Slurm allocation and requires approval before it reaches the scheduler.`,
-					hints: ["Approving resumes only this call."],
-				},
-				...(decision.policy !== undefined ? { policy: decision.policy } : {}),
-			};
-			return { kind: "park", decision: askDecision, axis: approvalAxisId(askDecision, level) };
-		}
-		// One-shot grant: resumeParkedCalls re-admits exactly the parked call
-		// the operator approved, with a confirmed posture. The engine converts
-		// its confirm rail to an allow (including M3 git ask rules), so the
-		// grant match executes directly instead of re-entering the mapping.
-		if (grant?.actionClass === actionClass) {
-			return { kind: "execute", spec, decision };
-		}
-		if (actionClass === "git_destructive") {
+		if (admission.code === "git_destructive") {
 			recordRegistryDisposition(call, decision, "blocked", {
-				reasons: [`action ${actionClass} is hard-blocked`],
+				reasons: [admission.reason],
 				reasonCode: "classification:git_destructive",
 			});
-			return {
-				kind: "terminal",
-				verdict: {
-					kind: "blocked",
-					reason: `action ${actionClass} is hard-blocked`,
-					decision,
-				},
-			};
+			return { kind: "blocked", reason: admission.reason, decision };
 		}
-		// Stage 2, the autonomy mapping (sd-01 §2.3): the net passed; the level
-		// decides run / ask / deny per action class. Plan-scale dispatch calls
-		// (multi-task, compete, remote node) carry the plan flag so default
-		// routes them through one plan approval.
-		const dispatchPlan =
-			call.tool === ToolNames.Dispatch
-				? (spec.describeDispatchPlan?.(call.args ?? {}) ?? describeDispatchPlan(call.args))
-				: null;
-		const planScale = dispatchPlan?.planScale === true;
-		// Gates declare their tier; write-shaped HTTP requests send data outward.
-		// The SDK and ACP adapters derive the same inputs from the same helper (F4).
-		const { exposure, options: autonomyOptions } = autonomyCallInputs(call, decision, {
-			...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
-			...(planScale ? { dispatchPlanScale: true } : {}),
-		});
-		const disposition = mapAutonomy(level, actionClass, autonomyOptions);
-		if (disposition === "ask") {
-			const askDecision =
-				planScale && dispatchPlan !== null
-					? toDispatchPlanAskDecision(decision, level, dispatchPlan)
-					: toAutonomyAskDecision(decision, level, call.tool, actionClass, exposure, readOutside);
-			return {
-				kind: "park",
-				decision: askDecision,
-				axis: approvalAxisId(askDecision, level),
-				...(dispatchPlan !== null ? { dispatchPlan } : {}),
-			};
-		}
-		recordRegistryDisposition(call, decision, "allowed");
-		return { kind: "execute", spec, decision };
+		const blocked: SafetyDecision = {
+			kind: "block",
+			classification: decision.classification,
+			rejection: { short: admission.reason, detail: admission.reason, hints: [] },
+			...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+		};
+		recordRegistryDisposition(call, blocked, "blocked", { reasonCode: `admission:${admission.code}` });
+		return { kind: "blocked", reason: admission.reason, decision: blocked };
 	};
 
 	/**
@@ -913,36 +869,29 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	): Extract<AdmitOutcome, { kind: "terminal" }> | null => {
 		const effects = spec.hostEffectCalls?.(call.args ?? {}) ?? [];
 		if (effects.length === 0) return null;
-		const posture = level === "yolo" ? "yolo" : undefined;
 		let hard: { label: string; cause: string } | null = null;
 		let soft: { label: string; cause: string } | null = null;
 		for (const effect of effects) {
 			const effectSpec = tools.get(effect.call.tool as ToolName);
-			const raw = deps.safety.evaluate(effect.call, posture);
-			const effectDecision = effectSpec ? applyRegisteredToolClassification(raw, effectSpec) : raw;
-			const actionClass = effectDecision.classification.actionClass;
-			if (effectDecision.kind === "block" || actionClass === "git_destructive") {
-				const cause =
-					effectDecision.kind === "block" ? effectDecision.rejection.short : `action ${actionClass} is hard-blocked`;
-				hard = { label: effect.label, cause };
+			// Each check is admitted exactly as its direct call would be, by the
+			// same evaluator, and never under a one-shot grant for this call.
+			const admission = evaluateAdmission({
+				principal: deps.principal ?? "main",
+				effects: [effect.call],
+				safety: deps.safety,
+				autonomy: level,
+				...(effectSpec !== undefined
+					? { normalize: (raw: SafetyDecision) => applyRegisteredToolClassification(raw, effectSpec) }
+					: {}),
+			});
+			if (
+				admission.kind === "deny" ||
+				(admission.kind === "ask" && admission.decision.classification.actionClass === "git_destructive")
+			) {
+				hard = { label: effect.label, cause: admission.reason };
 				break;
 			}
-			if (soft !== null) continue;
-			if (effectDecision.kind === "ask") {
-				soft = { label: effect.label, cause: effectDecision.rejection.short };
-				continue;
-			}
-			const exposure = effectDecision.classification.exposure === "outward" ? "outward" : DEFAULT_AUTONOMY_EXPOSURE;
-			const readOutside = effectDecision.policy?.readScope === "outside-workspace";
-			const disposition = mapAutonomy(level, actionClass, {
-				executeRecognized: effectDecision.policy?.execRecognition !== "unrecognized",
-				...(readOutside ? { readOutsideWorkspace: true } : {}),
-				...(exposure === "outward" ? { exposure } : {}),
-			});
-			if (disposition !== "allow") {
-				const ask = autonomyAskRejection(level, effect.call.tool, actionClass, exposure, readOutside);
-				soft = { label: effect.label, cause: ask.short };
-			}
+			if (soft === null && admission.kind === "ask") soft = { label: effect.label, cause: admission.reason };
 		}
 		const refused = hard ?? soft;
 		if (refused === null) return null;
@@ -1647,28 +1596,6 @@ function readOnlyDeniedVerdict(decision: SafetyDecision, tool: string): Extract<
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};
 	return { kind: "blocked", reason: rejection.short, decision: blocked };
-}
-
-/**
- * Park-shaped decision for an autonomy `ask` disposition. The engine passed
- * the call, so the rejection names the level as the asking axis; overlays and
- * non-interactive deniers read it from here. An outward-exposure park names
- * the tier instead of the action class, because the class is not why it asked.
- */
-function toAutonomyAskDecision(
-	decision: SafetyDecision,
-	level: AutonomyLevel,
-	tool: string,
-	actionClass: ActionClass,
-	exposure: AutonomyExposure = DEFAULT_AUTONOMY_EXPOSURE,
-	readOutsideWorkspace = false,
-): SafetyDecision {
-	return {
-		kind: "ask",
-		classification: decision.classification,
-		rejection: autonomyAskRejection(level, tool, actionClass, exposure, readOutsideWorkspace),
-		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
-	};
 }
 
 /** Tools whose results carry text somebody else wrote: a page, an MCP server's answer, a worker's report. */
