@@ -801,10 +801,12 @@ function bashPathTokenCandidates(command: string): string[] {
 		if (scanned.operator) continue;
 		const token = scanned.value;
 		if (token.length === 0) continue;
-		// A token containing whitespace came from a quoted string of prose, not
-		// a path argument; and flags are not paths unless they embed one
+		// A token containing whitespace usually came from a quoted string of
+		// prose, not a path argument. One that also holds a slash can still be a
+		// path through a directory with a space in its name (`"a b/../.env"`), so
+		// it is tested whole. Flags are not paths unless they embed one
 		// (--file=~/.aws/credentials).
-		if (/\s/.test(token)) continue;
+		if (/\s/.test(token) && !token.includes("/")) continue;
 		if (token.startsWith("-") && !token.includes("/") && !token.includes("=")) continue;
 		candidates.push(token);
 		const eq = token.indexOf("=");
@@ -1622,7 +1624,8 @@ function readOnlyInspectionRule(
 				sawScript = true;
 				continue;
 			}
-			if (arg.startsWith("-") || !operandStaysInWorkspace(arg, cwd, workspaceRoot, readScope)) return null;
+			if (arg.startsWith("-") || !operandStaysInWorkspace(arg, cwd, workspaceRoot, readScope) || spacedPathOperand(arg))
+				return null;
 		}
 		return sawScript ? "builtin:read-only:sed" : null;
 	}
@@ -1636,9 +1639,19 @@ function readOnlyInspectionRule(
 			if (arg.includes("/") || arg.includes("~")) return null;
 			continue;
 		}
-		if (!operandStaysInWorkspace(arg, cwd, workspaceRoot, readScope)) return null;
+		if (!operandStaysInWorkspace(arg, cwd, workspaceRoot, readScope) || spacedPathOperand(arg)) return null;
 	}
 	return `builtin:read-only:${command}`;
+}
+
+/**
+ * An operand with whitespace that also reads as a path (`a b/../.env`). The
+ * word-level scans treated whitespace as prose and never tested it, so it is
+ * not recognized even when the whole-token zero-access test passes. Prose with
+ * no path character (`grep "two words" f`) is not one.
+ */
+function spacedPathOperand(arg: string): boolean {
+	return /\s/u.test(arg) && /[/\\$`~]/u.test(arg);
 }
 
 function operandStaysInWorkspace(arg: string, cwd: string, workspaceRoot: string, readScope: ReadScopeInputs): boolean {
