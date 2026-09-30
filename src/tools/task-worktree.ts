@@ -690,6 +690,20 @@ export function cleanupTaskWorktree(worktree: TaskWorktree, deleteBranch: boolea
 export function discardIdleTaskWorktree(worktree: TaskWorktree): boolean {
 	assertOwnership(worktree);
 	if (workHeldBy(worktree.root, worktree) !== null) return false;
+	// workHeldBy counts base..branch only. A worker that detached HEAD or moved to
+	// another branch and committed there holds work the branch count cannot see,
+	// and deleting the worktree would orphan it. A gone working tree has no HEAD
+	// to read, so workHeldBy's verdict stands.
+	if (existsSync(worktree.path)) {
+		if (!checkTaskWorktreeHead(worktree).ok) return false;
+		try {
+			const strayed = Number.parseInt(git(worktree.path, ["rev-list", "--count", `${worktree.branch}..HEAD`]), 10);
+			if (strayed !== 0) return false;
+		} catch {
+			// A git failure means HEAD cannot be shown to hold nothing, so keep it.
+			return false;
+		}
+	}
 	cleanupTaskWorktree(worktree, true);
 	return true;
 }
