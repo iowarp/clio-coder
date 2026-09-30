@@ -336,7 +336,7 @@ export function createContextBundle(
 			const emitProgress = (event: Omit<ContextActivityPayload, "kind" | "at">): void => {
 				_context.bus.emit(BusChannels.ContextActivity, { kind: "context-clear", at: Date.now(), ...event });
 			};
-			emitProgress({ phase: "done", status: "started", message: "clearing context" });
+			emitProgress({ phase: "state", status: "started", message: "clearing accumulated project context" });
 			try {
 				const result = await withPromptSourceBoundary(
 					input?.cwd ?? process.cwd(),
@@ -346,7 +346,11 @@ export function createContextBundle(
 				const cwd = input?.cwd ?? process.cwd();
 				contextState.invalidate(cwd);
 				if (cwd === lastCwd) startupHints = collectStartupHints(cwd, options);
-				emitProgress({ phase: "done", status: "completed", message: "context cleared" });
+				emitProgress({
+					phase: "done",
+					status: "completed",
+					message: result.action === "cancelled" ? "context reset cancelled" : "context cleared",
+				});
 				return result;
 			} catch (err) {
 				emitProgress({

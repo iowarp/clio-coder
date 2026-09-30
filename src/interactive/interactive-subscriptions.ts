@@ -10,6 +10,7 @@ import {
 } from "./worker-replay.js";
 import {
 	createWorkerStream,
+	isContextOperationRun,
 	type WorkerEntryState,
 	type WorkerReceiptReader,
 	type WorkerStream,
@@ -82,6 +83,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		payload: DispatchRunIdentity & { assignmentId?: string },
 		status: "working" | "completed" | "failed",
 	): void => {
+		if (isContextOperationRun(payload)) return;
 		if (payload.assignmentId !== undefined) assignmentOfRun.set(payload.runId, payload.assignmentId);
 		const assignment = assignmentOfRun.get(payload.runId) ?? payload.runId;
 		if (status !== "working") assignmentOfRun.delete(payload.runId);

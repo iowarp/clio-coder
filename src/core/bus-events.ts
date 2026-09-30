@@ -195,10 +195,18 @@ export interface ContextSourcesChangedPayload {
 }
 
 export type ContextActivityKind = "context-init" | "context-clear" | "context-refresh" | "compaction";
-export type ContextActivityPhase = "scan" | "codewiki" | "generate" | "clio-md" | "state" | "compact" | "done";
+export type ContextActivityPhase =
+	| "scan"
+	| "codewiki"
+	| "generate"
+	| "clio-md"
+	| "state"
+	| "compact"
+	| "summarize"
+	| "done";
 export type ContextActivityStatus = "started" | "running" | "completed" | "failed";
 
-/** Structured progress for context operations. Interactive renders this as a live context island. */
+/** Structured progress for context operations, rendered above the composer. */
 export interface ContextActivityPayload {
 	kind: ContextActivityKind;
 	phase: ContextActivityPhase;
@@ -208,6 +216,7 @@ export interface ContextActivityPayload {
 	current?: number;
 	total?: number;
 	detail?: string;
+	stages?: ReadonlyArray<ContextActivityPhase>;
 }
 
 /**

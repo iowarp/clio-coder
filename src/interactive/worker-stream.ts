@@ -125,6 +125,11 @@ export function isHelperRun(run: { agentAudience?: DispatchStartedPayload["agent
 	return run.agentAudience === "shadow" || run.agentAudience === "internal";
 }
 
+/** These internal runs report through the context rail; their full task is a prompt payload. */
+export function isContextOperationRun(run: { agentId: string; requestOrigin?: string | undefined }): boolean {
+	return run.requestOrigin === "internal" && (run.agentId === "context-bootstrap" || run.agentId === "wiki-writer");
+}
+
 export interface WorkerEntryState {
 	/** Local presentation clock; never restored as a live timer from a receipt. */
 	startedAtMs?: number;
@@ -336,6 +341,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 
 	return {
 		started(payload): WorkerStreamChange | null {
+			if (isContextOperationRun(payload)) return null;
 			const runId = nonEmptyString(payload.runId);
 			const assignmentId = nonEmptyString(payload.assignmentId) ?? runId;
 			if (runId === undefined || assignmentId === undefined) return null;

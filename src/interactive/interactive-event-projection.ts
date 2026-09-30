@@ -133,6 +133,12 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		deps.chat.onEvent((event) => {
 			deps.onChatEventIngress?.(event);
 			if (event.type === "notice") {
+				// Context stages already occupy the rail above the editor. Legacy status
+				// receipts belong in the footer; errors retain their transcript evidence.
+				if (event.level === "info" && event.text.startsWith("[context engine] ")) {
+					deps.notify("info", event.text, "compaction-notice");
+					return;
+				}
 				if (event.surface === "transcript") {
 					deps.applyChatEvent(event);
 					// The footer names the armed skill surface; a change repaints it.

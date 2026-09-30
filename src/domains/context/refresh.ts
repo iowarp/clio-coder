@@ -5,6 +5,7 @@ import { tryReadClioMd } from "./clio-md.js";
 import { coordinateCodewikiWrite } from "./codewiki/coordinator.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import type { Fingerprint } from "./fingerprint.js";
+import { indexProgressSink } from "./progress.js";
 import { readClioState, writeClioState } from "./state.js";
 import { type RunWikiGenerateResult, runWikiGenerate, type WikiGenerate } from "./wiki/generate.js";
 import { readWikiMeta } from "./wiki/meta.js";
@@ -70,34 +71,57 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 	const projectType = prev?.projectType ?? detectProjectType(cwd);
 	const indexedAt = now().toISOString();
 
-	input.onProgress?.({ phase: "codewiki", status: "started", message: "rebuilding codemap" });
+	input.onProgress?.({
+		phase: "codewiki",
+		status: "started",
+		message: "reconciling codemap",
+		stages: input.wiki && hasWiki ? ["codewiki", "generate", "state"] : ["codewiki", "state"],
+	});
 	let fingerprint: Fingerprint | undefined;
 	let clioMd: ClioMdCuration = "absent";
-	const coordinated = await coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: projectType }), {
-		afterCommit: (result, workspace) => {
-			fingerprint = result.fingerprint;
-			clioMd = tryReadClioMd(workspace)?.ok ? "unchanged" : "absent";
-			input.onProgress?.({ phase: "state", status: "running", message: "writing state" });
-			const latest = readClioState(workspace);
-			writeClioState(
-				workspace,
-				{
-					version: 1,
-					projectType,
-					fingerprint: result.fingerprint,
-					codewikiVersion: result.codewiki.version,
-					...(latest?.contextSources ? { contextSources: latest.contextSources } : {}),
-					...(latest?.contextSourceHash ? { contextSourceHash: latest.contextSourceHash } : {}),
-					...(latest?.lastBootstrap ? { lastBootstrap: latest.lastBootstrap } : {}),
-					...(latest?.bootstrapFingerprint ? { bootstrapFingerprint: latest.bootstrapFingerprint } : {}),
-					...(latest?.lastInitAt ? { lastInitAt: latest.lastInitAt } : {}),
-					lastSessionAt: latest?.lastSessionAt ?? indexedAt,
-					lastIndexedAt: indexedAt,
-				},
-				result.codewiki,
-			);
+	const coordinated = await coordinateCodewikiWrite(
+		cwd,
+		(current) => ({
+			kind: "ensure",
+			cwd,
+			language: projectType,
+			current,
+			previous: readClioState(cwd)?.fingerprint ?? null,
+		}),
+		{
+			onProgress: indexProgressSink(input.onProgress),
+			afterCommit: (result, workspace) => {
+				fingerprint = result.fingerprint;
+				clioMd = tryReadClioMd(workspace)?.ok ? "unchanged" : "absent";
+				const entries = indexedSourceFileCount(result.codewiki);
+				input.onProgress?.({
+					phase: "codewiki",
+					status: "completed",
+					message: `index current; ${entries} source files`,
+					current: entries,
+					total: entries,
+				});
+				const latest = readClioState(workspace);
+				writeClioState(
+					workspace,
+					{
+						version: 1,
+						projectType,
+						fingerprint: result.fingerprint,
+						codewikiVersion: result.codewiki.version,
+						...(latest?.contextSources ? { contextSources: latest.contextSources } : {}),
+						...(latest?.contextSourceHash ? { contextSourceHash: latest.contextSourceHash } : {}),
+						...(latest?.lastBootstrap ? { lastBootstrap: latest.lastBootstrap } : {}),
+						...(latest?.bootstrapFingerprint ? { bootstrapFingerprint: latest.bootstrapFingerprint } : {}),
+						...(latest?.lastInitAt ? { lastInitAt: latest.lastInitAt } : {}),
+						lastSessionAt: latest?.lastSessionAt ?? indexedAt,
+						lastIndexedAt: indexedAt,
+					},
+					result.codewiki,
+				);
+			},
 		},
-	});
+	);
 	if (!coordinated || !fingerprint) throw new Error("codewiki refresh transaction did not commit");
 	const codewiki = coordinated.codewiki;
 
@@ -125,8 +149,15 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 	}
 
 	const committedClioMd = clioMd as ClioMdCuration;
-	input.io?.stdout(`clio-coder context refresh: codemap rebuilt (${entries} source file${entries === 1 ? "" : "s"})\n`);
-	input.onProgress?.({ phase: "done", status: "completed", message: "context refreshed" });
+	input.io?.stdout(
+		`clio-coder context refresh: codemap reconciled (${entries} source file${entries === 1 ? "" : "s"})\n`,
+	);
+	input.onProgress?.({ phase: "state", status: "completed", message: "project state saved" });
+	input.onProgress?.({
+		phase: "done",
+		status: wikiResult?.status === "failed" ? "failed" : "completed",
+		message: wikiResult?.status === "failed" ? "context refreshed; wiki update failed" : "context refreshed",
+	});
 	return {
 		action: "refreshed",
 		codewikiEntries: entries,

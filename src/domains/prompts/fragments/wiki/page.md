@@ -78,6 +78,11 @@ Grounding rules:
   the body. Omit it when none apply; never invent a decision ref or a missing rationale.
 - Cite source paths in backticks: `src/domains/dispatch/validation.ts`. Prefer a stable path plus
   a symbol name over a line number; use `path:line` only when the exact location is load-bearing.
+- Use repository-relative file paths in prose even when describing a relative import. A module's
+  import specifier is relative to that module, and copying it as a file citation can escape the
+  repository root. Name the resolved repository file instead. Quote test glob selectors inside
+  their complete verified command rather than as isolated file citations; frontmatter lists
+  concrete files, never glob patterns.
 - Link to another wiki page with a relative Markdown link from the list of other pages below. Do
   not link to a page that is not on that list; it does not exist.
 - Separate implemented behavior from partial, planned, or unverified behavior. Verify exact

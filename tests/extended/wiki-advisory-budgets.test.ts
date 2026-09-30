@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { it } from "node:test";
 import { modelWikiGenerate } from "../../src/cli/wiki-generate.js";
+import { configureGuardrails } from "../../src/core/guardrails.js";
 import type { WikiGenerateInput } from "../../src/domains/context/wiki/generate.js";
 import { readWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
@@ -42,6 +43,7 @@ it("lets healthy planning and every page finish beyond all ordinary wiki time es
 	const isolated = await isolateClioEnv("wiki-advisory-");
 	try {
 		const input = fixtureInput(isolated.dir);
+		configureGuardrails({ internalDispatchTimeoutMs: 2 * 60 * 60 * 1000 });
 		let clock = 0;
 		t.mock.method(performance, "now", () => clock);
 		t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
@@ -77,6 +79,7 @@ it("lets healthy planning and every page finish beyond all ordinary wiki time es
 			["written", "written"],
 		);
 	} finally {
+		configureGuardrails(undefined);
 		await isolated.restore();
 	}
 });

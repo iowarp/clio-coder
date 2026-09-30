@@ -69,10 +69,12 @@ const FOOTER_RE = /<!--\s*clio:fingerprint v1\s*\n([\s\S]*?)\n\s*-->/;
  * file still preloads in full.
  */
 export const HANDBOOK_TARGETS = {
+	lines: 200,
+	chars: 24_000,
 	conventions: 8,
-	conventionChars: 280,
+	conventionChars: 600,
 	invariants: 10,
-	invariantChars: 400,
+	invariantChars: 800,
 	sections: 8,
 	sectionChars: 4000,
 } as const;

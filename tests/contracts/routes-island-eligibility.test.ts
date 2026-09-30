@@ -5,7 +5,7 @@ import { visibleWidth } from "../../src/engine/tui.js";
 import { createInteractiveTickers } from "../../src/interactive/interactive-tickers.js";
 import { footerState } from "../harness/footer-fixture.js";
 
-test("task island yields only to context that fits, including resize and short terminals", () => {
+test("context progress allocates no transcript overlay; task island survives resize and short terminals", () => {
 	const terminal = { columns: 80, rows: 24 };
 	const slots: { component: Component; options: OverlayOptions; hidden: boolean }[] = [];
 	const row = footerState().dispatchRows[0];
@@ -69,9 +69,8 @@ test("task island yields only to context that fits, including resize and short t
 				terminal.rows = height;
 				controller.renderTaskIsland();
 				controller.renderContextIsland();
-				const contextFits = width >= 92 && height >= 20;
-				strictEqual(visible(0), width >= 80 && !contextFits, `${width}x${height} task`);
-				strictEqual(visible(1), contextFits, `${width}x${height} context`);
+				strictEqual(visible(0), width >= 80, `${width}x${height} task`);
+				strictEqual(slots.length, 1, "only the task island owns an overlay");
 				for (const slot of slots)
 					for (const line of slot.component.render(slot.options.width as number)) {
 						ok(visibleWidth(line) <= width);
@@ -88,7 +87,7 @@ test("task island yields only to context that fits, including resize and short t
 			controller.renderTaskIsland();
 			controller.renderContextIsland();
 			strictEqual(visible(0), false);
-			strictEqual(visible(1), false);
+			strictEqual(slots.length, 1);
 		}
 	} finally {
 		controller.dispose();

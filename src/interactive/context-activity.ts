@@ -6,9 +6,9 @@ import type {
 } from "../core/bus-events.js";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import { wrapTextWithAnsi } from "../engine/tui.js";
-import type { ClioTheme } from "./theme/index.js";
-import { animationStep, clioTheme, formatCompactMs, frame, GLYPH, padAnsi, spinnerFrame } from "./theme/index.js";
+import type { Component } from "../engine/tui.js";
+import { stripTerminalSequences, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { animationStep, clioTheme, formatCompactMs, GLYPH, padAnsi, spinnerFrame } from "./theme/index.js";
 
 export interface ContextActivitySnapshot {
 	kind: ContextActivityKind;
@@ -21,138 +21,117 @@ export interface ContextActivitySnapshot {
 	current: number | null;
 	total: number | null;
 	detail: string | null;
+	stages?: ReadonlyArray<ContextActivityPhase>;
 }
 
-interface ContextActivityEntry extends ContextActivitySnapshot {}
-
-export const CONTEXT_ISLAND_WIDTH = 52;
 const PHASES: ReadonlyArray<ContextActivityPhase> = ["scan", "codewiki", "generate", "clio-md", "state", "done"];
-/** Compaction is one bounded operation, not the five-stage context-init pipeline. */
-const COMPACTION_PHASES: ReadonlyArray<ContextActivityPhase> = ["compact", "done"];
 const PHASE_LABELS: Record<ContextActivityPhase, string> = {
 	scan: "scan",
-	// "index" rather than "wiki": this phase is the codewiki index build, which
-	// the old label confused with the Markdown wiki.
 	codewiki: "index",
 	generate: "draft",
-	"clio-md": "CLIO-CODER.md",
-	state: "state",
-	compact: "compact",
+	"clio-md": "handbook",
+	state: "save",
+	compact: "prepare",
+	summarize: "summarize",
 	done: "done",
 };
-const TERMINAL_RETENTION_MS = 4_000;
+const TITLES: Record<ContextActivityKind, string> = {
+	"context-init": "Context init",
+	"context-clear": "Context reset",
+	"context-refresh": "Context refresh",
+	compaction: "Context compact",
+};
+const TERMINAL_RETENTION_MS = 6000;
 
-const KINDS: ReadonlySet<string> = new Set<ContextActivityKind>([
-	"context-init",
-	"context-clear",
-	"context-refresh",
-	"compaction",
-]);
-const PHASE_SET: ReadonlySet<string> = new Set<ContextActivityPhase>([...PHASES, ...COMPACTION_PHASES]);
-
-function phasesFor(kind: ContextActivityKind): ReadonlyArray<ContextActivityPhase> {
-	return kind === "compaction" ? COMPACTION_PHASES : PHASES;
+function phasesFor(activity: ContextActivitySnapshot): ReadonlyArray<ContextActivityPhase> {
+	if (activity.stages?.length) return activity.stages.filter((phase) => phase !== "done");
+	if (activity.kind === "compaction") return ["compact", "summarize", "state"];
+	if (activity.kind === "context-clear") return ["state"];
+	if (activity.kind === "context-refresh") return ["codewiki", "state"];
+	return PHASES.slice(0, -1);
 }
 
-function phaseLabel(phase: ContextActivityPhase): string {
-	return PHASE_LABELS[phase];
-}
-const STATUSES: ReadonlySet<string> = new Set<ContextActivityStatus>(["started", "running", "completed", "failed"]);
-
-function isContextActivityPayload(value: unknown): value is ContextActivityPayload {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-	const record = value as Partial<Record<keyof ContextActivityPayload, unknown>>;
-	return (
-		typeof record.kind === "string" &&
-		KINDS.has(record.kind) &&
-		typeof record.phase === "string" &&
-		PHASE_SET.has(record.phase) &&
-		typeof record.status === "string" &&
-		STATUSES.has(record.status) &&
-		typeof record.message === "string" &&
-		typeof record.at === "number"
-	);
+function plain(value: string): string {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: progress includes untrusted filenames and provider error text.
+	const cleaned = stripTerminalSequences(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+	return cleaned.replace(/\s+/g, " ").trim();
 }
 
-function phaseIndex(kind: ContextActivityKind, phase: ContextActivityPhase): number {
-	const index = phasesFor(kind).indexOf(phase);
-	return index >= 0 ? index : 0;
-}
-
-function activityProgress(activity: ContextActivitySnapshot): number {
-	if (activity.status === "completed" && activity.phase === "done") return 1;
-	const phases = phasesFor(activity.kind);
-	const index = phaseIndex(activity.kind, activity.phase);
-	if (activity.total !== null && activity.total > 0 && activity.current !== null) {
-		const withinPhase = Math.max(0, Math.min(1, activity.current / activity.total));
-		return Math.min(1, (index + withinPhase) / phases.length);
-	}
-	return Math.min(1, index / Math.max(1, phases.length - 1));
-}
-
-function progressBar(theme: ClioTheme, activity: ContextActivitySnapshot, width: number): string {
-	const pct = activityProgress(activity);
-	const filled = Math.max(0, Math.min(width, Math.round(pct * width)));
-	const empty = Math.max(0, width - filled);
-	return `${theme.fg("meterFill", "▰".repeat(filled))}${theme.fg("meterFree", "▱".repeat(empty))}`;
-}
-
-function phaseTrail(theme: ClioTheme, activity: ContextActivitySnapshot, width: number): string {
-	const currentIndex = phaseIndex(activity.kind, activity.phase);
-	const parts = phasesFor(activity.kind)
-		.slice(0, -1)
-		.map((phase, index) => {
-			const label = phaseLabel(phase);
-			if (index < currentIndex) return theme.fg("success", label);
-			if (index === currentIndex && activity.status !== "completed") return theme.fg("contextAction", label);
-			return theme.fg("annotation", label);
-		});
-	return padAnsi(parts.join(theme.fg("border", " › ")), width, GLYPH.ellipsis);
-}
-
-function statusLabel(theme: ClioTheme, activity: ContextActivitySnapshot, tick: number): string {
-	if (activity.status === "failed") return theme.fg("error", `${GLYPH.error} failed`);
-	if (activity.status === "completed") return theme.fg("success", `${GLYPH.ok} done`);
-	return theme.fg("contextAction", `${spinnerFrame(tick)} ${phaseLabel(activity.phase)}`);
-}
-
-export function formatContextActivityIslandLines(
+/** A full-width, three-row instrument immediately above the input rails. */
+export function formatContextActivityRailLines(
 	activity: ContextActivitySnapshot,
-	width = CONTEXT_ISLAND_WIDTH,
+	width: number,
 	now = Date.now(),
 	tick = animationStep(now),
 ): string[] {
+	if (width <= 0) return [];
 	const theme = clioTheme();
-	const bodyWidth = Math.max(1, width - 4);
-	const title =
-		activity.kind === "context-init"
-			? "Context Init"
-			: activity.kind === "context-refresh"
-				? "Context Refresh"
-				: activity.kind === "compaction"
-					? "Context Compact"
-					: "Context";
-	const elapsedMs = Math.max(0, (activity.completedAtMs ?? now) - activity.startedAtMs);
-	const topLine = `${theme.fg("harnessHeading", title)} ${theme.fg("annotation", "·")} ${statusLabel(theme, activity, tick)} ${theme.fg("annotation", "·")} ${theme.fg("toolMetadata", formatCompactMs(elapsedMs))}`;
-	const barWidth = Math.max(8, Math.min(24, bodyWidth - 10));
-	const percent = `${Math.round(activityProgress(activity) * 100)}%`.padStart(4);
-	const progressLine = `${progressBar(theme, activity, barWidth)} ${theme.fg("counter", percent)}`;
-	const message = theme.fg(activity.status === "failed" ? "error" : "body", activity.message);
-	// The trail is compact navigation chrome and marks its cut. The message and
-	// detail are the only explanation of this operation, so they wrap in full.
-	// The progress bar is sized to fit and never cuts.
-	const body = [
-		padAnsi(topLine, bodyWidth, GLYPH.ellipsis),
-		padAnsi(progressLine, bodyWidth),
-		phaseTrail(theme, activity, bodyWidth),
-		...wrapTextWithAnsi(message, bodyWidth).map((line) => padAnsi(line, bodyWidth)),
-	];
-	if (activity.detail) {
-		body.push(
-			...wrapTextWithAnsi(theme.fg("annotation", activity.detail), bodyWidth).map((line) => padAnsi(line, bodyWidth)),
-		);
+	const done = activity.completedAtMs !== null && activity.status === "completed";
+	const failed = activity.status === "failed";
+	const stages = phasesFor(activity);
+	const index = done ? stages.length : Math.max(0, stages.indexOf(activity.phase));
+	const elapsed = formatCompactMs(Math.max(0, (activity.completedAtMs ?? now) - activity.startedAtMs));
+	const tone = failed ? "error" : done ? "success" : "contextAction";
+	const glyph = failed ? GLYPH.error : done ? GLYPH.ok : spinnerFrame(tick);
+	const title = theme.fg(tone, `${glyph} ${TITLES[activity.kind]}`);
+	const step = done
+		? "complete"
+		: failed
+			? "failed"
+			: `${Math.min(stages.length, index + 1)}/${stages.length} ${PHASE_LABELS[activity.phase]}`;
+	let header = `${title} ${theme.fg("annotation", `· ${step}`)}`;
+	const clock = theme.fg("toolMetadata", elapsed);
+	if (width >= 72 && !done && !failed) {
+		const trail = stages
+			.map((phase, position) =>
+				theme.fg(position < index ? "success" : position === index ? "contextAction" : "annotation", PHASE_LABELS[phase]),
+			)
+			.join(theme.fg("border", " › "));
+		header = `${title}  ${trail}`;
 	}
-	return frame(theme, "Context", body, width);
+	const rows = [
+		padAnsi(
+			`${padAnsi(header, Math.max(0, width - visibleWidth(clock) - 1), GLYPH.ellipsis)} ${clock}`,
+			width,
+			GLYPH.ellipsis,
+		),
+	];
+	// Stage completion determines filled length. A moving marker inside the
+	// current stage signals unknown work; it never invents an ETA or percentage.
+	const fraction =
+		activity.total !== null && activity.total > 0 && activity.current !== null
+			? Math.max(0, Math.min(1, activity.current / activity.total))
+			: activity.status === "completed"
+				? 1
+				: 0;
+	const filled = done ? width : Math.min(width - 1, Math.floor(((index + fraction) / stages.length) * width));
+	const remaining = width - filled;
+	const pulse =
+		!done && !failed && fraction === 0
+			? Math.min(remaining - 1, tick % Math.max(1, Math.floor(width / stages.length)))
+			: 0;
+	rows.push(
+		theme.fg(tone, GLYPH.barFull.repeat(filled)) +
+			theme.fg("meterFree", GLYPH.barEmpty.repeat(pulse)) +
+			(!done ? theme.fg(tone, failed ? GLYPH.error : "▸") : "") +
+			theme.fg("meterFree", GLYPH.barEmpty.repeat(Math.max(0, remaining - pulse - (done ? 0 : 1)))),
+	);
+	const counts = activity.current !== null && activity.total !== null ? ` · ${activity.current}/${activity.total}` : "";
+	const detail = activity.detail ? ` · ${plain(activity.detail)}` : "";
+	const message = theme.fg(failed ? "error" : "annotation", `${plain(activity.message)}${counts}${detail}`);
+	if (failed) rows.push(...wrapTextWithAnsi(message, Math.max(1, width)).map((line) => padAnsi(line, width)));
+	else rows.push(padAnsi(message, width, GLYPH.ellipsis));
+	return rows;
+}
+
+export function createContextProgressRail(getActivity: () => ContextActivitySnapshot | null): Component {
+	return {
+		render(width) {
+			const activity = getActivity();
+			return activity ? formatContextActivityRailLines(activity, width) : [];
+		},
+		invalidate() {},
+	};
 }
 
 export function createContextActivityStore(bus: SafeEventBus): {
@@ -160,37 +139,40 @@ export function createContextActivityStore(bus: SafeEventBus): {
 	active(now?: number): boolean;
 	unsubscribe(): void;
 } {
-	let current: ContextActivityEntry | null = null;
+	let current: ContextActivitySnapshot | null = null;
 	const snapshot = (now = Date.now()): ContextActivitySnapshot | null => {
-		if (!current) return null;
-		if (current.completedAtMs !== null && now - current.completedAtMs > TERMINAL_RETENTION_MS) return null;
+		if (!current || (current.completedAtMs !== null && now - current.completedAtMs > TERMINAL_RETENTION_MS)) return null;
 		return { ...current };
 	};
-	const unsubscribe = bus.on(BusChannels.ContextActivity, (raw) => {
-		if (!isContextActivityPayload(raw)) return;
-		const now = raw.at;
+	const unsubscribe = bus.on(BusChannels.ContextActivity, (raw: ContextActivityPayload) => {
+		if (
+			!raw ||
+			!Object.hasOwn(TITLES, raw.kind) ||
+			!Object.hasOwn(PHASE_LABELS, raw.phase) ||
+			!["started", "running", "completed", "failed"].includes(raw.status) ||
+			typeof raw.message !== "string" ||
+			!Number.isFinite(raw.at)
+		)
+			return;
+		const stages = Array.isArray(raw.stages)
+			? [...new Set(raw.stages.filter((phase) => Object.hasOwn(PHASE_LABELS, phase) && phase !== "done"))]
+			: undefined;
 		const startsNewRun =
 			raw.status === "started" &&
 			(raw.phase === "scan" || !current || current.completedAtMs !== null || current.kind !== raw.kind);
-		const startedAtMs = startsNewRun || !current ? now : current.startedAtMs;
 		current = {
 			kind: raw.kind,
 			phase: raw.phase,
 			status: raw.status,
 			message: raw.message,
-			startedAtMs,
-			updatedAtMs: now,
-			completedAtMs: raw.status === "completed" && raw.phase === "done" ? now : raw.status === "failed" ? now : null,
+			startedAtMs: startsNewRun || !current ? raw.at : current.startedAtMs,
+			updatedAtMs: raw.at,
+			completedAtMs: (raw.phase === "done" && raw.status === "completed") || raw.status === "failed" ? raw.at : null,
 			current: typeof raw.current === "number" && Number.isFinite(raw.current) ? raw.current : null,
 			total: typeof raw.total === "number" && Number.isFinite(raw.total) ? raw.total : null,
 			detail: typeof raw.detail === "string" && raw.detail.length > 0 ? raw.detail : null,
+			...(stages?.length ? { stages } : !startsNewRun && current?.stages ? { stages: current.stages } : {}),
 		};
 	});
-	return {
-		current: snapshot,
-		active(now = Date.now()) {
-			return snapshot(now) !== null;
-		},
-		unsubscribe,
-	};
+	return { current: snapshot, active: (now = Date.now()) => snapshot(now) !== null, unsubscribe };
 }

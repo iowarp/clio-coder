@@ -32,6 +32,7 @@ import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import { armInternalDispatchDeadline } from "./internal-dispatch.js";
 
 /**
  * Model id recorded on wiki metadata when the documenter target cannot be
@@ -261,21 +262,29 @@ async function runWikiDispatch(input: {
 		timer.unref();
 	};
 	armDeadline();
+	const safetyDeadline = armInternalDispatchDeadline(input.dispatch, handle.runId, "wiki dispatch");
+	let completedTools = 0;
+	const heartbeat = setInterval(
+		() => input.onHeartbeat?.({ elapsedMs: Math.round(performance.now() - startedAtClock), tools: completedTools }),
+		HEARTBEAT_MS,
+	);
+	heartbeat.unref();
 	let lastHeartbeatAt = startedAtClock;
 	try {
 		const summary = await drainDispatchEvents(handle.events, (tools) => {
+			completedTools = tools;
 			const nowMs = performance.now();
 			if (!input.onHeartbeat || nowMs - lastHeartbeatAt < HEARTBEAT_MS) return;
 			lastHeartbeatAt = nowMs;
 			input.onHeartbeat({ elapsedMs: Math.round(nowMs - startedAtClock), tools });
 		});
 		const receipt = await handle.finalPromise;
-		if (timedOut)
+		if (timedOut || safetyDeadline.timedOut())
 			return {
 				ok: false,
 				phase: "writer",
 				runId: handle.runId,
-				detail: `timed out; ${summaryDetail(summary, startedAtClock)}`,
+				detail: `${timedOut ? "timed out: explicit wiki deadline reached" : safetyDeadline.message()}; ${summaryDetail(summary, startedAtClock)}`,
 			};
 		if (receipt.exitCode !== 0) {
 			input.dispatch.abort(handle.runId);
@@ -290,7 +299,13 @@ async function runWikiDispatch(input: {
 	} catch (err) {
 		if (!timedOut) input.dispatch.abort(handle.runId);
 		await handle.finalPromise.catch(() => undefined);
-		const reason = timedOut ? "timed out" : err instanceof Error ? err.message : String(err);
+		const reason = timedOut
+			? "timed out: explicit wiki deadline reached"
+			: safetyDeadline.timedOut()
+				? safetyDeadline.message()
+				: err instanceof Error
+					? err.message
+					: String(err);
 		return {
 			ok: false,
 			phase: "writer",
@@ -298,6 +313,8 @@ async function runWikiDispatch(input: {
 			detail: `${reason}; ${formatElapsed(performance.now() - startedAtClock)}`,
 		};
 	} finally {
+		clearInterval(heartbeat);
+		safetyDeadline.clear();
 		clearTimeout(timer);
 	}
 }
@@ -430,6 +447,8 @@ async function runPagePhase(
 		phase: "generate",
 		status: "running",
 		message: `${written ? "wrote" : "could not write"} ${page.path} (${position.index}/${position.total})`,
+		current: position.index,
+		total: position.total,
 		detail,
 	});
 	return next;
@@ -444,6 +463,19 @@ async function generateWikiWithDocumenter(
 ): Promise<void> {
 	signal?.throwIfAborted();
 	const startedAtClock = performance.now();
+	if (
+		!input.replan &&
+		input.mode === "update" &&
+		input.unclaimedAreas.length === 0 &&
+		input.plan.pages.every((page) => page.status === "written")
+	) {
+		input.progress?.({
+			phase: "generate",
+			status: "running",
+			message: "all wiki evidence is current; no model dispatch needed",
+		});
+		return;
+	}
 	const routeDetail = [route.target, route.model, route.thinkingLevel ? `thinking=${route.thinkingLevel}` : undefined]
 		.filter((value): value is string => value !== undefined)
 		.join("/");
@@ -454,10 +486,8 @@ async function generateWikiWithDocumenter(
 		detail: `one page per dispatch${routeDetail ? `; ${routeDetail}` : ""}`,
 	});
 
-	// A resumed run keeps the plan its finished pages were written against;
-	// re-planning would churn the paths those pages already link to. Every other
-	// run plans, including an update, which is the only thing allowed to change
-	// a wiki's shape as the repository grows.
+	// Keep page paths stable while updating their source evidence. Only new
+	// areas, a changed depth, or --replan need the repository-wide planner.
 	let plan = input.resumed ? input.plan : await runPlanPhase(dispatch, input, route, deadline);
 	signal?.throwIfAborted();
 	if (!input.resumed) writeWikiPlanFile(input.outputDir, plan);

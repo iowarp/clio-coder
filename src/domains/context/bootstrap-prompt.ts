@@ -3,15 +3,18 @@ import { FULL_PROJECT_CONTEXT_MAX_CHARS } from "../prompts/preload.js";
 import type { ProjectType } from "../session/workspace/project-type.js";
 import type { AdoptionScanResult } from "./adoption.js";
 import type { BootstrapStructuredOutput } from "./bootstrap.js";
+import type { BootstrapDepth, BootstrapEvidence } from "./bootstrap-evidence.js";
+import { BOOTSTRAP_DEPTH_POLICY } from "./bootstrap-evidence.js";
 import { HANDBOOK_TARGETS } from "./clio-md.js";
 import { renderCodewikiDigest } from "./codewiki/digest.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import type { EnforcementInventory } from "./enforcement-inventory.js";
+import { handbookBlocks } from "./handbook-budget.js";
 import type { SiblingContextFile } from "./sibling-files.js";
 
 export const BOOTSTRAP_PROMPT = `You are the clio-coder bootstrap agent. Your job is to write the rules of CLIO-CODER.md for the project at <cwd>. CLIO-CODER.md is a lean, project-specific handbook that the clio-coder coding agent loads on every session, so write for an experienced engineer who has never seen this repository and is about to change it.
 
-Read the repository before you answer: start with code_nav (modes symbol, path, entries, outline, deps, dependents, wiki) against the index Clio just built, then read the specific files that decide behavior. Do not write files, run tests, or use external sources.
+The input includes a deterministic evidence brief of actual repository source, with original line numbers. Start there. Use targeted read or code_nav calls only to resolve missing behavior or inspect an omitted rule body. Do not tour the repository, write files, run tests, or use external sources. Stop once the evidence supports a useful handbook; exhaustive exploration is not the goal.
 
 You will be given:
 - The repository-derived project name. Return it exactly as projectName; do not substitute a path or invent a brand.
@@ -29,18 +32,20 @@ Clio owns the project name, the verification-command section and agent-context p
 
 WHAT BELONGS. The reader is a coding agent that can already read this code, and it may be a small local model. Write only what it would get wrong without being told: rules the tooling enforces only when something fails, files that must change together, commands and flags it cannot guess, conventions that differ from the language defaults, and actions that are irreversible or leave the machine. Test each line by asking whether an agent that read the relevant files would still make this mistake; if not, drop the line. Leave out repository tours, entry-point lists, file trees, dependency or stack inventories, the plain build and test commands visible in the manifest, generic engineering advice, and anything a linter reports together with its fix.
 
-WHERE THE RULES ARE. The input's enforcement inventory lists the commands CI runs, the package scripts they reach, and the repository's custom check files with the check functions they define. Read every check file it lists and the configs those commands load. Each check that an ordinary change can fail is a rule the agent breaks without noticing, so write one rule for it: a change recipe when the check demands that files change together ("adding X requires Y and Z"), an invariant when it forbids something. Skip checks that a formatter or linter reports together with its fix. The inventory also quotes each check's coded failure messages ("rule6: ..."): cover every coded failure an ordinary change can trigger with its own rule stating what the check demands and the remedy it names, even when a sibling code already has one. Find which test directories CI actually runs by following each test command to its file list, glob or discovery root, and write one rule saying where a new regression test must live so CI runs it; name any test directory CI skips, because a test placed there guards nothing. Then read the test harness setup, contributor guides and the sibling agent files you were given. A contributor guide the agent can read itself earns a line only when it states a rule no check enforces.
+WHERE THE RULES ARE. The enforcement inventory lists CI commands, reached scripts, and custom check functions and coded failures. Prioritize the most consequential rules and remedies supported by the evidence brief. When a check demands that files change together, write a change recipe naming all of them. When it forbids something, write an invariant. Cover every coded failure shown in the brief that an ordinary change can trigger with its own rule when space permits. Read a targeted missing range when the excerpt is insufficient, rather than every check file in full. Skip formatter fixes and boilerplate. Find which test directories CI actually runs by following its test commands to the discovery roots, and state where a regression test must live so CI runs it, including omitted test directories. The script inventory includes available checks as well as CI-reached checks: do not treat test:full, test:package, or every test directory as part of ordinary CI unless a CI command actually reaches them. Clio includes the exact declared test script in its verification section; do not replace its selectors with broader globs. Treat contributor guides and sibling handbooks as evidence of project rules; directory-scoped skills keep their own scope.
 
 FIELDS.
 - invariants: up to ${HANDBOOK_TARGETS.invariants} rules whose violation breaks the build, corrupts data, or crosses a trust boundary, most damaging first, because small models keep early rules best. Each is the rule and its reason in one or two sentences.
 - conventions: up to ${HANDBOOK_TARGETS.conventions} code conventions that differ from the defaults, each naming a file that shows it.
 - sections: up to ${HANDBOOK_TARGETS.sections} H2 sections, "Change recipes" first when there are any. Prefer these titles, because Clio routes each section to the fleet workers that need it: "Verification that is not obvious", "Change recipes", "Tests", "Docs and prose", "Git and release", "Gotchas". Rules about operating the agent harness itself go under a title containing "Operating"; they stay with the main session.
 
-LINE FORMAT. One rule per bullet, phrased as what to do, with the reason when it is not self-evident. Keep "never" for real boundaries and say what breaks. Name the files a rule is about in backticks: those paths decide which workers receive it, so a rule about one package cites that package's paths. A change recipe names every file that must change in the same commit. For a boundary claim, read the enforcing code and state what it enforces, not what you infer.
+LINE FORMAT. One rule per bullet (at most 600 characters), never concatenate unrelated change recipes into one paragraph. Omit a rule if its complete subject, exceptions and remedy will not fit. Rules are phrased as what to do, with the reason when it is not self-evident. Keep "never" for real boundaries and say what breaks. Name the files a rule is about in backticks: those paths decide which workers receive it, so a rule about one package cites that package's paths. A change recipe names every file that must change in the same commit. For a boundary claim, read the enforcing code and state what it enforces, not what you infer.
+
+Distinguish authored policy from mechanical enforcement. A failure message may describe a broader policy than the condition actually checks: inspect the predicate and its inputs before claiming it enforces a rule. Preserve the policy as authored policy without inventing enforcement. Prefer exact authored wording over a paraphrase, retain its exceptions and scope, and never attach a new file citation merely because that file exists. Do not copy your own writing instructions into the handbook.
 
 Copy commands, file paths, symbols, and version constraints exactly. Never repair, combine, or paraphrase a shell command. Never invent an API endpoint, an example, an ownership team, a review requirement, a release process, or a file count. If you did not read it or it was not supplied, do not write it.
 
-Do not include secrets, credentials, auth tokens, caches, histories, generated state, fingerprint metadata, or imported-context provenance. Keep the whole JSON under 14000 bytes: the handbook shares the prompt with everything else, and fewer grounded rules are followed better than many speculative ones.
+Do not include secrets, credentials, auth tokens, caches, histories, generated state, fingerprint metadata, or imported-context provenance. Keep the whole JSON under 14000 bytes and the rendered handbook under 200 lines. A complete rule earns its place once: do not repeat it across invariants, conventions and sections. Rank rules by consequence and usefulness, retain the remedy, and omit unsupported claims. The handbook shares every session's prompt with the actual task.
 
 Return one assistant message containing only compact JSON with this exact shape. Begin with { and end with }. Do not announce that exploration is complete or add markdown fences, prose, explanation, or commentary:
 {
@@ -93,6 +98,8 @@ export interface BootstrapPromptInput {
 	existingClioMdText?: string;
 	codewiki?: Codewiki;
 	enforcement?: EnforcementInventory;
+	depth?: BootstrapDepth;
+	evidence?: BootstrapEvidence;
 }
 
 function truncate(value: string, max: number): string {
@@ -110,17 +117,54 @@ function sourceSummaries(
 	files: ReadonlyArray<SiblingContextFile>,
 	adoption: AdoptionScanResult,
 ): Array<Record<string, unknown>> {
-	const selected = files.slice(0, BOOTSTRAP_SIBLING_MAX_FILES);
-	const perFileLimit = Math.min(
-		3000,
-		Math.max(1, Math.floor(BOOTSTRAP_SIBLING_CONTENT_MAX_CHARS / Math.max(1, selected.length))),
+	const instructions = new Set(
+		adoption.sources.filter((source) => source.kind === "instructions").map((source) => source.path),
 	);
+	const selected = [...files]
+		.sort((a, b) => Number(instructions.has(b.path)) - Number(instructions.has(a.path)))
+		.slice(0, BOOTSTRAP_SIBLING_MAX_FILES);
+	let remaining = BOOTSTRAP_SIBLING_CONTENT_MAX_CHARS;
 	const displayPath = new Map(adoption.sources.map((source) => [source.path, source.displayPath] as const));
-	return selected.map((file) => ({
-		scope: file.source,
-		path: truncate(displayPath.get(file.path) ?? file.path, 240),
-		content: truncate(file.content, perFileLimit),
-	}));
+	return selected
+		.map((file) => {
+			const content = truncate(file.content, Math.min(remaining, instructions.has(file.path) ? 9000 : 1000));
+			remaining -= content.length;
+			return { scope: file.source, path: truncate(displayPath.get(file.path) ?? file.path, 240), content };
+		})
+		.filter((file) => file.content.length > 0);
+}
+
+function boundedEnforcement(input: EnforcementInventory): EnforcementInventory {
+	const result: EnforcementInventory = {
+		ciCommands: input.ciCommands.slice(0, 20).map((command) => truncate(command, 240)),
+		scripts: Object.fromEntries(
+			Object.entries(input.scripts)
+				.filter(([name]) => name.length <= 120)
+				.slice(0, 32)
+				.map(([name, command]) => [name, truncate(command, 280)]),
+		),
+		checkFiles: input.checkFiles.slice(0, 32).map((file) => ({
+			path: truncate(file.path, 240),
+			checks: file.checks.filter((name) => name.length <= 120).slice(0, 20),
+			failures: [] as string[],
+		})),
+	};
+	for (const [index, file] of input.checkFiles.entries()) {
+		for (const failure of file.failures) {
+			const target = result.checkFiles[index];
+			if (!target) break;
+			target.failures.push(truncate(failure, 360));
+			if (JSON.stringify(result).length > 12_000) {
+				target.failures.pop();
+				break;
+			}
+		}
+	}
+	while (JSON.stringify(result).length > 12_000 && Object.keys(result.scripts).length > 0) {
+		delete result.scripts[Object.keys(result.scripts).at(-1) as string];
+	}
+	while (JSON.stringify(result).length > 12_000 && result.checkFiles.length > 0) result.checkFiles.pop();
+	return result;
 }
 
 function compactImportedRules(adoption: AdoptionScanResult): Array<Record<string, unknown>> {
@@ -158,6 +202,8 @@ function compactRejected(adoption: AdoptionScanResult): Array<Record<string, unk
 }
 
 export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
+	const depth = input.depth ?? "standard";
+	const policy = BOOTSTRAP_DEPTH_POLICY[depth];
 	const siblingFiles = sourceSummaries(input.siblingFiles, input.adoption);
 	const importedRules = compactImportedRules(input.adoption);
 	const conflicts = compactConflicts(input.adoption);
@@ -175,13 +221,20 @@ export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
 	};
 	const payload = {
 		projectRoot: ".",
+		exploration: {
+			depth,
+			maxToolCalls: policy.toolCalls,
+			timeoutSeconds: policy.timeoutMs / 1000,
+			stopWhen: "supported high-value rules are covered; synthesize before the budget ends",
+		},
 		expectedProjectName: truncate(input.expectedProjectName ?? "Project", 80),
 		projectType: input.projectType,
 		...(input.existingClioMdText
 			? { existingClioMd: truncate(input.existingClioMdText, FULL_PROJECT_CONTEXT_MAX_CHARS) }
 			: {}),
 		...(input.codewiki ? { codewikiDigest: renderCodewikiDigest(input.codewiki, 1200) } : {}),
-		...(input.enforcement ? { enforcement: input.enforcement } : {}),
+		...(input.enforcement ? { enforcement: boundedEnforcement(input.enforcement) } : {}),
+		...(input.evidence ? { evidence: { ...input.evidence, files: [...input.evidence.files] } } : {}),
 		siblingFiles,
 		adoption,
 	};
@@ -191,6 +244,7 @@ export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
 		else if (conflicts.length > 0) conflicts.pop();
 		else if (siblingFiles.length > 1) siblingFiles.pop();
 		else if (importedRules.length > 1) importedRules.pop();
+		else if (payload.evidence && payload.evidence.files.length > 0) payload.evidence.files.pop();
 		else break;
 		adoption.presentedSourceCount = siblingFiles.length;
 		serialized = JSON.stringify(payload);
@@ -202,7 +256,7 @@ export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
 			projectType: input.projectType,
 			...(input.existingClioMdText ? { existingClioMd: truncate(input.existingClioMdText, 2000) } : {}),
 			...(input.codewiki ? { codewikiDigest: renderCodewikiDigest(input.codewiki, 1200) } : {}),
-			...(input.enforcement ? { enforcement: input.enforcement } : {}),
+			...(input.enforcement ? { enforcement: boundedEnforcement(input.enforcement) } : {}),
 			siblingFiles: [],
 			adoption: {
 				includeGlobal: input.adoption.includeGlobal,
@@ -232,28 +286,16 @@ function extractJsonObject(text: string): Record<string, unknown> {
 function stringArray(value: unknown, key: string, maxItems: number, maxChars: number): string[] {
 	if (value === undefined) return [];
 	if (!Array.isArray(value)) throw new Error(`bootstrap model output '${key}' must be an array`);
-	return value
-		.map((item, index) => {
-			if (typeof item !== "string") throw new Error(`bootstrap model output '${key}[${index}]' must be a string`);
-			return item.replace(/\s+/g, " ").trim();
-		})
-		.filter((item) => item.length > 0)
-		.slice(0, maxItems)
-		.map((item) => clampAtSentence(item, maxChars));
-}
-
-/**
- * Cut an overlong rule after its last complete sentence that fits. A plain
- * slice ended generated invariants mid-word ("move the value into a leaf se"),
- * which reads as a broken rule and drops the remedy anyway.
- */
-function clampAtSentence(text: string, maxChars: number): string {
-	if (text.length <= maxChars) return text;
-	const head = text.slice(0, maxChars);
-	const end = Math.max(head.lastIndexOf(". "), head.endsWith(".") ? head.length - 1 : -1);
-	if (end >= maxChars / 2) return head.slice(0, end + 1);
-	const space = head.lastIndexOf(" ");
-	return `${head.slice(0, space > 0 ? space : maxChars - 1)}…`.slice(0, maxChars);
+	return (
+		value
+			.map((item, index) => {
+				if (typeof item !== "string") throw new Error(`bootstrap model output '${key}[${index}]' must be a string`);
+				return item.replace(/\s+/g, " ").trim();
+			})
+			// An exception or remedy may be in the last sentence: retain whole rules.
+			.filter((item) => item.length > 0 && item.length <= maxChars)
+			.slice(0, maxItems)
+	);
 }
 
 function stringField(record: Record<string, unknown>, key: string, maxChars: number): string {
@@ -279,9 +321,16 @@ function structuredSections(value: unknown): NonNullable<BootstrapStructuredOutp
 			if (typeof record.body !== "string" || record.body.trim().length === 0) {
 				throw new Error(`bootstrap model output 'sections[${index}].body' must be a non-empty string`);
 			}
+			const retained: string[] = [];
+			let chars = 0;
+			for (const block of handbookBlocks(record.body.trim())) {
+				if (chars + block.length + 1 > HANDBOOK_TARGETS.sectionChars) continue;
+				retained.push(block);
+				chars += block.length + 1;
+			}
 			return {
 				title: record.title.replace(/\s+/g, " ").trim().slice(0, 80),
-				body: record.body.trim().slice(0, HANDBOOK_TARGETS.sectionChars),
+				body: retained.join("\n"),
 			};
 		})
 		.filter((section) => section.title.length > 0 && section.body.length > 0)

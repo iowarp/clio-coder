@@ -1,15 +1,16 @@
 import { join, resolve } from "node:path";
-import type { BootstrapProgressEvent } from "../domains/context/index.js";
 import type { BootstrapGenerationState } from "../domains/context/state.js";
 import type { RunWikiGenerateResult } from "../domains/context/wiki/generate.js";
 import type { WikiMeta } from "../domains/context/wiki/meta.js";
 import { MAX_PAGE_ATTEMPTS } from "../domains/context/wiki/plan-store.js";
+import { createContextCliProgress } from "./context-progress.js";
 
 const HELP = `Usage:
   clio-coder context
   clio-coder context init [--yes] [--preview|--heuristic] [--adopt] [--propose|--apply|--rewrite]
+                         [--depth quick|standard|deep]
   clio-coder context refresh [--wiki]
-  clio-coder context wiki [--update|--retry-pending] [--status] [--depth auto|simple|medium|detailed]
+  clio-coder context wiki [--update|--retry-pending] [--replan] [--status] [--depth auto|simple|medium|detailed]
                     [--target <id>] [--model <id>] [--thinking off|low|medium|high]
   clio-coder context reset [--all] [--yes]
   clio-coder context index [--json]
@@ -28,12 +29,6 @@ Project context commands:
   clio-coder context replay       compare working-set policies over Clio ledgers
   clio-coder context working-set  inspect one session's working-set fold and path index
 `;
-
-function printWikiProgress(event: BootstrapProgressEvent): void {
-	if (event.status === "completed") return;
-	const detail = event.detail ? ` (${event.detail})` : "";
-	process.stderr.write(`clio-coder context wiki: ${event.message}${detail}\n`);
-}
 
 function wikiRecoveryLines(meta: WikiMeta | null): string[] {
 	const pending = meta?.plan?.pages.filter((page) => page.status !== "written") ?? [];
@@ -163,6 +158,7 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 		process.stdout.write(HELP);
 		return 2;
 	}
+	const progress = createContextCliProgress("refresh");
 	try {
 		const { runContextRefresh, readWikiMeta } = await import("../domains/context/index.js");
 		const wikiEntry = updateWiki ? await import("./wiki-generate.js") : null;
@@ -173,6 +169,7 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 				stderr: (s) => process.stderr.write(s),
 			},
 			wiki: updateWiki,
+			onProgress: progress.update,
 			...(wikiEntry
 				? { wikiGenerate: wikiEntry.modelWikiGenerate(), wikiModel: await wikiEntry.resolveDocumenterModelId() }
 				: {}),
@@ -191,6 +188,8 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 	} catch (err) {
 		process.stderr.write(`clio-coder context refresh failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
+	} finally {
+		progress.stop();
 	}
 }
 
@@ -243,6 +242,7 @@ function isThinkingLevel(value: unknown): value is WikiCliThinking {
 async function runWikiCommand(args: string[]): Promise<number> {
 	let forceUpdate = false;
 	let retryPending = false;
+	let replan = false;
 	let status = false;
 	let depth: WikiCliDepth = "auto";
 	let target: string | undefined;
@@ -260,6 +260,10 @@ async function runWikiCommand(args: string[]): Promise<number> {
 		}
 		if (arg === "--retry-pending") {
 			retryPending = true;
+			continue;
+		}
+		if (arg === "--replan") {
+			replan = true;
 			continue;
 		}
 		if (arg === "--status") {
@@ -298,6 +302,11 @@ async function runWikiCommand(args: string[]): Promise<number> {
 		return 2;
 	}
 	if (status) return runWikiStatusCommand();
+	if (replan && retryPending) {
+		process.stderr.write("clio-coder context wiki: --replan cannot be combined with --retry-pending\n");
+		return 2;
+	}
+	const progress = createContextCliProgress("wiki");
 	try {
 		const context = await import("../domains/context/index.js");
 		const { modelWikiGenerate, resolveDocumenterModelId } = await import("./wiki-generate.js");
@@ -310,10 +319,11 @@ async function runWikiCommand(args: string[]): Promise<number> {
 			cwd: process.cwd(),
 			...(forceUpdate ? { mode: "update" as const } : {}),
 			...(retryPending ? { retryPending: true } : {}),
+			...(replan ? { replan: true } : {}),
 			depth,
 			model: await resolveDocumenterModelId(route),
 			generate: modelWikiGenerate({ route }),
-			onProgress: printWikiProgress,
+			onProgress: progress.update,
 		});
 		if (result.status === "failed") {
 			process.stderr.write(`clio-coder context wiki failed: ${(result.problems ?? ["unknown failure"]).join("; ")}\n`);
@@ -324,6 +334,8 @@ async function runWikiCommand(args: string[]): Promise<number> {
 	} catch (err) {
 		process.stderr.write(`clio-coder context wiki failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
+	} finally {
+		progress.stop();
 	}
 }
 

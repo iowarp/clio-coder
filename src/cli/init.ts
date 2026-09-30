@@ -9,10 +9,11 @@ import {
 } from "../domains/context/init-options.js";
 import { type ThinkingLevel, VALID_THINKING_LEVELS } from "../domains/providers/index.js";
 import { modelBootstrapGenerate } from "./bootstrap-generate.js";
+import { createContextCliProgress } from "./context-progress.js";
 
 const HELP = `Usage:
   clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose|--apply|--rewrite]
-                    [--target <id> [--model <id>] [--thinking <level>]]
+                    [--depth quick|standard|deep] [--target <id> [--model <id>] [--thinking <level>]]
 
 Explore the repository and bootstrap the project context in one pass: CLIO-CODER.md,
 the codewiki index, and the .clio-coder state. The configured Clio
@@ -31,9 +32,10 @@ Options:
   --rewrite        replace an existing CLIO-CODER.md with a fresh draft that ignores it as source
   --json           emit one machine-readable result object on stdout
   --yes, -y        update .gitignore without prompting
-  --target <id>    override the configured Scout target for this noninteractive run
-  --model <id>     override the Scout wire model (requires --target)
-  --thinking <n>   override Scout thinking: ${VALID_THINKING_LEVELS.join("|")} (requires --target)
+  --depth <level>  bounded exploration: quick (8 calls, 2m), standard (16 calls, 4m), deep (32 calls, 8m)
+  --target <id>    override the configured bootstrap target for this noninteractive run
+  --model <id>     override the bootstrap wire model (requires --target)
+  --thinking <n>   override bootstrap thinking: ${VALID_THINKING_LEVELS.join("|")} (requires --target)
 `;
 
 function hasFlag(args: ReadonlyArray<string>, name: string): boolean {
@@ -61,13 +63,17 @@ function parseContextInitArgs(args: ReadonlyArray<string>): {
 			json = true;
 			continue;
 		}
-		if (arg === "--target" || arg === "--model" || arg === "--thinking") {
+		if (arg === "--target" || arg === "--model" || arg === "--thinking" || arg === "--depth") {
 			const value = args[index + 1];
 			if (!value || value.startsWith("-")) return { options, json, error: `${arg} requires a value` };
 			index += 1;
 			if (arg === "--target") target = value;
 			else if (arg === "--model") model = value;
-			else {
+			else if (arg === "--depth") {
+				if (value !== "quick" && value !== "standard" && value !== "deep")
+					return { options, json, error: "--depth must be quick, standard, or deep" };
+				options.depth = value;
+			} else {
 				if (!thinkingLevels.has(value as ThinkingLevel)) {
 					return { options, json, error: `--thinking must be one of: ${[...thinkingLevels].join("|")}` };
 				}
@@ -135,6 +141,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 	const useModel = parsed.options.heuristic !== true && parsed.options.preview !== true;
 	const startedAt = performance.now();
 	const phaseTimings = new Map<string, InitPhaseTiming>();
+	const progress = createContextCliProgress("init");
 	try {
 		const result = await runBootstrap({
 			cwd: process.cwd(),
@@ -145,6 +152,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 				stderr: (s) => process.stderr.write(s),
 			},
 			onProgress: (event) => {
+				progress.update(event);
 				const now = performance.now();
 				const timing = phaseTimings.get(event.phase);
 				if (event.status === "started") phaseTimings.set(event.phase, { startedAt: now });
@@ -198,15 +206,13 @@ export async function runInitCommand(args: string[]): Promise<number> {
 			);
 		}
 		// `--rewrite` asks for a draft that ignores the current CLIO-CODER.md. When the
-		// model pass fails, the fallback rebuilds the handbook from that very
-		// file and the write is reported as a refresh, so a caller scripting the
-		// exit code is told a rewrite happened that did not. Name what was
-		// written, name the two ways forward, and fail. The plain heuristic
+		// model pass fails, preserve the original bytes and make a scripted caller
+		// aware that the requested rewrite did not happen. The plain heuristic
 		// fallback still exits 0: it is a legitimate degraded mode, and the
 		// warning line above already names it.
 		if (parsed.options.rewriteClioMd === true && result.telemetry.generation.mode === "existing") {
 			process.stderr.write(
-				"clio-coder context init: --rewrite did not rewrite CLIO-CODER.md; the model draft failed and the fallback rebuilt the handbook from the existing file.\n" +
+				"clio-coder context init: --rewrite did not rewrite CLIO-CODER.md; the model draft failed and the existing file was preserved.\n" +
 					"  rerun `clio-coder context init --rewrite` once the bootstrap target answers, or `clio-coder context init --rewrite --heuristic` to replace it with the deterministic draft.\n",
 			);
 			return 1;
@@ -215,5 +221,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 	} catch (err) {
 		process.stderr.write(`clio-coder context init failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
+	} finally {
+		progress.stop();
 	}
 }

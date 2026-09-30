@@ -2,7 +2,7 @@ import { deepStrictEqual, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import type { ContextActivitySnapshot } from "../../src/interactive/context-activity.js";
-import { formatContextActivityIslandLines } from "../../src/interactive/context-activity.js";
+import { formatContextActivityRailLines } from "../../src/interactive/context-activity.js";
 import { createDispatchBoardView } from "../../src/interactive/dispatch-board.js";
 import { footerState } from "../harness/footer-fixture.js";
 
@@ -31,10 +31,10 @@ test("board and context spinners share the 120 ms animation step", () => {
 		for (const width of [60, 80, 120, 200]) {
 			Date.now = () => 199;
 			const beforeBoard = board.render(width);
-			const beforeContext = formatContextActivityIslandLines(activity, width, 199);
+			const beforeContext = formatContextActivityRailLines(activity, width, 199);
 			Date.now = () => 200;
 			const afterBoard = board.render(width);
-			const afterContext = formatContextActivityIslandLines(activity, width, 200);
+			const afterContext = formatContextActivityRailLines(activity, width, 200);
 			deepStrictEqual(afterBoard, beforeBoard);
 			deepStrictEqual(afterContext, beforeContext);
 			for (const line of [...afterBoard, ...afterContext]) {

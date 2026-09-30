@@ -1838,7 +1838,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				},
 				recall: { positionals: [...RECALL_POSITIONALS] },
 				init: {
-					flags: CONTEXT_INIT_FLAG_TABLE.flatMap(({ flag, aliases = [] }) => [flag, ...aliases].map((name) => ({ name }))),
+					flags: [
+						...CONTEXT_INIT_FLAG_TABLE.flatMap(({ flag, aliases = [] }) => [flag, ...aliases].map((name) => ({ name }))),
+						{ name: "--depth", takesValue: true, values: ["quick", "standard", "deep"] },
+					],
 				},
 				refresh: {},
 				// The terminal confirms a reset in its own chooser. A host with no chooser
@@ -1861,6 +1864,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					return { kind: "context-recall", ref: parsed.positionals[0] ?? "" };
 				case "init": {
 					const options: ContextInitOptions = {};
+					const depth = parsed.flags.get("--depth");
+					if (depth === "quick" || depth === "standard" || depth === "deep") options.depth = depth;
 					for (const { flag, aliases = [], field } of CONTEXT_INIT_FLAG_TABLE) {
 						if ([flag, ...aliases].some((name) => parsed.flags.has(name))) options[field] = true;
 					}

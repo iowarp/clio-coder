@@ -28,7 +28,7 @@ import { createCoalescingChatRenderer } from "./chat-renderer.js";
 import type { EditorChrome } from "./clio-editor.js";
 import { ClioEditor } from "./clio-editor.js";
 import { createCommandOutputRunIo } from "./command-output.js";
-import { createContextActivityStore } from "./context-activity.js";
+import { createContextActivityStore, createContextProgressRail } from "./context-activity.js";
 import type { DispatchBoardView } from "./dispatch-board.js";
 import { createDispatchBoardStore, createDispatchBoardView } from "./dispatch-board.js";
 import { dockTop, setDockFooterRows } from "./dock.js";
@@ -682,6 +682,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
 			}),
 			editor,
+			contextProgress: createContextProgressRail(() => contextActivityStore.current()),
 			footer: footer.view,
 		},
 		{

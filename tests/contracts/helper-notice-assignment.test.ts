@@ -2,7 +2,9 @@ import { deepStrictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createNotificationCenter } from "../../src/interactive/footer/notifications.js";
+import { createInteractiveEventProjection } from "../../src/interactive/interactive-event-projection.js";
 import { createInteractiveSubscriptions } from "../../src/interactive/interactive-subscriptions.js";
 
 const identity = {
@@ -73,4 +75,83 @@ test("parallel helpers keep one notice each", () => {
 	} finally {
 		dispose();
 	}
+});
+
+test("context generators use the composer progress rail without helper notices or transcript blocks", () => {
+	const { bus, shown, dispose } = footer();
+	try {
+		bus.emit(BusChannels.DispatchStarted, {
+			...identity,
+			agentId: "context-bootstrap",
+			agentAudience: "internal",
+			requestOrigin: "internal",
+			runId: "context-run",
+			pid: null,
+			assignmentId: "context-run",
+			attempt: 0,
+		});
+		bus.emit(BusChannels.DispatchCompleted, {
+			...identity,
+			agentId: "context-bootstrap",
+			agentAudience: "internal",
+			requestOrigin: "internal",
+			runId: "context-run",
+			outcome: "succeeded",
+		} as never);
+		deepStrictEqual(shown(), []);
+	} finally {
+		dispose();
+	}
+});
+
+test("context reduction status uses the footer while errors retain transcript evidence", () => {
+	const noop = (): void => undefined;
+	const handlers: Array<(event: ChatLoopEvent) => void> = [];
+	const ingress = (event: ChatLoopEvent): void => {
+		for (const handler of handlers) handler(event);
+	};
+	const transcript: ChatLoopEvent[] = [];
+	const footer: string[] = [];
+	const projection = createInteractiveEventProjection({
+		bus: createSafeEventBus(),
+		chat: {
+			onEvent: (handler) => {
+				handlers.push(handler);
+				return noop;
+			},
+			cancel: noop,
+		},
+		status: { subscribe: () => noop },
+		getTerminalColumns: () => 80,
+		applyChatEvent: (event) => transcript.push(event),
+		setFollowUpMessages: noop,
+		isAskUserWaiting: () => false,
+		closeAskUserSession: noop,
+		resetAskUserCancellation: noop,
+		recordToolStart: noop,
+		recordToolEnd: noop,
+		setLastTurnSummary: noop,
+		startTerminalProgress: noop,
+		stopTerminalProgress: noop,
+		refreshLiveWorkspaceGit: noop,
+		refreshFooter: noop,
+		requestRender: noop,
+		notify: (_level, text) => footer.push(text),
+		dismissNotification: noop,
+		appendTranscriptNotice: noop,
+		refreshSettingsOverlay: noop,
+	});
+	const status = {
+		type: "notice",
+		level: "info",
+		surface: "transcript",
+		text: "[context engine] llm_summary: 12 messages summarized",
+	} as const;
+	ingress(status);
+	deepStrictEqual(footer, [status.text]);
+	deepStrictEqual(transcript, []);
+	const failure = { ...status, level: "error" as const, text: "[context engine] checkpoint failed" };
+	ingress(failure);
+	deepStrictEqual(transcript, [failure]);
+	projection.dispose();
 });

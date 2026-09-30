@@ -66,13 +66,42 @@ it("asks the bootstrap model where a regression test must live so CI runs it", (
 	ok(/test directories? CI (?:actually )?runs/i.test(BOOTSTRAP_PROMPT), "prompt must ask which test paths CI executes");
 });
 
-it("clamps an overlong model rule at a sentence end instead of mid-word", () => {
-	const sentence = "Rule6 in `tests/boundaries/check-boundaries.ts` routes every entry through `STAGE0_SEAMS`. ";
-	const long = sentence.repeat(Math.ceil((HANDBOOK_TARGETS.invariantChars * 1.5) / sentence.length));
+it("omits an oversized rule whole rather than losing its final exception", () => {
+	const rule =
+		"Preserve `src/owner.ts`. " +
+		"The rationale requires space. ".repeat(HANDBOOK_TARGETS.invariantChars) +
+		" Except generated fixtures may be replaced.";
+	const complete = "Use `src/owner.ts` for owned writes.";
 	const output = parseBootstrapModelOutput(
-		JSON.stringify({ projectName: "harbor", identity: "A harbor.", conventions: [], invariants: [long], sections: [] }),
+		JSON.stringify({
+			projectName: "harbor",
+			identity: "A harbor.",
+			conventions: [],
+			invariants: [rule, complete],
+			sections: [],
+		}),
 	);
-	const clamped = output.invariants?.[0] ?? "";
-	ok(clamped.length <= HANDBOOK_TARGETS.invariantChars, `${clamped.length}`);
-	ok(clamped.endsWith("`STAGE0_SEAMS`."), clamped.slice(-40));
+	ok(output.invariants.length === 1);
+	ok(output.invariants[0] === complete);
+});
+
+it("preserves the exact default test selection without claiming optional suites run in CI", async () => {
+	const ordinary = "node --test tests/contracts/*.test.ts tests/smoke/boot.test.ts";
+	write(
+		"package.json",
+		JSON.stringify({ name: "fixture", scripts: { test: ordinary, "test:full": "node --test tests/**/*.test.ts" } }),
+	);
+	await runBootstrap({
+		cwd,
+		generate: async () => ({
+			projectName: "fixture",
+			identity: "Fixture.",
+			invariants: [],
+			conventions: [],
+			sections: [],
+		}),
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	ok(handbook.includes(`Exact package.json#scripts.test: \`${ordinary}\``));
+	ok(!handbook.includes("node --test tests/**/*.test.ts"));
 });
