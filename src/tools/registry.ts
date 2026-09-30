@@ -310,6 +310,8 @@ export interface ToolInvokeOptions {
 	turnConstraints?: TurnConstraints;
 	/** Registry-owned filter bound to the active compiled safety policy. */
 	allowsObservationPath?: (path: string) => boolean;
+	/** Registry-owned write-root check the typed mutation seam repeats right before it publishes (F3). */
+	writeTargetViolation?: (target: string) => string | null;
 	/** Trusted submitting host identity for nested dispatch; never model arguments. */
 	hostRun?: import("../domains/dispatch/contract.js").DispatchPreparationOptions["hostRun"];
 	/** Trusted resolved model capability; never read from tool arguments. */
@@ -613,11 +615,17 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			try {
 				const preparedArgs = prepareToolArgs(spec, call.args ?? {});
 				resultDisposition = resolveToolResultDisposition(spec, preparedArgs);
-				const { allowsObservationPath: _callerPathFilter, ...callerOptions } = options ?? {};
+				const {
+					allowsObservationPath: _callerPathFilter,
+					writeTargetViolation: _callerWriteCheck,
+					...callerOptions
+				} = options ?? {};
 				const allowsObservationPath = deps.safety.policy?.allowsObservationPath;
+				const writeTargetViolation = deps.safety.policy?.writeTargetViolation;
 				const result = await spec.run(preparedArgs, {
 					...callerOptions,
 					...(allowsObservationPath ? { allowsObservationPath } : {}),
+					...(writeTargetViolation ? { writeTargetViolation } : {}),
 				});
 				// A body that delegated to a nested invocation the registry refused
 				// (the gateway calling a denied capability) hands the refusal back

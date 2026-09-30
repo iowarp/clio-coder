@@ -160,6 +160,44 @@ describe("symlink escape admission", () => {
 		strictEqual(evaluatePathPolicy(policy, "read", "data/link.txt").kind, "allow");
 	});
 
+	// F3: write roots were checked lexically while the typed write followed the
+	// link, so `allowed/link/x` passed admission and landed in `other/x`.
+	it("F3: write roots judge where the write lands, at admission and again at the mutation seam", async () => {
+		mkdirSync(join(root, "allowed", "real"), { recursive: true });
+		mkdirSync(join(root, "allowed", "swap"));
+		mkdirSync(join(root, "other"));
+		symlinkSync("../other", join(root, "allowed", "link"));
+		const safety = createWorkerSafety({ cwd: root, writeRoots: ["allowed"] });
+		const registry = createRegistry({ safety, autonomy: () => "default" });
+		registry.register(writeTool);
+		const escaped = await registry.invoke({
+			tool: ToolNames.Write,
+			args: { path: "allowed/link/probe.txt", content: "x" },
+		});
+		strictEqual(escaped.kind, "blocked");
+		strictEqual(escaped.decision.policy?.reasonCode, "write-root");
+		const inside = await registry.invoke({
+			tool: ToolNames.Write,
+			args: { path: "allowed/real/probe.txt", content: "x" },
+		});
+		strictEqual(inside.kind, "ok");
+		strictEqual(existsSync(join(root, "allowed", "real", "probe.txt")), true);
+		// Admitted while `swap` is a real directory, then swapped for a link before the mutation.
+		strictEqual(
+			safety.evaluate({ tool: ToolNames.Write, args: { path: "allowed/swap/probe.txt", content: "x" } }).kind,
+			"allow",
+		);
+		rmSync(join(root, "allowed", "swap"), { recursive: true });
+		symlinkSync("../other", join(root, "allowed", "swap"));
+		const swapped = await writeTool.run(
+			{ path: "allowed/swap/probe.txt", content: "x" },
+			{ writeTargetViolation: (target) => safety.policy?.writeTargetViolation?.(target) ?? null },
+		);
+		strictEqual(swapped.kind, "error");
+		if (swapped.kind === "error") match(swapped.message, /outside the permitted write roots/u);
+		strictEqual(existsSync(join(root, "other", "probe.txt")), false);
+	});
+
 	it("keeps plain missing files and missing directories on the deepest real parent", () => {
 		const alias = join(base, "alias");
 		symlinkSync(root, alias);

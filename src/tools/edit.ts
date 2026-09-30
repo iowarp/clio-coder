@@ -156,7 +156,7 @@ export const editTool: ToolSpec = {
 	baseActionClass: "write",
 	executionMode: "sequential",
 	prepareArguments: prepareEditArguments,
-	async run(rawArgs): Promise<ToolResult> {
+	async run(rawArgs, options): Promise<ToolResult> {
 		// Normalize here too so direct run() callers (not just registry-admitted
 		// calls) accept the legacy/JSON-string shapes. Idempotent.
 		const args = prepareEditArguments(rawArgs);
@@ -194,7 +194,9 @@ export const editTool: ToolSpec = {
 							diff = generateDiffString(applied.baseContent, applied.newContent);
 						}
 					}
-					const file = await publishFileAtomically(filePath, finalContent);
+					const file = await publishFileAtomically(filePath, finalContent, {
+						...(options?.writeTargetViolation ? { admitTarget: options.writeTargetViolation } : {}),
+					});
 					// The validation nudge is point-of-failure conditioning: measured on
 					// a live 35B coder worker, the model edited correctly and then spent
 					// its remaining calls "validating" with navigation tools (code_nav

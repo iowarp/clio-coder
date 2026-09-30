@@ -53,6 +53,8 @@ export interface SafetyContract {
 		metadata(posture?: string): SafetyPolicyMetadata;
 		/** Pure search-result filter using the same compiled policy as admission. */
 		allowsObservationPath?(path: string): boolean;
+		/** Block reason when a typed write would land outside the run's write roots, or null (F3). */
+		writeTargetViolation?(target: string): string | null;
 	};
 
 	/**

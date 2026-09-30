@@ -16,7 +16,7 @@ export const writeTool: ToolSpec = {
 	}),
 	baseActionClass: "write",
 	executionMode: "sequential",
-	async run(args): Promise<ToolResult> {
+	async run(args, options): Promise<ToolResult> {
 		const pathArg = typeof args.path === "string" ? args.path : null;
 		if (!pathArg) return { kind: "error", message: "write: missing path argument" };
 		const content =
@@ -54,7 +54,9 @@ export const writeTool: ToolSpec = {
 						}
 					}
 					const diff = skipDiff ? undefined : generateDiffString(previousContent, content).diff;
-					const file = await publishFileAtomically(filePath, content);
+					const file = await publishFileAtomically(filePath, content, {
+						...(options?.writeTargetViolation ? { admitTarget: options.writeTargetViolation } : {}),
+					});
 					return { file, diff, previousEndedWithNewline: previousContent.endsWith("\n"), skipDiff };
 				},
 				physical,

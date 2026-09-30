@@ -61,12 +61,28 @@ export interface AtomicPublishResult {
 export interface AtomicPublishOptions {
 	/** Test seam. Must either perform the rename or throw before publishing. */
 	rename?: (tempPath: string, targetPath: string) => Promise<void>;
+	/**
+	 * Write-root check against the physical target, returning a block reason or
+	 * null. Admission judged the path earlier; a link swapped in since then
+	 * would move the write, so the target is judged again at the publish seam
+	 * before any directory is created and once more after (F3).
+	 */
+	admitTarget?: (targetPath: string) => string | null;
 }
 
-async function resolvePublishTarget(filePath: string): Promise<string> {
+function assertAdmitted(target: string, admitTarget: AtomicPublishOptions["admitTarget"]): void {
+	const reason = admitTarget?.(target) ?? null;
+	if (reason !== null) throw new Error(`Refusing write outside the permitted write roots: ${reason}`);
+}
+
+async function resolvePublishTarget(
+	filePath: string,
+	admitTarget?: AtomicPublishOptions["admitTarget"],
+): Promise<string> {
 	// Every link on the way is already followed, so a link here was swapped in
 	// after resolution and is refused as a non-file rather than followed.
 	const absolute = physicalTarget(filePath);
+	assertAdmitted(absolute, admitTarget);
 	try {
 		const info = await lstat(absolute);
 		if (!info.isFile()) throw new Error(`Refusing non-file target (including directories): ${filePath}`);
@@ -74,7 +90,9 @@ async function resolvePublishTarget(filePath: string): Promise<string> {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
 	await mkdir(dirname(absolute), { recursive: true });
-	return join(await realpath(dirname(absolute)), basename(absolute));
+	const target = join(await realpath(dirname(absolute)), basename(absolute));
+	assertAdmitted(target, admitTarget);
+	return target;
 }
 
 /**
@@ -91,7 +109,7 @@ export async function publishFileAtomically(
 ): Promise<AtomicPublishResult> {
 	let tempPath: string | undefined;
 	try {
-		const target = await resolvePublishTarget(filePath);
+		const target = await resolvePublishTarget(filePath, options.admitTarget);
 		const previous = await stat(target).catch((error: NodeJS.ErrnoException) => {
 			if (error.code === "ENOENT") return null;
 			throw error;

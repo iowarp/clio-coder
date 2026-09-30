@@ -52,6 +52,7 @@ async function writeTerminalArtifact(
 	kind: ArtifactKind,
 	args: Record<string, unknown>,
 	cwd: string,
+	admitTarget?: (target: string) => string | null,
 ): Promise<ToolResult> {
 	const content = typeof args.content === "string" ? args.content : "";
 	if (content.length === 0) return { kind: "error", message: `artifact: kind=${kind} requires non-empty content` };
@@ -65,7 +66,9 @@ async function writeTerminalArtifact(
 	const body = title.length > 0 && !content.trimStart().startsWith("#") ? `# ${title}\n\n${content}` : content;
 	let published: AtomicPublishResult;
 	try {
-		published = await withFileMutationQueue(target, () => publishFileAtomically(target, body));
+		published = await withFileMutationQueue(target, () =>
+			publishFileAtomically(target, body, admitTarget ? { admitTarget } : {}),
+		);
 	} catch (err) {
 		return { kind: "error", message: `artifact: ${err instanceof Error ? err.message : String(err)}` };
 	}
@@ -100,12 +103,12 @@ export function createArtifactTool(deps: ArtifactToolDeps = {}): ToolSpec {
 		}),
 		baseActionClass: "write",
 		executionMode: "sequential",
-		async run(args): Promise<ToolResult> {
+		async run(args, options): Promise<ToolResult> {
 			const kind = typeof args.kind === "string" ? args.kind : "";
 			if (!(ARTIFACT_KINDS as ReadonlyArray<string>).includes(kind)) {
 				return { kind: "error", message: `artifact: kind must be plan, review, or report; got '${kind}'` };
 			}
-			return writeTerminalArtifact(kind as ArtifactKind, args, cwdFromDeps(deps));
+			return writeTerminalArtifact(kind as ArtifactKind, args, cwdFromDeps(deps), options?.writeTargetViolation);
 		},
 	};
 }

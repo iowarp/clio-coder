@@ -121,6 +121,7 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 		isSubset,
 		policy: {
 			metadata: (posture) => policyEngine.metadata(posture),
+			writeTargetViolation: (target) => policyEngine.writeTargetViolation(target),
 			allowsObservationPath: (path) =>
 				policyEngine.evaluate({ tool: "read", args: { path } }).reasonCode !== "path-policy:zeroAccessPaths",
 		},

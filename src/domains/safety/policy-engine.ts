@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
-import { resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
+import { asDirectoryPathBoundary, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import {
 	canonicalizeExistingPath,
 	canonicalizePath,
@@ -12,6 +12,7 @@ import {
 } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir } from "../../core/xdg.js";
+import { expandPath } from "../../tools/path-utils.js";
 import { resolveProjectVerifierExecutionCwd } from "../../tools/verify/catalog.js";
 import { resolveVerifyCall } from "../../tools/verify/resolve.js";
 import { prepareVerifyArguments } from "../../tools/verify/surface.js";
@@ -127,6 +128,12 @@ export interface SafetyPolicyEngine {
 	 * policy alone instead of a whole admission.
 	 */
 	readablePath(target: string): boolean;
+	/**
+	 * Block reason when a write would land outside this run's write roots, or
+	 * null. The typed mutation seam asks again right before it publishes, so a
+	 * link swapped in after admission is still caught (F3).
+	 */
+	writeTargetViolation(target: string): string | null;
 	metadata(posture?: string): SafetyPolicyMetadata;
 }
 
@@ -253,24 +260,52 @@ function isWriteConfinementEscape(call: ClassifierCall, actionClass: string): bo
 }
 
 /**
- * Lexical write-root containment. The target is resolved against the worker cwd
- * and must equal a root or sit beneath it (`root` + path separator). The check
- * is lexical and does not chase symlinks, so a symlink inside a root that points
- * outside is not detected here. Returns the block reason, or null when allowed.
+ * The roots where a write through them lands, walked at the moment of the
+ * check. A root that cannot be resolved covers nothing.
+ */
+function physicalWriteRoots(roots: ReadonlyArray<string>, memo: PathWalkMemo): string[] {
+	return roots.flatMap((root) => {
+		const directory = root.endsWith("/");
+		const resolved = canonicalizePath(directory ? root.slice(0, -1) : root, memo);
+		if (resolved === null) return [];
+		return [directory ? asDirectoryPathBoundary(resolved) : resolved];
+	});
+}
+
+/** Block reason when a physical write target sits outside every physical root. */
+function writeRootViolation(
+	roots: ReadonlyArray<string>,
+	label: string,
+	physical: string | null,
+	memo: PathWalkMemo,
+): string | null {
+	if (physical === null) {
+		return `write target '${label}' cannot be resolved (a symbolic link loop or more than 40 links), so it cannot be shown inside the permitted write roots for this run: ${roots.join(", ")}`;
+	}
+	if (writeRootsCover(physicalWriteRoots(roots, memo), physical)) return null;
+	return `write target '${label}' resolves to '${physical}', which is outside the permitted write roots for this run: ${roots.join(", ")}`;
+}
+
+/**
+ * Write-root containment judges where the typed tool actually writes: the
+ * target goes through the same walk as resolveMutationTarget (realpath of the
+ * deepest existing ancestor plus the remaining components) and is compared
+ * with roots resolved the same way. The former lexical check let
+ * `allowed/link/x` through while the write landed wherever `link` pointed (F3).
+ * Returns the block reason, or null when allowed.
  */
 function evaluateWriteRoots(roots: ReadonlyArray<string>, writeRootCwd: string, call: ClassifierCall): string | null {
 	if (roots.length === 0) return null;
 	const target = writeRootTargetPath(call);
 	if (target === null) return null;
-	const resolved = path.resolve(writeRootCwd, target);
-	if (writeRootsCover(roots, resolved)) return null;
-	return `write target '${target}' resolves to '${resolved}', which is outside the permitted write roots for this run: ${roots.join(", ")}`;
+	const memo = createPathWalkMemo();
+	return writeRootViolation(roots, target, canonicalizeRawPath(expandPath(target), writeRootCwd, memo), memo);
 }
 
 export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}): SafetyPolicyEngine {
 	const cwd = canonicalizeExistingPath(path.resolve(options.cwd ?? process.cwd()));
-	// Write-root containment resolves lexically, so it keeps its own un-canonicalized
-	// cwd and roots to compare like against like (the design mandates no symlink chasing).
+	// Write targets resolve relative to the cwd the tools use, un-canonicalized,
+	// and both targets and roots are walked physically at each check (F3).
 	const writeRootCwd = path.resolve(options.cwd ?? process.cwd());
 	const writeRoots = (options.writeRoots ?? []).map((root) => resolvePathBoundary(writeRootCwd, root));
 	const skillRoots = activeClioSkillRoots(cwd);
@@ -652,6 +687,11 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				}
 			}
 			return allowDecision(base, allowInput);
+		},
+		writeTargetViolation(target) {
+			if (writeRoots.length === 0) return null;
+			const memo = createPathWalkMemo();
+			return writeRootViolation(writeRoots, target, canonicalizeRawPath(target, writeRootCwd, memo), memo);
 		},
 		readablePath(target) {
 			return evaluatePathPolicy(zeroAccessPolicy, "read", target, cwd).kind === "allow";
