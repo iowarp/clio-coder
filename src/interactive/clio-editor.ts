@@ -40,9 +40,21 @@ import type { TurnPreparationPhase } from "./turn-state.js";
 interface SuggestionEngine {
 	autocompleteList?: { getSelectedItem(): unknown };
 	autocompleteState: unknown;
+	updateAutocomplete?(): void;
 	tryTriggerAutocomplete?(): void;
 	cancelAutocomplete?(): void;
 }
+
+/**
+ * Pi's edits that remove text without asking the suggestion list to follow.
+ * Insertion, Backspace and Delete already refresh it.
+ */
+const KILL_ACTIONS = [
+	"tui.editor.deleteToLineStart",
+	"tui.editor.deleteToLineEnd",
+	"tui.editor.deleteWordBackward",
+	"tui.editor.deleteWordForward",
+] as const;
 
 const REVERSE_VIDEO = `${String.fromCharCode(27)}[7m`;
 const REVERSE_VIDEO_BLANK = `${REVERSE_VIDEO} ${String.fromCharCode(27)}[0m`;
@@ -275,6 +287,9 @@ export class ClioEditor extends Editor {
 		const before = this.getText();
 		this.suggestionsAreStale();
 		super.applyEdit(operation);
+		if (operation !== "undo" && operation !== "deleteCharBackward" && operation !== "deleteCharForward") {
+			this.followSuggestionsAfterKill(before);
+		}
 		this.revision += 1;
 		this.pastedBangOffsets = remapPastedBangOffsets(before, this.getText(), this.pastedBangOffsets, operation === "undo");
 	}
@@ -329,6 +344,17 @@ export class ClioEditor extends Editor {
 			return false;
 		}
 		return stamp.text !== text || stamp.line !== line || stamp.col !== col;
+	}
+
+	/**
+	 * A kill leaves the open list describing text that is gone: Ctrl+U on
+	 * `/context ` emptied the line under a palette that stayed up. Ask the
+	 * provider again so the list closes or narrows with the line.
+	 */
+	private followSuggestionsAfterKill(textBefore: string): void {
+		if (this.getText() === textBefore) return;
+		const engine = this.suggestionEngine();
+		if (engine.autocompleteState !== null) engine.updateAutocomplete?.();
 	}
 
 	/** Ask the provider for the next argument without the forced Tab path, which auto-applies a lone row. */
@@ -776,6 +802,7 @@ export class ClioEditor extends Editor {
 				return;
 			}
 		} else this.suggestionsAreStale();
+		const killsText = KILL_ACTIONS.some((action) => keybindings.matches(data, action));
 		const closesSuggestions =
 			keybindings.matches(data, "tui.select.cancel") ||
 			keybindings.matches(data, "tui.input.tab") ||
@@ -806,6 +833,7 @@ export class ClioEditor extends Editor {
 			this.getText().trimStart().startsWith("/") &&
 			this.selectedSuggestion() !== null;
 		super.handleInput(completesSlashRow ? "\t" : data);
+		if (killsText) this.followSuggestionsAfterKill(textBeforeInput);
 		if (completingDirectory && this.getText() !== textBeforeCompletion) {
 			if (cursorEndsDirectoryPath(this)) {
 				// Directory rows are submenus on the same provider. Re-open immediately
