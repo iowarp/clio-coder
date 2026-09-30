@@ -32,6 +32,7 @@ import { validateEngineToolArguments } from "../engine/ai.js";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "../engine/types.js";
 import { applyToolProfile, type ToolProfileName } from "./profiles.js";
 import type { ToolInvokeOptions, ToolRegistry, ToolResult, ToolSpec } from "./registry.js";
+import { prepareToolArgs } from "./registry.js";
 import {
 	isDispositionedToolResultError,
 	isRefusalToolResultError,
@@ -391,6 +392,17 @@ function toAgentTool(
 		},
 	};
 	if (spec.executionMode) tool.executionMode = spec.executionMode;
+	// Pi validates the wire schema before execute, so without this hook the
+	// weak-model normalizers (gateway with no op or a JSON-string args, edit's
+	// legacy fields) never ran on a direct call: the call failed validation
+	// first. Dispatch's normalizer reserves capacity keyed by argument
+	// identity, which Pi's clone would orphan, so it stays on the registry path.
+	if (spec.prepareArguments && !spec.prepareAdmissionArguments) {
+		tool.prepareArguments = (args: unknown) =>
+			(args !== null && typeof args === "object" && !Array.isArray(args)
+				? prepareToolArgs(spec, args as Record<string, unknown>)
+				: args) as never;
+	}
 	return tool;
 }
 

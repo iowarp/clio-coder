@@ -1380,7 +1380,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
  * throwing or non-object result is discarded so a buggy normalizer can never
  * abort admission; the raw args pass through unchanged.
  */
-function prepareToolArgs(spec: ToolSpec, args: Record<string, unknown>): Record<string, unknown> {
+export function prepareToolArgs(spec: ToolSpec, args: Record<string, unknown>): Record<string, unknown> {
 	if (!spec.prepareArguments) return args;
 	try {
 		const prepared = spec.prepareArguments(args);
