@@ -3,13 +3,16 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { initializeClioHome } from "../../src/core/init.js";
 import { readClioVersion } from "../../src/core/package-root.js";
+import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
 import {
 	inspectInstallation,
 	installationCommand,
 	npmInstallArgs,
 } from "../../src/domains/lifecycle/install-method.js";
-import { makeScratchHome } from "../harness/scratch-env.js";
+import { listMigrations } from "../../src/domains/lifecycle/migrations/index.js";
+import { isolateClioEnv, makeScratchHome } from "../harness/scratch-env.js";
 
 const ARGV_MODULE = new URL("../../src/cli/argv.ts", import.meta.url).href;
 const TSX_IMPORT = `--import=${import.meta.resolve("tsx")}`;
@@ -255,4 +258,19 @@ test("an older dist-tag never downgrades the installed package", (t) => {
 	assert.equal(result.status, 0, result.stderr + result.stdout);
 	assert.deepEqual(f.calls(), [{ entry: f.entry, args: ["doctor", "--fix"] }]);
 	assert.match(result.stdout, /keeping it/);
+});
+
+test("a fresh home records every registered migration and doctor reports none pending", async (t) => {
+	const home = await isolateClioEnv("clio-fresh-migrations-");
+	t.after(() => home.restore());
+	initializeClioHome();
+	const registered = listMigrations().map((migration) => migration.id);
+	const manifest = JSON.parse(readFileSync(join(home.dir, "state", "migrations.json"), "utf8")) as {
+		applied: string[];
+	};
+	assert.deepEqual(manifest.applied, registered);
+	const row = runDoctor().find((finding) => finding.name === "lifecycle migrations");
+	assert.equal(row?.ok, true);
+	assert.equal(row?.level, undefined);
+	assert.equal(row?.detail, `${registered.length} registered, all recorded`);
 });
