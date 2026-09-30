@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Id } from "./common.js";
+import { InterviewRound } from "./interviews.js";
 import { Operation, Progress } from "./operations.js";
 import { SessionDeltas } from "./sessions.js";
 
@@ -7,6 +8,11 @@ const base = { v: Type.Literal(1), epoch: Id, seq: Type.Integer({ minimum: 0 }),
 const cursor = { epoch: Id, seq: Type.Integer({ minimum: 0 }) };
 const resource = { resource: Id, revision: Type.Integer({ minimum: 1 }) };
 export const Event = Type.Union([
+	Type.Object({
+		...base,
+		type: Type.Literal("interview.changed"),
+		payload: Type.Object({ resource: Id, round: Type.Union([InterviewRound, Type.Null()]) }),
+	}),
 	Type.Object({ ...base, type: Type.Literal("turn.started"), payload: SessionDeltas["turn.started"] }),
 	Type.Object({ ...base, type: Type.Literal("turn.text"), payload: SessionDeltas["turn.text"] }),
 	Type.Object({ ...base, type: Type.Literal("turn.thought"), payload: SessionDeltas["turn.thought"] }),

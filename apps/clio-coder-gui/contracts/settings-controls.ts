@@ -29,7 +29,7 @@ export const SettingControl = Type.Object(
 		suggestions: Type.Optional(Type.Array(Type.String())),
 		optional: Type.Boolean(),
 		timing: SettingTiming,
-		/** The text form `applyControlValue` accepts. Structured collections cross as a count only. */
+		/** The text form `applyControlValue` accepts. Guided collections cross as JSON; withheld collections cross as a count only. */
 		value: Type.String(),
 		source: SettingsOrigin,
 		access: Type.Union([Type.Literal("writable"), Type.Literal("read-only")]),
@@ -53,7 +53,8 @@ export const SettingsControls = Type.Object(
 export const SettingWrite = Type.Object(
 	{
 		path: Type.String({ maxLength: 200, pattern: "^[A-Za-z][A-Za-z0-9]*(\\.[A-Za-z][A-Za-z0-9]*){1,6}$" }),
-		value: Type.String({ maxLength: 8192 }),
+		value: Type.String({ maxLength: 65536 }),
+		expectedValue: Type.Optional(Type.String({ maxLength: 65536 })),
 		confirmed: Type.Optional(Type.Boolean()),
 	},
 	closed,

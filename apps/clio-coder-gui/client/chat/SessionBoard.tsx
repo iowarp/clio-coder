@@ -35,7 +35,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 	settledTurns: number;
 	running: boolean;
 }) {
-	const [expanded, setExpanded] = useState(false);
+	const [expanded, setExpanded] = useState(true);
 	const [title, setTitle] = useState("");
 	const titleId = useId();
 	const panel = useRef<HTMLDetailsElement>(null);
@@ -117,6 +117,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 	const act = (id: string, action: OperatorTaskAction) => change.mutate([action, id]);
 	return (
 		<details
+			open={expanded}
 			ref={panel}
 			className="command-panel session-board"
 			onToggle={(event) => setExpanded(event.currentTarget.open)}

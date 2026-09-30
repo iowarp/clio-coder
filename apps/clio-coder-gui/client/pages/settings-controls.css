@@ -173,3 +173,69 @@
 	border-left: 2px solid var(--status-warn-line);
 	font-size: var(--text-meta);
 }
+.structured-settings {
+	margin: 0;
+	border: 0;
+	padding: 0;
+	display: grid;
+	gap: 14px;
+	min-width: 0;
+}
+.structured-settings__row {
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-sm);
+	padding: 16px;
+	display: grid;
+	gap: 12px;
+	min-width: 0;
+}
+.structured-settings__row-heading {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+.structured-settings__row-heading > strong {
+	font-size: var(--text-meta);
+}
+.structured-settings__row-heading > button {
+	padding: 6px 10px;
+	font-size: var(--text-exact);
+}
+.structured-settings__fields {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+}
+.structured-settings label,
+.structured-settings__field {
+	display: grid;
+	gap: 6px;
+	min-width: 0;
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+.structured-settings :is(input, select) {
+	width: 100%;
+	min-width: 0;
+	box-sizing: border-box;
+}
+.structured-settings__members {
+	display: grid;
+	gap: 16px;
+	padding: 12px;
+	background: var(--paper);
+}
+.structured-settings__members > div {
+	display: grid;
+	gap: 12px;
+}
+.structured-settings > button,
+.structured-settings__members > button {
+	width: fit-content;
+}
+@media (max-width: 750px) {
+	.structured-settings__fields {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}

@@ -6,6 +6,7 @@ import { ContextCapability } from "./context-ledger.js";
 import { ExtensionsCapability, LibraryCapability } from "./extensions.js";
 import { FleetCapability } from "./fleet-run.js";
 import { HandoffCapability } from "./handoff.js";
+import { InterviewCapability } from "./interviews.js";
 import { UsageCapability } from "./usage.js";
 
 const closed = { additionalProperties: false };
@@ -109,6 +110,7 @@ export const AgentCapabilities = Type.Object(
 		aside: Type.Optional(AsideCapability),
 		/** The conversation's spend and each provider's quota, read for the Usage view. */
 		usage: Type.Optional(UsageCapability),
+		interviews: Type.Optional(InterviewCapability),
 		/** Plugin reload, so a library change reaches an open session. */
 		library: Type.Optional(LibraryCapability),
 		/** ACP promptCapabilities.image: the agent accepts image blocks with a request. */

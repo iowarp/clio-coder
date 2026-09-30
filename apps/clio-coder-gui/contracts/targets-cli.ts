@@ -1,6 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Id } from "./common.js";
-import { SettingsReport } from "./settings.js";
+import { SettingsOrigin, SettingsReport } from "./settings.js";
 
 const closed = { additionalProperties: false };
 const text = Type.String({ maxLength: 256 });
@@ -58,7 +58,17 @@ export const Routing = Type.Object(
 			{ maxItems: 2000 },
 		),
 		profiles: Type.Array(
-			Type.Object({ name: text, target: nullable, runtime: nullable, model: nullable, thinkingLevel: text }, closed),
+			Type.Object(
+				{
+					name: text,
+					target: nullable,
+					runtime: nullable,
+					model: nullable,
+					thinkingLevel: text,
+					source: Type.Optional(SettingsOrigin),
+				},
+				closed,
+			),
 			{ maxItems: 2000 },
 		),
 		bindings: Type.Array(

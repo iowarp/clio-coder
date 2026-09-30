@@ -12,6 +12,12 @@ export function sessionRoutes(
 	snapshotHold?: () => Promise<void>,
 ) {
 	const { supervisor, workspaces } = sessions;
+	register(app, hub, routes.sessionInterview, ({ params }) => supervisor.interview(params.id));
+	register(app, hub, routes.answerInterview, ({ params, body }, context) =>
+		commands.run(`interview:${params.id}:${params.roundId}`, idempotencyKey(context), body, async () =>
+			supervisor.answerInterview(params.id, params.roundId, body),
+		),
+	);
 	register(app, hub, routes.permission, ({ params, body }, context) =>
 		commands.run(`permission:${params.id}:${params.permissionId}`, idempotencyKey(context), body, async () =>
 			supervisor.decide(params.id, params.permissionId, body.decision),

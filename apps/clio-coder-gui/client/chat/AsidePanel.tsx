@@ -52,7 +52,7 @@ export const AsidePanel = memo(function AsidePanel({
 	const drafts = draft.data ? draftsView(draft.data) : null;
 	const chosen = count ?? counts?.initial ?? 3;
 	return (
-		<details className="command-panel session-board aside-panel">
+		<details open className="command-panel session-board aside-panel">
 			<summary>Ask beside the conversation</summary>
 			<p className="session-board__note">
 				A side question or a set of drafts reads this conversation and answers here. Nothing either produces is added to the

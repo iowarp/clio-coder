@@ -1,4 +1,5 @@
 import { Value } from "typebox/value";
+import { SettingsOrigin } from "../../contracts/settings.js";
 import {
 	CliTargets,
 	Routing,
@@ -190,6 +191,7 @@ export class TargetsService {
 					runtime: optionalText(row.runtime),
 					model: optionalText(row.model),
 					thinkingLevel: text(row.thinkingLevel),
+					...(Value.Check(SettingsOrigin, row.source) ? { source: row.source } : {}),
 				};
 			}),
 			bindings: bindings.slice(0, 2000).map((value) => {

@@ -47,6 +47,32 @@
 	color: var(--ink-subtle);
 	background: transparent;
 }
+.composer__delivery {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--space-1);
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+	border: 0;
+	margin: 0;
+	padding: 0;
+}
+.composer__delivery > span {
+	margin-inline-end: var(--space-2);
+}
+.composer__delivery button {
+	padding: var(--space-1) var(--space-2);
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	font-size: inherit;
+}
+.composer__delivery button[aria-pressed="true"] {
+	border-color: var(--accent);
+	color: var(--accent);
+	background: var(--accent-soft);
+}
 
 /* Mid-turn delivery. The two modes are not interchangeable, so the chosen one
    states where it lands rather than leaving the operator to infer it. */
@@ -575,6 +601,13 @@
 	align-items: center;
 	gap: var(--space-2);
 	min-width: 0;
+	width: 100%;
+	max-width: 28rem;
+}
+.composer__attachment-actions {
+	display: flex;
+	flex-direction: column;
+	margin-inline-start: auto;
 }
 .composer__attachments img {
 	width: 48px;
@@ -614,4 +647,42 @@
 	display: inline-flex;
 	align-items: center;
 	gap: var(--space-1);
+}
+.composer__paste-note {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	color: var(--ink-muted);
+	font-size: var(--text-exact);
+	margin: 8px 0;
+}
+.composer__paste-note .icon {
+	width: 16px;
+	height: 16px;
+	flex: none;
+	color: var(--accent);
+}
+.composer__paste-review {
+	padding: 12px;
+	border: 1px solid var(--status-warn-line);
+	border-radius: var(--radius-sm);
+	background: var(--status-warn-tint);
+	color: var(--ink);
+	font-size: var(--text-meta);
+}
+.composer__paste-review p {
+	margin: 8px 0;
+}
+.composer__paste-review pre {
+	max-height: 160px;
+	overflow: auto;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font-size: var(--text-exact);
+}
+.composer__paste-review > div {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 10px;
 }

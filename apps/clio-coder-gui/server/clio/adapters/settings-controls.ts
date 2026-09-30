@@ -22,6 +22,7 @@ import type {
 	SettingWrite,
 	SettingWritten,
 } from "../../../contracts/settings-controls.js";
+import { STRUCTURED_SETTINGS } from "../../../contracts/structured-settings.js";
 import { AppProblem } from "../../services/problem.js";
 
 /**
@@ -40,14 +41,6 @@ const HIDDEN = [
 ];
 const READ_ONLY: Array<[prefix: string, reason: string]> = [
 	[
-		"context.compaction.systemPrompt",
-		"This is a file path. It stays a terminal setting until the app has a file picker bounded to the workspace.",
-	],
-	[
-		"integrations.library.catalog",
-		"This is a file path. It stays a terminal setting until the app has a file picker bounded to the workspace.",
-	],
-	[
 		"integrations.library.confirmedRemote",
 		"Recorded only by the confirmation flow. Run clio-coder library remote confirm <url> in a terminal.",
 	],
@@ -61,6 +54,10 @@ const READ_ONLY: Array<[prefix: string, reason: string]> = [
 	],
 ];
 const NOTES: Record<string, string> = {
+	"context.compaction.systemPrompt":
+		"Clio Coder reads this file when compacting context. Enter the path as you would in terminal settings.",
+	"integrations.library.catalog":
+		"Clio Coder reads this catalog path when resolving library resources. Saving the path does not install a package.",
 	"safety.review.enabled":
 		"Conversations in this app run over ACP, and headless and ACP runs never fire the review. This setting changes terminal sessions only.",
 	"safety.review.target": "Used by terminal sessions only; ACP runs never fire the review.",
@@ -87,7 +84,7 @@ const STRUCTURED_REASON =
 
 const hidden = (path: string) => HIDDEN.includes(path);
 const readOnlyReason = (control: RootControl): string | undefined => {
-	if (control.kind === "json") return STRUCTURED_REASON;
+	if (control.kind === "json" && !Object.hasOwn(STRUCTURED_SETTINGS, control.path)) return STRUCTURED_REASON;
 	return READ_ONLY.find(([prefix]) => control.path === prefix || control.path.startsWith(`${prefix}.`))?.[1];
 };
 const VALUE_HELP = new Map(
@@ -102,15 +99,16 @@ function at(root: unknown, path: string): unknown {
 	}
 	return cursor;
 }
-/** The text form the engine parses. Structured collections cross as a size, never as content. */
+/** The text form the engine parses. Only collections with a guided editor cross as content. Others cross as a size. */
 function text(control: RootControl, value: unknown): string {
 	if (value === undefined || value === null) return "";
+	if (control.kind === "json" && Object.hasOwn(STRUCTURED_SETTINGS, control.path)) return JSON.stringify(value);
 	if (control.kind === "json") {
 		const size = Array.isArray(value) ? value.length : Object.keys(value as object).length;
 		return `${size} ${size === 1 ? "entry" : "entries"}`;
 	}
 	if (Array.isArray(value)) return value.map(String).join(", ");
-	return String(value).slice(0, 4096);
+	return String(value);
 }
 function runtimes() {
 	const registry = getRuntimeRegistry();
@@ -132,12 +130,18 @@ export function readSettingsControls(cwd: string): SettingsControls {
 				source === "project" || source === "project.local" || source === "cli"
 					? `Set by the ${source} layer, which outranks your user settings. Change it there.`
 					: undefined;
-			const reason = readOnlyReason(control) ?? overridden;
-			const suggestions = control.path.endsWith(".target")
-				? targets
-				: control.path === "fleet.default.node"
-					? ["local", ...layered.settings.fleet.nodes.map((node) => node.id)]
+			const fullValue = text(control, at(layered.settings, control.path));
+			const oversized =
+				fullValue.length > 65536
+					? "This value exceeds the GUI's 64 KiB editor limit. Edit it in your user settings file."
 					: undefined;
+			const reason = readOnlyReason(control) ?? overridden ?? oversized;
+			const suggestions =
+				control.path.endsWith(".target") || ["fleet.profiles", "fleet.rosters"].includes(control.path)
+					? targets
+					: control.path === "fleet.default.node"
+						? ["local", ...layered.settings.fleet.nodes.map((node) => node.id)]
+						: undefined;
 			return {
 				path: control.path,
 				section: settingsSectionForPath(control.path),
@@ -151,7 +155,7 @@ export function readSettingsControls(cwd: string): SettingsControls {
 				...(suggestions ? { suggestions } : {}),
 				optional: control.optional,
 				timing: settingsChangeKind(control.path),
-				value: text(control, at(layered.settings, control.path)),
+				value: oversized ? `${fullValue.slice(0, 4096)}\n… (${fullValue.length} characters; preview shortened)` : fullValue,
 				source,
 				access: reason ? "read-only" : "writable",
 				...(reason ? { reason } : {}),
@@ -173,6 +177,11 @@ export function writeSettingControl(cwd: string, write: SettingWrite): SettingWr
 	if (!control) throw new AppProblem("not_found", "This setting is not part of the app's settings surface.");
 	if (control.access === "read-only")
 		throw new AppProblem("unsupported", control.reason ?? "This setting is read-only here.");
+	if (write.expectedValue !== undefined && write.expectedValue !== control.value)
+		throw new AppProblem(
+			"conflict",
+			"This setting changed while you were editing. Refresh it and review your draft before saving again.",
+		);
 	if (control.confirm && write.confirmed !== true)
 		throw new AppProblem("validation", `This change needs confirmation. ${control.confirm}`);
 	try {

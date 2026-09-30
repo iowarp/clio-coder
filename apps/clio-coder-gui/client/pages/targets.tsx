@@ -209,7 +209,10 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 										<dd>
 											{row.target ?? "No connection"} · {row.model ?? "No model"}
 										</dd>
-										<dd>{row.thinkingLevel}</dd>
+										<dd>
+											{row.thinkingLevel}
+											{row.source ? <small> · {row.source} settings</small> : null}
+										</dd>
 									</div>
 								))}
 							</dl>

@@ -1,9 +1,9 @@
 // The in-app reference: what each view is, every chord the app binds, the vocabulary the product
-// insists on, and the two surfaces honestly marked as absent from this build. The keyboard section
+// insists on, and capability-dependent surfaces. The keyboard section
 // is generated from the binding table, so the reference cannot drift from the handlers.
 
 import type { navigation } from "../design/navigation.js";
-import { formatKeybinding, KEYBINDING_ORDER, RESERVED_KEYBINDING_NAMESPACE } from "./keybindings.js";
+import { formatKeybinding, INTERVIEW_KEYBINDING_NAMESPACE, KEYBINDING_ORDER } from "./keybindings.js";
 
 type NavPath = (typeof navigation)[number]["path"];
 
@@ -188,12 +188,21 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 		],
 	},
 	{
-		id: RESERVED_KEYBINDING_NAMESPACE,
+		id: INTERVIEW_KEYBINDING_NAMESPACE,
 		title: "Interviews",
-		lede: "Clio Coder can open a question of its own during a turn. This build does not render one.",
-		entries: [],
-		reserved:
-			"This build of the app answers approvals only. When interviews arrive they will have their own keys, never Alt+A or Alt+R.",
+		lede:
+			"When the runtime supports interviews over ACP, Clio Coder opens a structured round of questions during a turn. Interview answers never use the Alt+A or Alt+R approval shortcuts.",
+		entries: [
+			{
+				term: "Review, then submit",
+				meaning:
+					"Choose options or write an answer for each question, review the whole round, then submit. Nothing is selected for you. Ctrl or Cmd + Enter submits only from the review screen.",
+			},
+			{
+				term: "Cancel interview",
+				meaning: "A cancellation supplies no answers. The runtime must end the interview without treating it as approval.",
+			},
+		],
 	},
 ];
 

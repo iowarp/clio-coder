@@ -32,7 +32,7 @@ export const BranchPanel = memo(function BranchPanel({
 	settledTurns: number;
 	running: boolean;
 }) {
-	const [expanded, setExpanded] = useState(false);
+	const [expanded, setExpanded] = useState(true);
 	const panel = useRef<HTMLDetailsElement>(null);
 	const headingId = useId();
 	const navigate = useNavigate();
@@ -87,6 +87,7 @@ export const BranchPanel = memo(function BranchPanel({
 	const busy = change.isPending || running;
 	return (
 		<details
+			open={expanded}
 			ref={panel}
 			className="command-panel session-board branch-panel"
 			onToggle={(event) => setExpanded(event.currentTarget.open)}
