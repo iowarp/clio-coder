@@ -24,7 +24,7 @@ Only the operator sets the level, through the user `settings.yaml`, `/settings`,
 | Write or edit inside the workspace | runs | runs |
 | Write outside the workspace, or another `system_modify` action | asks | runs |
 | Recognized command: a built-in test runner, read-only inspection (`cat`, `head`, `grep`, `rg`, `find`, `ls`, `wc`, `sed -n`, git inspection) on workspace paths, recognized steps joined by `&&`, `\|\|`, `;` or `\|` with output redirected only to `/dev/null` or `2>&1`, or a command declared in a trusted `.clio-coder/safety.yaml` | runs | runs |
-| Any other command: project build, lint, typecheck and CI scripts, `$(...)` and `<(...)`, an unquoted `~`, brace or glob operand, recursive `grep`, a symlink-following flag such as `find -L`, a redirect into a file, a step outside the recognized set | asks | runs |
+| Any other command: project build, lint, typecheck and CI scripts, `$(...)` and `<(...)`, an unquoted `~`, brace or glob operand, recursive `grep`, `rg` on a directory or with no named file, a symlink-following flag such as `find -L`, a redirect into a file, a step outside the recognized set | asks | runs |
 | Outward action: `ask_user` with `exposure: outward`, a bash `git push` other than `--dry-run`, or `web_fetch` other than a bodiless GET or HEAD | asks | runs |
 | Plan-scale dispatch: several tasks, a compete, a remote node, or applying a compete winner | asks once for the whole plan | runs, and the plan hash is sealed into each receipt |
 | Damage-control confirmation rule | asks | asks |

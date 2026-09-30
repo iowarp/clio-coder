@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { asDirectoryPathBoundary, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
@@ -1388,6 +1388,106 @@ function abbreviatesLongOption(arg: string, option: string): boolean {
 	return name.length > 0 && option.slice(2).startsWith(name);
 }
 
+const RG_FLAG_LETTERS = /^-[nisSwxvlcHIFNoqa]+$/u;
+const RG_VALUE_SHORT = new Set(["-A", "-B", "-C", "-m", "-g", "-t", "-T"]);
+const RG_FLAGS: ReadonlySet<string> = new Set([
+	"--line-number",
+	"--ignore-case",
+	"--smart-case",
+	"--case-sensitive",
+	"--fixed-strings",
+	"--word-regexp",
+	"--line-regexp",
+	"--invert-match",
+	"--count",
+	"--files-with-matches",
+	"--files-without-match",
+	"--only-matching",
+	"--no-heading",
+	"--heading",
+	"--with-filename",
+	"--no-filename",
+	"--no-line-number",
+	"--no-messages",
+	"--quiet",
+	"--text",
+]);
+const RG_VALUE_LONG = new Set([
+	"--regexp",
+	"--glob",
+	"--type",
+	"--max-count",
+	"--after-context",
+	"--before-context",
+	"--context",
+]);
+
+/**
+ * rg recurses by default, and a directory walk reaches non-hidden zero-access
+ * files (`*.pem`, `kubeconfig`). It is recognized only when it names at least
+ * one operand after the pattern and every operand is an existing regular file.
+ * The pattern position shifts with `-e`/`--regexp`, so only flags this parser
+ * knows are accepted; any other option, `-f`, or a stdin `-` operand is
+ * ambiguous and refused.
+ */
+function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string): boolean {
+	const positionals: string[] = [];
+	let explicitPattern = false;
+	let optionsEnded = false;
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		if (optionsEnded || !arg.startsWith("-") || arg === "-") {
+			if (arg === "-") return false;
+			positionals.push(arg);
+			continue;
+		}
+		if (arg === "--") {
+			optionsEnded = true;
+			continue;
+		}
+		if (arg.startsWith("--")) {
+			const eq = arg.indexOf("=");
+			const name = eq === -1 ? arg : arg.slice(0, eq);
+			if (RG_FLAGS.has(arg)) continue;
+			if (!RG_VALUE_LONG.has(name)) return false;
+			if (name === "--regexp") explicitPattern = true;
+			if (eq === -1) {
+				if (index + 1 >= args.length) return false;
+				index += 1;
+			}
+			continue;
+		}
+		if (RG_FLAG_LETTERS.test(arg)) continue;
+		const flag = arg.slice(0, 2);
+		if (flag === "-e") {
+			explicitPattern = true;
+			if (arg.length === 2) {
+				if (index + 1 >= args.length) return false;
+				index += 1;
+			}
+			continue;
+		}
+		if (RG_VALUE_SHORT.has(flag)) {
+			if (arg.length === 2) {
+				if (index + 1 >= args.length) return false;
+				index += 1;
+			}
+			continue;
+		}
+		return false;
+	}
+	const operands = explicitPattern ? positionals : positionals.slice(1);
+	if (operands.length === 0) return false;
+	return operands.every((operand) => {
+		try {
+			return statSync(path.resolve(cwd, operand)).isFile();
+		} catch {
+			// A path that cannot be stat'ed is not an existing regular file.
+			return false;
+		}
+	});
+}
+
 const GREP_FAMILY: ReadonlySet<string> = new Set(["grep", "egrep", "fgrep"]);
 
 /**
@@ -1451,6 +1551,7 @@ function readOnlyInspectionRule(
 	// real path, so a word carrying one is never recognized.
 	if (words.some((word) => hasUnquotedExpansion(source.slice(word.start, word.end)))) return null;
 	if (GREP_FAMILY.has(command) && recursesDirectories(args)) return null;
+	if (command === "rg" && !rgSearchesOnlyFiles(args, cwd)) return null;
 	if (command === "sed") {
 		if (!args.includes("-n")) return null;
 		let sawScript = false;
