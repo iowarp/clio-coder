@@ -793,6 +793,10 @@ function stripQuotes(token: string): string {
  */
 function bashPathTokenCandidates(command: string): string[] {
 	const candidates: string[] = [];
+	// `sh -c 'cat .env'` is one whitespace-bearing token below, skipped as prose,
+	// yet recognition judges exactly that inner script. Scan it as its own command.
+	const inner = inlineShellScript(command);
+	if (inner !== null && inner !== command) candidates.push(...bashPathTokenCandidates(inner));
 	for (const scanned of scanShellLikeDeep(command)) {
 		if (scanned.operator) continue;
 		const token = scanned.value;
