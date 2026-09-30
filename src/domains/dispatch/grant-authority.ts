@@ -1,6 +1,6 @@
 import { ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
-import { turnDelegatesTool } from "../../core/turn-constraints.js";
+import { turnDelegatesTool, workerTurnConstraints } from "../../core/turn-constraints.js";
 import { evaluateAdmission } from "../safety/admission.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
@@ -86,7 +86,9 @@ export function evaluateMainGrant(input: MainGrantInput): MainGrantVerdict {
 		cwd: record.cwd,
 		safety: input.safety,
 		autonomy: "yolo",
-		...(input.turnConstraints !== undefined ? { constraints: { turnConstraints: input.turnConstraints } } : {}),
+		...(input.turnConstraints !== undefined
+			? { constraints: { turnConstraints: workerTurnConstraints(input.turnConstraints) } }
+			: {}),
 	});
 	if (admission.kind === "deny") return { kind: "deny", reason: admission.reason };
 	if (admission.kind === "ask") return refuse(`the main agent's own admission asks: ${admission.reason}`);
