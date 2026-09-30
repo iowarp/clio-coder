@@ -7223,7 +7223,8 @@ export function createDispatchBundle(
 						? await runHostVerification(hostVerificationInput)
 						: await settlement.arrive(hostVerificationInput);
 				const hostRejection = hostVerificationRejection(hostVerification);
-				if (hostRejection !== null && finalOutcome === "succeeded") {
+				const workerSucceeded = finalOutcome === "succeeded";
+				if (hostRejection !== null && workerSucceeded) {
 					finalOutcome = "failed";
 					outcomeCode = hostRejection.outcomeCode;
 					finalDetail = hostRejection.detail;
@@ -7241,11 +7242,16 @@ export function createDispatchBundle(
 					finalOutcome === "succeeded" &&
 					sealedResultContractFact?.quality === "fail" &&
 					hostVerification?.status !== "verified";
+				// A merge-mode run the worker finished but host verification rejected
+				// keeps its branch like a withheld merge, so its tree is committed there
+				// for the operator's one merge command instead of left as loose edits.
+				const hostRejectedMerge =
+					req.taskWorktree !== undefined && (req.apply ?? "merge") === "merge" && hostRejection !== null && workerSucceeded;
 				let worktreeReceipt: RunReceiptDraft["worktree"];
-				if (req.taskWorktree !== undefined && finalOutcome === "succeeded") {
+				if (req.taskWorktree !== undefined && (finalOutcome === "succeeded" || hostRejectedMerge)) {
 					worktreeReceipt = applyTaskWorktree({
 						worktree: req.taskWorktree,
-						apply: mergeWithheld ? "preserve" : (req.apply ?? "merge"),
+						apply: mergeWithheld || hostRejectedMerge ? "preserve" : (req.apply ?? "merge"),
 						protectedPaths: getProtectedArtifactState().artifacts.map((artifact) => artifact.path),
 						commitMessage:
 							appliedResultContract !== null && resultValidation?.conformance === "pass"
@@ -7257,8 +7263,17 @@ export function createDispatchBundle(
 					});
 					if (worktreeReceipt.reason !== undefined) {
 						finalOutcome = "failed";
-						finalDetail = worktreeReceipt.detail ?? worktreeReceipt.reason;
+						finalDetail = hostRejectedMerge
+							? [finalDetail, worktreeReceipt.detail ?? worktreeReceipt.reason].filter(Boolean).join("; ")
+							: (worktreeReceipt.detail ?? worktreeReceipt.reason);
 						failureMessage = finalDetail;
+					} else if (hostRejectedMerge) {
+						// Only a commit on the branch makes the command true; a worker that
+						// changed nothing leaves the branch at its base.
+						if (worktreeReceipt.commit !== undefined && (worktreeReceipt.changedPaths?.length ?? 0) > 0) {
+							finalDetail = `${finalDetail}; its work is committed on the preserved branch ${req.taskWorktree.branch}, and \`git merge ${req.taskWorktree.branch}\` applies it if you accept the failed check`;
+							failureMessage = finalDetail;
+						}
 					} else if (mergeWithheld) {
 						finalOutcome = "failed";
 						outcomeCode = "merge_withheld";
