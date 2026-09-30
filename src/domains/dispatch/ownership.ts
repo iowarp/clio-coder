@@ -21,6 +21,8 @@
 
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { canonicalizePath, createPathWalkMemo } from "../../core/path-canonical.js";
+import { gitCheckoutRoot } from "../../tools/task-worktree.js";
+import { allowedWorktreeParents } from "../../tools/worktree-root.js";
 
 export interface DispatchOwner {
 	/** Clio session id of this process; null when it runs without one. */
@@ -86,6 +88,21 @@ export function dispatchOwnership(owner: DispatchOwner): DispatchOwnership {
 		}
 		return cached;
 	};
+	const within = (root: string, candidate: string): boolean => {
+		const rel = relative(root, candidate);
+		return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+	};
+	// A RAM task worktree runs outside the checkout, so its run carries a cwd
+	// under /dev/shm and a status reader in the project would never see it. The
+	// tmpfs parents are keyed on the checkout root, which is what ties them back.
+	let worktreeParents: string[] | undefined;
+	const taskWorktreeParents = (): string[] => {
+		if (worktreeParents === undefined) {
+			const checkout = gitCheckoutRoot(owner.cwd) ?? canonicalOf(owner.cwd);
+			worktreeParents = checkout === null ? [] : allowedWorktreeParents("auto", checkout);
+		}
+		return worktreeParents;
+	};
 	const inProject = (cwd: string | undefined): boolean => {
 		// An empty cwd is a row whose origin was never recorded. Resolving it
 		// would yield this process's cwd and adopt it into every project.
@@ -93,8 +110,11 @@ export function dispatchOwnership(owner: DispatchOwner): DispatchOwnership {
 		const root = canonicalOf(owner.cwd);
 		const candidate = canonicalOf(cwd);
 		if (root === null || candidate === null) return false;
-		const rel = relative(root, candidate);
-		return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+		if (within(root, candidate)) return true;
+		return taskWorktreeParents().some((parent) => {
+			const canonicalParent = canonicalOf(parent);
+			return canonicalParent !== null && within(canonicalParent, candidate);
+		});
 	};
 	const ownsRun = (run: OwnedRunFields): boolean =>
 		run.sessionId !== null && run.sessionId !== undefined ? run.sessionId === owner.sessionId : inProject(run.cwd);
