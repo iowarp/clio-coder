@@ -28,7 +28,8 @@ function within(root: string, path: string): boolean {
  * Validate the original writer output BEFORE assembly repairs metadata. Existing
  * frontmatter parsing supplies the references; no claims sidecar or prose schema
  * is required. The supported body citation form is a backticked file path with
- * optional :line[-end][:symbol] or #Lline[-Lend]. Markdown wiki links, commands,
+ * optional :line[-end][:symbol], #Lline[-Lend] or a pytest node id
+ * `path::Name(::Name)*`, which validates the file only. Markdown wiki links, commands,
  * symbols and decision refs are not interpreted as source evidence.
  */
 export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPageEvidenceResult {
@@ -220,9 +221,12 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 	};
 	for (const reference of references) {
 		const label = JSON.stringify(reference.slice(0, 160));
-		const match = /^([^:#]+)(?:(?::(\d+)(?:-(\d+))?)|(?:#L(\d+)(?:-L?(\d+))?))?(?::[A-Za-z_$][\w$.-]*)?$/.exec(reference);
+		const match =
+			/^([^:#]+)(?:(?::(\d+)(?:-(\d+))?)|(?:#L(\d+)(?:-L?(\d+))?))?(?::[A-Za-z_$][\w$.-]*|(?:::[A-Za-z_][\w$.-]*)+)?$/.exec(
+				reference,
+			);
 		if (!match) {
-			fail(`Repair citation ${label}: use path, path:line[-end], or path#Lline[-Lend].`);
+			fail(`Repair citation ${label}: use path, path:line[-end], path#Lline[-Lend], or path::Name.`);
 			continue;
 		}
 		const cited = match[1] ?? "";
