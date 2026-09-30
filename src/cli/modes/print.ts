@@ -145,6 +145,8 @@ interface HeadlessMainAgentReceiptStats {
 	blockedAttemptsTruncated: number;
 	/** Successful calls the registry classified as `MUTATING_ACTION_CLASS`. */
 	mutatingSucceeded: number;
+	/** Dispatched runs whose task worktree merged into this workspace. */
+	mergedTaskWorktrees: number;
 	/** Blocked action classes not followed by successful substantive work of that class. */
 	unresolvedBlocks: Set<string>;
 }
@@ -394,6 +396,7 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 		}
 	}
 	if (outcome === "ok" && actionClass === MUTATING_ACTION_CLASS && !terminating) stats.mutatingSucceeded += 1;
+	if (outcome === "ok" && tool === ToolNames.Dispatch) stats.mergedTaskWorktrees += mergedTaskWorktreeCount(event.result);
 	if (tool === ToolNames.Context) {
 		const rawTurnId = (event as { turnId?: unknown }).turnId;
 		const turnId = typeof rawTurnId === "string" ? rawTurnId : undefined;
@@ -436,8 +439,27 @@ function addRunUsage(left: RunUsageSummary, right: RunUsageSummary): RunUsageSum
  */
 function headlessNoop(stats: HeadlessMainAgentReceiptStats): boolean {
 	const totals = toolTotals(stats.toolStats);
-	if (stats.unresolvedBlocks.size > 0 && stats.mutatingSucceeded === 0) return true;
+	if (stats.unresolvedBlocks.size > 0 && !changedWorkspace(stats)) return true;
 	return totals.calls > 0 && totals.succeeded === 0;
+}
+
+/**
+ * A dispatch whose task worktree merged changed this workspace as surely as
+ * an edit did. Counting only the main agent's own write calls failed a
+ * delegated change that landed on the branch as a no-op, whenever an earlier
+ * exploratory command had been denied.
+ */
+function mergedTaskWorktreeCount(result: unknown): number {
+	const runs = (result as { details?: { runs?: unknown } } | undefined)?.details?.runs;
+	if (!Array.isArray(runs)) return 0;
+	return runs.filter((run) => {
+		const placement = (run as { placement?: { mode?: unknown; apply?: unknown; applied?: unknown } } | null)?.placement;
+		return placement?.mode === "worktree" && placement.apply === "merge" && placement.applied === true;
+	}).length;
+}
+
+function changedWorkspace(stats: HeadlessMainAgentReceiptStats): boolean {
+	return stats.mutatingSucceeded > 0 || stats.mergedTaskWorktrees > 0;
 }
 
 function toolTotals(stats: Map<string, ToolCallStat>): { calls: number; succeeded: number; blocked: number } {
@@ -453,7 +475,7 @@ function toolTotals(stats: Map<string, ToolCallStat>): { calls: number; succeede
 function noopFailureMessage(stats: HeadlessMainAgentReceiptStats, failOnNoop: boolean): string {
 	const totals = toolTotals(stats.toolStats);
 	const cause =
-		stats.unresolvedBlocks.size > 0 && stats.mutatingSucceeded === 0
+		stats.unresolvedBlocks.size > 0 && !changedWorkspace(stats)
 			? `${totals.blocked} tool call${totals.blocked === 1 ? " was" : "s were"} blocked without recovery and no write succeeded`
 			: `${totals.calls} tool call${totals.calls === 1 ? "" : "s"} ran and none succeeded`;
 	return `clio-coder run: no-op${failOnNoop ? " under --fail-on-noop" : ""}: ${cause}`;
@@ -676,6 +698,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		blockedAttempts: [],
 		blockedAttemptsTruncated: 0,
 		mutatingSucceeded: 0,
+		mergedTaskWorktrees: 0,
 		unresolvedBlocks: new Set<string>(),
 	};
 	// The receipt is this run's accounting, so it has to exist on the costly
@@ -894,7 +917,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		// block with no applied change. Judge settled tool outcomes, not prose
 		// or the presence of a validation contract. Recovered failures may succeed.
 		const limited = (receiptStats.toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0;
-		const blockedWithoutChange = receiptStats.unresolvedBlocks.size > 0 && receiptStats.mutatingSucceeded === 0;
+		const blockedWithoutChange = receiptStats.unresolvedBlocks.size > 0 && !changedWorkspace(receiptStats);
 		if (limited || blockedWithoutChange || (options.failOnNoop === true && headlessNoop(receiptStats))) {
 			const failureMessage = limited
 				? "clio-coder run: the agent recorded an explicit limitation; the task is incomplete"

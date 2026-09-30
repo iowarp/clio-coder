@@ -111,8 +111,9 @@ their stated defaults; supply decisions in the task prompt instead.
 Every main-agent receipt records blocked calls under safety.blockedAttempts and
 a noop flag. A run is a no-op when a block remains unresolved and no write
 succeeded, or when it ran tools and none succeeded; a run that called no tool
-is not. Only the main agent's own write-class calls count as writes: an
-artifact report, bash, and dispatch work do not. A later successful read or
+is not. The main agent's own write-class calls count as writes, and so does a
+dispatch whose task worktree merged; an artifact report, bash, and other
+dispatch work do not. A later successful read or
 command can recover a block of the same action class. Native observation does
 not certify that a blocked execution or write requirement was fulfilled.
 Bookkeeping and reports cannot recover blocks. An unresolved blocked run with no successful write exits 1 with outcome
