@@ -19,6 +19,7 @@ import {
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { cancelledAskUserResult } from "../../tools/ask-user.js";
 import { dockGrowthRows } from "../dock.js";
+import { scrollTranscriptPage } from "../layout.js";
 import {
 	buildHint,
 	DEFAULT_SELECT_THEME,
@@ -498,6 +499,12 @@ class AskUserOverlayView implements Component {
 		// Scrolling the question must not cost the operator their place in the
 		// options, so the region has keys of its own that neither control claims.
 		if (this.handleScrollInput(data, state.mode)) return;
+		// A question that fits its box has no use for the page keys, and the transcript behind
+		// it may hold the context the operator is answering from. A text field keeps them.
+		if (state.mode !== "text" && !this.questionOverflows) {
+			const direction = matchesKey(data, "pageUp") ? -1 : matchesKey(data, "pageDown") ? 1 : 0;
+			if (direction !== 0 && this.deps.tui && scrollTranscriptPage(this.deps.tui, direction)) return;
+		}
 
 		// Question navigation must work from both choices and the answer editor.
 		// Bare arrows browse an empty answer; once typing starts they edit text.

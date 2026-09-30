@@ -204,6 +204,17 @@ export function returnToLiveEdge(tui: TUI): void {
 	if (tui instanceof TuiAltScreen) tui.scrollToBottom();
 }
 
+/**
+ * Page the fullscreen transcript by a screenful, for an owner of the keyboard (a card, a
+ * question box) that has no scrolling of its own to do. False on the regular screen, which
+ * has no viewport, so the caller keeps its ordinary handling of the key.
+ */
+export function scrollTranscriptPage(tui: TUI, direction: -1 | 1): boolean {
+	if (!(tui instanceof TuiAltScreen)) return false;
+	tui.scrollBy(direction * Math.max(1, tui.terminal.rows - 3));
+	return true;
+}
+
 /** Keep the nearest surviving text at the viewport when a preset changes row counts. */
 export function preserveTranscriptScroll(view: ScrollView | undefined, width: number, mutation: () => void): void {
 	if (!view || view.isFollowingEnd) {

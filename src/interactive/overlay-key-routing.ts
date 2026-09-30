@@ -57,6 +57,8 @@ export interface PermissionOverlayKeyDeps {
 	togglePermissionTerms?: () => void;
 	/** Scroll a card taller than its rows (BT-005); false leaves the key unconsumed. */
 	scrollPermissionCard?: (delta: number) => boolean;
+	/** Page the fullscreen transcript behind a card that has nothing of its own to scroll; false when there is no viewport. */
+	scrollTranscript?: (direction: -1 | 1) => boolean;
 }
 
 export interface DispatchBoardOverlayKeyDeps {
@@ -163,6 +165,12 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 	if (deps.scrollPermissionCard && !isKeyRelease(data)) {
 		const delta = mutationScrollDelta(data);
 		if (delta !== 0 && deps.scrollPermissionCard(delta)) return true;
+	}
+	// A card that fits its rows leaves the page keys free, and the parked call sits at the tail of
+	// a transcript the operator may need to read before deciding.
+	if (deps.scrollTranscript && !isKeyRelease(data)) {
+		const direction = matchesKey(data, "pageUp") ? -1 : matchesKey(data, "pageDown") ? 1 : 0;
+		if (direction !== 0 && deps.scrollTranscript(direction)) return true;
 	}
 	if (isEscapeKey(data)) {
 		deps.cancelPermission();

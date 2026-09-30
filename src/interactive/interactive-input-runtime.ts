@@ -13,6 +13,7 @@ import type {
 } from "./application-controller.js";
 import { createApplicationController } from "./application-controller.js";
 import { focusedComponent, keyboardOwner } from "./keyboard-owner.js";
+import { scrollTranscriptPage } from "./layout.js";
 import type { LeaderTarget } from "./leader-key.js";
 import { createLeaderKeyController } from "./leader-key.js";
 import { createLeaderMenu } from "./leader-menu.js";
@@ -453,6 +454,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					scrollMutationInspection: (delta) => deps.overlay.scrollMutationInspection(delta),
 					togglePermissionTerms: () => deps.overlay.togglePermissionTerms(),
 					scrollPermissionCard: (delta) => deps.overlay.scrollPermissionCard(delta),
+					scrollTranscript: (direction) => (deps.tui ? scrollTranscriptPage(deps.tui, direction) : false),
 					canToggleOwner,
 					editDraft: (operation) => {
 						deps.editor.applyEdit?.(operation);
