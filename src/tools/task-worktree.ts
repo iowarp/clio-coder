@@ -17,6 +17,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { currentProcessLease, ownerIsAlive, type ProcessLease, validProcessLease } from "./process-lease.js";
 import { diskWorktreeParent } from "./worktree-root.js";
 
@@ -259,6 +260,28 @@ function claimPathFor(root: string, runId: string): string {
 	return join(diskWorktreeParent(root), `${runId}${OWNER_FILE_SUFFIX}`);
 }
 
+const CLAIMS_EXCLUDE_PATTERN = "/.clio-coder/worktrees/";
+
+/**
+ * Keep the claim directory out of the operator's `git status`. The claim JSON
+ * and any on-disk worktree live under the project root, and an untracked
+ * `.clio-coder/` in the operator's repo is noise Clio must not create. The
+ * checkout's own `info/exclude` is used so no tracked file changes.
+ */
+function excludeClaimsFromStatus(root: string): void {
+	try {
+		const excludePath = git(root, ["rev-parse", "--path-format=absolute", "--git-path", "info/exclude"]);
+		const current = existsSync(excludePath) ? readFileSync(excludePath, "utf8") : "";
+		if (current.split(/\r?\n/u).includes(CLAIMS_EXCLUDE_PATTERN)) return;
+		safeResourceWrite(
+			excludePath,
+			`${current}${current.length === 0 || current.endsWith("\n") ? "" : "\n"}${CLAIMS_EXCLUDE_PATTERN}\n`,
+		);
+	} catch {
+		// Best effort: an unwritable info/exclude leaves the claim visible to git status, and the run is unaffected.
+	}
+}
+
 export function createTaskWorktree(
 	root: string,
 	runId: string,
@@ -276,6 +299,7 @@ export function createTaskWorktree(
 	const path = join(parent, runId);
 	const branch = `clio-coder/task/${runId}`;
 	mkdirSync(claimParent, { recursive: true });
+	excludeClaimsFromStatus(canonical);
 	// Off the project root the directory may sit on a filesystem other users
 	// share (/dev/shm), so it is ours alone.
 	mkdirSync(parent, { recursive: true, mode: 0o700 });
