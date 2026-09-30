@@ -198,6 +198,51 @@ function stripProjectAutonomy(
 }
 
 /**
+ * `trustedUnmediated` hands a runtime its own authority over writes, so only
+ * the operator's user settings may grant it. A trusted project layer that
+ * defines targets or external agents could otherwise trust itself.
+ */
+function stripProjectRuntimeTrust(
+	blob: Record<string, unknown>,
+	origin: SettingsOrigin,
+	issues: SettingsLayerIssue[],
+): Record<string, unknown> {
+	const strip = (entries: unknown, path: string): unknown => {
+		if (!Array.isArray(entries)) return entries;
+		return entries.map((entry, index) => {
+			if (!isRecord(entry) || !Object.hasOwn(entry, "trustedUnmediated")) return entry;
+			issues.push({
+				origin,
+				path: `${path}[${index}].trustedUnmediated`,
+				message: "trustedUnmediated is set only in user settings; project value ignored",
+			});
+			const { trustedUnmediated: _ignored, ...rest } = entry;
+			return rest;
+		});
+	};
+	let cleaned = blob;
+	if (Array.isArray(blob.targets)) cleaned = { ...cleaned, targets: strip(blob.targets, "targets") };
+	const integrations = blob.integrations;
+	if (
+		isRecord(integrations) &&
+		isRecord(integrations.externalAgents) &&
+		Array.isArray(integrations.externalAgents.entries)
+	) {
+		cleaned = {
+			...cleaned,
+			integrations: {
+				...integrations,
+				externalAgents: {
+					...integrations.externalAgents,
+					entries: strip(integrations.externalAgents.entries, "integrations.externalAgents.entries"),
+				},
+			},
+		};
+	}
+	return cleaned;
+}
+
+/**
  * Deep-merge raw layer blobs in precedence order, recording the origin that last
  * set each leaf. Objects recurse; arrays and scalars replace.
  */
@@ -263,7 +308,10 @@ function prepareProjectLayers(
 		if (file?.error !== undefined) issues.push({ origin, path, message: file.error, kind: "unreadable" });
 		if (file?.text === null || file === undefined) return { origin, path, blob: undefined };
 		const raw = readRawLayer(origin, path, issues, file.text);
-		const blob = raw.blob === undefined ? undefined : stripProjectAutonomy(raw.blob, origin, issues, operatorLevel);
+		const blob =
+			raw.blob === undefined
+				? undefined
+				: stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues);
 		if (snapshot.verdict !== "trusted") {
 			issues.push({ origin, path, message: projectSurfaceTrustNotice(snapshot, file.path) });
 			return { origin, path, blob: undefined };
