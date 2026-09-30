@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { readSettings } from "../core/config.js";
+import { shellQuote } from "../core/shell-quote.js";
 import { rawDurationMs } from "../core/timers.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import { gitCheckoutRoot, listPreservedTaskWorktrees, type PreservedTaskWorktree } from "../tools/task-worktree.js";
@@ -19,11 +21,22 @@ function ageLabel(createdAt: string | null, now: number): string {
 	return hours < 48 ? `${hours}h old` : `${Math.floor(hours / 24)}d old`;
 }
 
-function describe(entry: PreservedTaskWorktree, now: number): string {
+/** Safe paths print bare, as before; anything a shell would split or expand is quoted. */
+function shellWord(value: string): string {
+	return /^[\w@%+=:,./-]+$/u.test(value) ? value : shellQuote(value);
+}
+
+function describe(entry: PreservedTaskWorktree, now: number, root: string, inRam: boolean): string {
+	// The leading `cd` makes the drop line work from any directory; without it
+	// `git worktree remove` failed with "not a git repository" outside the checkout.
+	// A tmpfs working tree is gone after a reboot; `worktree remove` then fails
+	// on the missing path and the `&&` chain would leave the branch and claim.
+	const release = existsSync(entry.path) ? `git worktree remove --force ${shellWord(entry.path)}` : "git worktree prune";
 	return (
-		`${entry.branch} (${entry.state}, ${ageLabel(entry.createdAt, now)}, ${entry.reason}): ` +
-		`inspect with git log ${entry.base}..${entry.branch}; drop with git worktree remove --force ${entry.path} && ` +
-		`git branch -D ${entry.branch} && rm ${entry.claimPath}`
+		`${entry.branch} (${entry.state}, ${ageLabel(entry.createdAt, now)}, ${entry.reason})${inRam ? " [held in RAM]" : ""}: ` +
+		`inspect with git log ${entry.base}..${entry.branch}; drop with cd ${shellWord(root)} && ` +
+		`${release} && ` +
+		`git branch -D ${entry.branch} && rm ${shellWord(entry.claimPath)}`
 	);
 }
 
@@ -77,12 +90,17 @@ export function taskWorktreeFindings(workspaceRoot: string, options: TaskWorktre
 	}
 	return [
 		rootFinding,
-		...preserved.map((entry) => ({
-			ok: true,
-			// A run keeps its worktree on purpose; a crash leaving work behind wants a look.
-			level: entry.state === "settled" ? ("info" as const) : ("warn" as const),
-			name: `task worktree ${entry.runId}`,
-			detail: describe(entry, now),
-		})),
+		...preserved.map((entry) => {
+			// Nothing removes a preserved worktree, so one on tmpfs keeps its
+			// files in memory until the operator drops it or the host reboots.
+			const inRam = existsSync(entry.path) && facts.filesystemType(entry.path) === "tmpfs";
+			return {
+				ok: true,
+				// A run keeps its worktree on purpose; a crash leaving work behind wants a look.
+				level: entry.state === "settled" ? ("info" as const) : ("warn" as const),
+				name: `task worktree ${entry.runId}`,
+				detail: describe(entry, now, root, inRam),
+			};
+		}),
 	];
 }
