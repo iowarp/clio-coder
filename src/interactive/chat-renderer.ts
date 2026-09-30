@@ -537,24 +537,6 @@ function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number): Agent
 	return message as unknown as AgentMessage;
 }
 
-/**
- * The transcript form of a replayed assistant row. A reply held on its closing
- * question persisted what the transcript showed as `displayText` beside the
- * full reply the model keeps; rows without it replay as written.
- */
-function withReplayedDisplayText(message: AgentMessage, entry: MessageEntry): AgentMessage {
-	const displayText = payloadObject(entry.payload)?.displayText;
-	if (typeof displayText !== "string") return message;
-	const content = (message as { content?: unknown }).content;
-	const kept = Array.isArray(content)
-		? content.filter((block) => !(block && typeof block === "object" && (block as { type?: unknown }).type === "text"))
-		: [];
-	return {
-		...message,
-		content: displayText.length > 0 ? [...kept, { type: "text", text: displayText }] : kept,
-	} as AgentMessage;
-}
-
 function toolCallIdsFromMessage(message: AgentMessage): string[] {
 	const content = (message as { content?: unknown }).content;
 	if (!Array.isArray(content)) return [];
@@ -1495,10 +1477,7 @@ function replayEntries(
 					const failure = messageFailure(entry);
 					const richMessage = richMessageFromEntry(entry, Number.POSITIVE_INFINITY);
 					if (richMessage || text.length > 0 || failure) {
-						const message = withReplayedDisplayText(
-							richMessage ?? makeTextMessage("assistant", text, entry.timestamp),
-							entry,
-						);
+						const message = richMessage ?? makeTextMessage("assistant", text, entry.timestamp);
 						if (failure) {
 							(message as { stopReason?: string; errorMessage?: string }).stopReason = failure.stopReason;
 							(message as { stopReason?: string; errorMessage?: string }).errorMessage = failure.errorMessage;
@@ -1519,8 +1498,8 @@ function replayEntries(
 							if (!runColdReasons.includes(reason)) runColdReasons.push(reason);
 						}
 						// Another assistant row before the next operator row means the run
-						// went on (a held question's interview, a middleware continuation),
-						// and live it settled once, at its end.
+						// went on through a middleware continuation, and live it settled
+						// once, at its end.
 						pendingSettle = null;
 						if (!continues) {
 							const endedAt = Date.parse(entry.timestamp);

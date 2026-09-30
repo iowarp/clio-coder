@@ -3,12 +3,13 @@
  *
  * The turn site is asked once, before the prompt is built, and three readers
  * that cannot await take what it left: the hint registration, the turn
- * controller and the prewarm. The turn-end site is asked once per turn and read
- * twice, by the prose-question nudge before it requests a continuation and by
- * the settled turn for its clarification streak, so the reading is shared. The
- * relevance site ranks a catalog when a tool is asked for one. Everything here
- * degrades to what the harness did before System One existed: an unbound, slow,
- * failed or unfitted site hands back null and the reader keeps its own answer.
+ * controller and the prewarm. The turn-end site is asked once per settled turn
+ * and its reading is shared: whether the message asks or blocks on the operator
+ * feeds the clarification streak and the turn outcome record that measures how
+ * turns end. The relevance site ranks a catalog when a tool is asked for one.
+ * Everything here degrades to what the harness did before System One existed:
+ * an unbound, slow, failed or unfitted site hands back null and the reader
+ * keeps its own answer.
  */
 
 import type { DecisionHintLines } from "../domains/middleware/decision-hints.js";
@@ -38,8 +39,7 @@ import type { ToolCallGateSubject, ToolCallGateVerdict } from "../tools/registry
 
 /**
  * How long a turn waits for the turn-end reading, counted from the moment it
- * was first asked for. The nudge sits on the critical path of a turn that is
- * otherwise finished, and the settled turn holds the next prompt behind it, so
+ * was first asked for. The settled turn holds the next prompt behind it, so
  * a slower answer is recorded by the runner but never waited for.
  */
 export const TURN_END_WAIT_MS = 1_200;
@@ -249,7 +249,7 @@ export interface SystemOneHost {
 	task(): string;
 	/** The user turn id of the last operator turn, the join key of a mid-turn ranking. */
 	turnId(): string | null;
-	/** Whether the turn-end site can answer, so the nudge knows whether to wait. */
+	/** Whether the turn-end site can answer, so a reader knows whether to wait. */
 	turnEndBound(): boolean;
 	/** Drop the operator texts kept in memory. The next turn-end reading reads the ledger once. */
 	forgetOperatorTexts(): void;

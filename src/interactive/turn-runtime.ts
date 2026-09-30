@@ -143,9 +143,6 @@ export type AssistantDeltaEvent =
 			partialThinking: string;
 	  };
 
-/** Where a streaming reply's finished text ends: after a sentence stop and its space, or a line break. */
-const SENTENCE_RELEASE_BOUNDARY = /[.!?][*_"'’)\]]*[ \t]+|\n/gu;
-
 export interface TurnRuntimeDeps {
 	state: ChatTurnState;
 	/** Capabilities behind the attached gateway, for the streaming tool-prose cutoff. */
@@ -776,10 +773,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				if (deps.hasQueuedSteering?.()) await deps.continuity?.pause();
 				const handoffChanged = (await deps.continuity?.settle(signal)) ?? false;
-				const steered = middleware.deliverFinalReplySteer(localRuntime);
 				const continued = await deliverInRunContinuation(signal);
 				const contextChanged =
-					(await middleware.prepareToolContinuation(localRuntime, signal)) || handoffChanged || steered || continued;
+					(await middleware.prepareToolContinuation(localRuntime, signal)) || handoffChanged || continued;
 				const update = await context.postToolContinuationGuard(localRuntime, signal, contextChanged);
 				const restored = context.installMemoryRestoration(localRuntime);
 				if (signal?.aborted || state.activeInterruptReason !== null) return undefined;
@@ -803,35 +799,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 		};
 
-		// A final reply held on its closing question carries the run one more
-		// request, inside this run, so the interview lands before the turn
-		// settles and the operator sees one completion (the post-settle
-		// continuation rendered a second "Done" and a re-summary). A plan closed
-		// by a terminating artifact is read here, after its tool batch.
-		//
-		// The run's final turn is also where turn_end fires, so a middleware
+		// The run's final turn is where turn_end fires, so a middleware
 		// request_continuation (stalled turn, open tasks, finish contract,
-		// detached batches, skill wait) carries the run on the same way instead
-		// of resubmitting a fresh prompt after the turn rendered Done. agent_end
-		// fires turn_end only for a final message this hook never saw: an engine
-		// that does not call finishTurn, or its thrown-failure path.
+		// detached batches, skill wait) carries the run on inside it instead of
+		// resubmitting a fresh prompt after the turn rendered Done, which showed
+		// the operator two completions for one request. agent_end fires turn_end
+		// only for a final message this hook never saw: an engine that does not
+		// call finishTurn, or its thrown-failure path.
 		let turnEndFiredFor: AgentMessage | null = null;
 		handle.agent.finishTurn = async (turn) => {
-			if (state.activeInterruptReason === null && state.pendingFinalReplySteer === null) {
-				if (pendingTerminalToolResult !== null) {
-					stallSuspendDepth += 1;
-					try {
-						await middleware.holdFinalReply(localRuntime, extractText(turn.message), turn.message.stopReason, true);
-					} finally {
-						stallSuspendDepth -= 1;
-						lastActivityAt = performance.now();
-					}
-				}
-			}
-			if (state.pendingFinalReplySteer !== null) {
-				persistence.continueTracedTurn();
-				return { action: "continue" };
-			}
 			// A tool batch that did not terminate, or an operator message already
 			// queued, carries the run on: this is not its final turn.
 			const final = !hasStructuredToolCall(turn.message) || pendingTerminalToolResult !== null;
@@ -878,42 +854,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (content.length === 0) return false;
 			localRuntime.agent.state.messages.push({ role: "user", content, timestamp: Date.now() });
 			return true;
-		};
-
-		// The live transcript lags a streaming reply by its unfinished last
-		// sentence while the prose-question gate could still hold the reply, so
-		// a closing question it withholds at message_end is never drawn first.
-		let tailHold: { text: string; released: number; armed: boolean } | null = null;
-		const emitReleasedText = (delta: string): void => {
-			if (tailHold === null || delta.length === 0) return;
-			deps.emit({
-				type: "text_delta",
-				contentIndex: 0,
-				delta,
-				partialText: tailHold.text.slice(0, tailHold.released),
-			});
-		};
-		const releaseHeldTail = (disarm: boolean): void => {
-			if (tailHold === null) return;
-			const held = tailHold.text.slice(tailHold.released);
-			tailHold.released = tailHold.text.length;
-			if (disarm) tailHold.armed = false;
-			emitReleasedText(held);
-		};
-		/** The part of a delta the transcript may draw now; null draws nothing yet. */
-		const holdTail = (delta: string): string | null => {
-			if (tailHold === null) return delta;
-			tailHold.text += delta;
-			const from = tailHold.released;
-			let end = tailHold.armed ? from : tailHold.text.length;
-			if (tailHold.armed) {
-				for (const match of tailHold.text.slice(from).matchAll(SENTENCE_RELEASE_BOUNDARY)) {
-					end = from + match.index + match[0].length;
-				}
-			}
-			if (end <= from) return null;
-			tailHold.released = end;
-			return tailHold.text.slice(from, end);
 		};
 
 		const generationTiming = createAssistantGenerationTiming();
@@ -1016,9 +956,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 			}
 			let publicEvent = enrichedEvent;
-			// The transcript text of a reply held on its closing question; the ledger
-			// keeps it beside the full reply so a resumed transcript matches the live one.
-			let heldDisplayText: string | null = null;
 			if (enrichedEvent.type === "message_end" && enrichedEvent.message?.role === "assistant") {
 				const gatewayRouting = gatewayRoutingObservationFromRecord(
 					enrichedEvent.message as unknown as Record<string, unknown>,
@@ -1041,39 +978,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						...enrichedEvent,
 						message: { ...enrichedEvent.message, usage: interruptedUsage as unknown as Usage },
 					} as typeof enrichedEvent;
-				}
-			}
-			if (
-				publicEvent.type === "message_end" &&
-				publicEvent.message?.role === "assistant" &&
-				!hasStructuredToolCall(publicEvent.message) &&
-				!state.synthesisToolLock &&
-				state.activeInterruptReason === null
-			) {
-				// Read before the panel settles the reply, so a closing prose question
-				// is taken off the transcript rather than shown and then answered
-				// twice. The engine keeps the whole message for the model.
-				const fullText = extractText(publicEvent.message);
-				stallSuspendDepth += 1;
-				let visibleText: string | null = null;
-				try {
-					visibleText = await middleware.holdFinalReply(localRuntime, fullText, publicEvent.message.stopReason, false);
-				} finally {
-					stallSuspendDepth -= 1;
-					lastActivityAt = performance.now();
-				}
-				if (visibleText !== null && visibleText !== fullText) {
-					heldDisplayText = visibleText;
-					const message = publicEvent.message;
-					const kept = message.content.filter((block) => block?.type !== "text");
-					publicEvent = {
-						...publicEvent,
-						message: {
-							...message,
-							content: visibleText.length > 0 ? [...kept, { type: "text", text: visibleText }] : kept,
-						},
-						finalReplyHeld: true,
-					} as typeof publicEvent;
 				}
 			}
 			if (enrichedEvent.type === "agent_end") {
@@ -1192,24 +1096,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (estimate !== undefined) state.interruptedUsage = estimate;
 				return;
 			}
-			if (publicEvent?.type === "message_start" && publicEvent.message?.role === "assistant") {
-				tailHold = {
-					text: "",
-					released: 0,
-					armed: !state.synthesisToolLock && middleware.finalReplyHoldArmed(),
-				};
-			} else if (publicEvent?.type === "message_update") {
-				// Reasoning or a tool call after the text means the held sentence is
-				// not a closing one; a tool-call turn is never held at all.
-				const inner = (publicEvent.assistantMessageEvent as { type?: unknown }).type;
-				if (typeof inner === "string" && inner.startsWith("toolcall")) releaseHeldTail(true);
-				else if (typeof inner === "string" && inner.startsWith("thinking")) releaseHeldTail(false);
-			} else if (publicEvent?.type === "message_end" && publicEvent.message?.role === "assistant") {
-				// A held reply's message_end replaces the streamed text itself; any
-				// other reply gets its last sentence before it settles.
-				if ((publicEvent as { finalReplyHeld?: unknown }).finalReplyHeld !== true) releaseHeldTail(true);
-				tailHold = null;
-			}
 			if (publicEvent) deps.emit(publicEvent);
 			if (publicEvent?.type === "message_update") {
 				const assistantEvent = publicEvent.assistantMessageEvent as {
@@ -1222,7 +1108,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					const partialText = extractText(assistantEvent.partial);
 					const frame = readDiffusionFrame(assistantEvent);
 					if (frame) {
-						releaseHeldTail(true);
 						deps.emit({
 							type: "text_frame",
 							contentIndex: assistantEvent.contentIndex ?? 0,
@@ -1230,15 +1115,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							progress: frame.progress,
 						});
 					} else {
-						const delta = holdTail(assistantEvent.delta ?? "");
-						if (delta !== null) {
-							deps.emit({
-								type: "text_delta",
-								contentIndex: assistantEvent.contentIndex ?? 0,
-								delta,
-								partialText: tailHold === null ? partialText : tailHold.text.slice(0, tailHold.released),
-							});
-						}
+						deps.emit({
+							type: "text_delta",
+							contentIndex: assistantEvent.contentIndex ?? 0,
+							delta: assistantEvent.delta ?? "",
+							partialText,
+						});
 					}
 					const localToolRuntime = runtimeNarratesToolCalls(localRuntime.runtimeResolution.runtimeTier);
 					if (
@@ -1284,12 +1166,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							}
 						: null;
 				const correlationId = event.type === "message_end" ? handle.requestCorrelationId(event.message) : undefined;
-				const persistedId = persistence.appendAssistantTurn(
-					enrichedEvent.message,
-					timing,
-					correlationId,
-					heldDisplayText ?? undefined,
-				);
+				const persistedId = persistence.appendAssistantTurn(enrichedEvent.message, timing, correlationId);
 				await deps.continuity?.response(persistedId, correlationId);
 				if (isAssistant) apiCallStartedAt = null;
 				const usage = (enrichedEvent.message as { usage?: Usage }).usage;

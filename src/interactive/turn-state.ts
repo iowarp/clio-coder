@@ -134,13 +134,6 @@ export interface ChatTurnState {
 	pendingRequestContinuation: boolean;
 	/** A middleware continuation carries the current run one more request, delivered by prepareNextTurn. */
 	pendingInRunContinuation: boolean;
-	/**
-	 * Model-only steer for a final reply held back on its closing question,
-	 * waiting for the engine's next request inside the same run.
-	 */
-	pendingFinalReplySteer: string | null;
-	/** The held reply's full text, so turn_end assessors still read the answer the operator got. */
-	heldFinalReplyText: string | null;
 	currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
 	currentTurnConstraints: TurnConstraints | undefined;
 	/**
@@ -177,8 +170,6 @@ export function createTurnState(initialThinkingLevel: ThinkingLevel): ChatTurnSt
 		stalledTurnNudgeSpent: false,
 		pendingRequestContinuation: false,
 		pendingInRunContinuation: false,
-		pendingFinalReplySteer: null,
-		heldFinalReplyText: null,
 		currentPendingSkillPolicy: undefined,
 		currentTurnConstraints: undefined,
 		activeSkillSurface: undefined,
