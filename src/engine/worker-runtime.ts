@@ -1603,10 +1603,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// The policy's own reasons name the remedy ("one command per bash call",
 		// "only through the typed git tool"). Without them a worker saw only
 		// "bash requires execute confirmation" and retried respelled variants.
-		const policyDetail = decision.classification.reasons
-			.map((entry) => entry.trim())
-			.filter((entry) => entry.length > 0)
-			.slice(0, 2)
+		const policyDetail = [
+			...new Set(
+				[
+					...(decision.policy?.reasons ?? []),
+					...(decision.kind === "allow" ? [] : decision.rejection.detail.split("\n").slice(1)),
+					...decision.classification.reasons,
+				]
+					.map((entry) => entry.replace(/^-\s+/u, "").trim())
+					.filter((entry) => entry.length > 0 && !entry.startsWith("rule:")),
+			),
+		]
+			.slice(0, 3)
 			.join(" ");
 		const reason =
 			onPermission === "fail"

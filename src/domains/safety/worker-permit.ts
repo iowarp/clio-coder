@@ -341,6 +341,6 @@ export function workerPermitPromptLine(view: {
 	}
 	// Phase C: the allowance is effective only inside the run's own task worktree.
 	return view.taskWorktree === true
-		? `${line} On your task branch you may stage and commit without asking, only through the git tool: op add with literal paths, op commit with a message. Every other Git mutation (switch, stash, rebase, merge, reset, branch, tag, config, push) needs approval, and HEAD must stay on your task branch. ${hostCommit}`
+		? `${line} On your task branch you may stage and commit without asking, only through the git capability: gateway(op="call", capability="git", args={op:"add", paths:["<literal path>"]}), then args={op:"commit", message:"<message>"}. Bash git add and commit ask. Every other Git mutation (switch, stash, rebase, merge, reset, branch, tag, config, push) needs approval, and HEAD must stay on your task branch. ${hostCommit}`
 		: `${line} This run has no task worktree, so every Git mutation needs approval.`;
 }
