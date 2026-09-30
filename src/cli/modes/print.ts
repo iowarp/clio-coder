@@ -12,6 +12,7 @@ import {
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
+import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import { runStatusForOutcome } from "../../domains/dispatch/outcome.js";
 import {
 	createRunReceiptQuality,
@@ -41,6 +42,7 @@ import { TOOL_PLANES } from "../../tools/policy.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { setupSteerChannel } from "../steer-channel.js";
+import { type DispatchedRunsSettlement, describeRuns, settleDispatchedRuns } from "./headless-dispatched-runs.js";
 import { createHeadlessJsonProjector } from "./json-stream.js";
 import { serializeJsonLine } from "./jsonl.js";
 
@@ -89,6 +91,11 @@ export interface HeadlessMainAgentOptions {
 	 * wall-clock limit from an external signal.
 	 */
 	deadline?: HeadlessRunDeadline;
+	/**
+	 * The dispatch ledger. When present, the run waits for the workers it
+	 * dispatched before sealing and fails when one did not deliver (D3, D6b).
+	 */
+	dispatch?: Pick<DispatchContract, "listRuns">;
 }
 
 interface HeadlessMainAgentResult {
@@ -824,6 +831,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		}
 		unsubscribe();
 	}
+	// Detached workers outlive the turn but not the process, so wait for them
+	// while a deadline can still fire.
+	const settlement: DispatchedRunsSettlement = options.dispatch
+		? await settleDispatchedRuns(options.dispatch, runId, () => termination.isShuttingDown())
+		: { live: [], undelivered: [] };
 	// The turn has settled. Nothing between here and the seal yields to a
 	// timer, so a deadline that has not fired by now never will, and one that
 	// did has already put the coordinator into shutdown, which the first branch
@@ -844,7 +856,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		// hook read interruption from the coordinator, so whichever seals first
 		// seals the same canceled outcome with the status the process exits with.
 		terminal = interruptedTerminal();
-		stderrMessage = terminal.failureMessage;
+		stderrMessage =
+			settlement.live.length > 0
+				? `${terminal.failureMessage ?? "clio-coder run: interrupted"}\nclio-coder run: canceling ${settlement.live.length} dispatched run(s) still in flight: ${describeRuns(settlement.live)}`
+				: terminal.failureMessage;
 	} else if (result.abortReason !== null) {
 		// An interrupted turn never answered, no matter what partial text or
 		// internal error the abort left behind: nonzero exit, abort reason. It
@@ -890,6 +905,17 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				status: "failed",
 				failureMessage,
 				outcomeDetail: limited ? "limitation" : "noop",
+			};
+			stderrMessage = failureMessage;
+		}
+		if (terminal.exitCode === 0 && settlement.undelivered.length > 0) {
+			const failureMessage = `clio-coder run: ${settlement.undelivered.length} dispatched worker(s) did not deliver: ${describeRuns(settlement.undelivered)}`;
+			terminal = {
+				exitCode: 1,
+				outcome: "failed",
+				status: "failed",
+				failureMessage,
+				outcomeDetail: "dispatched_worker_failed",
 			};
 			stderrMessage = failureMessage;
 		}
