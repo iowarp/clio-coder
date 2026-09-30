@@ -68,5 +68,9 @@ jobs:
             found { print }
           ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
           test -n "$(tr -d '[:space:]' < "$RUNNER_TEMP/release-notes.md")"
+          # A pre-release tag (vX.Y.Z-rc.N) must not take the Latest badge.
+          channel=()
+          case "$version" in *-*) channel=(--prerelease --latest=false) ;; esac
           gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/qualified-package/candidate.tgz" \
-            --title "Clio Coder $version" --notes-file "$RUNNER_TEMP/release-notes.md" --verify-tag
+            --title "Clio Coder $version" --notes-file "$RUNNER_TEMP/release-notes.md" --verify-tag \
+            "${channel[@]}"
