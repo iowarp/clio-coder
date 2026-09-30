@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { ToolNames } from "../tool-names.js";
 import {
@@ -124,5 +125,13 @@ export function workerSandboxLine(spec: WorkerSandboxSpec | undefined, availabil
 			: `Shell sandbox: unavailable (${availability.reason ?? "no backend"}); commands run unsandboxed.`;
 	}
 	const writes = spec.writableRoots.length === 0 ? "only a private /tmp" : "only your writable roots and a private /tmp";
-	return `Shell sandbox: ${availability.backend}. Commands you run can write ${writes}; .git and .clio-coder stay read-only; network is ${spec.network ? "allowed" : "off"}.`;
+	// bwrap binds a missing exact-file root with --bind-try, which skips it, so
+	// a command can never create that file. The native write tool can, inside
+	// the same boundary, so the worker is told to seed the file with it first.
+	const missing = spec.writableRoots.filter((root) => !root.endsWith("/") && !existsSync(root));
+	const seed =
+		missing.length === 0
+			? ""
+			: ` These write-root files do not exist yet and shell commands cannot create them, so create each with the write tool before any command writes to it: ${missing.join(", ")}.`;
+	return `Shell sandbox: ${availability.backend}. Commands you run can write ${writes}; .git and .clio-coder stay read-only; network is ${spec.network ? "allowed" : "off"}.${seed}`;
 }
