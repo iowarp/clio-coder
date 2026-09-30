@@ -114,6 +114,7 @@ import {
 } from "../domains/middleware/index.js";
 import { createMemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { announceMemoryStepEndpoint } from "../domains/middleware/memory-step-endpoint.js";
+import { createPlanCloseRegistration } from "../domains/middleware/plan-close.js";
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
@@ -2834,6 +2835,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	if (!options.headless && !options.acp) {
+		middleware.registerHook(
+			createPlanCloseRegistration({
+				canAsk: () => askUserHandler !== null,
+				isPlan: () => systemOneHost.interpretation()?.intent === "plan",
+			}),
+		);
 		// Demo guidance: operator-only capability tips after a turn. Everything it
 		// does, profile writes included, stops while interface.demo is off.
 		middleware.registerHook(

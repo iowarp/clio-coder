@@ -1,9 +1,10 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
+import { createPlanCloseRegistration } from "../../src/domains/middleware/plan-close.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { compile } from "../../src/domains/prompts/compiler.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
@@ -36,7 +37,10 @@ describe("turn-ending contract in the session prompt", () => {
 		const prompt = systemPrompt({ operatorInterviews: true });
 		ok(prompt.includes("## Ending a turn"), prompt);
 		ok(prompt.includes("Every turn ends in one of two states:"), prompt);
-		ok(prompt.includes('A requested plan always ends with ask_user "Carry out this plan?", even with no question.'), prompt);
+		ok(
+			prompt.includes('A requested plan always ends with ask_user "Carry out this plan?", even with no question.'),
+			prompt,
+		);
 		ok(prompt.includes("options carrying open choices: [Proceed with a per-user file (Recommended)"), prompt);
 		ok(prompt.includes(identityHalf), prompt);
 	});
@@ -50,6 +54,44 @@ describe("turn-ending contract in the session prompt", () => {
 			ok(prompt.includes("stops\nthere, without a question"), prompt);
 		}
 	});
+});
+
+it("continues only an armed plan that has not asked or changed files, once", () => {
+	let plan = false;
+	let canAsk = true;
+	const rule = createPlanCloseRegistration({ canAsk: () => canAsk, isPlan: () => plan });
+	const start = (metadata: MiddlewareHookInput["metadata"] = {}) => rule.evaluate({ hook: "turn_start", metadata });
+	const end = (stopReason = "stop") => rule.evaluate({ hook: "turn_end", metadata: { stopReason } });
+	start();
+	deepStrictEqual(end(), []);
+	plan = true;
+	start();
+	const effects = end();
+	strictEqual(effects.length, 1);
+	strictEqual(effects[0]?.kind, "request_continuation");
+	ok(effects[0]?.kind === "request_continuation" && effects[0].message.includes('ask_user "Carry out this plan?"'));
+	deepStrictEqual(end(), []);
+	start({ requestContinuation: true });
+	deepStrictEqual(end(), []);
+	for (const toolName of [ToolNames.AskUser, ToolNames.Edit, ToolNames.Write]) {
+		start();
+		rule.evaluate({ hook: "after_tool", toolName });
+		deepStrictEqual(end(), []);
+	}
+	start();
+	rule.evaluate({ hook: "after_tool", toolName: ToolNames.Read });
+	strictEqual(end().length, 1);
+	for (const stopReason of ["error", "aborted", "length"]) {
+		start();
+		deepStrictEqual(end(stopReason), []);
+	}
+	canAsk = false;
+	start();
+	deepStrictEqual(end(), []);
+	canAsk = true;
+	plan = false;
+	start({ turnMode: "proposal" });
+	strictEqual(end().length, 1);
 });
 
 describe("turn_end effects inside one chat-loop run", () => {
