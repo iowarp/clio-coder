@@ -68,7 +68,8 @@ function procMountsType(path: string): string | null {
 export const HOST_WORKTREE_ROOT_FACTS: WorktreeRootFacts = {
 	tmpfsCandidates() {
 		const runtime = process.env.XDG_RUNTIME_DIR;
-		return [...(runtime !== undefined && isAbsolute(runtime) ? [runtime] : []), "/dev/shm"];
+		// The worker sandbox masks the session runtime directory and its sockets.
+		return ["/dev/shm", ...(runtime !== undefined && isAbsolute(runtime) ? [runtime] : [])];
 	},
 	filesystemType: procMountsType,
 	freeBytes(path) {

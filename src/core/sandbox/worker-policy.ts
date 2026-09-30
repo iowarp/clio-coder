@@ -20,6 +20,8 @@ export interface WorkerSandboxPolicyInput {
 	allowedTools: ReadonlyArray<string>;
 	/** `safety.sandboxNetwork`: the operator's standing network grant for worker commands. */
 	networkSetting: boolean;
+	/** Parent checkouts supplying shared task dependencies; also visible when under /tmp. */
+	dependencyRoots?: ReadonlyArray<string>;
 }
 
 /**
@@ -55,6 +57,7 @@ export function resolveWorkerSandboxSpec(input: WorkerSandboxPolicyInput): Worke
 		input.cwd,
 		...(input.taskWorktree !== undefined ? [input.taskWorktree.path] : []),
 		...(layout !== null ? [layout.commonDir] : []),
+		...(input.dependencyRoots ?? []),
 	];
 	return {
 		version: WORKER_SANDBOX_SPEC_VERSION,
@@ -64,12 +67,13 @@ export function resolveWorkerSandboxSpec(input: WorkerSandboxPolicyInput): Worke
 		// `<file>/.git` fails bwrap with ENOTDIR, which -try does not skip, so
 		// every sandboxed command in a run with file write roots failed.
 		readOnlyPaths: [
-			...new Set(
-				(input.writeBoundaries.length > 0 && !input.readOnly
+			...new Set([
+				...(input.writeBoundaries.length > 0 && !input.readOnly
 					? writableRoots.filter((root) => root.endsWith("/"))
 					: writableRoots
 				).flatMap(protectedInside),
-			),
+				...(input.dependencyRoots ?? []),
+			]),
 		],
 		gitWritablePaths: [],
 		readableRoots: [...new Set(readableRoots)],

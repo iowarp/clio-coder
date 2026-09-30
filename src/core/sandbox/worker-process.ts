@@ -29,6 +29,21 @@ export function configureWorkerProcessSandbox(spec: WorkerSandboxSpec | undefine
 	unavailableReported = false;
 }
 
+/** Native edit/write tools run outside the child sandbox, so publication must honor its read-only paths. */
+export function workerReadOnlyTargetViolation(target: string): string | null {
+	if (active === null) return null;
+	const candidate = canonicalizePath(target);
+	if (candidate === null) return "sandbox: write target could not be resolved";
+	for (const entry of active.readOnlyPaths) {
+		const root = physical(entry);
+		const relative = path.relative(root, candidate);
+		if (relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))) {
+			return `sandbox: ${target} is read-only`;
+		}
+	}
+	return null;
+}
+
 /**
  * True when every command this worker spawns runs under bubblewrap bound to
  * the spec's writable roots, the same test dispatch applies before it offers
