@@ -13,6 +13,17 @@ export const PROSE_QUESTION_CONTINUATION_MESSAGE =
 export const PLAN_APPROVAL_CONTINUATION_MESSAGE =
 	'You finished a plan without asking whether to proceed. Close the turn with ask_user: one question on whether to carry out this plan, with options such as "Proceed as planned", "Proceed with changes" (the operator types them) and "Revise the plan first", each with a one-line description. Do not repeat the plan.';
 
+/**
+ * The in-run steer for a reply held back on its closing question. The operator
+ * already sees the reply without that question, so the model must not restate
+ * it, and an answer that declines needs no further text at all.
+ */
+export const PROSE_QUESTION_STEER_MESSAGE =
+	"[Clio Coder] Your reply ended by asking the operator something in prose. The operator already has the rest of that reply; only the closing question was withheld. Call ask_user now with that question, the context needed to answer it, and two to four options with one-line descriptions, recommended first. After the answer, do not restate or summarize your earlier reply: act on the answer, and if the operator declines or says what you gave is sufficient, end the turn without further text.";
+
+export const PLAN_APPROVAL_STEER_MESSAGE =
+	'[Clio Coder] You finished a plan without asking whether to proceed. The operator already has the plan. Close the turn with ask_user: one question on whether to carry it out, with options such as "Proceed as planned", "Proceed with changes" (the operator types them) and "Revise the plan first", each with a one-line description. After the answer, do not repeat or summarize the plan: act on the answer, and if the operator declines, end the turn without further text.';
+
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
 
 // The operator asked for a plan; the turn's deliverable is a proposal awaiting a go-ahead.
@@ -70,6 +81,65 @@ function endsOnProseQuestion(text: string): boolean {
 	return endsWithQuestion || endsWithOptions || OFFER_PATTERN.test(closingLines.slice(-3).join("\n"));
 }
 
+/**
+ * The reply with its closing question removed: whole trailing paragraphs while
+ * the remainder still ends on a question, or only the last sentences of a
+ * single closing paragraph that also carries the answer. A reply that is all
+ * question yields "". A closing paragraph that holds a fence is kept whole,
+ * because cutting a code block to drop one question costs more than it saves.
+ */
+function withoutClosingQuestion(text: string): string {
+	let body = text.trimEnd();
+	for (let cuts = 0; cuts < 3 && endsOnProseQuestion(body); cuts += 1) {
+		const breakMatch = /\n[ \t]*\n(?![\s\S]*\n[ \t]*\n)/u.exec(body);
+		const start = breakMatch === null ? 0 : breakMatch.index + breakMatch[0].length;
+		const paragraph = body.slice(start);
+		if (/^\s*(?:```|~~~)/mu.test(paragraph)) return text;
+		// Keep the answer sentences of a one-line paragraph that ends on its
+		// question. A multi-line paragraph is a list or a block and goes whole.
+		const lastBreak = paragraph.includes("\n")
+			? undefined
+			: [...paragraph.matchAll(/(?<=[^\d\s])[.!][*_"'’)\]]*[ \t]+(?=\S)/gu)].at(-1);
+		if (lastBreak?.index !== undefined) {
+			const head = paragraph.slice(0, lastBreak.index + lastBreak[0].trimEnd().length);
+			if (!endsOnProseQuestion(head) && endsOnProseQuestion(paragraph.slice(head.length))) {
+				return `${body.slice(0, start)}${head}`.trimEnd();
+			}
+		}
+		body = body.slice(0, start).trimEnd();
+		if (body.length === 0) return "";
+	}
+	return endsOnProseQuestion(body) ? text : body;
+}
+
+/** A final reply held back before the run settles, and the steer that replaces it. */
+export interface FinalReplyHold {
+	/** Model-only instruction, delivered inside the same run. */
+	steer: string;
+	/** What the operator's transcript keeps of the held reply. */
+	visibleText: string;
+}
+
+export interface FinalReplyGateInput {
+	userTurnId?: string | undefined;
+	text: string;
+	stopReason?: string | undefined;
+	/** The reply closed on a terminating tool (a plan artifact), so there is no prose to trim. */
+	terminalTool: boolean;
+	toolNames: ReadonlyArray<string>;
+}
+
+export interface ProseQuestionRegistration extends MiddlewareHookRegistration {
+	/**
+	 * Decide on a final reply before the run settles. A hold carries the steer
+	 * that asks the model for the interview inside the same run, so the
+	 * operator sees one turn and one completion. At most one hold per operator
+	 * turn: a reply that still ends on a question after the steer goes through.
+	 * Once consulted, the turn_end fallback stays silent for that reply.
+	 */
+	holdFinalReply(input: FinalReplyGateInput): Promise<FinalReplyHold | null>;
+}
+
 export interface ProseQuestionDeps {
 	getTurnConstraints?: () => TurnConstraints | undefined;
 	/** True only where an operator can answer an interview (interactive, with ask_user registered). */
@@ -122,7 +192,7 @@ interface DeferredContinuation {
  * bound, the regex proposes and the site disposes: it reads whether the message
  * stops on a required decision, and an invitation is left alone.
  */
-export function createProseQuestionRegistration(deps: ProseQuestionDeps): MiddlewareHookRegistration {
+export function createProseQuestionRegistration(deps: ProseQuestionDeps): ProseQuestionRegistration {
 	let substantiveTurn = false;
 	let planRequested = false;
 	let wroteThisTurn = false;
@@ -130,6 +200,20 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 	let askedThisTurn = false;
 	let requestText = "";
 	let deferred: DeferredContinuation | null = null;
+	// The in-run gate already read this turn's final reply, or already steered it.
+	let finalChecked = false;
+	let steered = false;
+	const gateOpen = (stopReason: unknown): boolean => {
+		if (!isNormalStopReason(stopReason)) return false;
+		if (!turnAllowsTool(deps.getTurnConstraints?.(), ToolNames.AskUser)) return false;
+		try {
+			return deps.askUserAvailable();
+		} catch {
+			return false;
+		}
+	};
+	const needsPlanApproval = (text: string): boolean =>
+		planRequested && !wroteThisTurn && !askedThisTurn && (planArtifactWritten || text.trim().length >= PLAN_MIN_CHARS);
 	return {
 		id: PROSE_QUESTION_REGISTRATION_ID,
 		description: "request one continuation when a substantive turn ends on a prose question instead of ask_user",
@@ -143,9 +227,14 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 				askedThisTurn = false;
 				requestText = input.text ?? "";
 				deferred = null;
+				finalChecked = false;
+				steered = false;
 				return NO_EFFECTS;
 			}
 			if (input.hook === "after_tool") {
+				// A tool ran after the gate read a reply, so the run goes on and a
+				// later reply is the final one.
+				finalChecked = false;
 				if (input.toolName === ToolNames.AskUser) askedThisTurn = true;
 				if (input.toolName !== undefined && WRITE_TOOLS.has(input.toolName)) wroteThisTurn = true;
 				// A plan written as a terminal artifact is still a plan awaiting a
@@ -156,13 +245,10 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 			}
 			if (input.hook !== "turn_end" || !substantiveTurn) return NO_EFFECTS;
 			substantiveTurn = false;
-			if (!isNormalStopReason(input.metadata?.stopReason)) return NO_EFFECTS;
-			if (!turnAllowsTool(deps.getTurnConstraints?.(), ToolNames.AskUser)) return NO_EFFECTS;
-			try {
-				if (!deps.askUserAvailable()) return NO_EFFECTS;
-			} catch {
-				return NO_EFFECTS;
-			}
+			// The in-run gate owns every reply it saw. What remains below is the
+			// fallback for a host that never consults it: a continuation after settle.
+			if (steered || finalChecked) return NO_EFFECTS;
+			if (!gateOpen(input.metadata?.stopReason)) return NO_EFFECTS;
 			// An interview earlier in the turn does not cover a question the
 			// closing text asks after it.
 			const text = input.text ?? "";
@@ -186,15 +272,38 @@ export function createProseQuestionRegistration(deps: ProseQuestionDeps): Middle
 			// out needs none, and neither does one the operator already answered an
 			// interview about: an approved plan may be implemented by dispatch,
 			// which leaves no write in this run.
-			if (
-				planRequested &&
-				!wroteThisTurn &&
-				!askedThisTurn &&
-				(planArtifactWritten || text.trim().length >= PLAN_MIN_CHARS)
-			) {
+			if (needsPlanApproval(text)) {
 				return [{ kind: "request_continuation", message: PLAN_APPROVAL_CONTINUATION_MESSAGE }];
 			}
 			return NO_EFFECTS;
+		},
+		async holdFinalReply(input): Promise<FinalReplyHold | null> {
+			if (!substantiveTurn || steered) return null;
+			finalChecked = true;
+			if (!gateOpen(input.stopReason)) return null;
+			if (!input.terminalTool && endsOnProseQuestion(input.text)) {
+				if (deps.blocksOnOperator !== undefined && deps.turnEndBound?.() === true && input.userTurnId) {
+					let blocks: boolean | null = null;
+					try {
+						blocks = await deps.blocksOnOperator({
+							userTurnId: input.userTurnId,
+							request: requestText,
+							message: input.text,
+							toolNames: input.toolNames,
+						});
+					} catch {
+						// An unreadable verdict is no verdict, and the regex reading stands.
+					}
+					if (blocks === false) return null;
+				}
+				steered = true;
+				return { steer: PROSE_QUESTION_STEER_MESSAGE, visibleText: withoutClosingQuestion(input.text) };
+			}
+			if (needsPlanApproval(input.text)) {
+				steered = true;
+				return { steer: PLAN_APPROVAL_STEER_MESSAGE, visibleText: input.text };
+			}
+			return null;
 		},
 		async evaluateAsync(): Promise<ReadonlyArray<MiddlewareEffect>> {
 			const pending = deferred;

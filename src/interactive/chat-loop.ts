@@ -57,6 +57,8 @@ import { requestFits } from "../domains/context/budget/request-fit.js";
 import type { DispatchContract } from "../domains/dispatch/index.js";
 import {
 	createMiddlewareToolChoiceControl,
+	type FinalReplyGateInput,
+	type FinalReplyHold,
 	type MiddlewareContract,
 	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
@@ -867,6 +869,12 @@ export interface CreateChatLoopDeps {
 	 * streak the next turn reads is computed from the answer. Null means the site
 	 * did not answer and the regex reading stands.
 	 */
+	/**
+	 * The prose-question gate: reads a final reply before the run settles and,
+	 * when it closes on a question for the operator, holds that question back
+	 * and steers the model to ask it through ask_user within the same run.
+	 */
+	holdFinalReply?: (input: FinalReplyGateInput) => Promise<FinalReplyHold | null>;
 	readTurnEnd?: (input: {
 		userTurnId: string;
 		request: string;
@@ -1206,6 +1214,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		middlewareToolChoice,
 		emitNotice: (text, level, source) => emitNotice(text, level, undefined, undefined, source),
 		emitFooterNotice,
+		holdFinalReply: deps.holdFinalReply,
 	});
 
 	try {
@@ -1951,6 +1960,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			state.turnToolCalls = 0;
 			state.turnToolNames = [];
 			state.turnSharedWorkerNote = isWorkerShareNote(text);
+			state.pendingFinalReplySteer = null;
+			state.heldFinalReplyText = null;
 			middlewareToolChoice.reset();
 			if (options.requestContinuation !== true) state.stalledTurnNudgeSpent = false;
 			const images = sidecarObservation === null && options.images?.length ? [...options.images] : undefined;

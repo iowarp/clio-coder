@@ -767,7 +767,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				if (deps.hasQueuedSteering?.()) await deps.continuity?.pause();
 				const handoffChanged = (await deps.continuity?.settle(signal)) ?? false;
-				const contextChanged = (await middleware.prepareToolContinuation(localRuntime, signal)) || handoffChanged;
+				const steered = middleware.deliverFinalReplySteer(localRuntime);
+				const contextChanged =
+					(await middleware.prepareToolContinuation(localRuntime, signal)) || handoffChanged || steered;
 				const update = await context.postToolContinuationGuard(localRuntime, signal, contextChanged);
 				const restored = context.installMemoryRestoration(localRuntime);
 				if (signal?.aborted || state.activeInterruptReason !== null) return undefined;
@@ -789,6 +791,25 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				stallSuspendDepth -= 1;
 				lastActivityAt = performance.now();
 			}
+		};
+
+		// A final reply held on its closing question carries the run one more
+		// request, inside this run, so the interview lands before the turn
+		// settles and the operator sees one completion (the post-settle
+		// continuation rendered a second "Done" and a re-summary). A plan closed
+		// by a terminating artifact is read here, after its tool batch.
+		handle.agent.finishTurn = async (turn) => {
+			if (state.activeInterruptReason !== null) return undefined;
+			if (state.pendingFinalReplySteer === null && pendingTerminalToolResult !== null) {
+				stallSuspendDepth += 1;
+				try {
+					await middleware.holdFinalReply(localRuntime, extractText(turn.message), turn.message.stopReason, true);
+				} finally {
+					stallSuspendDepth -= 1;
+					lastActivityAt = performance.now();
+				}
+			}
+			return state.pendingFinalReplySteer !== null ? { action: "continue" } : undefined;
 		};
 
 		const generationTiming = createAssistantGenerationTiming();
@@ -913,6 +934,38 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						...enrichedEvent,
 						message: { ...enrichedEvent.message, usage: interruptedUsage as unknown as Usage },
 					} as typeof enrichedEvent;
+				}
+			}
+			if (
+				publicEvent.type === "message_end" &&
+				publicEvent.message?.role === "assistant" &&
+				!hasStructuredToolCall(publicEvent.message) &&
+				!state.synthesisToolLock &&
+				state.activeInterruptReason === null
+			) {
+				// Read before the panel settles the reply, so a closing prose question
+				// is taken off the transcript rather than shown and then answered
+				// twice. The engine keeps the whole message for the model.
+				const fullText = extractText(publicEvent.message);
+				stallSuspendDepth += 1;
+				let visibleText: string | null = null;
+				try {
+					visibleText = await middleware.holdFinalReply(localRuntime, fullText, publicEvent.message.stopReason, false);
+				} finally {
+					stallSuspendDepth -= 1;
+					lastActivityAt = performance.now();
+				}
+				if (visibleText !== null && visibleText !== fullText) {
+					const message = publicEvent.message;
+					const kept = message.content.filter((block) => block?.type !== "text");
+					publicEvent = {
+						...publicEvent,
+						message: {
+							...message,
+							content: visibleText.length > 0 ? [...kept, { type: "text", text: visibleText }] : kept,
+						},
+						finalReplyHeld: true,
+					} as typeof publicEvent;
 				}
 			}
 			if (enrichedEvent.type === "agent_end") {

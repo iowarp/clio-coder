@@ -8,6 +8,8 @@
 import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsContinuation, turnAllowsTool } from "../core/turn-constraints.js";
 import {
+	type FinalReplyGateInput,
+	type FinalReplyHold,
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
 	type MiddlewareContract,
 	type MiddlewareEffect,
@@ -41,6 +43,8 @@ export interface TurnMiddlewareDeps {
 	 * joins the reminder buffer, so the model does not see it.
 	 */
 	emitOperatorTip?: (message: string, key: string) => void;
+	/** The prose-question gate; absent where no operator can answer an interview. */
+	holdFinalReply?: ((input: FinalReplyGateInput) => Promise<FinalReplyHold | null>) | undefined;
 }
 
 export interface TurnMiddleware {
@@ -57,6 +61,19 @@ export interface TurnMiddleware {
 		messages: ReadonlyArray<AgentMessage>,
 		terminalToolResult?: { toolCallId: string; toolName: string },
 	): Promise<void>;
+	/**
+	 * Read a final reply before the run settles. A hold arms a model-only steer
+	 * for the engine's next request in the same run and returns the text the
+	 * operator's transcript keeps; null leaves the reply as it is.
+	 */
+	holdFinalReply(
+		agentRuntime: AgentRuntime,
+		text: string,
+		stopReason: string | undefined,
+		terminalTool: boolean,
+	): Promise<string | null>;
+	/** Move an armed final-reply steer into model context. True when context changed. */
+	deliverFinalReplySteer(agentRuntime: AgentRuntime): boolean;
 	fireCompactionHook(
 		stage: "mask_observations" | "working_set_evict" | "working_set_recall" | "llm_summary",
 		trigger: CompactionTrigger | EvictionTrigger | RecallTrigger,
@@ -164,6 +181,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		message: string,
 		severity: MiddlewareReminderSeverity,
 		source: NoticeSource,
+		display = true,
 	): void => {
 		if (!deps.session?.current()) return;
 		try {
@@ -171,7 +189,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				kind: "custom",
 				parentTurnId: state.lastTurnId,
 				customType: "middlewareReminder",
-				display: true,
+				display,
 				// The source rides with the entry so a resumed transcript titles the callout the live one did.
 				data: { message, severity, source },
 			});
@@ -186,7 +204,16 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		message: string,
 		severity: MiddlewareReminderSeverity,
 		source: NoticeSource = "reminder",
+		modelOnly = false,
 	): void => {
+		if (modelOnly && severity !== "hard-block") {
+			// Advice for the model rides the next request and stays in the ledger
+			// for inspection. As a callout it reached the operator after the
+			// answer they asked for, addressed to someone else.
+			bufferReminder(message, severity);
+			appendMiddlewareReminderEntry(message, severity, source, false);
+			return;
+		}
 		if (message === FINISH_CONTRACT_ADVISORY_MESSAGE && severity === "warn") {
 			// The finish decision is already in the evidence ledger. Surface the
 			// warning to the operator without posing it as a new user instruction
@@ -321,7 +348,14 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			if (!deps.middleware) return;
 			const message = terminalToolResult === undefined ? lastAssistantMessage(messages) : null;
 			if (message === null && terminalToolResult === undefined) return;
-			const text = message === null ? "" : extractText(message);
+			const finalText = message === null ? "" : extractText(message);
+			// A steered turn's closing message is the short follow-up to its
+			// interview; the answer itself is the held reply, and assessors that
+			// judge the answer (worker claims, finish evidence) must still see it.
+			const held = state.heldFinalReplyText;
+			state.heldFinalReplyText = null;
+			state.pendingFinalReplySteer = null;
+			const text = held === null ? finalText : finalText.length > 0 ? `${held}\n\n${finalText}` : held;
 			// Empty error/abort completions still close a tool-bearing turn. Let
 			// lifecycle observers settle their state even without final prose.
 			const stopReason = message === null ? "stop" : (message as { stopReason?: unknown }).stopReason;
@@ -373,6 +407,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 						effect.message,
 						effect.severity ?? "info",
 						effect.source === "memory" ? "memory" : "reminder",
+						effect.audience === "model",
 					);
 					continue;
 				}
@@ -382,6 +417,46 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				}
 				if (effect.kind === "notify_operator") notifyOperator(effect.message, effect.key);
 			}
+		},
+
+		async holdFinalReply(agentRuntime, text, stopReason, terminalTool): Promise<string | null> {
+			if (!deps.holdFinalReply || state.pendingFinalReplySteer !== null) return null;
+			// An operator steer or follow-up already queued carries the run on; the
+			// reply is not the last word, so it is not held.
+			if (agentRuntime.agent.hasQueuedMessages?.() === true) return null;
+			let hold: FinalReplyHold | null = null;
+			try {
+				hold = await deps.holdFinalReply({
+					...(state.activeUserTurnId ? { userTurnId: state.activeUserTurnId } : {}),
+					text,
+					stopReason,
+					terminalTool,
+					toolNames: [...state.turnToolNames],
+				});
+			} catch {
+				// A gate that throws holds nothing; the reply stands as written.
+				return null;
+			}
+			if (hold === null) return null;
+			state.pendingFinalReplySteer = hold.steer;
+			state.heldFinalReplyText = text;
+			// Recorded for /view and receipts, never rendered in the transcript.
+			appendMiddlewareReminderEntry(hold.steer, "info", "reminder", false);
+			return hold.visibleText;
+		},
+
+		deliverFinalReplySteer(agentRuntime): boolean {
+			const steer = state.pendingFinalReplySteer;
+			if (steer === null) return false;
+			state.pendingFinalReplySteer = null;
+			// Context only, the way prepareToolContinuation delivers reminders: a
+			// message event would persist it as a new operator turn and render it.
+			agentRuntime.agent.state.messages.push({
+				role: "user",
+				content: `<system-reminder>\n${steer}\n</system-reminder>`,
+				timestamp: Date.now(),
+			});
+			return true;
 		},
 
 		/**

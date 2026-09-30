@@ -115,7 +115,10 @@ import {
 } from "../domains/middleware/index.js";
 import { createMemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { announceMemoryStepEndpoint } from "../domains/middleware/memory-step-endpoint.js";
-import { createProseQuestionRegistration } from "../domains/middleware/prose-question.js";
+import {
+	createProseQuestionRegistration,
+	type ProseQuestionRegistration,
+} from "../domains/middleware/prose-question.js";
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
@@ -1926,17 +1929,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 	// Every operator question goes through ask_user; this closes the gap when a
 	// model leaves one in prose anyway. Only where a UI can answer an interview.
+	// The chat loop consults the same registration before a run settles.
+	let proseQuestion: ProseQuestionRegistration | null = null;
 	if (interactive) {
-		middleware.registerHook(
-			createProseQuestionRegistration({
-				getTurnConstraints: () => chat.currentTurnConstraints?.(),
-				askUserAvailable: () => askUserHandler !== null && toolRegistry.get(ToolNames.AskUser) !== undefined,
-				// With the turn-end site bound, a reply the regex reads as a question waits
-				// for the site's reading of whether it blocks on the operator.
-				turnEndBound: () => systemOneHost.turnEndBound(),
-				blocksOnOperator: (turn) => systemOneHost.blocksOnOperator(turn),
-			}),
-		);
+		proseQuestion = createProseQuestionRegistration({
+			getTurnConstraints: () => chat.currentTurnConstraints?.(),
+			askUserAvailable: () => askUserHandler !== null && toolRegistry.get(ToolNames.AskUser) !== undefined,
+			// With the turn-end site bound, a reply the regex reads as a question waits
+			// for the site's reading of whether it blocks on the operator.
+			turnEndBound: () => systemOneHost.turnEndBound(),
+			blocksOnOperator: (turn) => systemOneHost.blocksOnOperator(turn),
+		});
+		middleware.registerHook(proseQuestion);
 	}
 	const middlewareToolChoice = createMiddlewareToolChoiceControl();
 	const toolRegistry = createRegistry({
@@ -2970,6 +2974,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		flushSystemOne,
 		readTurnEnd: (turn) => systemOneHost.readTurnEnd(turn),
+		...(proseQuestion !== null ? { holdFinalReply: proseQuestion.holdFinalReply } : {}),
 		recordOutcome: (outcome) => systemOneHost.recordOutcome(outcome),
 		getTaskMemoryHandoffSource: () => {
 			const meta = session?.current();

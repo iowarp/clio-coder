@@ -1826,6 +1826,16 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		entry.segments.push({ kind: "text", text, finalized: true });
 	};
 
+	/** Remove the text a message streamed but never settled, when its settled text is empty. */
+	const dropStreamedMessageText = (entry: Extract<TranscriptEntry, { role: "assistant" }>): void => {
+		const messageStart = Math.min(entry.messageStartSegmentIndex ?? 0, entry.segments.length);
+		for (let index = entry.segments.length - 1; index >= messageStart; index -= 1) {
+			const segment = entry.segments[index];
+			if (segment?.kind === "text" && !segment.finalized) entry.segments.splice(index, 1);
+		}
+		invalidateEntryCache(entry);
+	};
+
 	/**
 	 * Append the turn's terminal-error marker as its own error segment so the
 	 * render path styles it in the error token rather than piping it through
@@ -2554,8 +2564,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						? scopeTerminalErrorAfterSuccessfulTool(current, extractedTerminalError)
 						: extractedTerminalError;
 				const usage = assistantUsage(event.message);
+				// The chat loop held this reply's closing prose question back for an
+				// ask_user interview. The streamed question is dead text, even when
+				// nothing of the reply remains to show.
+				const held = (event as { finalReplyHeld?: unknown }).finalReplyHeld === true;
+				if (held && text.length === 0 && current?.role === "assistant") dropStreamedMessageText(current);
 				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0 && usage === undefined) {
-					if (completedStreamedArgs) markDirty();
+					if (completedStreamedArgs || held) markDirty();
 					return;
 				}
 				const assistant = ensureAssistant();
@@ -2582,7 +2597,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// The chat loop marks messages it sanitized after streaming (dead
 				// tool-call markup on a synthesis-locked turn); the streamed tail
 				// must be replaced, not kept alongside a duplicate segment.
-				const sanitized = (event as { lockedSynthesisSanitized?: unknown }).lockedSynthesisSanitized === true;
+				const sanitized = (event as { lockedSynthesisSanitized?: unknown }).lockedSynthesisSanitized === true || held;
 				if (text.length > 0) canonicalizeMessageText(assistant, text, sanitized);
 				if (terminalError.length > 0) appendErrorSegment(assistant, terminalError);
 				markDirty();

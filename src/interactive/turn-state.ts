@@ -132,6 +132,13 @@ export interface ChatTurnState {
 	stalledTurnNudgeSpent: boolean;
 	/** A middleware request_continuation is waiting to resubmit after settle. */
 	pendingRequestContinuation: boolean;
+	/**
+	 * Model-only steer for a final reply held back on its closing question,
+	 * waiting for the engine's next request inside the same run.
+	 */
+	pendingFinalReplySteer: string | null;
+	/** The held reply's full text, so turn_end assessors still read the answer the operator got. */
+	heldFinalReplyText: string | null;
 	currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
 	currentTurnConstraints: TurnConstraints | undefined;
 	/**
@@ -167,6 +174,8 @@ export function createTurnState(initialThinkingLevel: ThinkingLevel): ChatTurnSt
 		turnSharedWorkerNote: false,
 		stalledTurnNudgeSpent: false,
 		pendingRequestContinuation: false,
+		pendingFinalReplySteer: null,
+		heldFinalReplyText: null,
 		currentPendingSkillPolicy: undefined,
 		currentTurnConstraints: undefined,
 		activeSkillSurface: undefined,

@@ -35,7 +35,7 @@ const NO_TURN = "no-turn";
 interface ExplorationTurnState {
 	readOnlyCalls: number;
 	scoutSucceeded: boolean;
-	/** The advisory already reached the operator for this user turn. */
+	/** The advisory was already issued for this user turn. */
 	advised: boolean;
 }
 
@@ -81,12 +81,14 @@ function markScoutSuccess(state: ExplorationTurnState): void {
  * Advises the main agent to use Scout after a long read-only exploration turn.
  * Only a successful Scout dispatch suppresses the advisory for that turn.
  *
- * The advisory is a notice, never a `request_continuation`. Reading is the work
- * the operator asked for, so the finding is worth one line in the transcript
- * and the next request's reminder block, not a forced extra model round that
- * spends a full context window to be told the reads were intended. One
- * advisory per user turn: a later model round of the same turn re-counts its
- * own calls but stays silent once the operator has been told.
+ * The advisory is a reminder, never a `request_continuation`. Reading is the
+ * work the operator asked for, so the finding rides the next request's
+ * reminder block, not a forced extra model round that spends a full context
+ * window to be told the reads were intended. It is advice to the model about
+ * how to work, so it is model-only: shown to the operator after a finished
+ * answer, it read as an alarm about a turn that had gone fine. One advisory
+ * per user turn: a later model round of the same turn re-counts its own calls
+ * but stays silent once the advisory is spent.
  */
 export function createReadOnlyExplorationNudgeRegistration(): {
 	registration: MiddlewareHookRegistration;
@@ -160,7 +162,9 @@ export function createReadOnlyExplorationNudgeRegistration(): {
 					return [];
 				}
 				markAdvised(key);
-				return [{ kind: "inject_reminder", message: buildReadOnlyExplorationMessage(), severity: "info" }];
+				return [
+					{ kind: "inject_reminder", message: buildReadOnlyExplorationMessage(), severity: "info", audience: "model" },
+				];
 			},
 		},
 	};

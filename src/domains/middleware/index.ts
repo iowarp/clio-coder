@@ -99,6 +99,7 @@ export {
 	type MemoryInterventionDeps,
 } from "./memory-intervention.js";
 export { announceMemoryStepEndpoint, type MemoryStepEndpointAnnouncerDeps } from "./memory-step-endpoint.js";
+export type { FinalReplyGateInput, FinalReplyHold } from "./prose-question.js";
 export {
 	createMiddlewareRegistrationTable,
 	MIDDLEWARE_REGISTRATION_OWNERS,

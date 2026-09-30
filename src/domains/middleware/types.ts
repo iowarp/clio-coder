@@ -36,9 +36,18 @@ export type MiddlewareEffect =
 	/**
 	 * `source` names the subsystem a transcript callout is titled with when the
 	 * reminder is not a generic one. Only the model sees the message itself; the
-	 * operator's transcript shows it under this source.
+	 * operator's transcript shows it under this source. `audience: "model"`
+	 * marks advice written for the model alone: the host delivers it with the
+	 * next request and records it in the ledger, but never shows it as a
+	 * transcript callout.
 	 */
-	| { kind: "inject_reminder"; message: string; severity?: MiddlewareReminderSeverity; source?: "memory" }
+	| {
+			kind: "inject_reminder";
+			message: string;
+			severity?: MiddlewareReminderSeverity;
+			source?: "memory";
+			audience?: "model";
+	  }
 	| { kind: "annotate_tool_result"; message: string; severity?: MiddlewareAnnotationSeverity }
 	| { kind: "block_tool"; reason: string; severity: "hard-block" }
 	| { kind: "protect_path"; path: string; reason: string }
