@@ -31,6 +31,7 @@ import {
 	OPERATOR_PATH_POLICY,
 } from "./default-path-policy.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
+import { classifyBashGit } from "./git-policy.js";
 import { inertQuotedMatch } from "./literal-exemption.js";
 import {
 	type CompiledPathPolicy,
@@ -1054,6 +1055,16 @@ function evaluateBashPolicy(
 			};
 		}
 	}
+	if (isGitInspection(recognitionCommand)) {
+		return {
+			kind: "allow",
+			ruleId: GIT_INSPECT_RULE_ID,
+			reasonCode: GIT_INSPECT_RULE_ID,
+			reasons: ["the shared Git policy reads this plain git command as inspection only"],
+			policySource: "builtin-command-allowlist",
+			execRecognition: "recognized",
+		};
+	}
 	return {
 		kind: "allow",
 		ruleId: "bash-unrecognized",
@@ -1294,10 +1305,34 @@ function recognizeCommandChain(
 			continue;
 		}
 		const builtin = BUILTIN_ALLOWLIST.find((entry) => entry.re.test(rendered));
-		if (builtin === undefined) return null;
-		ruleIds.push(builtin.id);
+		if (builtin !== undefined) {
+			ruleIds.push(builtin.id);
+			continue;
+		}
+		if (!hasSequencingOperators(rendered) && isGitInspection(rendered)) {
+			ruleIds.push(GIT_INSPECT_RULE_ID);
+			continue;
+		}
+		return null;
 	}
 	return { ruleIds, requiresConfirmation, requiresAutonomyApproval, scriptPreviews };
+}
+
+const GIT_INSPECT_RULE_ID = "builtin:git-inspect";
+
+/**
+ * A plain `git` command the shared Git policy classifies as inspection only.
+ * The fixed regexes above recognize `git log --oneline -n 3` but asked for
+ * `git log --oneline -3`, and a headless run denied it. The policy already
+ * refuses global options, helpers and output files (`-c`, `--ext-diff`,
+ * `--output`), so it decides instead of one regex per spelling. An env or
+ * path prefix is not plain `git` and stays unrecognized.
+ */
+function isGitInspection(command: string): boolean {
+	if (!/^git[ \t]/u.test(command)) return false;
+	const verdict = classifyBashGit(command);
+	// Whitespace checks keep their own standalone-only recognition above.
+	return verdict?.class === "inspect" && !verdict.argv.includes("--check");
 }
 
 /**
