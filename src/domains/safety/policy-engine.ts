@@ -1798,9 +1798,20 @@ const GIT_INSPECT_RULE_ID = "builtin:git-inspect";
 function isGitInspection(command: string): boolean {
 	if (!/^git[ \t]/u.test(command)) return false;
 	const verdict = classifyBashGit(command);
+	if (verdict === null || verdict.class !== "inspect") return false;
+	if (verdict.subcommand !== null && GIT_UNRECOGNIZED_SUBCOMMANDS.has(verdict.subcommand)) return false;
 	// Whitespace checks keep their own standalone-only recognition above.
-	return verdict?.class === "inspect" && !verdict.argv.includes("--check");
+	return !verdict.argv.includes("--check");
 }
+
+/**
+ * Read-only for Git, but not for the no-prompt rail. `grep` and `blame` print
+ * file contents across the whole tree or read files their options name, and
+ * `cat-file` dumps any object. The shared Git policy still classes them as
+ * inspection, so workers and the typed Git allowance are unchanged; only bash
+ * recognition leaves them to the autonomy level.
+ */
+const GIT_UNRECOGNIZED_SUBCOMMANDS: ReadonlySet<string> = new Set(["grep", "blame", "annotate", "cat-file"]);
 
 /**
  * Sequencing and redirection operators. These defeat per-command allowlist

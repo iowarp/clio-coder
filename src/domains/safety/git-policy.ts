@@ -67,7 +67,7 @@ const GLOBAL_VALUE_OPTIONS = new Set([
 	"--attr-source",
 ]);
 
-/** Subcommands that only read. Helper-invoking flags still lift them (see {@link HELPER_FLAG}). */
+/** Subcommands that only read. Helper-invoking flags still lift them (see {@link helperFlag}). */
 const INSPECT_SUBCOMMANDS = new Set([
 	"status",
 	"diff",
@@ -122,12 +122,35 @@ const OUTWARD_SUBCOMMANDS = new Set([
 ]);
 
 /**
- * Flags that make an otherwise read-only command run a configured helper
+ * Long flags that make an otherwise read-only command run a configured helper
  * (external diff, text conversion, a pager, a signature verifier), write a
- * file, or read outside the repository.
+ * file, or read outside the repository. Git's parse-options accepts any
+ * unambiguous prefix of a long option, so `--open-f=cmd` is
+ * `--open-files-in-pager=cmd`: {@link helperFlag} matches every prefix, with or
+ * without `=value`. An ambiguous prefix is an error in Git, so refusing it
+ * costs an ask at worst.
  */
-const HELPER_FLAG =
-	/^(?:--ext-diff|--textconv|--filters|--show-signature|--output(?:=|$)|--open-files-in-pager(?:=|$)|-O|--no-index$|--contents(?:=|$)|--upload-pack|--exec(?:=|$))/u;
+const HELPER_LONG_FLAGS: ReadonlyArray<string> = [
+	"--ext-diff",
+	"--textconv",
+	"--filters",
+	"--show-signature",
+	"--output",
+	"--open-files-in-pager",
+	"--no-index",
+	"--contents",
+	"--upload-pack",
+	"--exec",
+];
+
+function helperFlag(arg: string): boolean {
+	if (arg.startsWith("--")) {
+		const name = (arg.split("=", 1)[0] ?? "").slice(2);
+		return name.length > 0 && HELPER_LONG_FLAGS.some((flag) => flag.slice(2).startsWith(name));
+	}
+	// -O[<pager>] runs a pager; an attached value (-Ocmd) is the same flag.
+	return arg.startsWith("-O");
+}
 
 /** Options `add` accepts in the task set; paths follow `--`. */
 const TASK_ADD_OPTIONS = new Set(["-A", "--all", "-u", "--update"]);
@@ -232,7 +255,7 @@ function subcommandClass(subcommand: string, args: ReadonlyArray<string>): { cla
 			? { class: "task-mutation", reason: "git commit -m on the current branch" }
 			: other(`${error}; only git commit -m <message> is in the task set`);
 	}
-	const helper = args.find((arg) => HELPER_FLAG.test(arg));
+	const helper = args.find(helperFlag);
 	const inspect = (reason: string) =>
 		helper === undefined
 			? { class: "inspect" as const, reason }
