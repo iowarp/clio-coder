@@ -100,7 +100,7 @@ describe("a granted call tells the model who granted it", () => {
 		const text = await grantedText("tool:one_shot");
 		ok(
 			text.startsWith(
-				"[operator approval] The operator approved this system_modify call once (rail: system-modify-confirm). The grant covers this call only; another call still needs its own approval. Say that the operator was asked and approved, not that the call ran without a prompt.\n",
+				"[operator approval] The operator approved this system_modify call once (rail: system-modify-confirm). The grant covers this call only; another call still needs its own approval. If you describe how this call ran, say the operator approved it, never that it ran without a prompt.\n",
 			),
 			text,
 		);

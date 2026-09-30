@@ -17,9 +17,11 @@
  * so only older records carry it. An escalation timeout always denies and
  * never releases a call; any source not named here gets the neutral wording.
  *
- * Every wording states the scope the registry already enforces: the grant
- * covers this call and nothing else, so the model cannot read it as standing
- * permission for a later one.
+ * The operator's own card already recorded the answer, so the operator notes
+ * are conditional: a model told to "say" the approval narrated it at the end of
+ * every reply (v0.6.0 flywheel s3, s6). Every wording states the scope the
+ * registry already enforces: the grant covers this call and nothing else, so
+ * the model cannot read it as standing permission for a later one.
  *
  * A call the System One gate parked also carries the gate's reason. The rail
  * id says which rail asked, but a gate park is a judgment of this command and
@@ -76,9 +78,9 @@ export function approvalNote(input: ApprovalNoteInput): string {
 	const call = `this ${input.actionClass} call`;
 	switch (input.requestedBy) {
 		case "tool:one_shot":
-			return `${OPERATOR_APPROVAL_NOTE_PREFIX} The operator approved ${call} once${rail}. ${SCOPE} Say that the operator was asked and approved, not that the call ran without a prompt.`;
+			return `${OPERATOR_APPROVAL_NOTE_PREFIX} The operator approved ${call} once${rail}. ${SCOPE} If you describe how this call ran, say the operator approved it, never that it ran without a prompt.`;
 		case "escalation:operator":
-			return `${OPERATOR_APPROVAL_NOTE_PREFIX} The operator approved ${call} once${rail}, through a forwarded worker escalation. ${SCOPE} Say that the operator was asked and approved, not that the call ran without a prompt.`;
+			return `${OPERATOR_APPROVAL_NOTE_PREFIX} The operator approved ${call} once${rail}, through a forwarded worker escalation. ${SCOPE} If you describe how this call ran, say the operator approved it, never that it ran without a prompt.`;
 		case "acp-client":
 			return `${APPROVAL_NOTE_PREFIX} The connected ACP client approved ${call} once${rail}. ${SCOPE} Say the client was asked and granted it, and do not claim this session's operator approved it.`;
 		case "grant:main":
