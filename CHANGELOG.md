@@ -4,6 +4,8 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## 0.5.9 - 2026-09-29
 
+Clio Coder 0.5.9 introduces experimental System One decisions. Typed decision calls, served by a hosted engine, a self-hosted `systemone` server or a configured chat model, can guide turn scope, dispatch and approval advisories, and an unfitted build runs in shadow. Model knowledge now comes from the serving server first, with packaged model profiles supplying the rest and labeled estimates where no window is reported. The Pi SDK moves to 0.99.1, bringing GPT-6.1 Sol through the `openai-codex` subscription and Sonnet 5.5 through `anthropic-max`. Settings files from earlier releases that stopped loading on a retired value such as `safety.autonomy: auto-edit` are previewed by `clio-coder doctor` and repaired by `clio-coder doctor --fix`.
+
 A `v0.5.8` tag was published on 2026-09-29 and withdrawn before the package reached npm. Its changes ship in 0.5.9.
 
 ### Turn control and workspace guidance
