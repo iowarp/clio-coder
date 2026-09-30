@@ -120,6 +120,7 @@ import {
 	resolveEndpointCapacities,
 	resolveModelCapabilities,
 	resolveRuntimeTarget,
+	runtimeEnforcement,
 	runtimeResolutionWarnings,
 	runtimeTargetSnapshot,
 	type TargetDescriptor,
@@ -1819,6 +1820,7 @@ function resolveDispatchPermit(
 	readOnly: boolean,
 	pathScope: DispatchPathScope,
 	settings: EffectiveSettings,
+	target: ResolvedTarget,
 ): WorkerPermit {
 	const contract = dispatchResultContract(req, recipe);
 	const hostHelper =
@@ -1838,6 +1840,14 @@ function resolveDispatchPermit(
 		...(req.inheritedPermitAllowance !== undefined ? { inherited: req.inheritedPermitAllowance } : {}),
 		mode: settings?.fleet.permissions.mode ?? "deny",
 		hostHelper,
+		runtime: {
+			id: target.runtime.id,
+			targetId: target.target.id,
+			enforcement: runtimeEnforcement(target.runtime),
+			// Read from the effective settings, the operator's configuration, never
+			// from anything the request or the model carries.
+			trustedUnmediated: settings?.targets.find((entry) => entry.id === target.target.id)?.trustedUnmediated === true,
+		},
 	});
 }
 
@@ -1849,6 +1859,7 @@ function receiptPermitSummary(permit: WorkerPermit): NonNullable<NonNullable<Run
 		git: permit.allowance.git,
 		asks: permit.allowance.asks,
 		approvalAuthority: permit.allowance.approvalAuthority,
+		...(permit.trustedUnmediated === true ? { trustedUnmediated: true as const } : {}),
 	};
 }
 
@@ -1857,14 +1868,17 @@ function assertRuntimeCanHonorWorkerPermissionMode(
 	onPermission: WorkerPermissionMode,
 ): void {
 	if (onPermission === "deny") return;
-	if (runtime.kind === "subprocess") {
+	// The runtime's enforcement descriptor decides (F10): fail needs per-call
+	// mediation, escalate also needs a call that can park and resume.
+	const enforcement = runtimeEnforcement(runtime);
+	if (!enforcement.perCallMediation) {
 		throw new Error(
 			`dispatch: runtime '${runtime.id}' cannot enforce fleet.permissions.mode='${onPermission}' because subprocess workers do not expose per-tool permission mediation; set fleet.permissions.mode='deny' or choose a mediated runtime`,
 		);
 	}
-	if (runtime.id === "claude-sdk" && onPermission === "escalate") {
+	if (onPermission === "escalate" && !enforcement.grantPauseResume) {
 		throw new Error(
-			"dispatch: runtime 'claude-sdk' cannot enforce fleet.permissions.mode='escalate' because its SDK permission callback cannot park for an operator decision; choose 'deny' or 'fail', or use a native mediated runtime",
+			`dispatch: runtime '${runtime.id}' cannot enforce fleet.permissions.mode='escalate' because its SDK permission callback cannot park for an operator decision; choose 'deny' or 'fail', or use a native mediated runtime`,
 		);
 	}
 }
@@ -1879,7 +1893,7 @@ function assertRuntimeCanHonorWorkerPermissionMode(
  */
 function assertWriteRootsEnforceable(runtime: RuntimeDescriptor, writeRoots: ReadonlyArray<string> | undefined): void {
 	if (!writeRoots || writeRoots.length === 0) return;
-	if (runtime.kind !== "subprocess") return;
+	if (runtimeEnforcement(runtime).scopeEnforcement) return;
 	throw new Error(
 		`dispatch: runtime '${runtime.id}' cannot enforce writeRoots: subprocess workers run their own tool surface without Clio per-tool mediation. Dispatch to a native or claude-sdk worker.`,
 	);
@@ -4270,7 +4284,7 @@ export function createDispatchBundle(
 		);
 		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target, pathScope.writeBoundaries.length > 0);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
-		const permit = resolveDispatchPermit(req, recipe, spec, effectiveTools, readOnly, pathScope, settings);
+		const permit = resolveDispatchPermit(req, recipe, spec, effectiveTools, readOnly, pathScope, settings, target);
 		const workerPermissionMode = workerPermissionModeForPermit(permit.allowance);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, workerPermissionMode);
 		const effectiveAdmission: DispatchAdmissionStage = {
@@ -4426,6 +4440,14 @@ export function createDispatchBundle(
 		if (req.readOnly === true && toolGovernance === "agent-managed") {
 			throw new Error(
 				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', which cannot enforce a read-only run; choose clio-coder-policy or deny-all governance`,
+			);
+		}
+		// Operator decision Q6: agent-managed governance approves every call the
+		// peer asks about, so Clio mediates nothing and the run needs the
+		// operator's explicit trust.
+		if (toolGovernance === "agent-managed" && configured.trustedUnmediated !== true) {
+			throw new Error(
+				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', so Clio cannot mediate its tool calls and it is refused write-capable work; choose clio-coder-policy or deny-all governance, or set trustedUnmediated: true on integrations.externalAgents.entries '${agentId}' to accept the agent's own authority`,
 			);
 		}
 		const admission = resolveDelegationAdmissionStage(req, safety);
@@ -5025,6 +5047,9 @@ export function createDispatchBundle(
 					toolCallsApproved: result.delegation.toolCallsApproved,
 					toolCallsDenied: result.delegation.toolCallsDenied,
 					toolGovernance: lifecycle.agentConfig.toolGovernance ?? "clio-coder-policy",
+					...(lifecycle.agentConfig.toolGovernance === "agent-managed" && lifecycle.agentConfig.trustedUnmediated === true
+						? { trustedUnmediated: true as const }
+						: {}),
 					toolCallLog: acp.toolCallLog(),
 				},
 				// The delegate's own ACP session id is recorded above as
@@ -7190,6 +7215,7 @@ export function createDispatchBundle(
 			req.readOnly === true || agentSpec.capabilityClass === "read-only",
 			pathScope,
 			settings,
+			target,
 		);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, workerPermissionModeForPermit(previewPermit.allowance));
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema, effectiveTools.length);

@@ -4,6 +4,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { turnDelegatesTool } from "../../core/turn-constraints.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
+import type { RuntimeEnforcement } from "../providers/index.js";
 import { classify } from "./action-classifier.js";
 import type { ApprovalAuthority } from "./admission.js";
 
@@ -36,6 +37,8 @@ export interface WorkerPermitCeiling {
 	tools: ReadonlyArray<string>;
 	readOnly: boolean;
 	writeRoots: ReadonlyArray<string>;
+	/** What the selected runtime itself enforces for this run. */
+	enforcement: RuntimeEnforcement;
 }
 
 export interface WorkerPermitAllowance {
@@ -53,7 +56,13 @@ export interface WorkerPermit {
 	version: typeof WORKER_PERMIT_VERSION;
 	ceiling: WorkerPermitCeiling;
 	allowance: WorkerPermitAllowance;
-	/** sha256 over the canonical ceiling and allowance. */
+	/**
+	 * Present when an unmediated runtime took write-capable work because the
+	 * operator marked its target trusted: the runtime's own authority, not
+	 * Clio's per-call mediation, governed the run.
+	 */
+	trustedUnmediated?: true;
+	/** sha256 over the canonical ceiling, allowance and trust opt-in. */
 	digest: string;
 }
 
@@ -199,6 +208,8 @@ export interface WorkerPermitInput {
 	mode: WorkerPermissionMode;
 	/** True when the host selected an internal helper protocol for this run. */
 	hostHelper?: boolean;
+	/** The selected runtime and target, and whether the operator trusts it unmediated. */
+	runtime: { id: string; targetId: string; enforcement: RuntimeEnforcement; trustedUnmediated: boolean };
 }
 
 function canonical(value: unknown): string {
@@ -212,9 +223,19 @@ function canonical(value: unknown): string {
 	return JSON.stringify(value);
 }
 
-function workerPermitDigest(ceiling: WorkerPermitCeiling, allowance: WorkerPermitAllowance): string {
+function workerPermitDigest(
+	ceiling: WorkerPermitCeiling,
+	allowance: WorkerPermitAllowance,
+	trustedUnmediated: boolean,
+): string {
+	const payload = {
+		version: WORKER_PERMIT_VERSION,
+		ceiling,
+		allowance,
+		...(trustedUnmediated ? { trustedUnmediated } : {}),
+	};
 	return createHash("sha256")
-		.update(`clio-coder.workerPermit:${canonical({ version: WORKER_PERMIT_VERSION, ceiling, allowance })}`, "utf8")
+		.update(`clio-coder.workerPermit:${canonical(payload)}`, "utf8")
 		.digest("hex");
 }
 
@@ -239,6 +260,14 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 	if (declarationErrors.length > 0) throw new WorkerPermitAdmissionError(`${who}: ${declarationErrors.join("; ")}`);
 	const ceilingErrors = capabilityClassCeilingErrors(input.capabilityClass, input.tools);
 	if (ceilingErrors.length > 0) throw new WorkerPermitAdmissionError(`${who}: ${ceilingErrors.join("; ")}`);
+	// Operator decision Q6: a runtime Clio cannot mediate per call takes
+	// write-capable work only when its target is explicitly trusted.
+	const unmediatedWrite = !input.readOnly && !input.runtime.enforcement.perCallMediation;
+	if (unmediatedWrite && !input.runtime.trustedUnmediated) {
+		throw new WorkerPermitAdmissionError(
+			`runtime '${input.runtime.id}' runs its own tool loop and Clio cannot mediate its individual calls, so it is refused write-capable work; dispatch a read-only run, choose a native or claude-sdk target, or set trustedUnmediated: true on target '${input.runtime.targetId}' in settings.yaml to accept the runtime's own authority`,
+		);
+	}
 
 	const route = askRouteForMode(input.mode);
 	const baseAsks = input.declared?.asks ?? route.asks;
@@ -267,17 +296,19 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 		tools: [...new Set(input.tools.filter((tool) => turnDelegatesTool(input.turnConstraints, tool)))].sort(),
 		readOnly: input.readOnly,
 		writeRoots: [...input.writeRoots],
+		enforcement: { ...input.runtime.enforcement },
 	};
 	const allowance: WorkerPermitAllowance = { git, asks, approvalAuthority };
 	return Object.freeze({
 		version: WORKER_PERMIT_VERSION,
+		...(unmediatedWrite ? { trustedUnmediated: true as const } : {}),
 		ceiling: Object.freeze({
 			...ceiling,
 			tools: Object.freeze([...ceiling.tools]),
 			writeRoots: Object.freeze([...ceiling.writeRoots]),
 		}),
 		allowance: Object.freeze(allowance),
-		digest: workerPermitDigest(ceiling, allowance),
+		digest: workerPermitDigest(ceiling, allowance, unmediatedWrite),
 	});
 }
 

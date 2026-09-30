@@ -23,6 +23,15 @@ const claudeSdkRuntime: RuntimeDescriptor = {
 	headlessCommand: "@anthropic-ai/claude-agent-sdk query()",
 	outputParser: "claude-agent-sdk-messages",
 	defaultCapabilities: claudeCodeCapabilities,
+	// canUseTool admits every SDK tool call through the shared evaluator, but the
+	// callback cannot park a call for a later decision.
+	enforcement: {
+		perCallMediation: true,
+		toolNarrowing: "exact",
+		scopeEnforcement: true,
+		grantPauseResume: false,
+		cancellation: true,
+	},
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthesizeClaudeDelegatedModel({
 			target,

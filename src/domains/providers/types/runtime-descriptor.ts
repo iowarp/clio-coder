@@ -148,6 +148,24 @@ export interface ReasoningProbeResult {
 	error?: string;
 }
 
+/**
+ * What Clio itself enforces for a worker on this runtime. A runtime that runs
+ * its own tool loop declares none of the per-call guarantees, whatever its own
+ * permission modes promise.
+ */
+export interface RuntimeEnforcement {
+	/** Clio admits each tool call before it runs. */
+	perCallMediation: boolean;
+	/** Whether Clio can narrow the tool surface to the exact admitted set. */
+	toolNarrowing: "exact" | "none";
+	/** Write roots and path policy are judged per call. */
+	scopeEnforcement: boolean;
+	/** A call can park for a decision and resume on the answer. */
+	grantPauseResume: boolean;
+	/** A live run can be cancelled. */
+	cancellation: boolean;
+}
+
 export interface RuntimeDescriptor {
 	id: string;
 	/** Deprecated or compatibility ids that resolve to this descriptor object. */
@@ -198,6 +216,12 @@ export interface RuntimeDescriptor {
 	 * in CapabilityFlags stays false because Clio neither sends nor observes
 	 * typed calls on this path; this field records the distinct external fact.
 	 */
+	/**
+	 * Worker-permit guarantees this runtime can honor. HTTP runtimes run in the
+	 * native worker and need no declaration; any other runtime that omits it is
+	 * treated as unmediated (see runtime-enforcement.ts).
+	 */
+	enforcement?: RuntimeEnforcement;
 	externalAgentLoop?: {
 		tools: "externally-governed-unobserved";
 		network: "externally-governed-unobserved";

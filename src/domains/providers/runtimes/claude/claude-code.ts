@@ -1,5 +1,5 @@
 import type { Api, Model } from "../../../../engine/types.js";
-
+import { UNMEDIATED_ENFORCEMENT } from "../../runtime-enforcement.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
@@ -23,6 +23,7 @@ const claudeCodeRuntime: RuntimeDescriptor = {
 	headlessCommand: "claude -p --output-format stream-json",
 	outputParser: "claude-code-stream-json",
 	defaultCapabilities: claudeCodeCapabilities,
+	enforcement: UNMEDIATED_ENFORCEMENT,
 	// The Claude CLI runs its own tool loop. Clio observes only the stream, so a
 	// declared per-tool budget is recorded as external-one-shot, never enforced.
 	externalAgentLoop: {

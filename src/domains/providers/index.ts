@@ -123,6 +123,7 @@ export {
 	resolveModelReference,
 	splitThinkingSuffix,
 } from "./resolver.js";
+export { runtimeEnforcement, UNMEDIATED_ENFORCEMENT } from "./runtime-enforcement.js";
 export {
 	type ContextWindowDetails,
 	type ContextWindowSource,
@@ -185,6 +186,7 @@ export type {
 	RuntimeApiFamily,
 	RuntimeAuth,
 	RuntimeDescriptor,
+	RuntimeEnforcement,
 	RuntimeKind,
 	RuntimeTier,
 } from "./types/runtime-descriptor.js";

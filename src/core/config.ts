@@ -676,6 +676,7 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 		"litellm",
 		"ollama",
 		"maxConcurrentRequests",
+		"trustedUnmediated",
 	]);
 	const id = "id" in value ? expectString(issues, `${path}.id`, value.id) : undefined;
 	const runtime = "runtime" in value ? expectString(issues, `${path}.runtime`, value.runtime) : undefined;
@@ -831,6 +832,10 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 	if ("maxConcurrentRequests" in value) {
 		const v = expectInteger(issues, `${path}.maxConcurrentRequests`, value.maxConcurrentRequests, { min: 1 });
 		if (v !== undefined) target.maxConcurrentRequests = v;
+	}
+	if ("trustedUnmediated" in value) {
+		const v = expectBoolean(issues, `${path}.trustedUnmediated`, value.trustedUnmediated);
+		if (v !== undefined) target.trustedUnmediated = v;
 	}
 	return target;
 }
@@ -1168,6 +1173,7 @@ function validateExternalAgent(
 		"permissionTimeoutMs",
 		"stallTimeoutMs",
 		"toolGovernance",
+		"trustedUnmediated",
 		"projectContext",
 		"labels",
 	]);
@@ -1218,6 +1224,10 @@ function validateExternalAgent(
 			RETIRED_TOOL_GOVERNANCE_VALUES,
 		);
 		if (parsed !== undefined) agent.toolGovernance = parsed;
+	}
+	if ("trustedUnmediated" in value) {
+		const parsed = expectBoolean(issues, `${path}.trustedUnmediated`, value.trustedUnmediated);
+		if (parsed !== undefined) agent.trustedUnmediated = parsed;
 	}
 	if ("projectContext" in value) {
 		const parsed = expectEnum(issues, `${path}.projectContext`, value.projectContext, ["none", "bounded"] as const);

@@ -217,7 +217,10 @@ test("external edits distinguish current checkout, preserved worktree, and faile
 	);
 	chmodSync(executable, 0o755);
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.targets = [{ id: "codex-test", runtime: "codex-cli", defaultModel: "codex-cli-default" }];
+	// Write-capable work on an unmediated CLI needs the operator's explicit trust (Q6).
+	settings.targets = [
+		{ id: "codex-test", runtime: "codex-cli", defaultModel: "codex-cli-default", trustedUnmediated: true },
+	];
 	settings.fleet.default.target = "codex-test";
 	settings.fleet.default.model = "codex-cli-default";
 	settings.fleet.retry.maxRetries = 0;
@@ -330,18 +333,26 @@ for (const event of [
 			}),
 			/denyTools cannot be enforced on an external CLI target/,
 		);
-		const run = await bundle.contract.dispatch({
+		const writeRequest = {
 			agentId: "coder",
 			target: "codex-test",
 			task: "Create proof.txt",
 			cwd: root,
 
-			executionRole: "builder",
-			requestOrigin: "user",
-			worktree: true,
-			apply: "preserve",
-		});
+			executionRole: "builder" as const,
+			requestOrigin: "user" as const,
+			worktree: true as const,
+			apply: "preserve" as const,
+		};
+		// Codex runs its own tool loop, so write-capable work is refused until the
+		// operator marks the target trusted-unmediated, and the opt-in is sealed.
+		await rejects(bundle.contract.dispatch(writeRequest), /refused write-capable work.*trustedUnmediated: true/u);
+		const target = settings.targets[0];
+		ok(target);
+		target.trustedUnmediated = true;
+		const run = await bundle.contract.dispatch(writeRequest);
 		const receipt = await run.finalPromise;
+		equal(receipt.safety?.permit?.trustedUnmediated, true);
 		equal(
 			receipt.outcome,
 			"succeeded",

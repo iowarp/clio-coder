@@ -47,6 +47,18 @@ function input(overrides: Partial<WorkerPermitInput> = {}): WorkerPermitInput {
 		readOnly: false,
 		writeRoots: [],
 		mode: "deny",
+		runtime: {
+			id: "native-fixture",
+			targetId: "native-fixture",
+			enforcement: {
+				perCallMediation: true,
+				toolNarrowing: "exact",
+				scopeEnforcement: true,
+				grantPauseResume: true,
+				cancellation: true,
+			},
+			trustedUnmediated: false,
+		},
 		...overrides,
 	};
 }

@@ -619,6 +619,8 @@ export interface RunReceiptDelegation {
 	toolCallsApproved: number;
 	toolCallsDenied: number;
 	toolGovernance: "clio-coder-policy" | "agent-managed" | "deny-all";
+	/** Present when agent-managed governance ran under the operator's trustedUnmediated opt-in. */
+	trustedUnmediated?: true;
 	toolCallLog: DelegationToolCallLogEntry[];
 }
 
@@ -704,6 +706,8 @@ export interface RunReceiptSafetySummary {
 		git: "inspect" | "worktree";
 		asks: "deny" | "fail" | "main";
 		approvalAuthority: "main" | "operator";
+		/** The operator's trustedUnmediated opt-in let an unmediated runtime take write-capable work. */
+		trustedUnmediated?: true;
 	};
 }
 

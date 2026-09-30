@@ -3,6 +3,7 @@ import { runCommandVector } from "../../../core/safe-exec.js";
 import type { Api, Model } from "../../../engine/types.js";
 
 import { synthesizeCatalogBackedModel } from "../catalog.js";
+import { UNMEDIATED_ENFORCEMENT } from "../runtime-enforcement.js";
 import type { CapabilityFlags } from "../types/capability-flags.js";
 import type { KnowledgeBaseHit } from "../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../types/runtime-descriptor.js";
@@ -74,6 +75,9 @@ export function createExternalCliRuntime(recipe: CliRuntimeRecipe): RuntimeDescr
 		headlessCommand: recipe.headlessCommand,
 		outputParser: recipe.outputParser,
 		defaultCapabilities: opaqueCliCapabilities,
+		// Codex, Pi and OpenCode run their own tools; their sandbox or read-only
+		// modes are the CLI's authority, not Clio per-call mediation.
+		enforcement: UNMEDIATED_ENFORCEMENT,
 		externalAgentLoop: {
 			tools: "externally-governed-unobserved",
 			network: "externally-governed-unobserved",

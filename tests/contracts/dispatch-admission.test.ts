@@ -711,7 +711,8 @@ describe("dispatch admission boundary", () => {
 
 	it("admits a budget-declaring recipe on a Claude CLI target as an external one-shot budget", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.targets = [{ id: "claude-worker", runtime: "claude-code", defaultModel: "sonnet" }];
+		// An artifact-write run on an unmediated CLI needs the operator's trust (Q6).
+		settings.targets = [{ id: "claude-worker", runtime: "claude-code", defaultModel: "sonnet", trustedUnmediated: true }];
 		settings.fleet.default.target = "claude-worker";
 		settings.fleet.default.model = "sonnet";
 		const spawn = (runtime: RuntimeDescriptor) => {

@@ -403,6 +403,7 @@ function validateTarget(value: unknown, runtimeId: string, runtimeAliases: Reado
 	readOptionalString(target, "defaultModel", "WorkerSpec.target");
 	readOptionalStringArray(target, "wireModels", "WorkerSpec.target");
 	readOptionalBoolean(target, "gateway", "WorkerSpec.target");
+	readOptionalBoolean(target, "trustedUnmediated", "WorkerSpec.target");
 	readOptionalEnum(target, "lifecycle", "WorkerSpec.target", TARGET_LIFECYCLES);
 	if (target.auth !== undefined) validateTargetAuth(target.auth);
 	if (target.pricing !== undefined) validateTargetPricing(target.pricing);
@@ -685,12 +686,27 @@ function exactKeys(record: Record<string, unknown>, keys: ReadonlyArray<string>,
  */
 function validateWorkerPermit(spec: Record<string, unknown>): void {
 	const permit = readRecord(spec.permit, "WorkerSpec.permit");
-	exactKeys(permit, ["version", "ceiling", "allowance", "digest"], "WorkerSpec.permit");
+	exactKeys(permit, ["version", "ceiling", "allowance", "digest", "trustedUnmediated"], "WorkerSpec.permit");
+	if (permit.trustedUnmediated !== undefined && permit.trustedUnmediated !== true) {
+		throw new Error("WorkerSpec.permit.trustedUnmediated must be true when present");
+	}
 	if (permit.version !== 1) throw new Error("WorkerSpec.permit.version must be 1");
 	const digest = readString(permit.digest, "WorkerSpec.permit.digest");
 	if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error("WorkerSpec.permit.digest must be a sha256 hex digest");
 	const ceiling = readRecord(permit.ceiling, "WorkerSpec.permit.ceiling");
-	exactKeys(ceiling, ["capabilityClass", "tools", "readOnly", "writeRoots"], "WorkerSpec.permit.ceiling");
+	exactKeys(ceiling, ["capabilityClass", "tools", "readOnly", "writeRoots", "enforcement"], "WorkerSpec.permit.ceiling");
+	const enforcement = readRecord(ceiling.enforcement, "WorkerSpec.permit.ceiling.enforcement");
+	exactKeys(
+		enforcement,
+		["perCallMediation", "toolNarrowing", "scopeEnforcement", "grantPauseResume", "cancellation"],
+		"WorkerSpec.permit.ceiling.enforcement",
+	);
+	for (const key of ["perCallMediation", "scopeEnforcement", "grantPauseResume", "cancellation"]) {
+		if (typeof enforcement[key] !== "boolean") {
+			throw new Error(`WorkerSpec.permit.ceiling.enforcement.${key} must be a boolean`);
+		}
+	}
+	readEnum(enforcement.toolNarrowing, "WorkerSpec.permit.ceiling.enforcement.toolNarrowing", ["exact", "none"] as const);
 	readEnum(ceiling.capabilityClass, "WorkerSpec.permit.ceiling.capabilityClass", PERMIT_CAPABILITY_CLASSES);
 	readStringArray(ceiling.tools, "WorkerSpec.permit.ceiling.tools");
 	if (typeof ceiling.readOnly !== "boolean") throw new Error("WorkerSpec.permit.ceiling.readOnly must be a boolean");

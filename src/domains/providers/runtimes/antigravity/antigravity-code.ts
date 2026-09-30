@@ -3,6 +3,7 @@ import { runCommandVector, type SafeCommandResult } from "../../../../core/safe-
 import type { Api, Model } from "../../../../engine/types.js";
 
 import { synthesizeCatalogBackedModel } from "../../catalog.js";
+import { UNMEDIATED_ENFORCEMENT } from "../../runtime-enforcement.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
@@ -237,6 +238,7 @@ const antigravityCodeRuntime: RuntimeDescriptor = {
 	headlessCommand: "agy --input-format stream-json --output-format stream-json",
 	outputParser: "antigravity-stream-json",
 	defaultCapabilities: antigravityCapabilities,
+	enforcement: UNMEDIATED_ENFORCEMENT,
 	externalAgentLoop: {
 		tools: "externally-governed-unobserved",
 		network: "externally-governed-unobserved",

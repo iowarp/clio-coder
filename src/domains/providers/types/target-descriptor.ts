@@ -118,4 +118,11 @@ export interface TargetDescriptor {
 	ollama?: OllamaTargetSettings;
 	/** Explicit request-slot limit for this inference endpoint. It overrides live discovery. */
 	maxConcurrentRequests?: number;
+	/**
+	 * Operator opt-in that lets a runtime Clio cannot mediate per call (a
+	 * subprocess CLI) take write-capable worker runs. Without it such runs are
+	 * refused; with it the receipt records that the runtime's own authority
+	 * governed the run (operator decision Q6).
+	 */
+	trustedUnmediated?: boolean;
 }

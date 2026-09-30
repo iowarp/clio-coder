@@ -398,6 +398,12 @@ export interface DelegationAgentConfig {
 	stallTimeoutMs?: number;
 	toolGovernance?: DelegationToolGovernance;
 	/**
+	 * Operator opt-in for toolGovernance agent-managed, where the peer decides
+	 * its own tool calls: without it such a delegation is refused, and with it
+	 * the receipt records the opt-in (operator decision Q6).
+	 */
+	trustedUnmediated?: boolean;
+	/**
 	 * Project context sent to this external agent as a dynamic message.
 	 * Defaults to "none": repo conventions/invariants never leave the machine
 	 * unless the operator opts this agent into the bounded projection.
