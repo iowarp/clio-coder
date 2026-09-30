@@ -114,11 +114,22 @@ export type SandboxedSpawnPlan =
  * backend runs directly and says so once on stderr, which the dispatcher keeps
  * as worker diagnostics; `required` without a backend refuses the command.
  */
-export function planSandboxedSpawn(command: SandboxCommand, cwd: string): SandboxedSpawnPlan {
+export function planSandboxedSpawn(
+	command: SandboxCommand,
+	cwd: string,
+	typedGitWritablePaths: ReadonlyArray<string> = [],
+): SandboxedSpawnPlan {
 	const policy = active;
 	if (policy === null) return { kind: "direct" };
 	const availability = sandboxAvailability();
-	const invocation = composeWorkerSandboxInvocation(policy, command, cwd, availability);
+	// v060 review F1: only the typed Git seam supplies metadata writes, scoped
+	// to this invocation; ordinary commands cannot inherit them from a spec.
+	const invocation = composeWorkerSandboxInvocation(
+		{ ...policy, gitWritablePaths: typedGitWritablePaths },
+		command,
+		cwd,
+		availability,
+	);
 	if (invocation !== null) return { kind: "sandboxed", file: invocation.file, args: invocation.args };
 	const reason = availability.reason ?? "no sandbox backend";
 	if (policy.mode === "required") {

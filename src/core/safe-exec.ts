@@ -113,6 +113,8 @@ export interface RunCommandVectorOptions {
 	maxOutputBytes?: number;
 	signal?: AbortSignal;
 	env?: Record<string, string>;
+	/** Trusted typed Git metadata writes for this invocation only (v060 review F1). */
+	typedGitWritablePaths?: ReadonlyArray<string>;
 	output?: SafeCommandOutputSink;
 	/**
 	 * Milliseconds between SIGTERM and SIGKILL when the runner stops the
@@ -482,7 +484,7 @@ export function runCommandVector(
 		// Inside a dispatched worker the vector runs under the worker's OS
 		// sandbox (decision Q8). The result keeps the requested file and argv so
 		// receipts and verification evidence describe the command, not bwrap.
-		const sandbox = planSandboxedSpawn({ argv: [file, ...args] }, cwd);
+		const sandbox = planSandboxedSpawn({ argv: [file, ...args] }, cwd, options.typedGitWritablePaths);
 		if (sandbox.kind === "refused") {
 			settled = true;
 			resolve({

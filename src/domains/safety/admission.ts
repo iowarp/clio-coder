@@ -126,6 +126,8 @@ export interface AdmissionGitContext {
 	hooksInsideWorkingTree(cwd: string): boolean;
 	/** The task worktree this run owns; absent when the run works in a shared checkout. */
 	taskWorktree?: {
+		/** Host-resolved metadata writes used only by the typed Git execution seam. */
+		typedGitWritablePaths?: ReadonlyArray<string>;
 		/** Re-checks ownership, the common Git directory and HEAD on the task branch for a command run in `cwd`. */
 		attest(cwd: string): TaskWorktreeAttestation;
 	};

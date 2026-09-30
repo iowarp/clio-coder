@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { buildSafeToolEnv } from "../core/safe-exec.js";
+import { readTaskWorktreeGitLayout, taskWorktreeGitWritablePaths } from "../core/sandbox/worktree-git.js";
 import type { AdmissionGitContext } from "../domains/safety/admission.js";
 import { classifyGitArgv, literalGitPathError } from "../domains/safety/git-policy.js";
 import type { WorkerGitAllowance } from "../domains/safety/worker-permit.js";
@@ -173,13 +174,21 @@ export function createWorkerGitContext(input: {
 	taskWorktree?: TaskWorktree;
 }): AdmissionGitContext {
 	const worktree = input.taskWorktree;
+	const layout = worktree === undefined ? null : readTaskWorktreeGitLayout(worktree.path);
 	return {
 		allowance: input.allowance,
 		executePermitted: input.executePermitted,
 		cwd: input.cwd,
 		hooksInsideWorkingTree: gitHooksInsideWorkingTree,
 		...(worktree !== undefined
-			? { taskWorktree: { attest: (cwd: string) => attestTaskWorktreeCwd(worktree, cwd) } }
+			? {
+					taskWorktree: {
+						attest: (cwd: string) => attestTaskWorktreeCwd(worktree, cwd),
+						...(layout !== null
+							? { typedGitWritablePaths: Object.freeze(taskWorktreeGitWritablePaths(layout, worktree.branch)) }
+							: {}),
+					},
+				}
 			: {}),
 	};
 }

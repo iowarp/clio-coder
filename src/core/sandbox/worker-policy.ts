@@ -7,7 +7,7 @@ import {
 	WORKER_SANDBOX_SPEC_VERSION,
 	type WorkerSandboxSpec,
 } from "./types.js";
-import { readTaskWorktreeGitLayout, taskWorktreeGitWritablePaths } from "./worktree-git.js";
+import { readTaskWorktreeGitLayout } from "./worktree-git.js";
 
 export interface WorkerSandboxPolicyInput {
 	mode: SandboxMode;
@@ -51,10 +51,6 @@ export function resolveWorkerSandboxSpec(input: WorkerSandboxPolicyInput): Worke
 			? [...input.writeBoundaries]
 			: [input.taskWorktree?.path ?? input.cwd];
 	const layout = input.taskWorktree === undefined ? null : readTaskWorktreeGitLayout(input.taskWorktree.path);
-	const gitWritablePaths =
-		layout !== null && input.taskWorktree !== undefined && !input.readOnly
-			? taskWorktreeGitWritablePaths(layout, input.taskWorktree.branch)
-			: [];
 	const readableRoots = [
 		input.cwd,
 		...(input.taskWorktree !== undefined ? [input.taskWorktree.path] : []),
@@ -65,7 +61,7 @@ export function resolveWorkerSandboxSpec(input: WorkerSandboxPolicyInput): Worke
 		mode: input.mode,
 		writableRoots,
 		readOnlyPaths: [...new Set(writableRoots.flatMap(protectedInside))],
-		gitWritablePaths,
+		gitWritablePaths: [],
 		readableRoots: [...new Set(readableRoots)],
 		network: workerSandboxNetwork(input.allowedTools, input.networkSetting),
 	};

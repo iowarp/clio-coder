@@ -62,7 +62,7 @@ export async function runVectorTool(
 	file: string,
 	vectorArgs: ReadonlyArray<string>,
 	args: Record<string, unknown>,
-	options?: { signal?: AbortSignal; env?: Record<string, string> },
+	options?: { signal?: AbortSignal; env?: Record<string, string>; typedGitWritablePaths?: ReadonlyArray<string> },
 ): Promise<ToolResult> {
 	const timeoutMs = timeoutArg(args);
 	const maxOutputBytes = maxOutputArg(args);
@@ -72,6 +72,7 @@ export async function runVectorTool(
 		if (cwd !== undefined) runOptions.cwd = cwd;
 		if (options?.signal !== undefined) runOptions.signal = options.signal;
 		if (options?.env !== undefined) runOptions.env = options.env;
+		if (options?.typedGitWritablePaths !== undefined) runOptions.typedGitWritablePaths = options.typedGitWritablePaths;
 		const result = await runCommandVector(file, vectorArgs, runOptions);
 		const output = truncateUtf8(combineSafeOutput(result), maxOutputBytes, TRUNCATION_MARKER);
 		const details = resultDetails(result);
@@ -144,8 +145,8 @@ async function runTypedGitMutation(
 		return { kind: "error", message: `git: op ${op} built an argv outside the task set; nothing ran` };
 	}
 	const context = options?.gitContext;
-	if (context !== undefined && options?.approval === undefined) {
-		if (!context.executePermitted && context.hooksInsideWorkingTree(cwd)) {
+	if (context !== undefined && (options?.approval === undefined || context.allowance === "worktree")) {
+		if (options?.approval === undefined && !context.executePermitted && context.hooksInsideWorkingTree(cwd)) {
 			return {
 				kind: "error",
 				message: `git: op ${op} would run repository hooks from inside the working tree and this permit has no execute capability; nothing ran`,
@@ -175,6 +176,9 @@ async function runTypedGitMutation(
 	const env = typedGitEnv(config, op === "add" ? { GIT_LITERAL_PATHSPECS: "1" } : {});
 	return runVectorTool("git", "git", argv, args, {
 		...(options?.signal !== undefined ? { signal: options.signal } : {}),
+		...(context?.allowance === "worktree" && context.taskWorktree?.typedGitWritablePaths !== undefined
+			? { typedGitWritablePaths: context.taskWorktree.typedGitWritablePaths }
+			: {}),
 		env,
 	});
 }
