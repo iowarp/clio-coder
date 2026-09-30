@@ -1087,6 +1087,70 @@ describe("safety gate boundary", () => {
 		strictEqual(policy.evaluate({ tool: ToolNames.Read, args: { path: "notes.txt" } }).kind, "allow");
 	});
 
+	function writeInspectionFixture(): void {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		for (const file of ["package.json", "README.md", "a.txt", "src/a.js", "src/duration.js"]) {
+			writeFileSync(join(scratch, file), "// TODO\n");
+		}
+	}
+
+	it("never recognizes read-only shell forms that expand, execute, recurse or follow links", () => {
+		writeInspectionFixture();
+		const policy = engine();
+		for (const command of [
+			"cat ~akougkas/.ssh/id_rsa",
+			"cat {~,x}/.aws/credentials",
+			"cat $'\\x2fetc/passwd'",
+			"cat .e*",
+			"cat .e*''",
+			"cat .[e]nv",
+			"cat .e{n,n}v",
+			"cat <(touch pwn)",
+			"echo hi | cat >(touch x)",
+			"grep -r API_KEY .",
+			"grep -rn API_KEY .",
+			"grep -d recurse API_KEY .",
+			"grep --directories=recurse x .",
+			"sort --out=o.txt a.txt",
+			"tail --fo a.txt",
+			"file --compil",
+			"find -L . -name x",
+			"tree -l",
+			"du -L .",
+			"ls --dereference",
+			"ls -L && cat a.txt",
+			"rg x",
+			"rg x src/",
+			"rg -e x .",
+			"cat a.txt | rg -f p",
+		]) {
+			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+			strictEqual(decision.execRecognition !== "recognized", true, command);
+		}
+	});
+
+	it("keeps everyday read-only openers recognized", () => {
+		writeInspectionFixture();
+		const policy = engine();
+		for (const command of [
+			"ls src/ && cat package.json",
+			'find . -name "*.test.js" -o -name "*.spec.js" | head -5',
+			"ls -la && find src test | head",
+			"ls; cat README.md; git log --oneline -3",
+			"cat package.json 2>/dev/null",
+			"npm test 2>&1 | tail -30",
+			"grep -n TODO src/duration.js | wc -l",
+			"sed -n '1,20p' src/duration.js",
+			"git log --oneline | head -3",
+			'cd pkg && git branch -a && echo "---X---" && git status && cat ../src/a.js',
+			"git log | rg foo",
+			"rg -n TODO src/a.js",
+		]) {
+			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+			strictEqual(decision.execRecognition, "recognized", command);
+		}
+	});
+
 	it("keeps /etc and /var system roots where macOS lands them, under /private", () => {
 		// A write is classified where it lands, and on macOS /etc and /var are
 		// links into /private, so a workspace opened in /etc there is /private/etc.
