@@ -84,6 +84,7 @@ import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import {
 	INTERNAL_HELPER_RESULT_KINDS,
+	resultContractAuthorship,
 	validateRecipeResult,
 	validateStructuredHelperResult,
 } from "../agents/result-contract.js";
@@ -7218,6 +7219,13 @@ export function createDispatchBundle(
 						worktree: req.taskWorktree,
 						apply: req.apply ?? "merge",
 						protectedPaths: getProtectedArtifactState().artifacts.map((artifact) => artifact.path),
+						commitMessage:
+							appliedResultContract !== null && resultValidation?.conformance === "pass"
+								? resultContractAuthorship(
+										appliedResultContract,
+										capturedOutput?.state === "final" ? capturedOutput.text : null,
+									).commitMessage
+								: null,
 					});
 					if (worktreeReceipt.reason !== undefined) {
 						finalOutcome = "failed";

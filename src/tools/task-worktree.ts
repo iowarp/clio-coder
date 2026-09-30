@@ -496,11 +496,19 @@ export function applyTaskWorktree(input: {
 	worktree: TaskWorktree;
 	apply: TaskWorktreeApply;
 	protectedPaths?: ReadonlyArray<string>;
+	/** The worker's validated `commitMessage`; a merge lands it on the operator's branch. */
+	commitMessage?: string | null;
 }): TaskWorktreeReceipt {
 	const { worktree } = input;
 	const before = checkTaskWorktreeHead(worktree);
 	if (!before.ok) return headMovedReceipt(worktree, input.apply, before.detail);
-	commitWorktreePath(worktree.path, COMMIT_IDENTITY, `Clio Coder task ${worktree.runId}`);
+	const taskLine = `Clio Coder task ${worktree.runId}`;
+	const authored = input.commitMessage?.trim();
+	commitWorktreePath(
+		worktree.path,
+		COMMIT_IDENTITY,
+		authored !== undefined && authored.length > 0 ? `${authored}\n\n${taskLine}` : taskLine,
+	);
 	// Pin the commit the snapshot produced. Everything after this reads and
 	// merges that immutable id, so a branch moved later cannot swap it (F5).
 	const pinned = checkTaskWorktreeHead(worktree);
