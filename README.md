@@ -34,6 +34,16 @@ mixed-language builds, Clio also supports general software development. Chat and
 workers can use different models on your workstation, an institutional gateway,
 or a cloud service. Clio is open-source, pre-1.0 software with active development.
 
+**Experimental software.** Clio Coder is pre-1.0. Settings, commands and interfaces may change between
+minor releases, so read the [changelog](CHANGELOG.md) before upgrading. For
+global npm, pnpm and bun installs, the interactive terminal UI checks the npm
+registry at most once a day and shows a notice when a newer release is out; a
+pre-release install also checks the `beta` channel. Run `clio-coder upgrade`, or
+`/upgrade` in the terminal UI, to update a global npm install; for pnpm and bun
+the same commands print the package-manager command to run. Report problems in
+[GitHub issues](https://github.com/iowarp/clio-coder/issues). Contributions are
+welcome; start with the [contributor guide](CONTRIBUTING.md).
+
 ## Get started
 
 Requires **Node.js 22.19 or newer** and a model with tool calling. Linux and macOS
