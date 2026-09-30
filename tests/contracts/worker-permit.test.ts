@@ -90,10 +90,10 @@ describe("worker permit", () => {
 		strictEqual(resolveWorkerPermit(input({ mode: "fail" })).allowance.asks, "fail");
 	});
 
-	it("records the explicit main opt-in with main authority but refuses to route it before grants exist", () => {
+	it("records the explicit main opt-in with main authority and parks its asks for the grant broker", () => {
 		const main = resolveWorkerPermit(input({ mode: "main" }));
 		deepStrictEqual(main.allowance, { git: "inspect", asks: "main", approvalAuthority: "main" });
-		strictEqual(workerPermissionModeForPermit(main.allowance), "deny");
+		strictEqual(workerPermissionModeForPermit(main.allowance), "escalate");
 		strictEqual(mainGrantsUnavailable(main.allowance), true);
 		// A recipe routing asks to main never raises who decides them.
 		const declared = resolveWorkerPermit(input({ mode: "deny", declared: { asks: "main" } }));

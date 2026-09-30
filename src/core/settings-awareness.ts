@@ -16,7 +16,7 @@ function describeSettingsPosture(settings: Readonly<ClioSettings>): string {
 		settings.fleet.permissions.mode === "escalate"
 			? "Workers ask you when a call needs approval; unanswered requests follow the configured timeout and fallback."
 			: settings.fleet.permissions.mode === "main"
-				? "Worker asks are routed for the main agent to decide; main-agent grants are not available yet, so each such call is denied and the worker can continue with allowed work."
+				? "Native local workers route ordinary asks to the main agent, which grants them at yolo and forwards them to you otherwise; operator rails always come to you, and a request nobody can answer is denied."
 				: settings.fleet.permissions.mode === "fail"
 					? "Workers stop their run when a call needs approval."
 					: "Workers follow their allowed tool and safety policy; a call needing approval is denied and the worker can continue with allowed work.";

@@ -47,7 +47,8 @@ export interface WorkerPermitAllowance {
 	/**
 	 * Who decides an ask routed to `main`. `operator` is the legacy escalate
 	 * route: the main agent's card, always decided by a person. `main` lets
-	 * the main agent grant, which Phase B refuses (no broker yet).
+	 * the main agent grant ordinary asks through the grant broker (Phase D),
+	 * on native local workers only.
 	 */
 	approvalAuthority: ApprovalAuthority;
 }
@@ -131,23 +132,24 @@ export function askRouteForMode(mode: WorkerPermissionMode): {
 }
 
 /**
- * The worker-side resolution the permit's allowance runs as today. Main
- * authority resolves as a denial until the Phase D grant broker exists: it is
- * refused, never silently allowed and never quietly sent to the operator.
+ * The worker-side resolution the permit's allowance runs as. Every ask routed
+ * to `main` parks: an operator-authority permit for a person's card, a
+ * main-authority permit for the grant broker, which binds each decision to
+ * the attempt and the parked call (Phase D).
  */
 export function workerPermissionModeForPermit(allowance: WorkerPermitAllowance): "deny" | "fail" | "escalate" {
-	if (allowance.asks === "main") return allowance.approvalAuthority === "operator" ? "escalate" : "deny";
+	if (allowance.asks === "main") return "escalate";
 	return allowance.asks;
 }
 
-/** True when asks go to the main agent with main authority, which Phase B cannot honor yet. */
+/** True when asks go to the main agent with main authority, which only native local workers can honor. */
 export function mainGrantsUnavailable(allowance: Pick<WorkerPermitAllowance, "asks" | "approvalAuthority">): boolean {
 	return allowance.asks === "main" && allowance.approvalAuthority === "main";
 }
 
-/** Denial reason for an ask a main-authority permit cannot route yet. */
+/** Denial reason for an ask a main-authority permit cannot route on this runtime. */
 export const MAIN_GRANTS_UNAVAILABLE_REASON =
-	"main-agent grants are not available yet (fleet.permissions.mode=main); the ask is denied, not sent to the operator";
+	"main-agent grants reach only native local workers (fleet.permissions.mode=main); the ask is denied, not sent to the operator";
 
 /** Why a tool list exceeds a capability class's direct ceiling, per the review's class table. */
 function capabilityClassCeilingErrors(capabilityClass: AgentCapabilityClass, tools: ReadonlyArray<string>): string[] {
@@ -324,7 +326,7 @@ export function workerPermitPromptLine(view: {
 	const asks =
 		view.asks === "main"
 			? view.approvalAuthority === "main"
-				? "main (main-agent grants are not available yet, so they are denied)"
+				? "main (the main agent decides ordinary asks; operator rails go to the operator)"
 				: "main (operator decides)"
 			: view.asks;
 	const scope = view.capabilityClass !== undefined ? `${view.capabilityClass}, ` : "";
