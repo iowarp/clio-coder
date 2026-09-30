@@ -8,9 +8,16 @@ import { compareReleaseVersions, fetchReleaseVersion, parseReleaseVersion } from
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60_000;
 export const UPDATE_NOTICE_INTERVAL_MS = 7 * UPDATE_CHECK_INTERVAL_MS;
 
+/** Dist-tags a check may consult. Pre-releases are published under `beta`, never `latest`. */
+type ReleaseTag = "latest" | "beta";
+
 interface UpdateCache {
 	checkedAt?: number;
 	available?: string | null;
+	/** Dist-tag that published `available`; absent means `latest`. */
+	availableTag?: ReleaseTag;
+	/** Dist-tags the cached check consulted, joined by `+`; absent means `latest`. */
+	track?: string;
 	notifiedKey?: string;
 	notifiedAt?: number;
 }
@@ -78,19 +85,43 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		}
 		signal.throwIfAborted();
 		// Development trees, local/npx copies and unknown layouts never generate registry traffic.
-		if (!["npm", "pnpm", "bun"].includes(installation.kind) || parseReleaseVersion(runningVersion)?.pre.length !== 0)
-			return null;
+		const running = parseReleaseVersion(runningVersion);
+		if (!["npm", "pnpm", "bun"].includes(installation.kind) || running === null) return null;
+		// A pre-release install also reads `beta`, so an rc learns about the next rc
+		// as well as the final release. Stable installs never see pre-releases.
+		const tags: ReleaseTag[] = running.pre.length > 0 ? ["latest", "beta"] : ["latest"];
+		const track = tags.join("+");
+		// A cache written for another track is stale: an rc that became stable must
+		// not keep announcing a beta, and an rc must not trust a latest-only answer.
+		const fresh = (value: UpdateCache) =>
+			recent(value.checkedAt, UPDATE_CHECK_INTERVAL_MS) && (value.track ?? "latest") === track;
 		let cache = await readCache();
-		if (!recent(cache.checkedAt, UPDATE_CHECK_INTERVAL_MS)) {
+		if (!fresh(cache)) {
 			cache = await withStateFileLock(
 				cachePath,
 				async () => {
 					const current = await readCache();
-					if (recent(current.checkedAt, UPDATE_CHECK_INTERVAL_MS)) return current;
-					const available = await (options.fetchVersion ?? fetchReleaseVersion)("latest", signal);
+					if (fresh(current)) return current;
+					const fetchVersion = options.fetchVersion ?? fetchReleaseVersion;
+					const found = await Promise.all(tags.map(async (tag) => ({ tag, version: await fetchVersion(tag, signal) })));
 					signal.throwIfAborted();
+					// Newest by SemVer precedence; `latest` is listed first and wins a tie.
+					let best: { tag: ReleaseTag; version: string } | null = null;
+					for (const { tag, version } of found)
+						if (
+							typeof version === "string" &&
+							parseReleaseVersion(version) &&
+							(best === null || compareReleaseVersions(version, best.version) === 1)
+						)
+							best = { tag, version };
 					// Failed attempts also back off for a day; offline sessions stay quiet.
-					const next = { ...current, checkedAt: now(), available: parseReleaseVersion(available) ? available : null };
+					const next: UpdateCache = {
+						...current,
+						checkedAt: now(),
+						track,
+						available: best?.version ?? null,
+						availableTag: best?.tag ?? "latest",
+					};
 					await writeCache(next, signal);
 					return next;
 				},
@@ -98,13 +129,19 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 			);
 		}
 		if (typeof cache.available !== "string" || compareReleaseVersions(cache.available, runningVersion) !== 1) return null;
+		// `/upgrade` and a bare `clio-coder upgrade` install `latest`; a newer beta
+		// needs the channel named, or the command would not install what was announced.
+		const beta = cache.availableTag === "beta";
+		const action =
+			installation.kind === "npm"
+				? beta
+					? "clio-coder upgrade --channel=beta to install"
+					: "/upgrade to review"
+				: `clio-coder upgrade${beta ? " --channel=beta" : ""} for update steps`;
 		return {
 			kind: "available",
 			key: `available:${runningVersion}:${cache.available}`,
-			text:
-				installation.kind === "npm"
-					? `v${cache.available} available · /upgrade to review`
-					: `v${cache.available} available · clio-coder upgrade for update steps`,
+			text: `v${cache.available} available · ${action}`,
 		};
 	}
 	async function claim(notice: UpdateNotice, isIdle: () => boolean, signal: AbortSignal): Promise<boolean> {
