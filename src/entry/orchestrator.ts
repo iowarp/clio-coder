@@ -1858,7 +1858,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// silently skip another.
 	const resolveBaselineAutonomy = (): AutonomyLevel =>
 		effectiveSettingsForDispatch?.().safety.autonomy ??
-		options.headless?.autonomy ??
+		(options.headless !== undefined ? (options.headless.autonomy ?? "default") : undefined) ??
 		options.autonomy ??
 		(config?.get() ?? readSettings()).safety.autonomy ??
 		"default";
@@ -2091,7 +2091,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// nothing reads, so `run --autonomy yolo` compiled and admitted at
 	// whatever settings.yaml said.
 	// The interactive `clio-coder --autonomy <level>` seeds the same override.
-	const startupAutonomy = options.headless?.autonomy ?? options.autonomy;
+	// yolo is a grant from a present human to the main agent. A headless run has
+	// no human to have granted it, so it runs at default unless its own command
+	// line says --autonomy yolo; a settings.yaml yolo does not carry over (D1).
+	const startupAutonomy = options.headless !== undefined ? (options.headless.autonomy ?? "default") : options.autonomy;
+	if (
+		options.headless !== undefined &&
+		options.headless.autonomy === undefined &&
+		(config?.get() ?? readSettings()).safety.autonomy === "yolo"
+	) {
+		process.stderr.write(
+			"clio-coder run: autonomy default (settings.yaml sets yolo, which a headless run takes only from --autonomy yolo)\n",
+		);
+	}
 	const sessionOverrides: SessionOverrides = new Map(
 		startupAutonomy === undefined ? [] : [["safety.autonomy", startupAutonomy]],
 	);
