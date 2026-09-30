@@ -10,6 +10,13 @@ export interface TurnConstraints {
 	readonly mode?: "answer" | "proposal" | "change";
 	readonly delegation?: "allowed" | "forbidden";
 	readonly allowedTools?: readonly string[];
+	/**
+	 * Delegation ceiling: the tools a dispatched worker may hold, separate from
+	 * the parent's own `allowedTools`. Without it a dispatch-only coordinator had
+	 * to hold every worker tool itself, including write, and could then bypass
+	 * dispatch entirely (D8c). Absent means the parent's own set is the ceiling.
+	 */
+	readonly delegatedTools?: readonly string[];
 	readonly skills?: "allowed" | "disabled";
 }
 
@@ -23,9 +30,8 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 		(value.mode !== undefined && !["answer", "proposal", "change"].includes(value.mode)) ||
 		(value.delegation !== undefined && !["allowed", "forbidden"].includes(value.delegation)) ||
 		(value.skills !== undefined && !["allowed", "disabled"].includes(value.skills)) ||
-		(value.allowedTools !== undefined &&
-			(!Array.isArray(value.allowedTools) ||
-				value.allowedTools.some((name) => typeof name !== "string" || !/^[a-zA-Z0-9_.-]+$/.test(name))))
+		!isToolNameList(value.allowedTools) ||
+		!isToolNameList(value.delegatedTools)
 	) {
 		throw new Error("Invalid explicit turn constraints");
 	}
@@ -34,13 +40,41 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 		...(value.delegation === undefined ? {} : { delegation: value.delegation }),
 		...(value.skills === undefined ? {} : { skills: value.skills }),
 		...(value.allowedTools === undefined ? {} : { allowedTools: Object.freeze([...new Set(value.allowedTools)].sort()) }),
+		...(value.delegatedTools === undefined
+			? {}
+			: { delegatedTools: Object.freeze([...new Set(value.delegatedTools)].sort()) }),
 	});
+}
+
+function isToolNameList(value: unknown): boolean {
+	return (
+		value === undefined ||
+		(Array.isArray(value) && value.every((name) => typeof name === "string" && /^[a-zA-Z0-9_.-]+$/.test(name)))
+	);
 }
 
 /** Capability policy, shared by schema projection, gateway, admission and prompts. */
 export function turnAllowsTool(constraints: TurnConstraints | undefined, capability: string): boolean {
 	if (constraints?.delegation === "forbidden" && capability === ToolNames.Dispatch) return false;
-	const allowed = constraints?.allowedTools;
+	return listAllowsTool(constraints?.allowedTools, capability);
+}
+
+/** Whether a dispatched worker may hold a tool under the parent's delegation ceiling. */
+export function turnDelegatesTool(constraints: TurnConstraints | undefined, capability: string): boolean {
+	return listAllowsTool(constraints?.delegatedTools ?? constraints?.allowedTools, capability);
+}
+
+/**
+ * The constraints a dispatched worker runs under: the delegation ceiling
+ * becomes its own tool set, and its own dispatches inherit that set as their
+ * ceiling rather than the parent's wider one.
+ */
+export function workerTurnConstraints(constraints: TurnConstraints): TurnConstraints {
+	const { delegatedTools, ...rest } = constraints;
+	return Object.freeze({ ...rest, ...(delegatedTools === undefined ? {} : { allowedTools: delegatedTools }) });
+}
+
+function listAllowsTool(allowed: readonly string[] | undefined, capability: string): boolean {
 	if (allowed === undefined || allowed.includes(capability)) return true;
 	// Naming a secondary capability necessarily admits its transport wrapper;
 	// naming the wrapper alone never admits every capability behind it.

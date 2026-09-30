@@ -233,6 +233,19 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			}
 			continue;
 		}
+		if (arg === "--delegate-tools") {
+			const value = need(arg);
+			if (value !== null) {
+				const names = value === "none" ? [] : value.split(",").map((name) => name.trim());
+				if (names.some((name) => !/^[a-zA-Z0-9_.-]+$/.test(name)))
+					parsed.diagnostics.push({
+						type: "error",
+						message: "--delegate-tools needs comma-separated capability names, or none",
+					});
+				else parsed.constraints = { ...parsed.constraints, delegatedTools: [...new Set(names)] };
+			}
+			continue;
+		}
 		if (arg === "--skill") {
 			const value = need(arg);
 			if (value !== null) parsed.skillPaths.push(value);

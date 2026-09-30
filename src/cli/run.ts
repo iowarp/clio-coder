@@ -65,6 +65,7 @@ Flags:
   --turn-mode <mode>        main-agent workflow: answer|proposal|change; not an authorization grant
   --allow-tools <names>     main-agent capability allowlist, comma-separated; none disables all tools
   --no-delegate            forbid main-agent dispatch for this task and its continuations
+  --delegate-tools <names>  tools dispatched workers may hold, independent of --allow-tools; none gives workers no tools
   --temperature <N>         one-run sampler override for supported local/OpenAI-compatible runtimes
   --top-p <N>               one-run nucleus sampling override (0..1)
   --top-k <N>               one-run top-k override
@@ -341,7 +342,7 @@ export async function runClioRun(
 			}
 			if (parsed.constraints && parsed.agentId !== undefined) {
 				process.stderr.write(
-					"clio-coder run: --turn-mode, --allow-tools, and --no-delegate apply to the main-agent task\n",
+					"clio-coder run: --turn-mode, --allow-tools, --delegate-tools, and --no-delegate apply to the main-agent task\n",
 				);
 				return 2;
 			}

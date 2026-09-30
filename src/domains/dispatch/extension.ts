@@ -38,7 +38,12 @@ import {
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import { rawDurationMs } from "../../core/timers.js";
 import { isBuiltinToolName, isHarnessExtensionToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
-import { snapshotTurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
+import {
+	snapshotTurnConstraints,
+	turnAllowsTool,
+	turnDelegatesTool,
+	workerTurnConstraints,
+} from "../../core/turn-constraints.js";
 import {
 	type AcpDelegationRunHandle,
 	type AcpDelegationRunInput,
@@ -1961,20 +1966,25 @@ function assertTurnConstraintCompatibility(
 	if (!constraints) return;
 	if (!turnAllowsTool(constraints, "dispatch"))
 		throw new Error("dispatch: forbidden by the parent task's explicit scope");
-	if (!mediated && (constraints.allowedTools !== undefined || constraints.skills === "disabled")) {
+	if (
+		!mediated &&
+		(constraints.allowedTools !== undefined ||
+			constraints.delegatedTools !== undefined ||
+			constraints.skills === "disabled")
+	) {
 		throw new Error(
 			"dispatch: this external runtime cannot enforce the parent task's tool/skill constraints; use a native worker",
 		);
 	}
-	const outside = tools.filter((name) => !turnAllowsTool(constraints, name));
+	const outside = tools.filter((name) => !turnDelegatesTool(constraints, name));
 	if (outside.length > 0)
 		throw new Error(
 			`dispatch: worker tool surface exceeds the parent task's explicit scope: ${outside.join(", ")}. Select a narrower recipe or tool profile.`,
 		);
-	if ((req.resolvedVerification?.length ?? 0) > 0 && !turnAllowsTool(constraints, "verify")) {
+	if ((req.resolvedVerification?.length ?? 0) > 0 && !turnDelegatesTool(constraints, "verify")) {
 		throw new Error("dispatch: host verification is outside the parent task's explicit tool scope");
 	}
-	if (req.worktree === true && !turnAllowsTool(constraints, "write")) {
+	if (req.worktree === true && !turnDelegatesTool(constraints, "write")) {
 		throw new Error("dispatch: worktree creation requires write in the parent task's explicit tool scope");
 	}
 }
@@ -2330,7 +2340,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	}
 	if (input.apiKey) spec.apiKey = input.apiKey;
 	if (input.req.noSkills !== undefined) spec.noSkills = input.req.noSkills;
-	if (input.req.turnConstraints !== undefined) spec.turnConstraints = input.req.turnConstraints;
+	if (input.req.turnConstraints !== undefined) spec.turnConstraints = workerTurnConstraints(input.req.turnConstraints);
 	const skillPaths = [...(input.req.skillPaths ?? []), ...(input.recipe?.boundSkillPaths ?? [])];
 	if (skillPaths.length > 0) spec.skillPaths = [...new Set(skillPaths)];
 	const recipeSkills = (input.recipe?.skills ?? []).map((name) => name.trim()).filter((name) => name.length > 0);
