@@ -9,6 +9,7 @@ skills: []
 audience: base
 category: quality
 capabilityClass: workspace-edit
+permissions: {git: worktree}
 latencyClass: balanced
 projectContextTier: bounded
 budget: {toolCalls: 40, readReserve: 5, synthesis: true}
