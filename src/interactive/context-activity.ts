@@ -96,25 +96,28 @@ export function formatContextActivityRailLines(
 			GLYPH.ellipsis,
 		),
 	];
-	// Stage completion determines filled length. A moving marker inside the
-	// current stage signals unknown work; it never invents an ETA or percentage.
-	const fraction =
+	// The bar measures the running stage only. Stage position is already in the
+	// trail and the step label; weighting stages equally filled 40% of the bar
+	// before a four-minute draft began (index finishes in under a second).
+	// Known counts fill the bar. Unknown work sweeps a marker across it and
+	// never suggests a percentage.
+	const known =
 		activity.total !== null && activity.total > 0 && activity.current !== null
 			? Math.max(0, Math.min(1, activity.current / activity.total))
 			: activity.status === "completed"
 				? 1
-				: 0;
-	const filled = done ? width : Math.min(width - 1, Math.floor(((index + fraction) / stages.length) * width));
-	const remaining = width - filled;
-	const pulse =
-		!done && !failed && fraction === 0
-			? Math.min(remaining - 1, tick % Math.max(1, Math.floor(width / stages.length)))
-			: 0;
+				: null;
+	const filled = done ? width : known === null ? 0 : Math.min(width - 1, Math.floor(known * width));
+	const sweepSpan = Math.max(1, width - 1);
+	const sweepPhase = (tick * Math.max(1, Math.floor(width / 24))) % (2 * sweepSpan);
+	const marker =
+		known === null && !done && !failed ? (sweepPhase <= sweepSpan ? sweepPhase : 2 * sweepSpan - sweepPhase) : filled;
+	const remaining = width - marker;
 	rows.push(
-		theme.fg(tone, GLYPH.barFull.repeat(filled)) +
-			theme.fg("meterFree", GLYPH.barEmpty.repeat(pulse)) +
+		theme.fg(tone, GLYPH.barFull.repeat(known === null ? 0 : filled)) +
+			theme.fg("meterFree", GLYPH.barEmpty.repeat(known === null ? marker : 0)) +
 			(!done ? theme.fg(tone, failed ? GLYPH.error : "▸") : "") +
-			theme.fg("meterFree", GLYPH.barEmpty.repeat(Math.max(0, remaining - pulse - (done ? 0 : 1)))),
+			theme.fg("meterFree", GLYPH.barEmpty.repeat(Math.max(0, remaining - (done ? 0 : 1)))),
 	);
 	const counts = activity.current !== null && activity.total !== null ? ` · ${activity.current}/${activity.total}` : "";
 	const detail = activity.detail ? ` · ${plain(activity.detail)}` : "";
