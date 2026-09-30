@@ -11,6 +11,12 @@ import { join } from "node:path";
 import { after, afterEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseRunCliArgs } from "../../src/cli/args.js";
+import {
+	snapshotTurnConstraints,
+	turnAllowsTool,
+	turnDelegatesTool,
+	workerTurnConstraints,
+} from "../../src/core/turn-constraints.js";
 import { resolvePanesEnablement } from "../../src/entry/panes-activation.js";
 import { type HeadlessScratch, headlessScratch, runCli } from "../harness/headless-run.js";
 import {
@@ -123,6 +129,28 @@ describe("run --agent", () => {
 		match(parsed.diagnostics.map((entry) => entry.message).join(" "), /--json-events.*main agent/u);
 		const mainAgent = parseRunCliArgs(["--json-events", "terminal", "Inspect"]);
 		deepStrictEqual(mainAgent.diagnostics, []);
+	});
+});
+
+describe("run --delegate-tools", () => {
+	it("parses a delegation ceiling separate from the parent's own tools", () => {
+		const parsed = parseRunCliArgs([
+			"--allow-tools",
+			"dispatch,monitor,read",
+			"--delegate-tools",
+			"read,write,edit",
+			"task",
+		]);
+		deepStrictEqual(parsed.diagnostics, []);
+		const constraints = snapshotTurnConstraints(parsed.constraints);
+		if (constraints === undefined) throw new Error("expected turn constraints");
+		deepStrictEqual(constraints.allowedTools, ["dispatch", "monitor", "read"]);
+		deepStrictEqual(constraints.delegatedTools, ["edit", "read", "write"]);
+		equal(turnDelegatesTool(constraints, "write"), true);
+		equal(turnAllowsTool(constraints, "write"), false);
+		const worker = workerTurnConstraints(constraints);
+		deepStrictEqual(worker.allowedTools, ["edit", "read", "write"]);
+		equal("delegatedTools" in worker, false);
 	});
 });
 
