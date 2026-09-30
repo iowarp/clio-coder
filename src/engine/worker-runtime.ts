@@ -26,6 +26,7 @@ import {
 	isWorkerToolCallCapSynthesisReason,
 } from "../core/guardrails.js";
 import { runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
+import { workerSandboxConfinesWrites } from "../core/sandbox/worker-process.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
@@ -551,6 +552,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const safety = createWorkerSafety({
 		cwd: process.cwd(),
 		...(input.writeRoots !== undefined ? { writeRoots: input.writeRoots } : {}),
+		...(input.writeRoots !== undefined && workerSandboxConfinesWrites() ? { writeRootsOsConfined: true } : {}),
 		...(input.protectedArtifactState !== undefined
 			? { protectedArtifactState: { artifacts: [...input.protectedArtifactState.artifacts] } }
 			: {}),

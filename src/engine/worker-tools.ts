@@ -50,6 +50,8 @@ export const INTERNAL_HELPER_RESULT_TOOL = "clio_submit_result";
 export interface WorkerSafetyOptions {
 	cwd?: string;
 	writeRoots?: ReadonlyArray<string>;
+	/** The worker's OS sandbox confines its commands to `writeRoots`. */
+	writeRootsOsConfined?: boolean;
 	protectedArtifactState?: ProtectedArtifactState;
 }
 
@@ -58,6 +60,7 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 	const policyEngine = createSafetyPolicyEngine({
 		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
 		...(options.writeRoots !== undefined ? { writeRoots: options.writeRoots } : {}),
+		...(options.writeRootsOsConfined === true ? { writeRootsOsConfined: true } : {}),
 	});
 	const protectedArtifactState: ProtectedArtifactState = {
 		artifacts: structuredClone(options.protectedArtifactState?.artifacts ?? []),

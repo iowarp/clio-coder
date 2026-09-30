@@ -2481,6 +2481,24 @@ function workerSandboxFor(input: {
 	};
 }
 
+/**
+ * True when the local OS sandbox confines every command this worker runs to
+ * its write roots: a native worker, no fleet node that could host it
+ * elsewhere, the sandbox not turned off, and bubblewrap usable here. Write-root
+ * confinement then need not refuse shell, verify and run_script by name, so a
+ * writer given file write roots can still run the project's tests. The worker
+ * derives the same answer from its WorkerSpec (engine/worker-runtime.ts).
+ */
+function osSandboxConfinesWrites(
+	runtimeKind: RuntimeDescriptor["kind"],
+	settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+): boolean {
+	if (runtimeKind !== "http" || (settings?.fleet.nodes?.length ?? 0) > 0) return false;
+	if ((settings?.safety.sandbox ?? "auto") === "off") return false;
+	const availability = sandboxAvailability();
+	return availability.available && availability.backend === "bwrap";
+}
+
 /** The sandbox sentence for the worker's safety line, probed on this host. */
 function workerSandboxPromptLine(input: Parameters<typeof workerSandboxFor>[0]): { sandboxLine?: string } {
 	const sandbox = workerSandboxFor(input);
@@ -4600,17 +4618,12 @@ export function createDispatchBundle(
 		if (target.runtime.kind === "subprocess" && req.denyTools && req.denyTools.length > 0) {
 			throw new Error("dispatch: denyTools cannot be enforced on an external CLI target; use a native worker");
 		}
+		const writeConfined = pathScope.writeBoundaries.length > 0 && !osSandboxConfinesWrites(target.runtime.kind, settings);
 		const effectiveTools = withLedgerToolNarrowing(
-			effectiveToolNames(
-				admission.allowedTools,
-				target,
-				pathScope.writeBoundaries.length > 0,
-				deniedToolNames(req),
-				req.cwd ?? process.cwd(),
-			),
+			effectiveToolNames(admission.allowedTools, target, writeConfined, deniedToolNames(req), req.cwd ?? process.cwd()),
 			req,
 		);
-		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target, pathScope.writeBoundaries.length > 0);
+		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target, writeConfined);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
 		const permit = resolveDispatchPermit(req, recipe, spec, effectiveTools, readOnly, pathScope, settings, target);
 		assertMainGrantRoutable(req, target.runtime, permit);
@@ -7685,23 +7698,12 @@ export function createDispatchBundle(
 		);
 		assertWorkerContextRequest(req, target.runtime.kind === "http");
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
+		const writeConfined = pathScope.writeBoundaries.length > 0 && !osSandboxConfinesWrites(target.runtime.kind, settings);
 		const effectiveTools = withLedgerToolNarrowing(
-			effectiveToolNames(
-				admission.allowedTools,
-				target,
-				pathScope.writeBoundaries.length > 0,
-				deniedToolNames(req),
-				req.cwd ?? process.cwd(),
-			),
+			effectiveToolNames(admission.allowedTools, target, writeConfined, deniedToolNames(req), req.cwd ?? process.cwd()),
 			req,
 		);
-		assertPostRuntimeToolCompatibility(
-			req.agentId,
-			agentSpec,
-			effectiveTools,
-			target,
-			pathScope.writeBoundaries.length > 0,
-		);
+		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, effectiveTools, target, writeConfined);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
 		// Preview refuses exactly what dispatch would: a widening narrowing, an
 		// orchestration worker, or a route the runtime cannot honor.

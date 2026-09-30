@@ -152,6 +152,12 @@ export interface SafetyPolicyEngineOptions {
 	 * the Claude SDK hook path inherit it.
 	 */
 	writeRoots?: ReadonlyArray<string>;
+	/**
+	 * True when the OS sandbox confines every command this run spawns to the
+	 * same write roots (a dispatched worker under bubblewrap). Execute-class
+	 * tools then stay admissible under write roots; dispatch still escapes.
+	 */
+	writeRootsOsConfined?: boolean;
 }
 
 interface SourcedRule {
@@ -256,12 +262,15 @@ function writeRootTargetPath(call: ClassifierCall): string | null {
  * without a path argument the lexical check can inspect. Execute-class tools run
  * project scripts or a shell; dispatch spawns a worker not bound to these roots.
  */
-function isWriteConfinementEscape(call: ClassifierCall, actionClass: string): boolean {
+function isWriteConfinementEscape(call: ClassifierCall, actionClass: string, osConfined: boolean): boolean {
 	// The typed git tool's add or commit runs a fixed argv that writes only Git
 	// metadata, and the task-worktree allowance and hooks guard decide it later.
 	// Blocking it as arbitrary bash made typed task commits impossible in any
 	// run that also declared write roots.
 	if (call.projection === "typed-git") return false;
+	// Under the OS sandbox a command's writes land only in the bound roots, so
+	// running one is no escape. A dispatched child is not bound by them.
+	if (osConfined && call.tool !== ToolNames.Dispatch && actionClass !== "dispatch") return false;
 	if (WRITE_ROOT_REFUSED_TOOLS.has(call.tool)) return true;
 	return actionClass === "execute" || actionClass === "dispatch";
 }
@@ -315,6 +324,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	// and both targets and roots are walked physically at each check (F3).
 	const writeRootCwd = path.resolve(options.cwd ?? process.cwd());
 	const writeRoots = (options.writeRoots ?? []).map((root) => resolvePathBoundary(writeRootCwd, root));
+	const writeRootsOsConfined = options.writeRootsOsConfined === true;
 	const skillRoots = activeClioSkillRoots(cwd);
 	const readExemptRoots = readScopeExemptRoots();
 	const packs = options.rulePacks ?? getCachedDefaultRulePacks();
@@ -397,7 +407,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// active writeRoots, execute-class tools (bash, verify, which run project
 			// scripts) and dispatch (which spawns a worker not bound to these roots)
 			// are blocked outright: they can mutate the filesystem outside the roots.
-			if (writeRoots.length > 0 && isWriteConfinementEscape(call, classification.actionClass)) {
+			if (writeRoots.length > 0 && isWriteConfinementEscape(call, classification.actionClass, writeRootsOsConfined)) {
 				return blockDecision(base, {
 					ruleId: "write-root",
 					reasonCode: "write-root",

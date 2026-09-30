@@ -30,6 +30,17 @@ export function configureWorkerProcessSandbox(spec: WorkerSandboxSpec | undefine
 }
 
 /**
+ * True when every command this worker spawns runs under bubblewrap bound to
+ * the spec's writable roots, the same test dispatch applies before it offers
+ * shell and verify to a write-confined worker.
+ */
+export function workerSandboxConfinesWrites(): boolean {
+	if (active === null) return false;
+	const availability = sandboxAvailability();
+	return availability.available && availability.backend === "bwrap";
+}
+
+/**
  * Sockets and runtime directories reachable through the read-only root that
  * would let a sandboxed command act outside it: the session bus, agent
  * sockets under the user runtime directory, and the container daemon.
