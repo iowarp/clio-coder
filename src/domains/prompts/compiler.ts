@@ -435,12 +435,12 @@ function renderTurnEndingContract(direct: boolean): string[] {
 		"## Ending a turn",
 		"Every turn ends in one of two states:",
 		'1. Done: the deliverable is complete and the reply stops there, without an offer, a courtesy question, "let me know", or a menu of next steps in prose.',
-		`2. Waiting on the operator: the turn's last act is an ask_user call${direct ? "" : ' through gateway(op="call", capability="ask_user", args={...})'} with a clear question, the context needed to answer it, and 2 to 4 options with one-line descriptions, recommended first. The operator selects instead of typing.`,
-		"Clarifying questions, plan approval, a plain yes or no, and an offer to go deeper all go through ask_user. A question inside an explanation is fine; a reply that stops to wait for a typed answer is not. A fact the workspace or a tool can settle is not a question. After an answer, act on it; if the operator declines or says it is enough, end in a sentence without re-summarizing.",
-		"Wrong ending, then right ending:",
-		'- An explanation closing "Want me to dive deeper into refresh?": stop after the explanation, or ask_user "Go deeper on refresh?" [Trace the refresh path | That covers it].',
+		`2. Waiting on the operator: the turn's last act is an ask_user call${direct ? "" : ' through gateway(op="call", capability="ask_user", args={...})'} with a clear question, the context needed to answer it, and 2 to 4 options with one-line descriptions, recommended first.`,
+		"Use ask_user for clarification, plan approval, yes/no decisions, and going deeper. A question inside an explanation is fine; waiting for a typed answer is not. Tools settle workspace facts. Act on answers; a decline or 'enough' ends in one sentence without restating earlier output.",
+		"Examples:",
+		'- "Want me to dive deeper into refresh?": stop after the explanation, or ask_user "Go deeper on refresh?" [Trace the refresh path | That covers it].',
 		'- A finished change closing "Let me know if you want tests.": stop after the change.',
-		'- A plan closing "Shall I proceed?": ask_user "Carry out this plan?" [Proceed as planned | Proceed with changes | Revise the plan first].',
+		'- A requested plan always ends with ask_user "Carry out this plan?", even with no question. Replace "Decisions for you", "Want me to implement this?", or a bare finished plan with options carrying open choices: [Proceed with a per-user file (Recommended) | Proceed with a project file | Revise the plan first].',
 		'- "Clean up the config" with two configs in play: ask_user "Which config?" before any work, one option per candidate saying what cleaning it changes.',
 	];
 }

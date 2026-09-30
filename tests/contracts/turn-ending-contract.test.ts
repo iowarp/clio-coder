@@ -36,7 +36,8 @@ describe("turn-ending contract in the session prompt", () => {
 		const prompt = systemPrompt({ operatorInterviews: true });
 		ok(prompt.includes("## Ending a turn"), prompt);
 		ok(prompt.includes("Every turn ends in one of two states:"), prompt);
-		ok(prompt.includes('ask_user "Carry out this plan?"'), prompt);
+		ok(prompt.includes('A requested plan always ends with ask_user "Carry out this plan?", even with no question.'), prompt);
+		ok(prompt.includes("options carrying open choices: [Proceed with a per-user file (Recommended)"), prompt);
 		ok(prompt.includes(identityHalf), prompt);
 	});
 
@@ -46,6 +47,7 @@ describe("turn-ending contract in the session prompt", () => {
 			ok(!prompt.includes("## Ending a turn"), prompt);
 			ok(!prompt.includes('ask_user "'), prompt);
 			ok(prompt.includes(identityHalf), prompt);
+			ok(prompt.includes("stops\nthere, without a question"), prompt);
 		}
 	});
 });
