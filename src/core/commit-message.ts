@@ -1,9 +1,12 @@
 /**
- * A line Git reads as a trailer: a token, optional blanks, a colon, then a
- * blank or the end of the line. Looser than Git's own parser on purpose, so a
- * spelling Git would accept is never let through.
+ * A line Git reads as a trailer: a token of letters, digits and hyphens,
+ * optional blanks, then a colon. Git does not require a blank after the colon,
+ * so `Co-authored-by:Evil <e@x>` is a trailer to it and must be one here. The
+ * token may start with a hyphen, as in Git's own separator scan. Only the
+ * default `:` separator is matched; a `trailer.separators` override is not
+ * visible from a message string.
  */
-const TRAILER_LINE = /^[A-Za-z0-9][A-Za-z0-9-]*[ \t]*:(?:[ \t]|$)/u;
+const TRAILER_LINE = /^[A-Za-z0-9-]+[ \t]*:/u;
 const CONTINUATION_LINE = /^[ \t]+\S/u;
 const PARAGRAPH_BREAK = /\n[ \t]*\n/u;
 
