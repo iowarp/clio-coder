@@ -71,6 +71,24 @@ export interface ApprovalRequestView {
 	 * which build's judgment they overrode.
 	 */
 	gateBuild?: string;
+	/**
+	 * A worker ask routed through the main agent (Phase D): who may discharge
+	 * it, and whether the main agent asked for it. The card names both so the
+	 * operator knows whose request they are answering.
+	 */
+	workerGrant?: { authority: "main" | "operator"; forwardedByMain: boolean };
+}
+
+/** The card line for a worker ask routed through the main agent, or null for every other card. */
+function workerGrantAuthorityLine(view: ApprovalRequestView): string | null {
+	const grant = view.workerGrant;
+	if (grant === undefined) return null;
+	if (grant.authority === "operator") {
+		return "Authority: operator only. This rail is not the main agent's to grant; your answer decides it.";
+	}
+	return grant.forwardedByMain
+		? "Authority: the main agent approved this worker request and, below yolo, asks you to decide."
+		: "Authority: the main agent may decide this ordinary worker request.";
 }
 
 const PERMISSION_OVERLAY_CONTENT_WIDTH = 78;
@@ -454,6 +472,7 @@ function permissionCardSections(
 				)
 			: []),
 		...wrapSentence(`Requested by: ${presentation.requestedByCopy}`, content),
+		...(workerGrantAuthorityLine(view) !== null ? wrapSentence(workerGrantAuthorityLine(view) ?? "", content) : []),
 		// Dimmed and below the facts, because it is the only line on this card
 		// that no part of the harness acted on. The sentence says so itself; the
 		// styling keeps it from reading as a verdict at a glance.

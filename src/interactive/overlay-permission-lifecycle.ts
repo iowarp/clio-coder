@@ -54,6 +54,8 @@ interface WorkerEscalationEntry {
 	reason: string;
 	target?: string;
 	fallback: "deny" | "fail";
+	/** Present on a worker ask routed through the main agent (Phase D). */
+	grant?: ApprovalRequestView["workerGrant"];
 }
 
 export interface OverlayPermissionLifecycleDeps {
@@ -227,6 +229,9 @@ function workerEscalationEntry(payload: PermissionRequestedPayload, autonomy: st
 			? { target: sanitizeCallTargetText(payload.target).slice(0, 200) }
 			: {}),
 		fallback: payload.fallback === "fail" ? "fail" : "deny",
+		...(payload.approvalAuthority === "main" || payload.approvalAuthority === "operator"
+			? { grant: { authority: payload.approvalAuthority, forwardedByMain: payload.forwardedByMain === true } }
+			: {}),
 	};
 }
 
@@ -239,6 +244,7 @@ function workerApprovalRequestView(entry: WorkerEscalationEntry): ApprovalReques
 		origin: { kind: "worker", agentId: entry.agentId, runId: entry.runId },
 		reason: entry.reason,
 		...(entry.target !== undefined && entry.target.length > 0 ? { target: entry.target } : {}),
+		...(entry.grant !== undefined ? { workerGrant: entry.grant } : {}),
 	};
 }
 
@@ -433,7 +439,9 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	});
 	const unsubscribeWorkerResolution = deps.bus.on(BusChannels.PermissionResolved, (payload) => {
 		if (typeof payload.requestId !== "string") return;
-		if (payload.decidedBy !== "timeout" && payload.status !== "expired") return;
+		// A brokered request the owner revoked (turn cancel, session end) leaves
+		// the card the same way an expired one does.
+		if (payload.decidedBy !== "timeout" && payload.decidedBy !== "revoked" && payload.status !== "expired") return;
 		const fallback = payload.fallback === "fail" ? "fail" : "deny";
 		withdrawWorkers((entry) => entry.requestId === payload.requestId, "timeout", fallback);
 	});
