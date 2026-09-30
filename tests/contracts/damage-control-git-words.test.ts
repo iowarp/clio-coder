@@ -40,6 +40,13 @@ it("review round 2 G: checkout discard forms and force push refspecs are gated",
 			strictEqual(engine.evaluate({ tool: "bash", args: { command } }, level).kind, expected, command);
 });
 
+it("F2: a path-spelled or wrapped git with global options still meets the hard git rails", () => {
+	const engine = createSafetyPolicyEngine({ cwd: process.cwd() });
+	for (const command of ["/usr/bin/git -C . push --force", "env git -C . reset --hard"])
+		for (const level of ["default", "yolo"] as const)
+			strictEqual(engine.evaluate({ tool: "bash", args: { command } }, level).kind, "block", `${level}: ${command}`);
+});
+
 it("accepted clean and checkout force prefixes retain destructive rails", () => {
 	const engine = createSafetyPolicyEngine({ cwd: process.cwd() });
 	for (const flag of ["--f", "--fo", "--for", "--forc"]) {

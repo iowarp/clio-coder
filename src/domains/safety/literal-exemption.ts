@@ -1,3 +1,4 @@
+import { isGitExecutable } from "./git-command-normalization.js";
 import { scanShellLike } from "./protected-artifacts.js";
 
 const EXECUTORS = new Set(
@@ -24,7 +25,8 @@ export function inertQuotedMatch(command: string, pattern: RegExp, ruleId = ""):
 			const allowed =
 				program === "echo" ||
 				program === "printf" ||
-				(program === "git" &&
+				// A path-spelled Git runs the same program, and F2 made the Git scans see it.
+				(isGitExecutable(program ?? "") &&
 					["commit", "tag"].includes(words[1]?.value ?? "") &&
 					["-m", "--message"].includes(previous ?? "")) ||
 				(["grep", "rg"].includes(program ?? "") && (i === 1 || previous === "-e" || previous === "--regexp"));
