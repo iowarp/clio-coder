@@ -125,7 +125,7 @@ After a turn settles, the site reads the assistant's final message. Its reading 
 
 The settled turn waits at most 1.2 s for the answer, counted from when it was first asked. A slower answer is recorded but never waited on. An unfitted build never delays the turn. Other readings, including whether the message blocks on a decision, announced work never started, a claimed passing check and whether the work moved on, are recorded without changing policy.
 
-The prose-question nudge has been removed. Turn-ending guidance lives in the prompt and the `ask_user` result. The plan-close registration uses the already cached `turn` intent or explicit proposal mode, never this site's reading of the reply.
+The prose-question nudge has been removed. Turn-ending guidance lives in the prompt and the `ask_user` result. The plan-close registration uses explicit proposal mode, the already cached `turn` intent, or, when no turn verdict exists, the operator's request naming a plan; never this site's reading of the reply.
 
 ### `relevance`: ranking skills, capabilities and memory
 

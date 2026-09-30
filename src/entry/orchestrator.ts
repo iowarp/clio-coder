@@ -2841,7 +2841,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		middleware.registerHook(
 			createPlanCloseRegistration({
 				canAsk: () => askUserHandler !== null,
-				isPlan: () => systemOneHost.interpretation()?.intent === "plan",
+				isPlan: () => {
+					const interpretation = systemOneHost.interpretation();
+					return interpretation === undefined ? undefined : interpretation.intent === "plan";
+				},
 			}),
 		);
 		// Demo guidance: operator-only capability tips after a turn. Everything it

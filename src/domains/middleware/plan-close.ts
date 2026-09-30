@@ -1,10 +1,24 @@
 import { ToolNames } from "../../core/tool-names.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 
-/** A cached turn verdict or explicit proposal mode can close a plan without reading prose. */
+/**
+ * The operator asked for a plan in words. Only the operator's own request is
+ * read, never the model's reply. A match that was not a plan request costs one
+ * "Carry out this plan?" card on a turn that already changed nothing.
+ */
+const PLAN_REQUEST = /\bplan(?:s|ning)?\b/iu;
+
+/**
+ * Close a requested plan through ask_user once. Proposal mode arms it; so does
+ * the turn verdict when System One is fitted. Without a verdict, the default
+ * install's case, the operator's request naming a plan arms it: the prompt
+ * contract alone closed 2 of 5 identical plan requests on a local model in the
+ * v0.6.0 flywheel, and the verdict-only arming never ran outside System One.
+ */
 export function createPlanCloseRegistration(deps: {
 	canAsk: () => boolean;
-	isPlan: () => boolean;
+	/** The fitted verdict's reading, or undefined when System One gave none. */
+	isPlan: () => boolean | undefined;
 }): MiddlewareHookRegistration {
 	let armed = false;
 	let askedOrChanged = false;
@@ -17,7 +31,9 @@ export function createPlanCloseRegistration(deps: {
 				armed = false;
 				askedOrChanged = false;
 				if (input.metadata?.requestContinuation !== true && deps.canAsk()) {
-					armed = input.metadata?.turnMode === "proposal" || deps.isPlan();
+					armed =
+						input.metadata?.turnMode === "proposal" ||
+						(deps.isPlan() ?? (typeof input.text === "string" && PLAN_REQUEST.test(input.text)));
 				}
 				return [];
 			}
