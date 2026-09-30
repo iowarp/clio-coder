@@ -13,7 +13,7 @@ import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.j
 import { containsInstructionMarkers, INSTRUCTION_SHAPED_WARNING } from "../core/untrusted-content.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
-import { type ActionClass, type ClassifierCall, webFetchIsOutward } from "../domains/safety/action-classifier.js";
+import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import { approvalAxisId } from "../domains/safety/approval-axis.js";
 import {
 	type AutonomyExposure,
@@ -23,6 +23,7 @@ import {
 	DEFAULT_AUTONOMY_LEVEL,
 	mapAutonomy,
 } from "../domains/safety/autonomy.js";
+import { autonomyCallInputs } from "../domains/safety/autonomy-inputs.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
@@ -848,19 +849,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				: null;
 		const planScale = dispatchPlan?.planScale === true;
 		// Gates declare their tier; write-shaped HTTP requests send data outward.
-		const exposure =
-			call.tool === ToolNames.AskUser
-				? askUserExposure(call.args)
-				: decision.classification.exposure === "outward" ||
-						(call.tool === ToolNames.WebFetch && webFetchIsOutward(call.args))
-					? "outward"
-					: DEFAULT_AUTONOMY_EXPOSURE;
-		const disposition = mapAutonomy(level, actionClass, {
-			executeRecognized: decision.policy?.execRecognition !== "unrecognized",
-			...(readOutside ? { readOutsideWorkspace: true } : {}),
+		// The SDK and ACP adapters derive the same inputs from the same helper (F4).
+		const { exposure, options: autonomyOptions } = autonomyCallInputs(call, decision, {
+			...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
 			...(planScale ? { dispatchPlanScale: true } : {}),
-			...(exposure === "outward" ? { exposure } : {}),
 		});
+		const disposition = mapAutonomy(level, actionClass, autonomyOptions);
 		if (disposition === "ask") {
 			const askDecision =
 				planScale && dispatchPlan !== null

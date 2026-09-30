@@ -2,12 +2,9 @@ import nodePath from "node:path";
 import { performance } from "node:perf_hooks";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
-import {
-	type AutonomyLevel,
-	autonomyAskRejection,
-	DEFAULT_AUTONOMY_LEVEL,
-	mapAutonomy,
-} from "../../domains/safety/autonomy.js";
+import type { AutonomyExposure, AutonomyLevel } from "../../domains/safety/autonomy.js";
+import { autonomyAskRejection, DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "../../domains/safety/autonomy.js";
+import { autonomyCallInputs } from "../../domains/safety/autonomy-inputs.js";
 import { describeCallAction } from "../../domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../../domains/safety/contract.js";
 import type { RejectionMessage } from "../../domains/safety/rejection-feedback.js";
@@ -214,12 +211,17 @@ function toReadOnlyBlock(decision: SafetyDecision, tool: string): SafetyDecision
 	};
 }
 
-function toAutonomyAsk(decision: SafetyDecision, level: AutonomyLevel, call: ClassifierCall): SafetyDecision {
+function toAutonomyAsk(
+	decision: SafetyDecision,
+	level: AutonomyLevel,
+	call: ClassifierCall,
+	exposure: AutonomyExposure,
+): SafetyDecision {
 	const actionClass = decision.classification.actionClass;
 	return {
 		kind: "ask",
 		classification: decision.classification,
-		rejection: autonomyAskRejection(level, call.tool, actionClass, undefined, readsOutsideWorkspace(decision)),
+		rejection: autonomyAskRejection(level, call.tool, actionClass, exposure, readsOutsideWorkspace(decision)),
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};
 }
@@ -314,16 +316,16 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 		return { kind: "deny", mapped, decision, reason: rejectionText(decision), permissionRequired: true };
 	}
 	const actionClass = decision.classification.actionClass;
-	const disposition = mapAutonomy(DEFAULT_AUTONOMY_LEVEL, actionClass, {
-		executeRecognized: decision.policy?.execRecognition !== "unrecognized",
-		...(readsOutsideWorkspace(decision) ? { readOutsideWorkspace: true } : {}),
-	});
+	// Native admission's inputs, outward exposure included, so a recognized
+	// outward command asks here exactly as it does natively (F4).
+	const autonomyInputs = autonomyCallInputs(call, decision);
+	const disposition = mapAutonomy(DEFAULT_AUTONOMY_LEVEL, actionClass, autonomyInputs.options);
 	if (disposition === "allow") {
 		const admission = input.budgetGate?.admit(mapped.clioToolName);
 		if (admission?.kind === "deny") return budgetDenial(input, mapped, call, admission.reason);
 		return { kind: "allow", mapped, decision, reason: decision.policy?.reasonCode ?? "allowed" };
 	}
-	const ask = toAutonomyAsk(decision, DEFAULT_AUTONOMY_LEVEL, call);
+	const ask = toAutonomyAsk(decision, DEFAULT_AUTONOMY_LEVEL, call, autonomyInputs.exposure);
 	return {
 		kind: "deny",
 		mapped,

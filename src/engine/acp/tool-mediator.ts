@@ -7,6 +7,7 @@ import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { DelegationToolCallLogEntry } from "../../domains/dispatch/types.js";
 import { DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "../../domains/safety/autonomy.js";
+import { autonomyCallInputs } from "../../domains/safety/autonomy-inputs.js";
 import type { SafetyContract, SafetyDecision } from "../../domains/safety/contract.js";
 import type {
 	AcpPermissionOption,
@@ -634,20 +635,26 @@ export class AcpToolMediator {
 				// The net passed; the autonomy mapping decides (sd-01 §2.2). An
 				// "ask" disposition resolves as a non-stall denial, exactly like a
 				// net confirm rail below: a delegation has no operator to answer.
-				const dispositions = safetyDecisions.map((candidate) => ({
-					candidate,
-					disposition: mapAutonomy(DEFAULT_AUTONOMY_LEVEL, candidate.classification.actionClass, {
-						executeRecognized: candidate.policy?.execRecognition !== "unrecognized",
-						...(candidate.policy?.readScope === "outside-workspace" ? { readOutsideWorkspace: true } : {}),
-					}),
-				}));
-				const askDisposition = dispositions.find((candidate) => candidate.disposition === "ask");
+				// Native admission's inputs, outward exposure included, so a
+				// recognized outward command is not approved here (F4).
+				const dispositions = mapped.evaluations.map((evaluation, index) => {
+					const candidate = safetyDecisions[index] as SafetyDecision;
+					const inputs = autonomyCallInputs({ tool: evaluation.tool, args: evaluation.args }, candidate);
+					return {
+						candidate,
+						inputs,
+						disposition: mapAutonomy(DEFAULT_AUTONOMY_LEVEL, candidate.classification.actionClass, inputs.options),
+					};
+				});
+				// A deny disposition fails closed like an ask; neither may approve.
+				const askDisposition = dispositions.find((candidate) => candidate.disposition !== "allow");
 				if (askDisposition !== undefined) {
 					safetyDecision = askDisposition.candidate;
 					decision = "denied";
-					const asked =
-						askDisposition.candidate.policy?.readScope === "outside-workspace"
-							? "a path outside the workspace"
+					const asked = askDisposition.inputs.readOutsideWorkspace
+						? "a path outside the workspace"
+						: askDisposition.inputs.exposure === "outward"
+							? `outward ${askDisposition.candidate.classification.actionClass}`
 							: askDisposition.candidate.classification.actionClass;
 					reason = `permission_required: autonomy ${DEFAULT_AUTONOMY_LEVEL} requires approval for ${asked}; denied by non-stall policy (no interactive operator in delegation context)`;
 				} else {

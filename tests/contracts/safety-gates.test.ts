@@ -17,6 +17,7 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
+import type { SafetyContract, SafetyDecision } from "../../src/domains/safety/contract.js";
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
 import {
@@ -25,6 +26,8 @@ import {
 	tokenizeShellLike,
 } from "../../src/domains/safety/protected-artifacts.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
+import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
+import { emitClaudeToolPermissionDecision } from "../../src/engine/claude/tool-safety.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createRegistry } from "../../src/tools/registry.js";
@@ -245,6 +248,73 @@ describe("safety gate boundary", () => {
 			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "default"), "ask", check);
 			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "yolo"), "allow", check);
 		}
+	});
+
+	it("asks for a policy-recognized outward command on native, Claude SDK and ACP admission (F4)", async () => {
+		const command = "git push origin main";
+		// In-memory project policy; the named safety.yaml is never written.
+		const policy = createSafetyPolicyEngine({
+			cwd: scratch,
+			projectPolicy: {
+				trustVerdict: "trusted",
+				path: join(scratch, ".clio-coder", "safety.yaml"),
+				hash: null,
+				valid: true,
+				errors: [],
+				commands: [
+					{
+						id: "push-main",
+						command,
+						actionClass: "execute",
+						shellOperators: "deny",
+						env: { mode: "none", allow: [] },
+						requireConfirmation: false,
+					},
+				],
+				pathPolicy: {},
+				disableDefaultPathPolicy: false,
+			},
+		});
+		const safety: SafetyContract = {
+			...createWorkerSafety({ cwd: scratch }),
+			evaluate(call, posture): SafetyDecision {
+				const decision = policy.evaluate(call, posture);
+				strictEqual(decision.kind, "allow", call.tool);
+				return { kind: "allow", classification: decision.classification, policy: decision };
+			},
+		};
+		const net = safety.evaluate({ tool: ToolNames.Bash, args: { command } });
+		strictEqual(net.classification.exposure, "outward");
+		strictEqual(net.policy?.execRecognition, "recognized");
+
+		const registry = createRegistry({ safety, autonomy: () => "default" });
+		registry.register(bashTool);
+		let nativeAsked = false;
+		registry.onPermissionRequired((_call, _decision, meta) => {
+			nativeAsked = true;
+			registry.cancelParkedCall(meta.requestId, "contract: denied");
+		});
+		await registry.invoke({ tool: ToolNames.Bash, args: { command } });
+		strictEqual(nativeAsked, true);
+
+		const sdk = emitClaudeToolPermissionDecision({
+			toolName: "Bash",
+			input: { command },
+			safety,
+			cwd: scratch,
+			emit: () => {},
+		});
+		strictEqual(sdk.kind, "deny");
+		strictEqual(sdk.kind === "deny" && sdk.permissionRequired, true);
+
+		const mediator = new AcpToolMediator({ safety, cwd: scratch, toolGovernance: "clio-coder-policy" });
+		await mediator.handle({
+			toolCall: { kind: "execute", rawInput: { command } },
+			options: [{ optionId: "allow", kind: "allow_once", name: "Allow" }],
+		});
+		const [entry] = mediator.snapshot().toolCallLog;
+		strictEqual(entry?.decision, "denied");
+		strictEqual(entry?.reason?.startsWith("permission_required: autonomy default"), true, entry?.reason);
 	});
 
 	it("yolo clears ordinary confirmation rails while damage control still decides", () => {
