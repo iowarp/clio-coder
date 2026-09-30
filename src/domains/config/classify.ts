@@ -60,6 +60,10 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"fleet.history",
 	"context",
 	"safety.limits",
+	// Dispatch reads both into each new WorkerSpec; a running worker keeps the
+	// policy it was spawned with.
+	"safety.sandbox",
+	"safety.sandboxNetwork",
 	"interface.terminalProgress",
 	"interface.desktopNotifications",
 	"integrations.projectResources",

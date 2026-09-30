@@ -439,6 +439,7 @@ export interface SettingControl {
 
 const CHOICES: Record<string, readonly string[]> = {
 	"safety.autonomy": ["default", "yolo"],
+	"safety.sandbox": ["auto", "required", "off"],
 	"chat.thinkingLevel": THINKING_LEVELS,
 	"fleet.default.thinkingLevel": THINKING_LEVELS,
 	"fleet.permissions.mode": ["deny", "escalate", "fail", "main"],
@@ -474,6 +475,14 @@ const OPTIONAL_STRINGS = new Set([
 	"context.compaction.systemPrompt",
 ]);
 const EXTRA_HELP: Record<string, [string, string]> = {
+	"safety.sandbox": [
+		"Worker command sandbox",
+		"Run dispatched workers' shell and verification commands in an OS sandbox that can write only the run's writable roots and a private /tmp. auto uses it when available, required refuses those commands without it, off never sandboxes. Your own chat commands are not sandboxed.",
+	],
+	"safety.sandboxNetwork": [
+		"Worker sandbox network",
+		"Let sandboxed worker commands reach the network. Workers that have web_fetch get network either way.",
+	],
 	"interface.demo": [
 		"Demo presentation and guidance",
 		"The full welcome artwork, dashboard, and shortcut hints. Off starts with a compact identity header and skips welcome-only reads. Also controls a short tip after some turns, picked from what the turn did, plus idle footer tips and key hints. On by default before 1.0. Off stops every tip and the guidance profile. No automatic demonstrations or permission changes.",

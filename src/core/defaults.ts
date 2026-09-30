@@ -12,6 +12,7 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { SiteId } from "../domains/system-one/types.js";
 import type { TurnControlSettings } from "../domains/turn-control/index.js";
 import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
+import type { SandboxMode } from "./sandbox/types.js";
 
 export type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 export type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -534,6 +535,15 @@ export interface SafetySettings {
 		observationBytesPerTurn: number;
 	};
 	review: ReviewSettings;
+	/**
+	 * OS sandbox for a dispatched worker's own commands (bash, run_script,
+	 * verification). auto sandboxes when a backend is available and records
+	 * when it is not; required refuses those commands without one; off never
+	 * sandboxes. Main-agent commands are not sandboxed.
+	 */
+	sandbox: SandboxMode;
+	/** Let sandboxed worker commands reach the network even without web_fetch. */
+	sandboxNetwork: boolean;
 }
 
 export interface IntegrationsSettings {
@@ -646,6 +656,8 @@ export const DEFAULT_SETTINGS = {
 			observationBytesPerTurn: GUARDRAIL_DEFAULTS.observationTurnBudgetBytes,
 		},
 		review: { enabled: false } as ReviewSettings,
+		sandbox: "auto" as SandboxMode,
+		sandboxNetwork: false,
 	} as SafetySettings,
 	interface: {
 		demo: true,
@@ -806,6 +818,9 @@ safety:
     observationBytesPerTurn: 196608
   review:
     enabled: false
+  # OS sandbox for dispatched worker commands: auto | required | off.
+  sandbox: auto
+  sandboxNetwork: false
 
 interface:
   # Capability guidance during project work; disable for a quiet experience.

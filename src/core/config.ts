@@ -34,6 +34,7 @@ import {
 	WORKING_SET_PROFILE_IDS,
 } from "./defaults.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
+import { SANDBOX_MODES } from "./sandbox/types.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
 import { MAX_TIMER_DELAY_MS } from "./timers.js";
 import { clioConfigDir, resolveClioDirs } from "./xdg.js";
@@ -2113,10 +2114,18 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.safety)) issues.add("safety", `expected a map, got ${describe(raw.safety)}`);
 		else {
 			const safety = raw.safety;
-			issues.unknownKeys("safety", safety, ["autonomy", "limits", "review"]);
+			issues.unknownKeys("safety", safety, ["autonomy", "limits", "review", "sandbox", "sandboxNetwork"]);
 			if ("autonomy" in safety) {
 				const parsed = expectEnum(issues, "safety.autonomy", safety.autonomy, AUTONOMY_LEVELS, RETIRED_AUTONOMY_VALUES);
 				if (parsed !== undefined) settings.safety.autonomy = parsed;
+			}
+			if ("sandbox" in safety) {
+				const parsed = expectEnum(issues, "safety.sandbox", safety.sandbox, SANDBOX_MODES);
+				if (parsed !== undefined) settings.safety.sandbox = parsed;
+			}
+			if ("sandboxNetwork" in safety) {
+				const parsed = expectBoolean(issues, "safety.sandboxNetwork", safety.sandboxNetwork);
+				if (parsed !== undefined) settings.safety.sandboxNetwork = parsed;
 			}
 			if ("limits" in safety) {
 				if (!isPlainObject(safety.limits)) issues.add("safety.limits", `expected a map, got ${describe(safety.limits)}`);

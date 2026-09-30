@@ -224,6 +224,9 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "safety.limits.sessionCostUsd":
 		case "safety.limits.chatToolCallsPerTurn":
 			return place("safety", "Spending & tool limits");
+		case "safety.sandbox":
+		case "safety.sandboxNetwork":
+			return place("safety", "Worker approvals");
 		default:
 	}
 	if (under(path, "chat.modelPicker")) return place("models", "Quick switch");
