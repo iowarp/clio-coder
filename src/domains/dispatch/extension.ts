@@ -264,6 +264,7 @@ import {
 	type JointRouteResolverInput,
 	resolveJointRoute,
 } from "./joint-route-resolver.js";
+import { mergeWithheldDetail } from "./merge-gate.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
 import {
 	type RunTerminationEvidence,
@@ -7236,12 +7237,17 @@ export function createDispatchBundle(
 				// Master's `npm test: exit 1` commit merged onto main (flywheel s5r2).
 				// The tree is still committed to its preserved branch, so a failure the
 				// operator knows was already there costs one merge command.
-				const mergeWithheld =
-					req.taskWorktree !== undefined &&
-					(req.apply ?? "merge") === "merge" &&
-					finalOutcome === "succeeded" &&
-					sealedResultContractFact?.quality === "fail" &&
-					hostVerification?.status !== "verified";
+				const withheldDetail =
+					req.taskWorktree !== undefined && (req.apply ?? "merge") === "merge" && finalOutcome === "succeeded"
+						? mergeWithheldDetail({
+								quality: sealedResultContractFact?.quality,
+								hostStatus: hostVerification?.status,
+								contract: appliedResultContract,
+								output: capturedOutput?.state === "final" ? capturedOutput.text : null,
+								branch: req.taskWorktree.branch,
+							})
+						: null;
+				const mergeWithheld = withheldDetail !== null;
 				// A merge-mode run the worker finished but host verification rejected
 				// keeps its branch like a withheld merge, so its tree is committed there
 				// for the operator's one merge command instead of left as loose edits.
@@ -7277,7 +7283,7 @@ export function createDispatchBundle(
 					} else if (mergeWithheld) {
 						finalOutcome = "failed";
 						outcomeCode = "merge_withheld";
-						finalDetail = `merge withheld: the worker's own report lists a failing validation; its work is committed on the preserved branch ${req.taskWorktree.branch}, and \`git merge ${req.taskWorktree.branch}\` applies it if that failure was already there`;
+						finalDetail = withheldDetail ?? finalDetail;
 						failureMessage = finalDetail;
 					}
 				}

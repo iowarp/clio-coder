@@ -300,8 +300,9 @@ After a successful worker and successful host verification, merge application
 commits the task branch, rechecks protected paths, and uses the same guarded
 merge path as compete. A conflict fails closed with
 `worktree_merge_conflict` and preserves the branch and worktree. A worker whose
-own report lists a failing validation is not merged unless host verification
-passed: the run fails, its work is committed on the preserved branch, and the
+own report lists a failing validation, or names a check it did not run
+(`declaredChecks`) with no validation that passed, is not merged unless host
+verification passed: the run fails, its work is committed on the preserved branch, and the
 detail names the `git merge` that applies it. Preserve
 application never merges and reports the branch. A detached task applies when its run finalizes, so `monitor(mode="collect")` returns the sealed application receipt.
 Admission refuses a non-git checkout, a read-only agent, compete mode, or an
@@ -959,7 +960,7 @@ include:
   without a nonempty receipt-sealed final answer and
   `host_verification_rejected` when a declared host check rejects the settled
   tree. `merge_withheld` marks a run whose task worktree was preserved instead
-  of merged because the worker's own report lists a failing validation. All
+  of merged because the worker's own report lists a failing validation or an unrun check. All
   three suppress automatic retry.
 - `routingIntent`, `routeDecision`, and `quality`: the normalized hard bounds,
   complete current-policy decision, exact execution role, route estimate and

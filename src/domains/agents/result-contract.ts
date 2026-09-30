@@ -1415,6 +1415,36 @@ export function resultContractAuthorship(contract: ResultContract, output: strin
 	return { commitMessage: read("commitMessage"), summary: read("summary") };
 }
 
+/** What a mutation report says about checks, read from the parsed result. */
+export interface MutationReportChecks {
+	/** Checks the worker named but did not run, in report order. */
+	declaredChecks: string[];
+	/** True when at least one executed validation entry reports passed. */
+	validationPassed: boolean;
+}
+
+/**
+ * Read `declaredChecks` and whether any validation passed from a mutation
+ * report. Anything unreadable or of another kind reads as no claim, so the
+ * caller never withholds work over a report it could not parse.
+ */
+export function mutationReportChecks(contract: ResultContract, output: string | null): MutationReportChecks {
+	const none: MutationReportChecks = { declaredChecks: [], validationPassed: false };
+	if (contract.kind !== "mutation-report") return none;
+	const parsed = parseJson(output);
+	if (!parsed.ok) return none;
+	const declared = parsed.value.declaredChecks;
+	const validations = parsed.value.validations;
+	return {
+		declaredChecks: Array.isArray(declared) ? declared.filter((entry): entry is string => string(entry)) : [],
+		validationPassed:
+			Array.isArray(validations) &&
+			validations.some(
+				(entry) => entry !== null && typeof entry === "object" && (entry as Record<string, unknown>).passed === true,
+			),
+	};
+}
+
 function validateDebugger(contract: ResultContract, output: string | null): ResultContractValidation {
 	const parsed = parseJson(output);
 	if (!parsed.ok) return failure(contract, "unmeasured", `Debugger result payload failed: ${parsed.reason}`);
