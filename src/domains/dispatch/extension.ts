@@ -63,6 +63,7 @@ import {
 	applyTaskWorktree,
 	cleanupTaskWorktree,
 	createTaskWorktree,
+	discardIdleTaskWorktree,
 	gitCheckoutRoot,
 	settleTaskWorktree,
 	shareTaskWorktreeDependencies,
@@ -5628,7 +5629,10 @@ export function createDispatchBundle(
 					}
 				} else if (req.taskWorktree !== undefined) {
 					try {
-						settleTaskWorktree(req.taskWorktree);
+						// A canceled run that never produced work leaves nothing to keep.
+						if (!(finalOutcome === "canceled" && discardIdleTaskWorktree(req.taskWorktree))) {
+							settleTaskWorktree(req.taskWorktree);
+						}
 					} catch (settleError) {
 						reportDispatchDiagnostic(`settle task worktree ${req.taskWorktree.runId}`, settleError);
 					}
@@ -7415,7 +7419,10 @@ export function createDispatchBundle(
 					// mode, a failed run, a refused merge). Saying so on the claim keeps
 					// restart recovery from reading it as a crash.
 					try {
-						settleTaskWorktree(req.taskWorktree);
+						// A canceled run that never produced work leaves nothing to keep.
+						if (!(finalOutcome === "canceled" && discardIdleTaskWorktree(req.taskWorktree))) {
+							settleTaskWorktree(req.taskWorktree);
+						}
 					} catch (settleError) {
 						reportDispatchDiagnostic(`settle task worktree ${req.taskWorktree.runId}`, settleError);
 					}

@@ -680,6 +680,20 @@ export function cleanupTaskWorktree(worktree: TaskWorktree, deleteBranch: boolea
 	rmSync(claimPathFor(worktree.root, worktree.runId), { force: true });
 }
 
+/**
+ * The cancel-path twin of restart recovery's rule: a canceled run whose worktree
+ * has no commit beyond its base and no modified, staged, or untracked file is
+ * removed with its branch and claim; one that holds work is left for the
+ * caller to settle. Returns whether it was removed. Esc in the TUI and
+ * `fleet cancel` both seal through the dispatch finalizer, so they share this.
+ */
+export function discardIdleTaskWorktree(worktree: TaskWorktree): boolean {
+	assertOwnership(worktree);
+	if (workHeldBy(worktree.root, worktree) !== null) return false;
+	cleanupTaskWorktree(worktree, true);
+	return true;
+}
+
 function replaceMarker(ownerPath: string, marker: Record<string, unknown>): void {
 	const temporary = `${ownerPath}.${randomBytes(6).toString("hex")}.tmp`;
 	writeFileSync(temporary, `${JSON.stringify(marker, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
@@ -777,7 +791,7 @@ function readTaskClaims(canonical: string, allowedParents: ReadonlyArray<string>
  * commit beyond its base and no modified, staged, or untracked file. Any git
  * failure is a reason to keep it.
  */
-function workHeldBy(canonical: string, claim: TaskClaim): string | null {
+function workHeldBy(canonical: string, claim: Pick<TaskClaim, "base" | "branch" | "path">): string | null {
 	try {
 		const commits = Number.parseInt(git(canonical, ["rev-list", "--count", `${claim.base}..${claim.branch}`]), 10);
 		if (!Number.isSafeInteger(commits)) return "its commits could not be counted";
