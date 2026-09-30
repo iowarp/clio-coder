@@ -1096,7 +1096,11 @@ function evaluateBashPolicy(
 			};
 		}
 	}
-	if (isGitInspection(recognitionCommand)) {
+	const standaloneWords = scanShellLike(recognitionCommand);
+	if (
+		standaloneWords.every((word) => !word.operator) &&
+		isGitInspection(standaloneWords, recognitionCommand, callCwd, workspaceRoot, readScope)
+	) {
 		return {
 			kind: "allow",
 			ruleId: GIT_INSPECT_RULE_ID,
@@ -1383,8 +1387,11 @@ const SED_PRINT_SCRIPT = /^(?:\d+|\$)(?:,(?:\d+|\$))?p$/u;
  * ANSI-C or locale quoting (`$'\x2fetc'`). The word's own `quoted` flag is
  * too coarse for this, because one quoted fragment marks the whole word
  * (`.e*''` is still a glob), so the raw text is walked with its quoting.
+ * `revisions` reads the word as a Git argument, where `HEAD~3`, `HEAD@{1}`
+ * and `v1^{commit}` are revision spellings: a tilde counts only at the start
+ * of the word and a brace only when bash would expand it (a comma or `..`).
  */
-function hasUnquotedExpansion(raw: string): boolean {
+function hasUnquotedExpansion(raw: string, revisions = false): boolean {
 	let quote: "'" | '"' | null = null;
 	for (let index = 0; index < raw.length; index += 1) {
 		const char = raw[index];
@@ -1404,6 +1411,13 @@ function hasUnquotedExpansion(raw: string): boolean {
 			quote = char;
 			continue;
 		}
+		if (revisions && char === "~" && index > 0) continue;
+		if (revisions && char === "{") {
+			const close = raw.indexOf("}", index);
+			if (close === -1 || /,|\.\./u.test(raw.slice(index + 1, close))) return true;
+			continue;
+		}
+		if (revisions && char === "}") continue;
 		if (char !== undefined && "~{}*?[".includes(char)) return true;
 		if (char === "$" && (raw[index + 1] === "'" || raw[index + 1] === '"')) return true;
 	}
@@ -1766,7 +1780,10 @@ function recognizeCommandChain(
 			ruleIds.push(builtin.id);
 			continue;
 		}
-		if (!hasSequencingOperators(rendered) && isGitInspection(rendered)) {
+		if (
+			!hasSequencingOperators(rendered) &&
+			cwds.every((from) => isGitInspection(segment, command, from, workspaceRoot, readScope))
+		) {
 			ruleIds.push(GIT_INSPECT_RULE_ID);
 			continue;
 		}
@@ -1795,13 +1812,38 @@ const GIT_INSPECT_RULE_ID = "builtin:git-inspect";
  * `--output`), so it decides instead of one regex per spelling. An env or
  * path prefix is not plain `git` and stays unrecognized.
  */
-function isGitInspection(command: string): boolean {
-	if (!/^git[ \t]/u.test(command)) return false;
-	const verdict = classifyBashGit(command);
-	if (verdict === null || verdict.class !== "inspect") return false;
-	if (verdict.subcommand !== null && GIT_UNRECOGNIZED_SUBCOMMANDS.has(verdict.subcommand)) return false;
+function isGitInspection(
+	words: ReadonlyArray<ShellToken>,
+	source: string,
+	cwd: string,
+	workspaceRoot: string,
+	readScope: ReadScopeInputs,
+): boolean {
+	if (words[0]?.value !== "git") return false;
+	// Every word is judged as written. One the shell expands or substitutes
+	// names files the checks below cannot see.
+	if (words.some((word) => (word.substitutions?.length ?? 0) > 0)) return false;
+	if (words.some((word) => hasUnquotedExpansion(source.slice(word.start, word.end), true))) return false;
+	const verdict = classifyBashGit(words.map((word) => word.value).join(" "));
+	if (verdict === null || verdict.class !== "inspect" || verdict.subcommand === null) return false;
+	if (GIT_UNRECOGNIZED_SUBCOMMANDS.has(verdict.subcommand)) return false;
 	// Whitespace checks keep their own standalone-only recognition above.
-	return !verdict.argv.includes("--check");
+	if (verdict.argv.includes("--check")) return false;
+	// Non-option words are revisions, pathspecs and option values. They are held
+	// to the workspace as readOnlyInspectionRule holds an operand, so an option
+	// value that names a file (`--contents /etc/hosts`, `-S /proc/self/environ`)
+	// or a pathspec outside the tree is not recognized.
+	const operands = words.slice(words.findIndex((word) => word.value === verdict.subcommand) + 1);
+	for (const { value } of operands) {
+		if (value === "--" || value === "-") continue;
+		if (value.startsWith("-")) {
+			const attached = value.includes("=") ? value.slice(value.indexOf("=") + 1) : "";
+			if (attached.startsWith("/") || attached.startsWith("~") || attached.split("/").includes("..")) return false;
+			continue;
+		}
+		if (!operandStaysInWorkspace(value, cwd, workspaceRoot, readScope)) return false;
+	}
+	return true;
 }
 
 /**

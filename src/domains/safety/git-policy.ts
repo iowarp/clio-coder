@@ -141,15 +141,33 @@ const HELPER_LONG_FLAGS: ReadonlyArray<string> = [
 	"--contents",
 	"--upload-pack",
 	"--exec",
+	// Options whose value names a file Git then reads: a revs file, an exclude list, a pattern file.
+	"--ignore-revs-file",
+	"--exclude-from",
+	"--exclude-per-directory",
+	"--file",
 ];
+/** Short flags whose value is a file, only in the subcommands where the letter means that (`log -S` is a pickaxe string). */
+const FILE_SHORT_FLAGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+	["-S", new Set(["blame", "annotate"])],
+	["-X", new Set(["ls-files"])],
+	["-f", new Set(["grep"])],
+]);
 
-function helperFlag(arg: string): boolean {
+function helperFlag(subcommand: string, arg: string): boolean {
 	if (arg.startsWith("--")) {
 		const name = (arg.split("=", 1)[0] ?? "").slice(2);
 		return name.length > 0 && HELPER_LONG_FLAGS.some((flag) => flag.slice(2).startsWith(name));
 	}
 	// -O[<pager>] runs a pager; an attached value (-Ocmd) is the same flag.
-	return arg.startsWith("-O");
+	if (arg.startsWith("-O")) return true;
+	if (!/^-[^-]/u.test(arg)) return false;
+	for (const [flag, subcommands] of FILE_SHORT_FLAGS) {
+		if (!subcommands.has(subcommand)) continue;
+		// The value attaches (-Sfile) or follows; grep also takes -f inside a cluster (-nf FILE).
+		if (arg.startsWith(flag) || (flag === "-f" && /^-[A-Za-z]*f/u.test(arg))) return true;
+	}
+	return false;
 }
 
 /** Options `add` accepts in the task set; paths follow `--`. */
@@ -255,7 +273,7 @@ function subcommandClass(subcommand: string, args: ReadonlyArray<string>): { cla
 			? { class: "task-mutation", reason: "git commit -m on the current branch" }
 			: other(`${error}; only git commit -m <message> is in the task set`);
 	}
-	const helper = args.find(helperFlag);
+	const helper = args.find((arg) => helperFlag(subcommand, arg));
 	const inspect = (reason: string) =>
 		helper === undefined
 			? { class: "inspect" as const, reason }
