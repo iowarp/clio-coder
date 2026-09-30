@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { parseJsonObjectPayload } from "../core/json-payload.js";
+import { evaluateSkillToolSurface } from "../core/skill-activation.js";
+import { ToolNames } from "../core/tool-names.js";
+import { turnAllowsTool } from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { CouncilReport, CouncilReportMember } from "../domains/agents/result-contract.js";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
@@ -2521,10 +2524,20 @@ export async function runDispatchTool(
 		(snapshot.writers === 1 && mode === "parallel" && requests.length > 1 && !snapshot.detach
 			? "a writer-limited batch admits its writers from this turn"
 			: null);
-	requests = requests.map((request) => ({
+	const mainCanSteer =
+		turnAllowsTool(options?.turnConstraints, ToolNames.Steer) &&
+		(options?.allowedTools === undefined || options.allowedTools.includes(ToolNames.Steer)) &&
+		evaluateSkillToolSurface(options?.pendingSkillPolicy, ToolNames.Steer) === null;
+	requests = requests.map(({ mainGrantRoute: _route, ...request }) => ({
 		...request,
-		mainGrantRoute:
-			grantRouteRefusal === null ? { kind: "yield" as const } : { kind: "refused" as const, reason: grantRouteRefusal },
+		// No route makes resolveDispatchPermit apply unavailable-responder deny
+		// immediately, rather than parking an ask main has no authority to answer.
+		...(mainCanSteer
+			? {
+					mainGrantRoute:
+						grantRouteRefusal === null ? { kind: "yield" as const } : { kind: "refused" as const, reason: grantRouteRefusal },
+				}
+			: {}),
 	}));
 	const background = createBackgroundSwitch();
 	// Review and Scout both execute under mode=parallel, so the operator-facing
