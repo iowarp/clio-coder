@@ -256,6 +256,9 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		state.stalledTurnNudgeSpent = true;
 		state.pendingRequestContinuation = true;
 		bufferReminder(message, "info");
+		// The nudge reaches the model as context inside the run, never as a
+		// persisted operator turn, so the ledger keeps it for inspection only.
+		appendMiddlewareReminderEntry(message, "info", "reminder", false);
 		// Producer-neutral wording: stalled-turn, the high-rigor finish contract,
 		// and the open-tasks nudge all arrive here, and the buffered reminder
 		// already carries each producer's specific message into the transcript.

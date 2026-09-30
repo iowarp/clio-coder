@@ -132,6 +132,8 @@ export interface ChatTurnState {
 	stalledTurnNudgeSpent: boolean;
 	/** A middleware request_continuation is waiting to resubmit after settle. */
 	pendingRequestContinuation: boolean;
+	/** A middleware continuation carries the current run one more request, delivered by prepareNextTurn. */
+	pendingInRunContinuation: boolean;
 	/**
 	 * Model-only steer for a final reply held back on its closing question,
 	 * waiting for the engine's next request inside the same run.
@@ -174,6 +176,7 @@ export function createTurnState(initialThinkingLevel: ThinkingLevel): ChatTurnSt
 		turnSharedWorkerNote: false,
 		stalledTurnNudgeSpent: false,
 		pendingRequestContinuation: false,
+		pendingInRunContinuation: false,
 		pendingFinalReplySteer: null,
 		heldFinalReplyText: null,
 		currentPendingSkillPolicy: undefined,

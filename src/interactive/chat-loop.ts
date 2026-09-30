@@ -1437,6 +1437,38 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitNotice,
 		emitFooterNotice,
 		toolStartTimes,
+		prepareInRunContinuation: async (signal) => {
+			const userTurnId = state.activeUserTurnId;
+			if (!deps.turnControl || userTurnId === null) return null;
+			const controllerAbort = new AbortController();
+			const forward = () => controllerAbort.abort();
+			signal?.addEventListener("abort", forward, { once: true });
+			try {
+				const result = await deps.turnControl.run({
+					operatorText: "",
+					continuation: true,
+					userTurnId,
+					signal: controllerAbort.signal,
+				});
+				outcomeCollector.recordControl(result.record);
+				if (deps.session?.current()) {
+					try {
+						deps.session.appendEntry({
+							kind: "custom",
+							customType: "turnControl",
+							parentTurnId: state.lastTurnId,
+							display: false,
+							data: result.record,
+						});
+					} catch {
+						/* S6: ledger recording is best effort and never costs the continuation. */
+					}
+				}
+				return result.block;
+			} finally {
+				signal?.removeEventListener("abort", forward);
+			}
+		},
 	});
 	// A fresh ledger and footer render before the first submit. Start the same
 	// live capability probe that submit and resume use so those boot surfaces
@@ -1962,6 +1994,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			state.turnSharedWorkerNote = isWorkerShareNote(text);
 			state.pendingFinalReplySteer = null;
 			state.heldFinalReplyText = null;
+			state.pendingInRunContinuation = false;
 			middlewareToolChoice.reset();
 			if (options.requestContinuation !== true) state.stalledTurnNudgeSpent = false;
 			const images = sidecarObservation === null && options.images?.length ? [...options.images] : undefined;

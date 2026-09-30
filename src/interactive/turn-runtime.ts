@@ -169,6 +169,12 @@ export interface TurnRuntimeDeps {
 	emitFooterNotice: (level: "info" | "warning", text: string, key: string) => void;
 	/** Tool-call id to its `performance.now()` start mark; spans only, never an instant. */
 	toolStartTimes: Map<string, number>;
+	/**
+	 * Turn-control work a middleware continuation runs before its request (the
+	 * detached-batch collection), returned as a block for model context. The
+	 * submit path did this for a resubmitted continuation.
+	 */
+	prepareInRunContinuation?: (signal?: AbortSignal) => Promise<string | null>;
 }
 
 export interface TurnRuntime {
@@ -768,8 +774,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (deps.hasQueuedSteering?.()) await deps.continuity?.pause();
 				const handoffChanged = (await deps.continuity?.settle(signal)) ?? false;
 				const steered = middleware.deliverFinalReplySteer(localRuntime);
+				const continued = await deliverInRunContinuation(signal);
 				const contextChanged =
-					(await middleware.prepareToolContinuation(localRuntime, signal)) || handoffChanged || steered;
+					(await middleware.prepareToolContinuation(localRuntime, signal)) || handoffChanged || steered || continued;
 				const update = await context.postToolContinuationGuard(localRuntime, signal, contextChanged);
 				const restored = context.installMemoryRestoration(localRuntime);
 				if (signal?.aborted || state.activeInterruptReason !== null) return undefined;
@@ -798,18 +805,72 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// settles and the operator sees one completion (the post-settle
 		// continuation rendered a second "Done" and a re-summary). A plan closed
 		// by a terminating artifact is read here, after its tool batch.
+		//
+		// The run's final turn is also where turn_end fires, so a middleware
+		// request_continuation (stalled turn, open tasks, finish contract,
+		// detached batches, skill wait) carries the run on the same way instead
+		// of resubmitting a fresh prompt after the turn rendered Done. agent_end
+		// fires turn_end only for a final message this hook never saw: an engine
+		// that does not call finishTurn, or its thrown-failure path.
+		let turnEndFiredFor: AgentMessage | null = null;
 		handle.agent.finishTurn = async (turn) => {
-			if (state.activeInterruptReason !== null) return undefined;
-			if (state.pendingFinalReplySteer === null && pendingTerminalToolResult !== null) {
-				stallSuspendDepth += 1;
-				try {
-					await middleware.holdFinalReply(localRuntime, extractText(turn.message), turn.message.stopReason, true);
-				} finally {
-					stallSuspendDepth -= 1;
-					lastActivityAt = performance.now();
+			if (state.activeInterruptReason === null && state.pendingFinalReplySteer === null) {
+				if (pendingTerminalToolResult !== null) {
+					stallSuspendDepth += 1;
+					try {
+						await middleware.holdFinalReply(localRuntime, extractText(turn.message), turn.message.stopReason, true);
+					} finally {
+						stallSuspendDepth -= 1;
+						lastActivityAt = performance.now();
+					}
 				}
 			}
-			return state.pendingFinalReplySteer !== null ? { action: "continue" } : undefined;
+			if (state.pendingFinalReplySteer !== null) return { action: "continue" };
+			// A tool batch that did not terminate, or an operator message already
+			// queued, carries the run on: this is not its final turn.
+			const final = !hasStructuredToolCall(turn.message) || pendingTerminalToolResult !== null;
+			if (!final || localRuntime.agent.hasQueuedMessages?.() === true) return undefined;
+			const terminal = pendingTerminalToolResult;
+			pendingTerminalToolResult = null;
+			if (terminal) persistence.appendTerminalToolAssistantTurn(terminal);
+			context.flushReconciledSnapshot();
+			turnEndFiredFor = turn.message;
+			stallSuspendDepth += 1;
+			try {
+				await middleware.fireTurnEnd(localRuntime, localRuntime.agent.state.messages, terminal ?? undefined);
+			} finally {
+				stallSuspendDepth -= 1;
+				lastActivityAt = performance.now();
+			}
+			if (!state.pendingRequestContinuation || state.activeInterruptReason !== null) return undefined;
+			if (turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return undefined;
+			state.pendingRequestContinuation = false;
+			state.pendingInRunContinuation = true;
+			return { action: "continue" };
+		};
+		// What the post-settle resubmit did between runs, done inside this one:
+		// a fresh per-turn tool count, the turn controller's collection, a
+		// turn_start marked as a continuation, and the buffered continuation
+		// reminders as model-only context.
+		const deliverInRunContinuation = async (signal?: AbortSignal): Promise<boolean> => {
+			if (!state.pendingInRunContinuation) return false;
+			state.pendingInRunContinuation = false;
+			state.turnToolCalls = 0;
+			state.turnToolNames = [];
+			middlewareToolChoice.reset();
+			let block: string | null = null;
+			try {
+				block = (await deps.prepareInRunContinuation?.(signal)) ?? null;
+			} catch {
+				// Collection is best effort; the continuation reminder still goes out.
+			}
+			middleware.fireTurnStart(localRuntime, "", 0, true);
+			const content = [block, middleware.flushPendingReminders()]
+				.filter((part): part is string => part !== null && part.length > 0)
+				.join("\n\n");
+			if (content.length === 0) return false;
+			localRuntime.agent.state.messages.push({ role: "user", content, timestamp: Date.now() });
+			return true;
 		};
 
 		const generationTiming = createAssistantGenerationTiming();
@@ -984,6 +1045,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (publicEvent) generationTiming.record(publicEvent, eventClock);
 			if (publicEvent?.type === "agent_start") {
+				turnEndFiredFor = null;
+				state.pendingInRunContinuation = false;
 				runStartMessageCount = localRuntime.agent.state.messages.length;
 				apiCallStartedAt = null;
 				apiCallFirstDeltaAt = null;
@@ -1184,7 +1247,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					persistence.appendTerminalToolAssistantTurn(terminal);
 				}
 				context.flushReconciledSnapshot();
-				await middleware.fireTurnEnd(localRuntime, enrichedEvent.messages, terminal ?? undefined);
+				const finalAssistant = [...enrichedEvent.messages].reverse().find((message) => message.role === "assistant");
+				if (terminal !== null || finalAssistant === undefined || finalAssistant !== turnEndFiredFor) {
+					await middleware.fireTurnEnd(localRuntime, enrichedEvent.messages, terminal ?? undefined);
+				}
+				turnEndFiredFor = null;
 			}
 		});
 
