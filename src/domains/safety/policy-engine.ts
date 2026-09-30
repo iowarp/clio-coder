@@ -923,7 +923,7 @@ function evaluateBashPolicy(
 	}
 	if (
 		typeof input === "string" &&
-		(/\$(?:[A-Za-z_{0-9@*#?!-])/.test(command) ||
+		(/\$(?:[A-Za-z_{0-9@*#?!'"-])/.test(command) ||
 			/(?:^|[\s;&|])(?:python[\d.]*|node|ruby|perl|php|lua)\s+(?:[^\n]*?\s)?-[ce]\b/.test(command)) &&
 		posture !== "confirmed" &&
 		posture !== "yolo"
@@ -932,7 +932,9 @@ function evaluateBashPolicy(
 			kind: "ask",
 			reasonCode: "bash-hidden-content",
 			ruleId: "bash-hidden-content",
-			reasons: ["shell variables or interpreter source hide paths from the safety scan and require one-shot confirmation"],
+			reasons: [
+				"shell variables, ANSI-C or locale quoting, or interpreter source hide paths from the safety scan and require one-shot confirmation",
+			],
 			policySource: "builtin-command-allowlist",
 			execRecognition: "unrecognized",
 		};
@@ -1324,6 +1326,79 @@ const READ_ONLY_INSPECTORS: ReadonlyMap<string, ReadonlyArray<string>> = new Map
 /** `sed -n` with a print-only line script (`1,80p`, `5p`, `10,$p`); every other sed program can write or execute. */
 const SED_PRINT_SCRIPT = /^(?:\d+|\$)(?:,(?:\d+|\$))?p$/u;
 
+/**
+ * True when the source text of one shell word carries an expansion the
+ * recognizer does not perform: tilde and brace expansion, pathname globs, and
+ * ANSI-C or locale quoting (`$'\x2fetc'`). The word's own `quoted` flag is
+ * too coarse for this, because one quoted fragment marks the whole word
+ * (`.e*''` is still a glob), so the raw text is walked with its quoting.
+ */
+function hasUnquotedExpansion(raw: string): boolean {
+	let quote: "'" | '"' | null = null;
+	for (let index = 0; index < raw.length; index += 1) {
+		const char = raw[index];
+		if (quote === "'") {
+			if (char === "'") quote = null;
+			continue;
+		}
+		if (char === "\\") {
+			index += 1;
+			continue;
+		}
+		if (quote === '"') {
+			if (char === '"') quote = null;
+			continue;
+		}
+		if (char === "'" || char === '"') {
+			quote = char;
+			continue;
+		}
+		if (char !== undefined && "~{}*?[".includes(char)) return true;
+		if (char === "$" && (raw[index + 1] === "'" || raw[index + 1] === '"')) return true;
+	}
+	return false;
+}
+
+/**
+ * GNU getopt_long accepts any unambiguous prefix of a long option, so `--out`
+ * is `--output`. An ambiguous prefix is an error there, which makes refusing
+ * every prefix (with or without `=value`) safe: it costs an ask at worst.
+ */
+function abbreviatesLongOption(arg: string, option: string): boolean {
+	if (!arg.startsWith("--") || arg === "--") return false;
+	const name = (arg.split("=", 1)[0] ?? "").slice(2);
+	return name.length > 0 && option.slice(2).startsWith(name);
+}
+
+const GREP_FAMILY: ReadonlySet<string> = new Set(["grep", "egrep", "fgrep"]);
+
+/**
+ * grep walks directories with `-r`, `-R`, `--recursive` and `-d recurse`
+ * (`--directories=recurse`, also inside a short cluster like `-rn` or `-drecurse`).
+ * The walk reaches zero-access files that naming them directly would not.
+ */
+function recursesDirectories(args: ReadonlyArray<string>): boolean {
+	for (const [index, arg] of args.entries()) {
+		if (arg === "--") break;
+		if (abbreviatesLongOption(arg, "--recursive") || abbreviatesLongOption(arg, "--dereference-recursive")) return true;
+		if (abbreviatesLongOption(arg, "--directories")) {
+			const value = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : (args[index + 1] ?? "");
+			if (value.startsWith("rec")) return true;
+			continue;
+		}
+		if (/^-[^-]/u.test(arg)) {
+			const cluster = arg.slice(1);
+			if (/[rR]/u.test(cluster)) return true;
+			const dAt = cluster.indexOf("d");
+			if (dAt !== -1) {
+				const attached = cluster.slice(dAt + 1);
+				if ((attached.length > 0 ? attached : (args[index + 1] ?? "")).startsWith("rec")) return true;
+			}
+		}
+	}
+	return false;
+}
+
 function refusedOption(arg: string, refused: ReadonlyArray<string>): boolean {
 	return refused.some((option) => {
 		if (arg === option || arg.startsWith(`${option}=`)) return true;
@@ -1342,13 +1417,19 @@ function refusedOption(arg: string, refused: ReadonlyArray<string>): boolean {
  * whole command string before recognition.
  */
 function readOnlyInspectionRule(
-	argv: ReadonlyArray<string>,
+	words: ReadonlyArray<ShellToken>,
+	source: string,
 	cwd: string,
 	workspaceRoot: string,
 	readScope: ReadScopeInputs,
 ): string | null {
-	const [command, ...args] = argv;
+	const [command, ...args] = words.map((word) => word.value);
 	if (command === undefined) return null;
+	// The operand check below sees the literal word; the shell sees what the
+	// word expands to. Any expansion the scanner does not perform hides the
+	// real path, so a word carrying one is never recognized.
+	if (words.some((word) => hasUnquotedExpansion(source.slice(word.start, word.end)))) return null;
+	if (GREP_FAMILY.has(command) && recursesDirectories(args)) return null;
 	if (command === "sed") {
 		if (!args.includes("-n")) return null;
 		let sawScript = false;
@@ -1411,7 +1492,7 @@ function recognizeCommandChain(
 	readScope: ReadScopeInputs,
 ): ChainRecognition | null {
 	const tokens = scanShellLike(command);
-	const segments: string[][] = [];
+	const segments: ShellToken[][] = [];
 	// joins[i] is the operator in front of segments[i].
 	const joins: Array<string | undefined> = [undefined];
 	let current: ShellToken[] = [];
@@ -1425,7 +1506,7 @@ function recognizeCommandChain(
 			continue;
 		}
 		if (CHAIN_OPERATORS.has(token.value)) {
-			segments.push(current.map((word) => word.value));
+			segments.push(current);
 			joins.push(token.value);
 			current = [];
 			if (token.value !== "&&") onlyAnd = false;
@@ -1439,13 +1520,13 @@ function recognizeCommandChain(
 			current.pop();
 		index += 1;
 	}
-	segments.push(current.map((word) => word.value));
+	segments.push(current);
 	if (segments.length > CHAIN_MAX_SEGMENTS) return null;
 	// A lone command keeps its standalone rules; this path adds only what the
 	// compound or a discard redirection needs, plus read-only inspection.
 	if (segments.length < 2 && tokens.every((token) => !token.operator)) {
 		const [only] = segments;
-		const rule = only === undefined ? null : readOnlyInspectionRule(only, callCwd, workspaceRoot, readScope);
+		const rule = only === undefined ? null : readOnlyInspectionRule(only, command, callCwd, workspaceRoot, readScope);
 		return rule === null
 			? null
 			: { ruleIds: [rule], requiresConfirmation: false, requiresAutonomyApproval: false, scriptPreviews: [] };
@@ -1462,14 +1543,14 @@ function recognizeCommandChain(
 	const scriptPreviews: string[] = [];
 	for (const [index, segment] of segments.entries()) {
 		if (segment.length === 0) return null;
-		if (segment[0] === "cd") {
+		if (segment[0]?.value === "cd") {
 			// A cd inside a pipeline runs in a subshell and moves nothing.
 			if (joins[index] === "|" || joins[index + 1] === "|") return null;
 			// Each later command runs in this directory, including project-policy
 			// cwd matching and script previews. Keep both logical and physical
 			// readings inside the workspace before recognizing the transition.
 			if (segment.length !== 2) return null;
-			const target = segment[1] ?? "";
+			const target = segment[1]?.value ?? "";
 			if (target.startsWith("~")) return null;
 			const reached: string[] = [];
 			for (const from of cwds) {
@@ -1488,7 +1569,7 @@ function recognizeCommandChain(
 		}
 		// Re-rendered from tokens, so quoting is gone: a member that needed its
 		// quotes fails the allowlist regex and the whole chain stays unrecognized.
-		const rendered = segment.join(" ");
+		const rendered = segment.map((word) => word.value).join(" ");
 		const projectScript = PROJECT_SCRIPT_COMMANDS.find((entry) => entry.re.test(rendered));
 		if (projectScript !== undefined) scriptPreviews.push(projectScriptPreview(rendered, chainCwd));
 		const projectMatches = cwds.map((from) => matchingProjectCommand(policy, rendered, from));
@@ -1519,7 +1600,7 @@ function recognizeCommandChain(
 		}
 		// Quoted words stay whole here (`find . -name "*.ts"`), which the
 		// re-rendered allowlist string above cannot express.
-		const inspections = cwds.map((from) => readOnlyInspectionRule(segment, from, workspaceRoot, readScope));
+		const inspections = cwds.map((from) => readOnlyInspectionRule(segment, command, from, workspaceRoot, readScope));
 		const inspection = inspections.every((rule) => rule !== null) ? inspections[0] : null;
 		if (inspection !== null && inspection !== undefined) {
 			ruleIds.push(inspection);
@@ -1556,12 +1637,13 @@ function hasSequencingOperators(command: string): boolean {
 }
 
 /**
- * Content-hiding constructs: `$(...)` and backticks execute text the net
- * cannot see until runtime. Kept separate from sequencing (sd-01 M5) so they
+ * Content-hiding constructs: `$(...)`, backticks and process substitution
+ * (`<(...)`, `>(...)`) execute text the net cannot see until runtime. Kept separate from sequencing (sd-01 M5) so they
  * can ask in default while yolo passes the ordinary confirmation.
  */
 function hasCommandSubstitution(command: string): boolean {
-	return /(`|\$\()/.test(command);
+	// `<(...)` and `>(...)` run their script exactly as `$(...)` does.
+	return /(`|\$\(|[<>]\()/.test(command);
 }
 
 /** Any shell operator at all; project policy entries with `shellOperators: deny` reject both kinds. */
