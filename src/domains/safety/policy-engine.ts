@@ -1091,11 +1091,15 @@ function blockDecision(
 }
 
 /**
- * Rule order is precedence, so the outer loop stays over the rules and each one
- * is offered every scan candidate. A rule fires on the first candidate
- * it matches, which can only add matches, never reorder or drop one.
+ * A hard rule outranks every confirmation rule; within one severity, rule order
+ * is precedence. Returning the first match in rule order let an authored ask
+ * rule for one segment of a compound command hide a later hard block for
+ * another: `gcloud iam policies list; firebase projects:delete x` asked, and a
+ * confirmed posture then admitted the project deletion (F1). Every rule is
+ * offered every scan candidate, so each segment is judged.
  */
 function matchSourcedRule(candidates: ReadonlyArray<string>, rules: ReadonlyArray<SourcedRule>) {
+	let first: { match: DamageControlMatch; source: SourcedRule["source"] } | null = null;
 	for (const entry of rules) {
 		if (
 			!candidates.some(
@@ -1115,9 +1119,12 @@ function matchSourcedRule(candidates: ReadonlyArray<string>, rules: ReadonlyArra
 			block: entry.rule.block,
 		};
 		if (entry.rule.ask !== undefined) match.ask = entry.rule.ask;
-		return { match, source: entry.source };
+		// The same test evaluate() applies before its block rail.
+		const hard = match.block === true || (match.ask !== true && match.actionClass === "git_destructive");
+		if (hard) return { match, source: entry.source };
+		first ??= { match, source: entry.source };
 	}
-	return null;
+	return first;
 }
 
 // Excludes "unknown" because damage control overrides must classify actions into concrete, actionable categories.

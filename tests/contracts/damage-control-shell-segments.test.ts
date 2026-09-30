@@ -97,6 +97,21 @@ test("hard blocks stay blocks behind every operator", () => {
 	}
 });
 
+// F1: an earlier confirmation rule matched the first segment and hid the hard
+// block on the second, so a confirmed posture admitted the project deletion.
+test("F1: a hard block in a later segment outranks an earlier confirmation rule", () => {
+	for (const command of [
+		"gcloud iam policies list; firebase projects:delete example",
+		"gcloud iam policies list && firebase projects:delete example",
+	]) {
+		for (const posture of ["default", "yolo", "confirmed"] as const) {
+			const decision = decide(command, posture);
+			strictEqual(decision.kind, "block", `${posture} ${JSON.stringify(command)}: ${decision.reasonCode}`);
+			strictEqual(decision.ruleId, "firebase-projects-delete", `${posture} ${JSON.stringify(command)}`);
+		}
+	}
+});
+
 // Segments come from the original text, so a rule cannot fire on a word that
 // only looks like a command inside a quoted argument.
 test("quoted text that merely spells a damage-control command does not ask", () => {
