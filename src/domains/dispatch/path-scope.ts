@@ -489,15 +489,6 @@ function renderParentTokens(tokens: ReadonlyArray<DispatchInferredParentToken>):
 	return renderOmittedPaths(tokens.map((entry) => `${entry.token} -> ${entry.resolved ?? "dropped"}`));
 }
 
-/** Render the named diagnostic for prose tokens whose leading "../" run was reinterpreted. */
-export function inferredScopeParentTokenDiagnostic(scope: DispatchPathScope): string | null {
-	const tokens = scope.parentTokens;
-	if (tokens.length === 0) return null;
-	return `legacy_scope_inferred: prose inference resolved path tokens carrying a leading '../' run against the dispatch root ${renderParentTokens(
-		tokens,
-	)}; an anchored token selects project rules without expanding worker authority and a dropped one took no part in scope`;
-}
-
 /** Render the interactive warning for prose tokens whose leading "../" run was reinterpreted. */
 export function inferredScopeParentTokenNotice(scope: DispatchPathScope): InferredScopeParentTokenNotice | null {
 	const tokens = scope.parentTokens;

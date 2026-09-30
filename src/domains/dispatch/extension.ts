@@ -274,7 +274,6 @@ import {
 import {
 	type DispatchPathScope,
 	declaredScopeReplacementDiagnostic,
-	inferredScopeParentTokenDiagnostic,
 	inferredScopeParentTokenNotice,
 	resolveDispatchPathScope,
 	runLedgerProjection,
@@ -4525,15 +4524,11 @@ export function createDispatchBundle(
 			reportDispatchDiagnostic("typed scope replacement", new Error(replacementDiagnostic));
 		}
 		// A reinterpreted "../" token is the one legacy-mode scope fact that earns
-		// the channel: it fires only where the dispatch used to fail outright, so
-		// it cannot warn on an ordinary intent-less dispatch. Anchoring is reported
-		// alongside dropping because it is the
-		// half that adds to scope, putting a path in working context that the
-		// prose never literally spelled.
-		const parentTokenDiagnostic = inferredScopeParentTokenDiagnostic(pathScope);
-		if (parentTokenDiagnostic !== null) {
-			reportDispatchDiagnostic("inferred scope parent tokens", new Error(parentTokenDiagnostic));
-		}
+		// a notice: it fires only where the dispatch used to fail outright, so it
+		// cannot warn on an ordinary intent-less dispatch. It travels on the bus
+		// and in the dispatch plan artifact. Operator stderr stays free of it
+		// because the scope it describes adds no authority the operator can act
+		// on, and every normal dispatch with a "../" token in its prose hit it.
 		const parentTokenNotice = inferredScopeParentTokenNotice(pathScope);
 		if (parentTokenNotice !== null) {
 			context.bus.emit(BusChannels.DispatchScopeNotice, {
