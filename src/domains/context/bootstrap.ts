@@ -42,6 +42,7 @@ import type { Codewiki } from "./codewiki/schema.js";
 import { collectEnforcementInventory, type EnforcementInventory } from "./enforcement-inventory.js";
 import type { Fingerprint } from "./fingerprint.js";
 import { fitGeneratedHandbook, normalizeHandbookRule } from "./handbook-budget.js";
+import { packageManager } from "./package-manager.js";
 import { indexProgressSink } from "./progress.js";
 import { type ProjectMetadata, readProjectMetadata } from "./project-metadata.js";
 import { renderPromptContext } from "./prompt-context.js";
@@ -488,23 +489,7 @@ function packageScripts(cwd: string): Record<string, string> {
 	return out;
 }
 
-export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
-
-/**
- * The command prefix an agent must actually type in this repository. The
- * handbook used to hardcode `npm run`, which is simply wrong in a pnpm, yarn, or
- * bun workspace. A handbook that names a command the repository cannot run is
- * worse than one that names no command at all: the agent runs it, it fails, and
- * the failure looks like the agent's own mistake.
- */
-export function packageManager(cwd: string): PackageManager {
-	const declared = stringField(readJsonFile(join(cwd, "package.json")), "packageManager")?.split("@")[0];
-	if (declared === "pnpm" || declared === "yarn" || declared === "bun" || declared === "npm") return declared;
-	if (existsSync(join(cwd, "pnpm-lock.yaml"))) return "pnpm";
-	if (existsSync(join(cwd, "yarn.lock"))) return "yarn";
-	if (existsSync(join(cwd, "bun.lock")) || existsSync(join(cwd, "bun.lockb"))) return "bun";
-	return "npm";
-}
+export { type PackageManager, packageManager } from "./package-manager.js";
 
 /** A script whose command rewrites the tree cannot serve as a verification gate. */
 const MUTATING_SCRIPT_RE = /(?:^|\s)--(?:fix|write)(?:\s|$)/;
@@ -626,6 +611,14 @@ function verificationSection(cwd: string, tomlFiles: TomlFileReader): ClioMdSect
 	}
 	if (hasScript("test")) {
 		lines.push(`Declared test command: ${command("test")}.`);
+		const selection = scripts.test;
+		// Preserve literal selection rather than guessing that every test root runs in CI.
+		// Oversized or Markdown-active commands remain available at their source path.
+		if (selection && selection.length <= 1200 && !/[`\r\n]/.test(selection)) {
+			lines.push(
+				`Exact package.json#scripts.test: \`${selection}\`. Other test scripts have separate selection; follow CI calls before claiming coverage.`,
+			);
+		}
 	}
 	if (hasScript("ci")) {
 		lines.push(`Full CI command, when requested: ${command("ci")}.`);

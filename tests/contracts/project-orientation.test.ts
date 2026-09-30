@@ -20,7 +20,10 @@ import {
 	legacyCodewikiPath,
 	readCodewiki,
 } from "../../src/domains/context/codewiki/artifact.js";
-import { coordinateCodewikiWrite } from "../../src/domains/context/codewiki/coordinator.js";
+import {
+	coordinateCodewikiExclusive,
+	coordinateCodewikiWrite,
+} from "../../src/domains/context/codewiki/coordinator.js";
 import { buildProjectOrientation } from "../../src/domains/context/orientation.js";
 import { readProjectStatus } from "../../src/domains/context/project-status.js";
 import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
@@ -449,6 +452,51 @@ test("oversized CMake does not hide checked Python/preset facts or certify unkno
 		);
 		writeFileSync(join(env.dir, "pyproject.toml"), '[project]\nname="changed"\n');
 		match(renderPromptContext(env.dir).text, /snapshot unavailable/);
+	} finally {
+		env.restore();
+	}
+});
+
+test("lockfile-only package manager changes invalidate cached commands", async () => {
+	const env = await isolateClioEnv("clio-orientation-lockfile-");
+	try {
+		writeFileSync(join(env.dir, "package.json"), JSON.stringify({ name: "fixture", scripts: { test: "node --test" } }));
+		writeFileSync(join(env.dir, "yarn.lock"), "# lockfile\n");
+		await index(env.dir);
+		match(renderPromptContext(env.dir).text, /yarn run test/);
+		writeFileSync(join(env.dir, "pnpm-lock.yaml"), `lockfileVersion: '9.0'\n${"# dependency\n".repeat(10000)}`);
+		match(renderPromptContext(env.dir).text, /snapshot unavailable/);
+		await index(env.dir);
+		match(renderPromptContext(env.dir).text, /pnpm run test/);
+		writeFileSync(
+			join(env.dir, "package.json"),
+			JSON.stringify({ name: "fixture", packageManager: "npm@11", scripts: { test: "node --test" } }),
+		);
+		await index(env.dir);
+		match(renderPromptContext(env.dir).text, /npm run test/);
+	} finally {
+		env.restore();
+	}
+});
+
+test("context reset asks before deleting artifacts and without holding their lease", { timeout: 5000 }, async () => {
+	const env = await isolateClioEnv("clio-reset-confirmation-");
+	try {
+		await index(env.dir);
+		writeFileSync(join(env.dir, "CLIO-CODER.md"), "# Keep operator rules\n");
+		const result = await runContextClear({
+			cwd: env.dir,
+			all: true,
+			confirmContext: () => true,
+			confirmAll: async () =>
+				coordinateCodewikiExclusive(env.dir, () => {
+					ok(existsSync(codemapPath(env.dir)), "confirmation precedes deletion");
+					return false;
+				}),
+		});
+		strictEqual(result.action, "cleared");
+		strictEqual(existsSync(codemapPath(env.dir)), false);
+		strictEqual(readFileSync(join(env.dir, "CLIO-CODER.md"), "utf8"), "# Keep operator rules\n");
 	} finally {
 		env.restore();
 	}

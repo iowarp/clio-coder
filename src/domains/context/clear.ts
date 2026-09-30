@@ -64,18 +64,17 @@ export async function runContextClear(input: RunContextClearInput = {}): Promise
 		return { action: "cancelled", removed: [], preserved: [...PRESERVED_CONTEXT_PATHS] };
 	}
 
-	const { removed, preserved } = await coordinateCodewikiExclusive(cwd, async (workspace) => {
+	// Operator input must not hold the index lease or follow a partial deletion.
+	const removeHandbook = input.all === true && (await input.confirmAll?.()) === true;
+	const { removed, preserved } = await coordinateCodewikiExclusive(cwd, (workspace) => {
 		const removed: string[] = [];
 		for (const relPath of ACCUMULATED_CONTEXT_PATHS) removeIfPresent(workspace, relPath, removed);
 
 		const preserved = [...PRESERVED_CONTEXT_PATHS];
-		if (input.all === true) {
-			const confirmedAll = await input.confirmAll?.();
-			if (confirmedAll === true) {
-				removeIfPresent(workspace, "CLIO-CODER.md", removed);
-				const index = preserved.indexOf("CLIO-CODER.md");
-				if (index !== -1) preserved.splice(index, 1);
-			}
+		if (removeHandbook) {
+			removeIfPresent(workspace, "CLIO-CODER.md", removed);
+			const index = preserved.indexOf("CLIO-CODER.md");
+			if (index !== -1) preserved.splice(index, 1);
 		}
 		return { removed, preserved };
 	});

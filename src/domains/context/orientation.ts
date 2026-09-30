@@ -6,10 +6,12 @@ import { parse as parseToml } from "smol-toml";
 import { shellQuote } from "../../core/shell-quote.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import type { Fingerprint } from "./fingerprint.js";
+import { packageManager } from "./package-manager.js";
 import { cmakeProjectDeclaration, readmeSummary, readmeTitle } from "./project-metadata.js";
 
 const INPUT_LIMIT = 64 * 1024;
 const MAX_ORIENTATION_BYTES = 12 * 1024;
+const LOCKFILES = new Set(["pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb"]);
 const INPUTS = [
 	"package.json",
 	"CMakeLists.txt",
@@ -17,6 +19,10 @@ const INPUTS = [
 	"pyproject.toml",
 	"Cargo.toml",
 	"README.md",
+	"pnpm-lock.yaml",
+	"yarn.lock",
+	"bun.lock",
+	"bun.lockb",
 ] as const;
 
 export interface ProjectOrientation {
@@ -37,7 +43,11 @@ export interface ProjectOrientation {
 function readInput(cwd: string, path: string): string | null {
 	try {
 		const full = join(cwd, path);
-		if (!statSync(full).isFile() || statSync(full).size > INPUT_LIMIT) return null;
+		const stat = statSync(full);
+		if (!stat.isFile()) return null;
+		// Commands depend on lockfile presence, not its potentially huge dependency graph.
+		if (LOCKFILES.has(path)) return "present";
+		if (stat.size > INPUT_LIMIT) return null;
 		const text = readFileSync(full, "utf8");
 		return Buffer.byteLength(text) <= INPUT_LIMIT ? text : null;
 	} catch {
@@ -74,8 +84,7 @@ export function buildProjectOrientation(cwd: string, codewiki: Codewiki, fingerp
 		if (pkg) {
 			const name = text(pkg.name, 80);
 			if (name) identity = { name, purpose: text(pkg.description), source: "package.json" };
-			const manager = text(pkg.packageManager)?.split("@")[0];
-			const runner = manager && ["pnpm", "npm", "yarn", "bun"].includes(manager) ? manager : "npm";
+			const runner = packageManager(cwd);
 			const scripts = record(pkg.scripts);
 			for (const name of ["build", "test:file", "test", "typecheck", "lint", "test:package", "ci"]) {
 				if (typeof scripts?.[name] === "string")

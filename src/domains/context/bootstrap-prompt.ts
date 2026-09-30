@@ -32,14 +32,14 @@ Clio owns the project name, the verification-command section and agent-context p
 
 WHAT BELONGS. The reader is a coding agent that can already read this code, and it may be a small local model. Write only what it would get wrong without being told: rules the tooling enforces only when something fails, files that must change together, commands and flags it cannot guess, conventions that differ from the language defaults, and actions that are irreversible or leave the machine. Test each line by asking whether an agent that read the relevant files would still make this mistake; if not, drop the line. Leave out repository tours, entry-point lists, file trees, dependency or stack inventories, the plain build and test commands visible in the manifest, generic engineering advice, and anything a linter reports together with its fix.
 
-WHERE THE RULES ARE. The enforcement inventory lists CI commands, reached scripts, and custom check functions and coded failures. Prioritize the most consequential rules and remedies supported by the evidence brief. When a check demands that files change together, write a change recipe naming all of them. When it forbids something, write an invariant. Cover every coded failure shown in the brief that an ordinary change can trigger with its own rule when space permits. Read a targeted missing range when the excerpt is insufficient, rather than every check file in full. Skip formatter fixes and boilerplate. Find which test directories CI actually runs by following its test commands to the discovery roots, and state where a regression test must live so CI runs it, including omitted test directories. Treat contributor guides and sibling handbooks as evidence of project rules; directory-scoped skills keep their own scope.
+WHERE THE RULES ARE. The enforcement inventory lists CI commands, reached scripts, and custom check functions and coded failures. Prioritize the most consequential rules and remedies supported by the evidence brief. When a check demands that files change together, write a change recipe naming all of them. When it forbids something, write an invariant. Cover every coded failure shown in the brief that an ordinary change can trigger with its own rule when space permits. Read a targeted missing range when the excerpt is insufficient, rather than every check file in full. Skip formatter fixes and boilerplate. Find which test directories CI actually runs by following its test commands to the discovery roots, and state where a regression test must live so CI runs it, including omitted test directories. The script inventory includes available checks as well as CI-reached checks: do not treat test:full, test:package, or every test directory as part of ordinary CI unless a CI command actually reaches them. Clio includes the exact declared test script in its verification section; do not replace its selectors with broader globs. Treat contributor guides and sibling handbooks as evidence of project rules; directory-scoped skills keep their own scope.
 
 FIELDS.
 - invariants: up to ${HANDBOOK_TARGETS.invariants} rules whose violation breaks the build, corrupts data, or crosses a trust boundary, most damaging first, because small models keep early rules best. Each is the rule and its reason in one or two sentences.
 - conventions: up to ${HANDBOOK_TARGETS.conventions} code conventions that differ from the defaults, each naming a file that shows it.
 - sections: up to ${HANDBOOK_TARGETS.sections} H2 sections, "Change recipes" first when there are any. Prefer these titles, because Clio routes each section to the fleet workers that need it: "Verification that is not obvious", "Change recipes", "Tests", "Docs and prose", "Git and release", "Gotchas". Rules about operating the agent harness itself go under a title containing "Operating"; they stay with the main session.
 
-LINE FORMAT. One rule per bullet, phrased as what to do, with the reason when it is not self-evident. Keep "never" for real boundaries and say what breaks. Name the files a rule is about in backticks: those paths decide which workers receive it, so a rule about one package cites that package's paths. A change recipe names every file that must change in the same commit. For a boundary claim, read the enforcing code and state what it enforces, not what you infer.
+LINE FORMAT. One rule per bullet (at most 600 characters), never concatenate unrelated change recipes into one paragraph. Omit a rule if its complete subject, exceptions and remedy will not fit. Rules are phrased as what to do, with the reason when it is not self-evident. Keep "never" for real boundaries and say what breaks. Name the files a rule is about in backticks: those paths decide which workers receive it, so a rule about one package cites that package's paths. A change recipe names every file that must change in the same commit. For a boundary claim, read the enforcing code and state what it enforces, not what you infer.
 
 Distinguish authored policy from mechanical enforcement. A failure message may describe a broader policy than the condition actually checks: inspect the predicate and its inputs before claiming it enforces a rule. Preserve the policy as authored policy without inventing enforcement. Prefer exact authored wording over a paraphrase, retain its exceptions and scope, and never attach a new file citation merely because that file exists. Do not copy your own writing instructions into the handbook.
 
@@ -286,28 +286,16 @@ function extractJsonObject(text: string): Record<string, unknown> {
 function stringArray(value: unknown, key: string, maxItems: number, maxChars: number): string[] {
 	if (value === undefined) return [];
 	if (!Array.isArray(value)) throw new Error(`bootstrap model output '${key}' must be an array`);
-	return value
-		.map((item, index) => {
-			if (typeof item !== "string") throw new Error(`bootstrap model output '${key}[${index}]' must be a string`);
-			return item.replace(/\s+/g, " ").trim();
-		})
-		.filter((item) => item.length > 0)
-		.slice(0, maxItems)
-		.map((item) => clampAtSentence(item, maxChars));
-}
-
-/**
- * Cut an overlong rule after its last complete sentence that fits. A plain
- * slice ended generated invariants mid-word ("move the value into a leaf se"),
- * which reads as a broken rule and drops the remedy anyway.
- */
-function clampAtSentence(text: string, maxChars: number): string {
-	if (text.length <= maxChars) return text;
-	const head = text.slice(0, maxChars);
-	const end = Math.max(head.lastIndexOf(". "), head.endsWith(".") ? head.length - 1 : -1);
-	if (end >= maxChars / 2) return head.slice(0, end + 1);
-	const space = head.lastIndexOf(" ");
-	return `${head.slice(0, space > 0 ? space : maxChars - 1)}…`.slice(0, maxChars);
+	return (
+		value
+			.map((item, index) => {
+				if (typeof item !== "string") throw new Error(`bootstrap model output '${key}[${index}]' must be a string`);
+				return item.replace(/\s+/g, " ").trim();
+			})
+			// An exception or remedy may be in the last sentence: retain whole rules.
+			.filter((item) => item.length > 0 && item.length <= maxChars)
+			.slice(0, maxItems)
+	);
 }
 
 function stringField(record: Record<string, unknown>, key: string, maxChars: number): string {

@@ -41,7 +41,10 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 	// where nothing has been recorded yet.
 	const state = readClioState(cwd);
 	const projectType = state?.projectType ?? detectProjectTypeHint(cwd);
-	const supportFragments = [renderProjectTypeFragment(projectType)];
+	const supportFragments = [
+		renderProjectTypeFragment(projectType),
+		"<context-evidence>Project handbooks provide standing instructions and navigation hints. They do not establish current branch, HEAD, dirty files, task completion, or implementation behavior. For repository orientation use code_nav mode=project for current Git and recorded task observations, even without an index; on a gateway-only tool surface call gateway with op=call, capability=code_nav, args={mode:project}. Read relevant definitions before making behavioral claims or proposing changes; label unverified facts as unknown. Preserve operator edits.</context-evidence>",
+	];
 	const pieces = [...supportFragments];
 	const addSupport = (fragment: string): void => {
 		pieces.push(fragment);
