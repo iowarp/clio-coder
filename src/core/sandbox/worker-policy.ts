@@ -60,7 +60,17 @@ export function resolveWorkerSandboxSpec(input: WorkerSandboxPolicyInput): Worke
 		version: WORKER_SANDBOX_SPEC_VERSION,
 		mode: input.mode,
 		writableRoots,
-		readOnlyPaths: [...new Set(writableRoots.flatMap(protectedInside))],
+		// Exact-file boundaries contain no .git to protect, and binding
+		// `<file>/.git` fails bwrap with ENOTDIR, which -try does not skip, so
+		// every sandboxed command in a run with file write roots failed.
+		readOnlyPaths: [
+			...new Set(
+				(input.writeBoundaries.length > 0 && !input.readOnly
+					? writableRoots.filter((root) => root.endsWith("/"))
+					: writableRoots
+				).flatMap(protectedInside),
+			),
+		],
 		gitWritablePaths: [],
 		readableRoots: [...new Set(readableRoots)],
 		network: workerSandboxNetwork(input.allowedTools, input.networkSetting),
