@@ -12,9 +12,11 @@ import {
 	normalizePathBoundaryEntry,
 	pathBoundariesOverlap,
 	pathBoundaryCovers,
+	writeRootsCover,
 } from "../../src/core/path-boundary.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { writeWikiMeta } from "../../src/domains/context/wiki/meta.js";
+import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { codeNavTool } from "../../src/tools/codewiki/code-nav.js";
 import { codeNavToolSurface } from "../../src/tools/codewiki/code-nav-surface.js";
@@ -53,6 +55,20 @@ describe("tool boundary contract", () => {
 		for (const entry of ["/etc/passwd", "../outside", "src/**/*.ts", "src\\windows"]) {
 			throws(() => normalizePathBoundaryEntry(entry));
 		}
+	});
+
+	it("treats a write root without a trailing slash as a directory (D2)", () => {
+		strictEqual(writeRootsCover(["/r/a/b"], "/r/a/b/c.py"), true);
+		strictEqual(pathBoundaryCovers(["/r/a/b"], "/r/a/b/c.py"), false);
+		const cwd = join(scratch.dir, "workspace");
+		mkdirSync(join(cwd, "a", "b"), { recursive: true });
+		const engine = createSafetyPolicyEngine({ cwd, writeRoots: ["a/b"] });
+		const inside = engine.evaluate({ tool: ToolNames.Write, args: { path: join(cwd, "a", "b", "c.py"), content: "x" } });
+		strictEqual(inside.reasonCode === "write-root", false, inside.reasons.join("; "));
+		ok(!inside.reasons.some((reason) => reason.includes("outside the permitted write roots")));
+		const outside = engine.evaluate({ tool: ToolNames.Write, args: { path: join(cwd, "a", "c.py"), content: "x" } });
+		strictEqual(outside.reasonCode, "write-root");
+		ok(outside.reasons.some((reason) => reason.includes("outside the permitted write roots")));
 	});
 
 	it("normalizes registry arguments and applies one bounded result disposition", async () => {
