@@ -42,8 +42,12 @@ function workerSandboxMaskedPaths(candidates?: ReadonlyArray<string>): SandboxMa
 	const masks: SandboxMaskedPath[] = [];
 	for (const entry of candidates ?? [...workerSecretPaths(), ...runtimeEscapePaths()]) {
 		try {
-			const stat = statSync(entry);
-			masks.push({ path: entry, kind: stat.isDirectory() ? "directory" : "file" });
+			// Mask the link's target: bwrap cannot mount over a symlink, and a
+			// dotfile link such as ~/.aws -> /mnt/c/... otherwise failed every
+			// sandboxed command. The target is what a read would reach.
+			const target = realpathSync(entry);
+			const stat = statSync(target);
+			masks.push({ path: target, kind: stat.isDirectory() ? "directory" : "file" });
 		} catch {
 			// Absent paths need no mask, and bwrap cannot mount over them anyway.
 		}
