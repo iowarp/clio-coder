@@ -373,8 +373,7 @@ export function stripDeadToolCallMarkup(text: string): string {
 export function lockedSynthesisFallbackText(): string {
 	return (
 		"[Clio Coder] loop guard: tool calls were disabled for the rest of this turn, but the reply contained only " +
-		"tool-call markup, which cannot run and was removed. Ask me to continue with a different approach, or " +
-		"narrow the request."
+		"tool-call markup, which cannot run and was removed. The turn stopped without a usable answer."
 	);
 }
 
