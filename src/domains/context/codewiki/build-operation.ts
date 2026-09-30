@@ -59,6 +59,7 @@ export async function executeCodewikiBuildOutcome(
 	if (request.kind === "ensure" && handed !== null) {
 		const needsBackfill = isArtifactRef(handed) ? handed.needsBackfill : codewikiNeedsBackfill(handed);
 		if (!needsBackfill) {
+			options.onProgress?.({ stage: "hash" });
 			const fingerprint = isArtifactRef(handed)
 				? computeFingerprint(request.cwd, null, { artifactLoc: handed.loc })
 				: computeFingerprint(request.cwd, handed);

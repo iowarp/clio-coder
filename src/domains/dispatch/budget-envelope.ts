@@ -190,7 +190,13 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 	}
 
 	const toolCalls = forceSynthesis
-		? Math.min(READ_ONLY_RESEARCH_SYNTHESIS_TOOL_CALLS, input.hardCap)
+		? Math.min(
+				READ_ONLY_RESEARCH_SYNTHESIS_TOOL_CALLS,
+				input.hardCap,
+				// Bootstrap has an explicit bounded exploration policy; ordinary
+				// scouts retain their established research synthesis allowance.
+				input.recipeId === "context-bootstrap" ? selected.toolCalls : READ_ONLY_RESEARCH_SYNTHESIS_TOOL_CALLS,
+			)
 		: selected.toolCalls;
 	if (forceSynthesis) {
 		reasons.push({

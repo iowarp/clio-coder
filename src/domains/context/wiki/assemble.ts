@@ -16,6 +16,7 @@
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, posix, relative } from "node:path";
+import { validateWikiPageEvidence } from "./evidence.js";
 import { readWikiPage, renderWikiPage, resolveSourcePath, type WikiPageMetadata } from "./frontmatter.js";
 import {
 	isGeneratedWikiFile,
@@ -104,13 +105,17 @@ function repairPage(
 	}
 
 	const issues: WikiPageIssue[] = [];
+	let validBodyEvidence: boolean | undefined;
 	for (const cited of parsed.unresolvedPaths) {
 		issues.push({ page: relPath, kind: "citation", reference: cited });
 	}
 	for (const match of body.matchAll(SOURCE_CITATION)) {
 		const cited = match[1] ?? "";
 		if (resolveSourcePath(sourceRoot, cited) === null) {
-			issues.push({ page: relPath, kind: "citation", reference: cited });
+			// The publication gate also understands imports and verified test
+			// selectors. Assembly must not relabel their evidence as unresolved.
+			validBodyEvidence ??= validateWikiPageEvidence({ pagePath: relPath, content: original, sourceRoot }).ok;
+			if (!validBodyEvidence) issues.push({ page: relPath, kind: "citation", reference: cited });
 		}
 	}
 	for (const match of body.matchAll(INTERNAL_LINK)) {

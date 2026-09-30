@@ -53,6 +53,14 @@ export interface CodewikiBuildWorkerOutcome {
 	changed: boolean;
 }
 
+export interface CodewikiBuildProgress {
+	stage: "queue" | "enumerate" | "hash" | "grammar" | "parse" | "edges";
+	current?: number;
+	total?: number;
+	path?: string;
+}
+
 export type CodewikiBuildWorkerMessage =
+	| { progress: CodewikiBuildProgress }
 	| { ok: true; result: CodewikiBuildWorkerOutcome }
 	| { ok: false; error: string; stack?: string };

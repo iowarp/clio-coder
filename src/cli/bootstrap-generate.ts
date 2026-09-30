@@ -6,6 +6,7 @@ import { isResponseSchemaRejection, UnsupportedResponseSchemaError } from "../co
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
+import { BOOTSTRAP_DEPTH_POLICY } from "../domains/context/bootstrap-evidence.js";
 import {
 	BOOTSTRAP_OUTPUT_JSON_SCHEMA,
 	buildBootstrapPrompt,
@@ -322,13 +323,20 @@ async function attemptBootstrapDispatch(
 			bootstrapTelemetry(prompt, "", startedAtClock, structuredOutputMode),
 		);
 	}
-	// No product cap. The bootstrap agent explores the repository with code_nav, and a
-	// 30s ceiling clamped over the operator's guardrail aborted every real run
-	// mid-exploration: an observed bootstrap burned 19k tokens across 5 tool calls
-	// and returned zero bytes at 29s. The wiki documenter in this same directory
-	// budgets minutes for the same shape of work. `internalDispatchTimeoutMs` is
-	// the operator's knob for slow targets; nothing here knows better than it does.
-	const deadline = armInternalDispatchDeadline(dispatch, handle.runId, "context bootstrap");
+	const policy = BOOTSTRAP_DEPTH_POLICY[input.depth ?? "standard"];
+	const remainingMs = Math.max(1, policy.timeoutMs - (performance.now() - startedAtClock));
+	const deadline = armInternalDispatchDeadline(dispatch, handle.runId, "context bootstrap", remainingMs);
+	const heartbeat = setInterval(
+		() =>
+			input.progress?.({
+				phase: "generate",
+				status: "running",
+				message: "bootstrap model is working",
+				detail: `run ${handle.runId}; ${Math.round((performance.now() - startedAtClock) / 1000)}s elapsed; ${policy.timeoutMs / 1000}s ceiling`,
+			}),
+		10_000,
+	);
+	heartbeat.unref();
 	let text = "";
 	let receipt: RunReceipt | undefined;
 	let parserAttempted = false;
@@ -385,6 +393,7 @@ async function attemptBootstrapDispatch(
 			),
 		);
 	} finally {
+		clearInterval(heartbeat);
 		deadline.clear();
 	}
 }
@@ -395,6 +404,7 @@ async function generateBootstrapWithModel(
 	route?: BootstrapRoute,
 ): Promise<BootstrapStructuredOutput> {
 	const prompt = buildBootstrapPrompt(input);
+	const policy = BOOTSTRAP_DEPTH_POLICY[input.depth ?? "standard"];
 	// The internal researcher reads this repository and returns JSON. Authored
 	// handbook text is evidence, not a source of inferred filesystem authority.
 	const scope = declaredScopeIntent({ readRoots: ["."] });
@@ -404,10 +414,11 @@ async function generateBootstrapWithModel(
 		phase: "generate",
 		status: "running",
 		message: "dispatching internal context-bootstrap agent",
-		detail: `agent=${CONTEXT_BOOTSTRAP_AGENT_ID}`,
+		detail: `${route?.target ?? "configured target"}/${route?.model ?? "configured model"}; ${input.depth ?? "standard"}; ${policy.toolCalls} exploration calls; ${input.evidence?.files.length ?? 0} evidence files`,
 	});
 	// Schema refusal happens before a worker starts, so parser fallback can reuse the same root identity.
 	const runIdHint = newRunId();
+	const assignmentDeadlineAt = Date.now() + policy.timeoutMs;
 	const dispatchBootstrap = (nativeSchema: boolean) =>
 		dispatch.dispatch({
 			runIdHint,
@@ -417,7 +428,9 @@ async function generateBootstrapWithModel(
 			task: prompt,
 			cwd: input.cwd,
 			requestOrigin: "internal",
+			assignmentDeadlineAt,
 			thinkingLevel: route?.thinkingLevel ?? "off",
+			budget: { toolCalls: policy.toolCalls, readReserve: Math.min(3, policy.toolCalls - 1) },
 			noSkills: true,
 			...(nativeSchema ? { responseSchema: BOOTSTRAP_OUTPUT_JSON_SCHEMA } : {}),
 			...(route ? { target: route.target } : {}),

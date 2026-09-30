@@ -3129,6 +3129,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			proposeClioMd?: boolean;
 			includeGlobalImports?: boolean;
 			heuristic?: boolean;
+			depth?: "quick" | "standard" | "deep";
 		},
 		runIo?: RunIo,
 	) => {

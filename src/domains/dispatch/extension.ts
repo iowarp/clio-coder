@@ -2068,7 +2068,9 @@ function resolveEffectiveWorkerBudget(input: {
 		revision: input.req.gate?.role === "builder" && input.req.gate.cycle > 1 && input.req.gate.verdict === "revise",
 		enforcement: budgetEnforcementForRuntime(input.runtime),
 		nativeReadOnlyResearch:
-			input.readOnly && (input.recipeId === "scout" || input.recipeId === "provenance") && declared.synthesis,
+			input.readOnly &&
+			(input.recipeId === "scout" || input.recipeId === "provenance" || input.recipeId === "context-bootstrap") &&
+			declared.synthesis,
 	});
 }
 
@@ -4093,10 +4095,12 @@ export function createDispatchBundle(
 		if ((req.lineage?.attempt ?? 0) > 0 || (rootRunId !== undefined && publishedPathScopeRoots.has(rootRunId))) return;
 		if (rootRunId !== undefined) publishedPathScopeRoots.add(rootRunId);
 		const internalOrigin = req.requestOrigin === "internal" || req.requestOrigin === "harness";
-		// Harness-generated prompts need a diagnostic when their typed scope omits
-		// prose paths; receipts retain the provenance for every dispatch origin.
+		// Context generators embed source paths as evidence under an explicit
+		// repository-wide read scope. That expected inventory is retained in the
+		// receipt, but warning on it obscures their actual stage progress.
 		const replacementDiagnostic = declaredScopeReplacementDiagnostic(pathScope);
-		if (replacementDiagnostic !== null && internalOrigin) {
+		const contextGenerator = req.agentId === "context-bootstrap" || req.agentId === "wiki-writer";
+		if (replacementDiagnostic !== null && internalOrigin && !contextGenerator) {
 			reportDispatchDiagnostic("typed scope replacement", new Error(replacementDiagnostic));
 		}
 		// A reinterpreted "../" token is the one legacy-mode scope fact that earns

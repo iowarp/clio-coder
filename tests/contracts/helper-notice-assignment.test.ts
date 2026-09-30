@@ -74,3 +74,30 @@ test("parallel helpers keep one notice each", () => {
 		dispose();
 	}
 });
+
+test("context generators use the composer progress rail without helper notices or transcript blocks", () => {
+	const { bus, shown, dispose } = footer();
+	try {
+		bus.emit(BusChannels.DispatchStarted, {
+			...identity,
+			agentId: "context-bootstrap",
+			agentAudience: "internal",
+			requestOrigin: "internal",
+			runId: "context-run",
+			pid: null,
+			assignmentId: "context-run",
+			attempt: 0,
+		});
+		bus.emit(BusChannels.DispatchCompleted, {
+			...identity,
+			agentId: "context-bootstrap",
+			agentAudience: "internal",
+			requestOrigin: "internal",
+			runId: "context-run",
+			outcome: "succeeded",
+		} as never);
+		deepStrictEqual(shown(), []);
+	} finally {
+		dispose();
+	}
+});

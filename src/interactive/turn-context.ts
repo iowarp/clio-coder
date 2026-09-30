@@ -11,6 +11,7 @@ import type { ContinuityReductionHooks } from "./continuity-controller.js";
  */
 
 import { createHash } from "node:crypto";
+import type { ContextActivityPhase } from "../core/bus-events.js";
 import {
 	BusChannels,
 	type ContextActivityStatus,
@@ -1097,17 +1098,26 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		return refreshedEntries;
 	};
 
-	// Compaction rides the context island as a single-phase "compaction"
-	// activity (rendered as "Context Compact"). Each stage brackets its work
-	// with a started/completed pair; a throwing summary emits failed. The
-	// island already knows this kind and phase, and `deps.bus` is optional.
-	const emitCompactionActivity = (status: ContextActivityStatus, message: string): void => {
+	let compactionActivityPhase: ContextActivityPhase = "compact";
+	const emitCompactionActivity = (
+		status: ContextActivityStatus,
+		message: string,
+		phase: ContextActivityPhase = status === "completed"
+			? "done"
+			: status === "failed"
+				? compactionActivityPhase
+				: "compact",
+	): void => {
+		compactionActivityPhase = phase;
 		deps.bus?.emit(BusChannels.ContextActivity, {
 			kind: "compaction",
-			phase: status === "completed" ? "done" : "compact",
+			phase,
 			status,
 			message,
 			at: Date.now(),
+			...(status === "started"
+				? { stages: phase === "summarize" ? (["compact", "summarize", "state"] as const) : (["compact"] as const) }
+				: {}),
 		});
 	};
 	const compactionFailureMessage = (error: unknown): string =>
@@ -1470,7 +1480,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const startSummaryLifecycle = (): void => {
 			middleware.fireCompactionHook("llm_summary", trigger);
 			deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
-			emitCompactionActivity("started", "compacting context (summary)");
+			emitCompactionActivity("started", "summarizing session history", "summarize");
 			summaryLifecycleStarted = true;
 		};
 		if (force) startSummaryLifecycle();
@@ -1536,6 +1546,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							...budget,
 							...handoff,
 							signal: summarySignal,
+							beforeSummaryCall: async () => {
+								await (handoff?.beforeSummaryCall ?? budget?.beforeSummaryCall)?.();
+								if (!summaryLifecycleStarted) startSummaryLifecycle();
+								emitCompactionActivity("running", "summarizing session history", "summarize");
+							},
 						})) ?? null
 					);
 				} finally {
@@ -1559,6 +1574,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			return false;
 		}
 		if (!summaryLifecycleStarted) startSummaryLifecycle();
+		emitCompactionActivity("running", "saving checkpoint and rebuilding context", "state");
 		deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 
 		// The checkpoint identifies the selected summary route; older results

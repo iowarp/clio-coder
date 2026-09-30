@@ -1,6 +1,6 @@
 /** Mechanical publication checks; these do not prove a claim or that a writer read its source. */
 import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { parse } from "yaml";
 import { readWikiPage, resolveSourcePath, stripFrontmatter } from "./frontmatter.js";
 
@@ -111,9 +111,72 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		return { ok: false, reasons };
 	}
 	const dependencies = new Set<string>();
+	const declaredFiles = new Set<string>();
 	const declaredFilesByName = new Map<string, Set<string>>();
 	const linesByFile = new Map<string, number>();
 	let readBytes = 0;
+	let literalBytes = 0;
+	const literalText = new Map<string, string | null>();
+	const sourceText = (path: string): string | null => {
+		if (literalText.has(path)) return literalText.get(path) ?? null;
+		let text: string | null = null;
+		try {
+			const real = realpathSync(path);
+			const stat = statSync(real);
+			if (within(root, real) && stat.isFile() && stat.size <= 512 * 1024 && literalBytes + stat.size <= 4 * 1024 * 1024) {
+				literalBytes += stat.size;
+				text = readFileSync(real, "utf8");
+			}
+		} catch {
+			// An unreadable definition cannot establish a literal reference.
+		}
+		literalText.set(path, text);
+		return text;
+	};
+	const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const importedSource = (specifier: string): string | null => {
+		if (!/^\.\.?\//.test(specifier)) return null;
+		const importPattern = new RegExp(
+			`(?:\\bfrom\\s*|\\b(?:require|import)\\s*\\(\\s*|\\bimport\\s*)["']${escapeRegex(specifier)}["']`,
+		);
+		const found = new Set<string>();
+		for (const origin of declaredFiles) {
+			if (!importPattern.test(sourceText(origin) ?? "")) continue;
+			const cited = relative(root, resolve(dirname(origin), specifier));
+			const resolved = resolveSourcePath(root, cited);
+			if (resolved !== null) found.add(resolved);
+		}
+		return found.size === 1 ? ([...found][0] ?? null) : null;
+	};
+	const verifiedTestSelector = (selector: string): boolean => {
+		if (
+			selector.length > 160 ||
+			!selector.includes("*") ||
+			selector.includes("**") ||
+			!/^[\w./*-]+$/.test(selector) ||
+			selector.split("/").includes("..")
+		)
+			return false;
+		const pattern = new RegExp(`^${selector.split("*").map(escapeRegex).join("[^/]*")}$`);
+		if (![...declaredFiles].some((path) => pattern.test(relative(root, path).split("\\").join("/")))) return false;
+		const manifest = resolve(root, "package.json");
+		try {
+			const scripts: unknown = JSON.parse(sourceText(manifest) ?? "{}").scripts;
+			if (typeof scripts !== "object" || scripts === null || Array.isArray(scripts)) return false;
+			if (
+				!Object.values(scripts).some(
+					(command) =>
+						typeof command === "string" &&
+						command.split(/\s+/).some((token) => token.replace(/^["']|["']$/g, "") === selector),
+				)
+			)
+				return false;
+			dependencies.add(relative(root, realpathSync(manifest)).split("\\").join("/"));
+			return true;
+		} catch {
+			return false;
+		}
+	};
 	for (const reference of references) {
 		const label = JSON.stringify(reference.slice(0, 160));
 		const match = /^([^:#]+)(?:(?::(\d+)(?:-(\d+))?)|(?:#L(\d+)(?:-L?(\d+))?))?(?::[A-Za-z_$][\w$.-]*)?$/.exec(reference);
@@ -123,7 +186,15 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		}
 		const cited = match[1] ?? "";
 		try {
+			if (
+				!declaredReferences.has(reference) &&
+				match[2] === undefined &&
+				match[4] === undefined &&
+				verifiedTestSelector(cited)
+			)
+				continue;
 			let source = resolveSourcePath(resolve(input.sourceRoot), cited);
+			if (source === null && !declaredReferences.has(reference)) source = importedSource(cited);
 			if (source === null && !declaredReferences.has(reference) && !/[\\/]/.test(cited)) {
 				const declared = declaredFilesByName.get(cited);
 				if (declared?.size === 1) source = [...declared][0] ?? null;
@@ -144,6 +215,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 			// Declared references are checked first. Body shorthand can reuse only
 			// their verified files; frontmatter itself remains repository-relative.
 			if (declaredReferences.has(reference) && !/[:#]/.test(reference)) {
+				declaredFiles.add(real);
 				for (const name of [basename(cited), basename(real)]) {
 					const files = declaredFilesByName.get(name) ?? new Set<string>();
 					files.add(real);

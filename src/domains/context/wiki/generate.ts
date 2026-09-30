@@ -20,6 +20,7 @@ import type { BootstrapProgressSink } from "../bootstrap.js";
 import { coordinateCodewikiWrite } from "../codewiki/coordinator.js";
 import type { Codewiki } from "../codewiki/schema.js";
 import type { Fingerprint } from "../fingerprint.js";
+import { indexProgressSink } from "../progress.js";
 import { readClioState, writeClioState } from "../state.js";
 import { assembleWikiTree, pageSourceIndex } from "./assemble.js";
 import { inspectWikiPageEvidence } from "./evidence.js";
@@ -70,13 +71,15 @@ export interface WikiGenerateInput {
 	 */
 	plan: WikiPlan;
 	/**
-	 * True when this run took over a staging tree an earlier run left behind. A
-	 * resumed run must not re-plan: its finished pages already link to the plan's
-	 * paths.
+	 * True when the saved plan still covers this run. Keep its stable page paths
+	 * for retries and source edits; replan only for new areas, a changed depth,
+	 * or an explicit operator request.
 	 */
 	resumed: boolean;
 	/** Operator-requested retry of pending work, including exhausted writers, once this run. */
 	retryPending?: boolean;
+	/** Explicitly reconsider page structure even when all source evidence is current. */
+	replan?: boolean;
 	/** Indexed areas no existing page covers, offered to a planning pass. */
 	unclaimedAreas: ReadonlyArray<WikiPlanPage>;
 	gitHead?: string | null;
@@ -94,6 +97,7 @@ export interface RunWikiGenerateInput {
 	depth?: WikiDepth;
 	/** Resume the existing plan, allowing exhausted pending writers one more attempt. */
 	retryPending?: boolean;
+	replan?: boolean;
 	model: string;
 	generate?: WikiGenerate;
 	onProgress?: BootstrapProgressSink;
@@ -117,7 +121,10 @@ function indexedSourceFileCount(codewiki: Codewiki): number {
 	return codewiki.files.filter((file) => file.lang !== "config").length;
 }
 
-async function loadOrBuildCodewiki(cwd: string): Promise<{
+async function loadOrBuildCodewiki(
+	cwd: string,
+	onProgress?: BootstrapProgressSink,
+): Promise<{
 	codewiki: Codewiki;
 	fingerprint: Fingerprint;
 }> {
@@ -133,6 +140,7 @@ async function loadOrBuildCodewiki(cwd: string): Promise<{
 			previous: readClioState(workspace)?.fingerprint ?? null,
 		}),
 		{
+			onProgress: indexProgressSink(onProgress),
 			afterCommit: ({ codewiki, fingerprint, changed }, workspace) => {
 				const prev = readClioState(workspace);
 				if (!changed && prev?.orientation) return;
@@ -472,6 +480,7 @@ export async function runWikiGenerate(
 	input: RunWikiGenerateInput = { model: "configured-clio-target" },
 ): Promise<RunWikiGenerateResult> {
 	const cwd = input.cwd ?? process.cwd();
+	if (input.replan && input.retryPending) throw new Error("wiki --replan cannot be combined with --retry-pending");
 
 	const lock = acquireWikiLock(cwd);
 	if (!lock.ok) {
@@ -485,7 +494,7 @@ export async function runWikiGenerate(
 		const existingMeta = readWikiMeta(cwd);
 		const mode = input.mode ?? (existingMeta ? "update" : "init");
 		progress(input, { phase: "codewiki", status: "started", message: "loading codewiki for wiki generation" });
-		const { codewiki, fingerprint } = await loadOrBuildCodewiki(cwd);
+		const { codewiki, fingerprint } = await loadOrBuildCodewiki(cwd, input.onProgress);
 		const sourceTreeHash = fingerprint.treeHash;
 		progress(input, {
 			phase: "codewiki",
@@ -583,8 +592,12 @@ export async function runWikiGenerate(
 				codewiki,
 				generation,
 				plan: resolved.plan,
-				resumed: resolved.resumed || (input.retryPending === true && !depthChanged),
+				resumed:
+					!input.replan &&
+					!depthChanged &&
+					(resolved.resumed || continuing || (savedPlan !== undefined && resolved.unclaimedAreas.length === 0)),
 				...(input.retryPending ? { retryPending: true } : {}),
+				...(input.replan ? { replan: true } : {}),
 				unclaimedAreas: resolved.unclaimedAreas,
 				...(input.decisions ? { decisions: input.decisions } : {}),
 				gitHead: existingMeta?.gitHead ?? null,

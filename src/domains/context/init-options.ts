@@ -1,4 +1,5 @@
 import type { RunBootstrapInput } from "./bootstrap.js";
+import type { BootstrapDepth } from "./bootstrap-evidence.js";
 
 export interface ContextInitOptions {
 	preview?: boolean;
@@ -8,12 +9,13 @@ export interface ContextInitOptions {
 	proposeClioMd?: boolean;
 	includeGlobalImports?: boolean;
 	heuristic?: boolean;
+	depth?: BootstrapDepth;
 }
 
 export interface ContextInitFlag {
 	flag: string;
 	aliases?: ReadonlyArray<string>;
-	field: keyof ContextInitOptions;
+	field: Exclude<keyof ContextInitOptions, "depth">;
 }
 
 export const CONTEXT_INIT_FLAG_TABLE: ReadonlyArray<ContextInitFlag> = [
@@ -47,12 +49,13 @@ export function validateInitOptions(options: ContextInitOptions): string | null 
 
 type BootstrapInitInput = Pick<
 	RunBootstrapInput,
-	"preview" | "adopt" | "applyClioMd" | "rewriteClioMd" | "proposeClioMd" | "includeGlobalImports"
+	"preview" | "adopt" | "applyClioMd" | "rewriteClioMd" | "proposeClioMd" | "includeGlobalImports" | "depth"
 >;
 
 export function bootstrapInputFromInitOptions(options: ContextInitOptions): BootstrapInitInput {
 	const implied = applyInitImplications(options);
 	const input: BootstrapInitInput = {};
+	if (implied.depth !== undefined) input.depth = implied.depth;
 	for (const field of [
 		"preview",
 		"adopt",

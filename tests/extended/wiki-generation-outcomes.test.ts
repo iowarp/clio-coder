@@ -59,8 +59,8 @@ describe("wiki generation outcomes", () => {
 	function git(...args: string[]) {
 		return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 	}
-	function run(generate: ReturnType<typeof generator>) {
-		return runWikiGenerate({ cwd, model: "fixture", generate });
+	function run(generate: ReturnType<typeof generator>, replan = false) {
+		return runWikiGenerate({ cwd, model: "fixture", generate, replan });
 	}
 	function crash(step: "backup" | "publish") {
 		let signal: string | null | undefined;
@@ -211,6 +211,7 @@ describe("wiki generation outcomes", () => {
 					else plan.pages[0].sources = ["src/extra.ts"];
 					writeWikiPlanFile(dir, plan);
 				}),
+				true,
 			);
 			assert.equal(attempted.length, 1);
 			assert.ok(attempted[0]?.endsWith("a.md"));
@@ -229,6 +230,7 @@ describe("wiki generation outcomes", () => {
 				plan.pages = [{ ...plan.pages[0], intent: "Explain the linked detail" }];
 				writeWikiPlanFile(dir, plan);
 			}),
+			true,
 		);
 		assert.equal(result.pending, 1);
 		assert.equal(existsSync(join(cwd, ".clio-coder/wiki/b.md")), false);
@@ -239,9 +241,23 @@ describe("wiki generation outcomes", () => {
 			generator((_spec, path) => {
 				if (path) assert.ok(path.endsWith("extra.md"));
 			}),
+			true,
 		);
 		assert.equal(existsSync(join(cwd, ".clio-coder/wiki/b.md")), false);
 		assert.equal(readWikiMeta(cwd)?.generation?.pagesWritten, 2);
+	});
+	it("skips planner and writer dispatch for a complete wiki with unchanged evidence", async () => {
+		await initialize();
+		const before = readWikiMeta(cwd);
+		let dispatches = 0;
+		const result = await run(
+			generator(() => {
+				dispatches++;
+			}),
+		);
+		assert.equal(dispatches, 0);
+		assert.equal(result.status, "noop");
+		assert.equal(readWikiMeta(cwd)?.contentHash, before?.contentHash);
 	});
 	it("tracks README/config bytes, preserved-mtime edits, and mixed dirty rollback", async () => {
 		writeFileSync(join(cwd, "README.md"), "before\n");
@@ -289,6 +305,7 @@ describe("wiki generation outcomes", () => {
 					utimesSync(source, before.atime, before.mtime);
 				}
 			}),
+			true,
 		);
 		assert.equal(result.pending, 1);
 		assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.status, "pending");
@@ -304,6 +321,7 @@ describe("wiki generation outcomes", () => {
 			generator((_spec, path) => {
 				if (path) attempted.push(path);
 			}),
+			true,
 		);
 		assert.equal(attempted.length, 2);
 	});
@@ -339,6 +357,7 @@ describe("wiki generation outcomes", () => {
 				plan.pages.push(page("extra"));
 				writeWikiPlanFile(dir, plan);
 			}),
+			true,
 		);
 		assert.equal(result.status, "noop");
 		assert.equal(result.pending, 1);
@@ -356,6 +375,7 @@ describe("wiki generation outcomes", () => {
 					return 1;
 				}
 			}),
+			true,
 		);
 		assert.equal(nextAttempts.length, 1);
 		assert.equal(readWikiMeta(cwd)?.plan?.pages[2]?.attempts, 2);

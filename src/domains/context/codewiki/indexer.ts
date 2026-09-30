@@ -50,6 +50,7 @@ const CODEWIKI_SYMBOL_KINDS_WITH_SIG = new Set<CodewikiSymbolKind>(["func", "cla
 
 export interface CodewikiBuildOptions {
 	readFile?: CodewikiReadFile;
+	onProgress?: (progress: import("./build-worker-protocol.js").CodewikiBuildProgress) => void;
 	/**
 	 * Slice budget shared across a whole index run. Callers that chain several
 	 * phases pass one slicer so the budget applies end to end rather than
@@ -1013,22 +1014,27 @@ async function buildFromPaths(
 ): Promise<Codewiki> {
 	const slicer = options.slicer ?? createSlicer();
 	const sortedPaths = [...relPaths].sort(compareStrings);
+	options.onProgress?.({ stage: "grammar", total: sortedPaths.length });
 	const treeSitterExtractor = await loadTreeSitterExtractor();
 	await treeSitterExtractor.ensureGrammarsForPaths(sortedPaths);
 	const readFile = options.readFile ?? defaultReadFile;
 	const builtFiles: BuiltFile[] = [];
-	for (const relPath of sortedPaths) {
+	options.onProgress?.({ stage: "parse", current: 0, total: sortedPaths.length });
+	for (const [index, relPath] of sortedPaths.entries()) {
 		// One read plus one tree-sitter parse per file; a full build of a large
 		// repo is thousands of them and must not land as a single turn.
 		await slicer.tick();
 		const built = buildFile(cwd, relPath, treeSitterExtractor, readFile);
 		if (built) builtFiles.push(built);
+		options.onProgress?.({ stage: "parse", current: index + 1, total: sortedPaths.length, path: relPath });
 	}
+	options.onProgress?.({ stage: "edges", current: sortedPaths.length, total: sortedPaths.length });
 	return codewikiFromBuiltFiles(cwd, language, builtFiles, slicer);
 }
 
 export async function buildCodewiki(input: BuildCodewikiInput, options: CodewikiBuildOptions = {}): Promise<Codewiki> {
 	const slicer = options.slicer ?? createSlicer();
+	options.onProgress?.({ stage: "enumerate" });
 	const files = (await enumerateWorkspaceFilesAsync(input.cwd, EXCLUDED_DIRS, undefined, slicer)).filter(
 		isIndexablePath,
 	);
@@ -1123,9 +1129,10 @@ export async function updateCodewikiPaths(
 	const slicer = options.slicer ?? createSlicer();
 	const rebuiltFiles: BuiltFile[] = [];
 	if (rebuildPaths.length > 0) {
+		options.onProgress?.({ stage: "grammar", total: rebuildPaths.length });
 		const treeSitterExtractor = await loadTreeSitterExtractor();
 		await treeSitterExtractor.ensureGrammarsForPaths(rebuildPaths);
-		for (const relPath of rebuildPaths) {
+		for (const [index, relPath] of rebuildPaths.entries()) {
 			await slicer.tick();
 			const built = buildFile(
 				cwd,
@@ -1134,6 +1141,7 @@ export async function updateCodewikiPaths(
 				(path) => currentTexts.get(normalizeRel(cwd, path)) ?? null,
 			);
 			if (built) rebuiltFiles.push(built);
+			options.onProgress?.({ stage: "parse", current: index + 1, total: rebuildPaths.length, path: relPath });
 		}
 	}
 	const removedFileIds = new Set(codewiki.files.filter((file) => changedPathSet.has(file.path)).map((file) => file.id));
@@ -1164,22 +1172,27 @@ export async function syncCodewiki(
 ): Promise<Codewiki> {
 	const slicer = options.slicer ?? createSlicer();
 	const readFile = options.readFile ?? defaultReadFile;
+	options.onProgress?.({ stage: "enumerate" });
 	const currentPaths = (await enumerateWorkspaceFilesAsync(cwd, EXCLUDED_DIRS, undefined, slicer)).filter(
 		isIndexablePath,
 	);
 	const currentFiles = new Map<string, string>();
 	const currentTexts = new Map<string, string>();
-	for (const relPath of currentPaths) {
+	const indexedFiles = new Map(codewiki.files.map((file) => [file.path, file] as const));
+	for (const [index, relPath] of currentPaths.entries()) {
 		// Reads and hashes every visible file in the workspace. Cheap per file,
 		// seconds in aggregate on a large repo.
 		await slicer.tick();
 		const text = readFile(join(cwd, relPath));
 		if (text !== null) {
-			currentFiles.set(relPath, contentHash(text));
-			currentTexts.set(relPath, text);
+			const hash = contentHash(text);
+			currentFiles.set(relPath, hash);
+			// Unchanged text is never parsed; retaining it duplicated the entire
+			// repository in memory on every refresh and code_nav reconciliation.
+			if (indexedFiles.get(relPath)?.hash !== hash) currentTexts.set(relPath, text);
 		}
+		options.onProgress?.({ stage: "hash", current: index + 1, total: currentPaths.length, path: relPath });
 	}
-	const indexedFiles = new Map(codewiki.files.map((file) => [file.path, file] as const));
 	const changedPaths = new Set<string>();
 	for (const [relPath, hash] of currentFiles) {
 		if (indexedFiles.get(relPath)?.hash !== hash) changedPaths.add(relPath);

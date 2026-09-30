@@ -14,6 +14,7 @@ import {
 } from "./artifact.js";
 import type {
 	CodewikiArtifactRef,
+	CodewikiBuildProgress,
 	CodewikiBuildWorkerMessage,
 	CodewikiBuildWorkerOutcome,
 	CodewikiBuildWorkerRequest,
@@ -62,7 +63,10 @@ function byReference(request: CodewikiBuildWorkerRequest, held: Codewiki | null)
 	return { ...request, current: artifactRef(held) };
 }
 
-async function executeInWorker(request: CodewikiBuildWorkerRequest): Promise<CodewikiBuildWorkerOutcome> {
+async function executeInWorker(
+	request: CodewikiBuildWorkerRequest,
+	onProgress?: (progress: CodewikiBuildProgress) => void,
+): Promise<CodewikiBuildWorkerOutcome> {
 	// Do not inherit test-runner/application `--import` hooks. In particular,
 	// `--import tsx` would be re-resolved from a hermetic fixture cwd before the
 	// source bootstrap can install its absolute loader.
@@ -75,6 +79,7 @@ async function executeInWorker(request: CodewikiBuildWorkerRequest): Promise<Cod
 		});
 	});
 	let timer: NodeJS.Timeout | undefined;
+	let lastProgress: CodewikiBuildProgress | undefined;
 	try {
 		return await new Promise<CodewikiBuildWorkerOutcome>((resolve, reject) => {
 			let settled = false;
@@ -85,10 +90,18 @@ async function executeInWorker(request: CodewikiBuildWorkerRequest): Promise<Cod
 				callback();
 			};
 			timer = setTimeout(() => {
-				finish(() => reject(new Error(`codewiki build worker exceeded ${BUILD_TIMEOUT_MS} ms`)));
+				const detail = lastProgress
+					? ` during ${lastProgress.stage}${lastProgress.path ? `; last reported file: ${lastProgress.path}` : ""}`
+					: " before reporting progress";
+				finish(() => reject(new Error(`codewiki build worker exceeded ${BUILD_TIMEOUT_MS} ms${detail}`)));
 			}, BUILD_TIMEOUT_MS);
 			timer.unref();
-			worker.once("message", (message: CodewikiBuildWorkerMessage) => {
+			worker.on("message", (message: CodewikiBuildWorkerMessage) => {
+				if ("progress" in message) {
+					lastProgress = message.progress;
+					onProgress?.(message.progress);
+					return;
+				}
 				finish(() => {
 					if (message.ok) resolve(message.result);
 					else {
@@ -104,10 +117,7 @@ async function executeInWorker(request: CodewikiBuildWorkerRequest): Promise<Cod
 				}),
 			);
 			worker.once("exit", (code) => {
-				if (code !== 0)
-					finish(() => {
-						reject(new Error(`codewiki build worker exited with code ${code}`));
-					});
+				finish(() => reject(new Error(`codewiki build worker exited with code ${code} before returning a result`)));
 			});
 		});
 	} finally {
@@ -147,6 +157,7 @@ export interface CodewikiCoordinatedResult {
 }
 
 export interface CodewikiCoordinateOptions {
+	onProgress?: (progress: CodewikiBuildProgress) => void;
 	/** Never create an artifact merely because a background session happened to start. */
 	requireExisting?: boolean;
 	/** Optional identity-checked cache, evaluated only after the cross-process lease is held. */
@@ -172,6 +183,7 @@ export function coordinateCodewikiWrite(
 	options: CodewikiCoordinateOptions = {},
 ): Promise<CodewikiCoordinatedResult | null> {
 	const workspace = resolve(cwd);
+	options.onProgress?.({ stage: "queue" });
 	return enqueueWorkspace(workspace, () => {
 		// Taking the lease creates the lock's parent, so a project that was never
 		// indexed gained an empty `.clio-coder/` from every successful write: the
@@ -186,7 +198,7 @@ export function coordinateCodewikiWrite(
 			const current = options.readCurrent?.(workspace) ?? readCodewiki(workspace);
 			const request = await select(current, workspace);
 			if (!request) return null;
-			const outcome = await executeInWorker(byReference({ ...request, cwd: workspace }, current));
+			const outcome = await executeInWorker(byReference({ ...request, cwd: workspace }, current), options.onProgress);
 			const codewiki = outcome.codewiki ?? current;
 			if (!codewiki) throw new Error("codewiki reconciliation returned no artifact");
 			const worker: CodewikiBuildWorkerResult = { codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
@@ -219,8 +231,9 @@ export async function reconcileCodewikiCandidate(
 export async function buildCodewikiCandidate(
 	cwd: string,
 	language: Codewiki["language"],
+	onProgress?: (progress: CodewikiBuildProgress) => void,
 ): Promise<CodewikiBuildWorkerResult> {
-	const outcome = await executeInWorker({ kind: "build", cwd: resolve(cwd), language });
+	const outcome = await executeInWorker({ kind: "build", cwd: resolve(cwd), language }, onProgress);
 	if (!outcome.codewiki) throw new Error("codewiki build returned no artifact");
 	return { codewiki: outcome.codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
 }

@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, parse, resolve } from "node:path";
+import { dirname, join, parse, relative, resolve } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
 import { readCiRunCommands } from "../../core/ci-commands.js";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
-import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
+import { enumerateWorkspaceFiles, enumerateWorkspaceFilesAsync } from "../../core/workspace-files.js";
 import { pythonProposals } from "../../tools/verify/toolchain.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import {
@@ -22,6 +23,8 @@ import {
 	renderImportedAgentContext,
 	scanAgentConfigs,
 } from "./adoption.js";
+import type { BootstrapDepth, BootstrapEvidence } from "./bootstrap-evidence.js";
+import { collectBootstrapEvidence } from "./bootstrap-evidence.js";
 import {
 	type ClioMdSection,
 	HANDBOOK_TARGETS,
@@ -38,6 +41,8 @@ import {
 import type { Codewiki } from "./codewiki/schema.js";
 import { collectEnforcementInventory, type EnforcementInventory } from "./enforcement-inventory.js";
 import type { Fingerprint } from "./fingerprint.js";
+import { fitGeneratedHandbook, normalizeHandbookRule } from "./handbook-budget.js";
+import { indexProgressSink } from "./progress.js";
 import { type ProjectMetadata, readProjectMetadata } from "./project-metadata.js";
 import { renderPromptContext } from "./prompt-context.js";
 import type { SiblingContextFile } from "./sibling-files.js";
@@ -82,6 +87,9 @@ export interface BootstrapGenerateInput {
 	existingClioMdText?: string;
 	/** What CI runs and which custom checks exist; the model explains each as a rule. */
 	enforcement?: EnforcementInventory;
+	depth?: BootstrapDepth;
+	evidence?: BootstrapEvidence;
+	repositoryFiles?: ReadonlyArray<string>;
 	progress?: BootstrapProgressSink;
 	reportGeneration?: BootstrapGenerationSink;
 }
@@ -148,6 +156,7 @@ export interface RunBootstrapInput {
 	homeDir?: string;
 	generate?: BootstrapGenerate;
 	onProgress?: BootstrapProgressSink;
+	depth?: BootstrapDepth;
 }
 
 export interface RunBootstrapResult {
@@ -555,16 +564,16 @@ function pythonVerificationLines(cwd: string, tomlFiles: TomlFileReader): string
 	const launcher = existsSync(join(cwd, "uv.lock")) ? "uv run " : "";
 	const pyproject = tomlFiles.read("pyproject.toml");
 	if (existsSync(join(cwd, "tox.ini")) || (pyproject !== null && tomlTableAt(pyproject, ["tool", "tox"]))) {
-		return [`Run \`${launcher}tox\` before handoff.`];
+		return [`Run \`${launcher}tox\`.`];
 	}
 	if (
 		existsSync(join(cwd, "pytest.ini")) ||
 		(pyproject !== null && tomlTableAt(pyproject, ["tool", "pytest", "ini_options"]))
 	) {
-		return [`Run \`${launcher}pytest\` before handoff.`];
+		return [`Run \`${launcher}pytest\`.`];
 	}
 	const derived = pythonProposals(cwd, []).find((proposal) => proposal.tags.includes("test"));
-	return derived ? [`Run the Python tests with \`${derived.command.join(" ")}\` before handoff.`] : [];
+	return derived ? [`Run the Python tests with \`${derived.command.join(" ")}\`.`] : [];
 }
 
 /** CI steps that prepare the machine rather than judge the change. */
@@ -580,10 +589,12 @@ const MAX_CI_GATE_COMMANDS = 8;
  */
 function ciGateLines(cwd: string): string[] {
 	const gates = readCiRunCommands(cwd)
-		.filter((command) => !CI_SETUP_RE.test(command) && !command.includes("${{") && !command.includes("`"))
+		.filter((command) => !CI_SETUP_RE.test(command) && !command.includes("$") && !command.includes("`"))
 		.slice(0, MAX_CI_GATE_COMMANDS);
 	if (gates.length === 0) return [];
-	return [`CI runs ${gates.map((command) => `\`${command}\``).join(", ")}; a change must pass the same commands.`];
+	return [
+		`CI runs ${gates.map((command) => `\`${command}\``).join(", ")}. These are CI checks, not authorization to expand the current task.`,
+	];
 }
 
 function verificationSection(cwd: string, tomlFiles: TomlFileReader): ClioMdSection | null {
@@ -604,20 +615,20 @@ function verificationSection(cwd: string, tomlFiles: TomlFileReader): ClioMdSect
 		.filter((name): name is string => name !== null)
 		.map(command);
 	if (baseline.length > 0) {
-		lines.push(`Before handoff, run ${baseline.join(", ")}.`);
+		lines.push(`Available static checks: ${baseline.join(", ")}.`);
 	}
 	if (hasScript("build")) {
-		lines.push(`Run ${command("build")} after CLI, worker, packaging, or generated-dist changes.`);
+		lines.push(`Build command: ${command("build")}; rebuild when the selected validation consumes compiled output.`);
 	}
 	const targeted = ["test:contracts", "test:smoke", "check:boundaries"].filter(hasScript).map(command);
 	if (targeted.length > 0) {
 		lines.push(`Use targeted checks for narrower risk: ${targeted.join(", ")}.`);
 	}
 	if (hasScript("test")) {
-		lines.push(`Run ${command("test")} when behavior crosses domains, tool contracts, smoke flows, or boundaries.`);
+		lines.push(`Declared test command: ${command("test")}.`);
 	}
 	if (hasScript("ci")) {
-		lines.push(`Use ${command("ci")} for the full local gate before committing broad or shared behavior changes.`);
+		lines.push(`Full CI command, when requested: ${command("ci")}.`);
 	}
 	lines.push(...cmakeVerificationLines(cwd));
 	// Cargo's commands are defined by the toolchain, not by each project, so
@@ -625,19 +636,19 @@ function verificationSection(cwd: string, tomlFiles: TomlFileReader): ClioMdSect
 	// declared package script.
 	const cargo = tomlFiles.read("Cargo.toml");
 	if (cargo !== null && (tomlTableAt(cargo, ["package"]) || tomlTableAt(cargo, ["workspace"]))) {
-		lines.push("Run `cargo build` and `cargo test` before handoff.");
+		lines.push("Cargo validation commands: `cargo build` and `cargo test`.");
 	}
 	// Go's commands are defined by the toolchain, not by each project, so
 	// naming them for any module carries the same confidence as a declared
 	// package script.
 	if (existsSync(join(cwd, "go.mod"))) {
-		lines.push("Run `go build ./...` and `go test ./...` before handoff.");
+		lines.push("Go validation commands: `go build ./...` and `go test ./...`.");
 	}
 	lines.push(...pythonVerificationLines(cwd, tomlFiles));
 	lines.unshift(...ciGateLines(cwd));
 	if (lines.length === 0) return null;
 	lines.push(
-		"`verify` runs declared and derived checks; when it cannot run one of these commands, run the same command through `bash` instead of skipping it.",
+		"Choose checks relevant to the change within the user-authorized scope and authored project policy. `verify` can run declared checks; an authorized command it cannot run can be executed through `bash`.",
 	);
 	return { title: "Verification expectations", body: lines.join(" ") };
 }
@@ -695,6 +706,8 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 	const pm = packageManager(input.cwd);
 	const scripts = packageScripts(input.cwd);
 	const evidence = [
+		...(input.evidence?.files.map((file) => `${file.path}\n${file.excerpt}`) ?? []),
+		...(input.enforcement ? [JSON.stringify(input.enforcement)] : []),
 		...siblingEvidence,
 		(input.existingClioMdText ?? "").slice(0, FULL_PROJECT_CONTEXT_MAX_CHARS),
 		input.expectedProjectName ?? "",
@@ -706,9 +719,9 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 			.join("\n")
 			.slice(0, 128_000),
 	].join("\n");
-	let repositoryPaths: string[] = [];
+	let repositoryPaths: ReadonlyArray<string> = input.repositoryFiles ?? [];
 	try {
-		repositoryPaths = enumerateWorkspaceFiles(input.cwd);
+		if (!input.repositoryFiles) repositoryPaths = enumerateWorkspaceFiles(input.cwd);
 	} catch {
 		// An unreadable tree leaves the indexed evidence as the only grounding.
 	}
@@ -861,6 +874,57 @@ function groundedModelLine(line: string, evidence: ModelGroundingCorpus | null):
 	return groundedModelBody(trimmed, evidence) === trimmed ? trimmed : null;
 }
 
+/** Root handbooks are authored policy. A small model may summarize away a
+ * prohibition, so retain uncovered explicit constraints directly from them. */
+function authoredProjectRules(input: BootstrapGenerateInput, output: BootstrapStructuredOutput): ClioMdSection[] {
+	const normalize = normalizeHandbookRule;
+	const generated = normalize(
+		[...output.invariants, ...output.conventions, ...(output.sections ?? []).map((section) => section.body)].join("\n"),
+	);
+	const rules: string[] = [];
+	const operating: string[] = [];
+	const seen = new Set<string>();
+	let chars = 0;
+	for (const file of handbookInstructionFiles(input)) {
+		const source = relative(input.cwd, file.path).split("\\").join("/");
+		// Global preferences remain separate; only project-wide handbooks become
+		// unconditional project rules, and fenced examples supply no policy.
+		if (source.startsWith("../")) continue;
+		let fence = false;
+		let operatingSection = false;
+		for (const raw of file.content.split(/\r?\n/)) {
+			if (/^\s*(`{3,}|~{3,})/.test(raw)) {
+				fence = !fence;
+				continue;
+			}
+			if (fence) continue;
+			if (/^\s*#{1,6}\s/.test(raw)) {
+				operatingSection = /\b(?:operating|development sessions|default scope|development checks)\b/i.test(raw);
+				continue;
+			}
+			if (/^\s*(?:\||<!--)/.test(raw)) continue;
+			const line = raw
+				.replace(/^\s*(?:[-*+]\s|\d+\.\s)/, "")
+				.replace(/^Project rules:\s*/i, "")
+				.trim();
+			if (!/\b(?:never|must|forbidden|required|do not|don't|preserve|only|ask the user before)\b/i.test(line)) continue;
+			if (line.length > 1200 || chars + line.length > 10_000 || rules.length + operating.length >= 40) continue;
+			const key = normalize(line);
+			const sentences = line.split(/(?<=[.!?])\s+(?=[A-Z])/).map(normalize);
+			if (seen.has(key) || sentences.every((sentence) => generated.includes(sentence))) continue;
+			seen.add(key);
+			// Keep the whole rule with its subject and remedy; "Do not just delete
+			// it" alone loses the settings migration that the prohibition protects.
+			(operatingSection ? operating : rules).push(`- ${line} (source: ${source})`);
+			chars += line.length;
+		}
+	}
+	return [
+		...(operating.length ? [{ title: "Operating instructions from project handbooks", body: operating.join("\n") }] : []),
+		...(rules.length ? [{ title: "Authored project rules", body: rules.join("\n") }] : []),
+	];
+}
+
 function sanitizeModelSection(section: ClioMdSection, evidence: ModelGroundingCorpus): ClioMdSection | null {
 	const body = groundedModelBody(section.body, evidence);
 	if (body.length < 40) return null;
@@ -883,16 +947,24 @@ function stabilizeGeneratedOutput(
 	for (const convention of existing?.conventions ?? []) pushUnique(conventions, convention);
 	for (const convention of base.conventions ?? []) {
 		const grounded = groundedModelLine(convention, groundingCorpus);
-		if (grounded) pushUnique(conventions, grounded);
+		if (grounded) {
+			pushUnique(conventions, grounded);
+			if (groundModelOutput) onModelSectionRetained?.();
+		}
 	}
-	for (const convention of inferConventions(input.cwd, handbookInstructionFiles(input), input.codewiki)) {
+	for (const convention of conventions.length === 0
+		? inferConventions(input.cwd, handbookInstructionFiles(input), input.codewiki)
+		: []) {
 		pushUnique(conventions, convention);
 	}
 	const invariants: string[] = [];
 	for (const invariant of existing?.invariants ?? []) pushUnique(invariants, invariant);
 	for (const invariant of base.invariants ?? []) {
 		const grounded = groundedModelLine(invariant, groundingCorpus);
-		if (grounded) pushUnique(invariants, grounded);
+		if (grounded) {
+			pushUnique(invariants, grounded);
+			if (groundModelOutput) onModelSectionRetained?.();
+		}
 	}
 	for (const invariant of inferInvariants(handbookInstructionFiles(input))) pushUnique(invariants, invariant);
 
@@ -910,6 +982,8 @@ function stabilizeGeneratedOutput(
 		ordinarySections.push(section);
 		return true;
 	};
+	const authoredRules = authoredProjectRules(input, base);
+	for (const section of authoredRules) addSection(section);
 	// Authored sections, then the model's grounded sections, then heuristics:
 	// the model reads the repository, the heuristics only read its metadata.
 	for (const section of existingSections) addSection(section);
@@ -1097,7 +1171,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	if (summary.action === "preserved") {
 		return [
 			"clio-coder context init preserved CLIO-CODER.md",
-			`  ${contextLine}; codemap rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
+			`  ${contextLine}; codemap reconciled ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
 			"  CLIO-CODER.md is treated as human-owned. Use --apply to replace it with a generated draft, --propose to write an ignored proposal, or --adopt to refresh only imported agent context.",
 			...(adoptionLine ? [adoptionLine] : []),
 			"",
@@ -1106,7 +1180,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	if (summary.action === "proposed") {
 		return [
 			"clio-coder context init proposed CLIO-CODER.md",
-			`  ${contextLine}; codemap rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
+			`  ${contextLine}; codemap reconciled ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
 			...(proposalLine ? [proposalLine] : []),
 			"  CLIO-CODER.md was not changed. Re-run with --apply only after reviewing the proposal.",
 			...(adoptionLine ? [adoptionLine] : []),
@@ -1115,7 +1189,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	}
 	return [
 		`clio-coder context init ${summary.action} CLIO-CODER.md`,
-		`  ${contextLine}; codemap rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
+		`  ${contextLine}; codemap reconciled ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
 		"  git policy: .clio-coder/ stays ignored by default; CLIO-CODER.md stays versioned and human-owned. Force-add .clio-coder assets only when you explicitly intend to share them.",
 		...(proposalLine ? [proposalLine] : []),
 		...(adoptionLine ? [adoptionLine] : []),
@@ -1204,7 +1278,7 @@ function writeClioMdFile(cwd: string, output: BootstrapStructuredOutput): string
 	const clioMdPath = join(cwd, "CLIO-CODER.md");
 	mkdirSync(dirname(clioMdPath), { recursive: true });
 	const serialized = serializeBootstrapOutput(output);
-	writeFileSync(clioMdPath, serialized, "utf8");
+	safeResourceWrite(clioMdPath, serialized);
 	return clioMdPath;
 }
 
@@ -1411,19 +1485,30 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	const indexedAt = now.toISOString();
 	// Index the repository before generation so the generator can ground CLIO-CODER.md
 	// in the real structure (entry points, key modules), not just sibling prose.
-	progress(input, { phase: "codewiki", status: "started", message: "building codemap index" });
+	progress(input, { phase: "codewiki", status: "started", message: "reconciling codemap index" });
 	let codewiki: Codewiki;
 	let codewikiFingerprint: Fingerprint;
 	if (input.preview === true) {
-		const candidate = await buildCodewikiCandidate(cwd, projectType);
+		const candidate = await buildCodewikiCandidate(cwd, projectType, indexProgressSink(input.onProgress));
 		codewiki = candidate.codewiki;
 		codewikiFingerprint = candidate.fingerprint;
 	} else {
-		const coordinated = await coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: projectType }), {
-			beforeCommit: (_result, workspace) => ensureGitignore(workspace, input),
-			afterCommit: ({ codewiki: committed, fingerprint }, workspace) =>
-				persistCodewikiForGeneration(workspace, projectType, indexedAt, committed, fingerprint),
-		});
+		const coordinated = await coordinateCodewikiWrite(
+			cwd,
+			(current) => ({
+				kind: "ensure",
+				cwd,
+				language: projectType,
+				current,
+				previous: readClioState(cwd)?.fingerprint ?? null,
+			}),
+			{
+				onProgress: indexProgressSink(input.onProgress),
+				beforeCommit: (_result, workspace) => ensureGitignore(workspace, input),
+				afterCommit: ({ codewiki: committed, fingerprint }, workspace) =>
+					persistCodewikiForGeneration(workspace, projectType, indexedAt, committed, fingerprint),
+			},
+		);
 		if (!coordinated) throw new Error("codewiki bootstrap transaction did not commit");
 		codewiki = coordinated.codewiki;
 		codewikiFingerprint = coordinated.worker.fingerprint;
@@ -1437,8 +1522,9 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		total: codewikiEntryCount,
 	});
 	const hadClioMd = existsSync(join(cwd, "CLIO-CODER.md"));
+	const originalClioMdText = readExistingClioMdText(cwd);
 	const useExistingClioMdAsSource = hadClioMd && input.rewriteClioMd !== true;
-	const existingClioMdText = useExistingClioMdAsSource ? readExistingClioMdText(cwd) : null;
+	const existingClioMdText = useExistingClioMdAsSource ? originalClioMdText : null;
 	const existingClioMd = useExistingClioMdAsSource ? tryReadClioMd(cwd) : null;
 	const existingParsed = existingClioMd?.ok ? existingClioMd.value : undefined;
 	const replaceClioMd = input.applyClioMd === true || input.rewriteClioMd === true;
@@ -1459,7 +1545,9 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	// withhold `generate` for --heuristic and --preview and supply it otherwise.
 	// For an existing handbook, retain that work as a proposal unless replacement
 	// or adoption was explicitly requested. Generation never implies publication.
-	const shouldGenerate = !hadClioMd || replaceClioMd || input.proposeClioMd === true || input.generate !== undefined;
+	const adoptionOnly = input.adopt === true && hadClioMd && !replaceClioMd && input.proposeClioMd !== true;
+	const shouldGenerate =
+		!hadClioMd || replaceClioMd || input.proposeClioMd === true || (input.generate !== undefined && !adoptionOnly);
 	const shouldPropose =
 		input.proposeClioMd === true || (hadClioMd && input.generate !== undefined && !replaceClioMd && input.adopt !== true);
 	let output: BootstrapStructuredOutput;
@@ -1472,6 +1560,20 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		if (reportedGeneration === undefined) reportedGeneration = reported;
 	};
 	if (shouldGenerate) {
+		const depth = input.depth ?? "standard";
+		const repositoryFiles = await enumerateWorkspaceFilesAsync(cwd);
+		const enforcement = collectEnforcementInventory(cwd, repositoryFiles);
+		const anchors = codewiki.files
+			.filter((file) => file.lang !== "config" && file.role !== "test")
+			.sort(
+				(a, b) =>
+					Number(b.role === "entry") - Number(a.role === "entry") ||
+					b.imports.length - a.imports.length ||
+					a.path.localeCompare(b.path),
+			)
+			.slice(0, depth === "quick" ? 2 : depth === "deep" ? 8 : 4)
+			.map((file) => file.path);
+		const evidence = collectBootstrapEvidence(cwd, repositoryFiles, enforcement, depth, anchors);
 		progress(input, {
 			phase: "generate",
 			status: "started",
@@ -1487,7 +1589,10 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			siblingFiles,
 			adoption,
 			codewiki,
-			enforcement: collectEnforcementInventory(cwd),
+			enforcement,
+			depth,
+			evidence,
+			repositoryFiles,
 			...(existingParsed ? { existingClioMd: existingParsed } : {}),
 			...(existingClioMdText ? { existingClioMdText } : {}),
 			...(input.onProgress ? { progress: input.onProgress } : {}),
@@ -1504,6 +1609,9 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 				siblingFiles,
 				adoption,
 				codewiki,
+				evidence,
+				enforcement,
+				repositoryFiles,
 				...(existingParsed ? { existingClioMd: existingParsed } : {}),
 				...(existingClioMdText ? { existingClioMdText } : {}),
 			},
@@ -1517,7 +1625,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			generation = {
 				...generation,
 				mode: "heuristic",
-				fallbackReason: "Scout draft contributed no evidence-grounded custom sections",
+				fallbackReason: "bootstrap draft contributed no evidence-grounded rules or sections",
 			};
 		}
 		progress(input, {
@@ -1541,6 +1649,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	if (input.adopt === true) {
 		output = replaceImportedAgentContext(output, renderImportedAgentContext(adoption));
 	}
+	if (shouldGenerate && generation.mode !== "existing") output = fitGeneratedHandbook(output);
 	const readNames = siblingFiles.map((file) => file.path).sort((a, b) => a.localeCompare(b));
 	const previewStatus = gitStatus(cwd);
 	if (input.preview === true) {
@@ -1554,6 +1663,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			adoption: summarizeAdoption(adoption, "preview"),
 		};
 		out(input.io, formatBootstrapSummary(summary));
+		progress(input, { phase: "done", status: "completed", message: "context preview ready; no files written" });
 		return {
 			clioMdPath: join(cwd, "CLIO-CODER.md"),
 			statePath: resolveStatePath(cwd),
@@ -1569,25 +1679,26 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 
 	let clioMdPath = join(cwd, "CLIO-CODER.md");
 	let proposalPath: string | undefined;
-	let action: RunBootstrapSummary["action"] = "preserved";
 	progress(input, {
 		phase: "clio-md",
 		status: "started",
 		message: hadClioMd ? "preserving CLIO-CODER.md" : "writing CLIO-CODER.md",
 	});
-	if (shouldPropose) {
-		proposalPath = writeClioMdProposal(cwd, now, output, generation, existingClioMdText);
-		action = "proposed";
-	} else if (!hadClioMd) {
-		clioMdPath = writeClioMdFile(cwd, output);
-		action = "wrote";
-	} else if (replaceClioMd) {
-		clioMdPath = writeClioMdFile(cwd, output);
-		action = "refreshed";
-	} else if (input.adopt === true && existingParsed) {
-		clioMdPath = writeClioMdFile(cwd, output);
-		action = "refreshed";
-	}
+	const action = await coordinateCodewikiExclusive(cwd, (): RunBootstrapSummary["action"] => {
+		const wouldPublish =
+			!hadClioMd || (replaceClioMd && generation.mode !== "existing") || (input.adopt && existingParsed);
+		const sourceChanged = hadClioMd !== existsSync(clioMdPath) || originalClioMdText !== readExistingClioMdText(cwd);
+		if (shouldPropose || (wouldPublish && sourceChanged)) {
+			proposalPath = writeClioMdProposal(cwd, now, output, generation, originalClioMdText);
+			if (sourceChanged)
+				warn(input.io, "CLIO-CODER.md changed during initialization; the generated draft was saved as a proposal.\n");
+			return "proposed";
+		} else if (wouldPublish) {
+			clioMdPath = writeClioMdFile(cwd, output);
+			return hadClioMd ? "refreshed" : "wrote";
+		}
+		return "preserved";
+	});
 	progress(input, {
 		phase: "clio-md",
 		status: "completed",

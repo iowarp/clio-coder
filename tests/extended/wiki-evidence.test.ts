@@ -27,6 +27,26 @@ beforeEach(() => {
 afterEach(() => rmSync(sandbox, { recursive: true, force: true }));
 
 describe("wiki mechanical evidence gate", () => {
+	it("resolves a real relative import from a declared source without accepting escaping or invented imports", () => {
+		writeFileSync(join(root, "tests/main.test.ts"), 'import { main } from "../src/main.js";\n');
+		const content = "---\nsources: [src/main.ts]\ntests: [tests/main.test.ts]\n---\nThe test imports `../src/main.js`.";
+		deepStrictEqual(check(content), { ok: true, reasons: [], dependencies: ["src/main.ts", "tests/main.test.ts"] });
+		strictEqual(check(content.replace("`../src/main.js`", "`../src/invented.js`")).ok, false);
+		writeFileSync(join(sandbox, "outside.ts"), "outside\n");
+		writeFileSync(join(root, "tests/main.test.ts"), 'import "../../outside.ts";\n');
+		strictEqual(check(content.replace("`../src/main.js`", "`../../outside.ts`")).ok, false);
+	});
+
+	it("accepts a test selector only when a package command declares it and a verified test matches", () => {
+		writeFileSync(join(root, "package.json"), '{"scripts":{"test":"node --test tests/*.test.ts"}}');
+		const content = "---\ntests: [tests/main.test.ts]\n---\nCI discovers `tests/*.test.ts`.";
+		deepStrictEqual(check(content), { ok: true, reasons: [], dependencies: ["package.json", "tests/main.test.ts"] });
+		strictEqual(check(content.replace("tests/*.test.ts", "tests/missing-*.test.ts")).ok, false);
+		strictEqual(check("---\ntests: [tests/*.test.ts]\n---\nA page.").ok, false);
+		writeFileSync(join(root, "package.json"), "{}");
+		strictEqual(check(content).ok, false);
+	});
+
 	it("accepts readable pages without a mandatory template and resolves JS source aliases", () => {
 		deepStrictEqual(check(page("src/main.js", "See `src/main.js:1-3` and `tests/main.test.ts#L1`.")), {
 			ok: true,

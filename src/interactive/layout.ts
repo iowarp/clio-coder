@@ -13,6 +13,7 @@ export interface LayoutParts {
 	chat: TranscriptComponent;
 	pending?: Component;
 	fleet?: Component;
+	contextProgress?: Component;
 	editor: Component;
 	footer: Component;
 }
@@ -100,6 +101,7 @@ function buildFullscreenLayout(parts: LayoutParts, options: LayoutOptions = {}):
 	const dock = new VStack();
 	if (parts.pending) dock.addChild(parts.pending, { shrink: 1, minSize: 0 });
 	if (parts.fleet) dock.addChild(parts.fleet, { shrink: 1, minSize: 0 });
+	if (parts.contextProgress) dock.addChild(parts.contextProgress, { shrink: 1, minSize: 0 });
 	dock.addChild(parts.editor, { shrink: 1, minSize: 3 });
 	dock.addChild(parts.footer, { shrink: 1, minSize: 1 });
 	const root = new VStack();
@@ -167,6 +169,7 @@ class RegularRoot implements Component {
 		}
 		if (this.parts.pending) write(this.parts.pending.render(width));
 		if (this.parts.fleet) write(this.parts.fleet.render(width));
+		if (this.parts.contextProgress) write(this.parts.contextProgress.render(width));
 		write(this.parts.editor.render(width));
 		write(this.parts.footer.render(width));
 		out.length = row;
@@ -179,6 +182,7 @@ class RegularRoot implements Component {
 		this.parts.chat.invalidate();
 		this.parts.pending?.invalidate();
 		this.parts.fleet?.invalidate();
+		this.parts.contextProgress?.invalidate();
 		this.parts.editor.invalidate();
 		this.parts.footer.invalidate();
 	}
