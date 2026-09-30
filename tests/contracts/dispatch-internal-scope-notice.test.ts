@@ -39,7 +39,7 @@ it("operator bootstrap report: internal schema retries keep scope provenance wit
 				}),
 				/responseSchema/,
 			);
-		strictEqual(diagnostics.filter((text) => text.includes("typed scope replacement")).length, 1);
+		strictEqual(diagnostics.filter((text) => text.includes("typed scope replacement")).length, 0);
 		strictEqual(
 			notices.length,
 			0,
@@ -67,8 +67,8 @@ it("operator bootstrap report: internal schema retries keep scope provenance wit
 		strictEqual(notices.length, 0, "operator retries omit transcript scope warnings");
 		strictEqual(
 			diagnostics.filter((text) => text.includes("typed scope replacement")).length,
-			1,
-			"only harness dispatches carry a scope diagnostic, and retries never repeat one",
+			0,
+			"context source inventories stay in receipt provenance without warning diagnostics",
 		);
 	} finally {
 		unsubscribe();
