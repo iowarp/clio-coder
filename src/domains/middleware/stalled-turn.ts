@@ -247,7 +247,7 @@ function hasActionWithObject(clause: string): boolean {
 	return false;
 }
 
-export function isNormalStopReason(value: unknown): boolean {
+function isNormalStopReason(value: unknown): boolean {
 	if (value === undefined || value === null) return true;
 	if (typeof value !== "string") return false;
 	const normalized = value
