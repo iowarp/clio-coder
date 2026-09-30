@@ -4,7 +4,11 @@ import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createAdmissionQueue } from "../../src/domains/dispatch/admission-queue.js";
-import { cloneRunToolBudgetEnvelope, resolveToolBudgetEnvelope } from "../../src/domains/dispatch/budget-envelope.js";
+import {
+	cloneRunToolBudgetEnvelope,
+	resolveToolBudgetEnvelope,
+	workerBudgetFromEnvelope,
+} from "../../src/domains/dispatch/budget-envelope.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { createClaudeWorkerBudgetGate } from "../../src/engine/claude/sdk-runtime.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
@@ -224,6 +228,43 @@ describe("dispatch advisory admission and explicit authority", () => {
 		} finally {
 			await bundle.extension.stop?.();
 		}
+	});
+	it("gives an advisory worker a hard ceiling at the recipe maximum and refuses one on an enforced budget", async () => {
+		const policy = { toolCalls: 20, readReserve: 2, synthesis: false, maximum: { toolCalls: 40, readReserve: 4 } };
+		const advisory = { ...base, policy, hardCap: 150 };
+		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope(advisory)).ceiling, 40);
+		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope({ ...advisory, hardCap: 30 })).ceiling, 30);
+		const admitted = resolveToolBudgetEnvelope({ ...advisory, request: { toolCalls: 50, readReserve: 2 } });
+		equal(workerBudgetFromEnvelope(admitted).ceiling, 50);
+
+		let observed: unknown;
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: (spec) => {
+				observed = JSON.parse(JSON.stringify(spec));
+				throw new Error("fixture launch reached");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({
+					agentId: "coder",
+					task: "Edit fixture.",
+					executionRole: "builder",
+					requestOrigin: "internal",
+				}),
+				/fixture launch/u,
+			);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+		const spec = observed as { budget: Record<string, unknown> };
+		equal(spec.budget.mode, "advisory");
+		equal(typeof parseWorkerSpec(spec).budget.ceiling, "number");
+		throws(
+			() => parseWorkerSpec({ ...spec, budget: { ...spec.budget, mode: "enforced" } }),
+			/ceiling applies only to advisory budgets/u,
+		);
 	});
 	it("an explicit assignment deadline stops a healthy worker with a truthful timeout receipt", {
 		timeout: 10_000,
