@@ -92,7 +92,7 @@ A site is named by the object it judges. One call to a site carries one bounded 
 | `turn` | The operator's request, read before the turn | 600 ms | Hints, orientation, direction, dispatch expectation, prewarm |
 | `toolCall` | A proposed tool call | 5000 ms for the approval card, 1500 ms for the yolo gate | Card advisory, one extra confirmation under `yolo` |
 | `toolResult` | Content returned by `web_fetch`, `web_read` and MCP tools | 1500 ms | Untrusted-content banner |
-| `turnEnd` | The assistant's finished message | 5000 ms | Clarification streak, prose-question nudge |
+| `turnEnd` | The assistant's finished message | 5000 ms | Clarification streak and turn outcome record |
 | `relevance` | Catalog entries against a need | 1500 ms | Ranks skills, gateway capabilities and memory |
 | `consult` | Evidence the main agent supplies | 3000 ms | The `consult` tool |
 | `drafts` | Candidate answers | 5000 ms | `/draft` judging |
@@ -119,14 +119,13 @@ The site rates the blast radius of a call on a four-rung ladder (`contained`, `l
 
 Only results from `web_fetch`, `web_read` and MCP tools are screened. They carry third parties' text. Clio's own listings, recipes and worker reports are written to direct an agent and are never sent. The site reads intent, so a paraphrased injection is caught and a document that merely quotes an attack is not. A flag puts a System One finding and the untrusted-content banner in front of the result. It never clears a result the deterministic marker scan already flagged. Under an unfitted build the call is recorded and never flags.
 
-### `turnEnd`: clarification streak and the prose-question nudge
+### `turnEnd`: clarification streak and turn outcomes
 
-After a turn settles, the site reads the assistant's final message. Two of its readings replace regular expressions over English prose:
+After a turn settles, the site reads the assistant's final message. Its reading of whether the message asks the operator something feeds the clarification streak that gates the `direction` workflow and the turn outcome record. When the site has no usable answer, the clarification streak keeps its existing fallback.
 
-- Whether the message asks the operator something. This feeds the clarification streak that gates the `direction` workflow and the prose-question nudge.
-- Whether the message blocks on a decision or is an invitation. When it is only an invitation, the nudge that sends the assistant back to `ask_user` stays quiet. Only the two tails are decisions, and the middle keeps the previous behavior.
+The settled turn waits at most 1.2 s for the answer, counted from when it was first asked. A slower answer is recorded but never waited on. An unfitted build never delays the turn. Other readings, including whether the message blocks on a decision, announced work never started, a claimed passing check and whether the work moved on, are recorded without changing policy.
 
-The nudge waits at most 1.2 s for the answer, counted from when it was first asked. A slower answer is recorded but never waited on. Other readings (announced work that never started, a claimed passing check, whether the work moved on) are recorded for later policy and change nothing today.
+The prose-question nudge has been removed. Turn-ending guidance lives in the prompt and the `ask_user` result. The plan-close registration uses the already cached `turn` intent or explicit proposal mode, never this site's reading of the reply.
 
 ### `relevance`: ranking skills, capabilities and memory
 
