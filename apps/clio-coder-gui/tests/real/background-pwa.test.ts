@@ -60,8 +60,11 @@ async function connected(page: Page) {
 	return meta.epoch as string;
 }
 
+// This check enables a real unit in the operator's systemd user manager, which
+// no scratch directory can isolate, so it runs only on explicit opt-in.
 test("native user service and installed Chrome PWA retain access through window, browser and server restarts", {
 	timeout: 180000,
+	skip: process.env.CLIO_CODER_REAL_SYSTEMD === "1" ? false : "set CLIO_CODER_REAL_SYSTEMD=1 to enable a real user unit",
 }, async () => {
 	assert.equal(
 		process.platform,

@@ -1,7 +1,8 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access, readFile, realpath, stat } from "node:fs/promises";
-import { delimiter, isAbsolute, join, win32 } from "node:path";
+import { tmpdir } from "node:os";
+import { delimiter, isAbsolute, join, resolve, win32 } from "node:path";
 import { Worker } from "node:worker_threads";
 import { type CliCommand, commandPlan } from "./cli-commands.js";
 import { createStdioTransport, processAlive, processBirthToken, resolvePackageRoot } from "./clio/http-shims.js";
@@ -199,6 +200,12 @@ export function serviceCommand(
 	if (action === "disable") return ["--user", "disable", "--now", "--", unit];
 	return ["--user", action, "--", unit];
 }
+function isTemporaryUnitFile(unitFile: string): boolean {
+	const roots = [tmpdir(), "/tmp", "/var/tmp"].map((root) => resolve(root));
+	const target = resolve(unitFile);
+	return roots.some((root) => target.startsWith(`${root}/`));
+}
+
 export async function controlService(
 	action: Parameters<typeof serviceCommand>[0],
 	unit: string,
@@ -207,6 +214,12 @@ export async function controlService(
 ) {
 	if (process.platform !== "linux")
 		throw new Error("Background setup currently requires Linux with a systemd user session.");
+	// `systemctl --user enable` links the unit into the user manager's own
+	// ~/.config/systemd/user and default.target.wants, which no environment
+	// override redirects. A unit file in a temp directory is a test fixture, and
+	// enabling it once left real login units pointing at deleted scratch paths.
+	if (action === "enable" && isTemporaryUnitFile(unitFile) && env.CLIO_CODER_REAL_SYSTEMD !== "1")
+		throw new Error("Refusing to enable a background service whose unit file lives in a temporary directory.");
 	const child = spawn("systemctl", serviceCommand(action, unit, unitFile), {
 		env,
 		shell: false,
