@@ -676,7 +676,15 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			effects:
 				promptedResult.reminder === null
 					? NO_EFFECTS
-					: [{ kind: "inject_reminder", message: promptedResult.reminder, severity: "advisory", source: "memory" }],
+					: [
+							{
+								kind: "inject_reminder",
+								message: promptedResult.reminder,
+								severity: "advisory",
+								source: "memory",
+								audience: "model",
+							},
+						],
 		};
 	}
 
@@ -898,7 +906,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				lastDecision = "injected";
 				rulesInjectedSincePromptedStep = true;
 				deps.bank.recordInjection([failure.entryId]);
-				return [{ kind: "inject_reminder", message, severity: "advisory", source: "memory" }];
+				return [{ kind: "inject_reminder", message, severity: "advisory", source: "memory", audience: "model" }];
 			}
 			lastDecision = "silent";
 			return NO_EFFECTS;
@@ -927,7 +935,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		deps.bank.recordInjection(citedIds);
 		lastInjectedMessage = message;
 		lastDecision = "injected";
-		return [{ kind: "inject_reminder", message, severity: "advisory", source: "memory" }];
+		return [{ kind: "inject_reminder", message, severity: "advisory", source: "memory", audience: "model" }];
 	}
 }
 
