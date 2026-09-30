@@ -69,6 +69,12 @@ export interface WorkerBudget {
 	hardCap: number;
 	/** Optional ceiling that a bounded result-contract revision may activate. */
 	revision?: WorkerBudgetPhase;
+	/**
+	 * Advisory mode only: the recipe's maximum, enforced as a hard tool-call
+	 * ceiling. An advisory run otherwise had no bound at all, and a worker that
+	 * kept rewriting finished files ran 110 calls over 16 minutes (D7).
+	 */
+	ceiling?: number;
 }
 
 interface WorkerSpecFields {
@@ -474,11 +480,11 @@ function validateAllowedTools(value: unknown): void {
 
 function validateWorkerBudget(value: unknown): void {
 	const budget = readRecord(value, "WorkerSpec.budget");
-	const expected = ["mode", "hardCap", "readReserve", "revision", "synthesis", "toolCalls"];
+	const expected = ["ceiling", "mode", "hardCap", "readReserve", "revision", "synthesis", "toolCalls"];
 	const actual = Object.keys(budget).sort();
 	if (
 		actual.some((key) => !expected.includes(key)) ||
-		actual.some((key) => key === "revision" && budget.revision === undefined)
+		actual.some((key) => (key === "revision" || key === "ceiling") && budget[key] === undefined)
 	) {
 		throw new Error(`WorkerSpec.budget may contain only: ${expected.join(", ")}`);
 	}
@@ -502,6 +508,16 @@ function validateWorkerBudget(value: unknown): void {
 		throw new Error("WorkerSpec.budget.readReserve must be an integer in [0, toolCalls)");
 	}
 	if (typeof budget.synthesis !== "boolean") throw new Error("WorkerSpec.budget.synthesis must be a boolean");
+	if (budget.ceiling !== undefined) {
+		if (budget.mode !== "advisory") throw new Error("WorkerSpec.budget.ceiling applies only to advisory budgets");
+		if (
+			typeof budget.ceiling !== "number" ||
+			!Number.isSafeInteger(budget.ceiling) ||
+			budget.ceiling < (budget.toolCalls as number)
+		) {
+			throw new Error("WorkerSpec.budget.ceiling must be a safe integer no smaller than toolCalls");
+		}
+	}
 	if (budget.revision !== undefined) {
 		const revision = readRecord(budget.revision, "WorkerSpec.budget.revision");
 		const revisionKeys = Object.keys(revision).sort();

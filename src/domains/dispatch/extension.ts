@@ -178,7 +178,7 @@ import {
 	registerDetachedBatch,
 } from "./batch-store.js";
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
-import { type RunToolBudgetEnvelope, resolveToolBudgetEnvelope } from "./budget-envelope.js";
+import { type RunToolBudgetEnvelope, resolveToolBudgetEnvelope, workerBudgetFromEnvelope } from "./budget-envelope.js";
 import { cancelDetail, FLEET_CANCEL_DETAIL, takeRunCancelRequest } from "./cancel-requests.js";
 import { assessCapabilityMismatch, type CapabilityMismatch } from "./capability-match.js";
 import {
@@ -4299,7 +4299,7 @@ export function createDispatchBundle(
 			operatorProfileApplied: compiledWorkerPrompt.operatorProfileApplied ?? false,
 			capabilityMismatch,
 			readOnly,
-			budget: budgetEnvelope.effective,
+			budget: workerBudgetFromEnvelope(budgetEnvelope),
 			budgetEnvelope,
 			...(settings ? { settings } : {}),
 		};

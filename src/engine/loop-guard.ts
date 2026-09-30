@@ -468,6 +468,8 @@ export interface CreateLoopGuardRegistrationOptions {
 	toolCallCap?: number;
 	/** Observe estimated work without disabling tools; fault-loop detection remains active. */
 	toolBudgetAdvisory?: boolean;
+	/** Advisory mode's hard lifetime ceiling; absent leaves an advisory run unbounded. */
+	toolCallCeiling?: number;
 	/**
 	 * Worker only: successful exploration attempts allowed before a graceful,
 	 * text-only synthesis phase. Unlike {@link toolCallCap}, crossing this soft
@@ -550,7 +552,7 @@ export interface LoopGuardRegistration extends MiddlewareHookRegistration {
 
 export function createLoopGuardRegistration(options: CreateLoopGuardRegistrationOptions): LoopGuardRegistration {
 	const budget = options.turnBlockBudget ?? INTERACTIVE_LOOP_BLOCK_BUDGET;
-	const cap = options.toolBudgetAdvisory ? undefined : options.toolCallCap;
+	const cap = options.toolBudgetAdvisory ? options.toolCallCeiling : options.toolCallCap;
 	let advisoryEmitted = false;
 	let softLimit =
 		!options.toolBudgetAdvisory &&
@@ -1268,7 +1270,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					advisoryEmitted = true;
 					effects.push({
 						kind: "annotate_tool_result",
-						message: `Advisory tool estimate reached (${count} calls). Reassess remaining work and finish the assignment; tools remain available. Explicit task requirements still apply.`,
+						message: `Advisory tool estimate reached (${count} calls). Reassess remaining work and finish the assignment; tools remain available${options.toolCallCeiling !== undefined ? ` until the hard ceiling of ${options.toolCallCeiling} calls` : ""}. Explicit task requirements still apply.`,
 						severity: "warn",
 					});
 				}
