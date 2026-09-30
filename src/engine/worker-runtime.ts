@@ -1600,7 +1600,20 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			}
 			return;
 		}
-		const reason = onPermission === "fail" ? failReason(call.tool, actionClass) : denyReason(call.tool, actionClass);
+		// The policy's own reasons name the remedy ("one command per bash call",
+		// "only through the typed git tool"). Without them a worker saw only
+		// "bash requires execute confirmation" and retried respelled variants.
+		const policyDetail = decision.classification.reasons
+			.map((entry) => entry.trim())
+			.filter((entry) => entry.length > 0)
+			.slice(0, 2)
+			.join(" ");
+		const reason =
+			onPermission === "fail"
+				? failReason(call.tool, actionClass)
+				: policyDetail.length > 0
+					? `${denyReason(call.tool, actionClass)}. ${policyDetail}`
+					: denyReason(call.tool, actionClass);
 		emit({
 			type: "clio_coder_permission_resolved",
 			payload: {
