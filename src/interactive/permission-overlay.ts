@@ -45,6 +45,11 @@ export interface ApprovalRequestView {
 	/** Admission-normalized exposure. Caller prose never supplies presentation fields. */
 	exposure?: AutonomyExposure;
 	reason: string;
+	/**
+	 * The safety-net rule's own reason text, set for a net-axis ask so the card can say what
+	 * triggered it. `reason` is the raw rejection short and stays off the card.
+	 */
+	netReason?: string;
 	/** Typed, sanitized multi-line artifact that this one approval authorizes. */
 	artifact?: { kind: "dispatch-plan"; text: string };
 	/**
@@ -402,6 +407,7 @@ function permissionInspectionLines(
 	const lines = [
 		...field("Tool: ", `${view.tool} · Action: ${view.actionClass}`, content),
 		...(view.target !== undefined && view.target.length > 0 ? field("Target: ", view.target, content) : []),
+		...(view.netReason !== undefined && view.netReason.length > 0 ? field("Why: ", view.netReason, content) : []),
 		...wrapSentence(`Mutation: ${mutationFactsLine(preview.facts)}`, content),
 		"",
 		...wrapSentence(preview.heading, content),
@@ -454,6 +460,7 @@ function permissionCardSections(
 	const facts = [
 		...field("Tool: ", `${view.tool} · Action: ${view.actionClass}`, content),
 		...(view.target !== undefined && view.target.length > 0 ? field("Target: ", view.target, content) : []),
+		...(view.netReason !== undefined && view.netReason.length > 0 ? field("Why: ", view.netReason, content) : []),
 		// Size and digest stay on the collapsed card whether or not the operator
 		// opens the mutation, so the decision always carries the identity of the
 		// bytes it applies to. Wrapped, never ellipsized: at 40 columns the digest

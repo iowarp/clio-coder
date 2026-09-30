@@ -159,6 +159,13 @@ function axisViewFromId(axisId: string | undefined, fallbackLevel: string): Appr
 	return null;
 }
 
+/** The rule's reason for a net-axis ask: the policy verdict's first reason, else the damage-control match's. */
+function netReasonOf(decision: SafetyDecision): string | undefined {
+	if (decision.kind !== "ask") return undefined;
+	const reason = decision.policy?.kind === "ask" ? decision.policy.reasons[0] : decision.match?.reason;
+	return reason !== undefined && reason.length > 0 ? sanitizeCallTargetText(reason) : undefined;
+}
+
 function mainApprovalRequestView(
 	call: ClassifierCall,
 	decision: SafetyDecision,
@@ -174,6 +181,7 @@ function mainApprovalRequestView(
 			? { kind: "net" as const, ruleId: axisFromDecision.ruleId }
 			: { kind: "autonomy" as const, level: autonomy });
 	const target = describeCallTarget(call.tool, call.args);
+	const netReason = axis.kind === "net" ? netReasonOf(decision) : undefined;
 	// Facts only. The mutation text stays in the inspector the overlay opener
 	// gets; this object reaches the transcript row and the approval-state event.
 	const mutation = mutationFacts(call.tool, call.args);
@@ -185,6 +193,7 @@ function mainApprovalRequestView(
 		origin: { kind: "main" },
 		reason:
 			decision.kind === "ask" ? decision.rejection.short : `${call.tool} requests ${decision.classification.actionClass}`,
+		...(netReason !== undefined ? { netReason } : {}),
 		...(call.tool === ToolNames.Dispatch && decision.kind === "ask"
 			? { artifact: { kind: "dispatch-plan" as const, text: decision.rejection.detail } }
 			: {}),
