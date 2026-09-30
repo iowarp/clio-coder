@@ -38,12 +38,12 @@ import { createMonitorTool } from "../../src/tools/monitor.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-it("uses orange only for a running Fleet glyph and mutes queued work", () => {
+it("gives running Fleet work the dispatch tone with an activity glyph and leaves queued work in body text", () => {
 	const running = dispatchStatusPresentation("running");
-	strictEqual(running.token, "muted");
-	strictEqual(running.glyphToken, "action");
+	strictEqual(running.token, "dispatchAction");
+	strictEqual(running.glyphToken, "activity");
 	const queued = dispatchStatusPresentation("enqueued");
-	strictEqual(queued.token, "muted");
+	strictEqual(queued.token, "body");
 	strictEqual(queued.glyphToken, undefined);
 });
 
