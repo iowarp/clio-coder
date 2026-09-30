@@ -27,6 +27,7 @@ import {
 	COUNCIL_MEMBER_LABEL_PATTERN,
 	DEFAULT_SETTINGS,
 	normalizeOutputStyle,
+	SETTINGS_FILE_MODE,
 	THEME_NAMED_COLORS,
 	THINKING_LEVELS,
 	type ThinkingLevel,
@@ -2421,7 +2422,7 @@ export function readSettings(): ClioSettings {
  * path and it always holds the lock.
  */
 function persistSettings(document: unknown): void {
-	safeResourceWrite(settingsPath(), stringifyYaml(document), { encoding: "utf8", mode: 0o644 });
+	safeResourceWrite(settingsPath(), stringifyYaml(document), { encoding: "utf8", mode: SETTINGS_FILE_MODE });
 }
 
 /**

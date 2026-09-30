@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { settingsPath, withSettingsLock } from "../../../core/config.js";
+import { SETTINGS_FILE_MODE } from "../../../core/defaults.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { Migration } from "./index.js";
 
@@ -51,7 +52,7 @@ const migration: Migration = {
 			// A `panes` map that held nothing but the retired knobs is left naming no
 			// setting at all, so it goes with them rather than staying as `panes: {}`.
 			if (Object.keys(panes).length === 0) delete parsed.panes;
-			safeResourceWrite(path, stringifyYaml(parsed), { encoding: "utf8", mode: 0o644 });
+			safeResourceWrite(path, stringifyYaml(parsed), { encoding: "utf8", mode: SETTINGS_FILE_MODE });
 		});
 	},
 };

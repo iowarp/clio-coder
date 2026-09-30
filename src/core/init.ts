@@ -7,7 +7,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { REGISTERED_MIGRATION_IDS } from "../domains/lifecycle/migrations/registry-ids.js";
-import { DEFAULT_SETTINGS_YAML } from "./defaults.js";
+import { DEFAULT_SETTINGS_YAML, SETTINGS_FILE_MODE } from "./defaults.js";
 import { readClioVersion } from "./package-root.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
@@ -105,7 +105,7 @@ export function initializeClioHome(): InitReport {
 	let touched = false;
 	withStateFileLockSync(settingsPath, () => {
 		if (existsSync(settingsPath)) return;
-		safeResourceWrite(settingsPath, DEFAULT_SETTINGS_YAML, { encoding: "utf8", mode: 0o644 });
+		safeResourceWrite(settingsPath, DEFAULT_SETTINGS_YAML, { encoding: "utf8", mode: SETTINGS_FILE_MODE });
 		created.push(settingsPath);
 		touched = true;
 	});

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { SettingsValidationError, settingsPath, validateSettings, withSettingsLock } from "../core/config.js";
-import { DEFAULT_SETTINGS_YAML } from "../core/defaults.js";
+import { DEFAULT_SETTINGS_YAML, SETTINGS_FILE_MODE } from "../core/defaults.js";
 import { editTextExternally, resolveExternalEditor } from "../core/external-editor.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import type { ConfigurePrompts } from "./configure-prompts.js";
@@ -43,7 +43,7 @@ export async function editSettings(prompts: ConfigurePrompts): Promise<boolean> 
 			const current = existsSync(file) ? readFileSync(file, "utf8") : null;
 			if (current !== original)
 				throw new Error("Settings changed while the editor was open. Reopen the editor to keep those changes.");
-			safeResourceWrite(file, draft, { encoding: "utf8", mode: 0o644, backup: original !== null });
+			safeResourceWrite(file, draft, { encoding: "utf8", mode: SETTINGS_FILE_MODE, backup: original !== null });
 		});
 		prompts.output.write(`Settings saved to ${file}${original === null ? "" : `; previous file: ${file}.bak`}\n`);
 		return true;

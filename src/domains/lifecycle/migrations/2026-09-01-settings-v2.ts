@@ -9,6 +9,7 @@ import {
 	validateSettings,
 	withSettingsLock,
 } from "../../../core/config.js";
+import { SETTINGS_FILE_MODE } from "../../../core/defaults.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { Migration } from "./index.js";
 
@@ -350,7 +351,7 @@ const migration: Migration = {
 			const backupPath = `${path}.v1.bak`;
 			safeResourceWrite(path, stringifyYaml(transformed.document), {
 				encoding: "utf8",
-				mode: 0o644,
+				mode: SETTINGS_FILE_MODE,
 				backup: { path: backupPath },
 			});
 			const report: SettingsV2MigrationReport = {

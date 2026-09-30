@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+	chmodSync,
 	closeSync,
 	copyFileSync,
 	existsSync,
@@ -136,6 +137,9 @@ export function safeResourceWrite(
 			backupPath = backup.path ?? safeResourceBackupPath(targetPath, backup.suffix ?? ".bak");
 			mkdirSync(path.dirname(backupPath), { recursive: true });
 			copyFileSync(targetPath, backupPath);
+			// A backup of a file being tightened must not keep the old, wider
+			// mode: the settings.yaml backups carry the same auth headers.
+			if (options.mode !== undefined) chmodSync(backupPath, statSync(targetPath).mode & 0o777 & options.mode);
 			fsyncFile(backupPath);
 			fsyncDirectory(path.dirname(backupPath));
 		}

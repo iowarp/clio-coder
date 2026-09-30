@@ -839,3 +839,10 @@ integrations:
   git:
     commitAttribution: true
 `;
+
+/**
+ * settings.yaml may carry provider auth headers, so it is owner-only. The
+ * clio-namespaces manifest declares it sensitive and `clio-ns doctor` reports
+ * any wider mode.
+ */
+export const SETTINGS_FILE_MODE = 0o600;

@@ -3,11 +3,12 @@
  * blank lines and flow style stay byte for byte what the operator wrote.
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type { Scalar } from "yaml";
 import { isMap, isScalar, isSeq, parseDocument, parse as parseYaml } from "yaml";
 import type { SettingsScalarRepair } from "./config.js";
 import { settingsPath, validateSettings, validateSettingsFile, withSettingsLock } from "./config.js";
+import { SETTINGS_FILE_MODE } from "./defaults.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 
 export interface SettingsRepairResult {
@@ -98,7 +99,7 @@ export function repairSettingsCoercions(): SettingsRepairResult {
 		if (edits.some((edit) => remaining.has(edit.repair.path))) {
 			return { rewritten: [], skipped: [...skipped, ...edits.map((edit) => edit.repair.path)] };
 		}
-		safeResourceWrite(path, next, { encoding: "utf8", mode: statSync(path).mode & 0o777 });
+		safeResourceWrite(path, next, { encoding: "utf8", mode: SETTINGS_FILE_MODE });
 		return { rewritten: edits.map((edit) => edit.repair), skipped };
 	});
 }
