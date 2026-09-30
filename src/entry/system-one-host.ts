@@ -1,12 +1,12 @@
 /**
  * What the composition root keeps between System One calls.
  *
- * The turn site is asked once, before the prompt is built, and three readers
- * that cannot await take what it left: the hint registration, the turn
- * controller and the prewarm. The turn-end site is asked once per settled turn
- * and its reading is shared: whether the message asks or blocks on the operator
- * feeds the clarification streak and the turn outcome record that measures how
- * turns end. The relevance site ranks a catalog when a tool is asked for one.
+ * The turn site is asked once, before the prompt is built, and readers that
+ * cannot await take what it left: the hint registration, the turn controller,
+ * the plan-close registration and the prewarm. The turn-end site is asked once
+ * per settled turn; whether the message asks the operator feeds the
+ * clarification streak and the turn outcome record that measures how turns
+ * end. The relevance site ranks a catalog when a tool is asked for one.
  * Everything here degrades to what the harness did before System One existed:
  * an unbound, slow, failed or unfitted site hands back null and the reader
  * keeps its own answer.
@@ -235,7 +235,7 @@ export interface TurnPrewarmPrediction {
 }
 
 export interface SystemOneHost {
-	/** Ask the `turn` site about this request and keep the verdict for its three readers. */
+	/** Ask the `turn` site about this request and keep the verdict for its synchronous readers. */
 	readTurn(input: TurnReadInput): Promise<void>;
 	/** This turn's hint lines, or null when no site answered. */
 	hints(): DecisionHintLines | null;
@@ -249,14 +249,10 @@ export interface SystemOneHost {
 	task(): string;
 	/** The user turn id of the last operator turn, the join key of a mid-turn ranking. */
 	turnId(): string | null;
-	/** Whether the turn-end site can answer, so a reader knows whether to wait. */
-	turnEndBound(): boolean;
 	/** Drop the operator texts kept in memory. The next turn-end reading reads the ledger once. */
 	forgetOperatorTexts(): void;
 	/** The settled turn's reading of whether the message asks the operator something; null keeps the regex. */
 	readTurnEnd(input: TurnEndReadInput): Promise<{ asks: boolean | null } | null>;
-	/** Whether the message blocks on a decision; false says it is an invitation, null keeps today's behavior. */
-	blocksOnOperator(input: TurnEndReadInput): Promise<boolean | null>;
 	/** The banner to put in front of a tool result whose content reads as directing an agent, or null. */
 	screenToolResult(
 		source: string,
@@ -393,7 +389,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		return earlier;
 	}
 
-	/** One reading per turn, shared by the nudge and the settled turn. */
+	/** One reading per settled turn, reused if its outcome is read again. */
 	function turnEndReading(input: TurnEndReadInput): Promise<Verdict<TurnEndValue> | null> {
 		if (turnEnd?.id === input.userTurnId) return turnEnd.read;
 		if (!systemOne.bound("turnEnd")) return Promise.resolve(null);
@@ -420,13 +416,12 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 	}
 
 	/**
-	 * The shared reading, or null once the turn's wait is spent. A settled turn
-	 * that follows a nudge which already waited would otherwise wait a second
-	 * full interval on an engine that missed the first.
+	 * The cached reading, or null once the turn's wait is spent. Repeated reads
+	 * must not spend another full interval on an engine that missed the first.
 	 */
 	function awaitTurnEnd(input: TurnEndReadInput): Promise<Verdict<TurnEndValue> | null> {
-		// Nothing a shadowed build says can move the nudge or the streak, so neither
-		// waits for it. With recording on the shared call still runs, detached; with it
+		// Nothing a shadowed build says can move the streak, so the turn never
+		// waits for it. With recording on the call still runs, detached; with it
 		// off there is nothing to feed, so no call is made. Once the build's last
 		// answer ages out `shadowed` reads false and the call is awaited again.
 		if (systemOne.shadowed("turnEnd")) {
@@ -505,7 +500,6 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 
 		task: () => turn?.task ?? "",
 		turnId: () => turn?.id ?? null,
-		turnEndBound: () => systemOne.bound("turnEnd"),
 
 		forgetOperatorTexts() {
 			operatorTexts = { session: null, seeded: false, turns: [] };
@@ -514,11 +508,6 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		async readTurnEnd(input) {
 			const verdict = await awaitTurnEnd(input);
 			return verdict === null ? null : { asks: verdict.value.asks };
-		},
-
-		async blocksOnOperator(input) {
-			const verdict = await awaitTurnEnd(input);
-			return verdict === null ? null : verdict.value.blocks;
 		},
 
 		async screenToolResult(source, content, ref, signal) {

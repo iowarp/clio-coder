@@ -173,19 +173,19 @@ describe("contracts/system one host: the turn-end wait", () => {
 		return { settled: () => done };
 	}
 
-	it("spends one budget across the nudge and the settled turn", async () => {
+	it("spends one budget across repeated settled-turn reads", async () => {
 		// The engine never answers within the turn.
 		const { calls, systemOne } = fakeSystemOne(() => new Promise(() => {}), ["turnEnd"]);
 		const host = hostOver(systemOne);
 
-		const nudge = pending(host.blocksOnOperator(input));
+		const first = pending(host.readTurnEnd(input));
 		await flush();
 		advance(TURN_END_WAIT_MS - 1);
 		await flush();
-		strictEqual(nudge.settled(), false, "the nudge is still inside its budget");
+		strictEqual(first.settled(), false, "the first read is still inside its budget");
 		advance(1);
 		await flush();
-		strictEqual(nudge.settled(), true, "the nudge gives up when the budget is spent");
+		strictEqual(first.settled(), true, "the first read gives up when the budget is spent");
 
 		// The settled turn reads the same call and finds the budget already spent: a fresh
 		// interval would keep it waiting here.
@@ -194,20 +194,20 @@ describe("contracts/system one host: the turn-end wait", () => {
 		advance(1);
 		await flush();
 		strictEqual(settled.settled(), true, "the settled turn does not wait a second interval");
-		strictEqual(calls.length, 1, "both readers share the one call");
+		strictEqual(calls.length, 1, "repeated reads share the one call");
 		deepStrictEqual(calls[0], { site: "turnEnd", ref: "turn-1" });
 	});
 
-	it("hands a reading that arrived inside the budget to both readers", async () => {
+	it("reuses a reading that arrived inside the budget", async () => {
 		let release: (answers: Readonly<Record<string, Answer>>) => void = () => {};
 		const { calls, systemOne } = fakeSystemOne(() => new Promise((resolve) => (release = resolve)), ["turnEnd"]);
 		const host = hostOver(systemOne);
 
-		const nudge = host.blocksOnOperator(input);
+		const first = host.readTurnEnd(input);
 		await flush();
 		advance(800);
 		release({ asksOperator: noul(0.99), blocksOnDecision: noul(0.99) });
-		strictEqual(await nudge, true);
+		deepStrictEqual(await first, { asks: true });
 
 		// Long after the budget, the finished reading is still the answer.
 		advance(60_000);
@@ -217,7 +217,7 @@ describe("contracts/system one host: the turn-end wait", () => {
 
 	it("asks nothing and waits for nothing when the site is unbound", async () => {
 		const { calls, systemOne } = fakeSystemOne(() => LOUD_TURN, []);
-		strictEqual(await hostOver(systemOne).blocksOnOperator(input), null);
+		strictEqual(await hostOver(systemOne).readTurnEnd(input), null);
 		strictEqual(calls.length, 0);
 	});
 });
@@ -244,13 +244,10 @@ describe("contracts/system one host: a shadowed build", () => {
 			strictEqual(host.hints(), null);
 		});
 
-		it(`resolves the nudge and the streak at once and makes ${made} call with ${label}`, async () => {
+		it(`resolves repeated outcome reads at once and makes ${made} call with ${label}`, async () => {
 			const { calls, systemOne } = fakeSystemOne(NEVER, ["turnEnd"], true);
 			const host = hostOver(systemOne, recording);
-			const settled = await Promise.race([
-				Promise.all([host.blocksOnOperator(input), host.readTurnEnd(input)]),
-				flushed(),
-			]);
+			const settled = await Promise.race([Promise.all([host.readTurnEnd(input), host.readTurnEnd(input)]), flushed()]);
 			deepStrictEqual(settled, [null, null]);
 			strictEqual(calls.length, made, "one shared call, or none");
 		});

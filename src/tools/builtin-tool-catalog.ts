@@ -476,7 +476,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "local_slow",
 		promptHint:
-			'Put the context the operator needs in the question itself. Do not ask about something the operator already stated: one question per round in interviews, up to four related questions otherwise, recommended option first with a one-line description per option, then action="complete" with the decisions before final prose.',
+			'Do not ask about something the operator already stated. Ask one question per round in interviews, up to four related questions otherwise, then action="complete" with the decisions before final prose.',
 	},
 	[ToolNames.ConfigureClio]: {
 		objective: "Preview one Clio settings change and apply it only after direct operator approval.",
