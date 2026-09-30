@@ -15,6 +15,7 @@ import {
 	type MiddlewareSnapshot,
 } from "../domains/middleware/index.js";
 import { classify as classifyAction } from "../domains/safety/action-classifier.js";
+import type { AdmissionGitContext } from "../domains/safety/admission.js";
 import { DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import {
@@ -146,6 +147,8 @@ export function createWorkerToolRegistry(
 	onMiddlewareEffects?: RegistryDeps["onMiddlewareEffects"],
 	agentLedger?: AgentLedgerPort,
 	workerRecall?: WorkerRecall,
+	/** The run's Git allowance and attested task worktree; absent means git inspect. */
+	git?: AdmissionGitContext,
 ): ToolRegistry {
 	// A worker always gets a middleware contract, even without a snapshot from
 	// the orchestrator, because the loop guard rides on it as a before_tool
@@ -163,6 +166,7 @@ export function createWorkerToolRegistry(
 		autonomy: () => DEFAULT_AUTONOMY_LEVEL,
 		...(readOnly === true ? { readOnly: true } : {}),
 		...(onMiddlewareEffects ? { onMiddlewareEffects } : {}),
+		...(git !== undefined ? { git } : {}),
 	});
 	// The ledger tool registers unconditionally. attestedToolSignature signs the
 	// names a bare registry produces, so a conditional registration would drift

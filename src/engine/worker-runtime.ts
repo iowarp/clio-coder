@@ -72,9 +72,11 @@ import { createRunEffectsRecorder, recordToolExecutionEffects } from "../domains
 import {
 	MAIN_GRANTS_UNAVAILABLE_REASON,
 	mainGrantsUnavailable,
+	type WorkerGitAllowance,
 	type WorkerPermitAllowance,
 } from "../domains/safety/worker-permit.js";
 import { resolveAgentTools, type ToolTelemetry } from "../tools/agent-tools.js";
+import { createWorkerGitContext } from "../tools/git-exec.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import {
 	CHAIN_OUTPUT_TRUNCATED_MARKER,
@@ -82,6 +84,7 @@ import {
 	type GatewayChainReceipt,
 	gatewayChainReceipts,
 } from "../tools/surface.js";
+import type { TaskWorktree } from "../tools/task-worktree.js";
 import { type AgentLedgerPort, canonicalJson } from "../worker/protocol.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
@@ -188,6 +191,12 @@ export interface WorkerRunInput {
 	onPermission?: "deny" | "fail" | "escalate";
 	/** The permit allowance behind onPermission, so a denial can say why it was not routed. */
 	permitAllowance?: WorkerPermitAllowance;
+	/**
+	 * The permit's Git allowance, whether its tools already execute code, and
+	 * the task worktree the host created for this run, if any (Phase C).
+	 * Absent means git inspect: every Git mutation asks.
+	 */
+	taskGit?: { allowance: WorkerGitAllowance; executePermitted: boolean; taskWorktree?: TaskWorktree };
 	/** Escalation bounds, honored only when onPermission="escalate". */
 	escalation?: WorkerEscalationConfig;
 	/** Dispatch-owned restriction on tool admission for this run. */
@@ -632,6 +641,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		(effects) => middlewareToolChoice.apply(effects),
 		input.agentLedger,
 		observations.recall,
+		input.taskGit !== undefined
+			? createWorkerGitContext({
+					allowance: input.taskGit.allowance,
+					executePermitted: input.taskGit.executePermitted,
+					cwd: input.cwd ?? process.cwd(),
+					...(input.taskGit.taskWorktree !== undefined ? { taskWorktree: input.taskGit.taskWorktree } : {}),
+				})
+			: undefined,
 	);
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;

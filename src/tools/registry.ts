@@ -12,6 +12,7 @@ import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } f
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import {
 	type AdmissionDisposition,
+	type AdmissionGitContext,
 	type AdmissionPrincipal,
 	type ApprovalAuthority,
 	evaluateAdmission,
@@ -153,7 +154,7 @@ export interface ToolSpec {
 	/** A safety-net confirmation required at every autonomy level. */
 	confirmationRuleId?: string;
 	/** Harness-owned projection of executable effects for the safety engine. Never package-supplied code. */
-	safetyCall?(args: Record<string, unknown>): ClassifierCall;
+	safetyCall?(args: Record<string, unknown>): ClassifierCall | undefined;
 	/**
 	 * Per-tool execution mode. Read-only tools set `"parallel"` so the model
 	 * can batch scans; mutating or filesystem-racing tools set `"sequential"`
@@ -274,6 +275,12 @@ export interface RegistryDeps {
 	/** Dispatch-owned restriction, fixed for the lifetime of this run. */
 	readOnly?: boolean;
 	/**
+	 * The worker's standing Git allowance and attested task worktree (Phase C).
+	 * Read only when `principal` is worker; the git tool body receives it too,
+	 * so a typed mutation re-attests right before Git runs.
+	 */
+	git?: AdmissionGitContext;
+	/**
 	 * Reads external content (a fetched page, an MCP result, worker text) for
 	 * instructions aimed at an agent, and returns a banner to put in front of the
 	 * result, or null. It only tightens: the deterministic marker scan runs
@@ -320,6 +327,8 @@ export interface ToolInvokeOptions {
 	allowsObservationPath?: (path: string) => boolean;
 	/** Registry-owned write-root check the typed mutation seam repeats right before it publishes (F3). */
 	writeTargetViolation?: (target: string) => string | null;
+	/** Registry-owned worker Git context; the git tool re-attests a typed mutation with it. */
+	gitContext?: AdmissionGitContext;
 	/** Trusted submitting host identity for nested dispatch; never model arguments. */
 	hostRun?: import("../domains/dispatch/contract.js").DispatchPreparationOptions["hostRun"];
 	/** Trusted resolved model capability; never read from tool arguments. */
@@ -645,6 +654,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const {
 					allowsObservationPath: _callerPathFilter,
 					writeTargetViolation: _callerWriteCheck,
+					gitContext: _callerGitContext,
 					...callerOptions
 				} = options ?? {};
 				const allowsObservationPath = deps.safety.policy?.allowsObservationPath;
@@ -653,6 +663,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...callerOptions,
 					...(allowsObservationPath ? { allowsObservationPath } : {}),
 					...(writeTargetViolation ? { writeTargetViolation } : {}),
+					...(deps.principal === "worker" && deps.git !== undefined ? { gitContext: deps.git } : {}),
 				});
 				// A body that delegated to a nested invocation the registry refused
 				// (the gateway calling a denied capability) hands the refusal back
@@ -794,6 +805,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				? { authorization: { actionClass: grant.actionClass, issuer: grant.issuer ?? "operator" } }
 				: {}),
 			normalize: (decision) => applyRegisteredToolClassification(decision, spec),
+			...(deps.git !== undefined ? { git: deps.git } : {}),
 			autonomyExtra: {
 				...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
 				...(planScale ? { dispatchPlanScale: true } : {}),

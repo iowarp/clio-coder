@@ -91,7 +91,8 @@ const SAFE_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const OWNER_FILE_SUFFIX = ".task-owner.json";
 const TASK_WORKTREE_KIND = "clio-coder-task-worktree";
 const LEGACY_TASK_WORKTREE_KIND = "clio-task-worktree";
-const COMMIT_IDENTITY = "clio-coder-task";
+/** Identity of commits the host makes on a task branch, and of worker commits when the repository names none. */
+export const COMMIT_IDENTITY = "clio-coder-task";
 
 function gitBytes(root: string, args: string[]): Buffer {
 	return execFileSync("git", ["-C", root, ...args], {
@@ -393,6 +394,36 @@ function checkTaskWorktreeHead(worktree: TaskWorktree): TaskHeadCheck {
 	return { ok: true, commit: headCommit };
 }
 
+/**
+ * Attest, at call time, that a Git command run in `cwd` acts on this run's own
+ * task worktree with HEAD on its task branch (Phase C). The cwd must sit
+ * inside the worktree and resolve to the worktree's own top level, so a nested
+ * repository or a `.git` file the worker planted in a subdirectory cannot
+ * redirect a commit elsewhere. Never throws: any failure is a refusal.
+ */
+export function attestTaskWorktreeCwd(
+	worktree: TaskWorktree,
+	cwd: string,
+): { ok: true } | { ok: false; detail: string } {
+	try {
+		const top = canonicalOrResolved(worktree.path);
+		const at = canonicalOrResolved(cwd);
+		const rel = relative(top, at);
+		if (rel.startsWith(`..${sep}`) || rel === ".." || isAbsolute(rel)) {
+			return { ok: false, detail: `cwd ${cwd} is outside task worktree ${worktree.path}` };
+		}
+		const cwdTop = canonicalOrResolved(git(at, ["rev-parse", "--show-toplevel"]));
+		if (cwdTop !== top) return { ok: false, detail: `cwd ${cwd} belongs to the working tree ${cwdTop}, not ${top}` };
+		const head = checkTaskWorktreeHead(worktree);
+		return head.ok ? { ok: true } : { ok: false, detail: head.detail };
+	} catch (error) {
+		return {
+			ok: false,
+			detail: `task worktree ${worktree.runId} could not be attested: ${error instanceof Error ? (error.message.split("\n")[0] ?? "git failed") : String(error)}`,
+		};
+	}
+}
+
 function headMovedReceipt(worktree: TaskWorktree, apply: TaskWorktreeApply, detail: string): TaskWorktreeReceipt {
 	return {
 		path: worktree.path,
@@ -420,10 +451,15 @@ export function snapshotTaskWorktree(worktree: TaskWorktree, apply: TaskWorktree
 	// A diff against a foreign HEAD would describe another branch's state (F5).
 	const head = checkTaskWorktreeHead(worktree);
 	if (!head.ok) return headMovedReceipt(worktree, apply, head.detail);
-	const tracked = gitBytes(worktree.path, ["diff", "--binary", "HEAD"]);
+	// Against the base, not HEAD: commits the worker made on its task branch
+	// (Phase C) are part of what it produced, alongside uncommitted edits.
+	const tracked = gitBytes(worktree.path, ["diff", "--binary", worktree.base]);
 	const untracked = nullDelimitedPaths(gitBytes(worktree.path, ["ls-files", "--others", "--exclude-standard", "-z"]));
 	const changedPaths = [
-		...new Set([...nullDelimitedPaths(gitBytes(worktree.path, ["diff", "--name-only", "-z", "HEAD"])), ...untracked]),
+		...new Set([
+			...nullDelimitedPaths(gitBytes(worktree.path, ["diff", "--name-only", "-z", worktree.base])),
+			...untracked,
+		]),
 	].sort();
 	const hash = createHash("sha256").update("working-tree\0").update(tracked);
 	for (const name of untracked) {

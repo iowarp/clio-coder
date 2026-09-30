@@ -175,6 +175,13 @@ interface WorkerSpecFields {
 	 */
 	permit: WorkerPermit;
 	/**
+	 * The task worktree the host created and owns for this run. The worker
+	 * re-attests it on every typed or bash Git mutation; only there does the
+	 * permit's `git: worktree` allowance admit add and commit (Phase C). An
+	 * older worker that ignores it only asks more.
+	 */
+	taskWorktree?: WorkerTaskWorktree;
+	/**
 	 * Escalation bounds, honored only when onPermission="escalate". A parked
 	 * call that receives no operator decision within timeoutMs applies fallback.
 	 * Defaults: 120000 ms, "deny".
@@ -196,6 +203,17 @@ interface WorkerSpecFields {
 	 * execute). The worker applies it through the shared exec seams.
 	 */
 	sandbox?: WorkerSandboxSpec;
+}
+
+/** The host's task worktree identity, the same facts its ownership claim records. */
+export interface WorkerTaskWorktree {
+	root: string;
+	runId: string;
+	path: string;
+	parent?: string;
+	branch: string;
+	base: string;
+	ownerToken: string;
 }
 
 /** Current wire shape. Every document carries its concrete admitted budget. */
@@ -893,6 +911,14 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 		throw new Error("WorkerSpec.readOnly must be a boolean");
 	}
 	validateWorkerPermit(spec);
+	if (spec.taskWorktree !== undefined) {
+		const worktree = readRecord(spec.taskWorktree, "WorkerSpec.taskWorktree");
+		exactKeys(worktree, ["root", "runId", "path", "parent", "branch", "base", "ownerToken"], "WorkerSpec.taskWorktree");
+		for (const key of ["root", "runId", "path", "branch", "base", "ownerToken"] as const) {
+			readString(worktree[key], `WorkerSpec.taskWorktree.${key}`);
+		}
+		if (worktree.parent !== undefined) readString(worktree.parent, "WorkerSpec.taskWorktree.parent");
+	}
 	if (spec.ledger !== undefined) {
 		const ledger = readRecord(spec.ledger, "WorkerSpec.ledger");
 		readString(ledger.id, "WorkerSpec.ledger.id");

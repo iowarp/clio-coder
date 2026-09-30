@@ -1,4 +1,4 @@
-import { isAbsolute } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import type { PendingSkillToolPolicy, SkillToolSurfaceViolation } from "../../core/skill-activation.js";
 import { evaluateSkillToolSurface } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
@@ -10,6 +10,8 @@ import { autonomyAskRejection, DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "./aut
 import { autonomyCallInputs } from "./autonomy-inputs.js";
 import type { SafetyContract, SafetyDecision } from "./contract.js";
 import { CONFIRMED_POSTURE, MAIN_GRANT_POSTURE } from "./contract.js";
+import { classifyBashGit } from "./git-policy.js";
+import type { WorkerGitAllowance } from "./worker-permit.js";
 
 /**
  * The one admission evaluator (Codex review, "One shared admission
@@ -22,7 +24,7 @@ import { CONFIRMED_POSTURE, MAIN_GRANT_POSTURE } from "./contract.js";
  *   1. the safety net over every effect: any hard block wins;
  *   2. hard permit limits: read-only, tool scope, skill surface, git_destructive;
  *   3. confirmation obligations the net or the tool raises;
- *   4. autonomy (main) or the worker's standing allowance;
+ *   4. autonomy (main) or the worker's standing allowance, Git included;
  *   5. a matching authorization, which clears only what it is allowed to clear.
  */
 
@@ -90,6 +92,43 @@ export interface AdmissionInput {
 	normalize?: (decision: SafetyDecision) => SafetyDecision;
 	/** Autonomy inputs a tool declares for itself: ask_user exposure, plan-scale dispatch. */
 	autonomyExtra?: { exposure?: AutonomyExposure; dispatchPlanScale?: boolean };
+	/**
+	 * The worker's Git context (Phase C). Read for the worker principal only;
+	 * absent means the permit's allowance is `inspect` and no task worktree is
+	 * attested, so every Git mutation asks.
+	 */
+	git?: AdmissionGitContext;
+}
+
+/** Result of re-attesting a task worktree for one call. */
+export type TaskWorktreeAttestation = { ok: true } | { ok: false; detail: string };
+
+/**
+ * What the worker's standing Git allowance needs to know at call time. The
+ * callbacks read the repository, so admission stays pure apart from them and
+ * the policy engine's audit.
+ */
+export interface AdmissionGitContext {
+	/** The permit's standing Git allowance. */
+	allowance: WorkerGitAllowance;
+	/**
+	 * True when the permit's tools already execute arbitrary code (bash,
+	 * run_script), so a repository hook adds no authority the worker lacks.
+	 */
+	executePermitted: boolean;
+	/** Absolute run cwd for a command effect that names none. */
+	cwd: string;
+	/**
+	 * Whether the hooks directory a Git mutation in `cwd` would run resolves
+	 * inside that working tree, where the worker can author it. Unresolvable
+	 * counts as inside.
+	 */
+	hooksInsideWorkingTree(cwd: string): boolean;
+	/** The task worktree this run owns; absent when the run works in a shared checkout. */
+	taskWorktree?: {
+		/** Re-checks ownership, the common Git directory and HEAD on the task branch for a command run in `cwd`. */
+		attest(cwd: string): TaskWorktreeAttestation;
+	};
 }
 
 export type AdmissionDenyCode =
@@ -102,7 +141,7 @@ export type AdmissionDenyCode =
 	| "skill_surface"
 	| "git_destructive";
 
-export type AdmissionAskSource = "safety-net" | "tool-confirmation" | "autonomy";
+export type AdmissionAskSource = "safety-net" | "tool-confirmation" | "autonomy" | "git-policy";
 
 export type AdmissionDisposition =
 	| {
@@ -307,6 +346,42 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 	for (let index = 0; index < effectDecisions.length; index += 1) {
 		const effectDecision = effectDecisions[index] as SafetyDecision;
 		const effect = input.effects[index] as ClassifierCall;
+		// A worker's Git is decided by its standing Git allowance, not by command
+		// recognition: a project policy that recognizes `git commit` does not
+		// give a worker the right to commit.
+		const git = principal === "worker" ? workerGitObligation(effect, input) : null;
+		if (git?.kind === "deny") return deny("git_destructive", git.reason, effectDecision);
+		if (git?.kind === "admit") continue;
+		if (git?.kind === "ask") {
+			if (git.authority === "main" && mainAuthorized) continue;
+			const ask: SafetyDecision = {
+				kind: "ask",
+				classification: effectDecision.classification,
+				rejection: {
+					short: `${call.tool} needs approval: ${git.reason}`,
+					detail: `${git.reason}. A worker's Git mutations are admitted by its permit's Git allowance: git worktree admits git add of literal paths and git commit -m on its own attested task branch; every other Git mutation needs approval.`,
+					hints: [
+						"Approving resumes only this call.",
+						"In an owned task worktree under git worktree, stage and commit with the git tool: op add with paths, op commit with message.",
+					],
+				},
+				...(effectDecision.policy !== undefined ? { policy: effectDecision.policy } : {}),
+			};
+			return {
+				kind: "ask",
+				// An ordinary Git ask is the worker's standing allowance, the same
+				// step and authority as any other autonomy ask; only the hooks rail
+				// the operator must decide is reported as its own source.
+				source: git.authority === "operator" ? "git-policy" : "autonomy",
+				approvalAuthority: git.authority,
+				reason: ask.rejection.short,
+				decision: ask,
+				netDecision: effectDecision,
+				level,
+				exposure: git.outward ? "outward" : "local",
+				readOutsideWorkspace: false,
+			};
+		}
 		const inputs = autonomyCallInputs(effect, effectDecision, input.autonomyExtra ?? {});
 		const disposition = mapAutonomy(level, effectDecision.classification.actionClass, inputs.options);
 		if (disposition === "allow") continue;
@@ -337,4 +412,55 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 		};
 	}
 	return { kind: "allow", decision: primary, authorized: mainAuthorized };
+}
+
+type WorkerGitObligation =
+	| { kind: "admit" }
+	| { kind: "deny"; reason: string }
+	| { kind: "ask"; authority: ApprovalAuthority; reason: string; outward: boolean };
+
+/**
+ * The worker's standing Git allowance for one command effect (Codex review,
+ * "Task-worktree Git contract"). Null when the effect runs no Git or only
+ * inspects, so ordinary recognition decides it. Every Git mutation asks main
+ * unless it is a task mutation (add of literal paths, commit -m) under `git:
+ * worktree` in the run's own task worktree, re-attested now. A mutation that
+ * would run hooks the worker can author, by a worker with no execute
+ * capability, asks the operator (operator decision Q5).
+ */
+function workerGitObligation(effect: ClassifierCall, input: AdmissionInput): WorkerGitObligation | null {
+	if (effect.tool !== ToolNames.Bash) return null;
+	const command = effect.args?.command;
+	if (typeof command !== "string") return null;
+	const verdict = classifyBashGit(command);
+	if (verdict === null || verdict.class === "inspect") return null;
+	if (verdict.class === "destructive") return { kind: "deny", reason: `${verdict.reason} is hard-blocked` };
+	const context = input.git;
+	const outward = verdict.class === "outward";
+	const ask = (reason: string, authority: ApprovalAuthority = "main"): WorkerGitObligation => ({
+		kind: "ask",
+		authority,
+		reason,
+		outward,
+	});
+	const base = input.cwd ?? context?.cwd;
+	const rawCwd = effect.args?.cwd;
+	const cwd =
+		typeof rawCwd === "string" && rawCwd.length > 0 ? (base !== undefined ? resolve(base, rawCwd) : rawCwd) : base;
+	const subcommand = verdict.subcommand ?? "";
+	if (context !== undefined && !context.executePermitted && (cwd === undefined || context.hooksInsideWorkingTree(cwd))) {
+		return ask(
+			`git ${subcommand} would run repository hooks from inside the working tree, which this worker can author, and its permit has no execute capability`,
+			"operator",
+		);
+	}
+	if (verdict.class !== "task-mutation") return ask(verdict.reason);
+	if (context?.allowance !== "worktree")
+		return ask(`git ${subcommand} needs git worktree; this permit grants git inspect`);
+	if (context.taskWorktree === undefined || cwd === undefined) {
+		return ask(`git ${subcommand} is allowed only in this run's own task worktree, and this run has none`);
+	}
+	const attested = context.taskWorktree.attest(cwd);
+	if (!attested.ok) return ask(attested.detail);
+	return { kind: "admit" };
 }

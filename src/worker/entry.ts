@@ -21,6 +21,7 @@ import {
 	withManagedGitCommitAttributionEnvironment,
 } from "../core/git-commit-attribution.js";
 import { configureWorkerProcessSandbox } from "../core/sandbox/worker-process.js";
+import { ToolNames } from "../core/tool-names.js";
 
 process.env.AI_AGENT = AI_AGENT_NAME;
 
@@ -214,6 +215,12 @@ async function main(): Promise<number> {
 		...(spec.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: spec.trustProjectCompatRoots } : {}),
 		...(spec.onPermission !== undefined ? { onPermission: spec.onPermission } : {}),
 		permitAllowance: { ...spec.permit.allowance },
+		taskGit: {
+			allowance: spec.permit.allowance.git,
+			// A permit that already runs arbitrary code gains nothing from a repository hook (Q5).
+			executePermitted: spec.permit.ceiling.tools.some((tool) => tool === ToolNames.Bash || tool === ToolNames.RunScript),
+			...(spec.taskWorktree !== undefined ? { taskWorktree: { ...spec.taskWorktree } } : {}),
+		},
 		...(spec.escalation !== undefined ? { escalation: spec.escalation } : {}),
 		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 		...(spec.readOnly !== undefined ? { readOnly: spec.readOnly } : {}),
