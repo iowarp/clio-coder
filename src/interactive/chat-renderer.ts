@@ -537,6 +537,24 @@ function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number): Agent
 	return message as unknown as AgentMessage;
 }
 
+/**
+ * The transcript form of a replayed assistant row. A reply held on its closing
+ * question persisted what the transcript showed as `displayText` beside the
+ * full reply the model keeps; rows without it replay as written.
+ */
+function withReplayedDisplayText(message: AgentMessage, entry: MessageEntry): AgentMessage {
+	const displayText = payloadObject(entry.payload)?.displayText;
+	if (typeof displayText !== "string") return message;
+	const content = (message as { content?: unknown }).content;
+	const kept = Array.isArray(content)
+		? content.filter((block) => !(block && typeof block === "object" && (block as { type?: unknown }).type === "text"))
+		: [];
+	return {
+		...message,
+		content: displayText.length > 0 ? [...kept, { type: "text", text: displayText }] : kept,
+	} as AgentMessage;
+}
+
 function toolCallIdsFromMessage(message: AgentMessage): string[] {
 	const content = (message as { content?: unknown }).content;
 	if (!Array.isArray(content)) return [];
@@ -1450,12 +1468,20 @@ function replayEntries(
 		settledRuns,
 	);
 	const placedAssignments = new Set<string>();
+	// A run's settle waits for the next operator row or the end of the replay.
+	let pendingSettle: (() => void) | null = null;
+	const settleReplayedRun = (): void => {
+		const settle = pendingSettle;
+		pendingSettle = null;
+		settle?.();
+	};
 	for (const entry of selected) {
 		// What this entry appends carries the time the ledger recorded it.
 		chatPanel.replayAt?.(timestampMillis(entry.timestamp));
 		switch (entry.kind) {
 			case "message": {
 				if (entry.role === "user") {
+					settleReplayedRun();
 					runAssistantMessages = [];
 					runColdReasons = [];
 					const startedAt = Date.parse(entry.timestamp);
@@ -1469,7 +1495,10 @@ function replayEntries(
 					const failure = messageFailure(entry);
 					const richMessage = richMessageFromEntry(entry, Number.POSITIVE_INFINITY);
 					if (richMessage || text.length > 0 || failure) {
-						const message = richMessage ?? makeTextMessage("assistant", text, entry.timestamp);
+						const message = withReplayedDisplayText(
+							richMessage ?? makeTextMessage("assistant", text, entry.timestamp),
+							entry,
+						);
 						if (failure) {
 							(message as { stopReason?: string; errorMessage?: string }).stopReason = failure.stopReason;
 							(message as { stopReason?: string; errorMessage?: string }).errorMessage = failure.errorMessage;
@@ -1489,6 +1518,10 @@ function replayEntries(
 						for (const reason of persistedColdReasons(entry)) {
 							if (!runColdReasons.includes(reason)) runColdReasons.push(reason);
 						}
+						// Another assistant row before the next operator row means the run
+						// went on (a held question's interview, a middleware continuation),
+						// and live it settled once, at its end.
+						pendingSettle = null;
 						if (!continues) {
 							const endedAt = Date.parse(entry.timestamp);
 							const elapsedMs =
@@ -1499,7 +1532,8 @@ function replayEntries(
 								...(elapsedMs === undefined ? {} : { elapsedMs }),
 								...(runColdReasons.length > 0 ? { coldReasons: [...runColdReasons] } : {}),
 							};
-							chatPanel.applyEvent({ type: "agent_end", messages: runAssistantMessages, replayed } as ChatLoopEvent);
+							const messages = runAssistantMessages;
+							pendingSettle = () => chatPanel.applyEvent({ type: "agent_end", messages, replayed } as ChatLoopEvent);
 						}
 					}
 					break;
@@ -1579,6 +1613,8 @@ function replayEntries(
 			}
 			case "custom":
 				if (entry.customType === "speculativeDispatch") {
+					// Written after its turn settled, and it annotates that receipt.
+					settleReplayedRun();
 					const counts = speculativeDispatchCounts(entry.data);
 					if (counts !== null) chatPanel.applyEvent({ type: "speculative_dispatch", counts });
 					break;
@@ -1652,6 +1688,7 @@ function replayEntries(
 				break;
 		}
 	}
+	settleReplayedRun();
 	// The transcript shows the note as what it is: assistant-authored handoff
 	// text, labelled, never rendered as an operator turn.
 	//

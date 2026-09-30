@@ -85,10 +85,16 @@ export interface TurnPersistence {
 	traceEventForRun(runId: string, input: TurnTraceEventInput): void;
 	/** True when this exact assistant message object was already persisted. */
 	wasPersisted(message: unknown): boolean;
+	/**
+	 * `displayText`, when given, is what the transcript showed of a reply held
+	 * on its closing question. The payload keeps the full reply for the model
+	 * and this beside it for replay.
+	 */
 	appendAssistantTurn(
 		message: AgentMessage,
 		timing?: AssistantCallTiming | null,
 		deliveryId?: string,
+		displayText?: string,
 	): string | undefined;
 	appendQueuedUserTurn(message: AgentMessage): void;
 	appendToolCallTurn(event: Extract<AgentEvent, { type: "tool_execution_start" }>): void;
@@ -293,6 +299,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		message: AgentMessage,
 		timing?: AssistantCallTiming | null,
 		deliveryId?: string,
+		displayText?: string,
 	): string | undefined => {
 		if (message?.role !== "assistant") return;
 		if (persistedAssistantMessages.has(message)) return;
@@ -304,6 +311,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
 		if (timing) payload.timing = timing;
+		if (displayText !== undefined) payload.displayText = displayText;
 		if (deliveryId) {
 			payload.continuityDeliveryId = deliveryId;
 			payload.stopReason = message.stopReason;

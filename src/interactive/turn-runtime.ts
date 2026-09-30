@@ -977,6 +977,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 			}
 			let publicEvent = enrichedEvent;
+			// The transcript text of a reply held on its closing question; the ledger
+			// keeps it beside the full reply so a resumed transcript matches the live one.
+			let heldDisplayText: string | null = null;
 			if (enrichedEvent.type === "message_end" && enrichedEvent.message?.role === "assistant") {
 				const gatewayRouting = gatewayRoutingObservationFromRecord(
 					enrichedEvent.message as unknown as Record<string, unknown>,
@@ -1021,6 +1024,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					lastActivityAt = performance.now();
 				}
 				if (visibleText !== null && visibleText !== fullText) {
+					heldDisplayText = visibleText;
 					const message = publicEvent.message;
 					const kept = message.content.filter((block) => block?.type !== "text");
 					publicEvent = {
@@ -1219,7 +1223,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							}
 						: null;
 				const correlationId = event.type === "message_end" ? handle.requestCorrelationId(event.message) : undefined;
-				const persistedId = persistence.appendAssistantTurn(enrichedEvent.message, timing, correlationId);
+				const persistedId = persistence.appendAssistantTurn(
+					enrichedEvent.message,
+					timing,
+					correlationId,
+					heldDisplayText ?? undefined,
+				);
 				await deps.continuity?.response(persistedId, correlationId);
 				if (isAssistant) apiCallStartedAt = null;
 				const usage = (enrichedEvent.message as { usage?: Usage }).usage;
