@@ -34,6 +34,26 @@ export interface DoctorOptions {
 	fix?: boolean;
 }
 
+/** Settings and credentials are owner read/write files; any group or other bit, or an owner execute bit, is wider. */
+const OWNER_ONLY_EXTRA_BITS = 0o177;
+
+function isWiderThanOwnerOnly(mode: number): boolean {
+	return (mode & OWNER_ONLY_EXTRA_BITS) !== 0;
+}
+
+/**
+ * Tighten `path` to 0600 when it is wider, leaving a stricter mode such as
+ * 0400 alone. Returns the mode it replaced, or null when nothing changed.
+ * POSIX modes carry no meaning on Windows, so the check does not run there.
+ */
+function tightenToOwnerOnly(path: string): number | null {
+	if (process.platform === "win32" || !existsSync(path)) return null;
+	const mode = statSync(path).mode & 0o777;
+	if (!isWiderThanOwnerOnly(mode)) return null;
+	chmodSync(path, 0o600);
+	return mode;
+}
+
 const FOREIGN_SKILL_SOURCES = new Set<SkillSource>(["agents", "claude", "codex", "copilot", "opencode"]);
 
 function describeNodeType(stats: Stats): string {
@@ -310,6 +330,7 @@ export function isUninitializedHome(dirs: ReturnType<typeof resolveClioDirs> = r
 export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	let repairFailure: string | null = null;
 	let settingsRepair: SettingsRepairResult | null = null;
+	let settingsTightenedFrom: number | null = null;
 	if (options.fix) {
 		// A repair that throws used to take the whole report with it, so the one
 		// command that explains the damage printed nothing. Record it and carry on;
@@ -317,6 +338,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 		try {
 			initializeClioHome();
 			settingsRepair = repairSettingsCoercions();
+			settingsTightenedFrom = tightenToOwnerOnly(join(resolveClioDirs().config, "settings.yaml"));
 			const credentialsPath = join(resolveClioDirs().config, "credentials.yaml");
 			if (existsSync(credentialsPath)) {
 				chmodSync(credentialsPath, 0o600);
@@ -399,6 +421,21 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 		} else {
 			findings.push({ ok: false, name: "settings.yaml", detail: formatSettingsIssues(validation.issues) });
 		}
+		const settingsMode = process.platform === "win32" ? null : statSync(settings).mode & 0o777;
+		if (settingsTightenedFrom !== null) {
+			findings.push({
+				ok: true,
+				name: "settings.yaml mode",
+				detail: `tightened ${settingsTightenedFrom.toString(8)} -> 600`,
+			});
+		} else if (settingsMode !== null && isWiderThanOwnerOnly(settingsMode)) {
+			findings.push({
+				ok: true,
+				level: "warn",
+				name: "settings.yaml mode",
+				detail: `${settingsMode.toString(8)} lets group or other users read it (run \`clio-coder doctor --fix\` to set 600)`,
+			});
+		}
 		if (validation.coercions.length > 0) {
 			// Loading works today, so this is a warning and not a failure. The file
 			// keeps its booleans until `--fix` rewrites exactly those values.
@@ -456,7 +493,12 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 			findings.push({
 				ok: mode === 0o600 && damage === null,
 				name: "credentials",
-				detail: damage === null ? mode.toString(8) : `${mode.toString(8)}; ${damage}`,
+				detail:
+					damage === null
+						? isWiderThanOwnerOnly(mode)
+							? `${mode.toString(8)} (run \`clio-coder doctor --fix\` to set 600)`
+							: mode.toString(8)
+						: `${mode.toString(8)}; ${damage}`,
 			});
 		} catch (err) {
 			// `String(err)` put a raw `Error: EACCES...` in the row and named no
