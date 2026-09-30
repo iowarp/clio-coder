@@ -117,8 +117,10 @@ export function createWorkerContextGuard(archive: (ref: string, message: AgentMe
 		const assistantIndices = input.messages.flatMap((message, index) => (message.role === "assistant" ? [index] : []));
 		const cutoff = assistantIndices[Math.max(0, assistantIndices.length - 2)] ?? 0;
 		const toolCalls = new Map(input.messages.flatMap(messageToolCalls).map((call) => [call.id, call]));
-		const evictableObservation = (message: AgentMessage | undefined): message is AgentMessage & { role: "toolResult" } => {
-			if (!message || message.role !== "toolResult" || message.isError || evicted.has(key(message))) return false;
+		const evictableObservation = (
+			message: AgentMessage | undefined,
+		): message is AgentMessage & { role: "toolResult" } => {
+			if (message?.role !== "toolResult" || message.isError || evicted.has(key(message))) return false;
 			const call = toolCalls.get(message.toolCallId);
 			// A gateway call carries its capability's read semantics: a page
 			// fetched through the gateway is as evictable as a direct fetch.

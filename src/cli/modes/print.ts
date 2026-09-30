@@ -396,7 +396,8 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 		}
 	}
 	if (outcome === "ok" && actionClass === MUTATING_ACTION_CLASS && !terminating) stats.mutatingSucceeded += 1;
-	if (outcome === "ok" && tool === ToolNames.Dispatch) stats.mergedTaskWorktrees += mergedTaskWorktreeCount(event.result);
+	if (outcome === "ok" && tool === ToolNames.Dispatch)
+		stats.mergedTaskWorktrees += mergedTaskWorktreeCount(event.result);
 	if (tool === ToolNames.Context) {
 		const rawTurnId = (event as { turnId?: unknown }).turnId;
 		const turnId = typeof rawTurnId === "string" ? rawTurnId : undefined;
