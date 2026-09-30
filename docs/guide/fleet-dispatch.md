@@ -309,7 +309,7 @@ explicit cwd outside the parent checkout with a named reason.
 | Value | Location |
 | --- | --- |
 | `disk` (default) | The location above, under the project root. |
-| `tmpfs` | A per-user, per-checkout directory, mode 0700, under `$XDG_RUNTIME_DIR` when that is a tmpfs mount and under `/dev/shm` otherwise. |
+| `tmpfs` | A per-user, per-checkout directory, mode 0700, under `/dev/shm` when that is a tmpfs mount and under `$XDG_RUNTIME_DIR` otherwise. `/dev/shm` comes first because the worker sandbox masks the session runtime directory. |
 | `auto` | The `tmpfs` behavior when such a mount exists, quietly falling back to disk when none does. |
 | An absolute path | That directory, provided Clio owns it outright. A directory on a shared mount that Clio does not own outright is refused. |
 
