@@ -222,6 +222,11 @@ async function main(): Promise<number> {
 			...(spec.taskWorktree !== undefined ? { taskWorktree: { ...spec.taskWorktree } } : {}),
 		},
 		...(spec.escalation !== undefined ? { escalation: spec.escalation } : {}),
+		// A main-routed ask's effect descriptor crosses on the control lane only,
+		// which is never journaled or displayed (Phase D).
+		...(spec.escalation?.grant !== undefined
+			? { emitGrantRequest: (request) => emitControlFrame({ kind: "grant_request", request }) }
+			: {}),
 		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 		...(spec.readOnly !== undefined ? { readOnly: spec.readOnly } : {}),
 		...(spec.writeRoots !== undefined ? { writeRoots: [...spec.writeRoots] } : {}),
@@ -270,8 +275,8 @@ async function main(): Promise<number> {
 	// Permission-decision lines resolve a parked escalation. Unknown or
 	// duplicate requestIds return false and are dropped without crashing the
 	// worker; runtimes without an escalation loop simply have no handler.
-	demux.onPermissionDecision(({ requestId, decision }) => {
-		const resolved = handle.resolvePermission?.(requestId, decision) ?? false;
+	demux.onPermissionDecision(({ requestId, decision, binding }) => {
+		const resolved = handle.resolvePermission?.(requestId, decision, binding) ?? false;
 		if (!resolved) {
 			process.stderr.write(`[worker] dropped permission_decision for unknown request '${requestId}'\n`);
 		}

@@ -26,7 +26,7 @@ export interface WorkerStdinDemux {
 	 * Decisions that arrive before registration are buffered in order and
 	 * flushed. Single handler; a second registration replaces the first.
 	 */
-	onPermissionDecision(handler: (decision: { requestId: string; decision: "approve" | "deny" }) => void): void;
+	onPermissionDecision(handler: (decision: WorkerPermissionDecision) => void): void;
 	/**
 	 * Register the handler for agent-ledger delta lines
 	 * (`{"type":"ledger_delta","entries":[...]}`). The orchestrator replays the
@@ -44,6 +44,47 @@ export interface WorkerStdinDemux {
 	 * close case stays a readSpec() rejection, not a channel-close event.
 	 */
 	onChannelClose(handler: () => void): void;
+}
+
+/**
+ * What a live grant decision names (Phase D). The worker checks every field
+ * against its single parked call before it consumes the decision.
+ */
+export interface WorkerDecisionBinding {
+	attemptToken: string;
+	attempt: number;
+	argDigest: string;
+	issuer: "main" | "operator";
+	/** The host's run id for audit; the worker cannot check it. */
+	runId?: string;
+	/** Host broker request id, for the worker's own resolution events. */
+	grantId?: string;
+	/** Why the host decided, bounded; a denial quotes it to the worker model. */
+	reason?: string;
+}
+
+export interface WorkerPermissionDecision {
+	requestId: string;
+	decision: "approve" | "deny";
+	binding?: WorkerDecisionBinding;
+}
+
+function parseDecisionBinding(value: unknown): WorkerDecisionBinding | null {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+	const record = value as Record<string, unknown>;
+	if (typeof record.attemptToken !== "string" || record.attemptToken.length === 0) return null;
+	if (!Number.isSafeInteger(record.attempt)) return null;
+	if (typeof record.argDigest !== "string" || !/^[0-9a-f]{64}$/.test(record.argDigest)) return null;
+	if (record.issuer !== "main" && record.issuer !== "operator") return null;
+	return {
+		attemptToken: record.attemptToken,
+		attempt: Number(record.attempt),
+		argDigest: record.argDigest,
+		issuer: record.issuer,
+		...(typeof record.runId === "string" ? { runId: record.runId } : {}),
+		...(typeof record.grantId === "string" ? { grantId: record.grantId } : {}),
+		...(typeof record.reason === "string" && record.reason.length > 0 ? { reason: record.reason.slice(0, 300) } : {}),
+	};
 }
 
 export interface WorkerSteerMessage {
@@ -96,8 +137,8 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 	let closed = false;
 	let steerHandler: ((steer: WorkerSteerMessage) => void) | null = null;
 	const pendingSteers: WorkerSteerMessage[] = [];
-	let permissionHandler: ((decision: { requestId: string; decision: "approve" | "deny" }) => void) | null = null;
-	const pendingPermissionDecisions: Array<{ requestId: string; decision: "approve" | "deny" }> = [];
+	let permissionHandler: ((decision: WorkerPermissionDecision) => void) | null = null;
+	const pendingPermissionDecisions: WorkerPermissionDecision[] = [];
 	let ledgerDeltaHandler: ((entries: ReadonlyArray<AgentLedgerEntry>) => void) | null = null;
 	const pendingLedgerDeltas: Array<ReadonlyArray<AgentLedgerEntry>> = [];
 	let droppedLines = 0;
@@ -129,12 +170,12 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 		pendingSteers.push(steer);
 	}
 
-	function deliverPermissionDecision(requestId: string, decision: "approve" | "deny"): void {
+	function deliverPermissionDecision(entry: WorkerPermissionDecision): void {
 		if (permissionHandler) {
-			permissionHandler({ requestId, decision });
+			permissionHandler(entry);
 			return;
 		}
-		pendingPermissionDecisions.push({ requestId, decision });
+		pendingPermissionDecisions.push(entry);
 	}
 
 	function deliverLedgerDelta(entries: ReadonlyArray<AgentLedgerEntry>): void {
@@ -176,10 +217,14 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 			(value as { requestId: string }).requestId.length > 0 &&
 			((value as { decision?: unknown }).decision === "approve" || (value as { decision?: unknown }).decision === "deny")
 		) {
-			deliverPermissionDecision(
-				(value as { requestId: string }).requestId,
-				(value as { decision: "approve" | "deny" }).decision,
-			);
+			// A malformed binding is delivered as no binding, which a grant-bound
+			// park treats as a mismatch and denies.
+			const binding = parseDecisionBinding((value as { binding?: unknown }).binding);
+			deliverPermissionDecision({
+				requestId: (value as { requestId: string }).requestId,
+				decision: (value as { decision: "approve" | "deny" }).decision,
+				...(binding !== null ? { binding } : {}),
+			});
 			return;
 		}
 		if (typeof value === "object" && value !== null && (value as { type?: unknown }).type === "ledger_delta") {
@@ -291,7 +336,7 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 				if (steer !== undefined) handler(steer);
 			}
 		},
-		onPermissionDecision(handler: (decision: { requestId: string; decision: "approve" | "deny" }) => void): void {
+		onPermissionDecision(handler: (decision: WorkerPermissionDecision) => void): void {
 			permissionHandler = handler;
 			while (pendingPermissionDecisions.length > 0) {
 				const entry = pendingPermissionDecisions.shift();

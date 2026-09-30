@@ -321,12 +321,40 @@ export interface WorkerModelLoad {
 export const WORKER_MODEL_LOAD_ID_MAX_CHARS = 256;
 export const WORKER_MODEL_LOAD_ALIAS_MAX = 8;
 
+/**
+ * One worker ask routed to the main agent (Phase D). It rides the control
+ * lane, which is never journaled or shown, because it carries the effect
+ * descriptor the host evaluates the grant against. Everything a display may
+ * show also rides the bulk `clio_coder_permission_escalated` event, bounded
+ * and sanitized.
+ */
+export interface WorkerGrantRequestFrame {
+	/** The worker registry's id for the parked call. */
+	requestId: string;
+	attemptToken: string;
+	attempt: number;
+	tool: string;
+	actionClass: string;
+	authority: "main" | "operator";
+	/** sha256 over the canonical effect descriptor. */
+	argDigest: string;
+	/** Null when the descriptor did not fit the frame; a main grant then refuses. */
+	effect: { tool: string; args: Record<string, unknown> } | null;
+	summary: string;
+	target?: string;
+	reasons: ReadonlyArray<string>;
+	axis?: string;
+	timeoutMs: number;
+	toolCallId?: string;
+}
+
 export type WorkerControlFrame =
 	| { kind: "announce"; attestation: WorkerAttestation }
 	| { kind: "heartbeat" }
 	| { kind: "cancel_ack"; at: number }
 	| { kind: "ledger_post"; body: AgentLedgerBody }
-	| { kind: "model_loaded"; load: WorkerModelLoad };
+	| { kind: "model_loaded"; load: WorkerModelLoad }
+	| { kind: "grant_request"; request: WorkerGrantRequestFrame };
 
 function sha256Hex(input: string): string {
 	return createHash("sha256").update(input, "utf8").digest("hex");
@@ -535,6 +563,76 @@ function parseModelLoad(value: unknown): FrameParseResult<WorkerModelLoad> {
 	return { ok: true, value: { targetId: record.targetId, modelId: record.modelId, aliasIds: [...aliases] } };
 }
 
+const GRANT_TEXT_MAX_CHARS = 1024;
+
+function boundedText(value: unknown, max = GRANT_TEXT_MAX_CHARS): string | null {
+	return typeof value === "string" && value.length > 0 && value.length <= max ? value : null;
+}
+
+function parseGrantRequest(value: unknown): FrameParseResult<WorkerGrantRequestFrame> {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return { ok: false, reason: "grant_request request is not an object" };
+	}
+	const record = value as Record<string, unknown>;
+	const requestId = boundedText(record.requestId, 128);
+	const attemptToken = boundedText(record.attemptToken, 128);
+	const tool = boundedText(record.tool, 128);
+	const actionClass = boundedText(record.actionClass, 64);
+	const summary = boundedText(record.summary);
+	if (requestId === null || attemptToken === null || tool === null || actionClass === null || summary === null) {
+		return { ok: false, reason: "grant_request is missing an identity field" };
+	}
+	if (record.authority !== "main" && record.authority !== "operator") {
+		return { ok: false, reason: "grant_request authority must be main or operator" };
+	}
+	if (typeof record.argDigest !== "string" || !HEX_64.test(record.argDigest)) {
+		return { ok: false, reason: "grant_request argDigest must be a sha256 hex digest" };
+	}
+	if (!Number.isSafeInteger(record.attempt) || Number(record.attempt) < 0) {
+		return { ok: false, reason: "grant_request attempt must be a non-negative integer" };
+	}
+	const timeoutMs = readFiniteNumber(record, "timeoutMs");
+	if (timeoutMs === null || timeoutMs <= 0) return { ok: false, reason: "grant_request timeoutMs must be positive" };
+	let effect: WorkerGrantRequestFrame["effect"] = null;
+	if (record.effect !== null) {
+		const raw = record.effect;
+		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+			return { ok: false, reason: "grant_request effect must be an object or null" };
+		}
+		const effectTool = boundedText((raw as Record<string, unknown>).tool, 128);
+		const args = (raw as Record<string, unknown>).args;
+		if (effectTool === null || typeof args !== "object" || args === null || Array.isArray(args)) {
+			return { ok: false, reason: "grant_request effect needs a tool and an args object" };
+		}
+		effect = { tool: effectTool, args: args as Record<string, unknown> };
+	}
+	const reasons = Array.isArray(record.reasons)
+		? record.reasons.filter((entry): entry is string => typeof entry === "string").slice(0, 8)
+		: [];
+	const target = boundedText(record.target);
+	const axis = boundedText(record.axis, 256);
+	const toolCallId = boundedText(record.toolCallId, 256);
+	return {
+		ok: true,
+		value: {
+			requestId,
+			attemptToken,
+			attempt: Number(record.attempt),
+			tool,
+			actionClass,
+			authority: record.authority,
+			argDigest: record.argDigest,
+			effect,
+			summary,
+			...(target !== null ? { target } : {}),
+			reasons: reasons.map((reason) => reason.slice(0, GRANT_TEXT_MAX_CHARS)),
+			...(axis !== null ? { axis } : {}),
+			timeoutMs,
+			...(toolCallId !== null ? { toolCallId } : {}),
+		},
+	};
+}
+
 /**
  * Parse one marked stderr line into a control frame. The caller has already
  * established that the line carries the marker.
@@ -569,6 +667,11 @@ export function parseControlFrame(line: string): FrameParseResult<WorkerControlF
 			if (!load.ok) return load;
 			return { ok: true, value: { kind: "model_loaded", load: load.value } };
 		}
+		case "grant_request": {
+			const request = parseGrantRequest(record.request);
+			if (!request.ok) return request;
+			return { ok: true, value: { kind: "grant_request", request: request.value } };
+		}
 		default:
 			return { ok: false, reason: `unknown control frame kind ${String(record.kind)}` };
 	}
@@ -591,6 +694,7 @@ const RECEIPT_BEARING_BULK_TYPES = new Set([
 	"clio_coder_run_outcome",
 	"clio_coder_permission_escalated",
 	"clio_coder_permission_resolved",
+	"clio_coder_permission_grant_execution",
 	"clio_coder_steer_received",
 	"clio_coder_tool_start",
 	"clio_coder_tool_finish",

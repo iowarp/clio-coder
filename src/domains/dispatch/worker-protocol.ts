@@ -32,6 +32,7 @@ export type {
 	AgentLedgerPort,
 	WorkerAttestation,
 	WorkerControlFrame,
+	WorkerGrantRequestFrame,
 	WorkerModelLoad,
 	WorkerResourceFacts,
 	WorkerResourceValue,

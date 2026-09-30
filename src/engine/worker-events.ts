@@ -30,14 +30,34 @@ export interface ClioPermissionResolvedEvent {
 		/**
 		 * Resolution provenance. Policy deny/fail uses "policy"; escalation
 		 * resolutions distinguish operator decisions from timeout fallbacks.
-		 * "remembered" answers an identical call with the operator's earlier
-		 * decision from this run, without a new escalation.
+		 * "remembered" answers an identical call with an earlier denial from
+		 * this run, without a new escalation; approvals are never remembered.
+		 * "main" is a main-agent grant decision (Phase D); "binding" denies a
+		 * decision whose attempt, request or argument digest did not match.
 		 */
-		source?: "operator" | "timeout" | "policy" | "remembered";
+		source?: "operator" | "timeout" | "policy" | "remembered" | "main" | "binding";
 		/** Approval request id this resolution answers. */
 		requestId?: string;
 		/** Resolved outcome for an escalation; escalate path only. */
 		decision?: "approved" | "denied";
+		/** Who may discharge this ask; present on main-routed asks. */
+		authority?: "main" | "operator";
+	};
+}
+
+/**
+ * Execution of a call a live grant released (Phase D). The decision frame
+ * says who approved; this says whether the call ran. A worker that dies
+ * between `start` and `end` leaves the outcome unknown to the host.
+ */
+export interface ClioPermissionGrantExecutionEvent {
+	type: "clio_coder_permission_grant_execution";
+	payload: {
+		requestId: string;
+		tool: string;
+		phase: "start" | "end" | "not_executed";
+		outcome?: "ok" | "error" | "blocked";
+		detail?: string;
 	};
 }
 
@@ -69,6 +89,14 @@ export interface ClioPermissionEscalatedEvent {
 			policySource?: string;
 		};
 		timeoutMs: number;
+		/**
+		 * Who may discharge this ask. Present on main-routed asks: `main` for an
+		 * ordinary autonomy ask the main agent may grant, `operator` for a rail
+		 * only a person clears.
+		 */
+		authority?: "main" | "operator";
+		/** sha256 over the parked call's effect descriptor; a grant must name it. */
+		argDigest?: string;
 	};
 }
 
@@ -108,6 +136,7 @@ export type ClioWorkerEvent =
 	| ClioToolFinishEvent
 	| ClioPermissionResolvedEvent
 	| ClioPermissionEscalatedEvent
+	| ClioPermissionGrantExecutionEvent
 	| ClioSteerReceivedEvent
 	| ClioRunOutcomeEvent
 	| ClioHelperResultEvent;

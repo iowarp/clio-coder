@@ -50,6 +50,7 @@ import {
 	WORKER_STDIN_QUEUE_MAX_BYTES,
 	type WorkerAttestation,
 	WorkerChannelFailure,
+	type WorkerGrantRequestFrame,
 	type WorkerModelLoad,
 } from "./worker-protocol.js";
 
@@ -139,6 +140,12 @@ export interface WorkerProcessOptions {
 	 * report always belongs to an admitted identity.
 	 */
 	onModelLoaded?: (load: WorkerModelLoad) => void;
+	/**
+	 * One worker ask routed to the main agent's grant broker (Phase D).
+	 * Delivered only after the announce is accepted, so a request always
+	 * belongs to an admitted identity.
+	 */
+	onGrantRequest?: (request: WorkerGrantRequestFrame) => void;
 	/**
 	 * Identity the plan approved. Defaults to the identity of the spec actually
 	 * written to stdin, which is what every production caller wants; a caller
@@ -459,6 +466,14 @@ function attachWorkerChannel(
 				return;
 			}
 			opts?.onModelLoaded?.(frame.value.load);
+			return;
+		}
+		if (frame.value.kind === "grant_request") {
+			if (!announceAccepted) {
+				appendStderr("[worker] dropped a grant request that arrived before attestation was accepted\n");
+				return;
+			}
+			opts?.onGrantRequest?.(frame.value.request);
 			return;
 		}
 		opts?.onControl?.({ kind: frame.value.kind });

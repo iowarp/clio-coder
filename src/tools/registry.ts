@@ -472,7 +472,19 @@ export interface OneShotGrant {
 	 * authority is `main`; an operator rail stays parked under it.
 	 */
 	issuer?: ApprovalAuthority;
+	/**
+	 * Observes the one parked call a `requestId` grant selected: it started,
+	 * it finished, or it was not executed. A live grant reports execution
+	 * separately from the decision (Phase D); "decision delivered" is not
+	 * "tool executed".
+	 */
+	onExecution?: (event: GrantExecutionEvent) => void;
 }
+
+export type GrantExecutionEvent =
+	| { phase: "start" }
+	| { phase: "end"; outcome: "ok" | "error" | "blocked" }
+	| { phase: "not_executed"; reason: string };
 
 export interface PermissionRequiredMeta {
 	requestId: string;
@@ -1258,6 +1270,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			} else if (grant.requestId !== undefined) {
 				const index = parked.findIndex((entry) => entry.meta.requestId === grant.requestId);
 				if (index === -1) {
+					grant.onExecution?.({ phase: "not_executed", reason: "the parked call is no longer waiting" });
 					const next = parked[0];
 					if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
 					return;
@@ -1273,18 +1286,29 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// that parked while the overlay was already open remain queued and
 				// need their own confirmation, so a concurrent privileged call
 				// cannot ride along on a grant approved for another call.
+				const observed = grant?.requestId !== undefined && grant.requestId === entry.meta.requestId;
 				if (grant !== undefined && entry.decision.classification.actionClass !== grant.actionClass) {
+					if (observed) grant?.onExecution?.({ phase: "not_executed", reason: "the grant names another action class" });
 					reparkEntry(entry, reparkIndex);
 					continue;
 				}
 				const outcome = admit(entry.call, grant, entry.options);
 				if (outcome.kind === "park") {
+					if (observed) {
+						grant?.onExecution?.({ phase: "not_executed", reason: "admission still requires another approval" });
+					}
 					reparkEntry(entry, reparkIndex);
 					continue;
 				}
 				cleanupParkedEntry(entry);
 				if (outcome.kind === "terminal") {
 					disposeAdmissionArgs(tools.get(entry.call.tool as ToolName), entry.call.args ?? {});
+					if (observed) {
+						grant?.onExecution?.({
+							phase: "not_executed",
+							reason: "reason" in outcome.verdict ? outcome.verdict.reason : "admission refused the call",
+						});
+					}
 					entry.resolve(observeBlockedAttempt(entry.call, outcome.verdict, entry.options) ?? outcome.verdict);
 					continue;
 				}
@@ -1302,7 +1326,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// Seal the park before the body runs. Everything after this line is
 				// the tool working, and the caller charges that to the tool.
 				entry.closePark();
+				if (observed) grant?.onExecution?.({ phase: "start" });
 				const verdict = await runSpec(outcome.spec, entry.call, outcome.decision, approvedOptions);
+				if (observed) {
+					grant?.onExecution?.({
+						phase: "end",
+						outcome: verdict.kind !== "ok" ? "blocked" : verdict.result.kind === "error" ? "error" : "ok",
+					});
+				}
 				// A grant is invisible in the result otherwise, and the model reported
 				// a confirmed call as one that never asked. The note names the
 				// surface that released the call, because an ACP client or a

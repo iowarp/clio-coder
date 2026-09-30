@@ -65,19 +65,17 @@ import {
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
+import type { ApprovalAuthority } from "../domains/safety/admission.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
+import { grantEffectDescriptor, grantEffectDigest } from "../domains/safety/grant-effect.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import { createRunEffectsRecorder, recordToolExecutionEffects } from "../domains/safety/run-effects.js";
-import {
-	MAIN_GRANTS_UNAVAILABLE_REASON,
-	mainGrantsUnavailable,
-	type WorkerGitAllowance,
-	type WorkerPermitAllowance,
-} from "../domains/safety/worker-permit.js";
+import type { WorkerGitAllowance, WorkerPermitAllowance } from "../domains/safety/worker-permit.js";
 import { resolveAgentTools, type ToolTelemetry } from "../tools/agent-tools.js";
 import { createWorkerGitContext } from "../tools/git-exec.js";
 import type { ToolProfileName } from "../tools/profiles.js";
+import type { GrantExecutionEvent } from "../tools/registry.js";
 import {
 	CHAIN_OUTPUT_TRUNCATED_MARKER,
 	effectiveToolCall,
@@ -85,7 +83,7 @@ import {
 	gatewayChainReceipts,
 } from "../tools/surface.js";
 import type { TaskWorktree } from "../tools/task-worktree.js";
-import { type AgentLedgerPort, canonicalJson } from "../worker/protocol.js";
+import { type AgentLedgerPort, canonicalJson, type WorkerGrantRequestFrame } from "../worker/protocol.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
 	DEFAULT_ESCALATION_TIMEOUT_MS,
@@ -95,6 +93,7 @@ import {
 	type WorkerPromptMessage,
 	type WorkerProtectedArtifactState,
 } from "../worker/spec-contract.js";
+import type { WorkerDecisionBinding } from "../worker/stdin-demux.js";
 import { createEngineAgent, type EngineAgentOptions } from "./agent.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "./apis/index.js";
@@ -115,6 +114,9 @@ import { patchWorkerRequestPayload, supportsNamedToolChoice } from "./provider-p
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
+
+/** Room left for the frame envelope under the 16 KiB control-lane bound. */
+const GRANT_REQUEST_FRAME_BUDGET_CHARS = 14 * 1024;
 
 /** Exact call and enforced permission conditions; never reuse an answer across asking axes. */
 export function workerPermissionCacheKey(call: ClassifierCall, decision: SafetyDecision, axis: string): string {
@@ -199,6 +201,11 @@ export interface WorkerRunInput {
 	taskGit?: { allowance: WorkerGitAllowance; executePermitted: boolean; taskWorktree?: TaskWorktree };
 	/** Escalation bounds, honored only when onPermission="escalate". */
 	escalation?: WorkerEscalationConfig;
+	/**
+	 * Carries a main-routed ask's effect descriptor to the host on the control
+	 * lane (Phase D). Wired only when `escalation.grant` is present.
+	 */
+	emitGrantRequest?: (request: WorkerGrantRequestFrame) => void;
 	/** Dispatch-owned restriction on tool admission for this run. */
 	readOnly?: boolean;
 	/** Internal external-connector posture. Native workers ignore it and always use default. */
@@ -226,12 +233,15 @@ export interface WorkerRunHandle {
 	 */
 	steer?(text: string): boolean | Promise<boolean>;
 	/**
-	 * Apply an operator decision to a parked escalation. Present only on native
-	 * pi-agent workers (the runtimes with a registry park loop); external
-	 * runners omit it. Returns false when the requestId is unknown or already
-	 * resolved (duplicate), so callers can drop the line without crashing.
+	 * Apply a decision to a parked escalation. Present only on native pi-agent
+	 * workers (the runtimes with a registry park loop); external runners omit
+	 * it. Returns false when the requestId is unknown or already resolved
+	 * (duplicate), so callers can drop the line without crashing. Under a
+	 * main-authority permit the decision must carry a binding that names this
+	 * attempt and the parked call's argument digest; one that does not denies
+	 * the call.
 	 */
-	resolvePermission?(requestId: string, decision: "approve" | "deny"): boolean;
+	resolvePermission?(requestId: string, decision: "approve" | "deny", binding?: WorkerDecisionBinding): boolean;
 }
 
 export type WorkerEventEmit = (event: AgentEvent | ClioWorkerEvent) => void;
@@ -1246,8 +1256,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// the dedicated permission-required code so the orchestrator can resolve
 	// the outcome as failed/permission_required without racing the event
 	// stream; "escalate" parks the call, hands the decision up to the operator
-	// over the event/stdin channels, and applies the configured deny/fail
-	// fallback on timeout so the run still cannot hang forever.
+	// or, under a main-authority permit, to the main agent's grant broker over
+	// the event/stdin channels, and applies the configured deny/fail fallback
+	// on timeout so the run still cannot hang forever.
 	// An escalation nobody can answer only waits out its timeout and then
 	// applies the fallback. When the dispatching process says it has no
 	// responder, the worker applies that fallback at once (F9).
@@ -1262,17 +1273,22 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					fallback: input.escalation?.fallback ?? DEFAULT_ESCALATION_FALLBACK,
 				}
 			: null;
+	// Present only when the permit routes asks to the main agent with main
+	// authority (Phase D): every decision must then name this attempt, the
+	// parked request and its argument digest.
+	const grantBinding = escalationConfig !== null ? input.escalation?.grant : undefined;
+	const operatorUnattended = input.escalation?.operatorResponder === "none";
+	const mainRoutedPermit = input.permitAllowance?.asks === "main" && input.permitAllowance.approvalAuthority === "main";
 	let permissionFailure = false;
 
 	// Exact, byte-stable denial reasons for the deny/fail postures. Escalate
 	// timeouts and operator denials use their own wording below.
-	const mainGrantDenial = input.permitAllowance !== undefined && mainGrantsUnavailable(input.permitAllowance);
 	const denyReason = (tool: string, actionClass: string): string =>
 		unattendedEscalation
-			? `permission denied by policy: no operator can answer worker escalations for this dispatch (fleet.permissions.mode=escalate, fallback=deny); ${tool} requires ${actionClass} confirmation`
-			: mainGrantDenial
-				? `permission denied by policy: ${MAIN_GRANTS_UNAVAILABLE_REASON}; ${tool} requires ${actionClass} confirmation`
-				: `permission denied by policy: dispatched workers run non-interactively (fleet.permissions.mode=deny); ${tool} requires ${actionClass} confirmation`;
+			? mainRoutedPermit
+				? `permission denied by policy: no operator or granting main agent can answer worker asks for this dispatch (fleet.permissions.mode=main, fallback=deny); ${tool} requires ${actionClass} confirmation`
+				: `permission denied by policy: no operator can answer worker escalations for this dispatch (fleet.permissions.mode=escalate, fallback=deny); ${tool} requires ${actionClass} confirmation`
+			: `permission denied by policy: dispatched workers run non-interactively (fleet.permissions.mode=deny); ${tool} requires ${actionClass} confirmation`;
 	const failReason = (tool: string, actionClass: string): string =>
 		unattendedEscalation
 			? `permission required for ${tool} (${actionClass}); no operator can answer worker escalations for this dispatch and fallback=fail ends this run`
@@ -1282,27 +1298,42 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		requestId: string;
 		tool: string;
 		actionClass: ActionClass;
-		/** Identity of the exact call and permission conditions for the answered-escalation memory. */
+		/** Identity of the exact call and permission conditions for the denial memory. */
 		callKey: string;
+		/** Who may discharge this ask. Always `operator` outside a main-routed permit. */
+		authority: ApprovalAuthority;
+		/** Digest a bound decision must name. */
+		argDigest: string;
 		timer: ReturnType<typeof setTimeout>;
 	}
 	let activeEscalation: ActiveEscalation | null = null;
-	// Answered escalations, keyed by the exact call and permission conditions. A worker that re-issues
-	// the identical call after the operator already decided it gets the same
-	// answer without a new card: a live coder re-asked one bash approval eight
-	// times after its edits were done, and each approval only bought the next
-	// identical card (#79). The memory is per run and per exact (tool, args)
-	// tuple and asking axis/classification; a different command or safety-net
-	// requirement is a new decision. Denials have the same bounded identity.
-	const answeredEscalations = new Map<
-		string,
-		{ decision: "approve" | "deny"; requestId: string; source: "operator" | "timeout" }
-	>();
+	// Denied escalations, keyed by the exact call and permission conditions. A
+	// worker that re-issues the identical call after it was denied gets the
+	// same answer without a new card: a live coder re-asked one bash approval
+	// eight times after its edits were done (#79). Approvals are never
+	// remembered: each new call, identical or not, needs its own decision, so
+	// one grant executes at most one call (F8).
+	const deniedEscalations = new Map<string, { requestId: string; source: "operator" | "timeout" | "main" }>();
+	// Requests a delivered approval already consumed. If admission still parks
+	// such a call, the call is denied rather than escalated a second time.
+	const consumedRequestIds = new Set<string>();
 	const clearActiveEscalation = (): void => {
 		if (activeEscalation) {
 			clearTimeout(activeEscalation.timer);
 			activeEscalation = null;
 		}
+	};
+	const emitGrantExecution = (active: ActiveEscalation, event: GrantExecutionEvent): void => {
+		emit({
+			type: "clio_coder_permission_grant_execution",
+			payload: {
+				requestId: active.requestId,
+				tool: active.tool,
+				phase: event.phase,
+				...(event.phase === "end" ? { outcome: event.outcome } : {}),
+				...(event.phase === "not_executed" ? { detail: event.reason } : {}),
+			},
+		} as ClioWorkerEvent);
 	};
 
 	// One escalation is outstanding at a time. A call that parks while a prior
@@ -1313,13 +1344,16 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const resolveEscalation = (
 		requestId: string,
 		decision: "approve" | "deny",
-		source: "operator" | "timeout",
+		source: "operator" | "timeout" | "main",
+		hostReason?: string,
 	): boolean => {
 		const active = activeEscalation;
 		if (!active || active.requestId !== requestId) return false;
 		clearActiveEscalation();
-		answeredEscalations.set(active.callKey, { decision, requestId, source });
+		const authority = grantBinding !== undefined ? { authority: active.authority } : {};
 		if (decision === "approve") {
+			consumedRequestIds.add(requestId);
+			const issuer: ApprovalAuthority = source === "main" ? "main" : "operator";
 			emit({
 				type: "clio_coder_permission_resolved",
 				payload: {
@@ -1329,26 +1363,39 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					source,
 					requestId,
 					decision: "approved",
-					reason: `operator approved permission escalation for ${active.tool} (${active.actionClass})`,
+					reason:
+						issuer === "main"
+							? `main agent granted ${active.tool} (${active.actionClass}) once`
+							: `operator approved permission escalation for ${active.tool} (${active.actionClass})`,
+					...authority,
 				},
 			} as ClioWorkerEvent);
 			void registry.resumeParkedCalls({
 				actionClass: active.actionClass,
 				requestId,
-				requestedBy: `escalation:${source}`,
+				requestedBy: issuer === "main" ? "grant:main" : `escalation:${source}`,
+				issuer,
+				onExecution: (event) => emitGrantExecution(active, event),
 			});
 			return true;
 		}
+		deniedEscalations.set(active.callKey, { requestId, source });
 		// A denial resolves to the effective posture: a timeout with fallback
 		// "fail" ends the run like posture fail; every other denial mirrors
 		// posture deny, so the structured tool denial the model sees (including
 		// the "permission denied" reason) is identical to the deny posture.
 		const effectiveFail = source === "timeout" && escalationConfig?.fallback === "fail";
 		const mode: "deny" | "fail" = effectiveFail ? "fail" : "deny";
-		const denialContext = source === "timeout" ? "escalation timed out with no operator decision" : "operator denied";
+		const decider = source === "main" ? "main agent" : "operator";
+		const denialContext =
+			source === "timeout"
+				? `escalation timed out with no ${grantBinding !== undefined ? "" : "operator "}decision`
+				: `${decider} denied`;
 		const reason = effectiveFail
 			? `permission required for ${active.tool} (${active.actionClass}); ${denialContext} and workers fallback=fail ends this run`
-			: `permission denied by ${source === "timeout" ? "escalation timeout fallback" : "operator"}: ${active.tool} requires ${active.actionClass} confirmation`;
+			: hostReason !== undefined
+				? `permission denied: ${hostReason}; ${active.tool} requires ${active.actionClass} confirmation`
+				: `permission denied by ${source === "timeout" ? "escalation timeout fallback" : decider}: ${active.tool} requires ${active.actionClass} confirmation`;
 		emit({
 			type: "clio_coder_permission_resolved",
 			payload: {
@@ -1359,6 +1406,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				requestId,
 				decision: "denied",
 				reason,
+				...authority,
 			},
 		} as ClioWorkerEvent);
 		if (effectiveFail) {
@@ -1367,9 +1415,54 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			agent.abort();
 			return true;
 		}
-		if (source === "operator") registry.cancelParkedCall(requestId, reason);
-		else registry.cancelParkedCalls(reason);
+		if (source === "timeout") registry.cancelParkedCalls(reason);
+		else registry.cancelParkedCall(requestId, reason);
 		return true;
+	};
+
+	/** A decision that does not name this attempt's parked call denies it without consuming anything. */
+	const denyUnboundDecision = (active: ActiveEscalation, mismatch: string): void => {
+		clearActiveEscalation();
+		const reason = `permission denied: ${mismatch}, so the parked ${active.tool} call was not executed`;
+		emit({
+			type: "clio_coder_permission_resolved",
+			payload: {
+				tool: active.tool,
+				actionClass: active.actionClass,
+				mode: "deny",
+				source: "binding",
+				requestId: active.requestId,
+				decision: "denied",
+				reason,
+				authority: active.authority,
+			},
+		} as ClioWorkerEvent);
+		registry.cancelParkedCall(active.requestId, reason);
+	};
+
+	const resolveDecision = (
+		requestId: string,
+		decision: "approve" | "deny",
+		binding: WorkerDecisionBinding | undefined,
+	): boolean => {
+		const active = activeEscalation;
+		if (!active || active.requestId !== requestId) return false;
+		if (grantBinding === undefined) return resolveEscalation(requestId, decision, "operator");
+		const mismatch =
+			binding === undefined
+				? "the decision carries no grant binding"
+				: binding.attemptToken !== grantBinding.attemptToken || binding.attempt !== grantBinding.attempt
+					? "the decision names another attempt"
+					: binding.argDigest !== active.argDigest
+						? "the decision names different arguments than the parked call"
+						: decision === "approve" && binding.issuer === "main" && active.authority !== "main"
+							? "the main agent cannot grant an operator-authority ask"
+							: null;
+		if (mismatch !== null || binding === undefined) {
+			denyUnboundDecision(active, mismatch ?? "the decision carries no grant binding");
+			return true;
+		}
+		return resolveEscalation(requestId, decision, binding.issuer === "main" ? "main" : "operator", binding.reason);
 	};
 
 	const denyActiveEscalationOnAbort = (reason: string): void => {
@@ -1385,6 +1478,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				requestId: active.requestId,
 				decision: "denied",
 				reason,
+				...(grantBinding !== undefined ? { authority: active.authority } : {}),
 			},
 		} as ClioWorkerEvent);
 		clearActiveEscalation();
@@ -1394,12 +1488,34 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		const actionClass = decision.classification.actionClass;
 		if (escalationConfig) {
 			const callKey = workerPermissionCacheKey(call, decision, meta.axis);
-			const remembered = answeredEscalations.get(callKey);
+			if (consumedRequestIds.has(meta.requestId)) {
+				// The approval was delivered and consumed; admission still refused the
+				// call, so it is denied here instead of asking a second time.
+				const reason = `permission denied: the approval for ${call.tool} did not admit the call under the worker's permit, and it was not executed`;
+				emit({
+					type: "clio_coder_permission_resolved",
+					payload: {
+						tool: call.tool,
+						actionClass,
+						mode: "deny",
+						source: "binding",
+						requestId: meta.requestId,
+						decision: "denied",
+						reason,
+					},
+				} as ClioWorkerEvent);
+				registry.cancelParkedCall(meta.requestId, reason);
+				return;
+			}
+			const remembered = deniedEscalations.get(callKey);
 			if (remembered !== undefined) {
-				const approved = remembered.decision === "approve";
-				const reason = approved
-					? `operator approved an identical ${call.tool} call under the same permission conditions earlier in this run (request ${remembered.requestId}); the answer stands without a new prompt`
-					: `permission denied by ${remembered.source === "timeout" ? "escalation timeout fallback" : "operator"}: an identical ${call.tool} call under the same permission conditions was already denied earlier in this run (request ${remembered.requestId}); the answer stands, so do not repeat this call`;
+				const decider =
+					remembered.source === "timeout"
+						? "escalation timeout fallback"
+						: remembered.source === "main"
+							? "main agent"
+							: "operator";
+				const reason = `permission denied by ${decider}: an identical ${call.tool} call under the same permission conditions was already denied earlier in this run (request ${remembered.requestId}); the answer stands, so do not repeat this call`;
 				emit({
 					type: "clio_coder_permission_resolved",
 					payload: {
@@ -1408,38 +1524,45 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						mode: "escalate",
 						source: "remembered",
 						requestId: meta.requestId,
-						decision: approved ? "approved" : "denied",
+						decision: "denied",
 						reason,
 					},
 				} as ClioWorkerEvent);
-				if (approved) {
-					void registry.resumeParkedCalls({
-						actionClass,
-						requestId: meta.requestId,
-						requestedBy: "escalation:remembered",
-					});
-				} else {
-					registry.cancelParkedCall(meta.requestId, reason);
-				}
+				registry.cancelParkedCall(meta.requestId, reason);
 				return;
 			}
 			if (activeEscalation !== null) return;
 			const requestId = meta.requestId;
+			const authority: ApprovalAuthority = grantBinding === undefined ? "operator" : meta.approvalAuthority;
+			if (grantBinding !== undefined && authority === "operator" && operatorUnattended) {
+				// Only a person clears an operator rail, and nobody can answer here.
+				const reason = `permission denied by policy: ${call.tool} raised an operator-authority ask and no operator can answer worker asks for this dispatch; ${call.tool} requires ${actionClass} confirmation`;
+				emit({
+					type: "clio_coder_permission_resolved",
+					payload: { tool: call.tool, actionClass, mode: "deny", source: "policy", requestId, reason, authority },
+				} as ClioWorkerEvent);
+				registry.cancelParkedCall(requestId, reason);
+				return;
+			}
+			const effect = grantEffectDescriptor(call.tool, call.args);
+			const argDigest = grantEffectDigest(effect);
 			// The timer must hold the event loop: its firing is what denies an
 			// escalation the orchestrator never resolves. clearActiveEscalation
 			// clears it on every resolution path.
 			const timer = setTimeout(() => resolveEscalation(requestId, "deny", "timeout"), escalationConfig.timeoutMs);
-			activeEscalation = { requestId, tool: call.tool, actionClass, callKey, timer };
-			// The operator decides on this exact call, so the escalation carries a
-			// sanitized allowlisted preview of its object. Unlisted fields cross only
-			// as type-and-size summaries, and the args stay inside the worker.
+			activeEscalation = { requestId, tool: call.tool, actionClass, callKey, authority, argDigest, timer };
+			// The decider sees this exact call through a sanitized allowlisted
+			// preview of its object. Unlisted fields cross only as type-and-size
+			// summaries on this display event; the effect descriptor a grant is
+			// evaluated against rides the control lane below.
 			const target = describeCallTarget(call.tool, call.args);
+			const summary = `${call.tool} requires ${actionClass} confirmation`;
 			emit({
 				type: "clio_coder_permission_escalated",
 				payload: {
 					requestId,
 					tool: call.tool,
-					summary: `${call.tool} requires ${actionClass} confirmation`,
+					summary,
 					...(target.length > 0 ? { target } : {}),
 					axis: meta.axis,
 					decision: {
@@ -1450,8 +1573,31 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						...(decision.policy?.policySource ? { policySource: decision.policy.policySource } : {}),
 					},
 					timeoutMs: escalationConfig.timeoutMs,
+					...(grantBinding !== undefined ? { authority, argDigest } : {}),
 				},
 			} as ClioWorkerEvent);
+			if (grantBinding !== undefined) {
+				const frame: WorkerGrantRequestFrame = {
+					requestId,
+					attemptToken: grantBinding.attemptToken,
+					attempt: grantBinding.attempt,
+					tool: call.tool,
+					actionClass,
+					authority,
+					argDigest,
+					effect,
+					summary,
+					...(target.length > 0 ? { target } : {}),
+					reasons: decision.classification.reasons.slice(0, 8),
+					axis: meta.axis,
+					timeoutMs: escalationConfig.timeoutMs,
+					...(meta.toolCallId !== undefined ? { toolCallId: meta.toolCallId } : {}),
+				};
+				// A descriptor too large for the control frame crosses as its digest
+				// alone; the host then refuses a main grant and only the operator decides.
+				const fits = JSON.stringify(frame).length <= GRANT_REQUEST_FRAME_BUDGET_CHARS;
+				input.emitGrantRequest?.(fits ? frame : { ...frame, effect: null });
+			}
 			return;
 		}
 		const reason = onPermission === "fail" ? failReason(call.tool, actionClass) : denyReason(call.tool, actionClass);
@@ -1535,7 +1681,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			agent.steer(taskMessage(trimmed));
 			return true;
 		},
-		resolvePermission: (requestId: string, decision: "approve" | "deny") =>
-			resolveEscalation(requestId, decision, "operator"),
+		resolvePermission: (requestId: string, decision: "approve" | "deny", binding?: WorkerDecisionBinding) =>
+			resolveDecision(requestId, decision, binding),
 	};
 }

@@ -28,8 +28,10 @@ import { INTERNAL_HELPER_RESULT_KINDS } from "./protocol.js";
  * Current attested, budget-bearing dispatch document emitted by this release.
  * Version 6 carries the immutable worker permit; a version 5 worker would
  * ignore it, so the older document is refused rather than half-honored.
+ * Version 7 parks main-authority asks for a live main-agent grant bound to
+ * the attempt (`escalation.grant`); a version 6 worker would deny them.
  */
-export const WORKER_SPEC_VERSION = 6;
+export const WORKER_SPEC_VERSION = 7;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 2;
 export const WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1;
 
@@ -243,6 +245,26 @@ export interface WorkerEscalationConfig {
 	 * the call for the full timeout (F9).
 	 */
 	responder?: "none";
+	/**
+	 * "none" when no operator can answer, but the main agent can grant
+	 * ordinary asks (a headless run at --autonomy yolo). Operator-authority
+	 * asks then apply the fallback at once; main-authority asks still park.
+	 */
+	operatorResponder?: "none";
+	/**
+	 * Present when the permit routes asks to the main agent with main
+	 * authority (Phase D). Every decision for such an ask must carry this
+	 * attempt token and number plus the parked call's argument digest; a
+	 * decision that does not is a denial.
+	 */
+	grant?: WorkerGrantBinding;
+}
+
+/** The per-attempt binding a live grant decision must name. */
+export interface WorkerGrantBinding {
+	/** Host-minted secret for this attempt; never shown to a model. */
+	attemptToken: string;
+	attempt: number;
 }
 
 /** Default escalation bounds when onPermission="escalate" but no override is given. */
@@ -744,11 +766,16 @@ function validateWorkerPermit(spec: Record<string, unknown>): void {
 		"main",
 		"operator",
 	] as const);
-	const expectedMode = asks === "main" ? (authority === "operator" ? "escalate" : "deny") : asks;
+	const expectedMode = asks === "main" ? "escalate" : asks;
 	if ((spec.onPermission ?? "deny") !== expectedMode) {
 		throw new Error(
 			`WorkerSpec.onPermission ${String(spec.onPermission ?? "deny")} disagrees with the permit allowance (expected ${expectedMode})`,
 		);
+	}
+	// A main-authority permit parks asks only for a decision bound to this attempt.
+	const escalation = spec.escalation as { grant?: unknown } | undefined;
+	if (asks === "main" && authority === "main" && escalation?.grant === undefined) {
+		throw new Error("WorkerSpec.escalation.grant is required when the permit routes asks to the main agent");
 	}
 	if ((spec.readOnly === true) !== ceiling.readOnly) {
 		throw new Error("WorkerSpec.readOnly disagrees with the permit ceiling");
@@ -905,6 +932,20 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 		}
 		if (escalation.responder !== undefined && escalation.responder !== "none") {
 			throw new Error('WorkerSpec.escalation.responder must be "none" when present');
+		}
+		if (escalation.operatorResponder !== undefined && escalation.operatorResponder !== "none") {
+			throw new Error('WorkerSpec.escalation.operatorResponder must be "none" when present');
+		}
+		if (escalation.grant !== undefined) {
+			const grant = readRecord(escalation.grant, "WorkerSpec.escalation.grant");
+			exactKeys(grant, ["attemptToken", "attempt"], "WorkerSpec.escalation.grant");
+			const token = readString(grant.attemptToken, "WorkerSpec.escalation.grant.attemptToken");
+			if (!/^[0-9a-f]{32,128}$/.test(token)) {
+				throw new Error("WorkerSpec.escalation.grant.attemptToken must be a hex token");
+			}
+			if (!Number.isSafeInteger(grant.attempt) || Number(grant.attempt) < 0) {
+				throw new Error("WorkerSpec.escalation.grant.attempt must be a non-negative integer");
+			}
 		}
 	}
 	if (spec.readOnly !== undefined && typeof spec.readOnly !== "boolean") {

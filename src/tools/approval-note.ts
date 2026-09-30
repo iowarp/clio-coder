@@ -10,10 +10,12 @@
  * Four sources release a parked call and they are not the same fact. The main
  * TUI card (`tool:one_shot`) and a forwarded worker escalation
  * (`escalation:operator`) are a person answering. An ACP client answering
- * `allow-once` is that client, not this session's operator. A remembered
- * escalation replays an earlier answer, so the note must not claim anyone was
- * asked for this call. An escalation timeout always denies and never releases
- * a call; any source not named here gets the neutral wording.
+ * `allow-once` is that client, not this session's operator. A main-agent
+ * grant (`grant:main`, Phase D) is the main agent answering, not a person.
+ * A remembered escalation replays an earlier answer, so the note must not
+ * claim anyone was asked for this call; workers no longer remember approvals,
+ * so only older records carry it. An escalation timeout always denies and
+ * never releases a call; any source not named here gets the neutral wording.
  *
  * Every wording states the scope the registry already enforces: the grant
  * covers this call and nothing else, so the model cannot read it as standing
@@ -79,6 +81,8 @@ export function approvalNote(input: ApprovalNoteInput): string {
 			return `${OPERATOR_APPROVAL_NOTE_PREFIX} The operator approved ${call} once${rail}, through a forwarded worker escalation. ${SCOPE} Say that the operator was asked and approved, not that the call ran without a prompt.`;
 		case "acp-client":
 			return `${APPROVAL_NOTE_PREFIX} The connected ACP client approved ${call} once${rail}. ${SCOPE} Say the client was asked and granted it, and do not claim this session's operator approved it.`;
+		case "grant:main":
+			return `${APPROVAL_NOTE_PREFIX} The main agent granted ${call} once${rail}, through its grant broker. ${SCOPE} Say the main agent approved it, and do not claim the operator was asked.`;
 		case "escalation:remembered":
 			return `${APPROVAL_NOTE_PREFIX} ${capitalize(call)} ran under a remembered escalation decision${rail}, not a new ask. ${SCOPE} Do not say anyone was asked for this call.`;
 		default:
