@@ -18,6 +18,7 @@ import {
 } from "../domains/evidence/trust-status.js";
 import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
 import type { DispatchRunEventRegistry } from "./dispatch.js";
+import { grantRequestLines, pendingRequestsFor, requestsAwaitingMain } from "./grant-request-text.js";
 import { collectDetachedBatch, collectRuns, durableRunEvidence } from "./monitor-collect.js";
 import { monitorToolSurface } from "./monitor-surface.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
@@ -175,6 +176,11 @@ function runStatus(deps: MonitorToolDeps, runId: string, ownership: DispatchOwne
 			`live: phase=${live.outcomePhase} heartbeat=${live.heartbeat} elapsed=${Math.round(live.elapsedMs / 1000)}s tokens=${live.tokens.total}`,
 		);
 	}
+	// A worker ask routed to the main agent waits here until it is answered (Phase D).
+	const pendingPermissions = pendingRequestsFor(deps.dispatch, [run.id, rootRunId]);
+	if (pendingPermissions.length > 0) {
+		lines.push("pending permission requests:", ...pendingPermissions.flatMap((view) => grantRequestLines(view)));
+	}
 	const trust = isTerminalRunEnvelope(run) ? summarizeTrustStatus(durableRunEvidence(run).trustStatus) : null;
 	if (trust)
 		lines.push(
@@ -215,6 +221,7 @@ function runStatus(deps: MonitorToolDeps, runId: string, ownership: DispatchOwne
 				: {}),
 			receiptPath: run.receiptPath,
 			running: live !== null,
+			...(pendingPermissions.length > 0 ? { pendingPermissions: pendingPermissions.map((view) => ({ ...view })) } : {}),
 		},
 	};
 }
@@ -472,6 +479,27 @@ async function runWait(
 	while (assignment?.status === "running" || (assignment === null && !isTerminalRunEnvelope(run))) {
 		if (signal?.aborted) return { kind: "error", message: "monitor: wait aborted" };
 		const elapsed = Math.round(performance.now() - startedAt);
+		// Waiting on a run whose worker waits on this caller would only run the
+		// request out, so the wait stops and says what to answer (Phase D).
+		const awaiting = requestsAwaitingMain(deps.dispatch, [runId, rootRunId, run.id]);
+		if (awaiting.length > 0) {
+			return {
+				kind: "ok",
+				output: [
+					`wait stopped after ${elapsed}ms: run ${runId} is waiting for your permission decision and keeps running.`,
+					...awaiting.flatMap((view) => grantRequestLines(view)),
+				].join("\n"),
+				details: {
+					mode: "wait",
+					runId,
+					timedOut: false,
+					permissionPending: true,
+					state: assignment?.status ?? run.status,
+					waitedMs: elapsed,
+					pendingPermissions: awaiting.map((view) => ({ ...view })),
+				},
+			};
+		}
 		if (elapsed >= timeoutMs) {
 			return {
 				kind: "ok",
@@ -522,6 +550,28 @@ async function runCollect(
 	while (result.kind === "ok" && result.details?.complete === false) {
 		if (signal?.aborted) return { kind: "error", message: "monitor: collect aborted" };
 		const elapsed = Math.round(performance.now() - startedAt);
+		const pendingRunIds = Array.isArray(result.details?.pendingRunIds)
+			? result.details.pendingRunIds.filter((entry): entry is string => typeof entry === "string")
+			: [];
+		const awaiting = requestsAwaitingMain(deps.dispatch, pendingRunIds);
+		if (awaiting.length > 0) {
+			return {
+				...result,
+				output: [
+					result.output,
+					"",
+					"A worker in this batch is waiting for your permission decision; collect stopped so you can answer it:",
+					...awaiting.flatMap((view) => grantRequestLines(view)),
+				].join("\n"),
+				details: {
+					...result.details,
+					timedOut: false,
+					permissionPending: true,
+					waitedMs: elapsed,
+					pendingPermissions: awaiting.map((view) => ({ ...view })),
+				},
+			};
+		}
 		if (elapsed >= timeoutMs) {
 			return {
 				...result,

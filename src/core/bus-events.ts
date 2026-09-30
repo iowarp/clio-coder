@@ -496,6 +496,22 @@ export interface PermissionRequestedPayload {
 	/** Admitted timeout fallback, so the operator surface can name what an expired ask became. */
 	fallback?: "deny" | "fail" | undefined;
 	escalation?: boolean | undefined;
+	/**
+	 * Who may discharge a worker ask routed through the main agent (Phase D):
+	 * `main` for an ordinary ask, `operator` for a rail only a person clears.
+	 */
+	approvalAuthority?: "main" | "operator" | undefined;
+	/** Set when the main agent approved and, below yolo, asks the operator to decide. */
+	forwardedByMain?: boolean | undefined;
+}
+
+/** Live-grant facts carried on a worker permission resolution (Phase D). */
+export interface PermissionGrantFacts {
+	attempt: number;
+	authority: "main" | "operator";
+	issuer?: "main" | "operator" | undefined;
+	execution: "not_executed" | "executing" | "executed" | "unknown";
+	state: string;
 }
 
 /**
@@ -517,6 +533,8 @@ export interface PermissionResolvedPayload {
 	requestedBy?: string | undefined;
 	/** Effective fallback applied to an expired worker escalation. */
 	fallback?: "deny" | "fail" | undefined;
+	/** Present when the resolution settles a live-grant request. */
+	grant?: PermissionGrantFacts | undefined;
 	at?: number | undefined;
 }
 

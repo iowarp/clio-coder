@@ -59,6 +59,9 @@ export function routeValidationProjection(
 		// must not be able to author either.
 		permitNarrowing,
 		inheritedPermitAllowance,
+		// Stamped by the dispatch tool from its own topology (Phase D); a model
+		// must not be able to claim its caller can yield for a live grant.
+		mainGrantRoute,
 		...raw
 	} = request;
 	const awaitingEnvelope =
@@ -91,6 +94,7 @@ export function routeValidationProjection(
 			...(taskWorktreeDestination !== undefined ? { taskWorktreeDestination } : {}),
 			...(permitNarrowing !== undefined ? { permitNarrowing: { ...permitNarrowing } } : {}),
 			...(inheritedPermitAllowance !== undefined ? { inheritedPermitAllowance: { ...inheritedPermitAllowance } } : {}),
+			...(mainGrantRoute !== undefined ? { mainGrantRoute: { ...mainGrantRoute } } : {}),
 			...(awaitingEnvelope ? { failover: "approved" as const } : {}),
 		}),
 	};

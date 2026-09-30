@@ -7,6 +7,8 @@ import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentAutomationAuthority, AgentSpec } from "../agents/spec.js";
 import type { WorkerContextSeed } from "../context/worker/contract.js";
 import type { CostProvenance } from "../providers/index.js";
+import type { ApprovalAuthority } from "../safety/admission.js";
+import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import type { WorkerPermissionDeclaration, WorkerPermitAllowance } from "../safety/worker-permit.js";
 import type { AgentTaskFeatures } from "./agent-candidates.js";
@@ -142,6 +144,78 @@ export interface DispatchRequest extends JobSpec {
 	 * model-authored: the argument parser builds requests field by field.
 	 */
 	ownerSessionId?: string | null;
+	/**
+	 * Whether the caller can yield to the main agent when a worker parks an ask
+	 * for a live grant (Phase D). The dispatch tool stamps it from its own
+	 * topology; absent means the run was started outside the dispatch tool.
+	 * Never model-authored.
+	 */
+	mainGrantRoute?: { kind: "yield" } | { kind: "refused"; reason: string };
+}
+
+/**
+ * A worker ask routed to the main agent, as the model and the operator see
+ * it. It carries a bounded preview only; the broker keeps the effect
+ * descriptor and the attempt binding.
+ */
+export interface WorkerGrantView {
+	requestId: string;
+	runId: string;
+	rootRunId: string;
+	attempt: number;
+	agentId: string;
+	tool: string;
+	actionClass: string;
+	approvalAuthority: ApprovalAuthority;
+	state: "pending" | "authorized" | "executing" | "completed" | "denied" | "expired" | "canceled";
+	execution: "not_executed" | "executing" | "executed" | "unknown";
+	issuer?: "main" | "operator";
+	summary: string;
+	target?: string;
+	reasons: ReadonlyArray<string>;
+	createdAt: string;
+	deadlineAt: string;
+	reason?: string;
+	forwardedByMain?: true;
+}
+
+export type MainGrantOutcome =
+	| {
+			ok: true;
+			view: WorkerGrantView;
+			decision: "approved" | "denied";
+			/** Who decided: the main agent itself, or the operator it asked. */
+			decidedBy: "main" | "operator";
+			message: string;
+	  }
+	| { ok: false; message: string; view?: WorkerGrantView };
+
+export interface MainGrantDecisionInput {
+	requestId: string;
+	/** Run or assignment id the model named; must match the record. */
+	runId: string;
+	decision: "approve" | "deny";
+	/** The deciding main agent's session; a request from another session fails. */
+	sessionId: string | null;
+	/** The main agent's effective autonomy. */
+	autonomy: AutonomyLevel;
+	/** The main turn's host constraints; the delegation ceiling is `delegatedTools ?? allowedTools`. */
+	turnConstraints?: TurnConstraints;
+	signal?: AbortSignal;
+}
+
+/** Live main-agent grants for native worker asks (Phase D). */
+export interface WorkerGrantsContract {
+	list(filter?: { sessionId?: string | null; runId?: string; pendingOnly?: boolean }): ReadonlyArray<WorkerGrantView>;
+	get(requestId: string): WorkerGrantView | null;
+	/**
+	 * The main agent's decision. Deny always settles. Approve is admitted as
+	 * the main agent's own call (yolo), forwarded to the operator (attended,
+	 * below yolo), or denied (headless below yolo); see grant-authority.ts.
+	 */
+	decideAsMain(input: MainGrantDecisionInput): Promise<MainGrantOutcome>;
+	/** Called when a worker parks a main-authority ask; returns the unsubscribe handle. */
+	onPending(listener: (view: WorkerGrantView) => void): () => void;
 }
 
 /** Internal, non-serializable admission hook for transactional resource owners. */
@@ -450,6 +524,9 @@ export interface DispatchContract {
 	 * fakes need not implement it; the real dispatch extension always does.
 	 */
 	resolveWorkerPermission?(runId: string, requestId: string, decision: "approve" | "deny"): void;
+
+	/** Live main-agent grants for native worker asks; absent in minimal bundles. */
+	grants?: WorkerGrantsContract;
 
 	/** Durable detached-batch records for async fan-out + collect. */
 	detached?: DetachedBatchesContract;

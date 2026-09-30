@@ -199,6 +199,17 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 						...(payload.actionClass !== undefined ? { actionClass: payload.actionClass } : {}),
 						...(payload.reason !== undefined ? { reason: payload.reason } : {}),
 						...(payload.requestedBy !== undefined ? { requestedBy: payload.requestedBy } : {}),
+						...(payload.grant !== undefined
+							? {
+									grant: {
+										attempt: payload.grant.attempt,
+										authority: payload.grant.authority,
+										...(payload.grant.issuer !== undefined ? { issuer: payload.grant.issuer } : {}),
+										execution: payload.grant.execution,
+										state: payload.grant.state,
+									},
+								}
+							: {}),
 					}),
 				);
 			});

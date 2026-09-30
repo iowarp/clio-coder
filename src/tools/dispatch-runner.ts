@@ -9,7 +9,7 @@ import type { CouncilReport, CouncilReportMember } from "../domains/agents/resul
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import { closeAgentLedger, openAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DetachedBatchRun } from "../domains/dispatch/batch-store.js";
-import type { AbortReason, DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
+import type { AbortReason, DispatchContract, DispatchRequest, WorkerGrantView } from "../domains/dispatch/contract.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
 import { compileExecutionPlan, requireAgentSteps } from "../domains/dispatch/execution-plan.js";
 import {
@@ -98,6 +98,7 @@ import type {
 	DispatchReviewSettings,
 	DispatchToolDeps,
 } from "./dispatch-types.js";
+import { grantRequestLines } from "./grant-request-text.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
@@ -143,6 +144,40 @@ function createBackgroundSwitch(): BackgroundSwitch {
 			signal();
 		},
 	};
+}
+
+/**
+ * Resolves when a worker in this call parks an ask for the main agent (Phase
+ * D). The attached call then yields: the main agent cannot decide while it is
+ * still inside this call, so waiting would only run the request out.
+ */
+interface GrantYieldWatch {
+	requested: Promise<{ kind: "yield"; views: WorkerGrantView[] }>;
+	dispose(): void;
+}
+
+function watchGrantYield(dispatch: DispatchContract, runIds: () => ReadonlyArray<string>): GrantYieldWatch {
+	const grants = dispatch.grants;
+	if (grants === undefined) return { requested: new Promise(() => {}), dispose: () => {} };
+	const matches = (view: WorkerGrantView): boolean => {
+		if (view.approvalAuthority !== "main" || view.state !== "pending") return false;
+		const ids = runIds();
+		return ids.includes(view.rootRunId) || ids.includes(view.runId);
+	};
+	let resolveYield: (value: { kind: "yield"; views: WorkerGrantView[] }) => void = () => {};
+	const requested = new Promise<{ kind: "yield"; views: WorkerGrantView[] }>((resolve) => {
+		resolveYield = resolve;
+	});
+	const settle = (): void => {
+		const views = grants.list({ pendingOnly: true }).filter(matches);
+		if (views.length > 0) resolveYield({ kind: "yield", views: [...views] });
+	};
+	const unsubscribe = grants.onPending((view) => {
+		if (matches(view)) settle();
+	});
+	// A request parked before the watch started is found by this first check.
+	settle();
+	return { requested, dispose: unsubscribe };
 }
 
 type EventSummary = DispatchEventSummary;
@@ -320,8 +355,12 @@ class DispatchBackgroundedError extends Error {
 		 * same as a batch that was detached from the start.
 		 */
 		readonly ledgerId: string | null = null,
+		/** Set when the call yielded to the main agent for a worker's permission request (Phase D). */
+		readonly yielded: ReadonlyArray<WorkerGrantView> = [],
 	) {
-		super("dispatch: backgrounded by operator");
+		super(
+			yielded.length > 0 ? "dispatch: yielded for a worker permission request" : "dispatch: backgrounded by operator",
+		);
 		this.name = "DispatchBackgroundedError";
 	}
 }
@@ -367,10 +406,19 @@ async function backgroundedDispatchResult(
 			details: { mode: "detached", batchId: converted.batchId, assignmentIds: liveIds },
 		};
 	}
-	const lines = [
-		`dispatch (${mode}) was moved to the background by the operator: batch=${converted.batchId} holds ${converted.live.length} still-running assignment(s)`,
-		...converted.live.map((run) => `- ${run.assignmentId} agent=${run.agentId}`),
-	];
+	const yielded = converted.yielded;
+	const lines =
+		yielded.length > 0
+			? [
+					`dispatch (${mode}) yielded to you: a worker is waiting for your permission decision. batch=${converted.batchId} holds ${converted.live.length} still-running assignment(s)`,
+					...converted.live.map((run) => `- ${run.assignmentId} agent=${run.agentId}`),
+					"",
+					...yielded.flatMap((view) => grantRequestLines(view)),
+				]
+			: [
+					`dispatch (${mode}) was moved to the background by the operator: batch=${converted.batchId} holds ${converted.live.length} still-running assignment(s)`,
+					...converted.live.map((run) => `- ${run.assignmentId} agent=${run.agentId}`),
+				];
 	if (converted.settled.length > 0) {
 		lines.push(
 			`${converted.settled.length} earlier ${mode} step(s) had already finished and are not in this batch: ${converted.settled.map((run) => run.receipt.runId).join(", ")}. Read them with monitor(mode="receipt", run_id=<id>).`,
@@ -390,7 +438,8 @@ async function backgroundedDispatchResult(
 		output: lines.join("\n"),
 		details: {
 			mode: "detached",
-			conversion: "operator-backgrounded",
+			conversion: yielded.length > 0 ? "permission-yield" : "operator-backgrounded",
+			...(yielded.length > 0 ? { pendingPermissions: yielded.map((view) => ({ ...view })) } : {}),
 			batchId: converted.batchId,
 			assignmentIds: liveIds,
 			runs: converted.live.map((run) => ({ runId: run.runId, assignmentId: run.assignmentId, agentId: run.agentId })),
@@ -2464,6 +2513,19 @@ export async function runDispatchTool(
 								: deps.dispatch.detached === undefined
 									? "detached batch records are unavailable in this context"
 									: null;
+	// Phase D: a worker ask routed to the main agent needs a caller that can
+	// yield. The same topologies that cannot move to the background cannot
+	// yield, and dispatch refuses main routing for them at admission.
+	const grantRouteRefusal =
+		backgroundRefusal ??
+		(snapshot.writers === 1 && mode === "parallel" && requests.length > 1 && !snapshot.detach
+			? "a writer-limited batch admits its writers from this turn"
+			: null);
+	requests = requests.map((request) => ({
+		...request,
+		mainGrantRoute:
+			grantRouteRefusal === null ? { kind: "yield" as const } : { kind: "refused" as const, reason: grantRouteRefusal },
+	}));
 	const background = createBackgroundSwitch();
 	// Review and Scout both execute under mode=parallel, so the operator-facing
 	// label names the topology they actually asked for.
@@ -2692,8 +2754,13 @@ async function runSequential(
 			activeRunId = handle.runId;
 			const registered = deps.runEvents.registerSingle(handle, request.agentId, fallbackProgressBus(deps));
 			const completion = registered.completion.then((value) => ({ kind: "completed" as const, value }));
-			const settled = await Promise.race([completion, background.requested.then(() => ({ kind: "background" as const }))]);
-			if (settled.kind === "background") {
+			const grantYield = watchGrantYield(deps.dispatch, () => [handle.runId]);
+			const settled = await Promise.race([
+				completion,
+				background.requested.then(() => ({ kind: "background" as const })),
+				grantYield.requested,
+			]).finally(() => grantYield.dispose());
+			if (settled.kind === "background" || settled.kind === "yield") {
 				// activeRunId stays set on purpose: the finally below only clears the
 				// timer and the abort listener, and the live step must survive both.
 				completion.catch(() => {});
@@ -2702,6 +2769,8 @@ async function runSequential(
 					[{ runId: handle.runId, assignmentId: handle.runId, agentId: request.agentId }],
 					[...runs],
 					requests.slice(index + 1).map((later) => later.agentId),
+					null,
+					settled.kind === "yield" ? settled.views : [],
 				);
 			}
 			activeRunId = null;
@@ -2842,8 +2911,13 @@ async function runBatch(
 	let backgrounded = false;
 	try {
 		const completion = registered.completion.then((value) => ({ kind: "completed" as const, value }));
-		const settled = await Promise.race([completion, background.requested.then(() => ({ kind: "background" as const }))]);
-		if (settled.kind === "background") {
+		const grantYield = watchGrantYield(deps.dispatch, () => handle.assignmentIds);
+		const settled = await Promise.race([
+			completion,
+			background.requested.then(() => ({ kind: "background" as const })),
+			grantYield.requested,
+		]).finally(() => grantYield.dispose());
+		if (settled.kind === "background" || settled.kind === "yield") {
 			// The batch drain keeps metering; only this await unwinds. Every run in
 			// a parallel batch is already live, so the whole batch converts.
 			completion.catch(() => {});
@@ -2858,6 +2932,7 @@ async function runBatch(
 				[],
 				[],
 				ledgerId,
+				settled.kind === "yield" ? settled.views : [],
 			);
 		}
 		const { summaries, receipts } = settled.value;

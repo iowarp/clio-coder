@@ -76,8 +76,10 @@ import {
 	WORKER_PROTECTED_ARTIFACT_STATE_VERSION,
 	WORKER_SPEC_VERSION,
 	type WorkerBudget,
+	type WorkerGrantBinding,
 	type WorkerPromptMessage,
 } from "../../worker/spec-contract.js";
+import type { WorkerDecisionBinding } from "../../worker/stdin-demux.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import {
@@ -144,7 +146,12 @@ import {
 	recordToolExecutionEffects,
 } from "../safety/run-effects.js";
 import type { ScopeSpec } from "../safety/scope.js";
-import { resolveWorkerPermit, type WorkerPermit, workerPermissionModeForPermit } from "../safety/worker-permit.js";
+import {
+	mainGrantsUnavailable,
+	resolveWorkerPermit,
+	type WorkerPermit,
+	workerPermissionModeForPermit,
+} from "../safety/worker-permit.js";
 import { SESSION_COST_CEILING_REASON, SessionCostCeilingError } from "../scheduling/budget.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
@@ -207,6 +214,8 @@ import type {
 	DispatchPreparationOptions,
 	DispatchRequest,
 	DispatchSnapshot,
+	MainGrantOutcome,
+	WorkerGrantView,
 } from "./contract.js";
 import { createWorkerOutputCapture, startDispatchEventPump, workerOutputCaptureBytes } from "./event-pump.js";
 import type { ExecutionHandoff } from "./execution-handoff.js";
@@ -228,6 +237,8 @@ import {
 } from "./failure-classification.js";
 import { routeFactVerdict } from "./fleet-preflight.js";
 import { competeStanceLiner, isBoundedGateRolePrompt } from "./gate-role-prompts.js";
+import { evaluateMainGrant } from "./grant-authority.js";
+import { createGrantBroker, type GrantRecord, type GrantState } from "./grant-broker.js";
 import {
 	classifyHeartbeat,
 	DEFAULT_HEARTBEAT_SPEC,
@@ -361,6 +372,7 @@ import {
 	type AgentLedgerBody,
 	computeSettingsFingerprint,
 	endpointIdentityHash,
+	type WorkerGrantRequestFrame,
 	type WorkerModelLoad,
 } from "./worker-protocol.js";
 import {
@@ -398,11 +410,12 @@ interface ActiveRun {
 	 */
 	steer?: (text: string) => boolean;
 	/**
-	 * Apply an operator permission decision to a parked escalation by writing a
-	 * `permission_decision` line to the worker's stdin. Returns false when the
-	 * channel is gone. Absent for run kinds without one (ACP).
+	 * Apply a permission decision to a parked escalation by writing a
+	 * `permission_decision` line to the worker's stdin. A live grant carries
+	 * its binding (Phase D). Returns false when the channel is gone. Absent for
+	 * run kinds without one (ACP).
 	 */
-	resolvePermission?: (requestId: string, decision: "approve" | "deny") => boolean;
+	resolvePermission?: (requestId: string, decision: "approve" | "deny", binding?: WorkerDecisionBinding) => boolean;
 	promise: Promise<void>;
 	recipe: AgentRecipe | null;
 	/** The permit this attempt ran under; a retry inherits it as a cap. Absent for ACP delegation. */
@@ -518,6 +531,8 @@ export interface DispatchBundleOptions {
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
 const DEFAULT_RESILIENCE_COOLDOWN_MS = 15_000;
+/** The grant broker expires this long before the worker's own escalation timer. */
+const GRANT_DEADLINE_MARGIN_MS = 1_000;
 
 /** A half-open route this dispatch was admitted to probe, keyed by its run id. */
 interface ProbeClaim {
@@ -1669,6 +1684,10 @@ interface DispatchWorkerSpecInput {
 	workerPermissionResponder: boolean;
 	/** The immutable permit this attempt was admitted under. */
 	permit: WorkerPermit;
+	/** Attempt binding for a main-authority permit's live grants (Phase D). */
+	grantAttempt?: WorkerGrantBinding;
+	/** The main agent's effective autonomy when the attempt spawns. */
+	mainAutonomy?: AutonomyLevel;
 }
 
 interface DispatchLifecycleStage {
@@ -1832,6 +1851,35 @@ function resolveDispatchPermit(
 	settings: EffectiveSettings,
 	target: ResolvedTarget,
 ): WorkerPermit {
+	const permit = resolveDispatchPermitOnce(req, recipe, spec, tools, readOnly, pathScope, settings, target);
+	// A run started outside the dispatch tool (a slash command, a watchdog, a
+	// host helper) has no main agent waiting on it. Its main-routed asks narrow
+	// to deny, and the permit on the receipt says so.
+	if (mainGrantsUnavailable(permit.allowance) && req.mainGrantRoute === undefined) {
+		return resolveDispatchPermitOnce(
+			{ ...req, permitNarrowing: { ...(req.permitNarrowing ?? {}), asks: "deny" } },
+			recipe,
+			spec,
+			tools,
+			readOnly,
+			pathScope,
+			settings,
+			target,
+		);
+	}
+	return permit;
+}
+
+function resolveDispatchPermitOnce(
+	req: DispatchRequest,
+	recipe: AgentRecipe,
+	spec: ReturnType<typeof normalizeAgentSpec>,
+	tools: ReadonlyArray<ToolName>,
+	readOnly: boolean,
+	pathScope: DispatchPathScope,
+	settings: EffectiveSettings,
+	target: ResolvedTarget,
+): WorkerPermit {
 	const contract = dispatchResultContract(req, recipe);
 	const hostHelper =
 		(spec.audience === "shadow" || spec.audience === "internal") &&
@@ -1871,6 +1919,64 @@ function receiptPermitSummary(permit: WorkerPermit): NonNullable<NonNullable<Run
 		approvalAuthority: permit.allowance.approvalAuthority,
 		...(permit.trustedUnmediated === true ? { trustedUnmediated: true as const } : {}),
 	};
+}
+
+/** The receipt's grant rows for one attempt; empty object when it opened none. */
+function receiptGrantAudit(
+	records: ReadonlyArray<GrantRecord>,
+	runId: string,
+): { grants?: NonNullable<NonNullable<RunReceiptDraft["safety"]>["grants"]> } {
+	const rows = records
+		.filter((record) => record.runId === runId)
+		.map((record) => ({
+			requestId: record.requestId,
+			attempt: record.attempt,
+			tool: record.tool,
+			actionClass: record.actionClass,
+			authority: record.approvalAuthority,
+			...(record.issuer !== undefined ? { issuer: record.issuer } : {}),
+			...(record.forwardedByMain === true ? { forwardedByMain: true as const } : {}),
+			decision:
+				record.state === "denied"
+					? ("denied" as const)
+					: record.state === "expired"
+						? ("expired" as const)
+						: record.state === "canceled" || record.state === "pending"
+							? ("canceled" as const)
+							: ("approved" as const),
+			execution: record.execution === "executing" ? ("unknown" as const) : record.execution,
+			...(record.reason !== undefined ? { reason: record.reason.slice(0, 500) } : {}),
+		}));
+	return rows.length > 0 ? { grants: rows } : {};
+}
+
+/**
+ * Live main-agent grants exist only for a single local native run whose
+ * caller can yield (Phase D). Every other route to a main-authority permit is
+ * an admission error naming why, never a silent downgrade.
+ */
+function assertMainGrantRoutable(
+	req: DispatchRequest,
+	runtime: RuntimeDescriptor,
+	permit: WorkerPermit,
+	node?: RunNodeIdentity | null,
+): void {
+	if (!mainGrantsUnavailable(permit.allowance)) return;
+	const route = req.mainGrantRoute;
+	const why =
+		runtime.kind !== "http"
+			? `runtime '${runtime.id}' has no live grant path; claude-sdk, ACP and subprocess workers cannot park an ask for the main agent yet`
+			: node !== undefined && node !== null && node.kind !== "local"
+				? `node '${node.id}' is remote, and remote workers cannot receive a bound grant yet`
+				: route?.kind === "refused"
+					? `this dispatch cannot yield to the main agent: ${route.reason}`
+					: req.ownerSessionId === undefined || req.ownerSessionId === null
+						? "the run has no owning session to decide its asks"
+						: null;
+	if (why === null) return;
+	throw new Error(
+		`dispatch: fleet.permissions.mode=main routes worker asks to the main agent, but ${why}; use fleet.permissions.mode escalate or deny for this work`,
+	);
 }
 
 function assertRuntimeCanHonorWorkerPermissionMode(
@@ -2494,14 +2600,25 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	spec.onPermission = workerPermissionModeForPermit(input.permit.allowance);
 	if (spec.onPermission === "escalate") {
 		const escalation = settings?.fleet.permissions.escalation;
+		// A main-authority permit parks asks for the main agent's grant broker
+		// (Phase D). The main agent can grant at yolo; below yolo only an
+		// attended operator can, so a headless default run has no responder.
+		const mainRouted = mainGrantsUnavailable(input.permit.allowance);
+		if (mainRouted && input.grantAttempt === undefined) {
+			throw new Error("dispatch: a main-authority permit needs a grant binding for its attempt");
+		}
+		const attended = input.workerPermissionResponder;
 		// With nobody to answer, an escalation could only ever time out, so the
 		// worker applies the fallback at once and says why (F9).
-		const unattended = !input.workerPermissionResponder;
-		if (escalation || unattended) {
+		const unattended = mainRouted ? !attended && input.mainAutonomy !== "yolo" : !attended;
+		const operatorUnattended = mainRouted && !attended && !unattended;
+		if (escalation || unattended || mainRouted) {
 			spec.escalation = {
 				timeoutMs: escalation?.timeoutMs ?? DEFAULT_ESCALATION_TIMEOUT_MS,
 				fallback: escalation?.fallback ?? DEFAULT_ESCALATION_FALLBACK,
 				...(unattended ? { responder: "none" as const } : {}),
+				...(operatorUnattended ? { operatorResponder: "none" as const } : {}),
+				...(mainRouted && input.grantAttempt !== undefined ? { grant: { ...input.grantAttempt } } : {}),
 			};
 		}
 	}
@@ -2957,6 +3074,133 @@ export function createDispatchBundle(
 	let ledger: Ledger | null = null;
 	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 	const active = new Map<string, ActiveRun>();
+	// Phase D: the trusted broker for worker asks routed to the main agent. It
+	// is process-local, like the workers it answers.
+	const grantAttended = options?.workerPermissionResponder === true;
+	const grantRunFallbacks = new Map<string, "deny" | "fail">();
+	const grantPendingListeners = new Set<(view: WorkerGrantView) => void>();
+	const grantView = (record: GrantRecord): WorkerGrantView => ({
+		requestId: record.requestId,
+		runId: record.runId,
+		rootRunId: record.rootRunId,
+		attempt: record.attempt,
+		agentId: record.agentId,
+		tool: record.tool,
+		actionClass: record.actionClass,
+		approvalAuthority: record.approvalAuthority,
+		state: record.state,
+		execution: record.execution,
+		...(record.issuer !== undefined ? { issuer: record.issuer } : {}),
+		summary: record.summary,
+		...(record.target !== undefined ? { target: record.target } : {}),
+		reasons: [...record.reasons],
+		createdAt: new Date(record.createdAt).toISOString(),
+		deadlineAt: new Date(record.deadlineAt).toISOString(),
+		...(record.reason !== undefined ? { reason: record.reason } : {}),
+		...(record.forwardedByMain === true ? { forwardedByMain: true as const } : {}),
+	});
+	const publishGrantChange = (record: GrantRecord, previous: GrantState | null): void => {
+		const origin = `worker:${record.runId}`;
+		const fallback = grantRunFallbacks.get(record.runId) ?? "deny";
+		const requested = (escalation: boolean): void => {
+			context.bus.emit(BusChannels.PermissionRequested, {
+				tool: record.tool,
+				actionClass: record.actionClass,
+				...(record.ownerSessionId !== null ? { sessionId: record.ownerSessionId } : {}),
+				requestedBy: record.runId,
+				requestId: record.requestId,
+				origin,
+				agentId: record.agentId,
+				summary: record.summary,
+				...(record.target !== undefined ? { target: record.target } : {}),
+				reasons: [...record.reasons],
+				timeoutMs: Math.max(0, record.deadlineAt - now()),
+				fallback,
+				escalation,
+				approvalAuthority: record.approvalAuthority,
+				...(record.forwardedByMain === true ? { forwardedByMain: true } : {}),
+			});
+		};
+		if (previous === null) {
+			// An operator rail goes straight to the operator's card when this
+			// process has one; an ordinary ask waits for the main agent, whose
+			// dispatch call yields on it.
+			requested(record.approvalAuthority === "operator" && grantAttended);
+			if (record.approvalAuthority === "main") {
+				const view = grantView(record);
+				for (const listener of grantPendingListeners) {
+					try {
+						listener(view);
+					} catch {
+						// A listener failure never changes the record; the model still reaches it through monitor.
+					}
+				}
+			}
+			return;
+		}
+		if (previous === "pending" && record.state === "pending") {
+			// The main agent approved below yolo: the operator decides, with the
+			// main agent's request as provenance.
+			if (record.forwardedByMain === true && record.approvalAuthority === "main") requested(true);
+			return;
+		}
+		if (record.state === previous || record.state === "executing") return;
+		const status =
+			record.state === "denied" || record.state === "canceled"
+				? "denied"
+				: record.state === "expired"
+					? "expired"
+					: record.issuer !== undefined
+						? "granted"
+						: "denied";
+		const decidedBy =
+			record.state === "expired"
+				? "timeout"
+				: record.state === "canceled"
+					? "revoked"
+					: record.issuer !== undefined
+						? record.forwardedByMain === true && record.issuer === "operator"
+							? "operator:forwarded-by-main"
+							: record.issuer
+						: "worker";
+		context.bus.emit(BusChannels.PermissionResolved, {
+			status,
+			tool: record.tool,
+			requestId: record.requestId,
+			...(record.ownerSessionId !== null ? { sessionId: record.ownerSessionId } : {}),
+			origin,
+			decidedBy,
+			actionClass: record.actionClass,
+			...(record.reason !== undefined ? { reason: record.reason } : {}),
+			requestedBy: record.runId,
+			...(record.state === "expired" ? { fallback } : {}),
+			grant: {
+				attempt: record.attempt,
+				authority: record.approvalAuthority,
+				...(record.issuer !== undefined ? { issuer: record.issuer } : {}),
+				execution: record.execution,
+				state: record.state,
+			},
+		});
+	};
+	const grantBroker = createGrantBroker({
+		now,
+		deliver: (record, decision, reason) => {
+			const run = active.get(record.runId);
+			if (run?.resolvePermission === undefined) return false;
+			return run.resolvePermission(record.workerRequestId, decision, {
+				attemptToken: record.attemptToken,
+				attempt: record.attempt,
+				argDigest: record.argDigest,
+				issuer: record.issuer ?? "operator",
+				runId: record.runId,
+				grantId: record.requestId,
+				reason: reason.slice(0, 300),
+			});
+		},
+		onChange: (record, previous) => publishGrantChange(record, previous),
+	});
+	const grantUnsubscribes: Array<() => void> = [];
 	const pendingCapacity = new Map<string, PendingCapacityAdmission>();
 	const ownedReservations = new Set<string>();
 	/**
@@ -3489,6 +3733,14 @@ export function createDispatchBundle(
 			// policy decision carried by the receipt, not an operational diagnostic
 			// that should leak into an embedding command's stderr.
 			return { scheduled: false };
+		}
+		if (receipt.safety?.grants?.some((grant) => grant.execution === "unknown") === true) {
+			retryBackoff.delete(rootRunId);
+			return {
+				scheduled: false,
+				settlementDetail:
+					"automatic retry suppressed because a granted call may have run before the worker exited, and its outcome is unknown",
+			};
 		}
 		const potentiallyMutated =
 			receipt.toolActivity?.mutatingSucceeded === true ||
@@ -4356,6 +4608,7 @@ export function createDispatchBundle(
 		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target, pathScope.writeBoundaries.length > 0);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
 		const permit = resolveDispatchPermit(req, recipe, spec, effectiveTools, readOnly, pathScope, settings, target);
+		assertMainGrantRoutable(req, target.runtime, permit);
 		const workerPermissionMode = workerPermissionModeForPermit(permit.allowance);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, workerPermissionMode);
 		const effectiveAdmission: DispatchAdmissionStage = {
@@ -5681,8 +5934,20 @@ export function createDispatchBundle(
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
 		const escalationCounts = { requested: 0, approved: 0, denied: 0, timedOut: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
+		// Phase D: a main-authority permit binds every grant to this attempt.
+		// The token is a host secret: it rides the spec and each decision frame
+		// and never reaches a model or a display.
+		const grantAttempt: WorkerGrantBinding | undefined = mainGrantsUnavailable(lifecycle.permit.allowance)
+			? { attemptToken: randomBytes(16).toString("hex"), attempt: req.lineage?.attempt ?? 0 }
+			: undefined;
 		let spec: WorkerSpec;
 		try {
+			assertMainGrantRoutable(req, lifecycle.target.runtime, lifecycle.permit, placement?.node ?? null);
+			if (grantAttempt !== undefined && placement?.spawn !== undefined) {
+				throw new Error(
+					"dispatch: fleet.permissions.mode=main routes worker asks to the main agent, but this placement launches through a remote transport, which cannot carry a bound grant yet; use fleet.permissions.mode escalate or deny for this work",
+				);
+			}
 			spec = buildDispatchWorkerSpec(
 				{
 					req,
@@ -5703,6 +5968,8 @@ export function createDispatchBundle(
 					...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
 					workerPermissionResponder: options?.workerPermissionResponder === true,
 					permit: lifecycle.permit,
+					...(grantAttempt !== undefined ? { grantAttempt } : {}),
+					mainAutonomy: lifecycle.settings?.safety.autonomy ?? "default",
 				},
 				config ?? undefined,
 			);
@@ -5753,6 +6020,56 @@ export function createDispatchBundle(
 				node: placed,
 			});
 		};
+		// A worker ask routed to the main agent enters the broker here, from the
+		// control lane, bound to this attempt. A request the broker refuses is
+		// denied at once rather than left to wait out its timeout.
+		const onGrantRequest = (request: WorkerGrantRequestFrame): void => {
+			if (grantAttempt === undefined) return;
+			if (request.attemptToken !== grantAttempt.attemptToken || request.attempt !== grantAttempt.attempt) {
+				reportDispatchDiagnostic(
+					`run ${runIdForPermissionAudit ?? "pending"}`,
+					new Error("dropped a grant request that names another attempt"),
+				);
+				return;
+			}
+			const denyAtOnce = (reason: string): void => {
+				sendToWorker?.({
+					type: "permission_decision",
+					requestId: request.requestId,
+					decision: "deny",
+					binding: { ...grantAttempt, argDigest: request.argDigest, issuer: "operator", reason },
+				});
+			};
+			const runId = runIdForPermissionAudit;
+			if (runId === null) {
+				denyAtOnce("the run was not registered yet");
+				return;
+			}
+			const opened = grantBroker.open({
+				workerRequestId: request.requestId,
+				runId,
+				rootRunId: lineage.rootRunId,
+				attempt: request.attempt,
+				attemptToken: grantAttempt.attemptToken,
+				ownerSessionId: req.ownerSessionId ?? null,
+				agentId: req.agentId,
+				...(request.toolCallId !== undefined ? { toolCallId: request.toolCallId } : {}),
+				tool: request.tool,
+				actionClass: request.actionClass,
+				approvalAuthority: request.authority,
+				argDigest: request.argDigest,
+				effect: request.effect,
+				cwd: lifecycle.cwd,
+				permitTools: lifecycle.permit.ceiling.tools,
+				summary: request.summary,
+				...(request.target !== undefined ? { target: request.target } : {}),
+				reasons: request.reasons,
+				// The broker expires a little before the worker's own timer, so the
+				// denial it sends is the one that settles the request.
+				deadlineAt: now() + Math.max(1_000, request.timeoutMs - GRANT_DEADLINE_MARGIN_MS),
+			});
+			if (!opened.ok) denyAtOnce(opened.reason);
+		};
 		const checkoutBefore =
 			lifecycle.runtimeKind === "subprocess" && req.taskWorktree === undefined ? snapshotCheckout(lifecycle.cwd) : null;
 		let worker: SpawnedWorker;
@@ -5765,6 +6082,7 @@ export function createDispatchBundle(
 				monotonicNow,
 				onModelLoaded,
 				...(agentLedgerId !== null ? { onLedgerPost } : {}),
+				...(grantAttempt !== undefined ? { onGrantRequest } : {}),
 			};
 			// Speculative dispatch: a process started on this turn's forecast is used
 			// only for exactly the recipe, target, model, runtime and directory it
@@ -5826,8 +6144,13 @@ export function createDispatchBundle(
 			return steeringProvenance.map((entry) => ({ ...entry }));
 		};
 		const resolvePermission = sendToWorker
-			? (requestId: string, decision: "approve" | "deny") =>
-					sendToWorker({ type: "permission_decision", requestId, decision })
+			? (requestId: string, decision: "approve" | "deny", binding?: WorkerDecisionBinding) =>
+					sendToWorker({
+						type: "permission_decision",
+						requestId,
+						decision,
+						...(binding !== undefined ? { binding } : {}),
+					})
 			: undefined;
 		const heartbeatAt = worker.heartbeatAt;
 		const workerEvents = worker.events;
@@ -5934,7 +6257,8 @@ export function createDispatchBundle(
 					target?: string;
 					axis?: string;
 					timeoutMs?: number;
-					source?: "operator" | "timeout" | "policy" | "remembered";
+					source?: "operator" | "timeout" | "policy" | "remembered" | "main" | "binding";
+					phase?: string;
 				};
 				toolName?: string;
 				toolCallId?: string;
@@ -6004,6 +6328,33 @@ export function createDispatchBundle(
 				}
 			}
 			if (
+				event.type === "clio_coder_permission_grant_execution" &&
+				grantAttempt !== undefined &&
+				event.payload &&
+				typeof event.payload.requestId === "string" &&
+				runIdForPermissionAudit !== null
+			) {
+				const phase = event.payload.phase;
+				if (phase === "start" || phase === "end" || phase === "not_executed") {
+					const detail =
+						phase === "end"
+							? `the granted call ran (${typeof event.payload.outcome === "string" ? event.payload.outcome : "ok"})`
+							: typeof event.payload.detail === "string"
+								? event.payload.detail.slice(0, 500)
+								: undefined;
+					grantBroker.markExecution(runIdForPermissionAudit, event.payload.requestId, phase, detail);
+				}
+			}
+			if (
+				event.type === "clio_coder_permission_escalated" &&
+				event.payload &&
+				typeof event.payload.requestId === "string" &&
+				grantAttempt !== undefined
+			) {
+				// A main-routed ask is presented by the grant broker from the control
+				// lane; this display event only counts it.
+				escalationCounts.requested += 1;
+			} else if (
 				event.type === "clio_coder_permission_escalated" &&
 				event.payload &&
 				typeof event.payload.requestId === "string"
@@ -6084,23 +6435,54 @@ export function createDispatchBundle(
 					}
 				}
 			}
-			if (event.type === "clio_coder_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
+			const brokered =
+				event.type === "clio_coder_permission_resolved" &&
+				grantAttempt !== undefined &&
+				runIdForPermissionAudit !== null &&
+				typeof event.payload?.requestId === "string"
+					? grantBroker.findByWorker(runIdForPermissionAudit, event.payload.requestId)
+					: null;
+			if (brokered !== null && event.payload && runIdForPermissionAudit !== null) {
+				// The broker owns the audit rows of a brokered request; the worker's
+				// resolution only settles a record it has not settled itself.
+				const source = event.payload.source;
+				const approved = event.payload.decision === "approved";
+				if (source === "timeout") escalationCounts.timedOut += 1;
+				else if (source === "main" || source === "operator") {
+					if (approved) escalationCounts.approved += 1;
+					else escalationCounts.denied += 1;
+				}
+				grantBroker.workerResolved(
+					runIdForPermissionAudit,
+					brokered.workerRequestId,
+					approved ? "approved" : "denied",
+					typeof event.payload.reason === "string" ? event.payload.reason.slice(0, 500) : "resolved by the worker",
+				);
+			} else if (
+				event.type === "clio_coder_permission_resolved" &&
+				event.payload &&
+				typeof event.payload.tool === "string"
+			) {
 				// Escalation resolutions already have a request event. Policy
 				// deny/fail is non-stalling, so dispatch mints the adjacent pair.
 				const source = event.payload.source;
-				const granted = (source === "operator" || source === "remembered") && event.payload.decision === "approved";
+				const granted = (source === "operator" || source === "main") && event.payload.decision === "approved";
 				const decidedBy =
 					source === "operator"
 						? "operator"
-						: source === "remembered"
-							? "operator:remembered"
-							: source === "timeout"
-								? "timeout"
-								: "policy:no-operator";
+						: source === "main"
+							? "main"
+							: source === "remembered"
+								? "remembered-denial"
+								: source === "timeout"
+									? "timeout"
+									: source === "binding"
+										? "policy:grant-binding"
+										: "policy:no-operator";
 				const requestId =
 					typeof event.payload.requestId === "string"
 						? event.payload.requestId
-						: source === "operator" || source === "timeout" || source === "remembered"
+						: source === "operator" || source === "timeout" || source === "remembered" || source === "main"
 							? undefined
 							: `worker-permission-${++workerPolicyPermissionCounter}`;
 				const origin = runIdForPermissionAudit !== null ? `worker:${runIdForPermissionAudit}` : undefined;
@@ -6109,7 +6491,11 @@ export function createDispatchBundle(
 					typeof event.payload.reason === "string" ? event.payload.reason : `${event.payload.tool} requires approval`;
 				// A remembered answer never raised an escalation card, so it mints
 				// the adjacent request/resolve pair the way policy denials do.
-				if ((decidedBy === "policy:no-operator" || source === "remembered") && requestId && origin) {
+				if (
+					(decidedBy === "policy:no-operator" || decidedBy === "policy:grant-binding" || source === "remembered") &&
+					requestId &&
+					origin
+				) {
 					context.bus.emit(BusChannels.PermissionRequested, {
 						tool: event.payload.tool,
 						actionClass,
@@ -6191,6 +6577,7 @@ export function createDispatchBundle(
 				toolSignature: lifecycle.toolSignature,
 			});
 			runIdForPermissionAudit = envelope.id;
+			if (grantAttempt !== undefined) grantRunFallbacks.set(envelope.id, spec.escalation?.fallback ?? "deny");
 			lineage = lineageFor(req, envelope.id);
 			if (req.lineage === undefined) {
 				if (capacityLease.assignmentId !== lineage.rootRunId) {
@@ -6538,6 +6925,7 @@ export function createDispatchBundle(
 								}
 							: safetyDecisionCounts,
 					blockedAttempts,
+					...(grantAttempt !== undefined ? receiptGrantAudit(grantBroker.list({ runId: envelope.id }), envelope.id) : {}),
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
 					...(lifecycle.readOnly ? { readOnly: true as const } : {}),
@@ -6658,6 +7046,12 @@ export function createDispatchBundle(
 						`run ${envelope.id}`,
 						new Error("event stream did not drain before receipt finalization"),
 					);
+				}
+				// The worker is gone: every grant it held settles now, after its last
+				// execution report drained. Retries run as new attempts with new requests.
+				if (grantAttempt !== undefined) {
+					grantBroker.revokeRun(envelope.id, "the worker exited", { final: true });
+					grantRunFallbacks.delete(envelope.id);
 				}
 				if (eventPump.droppedEvents() > 0) {
 					reportDispatchDiagnostic(
@@ -7309,6 +7703,7 @@ export function createDispatchBundle(
 			settings,
 			target,
 		);
+		assertMainGrantRoutable(req, target.runtime, previewPermit);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, workerPermissionModeForPermit(previewPermit.allowance));
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema, effectiveTools.length);
 		assertWriteRootsEnforceable(target.runtime, pathScope.writeBoundaries);
@@ -7802,6 +8197,26 @@ export function createDispatchBundle(
 			// whose caller iterates the handle itself (every operator path) as
 			// well as one drained by the dispatch tool's event registry.
 			if (options?.journalRunEvents === true) journalBridge = attachRunEventJournalBridge(context.bus);
+			// Phase D revocation: a pending grant never outlives its owner. A
+			// session that parks or ends and a main turn the operator cancels
+			// revoke what they hold; a run's own exit and abort revoke at the run.
+			grantUnsubscribes.push(
+				context.bus.on(BusChannels.SessionParked, (payload) => {
+					grantBroker.revokeSession(
+						payload.sessionId,
+						`the owning session was ${payload.reason === "close" ? "closed" : "parked"}`,
+					);
+				}),
+				context.bus.on(BusChannels.SessionEnd, () => {
+					const sessions = new Set(grantBroker.list({ state: "pending" }).map((record) => record.ownerSessionId));
+					for (const sessionId of sessions) grantBroker.revokeSession(sessionId, "the owning session ended");
+				}),
+				context.bus.on(BusChannels.RunAborted, (payload) => {
+					if (payload.runId !== null) return;
+					if (payload.source !== "stream_cancel" && payload.source !== "loop_guard") return;
+					grantBroker.revokeSession(options?.getSessionId?.() ?? null, "the owning main turn was canceled");
+				}),
+			);
 			// No in-memory executor survives a process restart, so every active
 			// side-store lease from an earlier bundle is orphaned and must expire.
 			cleanupDispatchReservations({ startup: true, nowMs: now() });
@@ -7878,6 +8293,8 @@ export function createDispatchBundle(
 			// bridge stops listening.
 			journalBridge?.stop();
 			journalBridge = null;
+			for (const unsubscribe of grantUnsubscribes.splice(0)) unsubscribe();
+			grantBroker.dispose();
 		},
 	};
 
@@ -8029,6 +8446,7 @@ export function createDispatchBundle(
 		for (const run of runs) {
 			emitRunAborted(run, "dispatch_drain");
 			run.aborted = true;
+			grantBroker.revokeRun(run.runId, "the owning session is shutting down");
 			try {
 				run.abort();
 			} catch {
@@ -8077,6 +8495,123 @@ export function createDispatchBundle(
 			if (current === null || run.lineage.attempt > current.lineage.attempt) current = run;
 		}
 		return current;
+	}
+
+	/**
+	 * The main agent's answer to one worker ask (Phase D). Denial always
+	 * settles. Approval is admitted by grant-authority.ts: granted as the main
+	 * agent's own call at yolo, forwarded to an attended operator below yolo,
+	 * refused and denied otherwise.
+	 */
+	async function decideGrantAsMain(
+		input: Parameters<NonNullable<DispatchContract["grants"]>["decideAsMain"]>[0],
+	): Promise<MainGrantOutcome> {
+		const record = grantBroker.get(input.requestId);
+		if (record === null) return { ok: false, message: `unknown permission request '${input.requestId}'` };
+		const base = { sessionId: input.sessionId, runId: input.runId };
+		const failed = (reason: string, view?: GrantRecord): MainGrantOutcome => ({
+			ok: false,
+			message: reason,
+			...(view !== undefined ? { view: grantView(view) } : {}),
+		});
+		if (input.decision === "deny") {
+			const result = grantBroker.decide(input.requestId, {
+				...base,
+				decision: "deny",
+				issuer: "main",
+				reason: "denied by the main agent",
+			});
+			if (!result.ok) return failed(result.reason, result.record);
+			return {
+				ok: true,
+				view: grantView(result.record),
+				decision: "denied",
+				decidedBy: result.record.issuer ?? "main",
+				message: result.duplicate
+					? `request ${input.requestId} was already denied`
+					: `denied request ${input.requestId}; the worker continues without the ${result.record.tool} call`,
+			};
+		}
+		if (record.state !== "pending") {
+			const result = grantBroker.decide(input.requestId, { ...base, decision: "approve", issuer: "main" });
+			if (!result.ok) return failed(result.reason, result.record);
+			return {
+				ok: true,
+				view: grantView(result.record),
+				decision: "approved",
+				decidedBy: result.record.issuer ?? "main",
+				message: `request ${input.requestId} is already ${result.record.state}; one approval runs the call at most once`,
+			};
+		}
+		if (record.ownerSessionId !== input.sessionId) {
+			return failed(`permission request '${input.requestId}' belongs to another session`);
+		}
+		if (input.runId !== record.runId && input.runId !== record.rootRunId) {
+			return failed(`permission request '${input.requestId}' belongs to run ${record.runId}, not '${input.runId}'`);
+		}
+		const verdict = evaluateMainGrant({
+			record,
+			autonomy: input.autonomy,
+			attended: grantAttended,
+			safety,
+			...(input.turnConstraints !== undefined ? { turnConstraints: input.turnConstraints } : {}),
+		});
+		if (verdict.kind === "grant") {
+			const result = grantBroker.decide(input.requestId, {
+				...base,
+				decision: "approve",
+				issuer: "main",
+				reason: "granted by the main agent at yolo",
+			});
+			if (!result.ok) return failed(result.reason, result.record);
+			return {
+				ok: true,
+				view: grantView(result.record),
+				decision: "approved",
+				decidedBy: "main",
+				message: `approved request ${input.requestId}: the worker runs this ${record.tool} call once; the approval does not cover any later call`,
+			};
+		}
+		if (verdict.kind === "deny") {
+			const result = grantBroker.decide(input.requestId, {
+				...base,
+				decision: "deny",
+				issuer: "main",
+				reason: `the main agent's approval was refused: ${verdict.reason}`,
+			});
+			return failed(
+				`approval refused: ${verdict.reason}. Request ${input.requestId} is ${result.ok ? "denied" : (result.record?.state ?? "settled")} and the worker continues without the call`,
+				result.ok ? result.record : result.record,
+			);
+		}
+		// Main below yolo, attended: the operator decides; the main agent's
+		// approval is recorded as provenance on the card and the receipt.
+		grantBroker.markForwarded(input.requestId);
+		const settled = await grantBroker.waitForDecision(input.requestId, input.signal);
+		if (settled === null) {
+			return failed(
+				`request ${input.requestId} is with the operator (${verdict.reason}); it stays pending until they answer or it expires`,
+			);
+		}
+		if (settled.state === "denied") {
+			return {
+				ok: true,
+				view: grantView(settled),
+				decision: "denied",
+				decidedBy: settled.issuer ?? "operator",
+				message: `the operator denied request ${input.requestId}; the worker continues without the ${settled.tool} call`,
+			};
+		}
+		if (settled.state === "authorized" || settled.state === "executing" || settled.state === "completed") {
+			return {
+				ok: true,
+				view: grantView(settled),
+				decision: "approved",
+				decidedBy: settled.issuer ?? "operator",
+				message: `the operator approved request ${input.requestId} (${verdict.reason}); the worker runs this ${settled.tool} call once`,
+			};
+		}
+		return failed(`request ${input.requestId} ${settled.state} before the operator answered`, settled);
 	}
 
 	const contract: DispatchContract = {
@@ -8191,6 +8726,7 @@ export function createDispatchBundle(
 			if (!run) return;
 			emitRunAborted(run, "dispatch_abort");
 			run.aborted = true;
+			grantBroker.revokeRun(run.runId, "the run was canceled");
 			// A timeout kill rides the abort path but must not launder into an
 			// operator abort: record the cause so the receipt names the timeout.
 			if (reason) run.abortDetail = reason.detail;
@@ -8223,6 +8759,14 @@ export function createDispatchBundle(
 			}
 		},
 		resolveWorkerPermission(runId, requestId, decision) {
+			// A brokered request is decided against its record: the operator's
+			// answer is bound to the attempt and argument digest the worker parked.
+			const brokered = grantBroker.get(requestId);
+			if (brokered !== null) {
+				const result = grantBroker.decide(requestId, { decision, issuer: "operator", runId });
+				if (!result.ok) throw new Error(`resolveWorkerPermission: ${result.reason}`);
+				return;
+			}
 			const run = currentAssignmentRun(runId);
 			if (!run) {
 				throw new Error(
@@ -8244,6 +8788,28 @@ export function createDispatchBundle(
 					`resolveWorkerPermission: run '${runId}' no longer accepts input; the worker has exited or its stdin is closed`,
 				);
 			}
+		},
+		grants: {
+			list(filter = {}) {
+				return grantBroker
+					.list({
+						...(filter.sessionId !== undefined ? { sessionId: filter.sessionId } : {}),
+						...(filter.runId !== undefined ? { runId: filter.runId } : {}),
+						...(filter.pendingOnly === true ? { state: "pending" as const } : {}),
+					})
+					.map(grantView);
+			},
+			get(requestId) {
+				const record = grantBroker.get(requestId);
+				return record === null ? null : grantView(record);
+			},
+			onPending(listener) {
+				grantPendingListeners.add(listener);
+				return () => {
+					grantPendingListeners.delete(listener);
+				};
+			},
+			decideAsMain: (input) => decideGrantAsMain(input),
 		},
 		detached: {
 			register: registerDetachedBatch,

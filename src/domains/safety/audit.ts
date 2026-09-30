@@ -98,6 +98,14 @@ export interface PermissionAuditRecord {
 	actionClass?: string;
 	reason?: string;
 	requestedBy?: string;
+	/** Live-grant facts: attempt, authority, issuer and execution state (Phase D). */
+	grant?: {
+		attempt: number;
+		authority: "main" | "operator";
+		issuer?: "main" | "operator";
+		execution: "not_executed" | "executing" | "executed" | "unknown";
+		state: string;
+	};
 }
 
 export type AbortSource = "dispatch_abort" | "dispatch_drain" | "stream_cancel" | "loop_guard";
@@ -344,6 +352,7 @@ export function buildPermissionAuditRecord(input: {
 	actionClass?: string;
 	reason?: string;
 	requestedBy?: string;
+	grant?: PermissionAuditRecord["grant"];
 	now?: Date;
 }): PermissionAuditRecord {
 	const now = input.now ?? new Date();
@@ -362,6 +371,7 @@ export function buildPermissionAuditRecord(input: {
 	if (input.actionClass !== undefined) record.actionClass = input.actionClass;
 	if (input.reason !== undefined) record.reason = input.reason;
 	if (input.requestedBy !== undefined) record.requestedBy = input.requestedBy;
+	if (input.grant !== undefined) record.grant = { ...input.grant };
 	return record;
 }
 

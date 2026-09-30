@@ -579,6 +579,22 @@ export interface ToolActivitySummary {
 	mutatingSucceeded: boolean;
 }
 
+/** One live-grant request on a worker receipt: who could decide, who did, and whether the call ran. */
+export interface RunGrantAudit {
+	requestId: string;
+	attempt: number;
+	tool: string;
+	actionClass: string;
+	authority: "main" | "operator";
+	/** Who decided; absent when nobody did (expiry, cancellation). */
+	issuer?: "main" | "operator";
+	/** True when the main agent asked the operator instead of deciding itself. */
+	forwardedByMain?: true;
+	decision: "approved" | "denied" | "expired" | "canceled";
+	execution: "not_executed" | "executed" | "unknown";
+	reason?: string;
+}
+
 export interface SafetyBlockedAttempt {
 	tool: string;
 	posture?: string;
@@ -657,6 +673,12 @@ export interface RunReceiptSafetySummary {
 		escalationTimedOut?: number;
 	};
 	blockedAttempts: SafetyBlockedAttempt[];
+	/**
+	 * Worker asks this attempt routed to the main agent's grant broker (Phase
+	 * D), one entry per request, oldest first. Present only when the run
+	 * opened at least one, so other receipts keep their exact shape.
+	 */
+	grants?: RunGrantAudit[];
 	/**
 	 * Blocked attempts left out of `blockedAttempts` by the main agent's receipt
 	 * bound (50 entries, each reason clipped to 500 characters; see
