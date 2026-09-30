@@ -133,6 +133,27 @@ describe("loop guard identical-call epoch", () => {
 		}
 	});
 
+	it("grants another epoch to a pending collect that blocked, but not to an instant unchanged one (D3)", () => {
+		for (const blocked of [true, false]) {
+			const guard = createLoopGuardRegistration({ safety: createWorkerSafety() });
+			const turn = blocked ? "collect-blocked" : "collect-instant";
+			const pending = (): MiddlewareHookInput => {
+				const input = afterCollect(turn, 2);
+				if (blocked) input.toolResultDetails = { ...input.toolResultDetails, timedOut: true, waitedMs: 6000 };
+				return input;
+			};
+			deepStrictEqual(guard.evaluate(beforeCollect(turn)), []);
+			guard.evaluate(pending());
+			deepStrictEqual(guard.evaluate(beforeCollect(turn)), []);
+			guard.evaluate(pending());
+			strictEqual(
+				guard.evaluate(beforeCollect(turn)).some((effect) => effect.kind === "block_tool"),
+				!blocked,
+				turn,
+			);
+		}
+	});
+
 	it("permits recovery through a different successful call before locking the turn", () => {
 		const guard = createLoopGuardRegistration({
 			safety: createWorkerSafety(),
