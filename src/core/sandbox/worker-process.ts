@@ -1,5 +1,7 @@
-import { realpathSync, statSync } from "node:fs";
+import { closeSync, constants, mkdirSync, openSync, realpathSync, statSync } from "node:fs";
+import path from "node:path";
 import { workerSecretPaths } from "../../domains/safety/secret-paths.js";
+import { canonicalizePath } from "../path-canonical.js";
 import { sandboxAvailability } from "./availability.js";
 import { buildSandboxInvocation } from "./invocation.js";
 import type {
@@ -74,6 +76,44 @@ function physical(entry: string): string {
 	}
 }
 
+/** Materialize admitted directory boundaries without creating through an escaping link. */
+function writableRoot(entry: string, workspace: string): string {
+	// Exact-file boundaries cannot be replaced with directories or widened to
+	// their parent just to make the mount possible.
+	if (!entry.endsWith("/")) return physical(entry);
+	const root = realpathSync(workspace);
+	const target = canonicalizePath(entry);
+	const contained = (candidate: string): boolean => {
+		const relative = path.relative(root, candidate);
+		return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+	};
+	if (target === null || !contained(target)) {
+		throw new Error(`sandbox: writable directory ${entry} resolves outside the worker workspace`);
+	}
+	// Pin each parent while creating its child: a worker replacing an ancestor
+	// with a link cannot redirect this host-side mkdir outside the workspace.
+	const flags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+	let directory = openSync(root, flags);
+	try {
+		for (const component of path.relative(root, target).split(path.sep).filter(Boolean)) {
+			const child = `/proc/self/fd/${directory}/${component}`;
+			try {
+				mkdirSync(child);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			}
+			const next = openSync(child, flags);
+			closeSync(directory);
+			directory = next;
+		}
+		const created = realpathSync(`/proc/self/fd/${directory}`);
+		if (!contained(created)) throw new Error(`sandbox: writable directory ${entry} escaped the worker workspace`);
+		return created;
+	} finally {
+		closeSync(directory);
+	}
+}
+
 /** Compose the invocation for one command under a worker policy and the probed backend. */
 export function composeWorkerSandboxInvocation(
 	policy: WorkerSandboxSpec,
@@ -86,7 +126,9 @@ export function composeWorkerSandboxInvocation(
 	const spec: SandboxInvocationSpec = {
 		command,
 		cwd: physical(cwd),
-		writableRoots: policy.writableRoots.map(physical),
+		writableRoots: policy.writableRoots.map((entry) =>
+			availability.backend === "bwrap" ? writableRoot(entry, policy.readableRoots[0] ?? cwd) : physical(entry),
+		),
 		readOnlyPaths: policy.readOnlyPaths.map(physical),
 		gitWritablePaths: policy.gitWritablePaths.map(physical),
 		readableRoots: policy.readableRoots.map(physical),
@@ -124,12 +166,17 @@ export function planSandboxedSpawn(
 	const availability = sandboxAvailability();
 	// v060 review F1: only the typed Git seam supplies metadata writes, scoped
 	// to this invocation; ordinary commands cannot inherit them from a spec.
-	const invocation = composeWorkerSandboxInvocation(
-		{ ...policy, gitWritablePaths: typedGitWritablePaths },
-		command,
-		cwd,
-		availability,
-	);
+	let invocation: SandboxInvocation | null;
+	try {
+		invocation = composeWorkerSandboxInvocation(
+			{ ...policy, gitWritablePaths: typedGitWritablePaths },
+			command,
+			cwd,
+			availability,
+		);
+	} catch (error) {
+		return { kind: "refused", message: error instanceof Error ? error.message : String(error) };
+	}
 	if (invocation !== null) return { kind: "sandboxed", file: invocation.file, args: invocation.args };
 	const reason = availability.reason ?? "no sandbox backend";
 	if (policy.mode === "required") {
