@@ -111,8 +111,11 @@ test("the reference covers every route and prints the keyboard table verbatim", 
 			assert.equal(section.entries.length, 0, `${section.id} is reserved but carries entries`);
 			assert.ok(section.reserved.startsWith("This build of the app"));
 		}
-	const interview = HELP_SECTIONS.find((section) => section.reserved?.includes("Alt+A"));
-	assert.ok(interview, "the reserved interview slot must state that it never reuses the approval keys");
+	const interview = HELP_SECTIONS.find((section) => section.id === "interview");
+	assert.ok(interview);
+	assert.equal(interview.reserved, undefined);
+	assert.ok(interview.entries.length > 0, "the implemented interview flow has actionable help");
+	assert.match(interview.lede, /never use the Alt\+A or Alt\+R approval shortcuts/);
 });
 
 test("help search matches every word across any field and reports nothing as nothing", () => {
