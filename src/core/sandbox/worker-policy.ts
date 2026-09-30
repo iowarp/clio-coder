@@ -20,6 +20,8 @@ export interface WorkerSandboxPolicyInput {
 	allowedTools: ReadonlyArray<string>;
 	/** `safety.sandboxNetwork`: the operator's standing network grant for worker commands. */
 	networkSetting: boolean;
+	/** Parent checkouts supplying shared task dependencies; also visible when under /tmp. */
+	dependencyRoots?: ReadonlyArray<string>;
 }
 
 /**
@@ -55,12 +57,13 @@ export function resolveWorkerSandboxSpec(input: WorkerSandboxPolicyInput): Worke
 		input.cwd,
 		...(input.taskWorktree !== undefined ? [input.taskWorktree.path] : []),
 		...(layout !== null ? [layout.commonDir] : []),
+		...(input.dependencyRoots ?? []),
 	];
 	return {
 		version: WORKER_SANDBOX_SPEC_VERSION,
 		mode: input.mode,
 		writableRoots,
-		readOnlyPaths: [...new Set(writableRoots.flatMap(protectedInside))],
+		readOnlyPaths: [...new Set([...writableRoots.flatMap(protectedInside), ...(input.dependencyRoots ?? [])])],
 		gitWritablePaths: [],
 		readableRoots: [...new Set(readableRoots)],
 		network: workerSandboxNetwork(input.allowedTools, input.networkSetting),

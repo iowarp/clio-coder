@@ -13,6 +13,7 @@ import {
 	realpathSync,
 	renameSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -315,6 +316,87 @@ export function createTaskWorktree(
 		{ encoding: "utf8", flag: "wx" },
 	);
 	return { root: canonical, runId, path, parent, branch, base: resolvedBase, ownerToken };
+}
+
+const DEPENDENCY_INPUTS = {
+	node_modules: [
+		"package.json",
+		"pnpm-lock.yaml",
+		"pnpm-workspace.yaml",
+		"package-lock.json",
+		"yarn.lock",
+		"bun.lock",
+		"bun.lockb",
+		".npmrc",
+	],
+	".venv": [
+		"pyproject.toml",
+		"uv.lock",
+		"poetry.lock",
+		"Pipfile",
+		"Pipfile.lock",
+		"requirements.txt",
+		"setup.py",
+		"setup.cfg",
+	],
+};
+
+function dependencyInput(path: string): Buffer | null {
+	try {
+		return readFileSync(path);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+		throw error;
+	}
+}
+
+/** Reuse installed environments only when the caller enforces these returned roots as read-only. */
+export function shareTaskWorktreeDependencies(worktree: TaskWorktree): string[] {
+	if (isCanonicalWorktreePathInside(worktree.root, worktree.path)) return [];
+	assertOwnership(worktree);
+	const readOnlyRoots = new Set<string>();
+	for (const [name, inputs] of Object.entries(DEPENDENCY_INPUTS)) {
+		let source: string;
+		try {
+			source = realpathSync(join(worktree.root, name));
+			if (!lstatSync(source).isDirectory()) continue;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+			throw error;
+		}
+		// An environment may link workspace packages beside it; protect that checkout too.
+		const sourceRoot = dirname(source);
+		if (sourceRoot === worktree.path || isCanonicalWorktreePathInside(sourceRoot, worktree.path)) continue;
+		if (
+			!inputs.every((name) => {
+				const parent = dependencyInput(join(worktree.root, name));
+				const task = dependencyInput(join(worktree.path, name));
+				return parent === null ? task === null : task !== null && parent.equals(task);
+			})
+		) {
+			continue;
+		}
+		try {
+			git(worktree.path, ["check-ignore", "-q", "--", `${name}/`]);
+		} catch (error) {
+			if ((error as { status?: number }).status === 1) continue;
+			throw error;
+		}
+		const destination = join(worktree.path, name);
+		if (!existsSync(destination)) {
+			// A real ignored directory keeps links out of commits even with a `node_modules/` rule.
+			mkdirSync(destination);
+			try {
+				for (const entry of readdirSync(source)) symlinkSync(join(source, entry), join(destination, entry));
+			} catch (error) {
+				rmSync(destination, { recursive: true, force: true });
+				throw error;
+			}
+		}
+		readOnlyRoots.add(worktree.root);
+		readOnlyRoots.add(sourceRoot);
+	}
+	return [...readOnlyRoots];
 }
 
 function assertOwnership(worktree: TaskWorktree): void {

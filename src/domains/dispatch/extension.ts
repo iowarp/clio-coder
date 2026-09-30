@@ -65,6 +65,7 @@ import {
 	createTaskWorktree,
 	gitCheckoutRoot,
 	settleTaskWorktree,
+	shareTaskWorktreeDependencies,
 	snapshotTaskWorktree,
 } from "../../tools/task-worktree.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
@@ -2465,10 +2466,15 @@ function workerSandboxFor(input: {
 	settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined;
 }): { applies: boolean; spec: WorkerSandboxSpec | undefined } {
 	if (input.runtimeKind !== "http") return { applies: false, spec: undefined };
+	const mode = input.settings?.safety.sandbox ?? "auto";
+	const dependencyRoots =
+		input.req.taskWorktree !== undefined && mode !== "off" && sandboxAvailability().available
+			? shareTaskWorktreeDependencies(input.req.taskWorktree)
+			: [];
 	return {
 		applies: true,
 		spec: resolveWorkerSandboxSpec({
-			mode: input.settings?.safety.sandbox ?? "auto",
+			mode,
 			readOnly: input.readOnly,
 			cwd: input.req.cwd ?? process.cwd(),
 			writeBoundaries: input.pathScope.writeBoundaries,
@@ -2477,6 +2483,7 @@ function workerSandboxFor(input: {
 				: {}),
 			allowedTools: input.allowedTools,
 			networkSetting: input.settings?.safety.sandboxNetwork === true,
+			dependencyRoots,
 		}),
 	};
 }

@@ -8,6 +8,7 @@ import type { WorkerRecall } from "../domains/context/worker/recall.js";
  * its registry factory, and the tool signature a worker attests.
  */
 
+import { workerReadOnlyTargetViolation } from "../core/sandbox/worker-process.js";
 import type { ToolName } from "../core/tool-names.js";
 import {
 	createMiddlewareContractFromSnapshot,
@@ -122,7 +123,7 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 		isSubset,
 		policy: {
 			metadata: (posture) => policyEngine.metadata(posture),
-			writeTargetViolation: (target) => policyEngine.writeTargetViolation(target),
+			writeTargetViolation: (target) => workerReadOnlyTargetViolation(target) ?? policyEngine.writeTargetViolation(target),
 			allowsObservationPath: (path) =>
 				policyEngine.evaluate({ tool: "read", args: { path } }).reasonCode !== "path-policy:zeroAccessPaths",
 		},
