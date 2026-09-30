@@ -106,7 +106,7 @@ export const HandoffPanel = memo(function HandoffPanel({
 	});
 	const shown = refusal ? handoffRefusal(refusal) : null;
 	return (
-		<details className="command-panel session-board handoff-panel" open={held ? true : undefined}>
+		<details className="command-panel session-board handoff-panel" open>
 			<summary>Hand off to a new conversation</summary>
 			{!sessionOpen ? <p>This session is not open. Load it to hand it off.</p> : null}
 			{sessionOpen && !supported ? <p>This Clio Coder session cannot hand itself off.</p> : null}

@@ -67,6 +67,7 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 						// after the event stream catches up. Heal the visible read on reconnect.
 						void queries.invalidateQueries({ queryKey: ["session"] });
 						void queries.invalidateQueries({ queryKey: ["sessions"] });
+						void queries.invalidateQueries({ queryKey: ["session-interview"] });
 					}
 					disconnected = false;
 				}
@@ -89,6 +90,10 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 						invalidate.add(key);
 			}
 			if (event.type === "operation.progress") operations.push({ ...event.payload });
+			if (event.type === "interview.changed") {
+				void queries.cancelQueries({ queryKey: ["session-interview", event.payload.resource], exact: true });
+				queries.setQueryData(["session-interview", event.payload.resource], event.payload.round);
+			}
 			if (event.type === "toolchain.changed") invalidate.add("tools");
 		}
 		if (resynced) {
@@ -129,6 +134,7 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 			"operation.progress",
 			"operation.finished",
 			"toolchain.changed",
+			"interview.changed",
 			...Object.keys(SessionDeltas),
 		])
 			source.addEventListener(type, receive as EventListener);

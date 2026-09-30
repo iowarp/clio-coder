@@ -3,11 +3,13 @@ import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SettingControl, SettingsControls, SettingWritten } from "../../contracts/settings-controls.js";
-import { ApiProblem, type Client, emptyInput } from "../api/client.js";
+import { STRUCTURED_SETTINGS } from "../../contracts/structured-settings.js";
+import { type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { useOperation } from "../api/queries.js";
 import { MODEL_TARGET_PATHS } from "./model-options.js";
 import { ModelSelect } from "./model-select.js";
+import { StructuredSettingsEditor } from "./StructuredSettingsEditor.js";
 import {
 	emptyMeaning,
 	groupControls,
@@ -107,14 +109,16 @@ function ControlRow({
 	save,
 	workspaceId,
 	draft,
+	expectedValue,
 	onDraft,
 	catalog,
 	compact = false,
 }: {
 	control: SettingControl;
-	save: (write: { path: string; value: string; confirmed?: boolean }) => Promise<SettingWritten>;
+	save: (write: { path: string; value: string; confirmed?: boolean; expectedValue?: string }) => Promise<SettingWritten>;
 	workspaceId: string;
 	draft: string | null;
+	expectedValue: string | undefined;
 	onDraft: (value: string | null, submittedValue?: string) => void;
 	catalog?: ModelCatalog | undefined;
 	compact?: boolean;
@@ -122,6 +126,8 @@ function ControlRow({
 	const fieldId = useId(),
 		helpId = useId();
 	const submitting = useRef(false);
+	const [structuredValid, setStructuredValid] = useState(true);
+	const [editorRevision, setEditorRevision] = useState(0);
 	const [confirmed, setConfirmed] = useState(false),
 		[saved, setSaved] = useState<{ sentences: string[]; timing: SettingWritten["timing"] } | null>(null);
 	const write = useMutation({
@@ -149,10 +155,11 @@ function ControlRow({
 		write.reset();
 	};
 	const writable = control.access === "writable";
+	const structured = control.kind === "json" && !!STRUCTURED_SETTINGS[control.path];
 	return (
 		<div className="setting-control" data-access={control.access}>
 			<div className="setting-control__about">
-				<label htmlFor={writable ? fieldId : undefined}>{control.label}</label>
+				<label htmlFor={writable && !structured ? fieldId : undefined}>{control.label}</label>
 				<p id={helpId}>{control.description}</p>
 				{control.help && <p className="setting-control__help">{control.help}</p>}
 				{control.note && <p className="setting-control__note">{control.note}</p>}
@@ -174,13 +181,29 @@ function ControlRow({
 					<form
 						onSubmit={(event) => {
 							event.preventDefault();
-							if (dirty && !submitting.current) {
+							if (dirty && structuredValid && !submitting.current) {
 								submitting.current = true;
-								write.mutate({ path: control.path, value, ...(control.confirm ? { confirmed } : {}) });
+								write.mutate({
+									path: control.path,
+									value,
+									expectedValue: expectedValue ?? control.value,
+									...(control.confirm ? { confirmed } : {}),
+								});
 							}
 						}}
 					>
-						{catalog ? (
+						{structured ? (
+							<StructuredSettingsEditor
+								key={`${control.value}:${editorRevision}`}
+								path={control.path}
+								value={value}
+								disabled={write.isPending}
+								onChange={edit}
+								suggestions={control.suggestions}
+								onValidityChange={setStructuredValid}
+								describedBy={helpId}
+							/>
+						) : catalog ? (
 							<ModelSelect
 								id={fieldId}
 								describedBy={helpId}
@@ -249,10 +272,21 @@ function ControlRow({
 						)}
 						{dirty && (
 							<div className="setting-control__actions">
-								<button type="submit" className="primary" disabled={write.isPending || (!!control.confirm && !confirmed)}>
+								<button
+									type="submit"
+									className="primary"
+									disabled={write.isPending || !structuredValid || (!!control.confirm && !confirmed)}
+								>
 									{write.isPaused ? "Waiting…" : write.isPending ? "Saving…" : "Save"}
 								</button>
-								<button type="button" disabled={write.isPending} onClick={() => edit(control.value)}>
+								<button
+									type="button"
+									disabled={write.isPending}
+									onClick={() => {
+										edit(control.value);
+										setEditorRevision((previous) => previous + 1);
+									}}
+								>
 									Revert
 								</button>
 							</div>
@@ -260,9 +294,6 @@ function ControlRow({
 						{write.error && (
 							<p className="setting-control__error" role="alert">
 								{write.error.message}
-								{write.error instanceof ApiProblem && write.error.problem.code === "conflict"
-									? " A project file sets this value."
-									: ""}
 							</p>
 						)}
 						{saved && (
@@ -287,6 +318,7 @@ export function SettingsControlsView({
 	compact?: boolean;
 }) {
 	const queries = useQueryClient();
+	const selectionId = useId();
 	const [search, setSearch] = useSearchParams();
 	const [localDiscovery, setLocalDiscovery] = useState<{ section: string | null; q: string }>({ section: null, q: "" });
 	const [selectedControl, setSelectedControl] = useState<string | null>(null);
@@ -311,7 +343,7 @@ export function SettingsControlsView({
 		);
 	};
 	const [showDrafts, setShowDrafts] = useState(false);
-	const [drafts, setDrafts, updateDraft] = useSettingsDrafts(client, workspaceId);
+	const [drafts, setDrafts, updateDraft, originalDraftValue] = useSettingsDrafts(client, workspaceId);
 	const key = ["settings-controls", workspaceId];
 	const report = useQuery({
 		queryKey: key,
@@ -411,7 +443,7 @@ export function SettingsControlsView({
 				</button>
 			</div>
 		);
-	const save = async (body: { path: string; value: string; confirmed?: boolean }) => {
+	const save = async (body: { path: string; value: string; confirmed?: boolean; expectedValue?: string }) => {
 		const result = await client.call(routes.writeSetting, { params: { id: workspaceId }, query: {}, body });
 		queries.setQueryData<SettingsControls>(key, result.controls);
 		for (const stale of ["workspace-settings", "config-graph", "targets", "routing"])
@@ -465,9 +497,10 @@ export function SettingsControlsView({
 			</label>
 			{compact ? (
 				<div className="sidebar-settings__selection">
-					<label>
-						Section
+					<div className="sidebar-settings__field">
+						<label htmlFor={`${selectionId}-section`}>Section</label>
 						<select
+							id={`${selectionId}-section`}
 							value={active ?? "all"}
 							onChange={(event) => {
 								discover(event.target.value, "");
@@ -481,11 +514,12 @@ export function SettingsControlsView({
 								</option>
 							))}
 						</select>
-					</label>
+					</div>
 					{active !== "targets" && active !== "advanced" && (
-						<label>
-							Setting · {visible.length}
+						<div className="sidebar-settings__field">
+							<label htmlFor={`${selectionId}-setting`}>Setting · {visible.length}</label>
 							<select
+								id={`${selectionId}-setting`}
 								value={chosen?.path ?? ""}
 								disabled={!visible.length}
 								onChange={(event) => setSelectedControl(event.target.value)}
@@ -502,7 +536,7 @@ export function SettingsControlsView({
 									</optgroup>
 								))}
 							</select>
-						</label>
+						</div>
 					)}
 					{unsaved.length > 0 || showDrafts ? (
 						<button type="button" aria-pressed={showDrafts} onClick={() => setShowDrafts(!showDrafts)}>
@@ -586,7 +620,8 @@ export function SettingsControlsView({
 							save={save}
 							workspaceId={workspaceId}
 							draft={drafts[control.path] ?? null}
-							onDraft={(value, submittedValue) => updateDraft(control.path, value, submittedValue)}
+							expectedValue={originalDraftValue(control.path)}
+							onDraft={(value, submittedValue) => updateDraft(control.path, value, submittedValue, control.value)}
 							catalog={catalogFor(control)}
 							compact={compact}
 						/>

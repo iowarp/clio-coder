@@ -22,6 +22,7 @@ import { StatusMark } from "../design/status.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
+import { persistAttachments, savedAttachments } from "./attachment-drafts.js";
 import { readAttachment } from "./attachment-image.js";
 import {
 	type Attachment,
@@ -48,6 +49,7 @@ import {
 	submitIntent,
 	submitLabel,
 } from "./composer-model.js";
+import { LARGE_PASTE_CHARACTERS, planPaste } from "./paste-model.js";
 import { RoutePicker } from "./RoutePicker.js";
 import type { RouteFacts } from "./route.js";
 import "./composer.css";
@@ -78,6 +80,18 @@ function fitComposerField(field: HTMLTextAreaElement | null): void {
 function fileBadge(name: string): string {
 	const extension = /\.([A-Za-z0-9]{1,4})$/u.exec(name)?.[1];
 	return extension ? extension.toUpperCase() : "TXT";
+}
+
+function saveAttachment(item: Attachment): void {
+	const url =
+		item.kind === "file"
+			? URL.createObjectURL(new Blob([item.text], { type: "text/plain;charset=utf-8" }))
+			: `data:${item.mimeType};base64,${item.data}`;
+	const link = document.createElement("a");
+	link.href = url;
+	link.download = item.name;
+	link.click();
+	if (item.kind === "file") setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /** Fill the composer for this session and put the caret in it. Used by Try again and the starters. */
@@ -117,14 +131,20 @@ export const Composer = memo(function Composer({
 	const options = useRef<HTMLDetailsElement | null>(null);
 	const [optionsOpen, setOptionsOpen] = useState(false);
 	useDetailsDismiss(options, optionsOpen);
-	const [attachments, setAttachments] = useState<Attachment[]>([]);
+	const [attachments, setAttachments] = useState<Attachment[]>(() => savedAttachments(sessionId));
+	const [attachmentsStored, setAttachmentsStored] = useState(true);
 	const [attachProblem, setAttachProblem] = useState<string | null>(null);
-	const attached = useRef<Attachment[]>([]);
+	const [pasteReview, setPasteReview] = useState<{ text: string; reason: string; bytes: number } | null>(null);
+	const [pasteNotice, setPasteNotice] = useState<{ id: string; text: string } | null>(null);
+	const attached = useRef<Attachment[]>(attachments);
 	const picker = useRef<HTMLInputElement | null>(null);
 	const pickerId = useId();
 	const layerOwned = useLayersActive();
 	const running = runningTurnId !== null;
 	const params = { params: { id: sessionId }, query: {}, body: {} };
+	useEffect(() => {
+		setAttachmentsStored(persistAttachments(sessionId, attachments));
+	}, [sessionId, attachments]);
 
 	useEffect(() => {
 		const focus = () => field.current?.focus();
@@ -379,9 +399,48 @@ export const Composer = memo(function Composer({
 				}}
 				onPaste={(event) => {
 					const images = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
-					if (!canAttachImages || images.length === 0) return;
+					if (canAttachImages && images.length > 0) {
+						event.preventDefault();
+						void attach(images);
+						return;
+					}
+					const paste = event.clipboardData.getData("text/plain");
+					if (paste.length < LARGE_PASTE_CHARACTERS && paste.length + store.snapshot().text.length <= 32000) return;
 					event.preventDefault();
-					void attach(images);
+					const field = event.currentTarget;
+					let index = 1;
+					while (attached.current.some((item) => item.name === `pasted-text-${index}.txt`)) index++;
+					const plan = planPaste(
+						paste,
+						store.snapshot().text,
+						field.selectionStart,
+						field.selectionEnd,
+						canAttachFiles,
+						`pasted-text-${index}.txt`,
+					);
+					setPasteNotice(null);
+					if (plan.kind === "review") {
+						setPasteReview(plan);
+						return;
+					}
+					if (plan.kind === "file") {
+						const file: FileAttachment = { ...plan.file, id: crypto.randomUUID() };
+						const admission = admitAttachment(attached.current, file);
+						if (!admission.ok) {
+							setPasteReview({ text: paste, reason: admission.reason, bytes: file.bytes });
+							return;
+						}
+						attached.current = [...attached.current, file];
+						setAttachments(attached.current);
+						setPasteNotice({
+							id: file.id,
+							text: `Full paste attached as ${file.name} · ${Math.max(1, Math.round(file.bytes / 1024))} KiB`,
+						});
+					}
+					setPasteReview(null);
+					store.write(plan.text);
+					if (!send.isPending) send.reset();
+					requestAnimationFrame(() => field.setSelectionRange(plan.caret, plan.caret));
 				}}
 				onKeyDown={(event) => {
 					const action = composerKeyAction(
@@ -399,6 +458,43 @@ export const Composer = memo(function Composer({
 					submit();
 				}}
 			/>
+			{pasteNotice && attachments.some((item) => item.id === pasteNotice.id) ? (
+				<p className="composer__paste-note" role="status">
+					<Icon name="paperclip" />
+					{pasteNotice.text}
+				</p>
+			) : null}
+			{pasteReview ? (
+				<div className="composer__paste-review" role="status">
+					<strong>Paste kept for review · {Math.max(1, Math.round(pasteReview.bytes / 1024))} KiB</strong>
+					<p>{pasteReview.reason}</p>
+					<details>
+						<summary>Preview pasted text</summary>
+						<pre>
+							{pasteReview.text.slice(0, 4000)}
+							{pasteReview.text.length > 4000 ? "\n… Preview shortened. The download contains the full paste." : ""}
+						</pre>
+					</details>
+					<div>
+						<button
+							type="button"
+							onClick={() => {
+								const url = URL.createObjectURL(new Blob([pasteReview.text], { type: "text/plain;charset=utf-8" }));
+								const link = document.createElement("a");
+								link.href = url;
+								link.download = "clio-coder-gui-pasted-text.txt";
+								link.click();
+								setTimeout(() => URL.revokeObjectURL(url), 1000);
+							}}
+						>
+							Save full paste
+						</button>
+						<button type="button" onClick={() => setPasteReview(null)}>
+							Dismiss paste
+						</button>
+					</div>
+				</div>
+			) : null}
 			{store.uncertainSubmission() && (
 				<p className="composer__notice" role="status">
 					<StatusMark tone="warn" label="Review draft" />A send may have finished before this page reloaded. Check the
@@ -427,12 +523,22 @@ export const Composer = memo(function Composer({
 										: `text, ${Math.max(1, Math.round(item.bytes / 1024))} KiB`}
 								</small>
 							</span>
-							<button type="button" className="composer__secondary" onClick={() => detach(item.id)}>
-								Remove<span className="sr-only"> {item.name}</span>
-							</button>
+							<span className="composer__attachment-actions">
+								<button type="button" className="composer__secondary" onClick={() => saveAttachment(item)}>
+									Save<span className="sr-only"> {item.name}</span>
+								</button>
+								<button type="button" className="composer__secondary" onClick={() => detach(item.id)}>
+									Remove<span className="sr-only"> {item.name}</span>
+								</button>
+							</span>
 						</li>
 					))}
 				</ul>
+			) : null}
+			{attachments.length > 0 && !attachmentsStored ? (
+				<p className="composer__paste-note" role="status">
+					Browser draft storage is unavailable. These attachments are kept in memory; save them before reloading this tab.
+				</p>
 			) : null}
 			{attachProblem ? (
 				<p className="composer__notice" role="alert">
@@ -444,6 +550,27 @@ export const Composer = memo(function Composer({
 				{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @path adds a project file
 				{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
 			</p>
+			{running && modes.length > 1 ? (
+				<fieldset className="composer__delivery">
+					<legend className="sr-only">Message delivery</legend>
+					<span>Deliver</span>
+					{modes.map((offer) => (
+						<button
+							key={offer.mode}
+							type="button"
+							aria-pressed={draft.mode === offer.mode}
+							title={offer.lands}
+							disabled={send.isPending}
+							onClick={() => {
+								store.chooseMode(offer.mode);
+								if (!send.isPending) send.reset();
+							}}
+						>
+							{offer.label}
+						</button>
+					))}
+				</fieldset>
+			) : null}
 			<div className="composer__actions">
 				<div className="composer__tools">
 					{canAttach ? (

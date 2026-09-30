@@ -7,11 +7,13 @@ const clients = new WeakMap<Client, Map<string, DraftStore>>();
 
 function createDraftStore() {
 	let drafts: Drafts = {};
+	const originals = new Map<string, string>();
 	const listeners = new Set<() => void>();
 	const update = (change: (current: Drafts) => Drafts) => {
 		const next = change(drafts);
 		if (next === drafts) return;
 		drafts = next;
+		for (const path of originals.keys()) if (!Object.hasOwn(next, path)) originals.delete(path);
 		for (const listener of listeners) listener();
 	};
 	return {
@@ -23,13 +25,17 @@ function createDraftStore() {
 			};
 		},
 		update,
-		set: (path: string, value: string | null, submittedValue?: string) => {
+		original: (path: string) => originals.get(path),
+		set: (path: string, value: string | null, submittedValue?: string, original?: string) => {
 			update((current) => {
 				// A completed save must not erase a newer edit made by a reopened editor.
 				if (submittedValue !== undefined && current[path] !== submittedValue) return current;
 				const next = { ...current };
 				if (value === null) delete next[path];
-				else next[path] = value;
+				else {
+					if (!Object.hasOwn(current, path) && original !== undefined) originals.set(path, original);
+					next[path] = value;
+				}
 				return next;
 			});
 		},
@@ -53,5 +59,10 @@ export function settingsDraftStore(client: Client, workspaceId: string) {
 
 export function useSettingsDrafts(client: Client, workspaceId: string) {
 	const store = useMemo(() => settingsDraftStore(client, workspaceId), [client, workspaceId]);
-	return [useSyncExternalStore(store.subscribe, store.read, store.read), store.update, store.set] as const;
+	return [
+		useSyncExternalStore(store.subscribe, store.read, store.read),
+		store.update,
+		store.set,
+		store.original,
+	] as const;
 }

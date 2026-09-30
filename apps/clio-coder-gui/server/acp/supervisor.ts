@@ -26,6 +26,11 @@ import {
 	FleetRunResult,
 } from "../../contracts/fleet-run.js";
 import { HandoffCancelled, HandoffCommitted, HandoffDraft } from "../../contracts/handoff.js";
+import {
+	INTERVIEW_CANCEL_METHOD,
+	INTERVIEW_REQUEST_METHOD,
+	type InterviewSubmission,
+} from "../../contracts/interviews.js";
 import type { PermissionDecision } from "../../contracts/permissions.js";
 import type { SetConfigOption } from "../../contracts/session-config.js";
 import { applySessionDelta, boundedText, emptySession } from "../../contracts/session-projection.js";
@@ -59,6 +64,7 @@ import type { AppFiles } from "../state/files.js";
 import { type ChildRow, ChildrenFile } from "./children-file.js";
 import { AcpClient, acpProblem, record } from "./client.js";
 import { fleetEvent } from "./fleet-events.js";
+import { Interviews } from "./interviews.js";
 import { Permissions, type PermissionTimers } from "./permissions.js";
 import { projectConfigOptions } from "./session-config.js";
 
@@ -88,6 +94,7 @@ type Entry = {
 	closing: boolean;
 	bound: boolean;
 	permissions?: Permissions;
+	interviews?: Interviews;
 	eventSequence: number;
 	prompt?: Promise<void>;
 	retired?: Promise<void>;
@@ -246,6 +253,18 @@ export class Supervisor {
 				() => this.cancelEntry(owned),
 				this.permissionTimers,
 			);
+			owned.interviews = new Interviews((round) =>
+				this.hub.publish({ type: "interview.changed", payload: { resource: owned.id, round } }),
+			);
+			transport.onRequest(INTERVIEW_REQUEST_METHOD, (params) => {
+				if (!owned.client.capabilities.interviews)
+					throw new AppProblem("conflict", "This peer has not announced interview support.");
+				return owned.interviews?.request(owned.id, owned.turnId, params);
+			});
+			transport.onNotification(INTERVIEW_CANCEL_METHOD, (params) => {
+				if (owned.client.capabilities.interviews?.cancel === INTERVIEW_CANCEL_METHOD)
+					owned.interviews?.withdraw(owned.id, params);
+			});
 			transport.onNotification("session/update", (params) => {
 				try {
 					this.update(owned, params);
@@ -382,6 +401,7 @@ export class Supervisor {
 	) {
 		if (!entry.turnId) return;
 		entry.permissions?.cancel();
+		entry.interviews?.cancel();
 		this.publish({
 			type: "turn.finished",
 			payload: {
@@ -530,6 +550,19 @@ export class Supervisor {
 			throw new AppProblem("conflict", "Session is not open in this server.");
 		return entry;
 	}
+	interview(id: string) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.interviews)
+			throw new AppProblem("conflict", "This runtime does not expose operator interviews over ACP.");
+		return entry.interviews?.current() ?? null;
+	}
+	answerInterview(id: string, roundId: string, submission: InterviewSubmission) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.interviews || !entry.interviews)
+			throw new AppProblem("conflict", "This runtime does not expose operator interviews over ACP.");
+		entry.interviews.answer(roundId, submission);
+		return {};
+	}
 	decide(id: string, permissionId: string, decision: PermissionDecision) {
 		this.active(id).permissions?.decide(permissionId, decision);
 		return {};
@@ -547,6 +580,7 @@ export class Supervisor {
 		try {
 			await entry.client.request("session/cancel", { sessionId: entry.id }, 2000);
 			entry.permissions?.cancel();
+			entry.interviews?.cancel();
 		} catch (error) {
 			this.failTurn(entry, acpProblem(error));
 			await this.retire(entry);
@@ -695,6 +729,7 @@ export class Supervisor {
 		entry.replay = null;
 		entry.turnId = null;
 		entry.permissions?.cancel();
+		entry.interviews?.cancel();
 		this.publish({
 			type: "session.reset",
 			payload: { resource: entry.id, revision: this.revision(entry.id), reason: "branch" },
@@ -1091,6 +1126,7 @@ export class Supervisor {
 			if (entry.turnId && !entry.client.transport.closed) {
 				await entry.client.request("session/cancel", { sessionId: entry.id }, 2000);
 				entry.permissions?.cancel();
+				entry.interviews?.cancel();
 				let timer: ReturnType<typeof setTimeout> | undefined;
 				await Promise.race([
 					entry.prompt,

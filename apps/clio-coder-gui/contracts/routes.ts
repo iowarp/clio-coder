@@ -34,6 +34,7 @@ import {
 	HandoffDraft,
 	HandoffPrepareRequest,
 } from "./handoff.js";
+import { InterviewRound, InterviewSubmission } from "./interviews.js";
 import {
 	LibraryAgents,
 	LibraryApplyResult,
@@ -400,6 +401,22 @@ export const routes = {
 		params: operationParams,
 		response: ConfigGraph,
 		summary: "Read-only customization graph without secrets or hook argv",
+	}),
+	sessionInterview: defineRoute({
+		...get,
+		path: "/api/sessions/:id/interview",
+		params: operationParams,
+		response: Type.Union([InterviewRound, Type.Null()]),
+		summary: "Pending operator interview when the ACP peer advertises support",
+	}),
+	answerInterview: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/interview/:roundId",
+		params: Type.Object({ id: Id, roundId: Id }, { additionalProperties: false }),
+		body: InterviewSubmission,
+		response: Empty,
+		summary: "Submit this interview round's choices and text, or cancel it",
 	}),
 	permission: defineRoute({
 		...post,

@@ -7,7 +7,7 @@ export type KeyModifier = "primary" | "alt" | "shift";
  * Where a binding is live. The dispatcher refuses to fire a binding whose scope is not the active
  * scope, which is how Escape-in-a-dialog and Alt+A-anywhere coexist without either one guessing.
  */
-export type ShortcutScope = "global" | "composer" | "dialog" | "palette" | "list";
+export type ShortcutScope = "global" | "composer" | "dialog" | "palette" | "list" | "interview";
 
 export interface Keybinding {
 	readonly id: string;
@@ -21,6 +21,14 @@ export interface Keybinding {
 }
 
 export const KEYBINDINGS = {
+	interviewSubmit: {
+		id: "interviewSubmit",
+		key: "Enter",
+		modifiers: ["primary"],
+		scope: "interview",
+		action: "Submit reviewed interview answers",
+		where: "In an interview, after reviewing every answer",
+	},
 	send: {
 		id: "send",
 		key: "Enter",
@@ -125,6 +133,30 @@ export const KEYBINDINGS = {
 		action: "Collapse or expand the sidebar",
 		where: "Anywhere except inside a dialog. The sidebar has a button too",
 	},
+	sessionPanel: {
+		id: "sessionPanel",
+		key: "|",
+		modifiers: ["primary", "shift"],
+		scope: "global",
+		action: "Collapse or expand the conversation session panel",
+		where: "In a conversation, except inside a dialog",
+	},
+	focusComposer: {
+		id: "focusComposer",
+		key: "l",
+		modifiers: ["primary", "shift"],
+		scope: "global",
+		action: "Focus the message composer",
+		where: "In a conversation, except inside a dialog",
+	},
+	agents: {
+		id: "agents",
+		key: "a",
+		modifiers: ["primary", "alt"],
+		scope: "global",
+		action: "Open the live agents view",
+		where: "In a conversation, except inside a dialog",
+	},
 	cancelTurn: {
 		id: "cancelTurn",
 		key: ".",
@@ -138,12 +170,8 @@ export const KEYBINDINGS = {
 export type KeybindingId = keyof typeof KEYBINDINGS;
 export const KEYBINDING_ORDER: readonly Keybinding[] = Object.values(KEYBINDINGS);
 
-/**
- * Reserved: an interview Clio opens through `ask_user` is a different exchange from an intra-turn
- * approval, and its answers must never share Alt+A or Alt+R. Nothing binds these yet; the entry
- * exists so the reference and the surface land together.
- */
-export const RESERVED_KEYBINDING_NAMESPACE = "interview" as const;
+/** Interviews own a separate shortcut scope so approval shortcuts cannot submit answers. */
+export const INTERVIEW_KEYBINDING_NAMESPACE = "interview" as const;
 
 /** The subset of a keyboard event the matcher reads; React and DOM events both satisfy it. */
 export interface KeyEventLike {
@@ -183,6 +211,7 @@ const MODIFIER_LABELS: Readonly<Record<KeyModifier, string>> = {
 
 const KEY_LABELS: Readonly<Record<string, string>> = {
 	Enter: "Enter",
+	"|": "\\",
 	Escape: "Esc",
 	ArrowLeft: "Left arrow",
 	ArrowRight: "Right arrow",

@@ -27,7 +27,7 @@ export const UsagePanel = memo(function UsagePanel({
 	capabilities: AgentCapabilities | undefined;
 	settledTurns: number;
 }) {
-	const [expanded, setExpanded] = useState(false);
+	const [expanded, setExpanded] = useState(true);
 	const supported = !!capabilities?.usage;
 	const usage = useQuery({
 		queryKey: ["session-usage", sessionId, settledTurns],
@@ -38,6 +38,7 @@ export const UsagePanel = memo(function UsagePanel({
 	const quota = usage.data ? quotaCards(usage.data) : null;
 	return (
 		<details
+			open={expanded}
 			className="command-panel session-board usage-panel"
 			onToggle={(event) => setExpanded(event.currentTarget.open)}
 		>

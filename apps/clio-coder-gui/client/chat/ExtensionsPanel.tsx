@@ -24,7 +24,7 @@ export const ExtensionsPanel = memo(function ExtensionsPanel({
 	capabilities: AgentCapabilities | undefined;
 	running: boolean;
 }) {
-	const [expanded, setExpanded] = useState(false);
+	const [expanded, setExpanded] = useState(true);
 	const queries = useQueryClient();
 	const params = { params: { id: sessionId }, query: {}, body: {} };
 	const supported = !!capabilities?.extensions;
@@ -41,6 +41,7 @@ export const ExtensionsPanel = memo(function ExtensionsPanel({
 	const outcome = reload.data ? reloadOutcome(reload.data) : null;
 	return (
 		<details
+			open={expanded}
 			className="command-panel session-board extensions-panel"
 			onToggle={(event) => setExpanded(event.currentTarget.open)}
 		>

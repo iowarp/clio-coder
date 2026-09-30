@@ -8318,6 +8318,30 @@
 													"thinkingLevel": {
 														"type": "string",
 														"maxLength": 256
+													},
+													"source": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "built-in"
+															},
+															{
+																"type": "string",
+																"const": "user"
+															},
+															{
+																"type": "string",
+																"const": "project"
+															},
+															{
+																"type": "string",
+																"const": "project.local"
+															},
+															{
+																"type": "string",
+																"const": "cli"
+															}
+														]
 													}
 												},
 												"additionalProperties": false
@@ -9749,7 +9773,11 @@
 									},
 									"value": {
 										"type": "string",
-										"maxLength": 8192
+										"maxLength": 65536
+									},
+									"expectedValue": {
+										"type": "string",
+										"maxLength": 65536
 									},
 									"confirmed": {
 										"type": "boolean"
@@ -10331,6 +10359,386 @@
 											}
 										}
 									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/interview": {
+			"get": {
+				"operationId": "sessionInterview",
+				"summary": "Pending operator interview when the ACP peer advertises support",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["id", "turnId", "requestedAt", "questions"],
+											"properties": {
+												"id": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"turnId": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"requestedAt": {
+													"type": "string"
+												},
+												"interviewId": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"questions": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["question"],
+														"properties": {
+															"question": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 8192
+															},
+															"header": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"options": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["label"],
+																	"properties": {
+																		"label": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 512
+																		},
+																		"description": {
+																			"type": "string",
+																			"maxLength": 2048
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																"maxItems": 16
+															},
+															"multi_select": {
+																"type": "boolean"
+															}
+														},
+														"additionalProperties": false
+													},
+													"minItems": 1,
+													"maxItems": 4
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "null"
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/interview/{roundId}": {
+			"post": {
+				"operationId": "answerInterview",
+				"summary": "Submit this interview round's choices and text, or cancel it",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "roundId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"anyOf": [
+									{
+										"type": "object",
+										"required": ["cancelled"],
+										"properties": {
+											"cancelled": {
+												"type": "boolean",
+												"const": true
+											}
+										},
+										"additionalProperties": false
+									},
+									{
+										"type": "object",
+										"required": ["answers"],
+										"properties": {
+											"answers": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"required": ["selected", "text"],
+													"properties": {
+														"selected": {
+															"type": "array",
+															"items": {
+																"type": "integer",
+																"minimum": 0,
+																"maximum": 15
+															},
+															"maxItems": 16,
+															"uniqueItems": true
+														},
+														"text": {
+															"type": "string",
+															"maxLength": 8192
+														}
+													},
+													"additionalProperties": false
+												},
+												"minItems": 1,
+												"maxItems": 4
+											}
+										},
+										"additionalProperties": false
+									}
+								]
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {},
 									"additionalProperties": false
 								}
 							}
@@ -11152,6 +11560,25 @@
 												"read": {
 													"type": "string",
 													"maxLength": 128
+												}
+											},
+											"additionalProperties": false
+										},
+										"interviews": {
+											"type": "object",
+											"required": ["version", "request"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"request": {
+													"type": "string",
+													"const": "_clio-coder/interview/request"
+												},
+												"cancel": {
+													"type": "string",
+													"const": "_clio-coder/interview/cancel"
 												}
 											},
 											"additionalProperties": false
@@ -33079,6 +33506,114 @@
 			},
 			"Event": {
 				"anyOf": [
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "interview.changed"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "round"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"round": {
+										"anyOf": [
+											{
+												"type": "object",
+												"required": ["id", "turnId", "requestedAt", "questions"],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"turnId": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"requestedAt": {
+														"type": "string"
+													},
+													"interviewId": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"questions": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["question"],
+															"properties": {
+																"question": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 8192
+																},
+																"header": {
+																	"type": "string",
+																	"maxLength": 128
+																},
+																"options": {
+																	"type": "array",
+																	"items": {
+																		"type": "object",
+																		"required": ["label"],
+																		"properties": {
+																			"label": {
+																				"type": "string",
+																				"minLength": 1,
+																				"maxLength": 512
+																			},
+																			"description": {
+																				"type": "string",
+																				"maxLength": 2048
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	"maxItems": 16
+																},
+																"multi_select": {
+																	"type": "boolean"
+																}
+															},
+															"additionalProperties": false
+														},
+														"minItems": 1,
+														"maxItems": 4
+													}
+												},
+												"additionalProperties": false
+											},
+											{
+												"type": "null"
+											}
+										]
+									}
+								}
+							}
+						}
+					},
 					{
 						"type": "object",
 						"required": ["v", "epoch", "seq", "at", "type", "payload"],

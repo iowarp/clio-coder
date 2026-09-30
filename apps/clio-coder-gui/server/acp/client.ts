@@ -18,6 +18,7 @@ import { ContextCapability } from "../../contracts/context-ledger.js";
 import { ExtensionsCapability, LibraryCapability } from "../../contracts/extensions.js";
 import { FleetCapability } from "../../contracts/fleet-run.js";
 import { HandoffCapability } from "../../contracts/handoff.js";
+import { INTERVIEW_CANCEL_METHOD, INTERVIEW_REQUEST_METHOD, InterviewCapability } from "../../contracts/interviews.js";
 import type { SessionConfig } from "../../contracts/session-config.js";
 import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
 import { UsageCapability } from "../../contracts/usage.js";
@@ -76,6 +77,7 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("context", optional(ContextCapability, meta["clio-coder/context"])),
 		...maybe("extensions", optional(ExtensionsCapability, meta["clio-coder/extensions"])),
 		...maybe("aside", optional(AsideCapability, meta["clio-coder/aside"])),
+		...maybe("interviews", optional(InterviewCapability, meta["clio-coder/interviews"])),
 		...maybe("usage", optional(UsageCapability, meta["clio-coder/accounting"])),
 		...maybe("library", optional(LibraryCapability, meta["clio-coder/library"])),
 	};
@@ -161,6 +163,7 @@ export class AcpClient {
 					// the running row's partial text rather than appending, which is
 					// the whole reason the stream is an opt-in.
 					"clio-coder/toolProgress": { version: 1 },
+					"clio-coder/interviews": { version: 1, request: INTERVIEW_REQUEST_METHOD, cancel: INTERVIEW_CANCEL_METHOD },
 				},
 			},
 		});

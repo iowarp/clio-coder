@@ -41,7 +41,8 @@
 	display: grid;
 	gap: 12px;
 }
-.sidebar-settings__selection label {
+.sidebar-settings__selection label,
+.sidebar-settings__field {
 	display: grid;
 	gap: 6px;
 }

@@ -17,7 +17,7 @@ import type { StatusTone } from "../design/status.js";
 import { type DiffPanel, diffPanel, NOT_APPROVED_NOTE } from "./diff-model.js";
 import { type ChainStepStatus, readGateway } from "./gateway-model.js";
 
-/** Ported from the workbench's clio-host.ts generic-label table. */
+/** Generic tool-label aliases from Clio Coder. */
 export const SAFE_TOOL_TITLES: Readonly<Record<string, string>> = {
 	read: "Read project content",
 	edit: "Edit project content",

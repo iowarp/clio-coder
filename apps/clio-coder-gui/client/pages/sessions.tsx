@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams } from "react-router";
-import { type AgentCapabilities, EMPTY_CAPABILITIES } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
@@ -9,12 +8,8 @@ import { clock, formatTime } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
 import { sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
-import { AsidePanel } from "../chat/AsidePanel.js";
-import { BranchPanel } from "../chat/BranchPanel.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
-import { CommandPanel } from "../chat/CommandPanel.js";
 import { Composer, fillComposer } from "../chat/Composer.js";
-import { ContextPanel } from "../chat/ContextPanel.js";
 import {
 	CONTEXT_WARNING_LABEL,
 	EMPTY_EYEBROW,
@@ -24,28 +19,25 @@ import {
 	STARTER_PROMPTS,
 	TRUNCATION_NOTE,
 } from "../chat/chat-turn.js";
-import { ExtensionsPanel } from "../chat/ExtensionsPanel.js";
-import { FleetRunPanel } from "../chat/FleetRunPanel.js";
-import { FleetStrip, LiveWorkers, workerCount } from "../chat/FleetStrip.js";
+import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
-import { HandoffPanel } from "../chat/HandoffPanel.js";
 import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/health.js";
 import { InspectorDock } from "../chat/InspectorDock.js";
+import { Interview } from "../chat/Interview.js";
 import { routeFacts } from "../chat/route.js";
-import { SessionBoardPanel } from "../chat/SessionBoard.js";
 import { SessionDashboard } from "../chat/SessionDashboard.js";
+import { isSessionPanelView, type SessionPanelView } from "../chat/session-panel-model.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
-import { UsagePanel } from "../chat/UsagePanel.js";
 import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark, type StatusTone } from "../design/status.js";
 import { useWorkspaceChrome } from "../design/workspace-chrome.js";
-import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
+import { useShortcut } from "../interaction/use-shortcut.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
 import { ProjectOpenForm, useProjectLaunch } from "./project-open.js";
-import { DeleteSession, SessionControls } from "./session-controls.js";
+import { DeleteSession } from "./session-controls.js";
 import "../chat/chat-turn.css";
 import "./projects.css";
 export function Workspaces({ client }: { client: Client }) {
@@ -331,153 +323,6 @@ function conversationTitle(snapshot: SessionSnapshot): string {
 }
 
 /**
- * Everything about the session that is not the conversation itself, behind one control: where it runs,
- * how it is configured, Clio Coder commands, dispatched workers, switching and closing. It opens on
- * demand so the header stays one line, and it closes on Escape or an outside press.
- */
-function SessionTools({
-	client,
-	session,
-	workspaceRoot,
-	capabilities,
-	capabilitiesError,
-	openSessions,
-	closing,
-	onClose,
-}: {
-	client: Client;
-	session: SessionSnapshot;
-	workspaceRoot: string | undefined;
-	capabilities: AgentCapabilities | undefined;
-	capabilitiesError: Error | null;
-	openSessions: readonly SessionSnapshot[];
-	closing: boolean;
-	onClose: () => void;
-}) {
-	const navigate = useNavigate();
-	const chrome = useWorkspaceChrome();
-	const panel = useRef<HTMLDetailsElement>(null);
-	const [open, setOpen] = useState(false);
-	useDetailsDismiss(panel, open);
-	const others = openSessions.filter((entry) => entry.state === "open");
-	return (
-		<details className="conversation__tools" ref={panel} onToggle={(event) => setOpen(event.currentTarget.open)}>
-			<summary>
-				<Icon name="settings" />
-				<span className="conversation__tools-label">Session tools</span>
-			</summary>
-			{open ? (
-				<div className="conversation__tools-body">
-					<section className="conversation__place" aria-label="Where this conversation runs">
-						<p className="eyebrow">Project folder</p>
-						<code title={workspaceRoot}>{workspaceRoot ?? "Reading the project path…"}</code>
-						<Link
-							className="conversation__settings-link"
-							to={`/settings?workspace=${session.workspaceId}`}
-							onClick={(event) => {
-								if (chrome && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
-									event.preventDefault();
-									chrome.openArea("settings");
-								}
-							}}
-						>
-							Project settings <span aria-hidden="true">→</span>
-						</Link>
-					</section>
-					{session.state === "open" && others.length > 1 ? (
-						<label className="conversation__switch">
-							Switch to another open conversation
-							<select value={session.id} onChange={(event) => void navigate(`/sessions/${event.target.value}`)}>
-								{others.map((entry) => (
-									<option value={entry.id} key={entry.id}>
-										{conversationTitle(entry)}
-									</option>
-								))}
-							</select>
-						</label>
-					) : null}
-					{capabilities || session.state !== "open" ? (
-						<SessionControls client={client} session={session} capabilities={capabilities ?? EMPTY_CAPABILITIES} />
-					) : capabilitiesError ? (
-						<p role="alert">{capabilitiesError.message}</p>
-					) : (
-						<p>Checking session controls…</p>
-					)}
-					<SessionBoardPanel
-						client={client}
-						sessionId={session.id}
-						sessionOpen={session.state === "open"}
-						capabilities={capabilities}
-						settledTurns={session.turns.filter((turn) => turn.status !== "running").length}
-						running={session.turns.at(-1)?.status === "running"}
-					/>
-					<UsagePanel
-						client={client}
-						sessionId={session.id}
-						sessionOpen={session.state === "open"}
-						capabilities={capabilities}
-						settledTurns={session.turns.filter((turn) => turn.status !== "running").length}
-					/>
-					<ContextPanel
-						client={client}
-						sessionId={session.id}
-						sessionOpen={session.state === "open"}
-						capabilities={capabilities}
-						settledTurns={session.turns.filter((turn) => turn.status !== "running").length}
-					/>
-					<BranchPanel
-						client={client}
-						sessionId={session.id}
-						sessionOpen={session.state === "open"}
-						capabilities={capabilities}
-						settledTurns={session.turns.filter((turn) => turn.status !== "running").length}
-						running={session.turns.at(-1)?.status === "running"}
-					/>
-					<HandoffPanel
-						client={client}
-						sessionId={session.id}
-						sessionOpen={session.state === "open"}
-						capabilities={capabilities}
-						running={session.turns.at(-1)?.status === "running"}
-					/>
-					<CommandPanel client={client} sessionId={session.id} sessionOpen={session.state === "open"} />
-					<AsidePanel
-						client={client}
-						sessionId={session.id}
-						sessionOpen={session.state === "open"}
-						capabilities={capabilities}
-						running={session.turns.at(-1)?.status === "running"}
-					/>
-					<ExtensionsPanel
-						client={client}
-						sessionId={session.id}
-						sessionOpen={session.state === "open"}
-						capabilities={capabilities}
-						running={session.turns.at(-1)?.status === "running"}
-					/>
-					<FleetRunPanel
-						client={client}
-						sessionId={session.id}
-						sessionOpen={session.state === "open"}
-						capabilities={capabilities}
-						running={session.turns.at(-1)?.status === "running"}
-					/>
-					<FleetStrip client={client} session={session} />
-					<div className="conversation__close">
-						<p>
-							Closing ends this Clio Coder session. The conversation stays in the project history and can be loaded again.
-						</p>
-						<button type="button" onClick={onClose} disabled={closing || session.state !== "open"}>
-							{closing ? "Closing…" : "Close session"}
-						</button>
-					</div>
-				</div>
-			) : null}
-		</details>
-	);
-}
-
-/**
  * Session health that needs a reader. A healthy target is one glyph in the route chip; anything else,
  * and every fact kind this build does not recognise, is written out here in full.
  */
@@ -514,24 +359,65 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const chrome = useWorkspaceChrome();
 	const navigate = useNavigate();
 	const inspectorButton = useId();
+	const panelButton = useId();
+	const opener = useRef<string | null>(null);
+	const [panelView, setSessionPanelView] = useState<SessionPanelView>(() => {
+		try {
+			const saved = localStorage.getItem("clio-coder-gui-session-panel-view");
+			return isSessionPanelView(saved) ? saved : "session";
+		} catch {
+			return "session";
+		}
+	});
+	const choosePanelView = useCallback((view: SessionPanelView) => {
+		setSessionPanelView(view);
+		try {
+			localStorage.setItem("clio-coder-gui-session-panel-view", view);
+		} catch {
+			/* In-memory preference still works. */
+		}
+	}, []);
 	const [inspectorOpen, setInspectorOpen] = useState(() => {
 		try {
-			return localStorage.getItem("clio-coder-gui-artifacts") === "open";
+			return (
+				(localStorage.getItem("clio-coder-gui-session-panel") ?? localStorage.getItem("clio-coder-gui-artifacts")) ===
+				"open"
+			);
 		} catch {
 			return false;
 		}
 	});
 	useEffect(() => {
 		try {
-			localStorage.setItem("clio-coder-gui-artifacts", inspectorOpen ? "open" : "closed");
+			localStorage.setItem("clio-coder-gui-session-panel", inspectorOpen ? "open" : "closed");
+			localStorage.removeItem("clio-coder-gui-artifacts");
 		} catch {
 			/* Preference holds in this tab. */
 		}
 	}, [inspectorOpen]);
 	const closeInspector = useCallback(() => {
+		const dismissed = document.activeElement;
 		setInspectorOpen(false);
-		requestAnimationFrame(() => document.getElementById(inspectorButton)?.focus());
-	}, [inspectorButton]);
+		requestAnimationFrame(() => {
+			const current = document.activeElement;
+			if (current === dismissed || current === document.body || current?.closest(".session-dock"))
+				document.getElementById(opener.current ?? panelButton)?.focus();
+		});
+	}, [panelButton]);
+	const showSessionPanel = useCallback(
+		(view: SessionPanelView, trigger: string) => {
+			opener.current = trigger;
+			choosePanelView(view);
+			setInspectorOpen(true);
+		},
+		[choosePanelView],
+	);
+	useShortcut("sessionPanel", () => {
+		if (inspectorOpen) closeInspector();
+		else showSessionPanel(panelView, panelButton);
+	});
+	useShortcut("focusComposer", () => document.querySelector<HTMLTextAreaElement>(".composer__field")?.focus());
+	useShortcut("agents", () => showSessionPanel("agents", panelButton));
 	const connection = useOutletContext<ConnectionState>();
 	const queries = useQueryClient();
 	const input = { params: { id }, query: {}, body: {} };
@@ -548,10 +434,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 		queryFn: () => client.call(routes.workspace, { params: { id: workspaceId }, query: {}, body: {} }),
 		enabled: workspaceId !== "",
 	});
-	const openSessions = useQuery({
-		queryKey: ["sessions"],
-		queryFn: () => client.call(routes.sessions, emptyInput),
-	});
+
 	const capabilities = useQuery({
 		queryKey: ["session-capabilities", id],
 		queryFn: () => client.call(routes.sessionCapabilities, input),
@@ -571,6 +454,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			void queries.invalidateQueries({ queryKey: ["session-history", snapshot.workspaceId] });
 		},
 	});
+	const closeSession = useCallback(() => close.mutate(), [close.mutate]);
 	const scroll = useRef<HTMLDivElement | null>(null);
 	const previousTurns = useRef<readonly ChatTurn[]>([]);
 	const snapshot = session.data;
@@ -680,24 +564,30 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						<button
 							id={inspectorButton}
 							type="button"
-							aria-label={inspectorOpen ? "Hide artifacts" : "Show artifacts"}
-							aria-expanded={inspectorOpen}
+							aria-label={inspectorOpen && panelView === "artifacts" ? "Hide artifacts" : "Show artifacts"}
+							aria-expanded={inspectorOpen && panelView === "artifacts"}
 							title="Files, results and evidence"
-							onClick={() => setInspectorOpen((value) => !value)}
+							onClick={() =>
+								inspectorOpen && panelView === "artifacts" ? closeInspector() : showSessionPanel("artifacts", inspectorButton)
+							}
 						>
 							<Icon name="artifacts" />
 						</button>
 					</div>
-					<SessionTools
-						client={client}
-						session={snapshot}
-						workspaceRoot={workspaceRoot}
-						capabilities={capabilities.data}
-						capabilitiesError={capabilities.error}
-						openSessions={openSessions.data ?? []}
-						closing={close.isPending}
-						onClose={() => close.mutate()}
-					/>
+					<button
+						id={panelButton}
+						type="button"
+						className="conversation__session-panel-toggle"
+						aria-label="Session panel"
+						aria-expanded={inspectorOpen && panelView !== "artifacts"}
+						title="Session panel (Ctrl/⌘ Shift \)"
+						onClick={() =>
+							inspectorOpen && panelView !== "artifacts" ? closeInspector() : showSessionPanel("session", panelButton)
+						}
+					>
+						<Icon name="sidebar" />
+						<span>Session panel</span>
+					</button>
 				</div>
 				<SessionDashboard session={snapshot} health={health} workers={liveWorkers} model={route.model ?? null} />
 				<SessionHealth summary={health} />
@@ -784,12 +674,22 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					route={route}
 				/>
 			</div>
+			<Interview
+				client={client}
+				sessionId={snapshot.id}
+				sessionOpen={snapshot.state === "open"}
+				capabilities={capabilities.data}
+			/>
 			<InspectorDock
 				open={inspectorOpen}
 				onClose={closeInspector}
 				client={client}
 				sessionId={snapshot.id}
 				workspaceRoot={workspaceRoot}
+				view={panelView}
+				onViewChange={choosePanelView}
+				onCloseSession={closeSession}
+				closing={close.isPending}
 			/>
 		</section>
 	);

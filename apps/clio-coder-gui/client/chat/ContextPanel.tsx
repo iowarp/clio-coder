@@ -23,7 +23,7 @@ export const ContextPanel = memo(function ContextPanel({
 	capabilities: AgentCapabilities | undefined;
 	settledTurns: number;
 }) {
-	const [expanded, setExpanded] = useState(false);
+	const [expanded, setExpanded] = useState(true);
 	const supported = !!capabilities?.context;
 	const ledger = useQuery({
 		queryKey: ["session-context", sessionId, settledTurns],
@@ -34,6 +34,7 @@ export const ContextPanel = memo(function ContextPanel({
 	const view = ledger.data ? contextView(ledger.data) : null;
 	return (
 		<details
+			open={expanded}
 			className="command-panel session-board context-panel"
 			onToggle={(event) => setExpanded(event.currentTarget.open)}
 		>

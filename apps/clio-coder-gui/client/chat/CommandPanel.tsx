@@ -102,7 +102,7 @@ export const CommandPanel = memo(function CommandPanel({
 	sessionId: string;
 	sessionOpen: boolean;
 }) {
-	const [expanded, setExpanded] = useState(false);
+	const [expanded, setExpanded] = useState(true);
 	const [name, setName] = useState("");
 	const [subcommand, setSubcommand] = useState("");
 	const [review, setReview] = useState<{ plan: CommandPlan; key: string } | null>(null);
@@ -141,7 +141,7 @@ export const CommandPanel = memo(function CommandPanel({
 		invoke.reset();
 	};
 	return (
-		<details className="command-panel" onToggle={(event) => setExpanded(event.currentTarget.open)}>
+		<details open={expanded} className="command-panel" onToggle={(event) => setExpanded(event.currentTarget.open)}>
 			<summary>Clio Coder commands</summary>
 			<p id={helpId} className="command-panel__note">
 				Only commands exposed by this session appear here. Review the arguments before sending. Commands that start work

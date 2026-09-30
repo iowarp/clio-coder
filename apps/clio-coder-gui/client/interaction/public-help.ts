@@ -14,6 +14,7 @@ export const PUBLIC_GUIDES = [
 	"doctor",
 	"troubleshooting",
 	"configuration-reference",
+	"quality-policy",
 	"environment-variables",
 ] as const;
 
