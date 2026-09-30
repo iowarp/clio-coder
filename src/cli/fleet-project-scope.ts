@@ -1,10 +1,21 @@
+import { readSettings } from "../core/config.js";
 import { dispatchOwnership } from "../domains/dispatch/ownership.js";
 import type { FleetRunRecord } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
 
+/** The configured `fleet.worktrees.root`, so runs in a custom-root worktree stay visible to project scope. */
+function configuredWorktreeRoot(): { worktreeRoot: string } | Record<string, never> {
+	try {
+		return { worktreeRoot: readSettings().fleet.worktrees.root };
+	} catch {
+		// Unreadable settings leave the disk and tmpfs locations, which is the pre-setting behavior.
+		return {};
+	}
+}
+
 /** One CLI inspection's explicit machine-wide choice or current-project view. */
 export function fleetInspectionScope(all: boolean, cwd = process.cwd()) {
-	const ownership = dispatchOwnership({ sessionId: null, cwd });
+	const ownership = dispatchOwnership({ sessionId: null, cwd, ...configuredWorktreeRoot() });
 	const seesRun = (run: RunEnvelope): boolean => all || ownership.seesRun(run);
 	const seesRunId = (runId: string, getRun: (id: string) => RunEnvelope | null): boolean => {
 		const run = getRun(runId);

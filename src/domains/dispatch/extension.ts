@@ -8697,7 +8697,15 @@ export function createDispatchBundle(
 		dispatch,
 		dispatchBatch,
 		sealCouncilSynthesis,
-		owner: () => ({ sessionId: options?.getSessionId?.() ?? null, cwd: process.cwd() }),
+		owner: () => {
+			// Only a configured absolute root adds a location ownership cannot derive.
+			const worktreeRoot = getEffectiveSettings()?.fleet?.worktrees?.root;
+			return {
+				sessionId: options?.getSessionId?.() ?? null,
+				cwd: process.cwd(),
+				...(worktreeRoot !== undefined && isAbsolute(worktreeRoot) ? { worktreeRoot } : {}),
+			};
+		},
 		listRuns(status) {
 			const l = requireLedger();
 			return status ? l.list({ status }) : l.list();

@@ -22,6 +22,7 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { canonicalizePath, createPathWalkMemo } from "../../core/path-canonical.js";
 import { gitCheckoutRoot } from "../../tools/task-worktree.js";
+import type { WorktreeRootSetting } from "../../tools/worktree-root.js";
 import { allowedWorktreeParents } from "../../tools/worktree-root.js";
 
 export interface DispatchOwner {
@@ -29,6 +30,12 @@ export interface DispatchOwner {
 	readonly sessionId: string | null;
 	/** Workspace the process runs in; project-scoped checks resolve against it. */
 	readonly cwd: string;
+	/**
+	 * Resolved `fleet.worktrees.root`. An absolute path here is what ties a run in
+	 * a custom-root worktree back to this project; absent, only the disk and
+	 * tmpfs locations count.
+	 */
+	readonly worktreeRoot?: WorktreeRootSetting;
 }
 
 export interface OwnedRunFields {
@@ -92,14 +99,15 @@ export function dispatchOwnership(owner: DispatchOwner): DispatchOwnership {
 		const rel = relative(root, candidate);
 		return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 	};
-	// A RAM task worktree runs outside the checkout, so its run carries a cwd
-	// under /dev/shm and a status reader in the project would never see it. The
-	// tmpfs parents are keyed on the checkout root, which is what ties them back.
+	// An off-disk task worktree runs outside the checkout, so its run carries a
+	// cwd under /dev/shm or the configured root and a status reader in the
+	// project would never see it. The parents are keyed on the checkout root,
+	// which is what ties them back.
 	let worktreeParents: string[] | undefined;
 	const taskWorktreeParents = (): string[] => {
 		if (worktreeParents === undefined) {
 			const checkout = gitCheckoutRoot(owner.cwd) ?? canonicalOf(owner.cwd);
-			worktreeParents = checkout === null ? [] : allowedWorktreeParents("auto", checkout);
+			worktreeParents = checkout === null ? [] : allowedWorktreeParents(owner.worktreeRoot ?? "auto", checkout);
 		}
 		return worktreeParents;
 	};
