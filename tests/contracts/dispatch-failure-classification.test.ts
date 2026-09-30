@@ -1,12 +1,15 @@
 import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-
+import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.js";
 import {
 	affectsTargetBreaker,
 	classifyFailure,
 	decideRetry,
 } from "../../src/domains/dispatch/failure-classification.js";
 import type { RunTerminationEvidence } from "../../src/domains/dispatch/outcome.js";
+import { blockedWriteAttempts } from "../../src/domains/dispatch/tool-stats.js";
+import type { ToolCallStat } from "../../src/domains/dispatch/types.js";
+import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
 
 const evidence: RunTerminationEvidence = {
 	exitCode: 1,
@@ -23,6 +26,26 @@ function classifyTail(stderrTail: string) {
 }
 
 describe("dispatch failure classification", () => {
+	it("seals a mutation worker whose every write was blocked as a deterministic failure", () => {
+		const classes: Record<string, ActionClass> = { read: "read", write: "write", edit: "write", bash: "execute" };
+		const classify = (tool: string): ActionClass => classes[tool] ?? "unknown";
+		const stats = (...rows: Array<Partial<ToolCallStat> & { tool: string }>): Map<string, ToolCallStat> =>
+			new Map(rows.map((row) => [row.tool, { count: 0, ok: 0, errors: 0, blocked: 0, totalDurationMs: 0, ...row }]));
+		const blockedWrites = [
+			{ tool: "read", count: 2, ok: 2 },
+			{ tool: "write", count: 2, blocked: 2 },
+			{ tool: "edit", count: 1, blocked: 1 },
+		];
+		strictEqual(blockedWriteAttempts(stats(...blockedWrites), classify), 3);
+		strictEqual(
+			blockedWriteAttempts(stats(...blockedWrites, { tool: "edit", count: 2, ok: 1, blocked: 1 }), classify),
+			null,
+		);
+		strictEqual(blockedWriteAttempts(stats(...blockedWrites, { tool: "bash", count: 1, ok: 1 }), classify), null);
+		strictEqual(blockedWriteAttempts(stats({ tool: "read", count: 3, ok: 3 }), classify), null);
+		strictEqual(isDeterministicOutcomeCode("worker_mutation_blocked"), true);
+	});
+
 	it("does not retry ACP model admission or peer HTTP 400/404 or charge the peer breaker", () => {
 		for (const tail of [
 			"ACP delegation failed: ACP peer does not offer requested model 'gpt-6-unknown'",
