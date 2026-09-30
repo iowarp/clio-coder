@@ -180,7 +180,9 @@ interface SourcedRule {
 
 const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:pwd", re: /^pwd$/ },
-	{ id: "builtin:ls", re: /^ls(?:\s+(-[A-Za-z0-9]+|\.[/\w.-]*|[/\w.-]+))*$/ },
+	// No symlink-dereferencing flag (-L, -H, --dereference*) and no long option:
+	// those go through readOnlyInspectionRule, which refuses them.
+	{ id: "builtin:ls", re: /^ls(?:\s+(-(?![A-Za-z0-9]*[LH])[A-Za-z0-9]+|\.[/\w.-]*|(?!-)[/\w.-]+))*$/ },
 	{ id: "builtin:git-status", re: /^git\s+status(?:\s+--short|\s+--branch|\s+-sb)*$/ },
 	{ id: "builtin:git-diff", re: /^git\s+diff(?:\s+--cached|\s+--stat|\s+--name-only|\s+--\s+[\w./-]+)*$/ },
 	{ id: "builtin:git-log", re: /^git\s+log\s+--oneline(?:\s+-n\s+[1-9]\d{0,2})?(?:\s+--\s+[\w./-]+)?$/ },
@@ -1295,12 +1297,12 @@ const READ_ONLY_INSPECTORS: ReadonlyMap<string, ReadonlyArray<string>> = new Map
 	["tail", ["-f", "-F", "--follow", "--retry"]],
 	["wc", []],
 	["nl", []],
-	["ls", []],
+	["ls", ["-L", "-H", "--dereference", "--dereference-command-line", "--dereference-command-line-symlink-to-dir"]],
 	["pwd", []],
 	["stat", []],
-	["du", []],
+	["du", ["-L", "-D", "-H", "--dereference", "--dereference-args"]],
 	["file", ["-C", "--compile"]],
-	["tree", ["-o", "-R"]],
+	["tree", ["-o", "-R", "-l"]],
 	["basename", []],
 	["dirname", []],
 	["realpath", []],
@@ -1318,9 +1320,25 @@ const READ_ONLY_INSPECTORS: ReadonlyMap<string, ReadonlyArray<string>> = new Map
 	["grep", []],
 	["egrep", []],
 	["fgrep", []],
-	["rg", ["--pre", "--pre-glob", "-z", "--search-zip", "--hostname-bin"]],
+	["rg", ["-L", "--follow", "--pre", "--pre-glob", "-z", "--search-zip", "--hostname-bin"]],
 	["jq", []],
-	["find", ["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"]],
+	[
+		"find",
+		[
+			"-L",
+			"-follow",
+			"-files0-from",
+			"-exec",
+			"-execdir",
+			"-ok",
+			"-okdir",
+			"-delete",
+			"-fprint",
+			"-fprint0",
+			"-fprintf",
+			"-fls",
+		],
+	],
 ]);
 
 /** `sed -n` with a print-only line script (`1,80p`, `5p`, `10,$p`); every other sed program can write or execute. */
