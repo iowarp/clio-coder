@@ -329,7 +329,7 @@ describe("operator questions held inside the run", () => {
 				(event) => event.type === "message_end" && (event as { finalReplyHeld?: boolean }).finalReplyHeld === true,
 			);
 			ok(held?.type === "message_end");
-			const heldText = (held.message.content as Array<{ type: string; text?: string }>)
+			const heldText = ((held.message as { content?: unknown }).content as Array<{ type: string; text?: string }>)
 				.filter((block) => block.type === "text")
 				.map((block) => block.text)
 				.join("");
