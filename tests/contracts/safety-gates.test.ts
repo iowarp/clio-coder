@@ -1123,6 +1123,23 @@ describe("safety gate boundary", () => {
 			"rg x src/",
 			"rg -e x .",
 			"cat a.txt | rg -f p",
+			"sh -c 'cat .env'",
+			"sh -c 'cat a.txt && cat key.pem'",
+			"cd li? && cat passwd",
+			"sort --files0-from=list",
+			"wc --files0-from=list",
+			"wc --files0=list",
+			"du --files0-from=list",
+			"file -f.env",
+			"grep -f.env a.txt",
+			"grep -nf.env a.txt",
+			"rg -f.env a.txt",
+			"diff -rN sub .",
+			"jq -n env",
+			"ls /etc",
+			"ls ..",
+			"ls -R",
+			"ls --recursive",
 		]) {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
 			strictEqual(decision.execRecognition !== "recognized", true, command);
