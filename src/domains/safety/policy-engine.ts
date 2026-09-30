@@ -1235,8 +1235,12 @@ function matchingProjectCommand(
 	return null;
 }
 
-/** Segment ceiling. Real compound calls are two to four steps. */
-const CHAIN_MAX_SEGMENTS = 8;
+/**
+ * Segment ceiling. Models pad inspection chains with `echo "---X---"` headers,
+ * and a flywheel chain of twelve such steps parked at a ceiling of eight. Every
+ * step is still judged on its own.
+ */
+const CHAIN_MAX_SEGMENTS = 16;
 
 /** What read-only recognition needs to hold a path operand to the workspace, as the read tools are. */
 interface ReadScopeInputs {
@@ -1399,6 +1403,8 @@ function recognizeCommandChain(
 ): ChainRecognition | null {
 	const tokens = scanShellLike(command);
 	const segments: string[][] = [];
+	// joins[i] is the operator in front of segments[i].
+	const joins: Array<string | undefined> = [undefined];
 	let current: ShellToken[] = [];
 	// Only && makes a later step conditional on a cd having taken effect.
 	let onlyAnd = true;
@@ -1411,6 +1417,7 @@ function recognizeCommandChain(
 		}
 		if (CHAIN_OPERATORS.has(token.value)) {
 			segments.push(current.map((word) => word.value));
+			joins.push(token.value);
 			current = [];
 			if (token.value !== "&&") onlyAnd = false;
 			continue;
@@ -1438,25 +1445,35 @@ function recognizeCommandChain(
 	let requiresConfirmation = false;
 	let requiresAutonomyApproval = false;
 	let chainCwd = callCwd;
+	// Every directory a later step may run in. In a pure && chain a failed cd
+	// stops the chain, so there is exactly one. After `||` or `;` a cd may not
+	// have taken effect, so each step is judged from every directory it could
+	// run in.
+	let cwds = [callCwd];
 	const scriptPreviews: string[] = [];
-	for (const segment of segments) {
+	for (const [index, segment] of segments.entries()) {
 		if (segment.length === 0) return null;
 		if (segment[0] === "cd") {
-			// After `||`, `;` or inside a pipeline a cd may not have taken effect,
-			// and later relative paths would resolve from the wrong directory.
-			if (!onlyAnd) return null;
+			// A cd inside a pipeline runs in a subshell and moves nothing.
+			if (joins[index] === "|" || joins[index + 1] === "|") return null;
 			// Each later command runs in this directory, including project-policy
 			// cwd matching and script previews. Keep both logical and physical
 			// readings inside the workspace before recognizing the transition.
 			if (segment.length !== 2) return null;
 			const target = segment[1] ?? "";
-			const nextCwd = path.resolve(chainCwd, target);
-			if (target.startsWith("~") || !isUnderOrSame(nextCwd, workspaceRoot)) return null;
-			// A shell `cd` is logical unless `-P` or `set -P` makes it physical;
-			// recognize it only when both readings stay inside.
-			const physical = canonicalizeRawPath(target, chainCwd);
-			if (physical === null || !isUnderOrSame(physical, workspaceRoot)) return null;
-			chainCwd = nextCwd;
+			if (target.startsWith("~")) return null;
+			const reached: string[] = [];
+			for (const from of cwds) {
+				const nextCwd = path.resolve(from, target);
+				if (!isUnderOrSame(nextCwd, workspaceRoot)) return null;
+				// A shell `cd` is logical unless `-P` or `set -P` makes it physical;
+				// recognize it only when both readings stay inside.
+				const physical = canonicalizeRawPath(target, from);
+				if (physical === null || !isUnderOrSame(physical, workspaceRoot)) return null;
+				reached.push(nextCwd);
+			}
+			chainCwd = reached.at(-1) ?? chainCwd;
+			cwds = onlyAnd ? reached : [...new Set([...cwds, ...reached])];
 			ruleIds.push("builtin:cd-workspace");
 			continue;
 		}
@@ -1465,7 +1482,8 @@ function recognizeCommandChain(
 		const rendered = segment.join(" ");
 		const projectScript = PROJECT_SCRIPT_COMMANDS.find((entry) => entry.re.test(rendered));
 		if (projectScript !== undefined) scriptPreviews.push(projectScriptPreview(rendered, chainCwd));
-		const projectMatch = matchingProjectCommand(policy, rendered, chainCwd);
+		const projectMatches = cwds.map((from) => matchingProjectCommand(policy, rendered, from));
+		const projectMatch = projectMatches.every((match) => match !== null) ? projectMatches[0] : null;
 		if (projectMatch) {
 			ruleIds.push(projectMatch.id);
 			if (projectMatch.requireConfirmation) requiresConfirmation = true;
@@ -1492,8 +1510,9 @@ function recognizeCommandChain(
 		}
 		// Quoted words stay whole here (`find . -name "*.ts"`), which the
 		// re-rendered allowlist string above cannot express.
-		const inspection = readOnlyInspectionRule(segment, chainCwd, workspaceRoot, readScope);
-		if (inspection !== null) {
+		const inspections = cwds.map((from) => readOnlyInspectionRule(segment, from, workspaceRoot, readScope));
+		const inspection = inspections.every((rule) => rule !== null) ? inspections[0] : null;
+		if (inspection !== null && inspection !== undefined) {
 			ruleIds.push(inspection);
 			continue;
 		}
