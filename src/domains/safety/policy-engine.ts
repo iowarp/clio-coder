@@ -1286,23 +1286,35 @@ function isDiscardRedirection(operator: string, target: string | undefined): boo
 
 /**
  * Commands that only read files or transform their input, each with the options
- * that would make it write, execute, or never return. A command outside this
- * table, or one carrying a refused option, leaves the whole compound
- * unrecognized, so the autonomy level decides it as before. awk, xargs, env and
- * the shells stay out because their arguments are programs.
+ * that would make it write, execute, walk a tree, or name an input list or
+ * output file. A command outside this table, or one carrying a refused option,
+ * leaves the whole compound unrecognized, so the autonomy level decides it as
+ * before. The table stays short on purpose: every wider member (jq, diff, cmp,
+ * du, file, tree, sort, column) had an option that read a list file, walked a
+ * tree, printed the environment or wrote a file, and a per-option denylist over
+ * a wide vocabulary kept leaking. awk, xargs, env and the shells stay out
+ * because their arguments are programs.
  */
 const READ_ONLY_INSPECTORS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
 	["cat", []],
 	["head", []],
 	["tail", ["-f", "-F", "--follow", "--retry"]],
-	["wc", []],
+	["wc", ["--files0-from"]],
 	["nl", []],
-	["ls", ["-L", "-H", "--dereference", "--dereference-command-line", "--dereference-command-line-symlink-to-dir"]],
+	[
+		"ls",
+		[
+			"-L",
+			"-H",
+			"-R",
+			"--recursive",
+			"--dereference",
+			"--dereference-command-line",
+			"--dereference-command-line-symlink-to-dir",
+		],
+	],
 	["pwd", []],
 	["stat", []],
-	["du", ["-L", "-D", "-H", "--dereference", "--dereference-args"]],
-	["file", ["-C", "--compile"]],
-	["tree", ["-o", "-R", "-l"]],
 	["basename", []],
 	["dirname", []],
 	["realpath", []],
@@ -1311,17 +1323,12 @@ const READ_ONLY_INSPECTORS: ReadonlyMap<string, ReadonlyArray<string>> = new Map
 	["printf", []],
 	["true", []],
 	["which", []],
-	["diff", []],
-	["cmp", []],
 	["cut", []],
 	["tr", []],
-	["column", []],
-	["sort", ["-o", "--output", "--compress-program", "-T", "--temporary-directory"]],
-	["grep", []],
-	["egrep", []],
-	["fgrep", []],
-	["rg", ["-L", "--follow", "--pre", "--pre-glob", "-z", "--search-zip", "--hostname-bin"]],
-	["jq", []],
+	["grep", ["-f", "--file", "--exclude-from"]],
+	["egrep", ["-f", "--file", "--exclude-from"]],
+	["fgrep", ["-f", "--file", "--exclude-from"]],
+	["rg", ["-f", "--file", "-L", "--follow", "--pre", "--pre-glob", "-z", "--search-zip", "--hostname-bin"]],
 	[
 		"find",
 		[
@@ -1339,6 +1346,28 @@ const READ_ONLY_INSPECTORS: ReadonlyMap<string, ReadonlyArray<string>> = new Map
 			"-fls",
 		],
 	],
+]);
+
+/**
+ * Short option letters that take a value, per command. In a cluster the first
+ * such letter ends the flags: everything after it is that option's value
+ * (`grep -efoo`, `head -qn20`, `cut -d,`), a number, pattern or format that
+ * names no file, so it must not be read as more flags. Letters that would take
+ * a file (`grep -f`) are in the refused list instead, and a refused letter is
+ * still caught when it is the value-taking one (`grep -f.env`, `grep -nf.env`).
+ */
+const SHORT_VALUE_LETTERS: ReadonlyMap<string, string> = new Map([
+	["head", "nc"],
+	["tail", "ncs"],
+	["cut", "dfbc"],
+	["grep", "efmABCdD"],
+	["egrep", "efmABCdD"],
+	["fgrep", "efmABCdD"],
+	["rg", "eABCmgtT"],
+	["ls", "wIT"],
+	["stat", "c"],
+	["nl", "bdfhilnsvw"],
+	["basename", "s"],
 ]);
 
 /** `sed -n` with a print-only line script (`1,80p`, `5p`, `10,$p`); every other sed program can write or execute. */
@@ -1519,15 +1548,24 @@ function recursesDirectories(args: ReadonlyArray<string>): boolean {
 	return false;
 }
 
-function refusedOption(arg: string, refused: ReadonlyArray<string>): boolean {
+function refusedOption(arg: string, refused: ReadonlyArray<string>, valueLetters = ""): boolean {
+	// The flags of a short cluster end at its first value-taking letter; what
+	// follows is that option's value, not more flags.
+	let flags = /^-[^-]/u.test(arg) ? arg.slice(1) : "";
+	for (let at = 0; at < flags.length; at += 1) {
+		if (valueLetters.includes(flags[at] ?? "")) {
+			flags = flags.slice(0, at + 1);
+			break;
+		}
+	}
 	return refused.some((option) => {
-		// GNU tools take any unambiguous prefix of a long option: `sort --out=x`
-		// writes x, `tail --fo` follows forever. find's single-dash words do not abbreviate.
+		// GNU tools take any unambiguous prefix of a long option: `wc --files0=x`
+		// reads a list file, `tail --fo` follows forever. find's single-dash words do not abbreviate.
 		if (abbreviatesLongOption(arg, option)) return true;
 		if (arg === option || arg.startsWith(`${option}=`)) return true;
-		// A short option can sit anywhere in a cluster (`sort -ro out`); a false
+		// A short option can sit anywhere in a cluster (`ls -lR`); a false
 		// match only costs an ask.
-		return /^-[A-Za-z]$/u.test(option) && /^-[^-]/u.test(arg) && arg.slice(1).includes(option.slice(1));
+		return /^-[A-Za-z]$/u.test(option) && flags.includes(option.slice(1));
 	});
 }
 
@@ -1575,7 +1613,7 @@ function readOnlyInspectionRule(
 	for (const arg of args) {
 		if (arg === "-" || arg === "--") continue;
 		if (arg.startsWith("-")) {
-			if (refusedOption(arg, refused)) return null;
+			if (refusedOption(arg, refused, SHORT_VALUE_LETTERS.get(command) ?? "")) return null;
 			// An option that embeds a path (--file=/x, -f/x) is refused rather than parsed per command.
 			if (arg.includes("/") || arg.includes("~")) return null;
 			continue;
