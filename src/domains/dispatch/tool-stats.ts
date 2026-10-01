@@ -172,7 +172,11 @@ export function workerNoWorkDetail(input: {
 	} catch {
 		// Plain final prose is also a valid worker report.
 	}
-	const reportedInability = /\b(?:cannot|can't|could not|couldn't|unable to)\b/iu.test(report);
+	// Only a report that opens with its inability counts: "the parser cannot overflow" in a no-change report is not one.
+	const reportedInability =
+		/^(?:i\s+)?(?:cannot|can't|could not|couldn't|was unable to|am unable to|unable to|blocked\b)/iu.test(
+			report.trimStart(),
+		);
 	const unchanged = input.mutatedPathCount === 0;
 	if (unchanged && (input.limitationRecorded || reportedInability)) {
 		const reason = input.limitationDetail?.trim() || report;
