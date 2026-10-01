@@ -145,7 +145,7 @@ it("sanitizes external task, name, route and label text before styling", (t) => 
 		assert.ok(!raw.includes("injected-title"));
 		assert.ok(!raw.includes("\x07") && !raw.includes("\x7f") && !raw.includes("\r") && !raw.includes("\t"));
 		const lines = f.lines(width);
-		assert.ok(lines.some((line) => line.includes("Task 科学 👩\\u{200d}🔬")));
+		assert.ok(lines.some((line) => line.includes("Task 科学 👩‍🔬")));
 		assert.ok(lines.some((line) => line.includes("Named test")));
 		for (const line of lines) assert.ok(visibleWidth(line) <= width);
 	}
@@ -263,7 +263,7 @@ it("keeps long Unicode identity within the frame at every supported width", (t) 
 	]);
 	for (const width of [40, 44, 60, 92, 120]) {
 		const lines = f.lines(width);
-		assert.match(f.selected(width), /科学 👩\\u\{200d\}🔬 é/);
+		assert.match(f.selected(width), /科学 👩‍🔬 é/);
 		for (const line of lines) {
 			assert.ok(visibleWidth(line) <= width);
 			assert.ok(!line.includes("\ufffd"));
