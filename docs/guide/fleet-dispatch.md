@@ -315,7 +315,9 @@ check it did not run (`declaredChecks`) with no validation that passed, and a
 diff that removes existing test cases or deletes a test file. The first three yield
 to passing host verification. The fourth does not, because a passing suite says nothing
 about a test that is gone. A test that moves to another file or is only reformatted is
-not counted as removed. A task clause that tells the worker not to validate (for
+not counted as removed. A run without a task worktree has no merge to withhold, so the same
+removal fails it as `worker_removed_tests` and leaves the edits in the checkout, unless a
+clause of the task asks for tests to be removed. A task clause that tells the worker not to validate (for
 example "do not run the tests") means an unrun check does not withhold. A merge-mode run
 whose host verification rejected the tree fails with `host_verification_rejected` and keeps
 its branch with the work committed, and the detail names the `git merge` that applies it.
@@ -1022,7 +1024,9 @@ include:
   `host_verification_rejected` when a declared host check rejects the settled
   tree. `merge_withheld` marks a run whose task worktree was preserved instead
   of merged because of one of the four gate cases above, and `worker_no_work`
-  marks an edit worker that finished without doing its assignment. All four
+  marks an edit worker that finished without doing its assignment.
+  `worker_removed_tests` marks a run in the current checkout whose change
+  removed existing test cases that the task did not ask to remove. All five
   suppress automatic retry.
 - `routingIntent`, `routeDecision`, and `quality`: the normalized hard bounds,
   complete current-policy decision, exact execution role, route estimate and

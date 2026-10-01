@@ -279,7 +279,7 @@ import {
 	type MergeCardOutcome,
 	mergeCardCauseNote,
 } from "./merge-card.js";
-import { mergeGateVerdict, mergeWithheldDetail, removedTestCases } from "./merge-gate.js";
+import { mergeGateVerdict, mergeWithheldDetail, removedTestCases, taskRequestsTestRemoval } from "./merge-gate.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
 import {
 	type RunTerminationEvidence,
@@ -7414,8 +7414,8 @@ export function createDispatchBundle(
 				}
 				// A run in the current tree has no merge to withhold, so a change that
 				// deletes existing test cases fails the run instead; the edits stay for
-				// the operator to judge (flywheel F-D1).
-				if (checkoutBefore !== null && finalOutcome === "succeeded") {
+				// the operator to judge (flywheel F-D1). A task that asks for the removal is exempt.
+				if (checkoutBefore !== null && finalOutcome === "succeeded" && !taskRequestsTestRemoval(req.task)) {
 					const removed = removedTestCases(
 						changedCheckoutDiff(checkoutBefore, lifecycle.cwd, (path) => isTestFilePath(path) || path.endsWith(".rs")),
 					);

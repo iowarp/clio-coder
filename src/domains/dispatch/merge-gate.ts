@@ -122,6 +122,21 @@ function taskRequestsValidation(task: string): boolean {
 		.some((clause) => !VALIDATION_OPT_OUT.test(clause) && VALIDATION_REQUEST.test(clause));
 }
 
+const TEST_REMOVAL_REQUEST =
+	/\b(?:delete|remove|drop|retire|prune)\b(?:(?!\b(?:so|until|making|make|that|which|because)\b)[^.\n]){0,60}\b(?:tests?|specs?|test\s+(?:cases?|files?|suites?))\b/iu;
+const TEST_REMOVAL_NEGATION = /\b(?:do\s+not|don['’]t|never|without)\s+(?:delete|remove|drop|retire|prune)\b/iu;
+
+/**
+ * True when a clause of the task asks for tests to be removed ("delete the
+ * obsolete totalDuration test"), so a diff that removes test cases did what was
+ * asked (flywheel F-D1). "Do not delete tests" does not count.
+ */
+export function taskRequestsTestRemoval(task: string): boolean {
+	return task
+		.split(TASK_CLAUSE_SPLIT)
+		.some((clause) => !TEST_REMOVAL_NEGATION.test(clause) && TEST_REMOVAL_REQUEST.test(clause));
+}
+
 /**
  * True when a clause of the task tells the worker not to validate. A check the
  * worker then reports as not run honored that instruction, so it is not a
