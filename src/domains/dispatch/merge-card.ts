@@ -12,7 +12,7 @@ import { boundedCheck } from "./merge-gate.js";
 export type MergeCardChoice = "merge" | "keep" | "discard";
 
 /** Why the card settled: an answer, or the fallback that applies Keep branch. */
-export type MergeCardCause = "answered" | "escaped" | "timeout" | "aborted";
+export type MergeCardCause = "answered" | "unlisted" | "escaped" | "timeout" | "aborted";
 
 export interface MergeCardOutcome {
 	choice: MergeCardChoice;
@@ -23,9 +23,12 @@ export interface MergeCardOutcome {
 export function mergeCardCauseNote(cause: MergeCardCause): string {
 	switch (cause) {
 		case "answered":
-			return "chosen on the card";
+			return "Keep branch chosen on the card";
+		case "unlisted":
+			return "the answer typed on the card was not one of its options";
 		case "escaped":
-			return "dismissed with Esc";
+			// Esc, Ctrl+C, and a handler that went away all settle the round as cancelled.
+			return "the card was dismissed without an answer";
 		case "timeout":
 			return "no answer before the escalation timeout";
 		case "aborted":
@@ -204,7 +207,7 @@ export async function askMergeCard(deps: MergeCardDeps, input: MergeCardInput): 
 			if (picked === null) return stopped();
 			if (picked.cancelled === true) return keep("escaped");
 			if (offersMerge(input) && chose(picked, MERGE)) return { choice: "merge", cause: "answered" };
-			if (!chose(picked, DISCARD)) return { choice: "keep", cause: "answered" };
+			if (!chose(picked, DISCARD)) return { choice: "keep", cause: chose(picked, KEEP) ? "answered" : "unlisted" };
 			const confirmed = await put(discardConfirmQuestion(input.branch), CONFIRM_PRESENTATION);
 			if (confirmed === null) return stopped();
 			// Esc, Back, and anything but a labelled Delete return to the card.
