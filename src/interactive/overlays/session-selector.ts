@@ -61,8 +61,8 @@ function previewLine(meta: SessionMeta): string {
 }
 
 function metaStrip(meta: SessionMeta, now: number): string {
-	// An ended session shows the ok glyph; an open one shows the running dot.
-	const status = meta.endedAt ? GLYPH.ok : GLYPH.running;
+	// Closing a session does not establish that its run succeeded.
+	const status = meta.endedAt ? GLYPH.scoped : GLYPH.running;
 	const when = formatRelativeTime(meta.lastActivityAt ?? meta.endedAt ?? meta.createdAt, now);
 	const count = typeof meta.messageCount === "number" ? meta.messageCount : 0;
 	const countLabel = count === 1 ? "1 msg" : `${count} msgs`;

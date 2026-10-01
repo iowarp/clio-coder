@@ -302,7 +302,7 @@ it("hides a failed user-only session but retains assistant and tool-call turns",
 	const cwd = join(isolated.dir, "repo");
 	mkdirSync(cwd);
 	const ids: string[] = [];
-	for (const role of [null, "assistant", "tool_call"] as const) {
+	for (const role of [null, "error", "assistant", "tool_call"] as const) {
 		const state = startSession({ cwd, model: role === null ? "does-not-exist-model" : "fixture" });
 		ids.push(state.meta.id);
 		const user = appendEntry(state, {
@@ -314,18 +314,30 @@ it("hides a failed user-only session but retains assistant and tool-call turns",
 		if (role !== null)
 			appendEntry(state, {
 				kind: "message",
-				role,
+				role: role === "error" ? "assistant" : role,
 				parentTurnId: user.turnId,
-				payload: role === "assistant" ? { text: "Hello" } : { name: "read", args: { path: "index.js" } },
+				payload:
+					role === "error"
+						? { content: [], stopReason: "error", errorMessage: "Unsupported model" }
+						: role === "assistant"
+							? { text: "Hello" }
+							: { name: "read", args: { path: "index.js" } },
 			});
 		await state.writer.close();
 	}
 	const history = listSessionsForCwd(cwd);
 	assert.equal(history.find((meta) => meta.id === ids[0])?.hasModelTurn, false);
-	for (const id of ids.slice(1)) assert.equal(history.find((meta) => meta.id === id)?.hasModelTurn, true);
+	assert.equal(history.find((meta) => meta.id === ids[1])?.hasModelTurn, false);
+	for (const id of ids.slice(2)) assert.equal(history.find((meta) => meta.id === id)?.hasModelTurn, true);
 	const f = picker(t, history);
 	const text = f.lines().join("\n");
-	assert.doesNotMatch(text, /Failed greeting|does-not-exist-model/u);
+	assert.doesNotMatch(text, /Failed greeting|does-not-exist-model|Conversation error/u);
 	assert.match(text, /Conversation assistant/u);
 	assert.match(text, /Conversation tool_call/u);
+});
+
+it("closed sessions carry no success claim", (t) => {
+	const f = picker(t, [session("failed", { endedAt: new Date().toISOString(), firstMessagePreview: "Failed task" })]);
+	assert.match(f.lines().join("\n"), /Failed task/u);
+	assert.doesNotMatch(f.lines().join("\n"), /✓/u);
 });

@@ -228,6 +228,13 @@ interface ScanResult {
 	labels: Map<string, { label: string; timestamp: string }>;
 }
 
+function hasAssistantContent(payload: unknown): boolean {
+	if (extractMessageText(payload) !== null) return true;
+	if (!payload || typeof payload !== "object") return false;
+	const content = (payload as { content?: unknown }).content;
+	return Array.isArray(content) && content.some((block) => block?.type === "toolCall");
+}
+
 function scanCurrentJsonl(currentPath: string): ScanResult {
 	const result: ScanResult = {
 		hasModelTurn: false,
@@ -241,7 +248,10 @@ function scanCurrentJsonl(currentPath: string): ScanResult {
 	if (!existsSync(currentPath)) return result;
 	const records = readSessionFileEntries(currentPath).filter((entry) => !isSessionHeader(entry));
 	for (const parsed of collectSessionEntries(records, currentPath)) {
-		if (parsed.kind === "message" && (parsed.role === "assistant" || parsed.role === "tool_call")) {
+		if (
+			parsed.kind === "message" &&
+			(parsed.role === "tool_call" || (parsed.role === "assistant" && hasAssistantContent(parsed.payload)))
+		) {
 			result.hasModelTurn = true;
 		}
 		if (result.lastTimestamp === null || parsed.timestamp > result.lastTimestamp) {
