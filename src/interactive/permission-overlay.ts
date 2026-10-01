@@ -50,6 +50,12 @@ export interface ApprovalRequestView {
 	 * triggered it. `reason` is the raw rejection short and stays off the card.
 	 */
 	netReason?: string;
+	/**
+	 * What a bash command would do, one sentence per step, from the pure
+	 * classifier in `command-consequence`. Text for the card only: admission never
+	 * reads it and no ask or block depends on it.
+	 */
+	consequence?: ReadonlyArray<string>;
 	/** Typed, sanitized multi-line artifact that this one approval authorizes. */
 	artifact?: { kind: "dispatch-plan"; text: string };
 	/**
@@ -82,6 +88,14 @@ export interface ApprovalRequestView {
 	 * operator knows whose request they are answering.
 	 */
 	workerGrant?: { authority: "main" | "operator"; forwardedByMain: boolean };
+}
+
+/** The consequence sentences, one row each, under one `Effect:` label that later rows hang beneath. */
+function consequenceFields(view: ApprovalRequestView, width: number): string[] {
+	const label = "Effect: ";
+	return (view.consequence ?? []).flatMap((line, index) =>
+		field(index === 0 ? label : " ".repeat(label.length), line, width),
+	);
 }
 
 /** The card line for a worker ask routed through the main agent, or null for every other card. */
@@ -461,6 +475,7 @@ function permissionCardSections(
 		...field("Tool: ", `${view.tool} · Action: ${view.actionClass}`, content),
 		...(view.target !== undefined && view.target.length > 0 ? field("Target: ", view.target, content) : []),
 		...(view.netReason !== undefined && view.netReason.length > 0 ? field("Why: ", view.netReason, content) : []),
+		...consequenceFields(view, content),
 		// Size and digest stay on the collapsed card whether or not the operator
 		// opens the mutation, so the decision always carries the identity of the
 		// bytes it applies to. Wrapped, never ellipsized: at 40 columns the digest

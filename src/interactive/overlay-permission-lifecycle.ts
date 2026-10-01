@@ -1,9 +1,16 @@
+import { statSync } from "node:fs";
+import { resolve } from "node:path";
 import { BusChannels, type PermissionRequestedPayload } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
+import {
+	commandFromBashTarget,
+	describeCommandConsequences,
+	type PathKind,
+} from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { decisionActionClass } from "../domains/safety/decision-presentation.js";
 import { askUserExposure } from "../tools/ask-user.js";
@@ -166,6 +173,50 @@ function netReasonOf(decision: SafetyDecision): string | undefined {
 	return reason !== undefined && reason.length > 0 ? sanitizeCallTargetText(reason) : undefined;
 }
 
+/** What exists at `path` once resolved against `cwd`; null when it does not, or cannot be read. */
+function pathKindIn(cwd: string): (path: string) => PathKind {
+	return (path) => {
+		try {
+			const stat = statSync(resolve(cwd, path));
+			return stat.isDirectory() ? "dir" : stat.isFile() ? "file" : null;
+		} catch {
+			// A path that cannot be statted is not an existing file to overwrite.
+			return null;
+		}
+	};
+}
+
+/**
+ * The consequence sentences for a bash ask, read from the full command. Card
+ * text only: a failure here is no sentence, never a different admission.
+ */
+function mainConsequence(call: ClassifierCall): string[] {
+	if (call.tool !== ToolNames.Bash) return [];
+	const command = call.args?.command;
+	if (typeof command !== "string") return [];
+	const cwd = typeof call.args?.cwd === "string" && call.args.cwd.length > 0 ? call.args.cwd : process.cwd();
+	try {
+		return describeCommandConsequences(command, { pathKind: pathKindIn(resolve(process.cwd(), cwd)) });
+	} catch {
+		// The card renders without the line; nothing waits on it.
+		return [];
+	}
+}
+
+/**
+ * A worker's command arrives only as the bounded `target` text, so its
+ * consequences are read from that and no existence check is possible.
+ */
+function workerConsequence(tool: string, target: string | undefined): string[] {
+	if (tool !== ToolNames.Bash || target === undefined) return [];
+	try {
+		return describeCommandConsequences(commandFromBashTarget(target));
+	} catch {
+		// The card renders without the line; nothing waits on it.
+		return [];
+	}
+}
+
 function mainApprovalRequestView(
 	call: ClassifierCall,
 	decision: SafetyDecision,
@@ -185,6 +236,7 @@ function mainApprovalRequestView(
 	// Facts only. The mutation text stays in the inspector the overlay opener
 	// gets; this object reaches the transcript row and the approval-state event.
 	const mutation = mutationFacts(call.tool, call.args);
+	const consequence = mainConsequence(call);
 	return {
 		requestId: meta?.requestId ?? "permission-pending",
 		tool: call.tool,
@@ -194,6 +246,7 @@ function mainApprovalRequestView(
 		reason:
 			decision.kind === "ask" ? decision.rejection.short : `${call.tool} requests ${decision.classification.actionClass}`,
 		...(netReason !== undefined ? { netReason } : {}),
+		...(consequence.length > 0 ? { consequence } : {}),
 		...(call.tool === ToolNames.Dispatch && decision.kind === "ask"
 			? { artifact: { kind: "dispatch-plan" as const, text: decision.rejection.detail } }
 			: {}),
@@ -245,6 +298,7 @@ function workerEscalationEntry(payload: PermissionRequestedPayload, autonomy: st
 }
 
 function workerApprovalRequestView(entry: WorkerEscalationEntry): ApprovalRequestView {
+	const consequence = workerConsequence(entry.tool, entry.target);
 	return {
 		requestId: entry.requestId,
 		tool: entry.tool,
@@ -253,6 +307,7 @@ function workerApprovalRequestView(entry: WorkerEscalationEntry): ApprovalReques
 		origin: { kind: "worker", agentId: entry.agentId, runId: entry.runId },
 		reason: entry.reason,
 		...(entry.target !== undefined && entry.target.length > 0 ? { target: entry.target } : {}),
+		...(consequence.length > 0 ? { consequence } : {}),
 		...(entry.grant !== undefined ? { workerGrant: entry.grant } : {}),
 	};
 }
