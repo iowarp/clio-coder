@@ -112,6 +112,12 @@ function blank(runId: string, at: string): FleetRun {
 	};
 }
 
+function terminalOutcome(payload: Readonly<Record<string, unknown>>): string | null {
+	const code = text(payload.outcomeCode) ?? text(payload.reason) ?? text(payload.outcome);
+	const detail = text(payload.outcomeDetail);
+	return detail === null ? code : `${code === null ? "" : `${code}: `}${detail}`;
+}
+
 function apply(run: FleetRun, type: string, payload: Readonly<Record<string, unknown>>, at: string): FleetRun {
 	const base = { ...run, agentId: text(payload.agentId) ?? run.agentId, updatedAt: at };
 	switch (type) {
@@ -135,7 +141,7 @@ function apply(run: FleetRun, type: string, payload: Readonly<Record<string, unk
 			return {
 				...base,
 				state: "done",
-				outcome: text(payload.outcome) ?? base.outcome,
+				outcome: terminalOutcome(payload) ?? base.outcome,
 				durationMs: integer(payload.durationMs) ?? base.durationMs,
 				tokenCount: integer(payload.tokenCount) ?? base.tokenCount,
 			};
@@ -143,7 +149,7 @@ function apply(run: FleetRun, type: string, payload: Readonly<Record<string, unk
 			return {
 				...base,
 				state: "failed",
-				outcome: text(payload.outcome) ?? text(payload.reason) ?? base.outcome,
+				outcome: terminalOutcome(payload) ?? base.outcome,
 				durationMs: integer(payload.durationMs) ?? base.durationMs,
 			};
 		default:
@@ -260,14 +266,14 @@ export function presentFleetFact(fact: { readonly type: string; readonly payload
 				label: "Run done",
 				tone: "success",
 				known: true,
-				summary: `${text(payload.outcome) ?? "Finished"} after ${integer(payload.durationMs) === null ? "an unreported time" : formatDuration(integer(payload.durationMs) ?? 0)}, ${amount(integer(payload.tokenCount))} tokens.`,
+				summary: `${terminalOutcome(payload) ?? "Finished"} after ${integer(payload.durationMs) === null ? "an unreported time" : formatDuration(integer(payload.durationMs) ?? 0)}, ${amount(integer(payload.tokenCount))} tokens.`,
 			};
 		case "fleet.failed":
 			return {
 				label: "Run failed",
 				tone: "fail",
 				known: true,
-				summary: `${text(payload.outcome) ?? text(payload.reason) ?? "Clio Coder reported no reason"}.`,
+				summary: `${terminalOutcome(payload) ?? "Clio Coder reported no reason"}.`,
 			};
 		case "fleet.loopBlocked": {
 			const disposition = text(payload.disposition);

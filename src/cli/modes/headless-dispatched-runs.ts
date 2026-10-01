@@ -82,3 +82,13 @@ export function describeRuns(runs: ReadonlyArray<RunEnvelope>): string {
 		})
 		.join(", ");
 }
+
+export function projectDispatchedRunOutcome(run: RunEnvelope) {
+	return {
+		runId: run.id,
+		agentId: run.agentId,
+		outcome: run.outcome ?? null,
+		outcomeCode: run.outcomeCode ?? null,
+		outcomeDetail: run.outcomeDetail ? boundedOutcomeDetail(run.outcomeDetail) : null,
+	};
+}

@@ -6,6 +6,7 @@ const identifier = Type.String({ maxLength: 128 });
 const nullableId = Type.Union([identifier, Type.Null()]);
 const count = Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]);
 const identity = { runId: identifier, agentId: identifier };
+const outcomeDetail = Type.Optional(Type.Union([Type.String({ maxLength: 2048 }), Type.Null()]));
 const start = Type.Object(
 	{
 		...identity,
@@ -34,10 +35,20 @@ export const FleetPayloads = {
 	"fleet.started": start,
 	"fleet.progress": Type.Object({ ...identity, progressCount: count, truncated: Type.Boolean() }, closed),
 	"fleet.completed": Type.Object(
-		{ ...identity, outcome: nullableId, outcomeCode: nullableId, durationMs: count, tokenCount: count },
+		{ ...identity, outcome: nullableId, outcomeCode: nullableId, outcomeDetail, durationMs: count, tokenCount: count },
 		closed,
 	),
-	"fleet.failed": Type.Object({ ...identity, outcome: nullableId, reason: nullableId, durationMs: count }, closed),
+	"fleet.failed": Type.Object(
+		{
+			...identity,
+			outcome: nullableId,
+			reason: nullableId,
+			outcomeCode: Type.Optional(nullableId),
+			outcomeDetail,
+			durationMs: count,
+		},
+		closed,
+	),
 	"evidence.ready": Type.Object(
 		{
 			runId: identifier,

@@ -636,3 +636,24 @@ test("a worker ask is read from the agent's meta, answered once, and withdrawn w
 	permissions.decide(published.at(-1)?.[1].id ?? "", "allow-once");
 	assert.deepEqual(await next, { outcome: { outcome: "selected", optionId: "allow-once" } });
 });
+
+test("fleet failures show their outcome code and recovery detail in the row and fact", () => {
+	const payload = {
+		runId: "held",
+		agentId: "coder",
+		outcome: "failed",
+		reason: "failed",
+		outcomeCode: "merge_withheld",
+		outcomeDetail: "Host check also fails on base abc; branch preserved; git merge task/held",
+		durationMs: 1,
+	};
+	const runs = foldFleetRuns([fact("fleet.failed", payload)]);
+	assert.match(
+		fleetRunDetail(runs[0] as NonNullable<(typeof runs)[0]>),
+		/merge_withheld: Host check also fails on base abc; branch preserved; git merge task\/held/,
+	);
+	assert.match(
+		presentFleetFact({ type: "fleet.failed", payload }).summary,
+		/merge_withheld: Host check also fails on base abc/,
+	);
+});

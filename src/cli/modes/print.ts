@@ -44,7 +44,12 @@ import { TOOL_PLANES } from "../../tools/policy.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { setupSteerChannel } from "../steer-channel.js";
-import { type DispatchedRunsSettlement, describeRuns, settleDispatchedRuns } from "./headless-dispatched-runs.js";
+import {
+	type DispatchedRunsSettlement,
+	describeRuns,
+	projectDispatchedRunOutcome,
+	settleDispatchedRuns,
+} from "./headless-dispatched-runs.js";
 import { createHeadlessJsonProjector } from "./json-stream.js";
 import { serializeJsonLine } from "./jsonl.js";
 
@@ -885,6 +890,16 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	const settlement: DispatchedRunsSettlement = options.dispatch
 		? await settleDispatchedRuns(options.dispatch, runId, () => termination.isShuttingDown())
 		: { live: [], undelivered: [] };
+	if (mode === "json" && (settlement.live.length > 0 || settlement.undelivered.length > 0)) {
+		writeJsonHeader(true);
+		writeRawStdout(
+			serializeJsonLine({
+				type: "dispatch_settlement",
+				live: settlement.live.map(projectDispatchedRunOutcome),
+				undelivered: settlement.undelivered.map(projectDispatchedRunOutcome),
+			}),
+		);
+	}
 	// The turn has settled. Nothing between here and the seal yields to a
 	// timer, so a deadline that has not fired by now never will, and one that
 	// did has already put the coordinator into shutdown, which the first branch

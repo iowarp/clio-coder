@@ -207,3 +207,34 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 		strictEqual(await served, 0);
 	});
 });
+
+it("forwards bounded failure codes and reasons for withheld and idle workers", async () => {
+	const { bus, peer, served } = await openSession(["dispatch.failed"]);
+	for (const outcomeCode of ["worker_no_work", "merge_withheld"] as const) {
+		bus.emit(BusChannels.DispatchFailed, {
+			runId: outcomeCode,
+			agentId: "coder",
+			targetId: "fixture",
+			wireModelId: "fixture",
+			runtimeId: "fixture",
+			runtimeKind: "http",
+			requestOrigin: "agent",
+			outcome: "failed",
+			reason: "failed",
+			outcomeCode,
+			outcomeDetail: `Host check also fails on base abc; branch preserved. ${"x".repeat(4000)}`,
+		});
+	}
+	const events = eventsOf(peer);
+	deepStrictEqual(
+		events.map((event) => (event.payload as Record<string, unknown>).outcomeCode),
+		["worker_no_work", "merge_withheld"],
+	);
+	for (const event of events) {
+		const detail = (event.payload as { outcomeDetail: string }).outcomeDetail;
+		ok(detail.startsWith("Host check also fails on base abc; branch preserved."));
+		ok(Buffer.byteLength(detail) <= 2048);
+	}
+	peer.transport.close();
+	strictEqual(await served, 0);
+});

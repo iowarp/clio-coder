@@ -20296,6 +20296,17 @@
 																					}
 																				]
 																			},
+																			"outcomeDetail": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 2048
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
 																			"durationMs": {
 																				"anyOf": [
 																					{
@@ -20360,6 +20371,28 @@
 																					{
 																						"type": "string",
 																						"maxLength": 128
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"outcomeCode": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 128
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"outcomeDetail": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 2048
 																					},
 																					{
 																						"type": "null"
@@ -23045,6 +23078,17 @@
 																					}
 																				]
 																			},
+																			"outcomeDetail": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 2048
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
 																			"durationMs": {
 																				"anyOf": [
 																					{
@@ -23109,6 +23153,28 @@
 																					{
 																						"type": "string",
 																						"maxLength": 128
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"outcomeCode": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 128
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"outcomeDetail": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 2048
 																					},
 																					{
 																						"type": "null"
@@ -24720,6 +24786,17 @@
 																					}
 																				]
 																			},
+																			"outcomeDetail": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 2048
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
 																			"durationMs": {
 																				"anyOf": [
 																					{
@@ -24784,6 +24861,28 @@
 																					{
 																						"type": "string",
 																						"maxLength": 128
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"outcomeCode": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 128
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"outcomeDetail": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 2048
 																					},
 																					{
 																						"type": "null"
@@ -26359,6 +26458,17 @@
 																						}
 																					]
 																				},
+																				"outcomeDetail": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"maxLength": 2048
+																						},
+																						{
+																							"type": "null"
+																						}
+																					]
+																				},
 																				"durationMs": {
 																					"anyOf": [
 																						{
@@ -26423,6 +26533,28 @@
 																						{
 																							"type": "string",
 																							"maxLength": 128
+																						},
+																						{
+																							"type": "null"
+																						}
+																					]
+																				},
+																				"outcomeCode": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"maxLength": 128
+																						},
+																						{
+																							"type": "null"
+																						}
+																					]
+																				},
+																				"outcomeDetail": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"maxLength": 2048
 																						},
 																						{
 																							"type": "null"
@@ -28245,6 +28377,17 @@
 																					}
 																				]
 																			},
+																			"outcomeDetail": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 2048
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
 																			"durationMs": {
 																				"anyOf": [
 																					{
@@ -28309,6 +28452,28 @@
 																					{
 																						"type": "string",
 																						"maxLength": 128
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"outcomeCode": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 128
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"outcomeDetail": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 2048
 																					},
 																					{
 																						"type": "null"
@@ -36963,6 +37128,17 @@
 																			}
 																		]
 																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
 																	"durationMs": {
 																		"anyOf": [
 																			{
@@ -37027,6 +37203,28 @@
 																			{
 																				"type": "string",
 																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeCode": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
 																			},
 																			{
 																				"type": "null"
@@ -37471,6 +37669,17 @@
 																			}
 																		]
 																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
 																	"durationMs": {
 																		"anyOf": [
 																			{
@@ -37535,6 +37744,28 @@
 																			{
 																				"type": "string",
 																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeCode": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
 																			},
 																			{
 																				"type": "null"
@@ -37979,6 +38210,17 @@
 																			}
 																		]
 																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
 																	"durationMs": {
 																		"anyOf": [
 																			{
@@ -38043,6 +38285,28 @@
 																			{
 																				"type": "string",
 																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeCode": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
 																			},
 																			{
 																				"type": "null"
@@ -38487,6 +38751,17 @@
 																			}
 																		]
 																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
 																	"durationMs": {
 																		"anyOf": [
 																			{
@@ -38551,6 +38826,28 @@
 																			{
 																				"type": "string",
 																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeCode": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
 																			},
 																			{
 																				"type": "null"
@@ -38995,6 +39292,17 @@
 																			}
 																		]
 																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
 																	"durationMs": {
 																		"anyOf": [
 																			{
@@ -39059,6 +39367,28 @@
 																			{
 																				"type": "string",
 																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeCode": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
 																			},
 																			{
 																				"type": "null"
@@ -39503,6 +39833,17 @@
 																			}
 																		]
 																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
 																	"durationMs": {
 																		"anyOf": [
 																			{
@@ -39567,6 +39908,28 @@
 																			{
 																				"type": "string",
 																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeCode": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
 																			},
 																			{
 																				"type": "null"
@@ -40011,6 +40374,17 @@
 																			}
 																		]
 																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
 																	"durationMs": {
 																		"anyOf": [
 																			{
@@ -40075,6 +40449,28 @@
 																			{
 																				"type": "string",
 																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeCode": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcomeDetail": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 2048
 																			},
 																			{
 																				"type": "null"

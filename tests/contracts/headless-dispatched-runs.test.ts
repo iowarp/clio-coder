@@ -1,6 +1,10 @@
 import { deepStrictEqual, doesNotMatch, match } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { describeRuns, settleDispatchedRuns } from "../../src/cli/modes/headless-dispatched-runs.js";
+import {
+	describeRuns,
+	projectDispatchedRunOutcome,
+	settleDispatchedRuns,
+} from "../../src/cli/modes/headless-dispatched-runs.js";
 import { mergeWithheldDetail } from "../../src/domains/dispatch/merge-gate.js";
 import type { RunEnvelope, RunOutcome } from "../../src/domains/dispatch/types.js";
 
@@ -84,4 +88,19 @@ it("reports the outcome code and bounded detail for any failed run", () => {
 	]);
 	match(description, /rejected \(coder, host_verification_rejected\): host verification check 'test' rejected/u);
 	match(description, /…, plain \(coder, failed\)$/u);
+});
+
+it("carries a bounded structured reason for the JSON settlement", () => {
+	const projected = projectDispatchedRunOutcome({
+		...run("idle", "failed"),
+		outcomeCode: "worker_no_work",
+		outcomeDetail: "worker executed no tools",
+	});
+	deepStrictEqual(projected, {
+		runId: "idle",
+		agentId: "coder",
+		outcome: "failed",
+		outcomeCode: "worker_no_work",
+		outcomeDetail: "worker executed no tools",
+	});
 });

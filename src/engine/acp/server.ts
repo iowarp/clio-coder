@@ -3371,6 +3371,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					agentId: identity.agentId,
 					outcome: safeStoredIdentifier(payload.outcome, 64),
 					outcomeCode: safeStoredIdentifier(payload.outcomeCode, 64),
+					outcomeDetail: safeStoredString(payload.outcomeDetail, 2048) || null,
 					durationMs: safeCount(payload.durationMs),
 					tokenCount: safeCount(payload.tokenCount),
 				});
@@ -3381,14 +3382,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				const identity = dispatchIdentity(payload);
 				if (identity === null) return;
 				dispatchProgress.delete(identity.runId);
-				// `outcomeDetail` is free-form failure prose that legitimately quotes
-				// paths, argv, and provider bodies. The taxonomy crosses; the prose
-				// does not.
 				forwardEvent("dispatch.failed", null, true, {
 					runId: identity.runId,
 					agentId: identity.agentId,
 					outcome: safeStoredIdentifier(payload.outcome, 64),
 					reason: safeStoredIdentifier(payload.reason, 64),
+					outcomeCode: safeStoredIdentifier(payload.outcomeCode, 64),
+					outcomeDetail: safeStoredString(payload.outcomeDetail, 2048) || null,
 					durationMs: safeCount(payload.durationMs),
 				});
 			}),
