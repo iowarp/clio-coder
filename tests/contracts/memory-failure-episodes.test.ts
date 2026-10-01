@@ -61,6 +61,20 @@ test("an observed same-operation success closes an episode and two fresh errors 
 	}
 });
 
+test("a repeat the operator asked for this turn gets no repeated-failure annotation or reminder", () => {
+	const { memory, receipt } = fixture();
+	try {
+		memory.evaluate({ hook: "turn_start", sessionId: "A", text: "Run pnpm test, then run it a second time to confirm." });
+		deepStrictEqual(receipt("error"), []);
+		deepStrictEqual(receipt("error"), []);
+		deepStrictEqual(memory.evaluate({ hook: "turn_end", sessionId: "A" }), []);
+		memory.evaluate({ hook: "turn_start", sessionId: "A", text: "Now fix it." });
+		strictEqual(receipt("error")[0]?.kind, "annotate_tool_result", "the next turn warns again");
+	} finally {
+		memory.dispose();
+	}
+});
+
 test("turn-end scanning does not revive a closed episode hidden behind another operation's annotation", () => {
 	const { memory, receipt } = fixture();
 	try {

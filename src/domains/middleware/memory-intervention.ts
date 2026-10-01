@@ -62,6 +62,13 @@ export interface MemoryInterventionSettings {
 
 const CALL_DESCRIPTION_MAX_CHARS = 180;
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
+/**
+ * Operator wording that asks for the same command to run again. A repeat the
+ * operator requested in the current turn is the task, not a repeated mistake
+ * (p8/B5), so the failure reminders stay quiet for that turn.
+ */
+const OPERATOR_REPEAT_REQUEST =
+	/\b(?:again|twice|thrice|(?:a|the)\s+(?:second|third)\s+time|second\s+run|re-?run|re-?try|retry|repeat|once\s+more|one\s+more\s+time|(?:two|three)\s+(?:times|runs))\b/iu;
 
 type ToolOutcome = "ok" | "error";
 
@@ -226,6 +233,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	const pendingTriggers = new Set<MemoryInterventionTriggerReason>();
 	const activity: TaskMemoryActivityEvent[] = [];
 	const annotatedThisTurn = new Set<string>();
+	let operatorAskedRepeat = false;
 	let telemetryBankSnapshot = deps.bank.snapshot();
 	let promptedStepInFlight = false;
 	// The tier of the step currently holding the single in-flight slot, so a
@@ -324,7 +332,10 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						if (!commitBridgeEnabled) reactivateAfterCompaction = true;
 						return NO_EFFECTS;
 					case "turn_start": {
-						if (input.text?.trim()) currentTask = shortText(input.text, 2_000);
+						if (input.text?.trim()) {
+							currentTask = shortText(input.text, 2_000);
+							operatorAskedRepeat = OPERATOR_REPEAT_REQUEST.test(input.text);
+						}
 						// Mid-turn annotations are spent per turn, not per session: the same
 						// command failing again in a later turn is news again.
 						annotatedThisTurn.clear();
@@ -497,6 +508,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		pendingTriggers.clear();
 		activity.length = 0;
 		annotatedThisTurn.clear();
+		operatorAskedRepeat = false;
 		telemetryBankSnapshot = deps.bank.snapshot();
 		promptedStepInFlight = false;
 		promptedStepTier = "rules";
@@ -786,7 +798,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		if (toolsSinceMemoryStep >= live.everyNTools) pendingTriggers.add("interval");
 		if (outcome === "error") {
 			consecutiveErrors += 1;
-			if (consecutiveErrors >= 2) pendingTriggers.add("tool_error_streak");
+			if (consecutiveErrors >= 2 && !operatorAskedRepeat) pendingTriggers.add("tool_error_streak");
 		} else {
 			consecutiveErrors = 0;
 		}
@@ -820,7 +832,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	 * itself, which the model reads on its very next round.
 	 */
 	function annotateRepeatedFailure(step: TrajectoryStep): ReadonlyArray<MiddlewareEffect> {
-		if (annotatedThisTurn.has(step.operationFingerprint)) return NO_EFFECTS;
+		if (operatorAskedRepeat || annotatedThisTurn.has(step.operationFingerprint)) return NO_EFFECTS;
 		const failure = failures.get(step.operationFingerprint);
 		if (failure === undefined) return NO_EFFECTS;
 		const occurrences = trajectory.filter(
@@ -877,6 +889,10 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 
 	function decideRepeatedFailure(): ReadonlyArray<MiddlewareEffect> {
 		try {
+			if (operatorAskedRepeat) {
+				lastDecision = "silent";
+				return NO_EFFECTS;
+			}
 			for (let index = trajectory.length - 1; index >= 0; index -= 1) {
 				const step = trajectory[index];
 				if (
