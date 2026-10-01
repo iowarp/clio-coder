@@ -377,7 +377,12 @@ function renderMarkdown(markdown, sourcePath, guide = false) {
 	renderer.code = ({ text, lang }) => {
 		const [language, ...rest] = (lang ?? "").split(/\s+/);
 		const title = rest.join(" ").match(/^title=(.+)$/)?.[1];
-		const label = title ?? { sh: "Shell", bash: "Shell", powershell: "PowerShell", bat: "CMD", yaml: "YAML", json: "JSON", text: "" }[language] ?? "";
+		const label =
+			title ??
+			{ sh: "Shell", bash: "Shell", powershell: "PowerShell", bat: "CMD", yaml: "YAML", json: "JSON", text: "" }[
+				language
+			] ??
+			"";
 		return `<pre${label ? ` data-label="${escapeHtml(label)}"` : ""}><code${language ? ` class="language-${escapeHtml(language)}"` : ""}>${escapeHtml(text)}</code></pre>\n`;
 	};
 	let table = 0;
