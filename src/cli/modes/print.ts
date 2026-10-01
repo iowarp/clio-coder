@@ -1,3 +1,4 @@
+import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
 import { readClioVersion } from "../../core/package-root.js";
 import {
@@ -97,6 +98,12 @@ export interface HeadlessMainAgentOptions {
 	 * dispatched before sealing and fails when one did not deliver (D3, D6b).
 	 */
 	dispatch?: Pick<DispatchContract, "listRuns">;
+	/**
+	 * Subscribes to dispatch scope notices on the bus. Text mode writes each to
+	 * stderr and `--json` carries it as a `dispatch_scope_notice` event, so a
+	 * run with no operator still says what a dispatch's scope entry did.
+	 */
+	scopeNotices?: (listener: (payload: unknown) => void) => () => void;
 }
 
 interface HeadlessMainAgentResult {
@@ -823,6 +830,19 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		result = resultFromEvent(event, result);
 	});
 
+	const unsubscribeScopeNotices = options.scopeNotices?.((payload) => {
+		const notice = readDispatchScopeNotice(payload);
+		if (notice === null) return;
+		if (mode === "json") {
+			// The terminal stream carries only the events a driver reads at the end.
+			if (jsonEvents === "terminal") return;
+			writeJsonHeader(false);
+			writeRawStdout(serializeJsonLine({ type: "dispatch_scope_notice", ...notice }));
+			return;
+		}
+		process.stderr.write(`clio-coder run: ${notice.message}\n`);
+	});
+
 	let cleanupSteer: (() => void) | undefined;
 	if (options.steerChannel) {
 		cleanupSteer = setupSteerChannel(options.steerChannel, (line) => {
@@ -854,6 +874,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		if (cleanupSteer) {
 			cleanupSteer();
 		}
+		unsubscribeScopeNotices?.();
 		unsubscribe();
 	}
 	// Detached workers outlive the turn but not the process, so wait for them

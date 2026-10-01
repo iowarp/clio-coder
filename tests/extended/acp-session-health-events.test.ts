@@ -74,10 +74,10 @@ async function openSession(kinds: ReadonlyArray<string>) {
 }
 
 describe("contracts/acp forwards the four session-health kinds", () => {
-	it("announces all eleven kinds and keeps each one the engine's own bus channel name", async () => {
+	it("announces all twelve kinds and keeps each one the engine's own bus channel name", async () => {
 		const { peer, served, init } = await openSession(HEALTH_KINDS);
 		const announced = init.agentCapabilities._meta["clio-coder/events"]?.kinds ?? [];
-		strictEqual(announced.length, 11);
+		strictEqual(announced.length, 12);
 		for (const kind of HEALTH_KINDS) ok(announced.includes(kind), `${kind} is not announced`);
 		// The bus channel table is the vocabulary; a renamed kind would hide the
 		// producer from anyone grepping a captured frame.
@@ -105,6 +105,33 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 		deepStrictEqual(events[1]?.payload, { warning: "Context window is 85% full." });
 		// The clear has to cross as itself, or a client's banner never comes down.
 		deepStrictEqual(events[2]?.payload, { warning: null });
+		peer.transport.close();
+		strictEqual(await served, 0);
+	});
+
+	it("forwards a dispatch scope notice as its code and message, without the path list", async () => {
+		const { bus, peer, served } = await openSession([...HEALTH_KINDS, "dispatch.scopeNotice"]);
+		strictEqual(BusChannels.DispatchScopeNotice, "dispatch.scopeNotice");
+		const message = '[dispatch scope] intent.write_roots "." names the whole workspace, so it sets no write boundary.';
+		bus.emit(BusChannels.DispatchScopeNotice, { code: "write_root_dot_unconfined", level: "warning", message });
+		bus.emit(BusChannels.DispatchScopeNotice, {
+			code: "legacy_scope_inferred",
+			level: "warning",
+			agentId: "scout",
+			paths: [{ path: "../x", policy: "working-context", provenance: "inferred", source: "task", confidence: "low" }],
+			message: "[dispatch scope] a path token was resolved.",
+		});
+		// A payload that is not a scope notice crosses nothing.
+		bus.emit(BusChannels.DispatchScopeNotice, { code: "made_up", level: "warning", message: "x" } as never);
+		const events = eventsOf(peer);
+		strictEqual(events.length, 2);
+		strictEqual(events[0]?.kind, "dispatch.scopeNotice");
+		deepStrictEqual(events[0]?.payload, { code: "write_root_dot_unconfined", level: "warning", message });
+		deepStrictEqual(events[1]?.payload, {
+			code: "legacy_scope_inferred",
+			level: "warning",
+			message: "[dispatch scope] a path token was resolved.",
+		});
 		peer.transport.close();
 		strictEqual(await served, 0);
 	});

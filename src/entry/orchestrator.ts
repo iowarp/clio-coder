@@ -3831,6 +3831,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(options.headless.failOnNoop === true ? { failOnNoop: true } : {}),
 				...(options.headless.deadline !== undefined ? { deadline: options.headless.deadline } : {}),
 				...(dispatch ? { dispatch } : {}),
+				scopeNotices: (listener) => bus.on(BusChannels.DispatchScopeNotice, listener),
 				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
 			});
 			await termination.shutdown(code);

@@ -623,7 +623,7 @@ test("safe settings reject extra keys before ACP, project four keys, and expose 
 	assert.equal(autonomy.level, "default");
 	assert.equal((await h.request(`${base}/autonomy`)).status, 200);
 });
-test("all eleven opted-in ACP event kinds reach valid bounded global envelopes, an unknown kind is dropped, and both strips retain", {
+test("all twelve opted-in ACP event kinds reach valid bounded global envelopes, an unknown kind is dropped, and both strips retain", {
 	timeout: 15000,
 }, async (t) => {
 	const h = await harness({}, { scenario: "fleet" });
@@ -647,7 +647,7 @@ test("all eleven opted-in ACP event kinds reach valid bounded global envelopes, 
 	}
 	const state = await json(await h.request(`/api/sessions/${session.id}`), routes.session.response);
 	assert.equal(state.fleet.length, 7);
-	assert.equal(state.health.length, 4);
+	assert.equal(state.health.length, 5);
 	assert.doesNotMatch(JSON.stringify(state.fleet), /private|excludedProviderBody/);
 	assert.doesNotMatch(JSON.stringify(state.health), /private|excludedProviderBody/);
 	// The fixture also sends a kind this build has never heard of. It must be

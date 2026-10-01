@@ -93,9 +93,10 @@ export const FleetItem = Type.Object(
 );
 export type FleetItem = Static<typeof FleetItem>;
 /**
- * The session's own health, as opposed to the fleet's. These four say the
+ * The session's own health, as opposed to the fleet's. These five say the
  * context window was cut, that it is close to full, that the loop guard stopped
- * a turn on call volume, and that a target changed state. They are kept out of
+ * a turn on call volume, that a target changed state, and that a dispatch's scope
+ * entry did something its request did not say. They are kept out of
  * `fleet` because they describe this conversation rather than a dispatched run,
  * and a board that mixed them would have to filter its own feed to draw either.
  */
@@ -110,6 +111,10 @@ export const HealthPayloads = {
 			hardCeiling: count,
 			interrupted: Type.Boolean(),
 		},
+		closed,
+	),
+	"health.scopeNotice": Type.Object(
+		{ code: Type.String({ maxLength: 64 }), message: Type.String({ maxLength: 1024 }) },
 		closed,
 	),
 	"health.provider": Type.Object(
@@ -144,12 +149,17 @@ export const HealthFacts = {
 		{ type: Type.Literal("health.provider"), payload: HealthPayloads["health.provider"] },
 		closed,
 	),
+	"health.scopeNotice": Type.Object(
+		{ type: Type.Literal("health.scopeNotice"), payload: HealthPayloads["health.scopeNotice"] },
+		closed,
+	),
 };
 export const HealthFact = Type.Union([
 	HealthFacts["health.compacted"],
 	HealthFacts["health.contextWarning"],
 	HealthFacts["health.toolBudget"],
 	HealthFacts["health.provider"],
+	HealthFacts["health.scopeNotice"],
 ]);
 export const HealthItem = Type.Object(
 	{ id: Id, at: Type.String(), sourceSequence: Type.Integer({ minimum: 1 }), fact: HealthFact },
@@ -161,6 +171,7 @@ export const HEALTH_EVENT_TYPES = [
 	"health.contextWarning",
 	"health.toolBudget",
 	"health.provider",
+	"health.scopeNotice",
 ] as const;
 /**
  * Every `_clio-coder/event` kind this app understands, mapped to the delta it
@@ -181,4 +192,5 @@ export const ACP_TO_WEB_EVENT = {
 	"context.warning": "health.contextWarning",
 	"safety.toolBudgetExceeded": "health.toolBudget",
 	"provider.health": "health.provider",
+	"dispatch.scopeNotice": "health.scopeNotice",
 } as const;

@@ -472,7 +472,9 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const liveWorkers = useMemo(() => (fleet === undefined ? 0 : foldFleetRuns(fleet).filter(isLiveRun).length), [fleet]);
 	const health = useMemo(() => summarizeHealth(snapshot?.health ?? []), [snapshot?.health]);
 	const notices = useMemo(() => {
-		const rows = [health.compaction, health.toolBudget].filter((row): row is HealthRow => row !== null);
+		const rows = [health.compaction, health.toolBudget, ...health.scopeNotices].filter(
+			(row): row is HealthRow => row !== null,
+		);
 		return placeHealthRows(rows, snapshot?.turns ?? []);
 	}, [health, snapshot?.turns]);
 	const running = snapshot?.turns.at(-1)?.status === "running";

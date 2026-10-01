@@ -23,7 +23,6 @@ import {
 	waitedSentence,
 	workerAskRows,
 } from "../client/chat/approval-model.js";
-import { Permissions } from "../server/acp/permissions.js";
 import {
 	FLEET_RUN_CAP,
 	FLEET_STATE_LABELS,
@@ -41,6 +40,7 @@ import {
 	steerOutcome,
 } from "../client/chat/fleet-facts.js";
 import type { Permission } from "../contracts/permissions.js";
+import { Permissions } from "../server/acp/permissions.js";
 
 const REQUESTED = Date.parse("2026-09-20T10:00:00.000Z");
 
@@ -209,7 +209,10 @@ test("the sentences the agent wrote from the whole command sit under the generic
 	);
 	assert.deepEqual(rows[2]?.lines, lines);
 	// A request that carries none keeps the rows it had.
-	assert.equal(decisionRows({ ...DECISION, consequenceLines: [] }).some((row) => row.term === "Effect"), false);
+	assert.equal(
+		decisionRows({ ...DECISION, consequenceLines: [] }).some((row) => row.term === "Effect"),
+		false,
+	);
 });
 
 test("an engine that announced no decision facts still yields a usable card", () => {
@@ -603,7 +606,14 @@ test("a worker ask is read from the agent's meta, answered once, and withdrawn w
 	);
 	const call = { toolCallId: "dispatch-1", title: "dispatch", kind: "other", rawInput: { agent: "scout" } };
 	const timeline = [
-		{ turnId: "turn-1", toolCallId: "dispatch-1", status: "in_progress", title: "dispatch", toolKind: "other", rawInput: call.rawInput },
+		{
+			turnId: "turn-1",
+			toolCallId: "dispatch-1",
+			status: "in_progress",
+			title: "dispatch",
+			toolKind: "other",
+			rawInput: call.rawInput,
+		},
 	] as never;
 	const ask = {
 		sessionId: "s-1",

@@ -17,6 +17,7 @@ import {
 	type ToolBudgetExceededPayload,
 } from "../../core/bus-events.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
+import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { ToolNames } from "../../core/tool-names.js";
@@ -771,6 +772,7 @@ const ACP_FORWARDABLE_EVENT_KINDS = [
 	"context.warning",
 	"safety.toolBudgetExceeded",
 	"provider.health",
+	"dispatch.scopeNotice",
 ] as const;
 
 type AcpForwardableEventKind = (typeof ACP_FORWARDABLE_EVENT_KINDS)[number];
@@ -798,6 +800,8 @@ const ACP_MAX_EVIDENCE_TAG_BYTES = 64;
  * bounded to a banner's worth and stripped rather than refused.
  */
 const ACP_MAX_EVENT_TEXT_BYTES = 256;
+/** A scope notice is two sentences of host prose, longer than a banner line. */
+const ACP_MAX_SCOPE_NOTICE_BYTES = 1024;
 
 /**
  * Progress events forwarded per run before the stream is capped. One run
@@ -3372,6 +3376,20 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				if (payload.warning !== null && typeof payload.warning !== "string") return;
 				const warning = payload.warning === null ? null : safeStoredString(payload.warning, ACP_MAX_EVENT_TEXT_BYTES);
 				forwardEvent("context.warning", null, false, { warning: warning === "" ? null : warning });
+			}),
+		);
+		unsubscribeEvents.push(
+			bus.on(BusChannels.DispatchScopeNotice, (payload) => {
+				// The same fields every other surface draws. The message is host-authored
+				// prose about what a dispatch's scope entry did, so it crosses bounded;
+				// the paths a legacy notice lists stay behind.
+				const notice = readDispatchScopeNotice(payload);
+				if (notice === null) return;
+				forwardEvent("dispatch.scopeNotice", null, false, {
+					code: notice.code,
+					level: notice.level,
+					message: safeStoredString(notice.message, ACP_MAX_SCOPE_NOTICE_BYTES),
+				});
 			}),
 		);
 		unsubscribeEvents.push(

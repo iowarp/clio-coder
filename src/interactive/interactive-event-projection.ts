@@ -3,12 +3,12 @@ import {
 	type ConfigReloadFailedPayload,
 	type ContextPrunedPayload,
 	type ContextWarningPayload,
-	type DispatchScopeNoticePayload,
 	type LoopBlockedPayload,
 	type RuntimeNoticePayload,
 	type ToolBudgetExceededPayload,
 } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
+import { readDispatchScopeNotice } from "../core/dispatch-scope-notice.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { routingChangeNotices } from "../core/session-routing.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -287,22 +287,10 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 
 	remainingUnsubscribers.push(
 		deps.bus.on(BusChannels.DispatchScopeNotice, (payload) => {
-			const event = payload as DispatchScopeNoticePayload | null | undefined;
-			if (
-				!event ||
-				typeof event !== "object" ||
-				![
-					"typed_scope_replaced_inferred_paths",
-					"legacy_scope_inferred",
-					"legacy_scope_empty",
-					"write_root_dot_unconfined",
-				].includes(event.code) ||
-				typeof event.message !== "string"
-			) {
-				return;
-			}
+			const notice = readDispatchScopeNotice(payload);
+			if (notice === null) return;
 			// Both scope notices are two sentences: what was replaced, then what it does not affect.
-			deps.appendTranscriptNotice("warn", event.message, "fleet");
+			deps.appendTranscriptNotice("warn", notice.message, "fleet");
 			deps.requestRender();
 		}),
 		deps.bus.on(BusChannels.LoopBlocked, (payload) => {

@@ -1,10 +1,13 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
+import { BusChannels } from "../core/bus-events.js";
 import { type ClioSettings, readSettings } from "../core/config.js";
+import { readDispatchScopeNotice } from "../core/dispatch-scope-notice.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { readFileArgsAsync } from "../core/file-references.js";
 import { withRunOverrides } from "../core/run-overrides.js";
 import { readStrictLayeredSettings } from "../core/settings-layers.js";
+import { getSharedBus } from "../core/shared-bus.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
@@ -639,6 +642,15 @@ async function runDispatch(
 	if (memorySection.length > 0) dispatchReq.memorySection = memorySection;
 
 	let cleanupSteer: (() => void) | undefined;
+	// A dispatch's scope entry can change what the worker may touch without saying
+	// so in the request, so the headless run reports it where an operator would see
+	// it: stderr in text mode, a `dispatch_scope_notice` line in the JSON stream.
+	const unsubscribeScopeNotices = getSharedBus().on(BusChannels.DispatchScopeNotice, (payload) => {
+		const notice = readDispatchScopeNotice(payload);
+		if (notice === null) return;
+		if (parsed.json) process.stdout.write(`${JSON.stringify({ type: "dispatch_scope_notice", ...notice })}\n`);
+		else process.stderr.write(`clio-coder run: ${notice.message}\n`);
+	});
 	try {
 		const handle = await dispatch.dispatch(dispatchReq);
 		if (parsed.steerChannel) {
@@ -682,6 +694,7 @@ async function runDispatch(
 		}
 
 		const receipt = await handle.finalPromise;
+		unsubscribeScopeNotices();
 		if (cleanupSteer) {
 			cleanupSteer();
 			cleanupSteer = undefined;
@@ -701,6 +714,7 @@ async function runDispatch(
 		await loaded.stop();
 		return mapExitCode(receipt);
 	} catch (err) {
+		unsubscribeScopeNotices();
 		if (cleanupSteer) {
 			cleanupSteer();
 		}

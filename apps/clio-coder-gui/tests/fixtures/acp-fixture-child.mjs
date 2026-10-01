@@ -522,6 +522,10 @@ const fleet = () => {
 			{ tool: "bash", callsThisTurn: 41, softBudget: 40, hardCeiling: 60, interrupted: false },
 		],
 		["provider.health", { targetId: "fixture", status: "degraded", available: true, latencyMs: 5 }],
+		[
+			"dispatch.scopeNotice",
+			{ code: "write_root_dot_unconfined", level: "warning", message: "[dispatch scope] a root of '.' set no boundary." },
+		],
 		// Not in ACP_TO_WEB_EVENT. A newer engine's kind must be dropped, not kill
 		// the session, so every fleet-scenario test exercises that path too.
 		["future.unknownKind", { anything: true }],
@@ -552,7 +556,7 @@ async function handle(frame) {
 		switch (frame.method) {
 			case "initialize": {
 				const kinds = frame.params?.clientCapabilities?._meta?.["clio-coder/events"]?.kinds;
-				if (!Array.isArray(kinds) || kinds.length !== 11) throw Error("event_opt_in");
+				if (!Array.isArray(kinds) || kinds.length !== 12) throw Error("event_opt_in");
 				const rows = JSON.parse(readFileSync(join(process.env.CLIO_CODER_STATE_DIR, "gui/children.json"), "utf8"));
 				if (!rows.some((row) => row.pid === process.pid && row.ownerPid === process.ppid))
 					throw Error("not_recorded_before_initialize");

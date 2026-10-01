@@ -736,6 +736,46 @@ it("headless reports a stable image error before opening a turn", { timeout: 15_
 	}
 });
 
+it("headless text mode reports a dispatch scope notice on stderr and ignores a payload that is not one", {
+	timeout: 15_000,
+}, async () => {
+	const f = fixture("success");
+	const message = '[dispatch scope] intent.write_roots "." names the whole workspace, so it sets no write boundary.';
+	const lines: string[] = [];
+	try {
+		// The listener fires while the run starts, before its first await, so stderr is
+		// only swapped across synchronous code and restored before anything is awaited.
+		const write = process.stderr.write;
+		process.stderr.write = ((chunk: string | Uint8Array) => {
+			lines.push(String(chunk));
+			return true;
+		}) as typeof process.stderr.write;
+		let running: Promise<number>;
+		try {
+			running = runHeadlessMainAgent(f.loop, {
+				prompt: "Hello",
+				mode: "text",
+				scopeNotices: (listener) => {
+					listener({ code: "write_root_dot_unconfined", level: "warning", message });
+					listener({ code: "made_up", level: "warning", message: "not a scope notice" });
+					return () => {};
+				},
+			});
+		} finally {
+			process.stderr.write = write;
+		}
+		strictEqual(await running, 0);
+		strictEqual(lines.filter((line) => line.includes("[dispatch scope]")).length, 1);
+		ok(lines.includes(`clio-coder run: ${message}\n`));
+		strictEqual(
+			lines.some((line) => line.includes("not a scope notice")),
+			false,
+		);
+	} finally {
+		await f.close();
+	}
+});
+
 it("headless shutdown retains its cancelled receipt and exit 143 without route advice", {
 	timeout: 15_000,
 }, async () => {

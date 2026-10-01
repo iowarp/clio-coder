@@ -475,6 +475,30 @@ test("a null context warning is the clearing edge and retires the banner", () =>
 	assert.equal(late.contextWarning?.detail, "97% of the context window is in use");
 });
 
+test("a dispatch scope notice is a standing statement per code, shown as written and never as an alarm", () => {
+	const summary = summarizeHealth([
+		health("health.scopeNotice", {
+			code: "write_root_dot_unconfined",
+			message: "[dispatch scope] a root of '.' set no boundary.",
+		}),
+		health("health.scopeNotice", {
+			code: "legacy_scope_inferred",
+			message: "[dispatch scope] a path token was resolved.",
+		}),
+		health("health.scopeNotice", { code: "write_root_dot_unconfined", message: "[dispatch scope] the newer statement." }),
+	]);
+	assert.deepEqual(
+		summary.scopeNotices.map((row) => [row.key, row.detail]),
+		[
+			["legacy_scope_inferred", "[dispatch scope] a path token was resolved."],
+			["write_root_dot_unconfined", "[dispatch scope] the newer statement."],
+		],
+	);
+	assert.equal(summary.scopeNotices[0]?.label, "Dispatch scope");
+	assert.equal(summary.attention, false);
+	assert.equal(summary.worst, "warn");
+});
+
 test("compaction, tool budget and provider health reduce to readable rows", () => {
 	const items: HealthItem[] = [
 		{

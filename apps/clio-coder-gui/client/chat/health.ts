@@ -1,6 +1,7 @@
-// The session-health taxonomy. `SessionSnapshot.health` is a bounded 32-entry strip of the four
+// The session-health taxonomy. `SessionSnapshot.health` is a bounded 32-entry strip of the five
 // facts that describe this conversation rather than a dispatched run: the context window was cut,
-// it is close to full, the loop guard stopped a turn on call volume, and a target changed state.
+// it is close to full, the loop guard stopped a turn on call volume, a target changed state, and a
+// dispatch scope entry did something its request did not say.
 //
 // An operator needs the newest of each, not a history, so this reduces the strip to one row per
 // live concern and one row per target. Two rules carry the weight:
@@ -24,7 +25,7 @@ export type HealthItemLike = Omit<HealthItem, "fact"> & {
 	readonly fact: { readonly type: string; readonly payload?: unknown };
 };
 
-export type HealthRowKind = "contextWarning" | "compaction" | "toolBudget" | "provider" | "unknown";
+export type HealthRowKind = "contextWarning" | "compaction" | "toolBudget" | "provider" | "scopeNotice" | "unknown";
 
 export interface HealthRow {
 	readonly id: string;
@@ -47,6 +48,8 @@ export interface HealthSummary {
 	readonly compaction: HealthRow | null;
 	/** The most recent tool-budget breach, which explains why a turn stopped making progress. */
 	readonly toolBudget: HealthRow | null;
+	/** One row per scope notice code, newest first seen, ordered by code. Each is a statement, not a state. */
+	readonly scopeNotices: readonly HealthRow[];
 	/** One row per target, newest state, ordered by target id. */
 	readonly providers: readonly HealthRow[];
 	/** One row per unrecognised fact type, newest first seen, ordered by type. */
@@ -154,6 +157,19 @@ function toRow(item: HealthItemLike): HealthRow | null {
 				attention: true,
 			};
 		}
+		case "health.scopeNotice": {
+			const code = text(payload.code) ?? "scope";
+			return {
+				...base,
+				kind: "scopeNotice",
+				key: code,
+				label: "Dispatch scope",
+				// The agent wrote two sentences: what the entry did, then what it leaves alone.
+				detail: text(payload.message) ?? "A dispatch scope entry changed what its request said.",
+				tone: "warn",
+				attention: false,
+			};
+		}
 		case "health.provider": {
 			const targetId = text(payload.targetId) ?? "unnamed target";
 			const status = text(payload.status) ?? "unknown";
@@ -196,6 +212,7 @@ export function summarizeHealth(items: readonly HealthItemLike[]): HealthSummary
 	let compaction: HealthRow | undefined;
 	let toolBudget: HealthRow | undefined;
 	const providers = new Map<string, HealthRow>();
+	const scopeNotices = new Map<string, HealthRow>();
 	const unknown = new Map<string, HealthRow>();
 	for (const item of items) {
 		const row = toRow(item);
@@ -213,6 +230,9 @@ export function summarizeHealth(items: readonly HealthItemLike[]): HealthSummary
 			case "provider":
 				if (newer(row, providers.get(row.key))) providers.set(row.key, row);
 				break;
+			case "scopeNotice":
+				if (newer(row, scopeNotices.get(row.key))) scopeNotices.set(row.key, row);
+				break;
 			case "unknown":
 				if (newer(row, unknown.get(row.key))) unknown.set(row.key, row);
 				break;
@@ -222,10 +242,12 @@ export function summarizeHealth(items: readonly HealthItemLike[]): HealthSummary
 	const standing = contextWarning !== undefined && contextWarning.detail !== null ? contextWarning : null;
 	const byKey = (left: HealthRow, right: HealthRow) => left.key.localeCompare(right.key, "en-US");
 	const providerRows = [...providers.values()].sort(byKey);
+	const scopeRows = [...scopeNotices.values()].sort(byKey);
 	const unknownRows = [...unknown.values()].sort(byKey);
 	const rows = [
 		...(standing === null ? [] : [standing]),
 		...(toolBudget === undefined ? [] : [toolBudget]),
+		...scopeRows,
 		...providerRows,
 		...(compaction === undefined ? [] : [compaction]),
 		...unknownRows,
@@ -234,6 +256,7 @@ export function summarizeHealth(items: readonly HealthItemLike[]): HealthSummary
 		contextWarning: standing,
 		compaction: compaction ?? null,
 		toolBudget: toolBudget ?? null,
+		scopeNotices: scopeRows,
 		providers: providerRows,
 		unknown: unknownRows,
 		rows,

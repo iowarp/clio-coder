@@ -169,6 +169,7 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 		case "health.contextWarning":
 		case "health.toolBudget":
 		case "health.provider":
+		case "health.scopeNotice":
 			return { ...state, health: [...state.health, event.payload.item].slice(-32) };
 		case "session.changed":
 			return { ...state, state: event.payload.state, recoveredOrphan: event.payload.recoveredOrphan };

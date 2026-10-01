@@ -206,6 +206,7 @@ export const SessionDeltas = {
 	"health.contextWarning": healthPayload,
 	"health.toolBudget": healthPayload,
 	"health.provider": healthPayload,
+	"health.scopeNotice": healthPayload,
 	"session.labelled": Type.Object({ ...base, label: nullableString }, closed),
 	"session.configured": Type.Object({ ...base, config: SessionConfig }, closed),
 	"session.changed": Type.Object({ ...base, state: SessionState, recoveredOrphan: Type.Boolean() }, closed),
@@ -233,4 +234,5 @@ export const ACP_EVENT_KINDS = [
 	"context.warning",
 	"safety.toolBudgetExceeded",
 	"provider.health",
+	"dispatch.scopeNotice",
 ] as const;
