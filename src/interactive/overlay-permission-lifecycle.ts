@@ -17,7 +17,7 @@ import type { SafetyDecision } from "../domains/safety/contract.js";
 import { decisionActionClass } from "../domains/safety/decision-presentation.js";
 import { askUserExposure } from "../tools/ask-user.js";
 import type { PermissionRequiredMeta, ToolRegistry } from "../tools/registry.js";
-import { approvalParkedNotice, workerEscalationNotice } from "./bus-notices.js";
+import { approvalParkedNotice } from "./bus-notices.js";
 import type { ToolApprovalStateEvent } from "./chat-loop.js";
 import type { NoticeLevel } from "./command-output.js";
 import { createMutationInspector, type MutationInspector, mutationFacts } from "./mutation-preview.js";
@@ -497,8 +497,6 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		const entry = workerEscalationEntry(payload, deps.getAutonomy());
 		if (!entry) return;
 		if (!markPermissionRequestSurfaced(announcedWorkerRequestIds, entry.requestId)) return;
-		const notice = workerEscalationNotice(payload);
-		if (notice !== null) deps.appendNotice(notice.level, notice.text, notice.source);
 		deps.onOperatorParked?.();
 		workerQueue.push(entry);
 		maybeOpenWorker();
