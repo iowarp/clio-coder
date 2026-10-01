@@ -235,7 +235,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `interface.panes.enabled` | `off` | restart |
 | `interface.panes.notifications` | `failures` | immediately |
 | `interface.panes.layout` | `off` | restart |
-| `interface.panes.workers.ratio` | `0.34` | restart |
+| `interface.panes.workers.ratio` | `0.34` | immediately on the next workers dock open |
 | `interface.panes.files.enabled` | `false` | immediately on the next files-pane open |
 | `interface.panes.files.mode` | `companion` | immediately on the next files-pane open |
 | `interface.panes.files.profile` | `managed` | immediately on the next files-pane open |
