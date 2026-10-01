@@ -1,5 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
+import { projectDispatchJsonEvent } from "../../src/cli/modes/json-stream.js";
 import { ledgerUsageCalls, type SessionEntry } from "../../src/domains/session/index.js";
 import {
 	remainingContextMaxTokens,
@@ -88,6 +89,35 @@ describe("contracts/metering integrity", () => {
 		strictEqual(corrected.totalTokens, corrected.input + corrected.output);
 		strictEqual(corrected.estimated, true);
 		strictEqual(estimatedUsageForInterruptedTurn({ ...message, stopReason: "stop" } as AgentMessage, 9_658), null);
+	});
+
+	it("counts tool arguments with interleaved text and thinking, and repairs older estimates", () => {
+		const message = {
+			role: "assistant",
+			stopReason: "aborted",
+			content: [
+				{ type: "text", text: "eight123" },
+				{ type: "thinking", thinking: "thoughts" },
+				{ type: "toolCall", id: "write-1", name: "write", arguments: "x".repeat(20_000) },
+			],
+			usage: { ...zeroUsage, input: 50, output: 6, estimated: true },
+		} as unknown as AgentMessage;
+		const usage = estimatedUsageForInterruptedTurn(message, 100);
+		strictEqual(usage?.output, 5004);
+		strictEqual(usage?.input, 100);
+		strictEqual(usage?.estimated, true);
+		const raw = { ...message, clioCoderOutputChars: 24_000 } as unknown as AgentMessage;
+		strictEqual(estimatedUsageForInterruptedTurn(raw, 100)?.output, 6000);
+		const authoritative = { ...raw, usage: { ...zeroUsage, input: 100, output: 42, totalTokens: 142 } } as AgentMessage;
+		strictEqual(estimatedUsageForInterruptedTurn(authoritative, 100), null);
+		const summary = projectDispatchJsonEvent({ type: "agent_end", messages: [raw] }) as {
+			usage: {
+				measured: boolean;
+				estimated?: boolean;
+			};
+		};
+		strictEqual(summary.usage.measured, false);
+		strictEqual(summary.usage.estimated, true);
 	});
 
 	it("resolves model, fallback, explicit, and served-window output budgets", () => {
@@ -194,6 +224,12 @@ describe("contracts/metering integrity", () => {
 					cost: { total: 0 },
 				}),
 				assistant("aborted", "aborted", completed, { provider: "llamacpp", responseModel: "model-a" }),
+				assistant(
+					"estimated",
+					"aborted",
+					{ ...completed, estimated: true },
+					{ provider: "llamacpp", responseModel: "model-a" },
+				),
 				assistant("complete", "stop", completed, { provider: "llamacpp", responseModel: "model-a" }),
 			],
 			{ target: "local-cluster", model: "model-a" },

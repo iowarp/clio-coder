@@ -1,3 +1,4 @@
+import { assistantOutputChars } from "../core/assistant-output.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { replaceEngineMessages, setEngineSystemPrompt } from "../engine/agent.js";
@@ -78,7 +79,6 @@ import {
 	type ContextUsageSnapshot,
 	captureContextSnapshot,
 	ceilChars,
-	contentChars,
 	contextUsageSnapshot,
 	estimateAgentContextBreakdown,
 	estimateAgentContextTokens,
@@ -633,10 +633,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const liveStreamingOutputTokens = (): number => {
 		if (!state.runtime) return 0;
 		if (state.streaming) {
-			const messages = state.runtime.agent.state.messages.filter((message) => message.role !== "system");
-			const lastMsg = messages[messages.length - 1] as { role?: string; payload?: unknown; content?: unknown } | undefined;
-			if (lastMsg && lastMsg.role === "assistant") {
-				return ceilChars(contentChars(lastMsg.payload ?? lastMsg.content));
+			const partial = state.runtime.agent.state.streamingMessage;
+			if (partial?.role === "assistant") {
+				return ceilChars(assistantOutputChars(partial));
 			}
 			return 0;
 		}
@@ -2136,8 +2135,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// Footer reads project the last publication. They never rescan the
 			// ledger or add streaming output to the next-request message estimate.
 			const view = budgetProducer.current() ?? refreshLiveBudget();
+			// Occupancy includes the active response. Admission still reads the
+			// published next-request input, so generated output is not charged a
+			// second time when it becomes settled history.
+			const tokens =
+				view.inputTokens === null ? null : view.inputTokens + (state.streaming ? liveStreamingOutputTokens() : 0);
 			return {
-				...contextUsageSnapshot(view.inputTokens, view.effectiveWindow, view.breakdown ?? undefined),
+				...contextUsageSnapshot(tokens, view.effectiveWindow, view.breakdown ?? undefined),
 				revision: view.revision,
 				inputSource: view.inputSource,
 				historical: view.historical,

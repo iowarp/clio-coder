@@ -31,6 +31,8 @@ export interface DispatchOverlay {
 
 export interface TurnSummary {
 	elapsedMs: number;
+	/** At least one call's usage was estimated from streamed content. */
+	estimated?: boolean;
 	modelId: string;
 	/** Direct response model-id observation for the last API call in the turn. */
 	responseModelIdObservation: ResponseModelIdObservation;
@@ -66,6 +68,7 @@ export interface TurnSummary {
  * calls even when the session total moved by 64k in the same footer line.
  */
 export interface RunTally {
+	estimated?: boolean;
 	inputTokens: number;
 	outputTokens: number;
 	cacheReadTokens: number;

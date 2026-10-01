@@ -6,6 +6,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { assistantOutputChars } from "../core/assistant-output.js";
 import {
 	type BackendCacheVerdict,
 	type BackendCompletionTimings,
@@ -396,6 +397,7 @@ export interface RunUsageSummary {
 	apiCalls: number;
 	hadReasoning: boolean;
 	hadUsage: boolean;
+	estimated?: boolean;
 	responseModelIdObservationCounts: ResponseModelIdObservationCounts;
 	lastResponseModelIdObservation: ResponseModelIdObservation;
 	lastDifferingResponseModelId: string | null;
@@ -447,6 +449,7 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 		const record = message as unknown as Record<string, unknown>;
 		const usage = message.usage;
 		if (!usage || typeof usage !== "object") continue;
+		if ((usage as { estimated?: unknown }).estimated === true) summary.estimated = true;
 		summary.lastResponseModelIdObservation = responseModelIdObservationFromRecord(record, "not-observed");
 		addResponseModelIdObservationCount(summary.responseModelIdObservationCounts, summary.lastResponseModelIdObservation);
 		summary.lastDifferingResponseModelId =
@@ -568,9 +571,9 @@ export function assistantSessionPayload(
  * are recorded as estimates rather than as zero.
  *
  * `estimated: true` is the provenance marker: no surface may report these as
- * provider-reported numbers. The usage fold and the context estimator both skip
- * aborted turns already, so this never reaches `/usage` or the window math; it is
- * the record's own honesty about what the cancelled call cost.
+ * provider-reported numbers. This feeds the interrupted record and the turn's
+ * display, while provider spend and context reconciliation retain their own
+ * authoritative usage paths.
  *
  * Returns null when the provider did report usage (there is nothing to fill in)
  * or when nothing streamed (an empty abort spent only the prompt, which the
@@ -582,13 +585,13 @@ export function estimatedUsageForInterruptedTurn(
 ): Record<string, unknown> | null {
 	if ((message as { stopReason?: unknown }).stopReason !== "aborted") return null;
 	const reported = (message as { usage?: Record<string, unknown> }).usage;
-	if (reported && typeof reported === "object") {
+	if (reported && typeof reported === "object" && reported.estimated !== true) {
 		for (const key of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"] as const) {
 			const value = reported[key];
 			if (typeof value === "number" && value > 0) return null;
 		}
 	}
-	const streamedChars = extractText(message).length + extractThinking(message).length;
+	const streamedChars = assistantOutputChars(message);
 	if (streamedChars === 0 && promptSideTokens <= 0) return null;
 	const input = Math.max(0, Math.round(promptSideTokens));
 	const output = streamedChars > 0 ? Math.max(1, ceilChars(streamedChars)) : 0;

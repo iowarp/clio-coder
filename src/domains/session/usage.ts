@@ -132,6 +132,10 @@ export function ledgerUsageCalls(
 		const rawUsage = record.usage;
 		if (!rawUsage || typeof rawUsage !== "object" || Array.isArray(rawUsage)) continue;
 		const usage = rawUsage as Record<string, unknown>;
+		// CLB-2: interrupted character estimates remain on their message and
+		// turn receipt. Provider usage totals must retain the same provenance
+		// after a resume as they had before it.
+		if (usage.estimated === true) continue;
 		const input = numberAt(usage, "input");
 		const output = numberAt(usage, "output");
 		const cacheRead = numberAt(usage, "cacheRead");

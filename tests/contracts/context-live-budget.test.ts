@@ -395,6 +395,27 @@ describe("live budget adapter", () => {
 		strictEqual(view.capturedSnapshotId !== null, true, "the capture stays reachable as a diagnostic reference");
 	});
 
+	it("adds the current raw argument stream to occupancy while keeping next-request input separate", () => {
+		const f = reconciledFixture();
+		const input = f.context.refreshLiveBudget().inputTokens;
+		ok(input !== null);
+		f.state.streaming = true;
+		const partial = {
+			...assistant(""),
+			content: [{ type: "toolCall", id: "write", name: "write", arguments: {} }],
+			clioCoderOutputChars: 12_000,
+		} as unknown as AgentMessage;
+		Object.assign(f.runtime.agent.state, { streamingMessage: partial });
+		strictEqual(f.context.contextUsage().tokens, input + 3000);
+		strictEqual(f.context.liveBudget().inputTokens, input);
+		Object.assign(f.runtime.agent.state, { streamingMessage: undefined });
+		strictEqual(f.context.contextUsage().tokens, input, "a settled previous response is not the current stream");
+		f.state.streaming = false;
+		f.runtime.agent.state.messages.push(assistant());
+		f.context.reconcileUsage(usage(21_000, 100));
+		strictEqual(f.context.contextUsage().tokens, 21_100, "authoritative occupancy replaces the live estimate");
+	});
+
 	it("shares one total and one revision between the admission refresh and every later read", () => {
 		const f = reconciledFixture();
 		const admission = f.context.refreshLiveBudget("send this");

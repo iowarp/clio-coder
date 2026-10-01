@@ -133,7 +133,7 @@ function blockChars(block: unknown): number {
 	return jsonLength(block);
 }
 
-export function contentChars(content: unknown): number {
+function contentChars(content: unknown): number {
 	if (typeof content === "string") return content.length;
 	if (!Array.isArray(content)) return jsonLength(content);
 	return content.reduce((sum, block) => sum + blockChars(block), 0);

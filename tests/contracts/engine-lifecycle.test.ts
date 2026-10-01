@@ -25,6 +25,7 @@ import {
 } from "@earendil-works/pi-ai";
 import type { Terminal } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { assistantOutputChars } from "../../src/core/assistant-output.js";
 import { CLIO_APP_KEYBINDINGS, CLIO_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
 import { createEngineAgent, type EngineStreamFn as StreamFn } from "../../src/engine/agent.js";
 import { StringEnum, validateEngineToolArguments } from "../../src/engine/ai.js";
@@ -247,6 +248,7 @@ describe("tool argument generation bounds", () => {
 		ok(result.errorMessage?.includes("3-character cycle"));
 		ok(result.errorMessage?.includes("No tools from this response were executed"));
 		strictEqual(observedSignal?.aborted, true);
+		strictEqual(assistantOutputChars(result), 18_000, "raw fragments count even when partial parsing has not advanced");
 		// A late provider success cannot replace the guard's terminal result.
 		source.push({ type: "done", reason: "toolUse", message: partial });
 		strictEqual(await guarded.result(), result);

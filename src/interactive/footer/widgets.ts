@@ -483,7 +483,9 @@ function formattedThroughput(theme: ClioTheme, throughput: TokenThroughputSnapsh
 	const tps = finiteNonNegative(throughput?.tokensPerSecond);
 	if (tps <= 0) return null;
 	const rounded = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10;
-	const parts = [`${theme.fg("metricValue", `${GLYPH.speed}${rounded}`)} ${theme.fg("metricUnit", "Tk/s")}`];
+	const parts = [
+		`${theme.fg("metricValue", `${GLYPH.speed}${throughput?.estimated ? "≈" : ""}${rounded}`)} ${theme.fg("metricUnit", "Tk/s")}`,
+	];
 	const ttft = finiteNonNegative(throughput?.ttftMs);
 	if (ttft > 0) parts.push(`${theme.fg("fieldName", "ttft")} ${theme.fg("counter", formatCompactMs(ttft))}`);
 	return joinChips(theme, parts);
@@ -504,7 +506,9 @@ function liveTokenValue(
 		finiteNonNegative(lastTurn?.inputTokens) ||
 		finiteNonNegative(sessionTokens?.input);
 	const parts = [
-		output > 0 ? theme.fg("counter", `${GLYPH.down} ${formatFooterTokens(output)}`) : null,
+		output > 0
+			? theme.fg("counter", `${GLYPH.down} ${throughput?.estimated ? "≈" : ""}${formatFooterTokens(output)}`)
+			: null,
 		input > 0 ? theme.fg("counter", `${GLYPH.up} ${formatFooterTokens(input)}`) : null,
 	];
 	const joined = joinChips(theme, parts);
@@ -528,10 +532,11 @@ function lastTurnOutcome(theme: ClioTheme, lastTurn: TurnSummary): string {
 }
 
 function lastTurnDetails(theme: ClioTheme, lastTurn: TurnSummary): string {
+	const estimate = lastTurn.estimated ? "≈" : "";
 	const parts: Array<string | null> = [
 		theme.fg(
 			"counter",
-			`${GLYPH.up} ${formatFooterTokens(lastTurn.inputTokens)} ${GLYPH.down} ${formatFooterTokens(lastTurn.outputTokens)}`,
+			`${GLYPH.up} ${estimate}${formatFooterTokens(lastTurn.inputTokens)} ${GLYPH.down} ${estimate}${formatFooterTokens(lastTurn.outputTokens)}`,
 		),
 		reasoningChip(theme, lastTurn),
 		lastTurn.cacheReadTokens > 0 || lastTurn.cacheWriteTokens > 0

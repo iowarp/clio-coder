@@ -1067,11 +1067,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					);
 				}
 				const timing = generationTiming.snapshot(eventClock);
-				if (summary.output > 0 && timing) {
+				const generated = generationTiming.output();
+				if (generated.outputTokens > 0 && timing) {
 					const durationMs = Math.round(timing.durationMs);
 					deps.observability.recordTokenThroughput({
-						tokensPerSecond: summary.output / (durationMs / 1000),
-						outputTokens: summary.output,
+						tokensPerSecond: generated.outputTokens / (durationMs / 1000),
+						...generated,
 						durationMs,
 						ttftMs: Math.round(timing.ttftMs),
 					});

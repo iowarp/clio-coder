@@ -34,6 +34,63 @@ test("throughput sums generation spans without tool, approval, worker or retry w
 	strictEqual(timing.snapshot(120000), null, "only a new run resets the accumulator");
 });
 
+test("live argument estimates are replaced by authoritative output and survive a later aborted call", () => {
+	const timing = createAssistantGenerationTiming();
+	const partial = {
+		role: "assistant",
+		clioCoderOutputChars: 12_000,
+		content: [{ type: "toolCall", id: "one", name: "write", arguments: {} }],
+	};
+	timing.record({ type: "agent_start" }, 0);
+	timing.record({ type: "message_start", message: partial }, 100);
+	timing.record(
+		{ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", delta: "raw", partial } },
+		200,
+	);
+	deepStrictEqual(timing.output(), { outputTokens: 3000, estimated: true });
+	timing.record(
+		{ type: "message_end", message: { ...partial, usage: { input: 100, output: 40, totalTokens: 140 } } },
+		1200,
+	);
+	deepStrictEqual(timing.output(), { outputTokens: 40, estimated: false });
+	const aborted = { ...partial, clioCoderOutputChars: 16_008 };
+	timing.record({ type: "message_start", message: aborted }, 10_000);
+	timing.record(
+		{ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", delta: "more", partial: aborted } },
+		11_000,
+	);
+	deepStrictEqual(timing.output(), { outputTokens: 4042, estimated: true });
+	timing.record(
+		{
+			type: "message_end",
+			message: { ...aborted, usage: { input: 100, output: 4002, totalTokens: 4102, estimated: true } },
+		},
+		12_000,
+	);
+	timing.record({ type: "agent_end" }, 12_000);
+	deepStrictEqual(timing.output(), { outputTokens: 4042, estimated: true }, "settlement charges each call once");
+	deepStrictEqual(
+		timing.snapshot(22_000),
+		{ durationMs: 2000, ttftMs: 200 },
+		"tool and idle waits stay outside the rate",
+	);
+	timing.record({ type: "agent_start" }, 23_000);
+	timing.record({ type: "message_start", message: partial }, 23_100);
+	timing.record(
+		{ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", delta: "raw", partial } },
+		23_200,
+	);
+	timing.record(
+		{ type: "message_end", message: { ...partial, usage: { input: 100, output: 0, totalTokens: 100 } } },
+		24_200,
+	);
+	deepStrictEqual(
+		timing.output(),
+		{ outputTokens: 0, estimated: false },
+		"an authoritative zero replaces the estimate too",
+	);
+});
+
 const MODEL: EngineModel = {
 	id: "timing-a",
 	name: "Timing fixture",

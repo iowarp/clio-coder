@@ -14,6 +14,8 @@ import type { WorkerProgressSnapshot } from "./worker-progress.js";
 export interface TokenThroughputSnapshot {
 	tokensPerSecond: number;
 	outputTokens: number;
+	/** True when any output in this rate is derived from characters rather than provider usage. */
+	estimated?: boolean;
 	durationMs: number;
 	ttftMs?: number;
 }

@@ -90,6 +90,7 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 	const record = message as unknown as Record<string, unknown>;
 	const next: RunTally = {
 		...tally,
+		...(usage?.estimated === true ? { estimated: true } : {}),
 		responseModelIdObservation: responseModelIdObservationFromRecord(record, "not-observed"),
 		inputTokens: tally.inputTokens + (usage ? finite(usage.input) : 0),
 		outputTokens: tally.outputTokens + (usage ? finite(usage.output) : 0),
@@ -137,6 +138,7 @@ export interface SummaryFromTallyInput {
 export function summaryFromRunTally(tally: RunTally, input: SummaryFromTallyInput): TurnSummary {
 	const summary: TurnSummary = {
 		elapsedMs: Math.max(0, input.endedAt - input.startedAt),
+		...(tally.estimated === true ? { estimated: true } : {}),
 		modelId: input.modelId,
 		targetId: input.targetId,
 		inputTokens: tally.inputTokens,

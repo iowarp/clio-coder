@@ -15,11 +15,10 @@ import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { UsageSnapshot } from "../domains/quota/types.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import type { LocalCapacity } from "../domains/scheduling/local-capacity.js";
-import { ceilChars, contentChars } from "../domains/session/context-accounting.js";
 import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { Component, ScrollView, TUI } from "../engine/tui.js";
-import { createAssistantGenerationTiming, hasAssistantGenerationDelta } from "./assistant-generation-timing.js";
+import { createAssistantGenerationTiming } from "./assistant-generation-timing.js";
 import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { createChatPanel } from "./chat-panel.js";
@@ -323,51 +322,23 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	let lastTurnSummary: TurnSummary | null = null;
 	let observabilitySnapshot = deps.observability.snapshot();
 	const generationTiming = createAssistantGenerationTiming();
-	let liveThroughput: {
-		settledOutputTokens: number;
-		partialOutputTokens: number;
-	} | null = null;
+	let liveGeneration = false;
 	const recordChatEvent = (event: ChatLoopEvent): void => {
 		generationTiming.record(event, now());
-		if (event.type === "agent_start") {
-			liveThroughput = {
-				settledOutputTokens: 0,
-				partialOutputTokens: 0,
-			};
-			return;
-		}
-		if (event.type === "agent_end") {
-			liveThroughput = null;
-			return;
-		}
-		if (!liveThroughput) return;
-		if (event.type === "message_start" && event.message?.role === "assistant") {
-			liveThroughput.partialOutputTokens = 0;
-			return;
-		}
-		if (event.type === "message_update") {
-			const update = event.assistantMessageEvent as { type?: unknown; partial?: { content?: unknown; payload?: unknown } };
-			if (!hasAssistantGenerationDelta(update)) return;
-			liveThroughput.partialOutputTokens = ceilChars(contentChars(update.partial?.payload ?? update.partial?.content));
-			return;
-		}
-		if (event.type === "message_end" && event.message?.role === "assistant") {
-			const output = (event.message as { usage?: { output?: unknown } }).usage?.output;
-			const reported = typeof output === "number" && Number.isFinite(output) && output > 0 ? output : null;
-			liveThroughput.settledOutputTokens += reported ?? liveThroughput.partialOutputTokens;
-			liveThroughput.partialOutputTokens = 0;
-		}
+		if (event.type === "agent_start") liveGeneration = true;
+		if (event.type === "agent_end") liveGeneration = false;
 	};
 	const currentLiveThroughput = (): TokenThroughputSnapshot | null => {
-		if (!liveThroughput) return null;
+		if (!liveGeneration) return null;
 		const timing = generationTiming.snapshot(now());
 		if (!timing) return null;
-		const outputTokens = liveThroughput.settledOutputTokens + liveThroughput.partialOutputTokens;
+		const { outputTokens, estimated } = generationTiming.output();
 		if (outputTokens <= 0) return null;
 		const { durationMs, ttftMs } = timing;
 		return {
 			tokensPerSecond: outputTokens / (durationMs / 1000),
 			outputTokens,
+			estimated,
 			durationMs,
 			ttftMs,
 		};
@@ -426,8 +397,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			if (setDockFooterRows(deps.tui, rows)) requestRender();
 		},
 		getSessionTokens: () => observabilitySnapshot.session.tokens,
-		getTokenThroughput: () =>
-			liveThroughput === null ? observabilitySnapshot.session.latestThroughput : currentLiveThroughput(),
+		getTokenThroughput: () => (liveGeneration ? currentLiveThroughput() : observabilitySnapshot.session.latestThroughput),
 		getSessionCost: () => observabilitySnapshot.session.cost,
 		getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
 		getContextUsage: () => deps.chat.contextUsage(),
@@ -818,7 +788,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			footerToolErrors = 0;
 			footerToolTruncatedResults = 0;
 			lastTurnSummary = null;
-			liveThroughput = null;
+			liveGeneration = false;
 			statusController.reset();
 		},
 		stopTickers,

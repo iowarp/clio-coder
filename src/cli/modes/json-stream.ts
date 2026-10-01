@@ -192,7 +192,8 @@ function segmentSummary(type: string, messages: ReadonlyArray<AgentMessage>): Re
 			totalTokens: usage.tokens,
 			costUsd: usage.costUsd,
 			apiCalls: usage.apiCalls,
-			measured: usage.hadUsage,
+			measured: usage.hadUsage && usage.estimated !== true,
+			...(usage.estimated === true ? { estimated: true } : {}),
 		},
 	};
 }

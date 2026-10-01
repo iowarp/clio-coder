@@ -438,6 +438,7 @@ function addRunUsage(left: RunUsageSummary, right: RunUsageSummary): RunUsageSum
 		apiCalls: left.apiCalls + right.apiCalls,
 		hadReasoning: left.hadReasoning || right.hadReasoning,
 		hadUsage: left.hadUsage || right.hadUsage,
+		...(left.estimated || right.estimated ? { estimated: true } : {}),
 		responseModelIdObservationCounts,
 		lastResponseModelIdObservation: last.lastResponseModelIdObservation,
 		lastDifferingResponseModelId: last.lastDifferingResponseModelId,

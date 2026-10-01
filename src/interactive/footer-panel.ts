@@ -64,7 +64,7 @@ export function throughputSegment(metric: TokenThroughputSnapshot | null | undef
 	const tps = metric?.tokensPerSecond;
 	if (typeof tps !== "number" || !Number.isFinite(tps) || tps <= 0) return null;
 	const rounded = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10;
-	return `${GLYPH.speed}${rounded} Tk/s`;
+	return `${GLYPH.speed}${metric?.estimated ? "≈" : ""}${rounded} Tk/s`;
 }
 
 function dispatchStatusCounts(rows: ReadonlyArray<DispatchBoardRow>): {

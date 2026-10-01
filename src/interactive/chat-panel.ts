@@ -111,6 +111,7 @@ export type { ReasoningTokenProvenance } from "./status/index.js";
 
 export interface ChatPanelTurnUsage {
 	elapsedMs?: number;
+	estimated?: boolean;
 	outcome?: string;
 	inputTokens: number;
 	outputTokens: number;
@@ -497,6 +498,7 @@ function assistantUsage(message: unknown): ChatPanelTurnUsage | undefined {
 		return undefined;
 	}
 	const turnUsage: ChatPanelTurnUsage = {
+		...(tally.estimated === true ? { estimated: true } : {}),
 		inputTokens: tally.inputTokens,
 		outputTokens: tally.outputTokens,
 		cacheReadTokens: tally.cacheReadTokens,
@@ -529,6 +531,7 @@ function aggregateAssistantUsage(messages: unknown): ChatPanelTurnUsage | undefi
 		total.modelCalls = (total.modelCalls ?? 0) + (usage.modelCalls ?? 1);
 		total.inputTokens += usage.inputTokens;
 		total.outputTokens += usage.outputTokens;
+		if (usage.estimated) total.estimated = true;
 		total.cacheReadTokens += usage.cacheReadTokens;
 		total.cacheWriteTokens += usage.cacheWriteTokens;
 		if (usage.reasoningTokens !== undefined) {
@@ -1013,7 +1016,7 @@ function renderSettledThinkingMarker(view: ReasoningUsageView, width: number): s
  * their asterisks, and an opener still streaming without its closer is dropped
  * at a line start so the heading does not flicker as the delta lands.
  */
-const THINKING_EMPHASIS = /(?<![\p{L}\p{N}_*\/\\.])(\*{1,2})(?=[^\s*])([^\n]*?[^\s*\\])\1(?![\p{L}\p{N}*])/gu;
+const THINKING_EMPHASIS = /(?<![\p{L}\p{N}_*/\\.])(\*{1,2})(?=[^\s*])([^\n]*?[^\s*\\])\1(?![\p{L}\p{N}*])/gu;
 const THINKING_OPEN_BOLD = /^(\s*)\*\*(?=[^\s*])/gmu;
 
 function stripThinkingEmphasis(text: string): string {
@@ -1067,7 +1070,8 @@ function renderTurnUsageLine(
 	const tokens = compactReasoningTokens;
 	const facts: string[] = [settled];
 	if (usage.modelCalls !== undefined && usage.modelCalls > 1) facts.push(`${usage.modelCalls} calls`);
-	facts.push(`in ${tokens(usage.inputTokens)}`, `out ${tokens(usage.outputTokens)}`);
+	const estimate = usage.estimated ? "≈" : "";
+	facts.push(`in ${estimate}${tokens(usage.inputTokens)}`, `out ${estimate}${tokens(usage.outputTokens)}`);
 	if (usage.cacheReadTokens > 0) facts.push(`cached ${tokens(usage.cacheReadTokens)}`);
 	if (usage.cacheWriteTokens > 0) facts.push(`cache write ${tokens(usage.cacheWriteTokens)}`);
 	const view = reasoningFromTurnUsage(usage);

@@ -7,6 +7,8 @@ import type {
 	StreamOptions,
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { assistantOutputBlockChars } from "../core/assistant-output.js";
+import { readDiffusionFrame } from "./apis/diffusion-frames.js";
 import { remainingContextMaxTokens } from "./apis/output-budget.js";
 
 // CLB-1: silence timers cannot bound an actively repeating argument stream.
@@ -69,11 +71,22 @@ export function guardToolArgumentStream<T extends StreamOptions>(
 	const signal = options?.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
 	const byteLimit = remainingContextMaxTokens(model, context, options) * ARGUMENT_BYTES_PER_OUTPUT_TOKEN;
 	const repeats = new Map<number, RepeatedArgumentRun>();
+	const generatedChars = new Map<number, number>();
+	let totalChars = 0;
 	let bytes = 0;
 	let lastPartial: AssistantMessage | undefined;
+	const counted = (message: AssistantMessage, final = false): AssistantMessage & { clioCoderOutputChars: number } => ({
+		...message,
+		clioCoderOutputChars: final
+			? message.content.reduce(
+					(sum, block, index) => sum + (generatedChars.get(index) ?? assistantOutputBlockChars(block)),
+					0,
+				)
+			: totalChars,
+	});
 	const aborted = (reason: string): AssistantMessage => ({
 		...(lastPartial
-			? structuredClone(lastPartial)
+			? counted(structuredClone(lastPartial), true)
 			: {
 					role: "assistant" as const,
 					content: [],
@@ -114,6 +127,15 @@ export function guardToolArgumentStream<T extends StreamOptions>(
 			const source = await invoke({ ...options, signal } as T);
 			for await (const event of source) {
 				if ("partial" in event) lastPartial = event.partial;
+				if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") {
+					const before = generatedChars.get(event.contentIndex) ?? 0;
+					// Diffusion frames replace the current answer; repeated frames are
+					// not additional output occupying the window or final tokens.
+					const frame = event.type === "text_delta" ? readDiffusionFrame(event) : null;
+					const after = frame ? frame.text.length : before + event.delta.length;
+					generatedChars.set(event.contentIndex, after);
+					totalChars += after - before;
+				}
 				if (event.type === "toolcall_delta") {
 					bytes += Buffer.byteLength(event.delta, "utf8");
 					if (bytes > byteLimit) {
@@ -145,16 +167,18 @@ export function guardToolArgumentStream<T extends StreamOptions>(
 						output.end(message);
 						return;
 					}
+					const message = counted(lastPartial, true);
+					output.push(event.type === "done" ? { ...event, message } : { ...event, error: message });
+					return;
 				}
-				output.push(event);
-				if (event.type === "done" || event.type === "error") return;
+				output.push("partial" in event ? { ...event, partial: counted(event.partial) } : event);
 			}
 			lastPartial = await source.result();
 			if (argumentBytes(lastPartial) > byteLimit) {
 				stop(`arguments exceeded the ${byteLimit}-byte safety ceiling for this response's output allowance`);
 				return;
 			}
-			output.end(signal.aborted ? aborted("Request was aborted.") : lastPartial);
+			output.end(signal.aborted ? aborted("Request was aborted.") : counted(lastPartial, true));
 		} catch (cause) {
 			const message = aborted(cause instanceof Error ? cause.message : String(cause));
 			const reason = signal.aborted || (cause instanceof Error && cause.name === "AbortError") ? "aborted" : "error";
