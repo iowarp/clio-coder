@@ -321,3 +321,35 @@ test("ACP interview text neutralizes display controls before applying wire bound
 	strictEqual(questions[1]?.question.length, 8192);
 	strictEqual(questions[1]?.options[0]?.label.length, 512);
 });
+
+test("ACP interview timeout and detach cancel rounds without a caller abort signal", async () => {
+	const channel = createAcpInterviewChannel();
+	const notifications: string[] = [];
+	let timeout: number | undefined;
+	let fail = true;
+	const detach = channel.attach({
+		transport: {
+			request: async <T>(_method: string, _params?: unknown, timeoutMs?: number): Promise<T> => {
+				timeout = timeoutMs;
+				if (fail) throw new Error("Interview request timed out");
+				return await new Promise<T>(() => {});
+			},
+			notify: (method) => notifications.push(method),
+		},
+		sessionId: () => "session-1",
+		enabled: () => true,
+		timeoutMs: 25,
+	});
+	deepStrictEqual(await channel.ask([{ question: "Continue?" }]), { answers: [], cancelled: true });
+	strictEqual(timeout, 25);
+	fail = false;
+	const cancelled = channel.ask([{ question: "Continue?" }]);
+	await new Promise((resolve) => setImmediate(resolve));
+	channel.cancel();
+	deepStrictEqual(await cancelled, { answers: [], cancelled: true });
+	const detached = channel.ask([{ question: "Continue?" }]);
+	await new Promise((resolve) => setImmediate(resolve));
+	detach();
+	deepStrictEqual(await detached, { answers: [], cancelled: true });
+	deepStrictEqual(notifications, Array(3).fill("_clio-coder/interview/cancel"));
+});

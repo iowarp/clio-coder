@@ -21,6 +21,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { proposeTaskBankPromotion, type TaskMemorySnapshot } from "../../domains/memory/index.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
@@ -257,6 +258,10 @@ function readResult(value: unknown, wire: WireQuestion[], original: AskUserQuest
 
 export function createAcpInterviewChannel(): AcpInterviewChannel {
 	let binding: AcpInterviewBinding | null = null;
+	const pending = new Set<() => void>();
+	const cancel = (): void => {
+		for (const abort of pending) abort();
+	};
 	const ask: AskUserHandler = async (questions, options) => {
 		const bound = binding;
 		if (bound === null || !bound.enabled()) return cancelled();
@@ -268,27 +273,37 @@ export function createAcpInterviewChannel(): AcpInterviewChannel {
 		if (signal?.aborted === true) return cancelled();
 		const interviewId = `interview-${randomUUID()}`;
 		let onAbort: (() => void) | undefined;
+		let wasCancelled = false;
 		const aborted = new Promise<"aborted">((resolve) => {
-			onAbort = () => resolve("aborted");
+			onAbort = () => {
+				wasCancelled = true;
+				resolve("aborted");
+			};
 			signal?.addEventListener("abort", onAbort, { once: true });
+			pending.add(onAbort);
 		});
 		try {
 			const reply = Promise.resolve()
 				.then(() =>
-					bound.transport.request<unknown>(ACP_INTERVIEW_REQUEST_METHOD, { sessionId, interviewId, questions: wire }),
+					bound.transport.request<unknown>(
+						ACP_INTERVIEW_REQUEST_METHOD,
+						{ sessionId, interviewId, questions: wire },
+						bound.timeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
+					),
 				)
 				.then(
 					(value) => ({ kind: "reply" as const, value }),
 					(err: unknown) => ({ kind: "failed" as const, err }),
 				);
 			const outcome = await Promise.race([reply, aborted]);
-			if (outcome === "aborted") {
+			if (outcome === "aborted" || wasCancelled) {
 				// The parked request answers late into a promise nothing awaits; the
 				// notification tells a client that supports it to drop the round.
 				bound.transport.notify(ACP_INTERVIEW_CANCEL_METHOD, { sessionId, interviewId });
 				return cancelled();
 			}
 			if (outcome.kind === "failed") {
+				bound.transport.notify(ACP_INTERVIEW_CANCEL_METHOD, { sessionId, interviewId });
 				// A client that refuses the round (no active turn, malformed) has not
 				// answered it, so the caller sees the same cancel an Esc gives.
 				bound.diagnostics?.(
@@ -303,15 +318,23 @@ export function createAcpInterviewChannel(): AcpInterviewChannel {
 			}
 			return result;
 		} finally {
-			if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+			if (onAbort !== undefined) {
+				signal?.removeEventListener("abort", onAbort);
+				pending.delete(onAbort);
+			}
 		}
 	};
 	return {
 		ask,
+		cancel,
 		attach(next) {
+			cancel();
 			binding = next;
 			return () => {
-				if (binding === next) binding = null;
+				if (binding === next) {
+					cancel();
+					binding = null;
+				}
 			};
 		},
 	};

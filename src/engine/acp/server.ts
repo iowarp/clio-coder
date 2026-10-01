@@ -181,12 +181,14 @@ export interface AcpInterviewBinding {
 	sessionId: () => string | null;
 	/** True once the client advertised the capability at initialize. */
 	enabled: () => boolean;
+	timeoutMs?: number;
 	diagnostics?: (line: string) => void;
 }
 
 export interface AcpInterviewChannel {
 	/** The handler the orchestrator installs as its ask_user handler. */
 	ask: AskUserHandler;
+	cancel(): void;
 	/** Returns the detach function; a later attach replaces an earlier one. */
 	attach(binding: AcpInterviewBinding): () => void;
 }
@@ -4850,12 +4852,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	const cancelSession = (session: AcpServerSession, reason: string): void => {
 		if (activeSessionId === session.id || activeSessionId === null) permission.cancelPending(reason);
+		if ((activeSessionId ?? boundSessionId) === session.id) options.interviews?.cancel();
 		if (!session.activePrompt) return;
 		session.activePrompt.cancelled = true;
 		options.chat.cancel();
-		// A prompt cancelled with a permission parked would otherwise sit on the
-		// outstanding request until the client answers or the timeout fires, and
-		// the turn cannot settle until the parked tool does.
 	};
 
 	const cancel = (params: unknown): Record<string, never> => {
@@ -5241,6 +5241,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		transport: options.transport,
 		sessionId: () => activeSessionId ?? boundSessionId,
 		enabled: () => handshake.initialized && handshake.interviewsEnabled,
+		timeoutMs: permissionTimeoutMs,
 		...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
 	});
 	options.onReady?.();
