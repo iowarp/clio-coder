@@ -1568,6 +1568,22 @@ function headlessDenialGuidance(decision: SafetyDecision, reason: string): strin
 }
 
 /**
+ * Rule ids whose bare name tells neither the model nor the operator reading its
+ * report what the rule guards. The model relays the id verbatim ("the rule that
+ * blocked it is system-modify-confirm"), so the meaning goes first and the id
+ * stays as the parenthetical a maintainer can grep. Ids that carry their own
+ * cause in the policy reasons need no entry.
+ */
+const HEADLESS_RULE_MEANINGS: Readonly<Record<string, string>> = {
+	"system-modify-confirm": "writes outside the workspace and other system-level changes need operator confirmation",
+};
+
+function headlessRuleLabel(ruleId: string): string {
+	const meaning = HEADLESS_RULE_MEANINGS[ruleId];
+	return meaning === undefined ? ruleId : `${meaning} (${ruleId})`;
+}
+
+/**
  * Terminal blocked verdict for a parked call that has been answered: denied at
  * the confirmation prompt, cancelled with the turn, or settled by an abort.
  *
@@ -1591,7 +1607,7 @@ function parkAnsweredBlockedVerdict(
 	const guidance = headlessDenialGuidance(decision, reason);
 	const detail = [reason];
 	if (reason.startsWith(HEADLESS_PERMISSION_DENIED_MARKER)) {
-		if (decision.policy?.ruleId) detail.push(`rule: ${decision.policy.ruleId}`);
+		if (decision.policy?.ruleId) detail.push(`rule: ${headlessRuleLabel(decision.policy.ruleId)}`);
 		const cause =
 			decision.policy?.kind === "ask"
 				? decision.policy.reasons[0]
