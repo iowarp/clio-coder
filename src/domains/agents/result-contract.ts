@@ -267,6 +267,8 @@ export interface ObservedRunEffects {
 	/** Canonical validation commands the run ran to a clean exit. */
 	validationCommands: ReadonlySet<string>;
 	checksAllBlocked?: boolean;
+	/** Observed failures and final passes by exact command name; report order is not evidence. */
+	validationOutcomes?: ReadonlyMap<string, boolean>;
 }
 
 export interface ResultContractValidationInput {
@@ -1689,7 +1691,12 @@ function validateMutation(contract: ResultContract, input: ResultContractValidat
 	const validations =
 		Array.isArray(value.validations) && value.validations.length === 0 ? [] : parseChecks(value.validations);
 	if (validations === null) return failure(contract, "unmeasured", mutationValidationsReason());
-	const reportedFailure = !validations.every((check) => check.passed);
+	// Settle a historical failure only with a matching observed final pass.
+	// Missing evidence keeps old, potentially nonchronological reports conservative.
+	const reportedFailure =
+		validations.some(
+			(check) => !check.passed && input.observedRunEffects?.validationOutcomes?.get(check.name) !== true,
+		) || [...(input.observedRunEffects?.validationOutcomes?.values() ?? [])].some((passed) => !passed);
 	const effects = input.observedRunEffects;
 	if (effects === undefined)
 		return success(contract, reportedFailure ? "fail" : validations.length > 0 ? "pass" : "unmeasured", value);

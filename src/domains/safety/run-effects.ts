@@ -48,6 +48,8 @@ export interface RunEffects {
 	failedMutationPaths: ReadonlySet<string>;
 	/** Canonical validation commands the run ran to a clean exit. */
 	validationCommands: ReadonlySet<string>;
+	/** Exact commands in the run cwd; observed finishes, never report order. */
+	validationOutcomes: ReadonlyMap<string, boolean>;
 	/** True only when every observed checking call has an authoritative blocked outcome. */
 	checksAllBlocked?: boolean;
 	/**
@@ -112,6 +114,8 @@ interface PendingEffects {
 	toolCallId: string;
 	paths: ReadonlyArray<string>;
 	validationCommand: string | null;
+	validationName: string | null;
+	mutationRevision: number;
 	verificationCommand: string | null;
 	opaque: boolean;
 }
@@ -212,6 +216,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const mutatedPaths = new Set<string>();
 	const failedMutationPaths = new Set<string>();
 	const validationCommands = new Set<string>();
+	const validationOutcomes = new Map<string, boolean>();
+	let mutationRevision = 0;
 	const verificationCommands = new Set<string>();
 	const checkingCalls = new Map<string, "ok" | "error" | "blocked" | null>();
 	const writeRecordDowngrades = new Map<string, WriteRecordDowngrade>();
@@ -232,6 +238,11 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				toolCallId,
 				paths: paths.map((target) => path.resolve(base, target)),
 				validationCommand,
+				validationName:
+					toolName === ToolNames.Bash && validationCommand !== null
+						? `${base === cwd ? "" : `cwd=${base}: `}${commandOf(args)?.trim() ?? ""}`
+						: null,
+				mutationRevision,
 				verificationCommand,
 				opaque,
 			});
@@ -240,6 +251,17 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			const effects = pending.get(toolCallId);
 			pending.delete(toolCallId);
 			if (effects === undefined) return;
+			// A pass before a later mutation cannot settle the final tree.
+			if (effects.paths.length > 0 || (effects.opaque && effects.validationCommand === null)) {
+				mutationRevision += 1;
+				for (const [name, passed] of validationOutcomes) if (passed) validationOutcomes.delete(name);
+			}
+			if (
+				effects.validationName !== null &&
+				checkingCalls.get(toolCallId) !== "blocked" &&
+				(failed || effects.mutationRevision === mutationRevision)
+			)
+				validationOutcomes.set(effects.validationName, !failed);
 			if (failed) {
 				for (const target of effects.paths) failedMutationPaths.add(target);
 				return;
@@ -272,6 +294,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				mutatedPaths: new Set(mutatedPaths),
 				failedMutationPaths: new Set([...failedMutationPaths].filter((target) => !mutatedPaths.has(target))),
 				validationCommands: new Set(validationCommands),
+				validationOutcomes: new Map(validationOutcomes),
 				checksAllBlocked: checkingCalls.size > 0 && [...checkingCalls.values()].every((outcome) => outcome === "blocked"),
 				verificationCommands: new Set(verificationCommands),
 				writeRecordComplete: writeRecordDowngrades.size === 0,

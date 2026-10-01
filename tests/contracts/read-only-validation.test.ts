@@ -297,3 +297,78 @@ it("withholds a verified merge whose diff replaces an existing test, but not an 
 		/removes existing test cases/u,
 	);
 });
+
+it("observed command outcomes preserve full failures and invalidate passes after edits", () => {
+	const recorder = createRunEffectsRecorder(process.cwd());
+	const run = (id: string, command: string, failed: boolean) => {
+		recorder.start(id, "bash", { command });
+		recorder.checkOutcome(id, failed ? "error" : "ok");
+		recorder.finish(id, failed);
+	};
+	run("initial", "npm test", true);
+	run("narrow", "npm test -- test/unit.js", false);
+	strictEqual(recorder.snapshot().validationOutcomes.get("npm test"), false);
+	recorder.start("other-cwd", "bash", { command: "npm test", cwd: "other" });
+	recorder.finish("other-cwd", false);
+	strictEqual(recorder.snapshot().validationOutcomes.get("npm test"), false);
+	run("final", "npm test", false);
+	strictEqual(recorder.snapshot().validationOutcomes.get("npm test"), true);
+	recorder.start("edit", "edit", { path: "src/math.ts" });
+	recorder.finish("edit", false);
+	strictEqual(recorder.snapshot().validationOutcomes.has("npm test"), false);
+	recorder.start("concurrent", "bash", { command: "npm test" });
+	recorder.start("later-edit", "edit", { path: "src/math.ts" });
+	recorder.finish("later-edit", false);
+	recorder.finish("concurrent", false);
+	strictEqual(recorder.snapshot().validationOutcomes.has("npm test"), false);
+	run("failure", "npm test", true);
+	strictEqual(recorder.snapshot().validationOutcomes.get("npm test"), false);
+});
+
+it("requires observed final outcomes to settle mutation-report failures", () => {
+	const failed = { name: "npm test", passed: false, evidence: "exit 1" };
+	const passed = { ...failed, passed: true, evidence: "claimed exit 0" };
+	for (const validations of [
+		[failed, passed],
+		[passed, failed],
+	]) {
+		const output = JSON.stringify({ mutatedPaths: [], validations });
+		strictEqual(
+			validateResultContract({
+				contract: { kind: "mutation-report" },
+				output,
+				cwd: process.cwd(),
+				networkAllowed: false,
+				filesystem: { readFile: () => null },
+			}).quality,
+			"fail",
+		);
+		for (const [outcomes, expected] of [
+			[[["npm test", true]], "pass"],
+			[[["npm test", false]], "fail"],
+			[[["npm test -- test/unit.js", true]], "fail"],
+			[
+				[
+					["npm test", true],
+					["npm run lint", false],
+				],
+				"fail",
+			],
+		] as const) {
+			const result = validateResultContract({
+				contract: { kind: "mutation-report" },
+				output,
+				cwd: process.cwd(),
+				networkAllowed: false,
+				filesystem: { readFile: () => null },
+				observedRunEffects: {
+					mutatedPaths: new Set(),
+					failedMutationPaths: new Set(),
+					validationCommands: new Set(["npm test"]),
+					validationOutcomes: new Map(outcomes),
+				},
+			});
+			strictEqual(result.quality, expected);
+		}
+	}
+});
