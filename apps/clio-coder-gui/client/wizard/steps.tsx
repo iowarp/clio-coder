@@ -532,6 +532,40 @@ export function DetectedStep({ view, busy, send }: StepProps<Of<"detected">>) {
 	);
 }
 
+export function LoginMethodStep({ view, busy, send }: StepProps<Of<"login-method">>) {
+	return (
+		<Step
+			title={`How do you want to sign in to ${view.provider}?`}
+			lede={<p>Browser login opens a page on this machine. Device code is for a machine with no browser.</p>}
+		>
+			<ul className="wizard-options">
+				{view.options.map((choice, index) => (
+					<li key={choice.id}>
+						<button
+							type="button"
+							className="wizard-card"
+							data-tile
+							{...(index === view.prompt.initial ? { "data-autofocus": true } : {})}
+							disabled={busy}
+							onClick={() => send(selectAnswer(view.prompt, choice))}
+						>
+							<span className="wizard-card__text">
+								<strong>{choice.label.replace(/\s*\(default\)$/u, "")}</strong>
+								{choice.hint ? (
+									<small>{choice.hint}</small>
+								) : /\(default\)/u.test(choice.label) ? (
+									<small>Recommended</small>
+								) : null}
+							</span>
+							<Icon name="chevronRight" />
+						</button>
+					</li>
+				))}
+			</ul>
+		</Step>
+	);
+}
+
 // ---- model -------------------------------------------------------------------------------------
 
 export function ModelStep({ view, busy, send }: StepProps<Of<"model">>) {
@@ -609,7 +643,7 @@ export function ModelMissingStep({ view, busy, send }: StepProps<Of<"model-missi
 	return (
 		<Step
 			title="Clio could not read a model list."
-			lede={<p>{view.reason ?? "Start the app or server and load a model, then check again."} No prompt is sent.</p>}
+			lede={<p>{view.reason ?? "Start the app or server and load a model, then check again."}</p>}
 			actions={
 				<>
 					{view.retry ? (

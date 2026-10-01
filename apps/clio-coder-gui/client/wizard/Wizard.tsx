@@ -19,6 +19,7 @@ import {
 	DetailsStep,
 	DetectedStep,
 	GenericStep,
+	LoginMethodStep,
 	ModelMissingStep,
 	ModelStep,
 	ProviderStep,
@@ -34,6 +35,7 @@ import {
 	STAGE_LABELS,
 	type StageId,
 	type StepView,
+	selectAnswer,
 	stagesFor,
 	viewFor,
 	type WizardMode,
@@ -52,6 +54,8 @@ const CAPTIONS: Readonly<Record<StageId | "welcome" | "saved", string>> = {
 	workspace: "Clio works inside the folder you choose.",
 	saved: "Connected.",
 };
+
+const CAPTION_NO_MODELS = "Clio only checks the address. It never sends a prompt.";
 
 /** A delay before the working screen replaces a step, so an answer the CLI takes a moment to accept does not flash. */
 const WORKING_DELAY_MS = 350;
@@ -101,7 +105,6 @@ export default function Wizard({
 	const [needsWorkspace, setNeedsWorkspace] = useState<boolean | null>(null);
 	const [phase, setPhase] = useState<"setup" | "workspace">("setup");
 	const [workingShown, setWorkingShown] = useState(false);
-	const lastView = useRef<WizardView | null>(null);
 	const lastStep = useRef<StepView | null>(null);
 	const started = useRef(false);
 
@@ -111,9 +114,8 @@ export default function Wizard({
 			setNeedsWorkspace(mode === "first" && workspaces.data.length === 0);
 	}, [needsWorkspace, workspaces.isSuccess, workspaces.data, mode]);
 
-	const raw = useMemo(() => viewFor(session.state, lastView.current), [session.state]);
+	const raw = useMemo(() => viewFor(session.state, lastStep.current), [session.state]);
 	useEffect(() => {
-		lastView.current = raw;
 		if ("prompt" in raw) lastStep.current = raw;
 	}, [raw]);
 	useEffect(() => {
@@ -135,6 +137,15 @@ export default function Wizard({
 			session.start(targetId);
 		}
 	}, [mode, targetId, session.state, session.start]);
+	// Repairing keeps the provider the connection already has, so its first question answers itself once.
+	const kept = useRef(false);
+	useEffect(() => {
+		if (mode !== "repair" || kept.current || view.kind !== "provider" || busy) return;
+		const current = view.options.find((option) => option.choice.id === view.prompt.initial);
+		if (!current) return;
+		kept.current = true;
+		session.answer(selectAnswer(view.prompt, current.choice));
+	}, [mode, view, busy, session.answer]);
 	// A cancelled run ends the wizard where it was opened, or returns a first run to its welcome.
 	useEffect(() => {
 		if (raw.kind !== "cancelled") return;
@@ -176,8 +187,9 @@ export default function Wizard({
 	const scene = phase === "workspace" ? "read" : "scene" in view ? view.scene : "read";
 	const stageKey: StageId | "welcome" | "saved" =
 		phase === "workspace" ? "workspace" : view.kind === "welcome" ? "welcome" : saved ? "saved" : (current ?? "provider");
-	const workingLabel =
-		raw.kind === "working" && workingShown ? raw.label : session.busy && session.state === null ? "Starting setup" : null;
+	// While the card shows what is being waited on, the card carries the spinner. The stage carries it only
+	// before the first step exists.
+	const workingLabel = session.busy && session.state === null ? "Starting setup" : null;
 
 	const send = session.answer;
 	const problem = session.state?.problem ?? session.error;
@@ -273,6 +285,9 @@ export default function Wizard({
 			case "detected":
 				content = <DetectedStep key={view.prompt.id} view={view} {...common} />;
 				break;
+			case "login-method":
+				content = <LoginMethodStep key={view.prompt.id} view={view} {...common} />;
+				break;
 			case "model":
 				content = <ModelStep key={view.prompt.id} view={view} {...common} />;
 				break;
@@ -361,7 +376,11 @@ export default function Wizard({
 			</header>
 			<div className="wizard__body">
 				<aside className="wizard__stage" aria-label="Clio">
-					<Stage scene={scene} caption={CAPTIONS[stageKey]} working={workingLabel} />
+					<Stage
+						scene={scene}
+						caption={view.kind === "model-missing" ? CAPTION_NO_MODELS : CAPTIONS[stageKey]}
+						working={workingLabel}
+					/>
 				</aside>
 				<main id="wizard-step" className="wizard__main" tabIndex={-1}>
 					{read.recap.length > 0 && phase === "setup" && view.kind !== "saved" ? (

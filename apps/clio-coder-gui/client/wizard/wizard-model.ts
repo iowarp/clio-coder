@@ -27,9 +27,12 @@ export const STAGE_LABELS: Readonly<Record<StageId, string>> = {
 
 export type WizardMode = "first" | "add" | "repair";
 
-/** The stages a run shows. Repair starts after the provider is chosen, and a machine with a workspace skips that stage. */
-export function stagesFor(mode: WizardMode, needsWorkspace: boolean): readonly StageId[] {
-	const stages: StageId[] = mode === "repair" ? ["connect", "model", "test"] : ["provider", "connect", "model", "test"];
+/**
+ * The stages a run shows. A machine that already has a workspace skips that stage. Repair keeps the
+ * provider stage because the CLI still asks it first; the wizard answers it with the saved provider.
+ */
+export function stagesFor(_mode: WizardMode, needsWorkspace: boolean): readonly StageId[] {
+	const stages: StageId[] = ["provider", "connect", "model", "test"];
 	if (needsWorkspace) stages.push("workspace");
 	return stages;
 }
@@ -118,6 +121,7 @@ export type StepView =
 	| (Base & { kind: "oauth-code"; prompt: TextPrompt })
 	| (Base & { kind: "server"; prompt: TextPrompt; title: string; guidance: readonly string[] })
 	| (Base & { kind: "detected"; prompt: SelectPrompt; served: string; options: readonly Choice[] })
+	| (Base & { kind: "login-method"; prompt: SelectPrompt; provider: string; options: readonly Choice[] })
 	| (Base & {
 			kind: "model";
 			prompt: SelectPrompt;
@@ -304,6 +308,17 @@ export function stepFor(prompt: Prompt): StepView {
 					hint: choice.hint,
 				})),
 			};
+		// configure-oauth.ts asks which sign-in flow to use when a provider has more than one.
+		const method = /^Select (.+) login method:?$/u.exec(title);
+		if (method)
+			return {
+				kind: "login-method",
+				stage: "connect",
+				scene: "helpers",
+				prompt,
+				provider: method[1] ?? "",
+				options: prompt.choices,
+			};
 		if (title.startsWith("That URL is serving "))
 			return {
 				kind: "detected",
@@ -379,8 +394,9 @@ export function stepFor(prompt: Prompt): StepView {
 
 // ---- messages ------------------------------------------------------------------------------------
 
+// The CLI wraps its introduction at 80 columns, so the tails of two sentences arrive as lines of their own.
 const INTRO =
-	/^(Welcome to Clio Coder|Add a target|Edit target:|Choose what you already use|Escape goes back|Saved result:)/u;
+	/^(Welcome to Clio Coder|Add a target|Edit target:|Choose what you already use|Back returns|Escape goes back|Saved result:|provider allows it\.|you complete\.)/u;
 
 export interface ProbeReading {
 	readonly state: "reachable" | "unreachable" | "auth-failed" | "warning";
@@ -482,8 +498,28 @@ export function sentence(text: string): string {
 }
 
 /** What the child is doing while no prompt is open, in the words the setup shows. */
-export function workingLabel(read: ReadMessages): string {
+export function workingLabel(read: ReadMessages, after: WizardView | null = null): string {
 	if (read.signIn) return "Waiting for you to finish signing in";
+	// The answer just sent says what the CLI is doing with it better than its messages do.
+	switch (after && "kind" in after ? after.kind : null) {
+		case "server":
+			return "Checking the address and reading the model list";
+		case "model-missing":
+			return "Checking the endpoint again";
+		case "model":
+		case "model-manual":
+			return "Reading what the model supports";
+		case "detected":
+			return "Reading the model list";
+		case "review":
+			return "Saving your connection";
+		case "credential-key":
+		case "credential-env":
+		case "credential-source":
+			return "Checking the credential";
+		default:
+			break;
+	}
 	const last = read.other.at(-1) ?? "";
 	if (/checking the endpoint|probe|read(ing)? .*model/iu.test(last)) return "Reading the model list";
 	if (read.probe?.state === "reachable") return "Server answered. Reading what it offers";
@@ -506,7 +542,7 @@ export function viewFor(state: SetupState | null, previous: WizardView | null): 
 				kind: "working",
 				stage: held?.stage ?? "provider",
 				scene: read.signIn ? "helpers" : (held?.scene ?? "focus"),
-				label: workingLabel(read),
+				label: workingLabel(read, held),
 				signIn: read.signIn,
 			};
 		}

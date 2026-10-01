@@ -35,6 +35,11 @@ export function WorkingStep({
 }) {
 	const root = useHeadingFocus();
 	const id = useId();
+	const [slow, setSlow] = useState(false);
+	useEffect(() => {
+		const timer = setTimeout(() => setSlow(true), 6000);
+		return () => clearTimeout(timer);
+	}, []);
 	return (
 		<section className="wizard-step wizard-step--working" ref={root} aria-labelledby={id} aria-busy="true">
 			<h1 id={id} tabIndex={-1}>
@@ -67,6 +72,11 @@ export function WorkingStep({
 						verification code appears here.
 					</p>
 				</div>
+			) : null}
+			{slow && !signIn ? (
+				<p className="wizard-hint">
+					This is taking longer than usual. An address that does not answer can take several seconds to give up.
+				</p>
 			) : null}
 			<div className="wizard-step__actions">
 				<button type="button" className="wizard-quiet" disabled={cancelling} onClick={onCancel}>
