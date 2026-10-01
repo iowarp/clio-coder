@@ -2005,11 +2005,22 @@ export function renderToolPreview(
 		if (notes.length > 0) {
 			const more = notes.length > 1 ? ` · +${notes.length - 1} more` : "";
 			rows.push(
-				`${failure ? RAIL_ERROR : RAIL_NORMAL}${toolMeta(truncateToWidth(sanitizeCallTargetText(`note to model · ${notes[0]}`), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH - more.length), GLYPH.ellipsis))}${toolMeta(more)}`,
+				`${failure ? RAIL_ERROR : RAIL_NORMAL}${toolMeta(truncateToWidth(sanitizeCallTargetText(`note to model · ${operatorNoteText(notes[0] ?? "")}`), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH - more.length), GLYPH.ellipsis))}${toolMeta(more)}`,
 			);
 		}
 	}
 	return rows;
+}
+
+/**
+ * The operator's view of a model-only note: no ledger entry ids and nothing
+ * from the first diagnostic marker on, so a truncated digest never reaches the
+ * transcript (flywheel F-Q3). /view keeps the note as the model read it.
+ */
+function operatorNoteText(note: string): string {
+	const bare = note.replace(/\[[a-z]{1,4}-[\w-]+\]\s*/gu, "");
+	const cut = bare.search(/\s*(?:with\s+)?\[(?:diagnostic\b|…|\.\.\.)/u);
+	return cut < 0 ? bare : bare.slice(0, cut);
 }
 
 /**
