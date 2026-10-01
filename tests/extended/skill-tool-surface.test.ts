@@ -797,13 +797,27 @@ describe("model skill activation by autonomy level", () => {
 	});
 });
 
-it("refuses ship in an editing worker without narrowing its editing tools", async () => {
+it("refuses ship in a task worktree without narrowing its editing tools", async () => {
 	const context = createContextTool({ getCwd: () => process.cwd() });
 	const policy = agentSkillToolPolicy(["ship"]);
 	ok(policy);
 	const result = await context.run(
 		{ scope: "skills", name: "ship" },
-		{ allowedTools: [ToolNames.Context, ToolNames.Edit, ToolNames.Write], pendingSkillPolicy: policy },
+		{
+			allowedTools: [ToolNames.Context, ToolNames.Edit, ToolNames.Write],
+			pendingSkillPolicy: policy,
+			gitContext: {
+				allowance: "worktree",
+				executePermitted: true,
+				cwd: process.cwd(),
+				hooksInsideWorkingTree: () => false,
+				taskWorktree: {
+					attest: () => {
+						throw new Error("skill admission does not attest git mutations");
+					},
+				},
+			},
+		},
 	);
 	ok(result.kind === "ok" || result.kind === "error");
 	const output = result.kind === "ok" ? result.output : result.message;
@@ -811,4 +825,22 @@ it("refuses ship in an editing worker without narrowing its editing tools", asyn
 	strictEqual(policy.loadedSkillNames.size, 0);
 	strictEqual(evaluateSkillToolSurface(policy, ToolNames.Edit), null);
 	strictEqual(evaluateSkillToolSurface(policy, ToolNames.Write), null);
+});
+
+it("allows ship in an editing worker in a shared checkout", async () => {
+	const context = createContextTool({
+		getCwd: () => process.cwd(),
+		getSkillLoaderOptions: () => ({
+			disableDiscovery: true,
+			explicitSkillPaths: [new URL("../../library/skills/git/ship", import.meta.url).pathname],
+		}),
+	});
+	const policy = agentSkillToolPolicy(["ship"]);
+	ok(policy);
+	const result = await context.run(
+		{ scope: "skills", name: "ship" },
+		{ allowedTools: [ToolNames.Context, ToolNames.Edit, ToolNames.Write], pendingSkillPolicy: policy },
+	);
+	strictEqual(result.kind, "ok");
+	ok(policy.loadedSkillNames.has("ship"));
 });

@@ -597,7 +597,7 @@ function runSkillsScope(
 			...(options ? { options } : {}),
 		});
 	}
-	if (name === "ship" && options?.allowedTools?.some((tool) => tool === ToolNames.Edit || tool === ToolNames.Write)) {
+	if (name === "ship" && options?.gitContext?.taskWorktree !== undefined) {
 		return skillRefusal(
 			"context: ship handles finished changes and cannot replace an editing worker assignment. The host commits task worktrees. Keep your edit/write tools, make the requested file changes, and report; do not load ship or commit.",
 			{ name, kind: "recipe-bound" },
