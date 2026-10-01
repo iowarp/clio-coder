@@ -155,6 +155,30 @@ export function blockedWriteAttempts(
 	return attempted > 0 && blocked === attempted ? attempted : null;
 }
 
+/**
+ * Why a workspace-edit worker that finished cleanly did none of its assignment:
+ * it recorded a successful `limitation` and the run changed nothing, the shape
+ * of the main agent's headless `limitation` failure. A worker that changed files
+ * and then recorded a limitation (typically "could not validate") keeps its
+ * outcome, because its edits landed; the receipt's quality fields carry the
+ * missing validation. `mutatedPathCount` is null when no finish-contract
+ * assessment exists, which leaves the shape undecided.
+ *
+ * A worker that ran no tool at all is deliberately not covered: its receipt
+ * stays succeeded with the zero-tool note, and the transcript row says it ran
+ * no tools (tests/contracts/host-verification-admission.test.ts runs a
+ * tool-less builder through host verification and needs it admitted).
+ */
+export function workerNoWorkDetail(input: {
+	limitationRecorded: boolean;
+	mutatedPathCount: number | null;
+}): string | null {
+	if (input.limitationRecorded && input.mutatedPathCount === 0) {
+		return "worker recorded a limitation and changed nothing, so the assignment was not done";
+	}
+	return null;
+}
+
 export function blockedWriteDetail(attempted: number): string {
 	return `all ${attempted} attempted write(s) were blocked by policy; no workspace mutation landed`;
 }

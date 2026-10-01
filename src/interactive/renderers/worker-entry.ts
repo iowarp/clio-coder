@@ -123,6 +123,13 @@ function cardPrefix(entry: WorkerEntryState): string {
  * heartbeat-timeout `stalled` a sealed receipt reports.
  */
 function outcomeUnit(receipt: WorkerReceiptSummary): string {
+	// A worker that exited cleanly without executing one tool did none of an
+	// assignment that needed tools, so "execution ok" would read as a done task.
+	// The receipt stays succeeded when the worker answered in prose by design
+	// (a judge or scout can); the row states the fact in a neutral tone.
+	if (receipt.outcome === "succeeded" && receipt.toolCalls === 0) {
+		return theme.fg("toolMetadata", `${GLYPH.queued} ran no tools`);
+	}
 	if (receipt.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
 	if (receipt.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} canceled`);
 	if (receipt.abandonedDetail !== undefined) return theme.fg("error", GLYPH.error);

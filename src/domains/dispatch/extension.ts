@@ -332,6 +332,7 @@ import {
 	snapshotToolStats,
 	snapshotUnfinishedTools,
 	summarizeToolActivity,
+	workerNoWorkDetail,
 	zeroSuccessfulToolNote,
 } from "./tool-stats.js";
 import {
@@ -7167,6 +7168,25 @@ export function createDispatchBundle(
 						outcomeCode = "worker_mutation_blocked";
 						finalDetail = blockedWriteDetail(blockedWrites);
 						failureMessage = finalDetail;
+					}
+				}
+				// A clean exit is not a done assignment: an edit worker that recorded a
+				// limitation and changed nothing sealed "succeeded" and rendered
+				// "execution ok" over an unchanged tree.
+				if (
+					finalOutcome === "succeeded" &&
+					outcomeCode === null &&
+					lifecycle.capabilityClass === "workspace-edit" &&
+					!lifecycle.readOnly
+				) {
+					const noWork = workerNoWorkDetail({
+						limitationRecorded: (toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0,
+						mutatedPathCount: finishContract?.assessment.mutatedPaths.length ?? null,
+					});
+					if (noWork !== null) {
+						finalOutcome = "failed";
+						finalDetail = noWork;
+						failureMessage = noWork;
 					}
 				}
 				// Close steering provenance before taking receipt snapshots. A late
