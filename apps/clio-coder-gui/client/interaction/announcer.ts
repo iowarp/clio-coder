@@ -14,9 +14,11 @@ interface LiveState {
 	/** Approval escalation only, so it never overwrites a fresher assertive message. */
 	readonly escalation: string;
 	readonly approvalPending: boolean;
+	/** The open page's own name (a task's title), which the tab shows in place of the section label. */
+	readonly pageTitle: string | null;
 }
 
-const EMPTY: LiveState = { assertive: "", polite: "", escalation: "", approvalPending: false };
+const EMPTY: LiveState = { assertive: "", polite: "", escalation: "", approvalPending: false, pageTitle: null };
 let state: LiveState = EMPTY;
 const listeners = new Set<() => void>();
 
@@ -52,6 +54,11 @@ export function announceEscalation(seconds: number | null): void {
 export function setApprovalPending(pending: boolean): void {
 	if (state.approvalPending === pending) return;
 	publish({ ...state, approvalPending: pending });
+}
+
+export function setPageTitle(title: string | null): void {
+	if (state.pageTitle === title) return;
+	publish({ ...state, pageTitle: title });
 }
 
 export function useLiveState(): LiveState {

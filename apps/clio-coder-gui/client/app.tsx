@@ -135,18 +135,38 @@ export function App({ client }: { client: Client }) {
 	useShortcut("newTask", startTask);
 	useShortcut("openWorkspace", openWorkspace);
 
-	// Read from what the rail already loaded, at the moment the palette opens, so Ctrl K costs no request.
-	const paletteTasks = useMemo<readonly PaletteTask[]>(() => {
-		if (!paletteOpen) return [];
-		const sessions = queries.getQueryData<SessionSnapshot[]>(["sessions"]) ?? [];
-		return (workspaces.data ?? []).flatMap((workspace) =>
-			taskRows(
-				workspace.id,
-				sessions,
-				queries.getQueryData<SessionSummary[]>(["session-history", workspace.id]) ?? [],
-			).map((row) => ({ id: row.id, title: row.title, project: workspace.name, open: row.open })),
-		);
-	}, [paletteOpen, workspaces.data, queries]);
+	// The rail only loads the projects that are expanded, so opening the palette lists what is cached,
+	// then fills in the other projects' saved tasks once (fresh results are reused for 30 seconds).
+	const [paletteTasks, setPaletteTasks] = useState<readonly PaletteTask[]>([]);
+	useEffect(() => {
+		if (!paletteOpen) return;
+		const collect = () => {
+			const sessions = queries.getQueryData<SessionSnapshot[]>(["sessions"]) ?? [];
+			return (workspaces.data ?? []).flatMap((workspace) =>
+				taskRows(
+					workspace.id,
+					sessions,
+					queries.getQueryData<SessionSummary[]>(["session-history", workspace.id]) ?? [],
+				).map((row) => ({ id: row.id, title: row.title, project: workspace.name, open: row.open })),
+			);
+		};
+		let current = true;
+		setPaletteTasks(collect());
+		void Promise.allSettled(
+			(workspaces.data ?? []).map((workspace) =>
+				queries.prefetchQuery({
+					queryKey: ["session-history", workspace.id],
+					queryFn: () => client.call(routes.sessionHistory, { params: { id: workspace.id }, query: {}, body: {} }),
+					staleTime: 30_000,
+				}),
+			),
+		).then(() => {
+			if (current) setPaletteTasks(collect());
+		});
+		return () => {
+			current = false;
+		};
+	}, [paletteOpen, workspaces.data, queries, client]);
 	const openTask = useCallback(
 		(id: string) => {
 			const sessions = queries.getQueryData<SessionSnapshot[]>(["sessions"]) ?? [];

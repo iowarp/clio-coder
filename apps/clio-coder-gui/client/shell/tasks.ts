@@ -4,14 +4,15 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { routes } from "../../contracts/routes.js";
-import { type Client, emptyInput } from "../api/client.js";
+import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { clock } from "../api/clock.js";
 import { sessionBuffer } from "../api/sessions.js";
+import { discardDraftStore } from "../chat/composer-model.js";
 import { type ProjectLaunch, useProjectLaunch } from "../pages/project-open.js";
 import { withRoom } from "./capacity.js";
-import { isUntouched } from "./shell-model.js";
+import { isUntouched, sessionIdFromPath } from "./shell-model.js";
 
 const WORKSPACE_KEY = "clio-coder-gui-workspace";
 
@@ -98,6 +99,50 @@ export function useTaskActions(client: Client, afterNavigate?: () => void): Task
 		closing: close.isPending ? (close.variables ?? null) : null,
 		error: resume.error ?? close.error ?? launch.error,
 	};
+}
+
+/** Save a task's name. An empty label clears it, and the task is named by its first request again. */
+export function useRenameTask(client: Client) {
+	const queries = useQueryClient();
+	return useMutation({
+		mutationFn: async ({ sessionId, workspaceId, label }: { sessionId: string; workspaceId: string; label: string }) => {
+			try {
+				return await client.call(routes.labelSession, {
+					params: { id: sessionId },
+					query: {},
+					body: { label, workspaceId },
+				});
+			} catch (error) {
+				// A task joins the saved history once Clio has answered in it, and only saved tasks can be named.
+				if (error instanceof ApiProblem && error.problem.status === 404)
+					throw new Error("This task is not saved yet. Rename it after Clio has answered once.");
+				throw error;
+			}
+		},
+		onSuccess: (_result, { sessionId, workspaceId }) => {
+			void queries.invalidateQueries({ queryKey: ["session", sessionId] });
+			void queries.invalidateQueries({ queryKey: ["sessions"] });
+			void queries.invalidateQueries({ queryKey: ["session-history", workspaceId] });
+		},
+	});
+}
+
+/** Delete a saved task for good. The caller asks first; leaving the deleted task's own page is handled here. */
+export function useDeleteTask(client: Client) {
+	const queries = useQueryClient();
+	const navigate = useNavigate();
+	const location = useLocation();
+	return useMutation({
+		mutationFn: ({ sessionId, workspaceId }: { sessionId: string; workspaceId: string }) =>
+			client.call(routes.deleteSession, { params: { id: sessionId }, query: {}, body: { workspaceId } }),
+		onSuccess: (_result, { sessionId, workspaceId }) => {
+			discardDraftStore(sessionId);
+			queries.removeQueries({ queryKey: ["session", sessionId] });
+			void queries.invalidateQueries({ queryKey: ["session-history", workspaceId] });
+			void queries.invalidateQueries({ queryKey: ["sessions"] });
+			if (sessionIdFromPath(location.pathname) === sessionId) void navigate("/");
+		},
+	});
 }
 
 /** A minute-resolution clock for relative ages, so a list of "5m" labels does not freeze. */

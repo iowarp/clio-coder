@@ -20,7 +20,7 @@ import { memo } from "react";
 import type { Permission } from "../../contracts/permissions.js";
 import type { SessionSnapshot, Turn } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
-import { formatTime } from "../api/clock.js";
+import { formatDuration, formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
 import { countRender } from "../render/render-probe.js";
@@ -54,6 +54,7 @@ import { TurnChanges } from "./TurnChanges.js";
 import { describeTool } from "./tool-presentation.js";
 import { type ChatTurn, sameTurnView } from "./turns.js";
 import "./chat-turn.css";
+import "./session-states.css";
 
 const NO_NOTICES: readonly HealthRow[] = [];
 
@@ -103,6 +104,11 @@ function sameChatTurn(previous: ChatTurnProps, next: ChatTurnProps): boolean {
 	return sameTurnView(previous, next);
 }
 
+/** After this long a live turn names its running time beside what it is doing. */
+const LONG_TURN_MS = 45_000;
+/** After this long it also says that waiting is expected and how to end the turn. */
+const VERY_LONG_TURN_MS = 5 * 60_000;
+
 function LiveChip({ status, working }: { status: LiveStatus; working: boolean }) {
 	return (
 		<span className="live-chip" data-state={status.state}>
@@ -145,11 +151,18 @@ export const ChatTurnView = memo(function ChatTurnView({
 	const reported = liveStatus(turn, row, pending, stopping, liveWorkers);
 	const last = turn.items.at(-1);
 	// The chip names the running call the way its row does ("Run python3 analyze.py"), not by tool id.
-	const status =
+	const described =
 		reported.state === "acting" && reported.detail !== null && last?.kind === "tool" && last.status === "in_progress"
 			? { ...reported, detail: describeTool(last, workspaceRoot) }
 			: reported;
-	const live = isLive(status) && !turn.settled;
+	const live = isLive(described) && !turn.settled;
+	const startedMs = row?.startedAt ? Date.parse(row.startedAt) : Number.NaN;
+	// A turn that has run a while shows how long, so a quiet stretch reads as work and not as a hang.
+	const runningMs = live && nowMs > 0 && Number.isFinite(startedMs) ? Math.max(0, nowMs - startedMs) : 0;
+	const status =
+		runningMs >= LONG_TURN_MS
+			? { ...described, detail: [described.detail, formatDuration(runningMs)].filter(Boolean).join(" · ") }
+			: described;
 	// A turn row stuck at "running" in a session that is no longer open is a record, not activity.
 	const working = live && isWorking(status.state) && (session.state === "open" || session.state === "starting");
 	const request = requestView(turn);
@@ -209,6 +222,11 @@ export const ChatTurnView = memo(function ChatTurnView({
 					<span className="sr-only">{author.name}</span>
 				)}
 				<div className="chat-response__body">
+					{runningMs >= VERY_LONG_TURN_MS && working ? (
+						<p className="chat-response__long">
+							This is a long run. Clio is still working, and Stop ends the turn without running anything further.
+						</p>
+					) : null}
 					{turn.segments.length === 0 && live ? (
 						<p className="chat-response__placeholder">
 							{working ? <ClioPulse size={PULSE_SIZE.row} /> : <span aria-hidden="true">{LIVE_GLYPHS[status.state]}</span>}{" "}

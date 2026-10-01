@@ -59,7 +59,7 @@ export const SIDEBAR_ID = "desktop-navigation";
 export function RouteFocus() {
 	const location = useLocation(),
 		previous = useRef(location.pathname);
-	const { approvalPending } = useLiveState();
+	const { approvalPending, pageTitle } = useLiveState();
 	useEffect(() => {
 		const changed = previous.current !== location.pathname;
 		previous.current = location.pathname;
@@ -70,7 +70,7 @@ export function RouteFocus() {
 	}, [location.pathname]);
 	useEffect(() => {
 		const section = navigation.find((item) => location.pathname.startsWith(item.path));
-		document.title = composeTitle(section?.label, approvalPending);
-	}, [location.pathname, approvalPending]);
+		document.title = composeTitle(pageTitle ?? section?.label, approvalPending);
+	}, [location.pathname, approvalPending, pageTitle]);
 	return null;
 }
