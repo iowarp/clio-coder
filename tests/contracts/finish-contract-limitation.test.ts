@@ -320,6 +320,16 @@ describe("finish contract: only a change that ran in the workspace needs validat
 			assistantTurnId: "assistant-1",
 		});
 		strictEqual(source.kind, "engage");
+		const requested = assessFinishContract({
+			sessionEntries: [
+				{ kind: "message", role: "user", turnId: "user-2", payload: { text: "Delete the src folder, then commit." } },
+				toolCall("rm-3", ToolNames.Bash, { command: "rm -rf src" }),
+				toolResult("rm-3", ToolNames.Bash, false),
+				assistantMessage("assistant-2", "Removed src/."),
+			],
+			assistantTurnId: "assistant-2",
+		});
+		strictEqual(requested.reason, "deletion_only");
 		const edited = assessFinishContract({
 			sessionEntries: [
 				...removal,

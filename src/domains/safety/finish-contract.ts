@@ -215,9 +215,15 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 		return { kind: "ok", reason: "explicit_limitation", evidence: limitations, mutatedPaths };
 	}
 	// Removing tests or docs leaves nothing to check (D2-t2-b). Removing source
-	// can break imports or the build, so it still earns the advisory; quality
-	// and acceptance gates above applied either way.
-	if (mutatedPaths.every((path) => !written.has(path) && isNonSourcePath(path))) {
+	// can break imports or the build, so it still earns the advisory unless the
+	// operator's own message asked for that removal (F-Y1); quality and
+	// acceptance gates above applied either way.
+	const request = latestUserText(sessionEntries, assistantTurnId);
+	if (
+		mutatedPaths.every(
+			(path) => !written.has(path) && (isNonSourcePath(path) || operatorRequestedDeletion(path, request)),
+		)
+	) {
 		return { kind: "ok", reason: "deletion_only", evidence: [], mutatedPaths };
 	}
 
@@ -881,6 +887,44 @@ function pushEvidence(evidence: FinishContractEvidence[], seen: Set<string>, ite
 	if (seen.has(key)) return;
 	seen.add(key);
 	evidence.push(item);
+}
+
+const DELETION_CLAUSE_SPLIT = /[.;\n]|\b(?:then|but)\b/iu;
+const DELETION_VERB = /\b(?:delete|remove|rm|drop|get\s+rid\s+of)\b/iu;
+const DELETION_NEGATION = /\b(?:do\s+not|don['’]t|never|without)\s+(?:delete|remove|drop)\b/iu;
+
+/** A clause of the operator's message that asks to delete and names this path or its last segment. */
+function operatorRequestedDeletion(path: string, request: string | null): boolean {
+	if (request === null) return false;
+	const trimmed = path.replace(/^\.\//u, "").replace(/\/+$/u, "");
+	const leaf = trimmed.split("/").pop() ?? "";
+	if (leaf.length === 0) return false;
+	const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+	const names = new RegExp(`(?:^|[\\s\`'"(/])(?:${literal(trimmed)}|${literal(leaf)})(?:$|[\\s\`'",;:)/])`, "u");
+	return request
+		.split(DELETION_CLAUSE_SPLIT)
+		.some((clause) => DELETION_VERB.test(clause) && !DELETION_NEGATION.test(clause) && names.test(clause));
+}
+
+/** Text of the last real user message before the assessed turn. */
+function latestUserText(entries: ReadonlyArray<unknown>, assistantTurnId: string | null): string | null {
+	const assistantIndex =
+		assistantTurnId === null ? -1 : entries.findIndex((entry) => turnIdOf(entry) === assistantTurnId);
+	for (let index = (assistantIndex >= 0 ? assistantIndex : entries.length) - 1; index >= 0; index -= 1) {
+		if (!isUserMessageEntry(entries[index])) continue;
+		const payload = asRecord(asRecord(entries[index])?.payload);
+		const content = payload?.text ?? payload?.content;
+		if (typeof content === "string") return content;
+		if (Array.isArray(content))
+			return content
+				.map((part) => {
+					const text = asRecord(part)?.text;
+					return typeof text === "string" ? text : "";
+				})
+				.join("\n");
+		return null;
+	}
+	return null;
 }
 
 function isUserMessageEntry(entry: unknown): boolean {
