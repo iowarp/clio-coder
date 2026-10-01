@@ -50,6 +50,7 @@ export interface EvaluateClaudeToolPermissionInput {
 	safety: SafetyContract;
 	cwd: string;
 	readOnly?: boolean;
+	workerExecuteAutonomy?: "yolo";
 	/**
 	 * The worker's admitted tool surface (Clio builtin names), already narrowed
 	 * by any tool_profile. When present, a mapped Claude tool whose Clio builtin
@@ -255,6 +256,7 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 	// unmapped Claude-internal tools defer to the safety net as before.
 	const admission = evaluateAdmission({
 		principal: "worker",
+		...(input.workerExecuteAutonomy !== undefined ? { workerExecuteAutonomy: input.workerExecuteAutonomy } : {}),
 		effects: [call],
 		cwd: input.cwd,
 		safety: input.safety,

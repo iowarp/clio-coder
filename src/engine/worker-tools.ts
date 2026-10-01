@@ -156,6 +156,7 @@ export function createWorkerToolRegistry(
 	workerRecall?: WorkerRecall,
 	/** The run's Git allowance and attested task worktree; absent means git inspect. */
 	git?: AdmissionGitContext,
+	executeAutonomy?: "yolo",
 ): ToolRegistry {
 	// A worker always gets a middleware contract, even without a snapshot from
 	// the orchestrator, because the loop guard rides on it as a before_tool
@@ -165,12 +166,13 @@ export function createWorkerToolRegistry(
 	for (const registration of hookRegistrations ?? []) {
 		middleware.registerHook(registration);
 	}
-	// Worker admission is always default; the spec carries a separate read-only restriction.
+	// Execute authority comes only from the host-bound permit; read-only still dominates.
 	const registry = createRegistry({
 		safety,
 		middleware,
 		principal: "worker",
 		autonomy: () => DEFAULT_AUTONOMY_LEVEL,
+		...(executeAutonomy !== undefined ? { workerExecuteAutonomy: executeAutonomy } : {}),
 		...(readOnly === true ? { readOnly: true } : {}),
 		...(onMiddlewareEffects ? { onMiddlewareEffects } : {}),
 		...(git !== undefined ? { git } : {}),

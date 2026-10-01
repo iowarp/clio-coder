@@ -42,6 +42,8 @@ export interface WorkerPermitCeiling {
 }
 
 export interface WorkerPermitAllowance {
+	/** Host-bound operator posture for execute effects only; absent keeps default admission. */
+	executeAutonomy?: "yolo";
 	git: WorkerGitAllowance;
 	asks: WorkerAskRoute;
 	/**
@@ -206,6 +208,8 @@ export interface WorkerPermitInput {
 	 * changed settings still runs no wider than the attempt it replaces.
 	 */
 	inherited?: WorkerPermitAllowance;
+	/** Effective operator posture from host settings, never a task field. */
+	operatorAutonomy?: "default" | "yolo";
 	/** fleet.permissions.mode. */
 	mode: WorkerPermissionMode;
 	/** True when the host selected an internal helper protocol for this run. */
@@ -300,7 +304,21 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 		writeRoots: [...input.writeRoots],
 		enforcement: { ...input.runtime.enforcement },
 	};
-	const allowance: WorkerPermitAllowance = { git, asks, approvalAuthority };
+	const executeAuthorized =
+		input.operatorAutonomy === "yolo" &&
+		input.runtime.enforcement.perCallMediation &&
+		!input.readOnly &&
+		input.declared?.asks !== "deny" &&
+		input.declared?.asks !== "fail" &&
+		narrowing.asks !== "deny" &&
+		narrowing.asks !== "fail" &&
+		(inherited === undefined || inherited.executeAutonomy === "yolo");
+	const allowance: WorkerPermitAllowance = {
+		git,
+		asks,
+		approvalAuthority,
+		...(executeAuthorized ? { executeAutonomy: "yolo" as const } : {}),
+	};
 	return Object.freeze({
 		version: WORKER_PERMIT_VERSION,
 		...(unmediatedWrite ? { trustedUnmediated: true as const } : {}),
@@ -316,6 +334,7 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 
 /** One prompt line naming the permit the worker runs under. */
 export function workerPermitPromptLine(view: {
+	executeAutonomy?: "yolo";
 	capabilityClass?: AgentCapabilityClass;
 	git: WorkerGitAllowance;
 	asks: WorkerAskRoute;
@@ -330,7 +349,7 @@ export function workerPermitPromptLine(view: {
 				: "main (operator decides)"
 			: view.asks;
 	const scope = view.capabilityClass !== undefined ? `${view.capabilityClass}, ` : "";
-	const line = `Permit: ${scope}git ${view.git}, asks ${asks}.`;
+	const line = `Permit: ${scope}git ${view.git}, asks ${asks}.${view.executeAutonomy === "yolo" ? " Execute admission: operator-bound yolo; hard safety rules still apply." : ""}`;
 	// The host commits whatever the task worktree holds when the run settles.
 	// Without this a worker told to commit burns calls on denied `git commit`
 	// attempts and writes stray report files as a substitute.

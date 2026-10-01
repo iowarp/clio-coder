@@ -267,11 +267,12 @@ export interface RegistryDeps {
 	 */
 	autonomy?: () => AutonomyLevel;
 	/**
-	 * Whose calls this registry admits. A worker never reads autonomy: its
-	 * standing allowance is the default mapping, and only its autonomy asks may
+	 * Whose calls this registry admits. Worker execute authority comes from
+	 * its bound permit, not this autonomy callback. Only its autonomy asks may
 	 * later be answered by the main agent. Absent means the main agent.
 	 */
 	principal?: AdmissionPrincipal;
+	workerExecuteAutonomy?: "yolo";
 	/** Dispatch-owned restriction, fixed for the lifetime of this run. */
 	readOnly?: boolean;
 	/**
@@ -837,6 +838,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			...(projectedCall !== undefined ? { capability: call, effects: [projectedCall] } : { effects: [call] }),
 			safety: deps.safety,
 			autonomy: level,
+			...(deps.workerExecuteAutonomy !== undefined ? { workerExecuteAutonomy: deps.workerExecuteAutonomy } : {}),
 			constraints: {
 				...(deps.readOnly === true ? { readOnly: true } : {}),
 				...(options?.turnConstraints !== undefined ? { turnConstraints: options.turnConstraints } : {}),
@@ -956,6 +958,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				effects: [effect.call],
 				safety: deps.safety,
 				autonomy: level,
+				...(deps.workerExecuteAutonomy !== undefined ? { workerExecuteAutonomy: deps.workerExecuteAutonomy } : {}),
 				...(effectSpec !== undefined
 					? { normalize: (raw: SafetyDecision) => applyRegisteredToolClassification(raw, effectSpec) }
 					: {}),

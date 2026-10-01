@@ -671,6 +671,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					...(input.taskGit.taskWorktree !== undefined ? { taskWorktree: input.taskGit.taskWorktree } : {}),
 				})
 			: undefined,
+		input.permitAllowance?.executeAutonomy,
 	);
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;

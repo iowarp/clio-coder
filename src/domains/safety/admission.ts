@@ -5,6 +5,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { turnAllowsTool } from "../../core/turn-constraints.js";
 import type { ActionClass, ClassifierCall } from "./action-classifier.js";
+import { classify } from "./action-classifier.js";
 import type { AutonomyExposure, AutonomyLevel } from "./autonomy.js";
 import { autonomyAskRejection, DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "./autonomy.js";
 import { autonomyCallInputs } from "./autonomy-inputs.js";
@@ -84,6 +85,8 @@ export interface AdmissionInput {
 	safety: Pick<SafetyContract, "evaluate">;
 	/** Operator autonomy. Read for the main principal only; workers never inherit it. */
 	autonomy?: AutonomyLevel;
+	/** Standing execute authority bound by the host permit, independent of model fields. */
+	workerExecuteAutonomy?: "yolo";
 	constraints?: AdmissionConstraints;
 	/** A tool-level confirmation rail required at every autonomy level. */
 	confirmationRuleId?: string;
@@ -215,7 +218,13 @@ function activatesSkill(call: ClassifierCall): boolean {
 export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 	const principal = input.principal;
 	const level: AutonomyLevel =
-		principal === "main" ? (input.autonomy ?? DEFAULT_AUTONOMY_LEVEL) : DEFAULT_AUTONOMY_LEVEL;
+		principal === "main"
+			? (input.autonomy ?? DEFAULT_AUTONOMY_LEVEL)
+			: input.workerExecuteAutonomy === "yolo" &&
+					input.effects.length > 0 &&
+					input.effects.every((effect) => classify(effect).actionClass === "execute")
+				? "yolo"
+				: DEFAULT_AUTONOMY_LEVEL;
 	const issuer = input.authorization?.issuer;
 	const posture =
 		issuer === "operator"
@@ -341,8 +350,8 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 		return deny("git_destructive", "action git_destructive is hard-blocked", destructive);
 	}
 
-	// Step 4: autonomy for the main agent, the default standing allowance for a
-	// worker. Every effect must be admitted; the first that is not decides. A
+	// Step 4: operator autonomy or the worker's bound standing allowance.
+	// Every effect must be admitted; the first that is not decides. A
 	// main agent's own ask goes to the operator; a worker's may go to the main.
 	const autonomyAuthority: ApprovalAuthority = principal === "worker" ? "main" : "operator";
 	for (let index = 0; index < effectDecisions.length; index += 1) {

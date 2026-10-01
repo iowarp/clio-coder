@@ -735,6 +735,7 @@ export interface RunReceiptSafetySummary {
 		git: "inspect" | "worktree";
 		asks: "deny" | "fail" | "main";
 		approvalAuthority: "main" | "operator";
+		executeAutonomy?: "yolo";
 		/** The operator's trustedUnmediated opt-in let an unmediated runtime take write-capable work. */
 		trustedUnmediated?: true;
 	};

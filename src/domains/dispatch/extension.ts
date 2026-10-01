@@ -1950,6 +1950,7 @@ function resolveDispatchPermitOnce(
 		...(spec.permissions !== undefined ? { declared: spec.permissions } : {}),
 		...(req.permitNarrowing !== undefined ? { narrowing: req.permitNarrowing } : {}),
 		...(req.inheritedPermitAllowance !== undefined ? { inherited: req.inheritedPermitAllowance } : {}),
+		operatorAutonomy: settings?.safety.autonomy ?? "default",
 		mode: settings?.fleet.permissions.mode ?? "deny",
 		hostHelper,
 		runtime: {
@@ -1971,6 +1972,7 @@ function receiptPermitSummary(permit: WorkerPermit): NonNullable<NonNullable<Run
 		git: permit.allowance.git,
 		asks: permit.allowance.asks,
 		approvalAuthority: permit.allowance.approvalAuthority,
+		...(permit.allowance.executeAutonomy !== undefined ? { executeAutonomy: permit.allowance.executeAutonomy } : {}),
 		...(permit.trustedUnmediated === true ? { trustedUnmediated: true as const } : {}),
 	};
 }

@@ -759,7 +759,11 @@ function validateWorkerPermit(spec: Record<string, unknown>): void {
 	if (typeof ceiling.readOnly !== "boolean") throw new Error("WorkerSpec.permit.ceiling.readOnly must be a boolean");
 	const roots = readStringArray(ceiling.writeRoots, "WorkerSpec.permit.ceiling.writeRoots");
 	const allowance = readRecord(permit.allowance, "WorkerSpec.permit.allowance");
-	exactKeys(allowance, ["git", "asks", "approvalAuthority"], "WorkerSpec.permit.allowance");
+	exactKeys(allowance, ["git", "asks", "approvalAuthority", "executeAutonomy"], "WorkerSpec.permit.allowance");
+	if (allowance.executeAutonomy !== undefined) {
+		readEnum(allowance.executeAutonomy, "WorkerSpec.permit.allowance.executeAutonomy", ["yolo"] as const);
+		if (ceiling.readOnly) throw new Error("WorkerSpec read-only permit cannot carry execute autonomy");
+	}
 	readEnum(allowance.git, "WorkerSpec.permit.allowance.git", ["inspect", "worktree"] as const);
 	const asks = readEnum(allowance.asks, "WorkerSpec.permit.allowance.asks", ["deny", "fail", "main"] as const);
 	const authority = readEnum(allowance.approvalAuthority, "WorkerSpec.permit.allowance.approvalAuthority", [
