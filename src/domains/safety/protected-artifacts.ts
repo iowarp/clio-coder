@@ -297,7 +297,13 @@ export interface ShellCommandStep {
  */
 export function shellCommandSteps(command: string, home?: string): ShellCommandStep[] {
 	const steps: ShellCommandStep[] = [];
-	for (const segment of expandedShellSegments(command)) {
+	// A here-document body is data for the command, not commands: admission
+	// removes the bodies before it reads, and so does the card. A here-document
+	// that survives (inside a substitution or an `sh -c` script) cannot be told
+	// from commands, so only the top-level commands are described then.
+	const body = withoutHeredocBodies(command);
+	const segments = /<<(?!<)/u.test(body) ? splitSegments(scanShellLike(body)) : expandedShellSegments(body);
+	for (const segment of segments) {
 		const truncatingRedirects: string[] = [];
 		for (let index = 0; index < segment.length - 1; index += 1) {
 			const operator = segment[index];
