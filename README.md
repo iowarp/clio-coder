@@ -57,9 +57,9 @@ clio-coder configure
 clio-coder
 ```
 
-Until coder.iowarp.ai serves it, use the copy attached to each GitHub release:
-`curl -fsSL https://github.com/iowarp/clio-coder/releases/latest/download/install.sh | sh`.
-It verifies the Node download against SHASUMS256.txt and the Node.js release keys,
+If coder.iowarp.ai is unreachable, use the copy attached to each GitHub release:
+`curl -fsSL https://github.com/iowarp/clio-coder/releases/latest/download/install.sh | sh`
+(`install.ps1` sits next to it). It verifies the Node download against SHASUMS256.txt and the Node.js release keys,
 installs under `~/.local/share/clio-coder-install`, and writes the launcher to
 `~/.local/bin/clio-coder`. See [HPC clusters](docs/guide/hpc-clusters.md) for old
 glibc, proxies and airgapped sites.
