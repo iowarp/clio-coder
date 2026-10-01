@@ -37,6 +37,13 @@ export interface AcpDelegationRunInput {
 	cwd: string;
 	safety: SafetyContract;
 	readOnly?: boolean;
+	/**
+	 * Canonical tools this delegation may use, handed to the mediator as a hard
+	 * scope. Absent leaves the peer's own surface to the safety net: an ACP
+	 * delegation carries no recipe, so dispatch has no admitted list to supply
+	 * and an empty one would deny every call.
+	 */
+	allowedTools?: ReadonlyArray<string>;
 	signal?: AbortSignal;
 	clientVersion?: string;
 	/** Testable SIGTERM grace used by hard termination. */
@@ -321,6 +328,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		cwd: input.cwd,
 		toolGovernance: input.agent.toolGovernance ?? "clio-coder-policy",
 		...(input.readOnly === true ? { readOnly: true } : {}),
+		...(input.allowedTools !== undefined ? { allowedTools: input.allowedTools } : {}),
 		onPermissionResolved: (event) =>
 			emit({
 				type: "clio_coder_permission_resolved",
