@@ -47,9 +47,19 @@
 	gap: var(--space-3);
 	align-items: start;
 	border: 1px solid var(--line);
-	border-radius: var(--radius-sm);
-	padding: var(--space-3);
+	border-radius: var(--radius-md);
+	padding: var(--space-3) var(--space-4);
 	cursor: pointer;
+	transition:
+		border-color var(--motion-fast) var(--ease-standard),
+		background-color var(--motion-fast) var(--ease-standard);
+}
+.connection-setup__choice:hover {
+	border-color: var(--line-strong);
+}
+.connection-setup__choice:has(input:focus-visible) {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
 }
 .connection-setup__choice[data-selected="true"] {
 	border-color: var(--accent);
@@ -98,11 +108,63 @@
 	}
 }
 
-/* Inside a first-run step: no frame, no second heading. */
+/* Inside a first-run step: no frame, no second heading. Each prompt mounts fresh (keyed by its id), so
+   it rises in on the site's entry timing and its choices follow on the stagger; nothing loops. */
 .connection-setup.connection-setup--bare {
 	max-width: none;
 	margin: var(--space-3) 0 0;
 	padding: 0;
 	border: 0;
 	background: transparent;
+}
+.connection-setup--bare .connection-setup__heading {
+	justify-content: end;
+}
+.connection-setup--bare .connection-setup__heading > button {
+	min-height: 0;
+	padding: 4px 10px;
+	border-color: transparent;
+	background: transparent;
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.connection-setup--bare .connection-setup__heading > button:hover:not(:disabled) {
+	border-color: var(--line);
+	color: var(--ink);
+}
+.connection-setup--bare .connection-setup__messages > summary {
+	color: var(--ink-muted);
+	font: 12px / 1.5 var(--font-mono);
+	cursor: pointer;
+}
+.connection-setup--bare .connection-setup__prompt {
+	animation: setup-rise var(--motion-entry) var(--ease-standard) both;
+}
+.connection-setup--bare .connection-setup__prompt h3 {
+	margin-bottom: var(--space-1);
+	font-weight: 500;
+}
+.connection-setup--bare .connection-setup__prompt h3:focus-visible {
+	outline: none;
+}
+.connection-setup--bare .connection-setup__choice {
+	animation: setup-rise var(--motion-entry) var(--ease-standard) both;
+}
+.connection-setup--bare .connection-setup__choice:nth-of-type(2) {
+	animation-delay: var(--motion-stagger);
+}
+.connection-setup--bare .connection-setup__choice:nth-of-type(3) {
+	animation-delay: calc(var(--motion-stagger) * 2);
+}
+.connection-setup--bare .connection-setup__choice:nth-of-type(n + 4) {
+	animation-delay: calc(var(--motion-stagger) * 3);
+}
+.connection-setup--bare .connection-setup__actions {
+	background: transparent;
+}
+@keyframes setup-rise {
+	from {
+		opacity: 0;
+		transform: translateY(var(--motion-distance));
+	}
 }
