@@ -144,6 +144,9 @@ test("ACP CLI boots the workspace named by its first session", { timeout: 90_000
 				return copy;
 			};
 			deepStrictEqual(normalized(init.agentCapabilities), normalized(eagerInit.agentCapabilities));
+			for (const params of [{ mcpServers: [] }, { cwd: launch, mcpServers: [] }]) {
+				await rejects(eager.request("session/new", params, 10_000));
+			}
 		} finally {
 			await eager.forceTerminate();
 		}
@@ -267,5 +270,56 @@ test("ACP preboot logout keeps the workspace unbound", async () => {
 	} finally {
 		transport.close();
 		await done;
+	}
+});
+
+test("ACP failed deferred boot answers the first and subsequent workspace requests", async () => {
+	for (const throws of [false, true]) {
+		const input = new PassThrough();
+		const output = new PassThrough();
+		const rows: Array<{ id: number; error?: { code: number } }> = [];
+		output.setEncoding("utf8");
+		output.on("data", (line: string) => rows.push(JSON.parse(line)));
+		const transport = createStdioServerTransport({ input, output });
+		let boots = 0;
+		const done = serveDeferredAcp({
+			transport,
+			handshake: createAcpHandshake({
+				session: true,
+				loadSession: false,
+				settings: false,
+				providers: false,
+				steer: false,
+				dispatch: false,
+				toolRegistry: false,
+				bus: false,
+			}),
+			launchCwd: process.cwd(),
+			pinned: true,
+			boot: async () => {
+				boots += 1;
+				if (throws) throw new Error("boot failed");
+				return 1;
+			},
+		});
+		const settled = done.catch(() => 1);
+		try {
+			for (const [id, method, params] of [
+				[1, "initialize", {}],
+				[2, "session/new", { cwd: process.cwd(), mcpServers: [] }],
+				[3, "session/new", { cwd: process.cwd(), mcpServers: [] }],
+			] as const) {
+				input.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+				for (let tries = 0; tries < 100 && !rows.some((row) => row.id === id); tries += 1) {
+					await new Promise((resolve) => setTimeout(resolve, 10));
+				}
+			}
+			strictEqual(rows.find((row) => row.id === 2)?.error?.code, -32603);
+			strictEqual(rows.find((row) => row.id === 3)?.error?.code, -32603);
+			strictEqual(boots, 1);
+		} finally {
+			transport.close();
+			await settled;
+		}
 	}
 });

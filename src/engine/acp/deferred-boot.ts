@@ -43,6 +43,7 @@ export async function serveDeferredAcp(options: DeferredAcpOptions): Promise<num
 	let readyResolve: (() => void) | null = null;
 	let readyReject: ((error: unknown) => void) | null = null;
 	let bootStarted = false;
+	let bootReady = false;
 	let bootResult: Promise<number> | null = null;
 	const ready = new Promise<void>((resolveReady, rejectReady) => {
 		readyResolve = resolveReady;
@@ -75,13 +76,19 @@ export async function serveDeferredAcp(options: DeferredAcpOptions): Promise<num
 		}
 		bootResult = options
 			.boot(root, () => {
+				bootReady = true;
 				transport.setFallbackRequestHandler(null);
 				transport.setRequestGate(null);
 				readyResolve?.();
 			})
+			.then((code) => {
+				if (!bootReady) {
+					readyReject?.(new AcpRequestError(-32603, "workspace boot failed", { code: "internal_error" }));
+				}
+				return code;
+			})
 			.catch((error: unknown) => {
 				readyReject?.(error);
-				transport.setRequestGate(null);
 				throw error;
 			});
 		// The request handler receives the boot error through ready. The serve
