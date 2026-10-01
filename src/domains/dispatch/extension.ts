@@ -7170,9 +7170,9 @@ export function createDispatchBundle(
 						failureMessage = finalDetail;
 					}
 				}
-				// A clean exit is not a done assignment: an edit worker that recorded a
-				// limitation and changed nothing sealed "succeeded" and rendered
-				// "execution ok" over an unchanged tree.
+				// A clean exit is not a done assignment: an edit worker that ran no tool,
+				// or recorded a limitation and changed nothing, sealed "succeeded" and
+				// rendered "execution ok" over an unchanged tree.
 				if (
 					finalOutcome === "succeeded" &&
 					outcomeCode === null &&
@@ -7180,6 +7180,7 @@ export function createDispatchBundle(
 					!lifecycle.readOnly
 				) {
 					const noWork = workerNoWorkDetail({
+						activity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
 						limitationRecorded: (toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0,
 						mutatedPathCount: finishContract?.assessment.mutatedPaths.length ?? null,
 					});

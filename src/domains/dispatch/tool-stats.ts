@@ -157,22 +157,23 @@ export function blockedWriteAttempts(
 
 /**
  * Why a workspace-edit worker that finished cleanly did none of its assignment:
- * it recorded a successful `limitation` and the run changed nothing, the shape
- * of the main agent's headless `limitation` failure. A worker that changed files
- * and then recorded a limitation (typically "could not validate") keeps its
- * outcome, because its edits landed; the receipt's quality fields carry the
- * missing validation. `mutatedPathCount` is null when no finish-contract
- * assessment exists, which leaves the shape undecided.
+ * it executed no tool at all, or it recorded a successful `limitation` and the
+ * run changed nothing (the shape of the main agent's headless `limitation`
+ * failure). A worker that changed files and then recorded a limitation
+ * (typically "could not validate") keeps its outcome, because its edits landed;
+ * the receipt's quality fields carry the missing validation.
+ * `mutatedPathCount` is null when no finish-contract assessment exists, which
+ * leaves the limitation shape undecided.
  *
- * A worker that ran no tool at all is deliberately not covered: its receipt
- * stays succeeded with the zero-tool note, and the transcript row says it ran
- * no tools (tests/contracts/host-verification-admission.test.ts runs a
- * tool-less builder through host verification and needs it admitted).
+ * Callers apply this to edit workers only. A judge or scout that answers in
+ * prose without a tool is a legitimate run and keeps its succeeded outcome.
  */
 export function workerNoWorkDetail(input: {
+	activity: ToolActivitySummary;
 	limitationRecorded: boolean;
 	mutatedPathCount: number | null;
 }): string | null {
+	if (input.activity.calls === 0) return "worker executed no tools, so it did none of its assignment";
 	if (input.limitationRecorded && input.mutatedPathCount === 0) {
 		return "worker recorded a limitation and changed nothing, so the assignment was not done";
 	}
