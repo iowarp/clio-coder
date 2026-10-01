@@ -1,6 +1,7 @@
-import { deepStrictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { settleDispatchedRuns } from "../../src/cli/modes/headless-dispatched-runs.js";
+import { describeRuns, settleDispatchedRuns } from "../../src/cli/modes/headless-dispatched-runs.js";
+import { mergeWithheldDetail } from "../../src/domains/dispatch/merge-gate.js";
 import type { RunEnvelope, RunOutcome } from "../../src/domains/dispatch/types.js";
 
 const ROOT = "root-run";
@@ -17,6 +18,25 @@ function run(id: string, outcome: RunOutcome | null, attempt = 0, parentRunId: s
 }
 
 describe("headless dispatched runs", () => {
+	it("reports a withheld merge with its preserved branch and recovery command", async () => {
+		const withheld = {
+			...run("withheld", "failed"),
+			outcomeCode: "merge_withheld" as const,
+			outcomeDetail: mergeWithheldDetail({
+				quality: "fail",
+				hostStatus: undefined,
+				contract: null,
+				output: null,
+				branch: "clio-coder/task/withheld",
+			}),
+		};
+		const settlement = await settleDispatchedRuns({ listRuns: () => [withheld] }, ROOT, () => false);
+		const description = describeRuns(settlement.undelivered);
+		match(description, /withheld \(coder, merge_withheld\)/u);
+		match(description, /preserved branch clio-coder\/task\/withheld/u);
+		match(description, /git merge clio-coder\/task\/withheld/u);
+		doesNotMatch(describeRuns([{ ...withheld, outcomeDetail: "the operator discarded the branch" }]), /git merge/u);
+	});
 	it("reports unretried failures as undelivered and names runs still live at shutdown", async () => {
 		const runs = [
 			run("retried-failure", "failed"),

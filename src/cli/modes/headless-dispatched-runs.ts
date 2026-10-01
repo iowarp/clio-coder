@@ -1,6 +1,7 @@
 import { sleep } from "../../core/timers.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import { isTerminalRunEnvelope, type RunEnvelope, type RunOutcome } from "../../domains/dispatch/types.js";
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 
 const SETTLE_POLL_MS = 500;
 
@@ -59,5 +60,12 @@ export async function settleDispatchedRuns(
 }
 
 export function describeRuns(runs: ReadonlyArray<RunEnvelope>): string {
-	return runs.map((run) => `${run.id} (${run.agentId}${run.outcome ? `, ${run.outcome}` : ""})`).join(", ");
+	return runs
+		.map((run) => {
+			const outcome = run.outcomeCode === "merge_withheld" ? run.outcomeCode : run.outcome;
+			const detail =
+				run.outcomeCode === "merge_withheld" && run.outcomeDetail ? `: ${sanitizeCallTargetText(run.outcomeDetail)}` : "";
+			return `${run.id} (${run.agentId}${outcome ? `, ${outcome}` : ""})${detail}`;
+		})
+		.join(", ");
 }
