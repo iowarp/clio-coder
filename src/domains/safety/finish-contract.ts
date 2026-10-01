@@ -135,7 +135,9 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 	const inWorkspace = input.workspaceRoot
 		? touchedPaths.filter((path) => isWithinWorkspace(path, input.workspaceRoot as string))
 		: touchedPaths;
-	const mutatedPaths = unchanged ? inWorkspace.filter((path) => !unchanged.has(path)) : inWorkspace;
+	const mutatedPaths = inWorkspace.filter(
+		(path) => !unchanged?.has(path) && !isClioConfigurationPath(path, input.workspaceRoot),
+	);
 	if (mutatedPaths.length === 0) {
 		return { kind: "ok", reason: "no_net_mutation", evidence: [], mutatedPaths };
 	}
@@ -216,6 +218,13 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 		evidence: [],
 		mutatedPaths,
 	};
+}
+
+function isClioConfigurationPath(path: string, workspaceRoot: string | undefined): boolean {
+	const root = resolve(workspaceRoot ?? ".");
+	const target = path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(2)) : resolve(root, path);
+	const local = relative(root, target).split(sep).join("/");
+	return /^\.clio-coder\/(?:settings(?:\.local)?\.yaml|fleets\/[^/]+\.md)$/u.test(local);
 }
 
 /** Relative targets resolve against the workspace; `~` and absolute paths are judged where they land. */
