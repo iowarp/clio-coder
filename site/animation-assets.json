@@ -1,0 +1,47 @@
+[
+  {
+    "id": "read",
+    "prompt": "C3",
+    "description": "Code-like dashes gather at the opening, followed by a quiet ring highlight.",
+    "original": "assets/Clio-Coder-Vid_10-01 16_58_40.zip#Static_locked-off_camera,_no_zoom,_20261001120426.mp4",
+    "sourceSha256": "cb067b48a89667788302b3e53b2e3dce9426383cb91a3f7251264c2e017b5ace",
+    "video": "assets/animations/read.mp4",
+    "poster": "assets/animations/read.webp"
+  },
+  {
+    "id": "focus",
+    "prompt": "C5",
+    "description": "One orange dash is adjusted beside the mark.",
+    "original": "assets/Clio-Coder-Vid_10-01 16_58_40.zip#Static_locked-off_camera,_no_zoom,_20261001120426_2.mp4",
+    "sourceSha256": "3bfa459be7b0a558217c7ff89fa5f847c3d4141c06aae66f5c9333c53e1cbd72",
+    "video": "assets/animations/focus.mp4",
+    "poster": "assets/animations/focus.webp"
+  },
+  {
+    "id": "helpers",
+    "prompt": "C6",
+    "description": "Small cyan helpers emerge, take separate paths, and return.",
+    "original": "assets/Clio-Coder-Vid_10-01 16_58_40.zip#Static_locked-off_camera,_no_zoom,_20261001120426_5.mp4",
+    "sourceSha256": "47aca0e9dd7b49b4426f956a80d0912b5d66eb9eef5be2a6407b2bd005d97613",
+    "video": "assets/animations/helpers.mp4",
+    "poster": "assets/animations/helpers.webp"
+  },
+  {
+    "id": "inspect",
+    "prompt": "C8",
+    "description": "A small change is followed by an inspection sweep across the arrangement.",
+    "original": "assets/Clio-Coder-Vid_10-01 16_58_40.zip#Static_locked-off_camera,_no_zoom,_20261001120426_4.mp4",
+    "sourceSha256": "97fddf823efae89948f0e65835c49fd513a4927b0a5d79a7cbcfc004d76f6f5d",
+    "video": "assets/animations/inspect.mp4",
+    "poster": "assets/animations/inspect.webp"
+  },
+  {
+    "id": "finale",
+    "prompt": "C9",
+    "description": "Separate contributions gather, the rings settle, and a highlight passes through.",
+    "original": "assets/Logo_animation_with_geometric_el\u2026_20261001120550.mp4",
+    "sourceSha256": "81c156161fc8c3b42a97c4953459807bc3aaa389bc605a2641c0c8a5e72ff044",
+    "video": "assets/animations/finale.mp4",
+    "poster": "assets/animations/finale.webp"
+  }
+]

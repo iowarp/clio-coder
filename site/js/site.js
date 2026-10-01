@@ -87,6 +87,7 @@
 	const copyTimers = new WeakMap();
 	const feedback = parseFloat(getComputedStyle(root).getPropertyValue("--motion-feedback")) || 1800;
 	for (const button of document.querySelectorAll("[data-copy]")) {
+		button.hidden = false;
 		button.addEventListener("click", async () => {
 			const previous = button.dataset.copyLabel ?? button.textContent;
 			button.dataset.copyLabel = previous;

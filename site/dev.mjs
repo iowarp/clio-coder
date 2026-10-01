@@ -32,6 +32,7 @@ const mime = {
 	".xml": "application/xml",
 	".txt": "text/plain; charset=utf-8",
 	".webp": "image/webp",
+	".mp4": "video/mp4",
 	".png": "image/png",
 	".svg": "image/svg+xml",
 	".woff2": "font/woff2",
@@ -56,7 +57,9 @@ async function build() {
 	try {
 		if (!values.snapshot) await run("python3", [join(site, "sync-docs.py"), "--worktree"]);
 		// --review adds the unregistered manuscripts in content/drafts to this preview only.
-		await run(process.execPath, [join(site, "build.mjs"), "--out", next, ...(values.review ? ["--review"] : [])]);
+		const buildArgs = [join(site, "build.mjs"), "--out", next, ...(values.review ? ["--review"] : [])];
+		const buildLock = process.env.CLIO_CODER_SITE_BUILD_LOCK;
+		await run(buildLock ? "flock" : process.execPath, buildLock ? [buildLock, process.execPath, ...buildArgs] : buildArgs);
 		await rm(previous, { recursive: true, force: true });
 		try {
 			await rename(out, previous);
@@ -145,7 +148,7 @@ function changed() {
 }
 watch(site, { recursive: true }, (_event, name) => {
 	if (!name || /^(?:\.preview|public|content\/docs|content\/index\.json)/.test(name)) return;
-	if (/\.(?:html|css|js|mjs|json|md|py|webp|png)$/.test(name)) changed();
+	if (/\.(?:html|css|js|mjs|json|md|py|webp|png|mp4)$/.test(name)) changed();
 });
 watch(join(site, "../docs/guide"), { recursive: true }, changed);
 for (const name of ["README.md", "package.json"]) watch(join(site, "..", name), changed);

@@ -107,18 +107,17 @@ function responsiveImages(html, path) {
 		if (!item) return tag;
 		const clio = source === "assets/brand/clio-mark.webp";
 		const parent = source === "assets/brand/iowarp-mark.webp";
-		const hero = tag.includes('class="hero-capture"');
 		const article = path.startsWith("/tutorials/") || path.startsWith("/docs");
 		const sizes = clio
-			? "36px"
+			? tag.includes('class="scene-mark"') ? "160px" : "36px"
 			: parent
 				? "(max-width: 600px) 130px, 220px"
 				: path.startsWith("/tutorials/")
 					? "(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px"
 					: article
 						? "(max-width: 600px) calc(100vw - 40px), (max-width: 850px) calc(100vw - 64px), 760px"
-						: hero
-							? "(max-width: 600px) calc(100vw - 64px), (max-width: 850px) calc(100vw - 96px), (max-width: 1344px) calc(100vw - 128px), 1216px"
+						: path === "/"
+							? "(max-width: 600px) calc(100vw - 64px), (max-width: 1000px) calc(100vw - 96px), 760px"
 							: "(max-width: 600px) calc(100vw - 40px), (max-width: 850px) calc((100vw - 96px) / 2), (max-width: 1344px) calc((100vw - 128px) / 2), 600px";
 		const srcset = [...item.variants, { path: source, width: item.width }]
 			.map((v) => `/${v.path} ${v.width}w`)
@@ -428,10 +427,18 @@ for (const item of Object.values(captures))
 	}
 for (const name of ["clio-mark.webp", "clio-mark.png", "iowarp-mark.webp", "iowarp-mark.png"])
 	await cp(join(root, "assets/brand", name), join(out, "assets/brand", name));
+await mkdir(join(out, "assets/animations"), { recursive: true });
+for (const asset of JSON.parse(await read("animation-assets.json"))) {
+	for (const path of [asset.video, asset.poster]) {
+		if (!/^assets\/animations\/[a-z-]+\.(?:mp4|webp)$/.test(path))
+			throw new Error("Animation assets must name a selected derivative.");
+		await cp(join(root, path), join(out, path));
+	}
+}
 await mkdir(join(out, "css"));
-for (const name of ["brand.css", "site.css"]) await cp(join(root, "css", name), join(out, "css", name));
+for (const name of ["brand.css", "site.css", "landing.css"]) await cp(join(root, "css", name), join(out, "css", name));
 await mkdir(join(out, "js"));
-for (const name of ["theme.js", "site.js", "docs.js", "redirect.js"])
+for (const name of ["theme.js", "site.js", "docs.js", "redirect.js", "landing.js"])
 	await cp(join(root, "js", name), join(out, "js", name));
 await mkdir(join(out, "content"));
 await writeFile(join(out, "content/docs-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
