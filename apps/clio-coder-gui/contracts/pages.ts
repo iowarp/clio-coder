@@ -14,6 +14,7 @@ export const PAGE_PATHS = [
 	"/docs",
 	"/docs/*",
 	"/settings",
+	"/settings/general",
 	"/settings/effective",
 	"/settings/why",
 	"/settings/targets",

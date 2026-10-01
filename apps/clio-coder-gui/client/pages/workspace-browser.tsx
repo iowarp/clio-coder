@@ -10,17 +10,22 @@ export function WorkspaceBrowser({
 	onChoose,
 	onStart,
 	onClose,
+	embedded = false,
 }: {
 	client: Client;
 	initialPath: string;
 	onChoose: (path: string) => void;
 	onStart: (path: string) => void;
 	onClose: () => void;
+	/** Inside the Open workspace dialog, which already carries the heading and the close button. */
+	embedded?: boolean;
 }) {
 	const [path, setPath] = useState<string | null>(initialPath.trim() || null);
 	const [hidden, setHidden] = useState(false);
 	const heading = useRef<HTMLHeadingElement>(null);
-	useEffect(() => heading.current?.focus(), []);
+	useEffect(() => {
+		if (!embedded) heading.current?.focus();
+	}, [embedded]);
 	const folders = useQuery({
 		queryKey: ["workspace-folders", path, hidden],
 		queryFn: () =>
@@ -33,8 +38,8 @@ export function WorkspaceBrowser({
 	});
 	const view = folders.error ? undefined : folders.data;
 	return (
-		<section className="workspace-browser" aria-label="Choose a project folder">
-			<div className="workspace-browser__head">
+		<section className="workspace-browser" data-embedded={embedded} aria-label="Choose a project folder">
+			<div className="workspace-browser__head" hidden={embedded}>
 				<div>
 					<p className="eyebrow">On the machine running Clio Coder</p>
 					<h2 ref={heading} tabIndex={-1}>
@@ -89,7 +94,7 @@ export function WorkspaceBrowser({
 								Use this path
 							</button>
 							<button type="button" className="primary" onClick={() => onStart(view.path)}>
-								Start conversation here
+								{embedded ? "Open here" : "Start conversation here"}
 							</button>
 						</div>
 					</div>

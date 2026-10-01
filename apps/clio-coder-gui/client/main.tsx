@@ -1,6 +1,7 @@
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { createBrowserRouter, RouterProvider } from "react-router";
+import { createBrowserRouter, RouterProvider, useRouteError } from "react-router";
 import { createClient } from "./api/client.js";
 import { launchToken } from "./api/token.js";
 import { App } from "./app.js";
@@ -17,6 +18,9 @@ const queries = new QueryClient({
 	mutationCache: new MutationCache({ onError: reportProblem }),
 });
 function RouteError() {
+	const error = useRouteError();
+	// The boundary swallows the cause; without this line a broken view is a blank apology with no lead.
+	useEffect(() => console.error("Route failed to render:", error), [error]);
 	return (
 		<main className="route-error" role="alert">
 			<p className="eyebrow">Clio Coder</p>
@@ -108,6 +112,13 @@ const router = createBrowserRouter([
 				lazy: async () => {
 					const { TargetsPage } = await import("./pages/targets.js");
 					return { element: <TargetsPage client={client} view="routing" /> };
+				},
+			},
+			{
+				path: "/settings/general",
+				lazy: async () => {
+					const { GeneralPage } = await import("./pages/general.js");
+					return { element: <GeneralPage client={client} /> };
 				},
 			},
 			{

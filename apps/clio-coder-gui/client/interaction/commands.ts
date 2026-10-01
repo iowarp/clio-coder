@@ -46,6 +46,7 @@ export const DESTINATIONS: readonly Destination[] = [
 	{ label: "Traces", path: "/traces", keywords: ["runs", "forensics"] },
 	{ label: "Toolchain", path: "/toolchain", keywords: ["tools", "install"] },
 	{ label: "Settings", path: "/settings", keywords: ["configuration", "preferences"] },
+	{ label: "General settings", path: "/settings/general", keywords: ["theme", "appearance", "install", "app"] },
 	{ label: "Fleet", path: "/fleet", keywords: ["dispatch", "workers", "runs"] },
 	{ label: "Evidence", path: "/evidence", keywords: ["receipts", "trust"] },
 	{ label: "Library", path: "/library", keywords: ["packages", "skills", "recipes"] },
@@ -76,6 +77,9 @@ export interface CommandHandlers {
 	dismissNotices(): void;
 	cancelTurn(turnId: string): void;
 	closeSession(): void;
+	/** Offered only by a shell that has a project to start in. */
+	newTask?(): void;
+	openWorkspace?(): void;
 }
 
 export const NO_SITUATION: CommandSituation = {
@@ -92,6 +96,27 @@ export const NO_SITUATION: CommandSituation = {
 export function appCommands(situation: CommandSituation, handlers: CommandHandlers): readonly Command[] {
 	const commands: Command[] = [];
 	const { runningTurnId, sessionId, sessionOpen } = situation;
+	const { newTask, openWorkspace } = handlers;
+	if (newTask)
+		commands.push({
+			id: "task.new",
+			title: "New task",
+			group: "Task",
+			keywords: ["start", "conversation", "chat", "session", "compose"],
+			binding: "newTask",
+			available: true,
+			run: newTask,
+		});
+	if (openWorkspace)
+		commands.push({
+			id: "workspace.open",
+			title: "Open workspace",
+			group: "Task",
+			keywords: ["project", "folder", "directory", "add"],
+			binding: "openWorkspace",
+			available: true,
+			run: openWorkspace,
+		});
 	if (sessionId !== null) {
 		commands.push({
 			id: "session.cancel",

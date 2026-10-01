@@ -1,0 +1,126 @@
+/* General settings: label on the left, control on the right, one hairline between blocks. */
+.general {
+	display: grid;
+	gap: 0;
+	max-width: 880px;
+}
+.general .panel-heading {
+	margin-bottom: var(--space-6);
+}
+.general__block {
+	display: grid;
+	grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+	gap: var(--space-8);
+	padding: var(--space-6) 0;
+	border-top: 1px solid var(--line);
+}
+.general__label h2 {
+	margin: 0 0 var(--space-1);
+	font-size: var(--text-body);
+	font-weight: 600;
+}
+.general__label p {
+	margin: 0;
+	font-size: var(--text-meta);
+	line-height: 1.5;
+	color: var(--ink-muted);
+}
+.general__control {
+	display: grid;
+	gap: var(--space-4);
+	justify-items: start;
+	min-width: 0;
+}
+.general__control p {
+	margin: 0;
+	font-size: var(--text-meta);
+	line-height: 1.6;
+	color: var(--ink-muted);
+	max-width: 46ch;
+}
+.general__link {
+	color: var(--accent);
+	text-decoration: none;
+	font-weight: 500;
+}
+.general__link:hover {
+	text-decoration: underline;
+}
+
+.theme-choice {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 8.5rem));
+	gap: var(--space-3);
+}
+.theme-choice label {
+	display: grid;
+	gap: 2px;
+	justify-items: start;
+	padding: var(--space-3);
+	cursor: pointer;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+}
+.theme-choice label:has(input:checked) {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+	box-shadow: 0 0 0 1px var(--accent);
+}
+.theme-choice label:has(input:focus-visible) {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
+}
+.theme-choice strong {
+	font-size: var(--text-meta);
+}
+.theme-choice small {
+	font-size: 11.5px;
+	color: var(--ink-muted);
+}
+.theme-choice__swatch {
+	width: 100%;
+	height: 36px;
+	margin-bottom: var(--space-2);
+	border-radius: var(--radius-sm);
+	border: 1px solid var(--line);
+}
+
+.shortcut-list {
+	display: grid;
+	gap: 0;
+	width: 100%;
+	margin: 0;
+}
+.shortcut-list > div {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-4);
+	padding: var(--space-2) 0;
+	border-bottom: 1px solid var(--line);
+	font-size: var(--text-meta);
+}
+.shortcut-list dt {
+	color: var(--ink);
+}
+.shortcut-list dd {
+	margin: 0;
+}
+.shortcut-list kbd {
+	padding: 2px 8px;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-xs);
+	font: 12px var(--font-mono);
+	color: var(--ink-muted);
+	white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+	.general__block {
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--space-4);
+	}
+	.theme-choice {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+}
