@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join, relative, resolve } from "node:path";
 import { PATH_BOUNDARY_MAX_ENTRIES, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import { runCommandVector } from "../../core/safe-exec.js";
+import { sandboxAvailability } from "../../core/sandbox/availability.js";
+import { buildSandboxInvocation } from "../../core/sandbox/invocation.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { JUDGED_CHECK_MAX_OUTPUT_BYTES, judgeNumericTexts, judgePerfTexts } from "../../tools/verify/scripts.js";
@@ -154,64 +156,105 @@ export async function compareHostVerificationBase(input: {
 		return reason === null && declared !== undefined ? [{ check, declared }] : [];
 	});
 	if (candidates.length === 0) return;
-	const stateDir = input.stateDir ?? clioStateDir();
-	const basePath = join(stateDir, "artifacts", worktree.runId, `verification-base-${randomUUID()}`);
-	mkdirSync(dirname(basePath), { recursive: true });
-	const git = (args: string[]) =>
-		runCommandVector("git", ["-C", worktree.path, ...args], { timeoutMs: 5_000, maxOutputBytes: 8_192 });
-	try {
-		const added = await git(["worktree", "add", "--detach", basePath, worktree.base]);
-		if (added.exitCode !== 0) throw new Error("base checkout could not be prepared within bounds");
-		for (const [index, { check, declared }] of candidates.entries()) {
-			const cwd = resolve(basePath, relative(worktree.path, declared.cwd));
-			if (cwd !== basePath && !cwd.startsWith(`${basePath}/`)) {
-				check.baseComparison = {
-					status: "not_compared",
-					base: worktree.base,
-					reason: "check cwd is outside the task worktree",
-				};
-				continue;
-			}
-			const outcome = await runCodeStep({
-				stepId: `base-${index + 1}`,
-				workspaceRoot: cwd,
-				command: {
-					id: declared.check,
-					argv: [...declared.argv],
-					cwd: "",
-					timeoutMs: Math.min(declared.timeoutMs, 5_000),
-					env: [],
-					description: "Bounded host check on task base.",
+	// The seatbelt backend permits shared temporary writes; only bubblewrap
+	// contains an arbitrary comparison command to this checkout (flywheel p9/C1).
+	const sandbox = sandboxAvailability();
+	if (!sandbox.available || sandbox.backend !== "bwrap" || sandbox.executable === null) {
+		for (const { check } of candidates)
+			check.baseComparison = {
+				status: "not_compared",
+				base: worktree.base,
+				reason: "isolated base comparison sandbox unavailable",
+			};
+		return;
+	}
+	for (const { check, declared } of candidates) {
+		const relativeCwd = relative(worktree.path, declared.cwd);
+		if (
+			relativeCwd === ".." ||
+			relativeCwd.startsWith("../") ||
+			resolve(worktree.path, relativeCwd) !== resolve(declared.cwd)
+		) {
+			check.baseComparison = {
+				status: "not_compared",
+				base: worktree.base,
+				reason: "check cwd is outside the task worktree",
+			};
+			continue;
+		}
+		try {
+			// The archive lives only in bubblewrap's private tmpfs. Even SIGKILL
+			// cannot leave a checkout or shared Git registration behind (flywheel p9/C1).
+			const basePath = `/tmp/verification-base-${randomUUID()}`;
+			const script = [
+				'base_dir="$1"; source_dir="$2"; base_ref="$3"; relative_cwd="$4"; shift 4',
+				'mkdir -p "$base_dir" || exit 125',
+				'git -C "$source_dir" archive "$base_ref" | tar -x -C "$base_dir" || exit 125',
+				'cd "$base_dir/$relative_cwd" || exit 125',
+				'case "$(pwd -P)/" in "$base_dir/"*) ;; *) exit 125 ;; esac',
+				'export TMPDIR="$base_dir" TMP="$base_dir" TEMP="$base_dir"',
+				'exec "$@"',
+			].join("\n");
+			const invocation = buildSandboxInvocation(
+				{
+					command: {
+						argv: [
+							"/bin/bash",
+							"-o",
+							"pipefail",
+							"-c",
+							script,
+							"base-check",
+							basePath,
+							worktree.path,
+							worktree.base,
+							relativeCwd,
+							...declared.argv,
+						],
+					},
+					cwd: worktree.path,
+					writableRoots: [],
+					network: false,
+					maskedPaths: [],
 				},
-				artifactDir: join(stateDir, "artifacts", worktree.runId, "verification", "base"),
-				env: input.env ?? process.env,
+				sandbox.backend,
+				sandbox.executable,
+			);
+			const env = Object.fromEntries(
+				FLEET_COMMAND_BASE_ENV.flatMap((name) => {
+					const value = (input.env ?? process.env)[name];
+					return value === undefined ? [] : [[name, value]];
+				}),
+			);
+			const outcome = await runCommandVector(invocation.file, invocation.args, {
+				cwd: worktree.path,
+				workspaceRoot: worktree.path,
+				env,
+				timeoutMs: Math.min(declared.timeoutMs, 5_000),
+				killGraceMs: 0,
 				maxOutputBytes: CODE_STEP_CAPTURE_MAX_BYTES,
 			});
+			const incomplete =
+				outcome.timedOut ||
+				outcome.signal !== null ||
+				outcome.outputCapped ||
+				outcome.failure !== null ||
+				outcome.exitCode === null ||
+				outcome.exitCode === 125;
 			check.baseComparison = {
-				status:
-					outcome.record.timedOut || outcome.record.signal !== null || outcome.record.outputTruncated
-						? "not_compared"
-						: outcome.record.exitCode === 0
-							? "passed"
-							: "failed",
+				status: incomplete ? "not_compared" : outcome.exitCode === 0 ? "passed" : "failed",
 				base: worktree.base,
-				exitCode: outcome.record.exitCode,
-				...(outcome.record.timedOut || outcome.record.signal !== null || outcome.record.outputTruncated
-					? { reason: "base check exhausted the comparison budget" }
-					: {}),
+				...(outcome.exitCode !== null ? { exitCode: outcome.exitCode } : {}),
+				...(incomplete ? { reason: "base check could not complete within the isolated comparison budget" } : {}),
+			};
+		} catch {
+			// Comparison is explanatory evidence; setup failure retains the host rejection.
+			check.baseComparison = {
+				status: "not_compared",
+				base: worktree.base,
+				reason: "isolated base comparison could not run",
 			};
 		}
-	} catch (error) {
-		for (const { check } of candidates)
-			if (check.baseComparison?.status === "not_compared") {
-				check.baseComparison = {
-					status: "not_compared",
-					base: worktree.base,
-					reason: error instanceof Error ? error.message : String(error),
-				};
-			}
-	} finally {
-		await git(["worktree", "remove", "--force", basePath]);
 	}
 }
 

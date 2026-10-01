@@ -1,9 +1,10 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import {
 	type BatchVerificationParticipant,
@@ -14,6 +15,7 @@ import {
 	workspaceFingerprint,
 } from "../../src/domains/dispatch/host-verification.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
+import type { RunHostVerification } from "../../src/domains/dispatch/types.js";
 import { adaptRunReceiptValidationStatus } from "../../src/domains/evidence/trust-status.js";
 
 import { loadProjectVerifierCatalog } from "../../src/tools/verify/catalog.js";
@@ -796,8 +798,16 @@ for (const baseFails of [true, false]) {
 		});
 		strictEqual(verification?.status, "rejected");
 		await compareHostVerificationBase({ verification, request, stateDir: scratch.stateDir });
-		strictEqual(verification?.checks[0]?.baseComparison?.status, baseFails ? "failed" : "passed");
-		match(hostVerificationRejection(verification)?.detail ?? "", baseFails ? /also fails on base/ : /passes on base/);
+		const contained = sandboxAvailability().available && sandboxAvailability().backend === "bwrap";
+		strictEqual(
+			verification?.checks[0]?.baseComparison?.status,
+			contained ? (baseFails ? "failed" : "passed") : "not_compared",
+		);
+		match(
+			hostVerificationRejection(verification)?.detail ?? "",
+			contained ? (baseFails ? /also fails on base/ : /passes on base/) : /base was not compared/,
+		);
+		strictEqual(verification?.status, "rejected");
 		match(hostVerificationRejection(verification)?.detail ?? "", /host ran this check/);
 		strictEqual(
 			execFileSync("git", ["-C", scratch.project, "worktree", "list", "--porcelain"], { encoding: "utf8" }).split(
@@ -838,4 +848,63 @@ it("states that an expensive failed host check was not compared", async () => {
 	strictEqual(verification.checks[0].baseComparison?.status, "not_compared");
 	match(hostVerificationRejection(verification)?.detail ?? "", /base was not compared/);
 	strictEqual(runCount(scratch), 1);
+});
+
+it("contains base-check writes and removes concurrent timed-out base checkouts", async () => {
+	const scratch = makeScratch();
+	const outside = join(scratch.root, "escaped");
+	const declared: ResolvedCheck = {
+		check: "contained",
+		cwd: scratch.project,
+		timeoutMs: 100,
+		argv: [
+			process.execPath,
+			"-e",
+			`try { require('node:fs').writeFileSync(${JSON.stringify(outside)}, 'escaped'); } catch {} setInterval(() => {}, 1000);`,
+		],
+	};
+	const request = {
+		resolvedVerification: [declared],
+		taskWorktree: {
+			root: scratch.project,
+			path: scratch.project,
+			runId: "concurrent",
+			branch: "main",
+			base: "HEAD",
+			ownerToken: "fixture",
+		},
+	};
+	const verification = (): RunHostVerification => ({
+		status: "rejected" as const,
+		checks: [
+			{
+				check: declared.check,
+				argv: [...declared.argv],
+				cwd: declared.cwd,
+				exitCode: 1,
+				durationMs: 1,
+				memo: false,
+				outputTail: "failure",
+			},
+		],
+	});
+	const left = verification();
+	const right = verification();
+	await Promise.all(
+		[left, right].map((value) =>
+			compareHostVerificationBase({ verification: value, request, stateDir: scratch.stateDir }),
+		),
+	);
+	strictEqual(existsSync(outside), false);
+	for (const value of [left, right]) {
+		strictEqual(value.status, "rejected");
+		strictEqual(value.checks[0]?.baseComparison?.status, "not_compared");
+		strictEqual(hostVerificationRejection(value)?.outcomeCode, "host_verification_rejected");
+	}
+	strictEqual(
+		execFileSync("git", ["-C", scratch.project, "worktree", "list", "--porcelain"], { encoding: "utf8" }).split(
+			"worktree ",
+		).length,
+		2,
+	);
 });
