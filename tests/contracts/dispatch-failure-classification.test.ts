@@ -59,6 +59,12 @@ describe("dispatch failure classification", () => {
 		strictEqual(workerNoWorkDetail({ activity: activity(4), limitationRecorded: true, mutatedPathCount: 2 }), null);
 		strictEqual(workerNoWorkDetail({ activity: activity(4), limitationRecorded: true, mutatedPathCount: null }), null);
 		strictEqual(workerNoWorkDetail({ activity: activity(4), limitationRecorded: false, mutatedPathCount: 0 }), null);
+		const denied = { activity: activity(1), limitationRecorded: false, mutatedPathCount: 0, escalationsDenied: 1 };
+		match(workerNoWorkDetail(denied) ?? "", /operator denied the worker's permission request/);
+		strictEqual(
+			workerNoWorkDetail({ ...denied, activity: { ...activity(1), mutatingSucceeded: true }, mutatedPathCount: 1 }),
+			null,
+		);
 	});
 
 	it("recognizes a prose-only limitation in the final mutation report without failing completed edits", () => {

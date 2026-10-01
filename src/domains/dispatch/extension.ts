@@ -7297,6 +7297,7 @@ export function createDispatchBundle(
 						activity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
 						limitationRecorded: (toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0,
 						mutatedPathCount: finishContract?.assessment.mutatedPaths.length ?? null,
+						escalationsDenied: escalationCounts.denied,
 						finalText: finishContractAssistantText,
 						limitationDetail:
 							finishContract?.assessment.evidence

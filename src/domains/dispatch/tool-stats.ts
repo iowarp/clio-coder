@@ -160,6 +160,8 @@ export function workerNoWorkDetail(input: {
 	activity: ToolActivitySummary;
 	limitationRecorded: boolean;
 	mutatedPathCount: number | null;
+	/** Permission asks the operator or main agent denied during the run. */
+	escalationsDenied?: number;
 	finalText?: string;
 	limitationDetail?: string;
 }): string | null {
@@ -178,6 +180,12 @@ export function workerNoWorkDetail(input: {
 			report.trimStart(),
 		);
 	const unchanged = input.mutatedPathCount === 0;
+	// The operator must see that the run did nothing because they denied the call
+	// (flywheel p7/A5); the worker's own text may not open with an inability.
+	const denied = input.escalationsDenied ?? 0;
+	if (denied > 0 && !input.activity.mutatingSucceeded && (input.mutatedPathCount ?? 0) === 0) {
+		return `the operator denied ${denied === 1 ? "the worker's permission request" : `${denied} of the worker's permission requests`}, so it changed nothing and the assignment was not done`;
+	}
 	if (unchanged && (input.limitationRecorded || reportedInability)) {
 		const reason = input.limitationDetail?.trim() || report;
 		return `worker recorded a limitation and changed nothing, so the assignment was not done${reason ? `: ${reason}` : ""}`;
