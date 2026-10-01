@@ -60,10 +60,15 @@ export function ChangesView({ session, workspaceRoot }: { session: PaneSession; 
 			{changes.files.length > 0 ? (
 				<div className="changes__head">
 					<p>
-						{changes.files.length} {changes.files.length === 1 ? "file" : "files"} changed{" "}
-						<span className="diffstat">
-							<span className="diffstat__add">+{changes.adds}</span> <span className="diffstat__del">−{changes.dels}</span>
-						</span>
+						{changes.applied > 0 ? (
+							<>
+								{changes.applied} {changes.applied === 1 ? "file" : "files"} changed{" "}
+								<span className="diffstat">
+									<span className="diffstat__add">+{changes.adds}</span> <span className="diffstat__del">−{changes.dels}</span>
+								</span>
+							</>
+						) : null}
+						{changes.pending > 0 ? `${changes.applied > 0 ? " · " : ""}${changes.pending} waiting for approval` : null}
 					</p>
 					<button
 						type="button"

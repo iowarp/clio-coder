@@ -209,6 +209,10 @@ export const SessionPane = memo(function SessionPane({
 						className="pane__panel"
 						hidden={view !== id}
 					>
+						{/* The legacy views open on h3s, so the pane names them at h2 for the outline. */}
+						{id === "session" || id === "tools" ? (
+							<h2 className="sr-only">{PANE_VIEWS.find((entry) => entry.id === id)?.label}</h2>
+						) : null}
 						{mounted(id) ? body : null}
 					</div>
 				))}
@@ -326,7 +330,7 @@ export const PaneToggles = memo(function PaneToggles({
 				onClick={() => onToggle("changes", ids.changes)}
 			>
 				<Icon name="fileDiff" />
-				{changes.files.length > 0 ? (
+				{changes.applied > 0 ? (
 					<span className="diffstat" aria-hidden="true">
 						<span className="diffstat__add">+{changes.adds}</span> <span className="diffstat__del">−{changes.dels}</span>
 					</span>
