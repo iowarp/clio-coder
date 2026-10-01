@@ -192,11 +192,13 @@ reported to `/usage` under a handoffs row and excluded from the turn count.
 
 ### Streaming Turn Settlement During Session Transitions
 
-When an operator issues `/new`, `/resume`, `/tree`, or `/fork` during streaming, `settleChatBeforeSessionSwitch` cancels and awaits the in-flight turn so partial assistant records and completed tools settle before replacing the writer. Shutdown separately stops shell admission and drains the active operator command. Hooks default to 500 ms each; the operator-shell hook allows six seconds for its existing five-second cancellation escalation, and worker group escalation uses 500 ms. Owned same-process-group descendants are covered by Linux validation, including descendants that close inherited pipes. Arbitrary daemonized or regrouped processes are outside this scope; macOS, Windows, and real SSH behavior remain unverified.
+When an operator issues `/new`, `/resume`, `/tree`, or `/fork` during streaming, `settleChatBeforeSessionSwitch` cancels and awaits the in-flight turn so partial assistant records and completed tools settle before replacing the writer. A busy `/new` says it is cancelling the active run, and any follow-up queued behind that run goes back into the editor instead of being dropped, including one still expanding when the session changed. A slash command typed while a run is active cannot be queued with `Ctrl+Q` or sent as an interrupt, because the model would receive it as text. Clio refuses it with a notice and keeps the draft, and `Enter` runs it now, cancelling the active run. Shutdown separately stops shell admission and drains the active operator command. Hooks default to 500 ms each; the operator-shell hook allows six seconds for its existing five-second cancellation escalation, and worker group escalation uses 500 ms. Owned same-process-group descendants are covered by Linux validation, including descendants that close inherited pipes. Arbitrary daemonized or regrouped processes are outside this scope; macOS, Windows, and real SSH behavior remain unverified.
 
 ---
 
 ## 5. Session Resumption (`/resume`) & Working Directory Fallback
+
+The `/resume` picker lists only sessions that reached a model turn: an assistant message with text or a tool call, or a tool call. A session that was opened and never used, or whose only assistant turns were empty failures, is hidden, and an ended session is not drawn as a success because closing it does not show the run succeeded. `--session <id>` and `--continue` do not use this filter.
 
 When resuming a session via `/resume` or a headless `clio-coder run --session <id>` / `--continue`:
 1. `src/domains/session/manager.ts:resumeSessionState` loads `meta.json` and runs migrations.

@@ -75,8 +75,13 @@ After each run, `sweepRunRecords` keeps the newest 100 completed records by comp
 ## `.clio-coder/` and git
 
 `clio-coder context init` checks for a blanket `.clio-coder/` ignore. With
-confirmation, or with `--yes`, it appends `.clio-coder/` to `.gitignore`; without
-confirmation it warns and leaves the file unchanged. A project that has never
+confirmation, or with `--yes`, it appends `.clio-coder/` to `.gitignore` and prints
+`.gitignore: added '.clio-coder/'`; without confirmation it warns, names `--yes`, and
+leaves the file unchanged. A `.gitignore` that lists the four earlier narrow rules
+(`.clio-coder/codemap.json`, `.clio-coder/codewiki.json`, `.clio-coder/state.json` and
+`.clio-coder/handoffs/`) is rewritten to the single `.clio-coder/` rule without a
+prompt, and init prints `.gitignore: updated '.clio-coder/' rule`. If the written
+`CLIO-CODER.md` is itself ignored by Git, init warns and leaves that ignore rule alone. A project that has never
 accepted or authored that rule can therefore see generated local state in
 `git status`.
 

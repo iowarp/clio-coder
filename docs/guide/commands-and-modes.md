@@ -304,6 +304,7 @@ A headless turn (`clio-coder run`) starts a fresh session unless `--session <id>
 - Session continuity options apply strictly to main-agent execution. They are non-applicable to `--agent` fleet dispatches because dispatched agents execute in isolated worker processes with independent transcripts; specifying session flags alongside `--agent` exits with code 2.
 - A named session that cannot be resumed (such as an unknown session ID or unreadable history) fails the run with exit code 2 before any model call is initiated.
 - An explicit `--target <id>` resolves targets from layered project settings (`.clio-coder/settings.yaml`, `.clio-coder/settings.local.yaml`) as well as user settings before applying target-not-found validation.
+- A text-mode run prints the `No CLIO-CODER.md detected` bootstrap hint and the imported-context refresh hint to stderr only when stderr is a terminal. A `--json` run or a piped one prints neither, and neither prints the interactive project-instructions line.
 - The session ID is discoverable via the `session` event when running under `--json` mode and on stderr via the `clio-coder run: session <id>` line in text mode. Standard output remains reserved for the assistant answer alone.
 
 ### JSON Event Streaming and Wire Projection Promise
@@ -371,7 +372,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/usage` | `/usage` | Show workspace activity, subscription quota, credits, and session token and cost totals |
 | `/doctor` | `/doctor [deep]` | Show a diagnostic report with errors and warnings first and full wrapped check details; `deep` adds live tool probes on the session's targets and a validation-contract dry run at the session's autonomy. See [Doctor](doctor.md). |
 | `/upgrade` | `/upgrade` | Recheck the latest release, review an eligible npm-global replacement, and ask before changing the package. User data is preserved; after success Clio asks you to exit and restart. Other installation kinds receive manager-specific instructions. |
-| `/context` | `/context compact [instructions] \| /context recall <ref> \| /context recover <handoffId> <reduce\|deliver> \| /context init [--preview] [--heuristic] [--adopt] [--global] [--propose\|--apply\|--rewrite] [--depth quick\|standard\|deep] \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, recover a paused handoff, init, refresh, and reset. `/context reset` also takes `--yes` and `--all` for hosts without a chooser |
+| `/context` | `/context compact [instructions] \| /context recall <ref> \| /context recover <handoffId> <reduce\|deliver> \| /context init [--preview] [--heuristic] [--adopt] [--global] [--propose\|--apply\|--rewrite] [--depth quick\|standard\|deep] \| /context refresh \| /context reset` | Context hub: window overlay plus compact (also `/compact [instructions]`), recall, recover a paused handoff, init, refresh, and reset. `/context reset` also takes `--yes` and `--all` for hosts without a chooser |
 | `/fleet` | `/fleet [run [--var <key=value>] <name>]` | Open Fleet Runs, or run a fleet contract with an approval preview. Configure fleets with `/settings fleet`. |
 | `/decisions` | `/decisions` | Show settled interview decisions and operator revisions |
 | `/tasks` | `/tasks add [--expect <path>] [--verify <checkId>[:timeoutMs]] <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
@@ -383,8 +384,8 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/model` | `/model [pattern]` | Open model selector or set a model |
 | `/config` | `/config [area] [group]` | Open settings; alias for `/settings`, including target setup in the dock |
 | `/settings` | `/settings [targets\|chat\|fleet\|context\|safety\|interface\|integrations\|advanced] [group]` | Open interactive settings, optionally at a durable area and UI group |
-| `/resume` | `/resume` | Resume a past session on the route it last ran on |
-| `/new` | `/new` | Start a fresh session |
+| `/resume` | `/resume` | Resume a past session on the route it last ran on. The picker hides sessions with no model turn |
+| `/new` | `/new` | Start a fresh session. While a run is active it cancels the run first and returns queued follow-ups to the editor |
 | `/handoff` | `/handoff <goal>` | Hand this session's working state to a fresh session for a stated goal |
 | `/tree` | `/tree` | Open session tree navigator. Press `p` to filter by current cwd, `s` to cycle tree order or most recent first, `e` to label the selected entry, and `Shift+T` to toggle timestamps. |
 | `/fork` | `/fork` | Fork from an assistant turn |

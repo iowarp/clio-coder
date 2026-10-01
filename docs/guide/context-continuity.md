@@ -9,13 +9,21 @@ Clio can reduce a long native session while preserving the assistant's exact han
 | Action | Use it for |
 | --- | --- |
 | Automatic compaction | Routine pressure management under your configured threshold. |
-| `/context compact [instructions]` | An operator-directed summary, optionally focused on specific information. |
+| `/context compact [instructions]` (or `/compact`) | An operator-directed summary, optionally focused on specific information. |
 | `self_compact({"note_to_self":"…"})` | An assistant-directed handoff followed by continuation of the same task. |
 | `/context recover <handoffId> <reduce\|deliver>` | Explicit recovery of an interrupted handoff. |
 
 `self_compact` is available to the native orchestrator. Dispatched workers do not receive its host callback, and external agents that own their own loop do not receive its schema through the native session tool surface. Skill restrictions and normal tool permission checks still apply.
 
 The assistant must call `self_compact` alone. A batch containing it and another tool, or two self-compaction calls, is rejected before any valid sibling executes. The note should preserve the objective, decisions, useful evidence, relevant paths, unresolved questions, and next steps. It must be nonblank and no larger than 8,192 UTF-8 bytes. Clio preserves the accepted text exactly and labels it as assistant-authored recall, rather than presenting it as an operator instruction.
+
+## What a compaction leaves behind
+
+An automatic compaction and `/context compact` both leave a persistent row in the transcript, for example `[context engine] compacted 36.2K → 28.6K tokens; 42 messages summarized to 1823 chars`. Later notices do not replace it. The two figures are the ones the footer shows: the whole next request, with the system prompt, tool schemas, summary and retained suffix, not the summary alone. After `/resume` the stored summary renders as `[compaction summary] compacted 36.2K → 28.6K tokens, cont. at turn <id>`. A summary stored before the after figure was recorded shows `~<tokens> tokens before` instead.
+
+Sentences in which you asked Clio to remember something (starting `remember`, `keep in mind` or `don't forget`) are copied verbatim into an `<operator-notes encoding="xml">` block beside the generated summary, and the summarizer is told to keep every literal you stated. Each note is cut at 400 characters, the newest 30 are kept across later compactions, and `&`, `<` and `>` are escaped so a note cannot close the block. A model that declined to store a value as memory therefore does not lose it to a summary.
+
+`/context compact` on a session with nothing older to summarize runs no summary and says so: `too short to compact (<used> of <window> tokens used); no older history can be summarized yet`, or `session is empty; start a conversation first`.
 
 ## What the receipt means
 
