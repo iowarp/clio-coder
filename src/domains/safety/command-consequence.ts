@@ -146,7 +146,11 @@ function executableConsequence(step: ShellCommandStep, options: CommandConsequen
 			return killConsequence(args);
 		case "pkill":
 		case "killall":
-			return killByNameConsequence(args);
+			return killByNameConsequence(executable, args);
+		case "find":
+			return findConsequence(args);
+		case "xargs":
+			return xargsConsequence(args);
 		case "npm":
 		case "pnpm":
 		case "yarn":
@@ -365,9 +369,7 @@ function gitRestore(args: ReadonlyArray<string>): string | null {
 	if (staged && !worktree) return null;
 	const dashDash = args.indexOf("--");
 	const paths =
-		dashDash >= 0
-			? args.slice(dashDash + 1)
-			: operands(args, new Set(["-s", "--source", "-p", "--patch", "--pathspec-from-file"]));
+		dashDash >= 0 ? args.slice(dashDash + 1) : operands(args, new Set(["-s", "--source", "--pathspec-from-file"]));
 	return paths.length > 0 ? `Discards uncommitted changes in ${list(paths)}` : null;
 }
 
@@ -548,33 +550,193 @@ function killConsequence(args: ReadonlyArray<string>): string | null {
 	return `${verb} ${parts.join(" and ")}`;
 }
 
-function killByNameConsequence(args: ReadonlyArray<string>): string | null {
-	if (args.includes("-0")) return null;
-	const valueOptions = new Set([
-		"-u",
-		"-U",
-		"-g",
-		"-G",
-		"-P",
-		"-s",
-		"-t",
-		"-F",
-		"-c",
-		"--signal",
-		"--euid",
-		"--uid",
-		"--pgroup",
-		"--group",
-		"--parent",
-		"--session",
-		"--terminal",
-		"--pidfile",
-		"--ns",
-		"--nslist",
-	]);
-	// `-9` and `-HUP` are signals, which operands() already skips as options.
-	const names = operands(args, valueOptions);
-	return names.length > 0 ? `Stops processes ${list(names)}` : null;
+/** What each process selector of pkill or killall narrows the match to, by option. */
+const PKILL_SELECTORS: Readonly<Record<string, string>> = {
+	"-u": "owned by",
+	"--euid": "owned by",
+	"-U": "owned by",
+	"--uid": "owned by",
+	"-g": "in process group",
+	"--pgroup": "in process group",
+	"-G": "of group",
+	"--group": "of group",
+	"-P": "whose parent is",
+	"--parent": "whose parent is",
+	"-s": "in session",
+	"--session": "in session",
+	"-t": "on terminal",
+	"--terminal": "on terminal",
+	"-F": "listed in",
+	"--pidfile": "listed in",
+};
+
+const KILLALL_SELECTORS: Readonly<Record<string, string>> = { "-u": "owned by", "--user": "owned by" };
+
+/**
+ * pkill and killall match by pattern and by selector (`pkill -u me` has no
+ * pattern and signals everything that user owns). A signal is `-9`, `-HUP` or
+ * `--signal`; killall also takes `-s`, which is a session selector for pkill.
+ */
+function killByNameConsequence(command: string, args: ReadonlyArray<string>): string | null {
+	const selectors = command === "pkill" ? PKILL_SELECTORS : KILLALL_SELECTORS;
+	const signalOptions = command === "pkill" ? ["--signal"] : ["-s", "--signal"];
+	const valueOptions = new Set(
+		command === "pkill"
+			? ["-r", "--runstates", "--ns", "--nslist"]
+			: ["-y", "--younger-than", "-o", "--older-than", "-Z", "--context"],
+	);
+	let signal: string | null = null;
+	const names: string[] = [];
+	const narrowing: string[] = [];
+	let endOfOptions = false;
+	for (let index = 0; index < args.length; index += 1) {
+		const word = args[index];
+		if (word === undefined) continue;
+		if (endOfOptions || !word.startsWith("-") || word === "-") {
+			names.push(word);
+			continue;
+		}
+		if (word === "--") {
+			endOfOptions = true;
+			continue;
+		}
+		const [option, inline] = word.startsWith("--") && word.includes("=") ? word.split(/=(.*)/su) : [word, undefined];
+		const value = inline ?? args[index + 1];
+		const consumesNext = inline === undefined;
+		if (option !== undefined && signalOptions.includes(option)) {
+			signal = value ?? null;
+			if (consumesNext) index += 1;
+		} else if (option !== undefined && selectors[option] !== undefined) {
+			narrowing.push(`${selectors[option]} ${shown(value ?? "")}`);
+			if (consumesNext) index += 1;
+		} else if (option !== undefined && valueOptions.has(option)) {
+			if (consumesNext) index += 1;
+		} else if (signal === null && /^-(?:\d+|[A-Z][A-Z0-9]+)$/u.test(word)) {
+			signal = word.slice(1);
+		}
+	}
+	// Signal 0 only tests whether a process exists.
+	if (signal === "0") return null;
+	if (names.length === 0 && narrowing.length === 0) return null;
+	const parts = [...(names.length > 0 ? [`matching ${list(names)}`] : []), ...narrowing];
+	return `${signalVerb(signal)} processes ${parts.join(" ")}`;
+}
+
+// ---------------------------------------------------------------------------
+// find, xargs
+// ---------------------------------------------------------------------------
+
+/** `find` primaries that take the next word as their value, so it is not a primary itself. */
+const FIND_VALUE_PRIMARIES: ReadonlySet<string> = new Set([
+	"-name",
+	"-iname",
+	"-path",
+	"-ipath",
+	"-wholename",
+	"-iwholename",
+	"-regex",
+	"-iregex",
+	"-lname",
+	"-ilname",
+	"-type",
+	"-xtype",
+	"-user",
+	"-group",
+	"-uid",
+	"-gid",
+	"-perm",
+	"-size",
+	"-mtime",
+	"-atime",
+	"-ctime",
+	"-mmin",
+	"-amin",
+	"-cmin",
+	"-newer",
+	"-fstype",
+	"-links",
+	"-inum",
+	"-samefile",
+	"-used",
+	"-maxdepth",
+	"-mindepth",
+	"-printf",
+	"-fprint",
+	"-fprint0",
+	"-context",
+]);
+
+const FIND_EXEC_PRIMARIES: ReadonlySet<string> = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
+
+/** `find ... -delete` and `find ... -exec rm ...` remove whatever the expression matches under the start points. */
+function findConsequence(args: ReadonlyArray<string>): string | null {
+	let index = 0;
+	while (index < args.length) {
+		const word = args[index];
+		if (word === "-H" || word === "-L" || word === "-P" || /^-O\d?$/u.test(word ?? "")) index += 1;
+		else if (word === "-D") index += 2;
+		else break;
+	}
+	const roots: string[] = [];
+	for (; index < args.length; index += 1) {
+		const word = args[index];
+		if (word === undefined || word.startsWith("-") || word === "(" || word === "!" || word === ",") break;
+		roots.push(word);
+	}
+	let removes = false;
+	for (; index < args.length; index += 1) {
+		const word = args[index] ?? "";
+		if (FIND_VALUE_PRIMARIES.has(word) || /^-newer[A-Za-z]{2}$/u.test(word)) {
+			index += 1;
+		} else if (FIND_EXEC_PRIMARIES.has(word)) {
+			if (basenameOf(args[index + 1]) === "rm") removes = true;
+			while (index < args.length && args[index] !== ";" && args[index] !== "+") index += 1;
+		} else if (word === "-delete") {
+			removes = true;
+		}
+	}
+	return removes ? `Deletes what find matches under ${list(roots.length > 0 ? roots : ["."])}` : null;
+}
+
+/** Options of GNU `xargs` that take the next word as their value. */
+const XARGS_VALUE_OPTIONS: ReadonlySet<string> = new Set([
+	"-a",
+	"-d",
+	"-E",
+	"-I",
+	"-L",
+	"-n",
+	"-P",
+	"-s",
+	"--arg-file",
+	"--delimiter",
+	"--max-args",
+	"--max-procs",
+	"--max-chars",
+	"--max-lines",
+]);
+
+/** `xargs rm`: the paths come from standard input, so only the ones written on the command line are named. */
+function xargsConsequence(args: ReadonlyArray<string>): string | null {
+	let replacement: string | null = null;
+	let index = 0;
+	for (; index < args.length; index += 1) {
+		const word = args[index];
+		if (word === undefined || !word.startsWith("-")) break;
+		if (word === "-I") replacement = args[index + 1] ?? null;
+		if (word.startsWith("-i") || word.startsWith("--replace")) replacement = replacement ?? "{}";
+		if (word.startsWith("-I") && word.length > 2) replacement = word.slice(2);
+		if (XARGS_VALUE_OPTIONS.has(word)) index += 1;
+	}
+	if (basenameOf(args[index]) !== "rm") return null;
+	const rmArgs = args.slice(index + 1);
+	const fixed = operands(rmArgs).filter((path) => path !== replacement && path !== "{}");
+	const what = fixed.length > 0 ? `${list(fixed)} and the paths xargs reads` : "the paths xargs reads";
+	return `Deletes ${what}${hasFlag(rmArgs, "rR", ["--recursive"]) ? " recursively" : ""}`;
+}
+
+function basenameOf(word: string | undefined): string {
+	return word === undefined ? "" : word.slice(word.lastIndexOf("/") + 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -603,7 +765,8 @@ function nodeInstallConsequence(manager: string, args: ReadonlyArray<string>): s
 	// `--workspace-root`, so the sets differ by manager.
 	const valueOptions = NODE_VALUE_OPTIONS[manager] ?? new Set<string>();
 	const words = operands(args, valueOptions);
-	const verb = words[0];
+	// A bare `yarn` is `yarn install`.
+	const verb = words[0] ?? (manager === "yarn" && args.length === 0 ? "install" : undefined);
 	if (verb === undefined || !NODE_INSTALL_VERBS.has(verb)) return null;
 	if (verb === "ci" && manager !== "npm") return null;
 	const packages = words.slice(1);
@@ -616,9 +779,45 @@ function nodeInstallConsequence(manager: string, args: ReadonlyArray<string>): s
 	return `Downloads packages${named(packages)} and changes ${manifest}${lock}, node_modules`;
 }
 
+/** Options of `pip install` and `uv pip install` that take their value as the next word. */
+const PIP_VALUE_OPTIONS: ReadonlySet<string> = new Set([
+	"-r",
+	"--requirement",
+	"-c",
+	"--constraint",
+	"-t",
+	"--target",
+	"-i",
+	"--index-url",
+	"--extra-index-url",
+	"-f",
+	"--find-links",
+	"--proxy",
+	"--cert",
+	"--client-cert",
+	"--timeout",
+	"--retries",
+	"--trusted-host",
+	"--prefix",
+	"--root",
+	"--src",
+	"--platform",
+	"--python-version",
+	"--implementation",
+	"--abi",
+	"--only-binary",
+	"--no-binary",
+	"--cache-dir",
+	"--upgrade-strategy",
+	"--python",
+	"-p",
+	"--override",
+	"--index",
+]);
+
 function pipConsequence(args: ReadonlyArray<string>): string | null {
 	if (args[0] !== "install") return null;
-	const packages = operands(args.slice(1), new Set(["-r", "--requirement", "-c", "--constraint", "-t", "--target"]));
+	const packages = operands(args.slice(1), PIP_VALUE_OPTIONS);
 	const requirement = args.findIndex((word) => word === "-r" || word === "--requirement");
 	const fromFile = requirement >= 0 && args[requirement + 1] !== undefined ? [`-r ${args[requirement + 1]}`] : [];
 	const place = hasFlag(args, "", ["--user"])
@@ -630,11 +829,11 @@ function pipConsequence(args: ReadonlyArray<string>): string | null {
 function uvConsequence(args: ReadonlyArray<string>): string | null {
 	const verb = args[0];
 	if (verb === "add") {
-		return `Downloads packages${named(operands(args.slice(1), new Set(["--group", "--index", "-r", "--requirements"])))} and changes pyproject.toml, uv.lock, .venv`;
+		return `Downloads packages${named(operands(args.slice(1), new Set([...PIP_VALUE_OPTIONS, "--group", "--requirements", "--extra"])))} and changes pyproject.toml, uv.lock, .venv`;
 	}
 	if (verb === "sync") return "Downloads packages and changes uv.lock, .venv";
 	if (verb === "pip" && args[1] === "install") {
-		const packages = operands(args.slice(2), new Set(["-r", "--requirement", "-c", "--constraint", "-p", "--python"]));
+		const packages = operands(args.slice(2), PIP_VALUE_OPTIONS);
 		return `Downloads packages${named(packages)} and changes the Python environment's site-packages`;
 	}
 	return null;
