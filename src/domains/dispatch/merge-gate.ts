@@ -39,59 +39,64 @@ function declaresTest(path: string, line: string): boolean {
 	return isTestFilePath(path) && TEST_DECLARATION.test(line);
 }
 
+function declarationKey(line: string): string {
+	const named = /^(test|it|specify)(?:\.\w+)*\s*\(\s*(["'`])((?:\\.|(?!\2).)*)\2/u.exec(line);
+	if (named !== null) return `${named[1]}(${JSON.stringify(named[3])})`;
+	const functionName = /^(?:(?:async\s+)?def|func|fn|(?:public\s+)?void)\s+(\w+)/u.exec(line);
+	if (functionName !== null) return functionName[1] ?? line;
+	return line
+		.replace(/(["'])(.*?)\1/gu, (_match, _quote: string, body: string) => JSON.stringify(body))
+		.replace(/\s+(?=(?:[^"\\]*"[^"\\]*")*[^"\\]*$)/gu, "")
+		.replace(/;$/u, "");
+}
+
 /**
- * Test cases and test files a zero-context unified diff removes. A declaration
- * line counts as removed only when no identical line is added in the same file,
- * so a moved or reformatted test is not flagged while a replaced one is. A task
- * told to leave a test alone once deleted it to get green, and the passing
- * suite hid it (flywheel p6/U3). Entries read `path: declaration line` or
- * `path (file removed)`, capped so a mass deletion stays cheap to report.
+ * Compare declarations across the entire diff so moving a test between files
+ * does not withhold a merge. Suite headings and snapshots are not test cases.
+ * A declaration split by a formatter is ambiguous, so allow that match rather
+ * than requiring the operator to merge a formatting-only change manually.
  */
 export function removedTestCases(diff: string): string[] {
-	const entries: string[] = [];
+	const removed: Array<{ path: string; line: string; deleted: boolean }> = [];
+	const added: string[] = [];
 	let path = "";
 	let inHeader = false;
 	let deletedFile = false;
-	let removed: string[] = [];
-	let added = new Map<string, number>();
-	const flush = (): void => {
-		if (path === "") return;
-		if (deletedFile) {
-			if (isTestFilePath(path)) entries.push(`${path} (file removed)`);
-		} else {
-			for (const line of removed) {
-				const left = added.get(line) ?? 0;
-				if (left > 0) added.set(line, left - 1);
-				else entries.push(`${path}: ${line}`);
-			}
-		}
-		path = "";
-		deletedFile = false;
-		removed = [];
-		added = new Map();
-	};
 	for (const line of diff.split("\n")) {
-		if (entries.length >= REMOVED_TESTS_MAX_ENTRIES) break;
 		const header = DIFF_FILE_HEADER.exec(line);
 		if (header !== null) {
-			flush();
 			path = header[1] ?? "";
 			inHeader = true;
+			deletedFile = false;
 			continue;
 		}
-		if (path === "") continue;
+		if (path === "" || /(?:^|\/)__snapshots__\/|\.snap(?:\.|$)/u.test(path)) continue;
 		if (inHeader) {
 			if (line.startsWith("deleted file mode")) deletedFile = true;
 			else if (line.startsWith("@@")) inHeader = false;
 			continue;
 		}
-		if (line.startsWith("@@")) continue;
+		if (!line.startsWith("-") && !line.startsWith("+")) continue;
 		const text = line.slice(1).trim();
-		if (line.startsWith("-") && declaresTest(path, line.slice(1))) removed.push(text);
-		else if (line.startsWith("+")) added.set(text, (added.get(text) ?? 0) + 1);
+		if (!declaresTest(path, text) || /^(?:describe|context)\b/u.test(text)) continue;
+		if (line.startsWith("-")) removed.push({ path, line: text, deleted: deletedFile });
+		else added.push(declarationKey(text));
 	}
-	flush();
-	return entries.slice(0, REMOVED_TESTS_MAX_ENTRIES);
+	const entries = new Set<string>();
+	for (const item of removed) {
+		const key = declarationKey(item.line);
+		let match = added.indexOf(key);
+		if (match < 0) {
+			match = added.findIndex((candidate) =>
+				/^(?:test|it|specify)(?:\.\w+)*\($/u.test(candidate)
+					? key.startsWith(candidate)
+					: /^(?:test|it|specify)(?:\.\w+)*\($/u.test(key) && candidate.startsWith(key),
+			);
+		}
+		if (match >= 0) added.splice(match, 1);
+		else entries.add(item.deleted ? `${item.path} (file removed)` : `${item.path}: ${item.line}`);
+	}
+	return [...entries].slice(0, REMOVED_TESTS_MAX_ENTRIES);
 }
 
 export function boundedCheck(check: string): string {

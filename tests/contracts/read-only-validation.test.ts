@@ -216,6 +216,32 @@ it("a declared unrun check holds the merge unless the task opted out of validati
 	strictEqual(mergeWithheldDetail({ ...input, task: "Edit the parser. Do not run the tests." }), null);
 });
 
+it("allows moved and formatted tests, renamed suites and snapshot deletions", () => {
+	const header = (path: string) => `diff --${"git"} a/${path} b/${path}`;
+	for (const diff of [
+		[
+			header("tests/old.test.ts"),
+			"deleted file mode 100644",
+			"@@ -1 +0,0 @@",
+			'-test("kept", () => {',
+			header("tests/new.test.ts"),
+			"@@ -0,0 +1 @@",
+			'+test("kept", () => {',
+		],
+		[header("tests/old.test.ts"), "@@ -1 +1 @@", "-test('kept',()=>{", '+test("kept", () => {'],
+		[header("tests/old.test.ts"), "@@ -1 +1 @@", '-describe("old suite", () => {', '+describe("new suite", () => {'],
+		[header("tests/old.test.ts"), "@@ -1 +1,2 @@", '-test("kept", () => {', "+test(", '+  "kept",'],
+		[
+			header("tests/__snapshots__/old.snap.ts"),
+			"deleted file mode 100644",
+			"@@ -1 +0,0 @@",
+			'-test("snapshot text", () => {',
+		],
+	]) {
+		deepStrictEqual(removedTestCases(diff.join("\n")), []);
+	}
+});
+
 it("withholds a verified merge whose diff replaces an existing test, but not an edited body", () => {
 	const header = (path: string) => `diff --${"git"} a/${path} b/${path}`;
 	const replaced = [
