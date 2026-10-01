@@ -75,6 +75,40 @@ test("a repeat the operator asked for this turn gets no repeated-failure annotat
 	}
 });
 
+for (const text of [
+	"Fix the retry handler.",
+	"Run retry handler tests.",
+	"Do not run pnpm test again.",
+	"Run pnpm test without trying again.",
+]) {
+	test(`repeat wording in an unrelated or negated task retains warnings: ${text}`, () => {
+		const { memory, receipt } = fixture();
+		try {
+			memory.evaluate({ hook: "turn_start", sessionId: "A", text: "Run pnpm test twice." });
+			deepStrictEqual(receipt("error"), []);
+			deepStrictEqual(receipt("error"), []);
+			memory.evaluate({ hook: "turn_start", sessionId: "A", text });
+			strictEqual(receipt("error")[0]?.kind, "annotate_tool_result");
+		} finally {
+			memory.dispose();
+		}
+	});
+}
+
+test("repeat suppression survives a continuation but clears on a fresh empty turn", () => {
+	const { memory, receipt } = fixture();
+	try {
+		memory.evaluate({ hook: "turn_start", sessionId: "A", text: "Please rerun pnpm test." });
+		receipt("error");
+		memory.evaluate({ hook: "turn_start", sessionId: "A", text: "", metadata: { requestContinuation: true } });
+		deepStrictEqual(receipt("error"), []);
+		memory.evaluate({ hook: "turn_start", sessionId: "A", text: "" });
+		strictEqual(receipt("error")[0]?.kind, "annotate_tool_result");
+	} finally {
+		memory.dispose();
+	}
+});
+
 test("turn-end scanning does not revive a closed episode hidden behind another operation's annotation", () => {
 	const { memory, receipt } = fixture();
 	try {

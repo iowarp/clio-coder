@@ -68,7 +68,23 @@ const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
  * (p8/B5), so the failure reminders stay quiet for that turn.
  */
 const OPERATOR_REPEAT_REQUEST =
-	/\b(?:again|twice|thrice|(?:a|the)\s+(?:second|third)\s+time|second\s+run|re-?run|re-?try|retry|repeat|once\s+more|one\s+more\s+time|(?:two|three)\s+(?:times|runs))\b/iu;
+	/\b(?:again|twice|thrice|(?:a|the)\s+(?:second|third)\s+time|second\s+run|once\s+more|one\s+more\s+time|(?:two|three)\s+(?:times|runs))\b/iu;
+const OPERATOR_COMMAND_REQUEST =
+	/^(?:(?:please|then|and)\s+|(?:can|could|would)\s+you\s+)*(run|execute|invoke|try|re-?run|re-?try|repeat)\b/iu;
+
+function operatorRequestsCommandRepeat(text: string): boolean {
+	// p8/B5 applies to affirmative command requests. A task about a retry
+	// handler or a prohibition on running again must retain failure warnings.
+	return text.split(/[\n!?;,]+|\.(?:\s+|$)/u).some((clause) => {
+		const request = clause.trim();
+		const command = OPERATOR_COMMAND_REQUEST.exec(request)?.[1];
+		return (
+			command !== undefined &&
+			(/^(?:re-?run|re-?try|repeat)$/iu.test(command) || OPERATOR_REPEAT_REQUEST.test(request)) &&
+			!/\b(?:not|never|avoid|stop|without)\b|\bdon['’]?t\b/iu.test(request)
+		);
+	});
+}
 
 type ToolOutcome = "ok" | "error";
 
@@ -332,9 +348,10 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						if (!commitBridgeEnabled) reactivateAfterCompaction = true;
 						return NO_EFFECTS;
 					case "turn_start": {
+						if (input.metadata?.requestContinuation !== true) operatorAskedRepeat = false;
 						if (input.text?.trim()) {
 							currentTask = shortText(input.text, 2_000);
-							operatorAskedRepeat = OPERATOR_REPEAT_REQUEST.test(input.text);
+							operatorAskedRepeat = operatorRequestsCommandRepeat(input.text);
 						}
 						// Mid-turn annotations are spent per turn, not per session: the same
 						// command failing again in a later turn is news again.
