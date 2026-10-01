@@ -97,3 +97,12 @@
 		font-size: 1.25rem;
 	}
 }
+
+/* Inside a first-run step: no frame, no second heading. */
+.connection-setup.connection-setup--bare {
+	max-width: none;
+	margin: var(--space-3) 0 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+}

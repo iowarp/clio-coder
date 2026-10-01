@@ -156,11 +156,14 @@ export function ConnectionSetup({
 	client,
 	targetId,
 	compact = false,
+	bare = false,
 	onSaved,
 }: {
 	client: Client;
 	targetId?: string;
 	compact?: boolean;
+	/** Inside a first-run step that supplies its own heading and description. */
+	bare?: boolean;
 	onSaved?: () => void;
 }) {
 	const queries = useQueryClient();
@@ -261,9 +264,12 @@ export function ConnectionSetup({
 			</div>
 		);
 	return (
-		<section className="connection-setup trace-panel" aria-label={targetId ? "Edit connection" : "Connect a model"}>
-			<div className="connection-setup__heading">
-				<div>
+		<section
+			className={`connection-setup trace-panel${bare ? " connection-setup--bare" : ""}`}
+			aria-label={targetId ? "Edit connection" : "Connect a model"}
+		>
+			<div className="connection-setup__heading" hidden={bare && !active}>
+				<div hidden={bare}>
 					<p className="eyebrow">Connections / Guided setup</p>
 					<h2>
 						{targetId
@@ -285,12 +291,14 @@ export function ConnectionSetup({
 			</div>
 			{!active && (
 				<>
-					<p>
-						{readiness.data?.targetId
-							? `${readiness.data.targetId}${readiness.data.model ? ` · ${readiness.data.model}` : ""}. `
-							: ""}
-						{readiness.data?.message ?? "Choose the app, subscription, provider, or server you already use."}
-					</p>
+					{bare ? null : (
+						<p>
+							{readiness.data?.targetId
+								? `${readiness.data.targetId}${readiness.data.model ? ` · ${readiness.data.model}` : ""}. `
+								: ""}
+							{readiness.data?.message ?? "Choose the app, subscription, provider, or server you already use."}
+						</p>
+					)}
 					{readiness.error && <p role="alert">Could not read saved setup: {readiness.error.message}</p>}
 					{completed && <p role="status">Connection saved. You can open a project and start a conversation.</p>}
 					{state.data?.status === "cancelled" && (

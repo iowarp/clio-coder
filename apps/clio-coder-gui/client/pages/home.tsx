@@ -78,6 +78,54 @@ function WorkspaceMenu({
 	);
 }
 
+/** The two things a first run needs, in order. Each step marks itself done and the composer takes over. */
+function Onboarding({
+	client,
+	ready,
+	summary,
+	targetId,
+	hasWorkspace,
+	onOpenWorkspace,
+}: {
+	client: Client;
+	ready: boolean;
+	/** What is connected when it is, or what is wrong with the saved connection when it is not. */
+	summary: string | null;
+	targetId: string | undefined;
+	hasWorkspace: boolean;
+	onOpenWorkspace: () => void;
+}) {
+	return (
+		<ol className="onboard">
+			<li data-done={ready}>
+				<span className="onboard__mark" aria-hidden="true">
+					{ready ? <Icon name="check" /> : "1"}
+				</span>
+				<div>
+					<h2>Connect a model</h2>
+					<p>{summary ?? "Choose the app, subscription, provider or server you already use."}</p>
+					{ready ? null : <ConnectionSetup client={client} bare {...(targetId ? { targetId } : {})} />}
+				</div>
+			</li>
+			<li data-done={hasWorkspace}>
+				<span className="onboard__mark" aria-hidden="true">
+					{hasWorkspace ? <Icon name="check" /> : "2"}
+				</span>
+				<div>
+					<h2>Open a workspace</h2>
+					<p>A folder on this machine. Clio reads and edits files inside it, and asks before it changes anything.</p>
+					{hasWorkspace ? null : (
+						<button type="button" className="primary" onClick={onOpenWorkspace}>
+							<Icon name="folderOpen" />
+							Open workspace
+						</button>
+					)}
+				</div>
+			</li>
+		</ol>
+	);
+}
+
 /**
  * A blank task. Nothing starts until the first message is sent: the session is created, the request
  * goes out, and the conversation opens already working. Until then no ACP child exists.
@@ -135,6 +183,16 @@ export function Home({ client }: { client: Client }) {
 		node.style.height = "auto";
 		node.style.height = `${Math.min(node.scrollHeight, 320)}px`;
 	}, [text]);
+	const needsSetup = setup.isSuccess && !ready;
+	const needsWorkspace = workspaces.isSuccess && list.length === 0;
+	const onboarding = needsSetup || needsWorkspace;
+	const summary = setup.data?.targetId
+		? ready
+			? `${setup.data.targetId}${setup.data.model ? ` · ${setup.data.model}` : ""}`
+			: `${setup.data.targetId}: ${setup.data.message}`
+		: ready
+			? null
+			: (setup.data?.message ?? null);
 	return (
 		<>
 			<TopBar />
@@ -142,7 +200,15 @@ export function Home({ client }: { client: Client }) {
 				<div className="newtask__inner">
 					<ClioLogo size={46} />
 					<h1 className="newtask__title">
-						What are we <em>working on</em>?
+						{onboarding ? (
+							<>
+								Let’s get you <em>started</em>.
+							</>
+						) : (
+							<>
+								What are we <em>working on</em>?
+							</>
+						)}
 					</h1>
 					{setup.error ? (
 						<div role="alert" className="newtask__notice">
@@ -152,81 +218,79 @@ export function Home({ client }: { client: Client }) {
 							</button>
 						</div>
 					) : null}
-					{setup.data && !ready ? (
-						<div className="newtask__notice">
-							<p>{setup.data.targetId ? `${setup.data.targetId}: ${setup.data.message}` : "Connect a model to begin."}</p>
-							<ConnectionSetup client={client} {...(setup.data.targetId ? { targetId: setup.data.targetId } : {})} />
-						</div>
-					) : null}
-					<form
-						className="newtask__composer"
-						onSubmit={(event) => {
-							event.preventDefault();
-							submit();
-						}}
-					>
-						<label className="sr-only" htmlFor={fieldId}>
-							Message Clio Coder
-						</label>
-						<textarea
-							id={fieldId}
-							ref={field}
-							rows={2}
-							value={text}
-							placeholder={workspaceId ? "Describe a task or ask a question" : "Open a workspace, then describe a task"}
-							disabled={!ready && setup.isSuccess}
-							onChange={(event) => setText(event.target.value)}
-							onKeyDown={(event) => {
-								if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-								if (event.ctrlKey || event.metaKey || window.matchMedia("(pointer: fine)").matches) {
+					{onboarding ? (
+						<Onboarding
+							client={client}
+							ready={ready}
+							summary={summary}
+							targetId={setup.data?.targetId ?? undefined}
+							hasWorkspace={!needsWorkspace}
+							onOpenWorkspace={() => shell?.openWorkspace()}
+						/>
+					) : (
+						<>
+							<form
+								className="newtask__composer"
+								onSubmit={(event) => {
 									event.preventDefault();
 									submit();
-								}
-							}}
-						/>
-						<div className="newtask__row">
-							<WorkspaceMenu
-								workspaces={list}
-								value={workspaceId}
-								onChange={setChosen}
-								onOpen={() => shell?.openWorkspace()}
-							/>
-							<span className="newtask__spacer" />
-							<button className="newtask__send" type="submit" disabled={!canSend} aria-label="Start task">
-								<Icon name="arrowUp" />
-							</button>
-						</div>
-					</form>
-					{send.error ? (
-						<p className="newtask__error" role="alert">
-							{send.error.message}
-						</p>
-					) : null}
-					{workspaceId ? (
-						<ul className="newtask__starters" aria-label="Ways to start">
-							{STARTER_PROMPTS.map((prompt) => (
-								<li key={prompt}>
-									<button
-										type="button"
-										onClick={() => {
-											setText(prompt);
-											field.current?.focus();
-										}}
-									>
-										{prompt}
+								}}
+							>
+								<label className="sr-only" htmlFor={fieldId}>
+									Message Clio Coder
+								</label>
+								<textarea
+									id={fieldId}
+									ref={field}
+									rows={2}
+									value={text}
+									placeholder="Describe a task or ask a question"
+									onChange={(event) => setText(event.target.value)}
+									onKeyDown={(event) => {
+										if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+										if (event.ctrlKey || event.metaKey || window.matchMedia("(pointer: fine)").matches) {
+											event.preventDefault();
+											submit();
+										}
+									}}
+								/>
+								<div className="newtask__row">
+									<WorkspaceMenu
+										workspaces={list}
+										value={workspaceId}
+										onChange={setChosen}
+										onOpen={() => shell?.openWorkspace()}
+									/>
+									<span className="newtask__spacer" />
+									<button className="newtask__send" type="submit" disabled={!canSend} aria-label="Start task">
+										<Icon name="arrowUp" />
 									</button>
-								</li>
-							))}
-						</ul>
-					) : workspaces.isSuccess ? (
-						<p className="newtask__hint">
-							Clio works inside a folder on this machine.{" "}
-							<button type="button" className="wb-link" onClick={() => shell?.openWorkspace()}>
-								Open a workspace
-							</button>{" "}
-							to begin.
-						</p>
-					) : null}
+								</div>
+							</form>
+							{send.error ? (
+								<p className="newtask__error" role="alert">
+									{send.error.message}
+								</p>
+							) : null}
+							{workspaceId ? (
+								<ul className="newtask__starters" aria-label="Ways to start">
+									{STARTER_PROMPTS.map((prompt) => (
+										<li key={prompt}>
+											<button
+												type="button"
+												onClick={() => {
+													setText(prompt);
+													field.current?.focus();
+												}}
+											>
+												{prompt}
+											</button>
+										</li>
+									))}
+								</ul>
+							) : null}
+						</>
+					)}
 				</div>
 			</div>
 		</>

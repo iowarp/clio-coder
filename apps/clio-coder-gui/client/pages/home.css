@@ -221,3 +221,66 @@
 	height: 30px;
 	color: var(--ink);
 }
+
+/* First run: two numbered steps, each marked done in place. */
+.onboard {
+	display: grid;
+	gap: var(--space-3);
+	width: 100%;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.onboard > li {
+	display: grid;
+	grid-template-columns: 32px minmax(0, 1fr);
+	gap: var(--space-4);
+	padding: var(--space-5);
+	border: 1px solid var(--line-strong);
+	border-radius: 16px;
+	background: var(--wb-faint);
+}
+.onboard > li[data-done="true"] {
+	border-color: var(--line);
+	background: transparent;
+}
+.onboard__mark {
+	display: grid;
+	place-items: center;
+	width: 28px;
+	height: 28px;
+	border: 1.5px solid var(--line-strong);
+	border-radius: 50%;
+	font-size: var(--text-meta);
+	font-weight: 600;
+	color: var(--ink-muted);
+}
+.onboard > li[data-done="true"] .onboard__mark {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+	color: var(--accent);
+}
+.onboard__mark .icon {
+	width: 15px;
+	height: 15px;
+	stroke-width: 2.4;
+}
+.onboard h2 {
+	margin: 2px 0 var(--space-1);
+	font-family: var(--font-ui);
+	font-size: var(--text-body);
+	font-weight: 600;
+	letter-spacing: -0.1px;
+}
+.onboard p {
+	margin: 0 0 var(--space-3);
+	font-size: var(--text-meta);
+	line-height: 1.55;
+	color: var(--ink-muted);
+}
+.onboard > li[data-done="true"] p {
+	margin-bottom: 0;
+}
+.onboard .primary {
+	margin-top: var(--space-1);
+}
