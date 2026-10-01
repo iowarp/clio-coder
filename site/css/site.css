@@ -1927,6 +1927,54 @@
 		visibility: hidden;
 		opacity: 0;
 	}
+	/* Tab sets built by site.js from [data-tabs]: install methods and shells. */
+	.tab-list {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0 1.75rem;
+		border-block-end: 1px solid var(--line);
+	}
+	.tab-list button {
+		position: relative;
+		min-block-size: 2.9rem;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: var(--muted);
+		font: 0.85rem / 1 var(--font-mono);
+	}
+	.tab-list button::after {
+		content: "";
+		position: absolute;
+		inset-inline: 0;
+		inset-block-end: -1px;
+		block-size: 2px;
+		background: var(--accent);
+		transform: scaleX(0);
+		transform-origin: left;
+	}
+	.tab-list button[aria-selected="true"],
+	.tab-list button:is(:hover, :focus-visible) {
+		color: var(--ink);
+	}
+	.tab-list button[aria-selected="true"]::after {
+		transform: scaleX(1);
+	}
+	.tab-list .tag {
+		margin-inline-start: 0.35rem;
+		border-color: var(--secondary);
+		color: var(--secondary);
+		font-size: 0.6rem;
+	}
+	[data-tabs-ready] > [data-tab] > .tab-label {
+		display: none;
+	}
+	.tab-set {
+		margin-block: var(--space-5);
+	}
+	.tab-set > .tab-list {
+		margin-block-end: var(--space-4);
+	}
 	.guide-tabs {
 		display: flex;
 		flex-wrap: wrap;
@@ -2133,6 +2181,12 @@
 }
 @layer motion {
 	.guide-tabs button::after {
+		transition: transform var(--motion-base) var(--motion-ease);
+	}
+	.tab-list button {
+		transition: color var(--motion-fast) var(--motion-ease);
+	}
+	.tab-list button::after {
 		transition: transform var(--motion-base) var(--motion-ease);
 	}
 	[data-sequence="ready"] .guide-frame {

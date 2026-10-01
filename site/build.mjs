@@ -109,7 +109,9 @@ function responsiveImages(html, path) {
 		const parent = source === "assets/brand/iowarp-mark.webp";
 		const article = path.startsWith("/tutorials/") || path.startsWith("/docs");
 		const sizes = clio
-			? tag.includes('class="scene-mark"') ? "160px" : "36px"
+			? tag.includes('class="scene-mark"')
+				? "160px"
+				: "36px"
 			: parent
 				? "(max-width: 600px) 130px, 220px"
 				: path.startsWith("/tutorials/")
@@ -117,7 +119,7 @@ function responsiveImages(html, path) {
 					: article
 						? "(max-width: 600px) calc(100vw - 40px), (max-width: 850px) calc(100vw - 64px), 760px"
 						: path === "/"
-							? "(max-width: 600px) calc(100vw - 64px), (max-width: 1000px) calc(100vw - 96px), 760px"
+							? "(max-width: 600px) calc(100vw - 64px), (max-width: 824px) calc(100vw - 88px), (max-width: 1000px) 736px, (max-height: 650px) 736px, (max-width: 1100px) calc((94vw - 64px) * 0.623 - 24px), (max-width: 1344px) calc((94vw - 96px) * 0.623 - 24px), 700px"
 							: "(max-width: 600px) calc(100vw - 40px), (max-width: 850px) calc((100vw - 96px) / 2), (max-width: 1344px) calc((100vw - 128px) / 2), 600px";
 		const srcset = [...item.variants, { path: source, width: item.width }]
 			.map((v) => `/${v.path} ${v.width}w`)
@@ -312,6 +314,22 @@ function directive(name, args, inner, render) {
 		}
 		case "diagram":
 			return guideDiagram(args);
+		case "tabs": {
+			// Each `### Label` section becomes a tab panel. The heading stays in the
+			// panel, so the Markdown and the no-script page read as plain sections.
+			const panels = render(inner)
+				.split(/(?=<h3 )/)
+				.filter((part) => part.trim());
+			return `<div class="tab-set" data-tabs="${escapeHtml(args || "Options")}">${panels
+				.map((panel) => {
+					const [, id, label] = panel.match(/^<h3 id="([^"]+)">([\s\S]*?)<\/h3>/) ?? [];
+					if (!id) throw new Error("Each tab in a tabs directive starts with a ### heading");
+					const text = label.replace(/<[^>]+>/g, "");
+					const windows = /PowerShell|CMD/.test(text) ? ' data-tab-platform="windows"' : "";
+					return `<div class="tab-panel" id="tab-${id}" data-tab="${escapeHtml(text)}"${windows}>${panel.replace("<h3 ", '<h3 class="tab-label" ')}</div>`;
+				})
+				.join("")}</div>`;
+		}
 		case "compare":
 			return `<div class="guide-compare">${render(inner)}</div>`;
 		case "next":
@@ -359,7 +377,7 @@ function renderMarkdown(markdown, sourcePath, guide = false) {
 	renderer.code = ({ text, lang }) => {
 		const [language, ...rest] = (lang ?? "").split(/\s+/);
 		const title = rest.join(" ").match(/^title=(.+)$/)?.[1];
-		const label = title ?? { sh: "Shell", bash: "Shell", yaml: "YAML", json: "JSON", text: "" }[language] ?? "";
+		const label = title ?? { sh: "Shell", bash: "Shell", powershell: "PowerShell", bat: "CMD", yaml: "YAML", json: "JSON", text: "" }[language] ?? "";
 		return `<pre${label ? ` data-label="${escapeHtml(label)}"` : ""}><code${language ? ` class="language-${escapeHtml(language)}"` : ""}>${escapeHtml(text)}</code></pre>\n`;
 	};
 	let table = 0;
@@ -429,7 +447,7 @@ for (const name of ["clio-mark.webp", "clio-mark.png", "iowarp-mark.webp", "iowa
 	await cp(join(root, "assets/brand", name), join(out, "assets/brand", name));
 await mkdir(join(out, "assets/animations"), { recursive: true });
 for (const asset of JSON.parse(await read("animation-assets.json"))) {
-	for (const path of [asset.video, asset.poster]) {
+	for (const path of [asset.video, asset.lightVideo, asset.poster]) {
 		if (!/^assets\/animations\/[a-z-]+\.(?:mp4|webp)$/.test(path))
 			throw new Error("Animation assets must name a selected derivative.");
 		await cp(join(root, path), join(out, path));
@@ -445,8 +463,8 @@ await writeFile(join(out, "content/docs-manifest.json"), `${JSON.stringify(manif
 await writePage(
 	"/",
 	await read("index.html"),
-	"Clio Coder — coding with your models and tools",
-	"An open-source AI coding agent for your projects. Choose local or cloud models, coordinate workers, and inspect results in the terminal or desktop alpha.",
+	"Clio Coder — an open-source coding agent for scientific software",
+	"Clio Coder reads, edits, and runs checks in your repository with local or cloud models you choose, from the terminal or a local desktop app in alpha. Built for scientific software and everyday engineering.",
 );
 await writePage(
 	"/404.html",
@@ -462,7 +480,7 @@ for (const item of index) {
 	const markdown = await read(`content/docs/${item.path}`);
 	if (createHash("sha256").update(markdown).digest("hex") !== entry?.sha256)
 		throw new Error(`Documentation hash mismatch: ${item.path}`);
-	const rendered = renderMarkdown(markdown, item.source);
+	const rendered = renderMarkdown(markdown, item.source, true);
 	const headings = [...rendered.matchAll(/<h2 id="([^"]+)">([\s\S]*?)<\/h2>/g)];
 	const toc = headings.map(([, id, text]) => `<a href="#${id}">${text.replace(/<[^>]+>/g, "")}</a>`).join("\n");
 	const nav = groups

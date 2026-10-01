@@ -185,6 +185,8 @@ try {
 	assert.equal(await page.locator('[data-media="zoom"]').getAttribute("aria-pressed"), "true");
 	await page.locator('[data-media="zoom"]').click();
 	await page.keyboard.press("ArrowRight");
+	assert.match(await page.locator("#media-caption").innerText(), /Clio Coder desktop/);
+	await page.keyboard.press("ArrowRight");
 	assert.match(await page.locator("#media-caption").innerText(), /through verify/);
 	await page.keyboard.press("Escape");
 	assert.equal(await page.locator(".media-dialog").evaluate((el) => el.open), false);

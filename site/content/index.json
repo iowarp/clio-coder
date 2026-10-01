@@ -7,7 +7,15 @@
     "excerpt": "Install, update, and launch Clio Coder on your machine.",
     "summary": "install.md",
     "headings": [
-      "Install and open a project",
+      "Install",
+      "macOS, Linux and WSL",
+      "PowerShell",
+      "CMD",
+      "npm",
+      "bun",
+      "Confirm the installation",
+      "Open a project",
+      "Update, roll back and remove",
       "Give Clio a useful first task",
       "Keep going",
       "When you need more detail"
