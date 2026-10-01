@@ -13,7 +13,8 @@ import "./render/markdown.css";
 
 const client = createClient(launchToken());
 const queries = new QueryClient({
-	defaultOptions: { queries: { retry: false } },
+	// A few seconds of freshness stops two views that mount together from asking for the same thing twice.
+	defaultOptions: { queries: { retry: false, staleTime: 5_000 } },
 	queryCache: new QueryCache({ onError: reportProblem }),
 	mutationCache: new MutationCache({ onError: reportProblem }),
 });

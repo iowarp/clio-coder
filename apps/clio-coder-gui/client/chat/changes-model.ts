@@ -55,40 +55,86 @@ function dirname(label: string): string {
 	return cut < 0 ? "" : label.slice(0, cut);
 }
 
+/** One call's contribution to a file's change, or null when the call changed nothing the transcript can vouch for. */
+interface ChangeEntry {
+	readonly path: string;
+	readonly provenance: "applied" | "proposed";
+	readonly adds: number;
+	readonly dels: number;
+	readonly call: ChangeCall;
+}
+
+// A timeline item keeps its identity until it changes, so what it contributes is read once per item
+// and project root. A streamed delta then costs a map lookup per call instead of presenting every call
+// again. The cache is keyed weakly, so it never outlives the snapshot that held the item.
+const entries = new WeakMap<TimelineItem, { root: string | undefined; entry: ChangeEntry | null }>();
+
+function changeEntry(item: TimelineItem, workspaceRoot: string | undefined): ChangeEntry | null {
+	const cached = entries.get(item);
+	if (cached !== undefined && cached.root === workspaceRoot) return cached.entry;
+	const card = presentTool(item, workspaceRoot === undefined ? {} : { workspaceRoot });
+	let entry: ChangeEntry | null = null;
+	if (card.body === "diff" && card.diff !== null) {
+		const { provenance } = card.diff;
+		const path = card.diff.path ?? item.locations?.[0]?.path;
+		// A refused or unfinished edit changed nothing the transcript can vouch for.
+		if (
+			(provenance === "applied" || provenance === "proposed") &&
+			path !== undefined &&
+			path !== null &&
+			path.trim() !== ""
+		)
+			entry = {
+				path,
+				provenance,
+				adds: provenance === "applied" ? (card.diff.diff?.adds ?? 0) : 0,
+				dels: provenance === "applied" ? (card.diff.diff?.dels ?? 0) : 0,
+				call: { id: item.id, panel: card.diff, status: item.status },
+			};
+	}
+	entries.set(item, { root: workspaceRoot, entry });
+	return entry;
+}
+
+// Four views read the same summary of the same tool list, so one computation serves them all.
+const summaries = new WeakMap<readonly TimelineItem[], Map<string, ChangeSummary>>();
+
 /** `tools` in the order the calls were made. */
 export function summarizeChanges(tools: readonly TimelineItem[], workspaceRoot?: string): ChangeSummary {
+	const memo = summaries.get(tools) ?? new Map<string, ChangeSummary>();
+	const key = workspaceRoot ?? "";
+	const hit = memo.get(key);
+	if (hit !== undefined) return hit;
 	const byPath = new Map<
 		string,
 		{ adds: number; dels: number; pending: boolean; applied: boolean; calls: ChangeCall[] }
 	>();
 	for (const item of tools) {
-		const card = presentTool(item, workspaceRoot === undefined ? {} : { workspaceRoot });
-		if (card.body !== "diff" || card.diff === null) continue;
-		const { provenance } = card.diff;
-		// A refused or unfinished edit changed nothing the transcript can vouch for.
-		if (provenance !== "applied" && provenance !== "proposed") continue;
-		const path = card.diff.path ?? item.locations?.[0]?.path;
-		if (path === undefined || path === null || path.trim() === "") continue;
-		const entry = byPath.get(path) ?? { adds: 0, dels: 0, pending: false, applied: false, calls: [] };
-		if (provenance === "applied") {
-			entry.applied = true;
-			entry.adds += card.diff.diff?.adds ?? 0;
-			entry.dels += card.diff.diff?.dels ?? 0;
-		} else entry.pending = true;
-		entry.calls.push({ id: item.id, panel: card.diff, status: item.status });
-		byPath.set(path, entry);
+		const entry = changeEntry(item, workspaceRoot);
+		if (entry === null) continue;
+		const file = byPath.get(entry.path) ?? { adds: 0, dels: 0, pending: false, applied: false, calls: [] };
+		if (entry.provenance === "applied") {
+			file.applied = true;
+			file.adds += entry.adds;
+			file.dels += entry.dels;
+		} else file.pending = true;
+		file.calls.push(entry.call);
+		byPath.set(entry.path, file);
 	}
-	const files: FileChange[] = [...byPath.entries()].map(([path, entry]) => {
+	const files: FileChange[] = [...byPath.entries()].map(([path, file]) => {
 		const label = relativeTo(path, workspaceRoot);
-		return { path, label, name: basename(label), dir: dirname(label), ...entry };
+		return { path, label, name: basename(label), dir: dirname(label), ...file };
 	});
-	return {
+	const summary: ChangeSummary = {
 		files,
 		adds: files.reduce((sum, file) => sum + file.adds, 0),
 		dels: files.reduce((sum, file) => sum + file.dels, 0),
 		applied: files.filter((file) => file.applied).length,
 		pending: files.filter((file) => !file.applied && file.pending).length,
 	};
+	memo.set(key, summary);
+	summaries.set(tools, memo);
+	return summary;
 }
 
 /** `+12 −3` with the real minus sign, or an empty string when nothing was counted. */

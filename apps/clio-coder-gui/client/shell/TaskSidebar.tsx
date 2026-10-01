@@ -6,6 +6,7 @@ import type { SessionSnapshot, Workspace } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import type { ConnectionState } from "../api/events.js";
 import { Icon } from "../design/icons.js";
+import { countRender } from "../render/render-probe.js";
 import { ClioLogo, ClioPulse, PULSE_SIZE } from "./ClioMark.js";
 import { chordHint } from "./chords.js";
 import { InlineRename } from "./InlineRename.js";
@@ -35,6 +36,7 @@ export function TaskSidebar({
 	/** Called after any navigation so a mobile drawer can close itself. */
 	onNavigate: () => void;
 }) {
+	countRender("task-sidebar");
 	const location = useLocation();
 	const now = useMinuteClock();
 	const [shown, setShown] = useState(PROJECTS_SHOWN);

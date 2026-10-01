@@ -27,6 +27,7 @@ import { setPageTitle } from "../interaction/announcer.js";
 import { useShortcut } from "../interaction/use-shortcut.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
+import { countRender } from "../render/render-probe.js";
 import { ClioLogo, ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { Menu, MenuItem } from "../shell/Menu.js";
 import { taskTitle } from "../shell/shell-model.js";
@@ -117,6 +118,7 @@ function SessionHealth({ summary }: { summary: HealthSummary }) {
 }
 
 function SessionView({ client, id }: { client: Client; id: string }) {
+	countRender("session-view");
 	const navigate = useNavigate();
 	const ids = { changes: useId(), pane: useId() };
 	const pane = usePaneState(ids.pane);

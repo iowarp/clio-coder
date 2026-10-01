@@ -39,6 +39,13 @@ export interface PaneSession {
 	readonly tools: readonly TimelineItem[];
 }
 
+/**
+ * The pane lists changed files and the paths tools touched. A call that edits or names a path can
+ * matter to it; a shell command that only streams output cannot, so its updates leave the pane alone.
+ */
+const readsPane = (item: TimelineItem): boolean =>
+	item.kind === "tool" && (item.toolKind === "edit" || (item.locations?.length ?? 0) > 0);
+
 export function selectPaneSession(session: SessionSnapshot): PaneSession {
 	return {
 		id: session.id,
@@ -46,6 +53,6 @@ export function selectPaneSession(session: SessionSnapshot): PaneSession {
 		turns: session.turns,
 		fleet: session.fleet,
 		timelineTruncated: session.timelineTruncated,
-		tools: session.timeline.filter((item) => item.kind === "tool"),
+		tools: session.timeline.filter(readsPane),
 	};
 }

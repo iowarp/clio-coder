@@ -5,6 +5,7 @@ import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 import { useShortcutLayer } from "../interaction/use-shortcut.js";
+import { countRender } from "../render/render-probe.js";
 import { Menu, MenuItem } from "../shell/Menu.js";
 import { ChangesView } from "./ChangesView.js";
 import { changeCounts, NO_CHANGES, summarizeChanges } from "./changes-model.js";
@@ -53,6 +54,7 @@ export const SessionPane = memo(function SessionPane({
 	view: PaneView;
 	onViewChange: (view: PaneView) => void;
 }) {
+	countRender("session-pane");
 	const tabId = useId();
 	const aside = useRef<HTMLElement>(null);
 	const dialog = useRef<HTMLDialogElement>(null);

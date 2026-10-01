@@ -4,6 +4,7 @@ import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { formatCost } from "../api/clock.js";
 import { Icon } from "../design/icons.js";
+import { countRender } from "../render/render-probe.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { boardView, type PlanRow } from "./board-model.js";
 import { changeCounts, summarizeChanges } from "./changes-model.js";
@@ -48,6 +49,7 @@ export function ProgressView({
 	nowMs: number;
 	onOpen: (view: PaneView) => void;
 }) {
+	countRender("progress");
 	const params = { params: { id: session.id }, query: {}, body: {} };
 	const open = session.state === "open";
 	const capabilities = useQuery({
