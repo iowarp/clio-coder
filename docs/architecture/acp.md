@@ -208,7 +208,7 @@ The v1 notification is
 | `context.warning` | Always the object `{warning}`, where `warning` is a control-character-stripped sentence bounded to 256 UTF-8 bytes, or `null`. The clearing edge is `{warning: null}`, never a null payload. | `false` |
 | `safety.toolBudgetExceeded` | `{tool,callsThisTurn,softBudget,hardCeiling,interrupted}`. | `true` exactly when `interrupted` |
 | `provider.health` | `{targetId,status,available,latencyMs}`, where status is exactly `healthy`, `degraded`, `unknown`, or `down`. | `false` |
-| `dispatch.scopeNotice` | `{code,level,message}`. `code` is `write_root_dot_unconfined`, `typed_scope_replaced_inferred_paths`, `legacy_scope_inferred` or `legacy_scope_empty`, `level` is `warning`, and `message` is the host's two sentences, control-character-stripped and bounded to 1024 UTF-8 bytes. The path lists a legacy notice carries stay behind. | `false` |
+| `dispatch.scopeNotice` | `{code,level,message}`. `code` is `write_root_dot_unconfined`, `write_roots_checks_withheld`, `typed_scope_replaced_inferred_paths`, `legacy_scope_inferred` or `legacy_scope_empty`, `level` is `warning`, and `message` is the host's two sentences, control-character-stripped and bounded to 1024 UTF-8 bytes. The path lists a legacy notice carries stay behind. | `false` |
 
 An event whose identity or taxonomy cannot be represented safely is dropped
 rather than forwarded under a repaired one.
