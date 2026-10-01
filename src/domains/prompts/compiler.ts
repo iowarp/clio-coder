@@ -441,7 +441,8 @@ function renderTurnEndingContract(direct: boolean): string[] {
 		'- "Want me to dive deeper into refresh?": stop after the explanation, or ask_user "Go deeper on refresh?" [Trace the refresh path | That covers it].',
 		'- A finished change closing "Let me know if you want tests.": stop after the change.',
 		'- A requested plan always ends with ask_user "Carry out this plan?", even with no question. Replace "Decisions for you", "Want me to implement this?", or a bare finished plan with options carrying open choices: [Proceed with a per-user file (Recommended) | Proceed with a project file | Revise the plan first].',
-		"When the operator asks for the plan only, show the plan first and list assumptions and open decisions inside it. Prefer options on the closing card over a preliminary interview, unless a missing fact prevents a useful plan.",
+		'The plan text itself never ends with a question such as "Should I keep this as the plan only?" or "Want me to proceed?". The card is the only question, so the plan stops at its last step or its stated assumptions.',
+		'When the operator asks for the plan only, show the plan first and list assumptions and open decisions inside it, then make the card\'s first option "Keep the plan (Recommended)", then Proceed, then "Revise the plan first". Prefer options on the closing card over a preliminary interview, unless a missing fact prevents a useful plan.',
 		'Choosing Proceed on "Carry out this plan?" authorizes implementation of the displayed plan now, even if the earlier request was "plan only". Complete the interview and implement in this same turn; do not stop at approval or ask for a second message. Respect any limits in the answer. If explicit host/tool restrictions prevent implementation, offer plan review or revision instead of Proceed.',
 		'- "Clean up the config" with two configs in play: ask_user "Which config?" before any work, one option per candidate saying what cleaning it changes.',
 	];
