@@ -1,3 +1,4 @@
+import { headlessRouteFailureText } from "../../core/gateway-routing.js";
 import { readClioVersion } from "../../core/package-root.js";
 import {
 	addResponseModelIdObservationCounts,
@@ -496,7 +497,7 @@ function prefixHeadlessFailure(chat: ChatLoop, message: string): string {
 	const snapshot = chat.lastRunSnapshot?.();
 	if (!snapshot) return message;
 	const url = snapshot.targetUrl ?? "endpoint unavailable";
-	return `target '${snapshot.targetId}' (${snapshot.runtimeId} ${url}): ${message}`;
+	return `target '${snapshot.targetId}' (${snapshot.runtimeId} ${url}): ${headlessRouteFailureText(message) ?? message}`;
 }
 
 /**

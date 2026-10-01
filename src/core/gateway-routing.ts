@@ -42,6 +42,44 @@ export function liteLLMRouteFailureMessage(
 	return providerMessage.includes(advice) ? providerMessage : `${providerMessage}\n\n${advice}`;
 }
 
+const ROUTE_FAILURE_TAIL =
+	/\n\n(?:LiteLLM route '([^'\n]*)' on target '([^'\n]*)' failed\. )Clio did not retry or substitute another model; select a different route with \/model, then resend\.$/;
+
+function jsonMessage(value: unknown): string | undefined {
+	if (typeof value === "string") return value.trim() || undefined;
+	if (typeof value !== "object" || value === null) return undefined;
+	const record = value as Record<string, unknown>;
+	return jsonMessage(record["message"]) ?? jsonMessage(record["detail"]) ?? jsonMessage(record["error"]);
+}
+
+/**
+ * Headless rendering of a failure built by liteLLMRouteFailureMessage. The
+ * stored text keeps the `/model` remedy because the TUI shows it, but a
+ * headless run has no such command, and LiteLLM's JSON body repeats its
+ * message under `provider_specific_fields`. Returns null for any other text so
+ * the caller prints it unchanged.
+ */
+export function headlessRouteFailureText(message: string): string | null {
+	const tail = ROUTE_FAILURE_TAIL.exec(message);
+	if (tail === null) return null;
+	const body = message.slice(0, tail.index).trim();
+	const jsonStart = body.indexOf("{");
+	let provider = body;
+	if (jsonStart >= 0) {
+		try {
+			const parsed: unknown = JSON.parse(body.slice(jsonStart));
+			const text = jsonMessage(parsed);
+			if (text !== undefined) provider = `${body.slice(0, jsonStart)}${text}`.trim();
+		} catch {
+			// Not a JSON body; the provider text is printed as the gateway sent it.
+		}
+	}
+	return (
+		`${provider} (model '${tail[1]}' on target '${tail[2]}'; Clio did not retry or substitute another model; ` +
+		"run `clio-coder models` to list routes or pass a different --model)"
+	);
+}
+
 /** OpenAI SDK transport failure, distinct from an HTTP gateway/backend error. */
 export function isLiteLLMConnectionFailure(message: string | null | undefined): boolean {
 	return message?.trim() === "Connection error.";
