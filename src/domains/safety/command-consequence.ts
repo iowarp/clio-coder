@@ -426,12 +426,68 @@ function recursiveOwnerConsequence(args: ReadonlyArray<string>, what: "permissio
 	return `Changes ${what} under ${list(paths)} recursively`;
 }
 
+/** Signals that end a process; the verb for any other signal names only that one was sent. */
+const TERMINATING_SIGNALS: ReadonlySet<string> = new Set(["9", "15", "KILL", "TERM"]);
+
+function signalVerb(signal: string | null): "Stops" | "Signals" {
+	if (signal === null) return "Stops";
+	return TERMINATING_SIGNALS.has(signal.toUpperCase().replace(/^SIG/u, "")) ? "Stops" : "Signals";
+}
+
+/**
+ * `kill`'s words in order: the first `-9` or `-KILL` is the signal, and once a
+ * signal is chosen or `--` has been seen a word like `-1` is a negative pid,
+ * which names a process group (`-1` names every process the user may signal).
+ */
 function killConsequence(args: ReadonlyArray<string>): string | null {
-	if (hasFlag(args, "l", ["--list", "--table"]) || args.includes("-L")) return null;
+	let signal: string | null = null;
+	const targets: string[] = [];
+	let endOfOptions = false;
+	for (let index = 0; index < args.length; index += 1) {
+		const word = args[index];
+		if (word === undefined) continue;
+		if (endOfOptions || !word.startsWith("-") || word === "-") {
+			targets.push(word);
+			continue;
+		}
+		if (word === "--") {
+			endOfOptions = true;
+			continue;
+		}
+		if (word === "-l" || word === "-L" || word === "--list" || word === "--table") return null;
+		if (word === "-s" || word === "-n" || word === "--signal") {
+			signal = args[index + 1] ?? null;
+			index += 1;
+			continue;
+		}
+		if (word.startsWith("--signal=")) {
+			signal = word.slice("--signal=".length);
+			continue;
+		}
+		if (signal !== null && /^-(?:\d+|\$.*)$/u.test(word)) {
+			targets.push(word);
+			continue;
+		}
+		if (signal === null && /^-(?:\d+|[A-Za-z][A-Za-z0-9+-]*)$/u.test(word)) signal = word.slice(1);
+	}
 	// Signal 0 only tests whether the process exists.
-	if (args.includes("-0") || args.some((word, i) => word === "-s" && args[i + 1] === "0")) return null;
-	const pids = operands(args, new Set(["-s", "-n", "--signal"]));
-	return pids.length > 0 ? `Stops processes ${list(pids)}` : null;
+	if (signal === "0") return null;
+	if (targets.length === 0) return null;
+	const verb = signalVerb(signal);
+	if (targets.includes("-1")) return `${verb} every process you can signal`;
+	const processes: string[] = [];
+	const groups: string[] = [];
+	let ownGroup = false;
+	for (const target of targets) {
+		if (target === "0") ownGroup = true;
+		else if (target.startsWith("-")) groups.push(target.slice(1));
+		else processes.push(target);
+	}
+	const parts: string[] = [];
+	if (processes.length > 0) parts.push(`processes ${list(processes)}`);
+	if (groups.length > 0) parts.push(`process ${groups.length === 1 ? "group" : "groups"} ${list(groups)}`);
+	if (ownGroup) parts.push("the current process group");
+	return `${verb} ${parts.join(" and ")}`;
 }
 
 function killByNameConsequence(args: ReadonlyArray<string>): string | null {
