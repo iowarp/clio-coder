@@ -342,6 +342,8 @@ export interface WorkerGrantRequestFrame {
 	effect: { tool: string; args: Record<string, unknown> } | null;
 	summary: string;
 	target?: string;
+	/** Card text only: what a bash command would do, composed in the worker from the full command. */
+	consequence?: ReadonlyArray<string>;
 	reasons: ReadonlyArray<string>;
 	axis?: string;
 	timeoutMs: number;
@@ -569,6 +571,21 @@ function boundedText(value: unknown, max = GRANT_TEXT_MAX_CHARS): string | null 
 	return typeof value === "string" && value.length > 0 && value.length <= max ? value : null;
 }
 
+const GRANT_CONSEQUENCE_MAX_LINES = 4;
+const GRANT_CONSEQUENCE_LINE_MAX_CHARS = 512;
+
+/** The display sentences of a grant request, or null when the field is absent or malformed. A bad one costs the card its line, never the request. */
+function parseGrantConsequence(value: unknown): string[] | null {
+	if (!Array.isArray(value) || value.length === 0 || value.length > GRANT_CONSEQUENCE_MAX_LINES) return null;
+	const lines: string[] = [];
+	for (const entry of value) {
+		const line = boundedText(entry, GRANT_CONSEQUENCE_LINE_MAX_CHARS);
+		if (line === null) return null;
+		lines.push(line);
+	}
+	return lines;
+}
+
 function parseGrantRequest(value: unknown): FrameParseResult<WorkerGrantRequestFrame> {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
 		return { ok: false, reason: "grant_request request is not an object" };
@@ -610,6 +627,7 @@ function parseGrantRequest(value: unknown): FrameParseResult<WorkerGrantRequestF
 		? record.reasons.filter((entry): entry is string => typeof entry === "string").slice(0, 8)
 		: [];
 	const target = boundedText(record.target);
+	const consequence = parseGrantConsequence(record.consequence);
 	const axis = boundedText(record.axis, 256);
 	const toolCallId = boundedText(record.toolCallId, 256);
 	return {
@@ -625,6 +643,7 @@ function parseGrantRequest(value: unknown): FrameParseResult<WorkerGrantRequestF
 			effect,
 			summary,
 			...(target !== null ? { target } : {}),
+			...(consequence !== null ? { consequence } : {}),
 			reasons: reasons.map((reason) => reason.slice(0, GRANT_TEXT_MAX_CHARS)),
 			...(axis !== null ? { axis } : {}),
 			timeoutMs,

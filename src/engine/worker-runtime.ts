@@ -68,6 +68,7 @@ import {
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { ApprovalAuthority } from "../domains/safety/admission.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
+import { describeBashCallConsequences } from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { grantEffectDescriptor, grantEffectDigest } from "../domains/safety/grant-effect.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
@@ -1559,6 +1560,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// summaries on this display event; the effect descriptor a grant is
 			// evaluated against rides the control lane below.
 			const target = describeCallTarget(call.tool, call.args);
+			// Composed here because only the worker holds the whole command: `target`
+			// is one flattened, cut line. Display text only, never read by a decision.
+			const consequence = describeBashCallConsequences(call.tool, call.args);
 			const summary = `${call.tool} requires ${actionClass} confirmation`;
 			emit({
 				type: "clio_coder_permission_escalated",
@@ -1567,6 +1571,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					tool: call.tool,
 					summary,
 					...(target.length > 0 ? { target } : {}),
+					...(consequence.length > 0 ? { consequence } : {}),
 					axis: meta.axis,
 					decision: {
 						actionClass,
@@ -1599,7 +1604,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				// A descriptor too large for the control frame crosses as its digest
 				// alone; the host then refuses a main grant and only the operator decides.
 				const fits = JSON.stringify(frame).length <= GRANT_REQUEST_FRAME_BUDGET_CHARS;
-				input.emitGrantRequest?.(fits ? frame : { ...frame, effect: null });
+				// The display sentences ride along only when they leave the frame inside
+				// the budget, so card text can never be what drops a grant's effect.
+				const withConsequence = consequence.length > 0 ? { ...frame, consequence } : frame;
+				const carriesConsequence = JSON.stringify(withConsequence).length <= GRANT_REQUEST_FRAME_BUDGET_CHARS;
+				input.emitGrantRequest?.(fits ? (carriesConsequence ? withConsequence : frame) : { ...frame, effect: null });
 			}
 			return;
 		}

@@ -80,6 +80,12 @@ export interface ClioPermissionEscalatedEvent {
 		 * themselves never cross the stdout seam.
 		 */
 		target?: string;
+		/**
+		 * What a bash command would do, one sentence per step, composed in the
+		 * worker from the full command. The bounded `target` is flattened and cut,
+		 * so the host never rebuilds this from it.
+		 */
+		consequence?: ReadonlyArray<string>;
 		axis?: string;
 		decision: {
 			actionClass: string;

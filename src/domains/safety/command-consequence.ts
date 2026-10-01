@@ -9,11 +9,16 @@
  * inherits their limits: no variable expansion, no aliases, no script bodies.
  * An operand written as `$DIR` is shown as `$DIR`.
  *
+ * It reads the full command from the call's arguments, in the process that
+ * holds them. The bounded `target` text is flattened to one line and cut, so a
+ * sentence built from it could name half an operand or miss a later step.
+ *
  * Every value that reaches a sentence is secret-redacted, collapsed to one line
  * with control bytes neutralized, and bounded, because the command text is
  * model-authored and the sentence appears on the surface that approves it.
  */
 
+import { ToolNames } from "../../core/tool-names.js";
 import { sanitizeCallTargetText } from "./call-target.js";
 import { type ShellCommandStep, sedInPlaceOperands, shellCommandSteps } from "./protected-artifacts.js";
 import { redactSecretString } from "./redaction.js";
@@ -32,15 +37,15 @@ export type PathKind = "file" | "dir" | null;
 export interface CommandConsequenceOptions {
 	/**
 	 * What exists at a path, resolved by the caller against the directory the
-	 * command runs in. Absent when the caller cannot look (a worker's command
-	 * reaches the host as text), in which case no overwrite is claimed, because
-	 * `>` and `cp` onto a new file overwrite nothing.
+	 * command runs in. Absent when the caller cannot look (a worker describes
+	 * its command before the host sees it), in which case no overwrite is
+	 * claimed, because `>` and `cp` onto a new file overwrite nothing.
 	 */
 	pathKind?: (path: string) => PathKind;
 }
 
 /** The sentences for a command, capped at three and followed by `and N more` when there are more. */
-export function describeCommandConsequences(command: string, options: CommandConsequenceOptions = {}): string[] {
+function describeCommandConsequences(command: string, options: CommandConsequenceOptions = {}): string[] {
 	const all: string[] = [];
 	for (const step of shellCommandSteps(command)) {
 		for (const line of stepConsequences(step, options)) {
@@ -53,16 +58,26 @@ export function describeCommandConsequences(command: string, options: CommandCon
 }
 
 /**
- * The command inside a worker escalation's `target`, for a card whose only
- * evidence is that string. `describeCallTarget` renders a bash call as the
- * command, then ` · name=value` for each further field, collapses newlines to
- * spaces, and ends in an ellipsis when it cuts. The ellipsis may sit inside a
- * word, so the last word is dropped rather than read as a complete operand.
+ * The sentences for one tool call's arguments: none unless it is a bash call
+ * with a string command. Called where the full arguments exist (the main
+ * agent's registry admission and the worker's escalation), never on the
+ * bounded `target` text, which is flattened and cut. Card text only, so a
+ * failure is no sentence and never a different admission.
  */
-export function commandFromBashTarget(target: string): string {
-	let text = target;
-	if (text.endsWith("…")) text = text.slice(0, -1).replace(/\S*$/u, "");
-	return text.replace(/(?: · [A-Za-z_][A-Za-z0-9_]*=[^·]*)+$/u, "").trim();
+export function describeBashCallConsequences(
+	tool: string,
+	args: Record<string, unknown> | undefined,
+	options: CommandConsequenceOptions = {},
+): string[] {
+	if (tool !== ToolNames.Bash) return [];
+	const command = args?.command;
+	if (typeof command !== "string") return [];
+	try {
+		return describeCommandConsequences(command, options);
+	} catch {
+		// The card renders without the line; nothing waits on it.
+		return [];
+	}
 }
 
 function stepConsequences(step: ShellCommandStep, options: CommandConsequenceOptions): string[] {

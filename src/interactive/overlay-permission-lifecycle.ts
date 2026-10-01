@@ -7,8 +7,8 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import {
-	commandFromBashTarget,
-	describeCommandConsequences,
+	COMMAND_CONSEQUENCE_MAX_LINES,
+	describeBashCallConsequences,
 	type PathKind,
 } from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
@@ -60,6 +60,7 @@ interface WorkerEscalationEntry {
 	axis: ApprovalRequestView["axis"];
 	reason: string;
 	target?: string;
+	consequence?: string[];
 	fallback: "deny" | "fail";
 	/** Present on a worker ask routed through the main agent (Phase D). */
 	grant?: ApprovalRequestView["workerGrant"];
@@ -191,30 +192,28 @@ function pathKindIn(cwd: string): (path: string) => PathKind {
  * text only: a failure here is no sentence, never a different admission.
  */
 function mainConsequence(call: ClassifierCall): string[] {
-	if (call.tool !== ToolNames.Bash) return [];
-	const command = call.args?.command;
-	if (typeof command !== "string") return [];
 	const cwd = typeof call.args?.cwd === "string" && call.args.cwd.length > 0 ? call.args.cwd : process.cwd();
-	try {
-		return describeCommandConsequences(command, { pathKind: pathKindIn(resolve(process.cwd(), cwd)) });
-	} catch {
-		// The card renders without the line; nothing waits on it.
-		return [];
-	}
+	return describeBashCallConsequences(call.tool, call.args, { pathKind: pathKindIn(resolve(process.cwd(), cwd)) });
 }
 
+/** Characters of one worker-supplied sentence kept; the worker bounds its own, this bounds a hostile one. */
+const WORKER_CONSEQUENCE_LINE_CHARS = 240;
+
 /**
- * A worker's command arrives only as the bounded `target` text, so its
- * consequences are read from that and no existence check is possible.
+ * The sentences a worker wrote from its own full arguments. They cross the
+ * stdout seam as data, so each is sanitized again, and anything that is not a
+ * short list of strings is dropped. The host never rebuilds them from the
+ * bounded `target`, which is flattened to one line and cut.
  */
-function workerConsequence(tool: string, target: string | undefined): string[] {
-	if (tool !== ToolNames.Bash || target === undefined) return [];
-	try {
-		return describeCommandConsequences(commandFromBashTarget(target));
-	} catch {
-		// The card renders without the line; nothing waits on it.
-		return [];
+function workerConsequenceLines(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	const lines: string[] = [];
+	for (const entry of value.slice(0, COMMAND_CONSEQUENCE_MAX_LINES + 1)) {
+		if (typeof entry !== "string") return [];
+		const line = sanitizeCallTargetText(entry).slice(0, WORKER_CONSEQUENCE_LINE_CHARS);
+		if (line.length > 0) lines.push(line);
 	}
+	return lines;
 }
 
 function mainApprovalRequestView(
@@ -270,6 +269,7 @@ function mainMutationInspector(call: ClassifierCall, view: ApprovalRequestView):
 
 function workerEscalationEntry(payload: PermissionRequestedPayload, autonomy: string): WorkerEscalationEntry | null {
 	if (!isLiveWorkerEscalationRequest(payload) || typeof payload.requestId !== "string") return null;
+	const consequence = workerConsequenceLines(payload.consequence);
 	const origin = typeof payload.origin === "string" ? payload.origin : undefined;
 	const runId = typeof payload.requestedBy === "string" ? payload.requestedBy : origin?.slice("worker:".length);
 	if (!runId) return null;
@@ -290,6 +290,7 @@ function workerEscalationEntry(payload: PermissionRequestedPayload, autonomy: st
 		...(typeof payload.target === "string" && payload.target.length > 0
 			? { target: sanitizeCallTargetText(payload.target).slice(0, 200) }
 			: {}),
+		...(consequence.length > 0 ? { consequence } : {}),
 		fallback: payload.fallback === "fail" ? "fail" : "deny",
 		...(payload.approvalAuthority === "main" || payload.approvalAuthority === "operator"
 			? { grant: { authority: payload.approvalAuthority, forwardedByMain: payload.forwardedByMain === true } }
@@ -298,7 +299,6 @@ function workerEscalationEntry(payload: PermissionRequestedPayload, autonomy: st
 }
 
 function workerApprovalRequestView(entry: WorkerEscalationEntry): ApprovalRequestView {
-	const consequence = workerConsequence(entry.tool, entry.target);
 	return {
 		requestId: entry.requestId,
 		tool: entry.tool,
@@ -307,7 +307,7 @@ function workerApprovalRequestView(entry: WorkerEscalationEntry): ApprovalReques
 		origin: { kind: "worker", agentId: entry.agentId, runId: entry.runId },
 		reason: entry.reason,
 		...(entry.target !== undefined && entry.target.length > 0 ? { target: entry.target } : {}),
-		...(consequence.length > 0 ? { consequence } : {}),
+		...(entry.consequence !== undefined ? { consequence: entry.consequence } : {}),
 		...(entry.grant !== undefined ? { workerGrant: entry.grant } : {}),
 	};
 }

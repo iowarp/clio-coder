@@ -507,6 +507,11 @@ export interface PermissionRequestedPayload {
 	summary?: string | undefined;
 	/** Sanitized one-line preview of the call's object (command, path, or compact args). */
 	target?: string | undefined;
+	/**
+	 * What a bash command would do, one sentence per step, written by the worker
+	 * from the full command it holds. Card text only; admission never reads it.
+	 */
+	consequence?: ReadonlyArray<string> | undefined;
 	timeoutMs?: number | undefined;
 	/** Admitted timeout fallback, so the operator surface can name what an expired ask became. */
 	fallback?: "deny" | "fail" | undefined;

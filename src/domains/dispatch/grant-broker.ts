@@ -56,6 +56,8 @@ export interface GrantRequestInput {
 	permitTools: ReadonlyArray<string>;
 	summary: string;
 	target?: string;
+	/** Card text only, composed by the worker from its full command. */
+	consequence?: ReadonlyArray<string>;
 	reasons: ReadonlyArray<string>;
 	/** Epoch ms after which the request expires. */
 	deadlineAt: number;

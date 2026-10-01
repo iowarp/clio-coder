@@ -3259,6 +3259,7 @@ export function createDispatchBundle(
 				agentId: record.agentId,
 				summary: record.summary,
 				...(record.target !== undefined ? { target: record.target } : {}),
+				...(record.consequence !== undefined ? { consequence: [...record.consequence] } : {}),
 				reasons: [...record.reasons],
 				timeoutMs: Math.max(0, record.deadlineAt - now()),
 				fallback,
@@ -6215,6 +6216,7 @@ export function createDispatchBundle(
 				permitTools: lifecycle.permit.ceiling.tools,
 				summary: request.summary,
 				...(request.target !== undefined ? { target: request.target } : {}),
+				...(request.consequence !== undefined ? { consequence: [...request.consequence] } : {}),
 				reasons: request.reasons,
 				// The broker expires a little before the worker's own timer, so the
 				// denial it sends is the one that settles the request.
@@ -6407,6 +6409,7 @@ export function createDispatchBundle(
 					requestId?: string;
 					summary?: string;
 					target?: string;
+					consequence?: unknown;
 					axis?: string;
 					timeoutMs?: number;
 					source?: "operator" | "timeout" | "policy" | "remembered" | "main" | "binding";
@@ -6522,6 +6525,7 @@ export function createDispatchBundle(
 					readStringOrNull(event.payload.actionClass) ??
 					"unknown";
 				const reasons = readStringArrayOrNull(ctx?.reasons) ?? readStringArrayOrNull(classification?.reasons);
+				const consequence = readStringArrayOrNull(event.payload.consequence);
 				const reasonCode = readStringOrNull(ctx?.reasonCode) ?? readStringOrNull(policy?.reasonCode);
 				const ruleId = readStringOrNull(ctx?.ruleId) ?? readStringOrNull(policy?.ruleId);
 				const policySource = readStringOrNull(ctx?.policySource) ?? readStringOrNull(policy?.policySource);
@@ -6542,6 +6546,7 @@ export function createDispatchBundle(
 					...(typeof event.payload.target === "string" && event.payload.target.length > 0
 						? { target: event.payload.target }
 						: {}),
+					...(consequence !== null ? { consequence } : {}),
 					...(reasons !== null ? { reasons } : {}),
 					...(reasonCode !== null ? { reasonCode } : {}),
 					...(ruleId !== null ? { ruleId } : {}),
