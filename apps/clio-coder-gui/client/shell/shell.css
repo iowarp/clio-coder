@@ -361,8 +361,8 @@
 	border-radius: 50%;
 }
 .wb-dot--approval {
-	background: var(--status-warn-line);
-	box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-warn-line) 24%, transparent);
+	background: var(--action-line);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--action-line) 24%, transparent);
 }
 .wb-dot--failed {
 	background: var(--status-fail-line);
@@ -625,9 +625,11 @@ button.wb-chip:hover:not(:disabled) {
 .wb-chip[data-tone="working"] {
 	color: var(--accent);
 }
+/* A pending approval is an action waiting on the operator, so the chip and the rail dot take the
+   action tokens the approval strip uses, not the warning ramp. */
 .wb-chip[data-tone="approval"] {
-	color: var(--status-warn-fg);
-	border-color: var(--status-warn-line);
+	color: var(--action-fg);
+	border-color: var(--action-line);
 }
 
 /* ---- phones: the rail becomes a drawer ------------------------------------- */
