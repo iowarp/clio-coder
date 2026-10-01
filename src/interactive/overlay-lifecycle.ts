@@ -363,6 +363,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		setOverlayHandle: (handle) => {
 			overlayTransitions.handle = handle;
 		},
+		replaceInterruptedOverlay: (from, to) => overlayTransitions.replaceInterrupted?.(from, to),
 		renderContextIsland: () => interactiveTickers.renderContextIsland(),
 		renderTaskIsland: () => interactiveTickers.renderTaskIsland(),
 		requestRender: () => tui.requestRender(),

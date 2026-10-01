@@ -1,12 +1,15 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import type { TUI } from "../../src/engine/tui.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
+import { createOverlayAskUserLifecycle } from "../../src/interactive/overlay-ask-user-lifecycle.js";
+import { createOverlayTransitions } from "../../src/interactive/overlay-transitions.js";
 import {
 	createAskUserViewForTesting,
 	formatAskUserQuestion,
 	optionAsksForText,
 } from "../../src/interactive/overlays/ask-user.js";
-import type { AskUserQuestion } from "../../src/tools/ask-user.js";
+import type { AskUserQuestion, AskUserResult } from "../../src/tools/ask-user.js";
 
 const ENTER = "\r";
 const DOWN = "\u001b[B";
@@ -445,4 +448,114 @@ test("a harness round drops Enter inside its input guard, takes Esc, and answers
 	await new Promise((resolve) => setTimeout(resolve, 100));
 	elapsed.handleInput(ENTER);
 	deepStrictEqual((await elapsedPending).answers[0]?.options, ["Keep branch"]);
+});
+
+/** A lifecycle on the real overlay transitions with a scripted overlay session, no TUI. */
+function lifecycleFixture() {
+	const sessions: FakeSession[] = [];
+	let permissionCloses = 0;
+	const transitions = createOverlayTransitions({
+		stopDispatchBoardTicker: () => {},
+		renderContextIsland: () => {},
+		renderTaskIsland: () => {},
+		requestRender: () => {},
+		cancelPendingAskUser: () => lifecycle.cancelPending(),
+		finishAuth: () => {},
+		onPermissionOverlayClosed: () => {
+			permissionCloses += 1;
+		},
+	});
+	const lifecycle = createOverlayAskUserLifecycle({
+		tui: {} as TUI,
+		getOverlayState: () => transitions.state,
+		setOverlayState: (state) => {
+			transitions.state = state;
+		},
+		getOverlayHandle: () => transitions.handle,
+		setOverlayHandle: (handle) => {
+			transitions.handle = handle;
+		},
+		replaceInterruptedOverlay: (from, to) => transitions.replaceInterrupted?.(from, to),
+		renderContextIsland: () => {},
+		renderTaskIsland: () => {},
+		requestRender: () => {},
+		openAskUserOverlay: () => {
+			const session = new FakeSession();
+			sessions.push(session);
+			return session;
+		},
+	});
+	return { lifecycle, transitions, sessions, permissionCloses: () => permissionCloses };
+}
+
+class FakeSession {
+	closed = false;
+	hidden = false;
+	waiting = true;
+	private resolveRound: ((result: AskUserResult) => void) | null = null;
+	asked: string[] = [];
+	setHidden(hidden: boolean): void {
+		this.hidden = hidden;
+	}
+	isHidden(): boolean {
+		return this.hidden;
+	}
+	focus(): void {}
+	unfocus(): void {}
+	isFocused(): boolean {
+		return !this.hidden && !this.closed;
+	}
+	getBounds(): undefined {
+		return undefined;
+	}
+	hide(): void {
+		this.close();
+	}
+	ask(questions: ReadonlyArray<AskUserQuestion>): Promise<AskUserResult> {
+		if (this.resolveRound !== null) return Promise.resolve({ answers: [], cancelled: true, unavailable: true });
+		this.asked.push(questions[0]?.question ?? "");
+		this.waiting = false;
+		return new Promise((resolve) => {
+			this.resolveRound = resolve;
+		});
+	}
+	answer(label: string): void {
+		const resolve = this.resolveRound;
+		this.resolveRound = null;
+		this.waiting = true;
+		resolve?.({ answers: [{ question: this.asked.at(-1) ?? "", answer: label, options: [label] }] });
+	}
+	cancel(): void {
+		const resolve = this.resolveRound;
+		this.resolveRound = null;
+		this.waiting = true;
+		resolve?.({ answers: [], cancelled: true });
+	}
+	close(): void {
+		this.closed = true;
+		this.cancel();
+	}
+	isWaiting(): boolean {
+		return this.waiting && this.resolveRound === null;
+	}
+}
+
+const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+const MODEL_CALL = { turnId: "turn-1", toolCallId: "call-1" };
+
+test("a permission prompt over an interview that ends restores nothing instead of a dead session", async () => {
+	const { lifecycle, transitions, sessions } = lifecycleFixture();
+	const round = lifecycle.handler([{ question: "Which?", options: [{ label: "A" }] }], MODEL_CALL);
+	await tick();
+	sessions[0]?.answer("A");
+	await round;
+	strictEqual(transitions.state, "ask-user");
+	const permission = new FakeSession();
+	strictEqual(transitions.showPermission(permission), true);
+	// A streamed text delta closes the interview while the permission prompt is up.
+	lifecycle.close();
+	strictEqual(sessions[0]?.closed, true);
+	transitions.close();
+	strictEqual(transitions.state, "closed", "no key is left swallowed by an ask-user state with no session");
+	strictEqual(transitions.handle, null);
 });

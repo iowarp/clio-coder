@@ -22,6 +22,12 @@ export interface OverlayTransitions {
 	handle: OverlayHandle | null;
 	/** Raise a permission prompt while preserving the modal it interrupted. */
 	showPermission(handle: OverlayHandle): boolean;
+	/**
+	 * Change which overlay a permission prompt restores when it closes, for an
+	 * interrupted overlay whose session ended underneath it. `to` null restores
+	 * nothing; the screen goes back to closed instead of to a dead session.
+	 */
+	replaceInterrupted?(from: OverlayHandle, to: OverlayHandle | null): void;
 	close(): void;
 }
 
@@ -53,6 +59,10 @@ export function createOverlayTransitions(deps: OverlayTransitionsDeps): OverlayT
 			state = "permission-confirm";
 			handle = nextHandle;
 			return true;
+		},
+		replaceInterrupted(from, to) {
+			if (interrupted === null || interrupted.handle !== from) return;
+			interrupted = to === null ? null : { state: interrupted.state, handle: to };
 		},
 		close,
 	};

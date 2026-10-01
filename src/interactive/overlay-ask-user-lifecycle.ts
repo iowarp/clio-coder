@@ -24,6 +24,12 @@ export interface OverlayAskUserLifecycleDeps {
 	setOverlayState(state: OverlayState): void;
 	getOverlayHandle(): unknown;
 	setOverlayHandle(handle: AskUserOverlaySession | null): void;
+	/**
+	 * A permission prompt on top of an interview restores that interview when it
+	 * closes. A session that ended under it must not be restored, or the screen
+	 * is left in ask-user with nothing behind it.
+	 */
+	replaceInterruptedOverlay?(from: AskUserOverlaySession, to: AskUserOverlaySession | null): void;
 	renderContextIsland(): void;
 	renderTaskIsland(): void;
 	requestRender(): void;
@@ -80,6 +86,7 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		if (current) {
 			current.close();
 			if (deps.getOverlayHandle() === current) deps.setOverlayHandle(null);
+			deps.replaceInterruptedOverlay?.(current, null);
 		} else if (deps.getOverlayState() === "ask-user") {
 			const handle = deps.getOverlayHandle() as { hide?: () => void } | null;
 			handle?.hide?.();
