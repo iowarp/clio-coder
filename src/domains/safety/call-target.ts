@@ -17,12 +17,26 @@ const BEL_CHAR = String.fromCharCode(7);
 const OSC_PATTERN = new RegExp(`${ESC_CHAR}\\][\\s\\S]*?(?:${BEL_CHAR}|${ESC_CHAR}\\\\|$)`, "g");
 const CSI_PATTERN = new RegExp(`${ESC_CHAR}\\[[0-9;?]*[0-9A-Za-z]`, "g");
 
+/**
+ * Bidirectional controls reorder what follows them, so `rm -rf ‮gpj.txt` can
+ * read as a different path on the surface that approves it. They are shown as
+ * `\u{202e}` text instead of being sent to the terminal.
+ */
+function isBidiControl(code: number): boolean {
+	return (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069) || code === 0x200e || code === 0x200f;
+}
+
+function bidiEscape(code: number): string {
+	return `\\u{${code.toString(16)}}`;
+}
+
 function sanitizeForDisplay(value: string): string {
 	const stripped = value.replace(OSC_PATTERN, "").replace(CSI_PATTERN, "");
 	let out = "";
 	for (const ch of stripped) {
 		const code = ch.codePointAt(0) ?? 0;
-		out += code < 0x20 || code === 0x7f ? " " : ch;
+		if (isBidiControl(code)) out += bidiEscape(code);
+		else out += code < 0x20 || code === 0x7f ? " " : ch;
 	}
 	return out;
 }
@@ -75,6 +89,11 @@ export function sanitizeMultilineDisplayText(value: string): SanitizedDisplayTex
 		const code = ch.codePointAt(0) ?? 0;
 		if (code < 0x20 || code === 0x7f) {
 			out += CONTROL_BYTE_PLACEHOLDER;
+			neutralized = true;
+			continue;
+		}
+		if (isBidiControl(code)) {
+			out += bidiEscape(code);
 			neutralized = true;
 			continue;
 		}
