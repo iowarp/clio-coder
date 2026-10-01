@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Value } from "typebox/value";
+import { FLEET_ANTI_CHURN_RULE } from "../../src/domains/agents/catalog.js";
 import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { compile } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
@@ -19,6 +20,12 @@ describe("compact coordinator dispatch contract", () => {
 		env = await isolateClioEnv("clio-coordinator-dispatch-");
 	});
 	afterEach(() => env.restore());
+
+	it("allows fresh operator dispatch requests after resolved runs", () => {
+		match(FLEET_ANTI_CHURN_RULE, /while an identical run is pending/);
+		match(FLEET_ANTI_CHURN_RULE, /operator merged, discarded, or kept/);
+		match(FLEET_ANTI_CHURN_RULE, /new operator request may dispatch the same task again/);
+	});
 
 	it("passes canonical string, object, and mixed tasks through both validation stages", async () => {
 		const registry = createRegistry({ safety: createWorkerSafety({ cwd: env.dir }), autonomy: () => "yolo" });

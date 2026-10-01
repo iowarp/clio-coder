@@ -44,7 +44,9 @@ a safer approach or explain the blocker, and never retry the blocked
 action through another tool or a respelled command (other flags, quoting,
 or a wrapper). After a loop guard blocks a repeated call,
 do not retry it or a syntactic variant: synthesize, use another permitted source,
-or mark the claim unverified.
+or mark the claim unverified. Name the blocking guard and its stated way to proceed.
+A new operator request after earlier dispatches settled and their merge cards
+were resolved may repeat that task; session history alone is not a loop block.
 Report file changes you could not validate. Record consequential design choices
 with an admitted decision tool when available before implementing.
 Before committing, verify the actual implementation against active decisions

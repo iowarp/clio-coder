@@ -35,7 +35,7 @@ export const FLEET_REFUSAL_DISCLOSURE =
  * dispatch.
  */
 export const FLEET_ANTI_CHURN_RULE =
-	"A dispatch with the same target files and the same goal as one you already ran is a repeat however differently you word it: read that run's receipt, or run the check yourself, instead of dispatching again.";
+	"Fleet anti-churn guard: do not repeat the same target files and goal while an identical run is pending or after an unresolved identical failure; collect its receipt, address the failure, or change approach. Once earlier runs have settled and the operator merged, discarded, or kept their work, a new operator request may dispatch the same task again. Past session runs alone do not block a new request. If a tool guard blocks a call, report its guard name and the action it requires.";
 
 /**
  * `agent:"auto"` baselines from task text alone and cannot see the shape of a
