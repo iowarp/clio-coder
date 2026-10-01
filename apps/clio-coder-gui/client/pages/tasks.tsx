@@ -5,7 +5,7 @@ import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { Icon } from "../design/icons.js";
-import { ClioPulse } from "../shell/ClioMark.js";
+import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { STATE_LABELS, shortAge, type TaskRow, taskRows } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
 import { useMinuteClock, useTaskActions } from "../shell/tasks.js";
@@ -13,7 +13,7 @@ import { DeleteSession } from "./session-controls.js";
 import "./tasks.css";
 
 function Glyph({ state }: { state: TaskRow["state"] }) {
-	if (state === "working" || state === "starting") return <ClioPulse size={14} />;
+	if (state === "working" || state === "starting") return <ClioPulse size={PULSE_SIZE.row} />;
 	if (state === "approval") return <span className="wb-dot wb-dot--approval" aria-hidden="true" />;
 	if (state === "failed") return <span className="wb-dot wb-dot--failed" aria-hidden="true" />;
 	return null;
@@ -68,7 +68,7 @@ export function Sessions({ client }: { client: Client }) {
 					disabled={!workspaceId || actions.launch.busy}
 					onClick={() => actions.newTask(workspaceId)}
 				>
-					<Icon name="compose" />
+					{actions.launch.busy ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="compose" />}
 					{actions.launch.busy ? "Starting…" : "New task"}
 				</button>
 			</TopBar>

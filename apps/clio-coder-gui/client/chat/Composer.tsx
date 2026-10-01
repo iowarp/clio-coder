@@ -22,6 +22,7 @@ import { StatusMark } from "../design/status.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
+import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { AutonomyPill } from "./AutonomyPill.js";
 import { persistAttachments, savedAttachments } from "./attachment-drafts.js";
 import { readAttachment } from "./attachment-image.js";
@@ -673,14 +674,15 @@ export const Composer = memo(function Composer({
 					/>
 					{running ? (
 						<button
-							className="composer__icon-button composer__stop"
+							className="composer__icon-button composer__stop composer__stop--live"
 							type="button"
 							disabled={stop.isPending}
 							onClick={() => stop.mutate()}
 							aria-label={stop.isPending ? "Stopping…" : "Stop turn"}
 							title="End this turn now. Nothing further is run."
 						>
-							<Icon name="stop" />
+							{sessionState === "open" ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="stop" />}
+							<span aria-hidden="true">{stop.isPending ? "Stopping" : "Stop"}</span>
 						</button>
 					) : null}
 					{!running || draft.text.trim() !== "" ? (
@@ -691,7 +693,7 @@ export const Composer = memo(function Composer({
 							aria-label={send.isPending ? "Sending…" : submitLabel(intent, situation, draft.mode)}
 							title={intent.kind === "blocked" ? intent.reason : (attachBlock ?? submitLabel(intent, situation, draft.mode))}
 						>
-							<Icon name="arrowUp" />
+							{send.isPending ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="arrowUp" />}
 						</button>
 					) : null}
 				</div>

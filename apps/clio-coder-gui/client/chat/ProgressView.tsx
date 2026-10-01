@@ -4,21 +4,27 @@ import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { formatCost } from "../api/clock.js";
 import { Icon } from "../design/icons.js";
-import { ClioPulse } from "../shell/ClioMark.js";
+import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { boardView, type PlanRow } from "./board-model.js";
 import { changeCounts, summarizeChanges } from "./changes-model.js";
 import { foldFleetRuns, isLiveRun } from "./fleet-facts.js";
 import { compactCount, compactDuration, taskOverview } from "./overview-model.js";
 import type { PaneSession, PaneView } from "./pane-model.js";
 
-function PlanGlyph({ tone }: { tone: PlanRow["tone"] }) {
+function PlanGlyph({ tone, live }: { tone: PlanRow["tone"]; live: boolean }) {
 	if (tone === "success")
 		return (
 			<span className="pane-step__glyph is-done" aria-hidden="true">
 				<Icon name="check" />
 			</span>
 		);
-	if (tone === "running") return <ClioPulse size={16} />;
+	// A step the plan records as running spins only while the task is working; afterwards it is a record.
+	if (tone === "running")
+		return live ? (
+			<ClioPulse size={PULSE_SIZE.step} />
+		) : (
+			<span className="pane-step__glyph is-blocked" aria-hidden="true" />
+		);
 	if (tone === "fail" || tone === "warn") return <span className="pane-step__glyph is-blocked" aria-hidden="true" />;
 	return <span className="pane-step__glyph" aria-hidden="true" />;
 }
@@ -63,6 +69,7 @@ export function ProgressView({
 	const changes = useMemo(() => summarizeChanges(session.tools, workspaceRoot), [session.tools, workspaceRoot]);
 	const liveWorkers = useMemo(() => foldFleetRuns(session.fleet).filter(isLiveRun).length, [session.fleet]);
 	const last = session.turns.at(-1);
+	const working = open && overview.running;
 	const state = overview.running
 		? "Working"
 		: last?.status === "failed"
@@ -85,7 +92,7 @@ export function ProgressView({
 				<header>
 					<h2 id="pane-goal">Task</h2>
 					<span className="pane-card__state" data-state={state}>
-						{overview.running ? <ClioPulse size={12} /> : null}
+						{working ? <ClioPulse size={PULSE_SIZE.inline} /> : null}
 						{state}
 					</span>
 				</header>
@@ -106,7 +113,7 @@ export function ProgressView({
 					<ol className="pane-steps">
 						{plan.rows.map((row) => (
 							<li key={row.id} data-tone={row.tone}>
-								<PlanGlyph tone={row.tone} />
+								<PlanGlyph tone={row.tone} live={working} />
 								<span>
 									{row.title}
 									{row.reason ? <small>{row.reason}</small> : null}

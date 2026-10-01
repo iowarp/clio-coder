@@ -25,7 +25,7 @@ import { StatusMark } from "../design/status.js";
 import { useShortcut } from "../interaction/use-shortcut.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
-import { ClioLogo, ClioPulse } from "../shell/ClioMark.js";
+import { ClioLogo, ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { Menu, MenuItem } from "../shell/Menu.js";
 import { taskTitle } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
@@ -216,13 +216,14 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const workspaceRoot = workspace.data?.path;
 	const title = taskTitle(snapshot);
 	const workspaceName = workspace.data?.name ?? "Project";
-	const elapsed =
-		running && turn?.startedAt && now > 0 ? formatDuration(Math.max(0, now - Date.parse(turn.startedAt))) : null;
+	const elapsedMs = running && turn?.startedAt && now > 0 ? Math.max(0, now - Date.parse(turn.startedAt)) : 0;
+	// Sub-second figures ("0ms") say nothing; the chip shows time once it is a whole second.
+	const elapsed = elapsedMs >= 1000 ? formatDuration(elapsedMs) : null;
 	const canClose = snapshot.state === "open" && !running;
 	const paneOpen = pane.open;
 	const chip: { tone: "working" | "approval" | "failed" | "quiet"; label: string } | null = pending
 		? { tone: "approval", label: "Needs your approval" }
-		: running
+		: running && snapshot.state === "open"
 			? {
 					tone: "working",
 					label: [liveWorkers > 0 ? `Waiting on ${workerCount(liveWorkers)}` : "Working", elapsed ?? null]
@@ -253,7 +254,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						</Link>
 						{chip ? (
 							<p className="wb-chip wb-chip--status" data-tone={chip.tone} role="status">
-								{chip.tone === "working" ? <ClioPulse size={14} /> : null}
+								{chip.tone === "working" ? <ClioPulse size={PULSE_SIZE.inline} /> : null}
 								<span>{chip.label}</span>
 								{snapshot.recoveredOrphan ? <span>· recovered after a server interruption</span> : null}
 							</p>

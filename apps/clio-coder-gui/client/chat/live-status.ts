@@ -27,7 +27,8 @@ export interface LiveStatus {
 }
 
 /**
- * Single-codepoint glyphs, so the chip never reflows as the state changes.
+ * Single-codepoint glyphs. The four working states render the Clio spinner instead (`isWorking`);
+ * their entries remain as the plain-text form of the same state.
  */
 export const LIVE_GLYPHS: Readonly<Record<LiveState, string>> = {
 	starting: "◌",
@@ -40,6 +41,15 @@ export const LIVE_GLYPHS: Readonly<Record<LiveState, string>> = {
 	failed: "✕",
 	stopped: "–",
 };
+
+/**
+ * The states in which Clio itself is doing something. Those draw the Clio spinner; the rest keep their
+ * glyph and word. A state is only "working" for a turn that is live in an open session, which the
+ * caller decides: a replayed or recorded turn never reaches one of these states.
+ */
+export const WORKING_STATES: ReadonlySet<LiveState> = new Set<LiveState>(["starting", "thinking", "writing", "acting"]);
+
+export const isWorking = (state: LiveState): boolean => WORKING_STATES.has(state);
 
 /**
  * The tone is supplementary. `StatusMark` renders a glyph and a word alongside it, so the state

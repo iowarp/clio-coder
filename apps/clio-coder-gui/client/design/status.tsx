@@ -1,3 +1,5 @@
+import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
+
 /**
  * The semantic status ramp. The truthfulness contract needs measured,
  * estimated, reported, replayed, unavailable, failed, stopped, skipped and
@@ -23,16 +25,23 @@ export function StatusMark({
 	label,
 	detail,
 	title,
+	live = false,
 }: {
 	tone?: StatusTone;
 	label: string;
 	detail?: string;
 	title?: string;
+	/**
+	 * Clio, a worker or a tool is doing this right now, so the mark carries the Clio spinner instead of
+	 * the tone's glyph. Pass it only for live work. A recorded or replayed state that merely reads
+	 * "running" keeps its glyph, because a spinner would claim activity nothing is performing.
+	 */
+	live?: boolean;
 }) {
 	return (
-		<span className="status-mark" data-tone={tone} title={title}>
+		<span className="status-mark" data-tone={tone} data-live={live ? "yes" : undefined} title={title}>
 			<span className="status-mark__glyph" aria-hidden="true">
-				{TONE_GLYPHS[tone]}
+				{live ? <ClioPulse size={PULSE_SIZE.inline} /> : TONE_GLYPHS[tone]}
 			</span>
 			{label}
 			{detail ? <span className="status-mark__detail">{detail}</span> : null}

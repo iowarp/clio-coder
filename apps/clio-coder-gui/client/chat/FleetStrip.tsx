@@ -14,6 +14,7 @@ import { STEER_TEXT_MAX_BYTES } from "../../contracts/steering.js";
 import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
+import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { capabilityRefusal, steeringAffordances } from "./composer-model.js";
 import {
 	FLEET_EMPTY,
@@ -31,6 +32,7 @@ import {
 	foldFleetRuns,
 	guidanceReady,
 	isLiveRun,
+	isWorkingRun,
 	type SteerOutcome,
 	steerOutcome,
 } from "./fleet-facts.js";
@@ -172,15 +174,25 @@ function RunSteer({ run, steering }: { run: FleetRun; steering: RunSteering }) {
 }
 
 /** The run rows alone, so a dispatch tool card can render its own matching runs inline. */
-export function FleetRunRows({ runs, steering }: { runs: readonly FleetRun[]; steering?: RunSteering | undefined }) {
+export function FleetRunRows({
+	runs,
+	steering,
+	sessionOpen = false,
+}: {
+	runs: readonly FleetRun[];
+	steering?: RunSteering | undefined;
+	/** A worker spins only while its session is open. In a recorded session "running" is a record. */
+	sessionOpen?: boolean;
+}) {
 	return (
 		<ul className="fleet-runs">
 			{runs.map((run) => {
 				const note = fleetRunNote(run);
+				const working = sessionOpen && isWorkingRun(run);
 				return (
 					<li className="fleet-run" key={run.runId}>
 						<span className="fleet-run__glyph" aria-hidden="true">
-							{FLEET_GLYPHS[run.state]}
+							{working ? <ClioPulse size={PULSE_SIZE.inline} /> : FLEET_GLYPHS[run.state]}
 						</span>
 						<span className="fleet-run__agent">{run.agentId}</span>
 						<span className="fleet-run__task">
@@ -233,7 +245,11 @@ export function FleetStrip({ client, session }: { client: Client; session: Sessi
 						</button>
 						<p role="status">{fleetFilterStatus(shown.length, runs.length)}</p>
 					</div>
-					{shown.length === 0 ? <p>{FLEET_EMPTY_FILTERED}</p> : <FleetRunRows runs={shown} steering={steering} />}
+					{shown.length === 0 ? (
+						<p>{FLEET_EMPTY_FILTERED}</p>
+					) : (
+						<FleetRunRows runs={shown} steering={steering} sessionOpen={session.state === "open"} />
+					)}
 				</>
 			) : (
 				<p>{FLEET_EMPTY}</p>
@@ -287,7 +303,7 @@ export const LiveWorkers = memo(function LiveWorkers({
 	const steering = sessionOpen && steeringAffordances(capabilities.data).dispatch ? { client, sessionId } : undefined;
 	return (
 		<section className="live-workers" aria-label={liveWorkersLabel(live.length)}>
-			<FleetRunRows runs={live} steering={steering} />
+			<FleetRunRows runs={live} steering={steering} sessionOpen={sessionOpen} />
 		</section>
 	);
 });

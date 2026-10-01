@@ -1,7 +1,17 @@
 /**
- * The brand's concentric "C", drawn as three counter-rotating arcs so the mark itself is the
- * activity indicator. Outer rings use the accent, the inner one the secondary, as in the logo.
- * Motion is CSS only and stops under `prefers-reduced-motion`, where the arcs read as the static mark.
+ * The sizes ClioPulse is drawn at, defined once. An inline mark beside a word, a list or task row,
+ * a step in a plan, and a stage (the setup wizard, an empty state). Pass one of these, not a number.
+ */
+export const PULSE_SIZE = { inline: 12, row: 14, step: 16, stage: 24 } as const;
+
+/**
+ * The one "Clio is working" indicator in the app: the brand's concentric "C", drawn as three
+ * counter-rotating arcs so the mark itself is the activity indicator. Outer rings use the accent, the
+ * inner one the secondary, as in the logo. Motion is CSS only and stops under `prefers-reduced-motion`.
+ *
+ * It means Clio, a worker, a tool or the setup child is doing something right now. It is never
+ * decoration and never stands for ordinary data loading. It is decorative to assistive technology
+ * unless it gets a `label`, so pair it with a word that carries the state.
  */
 export function ClioPulse({ size = 16, label }: { size?: number; label?: string }) {
 	return (

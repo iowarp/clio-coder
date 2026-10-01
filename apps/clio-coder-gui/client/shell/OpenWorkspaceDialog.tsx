@@ -3,6 +3,7 @@ import type { Client } from "../api/client.js";
 import { Dialog } from "../interaction/Dialog.js";
 import type { ProjectLaunch } from "../pages/project-open.js";
 import { WorkspaceBrowser } from "../pages/workspace-browser.js";
+import { ClioPulse, PULSE_SIZE } from "./ClioMark.js";
 
 /**
  * The server owns paths, so this is the browser's stand-in for a native folder dialog: type or paste
@@ -42,6 +43,7 @@ export function OpenWorkspaceDialog({
 					spellCheck={false}
 				/>
 				<button className="primary" type="submit" disabled={launch.busy || path.trim() === ""}>
+					{launch.busy ? <ClioPulse size={PULSE_SIZE.row} /> : null}
 					{launch.busy ? "Opening…" : "Open"}
 				</button>
 			</form>

@@ -9,7 +9,14 @@ import { StatusMark } from "../design/status.js";
 import { steeringAffordances } from "./composer-model.js";
 import { FleetRunPanel } from "./FleetRunPanel.js";
 import { FleetRunRows } from "./FleetStrip.js";
-import { FLEET_STATE_LABELS, FLEET_STATE_TONES, fleetNotices, fleetRunDetail, isLiveRun } from "./fleet-facts.js";
+import {
+	FLEET_STATE_LABELS,
+	FLEET_STATE_TONES,
+	fleetNotices,
+	fleetRunDetail,
+	isLiveRun,
+	isWorkingRun,
+} from "./fleet-facts.js";
 import { workerGraph } from "./worker-graph-model.js";
 
 export const WorkerGraph = memo(function WorkerGraph({
@@ -32,6 +39,7 @@ export const WorkerGraph = memo(function WorkerGraph({
 	const shown = liveOnly ? graph.nodes.filter((node) => isLiveRun(node.run)) : graph.nodes;
 	const selection = graph.nodes.find((node) => node.run.runId === selected);
 	const running = session.turns.at(-1)?.status === "running";
+	const open = session.state === "open";
 	return (
 		<section className="worker-graph" aria-label="Agent activity">
 			<div className="worker-graph__heading">
@@ -63,7 +71,7 @@ export const WorkerGraph = memo(function WorkerGraph({
 					<strong>Clio Coder</strong>
 					<small>Main conversation</small>
 				</div>
-				<StatusMark tone={running ? "running" : "neutral"} label={running ? "Working" : "Idle"} />
+				<StatusMark live={running && open} tone={running ? "running" : "neutral"} label={running ? "Working" : "Idle"} />
 			</div>
 			{graph.nodes.length > 0 ? (
 				<>
@@ -101,7 +109,11 @@ export const WorkerGraph = memo(function WorkerGraph({
 										) : null}
 										{run.node ? <code>{run.node}</code> : null}
 									</span>
-									<StatusMark tone={FLEET_STATE_TONES[run.state]} label={FLEET_STATE_LABELS[run.state]} />
+									<StatusMark
+										live={open && isWorkingRun(run)}
+										tone={FLEET_STATE_TONES[run.state]}
+										label={FLEET_STATE_LABELS[run.state]}
+									/>
 								</button>
 								{selected === run.runId && selection ? (
 									<div className="worker-graph__detail">
@@ -109,10 +121,9 @@ export const WorkerGraph = memo(function WorkerGraph({
 										<code title={run.runId}>{run.runId}</code>
 										<FleetRunRows
 											runs={[run]}
+											sessionOpen={open}
 											steering={
-												session.state === "open" && steeringAffordances(capabilities.data).dispatch
-													? { client, sessionId: session.id }
-													: undefined
+												open && steeringAffordances(capabilities.data).dispatch ? { client, sessionId: session.id } : undefined
 											}
 										/>
 									</div>

@@ -6,7 +6,7 @@ import type { SessionSnapshot, Workspace } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import type { ConnectionState } from "../api/events.js";
 import { Icon } from "../design/icons.js";
-import { ClioLogo, ClioPulse } from "./ClioMark.js";
+import { ClioLogo, ClioPulse, PULSE_SIZE } from "./ClioMark.js";
 import { chordHint } from "./chords.js";
 import { STATE_LABELS, sessionIdFromPath, shortAge, type TaskRow, taskRows } from "./shell-model.js";
 import { type TaskActions, useMinuteClock } from "./tasks.js";
@@ -83,7 +83,7 @@ export function TaskSidebar({
 					onClick={() => activeWorkspaceId && actions.newTask(activeWorkspaceId)}
 					title={activeWorkspaceId ? "Start a new task in the current project" : "Open a project first"}
 				>
-					<Icon name="compose" />
+					{actions.launch.busy ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="compose" />}
 					<span>{actions.launch.busy ? "Starting…" : "New task"}</span>
 					<kbd>{chordHint("newTask")}</kbd>
 				</button>
@@ -304,8 +304,8 @@ function TaskItem({
 	const label = STATE_LABELS[row.state];
 	const busy = actions.resuming === row.id || actions.closing === row.id;
 	const glyph =
-		row.state === "working" || row.state === "starting" ? (
-			<ClioPulse size={14} />
+		row.state === "working" || row.state === "starting" || actions.resuming === row.id ? (
+			<ClioPulse size={PULSE_SIZE.row} />
 		) : row.state === "approval" ? (
 			<span className="wb-dot wb-dot--approval" aria-hidden="true" />
 		) : row.state === "failed" ? (

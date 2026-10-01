@@ -24,6 +24,7 @@ import { formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
 import { countRender } from "../render/render-probe.js";
+import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { ActivityGroup } from "./ActivityGroup.js";
 import { isAwaitingAnswer } from "./approval-model.js";
 import {
@@ -38,7 +39,15 @@ import {
 } from "./chat-turn.js";
 import { turnOutcome } from "./composer-model.js";
 import type { HealthRow } from "./health.js";
-import { isLive, LIVE_GLYPHS, LIVE_TONES, type LiveStatus, livePlaceholder, liveStatus } from "./live-status.js";
+import {
+	isLive,
+	isWorking,
+	LIVE_GLYPHS,
+	LIVE_TONES,
+	type LiveStatus,
+	livePlaceholder,
+	liveStatus,
+} from "./live-status.js";
 import { MessageActions, TurnOutcome } from "./message-actions.js";
 import { ReasoningDisclosure } from "./Reasoning.js";
 import { TurnChanges } from "./TurnChanges.js";
@@ -73,6 +82,8 @@ function sameChatTurn(previous: ChatTurnProps, next: ChatTurnProps): boolean {
 	if (previous.liveWorkers !== next.liveWorkers) return false;
 	if (previous.notices !== next.notices) return false;
 	if (previous.stopping !== next.stopping) return false;
+	// A live turn only spins while its session is open.
+	if (!previous.turn.settled && previous.session.state !== next.session.state) return false;
 	// The live chip reads the current request, including its status and escalation facts.
 	if (!previous.turn.settled && previous.pending !== next.pending) return false;
 	// An anchored approval only reads the pending request for its own tool call. A request in
@@ -92,10 +103,11 @@ function sameChatTurn(previous: ChatTurnProps, next: ChatTurnProps): boolean {
 	return sameTurnView(previous, next);
 }
 
-function LiveChip({ status }: { status: LiveStatus }) {
+function LiveChip({ status, working }: { status: LiveStatus; working: boolean }) {
 	return (
 		<span className="live-chip" data-state={status.state}>
 			<StatusMark
+				live={working}
 				tone={LIVE_TONES[status.state]}
 				label={status.label}
 				{...(status.detail === null ? {} : { detail: status.detail })}
@@ -138,6 +150,8 @@ export const ChatTurnView = memo(function ChatTurnView({
 			? { ...reported, detail: describeTool(last, workspaceRoot) }
 			: reported;
 	const live = isLive(status) && !turn.settled;
+	// A turn row stuck at "running" in a session that is no longer open is a record, not activity.
+	const working = live && isWorking(status.state) && (session.state === "open" || session.state === "starting");
 	const request = requestView(turn);
 	const author = responseAuthor(turn);
 	const startedAt = turnStartedAt(row);
@@ -189,7 +203,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 					<div className="chat-response__meta">
 						<span className={author.delegated ? "chat-response__who" : "sr-only"}>{author.name}</span>
 						{/* A settled turn states its outcome once, in the footer. */}
-						{live || row === undefined ? <LiveChip status={status} /> : null}
+						{live || row === undefined ? <LiveChip status={status} working={working} /> : null}
 					</div>
 				) : (
 					<span className="sr-only">{author.name}</span>
@@ -197,7 +211,8 @@ export const ChatTurnView = memo(function ChatTurnView({
 				<div className="chat-response__body">
 					{turn.segments.length === 0 && live ? (
 						<p className="chat-response__placeholder">
-							<span aria-hidden="true">{LIVE_GLYPHS[status.state]}</span> {livePlaceholder(status)}
+							{working ? <ClioPulse size={PULSE_SIZE.row} /> : <span aria-hidden="true">{LIVE_GLYPHS[status.state]}</span>}{" "}
+							{livePlaceholder(status)}
 						</p>
 					) : null}
 					{turn.segments.map((segment, index) => {
@@ -225,6 +240,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 										session={session}
 										workspaceRoot={workspaceRoot}
 										nowMs={nowMs}
+										working={working}
 									/>
 								);
 						}
