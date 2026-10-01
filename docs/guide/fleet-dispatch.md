@@ -302,8 +302,17 @@ merge path as compete. A conflict fails closed with
 `worktree_merge_conflict` and preserves the branch and worktree. A worker whose
 own report lists a failing validation, or names a check it did not run
 (`declaredChecks`) with no validation that passed, is not merged unless host
-verification passed: the run fails, its work is committed on the preserved branch, and the
-detail names the `git merge` that applies it. Preserve
+verification passed. In the TUI an operator is asked first with a `Merge task branch?` card
+that shows the branch, the changed paths, and the failing or unrun check. `Merge` lands the
+branch through the same guarded path (protected paths included) and the run succeeds. `Keep branch`
+withholds: the run fails with `merge_withheld`, its work is committed on the preserved branch, and
+the detail names the `git merge` that applies it. `Discard` asks `Delete branch <b> and its worktree?
+This cannot be undone.` and, on `Delete`, removes the worktree and branch (`Back` or Esc returns to
+the card). Esc on the card, no answer within `fleet.permissions.escalation.timeoutMs`, or a cancelled
+run all keep the branch. Headless, ACP, and any surface without an operator always withhold. Cards
+for a batch appear one at a time, and members that pass the gate merge without waiting. The receipt's
+`worktree.detail` begins `operator merge:`, `operator keep:`, or `operator discard:` (with
+`worktree.reason` `operator_discarded`) when the card decided. Preserve
 application never merges and reports the branch. A detached task applies when its run finalizes, so `monitor(mode="collect")` returns the sealed application receipt.
 Admission refuses a non-git checkout, a read-only agent, compete mode, or an
 explicit cwd outside the parent checkout with a named reason.
