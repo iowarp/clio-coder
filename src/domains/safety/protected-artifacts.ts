@@ -307,7 +307,8 @@ export function shellCommandSteps(command: string, home?: string): ShellCommandS
 		const truncatingRedirects: string[] = [];
 		for (let index = 0; index < segment.length - 1; index += 1) {
 			const operator = segment[index];
-			if (operator === undefined || operator.value === ">>" || operator.value === "&>>") continue;
+			// `<>` opens read-write and does not truncate.
+			if (operator === undefined || [">>", "&>>", "<>"].includes(operator.value)) continue;
 			const target = redirectWriteTarget(operator, segment[index + 1]);
 			const targetToken = segment[index + 1];
 			if (target !== null && targetToken !== undefined && isInterestingWriteTarget(target)) {
@@ -935,7 +936,8 @@ function shellCommandWords(segment: ReadonlyArray<ShellToken>): ShellToken[] {
 function homeExpanded(token: ShellToken, home: string | undefined): string {
 	if (home === undefined || token.homeRelative !== true) return token.value;
 	const reference = /^(?:\$\{HOME\}|\$HOME|~)/u.exec(token.value)?.[0] ?? "";
-	return `${home.replace(/\/+$/u, "")}${token.value.slice(reference.length)}`;
+	// HOME=/ leaves an empty base, and `~` alone would then expand to nothing.
+	return `${home.replace(/\/+$/u, "")}${token.value.slice(reference.length)}` || "/";
 }
 
 function resourceCliMutatesSkills(
