@@ -3168,11 +3168,17 @@ export function createDispatchBundle(
 		// once a second and would let one flash up first.
 		if (run.aborted) return null;
 		// The worker has exited and nothing runs on its lease, but the assignment
-		// holds a global, node, and endpoint slot until the receipt settles. A card
-		// can wait out its whole timeout, so it must not keep other dispatches
-		// queued behind a slot nothing is using. The settle that follows releases
-		// by the same assignment id and finds nothing left to release.
-		capacityAdmission.releaseAssignment(run.lineage.rootRunId);
+		// holds a global, node, and endpoint slot until the receipt settles, and a
+		// card can wait out its whole timeout. Release it so a lone dispatch is not
+		// queued behind a slot nothing uses. Not when a sibling is queued or still
+		// active: releasing is what would admit it into this checkout while the
+		// operator's Merge lands (the writer lease is shared within a process, so it
+		// would not stop it), and a batch's members share one checkout. They keep
+		// today's order, with the slot held until the card settles. The later settle
+		// releases by the same assignment id and finds nothing left when released.
+		const siblingsShareCheckout =
+			pendingCapacity.size > 0 || [...active.values()].some((other) => other.runId !== run.runId);
+		if (!siblingsShareCheckout) capacityAdmission.releaseAssignment(run.lineage.rootRunId);
 		const canceled = new AbortController();
 		const watch = setInterval(() => {
 			if (run.aborted) canceled.abort();
