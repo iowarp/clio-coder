@@ -1,0 +1,64 @@
+name: pages
+
+# Publishes site/ to https://coder.iowarp.ai once it is on main. Deploys when
+# the site or the two installers it serves change, and on manual dispatch.
+# Before 0.6.0 the site is published from the gh-pages branch by
+# site/publish-pages.sh instead, and Pages stays on "Deploy from a branch" until
+# the maintainer switches the source to GitHub Actions. This workflow never
+# touches the ci or release jobs.
+on:
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - scripts/install.sh
+      - scripts/install.ps1
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The pinned documentation commit must be reachable for the provenance check.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Verify the pinned documentation snapshot
+        run: |
+          node site/deployment-check.mjs
+          python3 site/sync-docs.py --check
+      - name: Build the site
+        run: node site/build.mjs --out "$RUNNER_TEMP/site" --revision "$GITHUB_SHA"
+      - name: Check the built site
+        run: python3 site/check.py "$RUNNER_TEMP/site"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
