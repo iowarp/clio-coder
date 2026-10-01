@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isDevVersion } from "../../core/build-info.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import type { Installation } from "./install-method.js";
 import { compareReleaseVersions, fetchReleaseVersion, parseReleaseVersion } from "./release-version.js";
@@ -85,8 +86,11 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		}
 		signal.throwIfAborted();
 		// Development trees, local/npx copies and unknown layouts never generate registry traffic.
+		// A `-dev` version has no published artifact: the `beta` track would call it an rc, and
+		// `latest` is always an older stable, so neither answer is one the developer should see.
 		const running = parseReleaseVersion(runningVersion);
-		if (!["npm", "pnpm", "bun"].includes(installation.kind) || running === null) return null;
+		if (!["npm", "pnpm", "bun"].includes(installation.kind) || running === null || isDevVersion(runningVersion))
+			return null;
 		// A pre-release install also reads `beta`, so an rc learns about the next rc
 		// as well as the final release. Stable installs never see pre-releases.
 		const tags: ReleaseTag[] = running.pre.length > 0 ? ["latest", "beta"] : ["latest"];

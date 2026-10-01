@@ -8,6 +8,7 @@
  * overlong expressions are rejected instead of being treated as compatible.
  */
 
+import { compatibilityVersion } from "../../core/build-info.js";
 import { getVersionInfo } from "../lifecycle/version.js";
 
 const MAX_RANGE_CHARS = 256;
@@ -286,7 +287,7 @@ export function evaluateClioCompatibility(
 	const rangeValid = isValidSemVerRange(range);
 	return {
 		rangeValid,
-		satisfied: rangeValid && satisfiesSemVerRange(runningVersion, range),
+		satisfied: rangeValid && satisfiesSemVerRange(compatibilityVersion(runningVersion), range),
 		runningVersion,
 	};
 }

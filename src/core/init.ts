@@ -7,6 +7,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { REGISTERED_MIGRATION_IDS } from "../domains/lifecycle/migrations/registry-ids.js";
+import { isDevVersion } from "./build-info.js";
 import { DEFAULT_SETTINGS_YAML, SETTINGS_FILE_MODE } from "./defaults.js";
 import { readClioVersion } from "./package-root.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
@@ -146,9 +147,16 @@ export function initializeClioHome(): InitReport {
 	// can invent different install times, or a stale writer can erase the other
 	// process's noticedVersion after an upgrade.
 	const installPath = join(stateDir, "install.json");
-	const currentVersion = readClioVersion();
+	const runningVersion = readClioVersion();
 	withStateFileLockSync(installPath, () => {
 		const installMetadata = readInstallMetadata(installPath);
+		// A `-dev` checkout build is not a release, so it never becomes the recorded
+		// version of a home it shares with an installed one. Stamping `0.6.0-dev`
+		// would make the installed 0.5.9 read an upgrade from a version it never
+		// shipped, and doctor, upgrade and the one-time notice all key on this field.
+		// A home the dev build creates still records its own version.
+		const currentVersion =
+			installMetadata !== null && isDevVersion(runningVersion) ? installMetadata.version : runningVersion;
 		if (!installMetadata) {
 			const payload: InstallMetadata = {
 				version: currentVersion,

@@ -1,6 +1,6 @@
 import { accessSync, chmodSync, constants, type Dirent, existsSync, readdirSync, type Stats, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { readClioVersionLabel } from "../../core/build-info.js";
+import { isDevVersion, readClioVersionLabel } from "../../core/build-info.js";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
@@ -516,7 +516,10 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 
 	const stateRead = readStateInfoResult();
 	const state = stateRead.info;
-	const stateCurrent = Boolean(state && state.version === version.clio);
+	// A dev build never rewrites the recorded version (see initializeClioHome), so
+	// a record from the installed release is the expected state, not a stale one.
+	const devBuild = isDevVersion(version.clio);
+	const stateCurrent = Boolean(state && (state.version === version.clio || devBuild));
 	// Each stamp names what actually happened. A record rebuilt by `--fix` over a
 	// state root whose install time was gone carries no installedAt, and the row
 	// used to print the repair minute as the day Clio was installed.
@@ -533,7 +536,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 		name: "state metadata",
 		detail: state
 			? stateCurrent
-				? `${state.version} (${stateStamp})`
+				? `${state.version} (${stateStamp})${state.version === version.clio ? "" : "; this dev build leaves the recorded version alone"}`
 				: `stale ${state.version} (${stateStamp}); current ${version.clio} (run \`clio-coder doctor --fix\`)`
 			: stateRead.problem !== null
 				? // Present but unreadable. `--fix` cannot repair this one: it fails on
