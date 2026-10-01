@@ -63,7 +63,10 @@ export function coordinatorDispatchParameters() {
 		list: Type.Optional(Type.Boolean({ description: "Discover available worker recipes and their tools." })),
 		agent: Type.Optional(Type.String({ description: "Recipe id from list; choose a specialist for the task." })),
 		task: Type.Optional(
-			Type.String({ description: "One assignment with outcome and constraints; never combine with tasks." }),
+			Type.String({
+				description:
+					"One self-contained assignment with outcome and constraints, never the operator's words; never combine with tasks.",
+			}),
 		),
 		tasks: Type.Optional(
 			Type.Array(
@@ -233,7 +236,11 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 				},
 			),
 		),
-		task: Type.Optional(Type.String({ description: "One worker assignment. Use tasks for a batch." })),
+		task: Type.Optional(
+			Type.String({
+				description: "One self-contained worker assignment, never the operator's words. Use tasks for a batch.",
+			}),
+		),
 		tasks: Type.Optional(
 			Type.Array(
 				Type.Union([
