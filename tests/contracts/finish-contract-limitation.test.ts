@@ -101,6 +101,40 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		strictEqual(assessment.kind, "engage");
 	});
 
+	it("retains package identity behind a literal workspace cd prefix", () => {
+		const root = process.cwd();
+		for (const command of [`cd '${root}' && npm test`, `cd . && npm test`]) {
+			const assessment = assessFinishContract({
+				sessionEntries: [
+					...mutationWindow(),
+					toolCall("bash-1", ToolNames.Bash, { command }),
+					toolResult("bash-1", ToolNames.Bash, false),
+					assistantMessage("assistant-1", "Done."),
+				],
+				assistantTurnId: "assistant-1",
+				workspaceRoot: root,
+				rigor: "high",
+				activeAcceptance: { expectedOutputs: [], verification: [{ check: "test", timeoutMs: 1000 }] },
+			});
+			strictEqual(assessment.kind, "ok");
+			strictEqual(assessment.reason, "validation_evidence");
+			strictEqual(assessment.evidence[0]?.cwd, root);
+		}
+		for (const command of ["cd .. && npm test", "cd . || npm test", "cd '$DEST' && npm test"]) {
+			const assessment = assessFinishContract({
+				sessionEntries: [
+					...mutationWindow(),
+					toolCall("bash-1", ToolNames.Bash, { command }),
+					toolResult("bash-1", ToolNames.Bash, false),
+					assistantMessage("assistant-1", "Done."),
+				],
+				assistantTurnId: "assistant-1",
+				workspaceRoot: root,
+			});
+			strictEqual(assessment.kind, "engage");
+		}
+	});
+
 	it("keeps validation evidence ahead of a limitation receipt in the decision order", () => {
 		const entries = [
 			...mutationWindow(),

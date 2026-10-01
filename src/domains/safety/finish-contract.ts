@@ -11,6 +11,7 @@ import {
 	detectValidationCommand,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
+	scanShellLike,
 	toolMutationPaths,
 } from "./protected-artifacts.js";
 import type { Rigor } from "./rigor.js";
@@ -512,7 +513,9 @@ function bashValidationCall(
 	const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
 	const command = typeof args?.command === "string" ? args.command : null;
 	if (command === null) return null;
-	const detected = acceptanceValidationCommand(command, acceptanceChecks);
+	const execution = workspaceValidationCommand(command, args?.cwd, workspaceRoot);
+	if (execution === null) return null;
+	const detected = acceptanceValidationCommand(execution.command, acceptanceChecks);
 	if (detected.kind !== "validation") return null;
 	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
 	if (toolCallId === null) return null;
@@ -520,7 +523,7 @@ function bashValidationCall(
 		toolCallId,
 		command: detected.matched,
 		...validationCheckFields(detected.matched),
-		execution: packageCommandExecution(command, args?.cwd, workspaceRoot),
+		execution: packageCommandExecution(execution.command, execution.cwd, workspaceRoot),
 	};
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) candidate.turnId = turnId;
@@ -720,14 +723,16 @@ function bashExecutionEvidence(
 	if (typeof record.command !== "string") return null;
 	if (record.cancelled === true) return null;
 	if (record.exitCode !== 0) return null;
-	const detected = acceptanceValidationCommand(record.command, acceptanceChecks);
+	const execution = workspaceValidationCommand(record.command, record.cwd, workspaceRoot);
+	if (execution === null) return null;
+	const detected = acceptanceValidationCommand(execution.command, acceptanceChecks);
 	if (detected.kind !== "validation") return null;
 	const contextMarker = record.excludeFromContext === true ? " [not sent to model]" : "";
 	const evidence: FinishContractEvidence = {
 		kind: "validation_command",
 		summary: `validation command passed: ${detected.matched}${contextMarker}`,
 		...validationCheckFields(detected.matched),
-		...packageCommandExecution(record.command, record.cwd, workspaceRoot),
+		...packageCommandExecution(execution.command, execution.cwd, workspaceRoot),
 	};
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) evidence.turnId = turnId;
@@ -799,6 +804,32 @@ function declaredCheckExecution(entry: unknown, check: string | undefined): Vali
 		argv: details.argv,
 		...(typeof details.durationMs === "number" ? { durationMs: details.durationMs } : {}),
 	};
+}
+
+/** Resolve a literal leading cd without crediting checks from a different workspace. */
+function workspaceValidationCommand(
+	command: string,
+	cwd: unknown,
+	workspaceRoot: string | undefined,
+): { command: string; cwd: unknown } | null {
+	const tokens = scanShellLike(command);
+	if (tokens[0]?.value !== "cd") return { command, cwd };
+	const directory = tokens[1];
+	const separator = tokens[2];
+	if (
+		!workspaceRoot ||
+		!directory ||
+		directory.operator ||
+		directory.substitutions?.length ||
+		directory.homeRelative ||
+		/[$`]/u.test(directory.value) ||
+		separator?.operator !== true ||
+		separator.value !== "&&"
+	)
+		return null;
+	const executionCwd = resolve(workspaceRoot, typeof cwd === "string" ? cwd : ".", directory.value);
+	if (!isWithinWorkspace(executionCwd, workspaceRoot)) return null;
+	return { command: command.slice(separator.end).trim(), cwd: executionCwd };
 }
 
 /** Exact package commands retain their execution cwd; a matched substring proves no project identity. */
