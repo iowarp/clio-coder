@@ -280,6 +280,8 @@ for (const unavailable of ["available", "down", "missing-model", "unloaded"] as 
 		const route = createBackgroundMemoryModelClient(providers, settings, 1000, null);
 		assert.ok(route);
 		assert.equal(route.targetId, unavailable === "available" ? "memory" : "chat");
+		if (unavailable === "down") assert.match(route.fallbackReason ?? "", /endpoint unreachable/);
+		if (unavailable === "missing-model") assert.match(route.fallbackReason ?? "", /unknown model: memory-model/);
 		settings.context.memory.target = "chat";
 		settings.context.memory.model = "chat-model";
 		assert.ok(

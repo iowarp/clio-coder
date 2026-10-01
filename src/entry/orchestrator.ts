@@ -1,3 +1,4 @@
+import { redactSecretString } from "../domains/safety/redaction.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -439,8 +440,8 @@ export function createBackgroundMemoryModelClient(
 	if (!fallbackOnly) {
 		try {
 			return prepareBackgroundMemoryRoute(providers, configuredTarget, configuredModel, timeoutMs, bus, "dedicated");
-		} catch {
-			fallbackReason = "configured route unavailable";
+		} catch (error) {
+			fallbackReason = `configured route unavailable: ${memoryRouteFailureCause(error)}`;
 		}
 	} else fallbackReason = "configured route client error";
 	if (!chatTarget || !chatModel || sameRoute) {
@@ -460,15 +461,15 @@ export function createBackgroundMemoryModelClient(
 
 function prepareBackgroundMemoryModel(providers: ProvidersContract, targetId: string, wireModelId: string) {
 	const status = providers.list().find((entry) => entry.target.id === targetId);
-	if (
-		status &&
-		(!status.available ||
-			status.health.status === "down" ||
-			(hasLiveModelCatalog(status) && !status.discoveredModels.includes(wireModelId)) ||
-			modelResidencyForStatus(status, wireModelId) === "absent" ||
-			modelResidencyForStatus(status, wireModelId) === "loading")
-	)
-		throw new Error("background memory route is unavailable");
+	if (status) {
+		if (!status.available) throw new Error(status.reason || "configured target unavailable");
+		if (status.health.status === "down") throw new Error(status.health.lastError || "endpoint unreachable");
+		if (hasLiveModelCatalog(status) && !status.discoveredModels.includes(wireModelId)) {
+			throw new Error(`unknown model: ${wireModelId}`);
+		}
+		const residency = modelResidencyForStatus(status, wireModelId);
+		if (residency === "absent" || residency === "loading") throw new Error(`model ${wireModelId} is ${residency}`);
+	}
 	const resolved = resolveRuntimeTarget(providers, {
 		targetId,
 		wireModelId,
@@ -647,6 +648,10 @@ function prepareBackgroundMemoryRoute(
 const emitRouteFallbackNotice = declareRuntimeNoticeProducer("background-memory-route", ["route-fallback"]);
 
 /** Production callback composition shared with routing/capacity contracts. */
+function memoryRouteFailureCause(error: unknown): string {
+	return redactSecretString(error instanceof Error ? error.message : String(error)).split("\n", 1)[0]?.slice(0, 180) || "unknown route error";
+}
+
 export function createBackgroundMemoryRouting(
 	providers: ProvidersContract,
 	getSettings: () => Readonly<ClioSettings> | undefined,
@@ -655,6 +660,7 @@ export function createBackgroundMemoryRouting(
 	let route: BackgroundMemoryRoute | null = null;
 	let snapshot: Readonly<ClioSettings> | undefined;
 	let lastNotice: string | null = null;
+	let clientFailure: string | null = null;
 	const noteFallback = (): void => {
 		if (route?.selection !== "chat-fallback") {
 			lastNotice = null;
@@ -685,11 +691,24 @@ export function createBackgroundMemoryRouting(
 					? null
 					: createBackgroundMemoryModelClient(providers, snapshot, snapshot.context.memory.timeoutMs, bus);
 			noteFallback();
-			return route?.client ?? null;
+			clientFailure = null;
+			const client = route?.client;
+			return client ? {
+				...client,
+				complete: async (request) => {
+					try {
+						return await client.complete(request);
+					} catch (error) {
+						clientFailure = memoryRouteFailureCause(error);
+						throw error;
+					}
+				},
+			} : null;
 		},
 		getFallbackModelClient: (): TaskMemoryModelClient | null => {
 			if (route?.selection !== "dedicated" || snapshot === undefined) return null;
 			route = createBackgroundMemoryModelClient(providers, snapshot, snapshot.context.memory.timeoutMs, bus, true);
+			if (route && clientFailure) route.fallbackReason = `configured route client error: ${clientFailure}`;
 			noteFallback();
 			return route?.client ?? null;
 		},
