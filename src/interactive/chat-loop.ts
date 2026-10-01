@@ -112,8 +112,10 @@ import {
 	detectTerminalFailureFromState,
 	explainInterruptedAssistant,
 	extractText,
+	isOperatorCancelReason,
 	notConfiguredNotice,
 	noticeMessage,
+	OPERATOR_CANCEL_REASON,
 	pendingSkillRequestPreamble,
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
@@ -2639,9 +2641,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// The reason is carried by the provider's aborted assistant, or by
 				// one synthetic closing record after an empty abort settles.
 				state.activeInterruptReason =
-					requestedReason && requestedReason.length > 0 ? requestedReason : "[Clio Coder] active response cancelled.";
+					requestedReason && requestedReason.length > 0 ? requestedReason : OPERATOR_CANCEL_REASON;
 				state.activeInterruptByOperator = (options?.source ?? "stream_cancel") === "stream_cancel";
-				emitFooterNotice("warning", state.activeInterruptReason, "turn.interrupted");
+				// An Esc is reported once, by the turn's Cancelled outcome. The footer
+				// carries only an interruption the operator did not ask for.
+				if (!isOperatorCancelReason(state.activeInterruptReason))
+					emitFooterNotice("warning", state.activeInterruptReason, "turn.interrupted");
 			}
 			state.runtime?.agent.abort();
 			if (wasStreaming && deps.bus) {

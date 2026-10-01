@@ -148,8 +148,22 @@ export function terminalFailureFromAssistantMessage(
  */
 export function isSelfExplainingAbort(view: { stopReason: unknown; errorMessage: unknown; text: string }): boolean {
 	if (view.stopReason !== "aborted") return false;
+	// The operator pressed Esc, so the turn receipt's `Cancelled` outcome is the
+	// whole report. An `[aborted] ...` line under a partial answer read as a
+	// failure the operator never caused.
+	if (isOperatorCancelReason(view.errorMessage)) return true;
 	if (typeof view.errorMessage === "string" && view.errorMessage.length > 0) return false;
 	return view.text.trim().length > 0;
+}
+
+/** What the model and the ledger are told when the operator cancels a streaming turn. */
+export const OPERATOR_CANCEL_REASON = "Cancelled at your request.";
+
+/** Sessions written before the calm wording still carry this text; replay must read it the same way. */
+const LEGACY_OPERATOR_CANCEL_REASON = "[Clio Coder] active response cancelled.";
+
+export function isOperatorCancelReason(value: unknown): boolean {
+	return value === OPERATOR_CANCEL_REASON || value === LEGACY_OPERATOR_CANCEL_REASON;
 }
 
 export function isLengthStopAssistantMessage(message: AgentMessage | undefined): boolean {

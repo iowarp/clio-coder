@@ -2289,6 +2289,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					markDirty();
 					return;
 				}
+				// The Esc cancel is reported once. A settled run that already carries the
+				// Cancelled outcome has said so; the row below is only for a hollow abort
+				// that left no receipt to carry it.
+				if (event.operatorCancel === true && lastSettledReceipt?.turnUsage?.outcome === "Cancelled") return;
 				const text = event.text;
 				const mark = event.operatorCancel === true ? "cancelled" : event.level;
 				const source = event.source;
