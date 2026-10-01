@@ -297,6 +297,40 @@ describe("finish contract: only a change that ran in the workspace needs validat
 		strictEqual(assessment.reason, "no_net_mutation");
 		deepStrictEqual(assessment.mutatedPaths, []);
 	});
+
+	it("settles ok/deletion_only when the turn only removed tests, and engages for removed source or a write", () => {
+		const removal = [
+			userMessage("user-1"),
+			toolCall("rm-1", ToolNames.Bash, { command: "rm -r test" }),
+			toolResult("rm-1", ToolNames.Bash, false),
+		];
+		const deleted = assessFinishContract({
+			sessionEntries: [...removal, assistantMessage("assistant-1", "Removed test/.")],
+			assistantTurnId: "assistant-1",
+		});
+		strictEqual(deleted.kind, "ok");
+		strictEqual(deleted.reason, "deletion_only");
+		const source = assessFinishContract({
+			sessionEntries: [
+				userMessage("user-1"),
+				toolCall("rm-2", ToolNames.Bash, { command: "rm src/util.js" }),
+				toolResult("rm-2", ToolNames.Bash, false),
+				assistantMessage("assistant-1", "Removed src/util.js."),
+			],
+			assistantTurnId: "assistant-1",
+		});
+		strictEqual(source.kind, "engage");
+		const edited = assessFinishContract({
+			sessionEntries: [
+				...removal,
+				toolCall("write-1", ToolNames.Write, { path: "src/a.js", content: "x" }),
+				toolResult("write-1", ToolNames.Write, false),
+				assistantMessage("assistant-1", "Removed test/ and edited src/a.js."),
+			],
+			assistantTurnId: "assistant-1",
+		});
+		strictEqual(edited.kind, "engage");
+	});
 });
 
 describe("the limitation tool", () => {

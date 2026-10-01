@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isNonSourcePath } from "../../core/test-paths.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
 import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
@@ -51,6 +52,7 @@ export interface FinishContractEvidence extends ValidationExecutionEvidence {
 export type FinishContractReason =
 	| "no_mutation"
 	| "no_net_mutation"
+	| "deletion_only"
 	| "validation_evidence"
 	| "explicit_limitation"
 	| "unvalidated_mutation";
@@ -58,7 +60,7 @@ export type FinishContractReason =
 export type FinishContractAssessment =
 	| {
 			kind: "ok";
-			reason: "no_mutation" | "no_net_mutation" | "validation_evidence" | "explicit_limitation";
+			reason: "no_mutation" | "no_net_mutation" | "deletion_only" | "validation_evidence" | "explicit_limitation";
 			evidence: ReadonlyArray<FinishContractEvidence>;
 			mutatedPaths: ReadonlyArray<string>;
 			quality?: ReadonlyArray<QualityFinding>;
@@ -99,6 +101,8 @@ interface ToolCallEvidenceCandidate {
 interface MutationCandidate {
 	toolCallId: string;
 	paths: string[];
+	/** Targets the call wrote or created, as opposed to only removed. */
+	writes: string[];
 }
 
 /**
@@ -125,7 +129,7 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 	const assistantTurnId = input.assistantTurnId ?? null;
 	const window = recentEntries(sessionEntries, assistantTurnId, input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT);
 
-	const touchedPaths = mutatingReceipts(window);
+	const { paths: touchedPaths, written } = mutatingReceipts(window);
 	if (touchedPaths.length === 0) {
 		return { kind: "ok", reason: "no_mutation", evidence: [], mutatedPaths: touchedPaths };
 	}
@@ -209,6 +213,12 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 
 	if (limitations.length > 0) {
 		return { kind: "ok", reason: "explicit_limitation", evidence: limitations, mutatedPaths };
+	}
+	// Removing tests or docs leaves nothing to check (D2-t2-b). Removing source
+	// can break imports or the build, so it still earns the advisory; quality
+	// and acceptance gates above applied either way.
+	if (mutatedPaths.every((path) => !written.has(path) && isNonSourcePath(path))) {
+		return { kind: "ok", reason: "deletion_only", evidence: [], mutatedPaths };
 	}
 
 	return {
@@ -341,17 +351,19 @@ function limitationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {
  * turn. Grounded in the same mutation notion the action classifier records, so
  * the audit ledger and this gate stay consistent about what counts as a change.
  */
-function mutatingReceipts(recent: ReadonlyArray<unknown>): string[] {
+function mutatingReceipts(recent: ReadonlyArray<unknown>): { paths: string[]; written: Set<string> } {
 	const mutationCalls = new Map<string, MutationCandidate>();
 	const paths: string[] = [];
 	const seen = new Set<string>();
+	const written = new Set<string>();
 
 	for (const entry of capabilityEntries(recent)) {
 		// A user-run `!` bash execution is self-contained: it carries its own
 		// success signal, so any mutation targets count without a paired result.
 		const bashMutation = bashExecutionMutationPaths(entry);
 		if (bashMutation !== null) {
-			for (const path of bashMutation) pushPath(paths, seen, path);
+			for (const path of bashMutation.paths) pushPath(paths, seen, path);
+			for (const path of bashMutation.writes) written.add(path);
 			continue;
 		}
 
@@ -366,11 +378,12 @@ function mutatingReceipts(recent: ReadonlyArray<unknown>): string[] {
 			const candidate = mutationCalls.get(resultId);
 			if (candidate !== undefined) {
 				for (const path of candidate.paths) pushPath(paths, seen, path);
+				for (const path of candidate.writes) written.add(path);
 			}
 		}
 	}
 
-	return paths;
+	return { paths, written };
 }
 
 /** Mutation targets for a tool call, empty for read-only/execute-only tools. */
@@ -400,7 +413,8 @@ function mutatingToolCall(entry: unknown): MutationCandidate | null {
 	if (paths.length === 0) return null;
 	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
 	if (toolCallId === null) return null;
-	return { toolCallId, paths };
+	const command = toolName === ToolNames.Bash && typeof args?.command === "string" ? args.command : null;
+	return { toolCallId, paths, writes: command === null ? paths : extractCommandWriteTargets(command) };
 }
 
 /**
@@ -409,12 +423,13 @@ function mutatingToolCall(entry: unknown): MutationCandidate | null {
  * tool_call/tool_result pairing path; returns `[]` for a successful command
  * with no write/delete target (a read-only `!` command is not a mutation).
  */
-function bashExecutionMutationPaths(entry: unknown): string[] | null {
+function bashExecutionMutationPaths(entry: unknown): { paths: string[]; writes: string[] } | null {
 	const record = asRecord(entry);
 	if (record?.kind !== "bashExecution") return null;
 	if (typeof record.command !== "string") return null;
 	if (record.cancelled === true || record.exitCode !== 0) return null;
-	return [...extractCommandWriteTargets(record.command), ...extractCommandDeleteTargets(record.command)];
+	const writes = extractCommandWriteTargets(record.command);
+	return { paths: [...writes, ...extractCommandDeleteTargets(record.command)], writes };
 }
 
 function pushPath(paths: string[], seen: Set<string>, path: string): void {

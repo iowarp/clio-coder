@@ -1,3 +1,4 @@
+import { isTestFilePath } from "../../core/test-paths.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import { mutationReportChecks } from "../agents/result-contract.js";
 
@@ -18,10 +19,6 @@ export interface MergeGateInput {
 	removedTests?: ReadonlyArray<string>;
 }
 
-const TEST_DIR = /(?:^|\/)(?:[Tt]ests?|__tests__|specs?)\//u;
-const CODE_EXTENSION = /\.(?:[cm]?[jt]sx?|py|go|rs|rb|java|kt|cs|swift|scala|exs?|php|c|cc|cpp|sh|bats)$/u;
-const TEST_FILE_NAME =
-	/\.(?:test|spec)\.[cm]?[jt]sx?$|_test\.(?:go|py|rs|rb|exs?)$|(?:^|\/)test_[^/]*\.py$|(?:Test|Tests|Spec)\.(?:java|kt|cs|swift|scala)$/u;
 /** A line that declares one test case, across the common frameworks. */
 const TEST_DECLARATION =
 	/^\s*(?:(?:test|it|describe|specify|context)(?:\.(?:only|skip|each|todo|concurrent|serial|failing))*\s*[(`]|(?:describe|it|context)\s+["']|(?:async\s+)?def\s+test_|func\s+Test\w*\s*\(|fn\s+test_|@Test\b|\[(?:Fact|Test|TestMethod)\]|(?:public\s+)?void\s+test\w*\s*\()/u;
@@ -29,10 +26,6 @@ const TEST_DECLARATION =
 const RUST_TEST_ATTRIBUTE = /^\s*#\[(?:[\w:]+::)?test\b/u;
 const REMOVED_TESTS_MAX_ENTRIES = 50;
 const DIFF_FILE_HEADER = /^diff --git a\/.+ b\/(.+)$/u;
-
-function isTestFilePath(path: string): boolean {
-	return TEST_FILE_NAME.test(path) || (TEST_DIR.test(path) && CODE_EXTENSION.test(path));
-}
 
 function declaresTest(path: string, line: string): boolean {
 	if (path.endsWith(".rs") && RUST_TEST_ATTRIBUTE.test(line)) return true;
