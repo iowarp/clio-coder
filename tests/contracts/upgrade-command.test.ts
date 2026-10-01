@@ -73,6 +73,8 @@ function installedFixture() {
 				env: {
 					...process.env,
 					...home.env,
+					HOME: home.dir,
+					npm_config_cache: join(home.dir, "npm-cache"),
 					PATH: `${bin}:${process.env.PATH}`,
 					CALL_LOG: log,
 					// The installed-entry fixture imports the TypeScript argv parser.
@@ -215,7 +217,7 @@ test("failed checks never relaunch and recovery points to migrations", (t) => {
 	assert.match(result.stdout, /upgrade --post-install/);
 });
 
-test("post-install runs repairs even with current metadata and no pending migrations", (t) => {
+test("post-install initializes integrity without running environment repairs", (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
 	const state = join(f.home.dir, "state");
@@ -223,7 +225,7 @@ test("post-install runs repairs even with current metadata and no pending migrat
 	writeFileSync(join(state, "install.json"), JSON.stringify({ version: readClioVersion() }));
 	const result = f.run(["--post-install", "--skip-migrations", "--json"]);
 	assert.equal(result.status, 0, result.stderr + result.stdout);
-	assert.deepEqual(f.calls(), [{ entry: f.entry, args: ["doctor", "--fix"] }]);
+	assert.throws(f.calls, /ENOENT/, "post-install no longer invokes environment doctor repair");
 });
 
 test("restart rejects automation and conflicting flags before changing the installation", (t) => {
@@ -256,7 +258,7 @@ test("an older dist-tag never downgrades the installed package", (t) => {
 	t.after(f.home.cleanup);
 	const result = f.run(["--json"], "lookUpAvailableVersion: async () => ({ asked: true, version: '0.0.1' }),");
 	assert.equal(result.status, 0, result.stderr + result.stdout);
-	assert.deepEqual(f.calls(), [{ entry: f.entry, args: ["doctor", "--fix"] }]);
+	assert.throws(f.calls, /ENOENT/, "post-install no longer invokes environment doctor repair");
 	assert.match(result.stdout, /keeping it/);
 });
 
@@ -273,4 +275,25 @@ test("a fresh home records every registered migration and doctor reports none pe
 	assert.equal(row?.ok, true);
 	assert.equal(row?.level, undefined);
 	assert.equal(row?.detail, `${registered.length} registered, all recorded`);
+});
+
+test("post-install integrity rejects malformed settings with useful details", (t) => {
+	const f = installedFixture();
+	t.after(f.home.cleanup);
+	mkdirSync(join(f.home.dir, "config"));
+	writeFileSync(join(f.home.dir, "config/settings.yaml"), "broken: [\n");
+	const result = f.run(["--post-install", "--skip-migrations", "--json"]);
+	assert.equal(result.status, 1, result.stdout + result.stderr);
+	assert.match(result.stdout, /settings.yaml|YAML|parse/i);
+	assert.throws(f.calls, /ENOENT/, "doctor --fix was not invoked");
+	assert.equal(readFileSync(join(f.home.dir, "config/settings.yaml"), "utf8"), "broken: [\n");
+});
+
+test("rollback refuses manager-owned installs before any child command", (t) => {
+	const f = installedFixture();
+	t.after(f.home.cleanup);
+	const result = f.run(["--rollback", "--json"]);
+	assert.equal(result.status, 2, result.stdout + result.stderr);
+	assert.match(result.stdout, /native installer/i);
+	assert.throws(f.calls, /ENOENT/);
 });

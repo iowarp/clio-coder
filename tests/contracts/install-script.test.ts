@@ -63,4 +63,17 @@ describe("contracts/install-script", () => {
 		match(r.stdout, /dry run complete/u);
 		ok(!r.created, "a dry run creates nothing under HOME");
 	});
+	it("preserves the public UNIX version selection and accepts explicit background opt-out", () => {
+		const r = run(["--dry-run", "--version", "0.5.9", "--no-auto-update", "--no-modify-path"]);
+		strictEqual(r.code, 0, r.stderr);
+		match(r.stdout, /@iowarp\/clio-coder@0\.5\.9/u);
+		ok(!r.created);
+	});
+
+	it("rollback without an owned installation fails without creating an install", () => {
+		const r = run(["--rollback"]);
+		strictEqual(r.code, 1);
+		match(r.stderr, /no installer manifest/u);
+		ok(!r.created);
+	});
 });

@@ -4,13 +4,15 @@ import { join } from "node:path";
 import { isDevVersion } from "../../core/build-info.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import type { Installation } from "./install-method.js";
+import { installerPackageRoot, readInstallerRecord } from "./install-method.js";
+import { runNativeBackgroundUpdate } from "./native-update.js";
 import { compareReleaseVersions, fetchReleaseVersion, parseReleaseVersion } from "./release-version.js";
 
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60_000;
 export const UPDATE_NOTICE_INTERVAL_MS = 7 * UPDATE_CHECK_INTERVAL_MS;
 
 /** Dist-tags a check may consult. Pre-releases are published under `beta`, never `latest`. */
-type ReleaseTag = "latest" | "beta";
+type ReleaseTag = "latest" | "beta" | "dev";
 
 interface UpdateCache {
 	checkedAt?: number;
@@ -21,6 +23,7 @@ interface UpdateCache {
 	track?: string;
 	notifiedKey?: string;
 	notifiedAt?: number;
+	updateAttemptedAt?: number;
 }
 
 export interface UpdateNotice {
@@ -35,6 +38,7 @@ export interface UpdateCheckOptions {
 	cacheDir: string;
 	processStartedAt: number;
 	now?: () => number;
+	backgroundUpdate?: typeof runNativeBackgroundUpdate;
 	fetchVersion?: (channel: string, signal?: AbortSignal) => Promise<string | null>;
 }
 
@@ -42,7 +46,10 @@ export interface UpdateCheckOptions {
 export function createUpdateCheck(options: UpdateCheckOptions) {
 	const { installation, runningVersion } = options;
 	const now = options.now ?? Date.now;
-	const fingerprint = createHash("sha256").update(installation.root).digest("hex").slice(0, 16);
+	const fingerprint = createHash("sha256")
+		.update(installation.installer?.root ?? installation.root)
+		.digest("hex")
+		.slice(0, 16);
 	const cachePath = join(options.cacheDir, `update-${fingerprint}.json`);
 	const recent = (at: unknown, interval: number) => typeof at === "number" && at <= now() && now() - at < interval;
 	async function readCache(): Promise<UpdateCache> {
@@ -69,8 +76,10 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		signal.throwIfAborted();
 		// Read the installed files afresh; the running version is deliberately captured before hydration.
 		try {
-			const disk = JSON.parse(await readFile(join(installation.root, "package.json"), { encoding: "utf8", signal }));
-			const entry = await stat(installation.entry);
+			const active = installation.installer ? readInstallerRecord(installation.installer.root) : null;
+			const activeRoot = active ? installerPackageRoot(active.current) : installation.root;
+			const disk = JSON.parse(await readFile(join(activeRoot, "package.json"), { encoding: "utf8", signal }));
+			const entry = await stat(join(activeRoot, "dist", "cli", "index.js"));
 			if (disk.name === "@iowarp/clio-coder" && parseReleaseVersion(disk.version)) {
 				const replaced =
 					compareReleaseVersions(disk.version, runningVersion) !== 0 || entry.mtimeMs > options.processStartedAt;
@@ -92,12 +101,19 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		if (
 			!["npm", "pnpm", "bun", "installer"].includes(installation.kind) ||
 			running === null ||
-			isDevVersion(runningVersion)
+			(isDevVersion(runningVersion) && !installation.installer)
 		)
 			return null;
 		// A pre-release install also reads `beta`, so an rc learns about the next rc
 		// as well as the final release. Stable installs never see pre-releases.
-		const tags: ReleaseTag[] = running.pre.length > 0 ? ["latest", "beta"] : ["latest"];
+		const native = installation.installer ? readInstallerRecord(installation.installer.root) : null;
+		if (native?.versionPin) return null;
+		const tags: ReleaseTag[] =
+			native && ["latest", "beta", "dev"].includes(native.channel)
+				? [native.channel as ReleaseTag]
+				: running.pre.length > 0
+					? ["latest", "beta"]
+					: ["latest"];
 		const track = tags.join("+");
 		// A cache written for another track is stale: an rc that became stable must
 		// not keep announcing a beta, and an rc must not trust a latest-only answer.
@@ -156,13 +172,33 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		return withStateFileLock(
 			cachePath,
 			async () => {
-				const cache = await readCache();
+				let cache = await readCache();
 				if (
 					!isIdle() ||
 					(notice.kind === "available" && recent(cache.notifiedAt, UPDATE_CHECK_INTERVAL_MS)) ||
 					(cache.notifiedKey === notice.key && recent(cache.notifiedAt, UPDATE_NOTICE_INTERVAL_MS))
 				)
 					return false;
+				const native = installation.installer ? readInstallerRecord(installation.installer.root) : null;
+				if (
+					notice.kind === "available" &&
+					native?.autoUpdate &&
+					!native.versionPin &&
+					process.env.CLIO_CODER_AUTO_UPDATE !== "0" &&
+					typeof cache.available === "string" &&
+					!recent(cache.updateAttemptedAt, UPDATE_CHECK_INTERVAL_MS)
+				) {
+					cache = { ...cache, updateAttemptedAt: now() };
+					await writeCache(cache, signal);
+					const updated = await (options.backgroundUpdate ?? runNativeBackgroundUpdate)(
+						installation,
+						cache.available as string,
+						signal,
+					);
+					if (updated) {
+						notice.text = `Updated to v${cache.available} · current session preserved; restart then /resume to use it; upgrade --rollback to undo`;
+					}
+				}
 				await writeCache({ ...cache, notifiedKey: notice.key, notifiedAt: now() }, signal);
 				return isIdle() && !signal.aborted;
 			},

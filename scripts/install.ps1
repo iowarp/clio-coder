@@ -30,6 +30,10 @@ param(
 	[string]$BinDir = $env:CLIO_CODER_BIN_DIR,
 	[switch]$OmitOptional,
 	[switch]$AddToPath,
+	[switch]$NoModifyPath,
+	[switch]$NoAutoUpdate,
+	[switch]$AutoUpdate,
+	[switch]$Rollback,
 	[switch]$NoPostInstall,
 	[switch]$RefreshRuntime,
 	[switch]$Force,
@@ -104,10 +108,33 @@ function Install-ClioCoder {
 		return
 	}
 
+	New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+	$lock = Join-Path $installRoot ".install-lock"
+	try { New-Item -ItemType Directory -Path $lock -ErrorAction Stop | Out-Null }
+	catch { Fail "installation locked at $lock. If its pid process has exited, remove only that lock directory and retry." }
+	[IO.File]::WriteAllText((Join-Path $lock "pid"), [string]$PID)
+	$work = $null
+	try {
+	if ($Options.Rollback) {
+		$old = Get-Content -LiteralPath (Join-Path $installRoot "install.json") -Raw | ConvertFrom-Json
+		$helper = Join-Path $old.current "lib\node_modules\@iowarp\clio-coder\scripts\native-install.cjs"
+		& $old.node $helper rollback $installRoot
+		if ($LASTEXITCODE -ne 0) { Fail "rollback failed; active install preserved" }
+		return
+	}
+	$manifestFile = Join-Path $installRoot "install.json"
+	if (-not $Options.Version -and -not $Options.Package -and (Test-Path -LiteralPath $manifestFile)) {
+		$policy = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
+		if ($policy.versionPin) { $Options.Version = [string]$policy.versionPin; $installSpec = "$PackageName@$($policy.versionPin)" }
+	}
+	$owner = Join-Path $installRoot ".installer-owner"
+	if (-not (Test-Path -LiteralPath (Join-Path $installRoot "install.json")) -and -not (Test-Path -LiteralPath $owner)) {
+		if ((Test-Path -LiteralPath (Join-Path $installRoot "runtime")) -or (Test-Path -LiteralPath (Join-Path $installRoot "versions"))) { Fail "refusing to claim existing runtime/versions directories without installer ownership" }
+	}
+	[IO.File]::WriteAllText($owner, "clio-coder-installer")
 	New-Item -ItemType Directory -Force -Path (Join-Path $installRoot "runtime"), (Join-Path $installRoot "versions"), $binDir | Out-Null
 	$work = Join-Path $installRoot (".work." + [guid]::NewGuid().ToString("N").Substring(0, 8))
 	New-Item -ItemType Directory -Force -Path $work | Out-Null
-	try {
 		# Resolve the Node version: an exact x.y.z passes through, a major picks
 		# the newest release that ships this build's zip.
 		$nodeVersion = $Options.NodeVersion -replace "^v", ""
@@ -116,7 +143,7 @@ function Install-ClioCoder {
 			$zipName = Split-Path -Leaf $Options.NodeZip
 			if ($zipName -notmatch "^node-v(\d+\.\d+\.\d+)-(win-[a-z0-9]+)\.zip$") { Fail "-NodeZip must keep its release file name, such as node-v24.11.1-win-x64.zip" }
 			$nodeVersion = $Matches[1]
-			$build = $Matches[2]
+			if ($Matches[2] -ne $build) { Fail "-NodeZip architecture $($Matches[2]) does not match $build" }
 		} elseif ($nodeVersion -notmatch "^\d+\.\d+\.\d+$") {
 			if ($nodeVersion -notmatch "^\d+$") { Fail "invalid Node version '$nodeVersion'; use a major such as 24 or an exact version" }
 			$index = Join-Path $work "index.json"
@@ -170,14 +197,14 @@ function Install-ClioCoder {
 			if ($actual -ne $expected) { Fail "checksum mismatch for $zipName (expected $expected, got $actual); refusing to install it" }
 			Ok "checksum verified for $zipName"
 
-			$unpack = Join-Path $installRoot "runtime\.staging"
+			$unpack = Join-Path $work "runtime"
 			Remove-Item -LiteralPath $unpack -Recurse -Force -ErrorAction SilentlyContinue
 			New-Item -ItemType Directory -Force -Path $unpack | Out-Null
 			# bsdtar ships with Windows 10 1803 and later and is far faster than Expand-Archive.
 			$tar = Join-Path $env:SystemRoot "System32\tar.exe"
 			if (Test-Path -LiteralPath $tar) { & $tar -xf $zip -C $unpack; if ($LASTEXITCODE -ne 0) { Fail "could not unpack $zipName" } }
 			else { Expand-Archive -LiteralPath $zip -DestinationPath $unpack -Force }
-			if (Test-Path -LiteralPath $runtimeDir) { Remove-Item -LiteralPath $runtimeDir -Recurse -Force }
+			if (Test-Path -LiteralPath $runtimeDir) { $runtimeDir = "$runtimeDir-$PID"; $node = Join-Path $runtimeDir "node.exe" }
 			Move-Item -LiteralPath (Join-Path $unpack "node-v$nodeVersion-$build") -Destination $runtimeDir
 			Remove-Item -LiteralPath $unpack -Recurse -Force -ErrorAction SilentlyContinue
 		}
@@ -185,17 +212,11 @@ function Install-ClioCoder {
 		if ($LASTEXITCODE -ne 0 -or -not $ran) { Fail "the managed Node at $node does not run" }
 		Ok "Node v$ran runs ($build)"
 
-		# The version running now becomes the rollback target; older ones go first.
+		# Retain every runtime and package prefix while old sessions may still use them.
 		$manifestPath = Join-Path $installRoot "install.json"
 		$old = if (Test-Path -LiteralPath $manifestPath) { Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json } else { $null }
 		$previous = if ($old -and $old.current -and (Test-Path -LiteralPath $old.current)) { $old.current } else { "" }
-		$previousRuntime = if ($previous) { Split-Path -Parent $old.node } else { "" }
-		$keep = @($previous, $runtimeDir, $previousRuntime) | Where-Object { $_ }
-		Get-ChildItem -LiteralPath (Join-Path $installRoot "versions"), (Join-Path $installRoot "runtime") -Force |
-			Where-Object { $keep -notcontains $_.FullName } |
-			ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
-
-		$staging = Join-Path $installRoot "versions\.staging"
+		$staging = Join-Path $installRoot "versions\.staging-$PID"
 		New-Item -ItemType Directory -Force -Path (Join-Path $staging "lib") | Out-Null
 		$npmCli = Join-Path $runtimeDir "node_modules\npm\bin\npm-cli.js"
 		$npmArgs = @($npmCli, "install", "--prefix", (Join-Path $staging "lib"), "--no-save", "--loglevel=error")
@@ -210,50 +231,51 @@ function Install-ClioCoder {
 		$pkgJson = Join-Path $staging "lib\node_modules\@iowarp\clio-coder\package.json"
 		$pkg = Get-Content -LiteralPath $pkgJson -Raw | ConvertFrom-Json
 		if ($pkg.name -ne $PackageName) { Fail "npm finished, but $pkgJson is not $PackageName" }
+		if ([version](($pkg.version -split '-')[0]) -lt [version]"0.6.0") { Fail "Native Windows managed lifecycle requires 0.6.0 or later; registry returned $($pkg.version). Previous install and launcher remain active. No package has been published by this installer." }
 		$final = Join-Path $installRoot "versions\$($pkg.version)"
 		if (Test-Path -LiteralPath $final) { $final = "$final-$(Get-Date -Format yyyyMMddHHmmss)" }
 		Move-Item -LiteralPath $staging -Destination $final
 		$entry = Join-Path $final "lib\node_modules\@iowarp\clio-coder\dist\cli\index.js"
 		Ok "installed $PackageName $($pkg.version)"
 
-		# Stage, then replace, so a concurrent clio-coder never reads half a file.
-		$tmp = "$launcher.$PID.tmp"
-		$body = "@echo off`r`nrem $LauncherMark`r`nrem Written by Clio Coder's install.ps1; remove it with: clio-coder uninstall --remove-binary`r`n`"$node`" `"$entry`" %*`r`n"
-		[IO.File]::WriteAllText($tmp, $body, (New-Object Text.ASCIIEncoding))
-		Move-Item -LiteralPath $tmp -Destination $launcher -Force
-
-		$manifest = [ordered]@{
-			schema = 1; kind = "clio-coder-installer"; node = $node; nodeVersion = $nodeVersion; nodeBuild = $build
-			current = $final; previous = $previous; launcher = $launcher; channel = $Options.Channel
-			installedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+		$helper = Join-Path $final "lib\node_modules\@iowarp\clio-coder\scripts\native-install.cjs"
+		if (-not (Test-Path -LiteralPath $helper)) { Fail "candidate lacks lifecycle helper; previous install remains active" }
+		$pin = if ($Options.Package -or $Options.Version -match "^v?\d+\.\d+\.\d+") { [string]$pkg.version } else { "-" }
+		$auto = if ($Options.NoAutoUpdate -or $env:CLIO_CODER_AUTO_UPDATE -eq "0") { "0" } elseif ($env:CLIO_CODER_AUTO_UPDATE -eq "1") { "1" } else { "preserve" }
+		if ($Options.AutoUpdate) { $auto = "1" }
+		$post = if ($Options.NoPostInstall) { "0" } else { "1" }
+		& $node $helper activate $installRoot $node $nodeVersion $build $final $launcher $Options.Channel $pin $auto $post
+		if ($LASTEXITCODE -ne 0) { Fail "candidate checks failed; previous install remains active" }
+		if (-not $Options.NoPostInstall) {
+			& $node $entry upgrade --post-install
+			if ($LASTEXITCODE -ne 0) { Fail "package installed, but local migrations/initialization need attention. Run clio-coder upgrade --post-install; previous binary remains available with upgrade --rollback." }
 		}
-		[IO.File]::WriteAllText("$manifestPath.tmp", ($manifest | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
-		Move-Item -LiteralPath "$manifestPath.tmp" -Destination $manifestPath -Force
-
-		$reported = & $launcher --version
+		$reported = & $node $entry --version
+		if ($LASTEXITCODE -ne 0) { Fail "active CLI failed version check" }
 		Ok "$reported"
 
 		# Read and write the raw registry value: [Environment]::SetEnvironmentVariable
 		# would store it as REG_SZ and stop %USERPROFILE%-style entries expanding.
-		$envKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", $true)
-		$rawPath = [string]$envKey.GetValue("Path", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-		$onPath = ([Environment]::ExpandEnvironmentVariables($rawPath) -split ";") -contains $binDir
+		$modifyPath = -not $Options.NoModifyPath -and ($Options.AddToPath -or $env:CLIO_CODER_MODIFY_PATH -eq "1")
+		$envKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", [bool]$modifyPath)
+		$rawPath = if ($envKey) { [string]$envKey.GetValue("Path", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { "" }
+		$onPath = @([Environment]::ExpandEnvironmentVariables($rawPath) -split ";" | ForEach-Object { $_.TrimEnd("\") }) -contains $binDir.TrimEnd("\")
 		if ($onPath) {
 			Ok "$binDir is on your user PATH"
-		} elseif ($Options.AddToPath -or $env:CLIO_CODER_MODIFY_PATH -eq "1") {
+		} elseif ($modifyPath) {
+			if (-not $envKey) { $envKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("Environment") }
 			$kind = if ($envKey.GetValueNames() -contains "Path") { $envKey.GetValueKind("Path") } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
 			$envKey.SetValue("Path", ((@($rawPath.TrimEnd(";"), $binDir) | Where-Object { $_ }) -join ";"), $kind)
+			& $node $helper path-added $installRoot $binDir
+			if ($LASTEXITCODE -ne 0) { Fail "PATH was added but ownership receipt could not be written; review $manifestPath" }
 			# Setting any user variable broadcasts WM_SETTINGCHANGE so new terminals see the change.
 			[Environment]::SetEnvironmentVariable("CLIO_CODER_PATH_REFRESH", $null, "User")
-			Ok "added $binDir to your user PATH; open a new terminal to use it"
+			if (($env:Path -split ";") -notcontains $binDir) { $env:Path = "$binDir;$env:Path" }
+			Ok "added $binDir to your user PATH and this session; open a new terminal to use it"
 		} else {
 			Warn "$binDir is not on your PATH. Rerun with -AddToPath (or set CLIO_CODER_MODIFY_PATH=1), or add it yourself."
 		}
-		if (-not $Options.NoPostInstall) {
-			Say "running: $launcher upgrade --post-install"
-			& $launcher upgrade --post-install
-			if ($LASTEXITCODE -ne 0) { Fail "post-install checks did not finish; the package is installed. Run: $launcher upgrade --post-install" }
-		}
+		if ($envKey) { $envKey.Dispose() }
 		Write-Host ""
 		Write-Host "Installed: $launcher"
 		Write-Host "Runtime:   Node v$nodeVersion ($build), $runtimeDir"
@@ -266,13 +288,15 @@ function Install-ClioCoder {
 		Write-Host ""
 		Write-Host "Native Windows is best effort; WSL is the recommended way to run Clio Coder on Windows."
 	} finally {
-		Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
-		Remove-Item -LiteralPath (Join-Path $installRoot "versions\.staging") -Recurse -Force -ErrorAction SilentlyContinue
+		Remove-Item -LiteralPath $lock -Recurse -Force -ErrorAction SilentlyContinue
+		if ($work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
+		Remove-Item -LiteralPath (Join-Path $installRoot "versions\.staging-$PID") -Recurse -Force -ErrorAction SilentlyContinue
 	}
 }
 
 Install-ClioCoder -Options ([pscustomobject]@{
 	Version = $Version; Channel = $Channel; Package = $Package; NodeVersion = $NodeVersion; NodeZip = $NodeZip
 	InstallDir = $InstallDir; BinDir = $BinDir; OmitOptional = [bool]$OmitOptional; AddToPath = [bool]$AddToPath
+	NoModifyPath = [bool]$NoModifyPath; NoAutoUpdate = [bool]$NoAutoUpdate; AutoUpdate = [bool]$AutoUpdate; Rollback = [bool]$Rollback
 	NoPostInstall = [bool]$NoPostInstall; RefreshRuntime = [bool]$RefreshRuntime; Force = [bool]$Force; DryRun = [bool]$DryRun
 })

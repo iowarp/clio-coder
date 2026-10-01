@@ -215,3 +215,63 @@ test("update failures and shutdown during an in-flight check produce no notice",
 	await monitor.tick();
 	assert.equal(monitor.text(), null);
 });
+
+test("native background policy respects channel, pin, opt-out and manager ownership", async (t) => {
+	for (const policy of ["enabled", "optout", "pin", "manager"] as const) {
+		const f = await fixture(policy === "manager" ? "bun" : "installer");
+		t.after(f.home.cleanup);
+		const installRoot = join(f.home.dir, "native");
+		const current = join(installRoot, "versions", "0.5.4");
+		await mkdir(current, { recursive: true });
+		const node = join(installRoot, "runtime", "node", "bin", "node");
+		const manifest = {
+			schema: 2,
+			kind: "clio-coder-installer",
+			current,
+			node,
+			launcher: join(f.home.dir, "bin", "clio-coder"),
+			channel: "beta",
+			autoUpdate: policy !== "optout",
+			versionPin: policy === "pin" ? "0.5.4" : "",
+		};
+		await writeFile(join(installRoot, "install.json"), JSON.stringify(manifest));
+		if (policy !== "manager")
+			f.installation.installer = {
+				root: installRoot,
+				node,
+				nodeVersion: "24.20.0",
+				nodeBuild: "linux-x64",
+				current,
+				previous: null,
+				launcher: manifest.launcher,
+				channel: "beta",
+			};
+		let updates = 0;
+		const channels: string[] = [];
+		const check = createUpdateCheck({
+			...f,
+			fetchVersion: async (channel) => {
+				channels.push(channel);
+				return "0.6.1";
+			},
+			backgroundUpdate: async () => {
+				updates++;
+				return true;
+			},
+		});
+		const signal = new AbortController().signal;
+		const notice = await check.probe(signal);
+		if (policy === "pin") {
+			assert.equal(notice, null);
+			assert.deepEqual(channels, []);
+		} else {
+			assert.ok(notice);
+			assert.deepEqual(channels, policy === "manager" ? ["latest"] : ["beta"]);
+			assert.equal(await check.claim(notice, () => false, signal), false);
+			assert.equal(updates, 0);
+			assert.equal(await check.claim(notice, () => true, signal), true);
+			assert.equal(updates, policy === "enabled" ? 1 : 0);
+			assert.equal(JSON.parse(await readFile(join(installRoot, "install.json"), "utf8")).versionPin, "");
+		}
+	}
+});

@@ -6,7 +6,7 @@
  */
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { shellQuote } from "../../core/shell-quote.js";
 
@@ -53,6 +53,11 @@ export interface InstallerRecord {
 	previous: string | null;
 	launcher: string;
 	channel: string;
+	versionPin?: string;
+	autoUpdate?: boolean;
+	manager?: string;
+	pathAdded?: boolean;
+	pathEntry?: string;
 }
 
 export const INSTALLER_MANIFEST_KIND = "clio-coder-installer";
@@ -60,7 +65,7 @@ export const INSTALLER_MANIFEST_KIND = "clio-coder-installer";
 export const INSTALLER_LAUNCHER_MARK = "# clio-coder-installer launcher";
 
 export interface Installation {
-	kind: "source" | "npm" | "pnpm" | "bun" | "installer" | "local" | "unknown";
+	kind: "source" | "npm" | "pnpm" | "bun" | "installer" | "homebrew" | "winget" | "local" | "unknown";
 	root: string;
 	/** Stable entry used after replacement, independent of which launcher wins on PATH. */
 	entry: string;
@@ -80,7 +85,14 @@ export function readInstallerRecord(installRoot: string): InstallerRecord | null
 	}
 	if (raw === null || typeof raw !== "object") return null;
 	const record = raw as Record<string, unknown>;
+	if (record.schema !== 1 && record.schema !== 2) return null;
 	const text = (key: string): string => (typeof record[key] === "string" ? (record[key] as string) : "");
+	const owned = (folder: string, file: string) => {
+		const rel = relative(join(installRoot, folder), file);
+		return isAbsolute(file) && rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+	};
+	if (!owned("versions", text("current")) || !owned("runtime", text("node"))) return null;
+	if (text("previous") && !owned("versions", text("previous"))) return null;
 	if (text("kind") !== INSTALLER_MANIFEST_KIND || text("current") === "" || text("node") === "") return null;
 	return {
 		root: installRoot,
@@ -91,6 +103,11 @@ export function readInstallerRecord(installRoot: string): InstallerRecord | null
 		previous: text("previous") || null,
 		launcher: text("launcher"),
 		channel: text("channel") || "latest",
+		versionPin: text("versionPin"),
+		autoUpdate: record.autoUpdate === true,
+		manager: text("manager"),
+		pathAdded: record.pathAdded === true,
+		pathEntry: text("pathEntry"),
 	};
 }
 
@@ -129,12 +146,23 @@ export function inspectInstallation(entryPath = process.argv[1], fallbackRoot = 
 	}
 	if (sourceCheckoutRoot(base.entry) !== null) return { ...base, kind: "source" };
 	const parts = root.split(sep);
+	if (parts.includes("Cellar") && parts.includes("clio-coder")) return { ...base, kind: "homebrew" };
 	const npmSuffix = sep + join("lib", "node_modules", "@iowarp", "clio-coder");
 	if (root.endsWith(npmSuffix)) {
 		const prefix = root.slice(0, -npmSuffix.length) || sep;
 		const installer = installerRecordForPrefix(prefix);
-		if (installer !== null) return { ...base, kind: "installer", prefix, installer };
+		if (installer !== null)
+			return {
+				...base,
+				kind: installer.manager === "winget" && process.env.CLIO_CODER_MANAGER_UNINSTALL !== "1" ? "winget" : "installer",
+				prefix,
+				installer,
+			};
 		return { ...base, kind: "npm", prefix };
+	}
+	if (process.platform === "win32" && root.endsWith(sep + join("node_modules", "@iowarp", "clio-coder"))) {
+		const prefix = root.slice(0, -(sep + join("node_modules", "@iowarp", "clio-coder")).length);
+		if (existsSync(join(prefix, "clio-coder.cmd"))) return { ...base, kind: "npm", prefix };
 	}
 	// Store paths also occur in project-local and temporary installs. Only known
 	// global layouts should receive registry nudges or global-manager instructions.
@@ -166,11 +194,13 @@ export function installationCommand(
 		if (process.platform === "win32")
 			return action === "upgrade"
 				? `powershell -NoProfile -ExecutionPolicy Bypass -File "${join(installation.root, "scripts", "install.ps1")}" -Channel ${channel} -InstallDir "${record.root}" -BinDir "${dirname(record.launcher)}"`
-				: `Remove-Item -Recurse -Force "${record.root}", "${record.launcher}"`;
+				: "clio-coder uninstall --remove-binary";
 		return action === "upgrade"
 			? `sh ${shellQuote(join(installation.root, "scripts", "install.sh"))} --channel ${channel} --install-dir ${shellQuote(record.root)} --bin-dir ${shellQuote(dirname(record.launcher))}`
-			: `rm -rf ${shellQuote(record.root)} ${shellQuote(record.launcher)}`;
+			: "clio-coder uninstall --remove-binary";
 	}
+	if (installation.kind === "homebrew") return `brew ${action} clio-coder`;
+	if (installation.kind === "winget") return `winget ${action} --id IOWarp.ClioCoder --exact`;
 	if (installation.kind === "pnpm") return `pnpm ${action === "upgrade" ? "add" : "remove"} -g ${spec}`;
 	if (installation.kind === "bun") return `bun ${action === "upgrade" ? "add" : "remove"} -g ${spec}`;
 	if (installation.kind === "source")

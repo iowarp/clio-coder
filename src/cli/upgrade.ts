@@ -2,9 +2,11 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { initializeClioHome } from "../core/init.js";
+import { runCommandVector } from "../core/safe-exec.js";
 import { clioDirLayoutProblems, resolveClioDirs } from "../core/xdg.js";
+import { runDoctor } from "../domains/lifecycle/doctor.js";
+import type { Installation } from "../domains/lifecycle/install-method.js";
 import {
-	type Installation,
 	inspectInstallation,
 	installationCommand,
 	installerPackageRoot,
@@ -35,6 +37,7 @@ Flags:
   --refresh-runtime     install.sh installs: also move to the newest Node LTS the installer picks
   --skip-migrations     skip migrations after the install step
   --post-install        apply local checks after a package-manager update; skip reinstall
+  --rollback            native installs: restore the previous working version, disable background updates
   --restart             after success, launch the installed CLI in this project; type /resume there
                         to pick up the last session
   --json                emit machine-readable JSON output
@@ -61,6 +64,7 @@ interface UpgradeOptions {
 	json: boolean;
 	restart: boolean;
 	refreshRuntime: boolean;
+	rollback: boolean;
 }
 
 /**
@@ -78,6 +82,7 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 	let json = false;
 	let restart = false;
 	let refreshRuntime = false;
+	let rollback = false;
 
 	const toChannel = (value: string | undefined): Channel => {
 		if (value === undefined || !(CHANNELS as ReadonlyArray<string>).includes(value)) {
@@ -96,6 +101,7 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 		else if (arg === "--json") json = true;
 		else if (arg === "--restart") restart = true;
 		else if (arg === "--refresh-runtime") refreshRuntime = true;
+		else if (arg === "--rollback") rollback = true;
 		else if (arg.startsWith("--channel=")) channel = toChannel(arg.slice("--channel=".length));
 		else if (arg === "--channel") {
 			channel = toChannel(argv[i + 1]);
@@ -104,7 +110,9 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 	}
 	if (!help && restart && (json || postInstall))
 		throw new Error("--restart cannot be combined with --json or --post-install");
-	return { dryRun, channel, skipMigrations, help, postInstall, json, restart, refreshRuntime };
+	if (rollback && (postInstall || refreshRuntime || restart))
+		throw new Error("--rollback cannot combine with --post-install, --refresh-runtime or --restart");
+	return { dryRun, channel, skipMigrations, help, postInstall, json, restart, refreshRuntime, rollback };
 }
 
 /**
@@ -144,7 +152,7 @@ async function runChild(
 		let stdout = "";
 		let tail = "";
 		const keepTail = (chunk: Buffer): void => {
-			tail = `${tail}${chunk.toString("utf8")}`.slice(-2000);
+			tail = `${tail}${chunk.toString("utf8")}`.slice(-16384);
 		};
 		child.stdout?.on("data", (chunk: Buffer) => {
 			stdout = `${stdout}${chunk.toString("utf8")}`.slice(0, 8192);
@@ -157,8 +165,7 @@ async function runChild(
 				resolve(stdout);
 				return;
 			}
-			const lastLine = tail.trimEnd().split("\n").at(-1) ?? "";
-			reject(new Error(`${label} exited with code ${code ?? -1}${lastLine ? `: ${lastLine}` : ""}`));
+			reject(new Error(`${label} exited with code ${code ?? -1}${tail.trim() ? `:\n${tail.trim()}` : ""}`));
 		});
 	});
 }
@@ -170,7 +177,15 @@ function nodeFor(installation: Installation): string {
 }
 
 async function runNpmInstall(channel: Channel, installation: Installation): Promise<void> {
-	await runChild("npm", npmInstallArgs(installation, channel), "npm install");
+	const npmCli = join(
+		dirname(process.execPath),
+		process.platform === "win32" ? "node_modules/npm/bin/npm-cli.js" : "../lib/node_modules/npm/bin/npm-cli.js",
+	);
+	if (process.platform === "win32" && existsSync(npmCli))
+		await runChild(process.execPath, [npmCli, ...npmInstallArgs(installation, channel)], "npm install");
+	else if (process.platform === "win32")
+		throw new Error("Cannot locate npm-cli.js beside Node; use npm install -g from your terminal");
+	else await runChild("npm", npmInstallArgs(installation, channel), "npm install");
 }
 
 /**
@@ -210,6 +225,8 @@ async function runInstallerUpgrade(opts: UpgradeOptions, installation: Installat
 				"--no-post-install",
 			];
 	const env: NodeJS.ProcessEnv = { ...process.env };
+	if (record.versionPin) args.push(windows ? "-Version" : "--version", record.versionPin);
+	if (record.autoUpdate === false) args.push(windows ? "-NoAutoUpdate" : "--no-auto-update");
 	if (opts.refreshRuntime) {
 		delete env.CLIO_CODER_NODE_VERSION;
 		args.push(windows ? "-RefreshRuntime" : "--refresh-runtime");
@@ -220,8 +237,21 @@ async function runInstallerUpgrade(opts: UpgradeOptions, installation: Installat
 	return inspectInstallation(join(installerPackageRoot(updated.current), "dist", "cli", "index.js"));
 }
 
-async function runDoctorFixAfterInstall(installation: Installation): Promise<void> {
-	await runChild(nodeFor(installation), [installation.entry, "doctor", "--fix"], "clio-coder doctor --fix");
+async function runDoctorFixAfterInstall(_installation: Installation): Promise<void> {
+	initializeClioHome();
+	const integrity = new Set([
+		"engine runtime",
+		"directory layout",
+		"config dir",
+		"data dir",
+		"state dir",
+		"cache dir",
+		"settings.yaml",
+		"state metadata",
+		"lifecycle migrations",
+	]);
+	const failures = runDoctor().filter((finding) => !finding.ok && integrity.has(finding.name));
+	if (failures.length) throw new Error(failures.map((finding) => `${finding.name}: ${finding.detail}`).join("\n"));
 }
 
 async function runPostInstallUpgrade(opts: UpgradeOptions, installation: Installation): Promise<void> {
@@ -333,7 +363,60 @@ export async function runUpgradeCommand(
 	// An installer upgrade moves the entry to a new prefix; the relaunch and the
 	// background restart must use the new one.
 	let activeInstallation = installation;
+	if (installation.installer && !argv.some((arg) => arg === "--channel" || arg.startsWith("--channel="))) {
+		const recordedChannel = installation.installer.channel;
+		if (CHANNELS.includes(recordedChannel as Channel)) opts.channel = recordedChannel as Channel;
+	}
 	const method = installation.kind;
+	if (opts.rollback) {
+		const record = installation.installer;
+		if (method !== "installer" || !record) {
+			presenter.fail("Rollback requires a native installer installation");
+			presenter.finish();
+			return 2;
+		}
+		if (opts.dryRun) {
+			presenter.note(`Would restore ${record.previous ?? "no previous version"}`);
+			presenter.done("Done");
+			return record.previous ? 0 : 1;
+		}
+		const windows = process.platform === "win32";
+		const args = windows
+			? [
+					"-NoProfile",
+					"-ExecutionPolicy",
+					"Bypass",
+					"-File",
+					join(installation.root, "scripts", "install.ps1"),
+					"-InstallDir",
+					record.root,
+					"-BinDir",
+					dirname(record.launcher),
+					"-Rollback",
+				]
+			: [
+					join(installation.root, "scripts", "install.sh"),
+					"--install-dir",
+					record.root,
+					"--bin-dir",
+					dirname(record.launcher),
+					"--rollback",
+				];
+		const result = await runCommandVector(windows ? "powershell.exe" : "sh", args, {
+			env: Object.fromEntries(
+				Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+			),
+			timeoutMs: 60_000,
+		});
+		if (result.exitCode !== 0) {
+			presenter.fail("Rollback failed", result.stderr || result.stdout);
+			presenter.finish();
+			return 1;
+		}
+		presenter.note(result.stdout.trim());
+		presenter.done("Done");
+		return 0;
+	}
 	const methodLabel =
 		method === "source"
 			? "source checkout"
@@ -396,7 +479,9 @@ export async function runUpgradeCommand(
 
 	const lookup: RegistryLookup = opts.postInstall
 		? { asked: false, reason: "post-install checks" }
-		: await deps.lookUpAvailableVersion(opts.channel, method);
+		: installation.installer?.versionPin
+			? { asked: true, version: installation.installer.versionPin }
+			: await deps.lookUpAvailableVersion(opts.channel, method);
 	const availableVersion = lookup.asked ? lookup.version : null;
 
 	presenter.step(`Installation method: ${methodLabel}`);
@@ -538,9 +623,9 @@ export async function runUpgradeCommand(
 	} else {
 		try {
 			await deps.runDoctorFixAfterInstall(installation);
-			presenter.completedStep("Checked the install with clio-coder doctor --fix");
+			presenter.completedStep("Checked installation integrity and initialized local state");
 		} catch (err) {
-			presenter.fail("doctor fix failed", err instanceof Error ? err.message : String(err));
+			presenter.fail("installation integrity check failed", err instanceof Error ? err.message : String(err));
 			presenter.commandAdvice("To resolve the findings by hand, run:", "clio-coder doctor --fix");
 			presenter.finish();
 			return 1;

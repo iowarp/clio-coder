@@ -57,6 +57,8 @@
 		"bin/clio-coder.cjs",
 		"scripts/install.sh",
 		"scripts/install.ps1",
+		"scripts/install.cmd",
+		"scripts/native-install.cjs",
 		"!assets/README.md",
 		"!scripts/README.md",
 		"src/**",
