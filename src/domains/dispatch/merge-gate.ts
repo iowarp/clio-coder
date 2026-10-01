@@ -161,7 +161,8 @@ function taskOptsOutOfValidation(task: string): boolean {
 export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null {
 	// Ahead of the host-verified exit: a suite that passes proves nothing about
 	// a test the worker deleted, so only the operator can accept the removal.
-	const removedTests = input.removedTests ?? [];
+	// A task that asked for the removal got what it asked for (flywheel F-D1).
+	const removedTests = input.task !== undefined && taskRequestsTestRemoval(input.task) ? [] : (input.removedTests ?? []);
 	if (removedTests.length > 0) {
 		const shown = removedTests.slice(0, 2).map(boundedCheck).join("; ");
 		const more = removedTests.length > 2 ? `; and ${removedTests.length - 2} more` : "";

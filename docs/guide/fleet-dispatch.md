@@ -316,8 +316,8 @@ diff that removes existing test cases or deletes a test file. The first three yi
 to passing host verification. The fourth does not, because a passing suite says nothing
 about a test that is gone. A test that moves to another file or is only reformatted is
 not counted as removed. A run without a task worktree has no merge to withhold, so the same
-removal fails it as `worker_removed_tests` and leaves the edits in the checkout, unless a
-clause of the task asks for tests to be removed. A task clause that tells the worker not to validate (for
+removal fails it as `worker_removed_tests` and leaves the edits in the checkout. In both
+places a clause of the task that asks for tests to be removed exempts the removal. A task clause that tells the worker not to validate (for
 example "do not run the tests") means an unrun check does not withhold. A merge-mode run
 whose host verification rejected the tree fails with `host_verification_rejected` and keeps
 its branch with the work committed, and the detail names the `git merge` that applies it.

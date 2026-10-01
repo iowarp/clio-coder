@@ -291,4 +291,9 @@ it("withholds a verified merge whose diff replaces an existing test, but not an 
 	match(detail, /removes existing test cases.*totalDuration sums every part/u);
 	match(detail, /if removing those tests was intended/u);
 	strictEqual(mergeWithheldDetail({ ...input, removedTests: [] }), null);
+	strictEqual(mergeWithheldDetail({ ...input, task: "Delete the obsolete totalDuration test." }), null);
+	match(
+		mergeWithheldDetail({ ...input, task: "Do not delete tests; fix totalDuration." }) ?? "",
+		/removes existing test cases/u,
+	);
 });
