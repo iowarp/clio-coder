@@ -66,7 +66,12 @@ function digest(request: RelevanceRankRequest): string {
 			JSON.stringify([
 				request.use,
 				request.need,
-				request.candidates.map((c) => [c.id, c.summary, (c.categories ?? []).map((category) => category.id)]),
+				request.candidates.map((c) => [
+					c.id,
+					c.summary,
+					// Label and purpose are question wording; a change must not reuse a cached ranking.
+					(c.categories ?? []).map((category) => [category.id, category.label, category.purpose]),
+				]),
 			]),
 		)
 		.digest("hex");
@@ -121,6 +126,8 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 		ref: string,
 		signal: AbortSignal | undefined,
 	): Promise<RelevanceRanking | null> => {
+		// A listener added below never fires for a signal that was already aborted.
+		if (signal?.aborted === true) return null;
 		const grouping = groupsFor(request.candidates);
 		if ("abstain" in grouping) return null;
 		const groups = new Map<string, CategoryGroup<RelevanceCandidate>>(

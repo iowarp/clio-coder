@@ -266,8 +266,12 @@ function askedRecipes(recipes: ReadonlyArray<TurnRecipeOption> | undefined): Rec
 
 /** Code points of one recipe category's representative line. */
 const MAX_RECIPE_GROUP_CHARS = 240;
-/** The exit option of a category pick: a catalog is open, so "none of these" must be answerable. */
-const NO_GROUP = "none";
+/**
+ * The exit option of a category pick: a catalog is open, so "none of these" must
+ * be answerable. Group keys are category ids, which `groupByCategory` refuses
+ * when they contain `/`, so a key starting with one can never name a category.
+ */
+const NO_GROUP = "/none";
 
 type RecipePlan =
 	| { readonly kind: "flat"; readonly options: Record<string, string> }
