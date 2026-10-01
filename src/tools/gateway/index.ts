@@ -93,7 +93,14 @@ export interface GatewayCapabilityRanking {
  * decision site; a worker's gateway and an unbound session never rank.
  */
 export type GatewayCapabilityRanker = (
-	request: { query: string; entries: ReadonlyArray<{ name: string; description: string }> },
+	request: {
+		query: string;
+		entries: ReadonlyArray<{
+			name: string;
+			description: string;
+			group?: { id: string; label: string; description: string };
+		}>;
+	},
 	signal?: AbortSignal,
 ) => Promise<GatewayCapabilityRanking | null>;
 
@@ -108,7 +115,11 @@ export function capabilityRankerFrom(ranker: RelevanceRanker): GatewayCapability
 			{
 				use: "capabilities",
 				need: request.query,
-				candidates: request.entries.map((entry) => ({ id: entry.name, summary: entry.description })),
+				candidates: request.entries.map((entry) => ({
+					id: entry.name,
+					summary: entry.description,
+					...(entry.group !== undefined ? { group: entry.group } : {}),
+				})),
 			},
 			signal,
 		);
@@ -267,8 +278,31 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 	): Promise<GatewayCapabilityRanking | null> => {
 		if (deps.rankCapabilities === undefined || entries.length === 0) return null;
 		try {
+			// The catalog's own categories, for a ranker that must select among groups
+			// before ranking entries: the owning MCP server, else the capability
+			// namespace. A group is described by its members' own first sentences.
+			const groupOf = (entry: GatewayCapabilityEntry): string =>
+				entry.kind === "mcp" ? `mcp:${deps.mcp?.ownerIdOf(entry.name) ?? "unknown"}` : entry.kind;
+			const members = new Map<string, string[]>();
+			for (const entry of entries) {
+				const id = groupOf(entry);
+				members.set(id, [...(members.get(id) ?? []), entry.description]);
+			}
+			const groups = new Map(
+				[...members].map(([id, descriptions]) => {
+					const label = id.startsWith("mcp:") ? `MCP server ${id.slice(4)}` : `${id} harness capabilities`;
+					const description = `${descriptions.length} capabilities, such as: ${descriptions.slice(0, 3).join("; ")}`;
+					return [id, { id, label, description }] as const;
+				}),
+			);
 			return await deps.rankCapabilities(
-				{ query, entries: entries.map((entry) => ({ name: entry.name, description: entry.description })) },
+				{
+					query,
+					entries: entries.map((entry) => {
+						const group = groups.get(groupOf(entry));
+						return { name: entry.name, description: entry.description, ...(group !== undefined ? { group } : {}) };
+					}),
+				},
 				signal,
 			);
 		} catch {
