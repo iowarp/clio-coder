@@ -72,6 +72,12 @@ export interface SideQuestionInput {
  * machine. Only the system prompt and the appended message differ.
  */
 export interface OutOfTurnRoundInput extends Omit<SideQuestionInput, "question"> {
+	/**
+	 * Information-flow admission of this send: the block reason, or null. The
+	 * round sends the session's history, so it is judged like a turn would be.
+	 * Asked before `beforeRequest`, and again for a schema-free retry.
+	 */
+	admitFlow?: () => string | null;
 	systemPrompt: string;
 	/** The one message appended to the read-only copy of the history. */
 	userText: string;
@@ -191,6 +197,8 @@ export async function runOutOfTurnRound(input: OutOfTurnRoundInput): Promise<Sid
 }
 
 async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | null): Promise<SideQuestionResult> {
+	const flowRefusal = input.admitFlow?.() ?? null;
+	if (flowRefusal !== null) throw new Error(flowRefusal);
 	await input.beforeRequest?.();
 	input.signal?.throwIfAborted();
 	const options: Record<string, unknown> = { maxTokens: input.maxTokens ?? SIDE_QUESTION_MAX_TOKENS };

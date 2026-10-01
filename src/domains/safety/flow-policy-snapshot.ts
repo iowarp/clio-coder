@@ -13,7 +13,7 @@
  * must refuse on, never a quiet fallback to fewer rules.
  */
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
@@ -119,6 +119,22 @@ export function recallApprovedFlowPolicy(workspaceRoot: string): ApprovedFlowPol
 		};
 	}
 	return { kind: "approved", approved: { policyHash: raw.policyHash, informationFlow: raw.informationFlow } };
+}
+
+/**
+ * Drop the snapshot when an approved policy no longer carries any source rule,
+ * so a later unapproved edit cannot resurrect rules the operator removed.
+ * Returns the failure reason when a stale snapshot could not be removed.
+ */
+export function forgetApprovedFlowPolicy(workspaceRoot: string): string | null {
+	const file = snapshotPath(resolve(workspaceRoot));
+	try {
+		unlinkSync(file);
+		return null;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+		return `stale approved information-flow snapshot ${file} could not be removed (${error instanceof Error ? error.message : String(error)})`;
+	}
 }
 
 /**

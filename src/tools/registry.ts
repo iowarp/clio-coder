@@ -25,7 +25,7 @@ import type { DecisionPresentation } from "../domains/safety/decision-presentati
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
-	evaluateInformationFlow,
+	flowTransferRefusal,
 	isFlowRestrictionSet,
 	mergeFlowRestrictions,
 	resolveToolDestination,
@@ -710,14 +710,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (destination === null) return null;
 		const refusal = deps.flow?.refusal() ?? null;
 		if (refusal !== null) return refusal;
-		const carried = deps.flow?.carried() ?? null;
-		if (carried === null) return null;
-		const verdict = evaluateInformationFlow({
-			restrictions: carried,
+		return flowTransferRefusal(
+			deps.safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
+			deps.flow?.carried() ?? null,
 			destination,
-			policy: deps.safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
-		});
-		return verdict.kind === "permitted" ? null : verdict.reason;
+		);
 	};
 
 	const runSpec = async (
@@ -775,13 +772,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...(allowsObservationPath ? { allowsObservationPath } : {}),
 					...(writeTargetViolation ? { writeTargetViolation } : {}),
 					...(deps.principal === "worker" && deps.git !== undefined ? { gitContext: deps.git } : {}),
-					...(deps.flow !== undefined && deps.flow.carried() !== null
-						? {
-								flowAdmitsUrl: (url: string) => {
-									const violation = outboundFlowViolation(spec, { tool: spec.name, args: { url } });
-									return violation;
-								},
-							}
+					...(deps.flow !== undefined
+						? { flowAdmitsUrl: (url: string) => outboundFlowViolation(spec, { tool: spec.name, args: { url } }) }
 						: {}),
 				});
 				// A body that delegated to a nested invocation the registry refused

@@ -577,6 +577,23 @@ export function evaluateInformationFlow(input: InformationFlowInput): Informatio
 }
 
 /**
+ * The one check every first-party send seam asks: the block reason, or null.
+ * A policy that cannot vouch refuses before anything else is consulted, so a
+ * seam with nothing carried yet still refuses while provenance is unknown.
+ * Callers with their own ledger refusal check it first and pass the rest here.
+ */
+export function flowTransferRefusal(
+	policy: InformationFlowPolicy,
+	carried: FlowRestrictionSet | null,
+	destination: FlowDestination,
+): string | null {
+	if (policy.refusal !== null) return `${policy.refusal}; transfer to ${describeDestination(destination)} is refused`;
+	if (carried === null || carried.restrictions.length === 0) return null;
+	const verdict = evaluateInformationFlow({ restrictions: carried, destination, policy });
+	return verdict.kind === "permitted" ? null : verdict.reason;
+}
+
+/**
  * Identity of a configured inference target as bytes would leave: the target
  * id, its runtime, and the exact endpoint identity of its URL. No locality
  * is inferred from the address or the runtime; a `target:<id>` recipient is

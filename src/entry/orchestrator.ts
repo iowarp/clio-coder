@@ -168,7 +168,7 @@ import { createFinishContractRegistration } from "../domains/safety/finish-contr
 import type { AutonomyLevel, SafetyContract } from "../domains/safety/index.js";
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
-	evaluateInformationFlow,
+	flowTransferRefusal,
 	isFlowRestrictionSet,
 	mergeFlowRestrictions,
 	modelMayActivateSkills,
@@ -1641,21 +1641,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const admitModelFlow = (destination: { targetId: string; runtimeId: string; wireModelId: string }): string | null => {
 		const refusal = flowLedger.refusal();
 		if (refusal !== null) return refusal;
-		const carried = flowLedger.current();
-		if (carried === null) return null;
 		const target = providers.getTarget(destination.targetId);
-		const verdict = evaluateInformationFlow({
-			restrictions: carried,
-			destination: resolveModelDestination({
+		return flowTransferRefusal(
+			safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
+			flowLedger.current(),
+			resolveModelDestination({
 				targetId: destination.targetId,
 				runtimeId: destination.runtimeId,
 				url: target?.url ?? null,
 				model: destination.wireModelId,
 			}),
-			policy: safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
-		});
-		return verdict.kind === "permitted" ? null : verdict.reason;
+		);
 	};
+	/** The same admission for a round that sends the live agent runtime's context. */
+	const admitRuntimeFlow = (runtime: { targetId: string; runtimeId: string; wireModelId: string }): string | null =>
+		admitModelFlow({ targetId: runtime.targetId, runtimeId: runtime.runtimeId, wireModelId: runtime.wireModelId });
 	sessionIdForDispatch = () => session?.current()?.id ?? null;
 	const prompts = result.getContract<PromptsContract>("prompts");
 	const agents = result.getContract<AgentsContract>("agents");
@@ -2143,14 +2143,23 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	bus.on(BusChannels.DispatchStarted, (payload) => {
 		if (typeof payload?.runId === "string") taskBoard.attachRun(payload.runId);
 	});
+	// The receipt's flow label is absorbed the moment a run settles, attached or
+	// detached, so any later injection of its output (a collect, a continuation,
+	// a resume) already finds the session ledger carrying it.
+	const absorbDispatchFlow = (payload: { runId?: unknown; flowRestrictions?: unknown } | undefined): void => {
+		if (typeof payload?.runId !== "string" || !isFlowRestrictionSet(payload.flowRestrictions)) return;
+		flowLedger.absorb(payload.flowRestrictions, { tool: "dispatch", toolCallId: payload.runId });
+	};
 	bus.on(BusChannels.DispatchCompleted, (payload) => {
 		if (typeof payload?.runId !== "string") return;
 		taskBoard.detachRun(payload.runId);
+		absorbDispatchFlow(payload);
 		foldDispatchSkillActivations(session, payload);
 	});
 	bus.on(BusChannels.DispatchFailed, (payload) => {
 		if (typeof payload?.runId !== "string") return;
 		taskBoard.detachRun(payload.runId);
+		absorbDispatchFlow(payload);
 		// A run that failed after loading a skill is the case the operator most
 		// needs the provenance for, and the receipt already carried it here.
 		foldDispatchSkillActivations(session, payload);
@@ -2300,19 +2309,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const refusal = flowLedger.refusal();
 			if (refusal !== null) return { allowed: false, reason: refusal };
 			const inherited = isFlowRestrictionSet(request.inherited) ? request.inherited : null;
-			const restrictions = mergeFlowRestrictions(inherited, flowLedger.current());
-			if (restrictions === null) return { allowed: true };
-			const verdict = evaluateInformationFlow({
-				restrictions,
-				destination: resolveModelDestination({
+			const reason = flowTransferRefusal(
+				safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
+				mergeFlowRestrictions(inherited, flowLedger.current()),
+				resolveModelDestination({
 					targetId: request.destination.targetId,
 					runtimeId: request.destination.runtime,
 					url: request.destination.url,
 					model: request.destination.model,
 				}),
-				policy: safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
-			});
-			return verdict.kind === "permitted" ? { allowed: true } : { allowed: false, reason: verdict.reason };
+			);
+			return reason === null ? { allowed: true } : { allowed: false, reason };
 		},
 		providers,
 		credentialsPresent,
@@ -3186,6 +3193,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			: {}),
 		toolRegistry,
 		admitFlow: admitModelFlow,
+		admitRuntimeFlow,
 		hasAttachedDispatch: () => dispatchBackground.size() > 0,
 		// The pre-warm buys latency for a person about to type the next turn. A
 		// headless `run` submits its one prompt immediately and an unattended boot

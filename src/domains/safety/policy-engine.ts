@@ -35,7 +35,7 @@ import { classifyBashGit, splitGitChdir } from "./git-policy.js";
 import type { FlowRestrictionSet, InformationFlowPolicy } from "./information-flow.js";
 import { compileInformationFlowPolicy, flowRestrictionsForCall } from "./information-flow.js";
 import type { ApprovedFlowPolicy } from "./flow-policy-snapshot.js";
-import { recallApprovedFlowPolicy, rememberApprovedFlowPolicy } from "./flow-policy-snapshot.js";
+import { forgetApprovedFlowPolicy, recallApprovedFlowPolicy, rememberApprovedFlowPolicy } from "./flow-policy-snapshot.js";
 import { inertQuotedMatch } from "./literal-exemption.js";
 import {
 	type CompiledPathPolicy,
@@ -379,14 +379,10 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	let flowRefusal: string | null = null;
 	let approvedFlow: ApprovedFlowPolicy | null = null;
 	if (flowTrusted && projectPolicy.hash !== null && projectPolicy.path !== null) {
-		if (projectPolicy.informationFlow.sources.length > 0) {
-			flowRefusal = rememberApprovedFlowPolicy(
-				projectPolicyRoot,
-				projectPolicy.path,
-				projectPolicy.hash,
-				projectPolicy.informationFlow,
-			);
-		}
+		flowRefusal =
+			projectPolicy.informationFlow.sources.length > 0
+				? rememberApprovedFlowPolicy(projectPolicyRoot, projectPolicy.path, projectPolicy.hash, projectPolicy.informationFlow)
+				: forgetApprovedFlowPolicy(projectPolicyRoot);
 	} else {
 		const recalled = recallApprovedFlowPolicy(projectPolicyRoot);
 		if (recalled.kind === "approved") approvedFlow = recalled.approved;

@@ -698,6 +698,8 @@ export interface DispatchCompletedPayload extends DispatchRunIdentity, DispatchT
 	 * session ledger tagged with the runId.
 	 */
 	skillActivations?: ReadonlyArray<SkillActivation>;
+	/** The run's information-flow label from its receipt; a FlowRestrictionSet, kept opaque to core. */
+	flowRestrictions?: unknown;
 }
 
 /**

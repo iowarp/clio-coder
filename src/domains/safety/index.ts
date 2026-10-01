@@ -44,6 +44,7 @@ export {
 	evaluateInformationFlow,
 	flowEndpointIdentity,
 	flowRestrictionsForCall,
+	flowTransferRefusal,
 	isFlowRestrictionSet,
 	mcpTransportIdentity,
 	mergeFlowRestrictions,

@@ -5624,6 +5624,7 @@ export function createDispatchBundle(
 				...(receipt.skillActivations && receipt.skillActivations.length > 0
 					? { skillActivations: [...receipt.skillActivations] }
 					: {}),
+				...(receipt.safety?.flowRestrictions !== undefined ? { flowRestrictions: receipt.safety.flowRestrictions } : {}),
 			};
 			if (outcome === "succeeded") {
 				context.bus.emit(BusChannels.DispatchCompleted, payload);
@@ -7216,6 +7217,7 @@ export function createDispatchBundle(
 				...(receipt.skillActivations && receipt.skillActivations.length > 0
 					? { skillActivations: [...receipt.skillActivations] }
 					: {}),
+				...(receipt.safety?.flowRestrictions !== undefined ? { flowRestrictions: receipt.safety.flowRestrictions } : {}),
 			};
 			if (outcome === "succeeded") {
 				context.bus.emit(BusChannels.DispatchCompleted, payload);

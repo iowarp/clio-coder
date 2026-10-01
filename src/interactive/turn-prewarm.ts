@@ -31,6 +31,7 @@ import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 /** Why a pre-warm did not run. Returned for contracts; never shown to the operator. */
 export type PrewarmSkipReason =
 	| "disabled"
+	| "flow"
 	| "surface"
 	| "turn-active"
 	| "dispatch-active"
@@ -89,6 +90,12 @@ export interface TurnPrewarmDeps {
 	 * then it is absent and `dispatchActive()` stands in with a blanket skip.
 	 */
 	registerEndpointSlot?: (runtime: AgentRuntime) => (() => void) | null;
+	/**
+	 * Information-flow admission of the context-bearing round: the block reason
+	 * when the session's restricted history may not reach this runtime's target,
+	 * or null. The empty-context wake request sends no history and is not asked.
+	 */
+	admitRuntimeFlow?: (runtime: AgentRuntime) => string | null;
 	/** Test seam. Production uses the real provider round. */
 	runPrewarm?: typeof runPrewarmRound;
 	observeDeployment?: typeof observeCacheDeployment;
@@ -321,6 +328,10 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		if (detached.has(controller) || controller.signal.aborted || !stillSelected())
 			return { ran: false, reason: "superseded" };
 		if (Date.now() - started > 30000) return { ran: false, reason: "expired" };
+		// The round below sends the live history; a restricted history that this
+		// target may not receive skips the pre-warm rather than sending it.
+		const flowRefusal = deps.admitRuntimeFlow?.(runtime) ?? null;
+		if (flowRefusal !== null) return { ran: false, reason: "flow", detail: flowRefusal };
 		// This includes shared dispatch leases/reservations and this process's
 		// foreground streams. It is a fresh check, not an atomic global warm lease;
 		// server slot observations above also include unrelated active traffic.

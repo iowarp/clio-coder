@@ -759,6 +759,8 @@ export interface CreateChatLoopDeps {
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
 	/** Information-flow admission of each model request; see TurnRuntimeDeps.admitFlow. */
 	admitFlow?: (destination: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
+	/** The same admission for /btw, /draft, /handoff and the pre-warm, which send the live runtime's history. */
+	admitRuntimeFlow?: (runtime: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
 	/**
 	 * Run the compaction flow end-to-end (read entries, resolve model,
 	 * summarize, persist a compactionSummary entry) and return the result,
@@ -1809,6 +1811,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		providers: deps.providers,
 		context,
 		bus: deps.bus,
+		...(deps.admitRuntimeFlow !== undefined ? { admitRuntimeFlow: deps.admitRuntimeFlow } : {}),
 		...(deps.session ? { session: deps.session } : {}),
 		isLatencySurface: () => deps.isLatencySurface?.() !== false,
 		isTurnActive: () => turnActive || deps.isPrewarmBusy?.() === true,
@@ -2808,6 +2811,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				result = await withEndpointSlot(prepared.runtime, () =>
 					sideQuestionRound({
+						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 						model: prepared.runtime.agent.state.model,
 						// Read-only: runSideQuestion copies before appending its own
 						// message, so the live agent's history is untouched.
@@ -2850,6 +2854,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								samplingTemperature,
 								(sampling) =>
 									draftRound({
+										admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 										model: prepared.runtime.agent.state.model,
 										// Read-only, exactly as the side-question round treats it.
 										messages: prepared.runtime.agent.state.messages,
@@ -2891,6 +2896,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				result = await withEndpointSlot(prepared.runtime, () =>
 					handoffRound({
+						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 						model: prepared.runtime.agent.state.model,
 						// Read-only, exactly as the side-question round treats it.
 						messages: prepared.runtime.agent.state.messages,

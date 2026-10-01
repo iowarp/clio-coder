@@ -72,7 +72,7 @@ import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
-	evaluateInformationFlow,
+	flowTransferRefusal,
 	mergeFlowRestrictions,
 	resolveModelDestination,
 } from "../domains/safety/information-flow.js";
@@ -648,9 +648,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	});
 	const observations = createWorkerObservationStore();
 	// Run-scoped ledger: the inherited set plus what this run's reads add. It
-	// lives in memory only; the parent's session ledger already holds the
-	// inherited part, and a restriction this run discovers reaches the parent
-	// only through the dispatch result label (see the receipt gap in the report).
+	// lives in memory only; every growth is reported to the parent at once and
+	// sealed in the receipt, so the parent's session ledger absorbs it before
+	// any output of this run reaches its context.
 	let runFlow: FlowRestrictionSet | null = input.flowRestrictions ?? null;
 	const workerFlow: NonNullable<RegistryDeps["flow"]> = {
 		carried: () => runFlow,
@@ -953,18 +953,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// The run's restrictions are judged against the target as configured for
 		// this run before each request, the same verdict the parent would reach.
 		beforeStreamRequest: () => {
-			if (runFlow === null) return { block: false };
-			const verdict = evaluateInformationFlow({
-				restrictions: runFlow,
-				destination: resolveModelDestination({
+			const reason = flowTransferRefusal(
+				safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
+				runFlow,
+				resolveModelDestination({
 					targetId: input.target.id,
 					runtimeId: input.runtime.id,
 					url: input.target.url ?? null,
 					model: input.wireModelId,
 				}),
-				policy: safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
-			});
-			return verdict.kind === "permitted" ? { block: false } : { block: true, reason: verdict.reason };
+			);
+			return reason === null ? { block: false } : { block: true, reason };
 		},
 		beforeToolCall: async ({ assistantMessage, toolCall }) => {
 			if (helperSchema === null) return undefined;
