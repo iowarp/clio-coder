@@ -49,7 +49,12 @@ const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 // shipped at 54.44MB, and 0.5.8 adds about 0.9MB spread over chunks, src/**,
 // the code map and guides with no single leaked artifact. A leaked
 // node_modules or doubled dist still overshoots 60MB several times.
-const MAX_TARBALL_BYTES = 12_000_000;
+// 0.6.0 raises the tarball ceiling to 14MB by operator decision: 0.6.0 packs
+// at 11.85MB. Shipped src/** is load-bearing because code_nav source=clio and
+// read-scope let Clio read her own code, and the grammars stay local for
+// offline and HPC sites. The next lever is redirecting self-reading to the
+// tagged GitHub source so src/** can leave the tarball.
+const MAX_TARBALL_BYTES = 14_000_000;
 const MAX_UNPACKED_BYTES = 60_000_000;
 
 const FORBIDDEN = [
