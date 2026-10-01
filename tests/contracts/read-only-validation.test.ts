@@ -214,6 +214,12 @@ it("a declared unrun check holds the merge unless the task opted out of validati
 	};
 	match(mergeWithheldDetail({ ...input, task: "Edit the parser." }) ?? "", /host did not run/u);
 	strictEqual(mergeWithheldDetail({ ...input, task: "Edit the parser. Do not run the tests." }), null);
+	for (const task of ["Skip tests", "No tests needed", "No need to test", "Do not run tests and lint"]) {
+		strictEqual(mergeWithheldDetail({ ...input, task }), null, task);
+	}
+	for (const task of ["Run tests without changing snapshots", "Do not edit tests, but run lint checks"]) {
+		match(mergeWithheldDetail({ ...input, task }) ?? "", /requested validation/u, task);
+	}
 });
 
 it("allows moved and formatted tests, renamed suites and snapshot deletions", () => {

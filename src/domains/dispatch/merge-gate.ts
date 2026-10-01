@@ -118,7 +118,8 @@ export interface MergeGateVerdict {
 
 const TASK_CLAUSE_SPLIT = /[.;\n,]|\b(?:and|but|then)\b/iu;
 const VALIDATION_OPT_OUT =
-	/\b(?:do\s+not|don['’]t|never|skip|without|no\s+need\s+to|need\s+not)\b|\bnot\s+(?:required|needed|necessary)\b/iu;
+	/\b(?:do\s+not|don['’]t|never|skip|without|no\s+need\s+to|need\s+not)\s+(?:(?:run|execute|perform|do|running|executing)\s+)?(?:(?:the|any)\s+)?(?:tests?|checks?|validation|npm|pnpm|pytest|vitest|jest|tsc|lint|typecheck)\b|\bno\s+(?:tests?|checks?|validation)\s+(?:required|needed|necessary)\b|\b(?:tests?|checks?|validation)\b[^.\n]{0,40}\bnot\s+(?:required|needed|necessary)\b/iu;
+const VALIDATION_SUBJECT = /\b(?:tests?|checks?|validation|npm|pnpm|pytest|vitest|jest|tsc|lint|typecheck)\b/iu;
 const VALIDATION_REQUEST =
 	/\b(?:run|runs|running|execute|validate|verify|test)\b[^.\n]{0,100}\b(?:tests?|checks?|validation|npm|pnpm|pytest|vitest|jest|tsc|lint|typecheck)\b/iu;
 
@@ -136,7 +137,7 @@ function taskRequestsValidation(task: string): boolean {
 function taskOptsOutOfValidation(task: string): boolean {
 	return task
 		.split(TASK_CLAUSE_SPLIT)
-		.some((clause) => VALIDATION_OPT_OUT.test(clause) && VALIDATION_REQUEST.test(clause));
+		.some((clause) => VALIDATION_OPT_OUT.test(clause) && VALIDATION_SUBJECT.test(clause));
 }
 
 /**
@@ -178,7 +179,8 @@ export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null
 	const reported = mutationReportChecks(input.contract, input.output);
 	const first = reported.declaredChecks[0];
 	if (first === undefined || reported.validationPassed) return null;
-	if (input.task !== undefined && taskOptsOutOfValidation(input.task)) return null;
+	if (input.task !== undefined && taskOptsOutOfValidation(input.task) && !taskRequestsValidation(input.task))
+		return null;
 	return {
 		reason: `the worker asked for a check the host did not run (${boundedCheck(first)})`,
 		appliesWhen: "once that check passes",
