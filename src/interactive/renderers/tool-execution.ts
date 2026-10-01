@@ -1021,6 +1021,7 @@ function inlineArgs(row: ResolvedToolRow, finished: ToolExecutionFinished | null
 	const out: string[] = [];
 	for (const [key, value] of Object.entries(row.args)) {
 		if (skip.has(key) || value === undefined || value === null) continue;
+		if (row.spec.dropsUnknownArgs === true) continue;
 		const shown = inlineArgValue(value);
 		// A flag that is on reads as its name (`ignore_case`, `detach`).
 		if (shown !== null)
@@ -1843,7 +1844,7 @@ function previewArguments(call: ToolExecutionStart | ToolExecutionFinished, widt
 			if (typeof value === "string" && cutFromRow(value, display)) rest[key] = value;
 			continue;
 		}
-		if (inlineArgValue(value) !== null) continue;
+		if (row.spec.dropsUnknownArgs === true || inlineArgValue(value) !== null) continue;
 		rest[key] = value;
 	}
 	return rest;

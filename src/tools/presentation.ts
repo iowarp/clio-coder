@@ -165,6 +165,18 @@ export interface ToolRowSpec {
 	/** Argument fields the row states, so they are never repeated inline or as `key ›` rows. */
 	consumes: readonly string[];
 	/**
+	 * True when a field outside `consumes` is a model mistake the row never
+	 * restates, inline or as a `key ›` row. The tool's own error names what was
+	 * wrong; echoing the stray blob only prints it (p9/D1).
+	 */
+	dropsUnknownArgs?: true;
+	/**
+	 * Arguments the settled result adds to the row. A call that names its target
+	 * only in an earlier call (an apply by proposal id) reads its target back
+	 * from the structured result.
+	 */
+	settledArgs?: (args: ToolRowArgs, details: Readonly<Record<string, unknown>>) => ToolRowArgs;
+	/**
 	 * False when a settled observation's size is not a fact worth stating. A
 	 * listing counts its entries; the bytes of the listing text say nothing.
 	 */
@@ -705,6 +717,10 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		verbsFor: (args) => (args.action === "preview" ? ["previewing", "previewed"] : null),
 		object: (args) => plain(joinDefined("setting", text(args, "path"))),
 		consumes: ["action", "path", "value", "proposalId"],
+		dropsUnknownArgs: true,
+		// An apply carries only the proposal id; the saved path rides the result.
+		settledArgs: (args, details) =>
+			typeof args.path === "string" || typeof details.path !== "string" ? args : { ...args, path: details.path },
 		nouns: ["setting", "settings"],
 	},
 	[ToolNames.Gateway]: {
@@ -795,7 +811,7 @@ export function resolveToolRow(
 		).trim();
 		if (capability.length > 0 && capability !== ToolNames.Gateway && op !== "describe" && op !== "find") {
 			const inner = rowArgs(record.args);
-			const resolved = resolveToolRow(capability, inner, undefined, actionClass, context);
+			const resolved = resolveToolRow(capability, inner, details, actionClass, context);
 			return { ...resolved, viaGateway: true };
 		}
 		const spec = TOOL_ROWS[ToolNames.Gateway] as ToolRowSpec;
@@ -825,10 +841,14 @@ export function resolveToolRow(
 	const builtin = TOOL_ROWS[toolName];
 	if (builtin !== undefined) {
 		const verbs = builtin.verbsFor?.(record) ?? builtin.verbs;
+		const settled =
+			builtin.settledArgs !== undefined && details !== null && typeof details === "object"
+				? builtin.settledArgs(record, details as Readonly<Record<string, unknown>>)
+				: record;
 		return {
 			spec: verbs === builtin.verbs ? builtin : { ...builtin, verbs },
 			toolName,
-			args: record,
+			args: settled,
 			viaGateway: false,
 			externalLabel: null,
 			context,

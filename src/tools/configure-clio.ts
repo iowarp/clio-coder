@@ -145,6 +145,8 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 				return {
 					kind: "ok",
 					output: `Saved ${proposal.path}. ${savedSettingEffect(proposal.path)}`,
+					// The apply call carries only the proposal id; the transcript row names the setting from this.
+					details: { path: proposal.path },
 				};
 			} catch (error) {
 				return { kind: "error", message: error instanceof Error ? error.message : String(error) };
