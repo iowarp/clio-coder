@@ -39,16 +39,18 @@
 <a href="#when-you-need-more-detail">When you need more detail</a></details><h1 id="install-clio-coder">Install Clio Coder</h1>
 <p>Install, update, and launch Clio Coder on your machine.</p>
 <h2 id="install-and-open-a-project">Install and open a project</h2>
-<p>You need a model with tool calling. Linux and macOS are the primary platforms. The installer brings its own Node.js 24, needs no root, and works on HPC login nodes with an old glibc.</p>
+<p>You need a model with tool calling. Linux and macOS are the primary platforms. The installer brings its own Node.js 24 and needs no root, including on x64 HPC login nodes with glibc 2.17 or newer.</p>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">curl -fsSL https://coder.iowarp.ai/install.sh | sh
 cd /path/to/your/project
 clio-coder configure
 clio-coder</code></pre></div>
-<p>If <code>~/.local/bin</code> is not on your <code>PATH</code>, the installer prints the line to add. From 0.6.0 on, if this site is unreachable, the latest GitHub release carries the same script at <code>https://github.com/iowarp/clio-coder/releases/latest/download/install.sh</code>. The installer verifies the Node download against its published checksums and signature.</p>
-<p>On native Windows, which is best effort (WSL is the recommended route), run <code>irm https://coder.iowarp.ai/install.ps1 | iex</code>. Install, <code>--version</code>, <code>doctor</code> and <code>uninstall</code> are verified there. The terminal session itself is not routinely tested.</p>
-<p>With your own <strong>Node.js 22.19 or newer</strong>, npm works too: <code>npm install -g @iowarp/clio-coder</code>. An older Node stops with a message that names the installer. On a cluster, read <a href="/docs/guide/hpc-clusters.html">Install on a cluster</a>.</p>
+<p>If <code>~/.local/bin</code> is not on your <code>PATH</code>, the installer prints the line to add. It checks the Node download against its published SHA-256 checksums, and their OpenPGP signature when <code>gpg</code> is installed. Pass options after <code>sh -s --</code>, as in <code>curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --version 0.6.0</code>.</p>
+<p>From 0.6.0 on, if this site is unreachable, the latest GitHub release carries the same script at <code>https://github.com/iowarp/clio-coder/releases/latest/download/install.sh</code>.</p>
+<p>On native Windows, which is best effort (WSL is the recommended route), run <code>irm https://coder.iowarp.ai/install.ps1 | iex</code> from 0.6.0 on. The installer, <code>--version</code>, <code>doctor</code> and <code>uninstall</code> work there; the terminal session itself is not routinely tested.</p>
+<p>With your own <strong>Node.js 22.19 or newer</strong>, npm works too: <code>npm install -g @iowarp/clio-coder</code>. From 0.6.0, an older Node stops with a message that names the installer. On a cluster, read <a href="/docs/guide/hpc-clusters.html">Install on a cluster</a>.</p>
 <blockquote>
-<p><strong>Before Clio Coder 0.6.0 is published.</strong> The installer installs the latest published release, 0.5.9. Run it again after 0.6.0 ships. To remove a 0.5.9 install, delete <code>~/.local/bin/clio-coder</code> and <code>~/.local/share/clio-coder-install</code> yourself, because 0.5.9 cannot remove the installer&#39;s launcher and Node runtime.</p>
+<p><strong>Before Clio Coder 0.6.0 is published.</strong> The installer and npm install the latest release, 0.5.9. When 0.6.0 ships, run the install command again: 0.5.9&#39;s <code>clio-coder upgrade</code> does not recognize the installer&#39;s layout. Native Windows needs 0.6.0, so use WSL until then.</p>
+<p>To remove a 0.5.9 install, run <code>clio-coder uninstall</code>, then delete <code>~/.local/bin/clio-coder</code> and the install root: <code>~/.local/share/clio-coder-install</code> on Linux, or <code>~/Library/Application Support/clio-coder/install</code> on macOS.</p>
 </blockquote>
 <p>On first launch, <strong>Guided setup</strong> helps you connect a local app, a model server, an AI subscription, or a provider account. Choose a model, review the connection, and save. You can also run <code>clio-coder configure</code> before opening a project.</p>
 <p>Prefer the desktop alpha? It opens locally in your browser and shares the terminal&#39;s saved connections and settings:</p>
@@ -68,7 +70,7 @@ clio-coder</code></pre></div>
 <li><a href="/docs/guide/tool-usage.html">Tools and permissions</a>: understand changes and review checks.</li>
 <li><a href="/docs/guide/doctor.html">Check your installation</a>: diagnose a connection or setup problem.</li>
 </ul>
-<p>For an existing installation, <code>clio-coder upgrade</code> updates an installer or npm global install and applies settings migrations. Other package managers receive update instructions. Check your installed version with <code>clio-coder --version</code>; a development build says it is unreleased and names its commit.</p>
+<p>For an existing installation, <code>clio-coder upgrade</code> updates an installer or npm global install and applies settings migrations. Other package managers receive update instructions. Check your installed version with <code>clio-coder --version</code>.</p>
 <h2 id="when-you-need-more-detail">When you need more detail</h2>
 <p>These web guides cover the essentials. Detailed documentation ships with Clio Coder; ask Clio to look up its bundled guide for the feature you&#39;re using. Each page also links to its full source guide.</p>
 </div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/main" data-source-version="0.6.0" data-source-ref="6c148db046d4515e4de6ec1ed4fbdc405f8179db" data-source-commit="6c148db046d4515e4de6ec1ed4fbdc405f8179db">Guide to v0.6.0</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>

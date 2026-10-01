@@ -47,7 +47,8 @@ clio-coder configure --interop</code></pre></div>
 <li><code>/run --target &lt;target&gt; &lt;agent&gt; &lt;task&gt;</code> uses a configured headless target.</li>
 <li><code>/peer &lt;peer&gt; &lt;brief&gt;</code> opens an interactive Herdr pane.</li>
 </ul>
-<p>Managed ACP and headless runs record results and receipts. A pane is an interactive handoff and does not produce a managed receipt. For a headless task, <code>--worktree</code> preserves a Git task branch for review; it does not confine the peer&#39;s filesystem or network access. A peer that runs its own tool loop is refused write-capable work unless you set <code>trustedUnmediated</code> on its target in your user settings.</p>
+<p>Managed ACP and headless runs record results and receipts. A pane is an interactive handoff and does not produce a managed receipt. For a headless task, <code>--worktree</code> preserves a Git task branch for review; it does not confine the peer&#39;s filesystem or network access.</p>
+<p>A peer that runs its own tool loop is refused write-capable work unless you trust it with <code>trustedUnmediated: true</code> in your user settings: on the target for a headless peer, or on its external-agent entry for an ACP peer.</p>
 <h2 id="review-resources-from-another-agent">Review resources from another agent</h2>
 <p>The Library can discover supported foreign resources and review their origin, scope, trust, and actual availability before adoption. It identifies unsupported components rather than treating an entire foreign package as compatible.</p>
 <p>Open <code>/library</code>, then use its local-agent discovery action. Inspect the proposed resources and approve the ones you want in your user or project library.</p>

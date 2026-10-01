@@ -81,10 +81,13 @@ function Install-ClioCoder {
 	}
 	$installRoot = if ($Options.InstallDir) { $Options.InstallDir } elseif ($env:CLIO_CODER_HOME) { Join-Path $env:CLIO_CODER_HOME "install" } else { Join-Path $env:LOCALAPPDATA "clio-coder\install" }
 	$binDir = if ($Options.BinDir) { $Options.BinDir } else { Join-Path $env:USERPROFILE ".local\bin" }
-	$installRoot = [IO.Path]::GetFullPath($installRoot)
-	$binDir = [IO.Path]::GetFullPath($binDir)
+	# Resolve against the PowerShell location: [IO.Path]::GetFullPath uses the
+	# process directory, which `cd` in an interactive session does not move.
+	function Get-AbsolutePath([string]$Path) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path) }
+	$installRoot = Get-AbsolutePath $installRoot
+	$binDir = Get-AbsolutePath $binDir
 	$launcher = Join-Path $binDir "clio-coder.cmd"
-	$installSpec = if ($Options.Package) { [IO.Path]::GetFullPath($Options.Package) } else { "$PackageName@$spec" }
+	$installSpec = if ($Options.Package) { Get-AbsolutePath $Options.Package } else { "$PackageName@$spec" }
 	if ($Options.Package -and -not (Test-Path -LiteralPath $installSpec)) { Fail "-Package $installSpec does not exist" }
 
 	Say "platform:     Windows $build (PowerShell $($PSVersionTable.PSVersion))"

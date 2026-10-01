@@ -55,7 +55,7 @@
 </tr>
 <tr>
 <td>INFO</td>
-<td>A fact that usually needs no action, such as an optional tool being absent</td>
+<td>A fact that usually needs no action, such as an HPC compiler that is not on <code>PATH</code></td>
 </tr>
 <tr>
 <td>WARN</td>
@@ -68,7 +68,7 @@
 </tbody></table></div>
 <p>A live model list, a cached list, and a provider catalog are distinct evidence. A reachable endpoint does not establish that a model will answer well or call tools. The capacity row reports CPUs and available memory; it does not measure GPU memory or model fit.</p>
 <h2 id="repair-or-investigate-further">Repair or investigate further</h2>
-<p><code>clio-coder doctor --fix</code> repairs missing directories and credential permissions, rewrites retired setting values such as <code>safety.autonomy: auto-edit</code> and YAML <code>on</code> and <code>off</code> booleans while keeping your comments, and records fleet preflight results. Plain <code>doctor</code> previews the settings rewrite. Version migrations still run through <code>clio-coder upgrade</code>.</p>
+<p><code>clio-coder doctor --fix</code> creates missing directories and template files, makes <code>settings.yaml</code> and <code>credentials.yaml</code> owner-only, rewrites retired setting values such as <code>safety.autonomy: auto-edit</code> and YAML <code>on</code> and <code>off</code> booleans while keeping your comments, and records fleet preflight results. Plain <code>doctor</code> previews the settings rewrite. Version migrations still run through <code>clio-coder upgrade</code>.</p>
 <p>For a live tool-use probe and validation-contract dry run:</p>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder doctor --deep</code></pre></div>
 <p>Deep checks send model requests and may consume tokens. Allow more time for a cold local model with <code>--tools-timeout &lt;seconds&gt;</code>. Use <code>--json</code> for structured findings.</p>

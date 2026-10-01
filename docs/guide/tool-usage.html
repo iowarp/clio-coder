@@ -45,7 +45,8 @@
 <p>A useful sequence is <strong>inspect → change → verify → review</strong>. Inspect the actual diff before committing. The <code>git</code> tool can also run <code>add</code> and <code>commit</code>, and the safety rules judge those like the matching shell command.</p>
 <h2 id="understand-permission-requests">Understand permission requests</h2>
 <p><strong>default</strong> is the supervised mode for workspace edits and approved execution. <strong>yolo</strong> allows work without ordinary confirmation prompts; hard blocks and damage-control questions still apply. Set autonomy in <strong>Permissions &amp; Limits</strong>.</p>
-<p>Read each requested command and its working directory before approving it. A shell approval card also shows an <strong>Effect</strong> line that says in plain words what the command would do. It is a reading aid; admission does not depend on it. Asking for a plan or saying “do not edit” guides the task; it does not establish a technical read-only boundary. Use the explicit tool restrictions or read-only dispatch options when you need that boundary.</p>
+<p>Read each requested command and its working directory before approving it. In the terminal, a shell approval card also shows an <strong>Effect</strong> line that says in plain words what the command would do. It is a reading aid; admission does not depend on it.</p>
+<p>Asking for a plan or saying “do not edit” guides the task; it does not establish a technical read-only boundary. Use the explicit tool restrictions or read-only dispatch options when you need that boundary.</p>
 <h2 id="verify-using-your-projects-checks">Verify using your project&#39;s checks</h2>
 <p>Ask Clio to discover available checks, then run the relevant one with <code>verify</code>. It uses declared scripts and supported build/CI definitions rather than treating arbitrary output as a test result.</p>
 <blockquote>
