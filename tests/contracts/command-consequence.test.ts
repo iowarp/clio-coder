@@ -88,9 +88,9 @@ describe("bash approval card consequence lines", () => {
 		["git push --mirr origin", ["Mirrors every ref to origin, overwriting and deleting remote refs to match"]],
 		["git restore --stag f", []],
 		// Words the shell fills in.
-		["git push origin $':main'", []],
-		["rm -rf $'/'", ["Deletes a word set at run time recursively"]],
-		["kill -9 $'-1'", []],
+		["git push origin $':main'", ["Deletes main on origin"]],
+		["rm -rf $'/'", ["Deletes / recursively"]],
+		["kill -9 $'-1'", ["Stops every process you can signal"]],
 		["F=--force; git push origin main $F", []],
 		[
 			"git reset --hard HEAD~3",
