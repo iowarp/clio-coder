@@ -1,0 +1,96 @@
+/* The first-run stage: the Clio mark assembled by setup progress. ClioStage.tsx drives the motion with
+   the Web Animations API; this sheet draws the rest states. --stage-size is set by the page. */
+.clio-stage {
+	--stage-size: 52px;
+	/* Where the mark's centre sits across the stage; a left-aligned stage sets half the mark. */
+	--stage-x: 50%;
+	position: relative;
+	display: grid;
+	justify-items: center;
+	gap: var(--space-3);
+	isolation: isolate;
+}
+.clio-stage__mark {
+	position: relative;
+	display: block;
+	width: var(--stage-size);
+	height: var(--stage-size);
+}
+.clio-stage__layer {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+	fill: none;
+}
+.clio-stage__ring {
+	stroke: var(--accent);
+	opacity: 0;
+	transition: opacity var(--motion-base) var(--ease-standard);
+}
+.clio-stage__ring[data-lit] {
+	opacity: 1;
+}
+/* A pending ring is a loose ring of code dashes waiting to be gathered. */
+.clio-stage__ghost {
+	stroke: var(--line-strong);
+	stroke-dasharray: 2.6 3.6;
+	stroke-linecap: round;
+	opacity: 0.55;
+	transition: opacity var(--motion-base) var(--ease-standard);
+}
+.clio-stage__ghost[data-lit] {
+	opacity: 0;
+}
+.clio-stage__core {
+	stroke: var(--secondary);
+}
+.clio-stage__glint mask {
+	mask-type: alpha;
+}
+.clio-stage__glint mask circle {
+	stroke: var(--ink);
+}
+.clio-stage__glint g circle {
+	stroke: var(--glint);
+	opacity: 0;
+	transform-box: view-box;
+	transform-origin: center;
+}
+/* Faint concentric rules behind the mark, echoing the rings outward the way the site's scenes do. */
+.clio-stage__halo {
+	position: absolute;
+	z-index: -1;
+	top: calc(var(--stage-size) / 2);
+	left: var(--stage-x);
+	width: calc(var(--stage-size) * 3.4);
+	aspect-ratio: 1;
+	translate: -50% -50%;
+	background: repeating-radial-gradient(
+		circle,
+		transparent 0 calc(var(--stage-size) * 0.19 - 1px),
+		var(--line) calc(var(--stage-size) * 0.19 - 1px) calc(var(--stage-size) * 0.19)
+	);
+	mask-image: radial-gradient(circle, var(--ink) 18%, transparent 68%);
+	opacity: 0;
+	transition: opacity var(--motion-entry) var(--ease-standard);
+	pointer-events: none;
+}
+.clio-stage[data-finale] .clio-stage__halo {
+	opacity: 1;
+}
+.clio-stage__caption {
+	min-height: 1.5em;
+	margin: 0;
+	font: 500 11px / 1.5 var(--font-mono);
+	letter-spacing: var(--tracking-instrument);
+	text-transform: uppercase;
+	color: var(--secondary);
+}
+.clio-stage[data-finale] .clio-stage__caption {
+	color: var(--accent);
+}
+.clio-stage__caption:empty {
+	display: none;
+}

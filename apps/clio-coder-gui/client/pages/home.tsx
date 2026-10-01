@@ -8,7 +8,7 @@ import { sessionBuffer } from "../api/sessions.js";
 import { STARTER_PROMPTS } from "../chat/chat-turn.js";
 import { Icon } from "../design/icons.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
-import { ClioLogo } from "../shell/ClioMark.js";
+import { ClioStage } from "../shell/ClioStage.js";
 import { withRoom } from "../shell/capacity.js";
 import { useShell } from "../shell/shell-context.js";
 import { isUntouched } from "../shell/shell-model.js";
@@ -198,7 +198,10 @@ export function Home({ client }: { client: Client }) {
 			<TopBar />
 			<div className="newtask">
 				<div className="newtask__inner">
-					<ClioLogo size={46} />
+					<ClioStage
+						total={2}
+						done={setup.isSuccess && workspaces.isSuccess ? (ready ? 1 : 0) + (needsWorkspace ? 0 : 1) : null}
+					/>
 					<h1 className="newtask__title">
 						{onboarding ? (
 							<>

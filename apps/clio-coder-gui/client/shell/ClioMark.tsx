@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 
 /** One ring of the mark: a C that opens to the right, optionally cut like the maze in the logo. */
-type Ring = { r: number; w: number; gap: number; tone: "accent" | "secondary"; cuts?: readonly number[] };
+export type Ring = { r: number; w: number; gap: number; tone: "accent" | "secondary"; cuts?: readonly number[] };
 /** `cycle` is one beat in ms; larger marks travel farther per turn, so they turn more slowly. */
 type Geometry = { box: number; cycle: number; stagger: number; rings: readonly Ring[]; check: string };
 
@@ -43,7 +43,7 @@ const MD: Geometry = {
 	],
 	check: "M6 12.4 10.2 16.6 18.2 7.8",
 };
-const LG: Geometry = {
+export const LG: Geometry = {
 	cycle: 2600,
 	stagger: 140,
 	box: 48,
@@ -70,7 +70,7 @@ const CUT = 1.6;
  * A dash pattern that leaves the opening centred on three o'clock and breaks the arc at each cut.
  * Paired with a dash offset of half the opening, so the stroke starts just after the opening.
  */
-function dashes({ gap, cuts = [] }: Ring): string {
+export function dashes({ gap, cuts = [] }: Ring): string {
 	const start = gap / 2;
 	const end = 100 - gap / 2;
 	const out: number[] = [];
@@ -95,10 +95,14 @@ const subscribeStill = (notify: () => void) => {
 	return () => query.removeEventListener("change", notify);
 };
 const prefersStill = () => window.matchMedia(STILL).matches;
+/** True while the operator asks for reduced motion; follows changes made during the visit. */
+export function useStill(): boolean {
+	return useSyncExternalStore(subscribeStill, prefersStill, () => true);
+}
 
 let ease: string | undefined;
 /** The site's easing, read once from the generated brand tokens so the pulse has no curve of its own. */
-function brandEase(): string {
+export function brandEase(): string {
 	ease ??= getComputedStyle(document.documentElement).getPropertyValue("--ease-standard").trim() || "ease-out";
 	return ease;
 }
@@ -131,7 +135,7 @@ export function ClioPulse({ size = 16, label, done = false }: { size?: number; l
 	const { name, shape } = geometry(size);
 	const root = useRef<HTMLSpanElement>(null);
 	const turns = useRef<Animation[]>([]);
-	const still = useSyncExternalStore(subscribeStill, prefersStill, () => true);
+	const still = useStill();
 	const [phase, setPhase] = useState<Phase>(done ? "done" : "working");
 	const current = useRef(phase);
 	current.current = phase;
