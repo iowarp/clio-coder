@@ -625,13 +625,11 @@ function committedReceipt(worktree: TaskWorktree, commit: string, apply: TaskWor
 	};
 }
 
-/** Why a worktree no longer holds exactly the commit that was previewed, or null when it does. */
+/** How a worktree no longer holds exactly the commit that was previewed, or null when it does. */
 function previewDrift(worktree: TaskWorktree, pinned: string, head: string): string | null {
-	const refused = (found: string): string =>
-		`${WORKTREE_CHANGED_SINCE_PREVIEW}: task worktree ${worktree.runId} ${found} since commit ${pinned} was offered for merge. Nothing was merged; the branch ${worktree.branch} is preserved.`;
-	if (head !== pinned) return refused(`is now at ${head}`);
+	if (head !== pinned) return `is now at ${head}`;
 	// Ignored files never reach a commit, so only what a commit would take counts.
-	if (gitBytes(worktree.path, ["status", "--porcelain", "-z"]).length > 0) return refused("has uncommitted changes");
+	if (gitBytes(worktree.path, ["status", "--porcelain", "-z"]).length > 0) return "has uncommitted changes";
 	return null;
 }
 
@@ -655,8 +653,9 @@ export function applyTaskWorktree(input: {
 	let commit: string;
 	if (input.pinnedCommit !== undefined) {
 		commit = input.pinnedCommit;
-		const drift = previewDrift(worktree, commit, before.commit);
-		if (drift !== null) {
+		const found = previewDrift(worktree, commit, before.commit);
+		if (found !== null) {
+			const drift = `${WORKTREE_CHANGED_SINCE_PREVIEW}: task worktree ${worktree.runId} ${found} since commit ${commit} was offered for merge. Nothing was merged; the branch ${worktree.branch} is preserved.`;
 			return { ...committedReceipt(worktree, commit, input.apply), reason: WORKTREE_CHANGED_SINCE_PREVIEW, detail: drift };
 		}
 	} else {
@@ -733,19 +732,35 @@ export type TaskWorktreeDiscard =
 	/** The worktree is gone but the branch is not; `claimReleased` says whether the ownership claim went with it. */
 	| { outcome: "branch_kept"; claimReleased: boolean; error: unknown }
 	/** Nothing was removed. */
-	| { outcome: "kept"; error: unknown };
+	| { outcome: "kept"; error: unknown }
+	/** The worktree no longer holds the previewed commit, so nothing was removed. `detail` says how. */
+	| { outcome: "changed"; detail: string };
 
 /**
  * Remove a task worktree and its branch for an operator who chose to, and report
  * what each step actually did. The outcome is read from the steps, never
  * inferred from the one that failed: a claim that cannot be removed after the
  * branch is deleted is still a discard, and a branch that is already gone needs
- * no `git branch -D`. A worktree gone with its branch kept releases the claim,
+ * no `git branch -D`. With `pinnedCommit`, nothing is removed unless the
+ * worktree still holds exactly that commit. A worktree gone with its branch kept releases the claim,
  * because nothing of Clio's is left to guard and the operator holds the branch.
  */
-export function discardTaskWorktree(worktree: TaskWorktree): TaskWorktreeDiscard {
+export function discardTaskWorktree(worktree: TaskWorktree, pinnedCommit?: string): TaskWorktreeDiscard {
 	try {
 		assertOwnership(worktree);
+		// `worktree remove --force` and `branch -D` delete whatever was added after
+		// the preview, so a pinned discard applies the same drift check as Merge.
+		if (pinnedCommit !== undefined) {
+			const head = checkTaskWorktreeHead(worktree);
+			if (!head.ok) return { outcome: "changed", detail: head.detail };
+			const found = previewDrift(worktree, pinnedCommit, head.commit);
+			if (found !== null) {
+				return {
+					outcome: "changed",
+					detail: `task worktree ${worktree.runId} ${found} since commit ${pinnedCommit} was offered for discard`,
+				};
+			}
+		}
 		try {
 			removeWorktreeDirectory(worktree);
 		} catch (error) {

@@ -187,6 +187,21 @@ describe("task worktree restart recovery", () => {
 		ok(!existsSync(markerPath(partial)), "no claim is left for restart recovery to misread");
 		ok(branches().includes(partial.branch), "the branch holding the work is preserved");
 
+		// A pinned discard removes nothing when work arrived after the preview.
+		const late = createTaskWorktree(root, "run-discard-late", undefined, "merge");
+		writeFileSync(join(late.path, "w.txt"), "w\n");
+		const lateCommit = applyTaskWorktree({ worktree: late, apply: "preserve" }).commit;
+		ok(lateCommit !== undefined);
+		writeFileSync(join(late.path, "after-preview.txt"), "x\n");
+		const refused = discardTaskWorktree(late, lateCommit);
+		strictEqual(refused.outcome, "changed");
+		match(refused.outcome === "changed" ? refused.detail : "", /uncommitted changes/u);
+		ok(
+			existsSync(join(late.path, "after-preview.txt")) && branches().includes(late.branch) && existsSync(markerPath(late)),
+		);
+		rmSync(join(late.path, "after-preview.txt"));
+		deepStrictEqual(discardTaskWorktree(late, lateCommit), { outcome: "discarded", claimReleased: true });
+
 		// A branch already gone needs no `git branch -D`: the outcome is what the steps did.
 		const gone = createTaskWorktree(root, "run-discard-gone", undefined, "merge");
 		git(gone.path, "checkout", "-q", "--detach");

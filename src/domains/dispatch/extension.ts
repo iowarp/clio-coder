@@ -7411,6 +7411,7 @@ export function createDispatchBundle(
 						// commit) rather than a second implementation of it.
 						let discardFailed = false;
 						let branchKept = false;
+						let discardChanged: string | null = null;
 						// The commit the card describes. Merge lands this id or nothing.
 						const previewedCommit = worktreeReceipt.commit;
 						// The preserve pass does not look at protected paths, only the merge
@@ -7495,10 +7496,13 @@ export function createDispatchBundle(
 								};
 							}
 						} else if (card?.choice === "discard") {
-							const discard = discardTaskWorktree(req.taskWorktree);
+							const discard = discardTaskWorktree(req.taskWorktree, previewedCommit);
 							if (discard.outcome === "discarded") {
 								worktreeDiscarded = true;
 								claimReleased = discard.claimReleased;
+							} else if (discard.outcome === "changed") {
+								// Nothing was removed, so this settles as a keep that says why.
+								discardChanged = discard.detail;
 							} else {
 								reportDispatchDiagnostic(`discard task worktree ${req.taskWorktree.runId}`, discard.error);
 								// Either nothing was removed and this settles as a keep, or the
@@ -7524,6 +7528,14 @@ export function createDispatchBundle(
 								worktreeReceipt = {
 									...worktreeReceipt,
 									detail: `operator discard: removed the worktree, but deleting branch ${req.taskWorktree.branch} failed; the branch is preserved`,
+								};
+							} else if (discardChanged !== null) {
+								// Not the withheld detail: its `git merge` command would land work
+								// nobody previewed.
+								finalDetail = `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator discard refused: ${discardChanged}. Branch ${req.taskWorktree.branch} and its worktree are preserved; inspect them before merging or discarding.`;
+								worktreeReceipt = {
+									...worktreeReceipt,
+									detail: `operator keep: discard refused because the worktree changed after the preview (${discardChanged}); branch and worktree preserved`,
 								};
 							} else if (card !== null) {
 								worktreeReceipt = {
