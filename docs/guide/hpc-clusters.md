@@ -13,7 +13,8 @@ export PATH="$HOME/.local/bin:$PATH"
 clio-coder doctor
 ```
 
-Until coder.iowarp.ai serves the script, fetch it from the latest GitHub release:
+If coder.iowarp.ai is unreachable from the cluster, fetch the same script from the
+latest GitHub release:
 `https://github.com/iowarp/clio-coder/releases/latest/download/install.sh`.
 
 The script (`scripts/install.sh`) is POSIX sh and needs `curl` or `wget`, `tar`
