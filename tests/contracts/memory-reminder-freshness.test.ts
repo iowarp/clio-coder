@@ -112,3 +112,36 @@ test("a cited failed attempt stays silent after the same operation succeeds", as
 	strictEqual(repeated.reason, "intervened");
 	strictEqual(bank.snapshot().procedural[0]?.injectionCount, 1);
 });
+
+for (const probe of [false, true]) {
+	test(
+		probe
+			? "guessed missing-file reads do not earn a memory card even when repeated"
+			: "one failing check does not earn a memory card",
+		async () => {
+			const bank = new TaskMemoryBank();
+			const trajectory = Array.from({ length: probe ? 2 : 1 }, (_, index) => ({
+				step: index + 1,
+				toolName: probe ? "read" : "bash",
+				operationFingerprint: probe ? "guess" : "test",
+				callDescription: probe ? "read test/index.ts" : "npm test",
+				outcome: "error" as const,
+				resultDigest: probe ? "ENOENT: no such file" : "pre-existing test failure",
+				resultDigestProvenance: observedProvenance,
+			}));
+			const result = await runTaskMemoryPolicy(
+				bank,
+				{
+					complete: async () => ({
+						text:
+							'<operations>[{"op":"save_knowledge","content":"The latest attempt failed."}]</operations><context_for_action>[tm-k-1] Avoid repeating this failure.</context_for_action>',
+					}),
+				},
+				{ task: "Inspect the project", trajectory, deterministicTrigger: true, maxTokens: 2000 },
+			);
+			strictEqual(result.reason, "no_repeated_failure");
+			strictEqual(result.reminder, null);
+			strictEqual(bank.snapshot().knowledge[0]?.injectionCount, 0);
+		},
+	);
+}

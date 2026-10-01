@@ -388,6 +388,7 @@ export async function runTaskMemoryPolicy(
 		if (input.signal?.aborted || input.isCurrent?.() === false) return settle("silent", "scope_changed", usage);
 		const read = readPolicyStep(rawResponse, userPrompt);
 		if (!read.ok) return settle("malformed", read.reason, { ...usage, droppedOperations: read.dropped });
+		const priorKnowledge = new Map(bank.snapshot().knowledge.map((entry) => [entry.id, entry.content]));
 		const operations = resolveOperations(bank, read.step.operations);
 		applyOperations(bank, operations);
 		// A model's operation is dropped either by the grammar, which does not know
@@ -415,6 +416,15 @@ export async function runTaskMemoryPolicy(
 		const citedIds = citedRenderableEntryIds(bank, reminder);
 		if (!input.deterministicTrigger && citedIds.length === 0) return settle("gated", "uncited", counts);
 		if (citesResolvedFailure(bank, citedIds, input.trajectory)) return settle("gated", "resolved_failure", counts);
+		const restoresKnownFact = bank
+			.snapshot()
+			.knowledge.some((entry) => citedIds.includes(entry.id) && priorKnowledge.get(entry.id) === entry.content);
+		if (
+			input.trajectory.some((step) => step.outcome === "error") &&
+			!hasFailureLesson(input.trajectory) &&
+			!restoresKnownFact
+		)
+			return settle("gated", "no_repeated_failure", counts);
 		if (!hasCurrentWorkspacePaths(reminder, input.workspaceRoot ?? process.cwd()))
 			return settle("gated", "invalid_path", counts);
 		bank.recordInjection(citedIds);
@@ -707,6 +717,18 @@ function citedRenderableEntryIds(bank: TaskMemoryBank, reminder: string): string
 	return [...snapshot.knowledge, ...snapshot.procedural]
 		.map((entry) => entry.id)
 		.filter((id) => reminder.includes(`[${id}]`));
+}
+
+function hasFailureLesson(trajectory: TaskMemoryPolicyInput["trajectory"]): boolean {
+	const episodes = new Map<string, TaskMemoryTrajectoryStep[]>();
+	for (const step of trajectory) {
+		// Guessed file paths are exploration, not operator lessons.
+		if (step.toolName === "read" && /ENOENT|no such file|not found/iu.test(step.resultDigest)) continue;
+		const steps = episodes.get(step.operationFingerprint) ?? [];
+		steps.push(step);
+		episodes.set(step.operationFingerprint, steps);
+	}
+	return [...episodes.values()].some((steps) => steps.length >= 2 && steps.some((step) => step.outcome === "error"));
 }
 
 function citesResolvedFailure(

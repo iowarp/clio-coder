@@ -35,7 +35,7 @@ Second worked example. Given a trajectory where the same command failed twice an
 <operations>[{"op":"update_status","content":"The same build command has now failed twice with the same error."}]</operations>
 <context_for_action>[tm-p-1] this exact command already failed with this error; change the approach rather than running it again.</context_for_action>
 
-Status is your private progress model and must never appear in context_for_action. Default to <no_intervention/>. Intervene only to restore a relevant bank fact or prevent a repeated known failure. Cite supporting visible entries as [entry-id]. Never restate the latest observation, take over planning, give broad strategy, block a tool, or request continuation.`;
+Status is your private progress model and must never appear in context_for_action. Default to <no_intervention/>. Intervene only to restore a relevant bank fact or prevent a repeated known failure. Cite supporting visible entries as [entry-id]. A new failure lesson requires a repeated operation or an observed changed outcome. One failing check, including a pre-existing failure, earns no reminder. Missing-file errors from the action agent guessing paths are probing misses, not operator lessons; do not save them as durable knowledge or surface them as reminders. Restore established facts only when they remain relevant across turns. Never restate the latest observation, take over planning, give broad strategy, block a tool, or request continuation.`;
 
 export interface MemoryInterventionPromptInput {
 	task: string;
