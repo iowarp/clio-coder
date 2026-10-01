@@ -5,6 +5,7 @@
  * events without disturbing pi-agent-core consumers.
  */
 
+import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import type { StructuredHelperResult } from "../domains/agents/result-contract.js";
 import type { RunOutcomeCode } from "../domains/dispatch/types.js";
 import type { ToolFinishEvent, ToolStartEvent } from "../tools/agent-tools.js";
@@ -131,6 +132,17 @@ export interface ClioRunOutcomeEvent {
 	payload: { outcomeCode: RunOutcomeCode; detail?: string };
 }
 
+/**
+ * The run's information-flow restrictions after a read added to them: the
+ * inherited set plus what this worker read. The parent absorbs the latest
+ * into its own ledger before the result is shown or injected, and seals it
+ * in the receipt so a background or resumed collection carries it too.
+ */
+export interface ClioFlowRestrictionsEvent {
+	type: "clio_coder_flow_restrictions";
+	payload: { set: FlowRestrictionSet };
+}
+
 /** Emitted only after the host validates an internal helper's terminal object. */
 export interface ClioHelperResultEvent {
 	type: "clio_coder_helper_result";
@@ -145,4 +157,5 @@ export type ClioWorkerEvent =
 	| ClioPermissionGrantExecutionEvent
 	| ClioSteerReceivedEvent
 	| ClioRunOutcomeEvent
+	| ClioFlowRestrictionsEvent
 	| ClioHelperResultEvent;

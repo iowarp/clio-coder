@@ -69,6 +69,13 @@ import {
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { ApprovalAuthority } from "../domains/safety/admission.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
+import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
+import {
+	EMPTY_INFORMATION_FLOW_POLICY,
+	evaluateInformationFlow,
+	mergeFlowRestrictions,
+	resolveModelDestination,
+} from "../domains/safety/information-flow.js";
 import { describeBashCallConsequences } from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { grantEffectDescriptor, grantEffectDigest } from "../domains/safety/grant-effect.js";
@@ -78,7 +85,7 @@ import type { WorkerGitAllowance, WorkerPermitAllowance } from "../domains/safet
 import { resolveAgentTools, type ToolTelemetry } from "../tools/agent-tools.js";
 import { createWorkerGitContext } from "../tools/git-exec.js";
 import type { ToolProfileName } from "../tools/profiles.js";
-import type { GrantExecutionEvent } from "../tools/registry.js";
+import type { GrantExecutionEvent, RegistryDeps } from "../tools/registry.js";
 import {
 	CHAIN_OUTPUT_TRUNCATED_MARKER,
 	effectiveToolCall,
@@ -219,6 +226,12 @@ export interface WorkerRunInput {
 	 * native registry and the Claude SDK hook path block out-of-root writes.
 	 */
 	writeRoots?: ReadonlyArray<string>;
+	/**
+	 * Information-flow restrictions the inherited context carries. Every model
+	 * request of this run is judged against them and against what the run's
+	 * own reads add, at the same seam the main agent uses.
+	 */
+	flowRestrictions?: FlowRestrictionSet;
 }
 
 export interface WorkerRunResult {
@@ -634,6 +647,24 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			: {}),
 	});
 	const observations = createWorkerObservationStore();
+	// Run-scoped ledger: the inherited set plus what this run's reads add. It
+	// lives in memory only; the parent's session ledger already holds the
+	// inherited part, and a restriction this run discovers reaches the parent
+	// only through the dispatch result label (see the receipt gap in the report).
+	let runFlow: FlowRestrictionSet | null = input.flowRestrictions ?? null;
+	const workerFlow: NonNullable<RegistryDeps["flow"]> = {
+		carried: () => runFlow,
+		refusal: () => null,
+		absorb: (set) => {
+			const before = runFlow?.restrictions.length ?? 0;
+			runFlow = mergeFlowRestrictions(runFlow, set);
+			// Every growth reaches the parent on the receipt-bearing lane, so the
+			// label precedes any output derived from the read.
+			if (runFlow !== null && runFlow.restrictions.length > before) {
+				emit({ type: "clio_coder_flow_restrictions", payload: { set: runFlow } } as ClioWorkerEvent);
+			}
+		},
+	};
 	const registry = createWorkerToolRegistry(
 		input.middlewareSnapshot,
 		safety,
@@ -672,6 +703,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				})
 			: undefined,
 		input.permitAllowance?.executeAutonomy,
+		workerFlow,
 	);
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;
@@ -918,6 +950,22 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const inheritedMessages = seededWorkerMessages(input.contextSeed);
 	const contextGuard = createWorkerContextGuard(observations.archive);
 	const options: EngineAgentOptions = {
+		// The run's restrictions are judged against the target as configured for
+		// this run before each request, the same verdict the parent would reach.
+		beforeStreamRequest: () => {
+			if (runFlow === null) return { block: false };
+			const verdict = evaluateInformationFlow({
+				restrictions: runFlow,
+				destination: resolveModelDestination({
+					targetId: input.target.id,
+					runtimeId: input.runtime.id,
+					url: input.target.url ?? null,
+					model: input.wireModelId,
+				}),
+				policy: safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
+			});
+			return verdict.kind === "permitted" ? { block: false } : { block: true, reason: verdict.reason };
+		},
 		beforeToolCall: async ({ assistantMessage, toolCall }) => {
 			if (helperSchema === null) return undefined;
 			if (acceptedHelperResult !== null || workerBoundFailure !== null)

@@ -146,7 +146,9 @@ import { type ActionClass, classify as classifyAction } from "../safety/action-c
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
 import { assessFinishContract, type FinishContractAssessment } from "../safety/finish-contract.js";
+import { isFlowRestrictionSet, mergeFlowRestrictions } from "../safety/information-flow.js";
 import { WRITE_ROOT_REFUSED_TOOLS } from "../safety/policy-engine.js";
+import type { FlowRestrictionSet } from "../safety/information-flow.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js";
 import {
@@ -541,6 +543,12 @@ export interface DispatchBundleOptions {
 	operatorAsk?: { available(): boolean; ask: AskUserHandler };
 	/** Live hard-block state cloned into each mediated worker spec. */
 	getProtectedArtifactState?: () => ProtectedArtifactState;
+	/**
+	 * The parent session's information-flow restrictions at dispatch time, or
+	 * null. A worker inherits them with its context so its own model requests
+	 * are judged against them; the worker's result returns under the same label.
+	 */
+	getFlowRestrictions?: () => FlowRestrictionSet | null;
 	/** Git-backed receipt provenance collector; injectable for deterministic tests. */
 	collectReproducibility?: typeof collectReproducibilityMetadata;
 	/** Observer injection seam. Production constructs the durable observer. */
@@ -1718,6 +1726,7 @@ interface DispatchAdmissionStage {
 
 interface DispatchWorkerSpecInput {
 	req: DispatchRequest;
+	flowRestrictions?: FlowRestrictionSet | null;
 	pathScope: DispatchPathScope;
 	target: ResolvedTarget;
 	admission: DispatchAdmissionStage;
@@ -2364,6 +2373,15 @@ function protectedArtifactReceiptSummary(
 	};
 }
 
+/** An unmediated handoff of restricted context is refused; nothing on that path judges its sends. */
+function assertFlowHandoffMediated(path: string, restrictions: FlowRestrictionSet | null): void {
+	if (restrictions === null || restrictions.restrictions.length === 0) return;
+	const rules = [...new Set(restrictions.restrictions.map((r) => r.ruleId))].join(", ");
+	throw new Error(
+		`dispatch: ${path} cannot carry context restricted by information-flow rule ${rules}; the delegated agent's model requests are not admitted by Clio`,
+	);
+}
+
 function assertPlannedNodeIdentity(req: DispatchRequest, actual: RunNodeIdentity): void {
 	const planned = req.plannedNode;
 	if (planned === undefined) return;
@@ -2612,6 +2630,17 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 			version: WORKER_PROTECTED_ARTIFACT_STATE_VERSION,
 			artifacts: protectedArtifactState.artifacts,
 		};
+	}
+	if (input.flowRestrictions !== undefined && input.flowRestrictions !== null) {
+		// Only the native worker runs every model request through the flow
+		// admission seam. An SDK or subprocess runtime sends on its own, so
+		// restricted context is refused rather than handed over unjudged.
+		if (input.target.runtime.kind !== "http") {
+			throw new Error(
+				`dispatch: the session context carries information-flow restrictions (${[...new Set(input.flowRestrictions.restrictions.map((r) => r.ruleId))].join(", ")}) and the ${input.target.runtime.id} runtime cannot admit its own model requests against them; dispatch to a native HTTP target or start a session without the restricted reads`,
+			);
+		}
+		spec.flowRestrictions = structuredClone(input.flowRestrictions) as FlowRestrictionSet;
 	}
 	if (input.req.responseSchema !== undefined) spec.responseSchema = input.req.responseSchema;
 	// The worker repairs against exactly the contract the orchestrator will seal.
@@ -5958,6 +5987,7 @@ export function createDispatchBundle(
 			assertPlannedNodeIdentity(req, { id: "local", kind: "local" });
 			assertTurnConstraintCompatibility(req, [], false);
 			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
+			assertFlowHandoffMediated("acp-delegation", options?.getFlowRestrictions?.() ?? null);
 			if (req.responseSchema !== undefined) {
 				throw new UnsupportedResponseSchemaError(
 					"dispatch: responseSchema requires the native llamacpp runtime and cannot be enforced by an ACP delegation target",
@@ -6134,6 +6164,7 @@ export function createDispatchBundle(
 					dynamicHash: lifecycle.dynamicHash,
 					middlewareSnapshot: middleware.snapshot(),
 					protectedArtifactState,
+					flowRestrictions: options?.getFlowRestrictions?.() ?? null,
 					apiKey: lifecycle.apiKey,
 					readOnly: lifecycle.readOnly,
 					budget: lifecycle.budget,
@@ -6361,6 +6392,10 @@ export function createDispatchBundle(
 		let outcomeCode: RunOutcomeCode | null = null;
 		const trustedOutcomeCodes = new Set<RunOutcomeCode>();
 		const trustedOutcomeDetails = new Map<RunOutcomeCode, string>();
+		// What the run's context carries: the inherited set, grown by the worker's
+		// own restricted reads as it reports them. Only a mediated runtime's
+		// report is believed; the inherited part is the host's own fact.
+		let trustedFlow: FlowRestrictionSet | null = spec.flowRestrictions ?? null;
 		let reportedUntrustedOutcome = false;
 		const acceptsOutcomeCodeEvents =
 			lifecycle.runtimeKind === "http" ||
@@ -6447,6 +6482,10 @@ export function createDispatchBundle(
 				pendingCapabilities.set(event.toolCallId, effectiveToolCall(event.toolName, event.args).toolName);
 			}
 			if (event.type === "clio_coder_steer_received") acknowledgeSteer(event.payload?.sequence);
+			if (event.type === "clio_coder_flow_restrictions" && acceptsOutcomeCodeEvents) {
+				const reported = (event.payload as { set?: unknown } | undefined)?.set;
+				if (isFlowRestrictionSet(reported)) trustedFlow = mergeFlowRestrictions(trustedFlow, reported);
+			}
 			if (
 				event.type === "clio_coder_run_outcome" &&
 				isRunOutcomeCode(event.payload?.outcomeCode) &&
@@ -7122,6 +7161,7 @@ export function createDispatchBundle(
 						workspaceMutationPossible,
 					},
 					...(protectedArtifacts !== undefined ? { protectedArtifacts } : {}),
+					...(trustedFlow !== null ? { flowRestrictions: trustedFlow } : {}),
 					runtimeLimitations: lifecycle.runtimeLimitations,
 					// A remote node probes its own backend; this host's answer would
 					// be a claim about the wrong machine.
@@ -8046,6 +8086,7 @@ export function createDispatchBundle(
 			const protectedArtifactState = getProtectedArtifactState();
 			assertTurnConstraintCompatibility(req, [], false);
 			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
+			assertFlowHandoffMediated("acp-delegation", options?.getFlowRestrictions?.() ?? null);
 			if (req.responseSchema !== undefined) {
 				throw new UnsupportedResponseSchemaError(
 					"dispatch: responseSchema requires the native llamacpp runtime and cannot be enforced by an ACP delegation target",

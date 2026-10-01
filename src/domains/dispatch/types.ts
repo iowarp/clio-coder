@@ -1,3 +1,4 @@
+import type { FlowRestrictionSet } from "../safety/information-flow.js";
 import type { WorkerContextProvenance } from "../context/worker/contract.js";
 /**
  * Shared run + receipt types for the dispatch domain.
@@ -719,6 +720,12 @@ export interface RunReceiptSafetySummary {
 		unfinished: ReadonlyArray<{ tool: string; count: number }>;
 		workspaceMutationPossible: boolean;
 	};
+	/**
+	 * Information-flow restrictions the run's context carried at the end: the
+	 * inherited set plus what the worker read. The parent absorbs it before
+	 * the result reaches its own context, however late it is collected.
+	 */
+	flowRestrictions?: FlowRestrictionSet;
 	/** Frozen parent-session hard blocks enforced by this worker specification. */
 	protectedArtifacts?: {
 		version: 1;

@@ -1,3 +1,6 @@
+import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
+import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
+import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -689,6 +692,11 @@ export function formatDispatchOutput(
 	return withAgentLedgerBoard(truncateUtf8(lines.join("\n"), runBudget, TRUNCATION_MARKER), board);
 }
 
+/** The union of what the collected runs' contexts carried, for the parent ledger to absorb. */
+export function flowRestrictionsOfRuns(receipts: ReadonlyArray<RunReceipt | null>): FlowRestrictionSet | null {
+	return mergeFlowRestrictions(...receipts.map((receipt) => receipt?.safety?.flowRestrictions ?? null));
+}
+
 function dispatchDetails(
 	deps: DispatchToolDeps,
 	mode: string,
@@ -720,6 +728,9 @@ function dispatchDetails(
 				run.receipt.runId,
 		),
 		terminalRunIds: runs.map((run) => run.receipt.runId),
+		...(flowRestrictionsOfRuns(runs.map((run) => run.receipt)) !== null
+			? { [FLOW_RESTRICTIONS_DETAIL]: flowRestrictionsOfRuns(runs.map((run) => run.receipt)) }
+			: {}),
 		receiptCount: runs.length,
 		failedCount: failed.length,
 		batchSummary: batch,

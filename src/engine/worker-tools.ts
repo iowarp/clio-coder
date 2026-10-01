@@ -157,6 +157,8 @@ export function createWorkerToolRegistry(
 	/** The run's Git allowance and attested task worktree; absent means git inspect. */
 	git?: AdmissionGitContext,
 	executeAutonomy?: "yolo",
+	/** The run's information-flow ledger; absent means an unrestricted run. */
+	flow?: RegistryDeps["flow"],
 ): ToolRegistry {
 	// A worker always gets a middleware contract, even without a snapshot from
 	// the orchestrator, because the loop guard rides on it as a before_tool
@@ -176,6 +178,7 @@ export function createWorkerToolRegistry(
 		...(readOnly === true ? { readOnly: true } : {}),
 		...(onMiddlewareEffects ? { onMiddlewareEffects } : {}),
 		...(git !== undefined ? { git } : {}),
+		...(flow !== undefined ? { flow } : {}),
 	});
 	// The ledger tool registers unconditionally. attestedToolSignature signs the
 	// names a bare registry produces, so a conditional registration would drift

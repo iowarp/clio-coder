@@ -1,3 +1,5 @@
+import { flowRestrictionsOfRuns } from "./dispatch-runner.js";
+import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
 import { readFileSync } from "node:fs";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
@@ -332,6 +334,10 @@ export async function collectRuns(
 		output: lines.join("\n"),
 		details: {
 			mode: "collect",
+			...(() => {
+				const carried = flowRestrictionsOfRuns(collectedRows.map((row) => row.evidence.receipt));
+				return carried !== null ? { [FLOW_RESTRICTIONS_DETAIL]: carried } : {};
+			})(),
 			...(batchId.length > 0 ? { batchId, collected } : {}),
 			...(board !== null ? { agentLedgerBoard: board } : {}),
 			complete: true,

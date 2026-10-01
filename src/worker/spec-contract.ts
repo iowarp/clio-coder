@@ -3,6 +3,7 @@ import type { ProtectedModelRef, ResidencyRole } from "../core/residency-protect
 import { assertValidResponseSchema, runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
 import { WORKER_SANDBOX_SPEC_VERSION, type WorkerSandboxSpec } from "../core/sandbox/types.js";
 import type { ToolName } from "../core/tool-names.js";
+import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-constraints.js";
 import type { ResultContract } from "../domains/agents/result-contract.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
@@ -140,6 +141,8 @@ interface WorkerSpecFields {
 	middlewareSnapshot?: MiddlewareSnapshot;
 	/** Parent-session protections frozen before placement and worker launch. */
 	protectedArtifactState?: WorkerProtectedArtifactState;
+	/** Information-flow restrictions the inherited context carries; judged on every worker model request. */
+	flowRestrictions?: FlowRestrictionSet;
 	/**
 	 * Wire model ids the operator's configuration references, each tagged with
 	 * the role it serves (chat, memory, worker, target default). The worker
@@ -543,6 +546,22 @@ function validateAllowedTools(value: unknown): void {
 	}
 }
 
+/** Structural check only; the worker may not value-import the safety domain's guard. */
+function validateFlowRestrictions(value: unknown): void {
+	const set = readRecord(value, "WorkerSpec.flowRestrictions");
+	if (set.version !== 1) throw new Error("WorkerSpec.flowRestrictions.version must be 1");
+	if (!Array.isArray(set.restrictions)) throw new Error("WorkerSpec.flowRestrictions.restrictions must be an array");
+	for (const [index, entry] of set.restrictions.entries()) {
+		const r = readRecord(entry, `WorkerSpec.flowRestrictions.restrictions[${index}]`);
+		if (typeof r.ruleId !== "string" || typeof r.policyHash !== "string" || typeof r.sourceRef !== "string")
+			throw new Error(`WorkerSpec.flowRestrictions.restrictions[${index}] must name ruleId, policyHash and sourceRef`);
+		if (!Array.isArray(r.recipients) || r.recipients.some((ref) => typeof ref !== "string"))
+			throw new Error(`WorkerSpec.flowRestrictions.restrictions[${index}].recipients must be an array of strings`);
+	}
+	if (set.advisory !== undefined && (!Array.isArray(set.advisory) || set.advisory.some((a) => typeof a !== "string")))
+		throw new Error("WorkerSpec.flowRestrictions.advisory must be an array of strings");
+}
+
 function validateWorkerBudget(value: unknown): void {
 	const budget = readRecord(value, "WorkerSpec.budget");
 	const expected = ["ceiling", "mode", "hardCap", "readReserve", "revision", "synthesis", "toolCalls"];
@@ -897,6 +916,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	validateRuntimeResolution(spec.runtimeResolution);
 	if (spec.middlewareSnapshot !== undefined) validateMiddlewareSnapshot(spec.middlewareSnapshot);
 	if (spec.protectedArtifactState !== undefined) validateProtectedArtifactState(spec.protectedArtifactState);
+	if (spec.flowRestrictions !== undefined) validateFlowRestrictions(spec.flowRestrictions);
 	if (spec.noSkills !== undefined && typeof spec.noSkills !== "boolean") {
 		throw new Error("WorkerSpec.noSkills must be a boolean");
 	}
