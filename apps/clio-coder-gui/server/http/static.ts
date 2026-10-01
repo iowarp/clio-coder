@@ -34,6 +34,7 @@ export function staticClient(app: Hono, directory: string, pwa = false) {
 			".webmanifest": "application/manifest+json; charset=utf-8",
 			".png": "image/png",
 			".webp": "image/webp",
+			".mp4": "video/mp4",
 		};
 		context.header("Content-Type", types[extname(file)] ?? "application/octet-stream");
 		context.header(
