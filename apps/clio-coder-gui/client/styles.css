@@ -160,12 +160,18 @@ h1 em {
 	color: var(--accent);
 	font-weight: 400;
 }
+/* Matches the site's eyebrow: small mono capitals at regular weight. */
 .eyebrow {
-	font-size: var(--text-instrument);
-	letter-spacing: var(--tracking-instrument);
+	font-size: 11px;
+	letter-spacing: 0.1em;
 	text-transform: uppercase;
 	color: var(--ink-muted);
-	font-weight: 700;
+	font-weight: 500;
+	line-height: 1.6;
+}
+/* .trace-panel p outranks .eyebrow by one element, which set panel eyebrows at body size. */
+.trace-panel .eyebrow {
+	font-size: 11px;
 	line-height: 1.6;
 }
 .intro {
