@@ -745,6 +745,8 @@
 	display: grid;
 	gap: var(--space-1);
 	width: min(22rem, calc(100vw - 32px));
+	min-width: 0;
+	margin: 0;
 	padding: var(--space-2);
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-lg);
@@ -753,6 +755,8 @@
 	color: var(--ink);
 }
 .autonomy__title {
+	float: left;
+	width: 100%;
 	margin: 0;
 	padding: var(--space-1) var(--space-2);
 	font-size: 12px;

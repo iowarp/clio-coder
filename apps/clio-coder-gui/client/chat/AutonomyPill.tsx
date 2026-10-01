@@ -86,8 +86,8 @@ export function AutonomyPill({
 				<span>{meta.short}</span>
 				<Icon name="chevronDown" />
 			</summary>
-			<div className="autonomy__panel" role="group" aria-label="Working freedom for this task">
-				<p className="autonomy__title">Working freedom for this task</p>
+			<fieldset className="autonomy__panel">
+				<legend className="autonomy__title">Working freedom for this task</legend>
 				{(Object.keys(LEVELS) as AutonomyLevel[]).map((value) => (
 					<button
 						key={value}
@@ -126,7 +126,7 @@ export function AutonomyPill({
 						{set.error.message}
 					</p>
 				) : null}
-			</div>
+			</fieldset>
 		</details>
 	);
 }
