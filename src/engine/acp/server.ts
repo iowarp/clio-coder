@@ -1928,6 +1928,7 @@ interface AcpWorkerAskPort {
 interface AcpPermissionQueue {
 	chain: Promise<void>;
 	cancel: ((reason: string) => void) | null;
+	cancelWorkers: (() => void) | null;
 }
 
 /** How often a worker ask retries binding to an open tool call while the model is between calls. */
@@ -2005,10 +2006,22 @@ function installWorkerAskBridge(
 	// Asks still queued or on the client, each with the callback that marks it
 	// settled elsewhere (the worker timed out, the run ended, the owner revoked it).
 	const waiting = new Map<string, () => void>();
+	queue.cancelWorkers = () => {
+		for (const settle of waiting.values()) settle();
+	};
 	const unregisterRequested = bus.on(BusChannels.PermissionRequested, (payload: PermissionRequestedPayload) => {
 		if (!workers.enabled()) return;
 		const ask = workerAskOf(payload);
 		if (ask === null || waiting.has(ask.requestId)) return;
+		const owningSessionId = input.activeSessionId();
+		if (owningSessionId === null || (payload.sessionId !== undefined && payload.sessionId !== owningSessionId)) return;
+		const askWindowMs = Math.min(
+			input.permissionTimeoutMs,
+			typeof payload.timeoutMs === "number" && Number.isFinite(payload.timeoutMs) && payload.timeoutMs > 0
+				? payload.timeoutMs
+				: input.permissionTimeoutMs,
+		);
+		const giveUpAt = performance.now() + askWindowMs;
 		let settledElsewhere = false;
 		let signalSettled: () => void = () => {};
 		const settled = new Promise<{ kind: "settled" }>((resolve) => {
@@ -2037,23 +2050,19 @@ function installWorkerAskBridge(
 		const run = async (): Promise<void> => {
 			try {
 				if (settledElsewhere) return;
-				const askWindowMs = Math.min(
-					input.permissionTimeoutMs,
-					typeof payload.timeoutMs === "number" && payload.timeoutMs > 0 ? payload.timeoutMs : input.permissionTimeoutMs,
-				);
-				const giveUpAt = Date.now() + askWindowMs;
 				let sessionId: string | null = null;
 				let toolCallId: string | null = null;
 				// The model is often between tool calls when a worker asks, so binding
 				// retries until the ask's own window closes instead of failing at once.
 				for (;;) {
 					sessionId = input.activeSessionId();
+					if (sessionId !== owningSessionId) return;
 					toolCallId = sessionId === null ? null : workers.bindToolCall(ask.runId);
-					if (toolCallId !== null || settledElsewhere || Date.now() >= giveUpAt) break;
+					if (toolCallId !== null || settledElsewhere || performance.now() >= giveUpAt) break;
 					await Promise.race([wait(ACP_WORKER_ASK_BIND_POLL_MS), settled]);
 				}
 				const snapshot = toolCallId === null ? null : input.toolCallSnapshot(toolCallId);
-				if (settledElsewhere) return;
+				if (settledElsewhere || performance.now() >= giveUpAt) return;
 				if (sessionId === null || toolCallId === null || snapshot === null) {
 					input.diagnostics?.(`worker permission ${ask.requestId} had no open tool call to ask under`);
 					return;
@@ -2112,7 +2121,7 @@ function installWorkerAskBridge(
 									[ACP_WORKER_ASK_META_KEY]: workerMeta,
 								},
 							},
-							input.permissionTimeoutMs,
+							Math.max(1, giveUpAt - performance.now()),
 						),
 					)
 					.then(
@@ -2126,18 +2135,31 @@ function installWorkerAskBridge(
 						return;
 					}
 					if (outcome.kind === "cancelled") {
-						answerWorker("deny");
+						workers.withdraw(sessionId, ask.requestId);
 						return;
 					}
 					if (outcome.kind === "failed") {
-						if (outcome.err instanceof AcpTimeoutError) workers.withdraw(sessionId, ask.requestId);
+						workers.withdraw(sessionId, ask.requestId);
 						input.diagnostics?.(
 							`worker permission ${ask.requestId} failed: ${outcome.err instanceof Error ? outcome.err.message : String(outcome.err)}`,
 						);
-						answerWorker("deny");
 						return;
 					}
-					const answer = outcome.response.outcome;
+					if (settledElsewhere || performance.now() >= giveUpAt) {
+						workers.withdraw(sessionId, ask.requestId);
+						return;
+					}
+					const response: unknown = outcome.response;
+					const answer = isRecord(response) && isRecord(response.outcome) ? response.outcome : null;
+					if (
+						answer === null ||
+						answer.outcome !== "selected" ||
+						typeof answer.optionId !== "string" ||
+						!["allow-once", "reject-once", "reject-and-stop"].includes(answer.optionId)
+					) {
+						workers.withdraw(sessionId, ask.requestId);
+						return;
+					}
 					if (answer.outcome === "selected" && answer.optionId === "allow-once") {
 						answerWorker("approve");
 						return;
@@ -2163,6 +2185,7 @@ function installWorkerAskBridge(
 		if (typeof payload.requestId === "string") waiting.get(payload.requestId)?.();
 	});
 	return () => {
+		queue.cancelWorkers?.();
 		unregisterRequested();
 		unregisterResolved();
 	};
@@ -2279,10 +2302,16 @@ function installPermissionBridge(input: {
 }): AcpPermissionBridge {
 	// One client-facing ask at a time: a main-agent ask and a forwarded worker ask
 	// share this queue because the client holds a single pending permission.
-	const queue: AcpPermissionQueue = { chain: Promise.resolve(), cancel: null };
+	const queue: AcpPermissionQueue = { chain: Promise.resolve(), cancel: null, cancelWorkers: null };
 	const unregisterWorkerAsks = installWorkerAskBridge(input, queue);
 	if (!input.toolRegistry) {
-		return { unregister: unregisterWorkerAsks, cancelPending: (reason) => queue.cancel?.(reason) };
+		return {
+			unregister: unregisterWorkerAsks,
+			cancelPending: (reason) => {
+				queue.cancelWorkers?.();
+				queue.cancel?.(reason);
+			},
+		};
 	}
 	const queuedRequestIds = new Set<string>();
 	const queuedRequestDetails = new Map<string, { tool: string; actionClass: string }>();
@@ -2557,6 +2586,7 @@ function installPermissionBridge(input: {
 			unregisterWorkerAsks();
 		},
 		cancelPending: (reason: string) => {
+			queue.cancelWorkers?.();
 			queue.cancel?.(reason);
 		},
 	};
@@ -4819,13 +4849,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	});
 
 	const cancelSession = (session: AcpServerSession, reason: string): void => {
+		if (activeSessionId === session.id || activeSessionId === null) permission.cancelPending(reason);
 		if (!session.activePrompt) return;
 		session.activePrompt.cancelled = true;
 		options.chat.cancel();
 		// A prompt cancelled with a permission parked would otherwise sit on the
 		// outstanding request until the client answers or the timeout fires, and
 		// the turn cannot settle until the parked tool does.
-		permission.cancelPending(reason);
 	};
 
 	const cancel = (params: unknown): Record<string, never> => {
@@ -5002,8 +5032,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const session = getSession(params);
 		const close = (async (): Promise<Record<string, never>> => {
 			// The prompt writer must settle before the durable session is closed.
+			cancelSession(session, "session closed");
 			if (session.activePrompt) {
-				cancelSession(session, "session closed");
 				if (promptSettled) await promptSettled;
 			}
 			if (options.session?.current()?.id === session.id) await options.session.close();

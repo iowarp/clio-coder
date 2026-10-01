@@ -164,8 +164,11 @@ test("the plan projection bounds tasks and strings and strips control characters
  */
 async function forwardWorkerAsk(input: {
 	advertise: boolean;
-	answer: "allow-once" | "reject-once" | "reject-and-stop" | "never";
+	answer: "allow-once" | "reject-once" | "reject-and-stop" | "never" | "cancelled" | "failed";
 	settleElsewhere?: boolean;
+	cancelPending?: boolean;
+	secondAsk?: boolean;
+	foreignSession?: boolean;
 }) {
 	const bus = createSafeEventBus();
 	const resolved: Array<[string, string, string]> = [];
@@ -178,6 +181,8 @@ async function forwardWorkerAsk(input: {
 		closed: false,
 		request: async (_method, params) => {
 			asks.push(params as Record<string, unknown>);
+			if (input.answer === "failed") throw new Error("Client disconnected");
+			if (input.answer === "cancelled") return { outcome: { outcome: "cancelled" } } as never;
 			if (input.answer === "never") return await new Promise<never>(() => {});
 			return { outcome: { outcome: "selected", optionId: input.answer } } as never;
 		},
@@ -203,6 +208,7 @@ async function forwardWorkerAsk(input: {
 				requestedBy: "run-7",
 				requestId: "req-1",
 				origin: "worker:run-7",
+				...(input.foreignSession ? { sessionId: "another-session" } : {}),
 				agentId: "scout",
 				target: "git push origin main",
 				consequence: ["Publishes to origin"],
@@ -211,7 +217,21 @@ async function forwardWorkerAsk(input: {
 				escalation: true,
 				approvalAuthority: "operator",
 			});
+			if (input.secondAsk)
+				bus.emit(BusChannels.PermissionRequested, {
+					tool: "bash",
+					actionClass: "execute",
+					requestedBy: "run-7",
+					requestId: "req-2",
+					origin: "worker:run-7",
+					escalation: true,
+					timeoutMs: 60_000,
+				});
 			await new Promise((resolve) => setTimeout(resolve, 50));
+			if (input.cancelPending) {
+				await handlers.get("session/cancel")?.({ sessionId: (asks[0] as { sessionId: string }).sessionId });
+				await new Promise((resolve) => setImmediate(resolve));
+			}
 			if (input.settleElsewhere) {
 				bus.emit(BusChannels.PermissionResolved, { status: "expired", requestId: "req-1", decidedBy: "timeout" });
 				await new Promise((resolve) => setTimeout(resolve, 50));
@@ -300,6 +320,27 @@ test("a worker ask the worker already settled is withdrawn from the client and n
 
 test("a client that did not advertise worker permissions is never asked", async () => {
 	const turn = await forwardWorkerAsk({ advertise: false, answer: "allow-once" });
+	strictEqual(turn.asks.length, 0);
+	deepStrictEqual(turn.resolved, []);
+});
+
+test("worker non-answers never manufacture an operator denial", async () => {
+	for (const answer of ["cancelled", "failed"] as const) {
+		const turn = await forwardWorkerAsk({ advertise: true, answer });
+		deepStrictEqual(turn.resolved, []);
+		strictEqual(turn.notifications.filter((note) => note.method === "_clio-coder/permission/withdraw").length, 1);
+	}
+});
+
+test("cancellation withdraws the active worker ask and drops queued worker asks", async () => {
+	const turn = await forwardWorkerAsk({ advertise: true, answer: "never", cancelPending: true, secondAsk: true });
+	strictEqual(turn.asks.length, 1);
+	deepStrictEqual(turn.resolved, []);
+	strictEqual(turn.notifications.filter((note) => note.method === "_clio-coder/permission/withdraw").length, 1);
+});
+
+test("worker asks owned by another session never reach the client", async () => {
+	const turn = await forwardWorkerAsk({ advertise: true, answer: "allow-once", foreignSession: true });
 	strictEqual(turn.asks.length, 0);
 	deepStrictEqual(turn.resolved, []);
 });
