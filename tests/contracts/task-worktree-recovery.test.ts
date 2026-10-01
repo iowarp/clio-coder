@@ -9,6 +9,7 @@ import {
 	applyTaskWorktree,
 	createTaskWorktree,
 	discardIdleTaskWorktree,
+	discardTaskWorktree,
 	listPreservedTaskWorktrees,
 	recoverTaskWorktrees,
 	settleTaskWorktree,
@@ -165,6 +166,26 @@ describe("task worktree restart recovery", () => {
 		strictEqual(movedRefusal.applied, false);
 		ok(!existsSync(join(root, "more.txt")));
 		ok(!existsSync(join(root, `${moved.task.runId}.txt`)));
+	});
+
+	it("an operator discard whose branch deletion fails reports the branch kept and releases the claim", () => {
+		const done = createTaskWorktree(root, "run-discard-done", undefined, "merge");
+		writeFileSync(join(done.path, "w.txt"), "w\n");
+		applyTaskWorktree({ worktree: done, apply: "preserve" });
+		deepStrictEqual(discardTaskWorktree(done), { outcome: "discarded" });
+		ok(!existsSync(done.path) && !existsSync(markerPath(done)) && !branches().includes(done.branch));
+
+		const partial = createTaskWorktree(root, "run-discard-partial", undefined, "merge");
+		writeFileSync(join(partial.path, "w.txt"), "w\n");
+		applyTaskWorktree({ worktree: partial, apply: "preserve" });
+		// A stale ref lock makes `git branch -D` fail after the worktree is gone.
+		writeFileSync(join(root, ".git", "refs", "heads", `${partial.branch}.lock`), "");
+		const result = discardTaskWorktree(partial);
+		strictEqual(result.outcome, "branch_kept");
+		strictEqual(result.outcome === "branch_kept" && result.claimReleased, true);
+		ok(!existsSync(partial.path), "the worktree is gone");
+		ok(!existsSync(markerPath(partial)), "no claim is left for restart recovery to misread");
+		ok(branches().includes(partial.branch), "the branch holding the work is preserved");
 	});
 
 	it("never touches a live owner", () => {

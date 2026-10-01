@@ -65,6 +65,7 @@ import {
 	cleanupTaskWorktree,
 	createTaskWorktree,
 	discardIdleTaskWorktree,
+	discardTaskWorktree,
 	gitCheckoutRoot,
 	protectedPathsChangedByWorktreeBranch,
 	settleTaskWorktree,
@@ -7360,9 +7361,12 @@ export function createDispatchBundle(
 				const hostRejectedMerge =
 					req.taskWorktree !== undefined && (req.apply ?? "merge") === "merge" && hostRejection !== null && workerSucceeded;
 				let worktreeReceipt: RunReceiptDraft["worktree"];
-				// Set when the operator discarded the branch from the merge card, so the
-				// closing settle below does not look for a claim that is gone.
+				// Set when the operator discarded the branch and worktree from the merge card.
 				let worktreeDiscarded = false;
+				// Set once the task claim is gone, so the closing settle below does not
+				// look for it. A discard that removed the worktree but not the branch
+				// releases the claim too: nothing of Clio's is left to guard.
+				let claimReleased = false;
 				if (req.taskWorktree !== undefined && (finalOutcome === "succeeded" || hostRejectedMerge)) {
 					const taskCommitMessage =
 						appliedResultContract !== null && resultValidation?.conformance === "pass"
@@ -7395,6 +7399,7 @@ export function createDispatchBundle(
 						// same guarded path (head attestation, protected paths, pinned
 						// commit) rather than a second implementation of it.
 						let discardFailed = false;
+						let branchKept = false;
 						// The commit the card describes. Merge lands this id or nothing.
 						const previewedCommit = worktreeReceipt.commit;
 						// The preserve pass does not look at protected paths, only the merge
@@ -7456,13 +7461,17 @@ export function createDispatchBundle(
 								};
 							}
 						} else if (card?.choice === "discard") {
-							try {
-								cleanupTaskWorktree(req.taskWorktree, true);
+							const discard = discardTaskWorktree(req.taskWorktree);
+							if (discard.outcome === "discarded") {
 								worktreeDiscarded = true;
-							} catch (discardError) {
-								// The branch and worktree stay, so this settles as a keep.
-								discardFailed = true;
-								reportDispatchDiagnostic(`discard task worktree ${req.taskWorktree.runId}`, discardError);
+								claimReleased = true;
+							} else {
+								reportDispatchDiagnostic(`discard task worktree ${req.taskWorktree.runId}`, discard.error);
+								// Either nothing was removed and this settles as a keep, or the
+								// worktree is gone and only the branch remains.
+								branchKept = discard.outcome === "branch_kept";
+								discardFailed = !branchKept;
+								if (discard.outcome === "branch_kept") claimReleased = discard.claimReleased;
 							}
 						}
 						if (card?.choice !== "merge") {
@@ -7476,10 +7485,16 @@ export function createDispatchBundle(
 									reason: "operator_discarded",
 									detail: "operator discard: deleted the branch and its worktree on the merge card",
 								};
+							} else if (branchKept) {
+								finalDetail = `${finalDetail}; the operator discarded the worktree but deleting branch ${req.taskWorktree.branch} failed, so the branch remains and \`git branch -D ${req.taskWorktree.branch}\` finishes the discard`;
+								worktreeReceipt = {
+									...worktreeReceipt,
+									detail: `operator discard: removed the worktree, but deleting branch ${req.taskWorktree.branch} failed; the branch is preserved`,
+								};
 							} else if (card !== null) {
 								worktreeReceipt = {
 									...worktreeReceipt,
-									detail: `operator keep: ${discardFailed ? "the discard failed" : mergeCardCauseNote(card.cause)}; branch preserved`,
+									detail: `operator keep: ${discardFailed ? "the discard failed; branch and worktree preserved" : `${mergeCardCauseNote(card.cause)}; branch preserved`}`,
 								};
 							}
 							failureMessage = finalDetail;
@@ -7609,7 +7624,7 @@ export function createDispatchBundle(
 					} catch (cleanupError) {
 						reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
 					}
-				} else if (req.taskWorktree !== undefined && !worktreeDiscarded) {
+				} else if (req.taskWorktree !== undefined && !claimReleased) {
 					// The run is over and its worktree stays for the operator (preserve
 					// mode, a failed run, a refused merge). Saying so on the claim keeps
 					// restart recovery from reading it as a crash.

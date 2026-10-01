@@ -713,6 +713,38 @@ export function cleanupTaskWorktree(worktree: TaskWorktree, deleteBranch: boolea
 	rmSync(claimPathFor(worktree.root, worktree.runId), { force: true });
 }
 
+/** What an operator's discard of a task worktree actually removed. */
+export type TaskWorktreeDiscard =
+	| { outcome: "discarded" }
+	/** The worktree is gone but the branch is not; `claimReleased` says whether the ownership claim went with it. */
+	| { outcome: "branch_kept"; claimReleased: boolean; error: unknown }
+	/** Nothing was removed. */
+	| { outcome: "kept"; error: unknown };
+
+/**
+ * Remove a task worktree and its branch for an operator who chose to, and say
+ * which half happened when it fails. `cleanupTaskWorktree` removes the worktree
+ * before it deletes the branch, so a failed `git branch -D` leaves a branch
+ * with no worktree; the claim is released then, because nothing of Clio's is
+ * left to guard and the operator holds the branch.
+ */
+export function discardTaskWorktree(worktree: TaskWorktree): TaskWorktreeDiscard {
+	try {
+		cleanupTaskWorktree(worktree, true);
+		return { outcome: "discarded" };
+	} catch (error) {
+		if (existsSync(worktree.path)) return { outcome: "kept", error };
+		let claimReleased = true;
+		try {
+			cleanupTaskWorktree(worktree, false);
+		} catch {
+			// The claim stays; the closing settle or restart recovery reads it.
+			claimReleased = false;
+		}
+		return { outcome: "branch_kept", claimReleased, error };
+	}
+}
+
 /**
  * The cancel-path twin of restart recovery's rule: a canceled run whose worktree
  * has no commit beyond its base and no modified, staged, or untracked file is
