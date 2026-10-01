@@ -169,6 +169,53 @@ const DIRECTION_QUESTION = yesNo(
 const RECIPE_INSTRUCTIONS =
 	"Which one worker agent would the assistant dispatch first for `task`? Pick the agent whose description matches the work that agent would carry out. When the request names an agent, pick that agent. Ignore what the assistant does itself with the results afterwards.";
 
+/**
+ * Short criteria for renderers with a declared per-option bound (Julia-1 reads
+ * 48 tokens per option, and most full criteria here are longer). They are the
+ * site's own wording under `TURN_COMPACT_VERSION`, which joins the threshold
+ * identity of any build read through them; no Jev cut was measured on them and
+ * none applies. Each option fits 46 UTF-8 bytes, so it provably fits the bound.
+ */
+const TURN_COMPACT_VERSION = "turn-compact-v1";
+const COMPACT: Readonly<Record<string, Question>> = {
+	direct: yesNo(DIRECT_QUESTION.instructions, "Answerable without this workspace", "Needs this workspace or an action"),
+	dispatch: yesNo(
+		DISPATCH_QUESTION.instructions,
+		"Names workers or broad separable work",
+		"Direct reply, focused change, or plan only",
+	),
+	shape: pick(SHAPE_QUESTION.instructions, {
+		single: "One worker carries it",
+		parallel: "Independent pieces in parallel",
+		sequence: "Ordered dependent steps",
+		council: "Independent opinions on one question",
+	}),
+	intent: pick(INTENT_QUESTION.instructions, {
+		answer: "Answer from context or general knowledge",
+		inspect: "Needs evidence from files or tools",
+		plan: "Wants a design or review first",
+		implement: "Wants a change made in the workspace",
+		interview: "Blocked on a missing user decision",
+		continue: "Continues or corrects the previous work",
+		unknown: "Not enough evidence to tell",
+	}),
+	orientation: yesNo(
+		ORIENTATION_QUESTION.instructions,
+		"Asks for a tour or overview of an area",
+		"Asks one fact, a change, or chat",
+	),
+	breadth: pick(BREADTH_QUESTION.instructions, {
+		repository: "The whole repository",
+		area: "One subsystem or directory",
+		focused: "One file, symbol, or fact",
+	}),
+	direction: yesNo(
+		DIRECTION_QUESTION.instructions,
+		"Asks what to do next or for options",
+		"States, continues or approves a task",
+	),
+};
+
 /** The task already says who should do the work, so a plan line would only repeat it. */
 const NAMES_DELEGATION = /\b(?:dispatch\w*|agents?|workers?|scouts?|sub-?agents?|council)\b/i;
 
@@ -242,6 +289,10 @@ export const TURN_SITE: SiteDefinition<TurnObject, TurnValue> = {
 	id: "turn",
 	version: "turn-v2",
 	deadlineMs: 600,
+	// The recipe pick is its own task so it can be routed apart from intent; every cut reads intent answers.
+	taskOf: (id) => (id === "recipe" ? "recipe" : "intent"),
+	cutTask: () => "intent",
+	compact: { version: TURN_COMPACT_VERSION, questions: () => COMPACT },
 	state(object) {
 		const task = boundedHead(object.task, MAX_TASK_CHARS);
 		if (task.length === 0) return null;

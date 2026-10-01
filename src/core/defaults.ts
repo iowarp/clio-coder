@@ -9,6 +9,8 @@
 import { DEFAULT_WORKING_SET_SETTINGS } from "../domains/context/working-set/defaults.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import type { DecisionTask } from "../domains/system-one/contract.js";
+import type { ProfileId } from "../domains/system-one/profiles.js";
 import type { SiteId } from "../domains/system-one/types.js";
 import type { TurnControlSettings } from "../domains/turn-control/index.js";
 import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
@@ -81,10 +83,22 @@ export interface SystemOneEngineSettings {
 	/** Wire model id; absent means the target's default model. */
 	model?: string;
 	mode?: SystemOneMode;
+	/**
+	 * The capability profile of the served model (`contract.ts`), which picks its
+	 * renderer, the questions it may be asked and how its numbers are read.
+	 * Absent means `generic`: the legacy wire exactly as before profiles existed.
+	 */
+	profile?: ProfileId;
 }
 
-/** An engine name, or the engine with a deadline that replaces the site's own. */
-export type SystemOneSiteBinding = string | { engine: string; timeoutMs?: number };
+/**
+ * An engine name, or the engine with a deadline that replaces the site's own.
+ * `tasks` routes one task of the site to another engine; every task it does not
+ * name stays with `engine`, and every route shares the site's one deadline.
+ */
+export type SystemOneSiteBinding =
+	| string
+	| { engine: string; timeoutMs?: number; tasks?: Partial<Record<DecisionTask, string>> };
 
 export interface SystemOneSettings {
 	engines: Record<string, SystemOneEngineSettings>;

@@ -10,7 +10,8 @@
  * only from a labeled run on that build, and cite the run beside the numbers.
  */
 
-import type { QuestionType, SiteCuts } from "./types.js";
+import type { RendererId } from "./contract.js";
+import type { QuestionType, SiteCuts, SiteId } from "./types.js";
 
 /**
  * Cuts per answering build, keyed `<site>.<key>`.
@@ -91,6 +92,40 @@ export const FITTED_CUTS: Readonly<Record<string, Readonly<Record<string, number
 };
 
 /**
+ * The question contract each measured table was fitted under: the renderer
+ * and, per site, the site version, which names the wording, the evidence
+ * projection (state shape and bounds) and the policy together. A measured cut
+ * applies only when the call matches exactly, so a reworded site or another
+ * rendering goes silent until it is measured again. Dynamic candidate ids and
+ * recipe options are values inside that contract, never part of it.
+ *
+ * `jev-1.13.0` is mapped to the site versions the table has been applied to
+ * since the System One rebuild shipped them together (4c13e0757). The run notes
+ * above name turn-end-v2; turn-end-v3 shipped in the same commit as these cuts
+ * and is mapped deliberately, and no later version inherits them.
+ */
+export const FITTED_CONTRACTS: Readonly<
+	Record<string, { readonly renderer: RendererId; readonly sites: Readonly<Partial<Record<SiteId, string>>> }>
+> = {
+	"jev-1.13.0": {
+		renderer: "systemone-v1",
+		sites: {
+			turn: "turn-v2",
+			turnEnd: "turn-end-v3",
+			toolCall: "tool-call-v2",
+			toolResult: "tool-result-v2",
+			relevance: "relevance-v1",
+		},
+	},
+};
+
+/** The contract a call ran under: what a measured table must match. */
+export interface CallContract {
+	readonly siteVersion: string;
+	readonly renderer: RendererId;
+}
+
+/**
  * Softmax temperatures per LLM build, by question bucket. Raw logprobs from
  * small models are badly overconfident: fitted temperatures reported by the
  * community are 1.3 to 1.5 for a 27B model and 3 to 6 for a 4B one. Empty
@@ -124,28 +159,62 @@ export function temperatureFor(build: string, type: QuestionType, optionCount: n
 	return value !== undefined && Number.isFinite(value) && value > 0 ? value : 1;
 }
 
+function measuredApplies(build: string, site: string, contract: CallContract | undefined): boolean {
+	if (!Object.hasOwn(FITTED_CUTS, build)) return false;
+	// Callers that predate contracts (doctor, the shadow check) see the table as
+	// it stands; a call always passes its contract.
+	if (contract === undefined) return true;
+	const bound = Object.hasOwn(FITTED_CONTRACTS, build) ? FITTED_CONTRACTS[build] : undefined;
+	return (
+		bound !== undefined &&
+		bound.renderer === contract.renderer &&
+		bound.sites[site as SiteId] === contract.siteVersion
+	);
+}
+
 /**
- * One site's cuts under one build: the fitted table overlaid with the
+ * One site's cuts under one threshold identity (`thresholdIdentity`): the
+ * measured table when the call's contract matches it, overlaid with the
  * operator's `systemOne.cuts`, where the operator wins. `fitted` is true when
- * any cut exists for `<site>.` under the build, so a site with several cuts
- * stays silent as a whole for a build that has none.
+ * any cut exists for `<site>.` under the identity, so a site with several cuts
+ * stays silent as a whole for a build that has none. An operator cut acts, but
+ * `source` reports it as the operator's, never as measured.
  */
 export function cutsFor(
-	build: string,
+	identity: string,
 	site: string,
 	overrides?: Readonly<Record<string, Readonly<Record<string, number>>>>,
+	contract?: CallContract,
 ): SiteCuts {
-	const table = new Map<string, number>();
+	const table = new Map<string, { value: number; source: "measured" | "operator" }>();
 	const prefix = `${site}.`;
-	for (const source of [FITTED_CUTS, overrides]) {
-		if (source === undefined || !Object.hasOwn(source, build)) continue;
-		for (const [key, value] of Object.entries(source[build] ?? {})) {
-			if (key.startsWith(prefix) && Number.isFinite(value)) table.set(key.slice(prefix.length), value);
+	const sources = [
+		[measuredApplies(identity, site, contract) ? FITTED_CUTS : undefined, "measured"],
+		[overrides, "operator"],
+	] as const;
+	for (const [source, kind] of sources) {
+		if (source === undefined || !Object.hasOwn(source, identity)) continue;
+		for (const [key, value] of Object.entries(source[identity] ?? {})) {
+			if (key.startsWith(prefix) && Number.isFinite(value)) {
+				table.set(key.slice(prefix.length), { value, source: kind });
+			}
 		}
 	}
 	return {
-		build,
+		build: identity,
 		fitted: table.size > 0,
-		cut: (key) => table.get(key),
+		cut: (key) => table.get(key)?.value,
+		source: (key) => table.get(key)?.source,
 	};
+}
+
+/** `measured` when any cut at the site is measured, else `operator` when any exists, else `none`. */
+export function validationOf(cuts: SiteCuts, keys: Iterable<string>): "measured" | "operator" | "none" {
+	let operator = false;
+	for (const key of keys) {
+		const source = cuts.source(key);
+		if (source === "measured") return "measured";
+		if (source === "operator") operator = true;
+	}
+	return operator ? "operator" : "none";
 }

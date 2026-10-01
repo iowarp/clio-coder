@@ -10,7 +10,7 @@
 import { createHash } from "node:crypto";
 import { createRedactionTally } from "../../evidence/redact.js";
 import { redactSecretString } from "../../safety/redaction.js";
-import type { Answer, CallOutcome, DecisionRecord, EngineKind, SiteId } from "../types.js";
+import type { Answer, CallOutcome, DecisionRecord, EngineKind, RouteRecord, SiteId } from "../types.js";
 import { scrub } from "./scrub.js";
 
 export interface SessionRow {
@@ -39,6 +39,8 @@ export interface SessionRow {
 	readonly note?: string;
 	readonly fitted?: boolean;
 	readonly policy?: Readonly<Record<string, string | number | boolean | null>>;
+	/** Per-engine provenance without the rendered text, which only the dataset keeps. */
+	readonly routes?: ReadonlyArray<Omit<RouteRecord, "rendered">>;
 }
 
 /** The custom-entry type the chat loop writes one drain under. */
@@ -144,5 +146,13 @@ export function buildSessionRow(record: DecisionRecord, serialized: string, dige
 		...(record.note !== undefined ? { note: record.note } : {}),
 		...(record.fitted !== undefined ? { fitted: record.fitted } : {}),
 		...(record.policy !== undefined ? { policy: scrubPolicy(record.policy) } : {}),
+		...(record.routes !== undefined
+			? {
+					routes: record.routes.map(({ rendered: _rendered, ...route }) => ({
+						...route,
+						...(route.error !== undefined ? { error: ledgerError(route.error) } : {}),
+					})),
+				}
+			: {}),
 	};
 }

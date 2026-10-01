@@ -17,6 +17,9 @@
  */
 
 /** Decision sites, named by the object each one judges. */
+import type { DecisionTask, ReadoutKind, RendererId } from "./contract.js";
+import type { ProfileId } from "./profiles.js";
+
 export const SITE_IDS = ["turn", "toolCall", "toolResult", "turnEnd", "relevance", "consult", "drafts"] as const;
 export type SiteId = (typeof SITE_IDS)[number];
 
@@ -60,11 +63,17 @@ export interface Answer {
 	 * `partial`: an option order came back unreadable, so the mass has no position-bias averaging.
 	 */
 	readonly flags?: ReadonlyArray<"flip" | "approximate" | "partial">;
+	/** What the number is, as the engine's profile declares it. Absent on rows written before profiles. Not a calibration claim. */
+	readonly readout?: ReadoutKind;
 }
 
 export interface EngineRequest {
 	readonly state: Readonly<Record<string, unknown>>;
 	readonly questions: Readonly<Record<string, Question>>;
+	/** The task each question serves, so a profile renders and reads it under the right semantics. */
+	readonly tasks?: Readonly<Record<string, DecisionTask>>;
+	/** Site-owned compact wordings by question id, read only by a bounded renderer. Never sent on the legacy wire. */
+	readonly compact?: Readonly<Record<string, Question>>;
 	readonly signal: AbortSignal;
 }
 
@@ -84,6 +93,10 @@ export interface EngineReply {
 	 * `partial: 1 of 2 logprob orders unread`. Absent for a readout as configured.
 	 */
 	readonly note?: string;
+	/** Question id to why it was not asked: a task or semantics the profile does not answer, or a declared limit. */
+	readonly abstained?: Readonly<Record<string, string>>;
+	/** The questions exactly as a non-legacy renderer sent them; absent when what was sent is what the site wrote. */
+	readonly rendered?: Readonly<Record<string, Question>>;
 }
 
 export type EngineKind = "systemone" | "llm";
@@ -96,6 +109,14 @@ export interface DecisionEngine {
 	readonly model: string | null;
 	/** Tokens one state plus its longest question may use, or null when the engine declares no bound. */
 	readonly windowTokens: number | null;
+	/** The runtime and resolved endpoint a request leaves for, for the information-flow check. */
+	readonly runtime: string;
+	readonly url: string | null;
+	/** The capability profile, or null for an LLM engine, which renders its own prompt. */
+	readonly profile: ProfileId | null;
+	readonly renderer: RendererId;
+	/** Why this engine must not be asked `question` for `task`, or null when it may. Pure. */
+	unsupported(task: DecisionTask, question: Question, compact?: Question): string | null;
 	/** Rejects on transport failure, an unusable reply, or abort. The runner owns deadlines and fallback. */
 	decide(request: EngineRequest): Promise<EngineReply>;
 }
@@ -111,6 +132,12 @@ export interface SiteCuts {
 	readonly fitted: boolean;
 	/** The cut for `<site>.<key>`, or undefined when nobody fitted it for this build. */
 	cut(key: string): number | undefined;
+	/**
+	 * Where the cut for `key` came from: the measured table in `calibration.ts`,
+	 * or an operator's `systemOne.cuts`, which acts but is never reported as a
+	 * measured validation.
+	 */
+	source(key: string): "measured" | "operator" | undefined;
 }
 
 export interface SiteDefinition<O, V> {
@@ -126,6 +153,17 @@ export interface SiteDefinition<O, V> {
 	 * opens the gate's.
 	 */
 	readonly moment?: string;
+	/**
+	 * Short wordings for renderers with a declared per-option bound, keyed by
+	 * question id. They are the site's own text under their own version, which
+	 * joins the threshold identity of any build read through them; a question
+	 * with none is asked in its full wording or abstained on, never cut.
+	 */
+	readonly compact?: { readonly version: string; questions(object: O): Readonly<Record<string, Question>> };
+	/** The task question `id` serves; absent means the site's primary task. */
+	taskOf?(id: string): DecisionTask;
+	/** The task whose answers cut `key` is compared with; absent means the site's primary task. */
+	cutTask?(key: string): DecisionTask;
 	/** The bounded state for this object, or null to ask nothing. Pure: no I/O beyond what the object carries. */
 	state(object: O): Readonly<Record<string, unknown>> | null;
 	/** Every question about this object, fanned out in one call. */
@@ -149,6 +187,12 @@ export interface RunOptions {
 	/** Join key for outcome rows: the user turn id, a permission request id, a tool call id. */
 	readonly ref?: string;
 	readonly signal?: AbortSignal;
+	/**
+	 * The information-flow restrictions the evidence inherited from where it came
+	 * from, passed through to the flow check unread. System One never classifies
+	 * content to decide where it may go.
+	 */
+	readonly flow?: unknown;
 }
 
 export interface SiteBindingInfo {
@@ -161,6 +205,8 @@ export interface SiteBindingInfo {
 	readonly deadlineMs?: number;
 	/** Why a configured binding cannot answer, for doctor and the settings overlay. */
 	readonly problem?: string;
+	/** Tasks of this site routed to another engine, by task. */
+	readonly routes?: Readonly<Partial<Record<DecisionTask, string>>>;
 }
 
 export interface SystemOne {
@@ -175,11 +221,57 @@ export interface SystemOne {
 	 * before any answer names the build, for a fitted build, and when unbound.
 	 */
 	shadowed(site: SiteId): boolean;
+	/**
+	 * What the engine answering `task` at `site` can read in one request, so a
+	 * caller can choose a bounded hierarchy over a flat ask. Null when unbound.
+	 */
+	limits?(
+		site: SiteId,
+		task: DecisionTask,
+	): { readonly windowTokens: number | null; readonly maxOptions: number } | null;
 	/** One row per site, bound or not. */
 	describe(): ReadonlyArray<SiteBindingInfo>;
 }
 
-export type CallOutcome = "answered" | "failed" | "timeout" | "canceled" | "overflow" | "breaker-open";
+export type CallOutcome =
+	| "answered"
+	| "failed"
+	| "timeout"
+	| "canceled"
+	| "overflow"
+	| "breaker-open"
+	| "unsupported"
+	| "flow-denied";
+
+/**
+ * One engine's share of a call. A site whose tasks are routed to different
+ * engines leaves one route per engine, each with its own build and threshold
+ * identity, so no answer is ever filed under another engine's build.
+ */
+export interface RouteRecord {
+	readonly engine: string;
+	readonly kind: EngineKind;
+	readonly target: string;
+	readonly model: string | null;
+	readonly profile: ProfileId | null;
+	readonly renderer: RendererId;
+	readonly tasks: ReadonlyArray<DecisionTask>;
+	/** Question ids this route was given. */
+	readonly questions: ReadonlyArray<string>;
+	readonly outcome: CallOutcome;
+	readonly build: string | null;
+	/** `thresholdIdentity(build, renderer)`, the key its cuts are looked up under. */
+	readonly identity: string | null;
+	/** `measured`, `operator` or `none`: what kind of cut the identity has at this site. */
+	readonly validation: "measured" | "operator" | "none";
+	readonly error?: string;
+	readonly note?: string;
+	readonly abstained?: Readonly<Record<string, string>>;
+	readonly usage?: { readonly input: number; readonly output: number };
+	readonly rendered?: Readonly<Record<string, Question>>;
+	/** The site's compact wording version, when a bounded renderer read it. */
+	readonly compactVersion?: string;
+}
 
 /** Everything one call asked and got back. The recorder redacts before anything is persisted. */
 export interface DecisionRecord {
@@ -216,6 +308,8 @@ export interface DecisionRecord {
 	readonly note?: string;
 	readonly fitted?: boolean;
 	readonly policy?: Readonly<Record<string, string | number | boolean | null>>;
+	/** Per-engine provenance. Present on every call made since routes existed; one entry for an unrouted site. */
+	readonly routes?: ReadonlyArray<RouteRecord>;
 }
 
 /** What followed a decision, joined to it by `ref` when the dataset is exported. */

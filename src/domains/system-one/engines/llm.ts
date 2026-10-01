@@ -105,6 +105,12 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 		kind: "llm",
 		target: target.id,
 		model,
+		runtime: runtime.id,
+		url: target.url ?? null,
+		profile: null,
+		renderer: "llm-prompt",
+		// The prompt carries any task and shape the wire validates; votes and logprobs read every one.
+		unsupported: () => null,
 		windowTokens:
 			typeof window === "number" && Number.isFinite(window) && window > 0
 				? window > PROMPT_RESERVE_TOKENS * 4
@@ -233,7 +239,10 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 					if (mode === "logprobs") learnFromOrders(ctx.orders);
 					const answers: Record<string, Answer> = {};
 					for (const entry of settled) {
-						if (entry.status === "fulfilled" && entry.value[1] !== null) answers[entry.value[0]] = entry.value[1];
+						if (entry.status === "fulfilled" && entry.value[1] !== null) {
+							const answer = entry.value[1];
+							answers[entry.value[0]] = { ...answer, readout: mode === "logprobs" ? "logprob" : "vote" };
+						}
 					}
 					if (Object.keys(answers).length === 0) {
 						const failed = settled.find((entry): entry is PromiseRejectedResult => entry.status === "rejected");

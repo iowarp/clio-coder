@@ -19,6 +19,9 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { AUTONOMY_LEVELS } from "../domains/safety/autonomy.js";
 import type { SiteId } from "../domains/system-one/types.js";
 import { SITE_IDS } from "../domains/system-one/types.js";
+import type { DecisionTask } from "../domains/system-one/contract.js";
+import { SITE_TASKS } from "../domains/system-one/contract.js";
+import { PROFILE_IDS } from "../domains/system-one/profiles.js";
 import { TURN_CONTROL_WORKFLOWS } from "../domains/turn-control/settings.js";
 import {
 	ACTIVE_AGENT_AUTOMATION_ROLES,
@@ -1364,7 +1367,7 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 					issues.add(path, `expected a map, got ${describe(value)}`);
 					continue;
 				}
-				issues.unknownKeys(path, value, ["kind", "target", "model", "mode"]);
+				issues.unknownKeys(path, value, ["kind", "target", "model", "mode", "profile"]);
 				const kind = expectEnum(issues, `${path}.kind`, value.kind, SYSTEM_ONE_ENGINE_KINDS);
 				const target = expectString(issues, `${path}.target`, value.target);
 				if (kind === undefined || target === undefined) continue;
@@ -1385,6 +1388,14 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 				}
 				if (engine.mode !== undefined && kind !== "llm")
 					issues.add(`${path}.mode`, "only an llm engine has a readout mode");
+				if ("profile" in value) {
+					// An unknown profile is refused rather than read as generic: it would ask
+					// the model questions its contract was never checked against.
+					const profile = expectEnum(issues, `${path}.profile`, value.profile, PROFILE_IDS);
+					if (profile !== undefined && kind !== "systemone")
+						issues.add(`${path}.profile`, "only a systemone engine has a capability profile");
+					else if (profile !== undefined) engine.profile = profile;
+				}
 				engines[name] = engine;
 			}
 			next.engines = engines;
@@ -1405,11 +1416,36 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 				}
 				let engine: string | undefined;
 				let timeoutMs: number | undefined;
+				let tasks: Partial<Record<DecisionTask, string>> | undefined;
 				if (typeof value === "string") engine = expectString(issues, path, value);
 				else if (isPlainObject(value)) {
-					issues.unknownKeys(path, value, ["engine", "timeoutMs"]);
+					issues.unknownKeys(path, value, ["engine", "timeoutMs", "tasks"]);
 					engine = expectString(issues, `${path}.engine`, value.engine);
 					if ("timeoutMs" in value) timeoutMs = expectInteger(issues, `${path}.timeoutMs`, value.timeoutMs, { min: 1 });
+					if ("tasks" in value) {
+						if (!isPlainObject(value.tasks)) {
+							issues.add(`${path}.tasks`, `expected a map, got ${describe(value.tasks)}`);
+						} else {
+							// A task the site does not ask, or an engine nobody declared, is refused:
+							// either would leave the task running somewhere the operator did not name.
+							const asked = SITE_TASKS[site as SiteId];
+							const routed: Partial<Record<DecisionTask, string>> = {};
+							for (const [task, target] of Object.entries(value.tasks)) {
+								if (!asked.includes(task as DecisionTask)) {
+									issues.add(`${path}.tasks.${task}`, `unknown task, expected one of ${asked.join(", ")}`);
+									continue;
+								}
+								const routedTo = expectString(issues, `${path}.tasks.${task}`, target);
+								if (routedTo === undefined) continue;
+								if (!Object.hasOwn(declared, routedTo)) {
+									issues.add(`${path}.tasks.${task}`, `engine '${routedTo}' is not defined in systemOne.engines`);
+									continue;
+								}
+								routed[task as DecisionTask] = routedTo;
+							}
+							tasks = routed;
+						}
+					}
 				} else {
 					issues.add(path, `expected an engine name or a map, got ${describe(value)}`);
 					continue;
@@ -1419,7 +1455,14 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 					issues.add(path, `engine '${engine}' is not defined in systemOne.engines`);
 					continue;
 				}
-				sites[site as SiteId] = timeoutMs === undefined ? engine : { engine, timeoutMs };
+				sites[site as SiteId] =
+					timeoutMs === undefined && tasks === undefined
+						? engine
+						: {
+								engine,
+								...(timeoutMs !== undefined ? { timeoutMs } : {}),
+								...(tasks !== undefined ? { tasks } : {}),
+							};
 			}
 			next.sites = sites;
 		}

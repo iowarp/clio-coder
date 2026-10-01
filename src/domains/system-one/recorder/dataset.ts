@@ -35,7 +35,16 @@ import { clioStateDir, stateRootRemoved } from "../../../core/xdg.js";
 import type { RedactionTally } from "../../evidence/redact.js";
 import { createRedactionTally } from "../../evidence/redact.js";
 import { specHash } from "../questions.js";
-import type { Answer, CallOutcome, DecisionRecord, EngineKind, OutcomeRecord, Question, SiteId } from "../types.js";
+import type {
+	Answer,
+	CallOutcome,
+	DecisionRecord,
+	EngineKind,
+	OutcomeRecord,
+	Question,
+	RouteRecord,
+	SiteId,
+} from "../types.js";
 import { boundState, scrub, scrubbed } from "./scrub.js";
 import type { RetentionLimits } from "./store.js";
 import { DATASET_DIR_NAME, dayFileName, dayOf, pruneDataset } from "./store.js";
@@ -79,6 +88,8 @@ export interface DatasetDecisionRow {
 	readonly note?: string;
 	readonly fitted?: boolean;
 	readonly policy?: Readonly<Record<string, string | number | boolean | null>>;
+	/** Per-engine provenance, with the rendered questions a bounded renderer sent. */
+	readonly routes?: ReadonlyArray<RouteRecord>;
 }
 
 export interface DatasetSpecRow {
@@ -172,6 +183,7 @@ function decisionRow(item: PendingDecision, questions: Record<string, string>): 
 	const error = record.error === undefined ? undefined : scrub(record.error, tally);
 	const policy = record.policy === undefined ? undefined : scrub(record.policy, tally);
 	const answers = record.answers === undefined ? undefined : scrub(record.answers, tally, false);
+	const routes = record.routes === undefined ? undefined : scrub(record.routes, tally, false);
 	return {
 		kind: "decision",
 		v: 1,
@@ -200,6 +212,7 @@ function decisionRow(item: PendingDecision, questions: Record<string, string>): 
 		...(record.note !== undefined ? { note: record.note } : {}),
 		...(record.fitted !== undefined ? { fitted: record.fitted } : {}),
 		...(policy !== undefined ? { policy } : {}),
+		...(routes !== undefined ? { routes } : {}),
 	};
 }
 
