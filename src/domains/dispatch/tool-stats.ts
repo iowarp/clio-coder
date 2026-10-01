@@ -155,28 +155,30 @@ export function blockedWriteAttempts(
 	return attempted > 0 && blocked === attempted ? attempted : null;
 }
 
-/**
- * Why a workspace-edit worker that finished cleanly did none of its assignment:
- * it executed no tool at all, or it recorded a successful `limitation` and the
- * run changed nothing (the shape of the main agent's headless `limitation`
- * failure). A worker that changed files and then recorded a limitation
- * (typically "could not validate") keeps its outcome, because its edits landed;
- * the receipt's quality fields carry the missing validation.
- * `mutatedPathCount` is null when no finish-contract assessment exists, which
- * leaves the limitation shape undecided.
- *
- * Callers apply this to edit workers only. A judge or scout that answers in
- * prose without a tool is a legitimate run and keeps its succeeded outcome.
- */
+/** A clean process exit cannot overrule an edit worker's explicit report of inability. */
 export function workerNoWorkDetail(input: {
 	activity: ToolActivitySummary;
 	limitationRecorded: boolean;
 	mutatedPathCount: number | null;
+	finalText?: string;
+	limitationDetail?: string;
 }): string | null {
-	if (input.activity.calls === 0) return "worker executed no tools, so it did none of its assignment";
-	if (input.limitationRecorded && input.mutatedPathCount === 0) {
-		return "worker recorded a limitation and changed nothing, so the assignment was not done";
+	let report = input.finalText?.trim() ?? "";
+	try {
+		const parsed: unknown = JSON.parse(report);
+		if (parsed && typeof parsed === "object" && "summary" in parsed && typeof parsed.summary === "string") {
+			report = parsed.summary;
+		}
+	} catch {
+		// Plain final prose is also a valid worker report.
 	}
+	const reportedInability = /\b(?:cannot|can't|could not|couldn't|unable to)\b/iu.test(report);
+	const unchanged = input.mutatedPathCount === 0;
+	if (unchanged && (input.limitationRecorded || reportedInability)) {
+		const reason = input.limitationDetail?.trim() || report;
+		return `worker recorded a limitation and changed nothing, so the assignment was not done${reason ? `: ${reason}` : ""}`;
+	}
+	if (input.activity.calls === 0) return "worker executed no tools, so it did none of its assignment";
 	return null;
 }
 

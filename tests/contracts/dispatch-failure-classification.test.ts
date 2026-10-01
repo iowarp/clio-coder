@@ -61,6 +61,18 @@ describe("dispatch failure classification", () => {
 		strictEqual(workerNoWorkDetail({ activity: activity(4), limitationRecorded: false, mutatedPathCount: 0 }), null);
 	});
 
+	it("recognizes a prose-only limitation in the final mutation report without failing completed edits", () => {
+		const input = {
+			activity: { calls: 1, succeeded: 1, failed: 0, blocked: 0, mutatingSucceeded: false },
+			limitationRecorded: false,
+			mutatedPathCount: 0,
+			finalText: JSON.stringify({ mutatedPaths: [], summary: "Cannot add parseDuration because ms cannot parse compound strings. No edits made." }),
+		};
+		match(workerNoWorkDetail(input) ?? "", /ms cannot parse compound strings/);
+		strictEqual(workerNoWorkDetail({ ...input, mutatedPathCount: 1 }), null);
+		strictEqual(workerNoWorkDetail({ ...input, finalText: "Already implemented; no changes needed." }), null);
+	});
+
 	it("does not retry ACP model admission or peer HTTP 400/404 or charge the peer breaker", () => {
 		for (const tail of [
 			"ACP delegation failed: ACP peer does not offer requested model 'gpt-6-unknown'",

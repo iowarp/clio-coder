@@ -7288,6 +7288,8 @@ export function createDispatchBundle(
 						activity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
 						limitationRecorded: (toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0,
 						mutatedPathCount: finishContract?.assessment.mutatedPaths.length ?? null,
+						finalText: finishContractAssistantText,
+						limitationDetail: finishContract?.assessment.evidence.filter((item) => item.kind === "limitation").map((item) => item.summary).join("; ") ?? "",
 					});
 					if (noWork !== null) {
 						finalOutcome = "failed";
