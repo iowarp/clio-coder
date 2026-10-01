@@ -248,15 +248,17 @@ producer.
 | `typed_scope_replaced_inferred_paths` | warn | Typed intent was declared, so prose-only paths took no part in scope. |
 | `legacy_scope_inferred` | warn | Emitted by `path-scope.ts` when prose inference resolves a leading `../` run against the dispatch root. The detail lists each token as `<raw token> -> <path or dropped>`. |
 | `legacy_scope_empty` | retained compatibility id | Accepted by the event projection for older producers; no current source emits it. |
+| `write_root_dot_unconfined` | warn | A write root of `.` names the whole workspace, so it sets no write boundary and the worker keeps bash, verify and git. |
+| `write_roots_checks_withheld` | warn | Narrow write roots run without an OS sandbox enforcing them, so the worker loses bash and verify and cannot run checks. |
 | `intent_version_unsupported` | refuse | `intent.version` names a version this build does not speak. |
 | `intent_malformed` | refuse | Not a normalized intent for a reason other than its version. |
 | `intent_write_roots_contradiction` | refuse | Legacy `writeRoots` and `intent.write_roots` name different trees. |
-| `intent_outputs_outside_write_roots` | refuse | A declared output lies outside every declared write root. |
+| `intent_outputs_outside_write_roots` | refuse | A declared output lies outside every declared write root. The diagnostic tells the caller to list file paths within the roots, never an action such as commit. |
 | `intent_write_without_authority` | refuse | Write roots declared on a read-only request. |
 | `intent_scope_widening` | refuse | A narrowed intent reaches outside the intent it narrows. |
 | `intent_path_absolute` | refuse | A declared path is absolute rather than repository-relative. |
 | `intent_path_escapes_root` | refuse | A declared path escapes the repository root. |
-| `intent_path_malformed` | refuse | A declared path fails the boundary grammar. |
+| `intent_path_malformed` | refuse | A declared path fails the boundary grammar, including an `expected_outputs` entry that normalizes to `.`. Outputs are file paths, and the host commits worktree tasks. |
 | `intent_path_over_cap` | refuse | A list exceeds 32 entries or an entry exceeds 512 bytes. |
 | `verification_malformed` | refuse | A verification entry is not `{check, timeout_ms?}`. |
 | `verification_over_cap` | refuse | More than 8 verification entries. |
