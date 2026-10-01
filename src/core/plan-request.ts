@@ -3,7 +3,7 @@ export function isPlanOnlyRequest(text: string): boolean {
 	return (
 		/\bplan(?:s|ning)?\b/iu.test(text) &&
 		(/\bplan[ -]only\b|\bonly\s+(?:a\s+|the\s+)?plan\b/iu.test(text) ||
-			/\b(?:do\s+not|don['’]t|never)\s+(?:edit|modify|change|implement|execute)\b|\bno\s+(?:edits|implementation)\b/iu.test(
+			/\b(?:do\s+not|don['’]t|never)\s+(?:(?:edit|modify|change)\s+(?:anything|(?:any\s+)?(?:files|code))|(?:implement|execute)(?:\s+(?:anything|it|the\s+plan))?)(?=\s*(?:[.;,!]|$))|\bno\s+(?:edits|implementation)(?=\s*(?:[.;,!]|$))/iu.test(
 				text,
 			))
 	);

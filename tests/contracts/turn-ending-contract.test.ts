@@ -266,6 +266,9 @@ it("detects explicit plan-only requests and removes only a trailing duplicated c
 	const request = "Plan how to implement parseDuration. Give me the plan only; do not edit anything.";
 	strictEqual(isPlanOnlyRequest(request), true);
 	strictEqual(isPlanOnlyRequest("Plan the change and implement it."), false);
+	strictEqual(isPlanOnlyRequest("Plan and implement the parser; do not change the public API."), false);
+	strictEqual(isPlanOnlyRequest("Plan and implement this; do not edit tests."), false);
+	strictEqual(isPlanOnlyRequest("Plan this change; do not implement it."), true);
 	strictEqual(isPlanOnlyRequest("Do not edit anything; explain the parser."), false);
 	const rule = createPlanCloseRegistration({ canAsk: () => true, isPlan: () => undefined });
 	rule.evaluate({ hook: "turn_start", text: request });
