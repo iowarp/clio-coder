@@ -1502,9 +1502,14 @@ const RG_VALUE_LONG = new Set([
 function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string, piped: boolean): boolean {
 	const positionals: string[] = [];
 	let explicitPattern = false;
+	let listsFiles = false;
 	let optionsEnded = false;
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index] ?? "";
+		if (!optionsEnded && arg === "--files") {
+			listsFiles = true;
+			continue;
+		}
 		if (optionsEnded || !arg.startsWith("-") || arg === "-") {
 			if (arg === "-") return false;
 			positionals.push(arg);
@@ -1545,6 +1550,10 @@ function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string, piped: bo
 		}
 		return false;
 	}
+	// `--files` prints the paths rg would search and opens no file, so it lists
+	// like `find` does. Its operands are walk roots; the caller holds them to
+	// the workspace.
+	if (listsFiles) return !explicitPattern;
 	const operands = explicitPattern ? positionals : positionals.slice(1);
 	if (!explicitPattern && positionals.length === 0) return false;
 	// Fed by a pipe and naming no file, rg reads stdin and opens nothing.
