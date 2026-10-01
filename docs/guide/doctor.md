@@ -39,7 +39,10 @@ Doctor exits 0 when no row is an error. See
 The lifecycle rows report the detected install method, whether config, data,
 state, and cache are absolute and non-overlapping (including through symlinks),
 and whether `migrations.json` is trustworthy and current. Pending migrations
-are a warning with the post-install command. Invalid JSON, an invalid manifest
+are a warning with the post-install command. A registered migration that is
+not recorded but whose result the current valid `settings.yaml` already
+satisfies (`2026-09-01-settings-v2` and `2026-09-01-retire-panes-knobs`) is
+reported as satisfied, not pending. Invalid JSON, an invalid manifest
 shape, duplicate IDs, or an oversized manifest is an error: doctor does not
 rewrite it or guess that no migration ran. Restore or review the manifest before
 running upgrade. An unknown install method is a warning because Clio cannot

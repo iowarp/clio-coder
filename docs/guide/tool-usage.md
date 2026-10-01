@@ -956,7 +956,9 @@ gateway(op="call", capability="artifact", args={kind: "review", content: "# Revi
 | `value` | `preview`: the new value as text. |
 | `proposalId` | `apply`: the id the preview returned. |
 
-`preview` returns the affected change and a `proposalId`. One proposal is pending per session, it expires after 10 minutes, and `apply` fails when the saved value changed since the preview. At `default`, `apply` asks the operator to approve the exact preview. At `yolo`, `apply` saves it directly. The tool refuses `safety.autonomy`, credentials and arbitrary paths, because only the operator changes autonomy, through `/settings`, `clio-coder configure` or `--autonomy`.
+`preview` returns the changed values and a `proposalId`. Each changed leaf is one `path: old → new` line, an object value is compared key by key, and the preview shows at most 20 lines of 160 characters with `… N more changed values` after them. The Apply card and the transcript row name the setting and leave out the value text the model composed. One proposal is pending per session, it expires after 10 minutes, and `apply` fails when the saved value changed since the preview. At `default`, `apply` asks the operator to approve the exact preview. At `yolo`, `apply` saves it directly. The tool refuses `safety.autonomy`, credentials and arbitrary paths, because only the operator changes autonomy, through `/settings`, `clio-coder configure` or `--autonomy`.
+
+A saved `apply` reports when the change takes effect, by the setting's effect timing. Routing paths keep the session's current routing, so exit and start a new Clio session to use them. A live setting is picked up automatically once the settings watcher reads the save. A next-turn setting applies to the next request or dispatch, and running workers keep their settings. A restart-required setting needs a new session. There is no `/reload` command.
 
 ```text
 gateway(op="call", capability="configure_clio", args={action: "preview", path: "chat.thinkingLevel", value: "high"})
