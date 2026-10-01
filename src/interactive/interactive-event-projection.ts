@@ -73,6 +73,7 @@ export interface InteractiveEventProjectionDeps {
 	requestRender: () => void;
 	notify: (level: InteractiveProjectionNoticeLevel, text: string, key?: string) => void;
 	dismissNotification: (key: string) => void;
+	dismissHelperNotifications?: () => void;
 	appendTranscriptNotice: (level: InteractiveTranscriptNoticeLevel, text: string, source?: NoticeSource) => void;
 	refreshSettingsOverlay: () => void;
 	onConfigHotReload?: (settings: Readonly<ClioSettings>) => void;
@@ -229,6 +230,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			if (event.type === "agent_start") {
 				deps.dismissNotification("turn.interrupted");
 				deps.dismissNotification("finish.unverified");
+				deps.dismissHelperNotifications?.();
 			}
 			if (event.type === "agent_start" && showProgress) deps.startTerminalProgress();
 			else if (event.type === "agent_end") {

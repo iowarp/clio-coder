@@ -112,6 +112,7 @@ test("context reduction status uses the footer while errors retain transcript ev
 	};
 	const transcript: ChatLoopEvent[] = [];
 	const footer: string[] = [];
+	let helperDismissals = 0;
 	const projection = createInteractiveEventProjection({
 		bus: createSafeEventBus(),
 		chat: {
@@ -138,6 +139,7 @@ test("context reduction status uses the footer while errors retain transcript ev
 		requestRender: noop,
 		notify: (_level, text) => footer.push(text),
 		dismissNotification: noop,
+		dismissHelperNotifications: () => { helperDismissals += 1; },
 		appendTranscriptNotice: noop,
 		refreshSettingsOverlay: noop,
 	});
@@ -153,5 +155,7 @@ test("context reduction status uses the footer while errors retain transcript ev
 	const failure = { ...status, level: "error" as const, text: "[context engine] checkpoint failed" };
 	ingress(failure);
 	deepStrictEqual(transcript, [failure]);
+	ingress({ type: "agent_start" } as ChatLoopEvent);
+	deepStrictEqual(helperDismissals, 1);
 	projection.dispose();
 });

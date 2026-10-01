@@ -717,6 +717,11 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		requestRender: () => tui.requestRender(),
 		notify,
 		dismissNotification: (key) => notifications.dismiss(key),
+		dismissHelperNotifications: () => {
+			for (const notice of notifications.list()) {
+				if (notice.key?.startsWith("helper:")) notifications.dismiss(notice.id);
+			}
+		},
 		appendTranscriptNotice: (level, text, source) => appendNotice(level, text, busNoticeSink, source),
 		refreshSettingsOverlay: () => overlayLifecycle.refreshSettingsOverlay(),
 		onConfigHotReload: (settings) => {
