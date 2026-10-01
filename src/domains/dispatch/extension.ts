@@ -3162,6 +3162,9 @@ export function createDispatchBundle(
 	): Promise<MergeCardOutcome | null> => {
 		const operator = options?.operatorAsk;
 		if (operator === undefined || !operator.available()) return null;
+		// A run canceled before its turn never shows a card; the watch below polls
+		// once a second and would let one flash up first.
+		if (run.aborted) return null;
 		// The worker has exited and nothing runs on its lease, but the assignment
 		// holds a global, node, and endpoint slot until the receipt settles. A card
 		// can wait out its whole timeout, so it must not keep other dispatches
@@ -3174,8 +3177,10 @@ export function createDispatchBundle(
 		}, 1000);
 		watch.unref?.();
 		try {
-			return await mergeCardQueue(() =>
-				askMergeCard(
+			return await mergeCardQueue(async () => {
+				// A card queued behind others can outlive its run.
+				if (run.aborted) return null;
+				return askMergeCard(
 					{
 						ask: operator.ask,
 						// The same bound a worker permission ask lives under.
@@ -3183,8 +3188,8 @@ export function createDispatchBundle(
 						signal: canceled.signal,
 					},
 					input,
-				),
-			);
+				);
+			});
 		} catch (error) {
 			// A card that cannot be shown leaves the merge withheld, the same as no operator.
 			reportDispatchDiagnostic(`merge card for ${run.runId}`, error);
