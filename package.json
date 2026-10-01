@@ -41,7 +41,7 @@
 		"node": ">=22.19.0"
 	},
 	"bin": {
-		"clio-coder": "dist/cli/index.js"
+		"clio-coder": "bin/clio-coder.cjs"
 	},
 	"exports": {
 		"./package.json": "./package.json",
@@ -54,6 +54,7 @@
 		"!dist/**/*.map",
 		"!dist/metafile*.json",
 		"assets/clio-coder-logo-128.webp",
+		"bin/clio-coder.cjs",
 		"scripts/install.sh",
 		"!assets/README.md",
 		"!scripts/README.md",

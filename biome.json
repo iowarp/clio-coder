@@ -54,5 +54,18 @@
 			"!**/*.html",
 			"!tmp"
 		]
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["bin/clio-coder.cjs"],
+			"linter": {
+				"rules": {
+					"complexity": { "useArrowFunction": "off", "useOptionalChain": "off" },
+					"correctness": { "noInnerDeclarations": "off" },
+					"style": { "useTemplate": "off", "useNodejsImportProtocol": "off" },
+					"suspicious": { "noGlobalIsNan": "off" }
+				}
+			}
+		}
+	]
 }
