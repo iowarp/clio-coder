@@ -99,6 +99,7 @@ export type {
 	AgentToolRequirements,
 } from "./spec.js";
 export {
+	AGENT_CATEGORY_PURPOSE,
 	agentSpecPolicyErrors,
 	assertAgentSpecPolicy,
 	normalizeAgentSpec,

@@ -20,7 +20,9 @@
  */
 
 import { chosen } from "../answers.js";
-import { pick, yesNo } from "../questions.js";
+import type { CategoryGroup, CatalogCategory } from "../hierarchy.js";
+import { groupByCategory, representative } from "../hierarchy.js";
+import { MAX_CHOICE_OPTIONS, pick, yesNo } from "../questions.js";
 import type { Answer, Question, SiteCuts, SiteDefinition } from "../types.js";
 import { boundedHead, boundedTail, probability, round2, withoutQuotedCode } from "./bounds.js";
 
@@ -72,6 +74,8 @@ export const TURN_SCOPE_HINT =
 export interface TurnRecipeOption {
 	readonly id: string;
 	readonly description: string;
+	/** The catalog's categories for this recipe, coarsest first, each with its stated purpose. */
+	readonly categories?: ReadonlyArray<CatalogCategory>;
 }
 
 export interface TurnObject {
@@ -86,25 +90,45 @@ export interface TurnObject {
 	 * the prewarm is on, so with it off the request carries no recipe question.
 	 */
 	readonly recipes?: ReadonlyArray<TurnRecipeOption>;
+	/**
+	 * Options the engine answering the recipe task reads in one question
+	 * (`SystemOne.limits("turn", "recipe")`). A catalog past it is asked by
+	 * category first; absent means the legacy wire's bound.
+	 */
+	readonly recipeOptionLimit?: number;
 }
 
+/**
+ * Each probability is null when the engine did not answer that question, which
+ * a model profile without yes/no questions never does. Null is not a low
+ * probability: no hint or act reads it, and the advisory intent, shape and
+ * breadth answers stand on their own.
+ */
 export interface TurnValue {
 	/** Probability that the turn needs nothing from the workspace. */
-	readonly direct: number;
+	readonly direct: number | null;
 	/** Probability that the turn is work for workers. */
-	readonly dispatch: number;
+	readonly dispatch: number | null;
 	/** The split the delegated work reads as, or null when undecided. */
 	readonly shape: TurnShape | null;
 	/** The workflow the message asks for, or `unknown` when undecided. */
 	readonly intent: TurnIntent;
 	readonly intentCertainty: number;
 	/** Probability that the turn asks for an orientation in the repository or an area of it. */
-	readonly orientation: number;
+	readonly orientation: number | null;
 	readonly breadth: TurnBreadth | null;
 	/** Probability that the turn asks what to do next while stating no task of its own. */
-	readonly direction: number;
+	readonly direction: number | null;
 	/** The recipe a dispatch would name first, or null when undecided. Absent unless the recipe question was asked. */
 	readonly recipe?: string | null;
+	/**
+	 * The recipe category a dispatch would draw from, when the catalog was too
+	 * large to offer flat; the host asks `TURN_RECIPE_SITE` within it. Null when
+	 * undecided or "none". Absent unless the category question was asked.
+	 */
+	readonly recipeGroup?: string | null;
+	/** Why no recipe question could be asked of an oversized catalog. */
+	readonly recipeAbstained?: string;
 	/** One line for the main agent's submitted message, or null when the policy stays silent. */
 	readonly hints: { readonly scope: string | null; readonly plan: string | null };
 	/** What the turn controller may start. Never a grant of authority. */
@@ -114,6 +138,8 @@ export interface TurnValue {
 		readonly prewarm: boolean;
 		/** The fitted dispatch cut fired: the model is about to dispatch, so the harness skips its own orientation. Unlike the plan hint it holds when the task names delegation. */
 		readonly dispatch: boolean;
+		/** The prewarm cut fired and a recipe category was chosen: the prewarm waits on `TURN_RECIPE_SITE`. */
+		readonly prewarmPending: boolean;
 	};
 }
 
@@ -165,6 +191,9 @@ const DIRECTION_QUESTION = yesNo(
 	"Asks for direction, options, or a suggestion; says they are unsure or undecided",
 	"States or continues a task, asks a concrete question, approves or corrects work in `previous`, or is a greeting or thanks",
 );
+
+const RECIPE_GROUP_INSTRUCTIONS =
+	"Which category holds the one worker agent the assistant would dispatch first for `task`? Pick by the category's stated purpose. Pick none when no category fits.";
 
 const RECIPE_INSTRUCTIONS =
 	"Which one worker agent would the assistant dispatch first for `task`? Pick the agent whose description matches the work that agent would carry out. When the request names an agent, pick that agent. Ignore what the assistant does itself with the results afterwards.";
@@ -235,6 +264,68 @@ function askedRecipes(recipes: ReadonlyArray<TurnRecipeOption> | undefined): Rec
 	return Object.keys(offered).length >= 2 ? offered : null;
 }
 
+/** Code points of one recipe category's representative line. */
+const MAX_RECIPE_GROUP_CHARS = 240;
+/** The exit option of a category pick: a catalog is open, so "none of these" must be answerable. */
+const NO_GROUP = "none";
+
+type RecipePlan =
+	| { readonly kind: "flat"; readonly options: Record<string, string> }
+	| {
+			readonly kind: "groups";
+			readonly groups: ReadonlyArray<CategoryGroup<TurnRecipeOption>>;
+			readonly options: Record<string, string>;
+	  }
+	| { readonly kind: "abstain"; readonly reason: string };
+
+/**
+ * How the recipe catalog is asked: flat when the answering engine reads every
+ * option in one question, by the catalog's own categories when it does not,
+ * and not at all when the catalog carries no categories to group by. The
+ * shared `groupByCategory` bounds groups to one question's options with an
+ * exit, and members to one follow-up question.
+ */
+function recipePlan(object: TurnObject): RecipePlan | null {
+	const offered = askedRecipes(object.recipes);
+	if (offered === null) return null;
+	const limit = Math.max(2, Math.min(object.recipeOptionLimit ?? MAX_CHOICE_OPTIONS, MAX_CHOICE_OPTIONS));
+	if (Object.keys(offered).length <= limit) return { kind: "flat", options: offered };
+	const unique = (object.recipes ?? []).filter((recipe) => Object.hasOwn(offered, recipe.id.trim()));
+	const grouping = groupByCategory(
+		unique.map((recipe) => ({ ...recipe, id: recipe.id.trim() })),
+		{ maxGroups: limit - 1, maxMembers: limit },
+	);
+	if ("abstain" in grouping) return { kind: "abstain", reason: grouping.abstain };
+	const options: Record<string, string> = {};
+	for (const group of grouping.groups) options[group.key] = representative(group, MAX_RECIPE_GROUP_CHARS);
+	options[NO_GROUP] = "No listed category holds the worker this request needs first";
+	return { kind: "groups", groups: grouping.groups, options };
+}
+
+/**
+ * The recipes of the category a turn chose, for `TURN_RECIPE_SITE`. Empty when
+ * the key names no group or the group is too large for one question, which the
+ * host treats as no prewarm.
+ */
+export function recipesInGroup(object: TurnObject, key: string): ReadonlyArray<TurnRecipeOption> {
+	const plan = recipePlan(object);
+	if (plan === null || plan.kind !== "groups") return [];
+	const group = plan.groups.find((entry) => entry.key === key);
+	return group === undefined || group.oversized ? [] : group.members;
+}
+
+/**
+ * The winning option when it holds at least `cut` of the mass and clears the
+ * recipe certainty floor, else null. A cut on a choice is a probability of the
+ * chosen option, never a certainty.
+ */
+function choiceAtCut(answer: Answer | undefined, cut: number, allowed: ReadonlyArray<string>): string | null {
+	const winner = choiceIn(answer, RECIPE_MIN_CERTAINTY, allowed);
+	if (winner === null || answer?.calibrated !== true) return null;
+	const mass = answer.probabilities?.[winner];
+	return mass !== undefined && Number.isFinite(mass) && mass >= cut ? winner : null;
+}
+
 /** The winning option when it is one of `allowed` and at least `minCertainty` peaked, else null. */
 function choiceIn(answer: Answer | undefined, minCertainty: number, allowed: ReadonlyArray<string>): string | null {
 	const winner = chosen(answer, minCertainty);
@@ -252,7 +343,15 @@ function planHint(shape: TurnShape | null): string {
 function policy(
 	value: Pick<
 		TurnValue,
-		"direct" | "dispatch" | "intent" | "orientation" | "breadth" | "direction" | "shape" | "recipe"
+		| "direct"
+		| "dispatch"
+		| "intent"
+		| "orientation"
+		| "breadth"
+		| "direction"
+		| "shape"
+		| "recipe"
+		| "recipeGroup"
 	>,
 	task: string,
 	cuts: SiteCuts,
@@ -263,24 +362,26 @@ function policy(
 	const orientationCut = cut("orientation");
 	const directionCut = cut("direction");
 	const prewarmCut = cut("prewarm");
-	const dispatchConfident = dispatchCut !== undefined && value.dispatch >= dispatchCut;
+	const crosses = (p: number | null, at: number | undefined): boolean => at !== undefined && p !== null && p >= at;
+	const dispatchConfident = crosses(value.dispatch, dispatchCut);
+	const prewarmReady = crosses(value.dispatch, prewarmCut);
 	return {
 		hints: {
-			scope: directCut !== undefined && value.direct >= directCut ? TURN_SCOPE_HINT : null,
+			scope: crosses(value.direct, directCut) ? TURN_SCOPE_HINT : null,
 			plan: dispatchConfident && !NAMES_DELEGATION.test(task) ? planHint(value.shape) : null,
 		},
 		acts: {
 			// Intent is a veto for the three workflows that already have a task in hand.
 			orientation:
-				orientationCut !== undefined &&
-				value.orientation >= orientationCut &&
+				crosses(value.orientation, orientationCut) &&
 				(value.breadth === "repository" || value.breadth === "area") &&
 				value.intent !== "implement" &&
 				value.intent !== "continue" &&
 				value.intent !== "interview",
-			direction: directionCut !== undefined && value.direction >= directionCut,
+			direction: crosses(value.direction, directionCut),
 			dispatch: dispatchConfident,
-			prewarm: prewarmCut !== undefined && typeof value.recipe === "string" && value.dispatch >= prewarmCut,
+			prewarm: prewarmReady && typeof value.recipe === "string",
+			prewarmPending: prewarmReady && typeof value.recipeGroup === "string",
 		},
 	};
 }
@@ -290,9 +391,23 @@ export const TURN_SITE: SiteDefinition<TurnObject, TurnValue> = {
 	version: "turn-v2",
 	deadlineMs: 600,
 	// The recipe pick is its own task so it can be routed apart from intent; every cut reads intent answers.
-	taskOf: (id) => (id === "recipe" ? "recipe" : "intent"),
-	cutTask: () => "intent",
-	compact: { version: TURN_COMPACT_VERSION, questions: () => COMPACT },
+	// The recipe pick is its own task so it can be routed apart from intent, and
+	// a category pick is cluster selection with its own cut; every other cut reads
+	// intent answers.
+	taskOf: (id) => (id === "recipe" ? "recipe" : id === "recipeGroup" ? "clusterSelect" : "intent"),
+	cutTask: (key) => (key === "recipeGroup" ? "clusterSelect" : "intent"),
+	compact: {
+		version: TURN_COMPACT_VERSION,
+		questions(object) {
+			// A category pick's compact options are the categories' own labels.
+			const plan = recipePlan(object);
+			if (plan?.kind !== "groups") return COMPACT;
+			const labels: Record<string, string> = {};
+			for (const group of plan.groups) labels[group.key] = group.category.label;
+			labels[NO_GROUP] = "None of these";
+			return { ...COMPACT, recipeGroup: pick(RECIPE_GROUP_INSTRUCTIONS, labels) };
+		},
+	},
 	state(object) {
 		const task = boundedHead(object.task, MAX_TASK_CHARS);
 		if (task.length === 0) return null;
@@ -304,7 +419,7 @@ export const TURN_SITE: SiteDefinition<TurnObject, TurnValue> = {
 		};
 	},
 	questions(object) {
-		const recipes = askedRecipes(object.recipes);
+		const plan = recipePlan(object);
 		const questions: Record<string, Question> = {
 			direct: DIRECT_QUESTION,
 			dispatch: DISPATCH_QUESTION,
@@ -314,7 +429,8 @@ export const TURN_SITE: SiteDefinition<TurnObject, TurnValue> = {
 			breadth: BREADTH_QUESTION,
 			direction: DIRECTION_QUESTION,
 		};
-		if (recipes !== null) questions.recipe = pick(RECIPE_INSTRUCTIONS, recipes);
+		if (plan?.kind === "flat") questions.recipe = pick(RECIPE_INSTRUCTIONS, plan.options);
+		if (plan?.kind === "groups") questions.recipeGroup = pick(RECIPE_GROUP_INSTRUCTIONS, plan.options);
 		return questions;
 	},
 	read(answers, object, cuts) {
@@ -322,41 +438,102 @@ export const TURN_SITE: SiteDefinition<TurnObject, TurnValue> = {
 		const dispatch = probability(answers.dispatch);
 		const orientation = probability(answers.orientation);
 		const direction = probability(answers.direction);
-		if (direct === null && dispatch === null && orientation === null && direction === null) return null;
+		// A profile may answer only part of the turn (a label model takes the
+		// choices and not the yes/no questions). Any answered question is a value;
+		// only a call that answered nothing is no value.
+		if (!Object.values(answers).some((answer) => answer !== undefined)) return null;
 		const shape = choiceIn(answers.shape, SHAPE_MIN_CERTAINTY, Object.keys(TURN_SHAPES)) as TurnShape | null;
 		const intentAnswer = answers.intent;
 		const intent = (choiceIn(intentAnswer, INTENT_MIN_CERTAINTY, TURN_INTENTS) ?? "unknown") as TurnIntent;
 		const breadth = choiceIn(answers.breadth, BREADTH_MIN_CERTAINTY, BREADTHS) as TurnBreadth | null;
-		const recipes = askedRecipes(object.recipes);
-		const recipe = recipes === null ? undefined : choiceIn(answers.recipe, RECIPE_MIN_CERTAINTY, Object.keys(recipes));
+		const plan = recipePlan(object);
+		const recipe =
+			plan?.kind === "flat" ? choiceIn(answers.recipe, RECIPE_MIN_CERTAINTY, Object.keys(plan.options)) : undefined;
+		// A category pick narrows what a prewarm may start, so it reads only under its own cut.
+		const groupCut = cuts.fitted ? cuts.cut("recipeGroup") : undefined;
+		const pickedGroup =
+			plan?.kind === "groups" && groupCut !== undefined
+				? choiceAtCut(answers.recipeGroup, groupCut, Object.keys(plan.options))
+				: null;
+		const recipeGroup = plan?.kind === "groups" ? (pickedGroup === NO_GROUP ? null : pickedGroup) : undefined;
 		const value = {
-			direct: direct ?? 0,
-			dispatch: dispatch ?? 0,
+			direct,
+			dispatch,
 			shape,
 			intent,
 			intentCertainty: intentAnswer?.type === "choice" ? intentAnswer.certainty : 0,
-			orientation: orientation ?? 0,
+			orientation,
 			breadth,
-			direction: direction ?? 0,
+			direction,
 			...(recipe !== undefined ? { recipe } : {}),
+			...(recipeGroup !== undefined ? { recipeGroup } : {}),
+			...(plan?.kind === "abstain" ? { recipeAbstained: plan.reason } : {}),
 		};
 		return { ...value, ...policy(value, object.task, cuts) };
 	},
 	summarize: (value) => ({
-		direct: round2(value.direct),
-		dispatch: round2(value.dispatch),
+		direct: value.direct === null ? null : round2(value.direct),
+		dispatch: value.dispatch === null ? null : round2(value.dispatch),
 		shape: value.shape,
 		intent: value.intent,
 		intentCertainty: round2(value.intentCertainty),
-		orientation: round2(value.orientation),
+		orientation: value.orientation === null ? null : round2(value.orientation),
 		breadth: value.breadth,
-		direction: round2(value.direction),
+		direction: value.direction === null ? null : round2(value.direction),
 		...(value.recipe !== undefined ? { recipe: value.recipe } : {}),
+		...(value.recipeGroup !== undefined ? { recipeGroup: value.recipeGroup } : {}),
+		...(value.recipeAbstained !== undefined ? { recipeAbstained: value.recipeAbstained } : {}),
 		scopeHint: value.hints.scope !== null,
 		planHint: value.hints.plan !== null,
 		actOrientation: value.acts.orientation,
 		actDirection: value.acts.direction,
 		actPrewarm: value.acts.prewarm,
 		actDispatch: value.acts.dispatch,
+		actPrewarmPending: value.acts.prewarmPending,
 	}),
+};
+
+export interface TurnRecipeObject {
+	readonly task: string;
+	readonly previous: string;
+	readonly previousTask: string;
+	/** The members of the chosen category, from `recipesInGroup`. */
+	readonly recipes: ReadonlyArray<TurnRecipeOption>;
+}
+
+/**
+ * The second step of a category-first recipe pick: which recipe within the
+ * category the turn chose. Its own version, moment and cut key
+ * (`turn.recipeInGroup`), because a pick among a category's members is a
+ * different question from the flat pick `turn-v2` was measured on. Bounded to
+ * one request under its own deadline, after the turn call.
+ */
+export const TURN_RECIPE_SITE: SiteDefinition<TurnRecipeObject, { readonly recipe: string | null }> = {
+	id: "turn",
+	version: "turn-recipe-v1",
+	moment: "recipe",
+	deadlineMs: 600,
+	taskOf: () => "recipe",
+	cutTask: () => "recipe",
+	state(object) {
+		const task = boundedHead(object.task, MAX_TASK_CHARS);
+		if (task.length === 0 || askedRecipes(object.recipes) === null) return null;
+		return {
+			task,
+			previous: boundedTail(withoutQuotedCode(object.previous), MAX_PREVIOUS_CHARS),
+			previousTask: boundedHead(object.previousTask, MAX_PREVIOUS_TASK_CHARS),
+		};
+	},
+	questions(object) {
+		const offered = askedRecipes(object.recipes);
+		return offered === null ? {} : { recipe: pick(RECIPE_INSTRUCTIONS, offered) };
+	},
+	read(answers, object, cuts) {
+		const offered = askedRecipes(object.recipes);
+		const cut = cuts.fitted ? cuts.cut("recipeInGroup") : undefined;
+		if (offered === null || cut === undefined) return null;
+		const recipe = choiceAtCut(answers.recipe, cut, Object.keys(offered));
+		return recipe === null ? null : { recipe };
+	},
+	summarize: (value) => ({ recipe: value.recipe }),
 };

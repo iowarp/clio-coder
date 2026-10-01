@@ -68,6 +68,23 @@ const AGENT_CATEGORIES: ReadonlyArray<AgentCategory> = [
 	"internal",
 ];
 
+/**
+ * What each recipe category is for. A decision model choosing a category
+ * before a recipe reads this, so a catalog of any size is narrowed by the
+ * category a recipe declares rather than by its name. `internal` recipes are
+ * never offered to a model and have none.
+ */
+export const AGENT_CATEGORY_PURPOSE: Readonly<Record<Exclude<AgentCategory, "internal">, string>> = {
+	explore: "Find and map code, files and structure in the workspace without changing it.",
+	plan: "Design an approach, break down work or review a proposal before implementation.",
+	research: "Gather and synthesize information from documentation, papers or the web.",
+	implement: "Make code or file changes in the workspace.",
+	quality: "Test, verify, review or audit existing work.",
+	science: "Analyze data, run experiments or work with scientific computing.",
+	evolution: "Improve the harness, its recipes or its own prompts over time.",
+	operations: "Operate machines, services, deployments or infrastructure.",
+};
+
 const AGENT_CAPABILITY_CLASSES: ReadonlyArray<AgentCapabilityClass> = [
 	"read-only",
 	"artifact-write",

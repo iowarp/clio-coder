@@ -78,6 +78,7 @@ function scrubExportRow<T extends Record<string, unknown>>(row: T): T {
 		policy: keyed(row.policy),
 		answers: plain(row.answers),
 		questions: plain(row.questions),
+		...(row.routes !== undefined ? { routes: plain(row.routes) } : {}),
 		outcomes: Array.isArray(row.outcomes)
 			? row.outcomes.map((outcome: { facts?: unknown }) => ({ ...outcome, facts: keyed(outcome.facts) }))
 			: row.outcomes,
@@ -169,6 +170,9 @@ export function streamExport(options: ExportOptions, emit: (line: string) => voi
 						...(row.usage !== undefined ? { usage: row.usage } : {}),
 						...(row.note !== undefined ? { note: row.note } : {}),
 						policy: row.policy ?? null,
+						// Per-engine provenance with the rendered questions a bounded renderer sent,
+						// so a replay or a training row reads what the model actually read.
+						...(row.routes !== undefined ? { routes: row.routes } : {}),
 						latencyMs: row.latencyMs,
 						deadlineMs: row.deadlineMs,
 						outcomes: row.ref === undefined ? [] : (outcomes.get(row.ref) ?? []),

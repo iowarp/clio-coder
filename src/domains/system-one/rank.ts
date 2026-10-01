@@ -11,7 +11,9 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import type { FollowUpTracker } from "./outcomes.js";
-import type { RelevanceCandidate, RelevanceGroup, RelevanceUse } from "./sites/relevance.js";
+import type { CategoryGroup, Grouping } from "./hierarchy.js";
+import { groupByCategory } from "./hierarchy.js";
+import type { RelevanceCandidate, RelevanceUse } from "./sites/relevance.js";
 import {
 	RELEVANCE_CLUSTER_SITE,
 	RELEVANCE_MAX_CANDIDATES,
@@ -35,6 +37,8 @@ export interface RelevanceRanking {
 	readonly source: string;
 	/** Join key of the ranking call, carried by the follow-up outcome rows. */
 	readonly ref: string;
+	/** Selected groups left unranked because they exceed one request and have no finer category. */
+	readonly abstained?: ReadonlyArray<string>;
 }
 
 export interface RelevanceRanker {
@@ -62,7 +66,7 @@ function digest(request: RelevanceRankRequest): string {
 			JSON.stringify([
 				request.use,
 				request.need,
-				request.candidates.map((c) => [c.id, c.summary, c.group?.id ?? null]),
+				request.candidates.map((c) => [c.id, c.summary, (c.categories ?? []).map((category) => category.id)]),
 			]),
 		)
 		.digest("hex");
@@ -77,23 +81,8 @@ function flatTokens(request: RelevanceRankRequest, task: string): number {
 	return Math.ceil(chars / 4);
 }
 
-/**
- * The catalog's groups, or null when the candidates cannot be grouped honestly:
- * any entry without a category, a single group, or more groups than one
- * selection may offer. Null keeps the caller's local order.
- */
-function groupsOf(
-	candidates: ReadonlyArray<RelevanceCandidate>,
-): Map<string, { group: RelevanceGroup; members: RelevanceCandidate[] }> | null {
-	const groups = new Map<string, { group: RelevanceGroup; members: RelevanceCandidate[] }>();
-	for (const candidate of candidates) {
-		const group = candidate.group;
-		if (group === undefined || group.id.trim().length === 0 || group.description.trim().length === 0) return null;
-		const held = groups.get(group.id);
-		if (held === undefined) groups.set(group.id, { group, members: [candidate] });
-		else held.members.push(candidate);
-	}
-	return groups.size >= 2 && groups.size <= RELEVANCE_MAX_CLUSTERS ? groups : null;
+function groupsFor(candidates: ReadonlyArray<RelevanceCandidate>): Grouping<RelevanceCandidate> {
+	return groupByCategory(candidates, { maxGroups: RELEVANCE_MAX_CLUSTERS, maxMembers: RELEVANCE_MAX_GROUP });
 }
 
 export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRanker {
@@ -119,10 +108,12 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 	/**
 	 * Two levels, bounded: one cluster selection over the catalog's own groups,
 	 * then one entry ranking per selected group, at most 1 + RELEVANCE_MAX_SELECTED
-	 * requests inside the flat site's one deadline. Entries of unselected groups,
-	 * and of a selected group too large to ask in one request, get no score, which
-	 * every caller reads as "keep its place", so local discovery still lists them.
-	 * No recursion, no tournament, and no group is cut into chunks.
+	 * requests inside the flat site's one deadline. Groups are the catalog's own
+	 * categories, refined by finer categories where `groupByCategory` can. Entries
+	 * of unselected groups get no score, which every caller reads as "keep its
+	 * place", so local discovery still lists them; a selected group too large for
+	 * one request is named in `abstained` rather than partly ranked. No recursion,
+	 * no tournament, and no group is cut into chunks.
 	 */
 	const rankHierarchical = async (
 		request: RelevanceRankRequest,
@@ -130,8 +121,11 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 		ref: string,
 		signal: AbortSignal | undefined,
 	): Promise<RelevanceRanking | null> => {
-		const groups = groupsOf(request.candidates);
-		if (groups === null) return null;
+		const grouping = groupsFor(request.candidates);
+		if ("abstain" in grouping) return null;
+		const groups = new Map<string, CategoryGroup<RelevanceCandidate>>(
+			grouping.groups.map((group) => [group.key, group]),
+		);
 		const budget = new AbortController();
 		const timer = setTimeout(
 			() => budget.abort(new Error(`relevance hierarchy exceeded ${RELEVANCE_SITE.deadlineMs}ms`)),
@@ -146,17 +140,18 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 					use: request.use,
 					need: request.need,
 					task,
-					groups: [...groups.values()].map(({ group, members }) => ({ ...group, size: members.length })),
+					groups: grouping.groups,
 				},
 				{ ref, signal: budget.signal, ...flowOption() },
 			);
 			if (clusters === null) return null;
-			const chosen = clusters.value.selected
-				.map((id) => groups.get(id))
-				.filter(
-					(entry): entry is NonNullable<typeof entry> =>
-						entry !== undefined && entry.members.length <= RELEVANCE_MAX_GROUP,
-				);
+			const picked = clusters.value.selected
+				.map((key) => groups.get(key))
+				.filter((group): group is CategoryGroup<RelevanceCandidate> => group !== undefined);
+			// A selected group too large for one request and with no finer category
+			// abstains as a whole; ranking part of it would hide the rest.
+			const abstained = picked.filter((group) => group.oversized).map((group) => group.key);
+			const chosen = picked.filter((group) => !group.oversized);
 			const verdicts = await Promise.all(
 				chosen.map(({ members }) =>
 					input.systemOne.run(
@@ -174,7 +169,12 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 				sources.add(verdict.build);
 			}
 			if (Object.keys(scores).length === 0) return null;
-			return { scores, source: [...new Set([clusters.build, ...sources])].join(" + "), ref };
+			return {
+				scores,
+				source: [...new Set([clusters.build, ...sources])].join(" + "),
+				ref,
+				...(abstained.length > 0 ? { abstained } : {}),
+			};
 		} finally {
 			clearTimeout(timer);
 			signal?.removeEventListener("abort", onAbort);
@@ -201,20 +201,18 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 			const ref = `rk_${randomUUID()}`;
 			const task = input.task();
 			const limits = input.systemOne.limits?.("relevance", "relevance") ?? null;
-			// Each candidate is its own yes/no, so the flat ask is bounded by the window,
-			// not by an option count. Past the window, or past the flat site's candidate
-			// cap, the catalog's own groups are the only way to ask; without them a flat
-			// ask that fits keeps its old behavior (the first RELEVANCE_MAX_CANDIDATES
-			// scored, the rest keeping their places), and one that does not abstains.
+			// Each candidate is its own yes/no, so the flat ask is bounded by the window
+			// and the flat site's candidate cap, never by an option count. Past either,
+			// the catalog's own categories are the only honest way to ask; a catalog
+			// without them abstains, so the caller keeps its full baseline order rather
+			// than a ranking of whichever entries happened to come first.
 			const window = limits?.windowTokens ?? null;
-			const fits = window === null || flatTokens(request, task) <= window;
-			const grouped = groupsOf(request.candidates) !== null;
-			const ranking =
-				grouped && (!fits || request.candidates.length > RELEVANCE_MAX_CANDIDATES)
-					? await rankHierarchical(request, task, ref, signal)
-					: fits
-						? await rankFlat(request, task, ref, signal)
-						: null;
+			const flat =
+				request.candidates.length <= RELEVANCE_MAX_CANDIDATES &&
+				(window === null || flatTokens(request, task) <= window);
+			const ranking = flat
+				? await rankFlat(request, task, ref, signal)
+				: await rankHierarchical(request, task, ref, signal);
 			// A null is cached too: a slow engine must not be asked again by the next
 			// listing in the same turn. A caller's abort is not the engine's answer.
 			if (turn !== null && signal?.aborted !== true) cache.set(request.use, { turn, key, ranking });

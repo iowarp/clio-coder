@@ -19,6 +19,8 @@
  */
 
 import { yesNo } from "../questions.js";
+import type { CatalogCategory, CategoryGroup } from "../hierarchy.js";
+import { representative } from "../hierarchy.js";
 import type { Question, SiteDefinition } from "../types.js";
 import { boundedHead } from "./bounds.js";
 
@@ -53,19 +55,11 @@ export interface RelevanceCandidate {
 	/** One short line saying what the candidate is. Never file contents. */
 	readonly summary: string;
 	/**
-	 * The catalog's own category for this entry (an MCP server, a capability
-	 * namespace), when it has one. Only such metadata may group candidates for a
-	 * bounded hierarchy; nothing is grouped by name order or invented similarity.
+	 * The catalog's own categories for this entry, coarsest first, when it has
+	 * them. Only such metadata may group candidates for a bounded hierarchy;
+	 * nothing is grouped by name order or invented similarity.
 	 */
-	readonly group?: RelevanceGroup;
-}
-
-/** A catalog category, described by the catalog that owns it. */
-export interface RelevanceGroup {
-	readonly id: string;
-	readonly label: string;
-	/** What the category's entries do, in the catalog's words. */
-	readonly description: string;
+	readonly categories?: ReadonlyArray<CatalogCategory>;
 }
 
 export interface RelevanceObject {
@@ -147,46 +141,37 @@ export const RELEVANCE_SITE: SiteDefinition<RelevanceObject, RelevanceValue> = {
 export const RELEVANCE_MAX_CLUSTERS = 32;
 /** Groups whose entries are ranked after a selection, each in one request. */
 export const RELEVANCE_MAX_SELECTED = 3;
-/** Entries of one selected group ranked in its request; a larger group is left to local discovery. */
+/** Entries of one selected group ranked in its request; a larger group abstains explicitly. */
 export const RELEVANCE_MAX_GROUP = 64;
-/** Code points of one group's representative description. */
-const MAX_GROUP_DESCRIPTION_CHARS = 240;
+/** Code points of one group's representative line. */
+const MAX_GROUP_LINE_CHARS = 320;
 
 export interface ClusterObject {
 	readonly use: RelevanceUse;
 	readonly need: string;
 	readonly task: string;
-	/** The groups, each with its entry count, in the catalog's order. */
-	readonly groups: ReadonlyArray<RelevanceGroup & { readonly size: number }>;
+	/** The catalog's groups from `groupByCategory`, keyed by category path. */
+	readonly groups: ReadonlyArray<CategoryGroup<RelevanceCandidate>>;
 }
 
 export interface ClusterValue {
-	/** Up to `RELEVANCE_MAX_SELECTED` group ids, most fitting first. Empty never: no fitting group is no value. */
+	/** Up to `RELEVANCE_MAX_SELECTED` group keys, most fitting first. No fitting group is no value. */
 	readonly selected: ReadonlyArray<string>;
 	readonly scores: Readonly<Record<string, number>>;
-}
-
-function offeredGroups(object: ClusterObject): ClusterObject["groups"] {
-	const seen = new Set<string>();
-	return object.groups.filter((group) => {
-		if (group.id.trim().length === 0 || group.id === "__proto__" || seen.has(group.id)) return false;
-		seen.add(group.id);
-		return true;
-	});
 }
 
 /**
  * Which catalog groups could hold what the need asks for. This is its own
  * question with its own task (`clusterSelect`), version and cut key: choosing a
- * category from its description is not judging an entry, so neither Jev's
+ * category from its stated purpose is not judging an entry, so neither Jev's
  * `relevance.ranked` marker nor any entry-level measurement validates it. A
  * build selects groups only once `relevance.clusters` has a cut for it, and is
  * otherwise asked and recorded in shadow. Each group is an independent yes/no,
- * so "none of these" is every group answered no, which abstains.
+ * so "none of these" is every group answered below the cut, which abstains.
  */
 export const RELEVANCE_CLUSTER_SITE: SiteDefinition<ClusterObject, ClusterValue> = {
 	id: "relevance",
-	version: "relevance-cluster-v1",
+	version: "relevance-cluster-v2",
 	moment: "clusters",
 	deadlineMs: 1500,
 	taskOf: () => "clusterSelect",
@@ -194,27 +179,23 @@ export const RELEVANCE_CLUSTER_SITE: SiteDefinition<ClusterObject, ClusterValue>
 	state(object) {
 		const task = boundedHead(object.task, MAX_NEED_CHARS);
 		const need = boundedHead(object.need, MAX_NEED_CHARS) || task;
-		const groups = offeredGroups(object);
-		if (need.length === 0 || groups.length < 2 || groups.length > RELEVANCE_MAX_CLUSTERS) return null;
+		if (need.length === 0 || object.groups.length < 2 || object.groups.length > RELEVANCE_MAX_CLUSTERS) return null;
 		return {
 			need,
 			...(task.length > 0 && task !== need ? { task } : {}),
 			groups: Object.fromEntries(
-				groups.map((group) => [
-					group.id,
-					`${boundedHead(group.label, 80)} (${group.size} entries): ${boundedHead(group.description, MAX_GROUP_DESCRIPTION_CHARS)}`,
-				]),
+				object.groups.map((group) => [group.key, representative(group, MAX_GROUP_LINE_CHARS)]),
 			),
 		};
 	},
 	questions(object) {
 		const noun = NOUN[object.use];
 		const questions: Record<string, Question> = {};
-		for (const group of offeredGroups(object)) {
-			questions[group.id] = yesNo(
-				`Could a ${noun} in group ${group.id} of state.groups serve the need described in state.need?`,
-				"The group's described purpose covers that need",
-				"The group's described purpose is unrelated to that need",
+		for (const group of object.groups) {
+			questions[group.key] = yesNo(
+				`Could a ${noun} in group ${group.key} of state.groups serve the need described in state.need?`,
+				"The group's stated purpose covers that need",
+				"The group's stated purpose is unrelated to that need",
 			);
 		}
 		return questions;
@@ -223,17 +204,17 @@ export const RELEVANCE_CLUSTER_SITE: SiteDefinition<ClusterObject, ClusterValue>
 		const cut = cuts.cut("clusters");
 		if (cut === undefined) return null;
 		const scores: Record<string, number> = {};
-		for (const group of offeredGroups(object)) {
-			const answer = answers[group.id];
+		for (const group of object.groups) {
+			const answer = answers[group.key];
 			if (answer === undefined || answer.type !== "noul" || answer.noul === undefined) continue;
 			if (!Number.isFinite(answer.noul)) continue;
-			scores[group.id] = answer.noul;
+			scores[group.key] = answer.noul;
 		}
 		const selected = Object.entries(scores)
 			.filter(([, score]) => score >= cut)
 			.sort((left, right) => right[1] - left[1])
 			.slice(0, RELEVANCE_MAX_SELECTED)
-			.map(([id]) => id);
+			.map(([key]) => key);
 		return selected.length > 0 ? { selected, scores } : null;
 	},
 	summarize: (value) => ({ selected: value.selected.join(","), offered: Object.keys(value.scores).length }),

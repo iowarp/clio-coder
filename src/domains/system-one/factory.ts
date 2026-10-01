@@ -12,6 +12,7 @@ import type { ClioSettings } from "../../core/config.js";
 import type { ProvidersContract } from "../providers/contract.js";
 import type { RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
+import { cutsFor } from "./calibration.js";
 import type { DecisionTask } from "./contract.js";
 import { SITE_TASKS } from "./contract.js";
 import { createLlmEngine, llmEngineProblem } from "./engines/llm.js";
@@ -304,7 +305,13 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 				// validated route keeps the site live, and an engine not yet heard from
 				// is unknown, which is never shadow.
 				const usable = [resolution.usable, ...(resolution.routes ?? []).flatMap((route) => route.usable ?? [])];
-				return usable.every((engine) => runner.answeredFitted(digestOf(engine), site) === false);
+				// Cuts are live settings, so fittedness is recomputed from the identity
+				// each engine last answered under, never cached with the answer.
+				const cuts = deps.settings().systemOne.cuts;
+				return usable.every((engine) => {
+					const last = runner.answeredIdentity(digestOf(engine), site);
+					return last !== null && !cutsFor(last.identity, site, cuts, last.contract).fitted;
+				});
 			} catch {
 				// Unknown is not shadow: the caller waits exactly as it did before this existed.
 				return false;

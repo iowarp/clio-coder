@@ -74,6 +74,16 @@ export interface GatewayCapabilityEntry {
 	requiredArgs?: ReadonlyArray<string>;
 }
 
+/** What each action class is for, as a capability category's stated purpose. */
+const ACTION_CLASS_PURPOSE: Readonly<Partial<Record<ActionClass, string>>> = {
+	read: "Inspect files, workspace state, services or external sources without changing them.",
+	write: "Create or change files inside the workspace.",
+	execute: "Run commands, programs or external actions whose effects depend on what they run.",
+	dispatch: "Start, steer or collect worker agents.",
+	system_modify: "Change machine, harness or settings state outside the workspace.",
+	git_destructive: "Rewrite or discard version control history or uncommitted work.",
+};
+
 /** Entries an unfiltered listing must exceed before a ranker is asked to order it. */
 export const GATEWAY_RANK_MIN_LISTING = 40;
 /** Related entries a find adds beside a query's own hits. */
@@ -98,7 +108,7 @@ export type GatewayCapabilityRanker = (
 		entries: ReadonlyArray<{
 			name: string;
 			description: string;
-			group?: { id: string; label: string; description: string };
+			categories?: ReadonlyArray<{ id: string; label: string; purpose: string }>;
 		}>;
 	},
 	signal?: AbortSignal,
@@ -118,7 +128,7 @@ export function capabilityRankerFrom(ranker: RelevanceRanker): GatewayCapability
 				candidates: request.entries.map((entry) => ({
 					id: entry.name,
 					summary: entry.description,
-					...(entry.group !== undefined ? { group: entry.group } : {}),
+					...(entry.categories !== undefined ? { categories: entry.categories } : {}),
 				})),
 			},
 			signal,
@@ -278,29 +288,22 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 	): Promise<GatewayCapabilityRanking | null> => {
 		if (deps.rankCapabilities === undefined || entries.length === 0) return null;
 		try {
-			// The catalog's own categories, for a ranker that must select among groups
-			// before ranking entries: the owning MCP server, else the capability
-			// namespace. A group is described by its members' own first sentences.
-			const groupOf = (entry: GatewayCapabilityEntry): string =>
-				entry.kind === "mcp" ? `mcp:${deps.mcp?.ownerIdOf(entry.name) ?? "unknown"}` : entry.kind;
-			const members = new Map<string, string[]>();
-			for (const entry of entries) {
-				const id = groupOf(entry);
-				members.set(id, [...(members.get(id) ?? []), entry.description]);
-			}
-			const groups = new Map(
-				[...members].map(([id, descriptions]) => {
-					const label = id.startsWith("mcp:") ? `MCP server ${id.slice(4)}` : `${id} harness capabilities`;
-					const description = `${descriptions.length} capabilities, such as: ${descriptions.slice(0, 3).join("; ")}`;
-					return [id, { id, label, description }] as const;
-				}),
-			);
+			// The one category every capability carries with a stated purpose is its
+			// action class. MCP servers declare no purpose, so they are not offered as
+			// finer categories; an `unknown` class has none, and a catalog holding one
+			// is not grouped at all.
 			return await deps.rankCapabilities(
 				{
 					query,
 					entries: entries.map((entry) => {
-						const group = groups.get(groupOf(entry));
-						return { name: entry.name, description: entry.description, ...(group !== undefined ? { group } : {}) };
+						const purpose = ACTION_CLASS_PURPOSE[entry.actionClass];
+						return {
+							name: entry.name,
+							description: entry.description,
+							...(purpose !== undefined
+								? { categories: [{ id: entry.actionClass, label: `${entry.actionClass} capabilities`, purpose }] }
+								: {}),
+						};
 					}),
 				},
 				signal,

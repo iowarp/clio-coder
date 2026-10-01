@@ -8,6 +8,7 @@ export type { DecisionTask, ReadoutKind, RendererId, SemanticKind } from "./cont
 export { DECISION_TASKS, SITE_TASKS, thresholdIdentity } from "./contract.js";
 export type { CapabilityProfile, ProfileId } from "./profiles.js";
 export { PROFILE_IDS, PROFILES } from "./profiles.js";
+export type { CatalogCategory } from "./hierarchy.js";
 export type { DecisionFlowCheck } from "./runner.js";
 export { pick, rate, specHash, validateQuestion, yesNo } from "./questions.js";
 export type {

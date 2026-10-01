@@ -9,6 +9,7 @@
 
 import { randomUUID } from "node:crypto";
 import { createRedactionTally } from "../evidence/redact.js";
+import type { CallContract } from "./calibration.js";
 import { cutsFor, validationOf } from "./calibration.js";
 import type { DecisionTask } from "./contract.js";
 import { primaryTask, SITE_TASKS, thresholdIdentity } from "./contract.js";
@@ -105,11 +106,12 @@ export interface Runner {
 	 */
 	settled(maxWaitMs: number): Promise<void>;
 	/**
-	 * Whether the engine behind this digest last answered `site` from a threshold
-	 * identity with any cut there, or null when it has not answered within the TTL.
-	 * The identity includes the renderer and site version, which only a call knows.
+	 * The threshold identity and call contract the engine behind this digest last
+	 * answered `site` under, or null when it has not answered within the TTL. Only
+	 * a call knows the renderer and site version, so the caller recomputes cuts
+	 * from this against live settings rather than trusting a cached verdict.
 	 */
-	answeredFitted(digest: string, site: SiteId): boolean | null;
+	answeredIdentity(digest: string, site: SiteId): { identity: string; contract: CallContract } | null;
 }
 
 interface BreakerState {
@@ -140,7 +142,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 	// slow answer, and the call goes on to record it whenever it settles, so a
 	// process that exits in between would lose the row without something to wait on.
 	const inflight = new Set<Promise<unknown>>();
-	const answered = new Map<string, { fitted: boolean; at: number }>();
+	const answered = new Map<string, { identity: string; contract: CallContract; at: number }>();
 
 	function sessionAtStart(): string | null | undefined {
 		if (deps.currentSession === undefined) return undefined;
@@ -526,7 +528,11 @@ export function createRunner(deps: RunnerDeps): Runner {
 				siteVersion: site.version,
 				renderer: plan.route.engine.renderer,
 			});
-			answered.set(`${plan.route.digest}|${site.id}`, { fitted: plan.cuts.fitted, at: performance.now() });
+			answered.set(`${plan.route.digest}|${site.id}`, {
+				identity: plan.identity,
+				contract: { siteVersion: site.version, renderer: plan.route.engine.renderer },
+				at: performance.now(),
+			});
 		}
 		// A cut is read from the route that answered the task it is compared with,
 		// so a Jev cut is never applied to another engine's number.
@@ -605,10 +611,12 @@ export function createRunner(deps: RunnerDeps): Runner {
 		}
 	}
 
-	function answeredFitted(digest: string, site: SiteId): boolean | null {
+	function answeredIdentity(digest: string, site: SiteId): { identity: string; contract: CallContract } | null {
 		const last = answered.get(`${digest}|${site}`);
-		return last !== undefined && performance.now() - last.at < ANSWERED_BUILD_TTL_MS ? last.fitted : null;
+		return last !== undefined && performance.now() - last.at < ANSWERED_BUILD_TTL_MS
+			? { identity: last.identity, contract: last.contract }
+			: null;
 	}
 
-	return { run, settled, answeredFitted };
+	return { run, settled, answeredIdentity };
 }
