@@ -42,6 +42,7 @@ describe("turn-ending contract in the session prompt", () => {
 			prompt,
 		);
 		ok(prompt.includes("options carrying open choices: [Proceed with a per-user file (Recommended)"), prompt);
+		ok(prompt.includes("An explicit, specific operator instruction is its own consent"), prompt);
 		ok(prompt.includes(identityHalf), prompt);
 	});
 
