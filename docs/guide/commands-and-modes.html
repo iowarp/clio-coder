@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Commands and shortcuts — Clio Coder docs</title><meta name="description" content="Navigate the terminal, choose models, and control a session."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/docs/guide/commands-and-modes.html"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
+<meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/docs/guide/commands-and-modes.html"><meta property="og:title" content="Commands and shortcuts — Clio Coder docs"><meta property="og:description" content="Navigate the terminal, choose models, and control a session."><meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Commands and shortcuts — Clio Coder docs"><meta name="twitter:description" content="Navigate the terminal, choose models, and control a session."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta name="twitter:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="robots" content="index,follow,max-image-preview:large"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/"},{"@type":"TechArticle","@id":"https://coder.iowarp.ai/docs/guide/commands-and-modes.html#page","name":"Commands and shortcuts — Clio Coder docs","description":"Navigate the terminal, choose models, and control a session.","url":"https://coder.iowarp.ai/docs/guide/commands-and-modes.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","headline":"Commands and shortcuts — Clio Coder docs","mainEntityOfPage":"https://coder.iowarp.ai/docs/guide/commands-and-modes.html","author":{"@type":"Organization","name":"The Clio team","url":"https://coder.iowarp.ai/#project"},"image":"https://coder.iowarp.ai/assets/social-card.png","breadcrumb":{"@id":"https://coder.iowarp.ai/docs/guide/commands-and-modes.html#breadcrumbs"}},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/docs/guide/commands-and-modes.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://coder.iowarp.ai/docs.html"},{"@type":"ListItem","position":3,"name":"Commands and shortcuts — Clio Coder docs","item":"https://coder.iowarp.ai/docs/guide/commands-and-modes.html"}]}]}</script></head><body>
+<a class="skip" href="#content">Skip to content</a><header class="mast">
+  <div class="mast-row page">
+    <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio</a></nav></details></div>
+  </div>
+</header>
+<main class="page docs-layout" id="content">
+  <aside class="docs-sidebar" aria-label="Documentation"><details class="docs-menu"><summary>Browse documentation</summary><div class="docs-menu-body"><a class="docs-home" href="/docs.html">Clio Coder docs</a><label class="search-label" for="doc-search">Find a guide</label><input id="doc-search" type="search" placeholder="Search topics…" aria-describedby="search-status" /><p class="search-status" id="search-status" role="status"></p><ul class="search-hits" id="search-hits"></ul><noscript><p class="caption">Browse the guides below. Search requires JavaScript.</p></noscript><div id="all-docs"><details class="doc-nav-group" open><summary>Start</summary><a href="/docs.html">Install Clio Coder</a>
+<a href="/docs/guide/hpc-clusters.html">Install on a cluster</a>
+<a href="/docs/guide/configuration-and-targets.html">Connect a model</a></details>
+<details class="doc-nav-group" open><summary>Everyday use</summary><a href="/docs/guide/commands-and-modes.html" aria-current="page">Commands and shortcuts</a>
+<a href="/docs/guide/tool-usage.html">Tools and permissions</a>
+<a href="/docs/guide/context-continuity.html">Save and resume work</a>
+<a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
+<a href="/docs/guide/quality-policy.html">Require project checks</a></details>
+<details class="doc-nav-group"><summary>Extend Clio</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
+<a href="/docs/guide/resource-library.html">Skills and resources</a>
+<a href="/docs/guide/plugins.html">Install plugins</a>
+<a href="/docs/guide/interop.html">Editors and other agents</a>
+<a href="/docs/guide/slurm.html">Slurm workflows</a></details>
+<details class="doc-nav-group"><summary>Reference</summary><a href="/docs/guide/doctor.html">Check your installation</a>
+<a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
+<a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
+<a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Commands and shortcuts</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/commands-and-modes.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/commands-and-modes.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#launch-and-inspect">Launch and inspect</a>
+<a href="#everyday-terminal-commands">Everyday terminal commands</a>
+<a href="#a-few-keys-to-remember">A few keys to remember</a></details><h1 id="commands-and-shortcuts">Commands and shortcuts</h1>
+<p>Navigate the terminal, choose models, and control a session.</p>
+<h2 id="launch-and-inspect">Launch and inspect</h2>
+<div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Use it to</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>clio-coder</code></td>
+<td>Open the terminal in your project</td>
+</tr>
+<tr>
+<td><code>clio-coder gui --open</code></td>
+<td>Open the local desktop alpha</td>
+</tr>
+<tr>
+<td><code>clio-coder configure</code></td>
+<td>Connect a model with Guided setup</td>
+</tr>
+<tr>
+<td><code>clio-coder doctor</code></td>
+<td>Check installation and connections</td>
+</tr>
+<tr>
+<td><code>clio-coder --help</code></td>
+<td>See installed commands</td>
+</tr>
+</tbody></table></div>
+<p>For a single task without the interactive interface:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder run &quot;Explain this project&#39;s test setup. Do not change files.&quot; --cwd /path/to/project</code></pre></div>
+<p>Add <code>--json</code> when you need machine-readable events. A request to avoid edits is task guidance; use the tool restrictions in the full guide when execution must be constrained.</p>
+<h2 id="everyday-terminal-commands">Everyday terminal commands</h2>
+<div class="doc-table" role="region" aria-label="Reference table 2" tabindex="0"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it opens or does</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>/help</code></td>
+<td>Commands and effective keybindings</td>
+</tr>
+<tr>
+<td><code>/model</code></td>
+<td>Model picker for this session</td>
+</tr>
+<tr>
+<td><code>/settings</code></td>
+<td>Shared Settings Center</td>
+</tr>
+<tr>
+<td><code>/library</code></td>
+<td>Skills, prompts, agents, fleets, and plugins</td>
+</tr>
+<tr>
+<td><code>/context</code></td>
+<td>Context usage and pending handoffs</td>
+</tr>
+<tr>
+<td><code>/usage</code></td>
+<td>Session usage and supported subscription quotas</td>
+</tr>
+<tr>
+<td><code>/resume</code></td>
+<td>Previous conversations</td>
+</tr>
+<tr>
+<td><code>/tree</code></td>
+<td>Conversation history and branches</td>
+</tr>
+<tr>
+<td><code>/new</code></td>
+<td>A fresh conversation</td>
+</tr>
+<tr>
+<td><code>/view</code></td>
+<td>Artifacts and recorded results</td>
+</tr>
+</tbody></table></div>
+<h2 id="a-few-keys-to-remember">A few keys to remember</h2>
+<p><strong>Ctrl+G</strong> opens the action menu. Choose an entry with arrows and Enter, or its displayed suffix; Esc closes it. This is useful when your terminal intercepts an Alt shortcut. <code>/help</code> shows any custom bindings.</p>
+<div class="doc-table" role="region" aria-label="Reference table 3" tabindex="0"><table>
+<thead>
+<tr>
+<th>Default key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Enter</td>
+<td>Send; while running, steer at the next available slot</td>
+</tr>
+<tr>
+<td>Ctrl+J</td>
+<td>Insert a newline</td>
+</tr>
+<tr>
+<td>Ctrl+Q</td>
+<td>Queue a message for the end of the active turn</td>
+</tr>
+<tr>
+<td>Alt+Q</td>
+<td>Recover queued messages into the draft</td>
+</tr>
+<tr>
+<td>Alt+M</td>
+<td>Open the model picker</td>
+</tr>
+<tr>
+<td>Alt+L</td>
+<td>Open the Library</td>
+</tr>
+<tr>
+<td>Alt+O</td>
+<td>Cycle Compact, Standard, and Detailed output</td>
+</tr>
+<tr>
+<td>Alt+W</td>
+<td>Open Workers</td>
+</tr>
+</tbody></table></div>
+<p>Ctrl+C closes an active overlay, cancels a running turn, or clears an idle draft. When idle with an empty draft and no queued messages, two presses within about 1.2 seconds exit.</p>
+<p>For a course correction, open <strong>Ctrl+G → interrupt</strong>, or use <code>/interrupt &lt;text&gt;</code>. Work already completed remains in the session record.</p>
+</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/main" data-source-version="0.6.0" data-source-ref="6c148db046d4515e4de6ec1ed4fbdc405f8179db" data-source-commit="6c148db046d4515e4de6ec1ed4fbdc405f8179db">Guide to v0.6.0</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#launch-and-inspect">Launch and inspect</a>
+<a href="#everyday-terminal-commands">Everyday terminal commands</a>
+<a href="#a-few-keys-to-remember">A few keys to remember</a></aside>
+</main><footer class="colophon page">
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific software.</p></div>
+  <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
+</footer><script src="/js/site.js" defer></script><script src="/js/docs.js" defer></script>
+</body></html>

@@ -1,0 +1,209 @@
+[
+  {
+    "path": "README.md",
+    "title": "Install Clio Coder",
+    "group": "Start",
+    "excerpt": "Install, update, and launch Clio Coder on your machine.",
+    "headings": [
+      "Install and open a project",
+      "Give Clio a useful first task",
+      "Keep going",
+      "When you need more detail"
+    ],
+    "url": "/docs.html"
+  },
+  {
+    "path": "guide/hpc-clusters.md",
+    "title": "Install on a cluster",
+    "group": "Start",
+    "excerpt": "Install Clio on a login node with an old glibc, a proxy, or no internet.",
+    "headings": [
+      "Install without root",
+      "Old glibc, proxies, and quotas",
+      "Verified downloads",
+      "Airgapped sites and your own Node"
+    ],
+    "url": "/docs/guide/hpc-clusters.html"
+  },
+  {
+    "path": "guide/configuration-and-targets.md",
+    "title": "Connect a model",
+    "group": "Start",
+    "excerpt": "Set up local models, institutional endpoints, and cloud connections.",
+    "headings": [
+      "Connect the way you already work",
+      "Settings Center",
+      "Check the connection"
+    ],
+    "url": "/docs/guide/configuration-and-targets.html"
+  },
+  {
+    "path": "guide/commands-and-modes.md",
+    "title": "Commands and shortcuts",
+    "group": "Everyday use",
+    "excerpt": "Navigate the terminal, choose models, and control a session.",
+    "headings": [
+      "Launch and inspect",
+      "Everyday terminal commands",
+      "A few keys to remember"
+    ],
+    "url": "/docs/guide/commands-and-modes.html"
+  },
+  {
+    "path": "guide/tool-usage.md",
+    "title": "Tools and permissions",
+    "group": "Everyday use",
+    "excerpt": "Read, search, edit, and run commands with Clio's repository tools.",
+    "headings": [
+      "Ask for a bounded change",
+      "Understand permission requests",
+      "Verify using your project's checks"
+    ],
+    "url": "/docs/guide/tool-usage.html"
+  },
+  {
+    "path": "guide/context-continuity.md",
+    "title": "Save and resume work",
+    "group": "Everyday use",
+    "excerpt": "Resume conversations, manage context, and prepare a handoff.",
+    "headings": [
+      "Pick up a conversation",
+      "Keep long work focused",
+      "Recover an interrupted handoff"
+    ],
+    "url": "/docs/guide/context-continuity.html"
+  },
+  {
+    "path": "guide/panes-and-files.md",
+    "title": "Files and terminal panes",
+    "group": "Everyday use",
+    "excerpt": "Attach files and open companion terminal panes.",
+    "headings": [
+      "Add a file browser or companion shell",
+      "Use the files pane"
+    ],
+    "url": "/docs/guide/panes-and-files.html"
+  },
+  {
+    "path": "guide/fleet-dispatch.md",
+    "title": "Workers and fleets",
+    "group": "Extend Clio",
+    "excerpt": "Assign focused tasks and combine workers into a workflow.",
+    "headings": [
+      "Delegate a focused task",
+      "Follow the work",
+      "Permissions, sandbox, and merges",
+      "Compose a fleet when you need one"
+    ],
+    "url": "/docs/guide/fleet-dispatch.html"
+  },
+  {
+    "path": "guide/resource-library.md",
+    "title": "Skills and resources",
+    "group": "Extend Clio",
+    "excerpt": "Browse and use skills, prompts, agents, fleets, and plugins.",
+    "headings": [
+      "Find a useful skill",
+      "Review before installing",
+      "Refresh a running session"
+    ],
+    "url": "/docs/guide/resource-library.html"
+  },
+  {
+    "path": "guide/plugins.md",
+    "title": "Install plugins",
+    "group": "Extend Clio",
+    "excerpt": "Add reusable resources to your Clio installation.",
+    "headings": [
+      "Install a bundle of resources",
+      "Keep the installed copy under control",
+      "Choose the right kind of extension"
+    ],
+    "url": "/docs/guide/plugins.html"
+  },
+  {
+    "path": "guide/interop.md",
+    "title": "Editors and other agents",
+    "group": "Extend Clio",
+    "excerpt": "Use supported agent connections and editor integrations.",
+    "headings": [
+      "Bring an installed coding agent",
+      "Review resources from another agent",
+      "Connect an ACP frontend"
+    ],
+    "url": "/docs/guide/interop.html"
+  },
+  {
+    "path": "guide/slurm.md",
+    "title": "Slurm workflows",
+    "group": "Extend Clio",
+    "excerpt": "Connect Clio to supported Slurm tools for cluster work.",
+    "headings": [
+      "Work with a scheduler",
+      "Use a job workflow",
+      "Choose approvals deliberately"
+    ],
+    "url": "/docs/guide/slurm.html"
+  },
+  {
+    "path": "guide/doctor.md",
+    "title": "Check your installation",
+    "group": "Reference",
+    "excerpt": "Diagnose installation and connection problems with doctor.",
+    "headings": [
+      "Start with the standard check",
+      "Read the findings",
+      "Repair or investigate further"
+    ],
+    "url": "/docs/guide/doctor.html"
+  },
+  {
+    "path": "guide/troubleshooting.md",
+    "title": "Troubleshooting",
+    "group": "Reference",
+    "excerpt": "Resolve common connection, terminal, and runtime problems.",
+    "headings": [
+      "A connection is unavailable",
+      "Settings fail to load",
+      "A terminal shortcut does not arrive",
+      "Work stopped or a check failed"
+    ],
+    "url": "/docs/guide/troubleshooting.html"
+  },
+  {
+    "path": "guide/quality-policy.md",
+    "title": "Require project checks",
+    "group": "Everyday use",
+    "excerpt": "Choose the declared checks a change requires and inspect verification freshness.",
+    "headings": [
+      "Tell Clio what “checked” means in your project",
+      "Run the declared checks",
+      "Review freshness"
+    ],
+    "url": "/docs/guide/quality-policy.html"
+  },
+  {
+    "path": "guide/configuration-reference.md",
+    "title": "Configuration essentials",
+    "group": "Reference",
+    "excerpt": "Find settings layers, save scopes, and the full configuration reference.",
+    "headings": [
+      "Prefer the Settings Center",
+      "Know where a change is saved",
+      "Look up an exact key"
+    ],
+    "url": "/docs/guide/configuration-reference.html"
+  },
+  {
+    "path": "guide/environment-variables.md",
+    "title": "Environment essentials",
+    "group": "Reference",
+    "excerpt": "Use directory overrides and existing provider credentials when needed.",
+    "headings": [
+      "Use settings for ordinary preferences",
+      "Locate or separate installation state",
+      "Credentials and terminal behavior"
+    ],
+    "url": "/docs/guide/environment-variables.html"
+  }
+]

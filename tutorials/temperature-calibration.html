@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>A numerical change, checked with Clio — Clio Coder tutorials</title><meta name="description" content="Follow a temperature-conversion example through a floating-point test failure, a correction, and recorded verification."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/tutorials/temperature-calibration.html"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
+<meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/tutorials/temperature-calibration.html"><meta property="og:title" content="A numerical change, checked with Clio — Clio Coder tutorials"><meta property="og:description" content="Follow a temperature-conversion example through a floating-point test failure, a correction, and recorded verification."><meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="A numerical change, checked with Clio — Clio Coder tutorials"><meta name="twitter:description" content="Follow a temperature-conversion example through a floating-point test failure, a correction, and recorded verification."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta name="twitter:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="robots" content="index,follow,max-image-preview:large"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/"},{"@type":"TechArticle","@id":"https://coder.iowarp.ai/tutorials/temperature-calibration.html#page","name":"A numerical change, checked with Clio — Clio Coder tutorials","description":"Follow a temperature-conversion example through a floating-point test failure, a correction, and recorded verification.","url":"https://coder.iowarp.ai/tutorials/temperature-calibration.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","headline":"A numerical change, checked with Clio","mainEntityOfPage":"https://coder.iowarp.ai/tutorials/temperature-calibration.html","author":{"@type":"Organization","name":"The Clio team","url":"https://coder.iowarp.ai/#project"},"image":"https://coder.iowarp.ai/assets/gui-artifacts.webp","breadcrumb":{"@id":"https://coder.iowarp.ai/tutorials/temperature-calibration.html#breadcrumbs"}},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/tutorials/temperature-calibration.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Tutorials","item":"https://coder.iowarp.ai/learn.html"},{"@type":"ListItem","position":3,"name":"A numerical change, checked with Clio","item":"https://coder.iowarp.ai/tutorials/temperature-calibration.html"}]}]}</script></head><body>
+<a class="skip" href="#content">Skip to content</a><header class="mast">
+  <div class="mast-row page">
+    <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html" aria-current="page">Tutorials</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html" aria-current="page">Tutorials</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio</a></nav></details></div>
+  </div>
+</header>
+<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/learn.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All tutorials</a><p class="eyebrow"><span class="chapter">Scientific software</span>6 min read</p><h1>A numerical change, checked with Clio</h1><p class="lede">Follow a temperature-conversion example through a floating-point test failure, a correction, and recorded verification.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.6.0</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal · Desktop alpha</dd></div><div><dt class="eyebrow">Basis</dt><dd>Recorded session</dd></div></dl></header><div class="guide-layout"><article class="doc guide-body" id="doc"><figure class="guide-capture guide-cover"><a class="capture-frame" href="/assets/gui-artifacts.png"><img src="/assets/gui-artifacts.webp" width="1600" height="1000" alt="Clio Coder Artifacts panel displaying a successful verify call beside the temperature-calibration conversation" fetchpriority="high" srcset="/assets/responsive/gui-artifacts-480.webp 480w, /assets/responsive/gui-artifacts-768.webp 768w, /assets/responsive/gui-artifacts-1120.webp 1120w, /assets/gui-artifacts.webp 1600w" sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px" decoding="async"></a><figcaption class="caption">Artifacts, Results: the recorded verify call, its exit status, and its output beside the conversation. <span class="tag">Desktop alpha · v0.5.7</span></figcaption></figure><details class="doc-toc-mobile"><summary>On this page</summary><a href="#open-the-example">Open the example</a>
+<a href="#check-the-numerical-boundaries">Check the numerical boundaries</a>
+<a href="#run-a-declared-check">Run a declared check</a>
+<a href="#inspect-the-recorded-result">Inspect the recorded result</a></details><p>A small numerical task makes it easy to follow a change from code to a recorded check. This example converts temperatures between Celsius, Kelvin, and Fahrenheit, validates inputs, and tests physical boundaries without adding dependencies.</p>
+<h2 id="open-the-example">Open the example</h2>
+<p>Download the <a href="/assets/temperature-calibration.zip">runnable temperature-calibration example</a>. It includes the actual implementation, seven tests, and a private package manifest from the recorded session. It needs Node.js 22.19 or newer and has no dependencies to install.</p>
+<p>Extract the archive into your project&#39;s <code>examples/</code> folder, so the files live in <code>examples/temperature-calibration/</code>. Open the project in the desktop alpha:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder gui --open</code></pre></div>
+<p>You can also use the terminal. Select a model that supports tool calling. To reproduce the authoring task in your own project, ask:</p>
+<blockquote>
+<p>Create four temperature conversion functions for Celsius, Kelvin, and Fahrenheit. Reject non-numeric and non-finite inputs with TypeError, and temperatures below absolute zero with RangeError. Use 273.15 for the Celsius/Kelvin offset. Add Node.js tests for freezing, boiling, absolute zero, round trips within 1e-10, and invalid inputs. Use no dependencies. Run the tests and report the actual result.</p>
+</blockquote>
+<p>Choose a new example directory when creating files. In the supplied example, the implementation and tests are already present; start by asking Clio to read them.</p>
+<h2 id="check-the-numerical-boundaries">Check the numerical boundaries</h2>
+<p>These reference temperatures cover ordinary values and the physical lower boundary:</p>
+<div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
+<thead>
+<tr>
+<th>Reference</th>
+<th>Celsius</th>
+<th>Kelvin</th>
+<th>Fahrenheit</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Freezing point</td>
+<td>0 °C</td>
+<td>273.15 K</td>
+<td>32 °F</td>
+</tr>
+<tr>
+<td>Boiling point</td>
+<td>100 °C</td>
+<td>373.15 K</td>
+<td>212 °F</td>
+</tr>
+<tr>
+<td>Absolute zero</td>
+<td>−273.15 °C</td>
+<td>0 K</td>
+<td>−459.67 °F</td>
+</tr>
+</tbody></table></div>
+<p>The first run exposed an exact-equality assertion for the Fahrenheit value at absolute zero. JavaScript produced <code>−459.66999999999996</code>; the test expected <code>−459.67</code>. Clio changed that assertion to an absolute tolerance of <code>1e-10</code> and reran the tests. Review a tolerance against your domain’s numerical requirements before applying it elsewhere.</p>
+<h2 id="run-a-declared-check">Run a declared check</h2>
+<p>The example’s private <code>package.json</code> declares its test command. With the archive extracted into the folder above, ask Clio:</p>
+<blockquote>
+<p>Use verify with check test and cwd examples/temperature-calibration. Report the result and show the reference-temperature table. Do not edit files.</p>
+</blockquote>
+<p>Review any permission request before allowing the command. The recorded run passed seven tests with zero failures. The conversation keeps the check and its result beside Clio’s response.</p>
+<p><img width="1600" height="1000" src="/assets/gui-conversation.webp" alt="Clio Coder conversation reporting seven passing calibration tests and a reference-temperature table" loading="lazy" srcset="/assets/responsive/gui-conversation-480.webp 480w, /assets/responsive/gui-conversation-768.webp 768w, /assets/responsive/gui-conversation-1120.webp 1120w, /assets/gui-conversation.webp 1600w" sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px" decoding="async"></p>
+<p>To run the same tests yourself from the repository root:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">node --test examples/temperature-calibration/calibration.test.mjs</code></pre></div>
+<h2 id="inspect-the-recorded-result">Inspect the recorded result</h2>
+<p>Open <strong>Artifacts</strong> beside the conversation, then choose <strong>Results</strong>. Review the command, output, and recorded outcome. <strong>Files</strong> shows the paths reported by tools and their recorded changes. These views help you compare the answer with what ran.</p>
+<p><img width="1600" height="1000" src="/assets/gui-artifacts.webp" alt="Clio Coder Artifacts panel displaying a successful verify call beside the temperature-calibration conversation" loading="lazy" srcset="/assets/responsive/gui-artifacts-480.webp 480w, /assets/responsive/gui-artifacts-768.webp 768w, /assets/responsive/gui-artifacts-1120.webp 1120w, /assets/gui-artifacts.webp 1600w" sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px" decoding="async"></p>
+<p>The same conversation is available in the light theme:</p>
+<p><img width="1600" height="1000" src="/assets/gui-conversation-light.webp" alt="Clio Coder light desktop conversation with calibration test results and reference temperatures" loading="lazy" srcset="/assets/responsive/gui-conversation-light-480.webp 480w, /assets/responsive/gui-conversation-light-768.webp 768w, /assets/responsive/gui-conversation-light-1120.webp 1120w, /assets/gui-conversation-light.webp 1600w" sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px" decoding="async"></p>
+<p>Passing tests establish the behavior covered by those tests. This small example does not establish the scientific validity of a larger application. For project-specific requirements, see <a href="/docs/guide/quality-policy.html">quality policies</a> and <a href="/docs/guide/tool-usage.html">tool usage</a>.</p>
+</article><aside class="docs-toc guide-toc" aria-label="On this page"><h2>On this page</h2><a href="#open-the-example">Open the example</a>
+<a href="#check-the-numerical-boundaries">Check the numerical boundaries</a>
+<a href="#run-a-declared-check">Run a declared check</a>
+<a href="#inspect-the-recorded-result">Inspect the recorded result</a></aside></div><div class="tutorial-end"><p class="caption">By The Clio team · Clio Coder</p><a class="text-link" href="/docs.html">Continue with the documentation <span class="arrow arrow-forward" aria-hidden="true">→</span></a></div></main>
+<footer class="colophon page">
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific software.</p></div>
+  <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
+</footer><script src="/js/site.js" defer></script><script src="/js/docs.js" defer></script>
+</body></html>

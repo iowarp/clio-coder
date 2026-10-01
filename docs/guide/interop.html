@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Editors and other agents — Clio Coder docs</title><meta name="description" content="Use supported agent connections and editor integrations."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/docs/guide/interop.html"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
+<meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/docs/guide/interop.html"><meta property="og:title" content="Editors and other agents — Clio Coder docs"><meta property="og:description" content="Use supported agent connections and editor integrations."><meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Editors and other agents — Clio Coder docs"><meta name="twitter:description" content="Use supported agent connections and editor integrations."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta name="twitter:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="robots" content="index,follow,max-image-preview:large"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/"},{"@type":"TechArticle","@id":"https://coder.iowarp.ai/docs/guide/interop.html#page","name":"Editors and other agents — Clio Coder docs","description":"Use supported agent connections and editor integrations.","url":"https://coder.iowarp.ai/docs/guide/interop.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","headline":"Editors and other agents — Clio Coder docs","mainEntityOfPage":"https://coder.iowarp.ai/docs/guide/interop.html","author":{"@type":"Organization","name":"The Clio team","url":"https://coder.iowarp.ai/#project"},"image":"https://coder.iowarp.ai/assets/social-card.png","breadcrumb":{"@id":"https://coder.iowarp.ai/docs/guide/interop.html#breadcrumbs"}},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/docs/guide/interop.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://coder.iowarp.ai/docs.html"},{"@type":"ListItem","position":3,"name":"Editors and other agents — Clio Coder docs","item":"https://coder.iowarp.ai/docs/guide/interop.html"}]}]}</script></head><body>
+<a class="skip" href="#content">Skip to content</a><header class="mast">
+  <div class="mast-row page">
+    <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio</a></nav></details></div>
+  </div>
+</header>
+<main class="page docs-layout" id="content">
+  <aside class="docs-sidebar" aria-label="Documentation"><details class="docs-menu"><summary>Browse documentation</summary><div class="docs-menu-body"><a class="docs-home" href="/docs.html">Clio Coder docs</a><label class="search-label" for="doc-search">Find a guide</label><input id="doc-search" type="search" placeholder="Search topics…" aria-describedby="search-status" /><p class="search-status" id="search-status" role="status"></p><ul class="search-hits" id="search-hits"></ul><noscript><p class="caption">Browse the guides below. Search requires JavaScript.</p></noscript><div id="all-docs"><details class="doc-nav-group" open><summary>Start</summary><a href="/docs.html">Install Clio Coder</a>
+<a href="/docs/guide/hpc-clusters.html">Install on a cluster</a>
+<a href="/docs/guide/configuration-and-targets.html">Connect a model</a></details>
+<details class="doc-nav-group"><summary>Everyday use</summary><a href="/docs/guide/commands-and-modes.html">Commands and shortcuts</a>
+<a href="/docs/guide/tool-usage.html">Tools and permissions</a>
+<a href="/docs/guide/context-continuity.html">Save and resume work</a>
+<a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
+<a href="/docs/guide/quality-policy.html">Require project checks</a></details>
+<details class="doc-nav-group" open><summary>Extend Clio</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
+<a href="/docs/guide/resource-library.html">Skills and resources</a>
+<a href="/docs/guide/plugins.html">Install plugins</a>
+<a href="/docs/guide/interop.html" aria-current="page">Editors and other agents</a>
+<a href="/docs/guide/slurm.html">Slurm workflows</a></details>
+<details class="doc-nav-group"><summary>Reference</summary><a href="/docs/guide/doctor.html">Check your installation</a>
+<a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
+<a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
+<a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Editors and other agents</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/interop.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/interop.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#bring-an-installed-coding-agent">Bring an installed coding agent</a>
+<a href="#review-resources-from-another-agent">Review resources from another agent</a>
+<a href="#connect-an-acp-frontend">Connect an ACP frontend</a></details><h1 id="editors-and-other-agents">Editors and other agents</h1>
+<p>Use supported agent connections and editor integrations.</p>
+<h2 id="bring-an-installed-coding-agent">Bring an installed coding agent</h2>
+<p>Clio can dispatch a focused task to a configured coding peer or open an interactive handoff pane. Install and authenticate that peer&#39;s own CLI first, then inspect what Clio can use:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder interop inspect --json
+clio-coder configure --interop</code></pre></div>
+<p>In the terminal, <code>/interop</code> shows available connections. Supported managed modes vary by peer: Claude Code, Codex, and OpenCode have ACP recipes; other peers may use a headless CLI or a pane.</p>
+<ul>
+<li><code>/delegate &lt;peer&gt; &lt;task&gt;</code> uses a configured ACP connection.</li>
+<li><code>/run --target &lt;target&gt; &lt;agent&gt; &lt;task&gt;</code> uses a configured headless target.</li>
+<li><code>/peer &lt;peer&gt; &lt;brief&gt;</code> opens an interactive Herdr pane.</li>
+</ul>
+<p>Managed ACP and headless runs record results and receipts. A pane is an interactive handoff and does not produce a managed receipt. For a headless task, <code>--worktree</code> preserves a Git task branch for review; it does not confine the peer&#39;s filesystem or network access. A peer that runs its own tool loop is refused write-capable work unless you set <code>trustedUnmediated</code> on its target in your user settings.</p>
+<h2 id="review-resources-from-another-agent">Review resources from another agent</h2>
+<p>The Library can discover supported foreign resources and review their origin, scope, trust, and actual availability before adoption. It identifies unsupported components rather than treating an entire foreign package as compatible.</p>
+<p>Open <code>/library</code>, then use its local-agent discovery action. Inspect the proposed resources and approve the ones you want in your user or project library.</p>
+<h2 id="connect-an-acp-frontend">Connect an ACP frontend</h2>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder acp --cwd /path/to/project</code></pre></div>
+<p>This serves Clio over stdio for an ACP frontend, with session listing, resume, modes, and model options. Consult the full guide for peer-specific setup, permission limits, and installing Clio&#39;s portable library in other agents.</p>
+</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/main" data-source-version="0.6.0" data-source-ref="6c148db046d4515e4de6ec1ed4fbdc405f8179db" data-source-commit="6c148db046d4515e4de6ec1ed4fbdc405f8179db">Guide to v0.6.0</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#bring-an-installed-coding-agent">Bring an installed coding agent</a>
+<a href="#review-resources-from-another-agent">Review resources from another agent</a>
+<a href="#connect-an-acp-frontend">Connect an ACP frontend</a></aside>
+</main><footer class="colophon page">
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific software.</p></div>
+  <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
+</footer><script src="/js/site.js" defer></script><script src="/js/docs.js" defer></script>
+</body></html>

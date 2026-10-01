@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://coder.iowarp.ai/</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/hpc-clusters.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/configuration-and-targets.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/commands-and-modes.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/tool-usage.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/context-continuity.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/panes-and-files.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/fleet-dispatch.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/resource-library.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/plugins.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/interop.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/slurm.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/doctor.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/troubleshooting.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/quality-policy.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/configuration-reference.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/environment-variables.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/first-session.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/desktop-and-terminal.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/temperature-calibration.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/choose-model-for-your-project.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/coordinate-your-coding-agents.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/keep-long-coding-tasks-on-track.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/check-a-change-against-your-repository.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/add-skills-and-plugins-deliberately.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/work-from-a-laptop-with-remote-workers.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/learn.html</loc></url>
+</urlset>
