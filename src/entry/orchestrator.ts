@@ -2482,7 +2482,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						// they are labeled here before the request; the runner's flow check
 						// then judges the labels. A throw makes consult send nothing.
 						flowFor: (files) => {
-							const refusal = flowLedger.refusal();
+							// Neither an unusable policy nor an unusable ledger may let evidence leave.
+							const refusal = safety.policy?.informationFlow?.().refusal ?? flowLedger.refusal();
 							if (refusal !== null) throw new Error(refusal);
 							const labels = safety.policy?.flowRestrictionsForPaths?.(files, process.cwd()) ?? null;
 							if (labels !== null) {

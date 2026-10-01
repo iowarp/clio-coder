@@ -4,7 +4,7 @@ import { isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.js";
 import { normalizePromptHint } from "../core/prompt-hint.js";
 import type { PendingSkillToolPolicy, SkillToolSurfaceViolation } from "../core/skill-activation.js";
-import { type ToolName, ToolNames } from "../core/tool-names.js";
+import { type ToolName, ToolNames, isMcpToolName } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import { containsInstructionMarkers, INSTRUCTION_SHAPED_WARNING } from "../core/untrusted-content.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
@@ -717,6 +717,22 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		);
 	};
 
+	/**
+	 * Tools whose result can carry a restricted source into the transcript: the
+	 * path readers the source rules name, every MCP tool, and the outbound
+	 * tools. While the policy cannot say what is restricted, running one would
+	 * persist content under no label, and a later resume would read it as
+	 * unrestricted. Refused with the policy's own reason, which names the
+	 * snapshot and the remedy and never the content.
+	 */
+	const sourceAdmissionRefusal = (spec: ToolSpec, call: ClassifierCall): string | null => {
+		const refusal = deps.safety.policy?.informationFlow?.().refusal ?? null;
+		if (refusal === null) return null;
+		const isSource =
+			FLOW_SOURCE_TOOLS.has(spec.name) || isMcpToolName(spec.name) || resolveToolDestination(spec.name, call.args) !== null;
+		return isSource ? `${spec.name} refused while the information-flow policy is unavailable: ${refusal}` : null;
+	};
+
 	const runSpec = async (
 		spec: ToolSpec,
 		call: ClassifierCall,
@@ -727,8 +743,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		try {
 			// Explicit information-flow violations are final at every autonomy
 			// level, including yolo, and are decided before any hook can run the
-			// body. Permitted here grants nothing: admission already ran.
-			const flowViolation = outboundFlowViolation(spec, call);
+			// body. Permitted here grants nothing: admission already ran. A policy
+			// that cannot label sources refuses the source tools outright.
+			const flowViolation = sourceAdmissionRefusal(spec, call) ?? outboundFlowViolation(spec, call);
 			if (flowViolation !== null) {
 				recordRegistryDisposition(call, decision, "blocked", {
 					reasonCode: FLOW_BLOCK_REASON_CODE,
@@ -1605,6 +1622,14 @@ function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolS
 const GUARD_BLOCK_REASON_CODE = "guard_block";
 /** Reason code of a final information-flow block, for the audit row and the panel. */
 const FLOW_BLOCK_REASON_CODE = "information-flow";
+/** The path-reading tools a source rule can name; kept in step with the evaluator's READ_PATH_TOOLS. */
+const FLOW_SOURCE_TOOLS: ReadonlySet<string> = new Set([
+	ToolNames.Read,
+	ToolNames.Ls,
+	ToolNames.Grep,
+	ToolNames.Find,
+	ToolNames.Data,
+]);
 /** Result detail that carries a restricted read's label to the host; never model text. */
 export const FLOW_RESTRICTIONS_DETAIL = "clio_coder_flow_restrictions";
 
