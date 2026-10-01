@@ -105,7 +105,9 @@ export function marketplaceOfferReminder(entry: MarketplaceSkill, offerTag: stri
 		`Include the exact tag ${offerBindingTag(offerTag)} verbatim in that question's text so the harness can bind ` +
 		`the answer to this offer; the harness acts only on an answer carrying this tag. ` +
 		`Then continue the task in the same turn. The harness handles the answer; never install or load a skill yourself. ` +
-		`If it is not actually needed, do not mention it.`
+		`Built-in tools already cover ${ToolNames.Dispatch} (parallel workers, each in its own task worktree with ` +
+		`worktree: true) and git (inspect, commit, merge, through the git tool or bash); when they serve the request, ` +
+		`do not ask. If it is not actually needed, do not mention it.`
 	);
 }
 
@@ -156,6 +158,10 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 	let lastSeenSessionId: string | null | undefined;
 	let offeredNames = new Set<string>();
 	let sessionDeclines = new Set<string>();
+	// Set once the operator answers an offer without installing. A different
+	// skill offered two turns after "Not now" or a typed "No skill needed" is a
+	// nag, so offers stop for the rest of the session.
+	let offersPaused = false;
 	// Discovery parses and hashes every installed/catalog SKILL.md. On a real
 	// home with 31 entries per side that cost 36-92ms on every turn_start, while
 	// the lexical match itself stayed below 2ms. Inventory is stable within a
@@ -180,6 +186,7 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			lastSeenSessionId = sessionId;
 			offeredNames = new Set<string>();
 			sessionDeclines = new Set<string>();
+			offersPaused = false;
 			pendingOffer = null;
 			installedNamesCache = null;
 			marketplaceEntriesCache = null;
@@ -242,14 +249,23 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			// The answer binds only when its question carries this offer's tag.
 			if (!answer.question.includes(marker)) continue;
 			const option = chosenOfferOption(answer);
-			if (option === null) continue;
-			pendingOffer = null;
 			const offerKey = declineKey(offer.entry.name, offer.entry.version);
+			if (option === null) {
+				// The operator typed an answer instead of choosing one of the four
+				// options (the implicit "Other"). Nothing is installed on a guess.
+				pendingOffer = null;
+				sessionDeclines.add(offerKey);
+				offersPaused = true;
+				return NO_EFFECTS;
+			}
+			pendingOffer = null;
 			if (option === SKILL_INSTALL_OFFER_OPTION_NOT_NOW) {
+				offersPaused = true;
 				sessionDeclines.add(offerKey);
 				return NO_EFFECTS;
 			}
 			if (option === SKILL_INSTALL_OFFER_OPTION_NEVER) {
+				offersPaused = true;
 				sessionDeclines.add(offerKey);
 				try {
 					declines.recordNever(offer.entry.name, offer.entry.version);
@@ -309,6 +325,7 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			// that choice is noise.
 			const pendingSkillRequests = metadataNumber(input, "pendingSkillRequests");
 			if (pendingSkillRequests !== null && pendingSkillRequests > 0) return NO_EFFECTS;
+			if (offersPaused) return NO_EFFECTS;
 			const match = bestMatch(input.text ?? "");
 			if (!match) return NO_EFFECTS;
 			offeredNames.add(match.entry.name);

@@ -32,6 +32,20 @@ const TRIGGER_SCORE = 4;
 const TOKEN_FIRE_THRESHOLD = 3;
 
 /**
+ * A description without its referrals. Catalog descriptions end disclaimers
+ * with the skill to use instead ("Not for merging finished worktrees; use
+ * worktree-merge."). The referral names another skill, so its words are not
+ * part of what this one does: counting them made `worktree-create` match a
+ * request about merging.
+ */
+function describedCapability(description: string): string {
+	return description
+		.split(/(?<=[.!?])\s+/u)
+		.map((sentence) => (/^not\b/iu.test(sentence.trim()) ? sentence.replace(/;\s*use\b[^.!?]*/iu, "") : sentence))
+		.join(" ");
+}
+
+/**
  * Score one marketplace entry against the operator's request text. A trigger
  * phrase is a whole-phrase substring match on normalized text; token overlap
  * is a fallback for skills whose triggers have not been authored yet.
@@ -47,7 +61,7 @@ export function scorePromotionEntry(userText: string, entry: MarketplaceSkill): 
 	}
 	const requestTokens = distinctiveTokens(userText);
 	if (requestTokens.size === 0) return null;
-	const entryTokens = distinctiveTokens(`${entry.name.replace(/-/g, " ")} ${entry.description}`);
+	const entryTokens = distinctiveTokens(`${entry.name.replace(/-/g, " ")} ${describedCapability(entry.description)}`);
 	let overlap = 0;
 	for (const token of requestTokens) if (entryTokens.has(token)) overlap += 1;
 	return overlap >= TOKEN_FIRE_THRESHOLD ? { entry, score: overlap } : null;
