@@ -1,7 +1,7 @@
 Your conversation and a worker process do not have to run on the same machine. Clio Coder can coordinate native workers over SSH, so a local session directs work in a configured remote environment.
 
 ::: note Version scope
-This guide describes the v0.5.7 fleet. The configuration below is a template, not a recorded deployment, and this workflow does not grant access to institutional systems or override their scheduler and data rules.
+This guide describes the v0.6.0 fleet. The configuration below is a template, not a recorded deployment, and this workflow does not grant access to institutional systems or override their scheduler and data rules.
 :::
 
 ::: needs
@@ -61,11 +61,11 @@ Plain doctor reports node probes without refreshing dispatch eligibility.
 clio-coder doctor --fix
 ```
 
-After you review the setup and understand the changes, this records passing preflight results.
+After you review the setup and understand the changes, this records passing preflight results. It also rewrites retired enum values and YAML `on` and `off` booleans in `settings.yaml`, so run plain `doctor` first to preview them.
 
 ### Upgrade together
 
-Worker specification v5 requires compatible fleet nodes. Upgrade the client and workers together when release notes say so; session format changes also affect which clients can reopen conversations.
+Worker specification v7 requires compatible fleet nodes, so a 0.5 client or node cannot work with a 0.6 peer. Upgrade the client and workers together when release notes say so; session format changes also affect which clients can reopen conversations.
 :::
 
 ::: result What doctor tells you

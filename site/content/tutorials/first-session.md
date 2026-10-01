@@ -2,10 +2,10 @@ Clio Coder works in the repository you open. For your first session, give it a s
 
 ## 1. Install Clio
 
-You need Node.js 22.19 or newer. Linux and macOS are the primary supported platforms.
+The installer brings its own Node.js and needs no root. Linux and macOS are the primary supported platforms. Windows is best effort, and WSL is the recommended route.
 
 ```sh
-npm install -g @iowarp/clio-coder
+curl -fsSL https://coder.iowarp.ai/install.sh | sh
 ```
 
 Open a terminal in a repository you know:

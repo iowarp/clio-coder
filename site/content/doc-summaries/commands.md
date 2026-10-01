@@ -46,6 +46,6 @@ Add `--json` when you need machine-readable events. A request to avoid edits is 
 | Alt+O | Cycle Compact, Standard, and Detailed output |
 | Alt+W | Open Workers |
 
-Ctrl+C closes an active overlay, cancels a running turn, or clears an idle draft. When idle with an empty draft and no queued messages, two presses within half a second exit.
+Ctrl+C closes an active overlay, cancels a running turn, or clears an idle draft. When idle with an empty draft and no queued messages, two presses within about 1.2 seconds exit.
 
 For a course correction, open **Ctrl+G → interrupt**, or use `/interrupt <text>`. Work already completed remains in the session record.

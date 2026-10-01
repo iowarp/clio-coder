@@ -14,6 +14,20 @@
     ]
   },
   {
+    "path": "guide/hpc-clusters.md",
+    "source": "docs/guide/hpc-clusters.md",
+    "title": "Install on a cluster",
+    "group": "Start",
+    "excerpt": "Install Clio on a login node with an old glibc, a proxy, or no internet.",
+    "summary": "hpc.md",
+    "headings": [
+      "Install without root",
+      "Old glibc, proxies, and quotas",
+      "Verified downloads",
+      "Airgapped sites and your own Node"
+    ]
+  },
+  {
     "path": "guide/configuration-and-targets.md",
     "source": "docs/guide/configuration-and-targets.md",
     "title": "Connect a model",
@@ -87,6 +101,7 @@
     "headings": [
       "Delegate a focused task",
       "Follow the work",
+      "Permissions, sandbox, and merges",
       "Compose a fleet when you need one"
     ]
   },
