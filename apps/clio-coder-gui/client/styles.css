@@ -806,6 +806,14 @@ nav a:hover {
 	border-radius: var(--radius-sm);
 	color: var(--accent);
 }
+/* The panel's quiet button rule outranks .primary by one element; restate the fill so a panel's
+   one important action still reads as primary. */
+.trace-panel button.primary,
+.trace-filters button.primary {
+	border-color: var(--primary-fill);
+	background: var(--primary-fill);
+	color: var(--on-primary);
+}
 .trace-panel summary {
 	cursor: pointer;
 	margin: var(--space-3) 0;
