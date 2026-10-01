@@ -1846,7 +1846,7 @@ function isGitInspection(
 	if (split === null) return false;
 	let gitCwd = cwd;
 	for (const dir of split.dirs) {
-		const next = gitChdirTarget(dir, gitCwd, workspaceRoot, readScope);
+		const next = gitChdirTarget(dir, gitCwd, workspaceRoot);
 		if (next === null) return false;
 		gitCwd = next;
 	}
@@ -1875,16 +1875,19 @@ function isGitInspection(
 
 /**
  * The physical directory a `git -C <dir>` word lands in, or null when it is not
- * provably inside the workspace or an exempt read root. The word is a literal:
+ * provably inside the workspace. Exempt read roots do not count: they exist so
+ * a dependency file can be read, and a repository there carries a `.git/config`
+ * (`core.fsmonitor`, `core.pager`) the operator never vetted, which Git runs
+ * even for inspection. The word is a literal:
  * a variable, backslash, glob, brace, whitespace or tilde may name something
  * else at run time, so any of them asks. A directory that does not exist is
  * Git's own error. The zero-access scan already covered the whole command
  * string, so a protected path named here is blocked before this runs.
  */
-function gitChdirTarget(dir: string, from: string, workspaceRoot: string, readScope: ReadScopeInputs): string | null {
+function gitChdirTarget(dir: string, from: string, workspaceRoot: string): string | null {
 	if (/[*?[\]{}$`\\\s]/u.test(dir) || dir.startsWith("~")) return null;
-	if (!operandStaysInWorkspace(dir, from, workspaceRoot, readScope)) return null;
-	return canonicalizeRawPath(dir, from);
+	const physical = canonicalizeRawPath(dir, from);
+	return physical !== null && isUnderOrSame(physical, workspaceRoot) ? physical : null;
 }
 
 /**
