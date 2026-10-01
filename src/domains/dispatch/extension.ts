@@ -993,6 +993,29 @@ function pickOrchestratorScope(safety: SafetyContract): ScopeSpec {
 	return safety.scopes.workspace;
 }
 
+/**
+ * Write boundaries as the orchestrator sees them. A task worktree run reaches
+ * admission with `req.cwd` already inside the worktree, so declared roots
+ * resolve under the worktree path, which never sits inside the orchestrator's
+ * workspace root. The worker is confined to those worktree paths, but the
+ * subset check compares authority over the checkout, so each boundary is
+ * mapped back onto the checkout the worktree was cut from.
+ */
+function admissionWriteBoundaries(
+	req: Pick<DispatchRequest, "taskWorktree">,
+	boundaries: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+	const worktree = req.taskWorktree;
+	if (worktree === undefined) return boundaries;
+	return boundaries.map((boundary) => {
+		const directory = boundary.endsWith("/");
+		const rel = relative(worktree.path, directory ? boundary.slice(0, -1) : boundary);
+		if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return boundary;
+		const mapped = resolvePath(worktree.root, rel);
+		return directory ? asDirectoryPathBoundary(mapped) : mapped;
+	});
+}
+
 function pickWorkerScope(
 	safety: SafetyContract,
 	requestedActions: ReadonlyArray<ActionClass>,
@@ -2395,7 +2418,10 @@ function resolveDispatchAdmissionStage(
 	}
 	const requestedActions = deriveRequestedActions(allowedTools, safety);
 	const orchScope = pickOrchestratorScope(safety);
-	const workerScope = pickWorkerScope(safety, requestedActions, pathScope);
+	const workerScope = pickWorkerScope(safety, requestedActions, {
+		...pathScope,
+		writeBoundaries: admissionWriteBoundaries(req, pathScope.writeBoundaries),
+	});
 	const verdict = admit(
 		{
 			requestedScope: workerScope,
