@@ -22,6 +22,7 @@ import { StatusMark } from "../design/status.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
+import { AutonomyPill } from "./AutonomyPill.js";
 import { persistAttachments, savedAttachments } from "./attachment-drafts.js";
 import { readAttachment } from "./attachment-image.js";
 import {
@@ -599,6 +600,7 @@ export const Composer = memo(function Composer({
 							</button>
 						</>
 					) : null}
+					<AutonomyPill client={client} sessionId={sessionId} capabilities={capabilities.data} locked={running} />
 					<details
 						className="composer__options"
 						ref={options}
