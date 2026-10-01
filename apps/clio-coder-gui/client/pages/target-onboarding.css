@@ -144,9 +144,6 @@
 	margin-bottom: var(--space-1);
 	font-weight: 500;
 }
-.connection-setup--bare .connection-setup__prompt h3:focus-visible {
-	outline: none;
-}
 .connection-setup--bare .connection-setup__choice {
 	animation: setup-rise var(--motion-entry) var(--ease-standard) both;
 }
