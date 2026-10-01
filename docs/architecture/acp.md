@@ -39,9 +39,9 @@ clio-coder acp [--cwd PATH] [--permission-timeout MS]
 both spellings reach the same command dispatcher, option parser, stdout guard,
 and server boot path.
 
-- `--cwd PATH`: Bind this workspace before `initialize`. The path is resolved and canonicalized with `fs.realpath`, so a symlinked root, a trailing slash, and a `/.` suffix all name the same workspace. Clio enters that path before it reads settings, builds project context, or opens a session ledger. A path that does not exist or that the process cannot enter exits 2 without starting the server.
+- `--cwd PATH`: Pin this workspace. The path is resolved and canonicalized with `fs.realpath`, so a symlinked root, a trailing slash, and a `/.` suffix all name the same workspace. Clio enters that path before it reads settings, builds project context, or opens a session ledger. A path that does not exist or that the process cannot enter exits 2 without starting the server. Every session request must then name that root, and the first workspace request starts the boot.
 
-Without `--cwd`, Clio opens the stdio transport and answers `initialize`, `authenticate`, and `logout` before loading a workspace. The first `session/new`, `session/load`, or `session/resume` selects its absolute existing `cwd`. A first `session/list` with a `cwd` filter selects that directory; one without a filter selects the launch directory. Other workspace dependent session and Clio extension methods select the launch directory if called first. The selected root is canonicalized, entered, and held for the process lifetime. Requests received during boot wait for the normal project trust, settings, context, hooks, and tools to load. Later session requests naming another canonical root fail with `-32602` and name the bound root.
+With or without `--cwd`, Clio opens the stdio transport and answers `initialize`, `authenticate`, and `logout` before loading a workspace. The answer to `initialize` is what an [attended client](#attended-clients) advertises, so the boot that follows builds its tool surface from it. Without `--cwd`, the first `session/new`, `session/load`, or `session/resume` selects its absolute existing `cwd`. A first `session/list` with a `cwd` filter selects that directory; one without a filter selects the launch directory. Other workspace dependent session and Clio extension methods select the launch directory if called first. The selected root is canonicalized, entered, and held for the process lifetime. Requests received during boot wait for the normal project trust, settings, context, hooks, and tools to load. Later session requests naming another canonical root fail with `-32602` and name the bound root.
 - `--permission-timeout MS`: The server-side fail-safe ceiling for one mediated permission request, as a whole number from 1 through Node's maximum schedulable timer delay (`2147483647`) milliseconds. Values outside that range are refused before the protocol server starts. If the timer wins, the approval expires, the active turn is aborted, every parked call for that turn is settled only so execution can unwind, and `session/prompt` fails with `permission_expired`. Expiry is audited as `expired`, never as a human denial, and no denial result is fed into a continuing model loop. The flag overrides `integrations.externalAgents.defaults.permissionTimeoutMs` for this server only, which itself defaults to `DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000` ([defaults.ts](../../src/core/defaults.ts)). The graphical application treats the remaining ACP request window as a hard ceiling on its own approval budget, projects that duration onto its own clock, escalates immediately when the remaining window is shorter than its escalation delay, and cancels without publishing a card if the window has already elapsed. Other clients may enforce a shorter operator-facing policy by sending ordinary `session/cancel`.
 
 A client that advertises `clientCapabilities.auth.terminal:true` receives a terminal authentication method with `args:["auth","login"]`. Appending those args to the configured ACP launch command opens Clio's interactive Quick Connect flow through `clio-coder acp auth login` (including any preceding `--cwd` flag). Other clients receive no terminal method. The `authenticate` handler rejects unknown or terminal method IDs with `-32602`; terminal authentication takes place in a separate process. The `logout` handler ends the current ACP connection's authenticated state and returns `{}`. Subsequent session creation, loading and prompting on that connection return `-32000` until the client reconnects. Clio advertises `agentCapabilities.auth.logout:{}`.
@@ -208,6 +208,7 @@ The v1 notification is
 | `context.warning` | Always the object `{warning}`, where `warning` is a control-character-stripped sentence bounded to 256 UTF-8 bytes, or `null`. The clearing edge is `{warning: null}`, never a null payload. | `false` |
 | `safety.toolBudgetExceeded` | `{tool,callsThisTurn,softBudget,hardCeiling,interrupted}`. | `true` exactly when `interrupted` |
 | `provider.health` | `{targetId,status,available,latencyMs}`, where status is exactly `healthy`, `degraded`, `unknown`, or `down`. | `false` |
+| `dispatch.scopeNotice` | `{code,level,message}`. `code` is `write_root_dot_unconfined`, `typed_scope_replaced_inferred_paths`, `legacy_scope_inferred` or `legacy_scope_empty`, `level` is `warning`, and `message` is the host's two sentences, control-character-stripped and bounded to 1024 UTF-8 bytes. The path lists a legacy notice carries stay behind. | `false` |
 
 An event whose identity or taxonomy cannot be represented safely is dropped
 rather than forwarded under a repaired one.
@@ -308,6 +309,21 @@ for home identity, `doctor --json` for installation sanity, and
 `targets --json [--probe]` for target, auth, and health. `--probe` performs a
 request to the configured endpoint, so the client decides when that is allowed.
 
+### Attended clients
+
+A person is at the other end of an ACP connection only when the client says so at `initialize`. Two opt-ins under `clientCapabilities._meta` say it, each on its own. A client that advertises neither gets the unattended surface it always had: no `ask_user` tool, no merge card, and a worker permission ask that is not forwarded. The deferred front answers `initialize` before the orchestrator boots, so the tool surface, the session prompt and the dispatch domain are built from that answer and not guessed.
+
+| Opt-in | Payload | What it turns on |
+| --- | --- | --- |
+| `clio-coder/interviews` | `{version:1, request:"_clio-coder/interview/request", cancel?:"_clio-coder/interview/cancel"}` | The `ask_user` tool, the interview guidance in the session prompt, and the harness cards such as the task-worktree merge card. Clio echoes `{version:1, request, cancel}` under `agentCapabilities._meta["clio-coder/interviews"]` when it accepted the opt-in. |
+| `clio-coder/workerPermissions` | `{version:1, withdraw:"_clio-coder/permission/withdraw"}` | A dispatched worker's permission ask is sent as `session/request_permission`. A client that names another `withdraw` method, or none, is not asked. |
+
+**Interviews.** A round is the server-to-client request `_clio-coder/interview/request` with `{sessionId, interviewId, questions}`. It carries one to four questions, each `{question, header?, options?, multi_select?}` with at most 16 options. Question text is cut to 8192 characters, a header to 128, an option label to 512 and a description to 2048. The reply is `{answers:[{question, answer, options?, value?}], cancelled?}`. The default option a terminal card opens on has no field on the wire and is not sent. A cancelled reply, a request the client refuses (no turn is running, for example), a malformed reply and a turn abort all read as the operator's cancel. A turn abort also sends the notification `_clio-coder/interview/cancel` with `{sessionId, interviewId}` when the client named it.
+
+**Worker permission asks.** A worker ask that needs a person (`escalation: true` on the bus: an ask under `fleet.permissions.mode: escalate`, an operator-authority rail, or an ask the main agent forwarded below `yolo`) goes out as `session/request_permission`. It binds to the open tool call that spawned the run, else the newest open tool call, and retries the binding every 200 ms until the ask's own window closes, because the model is often between calls when a worker asks. If no tool call opens in that window the ask stays with the worker's timeout fallback and nothing is denied in the operator's name. The ask shares the one outstanding-request queue with main-agent asks. The answers map to the worker as on the terminal: `allow-once` approves, every other answer denies, and `reject-and-stop` also cancels the active turn. Dispatch settles the ask through `resolveWorkerPermission`, so a brokered request is still bound to its attempt and arguments.
+
+The request's `_meta` carries `clio-coder/decision` with `origin: {kind:"worker", agentId, runId}` and `clio-coder/workerAsk`: `{version:1, requestId, requestedBy, agentId, approvalAuthority?, forwardedByMain, fallback, timeoutMs?}`. `approvalAuthority` is `operator` for a rail only a person clears and `main` for an ordinary ask. Identifiers and enums only, so no worker prose reaches it. When the worker settles the ask first (it timed out, its run ended, or its owner revoked it), the server sends the notification `_clio-coder/permission/withdraw` with `{sessionId, requestId}`, because the wire cannot cancel one request. A client that keeps showing the card would otherwise refuse the next approval as a second pending one.
+
 ### Permission requests
 
 The outbound `session/request_permission` carries
@@ -356,7 +372,7 @@ could only read as a mismatch.
 
 `params._meta["clio-coder/decision"]` carries the classification the server
 already computed to pick the option labels:
-`{version:1, tier, tierLabel, title, semanticToken, authorizationCopy, consequenceCopy, reversibilityCopy, requestedByCopy, actionClass, axis, origin, exposure, affectedScope, reversibility, target?}`.
+`{version:1, tier, tierLabel, title, semanticToken, authorizationCopy, consequenceCopy, reversibilityCopy, requestedByCopy, actionClass, axis, origin, exposure, affectedScope, reversibility, target?, consequenceLines?}`.
 Without it a client re-derives a tier and a consequence from a tool name, which
 is a second and worse classifier.
 
@@ -364,7 +380,8 @@ is a second and worse classifier.
 or `worker`. `semanticToken` is `accent`, `action`, or `warning`. `affectedScope`
 and `reversibility` are the machine-readable facts behind the copy, so a client
 colours a badge without string-matching prose. `target` is a one-line allowlisted
-render of the call's arguments and is omitted when nothing is derivable. Every
+render of the call's arguments and is omitted when nothing is derivable.
+`consequenceLines` is present for a bash ask: at most nine sentences, one per step of the command, written by the host from the full command ("Deletes build recursively"). It is the text the terminal card shows as its Effect row, and it is omitted when the command has nothing to say. Every
 string is control-character-stripped and bounded to 512 UTF-8 bytes, and no
 model-authored prose reaches this record.
 
@@ -391,13 +408,16 @@ The shipped `clio-coder acp` composition supplies the session, settings, provide
 | `clio-coder/targets` | `initialize` → `agentCapabilities._meta` | `{ list:true, probe:true }` |
 | `clio-coder/agent` | `initialize` → `agentCapabilities._meta` | `{ version:1, meta:"clio-coder/agent" }`, advertising per-frame agent attribution. |
 | `clio-coder/agent` | live and replayed `session/update.params._meta` | An array beginning with orchestrator attribution and including bounded delegated-agent attribution for a tool call when available. |
-| `clio-coder/events` | `initialize` → `agentCapabilities._meta` | `{ version:1, notification:"_clio-coder/event", kinds:["safety.loopBlocked","dispatch.enqueued","dispatch.started","dispatch.progress","dispatch.completed","dispatch.failed","accountability.evidenceReady","compaction.end","context.warning","safety.toolBudgetExceeded","provider.health"], workspaceInstanceId }` |
+| `clio-coder/events` | `initialize` → `agentCapabilities._meta` | `{ version:1, notification:"_clio-coder/event", kinds:["safety.loopBlocked","dispatch.enqueued","dispatch.started","dispatch.progress","dispatch.completed","dispatch.failed","accountability.evidenceReady","compaction.end","context.warning","safety.toolBudgetExceeded","provider.health","dispatch.scopeNotice"], workspaceInstanceId }` |
 | `clio-coder/steering` | `initialize` → `agentCapabilities._meta` | `{ version:1, main, dispatch, modes:["next-slot","end-of-turn"], interrupt:true, methods:{steer,queue,clear,interrupt,dispatch} }`. `main` and `dispatch` report which queues this build actually wired. |
 | `clio-coder/commands` | `initialize` → `agentCapabilities._meta` | `{ version:1, list:"_clio-coder/commands/list", invoke:"_clio-coder/commands/invoke" }`. The live catalog supplies the workspace dependent command count after binding. Absent when the composition wired no command host, in which case both methods refuse. |
 | `clio-coder/toolProgress` | `initialize` → `clientCapabilities._meta` | `{ version:1 }`. The client opt-in that turns the stream on. Anything else, a missing key, a different version, or a non-object, leaves it off. |
 | `clio-coder/toolProgress` | `initialize` → `agentCapabilities._meta` | `{ version:1, minIntervalMs:250, maxFramesPerCall:64, maxContentBytes:16384 }`. Always announced, so a client that never receives a second frame can tell "the tool printed once" from "the floor suppressed it". |
 | `clio-coder/decision` | `initialize` → `agentCapabilities._meta` | `{ version:1, meta:"clio-coder/decision", options:["allow-once","reject-once","reject-and-stop"] }`. Present only when a tool registry is wired. |
 | `clio-coder/decision` | `session/request_permission` → `params._meta` | The classified decision facts for this ask; see **Permission requests**. |
+| `clio-coder/interviews` | `initialize` → `clientCapabilities._meta` and `agentCapabilities._meta` | The client opt-in and Clio's echo of it; see [Attended clients](#attended-clients). |
+| `clio-coder/workerPermissions` | `initialize` → `clientCapabilities._meta` | `{ version:1, withdraw:"_clio-coder/permission/withdraw" }`. The client opt-in for forwarded worker asks. |
+| `clio-coder/workerAsk` | `session/request_permission` → `params._meta` | Provenance of a forwarded worker ask; see [Attended clients](#attended-clients). |
 | `clio-coder/session` | `session/new`, `session/load`, or `session/resume` result `_meta` | Bind-time `{sessionId,target,model,autonomy,createdAt,resumed,replayed?}` attribution. |
 | `clio-coder/replay` | replayed `session/update.params._meta` | `{ turn }`; absent on live updates. |
 | `clio-coder/truncated` | `_clio-coder/targets/list` result `_meta` | `true` only when that method's aggregate byte budget omitted a target/model entry; absent otherwise. |

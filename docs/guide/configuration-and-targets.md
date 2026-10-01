@@ -218,7 +218,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `safety.review.enabled` | `false` | immediately |
 | `safety.review.target` | unset | immediately |
 | `safety.review.cadenceToolCalls` | unset | immediately |
-| `safety.sandbox` | `auto` | next dispatch; `auto` runs native worker bash, run_script and verify under bubblewrap (Linux) when available, `required` refuses those commands without a sandbox, `off` never sandboxes |
+| `safety.sandbox` | `auto` | next dispatch; `auto` runs native worker bash, run_script and verify under bubblewrap on Linux when available, or under a `sandbox-exec` seatbelt profile on macOS, whose profile is unverified, `required` refuses those commands without a sandbox, `off` never sandboxes |
 | `safety.sandboxNetwork` | `false` | next dispatch; `true` gives sandboxed worker commands network access, which workers holding `web_fetch` already get |
 
 ### Interface

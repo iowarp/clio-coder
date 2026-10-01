@@ -96,7 +96,7 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder dev share inspect <path> [--json]` | Inspect a share archive without importing it. Each share command refuses, with exit 2, a flag it does not use. |
 | `clio-coder export --out <path> ...` / `clio-coder import <path> ...` | Top-level aliases for `dev share export` and `dev share import`. Each `dev` command also resolves without the `dev` prefix. |
 | `clio-coder context` | Show project context status, preload class, codemap freshness, and the codemap digest when present. |
-| `clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose\|--apply\|--rewrite] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO-CODER.md`, `.clio-coder/codemap.json`, and `.clio-coder/state.json`. |
+| `clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose\|--apply\|--rewrite] [--depth quick\|standard\|deep] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO-CODER.md`, `.clio-coder/codemap.json`, and `.clio-coder/state.json`. `--depth` bounds the model's exploration: `quick` allows 8 tool calls and 2 minutes, `standard` (the default) 16 and 4, `deep` 32 and 8. Any other value exits 2. |
 | `clio-coder context refresh [--wiki]` | Rebuild the codemap and state without touching `CLIO-CODER.md`; with `--wiki`, update an existing Markdown wiki. |
 | `clio-coder context wiki [--update\|--retry-pending] [--status] [--depth auto\|simple\|medium\|detailed] [--target <id>] [--model <id>] [--thinking off\|low\|medium\|high]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio-coder/wiki/`. |
 | `clio-coder context reset [--all] [--yes]` | Clear accumulated project context artifacts; `--all` also removes `CLIO-CODER.md`. `--yes` (or `-y`) answers every confirmation and is required when stdin is not a terminal. |
@@ -145,6 +145,18 @@ Closing the setup view cancels its active wizard; abandoned setup expires after
 retrying. Setup replies are temporary and are not conversation or operation
 history. Stored keys use Clio's credential file, with mode 0600; they are not
 encrypted at rest.
+
+The application is an attended surface. It tells Clio at connection that a person is
+present, so the model can interview you: an `ask_user` round and the task-worktree
+merge card open as an interview panel in the conversation, and cancelling the panel
+supplies no answers, as in the terminal. A dispatched worker's permission ask appears on the
+approval card, which names the worker, says whether only you or the main agent may
+decide it, and says what happens if you do not answer. The card also lists what a bash
+command would do, one sentence per step, and a dispatch scope notice shows as a
+**Dispatch scope** row in the transcript. A worker ask that arrives while the model is
+between tool calls waits for the next call to open and is left to the worker's timeout
+fallback if none does. A client that does not advertise these capabilities gets none of
+this ([ACP architecture](../architecture/acp.md#attended-clients)).
 
 Once connected, select a project and start or resume a conversation. Selecting
 another area during a conversation opens its controls in the sidebar and
@@ -300,6 +312,7 @@ When `--json` or `--json-events <mode>` (`full` | `terminal`) is passed, `clio-c
 - **Wire Projection Promise:** Each piece of turn content crosses the wire exactly once.
 - Intermediate `message_update` events are dropped to prevent quadratic snapshot duplication over stdout.
 - `text_delta` and `thinking_delta` events stream incremental text deltas rather than accumulating message snapshots.
+- A `dispatch_scope_notice` event, `{type, code, level, message}`, reports a dispatch scope entry that did something its request did not say, such as a write root of `.` that sets no boundary. Text mode writes the same message to stderr. It is absent from `--json-events terminal`.
 - `agent_end` events carry segment summary metrics (`messageCount` and a `usage` object containing `input`, `output`, `cacheRead`, `cacheWrite`, `reasoning`, `totalTokens`, `costUsd`, `apiCalls`, and `measured`) instead of duplicating the full message transcript.
 - In `full` mode, `turn_end` preserves the final assistant message while dropping `toolResults` array objects, each of which already crossed the wire in an preceding `tool_execution_end` event. In `terminal` mode, `turn_end` is synthesized and carries timing, the exit code and any error, not the answer.
 - `tool_execution_start`, `tool_execution_update` and `tool_execution_end` name the capability that ran. A `gateway` op=call carries the capability as `toolName`, the capability's own arguments as `args`, and `via: "gateway"`, so a consumer of direct calls reads it unchanged. A `gateway` chain keeps its own frames, and its `tool_execution_end` is followed by a `tool_execution_start` and `tool_execution_end` pair per settled step, each with `toolCallId` `<parent>:<step id>`, `parentToolCallId`, the step's capability, arguments, result and `isError`, and `via: "gateway"`. A step whose `$from` binding failed never ran: its start frame carries the step's requested arguments with references unresolved, and its end frame adds `bindingError`. Assistant `toolCall` blocks and `toolResult` messages keep the wire name `gateway`.
@@ -358,7 +371,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/usage` | `/usage` | Show workspace activity, subscription quota, credits, and session token and cost totals |
 | `/doctor` | `/doctor [deep]` | Show a diagnostic report with errors and warnings first and full wrapped check details; `deep` adds live tool probes on the session's targets and a validation-contract dry run at the session's autonomy. See [Doctor](doctor.md). |
 | `/upgrade` | `/upgrade` | Recheck the latest release, review an eligible npm-global replacement, and ask before changing the package. User data is preserved; after success Clio asks you to exit and restart. Other installation kinds receive manager-specific instructions. |
-| `/context` | `/context compact [instructions] \| /context recall <ref> \| /context recover <handoffId> <reduce\|deliver> \| /context init [--preview] [--heuristic] [--adopt] [--global] [--propose\|--apply\|--rewrite] \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, recover a paused handoff, init, refresh, and reset. `/context reset` also takes `--yes` and `--all` for hosts without a chooser |
+| `/context` | `/context compact [instructions] \| /context recall <ref> \| /context recover <handoffId> <reduce\|deliver> \| /context init [--preview] [--heuristic] [--adopt] [--global] [--propose\|--apply\|--rewrite] [--depth quick\|standard\|deep] \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, recover a paused handoff, init, refresh, and reset. `/context reset` also takes `--yes` and `--all` for hosts without a chooser |
 | `/fleet` | `/fleet [run [--var <key=value>] <name>]` | Open Fleet Runs, or run a fleet contract with an approval preview. Configure fleets with `/settings fleet`. |
 | `/decisions` | `/decisions` | Show settled interview decisions and operator revisions |
 | `/tasks` | `/tasks add [--expect <path>] [--verify <checkId>[:timeoutMs]] <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
