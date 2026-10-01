@@ -1,6 +1,6 @@
 {
 	"name": "@iowarp/clio-coder",
-	"version": "0.5.9",
+	"version": "0.6.0-dev",
 	"description": "An open-source terminal coding agent for scientific software: your models, bounded workers, and inspectable evidence.",
 	"keywords": [
 		"ai",

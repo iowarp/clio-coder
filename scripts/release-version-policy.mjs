@@ -1,3 +1,6 @@
+/** `0.6.0-dev` and `0.6.0-dev.N` are checkout versions with no published artifact. Mirrors src/core/build-info.ts. */
+const DEV_VERSION = /^\d+\.\d+\.\d+-dev(?:[.+]|$)/;
+
 /**
  * Validate the relationship between package.json and the first release section
  * in CHANGELOG.md. Development trees may open with `## Unreleased`; immutable
@@ -10,6 +13,9 @@ export function releaseVersionErrors({ version, changelog, releaseContext }) {
 	const errors = [];
 	if (typeof version !== "string" || version.length === 0) {
 		return ["package.json has no version"];
+	}
+	if (releaseContext && DEV_VERSION.test(version)) {
+		return [`package.json version ${version} is a development version; set the release version before publishing`];
 	}
 	if (typeof changelog !== "string") {
 		return ["CHANGELOG.md is not text"];
@@ -62,6 +68,8 @@ export function readmeInstallVersion({ version, changelog }) {
  * @returns {string[]}
  */
 export function publishTagErrors({ version, tag }) {
+	if (typeof version === "string" && DEV_VERSION.test(version))
+		return [`package.json version ${version} is a development version and is never published, under any dist-tag`];
 	if (typeof version !== "string" || !/^\d+\.\d+\.\d+-/.test(version) || tag === "beta") return [];
 	const seen = typeof tag === "string" && tag.length > 0 ? `'${tag}'` : "unset";
 	return [
