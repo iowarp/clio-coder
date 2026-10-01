@@ -73,6 +73,13 @@ describe("dispatch failure classification", () => {
 		strictEqual(workerNoWorkDetail({ ...input, finalText: "Already implemented; no changes needed." }), null);
 	});
 
+	it("does not retry no-work outcomes or charge the provider breaker", () => {
+		const failure = classifyFailure(evidence, null, "failed", "worker_no_work");
+		strictEqual(failure, "deterministic-task");
+		strictEqual(decideRetry(failure, 0, 2).retry, false);
+		strictEqual(affectsTargetBreaker(failure), false);
+	});
+
 	it("does not retry ACP model admission or peer HTTP 400/404 or charge the peer breaker", () => {
 		for (const tail of [
 			"ACP delegation failed: ACP peer does not offer requested model 'gpt-6-unknown'",

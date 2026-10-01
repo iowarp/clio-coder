@@ -7293,6 +7293,7 @@ export function createDispatchBundle(
 					});
 					if (noWork !== null) {
 						finalOutcome = "failed";
+						outcomeCode = "worker_no_work";
 						finalDetail = noWork;
 						failureMessage = noWork;
 					}
