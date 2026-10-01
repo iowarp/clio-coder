@@ -190,14 +190,25 @@ export function createReadOnlyExplorationNudgeRegistration(): {
 const WORKER_NOUN = "(?:scouts?|shadow (?:agent|worker)s?|sub-?agents?|workers?)";
 const RESULT_VERB =
 	"(?:found|reported|returned|investigated|explored|concluded|confirmed|discovered|surfaced|completed|is complete|came back)";
+// Prose that explains how dispatch works ("when the worker has completed, the
+// coordinator reads the receipt") shares nouns and verbs with a fabricated
+// result. A claim is a definite, specific worker plus a result verb with no
+// conditional or modal word between them.
+const DEFINITE = "(?<!\\b(?:if|when|whenever|once|until|unless|whether)\\s)(?:the|this|that|our|my|each|both)";
+const NOT_HYPOTHETICAL =
+	"(?:(?!\\b(?:if|when|whenever|once|until|unless|whether|can|could|may|might|will|would|should|must|shall)\\b)[^.\\n])";
 
 const WORKER_CLAIM_PATTERNS: ReadonlyArray<RegExp> = [
-	// "the scout found ...", "the scout investigation is complete", "workers came back ..."
-	new RegExp(`\\b${WORKER_NOUN}\\b[^.\\n]{0,40}?\\b${RESULT_VERB}\\b`, "i"),
+	// "the scout found ...", "the scout investigation is complete", "both workers came back ..."
+	new RegExp(
+		`\\b${DEFINITE}\\s+(?:[\\w-]+\\s+){0,2}?${WORKER_NOUN}\\b${NOT_HYPOTHETICAL}{0,40}?\\b${RESULT_VERB}\\b`,
+		"i",
+	),
 	// "... reported by the scout"
-	new RegExp(`\\b${RESULT_VERB}\\b[^.\\n]{0,24}\\bby\\s+(?:the\\s+|a\\s+|our\\s+)?${WORKER_NOUN}\\b`, "i"),
-	// A titled worker deliverable: "Scout Shadow Report", "Worker findings".
-	/\b(?:scout|shadow|worker)\b[^\n]{0,20}\b(?:report|findings|summary)\b/i,
+	new RegExp(`\\b${RESULT_VERB}\\b${NOT_HYPOTHETICAL}{0,24}\\bby\\s+${DEFINITE}\\s+${WORKER_NOUN}\\b`, "i"),
+	// A titled worker deliverable, only as a heading or bold title: "## Scout Shadow Report",
+	// "**Worker findings**". A mid-sentence "worker summary" is architecture prose.
+	/^[ \t]*(?:#{1,6}[ \t]+|\*\*|__)(?:the\s+)?(?:scout|shadow|worker)\b[^\n]{0,20}\b(?:report|findings|summary)\b/im,
 ];
 
 export function claimsWorkerResults(text: string | undefined): boolean {
