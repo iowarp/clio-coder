@@ -2255,6 +2255,26 @@ describe("tool classes", () => {
 		);
 	});
 
+	it("summarizes dispatch intent and omits an empty intent", () => {
+		const call = {
+			toolCallId: "d",
+			toolName: "dispatch",
+			args: { agent: "scout", task: "map", intent: { read_roots: [], write_roots: [], expected_outputs: [] } },
+		};
+		const empty = rows(call, "standard", 100).join("\n");
+		doesNotMatch(empty, /intent|read_roots/u);
+		const summary = rows(
+			{
+				...call,
+				args: { ...call.args, intent: { write_roots: ["a", "b", "c", "d"], verification: [{ check: "test" }] } },
+			},
+			"standard",
+			100,
+		).join("\n");
+		match(summary, /intent › write: a, b, c \(\+1\); checks: test/u);
+		doesNotMatch(summary, /write_roots|"check"/u);
+	});
+
 	it("repeats under a row only the argument the row had to cut", () => {
 		const task = "List every call site of retry() and the options each one passes to it.";
 		const body = rows({ toolCallId: "d", toolName: "dispatch", args: { agent: "scout", task } }, "standard", 80);

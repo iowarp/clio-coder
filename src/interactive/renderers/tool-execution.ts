@@ -1214,6 +1214,29 @@ function isScalarList(value: unknown): value is Array<string | number | boolean>
 }
 
 /** Full redacted arguments are retained for inspection; transcript callers budget rows. */
+function dispatchIntentSummary(intent: Record<string, unknown>): string | null {
+	const parts: string[] = [];
+	for (const [key, label] of [
+		["read_roots", "read"],
+		["write_roots", "write"],
+		["relevant_paths", "context"],
+		["expected_outputs", "outputs"],
+		["verification", "checks"],
+	] as const) {
+		const values = intent[key];
+		if (!Array.isArray(values) || values.length === 0) continue;
+		const names = values
+			.slice(0, 3)
+			.map((value) =>
+				typeof value === "string" ? value : isPlainObject(value) && typeof value.check === "string" ? value.check : "check",
+			);
+		parts.push(`${label}: ${names.join(", ")}${values.length > 3 ? ` (+${values.length - 3})` : ""}`);
+	}
+	if (parts.length === 0) return null;
+	const text = sanitizeCallTargetText(parts.join("; "));
+	return text.length > 240 ? `${text.slice(0, 239)}${GLYPH.ellipsis}` : text;
+}
+
 export function renderToolArguments(
 	args: unknown,
 	width: number,
@@ -1226,7 +1249,10 @@ export function renderToolArguments(
 	const safeArgs = redactToolArgs(args);
 	const out: string[] = [];
 	const entries = isPlainObject(safeArgs) ? Object.entries(safeArgs) : [["input", safeArgs] as const];
-	for (const [key, value] of entries) {
+	for (const [key, rawValue] of entries) {
+		const value =
+			joinScalarLists && key === "intent" && isPlainObject(rawValue) ? dispatchIntentSummary(rawValue) : rawValue;
+		if (value === null) continue;
 		// In the transcript a list of short scalars reads as one row (`paths ›
 		// a.ts · b.ts`), not as the multi-row JSON array it would pretty-print
 		// to. Inspection and approval keep the exact JSON.
