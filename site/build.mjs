@@ -414,19 +414,7 @@ for (const path of [
 ])
 	await cp(join(root, path), join(out, path));
 for (const name of [
-	"gui-overview.webp",
-	"gui-overview.png",
-	"gui-conversation.webp",
-	"gui-conversation.png",
-	"gui-overview-light.webp",
-	"gui-overview-light.png",
-	"gui-conversation-light.webp",
-	"gui-conversation-light.png",
-	"gui-artifacts.webp",
-	"gui-artifacts.png",
 	"temperature-calibration.zip",
-	"tui-boot.webp",
-	"tui-boot.png",
 	"social-card.png",
 	"social-card-light.png",
 	"social-square.png",

@@ -75,11 +75,6 @@ A worktree is an organizational boundary. It does not confine a peer's filesyste
 A useful result may be a diagnosis, a patch, or a failed attempt that reveals a missing dependency. Look for the files it touched, the checks it ran, and the limits of its report. A claimed test result and an observed check are different evidence.
 :::
 
-::: capture tui-run-workers
-:::
-
-The worker above ran on a small model, made no tool calls, and still reported a passing suite. Its receipt keeps the difference: the verdict repeats the claim, and the quality line says no validation was observed.
-
 When comparing agents, give them the same task and evaluate the actual output. Record the model, connector, setup, check results, and any costs you can substantiate. Clio coordinating two peers does not make either one better.
 
 ::: limits

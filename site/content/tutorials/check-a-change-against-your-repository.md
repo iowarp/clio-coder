@@ -15,14 +15,19 @@ Recorded verification is evidence about named checks and named inputs. It is not
 The verifier derives checks from supported build systems, project scripts, and CI definitions. When it cannot resolve a requested check, it should not substitute an arbitrary command and call it a pass.
 
 ::: prompt
-Discover this project's verification checks. Run the relevant test check through verify. Report its exit status, failures, and anything you could not check.
+Run this project's test check through verify. Report its exit status, failures, and anything you could not check.
 :::
 
-::: capture tui-verify-result tui-view-checks
-A turn that listed the declared checks and ran one, and the recorded listing it read.
+::: capture tui-verify-result
+The same request in the temperature-calibration example, with the check's working directory named.
 :::
 
 Read the resolved command and working directory before approving execution. `verify` is subject to command admission: naming a check does not grant permission to run it, and a denied command is not a validation result.
+
+When a command needs your approval, the terminal card names the tool, the exact command, and, for commands it recognizes, an **Effect** line in plain words.
+
+::: capture tui-approval-effect
+:::
 
 The [tools guide](/docs/guide/tool-usage.html) covers discovery and execution. The [temperature-calibration example](/tutorials/temperature-calibration.html) follows a small numerical correction with recorded test results.
 
@@ -75,14 +80,11 @@ Required checks run through `verify` without argument or working-directory overr
 
 On the desktop alpha, open **Artifacts**, then **Results**, beside the conversation; **Files** shows paths and changes recorded by tools. In the terminal, `/view` opens artifacts and receipts.
 
-::: capture gui-results-verify
+::: capture tui-view-result
 :::
 
 ::: result What to look for
 The actual check, its result, and any missing evidence. A receipt is an inspectable record of the run; it is not a certificate that every scientific or operational requirement was met. Receipts sealed by 0.5 releases still verify; one sealed under an older integrity format is reported as retired and is not read as evidence.
-:::
-
-::: capture gui-trace
 :::
 
 ::: limits

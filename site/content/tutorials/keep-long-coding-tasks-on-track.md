@@ -24,8 +24,8 @@ The codemap locates structural information without reading every file into the c
 
 In the terminal, `/context` shows usage, output reservation, remaining headroom, and any pending handoff. On the desktop alpha, open **Session panel**, then **Context** under **Session**. Branches and handoffs are under **Tools**.
 
-::: capture tui-context gui-session-context gui-session-branches
-The same conversation's context in the terminal and the desktop alpha, and its branches.
+::: capture tui-context tui-tree
+The terminal's context window, and a forked conversation in /tree.
 :::
 
 Watch what you are accumulating. A large test log, an old exploration branch, and a current design decision should not carry the same weight. Ask the agent to cite the file or tool result behind an important conclusion instead of a remembered paraphrase.

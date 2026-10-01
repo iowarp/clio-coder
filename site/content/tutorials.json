@@ -6,10 +6,6 @@
     "category": "Getting started",
     "time": "5 min",
     "author": "The Clio team",
-    "image": "/assets/tui-boot.webp",
-    "width": 1920,
-    "height": 708,
-    "alt": "Clio Coder terminal ready for a first request, with model details and keyboard shortcuts",
     "source": "first-session.md",
     "cover": "tui-boot",
     "basis": "Documented workflow"
@@ -21,13 +17,9 @@
     "category": "Product tour",
     "time": "4 min",
     "author": "The Clio team",
-    "image": "/assets/gui-overview.webp",
-    "width": 1600,
-    "height": 1000,
-    "alt": "Clio Coder desktop overview with project selection and recent conversations",
     "source": "desktop-and-terminal.md",
-    "cover": "gui-overview",
-    "basis": "Product tour with release captures"
+    "cover": "tui-verify",
+    "basis": "Product tour with 0.6.0 development captures"
   },
   {
     "slug": "temperature-calibration",
@@ -36,12 +28,8 @@
     "category": "Scientific software",
     "time": "6 min",
     "author": "The Clio team",
-    "image": "/assets/gui-artifacts.webp",
-    "width": 1600,
-    "height": 1000,
-    "alt": "Clio Coder showing seven passing temperature-calibration tests beside recorded verification results",
     "source": "temperature-calibration.md",
-    "cover": "gui-artifacts",
+    "cover": "tui-view-result",
     "basis": "Recorded session"
   },
   {
@@ -52,8 +40,8 @@
     "time": "5 min",
     "author": "The Clio team",
     "source": "choose-model-for-your-project.md",
-    "cover": "gui-setup-review",
-    "basis": "Documented workflow with v0.5.7 captures",
+    "cover": "tui-configure-review",
+    "basis": "Documented workflow with 0.6.0 development captures",
     "versionScope": "0.6.0"
   },
   {
@@ -65,7 +53,7 @@
     "author": "The Clio team",
     "source": "coordinate-your-coding-agents.md",
     "cover": "tui-interop",
-    "basis": "Documented workflow with v0.5.7 captures",
+    "basis": "Documented workflow with 0.6.0 development captures",
     "versionScope": "0.6.0"
   },
   {
@@ -76,8 +64,8 @@
     "time": "5 min",
     "author": "The Clio team",
     "source": "keep-long-coding-tasks-on-track.md",
-    "cover": "gui-session-context",
-    "basis": "Documented workflow with v0.5.7 captures",
+    "cover": "tui-context",
+    "basis": "Documented workflow with 0.6.0 development captures",
     "versionScope": "0.6.0"
   },
   {
@@ -88,8 +76,8 @@
     "time": "5 min",
     "author": "The Clio team",
     "source": "check-a-change-against-your-repository.md",
-    "cover": "gui-results-verify",
-    "basis": "Documented workflow with v0.5.7 captures",
+    "cover": "tui-verify-result",
+    "basis": "Documented workflow with 0.6.0 development captures",
     "versionScope": "0.6.0"
   },
   {
@@ -101,7 +89,7 @@
     "author": "The Clio team",
     "source": "add-skills-and-plugins-deliberately.md",
     "cover": "tui-library-installed",
-    "basis": "Documented workflow with v0.5.7 captures",
+    "basis": "Documented workflow with 0.6.0 development captures",
     "versionScope": "0.6.0"
   },
   {
@@ -112,8 +100,8 @@
     "time": "5 min",
     "author": "The Clio team",
     "source": "work-from-a-laptop-with-remote-workers.md",
-    "cover": "gui-settings-fleet",
-    "basis": "Documented workflow with v0.5.7 captures",
+    "cover": "tui-settings-fleet",
+    "basis": "Documented workflow with 0.6.0 development captures",
     "versionScope": "0.6.0"
   }
 ]

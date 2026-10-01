@@ -26,7 +26,7 @@ This matters when a project needs a particular compiler, filesystem, or dataset.
 
 Fleet nodes live under `fleet.nodes` in user settings. The local node already exists and is not declared there. **Settings**, **Fleet** chooses the default worker node for work that does not name one.
 
-::: capture gui-settings-fleet
+::: capture tui-settings-fleet
 :::
 
 ```yaml title=settings.yaml

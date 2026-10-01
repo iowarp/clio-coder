@@ -76,8 +76,8 @@ Read the tool activity and compare the answer with the project. If it fails, che
 
 The model answering you need not handle every delegated task. In the desktop and in `clio-coder configure --settings`, Settings separates **Chat** from **Fleet**: select a connection and model for conversation, then use worker defaults or profiles for delegated work. The terminal `/settings` lists the conversation model under **Models & Inference** and worker defaults under **Fleet**.
 
-::: capture gui-settings-chat gui-settings-fleet
-Settings keep the conversation model and the worker model apart.
+::: capture tui-settings-models tui-settings-fleet
+Terminal settings keep the conversation model and the worker defaults apart.
 :::
 
 This helps when exploring a repository and changing code have different requirements, or when you want to keep a workflow while evaluating another model. The benefit depends on the task and environment; this guide makes no claim that a particular combination is cheaper or faster.

@@ -11,8 +11,7 @@ This guide describes v0.6.0. Library recipes and executable harness extensions h
 
 Open `/library` in the terminal or press Alt+L. On the desktop alpha, the Library page lists the catalog with an **Installed only** filter. In the terminal, **Browse** shows available content and **Installed** manages your copies.
 
-::: capture tui-library-skill-tdd gui-library
-The Library in the terminal and the desktop alpha.
+::: capture tui-library-skill-tdd
 :::
 
 ## Preview a small addition

@@ -539,7 +539,8 @@
 		max-block-size: 100%;
 		object-fit: contain;
 	}
-	.interface-item figcaption {
+	.interface-item figcaption,
+	.interface-text > h3 {
 		padding-block-start: 1.25rem;
 		display: flex;
 		justify-content: space-between;
@@ -555,6 +556,14 @@
 		border-radius: 0.2rem;
 		font: 0.65rem var(--font-mono);
 		white-space: nowrap;
+	}
+	/* The desktop alpha has no capture on the site, so its text sits level with the terminal item's text. */
+	.interface-text {
+		align-self: end;
+	}
+	.interface-text > h3 {
+		margin-block: 0 1rem;
+		font-family: var(--font-ui);
 	}
 	.interface-item > p {
 		color: var(--ink-soft);
@@ -1243,7 +1252,8 @@
 		.interface-item > p {
 			min-block-size: auto;
 		}
-		.interface-item figcaption {
+		.interface-item figcaption,
+		.interface-text > h3 {
 			font-size: 1rem;
 		}
 		.command-line {
@@ -1548,7 +1558,8 @@
 		.footer-bottom > div {
 			justify-content: flex-start;
 		}
-		.interface-item figcaption {
+		.interface-item figcaption,
+		.interface-text > h3 {
 			font-size: 1rem;
 		}
 		.interface-item > p {
