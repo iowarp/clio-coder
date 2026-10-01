@@ -15,6 +15,27 @@ import { renderToolAwaitingApproval } from "../../src/interactive/renderers/tool
 const DEEP_TARGET =
 	"/home/researcher/projects/high-entropy-alloys/sigma-phase-onset/.research/tasks/task-03/task-03-protocol-arc-melting-and-aging.md · content=<string 4173 bytes>";
 
+test("a worker bash target keeps command boundaries without terminal controls", () => {
+	const command = "rm -rf scratch-a\r\nrm -rf scratch-b";
+	const target = describeCallTarget("bash", { command, output_policy: "bounded" });
+	strictEqual(target, "rm -rf scratch-a ⏎ rm -rf scratch-b · output_policy=bounded");
+	const hostile = describeCallTarget("bash", {
+		command: `rm -rf scratch-a\u001b]0;hidden\ntext\u0007\nrm -rf scratch-b`,
+	});
+	strictEqual(hostile, "rm -rf scratch-a ⏎ rm -rf scratch-b");
+	const body = createPermissionOverlayBody({
+		...WRITE_VIEW,
+		tool: "bash",
+		actionClass: "execute",
+		target,
+		origin: { kind: "worker", runId: "worker-1", agentId: "coder" },
+	});
+	match(plain(body.render(76)).join(" "), /scratch-a ⏎ rm -rf scratch-b/u);
+	const bounded = describeCallTarget("bash", { command: `${command}\n`.repeat(30) });
+	strictEqual(bounded.length, CALL_TARGET_MAX_CHARS);
+	ok(bounded.endsWith("…"));
+});
+
 const WRITE_VIEW: ApprovalRequestView = {
 	requestId: "req-1",
 	tool: "write",

@@ -33,10 +33,11 @@ function bidiEscape(code: number): string {
 	return `\\u{${code.toString(16)}}`;
 }
 
-function sanitizeForDisplay(value: string): string {
+function sanitizeForDisplay(value: string, preserveLines = false): string {
 	const stripped = value.replace(OSC_PATTERN, "").replace(CSI_PATTERN, "");
+	const display = preserveLines ? stripped.replace(/\r\n|\n/g, " ⏎ ") : stripped;
 	let out = "";
-	for (const ch of stripped) {
+	for (const ch of display) {
 		const code = ch.codePointAt(0) ?? 0;
 		if (isBidiControl(code)) out += bidiEscape(code);
 		else out += code < 0x20 || code === 0x7f ? " " : ch;
@@ -281,7 +282,7 @@ export function describeCallAction(
 
 function renderAllowedTargetValue(value: unknown): string | null {
 	if (typeof value === "string") {
-		const rendered = sanitizeCallTargetText(redactSecretString(value));
+		const rendered = oneLine(sanitizeForDisplay(redactSecretString(value), true));
 		return rendered.length > 0 ? rendered : null;
 	}
 	if (typeof value === "number" && Number.isFinite(value)) return String(value);
