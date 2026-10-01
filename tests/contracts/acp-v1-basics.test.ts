@@ -245,6 +245,23 @@ test("ACP interview channel maps the client's reply, its cancel and a turn abort
 	reply = { answers: "not a list" };
 	deepStrictEqual(await channel.ask([question]), { answers: [], cancelled: true });
 
+	for (const malformed of [
+		{ answers: [{ question: "Another question", answer: "Merge", options: ["Merge"] }] },
+		{ answers: [{ question: "Merge?", answer: "Merge", options: ["Merge", "Keep branch"] }] },
+		{ answers: [{ question: "Merge?", answer: "Merge", options: ["Unoffered"] }] },
+		{ answers: [{ question: "Merge?", answer: "Merge", options: "Merge" }] },
+		{ answers: [{ question: "Merge?", answer: "Keep branch", options: ["Merge"] }] },
+		{ answers: [{ question: "Merge?", answer: "Merge; Merge", options: ["Merge", "Merge"] }] },
+		{ answers: [] },
+	]) {
+		reply = malformed;
+		deepStrictEqual(await channel.ask([question]), { answers: [], cancelled: true });
+	}
+	reply = { answers: [{ question: "Clean?", answer: "Keep", options: ["Keep"] }] };
+	deepStrictEqual(await channel.ask([{ question: "\u001b[31mClean?", options: [{ label: "\u001b[31mKeep" }] }]), {
+		answers: [{ question: "\u001b[31mClean?", answer: "Keep", options: ["\u001b[31mKeep"] }],
+	});
+
 	const controller = new AbortController();
 	reply = () => new Promise(() => {});
 	const aborted = channel.ask([question], { signal: controller.signal });

@@ -201,22 +201,55 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** The client's reply, or null when it does not carry the AskUserResult shape. */
-function readResult(value: unknown, asked: number): AskUserResult | null {
+function readResult(value: unknown, wire: WireQuestion[], original: AskUserQuestion[]): AskUserResult | null {
 	if (!isRecord(value)) return null;
 	if (value.cancelled === true) return cancelled();
-	if (!Array.isArray(value.answers) || value.answers.length > asked) return null;
+	if (value.cancelled !== undefined && value.cancelled !== false) return null;
+	if (!Array.isArray(value.answers) || value.answers.length !== wire.length) return null;
 	const answers: AskUserResult["answers"] = [];
-	for (const raw of value.answers) {
-		if (!isRecord(raw) || typeof raw.question !== "string" || typeof raw.answer !== "string") return null;
-		const options =
-			Array.isArray(raw.options) && raw.options.every((label) => typeof label === "string")
-				? (raw.options as string[]).slice(0, MAX_OPTIONS)
-				: undefined;
+	for (const [index, raw] of value.answers.entries()) {
+		const question = wire[index];
+		const source = original[index];
+		if (
+			question === undefined ||
+			source === undefined ||
+			!isRecord(raw) ||
+			raw.question !== question.question ||
+			typeof raw.answer !== "string" ||
+			raw.answer.trim().length === 0 ||
+			raw.answer.length > MAX_ANSWER_CHARS ||
+			(raw.value !== undefined && (typeof raw.value !== "string" || raw.value.length > MAX_ANSWER_CHARS))
+		)
+			return null;
+		const offered = question.options ?? [];
+		if (new Set(offered.map((option) => option.label)).size !== offered.length) return null;
+		const canonical = (source.options ?? [])
+			.filter((option) => sanitizeCallTargetText(option.label).length > 0)
+			.slice(0, MAX_OPTIONS);
+		let selected: string[] | undefined;
+		if (raw.options !== undefined) {
+			if (
+				!Array.isArray(raw.options) ||
+				raw.options.some((label) => typeof label !== "string") ||
+				new Set(raw.options).size !== raw.options.length ||
+				(question.multi_select !== true && raw.options.length > 1)
+			)
+				return null;
+			const text = typeof raw.value === "string" ? raw.value.trim() : "";
+			if (raw.options.length > 0 && raw.answer !== [...raw.options, ...(text ? [text] : [])].join("; ")) return null;
+			selected = [];
+			for (const label of raw.options) {
+				const position = offered.findIndex((option) => option.label === label);
+				const option = canonical[position];
+				if (position < 0 || option === undefined) return null;
+				selected.push(option.label);
+			}
+		}
 		answers.push({
-			question: cut(raw.question, MAX_QUESTION_CHARS),
-			answer: cut(raw.answer, MAX_ANSWER_CHARS),
-			...(options !== undefined && options.length > 0 ? { options } : {}),
-			...(typeof raw.value === "string" ? { value: cut(raw.value, MAX_ANSWER_CHARS) } : {}),
+			question: source.question,
+			answer: raw.answer,
+			...(selected !== undefined && selected.length > 0 ? { options: selected } : {}),
+			...(typeof raw.value === "string" ? { value: raw.value } : {}),
 		});
 	}
 	return { answers };
@@ -263,7 +296,7 @@ export function createAcpInterviewChannel(): AcpInterviewChannel {
 				);
 				return cancelled();
 			}
-			const result = readResult(outcome.value, wire.length);
+			const result = readResult(outcome.value, wire, questions.slice(0, MAX_QUESTIONS));
 			if (result === null) {
 				bound.diagnostics?.("interview reply did not match the answer contract");
 				return cancelled();
