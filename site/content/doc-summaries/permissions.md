@@ -10,7 +10,9 @@ A useful sequence is **inspect → change → verify → review**. Inspect the a
 
 **default** is the supervised mode for workspace edits and approved execution. **yolo** allows work without ordinary confirmation prompts; hard blocks and damage-control questions still apply. Set autonomy in **Permissions & Limits**.
 
-Read each requested command and its working directory before approving it. A shell approval card also shows an **Effect** line that says in plain words what the command would do. It is a reading aid; admission does not depend on it. Asking for a plan or saying “do not edit” guides the task; it does not establish a technical read-only boundary. Use the explicit tool restrictions or read-only dispatch options when you need that boundary.
+Read each requested command and its working directory before approving it. In the terminal, a shell approval card also shows an **Effect** line that says in plain words what the command would do. It is a reading aid; admission does not depend on it.
+
+Asking for a plan or saying “do not edit” guides the task; it does not establish a technical read-only boundary. Use the explicit tool restrictions or read-only dispatch options when you need that boundary.
 
 ## Verify using your project's checks
 

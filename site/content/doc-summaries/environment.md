@@ -26,4 +26,4 @@ Supported providers can read their conventional credential variables, such as `O
 
 `VISUAL` and `EDITOR` select an external editor, with `VISUAL` taking precedence. Terminal variables such as `TERM` and `COLORTERM` describe the environment; they do not grant tool permissions.
 
-The full guide lists provider-specific inputs, behavior overrides, and diagnostic switches. Use it when preparing automation or collecting a trace; most visitors need no environment changes to start Clio.
+The full guide lists provider-specific inputs, behavior overrides, and diagnostic switches. Use it when preparing automation or collecting a trace; most installations need no environment variables.

@@ -13,7 +13,7 @@ It checks the installation, configured connections, model-list evidence, local w
 | Badge | Meaning |
 | --- | --- |
 | OK | The check passed |
-| INFO | A fact that usually needs no action, such as an optional tool being absent |
+| INFO | A fact that usually needs no action, such as an HPC compiler that is not on `PATH` |
 | WARN | Worth attention; Clio can still work |
 | !! | A broken requirement; doctor exits with an error |
 
@@ -21,7 +21,7 @@ A live model list, a cached list, and a provider catalog are distinct evidence. 
 
 ## Repair or investigate further
 
-`clio-coder doctor --fix` repairs missing directories and credential permissions, rewrites retired setting values such as `safety.autonomy: auto-edit` and YAML `on` and `off` booleans while keeping your comments, and records fleet preflight results. Plain `doctor` previews the settings rewrite. Version migrations still run through `clio-coder upgrade`.
+`clio-coder doctor --fix` creates missing directories and template files, makes `settings.yaml` and `credentials.yaml` owner-only, rewrites retired setting values such as `safety.autonomy: auto-edit` and YAML `on` and `off` booleans while keeping your comments, and records fleet preflight results. Plain `doctor` previews the settings rewrite. Version migrations still run through `clio-coder upgrade`.
 
 For a live tool-use probe and validation-contract dry run:
 

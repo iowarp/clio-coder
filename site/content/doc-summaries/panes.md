@@ -29,7 +29,7 @@ Check `clio-coder doctor` if the host or files engine is unavailable.
 
 ## Use the files pane
 
-`/files` or **Alt+E** opens the file browser and gives it keyboard focus. Pick a file to insert an `@file` mention into Clio's composer. **Ctrl+Y** returns focus to Clio; `/files` or Alt+E then closes the pane.
+`/files` or **Alt+E** opens the file browser and gives it keyboard focus. Select a file and press **Ctrl+Y** to insert it as an `@file` mention and return focus to Clio; `/files` or Alt+E then closes the pane.
 
 | Command | Companion pane |
 | --- | --- |
