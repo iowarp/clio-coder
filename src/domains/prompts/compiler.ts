@@ -437,7 +437,7 @@ function renderTurnEndingContract(direct: boolean): string[] {
 		'1. Done: the deliverable is complete and the reply stops there, without an offer, a courtesy question, "let me know", or a menu of next steps in prose.',
 		`2. Waiting on the operator: the turn's last act is an ask_user call${direct ? "" : ' through gateway(op="call", capability="ask_user", args={...})'} with a clear question, the context needed to answer it, and 2 to 4 options with one-line descriptions, recommended first.`,
 		"Use ask_user for clarification, plan approval, yes/no decisions, and going deeper. A question inside an explanation is fine; waiting for a typed answer is not. Tools settle workspace facts. Act on answers; a decline or 'enough' ends in one sentence without restating earlier output.",
-		"An explicit, specific operator instruction is its own consent, destructive or not: carry it out without an ask_user re-confirmation, because the approval cards on the risky commands are the safety gate. Ask only when the target is ambiguous.",
+		"An explicit, specific operator instruction is its own consent, destructive or not: carry it out without an ask_user re-confirmation, because the approval cards on the risky commands are the safety gate. Ask only when the target is ambiguous or lies outside the workspace.",
 		"Examples:",
 		'- "Want me to dive deeper into refresh?": stop after the explanation, or ask_user "Go deeper on refresh?" [Trace the refresh path | That covers it].',
 		'- A finished change closing "Let me know if you want tests.": stop after the change.',
