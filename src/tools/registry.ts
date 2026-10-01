@@ -22,6 +22,13 @@ import { type AutonomyExposure, type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } fro
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
+import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
+import {
+	EMPTY_INFORMATION_FLOW_POLICY,
+	evaluateInformationFlow,
+	mergeFlowRestrictions,
+	resolveToolDestination,
+} from "../domains/safety/information-flow.js";
 import { SYSTEM_ONE_GATE_RULE_ID } from "../domains/safety/decision-presentation.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
@@ -294,7 +301,19 @@ export interface RegistryDeps {
 		content: string,
 		ref: string | undefined,
 		signal: AbortSignal | undefined,
+		restrictions: FlowRestrictionSet | null,
 	) => Promise<string | null>;
+	/**
+	 * The session's information-flow ledger. `carried` is what the context
+	 * already holds, judged before a mediated outbound call (web_fetch,
+	 * web_read, an MCP tool) runs; `absorb` records what a restricted read
+	 * just added, before its result is screened or returned. Absent means an
+	 * unrestricted session (a worker passes its own run-scoped ledger).
+	 */
+	flow?: {
+		carried(): FlowRestrictionSet | null;
+		absorb(set: FlowRestrictionSet, origin: { tool?: string; toolCallId?: string }): void;
+	};
 	/**
 	 * Asked when autonomy is yolo and an execute-class call was admitted as
 	 * unrecognized, before it runs. An escalating verdict parks the call for a
@@ -360,6 +379,12 @@ export interface ToolInvokeOptions {
 	writeTargetViolation?: (target: string) => string | null;
 	/** Registry-owned worker Git context; the git tool re-attests a typed mutation with it. */
 	gitContext?: AdmissionGitContext;
+	/**
+	 * Registry-owned information-flow check for every URL a fetch actually
+	 * connects to, redirect hops included. Returns the block reason or null.
+	 * Present only while the session carries restricted content.
+	 */
+	flowAdmitsUrl?: (url: string) => string | null;
 	/** Trusted submitting host identity for nested dispatch; never model arguments. */
 	hostRun?: import("../domains/dispatch/contract.js").DispatchPreparationOptions["hostRun"];
 	/** Trusted resolved model capability; never read from tool arguments. */
@@ -669,6 +694,25 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		return decision.match?.ruleId ?? decision.policy?.ruleId;
 	};
 
+	/**
+	 * Block reason when this call would carry the session's restricted content
+	 * to a destination its source rules do not admit, or null. Judged on the
+	 * requested identity; a fetch's redirect hops are judged again by the
+	 * fetch loop through `flowAdmitsUrl`.
+	 */
+	const outboundFlowViolation = (spec: ToolSpec, call: ClassifierCall): string | null => {
+		const carried = deps.flow?.carried() ?? null;
+		if (carried === null) return null;
+		const destination = resolveToolDestination(spec.name, call.args);
+		if (destination === null) return null;
+		const verdict = evaluateInformationFlow({
+			restrictions: carried,
+			destination,
+			policy: deps.safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
+		});
+		return verdict.kind === "permitted" ? null : verdict.reason;
+	};
+
 	const runSpec = async (
 		spec: ToolSpec,
 		call: ClassifierCall,
@@ -677,6 +721,17 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	): Promise<RegistryVerdict> => {
 		let resultDisposition = spec.metadata?.resultDisposition;
 		try {
+			// Explicit information-flow violations are final at every autonomy
+			// level, including yolo, and are decided before any hook can run the
+			// body. Permitted here grants nothing: admission already ran.
+			const flowViolation = outboundFlowViolation(spec, call);
+			if (flowViolation !== null) {
+				recordRegistryDisposition(call, decision, "blocked", {
+					reasonCode: FLOW_BLOCK_REASON_CODE,
+					reasons: [flowViolation],
+				});
+				return { kind: "blocked", reason: flowViolation, decision };
+			}
 			// The hook layer is the only control stage past safety admission. Guards
 			// (loop, protected artifacts, dispatch dedup) are before_tool
 			// registrations; the first block_tool effect decides the verdict. Keep
@@ -699,15 +754,28 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					allowsObservationPath: _callerPathFilter,
 					writeTargetViolation: _callerWriteCheck,
 					gitContext: _callerGitContext,
+					flowAdmitsUrl: _callerFlowAdmitsUrl,
 					...callerOptions
 				} = options ?? {};
 				const allowsObservationPath = deps.safety.policy?.allowsObservationPath;
 				const writeTargetViolation = deps.safety.policy?.writeTargetViolation;
+				// What this result will carry, decided from the path or tool name
+				// before the body runs, so a link swapped in afterwards cannot
+				// unlabel it and so the label exists before any screening.
+				const sourceRestrictions = deps.safety.policy?.flowRestrictionsFor?.(call) ?? null;
 				const result = await spec.run(preparedArgs, {
 					...callerOptions,
 					...(allowsObservationPath ? { allowsObservationPath } : {}),
 					...(writeTargetViolation ? { writeTargetViolation } : {}),
 					...(deps.principal === "worker" && deps.git !== undefined ? { gitContext: deps.git } : {}),
+					...(deps.flow !== undefined && deps.flow.carried() !== null
+						? {
+								flowAdmitsUrl: (url: string) => {
+									const violation = outboundFlowViolation(spec, { tool: spec.name, args: { url } });
+									return violation;
+								},
+							}
+						: {}),
 				});
 				// A body that delegated to a nested invocation the registry refused
 				// (the gateway calling a denied capability) hands the refusal back
@@ -717,7 +785,17 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const nestedBlocked = nestedBlockedVerdict(result);
 				if (nestedBlocked !== null) return nestedBlocked;
 				decision = nestedDecisions.get(result) ?? decision;
-				const screened = await screenExternalResult(spec, call, result, options);
+				// The restriction enters the ledger before the result goes anywhere:
+				// not to the screening classifier, not to the hooks, not to the model.
+				if (sourceRestrictions !== null && result.kind === "ok") {
+					deps.flow?.absorb(sourceRestrictions, {
+						tool: spec.name,
+						...(options?.toolCallId !== undefined ? { toolCallId: options.toolCallId } : {}),
+					});
+				}
+				const carriedForScreen =
+					result.kind === "ok" ? mergeFlowRestrictions(deps.flow?.carried() ?? null, sourceRestrictions) : null;
+				const screened = await screenExternalResult(spec, call, withFlowRestrictions(result, sourceRestrictions), options, carriedForScreen);
 				const digest = toolResultDigestFor(spec, screened, resultDisposition, options);
 				const afterEffects = runToolHook("after_tool", spec, call, decision, options, screened, digest);
 				const finalResult = shapeToolResult(
@@ -780,6 +858,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		call: ClassifierCall,
 		result: ToolResult,
 		options: ToolInvokeOptions | undefined,
+		restrictions: FlowRestrictionSet | null,
 	): Promise<ToolResult> => {
 		const screen = deps.screenToolResult;
 		if (screen === undefined || result.kind !== "ok" || !screensToolResult(spec.name)) return result;
@@ -790,6 +869,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				result.output,
 				options?.toolCallId,
 				options?.signal,
+				restrictions,
 			);
 			if (banner === null || banner.trim().length === 0) return result;
 			return { ...result, output: `${banner}\n\n${result.output}` };
@@ -1486,6 +1566,15 @@ function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolS
 
 /** Final reason code for a before_tool guard block, matching the audit convention (sd-01 §2.5). */
 const GUARD_BLOCK_REASON_CODE = "guard_block";
+/** Reason code of a final information-flow block, for the audit row and the panel. */
+const FLOW_BLOCK_REASON_CODE = "information-flow";
+/** Result detail that carries a restricted read's label to the host; never model text. */
+export const FLOW_RESTRICTIONS_DETAIL = "clio.flowRestrictions";
+
+function withFlowRestrictions(result: ToolResult, restrictions: FlowRestrictionSet | null): ToolResult {
+	if (restrictions === null || result.kind !== "ok") return result;
+	return { ...result, details: { ...(result.details ?? {}), [FLOW_RESTRICTIONS_DETAIL]: restrictions } };
+}
 
 const NO_PARK_LISTENER_REASON_CODE = "no_park_listener";
 const NO_PARK_LISTENER_REASON =

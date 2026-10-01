@@ -1,6 +1,7 @@
 import { UNTRUSTED_CONTENT_BANNER } from "../core/untrusted-content.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
+import type { WebFetchNetworkDependencies } from "./web-fetch-network.js";
 import { fetchWebUrl } from "./web-fetch-network.js";
 import { webFetchToolSurface, webReadToolSurface } from "./web-fetch-surface.js";
 
@@ -374,9 +375,10 @@ async function fetchArxivPaperSummary(
 	paperId: string,
 	init: Parameters<typeof fetch>[1],
 	maxBytes: number,
+	network: WebFetchNetworkDependencies,
 ): Promise<ToolResult | null> {
 	const metadataUrl = `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(paperId)}`;
-	const response = await fetchWebUrl(metadataUrl, init);
+	const response = await fetchWebUrl(metadataUrl, init, network);
 	if (response.status < 200 || response.status >= 300) return null;
 	const read = await readResponseText(response, Math.min(120_000, maxBytes));
 	const entry = /<entry\b[^>]*>([\s\S]*?)<\/entry>/i.exec(read.text)?.[1];
@@ -386,7 +388,7 @@ async function fetchArxivPaperSummary(
 	let alphaxivRead: ReadResult | null = null;
 	const alphaUrl = `https://alphaxiv.org/overview/${encodeURIComponent(paperId)}.md`;
 	try {
-		const alpha = await fetchWebUrl(alphaUrl, init);
+		const alpha = await fetchWebUrl(alphaUrl, init, network);
 		if (alpha.status >= 200 && alpha.status < 300) {
 			alphaxivRead = await readResponseText(alpha, Math.min(80_000, Math.max(0, maxBytes - read.bytesRead)));
 			if (alphaxivRead.text.trim().length > 0) paper.alphaxivOverview = alphaxivRead.text.trim();
@@ -438,8 +440,9 @@ async function fetchArxivApiSummary(
 	url: URL,
 	init: Parameters<typeof fetch>[1],
 	maxBytes: number,
+	network: WebFetchNetworkDependencies,
 ): Promise<ToolResult | null> {
-	const response = await fetchWebUrl(url, init);
+	const response = await fetchWebUrl(url, init, network);
 	if (response.status < 200 || response.status >= 300) return null;
 	const read = await readResponseText(response, Math.min(240_000, maxBytes));
 	const entries = Array.from(read.text.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi))
@@ -554,8 +557,9 @@ async function fetchRepoTreeSummary(
 	target: RepoTreeTarget,
 	init: Parameters<typeof fetch>[1],
 	maxBytes: number,
+	network: WebFetchNetworkDependencies,
 ): Promise<ToolResult | null> {
-	const apiResponse = await fetchWebUrl(target.apiUrl, init);
+	const apiResponse = await fetchWebUrl(target.apiUrl, init, network);
 	if (apiResponse.status < 200 || apiResponse.status >= 300) return null;
 	const apiRead = await readResponseText(apiResponse, Math.min(200_000, maxBytes));
 	let entries: unknown[];
@@ -583,7 +587,7 @@ async function fetchRepoTreeSummary(
 	for (const file of files) {
 		if (remaining <= 2000) break;
 		const rawUrl = `${target.rawBaseUrl}/${file}`;
-		const rawResponse = await fetchWebUrl(rawUrl, init);
+		const rawResponse = await fetchWebUrl(rawUrl, init, network);
 		if (rawResponse.status < 200 || rawResponse.status >= 300) continue;
 		const rawRead = await readResponseText(rawResponse, Math.min(80_000, remaining));
 		sections.push("", `--- ${file} ---`, rawRead.text.trim());
@@ -688,23 +692,35 @@ export const webFetchTool: ToolSpec = {
 				redirect: "manual",
 			};
 			if (body !== undefined) init.body = body;
+			// Every hop, helper URLs included, is judged by the session's
+			// information-flow restrictions when the registry supplied the check.
+			const network: WebFetchNetworkDependencies = {
+				...(options?.flowAdmitsUrl !== undefined
+					? {
+							admitHop: (hopUrl: URL) => {
+								const admits = options.flowAdmitsUrl;
+								return admits === undefined ? null : admits(hopUrl.toString());
+							},
+						}
+					: {}),
+			};
 			if (method === "GET" && body === undefined && format !== "raw" && Object.keys(userHeaders).length === 0) {
 				if (arxivApiUrl(parsed)) {
-					const arxivApiSummary = await fetchArxivApiSummary(parsed, init, maxBytes);
+					const arxivApiSummary = await fetchArxivApiSummary(parsed, init, maxBytes, network);
 					if (arxivApiSummary) return arxivApiSummary;
 				}
 				const arxivId = arxivIdFromUrl(parsed);
 				if (arxivId) {
-					const arxivSummary = await fetchArxivPaperSummary(arxivId, init, maxBytes);
+					const arxivSummary = await fetchArxivPaperSummary(arxivId, init, maxBytes, network);
 					if (arxivSummary) return arxivSummary;
 				}
 				const repoTarget = repoTreeTarget(parsed);
 				if (repoTarget) {
-					const repoSummary = await fetchRepoTreeSummary(repoTarget, init, maxBytes);
+					const repoSummary = await fetchRepoTreeSummary(repoTarget, init, maxBytes, network);
 					if (repoSummary) return repoSummary;
 				}
 			}
-			const response = await fetchWebUrl(parsed, init);
+			const response = await fetchWebUrl(parsed, init, network);
 			const contentType = headerValue(response, "content-type");
 			const readLimit =
 				response.status >= 200 && response.status < 300 ? maxBytes : Math.min(ERROR_PREVIEW_BYTES, maxBytes);

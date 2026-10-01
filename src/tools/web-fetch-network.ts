@@ -55,6 +55,12 @@ export interface WebFetchNetworkDependencies {
 	resolve?: (hostname: string) => Promise<Address[]>;
 	request?: (url: URL, init: RequestInit, address: Address) => Promise<Response>;
 	allowPrivateNetwork?: boolean;
+	/**
+	 * Information-flow check for every URL this request connects to, the
+	 * requested one and each redirect hop. Returns the block reason or null.
+	 * Checked before DNS so a refused hop sends nothing, not even a lookup.
+	 */
+	admitHop?: (url: URL) => string | null;
 }
 
 /** Pin the checked address in the socket lookup while retaining the URL host
@@ -142,6 +148,8 @@ export async function fetchWebUrl(
 		init.signal?.throwIfAborted();
 		if (!["http:", "https:"].includes(url.protocol) || url.username || url.password)
 			throw new Error("web_fetch: unsupported URL scheme or embedded credentials");
+		const hopViolation = dependencies.admitHop?.(url) ?? null;
+		if (hopViolation !== null) throw new WebFetchNetworkError(hopViolation);
 		const hostname = url.hostname.replace(/^\[|\]$/g, "");
 		const addresses = isIP(hostname)
 			? [{ address: hostname, family: isIP(hostname) }]
