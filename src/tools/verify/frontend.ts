@@ -107,6 +107,13 @@ export async function runFrontendCheck(
 
 	if (!existsSync(artifactPath)) return { kind: "error", message: `verify: file not found: ${artifactPath}` };
 	if (!statSync(artifactPath).isFile()) return { kind: "error", message: `verify: not a file: ${artifactPath}` };
+	// A Markdown or other non-web file is outside this check, not a failed one
+	// (flywheel Q4): no details, so no evidence reader records a failed validation.
+	if (!isFrontendArtifactPath(artifactPath))
+		return {
+			kind: "error",
+			message: `verify: check=frontend does not apply to ${path.basename(artifactPath)}; it validates .html, .htm, .css, .js, .mjs, or .cjs artifacts. No check ran, so do not report this as a failed check.`,
+		};
 
 	const browserMode = browserModeArg(args.browser);
 	const validateOptions: ValidationOptions = {
@@ -657,6 +664,11 @@ function resolveLocalReference(baseFile: string, raw: string): string | null {
 	} catch {
 		return path.resolve(path.dirname(baseFile), withoutQuery);
 	}
+}
+
+function isFrontendArtifactPath(filePath: string): boolean {
+	const ext = path.extname(filePath).toLowerCase();
+	return ext === ".html" || ext === ".htm" || ext === ".css" || isJavaScriptPath(filePath);
 }
 
 function isJavaScriptPath(filePath: string): boolean {
