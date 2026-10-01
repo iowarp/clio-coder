@@ -249,18 +249,57 @@
 			"capturedAt": "2026-10-01",
 			"source": "clio-coder 0.6.0-dev (commit 9ade954) installed with scripts/install.sh from an npm pack of the v060 tree, in an isolated profile (user researcher) under bubblewrap. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane and rendered with xterm.js. bash at 150 columns: clio-coder doctor. Cropped to rows 1-20, before the connection rows, which name a private endpoint."
 		},
-		"gui-artifacts": {
-			"image": "assets/gui-artifacts.webp",
-			"original": "assets/gui-artifacts.png",
-			"width": 1600,
-			"height": 1000,
-			"label": "Desktop results",
-			"alt": "Clio Coder desktop showing a temperature-calibration conversation, seven passing tests, and the Artifacts panel with the recorded verification output.",
-			"caption": "The desktop conversation with calibration results and the recorded verification output in Artifacts.",
-			"interface": "Desktop alpha",
-			"version": "0.5.7",
-			"capturedAt": "2026-09-27",
-			"source": "Existing repository capture assets/screenshots/gui-artifacts.png, added in 17ed2d6e89a42413399197160f94eef615010ff8 (0.5.7, 2026-09-27). Shows the recorded temperature-calibration session. Reused without altering the product UI."
+		"gui-task": {
+			"image": "assets/gui-task.webp",
+			"original": "assets/gui-task.png",
+			"width": 2880,
+			"height": 1920,
+			"label": "Task",
+			"alt": "Clio Coder desktop after a finished task: the conversation lists the approved bash call, Clio's reasoning and three file reads, then the reference temperatures from the test file; the Progress pane on the right shows the task, one turn, and the context meter.",
+			"caption": "A finished task on the desktop: the tool calls that ran, the answer, and the Progress pane beside it.",
+			"interface": "Desktop",
+			"version": "0.6.0-dev",
+			"capturedAt": "2026-10-01",
+			"source": "clio-coder 0.6.0-dev (commit f5f234d on feat/gui-native-clio, with feat/gui-workbench merged) built with pnpm run build from the checkout and started with clio-coder gui --foreground in an isolated profile (user researcher) under bubblewrap. Desktop app in Chrome at 1440x960, device pixel ratio 2, dark theme, reduced motion. Chat: Nemotron 3.5 Lightning through a LiteLLM gateway. Request typed in a new task in ~/projects/calibration-lab: Run the test check through verify and tell me what the reference temperatures in the test file are. The one bash approval was allowed once. The full window at the end of the turn, scrolled to the answer."
+		},
+		"gui-home": {
+			"image": "assets/guides/gui-home.webp",
+			"original": "assets/guides/gui-home.png",
+			"width": 2880,
+			"height": 1920,
+			"label": "New task",
+			"alt": "Clio Coder on the desktop at start: the task rail with the calibration-lab workspace and no tasks yet, the Clio mark, the question What are we working on, the composer with the workspace chip, and three starter prompts.",
+			"caption": "The desktop at start: the composer, the open workspace, and three ways to begin.",
+			"interface": "Desktop",
+			"version": "0.6.0-dev",
+			"capturedAt": "2026-10-01",
+			"source": "clio-coder 0.6.0-dev (commit f5f234d on feat/gui-native-clio, with feat/gui-workbench merged) built with pnpm run build from the checkout and started with clio-coder gui --foreground in an isolated profile (user researcher) under bubblewrap. Desktop app in Chrome at 1440x960, device pixel ratio 2, dark theme, reduced motion. Chat: Nemotron 3.5 Lightning through a LiteLLM gateway. Fresh launch with ~/projects/calibration-lab opened as the workspace and no tasks yet."
+		},
+		"gui-approval": {
+			"image": "assets/guides/gui-approval.webp",
+			"original": "assets/guides/gui-approval.png",
+			"width": 2880,
+			"height": 1920,
+			"label": "Approval",
+			"alt": "Clio Coder on the desktop waiting for an approval: a pinned strip reads Approval needed, bash, stops in 9m 57s, with Review, Reject, Reject and stop the turn, and Allow once; the card below shows the find command, its authorization, consequence and reversibility, and the top bar reads Needs your approval.",
+			"caption": "A bash call waits for you: the command, what approval authorizes, and what it can affect, before anything runs.",
+			"interface": "Desktop",
+			"version": "0.6.0-dev",
+			"capturedAt": "2026-10-01",
+			"source": "clio-coder 0.6.0-dev (commit f5f234d on feat/gui-native-clio, with feat/gui-workbench merged) built with pnpm run build from the checkout and started with clio-coder gui --foreground in an isolated profile (user researcher) under bubblewrap. Desktop app in Chrome at 1440x960, device pixel ratio 2, dark theme, reduced motion. Chat: Nemotron 3.5 Lightning through a LiteLLM gateway. Same request as the task capture, in a new task; the window while the first bash call was parked. The call was then rejected and the turn stopped."
+		},
+		"gui-setup": {
+			"image": "assets/guides/gui-setup.webp",
+			"original": "assets/guides/gui-setup.png",
+			"width": 2880,
+			"height": 1920,
+			"label": "Setup",
+			"alt": "The desktop setup wizard's welcome: five steps across the top, Provider, Connect, Model, Test, Workspace; the Clio mark in a black scene with the caption A coding agent that works in your folders and asks before it changes anything; and the three promises, pick a provider, connect and choose a model, open a folder, above Get started.",
+			"caption": "Guided setup in the desktop: a first run opens on the welcome and walks the five steps the terminal's configure asks.",
+			"interface": "Desktop",
+			"version": "0.6.0-dev",
+			"capturedAt": "2026-10-01",
+			"source": "clio-coder 0.6.0-dev (commit f5f234d on feat/gui-native-clio, with feat/gui-workbench merged) built with pnpm run build from the checkout and started with clio-coder gui --foreground in an isolated profile (user researcher) under bubblewrap. Desktop app in Chrome at 1440x960, device pixel ratio 2, dark theme, reduced motion. Chat: Nemotron 3.5 Lightning through a LiteLLM gateway. Launched from a profile with no model connection saved, so the app opened on the setup wizard's welcome. Nothing was entered."
 		}
 	}
 }

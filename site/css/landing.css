@@ -477,10 +477,6 @@
 	.story-chapter .interface-item > p {
 		min-block-size: 0;
 	}
-	.story-chapter .interface-text {
-		padding-block-start: 1rem;
-		border-block-start: 1px solid var(--line);
-	}
 	.story-chapter .model-routes {
 		margin-block-start: 2.5rem;
 	}
