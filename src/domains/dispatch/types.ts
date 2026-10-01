@@ -816,6 +816,8 @@ export interface RunReceiptVerification {
 }
 
 export interface RunHostVerificationCheck {
+	/** A bounded replay on the task base; absence on older receipts means not compared. */
+	baseComparison?: { status: "passed" | "failed" | "not_compared"; base?: string; exitCode?: number; reason?: string };
 	check: string;
 	argv: string[];
 	cwd: string;

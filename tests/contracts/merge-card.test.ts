@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { askMergeCard } from "../../src/domains/dispatch/merge-card.js";
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../src/tools/ask-user.js";
@@ -69,4 +69,31 @@ test("a branch that changes protected paths is not offered a Merge, and the card
 	strictEqual(labelAt(asked[0]), "Keep branch");
 	strictEqual(asked[0]?.question.includes("docs/policy.md"), true);
 	deepStrictEqual(outcome, { choice: "keep", cause: "unlisted" });
+});
+
+test("the merge card distinguishes a host failure also observed on the base", async () => {
+	const { ask, asked } = scripted([pick("Keep branch")]);
+	await askMergeCard(
+		{ ask, timeoutMs: 5_000 },
+		{
+			...INPUT,
+			hostVerification: {
+				status: "rejected",
+				checks: [
+					{
+						check: "test",
+						argv: ["npm", "test"],
+						cwd: ".",
+						exitCode: 1,
+						durationMs: 10,
+						memo: false,
+						outputTail: "failure",
+						baseComparison: { status: "failed", base: "base-sha", exitCode: 1 },
+					},
+				],
+			},
+		},
+	);
+	match(asked[0]?.question ?? "", /also fails on base base-sha/);
+	match(asked[0]?.question ?? "", /does not establish that the worker caused/);
 });

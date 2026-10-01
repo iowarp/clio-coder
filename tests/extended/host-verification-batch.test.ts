@@ -7,6 +7,7 @@ import { afterEach, describe, it } from "node:test";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import {
 	type BatchVerificationParticipant,
+	compareHostVerificationBase,
 	createBatchVerificationGate,
 	hostVerificationRejection,
 	runHostVerification,
@@ -757,4 +758,84 @@ describe("host verification capture and provenance parity", () => {
 		strictEqual(numeric.reference?.path, reference);
 		strictEqual(perf.baseline?.path, baseline);
 	});
+});
+
+for (const baseFails of [true, false]) {
+	it(`reports a quick host failure against a ${baseFails ? "failing" : "passing"} task base`, async () => {
+		const scratch = makeScratch();
+		const base = execFileSync("git", ["-C", scratch.project, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+		writeFileSync(join(scratch.project, "src", "a.ts"), "export const a = 9;\n");
+		const declared: ResolvedCheck = {
+			check: "test",
+			cwd: scratch.project,
+			timeoutMs: 5_000,
+			argv: [
+				process.execPath,
+				"-e",
+				baseFails
+					? "process.exit(1)"
+					: "process.exit(require('node:fs').readFileSync('src/a.ts','utf8').includes('9') ? 1 : 0)",
+			],
+		};
+		const request = {
+			resolvedVerification: [declared],
+			taskWorktree: {
+				root: scratch.project,
+				path: scratch.project,
+				runId: "comparison",
+				branch: "main",
+				base,
+				ownerToken: "fixture",
+			},
+		};
+		const verification = await runHostVerification({
+			runId: "comparison",
+			request,
+			workerSuccessful: true,
+			stateDir: scratch.stateDir,
+		});
+		strictEqual(verification?.status, "rejected");
+		await compareHostVerificationBase({ verification, request, stateDir: scratch.stateDir });
+		strictEqual(verification?.checks[0]?.baseComparison?.status, baseFails ? "failed" : "passed");
+		match(hostVerificationRejection(verification)?.detail ?? "", baseFails ? /also fails on base/ : /passes on base/);
+		match(hostVerificationRejection(verification)?.detail ?? "", /host ran this check/);
+		strictEqual(
+			execFileSync("git", ["-C", scratch.project, "worktree", "list", "--porcelain"], { encoding: "utf8" }).split(
+				"worktree ",
+			).length,
+			2,
+		);
+		strictEqual(readFileSync(join(scratch.project, "src", "a.ts"), "utf8"), "export const a = 9;\n");
+	});
+}
+
+it("states that an expensive failed host check was not compared", async () => {
+	const scratch = makeScratch();
+	const declared = check({ scratch, message: "failure", exitCode: 1 });
+	const verification = await runHostVerification({
+		runId: "uncompared",
+		request: { resolvedVerification: [declared] },
+		workerSuccessful: true,
+		stateDir: scratch.stateDir,
+	});
+	ok(verification?.checks[0]);
+	verification.checks[0].durationMs = 2_001;
+	await compareHostVerificationBase({
+		verification,
+		request: {
+			resolvedVerification: [declared],
+			taskWorktree: {
+				root: scratch.project,
+				path: scratch.project,
+				runId: "uncompared",
+				branch: "main",
+				base: "HEAD",
+				ownerToken: "fixture",
+			},
+		},
+		stateDir: scratch.stateDir,
+	});
+	strictEqual(verification.checks[0].baseComparison?.status, "not_compared");
+	match(hostVerificationRejection(verification)?.detail ?? "", /base was not compared/);
+	strictEqual(runCount(scratch), 1);
 });

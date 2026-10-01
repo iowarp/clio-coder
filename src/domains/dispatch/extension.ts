@@ -258,6 +258,7 @@ import {
 import { createHeldWorkerPool, type HeldWorkerKey, type HeldWorkerPool } from "./held-workers.js";
 import {
 	type BatchVerificationGate,
+	compareHostVerificationBase,
 	createBatchVerificationGate,
 	hostVerificationRejection,
 	runHostVerification,
@@ -7401,6 +7402,7 @@ export function createDispatchBundle(
 					settlement === undefined
 						? await runHostVerification(hostVerificationInput)
 						: await settlement.arrive(hostVerificationInput);
+				await compareHostVerificationBase({ verification: hostVerification, request: req });
 				const hostRejection = hostVerificationRejection(hostVerification);
 				const workerSucceeded = finalOutcome === "succeeded";
 				if (hostRejection !== null && workerSucceeded) {
@@ -7503,6 +7505,7 @@ export function createDispatchBundle(
 										branch: req.taskWorktree.branch,
 										changedPaths: worktreeReceipt.changedPaths ?? [],
 										reason: withheldVerdict.reason,
+										...(hostVerification !== undefined ? { hostVerification } : {}),
 										protectedPaths: previewedProtected,
 									})
 								: null;

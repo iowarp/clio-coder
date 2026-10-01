@@ -1,14 +1,16 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { PATH_BOUNDARY_MAX_ENTRIES, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
+import { runCommandVector } from "../../core/safe-exec.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { JUDGED_CHECK_MAX_OUTPUT_BYTES, judgeNumericTexts, judgePerfTexts } from "../../tools/verify/scripts.js";
 import { FLEET_COMMAND_BASE_ENV, type FleetCommand } from "../agents/fleet-commands.js";
 import { CODE_STEP_CAPTURE_MAX_BYTES, runCodeStep } from "./code-step.js";
 import type { DispatchRequest } from "./contract.js";
+import { hostCheckBaseNote } from "./host-verification-note.js";
 import type { RunHostVerification, RunHostVerificationAttribution, RunHostVerificationCheck } from "./types.js";
 import { captureWorkspaceSnapshot } from "./write-boundary.js";
 
@@ -121,6 +123,98 @@ function memoKey(command: FleetCommand, judgment: string, fingerprint: string, e
 	return sha256(JSON.stringify({ fingerprint, judgment, env: values }));
 }
 
+/** Compare only quick command checks, on an isolated base checkout, once (flywheel p9/C1). */
+export async function compareHostVerificationBase(input: {
+	verification: RunHostVerification | undefined;
+	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree">;
+	stateDir?: string;
+	env?: NodeJS.ProcessEnv;
+}): Promise<void> {
+	const failures = input.verification?.checks.filter((check) => check.exitCode !== 0) ?? [];
+	if (failures.length === 0) return;
+	const worktree = input.request.taskWorktree;
+	for (const check of failures)
+		check.baseComparison = { status: "not_compared", reason: "no isolated task base available" };
+	if (worktree === undefined) return;
+	const candidates = failures.flatMap((check) => {
+		const declared = input.request.resolvedVerification?.find((entry) => entry.check === check.check);
+		const reason =
+			declared === undefined
+				? "declared check unavailable"
+				: declared.kind !== undefined && declared.kind !== "command"
+					? "judged check cannot be replayed as a command"
+					: check.durationMs > 2_000
+						? "check exceeded the cheap comparison budget"
+						: existsSync(join(worktree.path, "node_modules"))
+							? "base dependencies were not provisioned"
+							: declared.argv.some((arg) => arg.includes(worktree.path))
+								? "command refers to the worker checkout"
+								: null;
+		check.baseComparison = { status: "not_compared", base: worktree.base, ...(reason ? { reason } : {}) };
+		return reason === null && declared !== undefined ? [{ check, declared }] : [];
+	});
+	if (candidates.length === 0) return;
+	const stateDir = input.stateDir ?? clioStateDir();
+	const basePath = join(stateDir, "artifacts", worktree.runId, `verification-base-${randomUUID()}`);
+	mkdirSync(dirname(basePath), { recursive: true });
+	const git = (args: string[]) =>
+		runCommandVector("git", ["-C", worktree.path, ...args], { timeoutMs: 5_000, maxOutputBytes: 8_192 });
+	try {
+		const added = await git(["worktree", "add", "--detach", basePath, worktree.base]);
+		if (added.exitCode !== 0) throw new Error("base checkout could not be prepared within bounds");
+		for (const [index, { check, declared }] of candidates.entries()) {
+			const cwd = resolve(basePath, relative(worktree.path, declared.cwd));
+			if (cwd !== basePath && !cwd.startsWith(`${basePath}/`)) {
+				check.baseComparison = {
+					status: "not_compared",
+					base: worktree.base,
+					reason: "check cwd is outside the task worktree",
+				};
+				continue;
+			}
+			const outcome = await runCodeStep({
+				stepId: `base-${index + 1}`,
+				workspaceRoot: cwd,
+				command: {
+					id: declared.check,
+					argv: [...declared.argv],
+					cwd: "",
+					timeoutMs: Math.min(declared.timeoutMs, 5_000),
+					env: [],
+					description: "Bounded host check on task base.",
+				},
+				artifactDir: join(stateDir, "artifacts", worktree.runId, "verification", "base"),
+				env: input.env ?? process.env,
+				maxOutputBytes: CODE_STEP_CAPTURE_MAX_BYTES,
+			});
+			check.baseComparison = {
+				status:
+					outcome.record.timedOut || outcome.record.signal !== null || outcome.record.outputTruncated
+						? "not_compared"
+						: outcome.record.exitCode === 0
+							? "passed"
+							: "failed",
+				base: worktree.base,
+				exitCode: outcome.record.exitCode,
+				...(outcome.record.timedOut || outcome.record.signal !== null || outcome.record.outputTruncated
+					? { reason: "base check exhausted the comparison budget" }
+					: {}),
+			};
+		}
+	} catch (error) {
+		for (const { check } of candidates)
+			if (check.baseComparison?.status === "not_compared") {
+				check.baseComparison = {
+					status: "not_compared",
+					base: worktree.base,
+					reason: error instanceof Error ? error.message : String(error),
+				};
+			}
+	} finally {
+		await git(["worktree", "remove", "--force", basePath]);
+	}
+}
+
 export function hostVerificationRejection(
 	verification: RunHostVerification | undefined,
 ): { outcomeCode: "host_verification_rejected"; detail: string } | null {
@@ -129,11 +223,14 @@ export function hostVerificationRejection(
 	return {
 		outcomeCode: "host_verification_rejected",
 		detail:
-			failedCheck === undefined
+			(failedCheck === undefined
 				? "host verification rejected"
 				: failedCheck.report !== undefined
 					? `host verification check '${failedCheck.check}' rejected: ${failedCheck.report.summary}`
-					: `host verification check '${failedCheck.check}' rejected with exit code ${failedCheck.exitCode}`,
+					: `host verification check '${failedCheck.check}' rejected with exit code ${failedCheck.exitCode}`) +
+			(failedCheck === undefined
+				? "; the base was not compared"
+				: `; ${hostCheckBaseNote(failedCheck)}. The host ran this check; rejection is not evidence that the worker skipped validation.`),
 	};
 }
 

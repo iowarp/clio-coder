@@ -1,7 +1,9 @@
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { createHarnessHold } from "../../tools/registry.js";
 import type { DecisionPresentation } from "../safety/decision-presentation.js";
+import { hostCheckBaseNote } from "./host-verification-note.js";
 import { boundedCheck } from "./merge-gate.js";
+import type { RunHostVerification } from "./types.js";
 
 /**
  * The operator's answer to a withheld task-worktree merge. The gate in
@@ -37,6 +39,7 @@ export function mergeCardCauseNote(cause: MergeCardCause): string {
 }
 
 export interface MergeCardInput {
+	hostVerification?: RunHostVerification;
 	branch: string;
 	changedPaths: ReadonlyArray<string>;
 	/** The gate's reason clause, as `mergeGateVerdict` words it. */
@@ -126,6 +129,9 @@ function mergeCardQuestion(input: MergeCardInput): AskUserQuestion {
 			...(omitted > 0 ? [`- … and ${omitted} more`] : []),
 			"",
 			`The merge was held because ${input.reason}.`,
+			...(input.hostVerification?.checks
+				.filter((check) => check.exitCode !== 0)
+				.map((check) => `Host check '${check.check}': ${hostCheckBaseNote(check)}.`) ?? []),
 			...(protectedPaths.length > 0
 				? [
 						`Merge is not offered: the branch changes protected ${protectedPaths.length === 1 ? "path" : "paths"} ${protectedPaths.map(boundedCheck).join(", ")}, which a merge never lands.`,

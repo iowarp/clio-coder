@@ -10,6 +10,7 @@ import {
 	formatBudgetRequest,
 	formatEffectiveBudget,
 } from "../domains/dispatch/budget-envelope.js";
+import { hostCheckBaseNote } from "../domains/dispatch/host-verification-note.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import type { RunReceipt, RunReceiptVerification } from "../domains/dispatch/types.js";
 import { formatTrustAxes, formatTrustSummary } from "../domains/evidence/trust-projection.js";
@@ -232,7 +233,7 @@ export function receiptEvidenceLabels(
 								: receipt.hostVerification?.strategy === "batch-settled"
 									? "executed after the worker batch"
 									: "executed after the worker";
-							return `${JSON.stringify(check.check)} (${source}; exit ${check.exitCode})`;
+							return `${JSON.stringify(check.check)} (${source}; exit ${check.exitCode}${check.exitCode !== 0 ? `; ${hostCheckBaseNote(check)}` : ""})`;
 						})
 						.join(", ")}.`,
 				]
