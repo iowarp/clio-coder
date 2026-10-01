@@ -52,7 +52,6 @@
 			"!benchmarks",
 			"!social-campaigns",
 			"!**/*.html",
-			"!site/image-variants.json",
 			"!tmp"
 		]
 	},
