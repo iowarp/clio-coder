@@ -7440,11 +7440,33 @@ export function createDispatchBundle(
 										protectedPaths: previewedProtected,
 									})
 								: null;
+						// The card can wait timeout x queue depth, and protection is live state
+						// that throws while it is degraded. Merge reads it again here and
+						// withholds when it cannot, never on the list from before the wait.
+						let mergeProtectedPaths: string[] | null = null;
 						if (card?.choice === "merge") {
+							try {
+								mergeProtectedPaths = getProtectedArtifactState().artifacts.map((artifact) => artifact.path);
+							} catch (protectedError) {
+								reportDispatchDiagnostic(`protected artifacts at merge of ${req.taskWorktree.runId}`, protectedError);
+							}
+						}
+						if (card?.choice === "merge" && mergeProtectedPaths === null) {
+							const reason = `protected artifact state could not be read when the operator chose Merge; nothing was merged and branch ${req.taskWorktree.branch} is preserved`;
+							worktreeReceipt = {
+								...worktreeReceipt,
+								reason: "protected_state_unavailable",
+								detail: `operator merge refused: ${reason}`,
+							};
+							finalOutcome = "failed";
+							outcomeCode = "merge_withheld";
+							finalDetail = `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator merge refused: ${reason}`;
+							failureMessage = finalDetail;
+						} else if (card?.choice === "merge" && mergeProtectedPaths !== null) {
 							const landed = applyTaskWorktree({
 								worktree: req.taskWorktree,
 								apply: "merge",
-								protectedPaths,
+								protectedPaths: mergeProtectedPaths,
 								commitMessage: taskCommitMessage,
 								...(previewedCommit !== undefined ? { pinnedCommit: previewedCommit } : {}),
 							});
